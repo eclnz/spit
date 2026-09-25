@@ -1,230 +1,173 @@
 # SPIT — Simple Pipeline in Text
 
-SPIT compiles a reusable logical pipeline against an observed source inventory to produce a concrete DAG. Product names and entity bindings identify logical artifacts; filenames are not part of their identity. The Rust core treats all product types, operation names, and dimensions as user-defined symbols.
+SPIT lets you write a pipeline as a text file, check which jobs it would create, and generate a Bash script to run them. The same pipeline works with any number of observed inputs.
 
-## Run the example
+## Try it
 
-The [basic example](examples/basic.spit) packages a pipeline definition and a small source inventory in one text file:
-
-```sh
-cargo run -- check examples/basic.spit
-cargo run -- dag examples/basic.spit
-```
-
-`check` prints `Pipeline valid.` and the number of resolved jobs. `dag` prints the [text DAG](basic.dag.txt), including inputs, outputs, and dependencies. After `cargo build`, use `target/debug/spit` in place of `cargo run --`.
-
-The same inventory can be supplied explicitly from [basic.sources](examples/basic.sources):
+From this repository:
 
 ```sh
-cargo run -- dag examples/basic.spit --sources examples/basic.sources
+cargo run -- check examples/bash_demo.spit --sources examples/bash_demo.sources
+cargo run -- dag examples/bash_demo.spit --sources examples/bash_demo.sources
 ```
 
-`--sources` selects the external inventory when the document also contains one. A reusable pipeline file can omit `sources:` and `contexts:` entirely and receive the inventory only through `--sources`.
+`check` reports whether the pipeline resolves. `dag` prints the jobs, their inputs and outputs, and their dependencies. Use `cargo build` to get the `target/debug/spit` executable.
 
-The [typed example](examples/typed.spit) shows inferred output types in the dry run:
+## Write a pipeline
 
-```sh
-cargo run -- dag examples/typed.spit --sources examples/typed.sources
-```
-
-For `Frame<Native>` and `Reference<Target>`, the example infers `CleanFrame<Native>` and `Transform<Native,Target>` without type annotations on its pipeline calls.
-
-Larger examples exercise the same compiler with different graph structures:
-
-| Example | Structure | Run |
-| --- | --- | --- |
-| [Branching](examples/branching.spit) | Two branches, shared policy, parallel aggregations, recombination | `cargo run -- dag examples/branching.spit` |
-| [Observed groups](examples/rich_shapes.spit) | Several subjects and sessions, reference reuse, successive aggregations | `cargo run -- dag examples/rich_shapes.spit --sources examples/rich_shapes.sources` |
-| [Nested aggregation](examples/complex.spit) | Partial typing, uneven groups, and three aggregation levels | `cargo run -- dag examples/complex.spit` |
-| [Analytics joins](examples/analytics.spit) | Several keyed joins followed by day, customer, and tenant rollups | `cargo run -- dag examples/analytics.spit` |
-| [Bash backend](examples/bash_demo.spit) | User-supplied Unix arguments, path templates, and grouped input expansion | `cargo run -- bash examples/bash_demo.spit --sources examples/bash_demo.sources` |
-| [MRtrix3 ACT](examples/mrtrix3_act.spit) | Raw DWI preprocessing, T1 registration, parcellation alignment, ACT tractography, SIFT2, connectomes | `cargo run -- bash examples/mrtrix3_act.spit --sources examples/mrtrix3_act.sources` |
-
-The ACT file starts with raw DWI runs, native T1w, reverse phase-encoded b=0 images, and lookup tables. Its products share parameterized types such as `MRI<DWI,Acquired>`: product names distinguish processing states, while reusable operations describe compatible data kinds and coordinate spaces. One `mean_b0` signature serves two stages, while image and label resampling have distinct commands so labels use nearest-neighbor interpolation. The example defines source and output paths plus MRtrix3, FSL, and FreeSurfer SynthSeg commands. It is an illustrative single-shell acquisition workflow: input images need gradient and phase-encoding metadata, the lookup tables must match SynthSeg labels, and spatial results require inspection. SPIT generates the script but does not inspect those data or run the tools itself. [Exploration findings](docs/exploration.md) records what these larger pipelines exposed.
-
-An indexer can supply an inventory on standard input, so pipeline authors need not list every scan by hand:
-
-```sh
-dataset-indexer | cargo run -- dag examples/basic.spit --sources -
-```
-
-`dataset-indexer` is illustrative; SPIT does not yet provide one. The `.sources` file is a fixture and a simple interchange format for a future indexer.
-
-## Generate Bash
-
-The [Bash example](examples/bash_demo.spit) declares commands and a path layout alongside the logical flow:
+Here is the complete [text processing example](examples/bash_demo.spit):
 
 ```text
 source shard : Lines [group, part]
+require shard count>=1 per [group]
+
 path: {product}/{entities}.txt
 path shard: input/{group}/{part}.txt
 
-operation sort_lines(Lines) -> Lines
+operation sort_lines(input: Lines) -> Lines
 command sort_lines: sort -u -o {output} {input}
 sorted = sort_lines(shard)
 
-operation merge(many Lines) -> Lines
-command merge: sort -m -u -o {output} {inputs}
+operation merge(items: many Lines) -> Lines @ drop(part)
+command merge: sort -m -u -o {output} {items}
 merged = merge(sorted @ vary(part))
 ```
 
-Generate a script and run it with a root directory containing the source files:
+`source` declares a family of input artifacts. A `shard` is identified by its `group` and `part` values. `sorted` keeps those dimensions. `merge` collects all parts of each group and produces one `merged[group=...]` artifact per group. The `@ drop(part)` contract and `@ vary(part)` call must agree.
+
+`path` lines say where artifacts live. `command` lines give the exact executable and argument order. SPIT decides which artifacts belong to each job before filling their paths into a command.
+
+## Supply the inputs
+
+The pipeline describes what to do; an inventory describes what is present. The example uses [bash_demo.sources](examples/bash_demo.sources):
+
+```text
+sources:
+    shard[group=alpha,part=01]
+    shard[group=alpha,part=02]
+    shard[group=beta,part=01]
+```
+
+This creates two sort jobs for `alpha`, one for `beta`, and one merge job for each group. Add another shard to the inventory and SPIT creates the corresponding job without changing the pipeline.
+
+An inventory can also be placed in the same `.spit` file for a small example, as in [basic.spit](examples/basic.spit). For reusable pipelines, keep it separate and pass `--sources inventory.spit`. Use `--sources -` to read an inventory from standard input.
+
+## Inspect and run
 
 ```sh
+cargo run -- paths examples/bash_demo.spit --sources examples/bash_demo.sources
+cargo run -- bound-dag examples/bash_demo.spit --sources examples/bash_demo.sources
+cargo run -- check examples/bash_demo.spit --sources examples/bash_demo.sources --root /path/to/data
 cargo run -- bash examples/bash_demo.spit --sources examples/bash_demo.sources > run.sh
 SPIT_ROOT=/path/to/data bash run.sh
 ```
 
-The inventory determines which groups and parts exist. SPIT resolves those jobs first, then emits one command per job; group names in the script come from the inventory rather than the pipeline text. Regenerate the script when the inventory changes. `SPIT_ROOT` defaults to the current directory. The sample inventory expects `input/alpha/01.txt`, `input/alpha/02.txt`, and `input/beta/01.txt` under that root.
+`paths` shows the path rule for each product. `bound-dag` shows every resolved artifact with its path, before any command is expanded. `check --root` verifies that every source file needed by the resolved jobs exists; derived outputs do not need to exist yet. `bash` writes a script that runs the jobs. `SPIT_ROOT` defaults to the current directory.
 
-A dataset indexer can supply the inventory at generation time with `--sources -`, just as it can for `dag`.
+Add `--strict-paths` to require a separate `path product:` rule for every product. Without it, a `path:` default can cover several products.
 
-The ACT example uses the same interface:
+## Syntax reference
 
-```sh
-cargo run -- bash examples/mrtrix3_act.spit --sources examples/mrtrix3_act.sources > act.sh
-cargo run -- bound-dag examples/mrtrix3_act.spit --sources examples/mrtrix3_act.sources
-bash -n act.sh
-SPIT_ROOT=/path/to/data bash act.sh
-```
-
-Its sample inventory generates 83 jobs over three observed subject sessions. Source paths are declared near the top of the pipeline file; adapt them to your data layout. A changed inventory changes the script without editing subject names into the pipeline.
-
-Each command template is an executable followed by ordered arguments. A port can be named, as in `operation register(moving: MRI<M,S>, reference: MRI<N,T>) -> Transform<S,T>`, so its command can use `{moving}` and `{reference}`. Unnamed inputs retain `{input}` or positional `{input1}`, `{input2}` names. `{output}` names the job's output. A many port, such as `runs: many MRI<DWI,S>`, expands only when its placeholder occupies a complete argument; it becomes one separately quoted Bash argument per artifact, ordered lexicographically by entity bindings. The legacy `{inputs}` alias works for a sole many port. Quoted words can contain spaces. Command templates do not use shell pipelines or redirection. A default `path:` template covers all products, while `path product:` overrides one family. Path templates may use `{product}`, `{entities}`, or a dimension such as `{group}`. Paths are relative to `SPIT_ROOT`; entity values are encoded as safe path components.
-
-An operation can declare its aggregation contract with `@ drop(run)`: `operation concatenate_runs(runs: many MRI<DWI,S>) -> MRI<DWI,S> @ drop(run)`. A call must then use `@ vary(run)`, and the resolver checks that the derived output dimensions equal the input dimensions minus `run`. The suffix is optional for older declarations.
-
-To call a shell function, declare its script with `shell-source: scripts/functions.sh`, then use `command copy: copy_data {input} {output}`. The generated Bash checks and sources that literal relative script path under `SPIT_ROOT` before running jobs.
-
-The generated script checks source paths, creates output directories, runs jobs in dependency order, and checks each output. `check` and `dag` remain logical checks and do not require command or path declarations. `bound-dag` shows every resolved job with port names and concrete relative paths, and validates those paths without needing command definitions.
-
-## Check path coverage
-
-Use `paths` while authoring to see the rule selected for every source and output product:
-
-```sh
-cargo run -- paths examples/mrtrix3_act.spit --sources examples/mrtrix3_act.sources
-```
-
-The report marks each rule as `explicit`, `default`, or `MISSING`. It checks template placeholders against product dimensions and catches collisions between concrete artifact paths. A missing rule is an error. To require an explicit `path product:` rule for **every** product, add `--strict-paths` to `paths`, `check`, `dag`, or `bash`:
-
-```sh
-cargo run -- check examples/mrtrix3_act.spit --sources examples/mrtrix3_act.sources --strict-paths
-```
-
-The ACT example intentionally uses the default `.mif` rule for many outputs, so that strict check fails until they are declared individually. SPIT cannot infer a product's intended file extension from its symbolic type; inspect default fallbacks when a special format such as `.txt` or `.tck` is needed. Ordinary `check` remains a logical DAG check.
-
-## Layers
+### Products and dimensions
 
 ```text
-pipeline definition ──┐
-                     ├──> generic resolver ──> concrete logical DAG
-source inventory ─────┘                          │
-                                                └──> path templates + commands ──> Bash
+source image : Image [subject, visit, run]
+source reference [subject, visit]
 ```
 
-- **Pipeline definition:** product families, optional symbolic types, dimensions, operation contracts, invocations, and optional coverage constraints. The internal `Pipeline` value contains no individual source artifacts.
-- **Source inventory:** the observed source artifact identities and optional entity contexts. It contains no operation definitions, types, or paths. An external indexer or manifest generator can create it.
-- **Resolver:** validates the inventory against product declarations, applies coverage constraints, checks local types and shapes, and expands all jobs and dependencies. It does not inspect files.
-- **Bash backend:** binds artifacts with user-defined path templates, expands command arguments after resolution, and emits a script with runtime file checks.
+Each `source` declares a product family, not an individual file. `image[subject=A,visit=1,run=2]` identifies one artifact. Types such as `Image` are optional; product names and entity bindings identify artifacts.
 
-Changing the inventory can change the number of jobs without changing the pipeline definition. SPIT assumes no fixed number of subjects, sessions, or scans.
-
-## Small text format
-
-The pipeline text has `products:`, `operations:`, `pipeline:`, and optional `constraints:` sections. For example:
+An assignment introduces a derived product automatically:
 
 ```text
-products:
-    image      : Image      [subject, visit, repeat]
-    reference  : Reference  [subject, visit]
-    registered : Registered [subject, visit, repeat]
-    average    : Average    [subject, visit]
-
-operations:
-    align(Image, Reference) -> Registered
-    mean(many Registered) -> Average
-
-pipeline:
-    registered = align(image, reference)
-    average = mean(registered @ vary(repeat))
-
-constraints:
-    require image count>=1 per [subject, visit]
-    require reference count=1 per [subject, visit]
+processed = process(image)
+average = mean(processed @ vary(run))
 ```
 
-An inventory contains `sources:` and optional `contexts:` sections. These can appear in the same `.spit` document for an example, or in a separate file supplied with `--sources`:
+The first input determines a normal operation's output dimensions. For an aggregation, `vary(run)` removes `run` from the output identity. You can write the output type and dimensions explicitly when helpful:
+
+```text
+average : Image [subject, visit] = mean(processed @ vary(run))
+```
+
+### Operations and commands
+
+```text
+operation process(image: Image) -> Image
+command process: process_tool --in {image} --out {output}
+
+operation mean(images: many Image) -> Image @ drop(run)
+command mean: mean_tool {images} --out {output}
+```
+
+Declare an operation before its first use. Inputs in a call follow the port order in the declaration. A `one` input must resolve to exactly one artifact for each job; SPIT reports missing or ambiguous matches. A `many` input needs `@ vary(dimension)`, and its command placeholder expands to one separately quoted argument per artifact, ordered by entity bindings. A many placeholder must occupy a whole argument.
+
+Input port names are optional. An unnamed single input is `{input}`; multiple unnamed inputs are `{input1}`, `{input2}`, and so on. `{output}` is the output path. Command templates give ordered words and arguments, not shell pipelines or redirection.
+
+To call a shell function, declare its script and then use the function name in a command:
+
+```text
+shell-source: scripts/functions.sh
+command process: my_process {image} {output}
+```
+
+### Paths
+
+```text
+path: results/{product}/{entities}.txt
+path image: input/{subject}/{visit}/{run}.txt
+```
+
+`path:` sets a default. `path image:` overrides it for `image`. Templates can use `{product}`, `{entities}`, or a declared dimension. Paths are relative to `SPIT_ROOT`. SPIT checks missing rules, invalid placeholders, and collisions between resolved artifact paths.
+
+Place a source path beside its `source` line and a derived path beside its assignment. The default can stay near the top of the file.
+
+### Constraints and optional types
+
+```text
+require image count>=2 per [subject, visit]
+require reference count=1 per [subject, visit]
+```
+
+Constraints check each observed group. They do not set a total subject or visit count. An inventory may include `contexts:` to name a group even when one of its required inputs is absent:
 
 ```text
 contexts:
     [subject=A,visit=1]
-
 sources:
-    image[subject=A,visit=1,repeat=1]
-    image[subject=A,visit=1,repeat=2]
-    reference[subject=A,visit=1]
+    image[subject=A,visit=1,run=1]
 ```
 
-Contexts and source records establish the observed groups for coverage checks. If a context is present but lacks a required artifact, a rule reports the missing count. Source records can also establish groups without explicit context rows. A group invisible to both the contexts and source records cannot be inferred as missing.
+Types are additive. You can leave them out, add them to selected products and operations, or type the whole pipeline. Known mismatches fail; missing type information does not.
 
-Section order is flexible. Blank lines and `#` comments are allowed. Names use letters, digits, and underscores, starting with a letter or underscore. Source values are single tokens. Input bindings in pipeline calls follow declared port order; named ports make that order visible in command templates. The first single input drives output shape for a preserve operation.
+## More examples
 
-Types are optional. The same shape rules work with an untyped declaration:
+| Example | Shows |
+| --- | --- |
+| [Basic](examples/basic.spit) | Sectioned syntax and an inventory in one file |
+| [Untyped](examples/untyped.spit) | Resolution without types |
+| [Typed](examples/typed.spit) | Parameterized symbolic types |
+| [Branching](examples/branching.spit) | Shared inputs and branches |
+| [Complex](examples/complex.spit) | Nested aggregation |
+| [Analytics](examples/analytics.spit) | Joins and rollups |
+| [MRtrix3 ACT](examples/mrtrix3_act.spit) | A larger pipeline with commands and paths |
+
+SPIT also accepts grouped `products:`, `operations:`, `pipeline:`, and `constraints:` sections. The flow style above is intended for writing a pipeline in the order you read it.
+
+Run `cargo test --test source_files` to see the MRtrix example checked against a temporary tree of empty BIDS-named NIfTI images and sidecars. The pipeline imports each DWI's `.bvec`, `.bval`, and JSON metadata into a `.mif` before processing.
+
+## How SPIT works
 
 ```text
-products:
-    raw       [subject, repeat]
-    processed [subject, repeat]
-    combined  [subject]
-
-operations:
-    process(one)
-    combine(many)
-
-pipeline:
-    processed = process(raw)
-    combined = combine(processed @ vary(repeat))
+pipeline text + source inventory
+              ↓
+       resolved logical DAG
+              ↓
+       paths and commands
+              ↓
+          Bash script
 ```
 
-Add `: Type` to a product, or input and output types to an operation, whenever those checks are useful. An omitted type is `Unknown`: it participates in resolution and causes no mismatch by itself. When two known types conflict, resolution fails. Product names and dimensions still determine artifact identity and shape; types do not select a product in this version of the text language.
+The inventory supplies artifact identities; the pipeline supplies operations and rules. Resolution checks dimensions, matching, cardinality, constraints, and any known types. Path binding and command expansion happen afterward. SPIT currently supports one output per operation and does not inspect file contents or command-specific metadata. See [architecture](docs/architecture.md) for the internal model.
 
-Run the complete [untyped example](examples/untyped.spit) with `cargo run -- dag examples/untyped.spit`.
-
-For authoring a pipeline as a readable sequence, SPIT also accepts a flow-first form. It uses one top-level stream of `source`, `require`, `operation`, and assignment statements:
-
-```text
-source raw       : Image<Native> [subject, repeat]
-source reference : Reference       [subject]
-require raw count>=1 per [subject]
-require reference count=1 per [subject]
-
-operation align(Image<S>, Reference) -> Registered<S>
-registered = align(raw, reference)
-
-operation mean(many Registered<S>) -> Average<S>
-average = mean(registered @ vary(repeat))
-```
-
-`source` statements declare product families; actual source artifacts still come from the separate inventory. An assignment declares its output product automatically. Preserve operations inherit the driving input dimensions, and aggregate operations remove the dimension named by `vary(...)`. An optional output annotation can make either one explicit:
-
-```text
-average : Average<Native> [subject] = mean(registered @ vary(repeat))
-```
-
-Flow operations must be declared before their first use. This keeps the file self-contained while leaving room for a future `use` or import form. The original sectioned syntax remains supported for generated files and grouped declarations.
-
-## Resolution rules
-
-- Artifact types, when supplied, are symbolic expressions. Named constructors and their argument structure must match; an operation's single-letter uppercase type variables unify across its ports and are instantiated separately for each job. Missing types become `Unknown`, which is compatible but does not establish a variable binding.
-- Each source record must bind exactly the declared dimensions of its product. The product name and bindings must be unique.
-- For a preserve operation, the first `one` input drives one output per artifact. Later `one` inputs match on shared dimensions. Zero matches is missing; multiple matches is ambiguous. A unique later input must be no more specific than the driving artifact.
-- A `many` operation has exactly one input and requires `@ vary(dimension)` in its invocation. The resolver groups its input family by every other dimension and removes the varied dimension from each output identity.
-- Coverage rules check counts per observed group. `count=1` requires exactly one; `count>=1` requires at least one. They do not assert a total number of groups.
-- Invocation outputs have one producing invocation. The resolver sorts invocations by dependencies, detects cycles, and rejects duplicate artifacts.
-
-Run the tests with `cargo test`. The [Rust construction example](examples/basic.rs) remains an internal API demonstration; pipeline authors use `.spit` text files.
-
-## Current limits
-
-SPIT does not discover source files or inspect them during compilation. The Bash script checks their existence when run; it does not verify file content, spatial compatibility, or command-specific metadata. Type checking has no subtyping, automatic coercion, strict mode, or graph-wide inference. Unresolved type variables become `Unknown` at a job output. Operations still have one output, and the broader shape algebra from the full design brief remains to be implemented.
+Run the test suite with `cargo test`.

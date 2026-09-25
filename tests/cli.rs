@@ -78,9 +78,9 @@ fn bound_dag_displays_resolved_paths_before_command_expansion() {
         String::from_utf8_lossy(&output.stderr)
     );
     let report = String::from_utf8(output.stdout).unwrap();
-    assert_eq!(report.matches("Job ").count(), 83);
+    assert_eq!(report.matches("Job ").count(), 93);
     assert!(report.contains("moving: t1w[sub=01,ses=01]"));
-    assert!(report.contains("path: input/sub-01/ses-01/t1w.nii.gz"));
+    assert!(report.contains("path: sub-01/ses-01/anat/sub-01_ses-01_T1w.nii.gz"));
 }
 
 #[test]
@@ -96,7 +96,7 @@ fn expanded_examples_resolve() {
         (
             "examples/mrtrix3_act.spit",
             Some("examples/mrtrix3_act.sources"),
-            83,
+            93,
         ),
         ("examples/analytics.spit", None, 34),
     ] {

@@ -138,8 +138,26 @@ fn act_example_generates_valid_bash_for_new_sessions() {
     let inventory =
         parse_source_inventory(include_str!("../examples/mrtrix3_act.sources")).unwrap();
     let dag = resolve(&pipeline, &inventory).unwrap();
-    assert_eq!(dag.jobs.len(), 83);
+    assert_eq!(dag.jobs.len(), 93);
     let script = render_bash(&pipeline, &dag).unwrap();
+    assert!(script.contains("'-fslgrad'"));
+    assert!(script.contains("'-json_import'"));
+    let import = script
+        .lines()
+        .find(|line| {
+            line.starts_with("'mrconvert'") && line.contains("dwi_mif/sub=01__ses=01__run=01")
+        })
+        .unwrap();
+    let positions = [
+        "sub-01_ses-01_run-01_dwi.nii.gz",
+        "'-fslgrad'",
+        "sub-01_ses-01_run-01_dwi.bvec",
+        "sub-01_ses-01_run-01_dwi.bval",
+        "'-json_import'",
+        "sub-01_ses-01_run-01_dwi.json",
+    ]
+    .map(|part| import.find(part).unwrap());
+    assert!(positions.windows(2).all(|pair| pair[0] < pair[1]));
     assert!(script.contains("'dwicat'"));
     assert!(script.contains("'flirt' '-in'"));
     assert!(script.contains("'transformconvert'"));
@@ -159,14 +177,14 @@ fn act_example_generates_valid_bash_for_new_sessions() {
     );
 
     let inventory = parse_source_inventory(&format!(
-        "{}    raw_dwi[sub=03,ses=01,run=01]\n    raw_dwi[sub=03,ses=01,run=02]\n    reverse_b0[sub=03,ses=01]\n    t1w[sub=03,ses=01]\n",
+        "{}    raw_dwi[sub=03,ses=01,run=01]\n    raw_dwi[sub=03,ses=01,run=02]\n    dwi_bvec[sub=03,ses=01,run=01]\n    dwi_bvec[sub=03,ses=01,run=02]\n    dwi_bval[sub=03,ses=01,run=01]\n    dwi_bval[sub=03,ses=01,run=02]\n    dwi_json[sub=03,ses=01,run=01]\n    dwi_json[sub=03,ses=01,run=02]\n    reverse_b0[sub=03,ses=01]\n    reverse_b0_json[sub=03,ses=01]\n    t1w[sub=03,ses=01]\n",
         include_str!("../examples/mrtrix3_act.sources")
     ))
     .unwrap();
     let expanded = resolve(&pipeline, &inventory).unwrap();
     assert!(expanded.jobs.len() > dag.jobs.len());
     let script = render_bash(&pipeline, &expanded).unwrap();
-    assert!(script.contains("input/sub-03/ses-01/run-01_dwi.mif"));
+    assert!(script.contains("sub-03/ses-01/dwi/sub-03_ses-01_run-01_dwi.nii.gz"));
     assert!(script.contains("derivatives/weighted_connectome/sub=03__ses=01.csv"));
 }
 
@@ -218,7 +236,7 @@ fn bound_dag_shows_port_names_and_paths_without_commands() {
     let dag = resolve(&pipeline, &inventory).unwrap();
     pipeline.commands.clear();
     let report = render_bound_dag(&pipeline, &dag).unwrap();
-    assert_eq!(report.matches("Job ").count(), 83);
+    assert_eq!(report.matches("Job ").count(), 93);
     assert!(report.contains("moving: t1w[sub=01,ses=01]"));
     assert!(report.contains("reference: session_b0_nifti[sub=01,ses=01]"));
     assert!(report.contains("path: derivatives/weighted_connectome/sub=01__ses=01.csv"));

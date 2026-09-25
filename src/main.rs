@@ -6,17 +6,18 @@ use std::process::ExitCode;
 
 use spit::{
     inspect_paths, parse_document, parse_source_inventory, render_bash, render_bound_dag,
-    render_dag, resolve, validate_concrete_paths,
+    render_dag, resolve, validate_concrete_paths, validate_source_files,
 };
 
 const USAGE: &str =
-    "usage: spit <check|dag|bound-dag|paths|bash> <pipeline.spit> [--sources <inventory.spit|->] [--strict-paths]";
+    "usage: spit <check|dag|bound-dag|paths|bash> <pipeline.spit> [--sources <inventory.spit|->] [--root <directory>] [--strict-paths]";
 
 struct CliArgs {
     command: String,
     pipeline: String,
     sources: Option<String>,
     strict_paths: bool,
+    root: Option<String>,
 }
 
 fn parse_args() -> Result<CliArgs, Box<dyn Error>> {
@@ -34,10 +35,12 @@ fn parse_args() -> Result<CliArgs, Box<dyn Error>> {
     }
     let mut sources = None;
     let mut strict_paths = false;
+    let mut root = None;
     while let Some(flag) = args.next() {
         match flag.as_str() {
             "--sources" if sources.is_none() => sources = Some(args.next().ok_or(USAGE)?),
             "--strict-paths" if !strict_paths => strict_paths = true,
+            "--root" if root.is_none() => root = Some(args.next().ok_or(USAGE)?),
             _ => return Err(USAGE.into()),
         }
     }
@@ -46,6 +49,7 @@ fn parse_args() -> Result<CliArgs, Box<dyn Error>> {
         pipeline,
         sources,
         strict_paths,
+        root,
     })
 }
 
@@ -84,8 +88,18 @@ fn run() -> Result<(), Box<dyn Error>> {
         coverage.validate(args.strict_paths)?;
         validate_concrete_paths(&pipeline, &dag)?;
     }
+    let checked_files = args
+        .root
+        .as_ref()
+        .map(|root| validate_source_files(&pipeline, &dag, std::path::Path::new(root)))
+        .transpose()?;
     match args.command.as_str() {
-        "check" => println!("Pipeline valid.\n\n{} jobs resolved.", dag.jobs.len()),
+        "check" => {
+            println!("Pipeline valid.\n\n{} jobs resolved.", dag.jobs.len());
+            if let Some(count) = checked_files {
+                println!("{count} source files verified.");
+            }
+        }
         "dag" => print!("{}", render_dag(&dag)),
         "bound-dag" => print!("{}", render_bound_dag(&pipeline, &dag)?),
         "paths" => (),

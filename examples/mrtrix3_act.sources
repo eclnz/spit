@@ -1,6 +1,7 @@
-# Three sessions with raw DWI runs, opposite phase-encoded b=0, and native T1w.
+# Three sessions with BIDS DWI runs, sidecars, opposite phase-encoded b=0,
+# and native T1w. Every sidecar is a separate source artifact.
 # This fixture represents an acquisition with two or more compatible forward
-# DWI runs per session and a reverse b=0 for the chosen -rpe_pair workflow.
+# DWI runs per session and a reverse b=0 for the chosen -rpe_header workflow.
 # Shared lookup tables are global logical artifacts with no entity dimensions.
 contexts:
     [sub=01,ses=01]
@@ -15,9 +16,33 @@ sources:
     raw_dwi[sub=02,ses=01,run=01]
     raw_dwi[sub=02,ses=01,run=02]
     raw_dwi[sub=02,ses=01,run=03]
+    dwi_bvec[sub=01,ses=01,run=01]
+    dwi_bvec[sub=01,ses=01,run=02]
+    dwi_bvec[sub=01,ses=02,run=01]
+    dwi_bvec[sub=01,ses=02,run=02]
+    dwi_bvec[sub=02,ses=01,run=01]
+    dwi_bvec[sub=02,ses=01,run=02]
+    dwi_bvec[sub=02,ses=01,run=03]
+    dwi_bval[sub=01,ses=01,run=01]
+    dwi_bval[sub=01,ses=01,run=02]
+    dwi_bval[sub=01,ses=02,run=01]
+    dwi_bval[sub=01,ses=02,run=02]
+    dwi_bval[sub=02,ses=01,run=01]
+    dwi_bval[sub=02,ses=01,run=02]
+    dwi_bval[sub=02,ses=01,run=03]
+    dwi_json[sub=01,ses=01,run=01]
+    dwi_json[sub=01,ses=01,run=02]
+    dwi_json[sub=01,ses=02,run=01]
+    dwi_json[sub=01,ses=02,run=02]
+    dwi_json[sub=02,ses=01,run=01]
+    dwi_json[sub=02,ses=01,run=02]
+    dwi_json[sub=02,ses=01,run=03]
     reverse_b0[sub=01,ses=01]
     reverse_b0[sub=01,ses=02]
     reverse_b0[sub=02,ses=01]
+    reverse_b0_json[sub=01,ses=01]
+    reverse_b0_json[sub=01,ses=02]
+    reverse_b0_json[sub=02,ses=01]
     t1w[sub=01,ses=01]
     t1w[sub=01,ses=02]
     t1w[sub=02,ses=01]

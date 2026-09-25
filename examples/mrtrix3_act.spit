@@ -1,39 +1,48 @@
-# ACT connectome from raw DWI runs and native T1w.
-# This example assumes single-shell DWI with gradients and phase-encoding
-# metadata in the .mif headers, plus a reversed-PE b=0 per session.
+# ACT connectome from BIDS DWI runs and native T1w.
+# This example assumes single-shell DWI, a reversed-PE b=0 per session,
+# and phase-encoding metadata in the BIDS JSON sidecars.
 # It requires MRtrix3, FSL, and FreeSurfer SynthSeg on the execution host.
 # Supply lookup tables that match the SynthSeg parcellation labels.
 
-source raw_dwi    : MRI<DWI,Acquired>            [sub, ses, run]
-source reverse_b0 : MRI<B0,Acquired>             [sub, ses]
-source t1w        : MRI<T1w,Anatomical>          [sub, ses]
-source source_lut : LookupTable                  []
-source target_lut : LookupTable                  []
+# Default for generated MRtrix images; formats that differ declare a path below.
+path: derivatives/{product}/{entities}.mif
+
+source raw_dwi : MRI<DWI,Acquired> [sub, ses, run]
+path raw_dwi: sub-{sub}/ses-{ses}/dwi/sub-{sub}_ses-{ses}_run-{run}_dwi.nii.gz
+source dwi_bvec : GradientDirections [sub, ses, run]
+path dwi_bvec: sub-{sub}/ses-{ses}/dwi/sub-{sub}_ses-{ses}_run-{run}_dwi.bvec
+source dwi_bval : GradientAmplitudes [sub, ses, run]
+path dwi_bval: sub-{sub}/ses-{ses}/dwi/sub-{sub}_ses-{ses}_run-{run}_dwi.bval
+source dwi_json : AcquisitionMetadata [sub, ses, run]
+path dwi_json: sub-{sub}/ses-{ses}/dwi/sub-{sub}_ses-{ses}_run-{run}_dwi.json
+
+source reverse_b0 : MRI<B0,Acquired> [sub, ses]
+path reverse_b0: sub-{sub}/ses-{ses}/fmap/sub-{sub}_ses-{ses}_dir-PA_epi.nii.gz
+source reverse_b0_json : AcquisitionMetadata [sub, ses]
+path reverse_b0_json: sub-{sub}/ses-{ses}/fmap/sub-{sub}_ses-{ses}_dir-PA_epi.json
+source t1w : MRI<T1w,Anatomical> [sub, ses]
+path t1w: sub-{sub}/ses-{ses}/anat/sub-{sub}_ses-{ses}_T1w.nii.gz
+source source_lut : LookupTable []
+path source_lut: config/source_lut.txt
+source target_lut : LookupTable []
+path target_lut: config/target_lut.txt
 
 require raw_dwi count>=2 per [sub, ses]
 require reverse_b0 count=1 per [sub, ses]
 require t1w count=1 per [sub, ses]
 
-# Paths describe a dataset layout; the source inventory still contains only
-# logical artifact identities. Adjust the source paths for your own dataset.
-path: derivatives/{product}/{entities}.mif
-path raw_dwi: input/sub-{sub}/ses-{ses}/run-{run}_dwi.mif
-path reverse_b0: input/sub-{sub}/ses-{ses}/reverse_b0.mif
-path t1w: input/sub-{sub}/ses-{ses}/t1w.nii.gz
-path source_lut: config/source_lut.txt
-path target_lut: config/target_lut.txt
-path parcellation_t1: derivatives/parcellation_t1/{entities}.nii.gz
-path session_b0_nifti: derivatives/session_b0_nifti/{entities}.nii.gz
-path t1_to_dwi_flirt: derivatives/t1_to_dwi_flirt/{entities}.mat
-path t1_to_dwi: derivatives/t1_to_dwi/{entities}.txt
-path wm_response: derivatives/wm_response/{entities}.txt
-path act_tracks: derivatives/act_tracks/{entities}.tck
-path sift2_weights: derivatives/sift2_weights/{entities}.txt
-path weighted_connectome: derivatives/weighted_connectome/{entities}.csv
+# Import gradients and phase-encoding metadata with their matching NIfTI.
+operation import_dwi(image: MRI<DWI,Acquired>, bvec: GradientDirections, bval: GradientAmplitudes, metadata: AcquisitionMetadata) -> MRI<DWI,Acquired>
+command import_dwi: mrconvert {image} {output} -fslgrad {bvec} {bval} -json_import {metadata}
+dwi_mif = import_dwi(raw_dwi, dwi_bvec, dwi_bval, dwi_json)
+
+operation import_reverse_b0(image: MRI<B0,Acquired>, metadata: AcquisitionMetadata) -> MRI<B0,Acquired>
+command import_reverse_b0: mrconvert {image} {output} -json_import {metadata}
+reverse_b0_mif = import_reverse_b0(reverse_b0, reverse_b0_json)
 
 operation denoise(MRI<DWI,S>) -> MRI<DWI,S>
 command denoise: dwidenoise {input} {output}
-denoised_dwi = denoise(raw_dwi)
+denoised_dwi = denoise(dwi_mif)
 
 operation remove_gibbs(MRI<DWI,S>) -> MRI<DWI,S>
 command remove_gibbs: mrdegibbs {input} {output}
@@ -56,7 +65,7 @@ forward_b0 = mean_b0(forward_b0_series)
 
 operation combine_pe_pair(forward: MRI<B0,S>, reverse: MRI<B0,S>) -> MRI<B0Pair,S>
 command combine_pe_pair: mrcat {forward} {reverse} {output} -axis 3
-se_epi_pair = combine_pe_pair(forward_b0, reverse_b0)
+se_epi_pair = combine_pe_pair(forward_b0, reverse_b0_mif)
 
 # -rpe_header uses the phase-encoding metadata rather than fixed subject names
 # or acquisition parameters; the paired b=0 headers must be valid.
@@ -74,6 +83,7 @@ session_b0 = mean_b0(session_b0_series)
 operation parcellate_t1(MRI<T1w,S>) -> MRI<Parcellation,S>
 command parcellate_t1: mri_synthseg --i {input} --o {output} --parc
 parcellation_t1 = parcellate_t1(t1w)
+path parcellation_t1: derivatives/parcellation_t1/{entities}.nii.gz
 
 operation convert_labels(labels: MRI<Parcellation,S>, source_lut: LookupTable, target_lut: LookupTable) -> MRI<Parcellation,S>
 command convert_labels: labelconvert {labels} {source_lut} {target_lut} {output}
@@ -84,14 +94,17 @@ nodes_t1 = convert_labels(parcellation_t1, source_lut, target_lut)
 operation export_nifti(MRI<K,S>) -> MRI<K,S>
 command export_nifti: mrconvert {input} {output}
 session_b0_nifti = export_nifti(session_b0)
+path session_b0_nifti: derivatives/session_b0_nifti/{entities}.nii.gz
 
 operation flirt_register(moving: MRI<M,S>, reference: MRI<N,T>) -> FSLTransform<S,T>
 command flirt_register: flirt -in {moving} -ref {reference} -omat {output} -dof 6 -cost corratio
 t1_to_dwi_flirt = flirt_register(t1w, session_b0_nifti)
+path t1_to_dwi_flirt: derivatives/t1_to_dwi_flirt/{entities}.mat
 
 operation convert_flirt(matrix: FSLTransform<S,T>, moving: MRI<M,S>, reference: MRI<N,T>) -> Transform<S,T>
 command convert_flirt: transformconvert {matrix} {moving} {reference} flirt_import {output}
 t1_to_dwi = convert_flirt(t1_to_dwi_flirt, t1w, session_b0_nifti)
+path t1_to_dwi: derivatives/t1_to_dwi/{entities}.txt
 
 # The reference image determines the target voxel grid. Continuous images
 # use linear interpolation; label images use nearest-neighbor interpolation.
@@ -117,6 +130,7 @@ gmwmi = make_gmwmi(five_tt)
 operation estimate_wm_response(MRI<DWI,S>) -> Response<DWI>
 command estimate_wm_response: dwi2response tournier {input} {output}
 wm_response = estimate_wm_response(corrected_dwi)
+path wm_response: derivatives/wm_response/{entities}.txt
 
 operation estimate_wm_fod(dwi: MRI<DWI,S>, response: Response<DWI>) -> MRI<FOD,S>
 command estimate_wm_fod: dwi2fod csd {dwi} {response} {output}
@@ -125,11 +139,14 @@ wm_fod = estimate_wm_fod(corrected_dwi, wm_response)
 operation track_act(fod: MRI<FOD,S>, tissue: MRI<Tissue,S>, seed: MRI<Mask,S>) -> Tractogram<S>
 command track_act: tckgen {fod} {output} -act {tissue} -backtrack -seed_gmwmi {seed} -select 1000000
 act_tracks = track_act(wm_fod, five_tt, gmwmi)
+path act_tracks: derivatives/act_tracks/{entities}.tck
 
 operation weight_streamlines(tracks: Tractogram<S>, fod: MRI<FOD,S>, tissue: MRI<Tissue,S>) -> StreamlineWeights
 command weight_streamlines: tcksift2 {tracks} {fod} {output} -act {tissue}
 sift2_weights = weight_streamlines(act_tracks, wm_fod, five_tt)
+path sift2_weights: derivatives/sift2_weights/{entities}.txt
 
 operation build_connectome(tracks: Tractogram<S>, nodes: MRI<Parcellation,S>, weights: StreamlineWeights) -> Connectome
 command build_connectome: tck2connectome {tracks} {nodes} {output} -tck_weights_in {weights}
 weighted_connectome = build_connectome(act_tracks, nodes_dwi, sift2_weights)
+path weighted_connectome: derivatives/weighted_connectome/{entities}.csv

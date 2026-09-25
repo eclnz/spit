@@ -6,10 +6,10 @@ require shard count>=1 per [group]
 path: {product}/{entities}.txt
 path shard: input/{group}/{part}.txt
 
-operation sort_lines(Lines) -> Lines
+operation sort_lines(input: Lines) -> Lines
 command sort_lines: sort -u -o {output} {input}
 sorted = sort_lines(shard)
 
-operation merge(many Lines) -> Lines
-command merge: sort -m -u -o {output} {inputs}
+operation merge(items: many Lines) -> Lines @ drop(part)
+command merge: sort -m -u -o {output} {items}
 merged = merge(sorted @ vary(part))

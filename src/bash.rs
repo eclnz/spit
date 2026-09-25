@@ -259,6 +259,41 @@ pub fn validate_concrete_paths(pipeline: &Pipeline, dag: &ResolvedDag) -> Result
     Ok(())
 }
 
+/// Check the files needed to start the resolved DAG under a dataset root.
+/// Derived outputs are deliberately excluded because the pipeline creates them.
+pub fn validate_source_files(
+    pipeline: &Pipeline,
+    dag: &ResolvedDag,
+    root: &Path,
+) -> Result<usize, BashError> {
+    if !root.is_dir() {
+        return Err(error(format!(
+            "source root is not a directory: `{}`",
+            root.display()
+        )));
+    }
+    inspect_paths(pipeline)?.validate(false)?;
+    let paths = bound_paths(pipeline, dag)?;
+    let outputs: BTreeSet<_> = dag.jobs.iter().map(|job| key(&job.output)).collect();
+    let mut checked = 0;
+    for (artifact, relative) in paths {
+        if outputs.contains(&artifact) {
+            continue;
+        }
+        let full_path = root.join(&relative);
+        if !full_path.is_file() {
+            return Err(error(format!(
+                "missing source file for `{}[{}]`: `{}`",
+                artifact.0,
+                artifact.1,
+                full_path.display()
+            )));
+        }
+        checked += 1;
+    }
+    Ok(checked)
+}
+
 /// Inspect the resolved jobs and bound paths before expanding any commands.
 pub fn render_bound_dag(pipeline: &Pipeline, dag: &ResolvedDag) -> Result<String, BashError> {
     inspect_paths(pipeline)?.validate(false)?;
