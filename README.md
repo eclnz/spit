@@ -11,7 +11,36 @@ cargo run -- check examples/bash_demo.spit --sources examples/bash_demo.sources
 cargo run -- dag examples/bash_demo.spit --sources examples/bash_demo.sources
 ```
 
-`check` reports whether the pipeline resolves. `dag` prints the jobs, their inputs and outputs, and their dependencies. Use `cargo build` to get the `target/debug/spit` executable.
+Use `cargo build` to get the `target/debug/spit` executable. With `cargo run`, the `--` separates Cargo's arguments from SPIT's arguments.
+
+## CLI commands and options
+
+```text
+spit <check|dag|bound-dag|paths|bash> <pipeline.spit> [--sources <inventory.spit|->] [--root <directory>] [--strict-paths]
+```
+
+Choose one command per call. The pipeline file comes next; options follow it.
+
+| Command | Result |
+| --- | --- |
+| `check` | Validate the pipeline and report how many jobs resolve. |
+| `dag` | Print the jobs, their artifact identities, and dependencies. |
+| `bound-dag` | Print the resolved DAG with a path for every artifact. |
+| `paths` | Show which path rule covers each product and validate the resulting paths. |
+| `bash` | Write a Bash script for the resolved jobs to standard output. It does not run the script. |
+
+| Option | Effect |
+| --- | --- |
+| `--sources <inventory.spit>` | Read source artifact identities from a separate file. Required unless the pipeline contains an inline inventory. Use `--sources -` to read standard input. |
+| `--root <directory>` | Check that every required source path points to a regular file under this directory. Available with any command; derived outputs need not exist yet. |
+| `--strict-paths` | Require an explicit `path product:` rule for every product, even if a default `path:` rule exists. |
+
+For example, `check` resolves the pipeline, while `check --root` also verifies its input files:
+
+```sh
+cargo run -- check examples/bash_demo.spit --sources examples/bash_demo.sources
+cargo run -- check examples/bash_demo.spit --sources examples/bash_demo.sources --root /path/to/data
+```
 
 ## Write a pipeline
 
@@ -52,19 +81,16 @@ This creates two sort jobs for `alpha`, one for `beta`, and one merge job for ea
 
 An inventory can also be placed in the same `.spit` file for a small example, as in [basic.spit](examples/basic.spit). For reusable pipelines, keep it separate and pass `--sources inventory.spit`. Use `--sources -` to read an inventory from standard input.
 
-## Inspect and run
+## Inspect and generate a script
 
 ```sh
 cargo run -- paths examples/bash_demo.spit --sources examples/bash_demo.sources
 cargo run -- bound-dag examples/bash_demo.spit --sources examples/bash_demo.sources
-cargo run -- check examples/bash_demo.spit --sources examples/bash_demo.sources --root /path/to/data
 cargo run -- bash examples/bash_demo.spit --sources examples/bash_demo.sources > run.sh
 SPIT_ROOT=/path/to/data bash run.sh
 ```
 
-`paths` shows the path rule for each product. `bound-dag` shows every resolved artifact with its path, before any command is expanded. `check --root` verifies that every source file needed by the resolved jobs exists; derived outputs do not need to exist yet. `bash` writes a script that runs the jobs. `SPIT_ROOT` defaults to the current directory.
-
-Add `--strict-paths` to require a separate `path product:` rule for every product. Without it, a `path:` default can cover several products.
+`bound-dag` shows paths before command expansion. The generated script uses `SPIT_ROOT` for relative paths; when unset, it uses the current directory.
 
 ## Syntax reference
 
