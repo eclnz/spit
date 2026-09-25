@@ -126,6 +126,29 @@ Add `: Type` to a product, or input and output types to an operation, whenever t
 
 Run the complete [untyped example](examples/untyped.spit) with `cargo run -- dag examples/untyped.spit`.
 
+For authoring a pipeline as a readable sequence, SPIT also accepts a flow-first form. It uses one top-level stream of `source`, `require`, `operation`, and assignment statements:
+
+```text
+source raw       : Image<Native> [subject, repeat]
+source reference : Reference       [subject]
+require raw count>=1 per [subject]
+require reference count=1 per [subject]
+
+operation align(Image<S>, Reference) -> Registered<S>
+registered = align(raw, reference)
+
+operation mean(many Registered<S>) -> Average<S>
+average = mean(registered @ vary(repeat))
+```
+
+`source` statements declare product families; actual source artifacts still come from the separate inventory. An assignment declares its output product automatically. Preserve operations inherit the driving input dimensions, and aggregate operations remove the dimension named by `vary(...)`. An optional output annotation can make either one explicit:
+
+```text
+average : Average<Native> [subject] = mean(registered @ vary(repeat))
+```
+
+Flow operations must be declared before their first use. This keeps the file self-contained while leaving room for a future `use` or import form. The original sectioned syntax remains supported for generated files and grouped declarations.
+
 ## Resolution rules
 
 - Artifact types, when supplied, are symbolic expressions. Named constructors and their argument structure must match; an operation's single-letter uppercase type variables unify across its ports and are instantiated separately for each job. Missing types become `Unknown`, which is compatible but does not establish a variable binding.

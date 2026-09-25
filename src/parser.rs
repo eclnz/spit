@@ -41,6 +41,23 @@ enum Section {
 }
 
 pub fn parse_pipeline(text: &str) -> Result<Pipeline, ParseError> {
+    if is_sectioned_document(text) {
+        parse_sectioned_pipeline(text)
+    } else {
+        parse_flow_pipeline(text)
+    }
+}
+
+fn is_sectioned_document(text: &str) -> bool {
+    text.lines().map(strip_comment).map(str::trim).any(|line| {
+        matches!(
+            line,
+            "products:" | "operations:" | "pipeline:" | "constraints:"
+        )
+    })
+}
+
+fn parse_sectioned_pipeline(text: &str) -> Result<Pipeline, ParseError> {
     let mut pipeline = Pipeline::default();
     let mut section = None;
 
@@ -83,6 +100,119 @@ pub fn parse_pipeline(text: &str) -> Result<Pipeline, ParseError> {
     }
 
     Ok(pipeline)
+}
+
+fn parse_flow_pipeline(text: &str) -> Result<Pipeline, ParseError> {
+    let mut pipeline = Pipeline::default();
+
+    for (index, original) in text.lines().enumerate() {
+        let line_number = index + 1;
+        let line = strip_comment(original).trim();
+        if line.is_empty() {
+            continue;
+        }
+
+        if let Some(declaration) = line.strip_prefix("source ") {
+            pipeline
+                .products
+                .push(parse_product(declaration.trim(), line_number)?);
+        } else if line.starts_with("operation ") {
+            let declaration = line.strip_prefix("operation ").unwrap().trim();
+            pipeline
+                .operations
+                .push(parse_operation(declaration, line_number)?);
+        } else if line.starts_with("require ") {
+            pipeline
+                .constraints
+                .push(parse_coverage_rule(line, line_number)?);
+        } else if line.contains('=') {
+            let (invocation, product) = parse_flow_invocation(line, line_number, &pipeline)?;
+            pipeline.products.push(product);
+            pipeline.invocations.push(invocation);
+        } else if line.starts_with("use ") {
+            return Err(ParseError::new(
+                line_number,
+                "imports are not implemented yet; declare the operation before using it",
+            ));
+        } else {
+            return Err(ParseError::new(
+                line_number,
+                "expected source, operation, require, or output = operation(inputs)",
+            ));
+        }
+    }
+
+    Ok(pipeline)
+}
+
+fn strip_comment(line: &str) -> &str {
+    line.split('#').next().unwrap_or("")
+}
+
+fn parse_flow_invocation(
+    line: &str,
+    number: usize,
+    pipeline: &Pipeline,
+) -> Result<(Invocation, ProductDef), ParseError> {
+    let (left, call) = line
+        .split_once('=')
+        .ok_or_else(|| ParseError::new(number, "expected flow step: output = operation(inputs)"))?;
+    let (output_name, output_type, output_dimensions) = parse_flow_output(left.trim(), number)?;
+    let (operation_name, _) = call_parts(call.trim(), number)?;
+    pipeline
+        .operations
+        .iter()
+        .find(|operation| operation.name == operation_name)
+        .ok_or_else(|| {
+            ParseError::new(
+                number,
+                format!("operation `{operation_name}` must be declared before its first flow step"),
+            )
+        })?;
+    let invocation = parse_invocation_parts(&output_name, call, number)?;
+    let dimensions = output_dimensions.unwrap_or_else(|| {
+        let input = invocation.inputs.first().map(InputBinding::product_name);
+        let input = input.and_then(|name| {
+            pipeline
+                .products
+                .iter()
+                .find(|product| product.name == name)
+        });
+        let mut dimensions = input
+            .map(|product| product.dimensions.clone())
+            .unwrap_or_default();
+        if let Some(InputBinding::Vary { dimension, .. }) = invocation.inputs.first() {
+            dimensions.retain(|value| value != dimension);
+        }
+        dimensions
+    });
+    Ok((
+        invocation,
+        ProductDef::new(
+            &output_name,
+            output_type.unwrap_or(TypeExpr::Unknown),
+            &dimensions.iter().map(String::as_str).collect::<Vec<_>>(),
+        ),
+    ))
+}
+
+type FlowOutput = (String, Option<TypeExpr>, Option<Vec<String>>);
+
+fn parse_flow_output(left: &str, number: usize) -> Result<FlowOutput, ParseError> {
+    if let Some((name, declaration)) = left.split_once(':') {
+        let product = parse_product(&format!("{}:{}", name.trim(), declaration), number)?;
+        Ok((
+            product.name,
+            Some(product.artifact_type),
+            Some(product.dimensions),
+        ))
+    } else {
+        Ok((
+            identifier(left, number, "output product")?.to_owned(),
+            None,
+            None,
+        ))
+    }
 }
 
 /// Parse a text document that may package an inventory alongside its pipeline.
@@ -307,6 +437,14 @@ fn parse_invocation(line: &str, number: usize) -> Result<Invocation, ParseError>
         )
     })?;
     let output_product = identifier(output_product.trim(), number, "output product")?;
+    parse_invocation_parts(output_product, call, number)
+}
+
+fn parse_invocation_parts(
+    output_product: &str,
+    call: &str,
+    number: usize,
+) -> Result<Invocation, ParseError> {
     let (operation, args) = call_parts(call.trim(), number)?;
     let mut bindings = Vec::new();
     for arg in comma_items(args, number)? {

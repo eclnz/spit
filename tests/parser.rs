@@ -99,3 +99,34 @@ fn separate_pipeline_still_parses_without_inventory() {
     assert!(inventory.is_none());
     assert!(!pipeline.products.is_empty());
 }
+
+#[test]
+fn flow_form_infers_intermediate_products_and_keeps_inventory_separate() {
+    let text = "source raw : Image<Native> [subject, run]\n\
+operation clean(Image<S>) -> Clean<S>\n\
+cleaned = clean(raw)\n\
+operation mean(many Clean<S>) -> Mean<S>\n\
+average : Mean<Native> [subject] = mean(cleaned @ vary(run))\n\
+require raw count>=1 per [subject]\n\
+sources:\n\
+    raw[subject=A,run=1]\n\
+    raw[subject=A,run=2]\n";
+    let (pipeline, inventory) = parse_document(text).unwrap();
+    let inventory = inventory.unwrap();
+    assert_eq!(pipeline.products.len(), 3);
+    assert_eq!(pipeline.operations.len(), 2);
+    assert_eq!(pipeline.invocations.len(), 2);
+    assert_eq!(pipeline.constraints.len(), 1);
+    assert_eq!(pipeline.products[1].name, "cleaned");
+    assert_eq!(pipeline.products[1].dimensions, vec!["subject", "run"]);
+    assert_eq!(pipeline.products[2].dimensions, vec!["subject"]);
+    assert_eq!(resolve(&pipeline, &inventory).unwrap().jobs.len(), 3);
+}
+
+#[test]
+fn flow_form_requires_operation_declaration_before_use() {
+    let error = parse_pipeline("source raw [subject]\nresult = transform(raw)\n").unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("must be declared before its first flow step"));
+}

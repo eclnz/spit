@@ -16,6 +16,8 @@ The first ACT draft gave almost every processing stage a new type. The revised e
 
 The analytics example exercises the same constraint mechanism outside imaging. Its relations use `Relation<...,CustomerKey>`, and each join operation repeats a key variable across both inputs. A relation declared with a different key type is rejected before job expansion. Entity dimensions then select the matching tenant and customer records, while explicit `vary(event)`, `vary(day)`, and `vary(customer)` calls change the result grain through successive rollups.
 
+The ACT example now uses the flow-first authoring form. Sources and coverage expectations appear before the first processing step, operation contracts sit beside the step where they are introduced, and intermediate product declarations are inferred from the operation and its input shape. The resolved graph is unchanged.
+
 ## Confirmed bug: partial type information depends on input order
 
 This pipeline currently passes, though `Foo` and `Bar` are known to conflict:
