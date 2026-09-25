@@ -160,6 +160,39 @@ fn operation_type_variables_do_not_leak_between_invocations() {
 }
 
 #[test]
+fn act_example_reuses_image_operations_across_kinds_and_spaces() {
+    let pipeline = parse_pipeline(include_str!("../examples/mrtrix3_act.spit")).unwrap();
+    let inventory =
+        parse_source_inventory(include_str!("../examples/mrtrix3_act.sources")).unwrap();
+    let dag = resolve(&pipeline, &inventory).unwrap();
+    let output_type = |name: &str| {
+        dag.jobs
+            .iter()
+            .find(|job| job.output.product == name)
+            .unwrap()
+            .output
+            .artifact_type
+            .clone()
+    };
+
+    assert_eq!(output_type("forward_b0"), product("MRI<B0,Acquired>"));
+    assert_eq!(output_type("session_b0"), product("MRI<B0,Diffusion>"));
+    assert_eq!(output_type("t1w_dwi"), product("MRI<T1w,Diffusion>"));
+    assert_eq!(
+        output_type("nodes_dwi"),
+        product("MRI<Parcellation,Diffusion>")
+    );
+    assert_eq!(
+        pipeline
+            .operations
+            .iter()
+            .filter(|operation| operation.name == "mrtransform")
+            .count(),
+        1
+    );
+}
+
+#[test]
 fn conflicting_port_bindings_are_a_structured_resolver_error() {
     let pipeline = parse_pipeline(
         "products:\n  a : A<Native> [subject]\n  b : B<MNI> [subject]\n  c : Unknown [subject]\noperations:\n  op(A<X>, B<X>) -> C<X>\npipeline:\n  c = op(a, b)\n",

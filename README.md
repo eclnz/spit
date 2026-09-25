@@ -38,7 +38,7 @@ Larger examples exercise the same compiler with different graph structures:
 | [Nested aggregation](examples/complex.spit) | Partial typing, uneven groups, and three aggregation levels | `cargo run -- dag examples/complex.spit` |
 | [MRtrix3 ACT](examples/mrtrix3_act.spit) | Raw DWI preprocessing, T1 registration, parcellation alignment, ACT tractography, SIFT2, connectomes | `cargo run -- dag examples/mrtrix3_act.spit --sources examples/mrtrix3_act.sources` |
 
-The ACT file starts with raw DWI runs, native T1w, reverse phase-encoded b=0 images, and lookup tables. It declares the processing and alignment stages that lead to one connectome per session. SPIT resolves this logical graph; it does not yet run the tools, inspect files, or verify spatial alignment. [Exploration findings](docs/exploration.md) records what these larger pipelines exposed.
+The ACT file starts with raw DWI runs, native T1w, reverse phase-encoded b=0 images, and lookup tables. Its products share parameterized types such as `MRI<DWI,Acquired>`: product names distinguish processing states, while reusable operations describe compatible data kinds and coordinate spaces. For example, one `mean_b0` signature serves two stages, and one `mrtransform` signature serves T1w and parcellation images. SPIT resolves this logical graph; it does not yet run the tools, inspect files, or verify spatial alignment. [Exploration findings](docs/exploration.md) records what these larger pipelines exposed.
 
 An indexer can supply an inventory on standard input, so pipeline authors need not list every scan by hand:
 

@@ -1,78 +1,78 @@
 # ACT connectome: a logical DAG from raw DWI runs and native T1w.
-# These operation names suggest possible MRtrix3 stages, not executable commands.
+# Operations are reusable calls; command bindings and execution come later.
 # DWI preprocessing, T1-to-DWI registration, and node alignment are explicit.
 # The parcellation stage represents an anatomical tool such as FreeSurfer;
 # convert_labels represents MRtrix3 labelconvert with two shared lookup tables.
+# Product names describe processing state. Types describe reusable data kinds
+# and coordinate spaces; operations can be reused across compatible products.
 products:
-    raw_dwi              : RawDWI                       [sub, ses, run]
-    reverse_b0           : ReversePEB0                  [sub, ses]
-    t1w                  : NativeT1w                    [sub, ses]
-    source_lut           : SourceLUT                    []
-    target_lut           : TargetLUT                    []
-    denoised_dwi         : DenoisedDWI                  [sub, ses, run]
-    degibbsed_dwi        : DegibbsedDWI                 [sub, ses, run]
-    session_dwi          : ConcatenatedDWI              [sub, ses]
-    forward_b0           : ForwardPEB0                  [sub, ses]
-    se_epi_pair          : SEEPIPair                    [sub, ses]
-    preprocessed_dwi     : MotionDistortionCorrectedDWI [sub, ses]
-    corrected_dwi        : BiasCorrectedDWI             [sub, ses]
-    session_b0           : DWIReference                 [sub, ses]
-    parcellation_t1      : NativeParcellation           [sub, ses]
-    nodes_t1             : NodesInT1Space               [sub, ses]
-    t1_to_dwi            : RigidT1ToDWITransform        [sub, ses]
-    t1w_dwi              : T1wInDWISpace                [sub, ses]
-    nodes_dwi            : NodesInDWISpace              [sub, ses]
-    five_tt              : FiveTTInDWISpace             [sub, ses]
-    gmwmi                : GMWMIInDWISpace              [sub, ses]
-    wm_response          : WMResponse                   [sub, ses]
-    wm_fod               : WMFODInDWISpace              [sub, ses]
-    act_tracks           : TractogramInDWISpace         [sub, ses]
-    sift2_weights        : StreamlineWeights            [sub, ses]
-    weighted_connectome  : Connectome                   [sub, ses]
+    raw_dwi              : MRI<DWI,Acquired>               [sub, ses, run]
+    reverse_b0           : MRI<B0,Acquired>                [sub, ses]
+    t1w                  : MRI<T1w,Anatomical>             [sub, ses]
+    source_lut           : LookupTable                     []
+    target_lut           : LookupTable                     []
+    denoised_dwi         : MRI<DWI,Acquired>               [sub, ses, run]
+    degibbsed_dwi        : MRI<DWI,Acquired>               [sub, ses, run]
+    session_dwi          : MRI<DWI,Acquired>               [sub, ses]
+    forward_b0           : MRI<B0,Acquired>                [sub, ses]
+    se_epi_pair          : MRI<B0Pair,Acquired>            [sub, ses]
+    preprocessed_dwi     : MRI<DWI,Diffusion>              [sub, ses]
+    corrected_dwi        : MRI<DWI,Diffusion>              [sub, ses]
+    session_b0           : MRI<B0,Diffusion>               [sub, ses]
+    parcellation_t1      : MRI<Parcellation,Anatomical>    [sub, ses]
+    nodes_t1             : MRI<Parcellation,Anatomical>    [sub, ses]
+    t1_to_dwi            : Transform<Anatomical,Diffusion> [sub, ses]
+    t1w_dwi              : MRI<T1w,Diffusion>              [sub, ses]
+    nodes_dwi            : MRI<Parcellation,Diffusion>     [sub, ses]
+    five_tt              : MRI<Tissue,Diffusion>           [sub, ses]
+    gmwmi                : MRI<Mask,Diffusion>             [sub, ses]
+    wm_response          : Response<DWI>                  [sub, ses]
+    wm_fod               : MRI<FOD,Diffusion>              [sub, ses]
+    act_tracks           : Tractogram<Diffusion>          [sub, ses]
+    sift2_weights        : StreamlineWeights              [sub, ses]
+    weighted_connectome  : Connectome                     [sub, ses]
 
 operations:
     # Candidate implementations: dwidenoise, mrdegibbs, and dwicat.
-    denoise(RawDWI) -> DenoisedDWI
-    remove_gibbs(DenoisedDWI) -> DegibbsedDWI
-    concatenate_runs(many DegibbsedDWI) -> ConcatenatedDWI
+    denoise(MRI<DWI,S>) -> MRI<DWI,S>
+    remove_gibbs(MRI<DWI,S>) -> MRI<DWI,S>
+    concatenate_runs(many MRI<DWI,S>) -> MRI<DWI,S>
     # b=0 extraction plus mean; mrcat of forward and reverse b=0;
     # dwifslpreproc -rpe_pair; then dwibiascorrect.
-    extract_forward_b0(ConcatenatedDWI) -> ForwardPEB0
-    combine_pe_pair(ForwardPEB0, ReversePEB0) -> SEEPIPair
-    preprocess_dwi(ConcatenatedDWI, SEEPIPair) -> MotionDistortionCorrectedDWI
-    bias_correct(MotionDistortionCorrectedDWI) -> BiasCorrectedDWI
-    make_session_b0(BiasCorrectedDWI) -> DWIReference
-    # Anatomical parcellation, labelconvert, rigid registration, and mrtransform.
-    parcellate_t1(NativeT1w) -> NativeParcellation
-    convert_labels(NativeParcellation, SourceLUT, TargetLUT) -> NodesInT1Space
-    register_t1(NativeT1w, DWIReference) -> RigidT1ToDWITransform
-    align_t1(NativeT1w, RigidT1ToDWITransform) -> T1wInDWISpace
-    align_nodes(NodesInT1Space, RigidT1ToDWITransform) -> NodesInDWISpace
+    mean_b0(MRI<DWI,S>) -> MRI<B0,S>
+    combine_pe_pair(MRI<B0,S>, MRI<B0,S>) -> MRI<B0Pair,S>
+    preprocess_dwi(MRI<DWI,Acquired>, MRI<B0Pair,Acquired>) -> MRI<DWI,Diffusion>
+    bias_correct(MRI<DWI,S>) -> MRI<DWI,S>
+    # Anatomical parcellation, labelconvert, rigid mrregister, and mrtransform.
+    parcellate_t1(MRI<T1w,S>) -> MRI<Parcellation,S>
+    convert_labels(MRI<Parcellation,S>, LookupTable, LookupTable) -> MRI<Parcellation,S>
+    mrregister(MRI<M,S>, MRI<N,T>) -> Transform<S,T>
+    mrtransform(MRI<K,S>, Transform<S,T>) -> MRI<K,T>
     # 5ttgen, 5tt2gmwmi, single-output response/FOD estimation, tckgen,
     # tcksift2, and tck2connectome. Multi-output variants await SPIT support.
-    make_5tt(T1wInDWISpace) -> FiveTTInDWISpace
-    make_gmwmi(FiveTTInDWISpace) -> GMWMIInDWISpace
-    estimate_wm_response(BiasCorrectedDWI) -> WMResponse
-    estimate_wm_fod(BiasCorrectedDWI, WMResponse) -> WMFODInDWISpace
-    track_act(WMFODInDWISpace, FiveTTInDWISpace, GMWMIInDWISpace) -> TractogramInDWISpace
-    weight_streamlines(TractogramInDWISpace, WMFODInDWISpace, FiveTTInDWISpace) -> StreamlineWeights
-    build_connectome(TractogramInDWISpace, NodesInDWISpace, StreamlineWeights) -> Connectome
+    make_5tt(MRI<T1w,S>) -> MRI<Tissue,S>
+    make_gmwmi(MRI<Tissue,S>) -> MRI<Mask,S>
+    estimate_wm_response(MRI<DWI,S>) -> Response<DWI>
+    estimate_wm_fod(MRI<DWI,S>, Response<DWI>) -> MRI<FOD,S>
+    track_act(MRI<FOD,S>, MRI<Tissue,S>, MRI<Mask,S>) -> Tractogram<S>
+    weight_streamlines(Tractogram<S>, MRI<FOD,S>, MRI<Tissue,S>) -> StreamlineWeights
+    build_connectome(Tractogram<S>, MRI<Parcellation,S>, StreamlineWeights) -> Connectome
 
 pipeline:
     denoised_dwi = denoise(raw_dwi)
     degibbsed_dwi = remove_gibbs(denoised_dwi)
     # Consume run to make one session DWI for subsequent motion correction.
     session_dwi = concatenate_runs(degibbsed_dwi @ vary(run))
-    forward_b0 = extract_forward_b0(session_dwi)
+    forward_b0 = mean_b0(session_dwi)
     se_epi_pair = combine_pe_pair(forward_b0, reverse_b0)
     preprocessed_dwi = preprocess_dwi(session_dwi, se_epi_pair)
     corrected_dwi = bias_correct(preprocessed_dwi)
-    session_b0 = make_session_b0(corrected_dwi)
+    session_b0 = mean_b0(corrected_dwi)
     parcellation_t1 = parcellate_t1(t1w)
     nodes_t1 = convert_labels(parcellation_t1, source_lut, target_lut)
-    t1_to_dwi = register_t1(t1w, session_b0)
-    t1w_dwi = align_t1(t1w, t1_to_dwi)
-    nodes_dwi = align_nodes(nodes_t1, t1_to_dwi)
+    t1_to_dwi = mrregister(t1w, session_b0)
+    t1w_dwi = mrtransform(t1w, t1_to_dwi)
+    nodes_dwi = mrtransform(nodes_t1, t1_to_dwi)
     five_tt = make_5tt(t1w_dwi)
     gmwmi = make_gmwmi(five_tt)
     wm_response = estimate_wm_response(corrected_dwi)
