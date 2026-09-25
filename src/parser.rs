@@ -1,4 +1,4 @@
-//! A deliberately small parser for the v0.1 text format.
+//! Parse sectioned or flow-style pipelines and separate source inventories.
 
 use std::collections::BTreeMap;
 use std::fmt;

@@ -1,6 +1,6 @@
 # Pipeline authoring trials
 
-Three agents authored logical pipelines of different structures and complexity. All MRI terms in the ACT trial are example data; the compiler core remains domain agnostic.
+The example pipelines exercise different structures and levels of complexity. MRI terms in the ACT example are domain-specific sample data; the compiler core remains domain agnostic.
 
 | Pipeline | What it exercises | Command | Result |
 | --- | --- | --- | --- |
@@ -48,6 +48,6 @@ The DAG reports `merged : Frame<Unknown>` and accepts `sink`. Reversing the `mer
 3. **One output per operation:** The ACT example uses single-output response and FOD stages. Multi-output MRtrix3 commands such as multi-tissue response estimation cannot be represented as one invocation with several named products. One job should eventually own all named outputs, with a path for each in Bash.
 4. **Collection contracts:** `many` accepts a one-item group. There is no operation-level minimum collection size or declared ordering. For values `1`, `2`, and `10`, the rendered input order is lexicographic: `1`, `10`, `2`.
 5. **Validation scope:** With an empty inventory, `check` can print `Pipeline valid. 0 jobs resolved.` A declared branch with no source artifacts produces no jobs and no error unless a coverage rule makes that family required. Count rules can require two artifacts per observed group but cannot specify which entity values must be present. Fully unobserved groups remain unknowable by design.
-6. **Input order and diagnostics:** The first `one` input determines a preserve operation's output dimensions; swapping otherwise equivalent ports can make a pipeline invalid. Errors identify positional ports as `input2`, which is hard to interpret in larger operations. Job ordering follows alphabetical dimension keys rather than product declaration order.
+6. **Input order and diagnostics:** The first `one` input determines a preserve operation's output dimensions; swapping otherwise equivalent ports can make a pipeline invalid. Unnamed ports appear in errors as `input2`, which is hard to interpret in larger operations; named ports provide clearer errors. Job ordering follows alphabetical dimension keys rather than product declaration order.
 7. **Inventory override:** `--sources` selects the external inventory for resolution, but a malformed embedded inventory is parsed first and still fails. The CLI should either skip validation of overridden inline inventory or state that both must be well formed.
 8. **Physical and execution layers:** SPIT can bind paths with templates and emit Bash commands after DAG resolution. The ACT example now includes explicit commands and path rules. The generated script checks that source and output paths exist, but SPIT cannot discover files, validate spatial compatibility, or inspect command-specific metadata. Multiple-output stages still need model support.

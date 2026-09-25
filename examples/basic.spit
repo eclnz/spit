@@ -1,4 +1,4 @@
-# SPIT v0.1: logical artifacts only; no paths or execution commands.
+# Sectioned pipeline example with an embedded source inventory.
 products:
     bold       : BOLD           [sub, ses, run]
     t1w        : T1w            [sub, ses]

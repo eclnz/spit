@@ -1,4 +1,4 @@
-//! SPIT: a small static compiler for logical artifact pipelines.
+//! SPIT: resolve artifact pipelines, bind paths, and generate Bash scripts.
 
 pub mod bash;
 pub mod error;

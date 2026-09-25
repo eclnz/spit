@@ -20,7 +20,7 @@ The resolved DAG has logical identities only. The Bash backend binds each concre
 
 An operation's logical signature defines its input ports, output type, and shape/cardinality rules. Its executable implementation is a separate `command` declaration keyed by operation name. For example, `operation register(moving: MRI<M,S>, reference: MRI<N,T>) -> Transform<S,T>` and `command register: flirt -in {moving} -ref {reference} -omat {output}` give each argument an explicit source and position. Unnamed ports retain positional names for compatibility. An aggregate contract can name the removed dimension with `@ drop(run)`; the resolver checks it against the call's `@ vary(run)` and the output family dimensions. SPIT does not infer a command-line interface from the logical signature.
 
-The intended flow is:
+The compilation flow is:
 
 ```text
 pipeline text -> logical resolution and validation -> concrete DAG
@@ -36,8 +36,6 @@ With `--root <directory>`, SPIT also checks that each source file needed by the 
 
 Each placeholder refers to an input port or the output. A sole many port expands into individual quoted arguments in lexicographic entity-binding order, and its placeholder must occupy a complete argument. Missing path templates, unknown placeholders, path collisions, and an embedded many expansion fail before emitting Bash. `shell-source:` declares a literal relative script path for functions called by commands; generated Bash checks and sources it before jobs. Command templates cannot influence matching, grouping, type checks, or job count. The resulting script checks required source paths, creates output directories, and checks that each job produced its declared output. Source discovery and richer physical validation remain separate work.
 
-An operation may have multiple named output ports. Each resolved invocation instance produces one job containing all its outputs; it must not be expanded into duplicate command invocations. Each output port binds to a distinct named product and receives its own logical identity, type, and declared shape. Downstream consumers of any of those products depend on the same producing job. The physical binding pass must provide a destination for every output, and execution validation must check the full output set. This models commands such as multi-tissue response estimation, which emit several artifacts together.
+The current model stores one output per operation and job. To support commands such as multi-tissue response estimation, a future invocation should produce one job with several named output ports. Each port would bind to a distinct product and path, and downstream consumers of any output would depend on that same job. Multiple outputs and named output ports are not implemented yet. The generated script is specific to the supplied inventory; a new inventory requires a new compile.
 
-Multiple outputs and named output ports are not implemented yet. The current model stores only one output per operation and job. The generated script is specific to the supplied inventory; a new inventory requires a new compile.
-
-The `examples/basic.spit` document embeds a small inventory for a one-command demonstration; `examples/basic.sources` contains that inventory alone for the external-input route. They use imaging names as sample data; `src/` contains no imaging-specific types, operations, or assumptions.
+The `examples/basic.spit` document embeds a small inventory for a sectioned pipeline example; `examples/basic.sources` contains that inventory alone for the external-input route. They use imaging names as sample data; `src/` contains no imaging-specific types, operations, or assumptions.

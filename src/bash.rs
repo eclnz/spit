@@ -1,4 +1,4 @@
-//! Bash generation from a resolved DAG and explicit command/path templates.
+//! Path binding, source-file validation, and Bash generation for resolved DAGs.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{self, Write};
