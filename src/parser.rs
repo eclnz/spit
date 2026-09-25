@@ -75,6 +75,10 @@ fn parse_sectioned_pipeline(text: &str) -> Result<Pipeline, ParseError> {
             "pipeline:" => section = Some(Section::Pipeline),
             "constraints:" => section = Some(Section::Constraints),
             "commands:" => section = Some(Section::Commands),
+            source if source.starts_with("shell-source:") => {
+                set_shell_source(&mut pipeline, source, line_number)?;
+                section = None;
+            }
             path if path.starts_with("path:") || path.starts_with("path ") => {
                 set_path(&mut pipeline, path, line_number)?;
                 section = None;
@@ -140,6 +144,8 @@ fn parse_flow_pipeline(text: &str) -> Result<Pipeline, ParseError> {
             pipeline
                 .commands
                 .push(parse_command(declaration, line_number)?);
+        } else if line.starts_with("shell-source:") {
+            set_shell_source(&mut pipeline, line, line_number)?;
         } else if line.starts_with("path ") || line.starts_with("path:") {
             set_path(&mut pipeline, line, line_number)?;
         } else if line.contains('=') {
@@ -160,6 +166,15 @@ fn parse_flow_pipeline(text: &str) -> Result<Pipeline, ParseError> {
     }
 
     Ok(pipeline)
+}
+
+fn set_shell_source(pipeline: &mut Pipeline, line: &str, number: usize) -> Result<(), ParseError> {
+    let path = line.strip_prefix("shell-source:").unwrap().trim();
+    if path.is_empty() {
+        return Err(ParseError::new(number, "shell-source needs a script path"));
+    }
+    pipeline.shell_sources.push(path.to_owned());
+    Ok(())
 }
 
 fn parse_command(line: &str, number: usize) -> Result<CommandDef, ParseError> {
@@ -339,6 +354,7 @@ pub fn parse_document(text: &str) -> Result<(Pipeline, Option<SourceInventory>),
             }
             _ if line.starts_with("path:")
                 || line.starts_with("path ")
+                || line.starts_with("shell-source:")
                 || line.starts_with("source ")
                 || line.starts_with("operation ")
                 || line.starts_with("command ")
@@ -475,6 +491,25 @@ fn parse_product(line: &str, number: usize) -> Result<ProductDef, ParseError> {
 }
 
 fn parse_operation(line: &str, number: usize) -> Result<OperationDef, ParseError> {
+    let (line, aggregated_dimension) = if let Some((signature, tail)) = line.rsplit_once(" @ drop(")
+    {
+        let dimension = tail.strip_suffix(')').ok_or_else(|| {
+            ParseError::new(
+                number,
+                "expected `@ drop(dimension)` after operation signature",
+            )
+        })?;
+        (
+            signature,
+            Some(identifier(
+                dimension.trim(),
+                number,
+                "aggregated dimension",
+            )?),
+        )
+    } else {
+        (line, None)
+    };
     let (signature, output_type) = if let Some((signature, output_type)) = line.split_once("->") {
         let output_type = parse_type_expr(output_type.trim(), true)
             .map_err(|message| ParseError::new(number, message))?;
@@ -493,6 +528,14 @@ fn parse_operation(line: &str, number: usize) -> Result<OperationDef, ParseError
     let mut ports = Vec::new();
     let count = inputs.len();
     for (index, input) in inputs.iter().enumerate() {
+        let (declared_name, input) = if let Some((name, value)) = input.split_once(':') {
+            (
+                Some(identifier(name.trim(), number, "input port")?),
+                value.trim(),
+            )
+        } else {
+            (None, input.as_str())
+        };
         let (cardinality, artifact_type) = if input == "many" {
             (Cardinality::Many, TypeExpr::Unknown)
         } else if input == "one" {
@@ -515,11 +558,13 @@ fn parse_operation(line: &str, number: usize) -> Result<OperationDef, ParseError
                 parse_type_expr(input, true).map_err(|message| ParseError::new(number, message))?,
             )
         };
-        let port_name = if count == 1 {
-            "input".to_owned()
-        } else {
-            format!("input{}", index + 1)
-        };
+        let port_name = declared_name.map(str::to_owned).unwrap_or_else(|| {
+            if count == 1 {
+                "input".to_owned()
+            } else {
+                format!("input{}", index + 1)
+            }
+        });
         ports.push(match cardinality {
             Cardinality::One => InputPort::one(&port_name, artifact_type),
             Cardinality::Many => InputPort::many(&port_name, artifact_type),
@@ -539,7 +584,17 @@ fn parse_operation(line: &str, number: usize) -> Result<OperationDef, ParseError
     } else {
         ShapeRule::Preserve
     };
-    Ok(OperationDef::new(name, ports, output_type, shape_rule))
+    if aggregated_dimension.is_some() && shape_rule != ShapeRule::Aggregate {
+        return Err(ParseError::new(
+            number,
+            "`@ drop(dimension)` requires a many input",
+        ));
+    }
+    let mut operation = OperationDef::new(name, ports, output_type, shape_rule);
+    if let Some(dimension) = aggregated_dimension {
+        operation = operation.aggregating(dimension);
+    }
+    Ok(operation)
 }
 
 fn parse_invocation(line: &str, number: usize) -> Result<Invocation, ParseError> {

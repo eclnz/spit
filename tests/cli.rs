@@ -62,6 +62,28 @@ fn bash_command_expands_observed_groups() {
 }
 
 #[test]
+fn bound_dag_displays_resolved_paths_before_command_expansion() {
+    let output = Command::new(env!("CARGO_BIN_EXE_spit"))
+        .args([
+            "bound-dag",
+            "examples/mrtrix3_act.spit",
+            "--sources",
+            "examples/mrtrix3_act.sources",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report = String::from_utf8(output.stdout).unwrap();
+    assert_eq!(report.matches("Job ").count(), 83);
+    assert!(report.contains("moving: t1w[sub=01,ses=01]"));
+    assert!(report.contains("path: input/sub-01/ses-01/t1w.nii.gz"));
+}
+
+#[test]
 fn expanded_examples_resolve() {
     for (pipeline, sources, expected_jobs) in [
         ("examples/branching.spit", None, 21),

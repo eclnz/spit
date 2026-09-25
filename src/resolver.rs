@@ -349,6 +349,12 @@ fn validate_invocation(
     )?;
     match &operation.shape_rule {
         ShapeRule::Preserve => {
+            if operation.aggregated_dimension.is_some() {
+                return Err(unsupported(
+                    operation,
+                    "preserve operation cannot declare a dropped dimension",
+                ));
+            }
             if operation.inputs.is_empty()
                 || operation
                     .inputs
@@ -388,6 +394,14 @@ fn validate_invocation(
                     "aggregation requires an explicit vary(dimension) binding",
                 ));
             };
+            if let Some(declared) = &operation.aggregated_dimension {
+                if declared != dimension {
+                    return Err(unsupported(
+                        operation,
+                        format!("declares drop({declared}) but invocation uses vary({dimension})"),
+                    ));
+                }
+            }
             let input = find_product(products, product)?;
             if !input.dimensions.contains(dimension) {
                 return Err(ResolveError::InvalidAggregationDimension {
@@ -650,7 +664,8 @@ fn expand_aggregate(
     }
     let mut jobs = Vec::new();
     for (entities, mut inputs) in groups {
-        inputs.sort();
+        // Collection arguments follow entity bindings in lexicographic order.
+        inputs.sort_by(|left, right| left.entities.cmp(&right.entities));
         let output = ArtifactInstance {
             product: output_def.name.clone(),
             artifact_type: infer_output_type(operation, &inputs, output_def)?,

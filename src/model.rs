@@ -127,6 +127,8 @@ pub struct OperationDef {
     pub inputs: Vec<InputPort>,
     pub output_type: ArtifactType,
     pub shape_rule: ShapeRule,
+    /// An optional declared dimension consumed by an aggregate operation.
+    pub aggregated_dimension: Option<String>,
 }
 
 impl OperationDef {
@@ -141,7 +143,13 @@ impl OperationDef {
             inputs,
             output_type: output_type.into(),
             shape_rule,
+            aggregated_dimension: None,
         }
+    }
+
+    pub fn aggregating(mut self, dimension: &str) -> Self {
+        self.aggregated_dimension = Some(dimension.to_owned());
+        self
     }
 }
 
@@ -210,6 +218,7 @@ pub struct Pipeline {
     pub invocations: Vec<Invocation>,
     pub constraints: Vec<CoverageRule>,
     pub commands: Vec<CommandDef>,
+    pub shell_sources: Vec<String>,
     pub path_template: Option<String>,
     pub product_paths: BTreeMap<String, String>,
 }

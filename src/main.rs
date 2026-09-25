@@ -5,12 +5,12 @@ use std::io::{self, Read};
 use std::process::ExitCode;
 
 use spit::{
-    inspect_paths, parse_document, parse_source_inventory, render_bash, render_dag, resolve,
-    validate_concrete_paths,
+    inspect_paths, parse_document, parse_source_inventory, render_bash, render_bound_dag,
+    render_dag, resolve, validate_concrete_paths,
 };
 
 const USAGE: &str =
-    "usage: spit <check|dag|paths|bash> <pipeline.spit> [--sources <inventory.spit|->] [--strict-paths]";
+    "usage: spit <check|dag|bound-dag|paths|bash> <pipeline.spit> [--sources <inventory.spit|->] [--strict-paths]";
 
 struct CliArgs {
     command: String,
@@ -22,7 +22,10 @@ struct CliArgs {
 fn parse_args() -> Result<CliArgs, Box<dyn Error>> {
     let mut args = env::args().skip(1);
     let command = args.next().ok_or(USAGE)?;
-    if !matches!(command.as_str(), "check" | "dag" | "paths" | "bash") {
+    if !matches!(
+        command.as_str(),
+        "check" | "dag" | "bound-dag" | "paths" | "bash"
+    ) {
         return Err(USAGE.into());
     }
     let pipeline = args.next().ok_or(USAGE)?;
@@ -84,6 +87,7 @@ fn run() -> Result<(), Box<dyn Error>> {
     match args.command.as_str() {
         "check" => println!("Pipeline valid.\n\n{} jobs resolved.", dag.jobs.len()),
         "dag" => print!("{}", render_dag(&dag)),
+        "bound-dag" => print!("{}", render_bound_dag(&pipeline, &dag)?),
         "paths" => (),
         "bash" => print!("{}", render_bash(&pipeline, &dag)?),
         _ => unreachable!(),

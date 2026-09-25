@@ -83,15 +83,20 @@ The ACT example uses the same interface:
 
 ```sh
 cargo run -- bash examples/mrtrix3_act.spit --sources examples/mrtrix3_act.sources > act.sh
+cargo run -- bound-dag examples/mrtrix3_act.spit --sources examples/mrtrix3_act.sources
 bash -n act.sh
 SPIT_ROOT=/path/to/data bash act.sh
 ```
 
 Its sample inventory generates 83 jobs over three observed subject sessions. Source paths are declared near the top of the pipeline file; adapt them to your data layout. A changed inventory changes the script without editing subject names into the pipeline.
 
-Each command template is an executable followed by ordered arguments. `{input}` names a sole input, `{input1}` and `{input2}` name positional inputs, `{inputs}` expands an aggregated input into separate arguments, and `{output}` names the job's output. Quoted words can contain spaces. SPIT quotes the expanded arguments for Bash; command templates do not use shell pipelines or redirection. A default `path:` template covers all products, while `path product:` overrides one family. Path templates may use `{product}`, `{entities}`, or a dimension such as `{group}`. Paths are relative to `SPIT_ROOT`; entity values are encoded as safe path components.
+Each command template is an executable followed by ordered arguments. A port can be named, as in `operation register(moving: MRI<M,S>, reference: MRI<N,T>) -> Transform<S,T>`, so its command can use `{moving}` and `{reference}`. Unnamed inputs retain `{input}` or positional `{input1}`, `{input2}` names. `{output}` names the job's output. A many port, such as `runs: many MRI<DWI,S>`, expands only when its placeholder occupies a complete argument; it becomes one separately quoted Bash argument per artifact, ordered lexicographically by entity bindings. The legacy `{inputs}` alias works for a sole many port. Quoted words can contain spaces. Command templates do not use shell pipelines or redirection. A default `path:` template covers all products, while `path product:` overrides one family. Path templates may use `{product}`, `{entities}`, or a dimension such as `{group}`. Paths are relative to `SPIT_ROOT`; entity values are encoded as safe path components.
 
-The generated script checks source paths, creates output directories, runs jobs in dependency order, and checks each output. `check` and `dag` remain logical checks and do not require command or path declarations.
+An operation can declare its aggregation contract with `@ drop(run)`: `operation concatenate_runs(runs: many MRI<DWI,S>) -> MRI<DWI,S> @ drop(run)`. A call must then use `@ vary(run)`, and the resolver checks that the derived output dimensions equal the input dimensions minus `run`. The suffix is optional for older declarations.
+
+To call a shell function, declare its script with `shell-source: scripts/functions.sh`, then use `command copy: copy_data {input} {output}`. The generated Bash checks and sources that literal relative script path under `SPIT_ROOT` before running jobs.
+
+The generated script checks source paths, creates output directories, runs jobs in dependency order, and checks each output. `check` and `dag` remain logical checks and do not require command or path declarations. `bound-dag` shows every resolved job with port names and concrete relative paths, and validates those paths without needing command definitions.
 
 ## Check path coverage
 
@@ -163,7 +168,7 @@ sources:
 
 Contexts and source records establish the observed groups for coverage checks. If a context is present but lacks a required artifact, a rule reports the missing count. Source records can also establish groups without explicit context rows. A group invisible to both the contexts and source records cannot be inferred as missing.
 
-Section order is flexible. Blank lines and `#` comments are allowed. Names use letters, digits, and underscores, starting with a letter or underscore. Source values are single tokens. Operation inputs are positional in this prototype; the first single input drives output shape for a preserve operation.
+Section order is flexible. Blank lines and `#` comments are allowed. Names use letters, digits, and underscores, starting with a letter or underscore. Source values are single tokens. Input bindings in pipeline calls follow declared port order; named ports make that order visible in command templates. The first single input drives output shape for a preserve operation.
 
 Types are optional. The same shape rules work with an untyped declaration:
 

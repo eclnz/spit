@@ -8,6 +8,7 @@ use crate::model::{
     ArtifactInstance, Cardinality, EntityBinding, Job, OperationDef, Pipeline, ProductDef,
     ResolvedDag,
 };
+use crate::render::render_typed_artifact;
 
 type ArtifactKey = (String, EntityBinding);
 
@@ -196,6 +197,14 @@ pub fn render_bash(pipeline: &Pipeline, dag: &ResolvedDag) -> Result<String, Bas
     if paths.keys().any(|identity| !outputs.contains(identity)) {
         script.push('\n');
     }
+    for source in &pipeline.shell_sources {
+        validate_shell_source(source)?;
+        writeln!(script, "spit_require {}", shell_path(source)).unwrap();
+        writeln!(script, "source {}", shell_path(source)).unwrap();
+    }
+    if !pipeline.shell_sources.is_empty() {
+        script.push('\n');
+    }
 
     for job in &dag.jobs {
         let operation = operations.get(job.operation.as_str()).ok_or_else(|| {
@@ -229,10 +238,81 @@ pub fn render_bash(pipeline: &Pipeline, dag: &ResolvedDag) -> Result<String, Bas
     Ok(script)
 }
 
+fn validate_shell_source(path: &str) -> Result<(), BashError> {
+    if path.starts_with('/')
+        || path
+            .split('/')
+            .any(|part| part.is_empty() || part == "." || part == "..")
+        || path.contains('{')
+        || path.contains('}')
+    {
+        return Err(error(format!(
+            "shell-source must be a literal relative path: `{path}`"
+        )));
+    }
+    Ok(())
+}
+
 /// Validate concrete artifact path bindings without requiring commands.
 pub fn validate_concrete_paths(pipeline: &Pipeline, dag: &ResolvedDag) -> Result<(), BashError> {
     bound_paths(pipeline, dag)?;
     Ok(())
+}
+
+/// Inspect the resolved jobs and bound paths before expanding any commands.
+pub fn render_bound_dag(pipeline: &Pipeline, dag: &ResolvedDag) -> Result<String, BashError> {
+    inspect_paths(pipeline)?.validate(false)?;
+    let paths = bound_paths(pipeline, dag)?;
+    let operations: BTreeMap<_, _> = pipeline
+        .operations
+        .iter()
+        .map(|operation| (operation.name.as_str(), operation))
+        .collect();
+    let mut output = String::new();
+    for (index, job) in dag.jobs.iter().enumerate() {
+        if index > 0 {
+            output.push('\n');
+        }
+        let operation = operations.get(job.operation.as_str()).ok_or_else(|| {
+            error(format!(
+                "unknown operation `{}` in resolved DAG",
+                job.operation
+            ))
+        })?;
+        writeln!(output, "Job {}", job.id).unwrap();
+        writeln!(output, "  operation: {}", job.operation).unwrap();
+        writeln!(output, "  inputs:").unwrap();
+        for (input_index, input) in job.inputs.iter().enumerate() {
+            let port = if operation.inputs.len() == 1
+                && operation.inputs[0].cardinality == Cardinality::Many
+            {
+                &operation.inputs[0]
+            } else {
+                operation.inputs.get(input_index).ok_or_else(|| {
+                    error(format!(
+                        "job {} has more inputs than operation ports",
+                        job.id
+                    ))
+                })?
+            };
+            writeln!(
+                output,
+                "    {}: {}",
+                port.name,
+                render_typed_artifact(dag, input)
+            )
+            .unwrap();
+            writeln!(output, "      path: {}", paths[&key(input)]).unwrap();
+        }
+        writeln!(output, "  output:").unwrap();
+        writeln!(output, "    {}", render_typed_artifact(dag, &job.output)).unwrap();
+        writeln!(output, "      path: {}", paths[&key(&job.output)]).unwrap();
+        if !job.dependencies.is_empty() {
+            let dependencies: Vec<_> = job.dependencies.iter().map(ToString::to_string).collect();
+            writeln!(output, "  depends_on: {}", dependencies.join(", ")).unwrap();
+        }
+    }
+    Ok(output)
 }
 
 fn bound_paths(

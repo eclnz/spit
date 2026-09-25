@@ -25,7 +25,7 @@ pub fn render_dag(dag: &ResolvedDag) -> String {
     output
 }
 
-fn render_typed_artifact(dag: &ResolvedDag, artifact: &ArtifactInstance) -> String {
+pub(crate) fn render_typed_artifact(dag: &ResolvedDag, artifact: &ArtifactInstance) -> String {
     let identity = render_artifact(dag, artifact);
     if artifact.artifact_type == TypeExpr::Unknown {
         identity

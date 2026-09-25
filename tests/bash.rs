@@ -3,8 +3,8 @@ use std::process::{Command, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use spit::{
-    inspect_paths, parse_document, parse_pipeline, parse_source_inventory, render_bash, resolve,
-    PathRule,
+    inspect_paths, parse_document, parse_pipeline, parse_source_inventory, render_bash,
+    render_bound_dag, resolve, PathRule,
 };
 
 fn demo_script() -> String {
@@ -208,4 +208,79 @@ fn path_coverage_catches_missing_and_invalid_rules_without_jobs() {
         .product_paths
         .insert("unused".to_owned(), "input/{id}.txt".to_owned());
     inspect_paths(&pipeline).unwrap().validate(true).unwrap();
+}
+
+#[test]
+fn bound_dag_shows_port_names_and_paths_without_commands() {
+    let (mut pipeline, _) = parse_document(include_str!("../examples/mrtrix3_act.spit")).unwrap();
+    let inventory =
+        parse_source_inventory(include_str!("../examples/mrtrix3_act.sources")).unwrap();
+    let dag = resolve(&pipeline, &inventory).unwrap();
+    pipeline.commands.clear();
+    let report = render_bound_dag(&pipeline, &dag).unwrap();
+    assert_eq!(report.matches("Job ").count(), 83);
+    assert!(report.contains("moving: t1w[sub=01,ses=01]"));
+    assert!(report.contains("reference: session_b0_nifti[sub=01,ses=01]"));
+    assert!(report.contains("path: derivatives/weighted_connectome/sub=01__ses=01.csv"));
+
+    pipeline.product_paths.remove("weighted_connectome");
+    pipeline.path_template = None;
+    assert!(render_bound_dag(&pipeline, &dag)
+        .unwrap_err()
+        .to_string()
+        .contains("no path rule"));
+}
+
+#[test]
+fn named_many_port_expands_in_entity_order_as_separate_arguments() {
+    let text = "source raw [group, part]\npath: {product}/{entities}.txt\noperation gather(items: many) @ drop(part)\ncommand gather: collect {items} {output}\nresult = gather(raw @ vary(part))\nsources:\n  raw[group=a,part=2]\n  raw[group=a,part=1]\n";
+    let (pipeline, inventory) = parse_document(text).unwrap();
+    let dag = resolve(&pipeline, &inventory.unwrap()).unwrap();
+    let script = render_bash(&pipeline, &dag).unwrap();
+    let command = script
+        .lines()
+        .find(|line| line.starts_with("'collect'"))
+        .unwrap();
+    assert!(command.contains("'raw/group=a__part=1.txt' \"$SPIT_ROOT\"/'raw/group=a__part=2.txt'"));
+    assert!(command.ends_with("\"$SPIT_ROOT\"/'result/group=a.txt'"));
+}
+
+#[test]
+fn declared_shell_source_provides_a_callable_function() {
+    let text = "source raw [id]\npath raw: input/{id}.txt\npath result: output/{id}.txt\nshell-source: scripts/functions.sh\noperation copy(data: one)\ncommand copy: copy_data {data} {output}\nresult = copy(raw)\nsources:\n  raw[id=x]\n";
+    let (pipeline, inventory) = parse_document(text).unwrap();
+    let dag = resolve(&pipeline, &inventory.unwrap()).unwrap();
+    let script = render_bash(&pipeline, &dag).unwrap();
+    let suffix = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "spit sourced function {} {suffix}",
+        std::process::id()
+    ));
+    fs::create_dir_all(root.join("input")).unwrap();
+    fs::create_dir_all(root.join("scripts")).unwrap();
+    fs::write(root.join("input/x.txt"), "hello\n").unwrap();
+    fs::write(
+        root.join("scripts/functions.sh"),
+        "copy_data() { cp -- \"$1\" \"$2\"; }\n",
+    )
+    .unwrap();
+    let run = Command::new("bash")
+        .arg("-c")
+        .arg(&script)
+        .env("SPIT_ROOT", &root)
+        .output()
+        .unwrap();
+    assert!(
+        run.status.success(),
+        "{}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert_eq!(
+        fs::read_to_string(root.join("output/x.txt")).unwrap(),
+        "hello\n"
+    );
+    fs::remove_dir_all(root).unwrap();
 }

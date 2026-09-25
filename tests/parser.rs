@@ -153,3 +153,35 @@ fn equals_command_keeps_colons_in_arguments() {
         "tool --url https://example.com/a:b {input} {output}"
     );
 }
+
+#[test]
+fn named_ports_and_declared_aggregate_shape_are_checked() {
+    let text = "source raw [sub, run]\noperation combine(runs: many) @ drop(run)\nresult = combine(raw @ vary(run))\nsources:\n  raw[sub=01,run=2]\n  raw[sub=01,run=1]\n";
+    let (pipeline, inventory) = parse_document(text).unwrap();
+    assert_eq!(pipeline.operations[0].inputs[0].name, "runs");
+    assert_eq!(
+        pipeline.operations[0].aggregated_dimension.as_deref(),
+        Some("run")
+    );
+    let dag = resolve(&pipeline, &inventory.unwrap()).unwrap();
+    assert_eq!(dag.jobs[0].output.entities.0.len(), 1);
+
+    let wrong_vary = text.replace("vary(run)", "vary(sub)");
+    let (pipeline, inventory) = parse_document(&wrong_vary).unwrap();
+    assert!(resolve(&pipeline, &inventory.unwrap())
+        .unwrap_err()
+        .to_string()
+        .contains("declares drop(run) but invocation uses vary(sub)"));
+
+    let wrong_shape = text.replace("result =", "result : Data [sub, run] =");
+    let (pipeline, inventory) = parse_document(&wrong_shape).unwrap();
+    assert!(resolve(&pipeline, &inventory.unwrap()).is_err());
+}
+
+#[test]
+fn shell_source_stays_in_pipeline_when_following_embedded_inventory() {
+    let text = "source raw [id]\noperation copy(one)\nresult = copy(raw)\nsources:\n  raw[id=x]\nshell-source: scripts/functions.sh\n";
+    let (pipeline, inventory) = parse_document(text).unwrap();
+    assert_eq!(pipeline.shell_sources, vec!["scripts/functions.sh"]);
+    assert_eq!(inventory.unwrap().artifacts.len(), 1);
+}

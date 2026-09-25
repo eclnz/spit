@@ -9,7 +9,7 @@ pub mod resolver;
 pub mod types;
 
 pub use bash::{
-    inspect_paths, render_bash, validate_concrete_paths, BashError, PathCoverage,
+    inspect_paths, render_bash, render_bound_dag, validate_concrete_paths, BashError, PathCoverage,
     PathCoverageEntry, PathRule,
 };
 pub use error::ResolveError;
