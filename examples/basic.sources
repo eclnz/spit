@@ -1,0 +1,8 @@
+# A source inventory can be supplied by a dataset indexer or a generated manifest.
+contexts:
+    [sub=01,ses=01]
+
+sources:
+    bold[sub=01,ses=01,run=1]
+    bold[sub=01,ses=01,run=2]
+    t1w[sub=01,ses=01]

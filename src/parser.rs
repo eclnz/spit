@@ -4,8 +4,8 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 use crate::model::{
-    ArtifactInstance, Cardinality, EntityBinding, InputBinding, InputPort, Invocation,
-    OperationDef, Pipeline, ProductDef, ShapeRule,
+    Cardinality, CountRequirement, CoverageRule, EntityBinding, InputBinding, InputPort,
+    Invocation, OperationDef, Pipeline, ProductDef, ShapeRule, SourceInventory, SourceRecord,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -36,13 +36,12 @@ enum Section {
     Products,
     Operations,
     Pipeline,
-    Sources,
+    Constraints,
 }
 
 pub fn parse_pipeline(text: &str) -> Result<Pipeline, ParseError> {
     let mut pipeline = Pipeline::default();
     let mut section = None;
-    let mut source_lines = Vec::new();
 
     for (index, original) in text.lines().enumerate() {
         let line_number = index + 1;
@@ -54,48 +53,115 @@ pub fn parse_pipeline(text: &str) -> Result<Pipeline, ParseError> {
             "products:" => section = Some(Section::Products),
             "operations:" => section = Some(Section::Operations),
             "pipeline:" => section = Some(Section::Pipeline),
-            "sources:" => section = Some(Section::Sources),
-            _ => {
-                match section {
-                    Some(Section::Products) => {
-                        pipeline.products.push(parse_product(line, line_number)?)
-                    }
-                    Some(Section::Operations) => pipeline
-                        .operations
-                        .push(parse_operation(line, line_number)?),
-                    Some(Section::Pipeline) => pipeline
-                        .invocations
-                        .push(parse_invocation(line, line_number)?),
-                    Some(Section::Sources) => source_lines.push((line.to_owned(), line_number)),
-                    None => return Err(ParseError::new(
-                        line_number,
-                        "expected a section header: products:, operations:, pipeline:, or sources:",
-                    )),
-                }
+            "constraints:" => section = Some(Section::Constraints),
+            "sources:" | "contexts:" => {
+                return Err(ParseError::new(
+                    line_number,
+                    "source inventory belongs in a separate file, not the pipeline definition",
+                ))
             }
+            _ => match section {
+                Some(Section::Products) => {
+                    pipeline.products.push(parse_product(line, line_number)?)
+                }
+                Some(Section::Operations) => pipeline
+                    .operations
+                    .push(parse_operation(line, line_number)?),
+                Some(Section::Pipeline) => pipeline
+                    .invocations
+                    .push(parse_invocation(line, line_number)?),
+                Some(Section::Constraints) => pipeline
+                    .constraints
+                    .push(parse_coverage_rule(line, line_number)?),
+                None => return Err(ParseError::new(
+                    line_number,
+                    "expected a section header: products:, operations:, pipeline:, or constraints:",
+                )),
+            },
         }
     }
 
-    let products: BTreeMap<_, _> = pipeline
-        .products
-        .iter()
-        .map(|product| (product.name.as_str(), &product.artifact_type))
-        .collect();
-    for (line, line_number) in source_lines {
-        let (product, entities) = parse_source(&line, line_number)?;
-        let artifact_type = products.get(product.as_str()).ok_or_else(|| {
-            ParseError::new(
-                line_number,
-                format!("source refers to unknown product `{product}`"),
-            )
-        })?;
-        pipeline.sources.push(ArtifactInstance {
-            product,
-            artifact_type: (*artifact_type).clone(),
-            entities,
-        });
-    }
     Ok(pipeline)
+}
+
+/// Parse an inventory supplied by a dataset indexer or written as a fixture.
+/// The inventory contains logical identities, never paths or artifact types.
+pub fn parse_source_inventory(text: &str) -> Result<SourceInventory, ParseError> {
+    let mut inventory = SourceInventory::default();
+    let mut section = None;
+    for (index, original) in text.lines().enumerate() {
+        let number = index + 1;
+        let line = original.split('#').next().unwrap_or("").trim();
+        if line.is_empty() {
+            continue;
+        }
+        match line {
+            "sources:" => section = Some("sources"),
+            "contexts:" => section = Some("contexts"),
+            _ => match section {
+                Some("sources") => inventory.artifacts.push(parse_source(line, number)?),
+                Some("contexts") => inventory.contexts.push(parse_context(line, number)?),
+                _ => {
+                    return Err(ParseError::new(
+                        number,
+                        "expected inventory section header: sources: or contexts:",
+                    ))
+                }
+            },
+        }
+    }
+    Ok(inventory)
+}
+
+fn parse_coverage_rule(line: &str, number: usize) -> Result<CoverageRule, ParseError> {
+    let syntax = "expected constraint: require product count=1 per [dimensions] or count>=1";
+    let rest = line
+        .strip_prefix("require ")
+        .ok_or_else(|| ParseError::new(number, syntax))?;
+    let (subject, dimensions) = rest
+        .split_once(" per ")
+        .ok_or_else(|| ParseError::new(number, syntax))?;
+    let mut parts = subject.split_whitespace();
+    let product = identifier(parts.next().unwrap_or(""), number, "constraint product")?;
+    let count_token = parts
+        .next()
+        .ok_or_else(|| ParseError::new(number, syntax))?;
+    if parts.next().is_some() {
+        return Err(ParseError::new(number, syntax));
+    }
+    let count = if let Some(value) = count_token.strip_prefix("count=") {
+        CountRequirement::Exactly(parse_count(value, number)?)
+    } else if let Some(value) = count_token.strip_prefix("count>=") {
+        CountRequirement::AtLeast(parse_count(value, number)?)
+    } else {
+        return Err(ParseError::new(number, syntax));
+    };
+    let dimensions = dimensions
+        .trim()
+        .strip_prefix('[')
+        .and_then(|value| value.strip_suffix(']'))
+        .ok_or_else(|| ParseError::new(number, syntax))?;
+    let dimensions = comma_items(dimensions, number)?;
+    if dimensions.is_empty() {
+        return Err(ParseError::new(
+            number,
+            "coverage rule needs group dimensions",
+        ));
+    }
+    for dimension in &dimensions {
+        identifier(dimension, number, "constraint dimension")?;
+    }
+    Ok(CoverageRule::new(
+        product,
+        &dimensions.iter().map(String::as_str).collect::<Vec<_>>(),
+        count,
+    ))
+}
+
+fn parse_count(value: &str, number: usize) -> Result<usize, ParseError> {
+    value
+        .parse()
+        .map_err(|_| ParseError::new(number, "constraint count must be a nonnegative integer"))
 }
 
 fn parse_product(line: &str, number: usize) -> Result<ProductDef, ParseError> {
@@ -210,7 +276,7 @@ fn parse_invocation(line: &str, number: usize) -> Result<Invocation, ParseError>
     Ok(Invocation::new(operation, bindings, output_product))
 }
 
-fn parse_source(line: &str, number: usize) -> Result<(String, EntityBinding), ParseError> {
+fn parse_source(line: &str, number: usize) -> Result<SourceRecord, ParseError> {
     let (product, bindings) = line.split_once('[').ok_or_else(|| {
         ParseError::new(
             number,
@@ -218,6 +284,18 @@ fn parse_source(line: &str, number: usize) -> Result<(String, EntityBinding), Pa
         )
     })?;
     let product = identifier(product.trim(), number, "source product")?;
+    let entities = parse_bindings(bindings, number)?;
+    Ok(SourceRecord::new(product, entities))
+}
+
+fn parse_context(line: &str, number: usize) -> Result<EntityBinding, ParseError> {
+    let bindings = line
+        .strip_prefix('[')
+        .ok_or_else(|| ParseError::new(number, "expected context: [dimension=value,...]"))?;
+    parse_bindings(bindings, number)
+}
+
+fn parse_bindings(bindings: &str, number: usize) -> Result<EntityBinding, ParseError> {
     let bindings = bindings
         .strip_suffix(']')
         .ok_or_else(|| ParseError::new(number, "expected closing `]` in source artifact"))?;
@@ -244,7 +322,7 @@ fn parse_source(line: &str, number: usize) -> Result<(String, EntityBinding), Pa
             ));
         }
     }
-    Ok((product.to_owned(), EntityBinding(values)))
+    Ok(EntityBinding(values))
 }
 
 fn call_parts(line: &str, number: usize) -> Result<(&str, &str), ParseError> {

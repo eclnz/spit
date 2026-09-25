@@ -8,9 +8,10 @@ pub mod resolver;
 
 pub use error::ResolveError;
 pub use model::{
-    ArtifactInstance, ArtifactType, Cardinality, EntityBinding, InputBinding, InputPort,
-    Invocation, Job, OperationDef, Pipeline, ProductDef, ResolvedDag, ShapeRule,
+    ArtifactInstance, ArtifactType, Cardinality, CountRequirement, CoverageRule, EntityBinding,
+    InputBinding, InputPort, Invocation, Job, OperationDef, Pipeline, ProductDef, ResolvedDag,
+    ShapeRule, SourceInventory, SourceRecord,
 };
-pub use parser::{parse_pipeline, ParseError};
+pub use parser::{parse_pipeline, parse_source_inventory, ParseError};
 pub use render::render_dag;
 pub use resolver::resolve;

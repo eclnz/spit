@@ -1,6 +1,6 @@
 use std::fmt;
 
-use crate::model::{ArtifactInstance, ArtifactType, EntityBinding};
+use crate::model::{ArtifactInstance, ArtifactType, CountRequirement, EntityBinding};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ResolveError {
@@ -41,6 +41,12 @@ pub enum ResolveError {
     UnsupportedShapeRelationship {
         operation: String,
         detail: String,
+    },
+    CoverageViolation {
+        product: String,
+        context: EntityBinding,
+        expected: CountRequirement,
+        found: usize,
     },
     InvalidDefinition {
         detail: String,
@@ -96,6 +102,15 @@ impl fmt::Display for ResolveError {
             Self::UnsupportedShapeRelationship { operation, detail } => {
                 write!(f, "unsupported shape for `{operation}`: {detail}")
             }
+            Self::CoverageViolation {
+                product,
+                context,
+                expected,
+                found,
+            } => write!(
+                f,
+                "source coverage for `{product}` at [{context}]: expected {expected} artifact(s), found {found}"
+            ),
             Self::InvalidDefinition { detail } => f.write_str(detail),
         }
     }

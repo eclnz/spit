@@ -1,6 +1,9 @@
-use spit::{parse_pipeline, resolve, ParseError, ResolveError};
+use spit::{
+    parse_pipeline, parse_source_inventory, resolve, ParseError, ResolveError, SourceInventory,
+};
 
 const EXAMPLE: &str = include_str!("../examples/basic.spit");
+const INVENTORY: &str = include_str!("../examples/basic.sources");
 
 #[test]
 fn parses_and_resolves_user_facing_example() {
@@ -8,8 +11,10 @@ fn parses_and_resolves_user_facing_example() {
     assert_eq!(pipeline.products.len(), 5);
     assert_eq!(pipeline.operations.len(), 3);
     assert_eq!(pipeline.invocations.len(), 3);
-    assert_eq!(pipeline.sources.len(), 3);
-    let dag = resolve(&pipeline).unwrap();
+    assert_eq!(pipeline.constraints.len(), 2);
+    let inventory = parse_source_inventory(INVENTORY).unwrap();
+    assert_eq!(inventory.artifacts.len(), 3);
+    let dag = resolve(&pipeline, &inventory).unwrap();
     assert_eq!(dag.jobs.len(), 5);
     assert_eq!(dag.jobs[4].inputs.len(), 2);
     assert!(!dag.jobs[4].output.entities.0.contains_key("run"));
@@ -25,10 +30,19 @@ fn reports_line_for_bad_text() {
 
 #[test]
 fn rejects_duplicate_dimension_in_source() {
-    let text = "products:\n  bold : BOLD [sub]\nsources:\n  bold[sub=01,sub=02]\n";
+    let text = "sources:\n  bold[sub=01,sub=02]\n";
+    assert!(matches!(
+        parse_source_inventory(text),
+        Err(ParseError { line: 2, .. })
+    ));
+}
+
+#[test]
+fn rejects_source_inventory_inside_pipeline_file() {
+    let text = "products:\n  bold : BOLD [sub]\nsources:\n  bold[sub=01]\n";
     assert!(matches!(
         parse_pipeline(text),
-        Err(ParseError { line: 4, .. })
+        Err(ParseError { line: 3, .. })
     ));
 }
 
@@ -40,7 +54,7 @@ fn reports_semantic_type_error_after_parsing() {
     );
     let pipeline = parse_pipeline(&text).unwrap();
     assert!(matches!(
-        resolve(&pipeline),
+        resolve(&pipeline, &SourceInventory::default()),
         Err(ResolveError::TypeMismatch { .. })
     ));
 }

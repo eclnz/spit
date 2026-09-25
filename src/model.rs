@@ -198,9 +198,66 @@ impl Invocation {
 #[derive(Clone, Debug, Default)]
 pub struct Pipeline {
     pub products: Vec<ProductDef>,
-    pub sources: Vec<ArtifactInstance>,
     pub operations: Vec<OperationDef>,
     pub invocations: Vec<Invocation>,
+    pub constraints: Vec<CoverageRule>,
+}
+
+/// A source record identifies a logical artifact without binding it to a path.
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
+pub struct SourceRecord {
+    pub product: String,
+    pub entities: EntityBinding,
+}
+
+impl SourceRecord {
+    pub fn new(product: &str, entities: EntityBinding) -> Self {
+        Self {
+            product: product.to_owned(),
+            entities,
+        }
+    }
+}
+
+/// Supplied by a dataset indexer, a manifest, or the text fixture parser.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct SourceInventory {
+    pub artifacts: Vec<SourceRecord>,
+    /// Observed contexts can expose missing artifacts even when no other source
+    /// family has an artifact for that context.
+    pub contexts: Vec<EntityBinding>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum CountRequirement {
+    Exactly(usize),
+    AtLeast(usize),
+}
+
+impl fmt::Display for CountRequirement {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Exactly(count) => write!(f, "exactly {count}"),
+            Self::AtLeast(count) => write!(f, "at least {count}"),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CoverageRule {
+    pub product: String,
+    pub group_by: Vec<String>,
+    pub count: CountRequirement,
+}
+
+impl CoverageRule {
+    pub fn new(product: &str, group_by: &[&str], count: CountRequirement) -> Self {
+        Self {
+            product: product.to_owned(),
+            group_by: group_by.iter().map(|value| (*value).to_owned()).collect(),
+            count,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

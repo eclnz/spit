@@ -1,6 +1,6 @@
 use spit::{
-    render_dag, resolve, ArtifactInstance, EntityBinding, InputBinding, InputPort, Invocation,
-    OperationDef, Pipeline, ProductDef, ShapeRule,
+    render_dag, resolve, EntityBinding, InputBinding, InputPort, Invocation, OperationDef,
+    Pipeline, ProductDef, ShapeRule, SourceInventory, SourceRecord,
 };
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -11,23 +11,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             ProductDef::new("denoised", "DenoisedBOLD", &["sub", "ses", "run"]),
             ProductDef::new("registered", "RegisteredBOLD", &["sub", "ses", "run"]),
             ProductDef::new("mean_bold", "MeanBOLD", &["sub", "ses"]),
-        ],
-        sources: vec![
-            ArtifactInstance::new(
-                "bold",
-                "BOLD",
-                EntityBinding::from_pairs([("sub", "01"), ("ses", "01"), ("run", "1")]),
-            ),
-            ArtifactInstance::new(
-                "bold",
-                "BOLD",
-                EntityBinding::from_pairs([("sub", "01"), ("ses", "01"), ("run", "2")]),
-            ),
-            ArtifactInstance::new(
-                "t1w",
-                "T1w",
-                EntityBinding::from_pairs([("sub", "01"), ("ses", "01")]),
-            ),
         ],
         operations: vec![
             OperationDef::new(
@@ -68,9 +51,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "mean_bold",
             ),
         ],
+        constraints: Vec::new(),
     };
 
-    let dag = resolve(&pipeline)?;
+    let inventory = SourceInventory {
+        artifacts: vec![
+            SourceRecord::new(
+                "bold",
+                EntityBinding::from_pairs([("sub", "01"), ("ses", "01"), ("run", "1")]),
+            ),
+            SourceRecord::new(
+                "bold",
+                EntityBinding::from_pairs([("sub", "01"), ("ses", "01"), ("run", "2")]),
+            ),
+            SourceRecord::new(
+                "t1w",
+                EntityBinding::from_pairs([("sub", "01"), ("ses", "01")]),
+            ),
+        ],
+        contexts: Vec::new(),
+    };
+    let dag = resolve(&pipeline, &inventory)?;
     print!("{}", render_dag(&dag));
     Ok(())
 }

@@ -2,13 +2,16 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::error::ResolveError;
 use crate::model::{
-    ArtifactInstance, Cardinality, EntityBinding, InputBinding, Invocation, Job, OperationDef,
-    Pipeline, ProductDef, ResolvedDag, ShapeRule,
+    ArtifactInstance, Cardinality, CountRequirement, EntityBinding, InputBinding, Invocation, Job,
+    OperationDef, Pipeline, ProductDef, ResolvedDag, ShapeRule, SourceInventory,
 };
 
 type ArtifactKey = (String, EntityBinding);
 
-pub fn resolve(pipeline: &Pipeline) -> Result<ResolvedDag, ResolveError> {
+pub fn resolve(
+    pipeline: &Pipeline,
+    inventory: &SourceInventory,
+) -> Result<ResolvedDag, ResolveError> {
     let products = index_products(&pipeline.products)?;
     let operations = index_operations(&pipeline.operations)?;
     let producers = index_producers(&pipeline.invocations, &products, &operations)?;
@@ -23,25 +26,22 @@ pub fn resolve(pipeline: &Pipeline) -> Result<ResolvedDag, ResolveError> {
     let mut artifact_producers: BTreeMap<ArtifactKey, usize> = BTreeMap::new();
     let mut seen: BTreeSet<ArtifactKey> = BTreeSet::new();
 
-    for source in &pipeline.sources {
-        let product = find_product(&products, &source.product)?;
-        if producers.contains_key(&source.product) {
+    for record in &inventory.artifacts {
+        let product = find_product(&products, &record.product)?;
+        if producers.contains_key(&record.product) {
             return Err(ResolveError::InvalidDefinition {
                 detail: format!(
                     "product `{}` cannot be both a source family and an invocation output",
-                    source.product
+                    record.product
                 ),
             });
         }
-        if source.artifact_type != product.artifact_type {
-            return Err(ResolveError::InvalidDefinition {
-                detail: format!(
-                    "source `{source}` has type {}, but product `{}` is declared as {}",
-                    source.artifact_type, product.name, product.artifact_type
-                ),
-            });
-        }
-        let actual: BTreeSet<_> = source.entities.0.keys().cloned().collect();
+        let source = ArtifactInstance {
+            product: record.product.clone(),
+            artifact_type: product.artifact_type.clone(),
+            entities: record.entities.clone(),
+        };
+        let actual: BTreeSet<_> = record.entities.0.keys().cloned().collect();
         let expected: BTreeSet<_> = product.dimensions.iter().cloned().collect();
         if actual != expected {
             return Err(ResolveError::InvalidDefinition {
@@ -51,20 +51,19 @@ pub fn resolve(pipeline: &Pipeline) -> Result<ResolvedDag, ResolveError> {
                 ),
             });
         }
-        let key = artifact_key(source);
+        let key = artifact_key(&source);
         if !seen.insert(key) {
-            return Err(ResolveError::DuplicateOutputArtifact {
-                artifact: source.clone(),
-            });
+            return Err(ResolveError::DuplicateOutputArtifact { artifact: source });
         }
         artifacts
             .entry(source.product.clone())
             .or_default()
-            .push(source.clone());
+            .push(source);
     }
     for family in artifacts.values_mut() {
         family.sort();
     }
+    validate_coverage(pipeline, inventory, &products, &producers, &artifacts)?;
 
     let mut dag = ResolvedDag {
         jobs: Vec::new(),
@@ -122,6 +121,78 @@ pub fn resolve(pipeline: &Pipeline) -> Result<ResolvedDag, ResolveError> {
         }
     }
     Ok(dag)
+}
+
+fn validate_coverage(
+    pipeline: &Pipeline,
+    inventory: &SourceInventory,
+    products: &BTreeMap<&str, &ProductDef>,
+    producers: &BTreeMap<String, usize>,
+    artifacts: &BTreeMap<String, Vec<ArtifactInstance>>,
+) -> Result<(), ResolveError> {
+    for rule in &pipeline.constraints {
+        let product = find_product(products, &rule.product)?;
+        if producers.contains_key(&rule.product) {
+            return Err(ResolveError::InvalidDefinition {
+                detail: format!(
+                    "coverage rule product `{}` must be a source family",
+                    rule.product
+                ),
+            });
+        }
+        let group_by = dimension_set(&rule.group_by);
+        if group_by.len() != rule.group_by.len()
+            || !group_by.is_subset(&dimension_set(&product.dimensions))
+        {
+            return Err(ResolveError::InvalidDefinition {
+                detail: format!(
+                    "coverage rule for `{}` must group by distinct dimensions of that product",
+                    rule.product
+                ),
+            });
+        }
+
+        let groups: BTreeSet<_> = inventory
+            .contexts
+            .iter()
+            .chain(inventory.artifacts.iter().map(|record| &record.entities))
+            .filter_map(|binding| project(binding, &rule.group_by))
+            .collect();
+        for context in groups {
+            let found = family(artifacts, &rule.product)
+                .iter()
+                .filter(|artifact| {
+                    project(&artifact.entities, &rule.group_by) == Some(context.clone())
+                })
+                .count();
+            let valid = match rule.count {
+                CountRequirement::Exactly(expected) => found == expected,
+                CountRequirement::AtLeast(minimum) => found >= minimum,
+            };
+            if !valid {
+                return Err(ResolveError::CoverageViolation {
+                    product: rule.product.clone(),
+                    context,
+                    expected: rule.count.clone(),
+                    found,
+                });
+            }
+        }
+    }
+    Ok(())
+}
+
+fn project(binding: &EntityBinding, dimensions: &[String]) -> Option<EntityBinding> {
+    let values = dimensions
+        .iter()
+        .map(|dimension| {
+            binding
+                .0
+                .get(dimension)
+                .map(|value| (dimension.clone(), value.clone()))
+        })
+        .collect::<Option<BTreeMap<_, _>>>()?;
+    Some(EntityBinding(values))
 }
 
 fn index_products(products: &[ProductDef]) -> Result<BTreeMap<&str, &ProductDef>, ResolveError> {
