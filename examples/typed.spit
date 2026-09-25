@@ -1,0 +1,14 @@
+# Symbolic type inference; operation variables are local to each invocation.
+products:
+    raw       : Frame<Native>     [sample]
+    reference : Reference<Target> [sample]
+    cleaned   : Unknown           [sample]
+    transform : Unknown           [sample]
+
+operations:
+    clean(Frame<S>) -> CleanFrame<S>
+    align(CleanFrame<A>, Reference<B>) -> Transform<A,B>
+
+pipeline:
+    cleaned = clean(raw)
+    transform = align(cleaned, reference)

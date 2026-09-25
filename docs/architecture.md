@@ -6,6 +6,8 @@ The pipeline definition is a reusable graph template. It names product families 
 
 `resolve(&pipeline, &inventory)` checks the declarations and inventory, then enumerates jobs, logical artifact instances, and dependencies. A coverage rule counts a source family within each observed context; it does not prescribe the number of contexts in the dataset. This is how a missing required image in an observed session can fail without requiring a global subject or session count.
 
+Symbolic type checking is separate from entity matching. Operation signatures use `TypeExpr` values; each concrete job receives a fresh substitution map for its type variables. Inputs unify with the signature, and the inferred output type is substituted into the job's output artifact. A known conflict fails resolution. `Unknown` leaves compatibility undecided and unresolved variables are erased to `Unknown` at the output boundary, preventing local variables from leaking into another job.
+
 The resolved DAG has logical identities only. A future physical binding layer may attach paths and inspect files. Execution backends will consume a fully resolved and validated DAG. Neither physical discovery nor command execution is part of the resolver.
 
 The `examples/basic.spit` pipeline and `examples/basic.sources` inventory demonstrate the boundary. They use imaging names as sample data; `src/` contains no imaging-specific types, operations, or assumptions.

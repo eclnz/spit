@@ -7,6 +7,7 @@ use crate::model::{
     Cardinality, CountRequirement, CoverageRule, EntityBinding, InputBinding, InputPort,
     Invocation, OperationDef, Pipeline, ProductDef, ShapeRule, SourceInventory, SourceRecord,
 };
+use crate::types::parse_type_expr;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ParseError {
@@ -176,7 +177,8 @@ fn parse_product(line: &str, number: usize) -> Result<ProductDef, ParseError> {
         .trim()
         .split_once('[')
         .ok_or_else(|| ParseError::new(number, "expected product type followed by [dimensions]"))?;
-    let artifact_type = identifier(artifact_type.trim(), number, "artifact type")?;
+    let artifact_type = parse_type_expr(artifact_type.trim(), false)
+        .map_err(|message| ParseError::new(number, message))?;
     let dimensions = dimensions
         .strip_suffix(']')
         .ok_or_else(|| ParseError::new(number, "expected closing `]` in product declaration"))?;
@@ -198,7 +200,8 @@ fn parse_operation(line: &str, number: usize) -> Result<OperationDef, ParseError
             "expected operation: name(InputType, ...) -> OutputType",
         )
     })?;
-    let output_type = identifier(output_type.trim(), number, "output type")?;
+    let output_type = parse_type_expr(output_type.trim(), true)
+        .map_err(|message| ParseError::new(number, message))?;
     let (name, inputs) = call_parts(signature.trim(), number)?;
     let inputs = comma_items(inputs, number)?;
     if inputs.is_empty() {
@@ -215,7 +218,8 @@ fn parse_operation(line: &str, number: usize) -> Result<OperationDef, ParseError
         } else {
             (Cardinality::One, input.as_str())
         };
-        let artifact_type = identifier(artifact_type, number, "input type")?;
+        let artifact_type = parse_type_expr(artifact_type, true)
+            .map_err(|message| ParseError::new(number, message))?;
         let port_name = if count == 1 {
             "input".to_owned()
         } else {
@@ -341,25 +345,32 @@ fn comma_items(text: &str, number: usize) -> Result<Vec<String>, ParseError> {
         return Ok(Vec::new());
     }
     let mut items = Vec::new();
-    let mut depth = 0usize;
+    let mut paren_depth = 0usize;
+    let mut angle_depth = 0usize;
     let mut start = 0usize;
     for (index, character) in text.char_indices() {
         match character {
-            '(' => depth += 1,
+            '(' => paren_depth += 1,
             ')' => {
-                depth = depth
+                paren_depth = paren_depth
                     .checked_sub(1)
                     .ok_or_else(|| ParseError::new(number, "unexpected `)`"))?
             }
-            ',' if depth == 0 => {
+            '<' => angle_depth += 1,
+            '>' => {
+                angle_depth = angle_depth
+                    .checked_sub(1)
+                    .ok_or_else(|| ParseError::new(number, "unexpected `>`"))?
+            }
+            ',' if paren_depth == 0 && angle_depth == 0 => {
                 items.push(text[start..index].trim().to_owned());
                 start = index + 1;
             }
             _ => {}
         }
     }
-    if depth != 0 {
-        return Err(ParseError::new(number, "unclosed `(`"));
+    if paren_depth != 0 || angle_depth != 0 {
+        return Err(ParseError::new(number, "unclosed `(` or `<`"));
     }
     items.push(text[start..].trim().to_owned());
     if items.iter().any(String::is_empty) {

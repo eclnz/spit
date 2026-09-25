@@ -1,20 +1,9 @@
 use std::collections::BTreeMap;
 use std::fmt;
 
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
-pub struct ArtifactType(pub String);
+use crate::types::TypeExpr;
 
-impl From<&str> for ArtifactType {
-    fn from(value: &str) -> Self {
-        Self(value.to_owned())
-    }
-}
-
-impl fmt::Display for ArtifactType {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
-    }
-}
+pub type ArtifactType = TypeExpr;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Ord, PartialOrd)]
 pub struct EntityBinding(pub BTreeMap<String, String>);
@@ -57,7 +46,7 @@ pub struct ProductDef {
 }
 
 impl ProductDef {
-    pub fn new(name: &str, artifact_type: &str, dimensions: &[&str]) -> Self {
+    pub fn new(name: &str, artifact_type: impl Into<ArtifactType>, dimensions: &[&str]) -> Self {
         Self {
             name: name.to_owned(),
             artifact_type: artifact_type.into(),
@@ -74,7 +63,11 @@ pub struct ArtifactInstance {
 }
 
 impl ArtifactInstance {
-    pub fn new(product: &str, artifact_type: &str, entities: EntityBinding) -> Self {
+    pub fn new(
+        product: &str,
+        artifact_type: impl Into<ArtifactType>,
+        entities: EntityBinding,
+    ) -> Self {
         Self {
             product: product.to_owned(),
             artifact_type: artifact_type.into(),
@@ -103,7 +96,7 @@ pub struct InputPort {
 }
 
 impl InputPort {
-    pub fn one(name: &str, artifact_type: &str) -> Self {
+    pub fn one(name: &str, artifact_type: impl Into<ArtifactType>) -> Self {
         Self {
             name: name.to_owned(),
             artifact_type: artifact_type.into(),
@@ -111,7 +104,7 @@ impl InputPort {
         }
     }
 
-    pub fn many(name: &str, artifact_type: &str) -> Self {
+    pub fn many(name: &str, artifact_type: impl Into<ArtifactType>) -> Self {
         Self {
             name: name.to_owned(),
             artifact_type: artifact_type.into(),
@@ -140,7 +133,7 @@ impl OperationDef {
     pub fn new(
         name: &str,
         inputs: Vec<InputPort>,
-        output_type: &str,
+        output_type: impl Into<ArtifactType>,
         shape_rule: ShapeRule,
     ) -> Self {
         Self {

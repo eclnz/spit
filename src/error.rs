@@ -14,8 +14,15 @@ pub enum ResolveError {
         operation: String,
         port: String,
         product: String,
-        expected: ArtifactType,
-        found: ArtifactType,
+        expected: Box<ArtifactType>,
+        found: Box<ArtifactType>,
+    },
+    TypeVariableConflict {
+        operation: String,
+        port: String,
+        variable: String,
+        previous: Box<ArtifactType>,
+        required: Box<ArtifactType>,
     },
     MissingInput {
         operation: String,
@@ -67,6 +74,16 @@ impl fmt::Display for ResolveError {
             } => write!(
                 f,
                 "type mismatch at `{operation}.{port}`: product `{product}` is {found}, expected {expected}"
+            ),
+            Self::TypeVariableConflict {
+                operation,
+                port,
+                variable,
+                previous,
+                required,
+            } => write!(
+                f,
+                "type conflict at `{operation}.{port}`: variable `{variable}` was inferred as {previous}, but now requires {required}"
             ),
             Self::MissingInput {
                 operation,

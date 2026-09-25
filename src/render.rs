@@ -12,10 +12,22 @@ pub fn render_dag(dag: &ResolvedDag) -> String {
         writeln!(output, "  operation: {}", job.operation).unwrap();
         writeln!(output, "  inputs:").unwrap();
         for input in &job.inputs {
-            writeln!(output, "    {}", render_artifact(dag, input)).unwrap();
+            writeln!(
+                output,
+                "    {} : {}",
+                render_artifact(dag, input),
+                input.artifact_type
+            )
+            .unwrap();
         }
         writeln!(output, "  output:").unwrap();
-        writeln!(output, "    {}", render_artifact(dag, &job.output)).unwrap();
+        writeln!(
+            output,
+            "    {} : {}",
+            render_artifact(dag, &job.output),
+            job.output.artifact_type
+        )
+        .unwrap();
         if !job.dependencies.is_empty() {
             let dependencies: Vec<_> = job.dependencies.iter().map(ToString::to_string).collect();
             writeln!(output, "  depends_on: {}", dependencies.join(", ")).unwrap();

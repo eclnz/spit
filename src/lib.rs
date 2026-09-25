@@ -5,6 +5,7 @@ pub mod model;
 pub mod parser;
 pub mod render;
 pub mod resolver;
+pub mod types;
 
 pub use error::ResolveError;
 pub use model::{
@@ -15,3 +16,4 @@ pub use model::{
 pub use parser::{parse_pipeline, parse_source_inventory, ParseError};
 pub use render::render_dag;
 pub use resolver::resolve;
+pub use types::{parse_type_expr, Compatibility, Substitutions, TypeExpr, TypeUnifyError};

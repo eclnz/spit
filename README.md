@@ -13,6 +13,14 @@ cargo run -- dag examples/basic.spit --sources examples/basic.sources
 
 `check` prints `Pipeline valid.` and the number of resolved jobs. `dag` prints the [text DAG](basic.dag.txt), including inputs, outputs, and dependencies. After `cargo build`, use `target/debug/spit` in place of `cargo run --`.
 
+The [typed example](examples/typed.spit) shows inferred output types in the dry run:
+
+```sh
+cargo run -- dag examples/typed.spit --sources examples/typed.sources
+```
+
+For `Frame<Native>` and `Reference<Target>`, the example infers `CleanFrame<Native>` and `Transform<Native,Target>` without type annotations on its pipeline calls.
+
 An indexer can supply an inventory on standard input, so pipeline authors need not list every scan by hand:
 
 ```sh
@@ -79,7 +87,7 @@ Section order is flexible. Blank lines and `#` comments are allowed. Names use l
 
 ## Resolution rules
 
-- Artifact types are symbolic names checked for exact equality at each input and output.
+- Artifact types are symbolic expressions. Named constructors and their argument structure must match; an operation's single-letter uppercase type variables unify across its ports and are instantiated separately for each job. `Unknown` is compatible but does not establish a variable binding.
 - Each source record must bind exactly the declared dimensions of its product. The product name and bindings must be unique.
 - For a preserve operation, the first `one` input drives one output per artifact. Later `one` inputs match on shared dimensions. Zero matches is missing; multiple matches is ambiguous. A unique later input must be no more specific than the driving artifact.
 - A `many` operation has exactly one input and requires `@ vary(dimension)` in its invocation. The resolver groups its input family by every other dimension and removes the varied dimension from each output identity.
@@ -90,4 +98,4 @@ Run the tests with `cargo test`. The [Rust construction example](examples/basic.
 
 ## Current limits
 
-SPIT does not yet discover source files, bind logical artifacts to paths, verify physical files, or execute jobs. It also does not implement generic semantic types or the broader shape algebra from the full design brief. The present text parser and resolver remain intentionally small while their boundaries are tested.
+SPIT does not yet discover source files, bind logical artifacts to paths, verify physical files, or execute jobs. Type checking has no subtyping, automatic coercion, strict mode, or graph-wide inference. Unresolved type variables become `Unknown` at a job output. Operations still have one output, and the broader shape algebra from the full design brief remains to be implemented.

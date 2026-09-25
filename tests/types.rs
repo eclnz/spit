@@ -1,0 +1,188 @@
+use spit::{
+    parse_pipeline, parse_source_inventory, parse_type_expr, resolve, Compatibility, ResolveError,
+    Substitutions, TypeExpr, TypeUnifyError,
+};
+
+fn product(text: &str) -> TypeExpr {
+    parse_type_expr(text, false).unwrap()
+}
+
+fn signature(text: &str) -> TypeExpr {
+    parse_type_expr(text, true).unwrap()
+}
+
+#[test]
+fn exact_named_types_match() {
+    let mut substitutions = Substitutions::default();
+    assert_eq!(
+        substitutions.unify(&product("BOLD"), &product("BOLD")),
+        Ok(Compatibility::Compatible)
+    );
+}
+
+#[test]
+fn different_named_types_fail() {
+    let mut substitutions = Substitutions::default();
+    assert!(matches!(
+        substitutions.unify(&product("BOLD"), &product("T1w")),
+        Err(TypeUnifyError::Mismatch { .. })
+    ));
+}
+
+#[test]
+fn different_constructors_and_arities_fail() {
+    let mut substitutions = Substitutions::default();
+    assert!(matches!(
+        substitutions.unify(&signature("BOLD<S>"), &product("Image<Native>")),
+        Err(TypeUnifyError::Mismatch { .. })
+    ));
+    assert!(matches!(
+        substitutions.unify(&signature("Pair<A,B>"), &product("Pair<Native>")),
+        Err(TypeUnifyError::Mismatch { .. })
+    ));
+}
+
+#[test]
+fn generic_input_infers_variable_and_substitutes_output() {
+    let mut substitutions = Substitutions::default();
+    assert_eq!(
+        substitutions.unify(&signature("BOLD<S>"), &product("BOLD<Native>")),
+        Ok(Compatibility::Compatible)
+    );
+    assert_eq!(substitutions.0["S"], product("Native"));
+    assert_eq!(
+        substitutions.substitute(&signature("DenoisedBOLD<S>")),
+        product("DenoisedBOLD<Native>")
+    );
+}
+
+#[test]
+fn multiple_variables_infer_independently() {
+    let mut substitutions = Substitutions::default();
+    substitutions
+        .unify(&signature("BOLD<A>"), &product("BOLD<Native>"))
+        .unwrap();
+    substitutions
+        .unify(&signature("T1w<B>"), &product("T1w<MNI>"))
+        .unwrap();
+    assert_eq!(
+        substitutions.substitute(&signature("Affine<A,B>")),
+        product("Affine<Native,MNI>")
+    );
+}
+
+#[test]
+fn conflicting_variable_reports_previous_and_required_types() {
+    let mut substitutions = Substitutions::default();
+    substitutions
+        .unify(&signature("A<X>"), &product("A<Native>"))
+        .unwrap();
+    assert!(matches!(
+        substitutions.unify(&signature("B<X>"), &product("B<MNI>")),
+        Err(TypeUnifyError::VariableConflict { variable, previous, required })
+            if variable == "X" && previous == product("Native") && required == product("MNI")
+    ));
+}
+
+#[test]
+fn nested_types_unify_recursively() {
+    let mut substitutions = Substitutions::default();
+    substitutions
+        .unify(
+            &signature("Wrapper<Image<S>>"),
+            &product("Wrapper<Image<Native>>"),
+        )
+        .unwrap();
+    assert_eq!(substitutions.0["S"], product("Native"));
+}
+
+#[test]
+fn unknown_is_indeterminate_without_binding_a_variable() {
+    let mut substitutions = Substitutions::default();
+    assert_eq!(
+        substitutions.unify(&signature("BOLD<S>"), &TypeExpr::Unknown),
+        Ok(Compatibility::Unknown)
+    );
+    assert!(substitutions.0.is_empty());
+    assert_eq!(
+        substitutions.substitute(&signature("DenoisedBOLD<S>")),
+        signature("DenoisedBOLD<S>")
+    );
+}
+
+#[test]
+fn unresolved_output_variables_become_unknown_at_job_boundary() {
+    let pipeline = parse_pipeline(
+        "products:\n  raw : Unknown [subject]\n  result : Unknown [subject]\noperations:\n  transform(A<S>) -> B<S>\npipeline:\n  result = transform(raw)\n",
+    )
+    .unwrap();
+    let inventory = parse_source_inventory("sources:\n  raw[subject=A]\n").unwrap();
+    let dag = resolve(&pipeline, &inventory).unwrap();
+    assert_eq!(dag.jobs[0].output.artifact_type, product("B<Unknown>"));
+}
+
+#[test]
+fn generic_pipeline_infers_output_type_without_pipeline_annotations() {
+    let pipeline = parse_pipeline(
+        "products:\n  bold : BOLD<Native> [subject]\n  denoised : Unknown [subject]\noperations:\n  denoise(BOLD<S>) -> DenoisedBOLD<S>\npipeline:\n  denoised = denoise(bold)\n",
+    )
+    .unwrap();
+    let inventory = parse_source_inventory("sources:\n  bold[subject=A]\n").unwrap();
+    let dag = resolve(&pipeline, &inventory).unwrap();
+    assert_eq!(
+        dag.jobs[0].output.artifact_type,
+        product("DenoisedBOLD<Native>")
+    );
+}
+
+#[test]
+fn chained_generic_operations_propagate_concrete_type() {
+    let pipeline = parse_pipeline(
+        "products:\n  raw : A<Native> [subject]\n  middle : Unknown [subject]\n  final : Unknown [subject]\noperations:\n  f(A<X>) -> B<X>\n  g(B<Y>) -> C<Y>\npipeline:\n  middle = f(raw)\n  final = g(middle)\n",
+    )
+    .unwrap();
+    let inventory = parse_source_inventory("sources:\n  raw[subject=A]\n").unwrap();
+    let dag = resolve(&pipeline, &inventory).unwrap();
+    assert_eq!(dag.jobs[0].output.artifact_type, product("B<Native>"));
+    assert_eq!(dag.jobs[1].output.artifact_type, product("C<Native>"));
+}
+
+#[test]
+fn operation_type_variables_do_not_leak_between_invocations() {
+    let pipeline = parse_pipeline(
+        "products:\n  a : A<Native> [subject]\n  b : A<MNI> [subject]\n  out_a : Unknown [subject]\n  out_b : Unknown [subject]\noperations:\n  convert(A<X>) -> B<X>\npipeline:\n  out_a = convert(a)\n  out_b = convert(b)\n",
+    )
+    .unwrap();
+    let inventory = parse_source_inventory("sources:\n  a[subject=01]\n  b[subject=01]\n").unwrap();
+    let dag = resolve(&pipeline, &inventory).unwrap();
+    assert_eq!(dag.jobs[0].output.artifact_type, product("B<Native>"));
+    assert_eq!(dag.jobs[1].output.artifact_type, product("B<MNI>"));
+}
+
+#[test]
+fn conflicting_port_bindings_are_a_structured_resolver_error() {
+    let pipeline = parse_pipeline(
+        "products:\n  a : A<Native> [subject]\n  b : B<MNI> [subject]\n  c : Unknown [subject]\noperations:\n  op(A<X>, B<X>) -> C<X>\npipeline:\n  c = op(a, b)\n",
+    )
+    .unwrap();
+    let inventory = parse_source_inventory("sources:\n  a[subject=01]\n  b[subject=01]\n").unwrap();
+    assert!(matches!(
+        resolve(&pipeline, &inventory),
+        Err(ResolveError::TypeVariableConflict { operation, port, variable, .. })
+            if operation == "op" && port == "input2" && variable == "X"
+    ));
+}
+
+#[test]
+fn declared_output_type_cannot_contradict_inferred_type() {
+    let pipeline = parse_pipeline(
+        "products:\n  raw : A<Native> [subject]\n  result : B<MNI> [subject]\noperations:\n  f(A<X>) -> B<X>\npipeline:\n  result = f(raw)\n",
+    )
+    .unwrap();
+    let inventory = parse_source_inventory("sources:\n  raw[subject=01]\n").unwrap();
+    assert!(matches!(
+        resolve(&pipeline, &inventory),
+        Err(ResolveError::TypeVariableConflict { port, variable, .. })
+            if port == "output" && variable == "X"
+    ));
+}

@@ -5,6 +5,7 @@ use crate::model::{
     ArtifactInstance, Cardinality, CountRequirement, EntityBinding, InputBinding, Invocation, Job,
     OperationDef, Pipeline, ProductDef, ResolvedDag, ShapeRule, SourceInventory,
 };
+use crate::types::{Substitutions, TypeExpr, TypeUnifyError};
 
 type ArtifactKey = (String, EntityBinding);
 
@@ -198,9 +199,17 @@ fn project(binding: &EntityBinding, dimensions: &[String]) -> Option<EntityBindi
 fn index_products(products: &[ProductDef]) -> Result<BTreeMap<&str, &ProductDef>, ResolveError> {
     let mut indexed = BTreeMap::new();
     for product in products {
-        if product.name.is_empty() || product.artifact_type.0.is_empty() {
+        if product.name.is_empty() || !product.artifact_type.is_valid() {
             return Err(ResolveError::InvalidDefinition {
                 detail: "product names and artifact types must not be empty".to_owned(),
+            });
+        }
+        if product.artifact_type.has_variables() {
+            return Err(ResolveError::InvalidDefinition {
+                detail: format!(
+                    "product `{}` must use a concrete or Unknown type, not an operation variable",
+                    product.name
+                ),
             });
         }
         let dimensions: BTreeSet<_> = product.dimensions.iter().collect();
@@ -228,7 +237,7 @@ fn index_operations(
 ) -> Result<BTreeMap<&str, &OperationDef>, ResolveError> {
     let mut indexed = BTreeMap::new();
     for operation in operations {
-        if operation.name.is_empty() || operation.output_type.0.is_empty() {
+        if operation.name.is_empty() || !operation.output_type.is_valid() {
             return Err(ResolveError::InvalidDefinition {
                 detail: "operation names and output types must not be empty".to_owned(),
             });
@@ -238,7 +247,7 @@ fn index_operations(
             || operation
                 .inputs
                 .iter()
-                .any(|port| port.name.is_empty() || port.artifact_type.0.is_empty())
+                .any(|port| port.name.is_empty() || !port.artifact_type.is_valid())
         {
             return Err(ResolveError::InvalidDefinition {
                 detail: format!("operation `{}` has invalid input ports", operation.name),
@@ -318,27 +327,26 @@ fn validate_invocation(
             ),
         ));
     }
-    if output.artifact_type != operation.output_type {
-        return Err(ResolveError::TypeMismatch {
-            operation: operation.name.clone(),
-            port: "output".to_owned(),
-            product: output.name.clone(),
-            expected: operation.output_type.clone(),
-            found: output.artifact_type.clone(),
-        });
-    }
+    let mut substitutions = Substitutions::default();
     for (port, binding) in operation.inputs.iter().zip(&invocation.inputs) {
         let product = find_product(products, binding.product_name())?;
-        if product.artifact_type != port.artifact_type {
-            return Err(ResolveError::TypeMismatch {
-                operation: operation.name.clone(),
-                port: port.name.clone(),
-                product: product.name.clone(),
-                expected: port.artifact_type.clone(),
-                found: product.artifact_type.clone(),
-            });
-        }
+        unify_port(
+            &mut substitutions,
+            operation,
+            &port.name,
+            &product.name,
+            &port.artifact_type,
+            &product.artifact_type,
+        )?;
     }
+    unify_port(
+        &mut substitutions,
+        operation,
+        "output",
+        &output.name,
+        &operation.output_type,
+        &output.artifact_type,
+    )?;
     match &operation.shape_rule {
         ShapeRule::Preserve => {
             if operation.inputs.is_empty()
@@ -405,6 +413,90 @@ fn validate_invocation(
         }
     }
     Ok(())
+}
+
+fn unify_port(
+    substitutions: &mut Substitutions,
+    operation: &OperationDef,
+    port: &str,
+    product: &str,
+    expected: &TypeExpr,
+    actual: &TypeExpr,
+) -> Result<(), ResolveError> {
+    substitutions
+        .unify(expected, actual)
+        .map(|_| ())
+        .map_err(|error| match error {
+            TypeUnifyError::VariableConflict {
+                variable,
+                previous,
+                required,
+            } => ResolveError::TypeVariableConflict {
+                operation: operation.name.clone(),
+                port: port.to_owned(),
+                variable,
+                previous: Box::new(previous),
+                required: Box::new(required),
+            },
+            _ => ResolveError::TypeMismatch {
+                operation: operation.name.clone(),
+                port: port.to_owned(),
+                product: product.to_owned(),
+                expected: Box::new(expected.clone()),
+                found: Box::new(actual.clone()),
+            },
+        })
+}
+
+fn infer_output_type(
+    operation: &OperationDef,
+    inputs: &[ArtifactInstance],
+    output_def: &ProductDef,
+) -> Result<TypeExpr, ResolveError> {
+    let mut substitutions = Substitutions::default();
+    match operation.shape_rule {
+        ShapeRule::Preserve => {
+            for (port, input) in operation.inputs.iter().zip(inputs) {
+                unify_port(
+                    &mut substitutions,
+                    operation,
+                    &port.name,
+                    &input.product,
+                    &port.artifact_type,
+                    &input.artifact_type,
+                )?;
+            }
+        }
+        ShapeRule::Aggregate => {
+            let port = &operation.inputs[0];
+            for input in inputs {
+                unify_port(
+                    &mut substitutions,
+                    operation,
+                    &port.name,
+                    &input.product,
+                    &port.artifact_type,
+                    &input.artifact_type,
+                )?;
+            }
+        }
+    }
+    unify_port(
+        &mut substitutions,
+        operation,
+        "output",
+        &output_def.name,
+        &operation.output_type,
+        &output_def.artifact_type,
+    )?;
+    let inferred = substitutions
+        .substitute(&operation.output_type)
+        .erase_variables();
+    if inferred == TypeExpr::Unknown {
+        Ok(output_def.artifact_type.clone())
+    } else {
+        Ok(inferred)
+    }
 }
 
 fn dimension_set(dimensions: &[String]) -> BTreeSet<String> {
@@ -526,7 +618,7 @@ fn expand_preserve(
         }
         let output = ArtifactInstance {
             product: output_def.name.clone(),
-            artifact_type: output_def.artifact_type.clone(),
+            artifact_type: infer_output_type(operation, &inputs, output_def)?,
             entities: driving_artifact.entities.clone(),
         };
         jobs.push(make_job(
@@ -561,7 +653,7 @@ fn expand_aggregate(
         inputs.sort();
         let output = ArtifactInstance {
             product: output_def.name.clone(),
-            artifact_type: output_def.artifact_type.clone(),
+            artifact_type: infer_output_type(operation, &inputs, output_def)?,
             entities,
         };
         jobs.push(make_job(
