@@ -2,7 +2,10 @@ use std::fs;
 use std::process::{Command, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use spit::{parse_document, parse_pipeline, parse_source_inventory, render_bash, resolve};
+use spit::{
+    inspect_paths, parse_document, parse_pipeline, parse_source_inventory, render_bash, resolve,
+    PathRule,
+};
 
 fn demo_script() -> String {
     let (pipeline, embedded) = parse_document(include_str!("../examples/bash_demo.spit")).unwrap();
@@ -165,4 +168,44 @@ fn act_example_generates_valid_bash_for_new_sessions() {
     let script = render_bash(&pipeline, &expanded).unwrap();
     assert!(script.contains("input/sub-03/ses-01/run-01_dwi.mif"));
     assert!(script.contains("derivatives/weighted_connectome/sub=03__ses=01.csv"));
+}
+
+#[test]
+fn path_coverage_exposes_default_fallbacks_and_strict_rejects_them() {
+    let (pipeline, _) = parse_document(include_str!("../examples/mrtrix3_act.spit")).unwrap();
+    let coverage = inspect_paths(&pipeline).unwrap();
+    assert!(coverage
+        .entries
+        .iter()
+        .any(|entry| { entry.product == "wm_fod" && matches!(entry.rule, PathRule::Default(_)) }));
+    assert!(coverage.entries.iter().any(|entry| {
+        entry.product == "wm_response" && matches!(entry.rule, PathRule::Explicit(_))
+    }));
+    coverage.validate(false).unwrap();
+    assert!(coverage
+        .validate(true)
+        .unwrap_err()
+        .to_string()
+        .contains("wm_fod"));
+}
+
+#[test]
+fn path_coverage_catches_missing_and_invalid_rules_without_jobs() {
+    let mut pipeline = parse_pipeline("source unused [id]\n").unwrap();
+    let coverage = inspect_paths(&pipeline).unwrap();
+    assert_eq!(coverage.entries[0].rule, PathRule::Missing);
+    assert!(coverage.validate(false).is_err());
+
+    pipeline
+        .product_paths
+        .insert("unused".to_owned(), "input/{missing}.txt".to_owned());
+    assert!(inspect_paths(&pipeline)
+        .unwrap_err()
+        .to_string()
+        .contains("absent dimension"));
+
+    pipeline
+        .product_paths
+        .insert("unused".to_owned(), "input/{id}.txt".to_owned());
+    inspect_paths(&pipeline).unwrap().validate(true).unwrap();
 }

@@ -28,6 +28,8 @@ concrete DAG + path templates -> bound artifact paths
 bound paths + operation commands -> argument expansion -> Bash script
 ```
 
+`spit paths` reports whether each declared product uses an explicit rule, the default rule, or no rule. It validates template dimensions even for product families with no resolved jobs and checks collisions among concrete paths. `--strict-paths` requires explicit rules for all products during compilation; without it, a default rule can cover multiple families.
+
 Each placeholder refers to an input port, all aggregated inputs, or the output. Missing path templates, unknown placeholders, path collisions, and an embedded `many` expansion fail before emitting Bash. The backend quotes each resolved argument for Bash and preserves declared argument order. Command templates cannot influence matching, grouping, type checks, or job count. The resulting script checks required source paths, creates output directories, and checks that each job produced its declared output. Source discovery and richer physical validation remain separate work.
 
 An operation may have multiple named output ports. Each resolved invocation instance produces one job containing all its outputs; it must not be expanded into duplicate command invocations. Each output port binds to a distinct named product and receives its own logical identity, type, and declared shape. Downstream consumers of any of those products depend on the same producing job. The physical binding pass must provide a destination for every output, and execution validation must check the full output set. This models commands such as multi-tissue response estimation, which emit several artifacts together.

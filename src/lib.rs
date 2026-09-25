@@ -8,7 +8,10 @@ pub mod render;
 pub mod resolver;
 pub mod types;
 
-pub use bash::{render_bash, BashError};
+pub use bash::{
+    inspect_paths, render_bash, validate_concrete_paths, BashError, PathCoverage,
+    PathCoverageEntry, PathRule,
+};
 pub use error::ResolveError;
 pub use model::{
     ArtifactInstance, ArtifactType, Cardinality, CommandDef, CountRequirement, CoverageRule,

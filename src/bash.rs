@@ -5,7 +5,8 @@ use std::fmt::{self, Write};
 use std::path::Path;
 
 use crate::model::{
-    ArtifactInstance, Cardinality, EntityBinding, Job, OperationDef, Pipeline, ResolvedDag,
+    ArtifactInstance, Cardinality, EntityBinding, Job, OperationDef, Pipeline, ProductDef,
+    ResolvedDag,
 };
 
 type ArtifactKey = (String, EntityBinding);
@@ -25,9 +26,138 @@ fn error(message: impl Into<String>) -> BashError {
     BashError(message.into())
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum PathRule {
+    Explicit(String),
+    Default(String),
+    Missing,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PathCoverageEntry {
+    pub product: String,
+    pub source: bool,
+    pub rule: PathRule,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PathCoverage {
+    pub entries: Vec<PathCoverageEntry>,
+}
+
+impl PathCoverage {
+    /// Missing rules always fail. Strict mode also rejects default fallbacks.
+    pub fn validate(&self, strict: bool) -> Result<(), BashError> {
+        let missing: Vec<_> = self
+            .entries
+            .iter()
+            .filter(|entry| entry.rule == PathRule::Missing)
+            .map(|entry| entry.product.as_str())
+            .collect();
+        if !missing.is_empty() {
+            return Err(error(format!(
+                "no path rule for products: {}",
+                missing.join(", ")
+            )));
+        }
+        if strict {
+            let fallback: Vec<_> = self
+                .entries
+                .iter()
+                .filter(|entry| matches!(entry.rule, PathRule::Default(_)))
+                .map(|entry| entry.product.as_str())
+                .collect();
+            if !fallback.is_empty() {
+                return Err(error(format!(
+                    "strict paths requires explicit rules for products: {}",
+                    fallback.join(", ")
+                )));
+            }
+        }
+        Ok(())
+    }
+}
+
+impl fmt::Display for PathCoverage {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "Product path coverage:")?;
+        for entry in &self.entries {
+            let role = if entry.source { "source" } else { "output" };
+            match &entry.rule {
+                PathRule::Explicit(template) => {
+                    writeln!(f, "  {} ({role}): explicit {template}", entry.product)?;
+                }
+                PathRule::Default(template) => {
+                    writeln!(f, "  {} ({role}): default {template}", entry.product)?;
+                }
+                PathRule::Missing => {
+                    writeln!(f, "  {} ({role}): MISSING", entry.product)?;
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Inspect every declared product, including families with no resolved jobs.
+pub fn inspect_paths(pipeline: &Pipeline) -> Result<PathCoverage, BashError> {
+    for name in pipeline.product_paths.keys() {
+        if !pipeline
+            .products
+            .iter()
+            .any(|product| &product.name == name)
+        {
+            return Err(error(format!("path refers to unknown product `{name}`")));
+        }
+    }
+    let outputs: BTreeSet<_> = pipeline
+        .invocations
+        .iter()
+        .map(|invocation| invocation.output_product.as_str())
+        .collect();
+    let mut entries = Vec::new();
+    for product in &pipeline.products {
+        let rule = if let Some(template) = pipeline.product_paths.get(&product.name) {
+            validate_path_template(pipeline, product)?;
+            PathRule::Explicit(template.clone())
+        } else if let Some(template) = &pipeline.path_template {
+            validate_path_template(pipeline, product)?;
+            PathRule::Default(template.clone())
+        } else {
+            PathRule::Missing
+        };
+        entries.push(PathCoverageEntry {
+            product: product.name.clone(),
+            source: !outputs.contains(product.name.as_str()),
+            rule,
+        });
+    }
+    Ok(PathCoverage { entries })
+}
+
+fn validate_path_template(pipeline: &Pipeline, product: &ProductDef) -> Result<(), BashError> {
+    let entities = EntityBinding(
+        product
+            .dimensions
+            .iter()
+            .map(|dimension| (dimension.clone(), "sample".to_owned()))
+            .collect(),
+    );
+    let artifact = ArtifactInstance::new(&product.name, product.artifact_type.clone(), entities);
+    let dag = ResolvedDag {
+        jobs: Vec::new(),
+        product_dimensions: [(product.name.clone(), product.dimensions.clone())]
+            .into_iter()
+            .collect(),
+    };
+    bind_path(pipeline, &dag, &artifact)?;
+    Ok(())
+}
+
 /// Generate a script for the concrete jobs already selected by `resolve`.
 /// Each artifact path is derived from its product and entity bindings.
 pub fn render_bash(pipeline: &Pipeline, dag: &ResolvedDag) -> Result<String, BashError> {
+    inspect_paths(pipeline)?.validate(false)?;
     let operations: BTreeMap<_, _> = pipeline
         .operations
         .iter()
@@ -51,37 +181,8 @@ pub fn render_bash(pipeline: &Pipeline, dag: &ResolvedDag) -> Result<String, Bas
             )));
         }
     }
-    for product in pipeline.product_paths.keys() {
-        if !pipeline
-            .products
-            .iter()
-            .any(|defined| &defined.name == product)
-        {
-            return Err(error(format!("path refers to unknown product `{product}`")));
-        }
-    }
-
     let outputs: BTreeSet<_> = dag.jobs.iter().map(|job| key(&job.output)).collect();
-    let mut paths = BTreeMap::new();
-    let mut owners = BTreeMap::new();
-    for artifact in dag
-        .jobs
-        .iter()
-        .flat_map(|job| job.inputs.iter().chain(std::iter::once(&job.output)))
-    {
-        let identity = key(artifact);
-        if paths.contains_key(&identity) {
-            continue;
-        }
-        let relative = bind_path(pipeline, dag, artifact)?;
-        if let Some(previous) = owners.insert(relative.clone(), identity.clone()) {
-            return Err(error(format!(
-                "artifacts `{}[{}]` and `{}[{}]` bind to the same path `{relative}`",
-                previous.0, previous.1, identity.0, identity.1
-            )));
-        }
-        paths.insert(identity, relative);
-    }
+    let paths = bound_paths(pipeline, dag)?;
 
     let mut script =
         String::from("#!/usr/bin/env bash\nset -euo pipefail\nSPIT_ROOT=\"${SPIT_ROOT:-.}\"\n\n");
@@ -126,6 +227,39 @@ pub fn render_bash(pipeline: &Pipeline, dag: &ResolvedDag) -> Result<String, Bas
         writeln!(script, "spit_require {}\n", shell_path(output_path)).unwrap();
     }
     Ok(script)
+}
+
+/// Validate concrete artifact path bindings without requiring commands.
+pub fn validate_concrete_paths(pipeline: &Pipeline, dag: &ResolvedDag) -> Result<(), BashError> {
+    bound_paths(pipeline, dag)?;
+    Ok(())
+}
+
+fn bound_paths(
+    pipeline: &Pipeline,
+    dag: &ResolvedDag,
+) -> Result<BTreeMap<ArtifactKey, String>, BashError> {
+    let mut paths = BTreeMap::new();
+    let mut owners = BTreeMap::new();
+    for artifact in dag
+        .jobs
+        .iter()
+        .flat_map(|job| job.inputs.iter().chain(std::iter::once(&job.output)))
+    {
+        let identity = key(artifact);
+        if paths.contains_key(&identity) {
+            continue;
+        }
+        let relative = bind_path(pipeline, dag, artifact)?;
+        if let Some(previous) = owners.insert(relative.clone(), identity.clone()) {
+            return Err(error(format!(
+                "artifacts `{}[{}]` and `{}[{}]` bind to the same path `{relative}`",
+                previous.0, previous.1, identity.0, identity.1
+            )));
+        }
+        paths.insert(identity, relative);
+    }
+    Ok(paths)
 }
 
 fn key(artifact: &ArtifactInstance) -> ArtifactKey {

@@ -93,6 +93,22 @@ Each command template is an executable followed by ordered arguments. `{input}` 
 
 The generated script checks source paths, creates output directories, runs jobs in dependency order, and checks each output. `check` and `dag` remain logical checks and do not require command or path declarations.
 
+## Check path coverage
+
+Use `paths` while authoring to see the rule selected for every source and output product:
+
+```sh
+cargo run -- paths examples/mrtrix3_act.spit --sources examples/mrtrix3_act.sources
+```
+
+The report marks each rule as `explicit`, `default`, or `MISSING`. It checks template placeholders against product dimensions and catches collisions between concrete artifact paths. A missing rule is an error. To require an explicit `path product:` rule for **every** product, add `--strict-paths` to `paths`, `check`, `dag`, or `bash`:
+
+```sh
+cargo run -- check examples/mrtrix3_act.spit --sources examples/mrtrix3_act.sources --strict-paths
+```
+
+The ACT example intentionally uses the default `.mif` rule for many outputs, so that strict check fails until they are declared individually. SPIT cannot infer a product's intended file extension from its symbolic type; inspect default fallbacks when a special format such as `.txt` or `.tck` is needed. Ordinary `check` remains a logical DAG check.
+
 ## Layers
 
 ```text
