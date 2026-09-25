@@ -188,12 +188,30 @@ impl Invocation {
     }
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CommandDef {
+    pub operation: String,
+    pub template: String,
+}
+
+impl CommandDef {
+    pub fn new(operation: &str, template: &str) -> Self {
+        Self {
+            operation: operation.to_owned(),
+            template: template.to_owned(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct Pipeline {
     pub products: Vec<ProductDef>,
     pub operations: Vec<OperationDef>,
     pub invocations: Vec<Invocation>,
     pub constraints: Vec<CoverageRule>,
+    pub commands: Vec<CommandDef>,
+    pub path_template: Option<String>,
+    pub product_paths: BTreeMap<String, String>,
 }
 
 /// A source record identifies a logical artifact without binding it to a path.

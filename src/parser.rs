@@ -4,8 +4,9 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 use crate::model::{
-    Cardinality, CountRequirement, CoverageRule, EntityBinding, InputBinding, InputPort,
-    Invocation, OperationDef, Pipeline, ProductDef, ShapeRule, SourceInventory, SourceRecord,
+    Cardinality, CommandDef, CountRequirement, CoverageRule, EntityBinding, InputBinding,
+    InputPort, Invocation, OperationDef, Pipeline, ProductDef, ShapeRule, SourceInventory,
+    SourceRecord,
 };
 use crate::types::{parse_type_expr, TypeExpr};
 
@@ -38,6 +39,7 @@ enum Section {
     Operations,
     Pipeline,
     Constraints,
+    Commands,
 }
 
 pub fn parse_pipeline(text: &str) -> Result<Pipeline, ParseError> {
@@ -63,7 +65,7 @@ fn parse_sectioned_pipeline(text: &str) -> Result<Pipeline, ParseError> {
 
     for (index, original) in text.lines().enumerate() {
         let line_number = index + 1;
-        let line = original.split('#').next().unwrap_or("").trim();
+        let line = strip_comment(original).trim();
         if line.is_empty() {
             continue;
         }
@@ -72,6 +74,11 @@ fn parse_sectioned_pipeline(text: &str) -> Result<Pipeline, ParseError> {
             "operations:" => section = Some(Section::Operations),
             "pipeline:" => section = Some(Section::Pipeline),
             "constraints:" => section = Some(Section::Constraints),
+            "commands:" => section = Some(Section::Commands),
+            path if path.starts_with("path:") || path.starts_with("path ") => {
+                set_path(&mut pipeline, path, line_number)?;
+                section = None;
+            }
             "sources:" | "contexts:" => {
                 return Err(ParseError::new(
                     line_number,
@@ -91,9 +98,12 @@ fn parse_sectioned_pipeline(text: &str) -> Result<Pipeline, ParseError> {
                 Some(Section::Constraints) => pipeline
                     .constraints
                     .push(parse_coverage_rule(line, line_number)?),
+                Some(Section::Commands) => pipeline
+                    .commands
+                    .push(parse_command(line, line_number)?),
                 None => return Err(ParseError::new(
                     line_number,
-                    "expected a section header: products:, operations:, pipeline:, or constraints:",
+                    "expected a section header: products:, operations:, pipeline:, constraints:, or commands:",
                 )),
             },
         }
@@ -125,6 +135,13 @@ fn parse_flow_pipeline(text: &str) -> Result<Pipeline, ParseError> {
             pipeline
                 .constraints
                 .push(parse_coverage_rule(line, line_number)?);
+        } else if line.starts_with("command ") {
+            let declaration = line.strip_prefix("command ").unwrap().trim();
+            pipeline
+                .commands
+                .push(parse_command(declaration, line_number)?);
+        } else if line.starts_with("path ") || line.starts_with("path:") {
+            set_path(&mut pipeline, line, line_number)?;
         } else if line.contains('=') {
             let (invocation, product) = parse_flow_invocation(line, line_number, &pipeline)?;
             pipeline.products.push(product);
@@ -145,8 +162,95 @@ fn parse_flow_pipeline(text: &str) -> Result<Pipeline, ParseError> {
     Ok(pipeline)
 }
 
+fn parse_command(line: &str, number: usize) -> Result<CommandDef, ParseError> {
+    let (operation, template) = line
+        .split_once(':')
+        .or_else(|| line.split_once('='))
+        .ok_or_else(|| {
+            ParseError::new(
+                number,
+                "expected command: operation: executable [arguments]",
+            )
+        })?;
+    let operation = identifier(operation.trim(), number, "command operation")?;
+    let template = template.trim();
+    if template.is_empty() {
+        return Err(ParseError::new(
+            number,
+            "command template must not be empty",
+        ));
+    }
+    Ok(CommandDef::new(operation, template))
+}
+
+fn set_path(pipeline: &mut Pipeline, line: &str, number: usize) -> Result<(), ParseError> {
+    let (product, template) = if let Some(template) = line.strip_prefix("path:") {
+        (None, template)
+    } else {
+        let declaration = line.strip_prefix("path ").unwrap_or("");
+        let (product, template) = declaration.split_once(':').ok_or_else(|| {
+            ParseError::new(number, "expected path product: template or path: template")
+        })?;
+        (
+            Some(identifier(product.trim(), number, "path product")?),
+            template,
+        )
+    };
+    let template = template.trim();
+    let template = template
+        .strip_prefix('"')
+        .and_then(|value| value.strip_suffix('"'))
+        .or_else(|| {
+            template
+                .strip_prefix('\'')
+                .and_then(|value| value.strip_suffix('\''))
+        })
+        .unwrap_or(template)
+        .trim();
+    if template.is_empty() {
+        return Err(ParseError::new(number, "path template must not be empty"));
+    }
+    if let Some(product) = product {
+        if pipeline
+            .product_paths
+            .insert(product.to_owned(), template.to_owned())
+            .is_some()
+        {
+            return Err(ParseError::new(
+                number,
+                format!("duplicate path template for product `{product}`"),
+            ));
+        }
+    } else if pipeline
+        .path_template
+        .replace(template.to_owned())
+        .is_some()
+    {
+        return Err(ParseError::new(number, "duplicate default path template"));
+    }
+    Ok(())
+}
+
 fn strip_comment(line: &str) -> &str {
-    line.split('#').next().unwrap_or("")
+    let mut quote = None;
+    let mut escaped = false;
+    let mut whitespace_before = true;
+    for (index, character) in line.char_indices() {
+        if escaped {
+            escaped = false;
+        } else {
+            match (quote, character) {
+                (None, '\\') | (Some('"'), '\\') => escaped = true,
+                (None, '\'') => quote = Some('\''),
+                (None, '"') => quote = Some('"'),
+                (Some('\''), '\'') | (Some('"'), '"') => quote = None,
+                (None, '#') if whitespace_before => return &line[..index],
+                _ => {}
+            }
+        }
+        whitespace_before = character.is_whitespace();
+    }
+    line
 }
 
 fn parse_flow_invocation(
@@ -224,14 +328,23 @@ pub fn parse_document(text: &str) -> Result<(Pipeline, Option<SourceInventory>),
     let mut has_inventory = false;
 
     for original in text.lines() {
-        let line = original.split('#').next().unwrap_or("").trim();
+        let line = strip_comment(original).trim();
         match line {
-            "products:" | "operations:" | "pipeline:" | "constraints:" => {
+            "products:" | "operations:" | "pipeline:" | "constraints:" | "commands:" => {
                 inventory_section = false;
             }
             "sources:" | "contexts:" => {
                 inventory_section = true;
                 has_inventory = true;
+            }
+            _ if line.starts_with("path:")
+                || line.starts_with("path ")
+                || line.starts_with("source ")
+                || line.starts_with("operation ")
+                || line.starts_with("command ")
+                || line.starts_with("require ") =>
+            {
+                inventory_section = false;
             }
             _ => {}
         }
@@ -262,7 +375,7 @@ pub fn parse_source_inventory(text: &str) -> Result<SourceInventory, ParseError>
     let mut section = None;
     for (index, original) in text.lines().enumerate() {
         let number = index + 1;
-        let line = original.split('#').next().unwrap_or("").trim();
+        let line = strip_comment(original).trim();
         if line.is_empty() {
             continue;
         }

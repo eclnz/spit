@@ -37,6 +37,7 @@ Larger examples exercise the same compiler with different graph structures:
 | [Observed groups](examples/rich_shapes.spit) | Several subjects and sessions, reference reuse, successive aggregations | `cargo run -- dag examples/rich_shapes.spit --sources examples/rich_shapes.sources` |
 | [Nested aggregation](examples/complex.spit) | Partial typing, uneven groups, and three aggregation levels | `cargo run -- dag examples/complex.spit` |
 | [Analytics joins](examples/analytics.spit) | Several keyed joins followed by day, customer, and tenant rollups | `cargo run -- dag examples/analytics.spit` |
+| [Bash backend](examples/bash_demo.spit) | User-supplied Unix arguments, path templates, and grouped input expansion | `cargo run -- bash examples/bash_demo.spit --sources examples/bash_demo.sources` |
 | [MRtrix3 ACT](examples/mrtrix3_act.spit) | Raw DWI preprocessing, T1 registration, parcellation alignment, ACT tractography, SIFT2, connectomes | `cargo run -- dag examples/mrtrix3_act.spit --sources examples/mrtrix3_act.sources` |
 
 The ACT file starts with raw DWI runs, native T1w, reverse phase-encoded b=0 images, and lookup tables. Its products share parameterized types such as `MRI<DWI,Acquired>`: product names distinguish processing states, while reusable operations describe compatible data kinds and coordinate spaces. For example, one `mean_b0` signature serves two stages, and one `mrtransform` signature serves T1w and parcellation images. SPIT resolves this logical graph; it does not yet run the tools, inspect files, or verify spatial alignment. [Exploration findings](docs/exploration.md) records what these larger pipelines exposed.
@@ -49,19 +50,52 @@ dataset-indexer | cargo run -- dag examples/basic.spit --sources -
 
 `dataset-indexer` is illustrative; SPIT does not yet provide one. The `.sources` file is a fixture and a simple interchange format for a future indexer.
 
+## Generate Bash
+
+The [Bash example](examples/bash_demo.spit) declares commands and a path layout alongside the logical flow:
+
+```text
+source shard : Lines [group, part]
+path: {product}/{entities}.txt
+path shard: input/{group}/{part}.txt
+
+operation sort_lines(Lines) -> Lines
+command sort_lines: sort -u -o {output} {input}
+sorted = sort_lines(shard)
+
+operation merge(many Lines) -> Lines
+command merge: sort -m -u -o {output} {inputs}
+merged = merge(sorted @ vary(part))
+```
+
+Generate a script and run it with a root directory containing the source files:
+
+```sh
+cargo run -- bash examples/bash_demo.spit --sources examples/bash_demo.sources > run.sh
+SPIT_ROOT=/path/to/data bash run.sh
+```
+
+The inventory determines which groups and parts exist. SPIT resolves those jobs first, then emits one command per job; group names in the script come from the inventory rather than the pipeline text. Regenerate the script when the inventory changes. `SPIT_ROOT` defaults to the current directory. The sample inventory expects `input/alpha/01.txt`, `input/alpha/02.txt`, and `input/beta/01.txt` under that root.
+
+A dataset indexer can supply the inventory at generation time with `--sources -`, just as it can for `dag`.
+
+Each command template is an executable followed by ordered arguments. `{input}` names a sole input, `{input1}` and `{input2}` name positional inputs, `{inputs}` expands an aggregated input into separate arguments, and `{output}` names the job's output. Quoted words can contain spaces. SPIT quotes the expanded arguments for Bash; command templates do not use shell pipelines or redirection. A default `path:` template covers all products, while `path product:` overrides one family. Path templates may use `{product}`, `{entities}`, or a dimension such as `{group}`. Paths are relative to `SPIT_ROOT`; entity values are encoded as safe path components.
+
+The generated script checks source paths, creates output directories, runs jobs in dependency order, and checks each output. `check` and `dag` remain logical checks and do not require command or path declarations.
+
 ## Layers
 
 ```text
 pipeline definition ──┐
                      ├──> generic resolver ──> concrete logical DAG
 source inventory ─────┘                          │
-                                                └──> later physical binding and execution
+                                                └──> path templates + commands ──> Bash
 ```
 
 - **Pipeline definition:** product families, optional symbolic types, dimensions, operation contracts, invocations, and optional coverage constraints. The internal `Pipeline` value contains no individual source artifacts.
 - **Source inventory:** the observed source artifact identities and optional entity contexts. It contains no operation definitions, types, or paths. An external indexer or manifest generator can create it.
 - **Resolver:** validates the inventory against product declarations, applies coverage constraints, checks local types and shapes, and expands all jobs and dependencies. It does not inspect files.
-- **Physical binding:** a later pass will map logical source identities to paths and verify files. This pass is not implemented yet.
+- **Bash backend:** binds artifacts with user-defined path templates, expands command arguments after resolution, and emits a script with runtime file checks.
 
 Changing the inventory can change the number of jobs without changing the pipeline definition. SPIT assumes no fixed number of subjects, sessions, or scans.
 
@@ -162,4 +196,4 @@ Run the tests with `cargo test`. The [Rust construction example](examples/basic.
 
 ## Current limits
 
-SPIT does not yet discover source files, bind logical artifacts to paths, verify physical files, or execute jobs. Type checking has no subtyping, automatic coercion, strict mode, or graph-wide inference. Unresolved type variables become `Unknown` at a job output. Operations still have one output, and the broader shape algebra from the full design brief remains to be implemented.
+SPIT does not discover source files or inspect them during compilation. The Bash script checks their existence when run; it does not verify file content, spatial compatibility, or command-specific metadata. Type checking has no subtyping, automatic coercion, strict mode, or graph-wide inference. Unresolved type variables become `Unknown` at a job output. Operations still have one output, and the broader shape algebra from the full design brief remains to be implemented.

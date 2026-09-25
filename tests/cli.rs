@@ -38,6 +38,28 @@ fn separate_inventory_remains_supported() {
 }
 
 #[test]
+fn bash_command_expands_observed_groups() {
+    let output = Command::new(env!("CARGO_BIN_EXE_spit"))
+        .args([
+            "bash",
+            "examples/bash_demo.spit",
+            "--sources",
+            "examples/bash_demo.sources",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let script = String::from_utf8(output.stdout).unwrap();
+    assert_eq!(script.matches("# Job ").count(), 5);
+    assert!(script.contains("input/alpha/01.txt"));
+    assert!(script.contains("input/beta/01.txt"));
+}
+
+#[test]
 fn expanded_examples_resolve() {
     for (pipeline, sources, expected_jobs) in [
         ("examples/branching.spit", None, 21),

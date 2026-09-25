@@ -369,6 +369,7 @@ fn full_pipeline() -> Pipeline {
             ),
         ],
         constraints: Vec::new(),
+        ..Pipeline::default()
     }
 }
 

@@ -4,7 +4,7 @@ use std::fs;
 use std::io::{self, Read};
 use std::process::ExitCode;
 
-use spit::{parse_document, parse_source_inventory, render_dag, resolve};
+use spit::{parse_document, parse_source_inventory, render_bash, render_dag, resolve};
 
 fn main() -> ExitCode {
     match run() {
@@ -18,12 +18,15 @@ fn main() -> ExitCode {
 
 fn run() -> Result<(), Box<dyn Error>> {
     let args: Vec<_> = env::args().skip(1).collect();
-    if !matches!(args.first().map(String::as_str), Some("check" | "dag"))
-        || !matches!(args.len(), 2 | 4)
+    // TODO: parse args as own function?
+    if !matches!(
+        args.first().map(String::as_str),
+        Some("check" | "dag" | "bash")
+    ) || !matches!(args.len(), 2 | 4)
         || (args.len() == 4 && args[2] != "--sources")
     {
         return Err(
-            "usage: spit <check|dag> <pipeline.spit> [--sources <inventory.spit|->]".into(),
+            "usage: spit <check|dag|bash> <pipeline.spit> [--sources <inventory.spit|->]".into(),
         );
     }
     let (pipeline, embedded_inventory) = parse_document(&fs::read_to_string(&args[1])?)?;
@@ -44,6 +47,7 @@ fn run() -> Result<(), Box<dyn Error>> {
     match args[0].as_str() {
         "check" => println!("Pipeline valid.\n\n{} jobs resolved.", dag.jobs.len()),
         "dag" => print!("{}", render_dag(&dag)),
+        "bash" => print!("{}", render_bash(&pipeline, &dag)?),
         _ => unreachable!(),
     }
     Ok(())

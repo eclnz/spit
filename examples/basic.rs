@@ -52,6 +52,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             ),
         ],
         constraints: Vec::new(),
+        ..Pipeline::default()
     };
 
     let inventory = SourceInventory {

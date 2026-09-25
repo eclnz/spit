@@ -130,3 +130,13 @@ fn flow_form_requires_operation_declaration_before_use() {
         .to_string()
         .contains("must be declared before its first flow step"));
 }
+
+#[test]
+fn command_arguments_keep_quoted_hashes_and_strip_comments() {
+    let text = "source raw [id]\noperation copy(one)\ncommand copy: tool --tag '#run' {input} {output} # explanation\nresult = copy(raw)\n";
+    let pipeline = parse_pipeline(text).unwrap();
+    assert_eq!(
+        pipeline.commands[0].template,
+        "tool --tag '#run' {input} {output}"
+    );
+}
