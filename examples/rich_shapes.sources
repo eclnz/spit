@@ -1,0 +1,15 @@
+contexts:
+    [sub=A,ses=1]
+    [sub=A,ses=2]
+    [sub=B,ses=1]
+
+sources:
+    scan[sub=A,ses=1,run=1]
+    scan[sub=A,ses=1,run=2]
+    scan[sub=A,ses=2,run=1]
+    scan[sub=B,ses=1,run=1]
+    scan[sub=B,ses=1,run=2]
+    scan[sub=B,ses=1,run=3]
+    ref[sub=A,ses=1]
+    ref[sub=A,ses=2]
+    ref[sub=B,ses=1]

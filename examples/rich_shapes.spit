@@ -1,0 +1,22 @@
+products:
+    scan [sub, ses, run]
+    ref [sub, ses]
+    cleaned [sub, ses, run]
+    aligned [sub, ses, run]
+    session_mean [sub, ses]
+    subject_mean [sub]
+
+operations:
+    clean(one)
+    align(one, one)
+    mean(many)
+
+pipeline:
+    cleaned = clean(scan)
+    aligned = align(cleaned, ref)
+    session_mean = mean(aligned @ vary(run))
+    subject_mean = mean(session_mean @ vary(ses))
+
+constraints:
+    require scan count>=1 per [sub, ses]
+    require ref count=1 per [sub, ses]

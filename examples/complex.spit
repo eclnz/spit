@@ -1,0 +1,53 @@
+products:
+    reading       : Reading<Raw> [site, device, window, sample]
+    gain          [site, device]
+    baseline      : Baseline [site, window]
+    target        : Target [site]
+    normalized    [site, device, window, sample]
+    checked       : Flag [site, device, window, sample]
+    window_mean   : Reading<Normalized> [site, device, window]
+    scored        [site, device, window]
+    device_mean   : Reading<Normalized> [site, device]
+    site_mean     : Reading<Normalized> [site]
+
+operations:
+    normalize(Reading<Raw>, one, Baseline) -> Reading<Normalized>
+    inspect(Reading<Raw>) -> Flag
+    mean(many Reading<Normalized>) -> Reading<Normalized>
+    score(Reading<Normalized>, Target) -> Score
+
+pipeline:
+    normalized = normalize(reading, gain, baseline)
+    checked = inspect(reading)
+    window_mean = mean(normalized @ vary(sample))
+    scored = score(window_mean, target)
+    device_mean = mean(window_mean @ vary(window))
+    site_mean = mean(device_mean @ vary(device))
+
+constraints:
+    require reading count>=1 per [site, device, window]
+    require gain count=1 per [site, device]
+    require baseline count=1 per [site, window]
+    require target count=1 per [site]
+
+contexts:
+    [site=A,device=D1,window=W1]
+    [site=A,device=D1,window=W2]
+    [site=A,device=D2,window=W1]
+    [site=B,device=D3,window=W2]
+
+sources:
+    reading[site=A,device=D1,window=W1,sample=1]
+    reading[site=A,device=D1,window=W1,sample=2]
+    reading[site=A,device=D1,window=W2,sample=1]
+    reading[site=A,device=D2,window=W1,sample=1]
+    reading[site=B,device=D3,window=W2,sample=1]
+    reading[site=B,device=D3,window=W2,sample=2]
+    gain[site=A,device=D1]
+    gain[site=A,device=D2]
+    gain[site=B,device=D3]
+    baseline[site=A,window=W1]
+    baseline[site=A,window=W2]
+    baseline[site=B,window=W2]
+    target[site=A]
+    target[site=B]

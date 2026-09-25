@@ -29,6 +29,17 @@ cargo run -- dag examples/typed.spit --sources examples/typed.sources
 
 For `Frame<Native>` and `Reference<Target>`, the example infers `CleanFrame<Native>` and `Transform<Native,Target>` without type annotations on its pipeline calls.
 
+Larger examples exercise the same compiler with different graph structures:
+
+| Example | Structure | Run |
+| --- | --- | --- |
+| [Branching](examples/branching.spit) | Two branches, shared policy, parallel aggregations, recombination | `cargo run -- dag examples/branching.spit` |
+| [Observed groups](examples/rich_shapes.spit) | Several subjects and sessions, reference reuse, successive aggregations | `cargo run -- dag examples/rich_shapes.spit --sources examples/rich_shapes.sources` |
+| [Nested aggregation](examples/complex.spit) | Partial typing, uneven groups, and three aggregation levels | `cargo run -- dag examples/complex.spit` |
+| [MRtrix3 ACT](examples/mrtrix3_act.spit) | Session 5TT, run-level FOD and ACT tractography, SIFT2 weights, connectomes | `cargo run -- dag examples/mrtrix3_act.spit --sources examples/mrtrix3_act.sources` |
+
+The ACT file is a logical dependency example. It assumes its input images and parcellations are already in the stated session space. SPIT does not yet run MRtrix3, inspect files, or verify spatial alignment. The optional run-to-session connectome aggregation in that example is illustrative and needs a defined scientific method before execution. [Exploration findings](docs/exploration.md) records what these larger pipelines exposed.
+
 An indexer can supply an inventory on standard input, so pipeline authors need not list every scan by hand:
 
 ```sh

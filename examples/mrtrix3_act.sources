@@ -1,0 +1,19 @@
+# Three observed sessions, with different numbers of DWI runs.
+contexts:
+    [sub=01,ses=01]
+    [sub=01,ses=02]
+    [sub=02,ses=01]
+
+sources:
+    dwi[sub=01,ses=01,run=01]
+    dwi[sub=01,ses=01,run=02]
+    dwi[sub=01,ses=02,run=01]
+    dwi[sub=02,ses=01,run=01]
+    dwi[sub=02,ses=01,run=02]
+    dwi[sub=02,ses=01,run=03]
+    t1w[sub=01,ses=01]
+    t1w[sub=01,ses=02]
+    t1w[sub=02,ses=01]
+    nodes[sub=01,ses=01]
+    nodes[sub=01,ses=02]
+    nodes[sub=02,ses=01]

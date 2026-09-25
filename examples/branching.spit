@@ -1,0 +1,37 @@
+products:
+    raw       : Record [team, period, item]
+    policy    : Policy [team]
+    cleaned   : CleanRecord [team, period, item]
+    validated : ValidRecord [team, period, item]
+    enriched  : EnrichedRecord [team, period, item]
+    audit     : Audit [team, period]
+    digest    : Digest [team, period]
+    report    : Report [team, period]
+
+operations:
+    clean(Record) -> CleanRecord
+    validate(CleanRecord, Policy) -> ValidRecord
+    enrich(CleanRecord, Policy) -> EnrichedRecord
+    audit_group(many ValidRecord) -> Audit
+    digest_group(many EnrichedRecord) -> Digest
+    assemble(Audit, Digest, Policy) -> Report
+
+pipeline:
+    cleaned = clean(raw)
+    validated = validate(cleaned, policy)
+    enriched = enrich(cleaned, policy)
+    audit = audit_group(validated @ vary(item))
+    digest = digest_group(enriched @ vary(item))
+    report = assemble(audit, digest, policy)
+
+constraints:
+    require raw count>=1 per [team, period]
+    require policy count=1 per [team]
+
+sources:
+    raw[team=Alpha,period=Q1,item=1]
+    raw[team=Alpha,period=Q1,item=2]
+    raw[team=Alpha,period=Q2,item=1]
+    raw[team=Beta,period=Q1,item=1]
+    policy[team=Alpha]
+    policy[team=Beta]

@@ -1,0 +1,46 @@
+# ACT / single-shell connectome example. These are symbolic logical products.
+# Assumption: each session's preprocessed DWI runs, T1w, and node parcellation
+# are already aligned to one session diffusion space. SPIT cannot verify this.
+# Operation names below represent stages; SPIT does not invoke MRtrix3 commands.
+# Possible bindings: make_5tt -> 5ttgen fsl; make_gmwmi -> 5tt2gmwmi;
+# estimate_wm_response -> dwi2response tournier; estimate_wm_fod -> dwi2fod csd;
+# track_act -> tckgen -act -seed_gmwmi; weight_streamlines -> tcksift2;
+# build_connectome -> tck2connectome -tck_weights_in.
+# summarize_runs is illustrative; its scientific combination rule is unspecified.
+products:
+    dwi                 : DWIInSessionSpace       [sub, ses, run]
+    t1w                 : T1wInSessionSpace       [sub, ses]
+    nodes               : NodesInSessionSpace     [sub, ses]
+    five_tt             : FiveTTInSessionSpace    [sub, ses]
+    gmwmi               : GMWMIInSessionSpace     [sub, ses]
+    wm_response         : WMResponse              [sub, ses, run]
+    wm_fod              : WMFODInSessionSpace     [sub, ses, run]
+    act_tracks          : Tractogram              [sub, ses, run]
+    sift2_weights       : StreamlineWeights       [sub, ses, run]
+    weighted_connectome : Connectome              [sub, ses, run]
+    session_connectome  : Connectome              [sub, ses]
+
+operations:
+    make_5tt(T1wInSessionSpace) -> FiveTTInSessionSpace
+    make_gmwmi(FiveTTInSessionSpace) -> GMWMIInSessionSpace
+    estimate_wm_response(DWIInSessionSpace) -> WMResponse
+    estimate_wm_fod(DWIInSessionSpace, WMResponse) -> WMFODInSessionSpace
+    track_act(WMFODInSessionSpace, FiveTTInSessionSpace, GMWMIInSessionSpace) -> Tractogram
+    weight_streamlines(Tractogram, WMFODInSessionSpace, FiveTTInSessionSpace) -> StreamlineWeights
+    build_connectome(Tractogram, NodesInSessionSpace, StreamlineWeights) -> Connectome
+    summarize_runs(many Connectome) -> Connectome
+
+pipeline:
+    five_tt = make_5tt(t1w)
+    gmwmi = make_gmwmi(five_tt)
+    wm_response = estimate_wm_response(dwi)
+    wm_fod = estimate_wm_fod(dwi, wm_response)
+    act_tracks = track_act(wm_fod, five_tt, gmwmi)
+    sift2_weights = weight_streamlines(act_tracks, wm_fod, five_tt)
+    weighted_connectome = build_connectome(act_tracks, nodes, sift2_weights)
+    session_connectome = summarize_runs(weighted_connectome @ vary(run))
+
+constraints:
+    require dwi count>=1 per [sub, ses]
+    require t1w count=1 per [sub, ses]
+    require nodes count=1 per [sub, ses]

@@ -36,3 +36,39 @@ fn separate_inventory_remains_supported() {
         .unwrap()
         .contains("Pipeline valid."));
 }
+
+#[test]
+fn expanded_examples_resolve() {
+    for (pipeline, sources, expected_jobs) in [
+        ("examples/branching.spit", None, 21),
+        ("examples/complex.spit", None, 25),
+        (
+            "examples/rich_shapes.spit",
+            Some("examples/rich_shapes.sources"),
+            17,
+        ),
+        (
+            "examples/mrtrix3_act.spit",
+            Some("examples/mrtrix3_act.sources"),
+            39,
+        ),
+    ] {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_spit"));
+        command.args(["check", pipeline]);
+        if let Some(sources) = sources {
+            command.args(["--sources", sources]);
+        }
+        let output = command.output().unwrap();
+        assert!(
+            output.status.success(),
+            "{pipeline}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            String::from_utf8(output.stdout)
+                .unwrap()
+                .contains(&format!("{expected_jobs} jobs resolved.")),
+            "{pipeline} resolved an unexpected number of jobs"
+        );
+    }
+}
