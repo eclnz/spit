@@ -1,5 +1,6 @@
 use spit::{
-    parse_pipeline, parse_source_inventory, resolve, ParseError, ResolveError, SourceInventory,
+    parse_document, parse_pipeline, parse_source_inventory, render_dag, resolve, ParseError,
+    ResolveError, TypeExpr,
 };
 
 const EXAMPLE: &str = include_str!("../examples/basic.spit");
@@ -7,12 +8,13 @@ const INVENTORY: &str = include_str!("../examples/basic.sources");
 
 #[test]
 fn parses_and_resolves_user_facing_example() {
-    let pipeline = parse_pipeline(EXAMPLE).unwrap();
+    let (pipeline, embedded_inventory) = parse_document(EXAMPLE).unwrap();
     assert_eq!(pipeline.products.len(), 5);
     assert_eq!(pipeline.operations.len(), 3);
     assert_eq!(pipeline.invocations.len(), 3);
     assert_eq!(pipeline.constraints.len(), 2);
-    let inventory = parse_source_inventory(INVENTORY).unwrap();
+    let inventory = embedded_inventory.unwrap();
+    assert_eq!(inventory, parse_source_inventory(INVENTORY).unwrap());
     assert_eq!(inventory.artifacts.len(), 3);
     let dag = resolve(&pipeline, &inventory).unwrap();
     assert_eq!(dag.jobs.len(), 5);
@@ -52,9 +54,48 @@ fn reports_semantic_type_error_after_parsing() {
         "registered = register(denoised, t1w)",
         "registered = register(denoised, bold)",
     );
-    let pipeline = parse_pipeline(&text).unwrap();
+    let (pipeline, inventory) = parse_document(&text).unwrap();
     assert!(matches!(
-        resolve(&pipeline, &SourceInventory::default()),
+        resolve(&pipeline, &inventory.unwrap()),
         Err(ResolveError::TypeMismatch { .. })
     ));
+}
+
+#[test]
+fn resolves_untyped_pipeline_by_shape_and_cardinality() {
+    let (pipeline, inventory) = parse_document(include_str!("../examples/untyped.spit")).unwrap();
+    assert!(pipeline
+        .products
+        .iter()
+        .all(|product| product.artifact_type == TypeExpr::Unknown));
+    let dag = resolve(&pipeline, &inventory.unwrap()).unwrap();
+    assert_eq!(dag.jobs.len(), 3);
+    assert_eq!(dag.jobs[2].inputs.len(), 2);
+    assert_eq!(dag.jobs[2].output.artifact_type, TypeExpr::Unknown);
+    assert!(!dag.jobs[2].output.entities.0.contains_key("repeat"));
+    assert!(!render_dag(&dag).contains(": Unknown"));
+}
+
+#[test]
+fn partially_typed_pipeline_accepts_unknown_and_rejects_known_mismatch() {
+    let text = "products:\n  raw [sub]\n  output : Result [sub]\noperations:\n  process(Input) -> Result\npipeline:\n  output = process(raw)\nsources:\n  raw[sub=01]\n";
+    let (pipeline, inventory) = parse_document(text).unwrap();
+    assert_eq!(
+        resolve(&pipeline, &inventory.unwrap()).unwrap().jobs.len(),
+        1
+    );
+
+    let mismatched = text.replace("raw [sub]", "raw : Other [sub]");
+    let (pipeline, inventory) = parse_document(&mismatched).unwrap();
+    assert!(matches!(
+        resolve(&pipeline, &inventory.unwrap()),
+        Err(ResolveError::TypeMismatch { .. })
+    ));
+}
+
+#[test]
+fn separate_pipeline_still_parses_without_inventory() {
+    let (pipeline, inventory) = parse_document(include_str!("../examples/typed.spit")).unwrap();
+    assert!(inventory.is_none());
+    assert!(!pipeline.products.is_empty());
 }

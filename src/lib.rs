@@ -13,7 +13,7 @@ pub use model::{
     InputBinding, InputPort, Invocation, Job, OperationDef, Pipeline, ProductDef, ResolvedDag,
     ShapeRule, SourceInventory, SourceRecord,
 };
-pub use parser::{parse_pipeline, parse_source_inventory, ParseError};
+pub use parser::{parse_document, parse_pipeline, parse_source_inventory, ParseError};
 pub use render::render_dag;
 pub use resolver::resolve;
 pub use types::{parse_type_expr, Compatibility, Substitutions, TypeExpr, TypeUnifyError};

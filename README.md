@@ -4,14 +4,22 @@ SPIT compiles a reusable logical pipeline against an observed source inventory t
 
 ## Run the example
 
-The [pipeline definition](examples/basic.spit) and [source inventory](examples/basic.sources) are separate inputs:
+The [basic example](examples/basic.spit) packages a pipeline definition and a small source inventory in one text file:
 
 ```sh
-cargo run -- check examples/basic.spit --sources examples/basic.sources
-cargo run -- dag examples/basic.spit --sources examples/basic.sources
+cargo run -- check examples/basic.spit
+cargo run -- dag examples/basic.spit
 ```
 
 `check` prints `Pipeline valid.` and the number of resolved jobs. `dag` prints the [text DAG](basic.dag.txt), including inputs, outputs, and dependencies. After `cargo build`, use `target/debug/spit` in place of `cargo run --`.
+
+The same inventory can be supplied explicitly from [basic.sources](examples/basic.sources):
+
+```sh
+cargo run -- dag examples/basic.spit --sources examples/basic.sources
+```
+
+`--sources` selects the external inventory when the document also contains one. A reusable pipeline file can omit `sources:` and `contexts:` entirely and receive the inventory only through `--sources`.
 
 The [typed example](examples/typed.spit) shows inferred output types in the dry run:
 
@@ -38,7 +46,7 @@ source inventory ─────┘                          │
                                                 └──> later physical binding and execution
 ```
 
-- **Pipeline definition:** product families, symbolic types, dimensions, operation contracts, invocations, and optional coverage constraints. It contains no individual source artifacts.
+- **Pipeline definition:** product families, optional symbolic types, dimensions, operation contracts, invocations, and optional coverage constraints. The internal `Pipeline` value contains no individual source artifacts.
 - **Source inventory:** the observed source artifact identities and optional entity contexts. It contains no operation definitions, types, or paths. An external indexer or manifest generator can create it.
 - **Resolver:** validates the inventory against product declarations, applies coverage constraints, checks local types and shapes, and expands all jobs and dependencies. It does not inspect files.
 - **Physical binding:** a later pass will map logical source identities to paths and verify files. This pass is not implemented yet.
@@ -47,7 +55,7 @@ Changing the inventory can change the number of jobs without changing the pipeli
 
 ## Small text format
 
-The pipeline file has `products:`, `operations:`, `pipeline:`, and optional `constraints:` sections. For example:
+The pipeline text has `products:`, `operations:`, `pipeline:`, and optional `constraints:` sections. For example:
 
 ```text
 products:
@@ -69,7 +77,7 @@ constraints:
     require reference count=1 per [subject, visit]
 ```
 
-An inventory file contains `sources:` and optional `contexts:` sections:
+An inventory contains `sources:` and optional `contexts:` sections. These can appear in the same `.spit` document for an example, or in a separate file supplied with `--sources`:
 
 ```text
 contexts:
@@ -85,9 +93,30 @@ Contexts and source records establish the observed groups for coverage checks. I
 
 Section order is flexible. Blank lines and `#` comments are allowed. Names use letters, digits, and underscores, starting with a letter or underscore. Source values are single tokens. Operation inputs are positional in this prototype; the first single input drives output shape for a preserve operation.
 
+Types are optional. The same shape rules work with an untyped declaration:
+
+```text
+products:
+    raw       [subject, repeat]
+    processed [subject, repeat]
+    combined  [subject]
+
+operations:
+    process(one)
+    combine(many)
+
+pipeline:
+    processed = process(raw)
+    combined = combine(processed @ vary(repeat))
+```
+
+Add `: Type` to a product, or input and output types to an operation, whenever those checks are useful. An omitted type is `Unknown`: it participates in resolution and causes no mismatch by itself. When two known types conflict, resolution fails. Product names and dimensions still determine artifact identity and shape; types do not select a product in this version of the text language.
+
+Run the complete [untyped example](examples/untyped.spit) with `cargo run -- dag examples/untyped.spit`.
+
 ## Resolution rules
 
-- Artifact types are symbolic expressions. Named constructors and their argument structure must match; an operation's single-letter uppercase type variables unify across its ports and are instantiated separately for each job. `Unknown` is compatible but does not establish a variable binding.
+- Artifact types, when supplied, are symbolic expressions. Named constructors and their argument structure must match; an operation's single-letter uppercase type variables unify across its ports and are instantiated separately for each job. Missing types become `Unknown`, which is compatible but does not establish a variable binding.
 - Each source record must bind exactly the declared dimensions of its product. The product name and bindings must be unique.
 - For a preserve operation, the first `one` input drives one output per artifact. Later `one` inputs match on shared dimensions. Zero matches is missing; multiple matches is ambiguous. A unique later input must be no more specific than the driving artifact.
 - A `many` operation has exactly one input and requires `@ vary(dimension)` in its invocation. The resolver groups its input family by every other dimension and removes the varied dimension from each output identity.

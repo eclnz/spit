@@ -1,0 +1,17 @@
+# Types are optional; product names, dimensions, and cardinality resolve the DAG.
+products:
+    raw       [subject, repeat]
+    processed [subject, repeat]
+    combined  [subject]
+
+operations:
+    process(one)
+    combine(many)
+
+pipeline:
+    processed = process(raw)
+    combined = combine(processed @ vary(repeat))
+
+sources:
+    raw[subject=A,repeat=1]
+    raw[subject=A,repeat=2]

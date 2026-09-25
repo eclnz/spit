@@ -7,7 +7,7 @@ use crate::model::{
     Cardinality, CountRequirement, CoverageRule, EntityBinding, InputBinding, InputPort,
     Invocation, OperationDef, Pipeline, ProductDef, ShapeRule, SourceInventory, SourceRecord,
 };
-use crate::types::parse_type_expr;
+use crate::types::{parse_type_expr, TypeExpr};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ParseError {
@@ -58,7 +58,7 @@ pub fn parse_pipeline(text: &str) -> Result<Pipeline, ParseError> {
             "sources:" | "contexts:" => {
                 return Err(ParseError::new(
                     line_number,
-                    "source inventory belongs in a separate file, not the pipeline definition",
+                    "source inventory is separate from Pipeline; use parse_document for a combined text file",
                 ))
             }
             _ => match section {
@@ -83,6 +83,46 @@ pub fn parse_pipeline(text: &str) -> Result<Pipeline, ParseError> {
     }
 
     Ok(pipeline)
+}
+
+/// Parse a text document that may package an inventory alongside its pipeline.
+/// The two remain separate values for resolution.
+pub fn parse_document(text: &str) -> Result<(Pipeline, Option<SourceInventory>), ParseError> {
+    let mut pipeline_text = String::new();
+    let mut inventory_text = String::new();
+    let mut inventory_section = false;
+    let mut has_inventory = false;
+
+    for original in text.lines() {
+        let line = original.split('#').next().unwrap_or("").trim();
+        match line {
+            "products:" | "operations:" | "pipeline:" | "constraints:" => {
+                inventory_section = false;
+            }
+            "sources:" | "contexts:" => {
+                inventory_section = true;
+                has_inventory = true;
+            }
+            _ => {}
+        }
+        if inventory_section {
+            inventory_text.push_str(original);
+            pipeline_text.push('\n');
+            inventory_text.push('\n');
+        } else {
+            pipeline_text.push_str(original);
+            pipeline_text.push('\n');
+            inventory_text.push('\n');
+        }
+    }
+
+    let pipeline = parse_pipeline(&pipeline_text)?;
+    let inventory = if has_inventory {
+        Some(parse_source_inventory(&inventory_text)?)
+    } else {
+        None
+    };
+    Ok((pipeline, inventory))
 }
 
 /// Parse an inventory supplied by a dataset indexer or written as a fixture.
@@ -166,19 +206,17 @@ fn parse_count(value: &str, number: usize) -> Result<usize, ParseError> {
 }
 
 fn parse_product(line: &str, number: usize) -> Result<ProductDef, ParseError> {
-    let (name, rest) = line.split_once(':').ok_or_else(|| {
-        ParseError::new(
-            number,
-            "expected product declaration: name : Type [dimensions]",
-        )
-    })?;
-    let name = identifier(name.trim(), number, "product name")?;
-    let (artifact_type, dimensions) = rest
-        .trim()
+    let (declaration, dimensions) = line
         .split_once('[')
-        .ok_or_else(|| ParseError::new(number, "expected product type followed by [dimensions]"))?;
-    let artifact_type = parse_type_expr(artifact_type.trim(), false)
-        .map_err(|message| ParseError::new(number, message))?;
+        .ok_or_else(|| ParseError::new(number, "expected product name followed by [dimensions]"))?;
+    let (name, artifact_type) = if let Some((name, ty)) = declaration.split_once(':') {
+        let ty = parse_type_expr(ty.trim(), false)
+            .map_err(|message| ParseError::new(number, message))?;
+        (name.trim(), ty)
+    } else {
+        (declaration.trim(), TypeExpr::Unknown)
+    };
+    let name = identifier(name, number, "product name")?;
     let dimensions = dimensions
         .strip_suffix(']')
         .ok_or_else(|| ParseError::new(number, "expected closing `]` in product declaration"))?;
@@ -194,14 +232,13 @@ fn parse_product(line: &str, number: usize) -> Result<ProductDef, ParseError> {
 }
 
 fn parse_operation(line: &str, number: usize) -> Result<OperationDef, ParseError> {
-    let (signature, output_type) = line.split_once("->").ok_or_else(|| {
-        ParseError::new(
-            number,
-            "expected operation: name(InputType, ...) -> OutputType",
-        )
-    })?;
-    let output_type = parse_type_expr(output_type.trim(), true)
-        .map_err(|message| ParseError::new(number, message))?;
+    let (signature, output_type) = if let Some((signature, output_type)) = line.split_once("->") {
+        let output_type = parse_type_expr(output_type.trim(), true)
+            .map_err(|message| ParseError::new(number, message))?;
+        (signature, output_type)
+    } else {
+        (line, TypeExpr::Unknown)
+    };
     let (name, inputs) = call_parts(signature.trim(), number)?;
     let inputs = comma_items(inputs, number)?;
     if inputs.is_empty() {
@@ -213,13 +250,28 @@ fn parse_operation(line: &str, number: usize) -> Result<OperationDef, ParseError
     let mut ports = Vec::new();
     let count = inputs.len();
     for (index, input) in inputs.iter().enumerate() {
-        let (cardinality, artifact_type) = if let Some(value) = input.strip_prefix("many ") {
-            (Cardinality::Many, value.trim())
+        let (cardinality, artifact_type) = if input == "many" {
+            (Cardinality::Many, TypeExpr::Unknown)
+        } else if input == "one" {
+            (Cardinality::One, TypeExpr::Unknown)
+        } else if let Some(value) = input.strip_prefix("many ") {
+            (
+                Cardinality::Many,
+                parse_type_expr(value.trim(), true)
+                    .map_err(|message| ParseError::new(number, message))?,
+            )
+        } else if let Some(value) = input.strip_prefix("one ") {
+            (
+                Cardinality::One,
+                parse_type_expr(value.trim(), true)
+                    .map_err(|message| ParseError::new(number, message))?,
+            )
         } else {
-            (Cardinality::One, input.as_str())
+            (
+                Cardinality::One,
+                parse_type_expr(input, true).map_err(|message| ParseError::new(number, message))?,
+            )
         };
-        let artifact_type = parse_type_expr(artifact_type, true)
-            .map_err(|message| ParseError::new(number, message))?;
         let port_name = if count == 1 {
             "input".to_owned()
         } else {

@@ -19,3 +19,11 @@ pipeline:
 constraints:
     require bold count>=1 per [sub, ses]
     require t1w count=1 per [sub, ses]
+
+contexts:
+    [sub=01,ses=01]
+
+sources:
+    bold[sub=01,ses=01,run=1]
+    bold[sub=01,ses=01,run=2]
+    t1w[sub=01,ses=01]
