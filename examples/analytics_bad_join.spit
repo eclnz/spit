@@ -1,0 +1,16 @@
+# This should fail: the second input uses AccountKey, but the join requires
+# both relations to share the same key variable K.
+products:
+    events    : Relation<Event,CustomerKey>  [tenant, customer, event]
+    accounts  : Relation<Account,AccountKey> [tenant]
+    joined    : Relation<Joined,CustomerKey>  [tenant, customer, event]
+
+operations:
+    join(Relation<Event,K>, Relation<Account,K>) -> Relation<Joined,K>
+
+pipeline:
+    joined = join(events, accounts)
+
+sources:
+    events[tenant=acme,customer=alice,event=e1]
+    accounts[tenant=acme]

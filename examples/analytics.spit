@@ -1,0 +1,69 @@
+# Analytics example: a keyed relation pipeline with several joins and rollups.
+# Product names describe query stages. Relation<...,CustomerKey> records the
+# join key; repeated K variables in operation signatures enforce compatibility.
+products:
+    events             : Relation<Event,CustomerKey>              [tenant, customer, day, event]
+    customers          : Relation<Customer,CustomerKey>           [tenant, customer]
+    subscriptions      : Relation<Subscription,CustomerKey>      [tenant, customer]
+    purchases          : Relation<Purchase,CustomerKey>           [tenant, customer]
+    campaigns           : Relation<Campaign,CustomerKey>           [tenant, customer]
+    clean_events       : Relation<Event,CustomerKey>              [tenant, customer, day, event]
+    customer_events    : Relation<CustomerEvent,CustomerKey>     [tenant, customer, day, event]
+    subscribed_events  : Relation<SubscribedEvent,CustomerKey>   [tenant, customer, day, event]
+    purchased_events   : Relation<PurchasedEvent,CustomerKey>    [tenant, customer, day, event]
+    attributed_events  : Relation<AttributedEvent,CustomerKey>   [tenant, customer, day, event]
+    daily_metrics      : Relation<CustomerDayMetric,CustomerKey> [tenant, customer, day]
+    customer_metrics   : Relation<CustomerMetric,CustomerKey>   [tenant, customer]
+    tenant_metrics     : Relation<TenantMetric,TenantKey>        [tenant]
+
+operations:
+    clean(Relation<Event,CustomerKey>) -> Relation<Event,CustomerKey>
+    join_customers(Relation<Event,CustomerKey>, Relation<Customer,CustomerKey>) -> Relation<CustomerEvent,CustomerKey>
+    join_subscriptions(Relation<CustomerEvent,CustomerKey>, Relation<Subscription,CustomerKey>) -> Relation<SubscribedEvent,CustomerKey>
+    join_purchases(Relation<SubscribedEvent,CustomerKey>, Relation<Purchase,CustomerKey>) -> Relation<PurchasedEvent,CustomerKey>
+    join_campaigns(Relation<PurchasedEvent,CustomerKey>, Relation<Campaign,CustomerKey>) -> Relation<AttributedEvent,CustomerKey>
+    aggregate_day(many Relation<AttributedEvent,CustomerKey>) -> Relation<CustomerDayMetric,CustomerKey>
+    aggregate_customer(many Relation<CustomerDayMetric,CustomerKey>) -> Relation<CustomerMetric,CustomerKey>
+    aggregate_tenant(many Relation<CustomerMetric,CustomerKey>) -> Relation<TenantMetric,TenantKey>
+
+pipeline:
+    clean_events = clean(events)
+    customer_events = join_customers(clean_events, customers)
+    subscribed_events = join_subscriptions(customer_events, subscriptions)
+    purchased_events = join_purchases(subscribed_events, purchases)
+    attributed_events = join_campaigns(purchased_events, campaigns)
+    daily_metrics = aggregate_day(attributed_events @ vary(event))
+    customer_metrics = aggregate_customer(daily_metrics @ vary(day))
+    tenant_metrics = aggregate_tenant(customer_metrics @ vary(customer))
+
+constraints:
+    require events count>=1 per [tenant, customer, day]
+    require customers count=1 per [tenant, customer]
+    require subscriptions count=1 per [tenant, customer]
+    require purchases count=1 per [tenant, customer]
+    require campaigns count=1 per [tenant, customer]
+
+contexts:
+    [tenant=acme,customer=alice,day=mon]
+    [tenant=acme,customer=alice,day=tue]
+    [tenant=acme,customer=bob,day=mon]
+    [tenant=globex,customer=carol,day=mon]
+
+sources:
+    events[tenant=acme,customer=alice,day=mon,event=e1]
+    events[tenant=acme,customer=alice,day=mon,event=e2]
+    events[tenant=acme,customer=alice,day=tue,event=e3]
+    events[tenant=acme,customer=bob,day=mon,event=e4]
+    events[tenant=globex,customer=carol,day=mon,event=e5]
+    customers[tenant=acme,customer=alice]
+    customers[tenant=acme,customer=bob]
+    customers[tenant=globex,customer=carol]
+    subscriptions[tenant=acme,customer=alice]
+    subscriptions[tenant=acme,customer=bob]
+    subscriptions[tenant=globex,customer=carol]
+    purchases[tenant=acme,customer=alice]
+    purchases[tenant=acme,customer=bob]
+    purchases[tenant=globex,customer=carol]
+    campaigns[tenant=acme,customer=alice]
+    campaigns[tenant=acme,customer=bob]
+    campaigns[tenant=globex,customer=carol]

@@ -1,6 +1,6 @@
 use spit::{
-    parse_pipeline, parse_source_inventory, parse_type_expr, resolve, Compatibility, ResolveError,
-    Substitutions, TypeExpr, TypeUnifyError,
+    parse_document, parse_pipeline, parse_source_inventory, parse_type_expr, resolve,
+    Compatibility, ResolveError, Substitutions, TypeExpr, TypeUnifyError,
 };
 
 fn product(text: &str) -> TypeExpr {
@@ -190,6 +190,18 @@ fn act_example_reuses_image_operations_across_kinds_and_spaces() {
             .count(),
         1
     );
+}
+
+#[test]
+fn analytics_join_key_variables_reject_mismatched_relations() {
+    let valid = parse_document(include_str!("../examples/analytics.spit")).unwrap();
+    assert_eq!(resolve(&valid.0, &valid.1.unwrap()).unwrap().jobs.len(), 34);
+
+    let invalid = parse_document(include_str!("../examples/analytics_bad_join.spit")).unwrap();
+    assert!(matches!(
+        resolve(&invalid.0, &invalid.1.unwrap()),
+        Err(ResolveError::TypeVariableConflict { .. })
+    ));
 }
 
 #[test]

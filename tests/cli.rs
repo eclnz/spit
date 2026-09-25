@@ -52,6 +52,7 @@ fn expanded_examples_resolve() {
             Some("examples/mrtrix3_act.sources"),
             68,
         ),
+        ("examples/analytics.spit", None, 34),
     ] {
         let mut command = Command::new(env!("CARGO_BIN_EXE_spit"));
         command.args(["check", pipeline]);
