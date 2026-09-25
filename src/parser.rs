@@ -163,17 +163,19 @@ fn parse_flow_pipeline(text: &str) -> Result<Pipeline, ParseError> {
 }
 
 fn parse_command(line: &str, number: usize) -> Result<CommandDef, ParseError> {
-    let (operation, template) = line
-        .split_once(':')
-        .or_else(|| line.split_once('='))
+    let delimiter = [line.find(':'), line.find('=')]
+        .into_iter()
+        .flatten()
+        .min()
         .ok_or_else(|| {
             ParseError::new(
                 number,
                 "expected command: operation: executable [arguments]",
             )
         })?;
+    let (operation, rest) = line.split_at(delimiter);
     let operation = identifier(operation.trim(), number, "command operation")?;
-    let template = template.trim();
+    let template = rest[1..].trim();
     if template.is_empty() {
         return Err(ParseError::new(
             number,
@@ -234,7 +236,6 @@ fn set_path(pipeline: &mut Pipeline, line: &str, number: usize) -> Result<(), Pa
 fn strip_comment(line: &str) -> &str {
     let mut quote = None;
     let mut escaped = false;
-    let mut whitespace_before = true;
     for (index, character) in line.char_indices() {
         if escaped {
             escaped = false;
@@ -244,11 +245,10 @@ fn strip_comment(line: &str) -> &str {
                 (None, '\'') => quote = Some('\''),
                 (None, '"') => quote = Some('"'),
                 (Some('\''), '\'') | (Some('"'), '"') => quote = None,
-                (None, '#') if whitespace_before => return &line[..index],
+                (None, '#') => return &line[..index],
                 _ => {}
             }
         }
-        whitespace_before = character.is_whitespace();
     }
     line
 }

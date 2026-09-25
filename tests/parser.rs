@@ -133,10 +133,23 @@ fn flow_form_requires_operation_declaration_before_use() {
 
 #[test]
 fn command_arguments_keep_quoted_hashes_and_strip_comments() {
-    let text = "source raw [id]\noperation copy(one)\ncommand copy: tool --tag '#run' {input} {output} # explanation\nresult = copy(raw)\n";
+    let text = "source raw [id]# source comment\noperation copy(one)\ncommand copy: tool --tag '#run' --label \"part#1\" {input} {output}# command comment\nresult = copy(raw)\n";
     let pipeline = parse_pipeline(text).unwrap();
     assert_eq!(
         pipeline.commands[0].template,
-        "tool --tag '#run' {input} {output}"
+        "tool --tag '#run' --label \"part#1\" {input} {output}"
+    );
+}
+
+#[test]
+fn equals_command_keeps_colons_in_arguments() {
+    let pipeline = parse_pipeline(
+        "source raw [id]\noperation fetch(one)\ncommand fetch = tool --url https://example.com/a:b {input} {output}\nresult = fetch(raw)\n",
+    )
+    .unwrap();
+    assert_eq!(pipeline.commands[0].operation, "fetch");
+    assert_eq!(
+        pipeline.commands[0].template,
+        "tool --url https://example.com/a:b {input} {output}"
     );
 }
