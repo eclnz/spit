@@ -38,9 +38,9 @@ Larger examples exercise the same compiler with different graph structures:
 | [Nested aggregation](examples/complex.spit) | Partial typing, uneven groups, and three aggregation levels | `cargo run -- dag examples/complex.spit` |
 | [Analytics joins](examples/analytics.spit) | Several keyed joins followed by day, customer, and tenant rollups | `cargo run -- dag examples/analytics.spit` |
 | [Bash backend](examples/bash_demo.spit) | User-supplied Unix arguments, path templates, and grouped input expansion | `cargo run -- bash examples/bash_demo.spit --sources examples/bash_demo.sources` |
-| [MRtrix3 ACT](examples/mrtrix3_act.spit) | Raw DWI preprocessing, T1 registration, parcellation alignment, ACT tractography, SIFT2, connectomes | `cargo run -- dag examples/mrtrix3_act.spit --sources examples/mrtrix3_act.sources` |
+| [MRtrix3 ACT](examples/mrtrix3_act.spit) | Raw DWI preprocessing, T1 registration, parcellation alignment, ACT tractography, SIFT2, connectomes | `cargo run -- bash examples/mrtrix3_act.spit --sources examples/mrtrix3_act.sources` |
 
-The ACT file starts with raw DWI runs, native T1w, reverse phase-encoded b=0 images, and lookup tables. Its products share parameterized types such as `MRI<DWI,Acquired>`: product names distinguish processing states, while reusable operations describe compatible data kinds and coordinate spaces. For example, one `mean_b0` signature serves two stages, and one `mrtransform` signature serves T1w and parcellation images. SPIT resolves this logical graph; it does not yet run the tools, inspect files, or verify spatial alignment. [Exploration findings](docs/exploration.md) records what these larger pipelines exposed.
+The ACT file starts with raw DWI runs, native T1w, reverse phase-encoded b=0 images, and lookup tables. Its products share parameterized types such as `MRI<DWI,Acquired>`: product names distinguish processing states, while reusable operations describe compatible data kinds and coordinate spaces. One `mean_b0` signature serves two stages, while image and label resampling have distinct commands so labels use nearest-neighbor interpolation. The example defines source and output paths plus MRtrix3, FSL, and FreeSurfer SynthSeg commands. It is an illustrative single-shell acquisition workflow: input images need gradient and phase-encoding metadata, the lookup tables must match SynthSeg labels, and spatial results require inspection. SPIT generates the script but does not inspect those data or run the tools itself. [Exploration findings](docs/exploration.md) records what these larger pipelines exposed.
 
 An indexer can supply an inventory on standard input, so pipeline authors need not list every scan by hand:
 
@@ -78,6 +78,16 @@ SPIT_ROOT=/path/to/data bash run.sh
 The inventory determines which groups and parts exist. SPIT resolves those jobs first, then emits one command per job; group names in the script come from the inventory rather than the pipeline text. Regenerate the script when the inventory changes. `SPIT_ROOT` defaults to the current directory. The sample inventory expects `input/alpha/01.txt`, `input/alpha/02.txt`, and `input/beta/01.txt` under that root.
 
 A dataset indexer can supply the inventory at generation time with `--sources -`, just as it can for `dag`.
+
+The ACT example uses the same interface:
+
+```sh
+cargo run -- bash examples/mrtrix3_act.spit --sources examples/mrtrix3_act.sources > act.sh
+bash -n act.sh
+SPIT_ROOT=/path/to/data bash act.sh
+```
+
+Its sample inventory generates 83 jobs over three observed subject sessions. Source paths are declared near the top of the pipeline file; adapt them to your data layout. A changed inventory changes the script without editing subject names into the pipeline.
 
 Each command template is an executable followed by ordered arguments. `{input}` names a sole input, `{input1}` and `{input2}` name positional inputs, `{inputs}` expands an aggregated input into separate arguments, and `{output}` names the job's output. Quoted words can contain spaces. SPIT quotes the expanded arguments for Bash; command templates do not use shell pipelines or redirection. A default `path:` template covers all products, while `path product:` overrides one family. Path templates may use `{product}`, `{entities}`, or a dimension such as `{group}`. Paths are relative to `SPIT_ROOT`; entity values are encoded as safe path components.
 

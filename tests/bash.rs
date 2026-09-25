@@ -126,3 +126,43 @@ fn adding_a_group_to_inventory_expands_the_script() {
     assert!(script.contains("input/gamma/01.txt"));
     assert!(script.contains("merged/group=gamma.txt"));
 }
+
+#[test]
+fn act_example_generates_valid_bash_for_new_sessions() {
+    let (pipeline, embedded) =
+        parse_document(include_str!("../examples/mrtrix3_act.spit")).unwrap();
+    assert!(embedded.is_none());
+    let inventory =
+        parse_source_inventory(include_str!("../examples/mrtrix3_act.sources")).unwrap();
+    let dag = resolve(&pipeline, &inventory).unwrap();
+    assert_eq!(dag.jobs.len(), 83);
+    let script = render_bash(&pipeline, &dag).unwrap();
+    assert!(script.contains("'dwicat'"));
+    assert!(script.contains("'flirt' '-in'"));
+    assert!(script.contains("'transformconvert'"));
+    assert!(script.contains("'mrtransform'"));
+    assert!(script.contains("'-interp' 'nearest'"));
+    assert!(script.contains("'tck2connectome'"));
+    let syntax = Command::new("bash")
+        .arg("-n")
+        .arg("-c")
+        .arg(&script)
+        .output()
+        .unwrap();
+    assert!(
+        syntax.status.success(),
+        "{}",
+        String::from_utf8_lossy(&syntax.stderr)
+    );
+
+    let inventory = parse_source_inventory(&format!(
+        "{}    raw_dwi[sub=03,ses=01,run=01]\n    raw_dwi[sub=03,ses=01,run=02]\n    reverse_b0[sub=03,ses=01]\n    t1w[sub=03,ses=01]\n",
+        include_str!("../examples/mrtrix3_act.sources")
+    ))
+    .unwrap();
+    let expanded = resolve(&pipeline, &inventory).unwrap();
+    assert!(expanded.jobs.len() > dag.jobs.len());
+    let script = render_bash(&pipeline, &expanded).unwrap();
+    assert!(script.contains("input/sub-03/ses-01/run-01_dwi.mif"));
+    assert!(script.contains("derivatives/weighted_connectome/sub=03__ses=01.csv"));
+}

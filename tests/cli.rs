@@ -72,7 +72,7 @@ fn expanded_examples_resolve() {
         (
             "examples/mrtrix3_act.spit",
             Some("examples/mrtrix3_act.sources"),
-            68,
+            83,
         ),
         ("examples/analytics.spit", None, 34),
     ] {

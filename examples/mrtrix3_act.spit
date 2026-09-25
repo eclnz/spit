@@ -1,7 +1,8 @@
-# ACT connectome: a logical DAG from raw DWI runs and native T1w.
-# Product names describe processing state. Types describe reusable data kinds
-# and coordinate spaces; operations can be reused across compatible products.
-# These are logical contracts. Command bindings and execution come later.
+# ACT connectome from raw DWI runs and native T1w.
+# This example assumes single-shell DWI with gradients and phase-encoding
+# metadata in the .mif headers, plus a reversed-PE b=0 per session.
+# It requires MRtrix3, FSL, and FreeSurfer SynthSeg on the execution host.
+# Supply lookup tables that match the SynthSeg parcellation labels.
 
 source raw_dwi    : MRI<DWI,Acquired>            [sub, ses, run]
 source reverse_b0 : MRI<B0,Acquired>             [sub, ses]
@@ -13,65 +14,122 @@ require raw_dwi count>=2 per [sub, ses]
 require reverse_b0 count=1 per [sub, ses]
 require t1w count=1 per [sub, ses]
 
-# Candidate implementations: dwidenoise, mrdegibbs, and dwicat.
+# Paths describe a dataset layout; the source inventory still contains only
+# logical artifact identities. Adjust the source paths for your own dataset.
+path: derivatives/{product}/{entities}.mif
+path raw_dwi: input/sub-{sub}/ses-{ses}/run-{run}_dwi.mif
+path reverse_b0: input/sub-{sub}/ses-{ses}/reverse_b0.mif
+path t1w: input/sub-{sub}/ses-{ses}/t1w.nii.gz
+path source_lut: config/source_lut.txt
+path target_lut: config/target_lut.txt
+path parcellation_t1: derivatives/parcellation_t1/{entities}.nii.gz
+path session_b0_nifti: derivatives/session_b0_nifti/{entities}.nii.gz
+path t1_to_dwi_flirt: derivatives/t1_to_dwi_flirt/{entities}.mat
+path t1_to_dwi: derivatives/t1_to_dwi/{entities}.txt
+path wm_response: derivatives/wm_response/{entities}.txt
+path act_tracks: derivatives/act_tracks/{entities}.tck
+path sift2_weights: derivatives/sift2_weights/{entities}.txt
+path weighted_connectome: derivatives/weighted_connectome/{entities}.csv
+
 operation denoise(MRI<DWI,S>) -> MRI<DWI,S>
+command denoise: dwidenoise {input} {output}
 denoised_dwi = denoise(raw_dwi)
 
 operation remove_gibbs(MRI<DWI,S>) -> MRI<DWI,S>
+command remove_gibbs: mrdegibbs {input} {output}
 degibbsed_dwi = remove_gibbs(denoised_dwi)
 
 # Consume run to make one session DWI for subsequent motion correction.
 operation concatenate_runs(many MRI<DWI,S>) -> MRI<DWI,S>
+command concatenate_runs: dwicat {inputs} {output}
 session_dwi = concatenate_runs(degibbsed_dwi @ vary(run))
 
-# b=0 extraction plus mean; mrcat of forward and reverse b=0;
-# dwifslpreproc -rpe_pair; then dwibiascorrect.
-operation mean_b0(MRI<DWI,S>) -> MRI<B0,S>
-forward_b0 = mean_b0(session_dwi)
+# Extract b=0 volumes, then average them. Both stages can be reused after
+# motion and distortion correction to make a corrected registration target.
+operation extract_b0(MRI<DWI,S>) -> MRI<B0Series,S>
+command extract_b0: dwiextract {input} {output} -bzero
+forward_b0_series = extract_b0(session_dwi)
+
+operation mean_b0(MRI<B0Series,S>) -> MRI<B0,S>
+command mean_b0: mrmath {input} mean {output} -axis 3
+forward_b0 = mean_b0(forward_b0_series)
 
 operation combine_pe_pair(MRI<B0,S>, MRI<B0,S>) -> MRI<B0Pair,S>
+command combine_pe_pair: mrcat {input1} {input2} {output} -axis 3
 se_epi_pair = combine_pe_pair(forward_b0, reverse_b0)
 
+# -rpe_header uses the phase-encoding metadata rather than fixed subject names
+# or acquisition parameters; the paired b=0 headers must be valid.
 operation preprocess_dwi(MRI<DWI,Acquired>, MRI<B0Pair,Acquired>) -> MRI<DWI,Diffusion>
+command preprocess_dwi: dwifslpreproc {input1} {output} -rpe_header -se_epi {input2} -align_seepi
 preprocessed_dwi = preprocess_dwi(session_dwi, se_epi_pair)
 
 operation bias_correct(MRI<DWI,S>) -> MRI<DWI,S>
+command bias_correct: dwibiascorrect fsl {input} {output}
 corrected_dwi = bias_correct(preprocessed_dwi)
-session_b0 = mean_b0(corrected_dwi)
+session_b0_series = extract_b0(corrected_dwi)
+session_b0 = mean_b0(session_b0_series)
 
-# Anatomical parcellation, labelconvert, rigid mrregister, and mrtransform.
+# Generate a parcellation in native T1 space, then remap its integer labels.
 operation parcellate_t1(MRI<T1w,S>) -> MRI<Parcellation,S>
+command parcellate_t1: mri_synthseg --i {input} --o {output} --parc
 parcellation_t1 = parcellate_t1(t1w)
 
 operation convert_labels(MRI<Parcellation,S>, LookupTable, LookupTable) -> MRI<Parcellation,S>
+command convert_labels: labelconvert {input1} {input2} {input3} {output}
 nodes_t1 = convert_labels(parcellation_t1, source_lut, target_lut)
 
-operation mrregister(MRI<M,S>, MRI<N,T>) -> Transform<S,T>
-t1_to_dwi = mrregister(t1w, session_b0)
+# FLIRT handles the T1/b=0 contrast difference. Its matrix is converted to
+# MRtrix coordinates using the same moving and reference images.
+operation export_nifti(MRI<K,S>) -> MRI<K,S>
+command export_nifti: mrconvert {input} {output}
+session_b0_nifti = export_nifti(session_b0)
 
-operation mrtransform(MRI<K,S>, Transform<S,T>) -> MRI<K,T>
-t1w_dwi = mrtransform(t1w, t1_to_dwi)
-nodes_dwi = mrtransform(nodes_t1, t1_to_dwi)
+operation flirt_register(MRI<M,S>, MRI<N,T>) -> FSLTransform<S,T>
+command flirt_register: flirt -in {input1} -ref {input2} -omat {output} -dof 6 -cost corratio
+t1_to_dwi_flirt = flirt_register(t1w, session_b0_nifti)
 
-# 5ttgen, 5tt2gmwmi, single-output response/FOD estimation, tckgen,
-# tcksift2, and tck2connectome. Multi-output variants await SPIT support.
+operation convert_flirt(FSLTransform<S,T>, MRI<M,S>, MRI<N,T>) -> Transform<S,T>
+command convert_flirt: transformconvert {input1} {input2} {input3} flirt_import {output}
+t1_to_dwi = convert_flirt(t1_to_dwi_flirt, t1w, session_b0_nifti)
+
+# The reference image determines the target voxel grid. Continuous images
+# use linear interpolation; label images use nearest-neighbor interpolation.
+operation mrtransform(MRI<K,S>, Transform<S,T>, MRI<N,T>) -> MRI<K,T>
+command mrtransform: mrtransform {input1} {output} -linear {input2} -template {input3} -interp linear
+t1w_dwi = mrtransform(t1w, t1_to_dwi, session_b0)
+
+operation mrtransform_labels(MRI<Parcellation,S>, Transform<S,T>, MRI<N,T>) -> MRI<Parcellation,T>
+command mrtransform_labels: mrtransform {input1} {output} -linear {input2} -template {input3} -interp nearest
+nodes_dwi = mrtransform_labels(nodes_t1, t1_to_dwi, session_b0)
+
+# Make the 5TT in native T1 space before resampling into diffusion space.
 operation make_5tt(MRI<T1w,S>) -> MRI<Tissue,S>
-five_tt = make_5tt(t1w_dwi)
+command make_5tt: 5ttgen fsl {input} {output}
+five_tt_t1 = make_5tt(t1w)
+five_tt = mrtransform(five_tt_t1, t1_to_dwi, session_b0)
 
 operation make_gmwmi(MRI<Tissue,S>) -> MRI<Mask,S>
+command make_gmwmi: 5tt2gmwmi {input} {output}
 gmwmi = make_gmwmi(five_tt)
 
+# Single-shell, single-tissue response and FOD estimation.
 operation estimate_wm_response(MRI<DWI,S>) -> Response<DWI>
+command estimate_wm_response: dwi2response tournier {input} {output}
 wm_response = estimate_wm_response(corrected_dwi)
 
 operation estimate_wm_fod(MRI<DWI,S>, Response<DWI>) -> MRI<FOD,S>
+command estimate_wm_fod: dwi2fod csd {input1} {input2} {output}
 wm_fod = estimate_wm_fod(corrected_dwi, wm_response)
 
 operation track_act(MRI<FOD,S>, MRI<Tissue,S>, MRI<Mask,S>) -> Tractogram<S>
+command track_act: tckgen {input1} {output} -act {input2} -backtrack -seed_gmwmi {input3} -select 1000000
 act_tracks = track_act(wm_fod, five_tt, gmwmi)
 
 operation weight_streamlines(Tractogram<S>, MRI<FOD,S>, MRI<Tissue,S>) -> StreamlineWeights
+command weight_streamlines: tcksift2 {input1} {input2} {output} -act {input3}
 sift2_weights = weight_streamlines(act_tracks, wm_fod, five_tt)
 
 operation build_connectome(Tractogram<S>, MRI<Parcellation,S>, StreamlineWeights) -> Connectome
+command build_connectome: tck2connectome {input1} {input2} {output} -tck_weights_in {input3}
 weighted_connectome = build_connectome(act_tracks, nodes_dwi, sift2_weights)
