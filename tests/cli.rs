@@ -5,7 +5,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 #[test]
 fn example_runs_with_embedded_inventory() {
     let output = Command::new(env!("CARGO_BIN_EXE_spit"))
-        .args(["dag", "examples/basic.spit"])
+        .args(["dag", "examples/basic/basic.spit"])
         .output()
         .unwrap();
     assert!(
@@ -23,9 +23,9 @@ fn separate_inventory_remains_supported() {
     let output = Command::new(env!("CARGO_BIN_EXE_spit"))
         .args([
             "check",
-            "examples/typed.spit",
+            "examples/types/typed.spit",
             "--sources",
-            "examples/typed.sources",
+            "examples/types/typed.sources",
         ])
         .output()
         .unwrap();
@@ -44,9 +44,9 @@ fn bash_command_expands_observed_groups() {
     let output = Command::new(env!("CARGO_BIN_EXE_spit"))
         .args([
             "bash",
-            "examples/bash_demo.spit",
+            "examples/commands/bash_demo.spit",
             "--sources",
-            "examples/bash_demo.sources",
+            "examples/commands/bash_demo.sources",
         ])
         .output()
         .unwrap();
@@ -66,9 +66,9 @@ fn bound_dag_displays_resolved_paths_before_command_expansion() {
     let output = Command::new(env!("CARGO_BIN_EXE_spit"))
         .args([
             "bound-dag",
-            "examples/mrtrix3_act.spit",
+            "examples/commands/mrtrix3_act.spit",
             "--sources",
-            "examples/mrtrix3_act.sources",
+            "examples/commands/mrtrix3_act.sources",
         ])
         .output()
         .unwrap();
@@ -86,19 +86,19 @@ fn bound_dag_displays_resolved_paths_before_command_expansion() {
 #[test]
 fn expanded_examples_resolve() {
     for (pipeline, sources, expected_jobs) in [
-        ("examples/branching.spit", None, 21),
-        ("examples/complex.spit", None, 25),
+        ("examples/pipelines/branching.spit", None, 21),
+        ("examples/pipelines/complex.spit", None, 25),
         (
-            "examples/rich_shapes.spit",
-            Some("examples/rich_shapes.sources"),
+            "examples/pipelines/rich_shapes.spit",
+            Some("examples/pipelines/rich_shapes.sources"),
             17,
         ),
         (
-            "examples/mrtrix3_act.spit",
-            Some("examples/mrtrix3_act.sources"),
+            "examples/commands/mrtrix3_act.spit",
+            Some("examples/commands/mrtrix3_act.sources"),
             93,
         ),
-        ("examples/analytics.spit", None, 34),
+        ("examples/analytics/analytics.spit", None, 34),
     ] {
         let mut command = Command::new(env!("CARGO_BIN_EXE_spit"));
         command.args(["check", pipeline]);
@@ -125,9 +125,9 @@ fn paths_reports_fallbacks_and_strict_check_rejects_them() {
     let paths = Command::new(env!("CARGO_BIN_EXE_spit"))
         .args([
             "paths",
-            "examples/mrtrix3_act.spit",
+            "examples/commands/mrtrix3_act.spit",
             "--sources",
-            "examples/mrtrix3_act.sources",
+            "examples/commands/mrtrix3_act.sources",
         ])
         .output()
         .unwrap();
@@ -139,10 +139,10 @@ fn paths_reports_fallbacks_and_strict_check_rejects_them() {
     let strict = Command::new(env!("CARGO_BIN_EXE_spit"))
         .args([
             "check",
-            "examples/mrtrix3_act.spit",
+            "examples/commands/mrtrix3_act.spit",
             "--strict-paths",
             "--sources",
-            "examples/mrtrix3_act.sources",
+            "examples/commands/mrtrix3_act.sources",
         ])
         .output()
         .unwrap();

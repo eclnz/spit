@@ -3,8 +3,8 @@ use spit::{
     ResolveError, TypeExpr,
 };
 
-const EXAMPLE: &str = include_str!("../examples/basic.spit");
-const INVENTORY: &str = include_str!("../examples/basic.sources");
+const EXAMPLE: &str = include_str!("../examples/basic/basic.spit");
+const INVENTORY: &str = include_str!("../examples/basic/basic.sources");
 
 #[test]
 fn parses_and_resolves_user_facing_example() {
@@ -63,7 +63,7 @@ fn reports_semantic_type_error_after_parsing() {
 
 #[test]
 fn resolves_untyped_pipeline_by_shape_and_cardinality() {
-    let (pipeline, inventory) = parse_document(include_str!("../examples/untyped.spit")).unwrap();
+    let (pipeline, inventory) = parse_document(include_str!("../examples/types/untyped.spit")).unwrap();
     assert!(pipeline
         .products
         .iter()
@@ -95,7 +95,7 @@ fn partially_typed_pipeline_accepts_unknown_and_rejects_known_mismatch() {
 
 #[test]
 fn separate_pipeline_still_parses_without_inventory() {
-    let (pipeline, inventory) = parse_document(include_str!("../examples/typed.spit")).unwrap();
+    let (pipeline, inventory) = parse_document(include_str!("../examples/types/typed.spit")).unwrap();
     assert!(inventory.is_none());
     assert!(!pipeline.products.is_empty());
 }

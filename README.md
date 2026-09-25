@@ -7,8 +7,8 @@ SPIT lets you write a pipeline as a text file, check which jobs it would create,
 From this repository:
 
 ```sh
-cargo run -- check examples/bash_demo.spit --sources examples/bash_demo.sources
-cargo run -- dag examples/bash_demo.spit --sources examples/bash_demo.sources
+cargo run -- check examples/commands/bash_demo.spit --sources examples/commands/bash_demo.sources
+cargo run -- dag examples/commands/bash_demo.spit --sources examples/commands/bash_demo.sources
 ```
 
 Use `cargo build` to get the `target/debug/spit` executable. With `cargo run`, the `--` separates Cargo's arguments from SPIT's arguments.
@@ -38,13 +38,13 @@ Choose one command per call. The pipeline file comes next; options follow it.
 For example, `check` resolves the pipeline, while `check --root` also verifies its input files:
 
 ```sh
-cargo run -- check examples/bash_demo.spit --sources examples/bash_demo.sources
-cargo run -- check examples/bash_demo.spit --sources examples/bash_demo.sources --root /path/to/data
+cargo run -- check examples/commands/bash_demo.spit --sources examples/commands/bash_demo.sources
+cargo run -- check examples/commands/bash_demo.spit --sources examples/commands/bash_demo.sources --root /path/to/data
 ```
 
 ## Write a pipeline
 
-Here is the complete [text processing example](examples/bash_demo.spit):
+Here is the complete [text processing example](examples/commands/bash_demo.spit):
 
 ```text
 source shard : Lines [group, part]
@@ -68,7 +68,7 @@ merged = merge(sorted @ vary(part))
 
 ## Supply the inputs
 
-The pipeline describes what to do; an inventory describes what is present. The example uses [bash_demo.sources](examples/bash_demo.sources):
+The pipeline describes what to do; an inventory describes what is present. The example uses [bash_demo.sources](examples/commands/bash_demo.sources):
 
 ```text
 sources:
@@ -79,14 +79,14 @@ sources:
 
 This creates two sort jobs for `alpha`, one for `beta`, and one merge job for each group. Add another shard to the inventory and SPIT creates the corresponding job without changing the pipeline.
 
-An inventory can also be placed in the same `.spit` file for a small example, as in [basic.spit](examples/basic.spit). For reusable pipelines, keep it separate and pass `--sources inventory.spit`. Use `--sources -` to read an inventory from standard input.
+An inventory can also be placed in the same `.spit` file for a small example, as in [basic.spit](examples/basic/basic.spit). For reusable pipelines, keep it separate and pass `--sources inventory.spit`. Use `--sources -` to read an inventory from standard input.
 
 ## Inspect and generate a script
 
 ```sh
-cargo run -- paths examples/bash_demo.spit --sources examples/bash_demo.sources
-cargo run -- bound-dag examples/bash_demo.spit --sources examples/bash_demo.sources
-cargo run -- bash examples/bash_demo.spit --sources examples/bash_demo.sources > run.sh
+cargo run -- paths examples/commands/bash_demo.spit --sources examples/commands/bash_demo.sources
+cargo run -- bound-dag examples/commands/bash_demo.spit --sources examples/commands/bash_demo.sources
+cargo run -- bash examples/commands/bash_demo.spit --sources examples/commands/bash_demo.sources > run.sh
 SPIT_ROOT=/path/to/data bash run.sh
 ```
 
@@ -170,13 +170,13 @@ Types are additive. You can leave them out, add them to selected products and op
 
 | Example | Shows |
 | --- | --- |
-| [Basic](examples/basic.spit) | Sectioned syntax and an inventory in one file |
-| [Untyped](examples/untyped.spit) | Resolution without types |
-| [Typed](examples/typed.spit) | Parameterized symbolic types |
-| [Branching](examples/branching.spit) | Shared inputs and branches |
-| [Complex](examples/complex.spit) | Nested aggregation |
-| [Analytics](examples/analytics.spit) | Joins and rollups |
-| [MRtrix3 ACT](examples/mrtrix3_act.spit) | A larger pipeline with commands and paths |
+| [Basic](examples/basic/basic.spit) | Sectioned syntax and an inventory in one file |
+| [Untyped](examples/types/untyped.spit) | Resolution without types |
+| [Typed](examples/types/typed.spit) | Parameterized symbolic types |
+| [Branching](examples/pipelines/branching.spit) | Shared inputs and branches |
+| [Complex](examples/pipelines/complex.spit) | Nested aggregation |
+| [Analytics](examples/analytics/analytics.spit) | Joins and rollups |
+| [MRtrix3 ACT](examples/commands/mrtrix3_act.spit) | A larger pipeline with commands and paths |
 
 SPIT also accepts grouped `products:`, `operations:`, `pipeline:`, and `constraints:` sections. The flow style above is intended for writing a pipeline in the order you read it.
 

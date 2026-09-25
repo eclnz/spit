@@ -161,9 +161,9 @@ fn operation_type_variables_do_not_leak_between_invocations() {
 
 #[test]
 fn act_example_reuses_image_operations_across_kinds_and_spaces() {
-    let pipeline = parse_pipeline(include_str!("../examples/mrtrix3_act.spit")).unwrap();
+    let pipeline = parse_pipeline(include_str!("../examples/commands/mrtrix3_act.spit")).unwrap();
     let inventory =
-        parse_source_inventory(include_str!("../examples/mrtrix3_act.sources")).unwrap();
+        parse_source_inventory(include_str!("../examples/commands/mrtrix3_act.sources")).unwrap();
     let dag = resolve(&pipeline, &inventory).unwrap();
     let output_type = |name: &str| {
         dag.jobs
@@ -194,10 +194,10 @@ fn act_example_reuses_image_operations_across_kinds_and_spaces() {
 
 #[test]
 fn analytics_join_key_variables_reject_mismatched_relations() {
-    let valid = parse_document(include_str!("../examples/analytics.spit")).unwrap();
+    let valid = parse_document(include_str!("../examples/analytics/analytics.spit")).unwrap();
     assert_eq!(resolve(&valid.0, &valid.1.unwrap()).unwrap().jobs.len(), 34);
 
-    let invalid = parse_document(include_str!("../examples/analytics_bad_join.spit")).unwrap();
+    let invalid = parse_document(include_str!("../examples/analytics/analytics_bad_join.spit")).unwrap();
     assert!(matches!(
         resolve(&invalid.0, &invalid.1.unwrap()),
         Err(ResolveError::TypeVariableConflict { .. })

@@ -62,9 +62,9 @@ impl Fixture {
         Command::new(env!("CARGO_BIN_EXE_spit"))
             .args([
                 "check",
-                "examples/mrtrix3_act.spit",
+                "examples/commands/mrtrix3_act.spit",
                 "--sources",
-                "examples/mrtrix3_act.sources",
+                "examples/commands/mrtrix3_act.sources",
                 "--root",
                 self.0.to_str().unwrap(),
             ])
@@ -111,14 +111,14 @@ fn act_pipeline_reports_a_missing_required_file() {
 #[test]
 fn act_pipeline_rejects_a_scan_without_an_inventory_sidecar() {
     let fixture = Fixture::new(None);
-    let inventory = include_str!("../examples/mrtrix3_act.sources")
+    let inventory = include_str!("../examples/commands/mrtrix3_act.sources")
         .replace("    dwi_bval[sub=01,ses=02,run=02]\n", "");
     let inventory_path = fixture.0.join("incomplete.sources");
     fs::write(&inventory_path, inventory).unwrap();
     let result = Command::new(env!("CARGO_BIN_EXE_spit"))
         .args([
             "check",
-            "examples/mrtrix3_act.spit",
+            "examples/commands/mrtrix3_act.spit",
             "--sources",
             inventory_path.to_str().unwrap(),
             "--root",

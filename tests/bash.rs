@@ -8,9 +8,9 @@ use spit::{
 };
 
 fn demo_script() -> String {
-    let (pipeline, embedded) = parse_document(include_str!("../examples/bash_demo.spit")).unwrap();
+    let (pipeline, embedded) = parse_document(include_str!("../examples/commands/bash_demo.spit")).unwrap();
     assert!(embedded.is_none());
-    let inventory = parse_source_inventory(include_str!("../examples/bash_demo.sources")).unwrap();
+    let inventory = parse_source_inventory(include_str!("../examples/commands/bash_demo.sources")).unwrap();
     let dag = resolve(&pipeline, &inventory).unwrap();
     assert_eq!(dag.jobs.len(), 5);
     render_bash(&pipeline, &dag).unwrap()
@@ -68,8 +68,8 @@ fn generated_script_uses_inventory_groups_and_declared_arguments() {
 
 #[test]
 fn backend_rejects_undeclared_placeholders_and_path_collisions() {
-    let (mut pipeline, _) = parse_document(include_str!("../examples/bash_demo.spit")).unwrap();
-    let inventory = parse_source_inventory(include_str!("../examples/bash_demo.sources")).unwrap();
+    let (mut pipeline, _) = parse_document(include_str!("../examples/commands/bash_demo.spit")).unwrap();
+    let inventory = parse_source_inventory(include_str!("../examples/commands/bash_demo.sources")).unwrap();
     let dag = resolve(&pipeline, &inventory).unwrap();
 
     pipeline.commands[0].template = "sort -o {output} {missing}".to_owned();
@@ -105,8 +105,8 @@ path: {product}/{entities}.txt\n";
 
 #[test]
 fn many_input_must_occupy_its_own_argument() {
-    let (mut pipeline, _) = parse_document(include_str!("../examples/bash_demo.spit")).unwrap();
-    let inventory = parse_source_inventory(include_str!("../examples/bash_demo.sources")).unwrap();
+    let (mut pipeline, _) = parse_document(include_str!("../examples/commands/bash_demo.spit")).unwrap();
+    let inventory = parse_source_inventory(include_str!("../examples/commands/bash_demo.sources")).unwrap();
     let dag = resolve(&pipeline, &inventory).unwrap();
     pipeline.commands[1].template = "sort -o {output} --files={inputs}".to_owned();
     assert!(render_bash(&pipeline, &dag)
@@ -117,10 +117,10 @@ fn many_input_must_occupy_its_own_argument() {
 
 #[test]
 fn adding_a_group_to_inventory_expands_the_script() {
-    let (pipeline, _) = parse_document(include_str!("../examples/bash_demo.spit")).unwrap();
+    let (pipeline, _) = parse_document(include_str!("../examples/commands/bash_demo.spit")).unwrap();
     let inventory = parse_source_inventory(&format!(
         "{}    shard[group=gamma,part=01]\n",
-        include_str!("../examples/bash_demo.sources")
+        include_str!("../examples/commands/bash_demo.sources")
     ))
     .unwrap();
     let dag = resolve(&pipeline, &inventory).unwrap();
@@ -133,10 +133,10 @@ fn adding_a_group_to_inventory_expands_the_script() {
 #[test]
 fn act_example_generates_valid_bash_for_new_sessions() {
     let (pipeline, embedded) =
-        parse_document(include_str!("../examples/mrtrix3_act.spit")).unwrap();
+        parse_document(include_str!("../examples/commands/mrtrix3_act.spit")).unwrap();
     assert!(embedded.is_none());
     let inventory =
-        parse_source_inventory(include_str!("../examples/mrtrix3_act.sources")).unwrap();
+        parse_source_inventory(include_str!("../examples/commands/mrtrix3_act.sources")).unwrap();
     let dag = resolve(&pipeline, &inventory).unwrap();
     assert_eq!(dag.jobs.len(), 93);
     let script = render_bash(&pipeline, &dag).unwrap();
@@ -178,7 +178,7 @@ fn act_example_generates_valid_bash_for_new_sessions() {
 
     let inventory = parse_source_inventory(&format!(
         "{}    raw_dwi[sub=03,ses=01,run=01]\n    raw_dwi[sub=03,ses=01,run=02]\n    dwi_bvec[sub=03,ses=01,run=01]\n    dwi_bvec[sub=03,ses=01,run=02]\n    dwi_bval[sub=03,ses=01,run=01]\n    dwi_bval[sub=03,ses=01,run=02]\n    dwi_json[sub=03,ses=01,run=01]\n    dwi_json[sub=03,ses=01,run=02]\n    reverse_b0[sub=03,ses=01]\n    reverse_b0_json[sub=03,ses=01]\n    t1w[sub=03,ses=01]\n",
-        include_str!("../examples/mrtrix3_act.sources")
+        include_str!("../examples/commands/mrtrix3_act.sources")
     ))
     .unwrap();
     let expanded = resolve(&pipeline, &inventory).unwrap();
@@ -190,7 +190,7 @@ fn act_example_generates_valid_bash_for_new_sessions() {
 
 #[test]
 fn path_coverage_exposes_default_fallbacks_and_strict_rejects_them() {
-    let (pipeline, _) = parse_document(include_str!("../examples/mrtrix3_act.spit")).unwrap();
+    let (pipeline, _) = parse_document(include_str!("../examples/commands/mrtrix3_act.spit")).unwrap();
     let coverage = inspect_paths(&pipeline).unwrap();
     assert!(coverage
         .entries
@@ -230,9 +230,9 @@ fn path_coverage_catches_missing_and_invalid_rules_without_jobs() {
 
 #[test]
 fn bound_dag_shows_port_names_and_paths_without_commands() {
-    let (mut pipeline, _) = parse_document(include_str!("../examples/mrtrix3_act.spit")).unwrap();
+    let (mut pipeline, _) = parse_document(include_str!("../examples/commands/mrtrix3_act.spit")).unwrap();
     let inventory =
-        parse_source_inventory(include_str!("../examples/mrtrix3_act.sources")).unwrap();
+        parse_source_inventory(include_str!("../examples/commands/mrtrix3_act.sources")).unwrap();
     let dag = resolve(&pipeline, &inventory).unwrap();
     pipeline.commands.clear();
     let report = render_bound_dag(&pipeline, &dag).unwrap();

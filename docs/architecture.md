@@ -38,4 +38,4 @@ Each placeholder refers to an input port or the output. A sole many port expands
 
 The current model stores one output per operation and job. To support commands such as multi-tissue response estimation, a future invocation should produce one job with several named output ports. Each port would bind to a distinct product and path, and downstream consumers of any output would depend on that same job. Multiple outputs and named output ports are not implemented yet. The generated script is specific to the supplied inventory; a new inventory requires a new compile.
 
-The `examples/basic.spit` document embeds a small inventory for a sectioned pipeline example; `examples/basic.sources` contains that inventory alone for the external-input route. They use imaging names as sample data; `src/` contains no imaging-specific types, operations, or assumptions.
+The `examples/basic/basic.spit` document embeds a small inventory for a sectioned pipeline example; `examples/basic/basic.sources` contains that inventory alone for the external-input route. They use imaging names as sample data; `src/` contains no imaging-specific types, operations, or assumptions.
