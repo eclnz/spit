@@ -50,7 +50,7 @@ fn expanded_examples_resolve() {
         (
             "examples/mrtrix3_act.spit",
             Some("examples/mrtrix3_act.sources"),
-            39,
+            68,
         ),
     ] {
         let mut command = Command::new(env!("CARGO_BIN_EXE_spit"));

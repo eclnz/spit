@@ -1,19 +1,25 @@
-# Three observed sessions, with different numbers of DWI runs.
+# Three sessions with raw DWI runs, opposite phase-encoded b=0, and native T1w.
+# This fixture represents an acquisition with two or more compatible forward
+# DWI runs per session and a reverse b=0 for the chosen -rpe_pair workflow.
+# Shared lookup tables are global logical artifacts with no entity dimensions.
 contexts:
     [sub=01,ses=01]
     [sub=01,ses=02]
     [sub=02,ses=01]
 
 sources:
-    dwi[sub=01,ses=01,run=01]
-    dwi[sub=01,ses=01,run=02]
-    dwi[sub=01,ses=02,run=01]
-    dwi[sub=02,ses=01,run=01]
-    dwi[sub=02,ses=01,run=02]
-    dwi[sub=02,ses=01,run=03]
+    raw_dwi[sub=01,ses=01,run=01]
+    raw_dwi[sub=01,ses=01,run=02]
+    raw_dwi[sub=01,ses=02,run=01]
+    raw_dwi[sub=01,ses=02,run=02]
+    raw_dwi[sub=02,ses=01,run=01]
+    raw_dwi[sub=02,ses=01,run=02]
+    raw_dwi[sub=02,ses=01,run=03]
+    reverse_b0[sub=01,ses=01]
+    reverse_b0[sub=01,ses=02]
+    reverse_b0[sub=02,ses=01]
     t1w[sub=01,ses=01]
     t1w[sub=01,ses=02]
     t1w[sub=02,ses=01]
-    nodes[sub=01,ses=01]
-    nodes[sub=01,ses=02]
-    nodes[sub=02,ses=01]
+    source_lut[]
+    target_lut[]
