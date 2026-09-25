@@ -1,0 +1,22 @@
+# SPIT v0.1: logical artifacts only; no paths or execution commands.
+products:
+    bold       : BOLD           [sub, ses, run]
+    t1w        : T1w            [sub, ses]
+    denoised   : DenoisedBOLD   [sub, ses, run]
+    registered : RegisteredBOLD [sub, ses, run]
+    mean_bold  : MeanBOLD       [sub, ses]
+
+operations:
+    denoise(BOLD) -> DenoisedBOLD
+    register(DenoisedBOLD, T1w) -> RegisteredBOLD
+    mean(many RegisteredBOLD) -> MeanBOLD
+
+pipeline:
+    denoised   = denoise(bold)
+    registered = register(denoised, t1w)
+    mean_bold  = mean(registered @ vary(run))
+
+sources:
+    bold[sub=01,ses=01,run=1]
+    bold[sub=01,ses=01,run=2]
+    t1w[sub=01,ses=01]

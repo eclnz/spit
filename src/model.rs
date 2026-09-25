@@ -1,0 +1,221 @@
+use std::collections::BTreeMap;
+use std::fmt;
+
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
+pub struct ArtifactType(pub String);
+
+impl From<&str> for ArtifactType {
+    fn from(value: &str) -> Self {
+        Self(value.to_owned())
+    }
+}
+
+impl fmt::Display for ArtifactType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Ord, PartialOrd)]
+pub struct EntityBinding(pub BTreeMap<String, String>);
+
+impl EntityBinding {
+    pub fn from_pairs<const N: usize>(pairs: [(&str, &str); N]) -> Self {
+        Self(
+            pairs
+                .into_iter()
+                .map(|(dimension, value)| (dimension.to_owned(), value.to_owned()))
+                .collect(),
+        )
+    }
+
+    pub fn without(&self, dimension: &str) -> Self {
+        let mut values = self.0.clone();
+        values.remove(dimension);
+        Self(values)
+    }
+
+    pub fn matches_shared(&self, other: &Self) -> bool {
+        self.0
+            .iter()
+            .all(|(dimension, value)| other.0.get(dimension).is_none_or(|other| other == value))
+    }
+}
+
+impl fmt::Display for EntityBinding {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let parts: Vec<_> = self.0.iter().map(|(k, v)| format!("{k}={v}")).collect();
+        f.write_str(&parts.join(","))
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProductDef {
+    pub name: String,
+    pub artifact_type: ArtifactType,
+    pub dimensions: Vec<String>,
+}
+
+impl ProductDef {
+    pub fn new(name: &str, artifact_type: &str, dimensions: &[&str]) -> Self {
+        Self {
+            name: name.to_owned(),
+            artifact_type: artifact_type.into(),
+            dimensions: dimensions.iter().map(|value| (*value).to_owned()).collect(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
+pub struct ArtifactInstance {
+    pub product: String,
+    pub artifact_type: ArtifactType,
+    pub entities: EntityBinding,
+}
+
+impl ArtifactInstance {
+    pub fn new(product: &str, artifact_type: &str, entities: EntityBinding) -> Self {
+        Self {
+            product: product.to_owned(),
+            artifact_type: artifact_type.into(),
+            entities,
+        }
+    }
+}
+
+impl fmt::Display for ArtifactInstance {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}[{}]", self.product, self.entities)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Cardinality {
+    One,
+    Many,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct InputPort {
+    pub name: String,
+    pub artifact_type: ArtifactType,
+    pub cardinality: Cardinality,
+}
+
+impl InputPort {
+    pub fn one(name: &str, artifact_type: &str) -> Self {
+        Self {
+            name: name.to_owned(),
+            artifact_type: artifact_type.into(),
+            cardinality: Cardinality::One,
+        }
+    }
+
+    pub fn many(name: &str, artifact_type: &str) -> Self {
+        Self {
+            name: name.to_owned(),
+            artifact_type: artifact_type.into(),
+            cardinality: Cardinality::Many,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ShapeRule {
+    /// The first input drives one output per artifact and preserves its dimensions.
+    Preserve,
+    /// One many-valued input groups by the dimension named in its `vary` binding.
+    Aggregate,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OperationDef {
+    pub name: String,
+    pub inputs: Vec<InputPort>,
+    pub output_type: ArtifactType,
+    pub shape_rule: ShapeRule,
+}
+
+impl OperationDef {
+    pub fn new(
+        name: &str,
+        inputs: Vec<InputPort>,
+        output_type: &str,
+        shape_rule: ShapeRule,
+    ) -> Self {
+        Self {
+            name: name.to_owned(),
+            inputs,
+            output_type: output_type.into(),
+            shape_rule,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum InputBinding {
+    Product(String),
+    Vary { product: String, dimension: String },
+}
+
+impl InputBinding {
+    pub fn product(name: &str) -> Self {
+        Self::Product(name.to_owned())
+    }
+
+    pub fn vary(product: &str, dimension: &str) -> Self {
+        Self::Vary {
+            product: product.to_owned(),
+            dimension: dimension.to_owned(),
+        }
+    }
+
+    pub fn product_name(&self) -> &str {
+        match self {
+            Self::Product(name) | Self::Vary { product: name, .. } => name,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Invocation {
+    pub operation: String,
+    /// Bindings correspond to operation ports in declaration order.
+    pub inputs: Vec<InputBinding>,
+    pub output_product: String,
+}
+
+impl Invocation {
+    pub fn new(operation: &str, inputs: Vec<InputBinding>, output_product: &str) -> Self {
+        Self {
+            operation: operation.to_owned(),
+            inputs,
+            output_product: output_product.to_owned(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct Pipeline {
+    pub products: Vec<ProductDef>,
+    pub sources: Vec<ArtifactInstance>,
+    pub operations: Vec<OperationDef>,
+    pub invocations: Vec<Invocation>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Job {
+    pub id: usize,
+    pub operation: String,
+    /// One port may contribute several artifacts for aggregation.
+    pub inputs: Vec<ArtifactInstance>,
+    pub output: ArtifactInstance,
+    pub dependencies: Vec<usize>,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct ResolvedDag {
+    pub jobs: Vec<Job>,
+    /// Declaration order is retained for readable dry-run output.
+    pub product_dimensions: BTreeMap<String, Vec<String>>,
+}

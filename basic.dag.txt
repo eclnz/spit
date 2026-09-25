@@ -1,0 +1,40 @@
+Job 1
+  operation: denoise
+  inputs:
+    bold[sub=01,ses=01,run=1]
+  output:
+    denoised[sub=01,ses=01,run=1]
+
+Job 2
+  operation: denoise
+  inputs:
+    bold[sub=01,ses=01,run=2]
+  output:
+    denoised[sub=01,ses=01,run=2]
+
+Job 3
+  operation: register
+  inputs:
+    denoised[sub=01,ses=01,run=1]
+    t1w[sub=01,ses=01]
+  output:
+    registered[sub=01,ses=01,run=1]
+  depends_on: 1
+
+Job 4
+  operation: register
+  inputs:
+    denoised[sub=01,ses=01,run=2]
+    t1w[sub=01,ses=01]
+  output:
+    registered[sub=01,ses=01,run=2]
+  depends_on: 2
+
+Job 5
+  operation: mean
+  inputs:
+    registered[sub=01,ses=01,run=1]
+    registered[sub=01,ses=01,run=2]
+  output:
+    mean_bold[sub=01,ses=01]
+  depends_on: 3, 4
