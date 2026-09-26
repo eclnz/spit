@@ -135,11 +135,11 @@ fn flow_form_requires_operation_declaration_before_use() {
 
 #[test]
 fn command_arguments_keep_quoted_hashes_and_strip_comments() {
-    let text = "source raw [id]# source comment\noperation copy(one)\ncommand copy: tool --tag '#run' --label \"part#1\" {input} {output}# command comment\nresult = copy(raw)\n";
+    let text = "source raw [id] # source comment\n# whole-line comment\noperation copy(one)\ncommand copy: tool --tag '#run' --label \"part#1\" --color=#fff {input} {output} # command comment\nresult = copy(raw)\n";
     let pipeline = parse_pipeline(text).unwrap();
     assert_eq!(
         pipeline.commands[0].template,
-        "tool --tag '#run' --label \"part#1\" {input} {output}"
+        "tool --tag '#run' --label \"part#1\" --color=#fff {input} {output}"
     );
 }
 
@@ -226,15 +226,17 @@ fn path_template_errors_are_reported_while_parsing() {
 }
 
 #[test]
-fn hash_joined_to_text_is_rejected_instead_of_truncating() {
-    let text = "source raw [id]\noperation copy(one)\ncommand copy: tool --color=#fff {input} {output}\n";
-    let error = parse_pipeline(text).unwrap_err();
-    assert_eq!(error.line, 3);
-    assert!(error.message.contains("`--color=`"), "{error}");
-    assert!(parse_pipeline(
-        "source raw [id]\noperation copy(one)\ncommand copy: tool '--color=#fff' {input} {output} # note\n"
+fn hash_inside_a_word_is_text_as_in_bash() {
+    let pipeline = parse_pipeline(
+        "source raw [id]\noperation copy(one)\ncommand copy: tool --url=https://example.com/#top {input} {output}# note\n",
     )
-    .is_ok());
+    .unwrap();
+    assert_eq!(
+        pipeline.commands[0].template,
+        "tool --url=https://example.com/#top {input} {output}# note"
+    );
+    let error = parse_pipeline("source raw [id]# note\n").unwrap_err();
+    assert_eq!(error.line, 1);
 }
 
 #[test]

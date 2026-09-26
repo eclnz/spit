@@ -469,3 +469,40 @@ fn undeclared_operation_is_reported_when_its_name_prefixes_an_invalid_one() {
         .message
         .contains("operation `copy` must be declared"));
 }
+
+#[test]
+fn source_with_wrong_dimensions_points_to_its_inventory_line() {
+    let pipeline = "source raw [id]\n";
+    let issues = diagnose(pipeline, Some("sources:\n  raw[id=x]\n  raw[other=y]\n"));
+    assert_eq!(issues.len(), 1, "{issues:?}");
+    assert_eq!(issues[0].source, "inventory");
+    assert_eq!(issues[0].line, Some(3));
+    assert!(issues[0]
+        .message
+        .contains("must bind exactly the dimensions"));
+}
+
+#[test]
+fn hash_ending_a_word_is_flagged_as_a_likely_comment() {
+    let text = "\
+source raw [id]
+operation copy(one)
+command copy: tool --color=#fff {input} {output}# note
+result = copy(raw)
+source spare [id]# note
+";
+    assert_eq!(
+        rendered(&diagnose(text, None)),
+        [
+            "warning: line 3: `#` after `{output}` is part of that word, not a comment; put a space before `#` to start a comment, or quote the text to keep it",
+            "error: line 5: expected closing `]` in product declaration (`#` after `[id]` is part of that word, not a comment; put a space before `#` to start a comment, or quote the text to keep it)",
+        ]
+    );
+    let quoted = text
+        .replace("{output}# note", "{output} # note")
+        .replace("[id]# note", "[id] # note");
+    assert_eq!(
+        rendered(&diagnose(&quoted, None)),
+        ["warning: line 5: source product `spare` is never used as an input"]
+    );
+}

@@ -3,13 +3,14 @@
 use std::collections::BTreeMap;
 use std::fmt;
 
-use crate::bash::{check_command_syntax, check_path_template_syntax};
+use crate::bash::check_command_syntax;
 use crate::imports::apply_import;
 use crate::model::{
     Cardinality, CommandDef, CountRequirement, CoverageRule, EntityBinding, InputBinding,
     InputPort, Invocation, OperationDef, Pipeline, ProductDef, ShapeRule, SourceInventory,
     SourceRecord,
 };
+use crate::paths::check_path_template_syntax;
 use crate::types::{parse_type_expr, TypeExpr};
 
 const SHELL_SOURCE_REMOVED: &str =
@@ -80,7 +81,7 @@ fn parse_sectioned_pipeline(
 
     for (index, original) in text.lines().enumerate() {
         let line_number = index + 1;
-        let line = strip_line_comment(original, line_number)?.trim();
+        let line = strip_comment(original).trim();
         if line.is_empty() {
             continue;
         }
@@ -164,7 +165,7 @@ fn parse_flow_pipeline(
 
     for (index, original) in text.lines().enumerate() {
         let line_number = index + 1;
-        let line = strip_line_comment(original, line_number)?.trim();
+        let line = strip_comment(original).trim();
         if line.is_empty() {
             continue;
         }
@@ -327,50 +328,67 @@ fn set_path(pipeline: &mut Pipeline, line: &str, number: usize) -> Result<(), Pa
     Ok(())
 }
 
+/// As in Bash, an unquoted `#` starts a comment only at the start of a word,
+/// so arguments such as `--color=#fff` are kept intact.
 pub(crate) fn strip_comment(line: &str) -> &str {
     &line[..comment_start(line).unwrap_or(line.len())]
 }
 
-/// Strip a trailing comment, rejecting a `#` joined to text on both sides.
-/// Such a `#` would silently cut an argument like `--color=#fff` short.
-fn strip_line_comment(line: &str, number: usize) -> Result<&str, ParseError> {
-    let Some(index) = comment_start(line) else {
-        return Ok(line);
-    };
-    let before = line[..index].chars().next_back();
-    let after = line[index + 1..].chars().next();
-    if before.is_some_and(|value| !value.is_whitespace())
-        && after.is_some_and(|value| !value.is_whitespace())
-    {
-        return Err(ParseError::new(
-            number,
-            format!(
-                "`#` inside `{}` starts a comment; quote the text or put a space before the comment",
-                line[..index].split_whitespace().next_back().unwrap_or("")
-            ),
-        ));
-    }
-    Ok(&line[..index])
+fn comment_start(line: &str) -> Option<usize> {
+    scan_hashes(line).find_map(|hash| hash.starts_word.then_some(hash.index))
 }
 
-fn comment_start(line: &str) -> Option<usize> {
+/// The word before an unquoted `#` that ends it, as in `word# note`: the `#`
+/// stays part of the word, though it reads like the start of a comment.
+pub(crate) fn glued_comment(line: &str) -> Option<&str> {
+    let end = comment_start(line).unwrap_or(line.len());
+    scan_hashes(&line[..end]).find_map(|hash| {
+        let ends_word = line[hash.index + 1..]
+            .chars()
+            .next()
+            .is_none_or(char::is_whitespace);
+        (!hash.starts_word && ends_word).then(|| {
+            let word_start = line[..hash.index]
+                .rfind(char::is_whitespace)
+                .map_or(0, |index| index + 1);
+            &line[word_start..hash.index]
+        })
+    })
+}
+
+struct Hash {
+    index: usize,
+    starts_word: bool,
+}
+
+/// Every unquoted, unescaped `#` in `line`.
+fn scan_hashes(line: &str) -> impl Iterator<Item = Hash> + '_ {
     let mut quote = None;
     let mut escaped = false;
-    for (index, character) in line.char_indices() {
+    let mut word_start = true;
+    line.char_indices().filter_map(move |(index, character)| {
+        let at_word_start = word_start;
+        word_start = false;
         if escaped {
             escaped = false;
-        } else {
-            match (quote, character) {
-                (None, '\\') | (Some('"'), '\\') => escaped = true,
-                (None, '\'') => quote = Some('\''),
-                (None, '"') => quote = Some('"'),
-                (Some('\''), '\'') | (Some('"'), '"') => quote = None,
-                (None, '#') => return Some(index),
-                _ => {}
-            }
+            return None;
         }
-    }
-    None
+        match (quote, character) {
+            (None, '\\') | (Some('"'), '\\') => escaped = true,
+            (None, '\'') => quote = Some('\''),
+            (None, '"') => quote = Some('"'),
+            (Some('\''), '\'') | (Some('"'), '"') => quote = None,
+            (None, '#') => {
+                return Some(Hash {
+                    index,
+                    starts_word: at_word_start,
+                })
+            }
+            _ => {}
+        }
+        word_start = quote.is_none() && character.is_whitespace();
+        None
+    })
 }
 
 fn parse_flow_invocation(
@@ -565,7 +583,7 @@ pub fn parse_source_inventory(text: &str) -> Result<SourceInventory, ParseError>
     let mut section = None;
     for (index, original) in text.lines().enumerate() {
         let number = index + 1;
-        let line = strip_line_comment(original, number)?.trim();
+        let line = strip_comment(original).trim();
         if line.is_empty() {
             continue;
         }
