@@ -166,6 +166,12 @@ sources:
 
 Types are additive. You can leave them out, add them to selected products and operations, or type the whole pipeline. Known mismatches fail; missing type information does not.
 
+In operation signatures, a single capital letter such as `S` is a local type variable. Use a `$` prefix for longer names, such as `$SourceSpace` or `$Kind`. An unprefixed name such as `World` is a concrete type. Variables are allowed in operation signatures, not product declarations:
+
+```text
+operation project(sample: Frame<$Kind,$SourceSpace>, calibration: Calibration<$Kind,$SourceSpace,$TargetSpace>) -> Frame<$Kind,$TargetSpace>
+```
+
 ## More examples
 
 | Example | Shows |
@@ -177,6 +183,7 @@ Types are additive. You can leave them out, add them to selected products and op
 | [Complex](examples/pipelines/complex.spit) | Nested aggregation |
 | [Analytics](examples/analytics/analytics.spit) | Joins and rollups |
 | [MRtrix3 ACT](examples/commands/mrtrix3_act.spit) | A larger pipeline with commands and paths |
+| [Compiler stress pipelines](examples/stress/README.md) | Deep type inference, deliberate type errors, uneven joins, and large multilevel DAGs |
 
 SPIT also accepts grouped `products:`, `operations:`, `pipeline:`, and `constraints:` sections. The flow style above is intended for writing a pipeline in the order you read it.
 

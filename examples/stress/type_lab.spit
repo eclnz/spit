@@ -1,0 +1,89 @@
+# Compile-only type stress fixture. Inferred products deliberately use Unknown
+# so concrete nested types must propagate across several generic invocations.
+# The same operation is instantiated for different K, S, and P bindings.
+
+source lidar : Stream<Frame<Lidar,Sensor>,Raw> [lab, rig, capture, slice]
+source camera : Stream<Frame<Camera,Sensor>,Raw> [lab, rig, capture, slice]
+source unclassified : Stream<Frame<Unknown,Sensor>,Raw> [lab, rig, capture, slice]
+source opaque : Unknown [lab, rig, capture, slice]
+source lidar_cal : Calibration<Lidar,Sensor,World> [lab, rig]
+source camera_cal : Calibration<Camera,Sensor,World> [lab, rig]
+source reference : Reference<World> [lab, rig]
+source policy : Policy<World> [lab]
+source atlas : Atlas<World> []
+
+require lidar count>=1 per [lab, rig, capture]
+require camera count>=1 per [lab, rig, capture]
+require lidar_cal count=1 per [lab, rig]
+require camera_cal count=1 per [lab, rig]
+require reference count=1 per [lab, rig]
+require policy count=1 per [lab]
+
+path: artifacts/{product}/{entities}.bin
+path atlas: config/world-atlas.bin
+
+operation normalize(sample: Stream<Frame<K,S>,P>) -> Stream<Frame<K,S>,Normalized>
+normalized_lidar = normalize(lidar)
+normalized_camera = normalize(camera)
+normalized_unclassified = normalize(unclassified)
+
+operation project(sample: Stream<Frame<$Kind,$SourceSpace>,$Processing>, calibration: Calibration<$Kind,$SourceSpace,$TargetSpace>) -> Stream<Frame<$Kind,$TargetSpace>,$Processing>
+world_lidar = project(normalized_lidar, lidar_cal)
+world_camera = project(normalized_camera, camera_cal)
+world_unclassified = project(normalized_unclassified, camera_cal)
+
+operation verify_projection(sample: Stream<Frame<$Kind,$TargetSpace>,$Processing>, calibration: Calibration<$Kind,$SourceSpace,$TargetSpace>, reference: Reference<$TargetSpace>) -> Verified<Frame<$Kind,$TargetSpace>,$Processing>
+verified_lidar = verify_projection(world_lidar, lidar_cal, reference)
+verified_camera = verify_projection(world_camera, camera_cal, reference)
+verified_unclassified = verify_projection(world_unclassified, camera_cal, reference)
+
+# An entirely unknown input gains K, S, and T from the calibration, while P
+# remains unknown and is erased at the job boundary.
+operation classify(sample: Stream<Frame<K,S>,P>, calibration: Calibration<K,S,T>) -> Classified<K,T,P>
+classified_opaque = classify(opaque, camera_cal)
+
+operation measure(sample: Stream<Frame<K,S>,P>) -> Quality<K,S,P>
+raw_lidar_quality = measure(lidar)
+raw_camera_quality = measure(camera)
+world_lidar_quality = measure(world_lidar)
+world_camera_quality = measure(world_camera)
+
+operation pair(left: Verified<Frame<Lidar,S>,P>, right: Verified<Frame<Camera,S>,P>) -> Pair<Frame<Lidar,S>,Frame<Camera,S>,P>
+paired = pair(verified_lidar, verified_camera)
+
+operation fuse(pair: Pair<Frame<Lidar,S>,Frame<Camera,S>,P>, atlas: Atlas<S>) -> Fused<S,P>
+fused = fuse(paired, atlas)
+
+operation score(fused: Fused<S,P>, policy: Policy<S>) -> Score<S,P>
+scored = score(fused, policy)
+
+operation build_case(pair: Pair<Frame<Lidar,S>,Frame<Camera,S>,P>, score: Score<S,P>, lidar: Quality<Lidar,S,P>, camera: Quality<Camera,S,P>) -> Case<Bundle<Frame<Lidar,S>,Frame<Camera,S>>,Score<S,P>>
+case_file = build_case(paired, scored, world_lidar_quality, world_camera_quality)
+
+operation adjudicate(case: Case<Bundle<Frame<Lidar,S>,Frame<Camera,S>>,Score<S,P>>, atlas: Atlas<S>) -> Decision<S,P>
+decision = adjudicate(case_file, atlas)
+
+operation select(fused: Fused<S,P>, score: Score<S,P>, decision: Decision<S,P>) -> Selected<S,P>
+selected = select(fused, scored, decision)
+
+operation collect_selected(items: many Selected<S,P>) -> SelectedBatch<S,P> @ drop(slice)
+selected_batch = collect_selected(selected @ vary(slice))
+
+operation collect_quality(items: many Quality<K,S,P>) -> QualityBatch<K,S,P> @ drop(slice)
+lidar_quality_batch = collect_quality(world_lidar_quality @ vary(slice))
+camera_quality_batch = collect_quality(world_camera_quality @ vary(slice))
+
+operation audit(selected: SelectedBatch<S,P>, lidar: QualityBatch<Lidar,S,P>, camera: QualityBatch<Camera,S,P>) -> Audit<S,P>
+audited = audit(selected_batch, lidar_quality_batch, camera_quality_batch)
+
+operation approve(selected: SelectedBatch<S,P>, audit: Audit<S,P>, policy: Policy<S>) -> Approved<S,P>
+approved_capture = approve(selected_batch, audited, policy)
+
+operation summarize_captures(items: many Approved<S,P>) -> RigSummary<S,P> @ drop(capture)
+rig_summary = summarize_captures(approved_capture @ vary(capture))
+
+operation summarize_rigs(items: many RigSummary<S,P>) -> LabSummary<S,P> @ drop(rig)
+lab_summary = summarize_rigs(rig_summary @ vary(rig))
+
+operation summarize_labs(items: many LabSummary<S,P>) -> GlobalSummary<S,P> @ drop(lab)
+global_summary = summarize_labs(lab_summary @ vary(lab))

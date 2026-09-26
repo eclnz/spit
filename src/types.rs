@@ -83,7 +83,9 @@ impl From<&str> for TypeExpr {
 impl fmt::Display for TypeExpr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Named(name) | Self::Variable(name) => f.write_str(name),
+            Self::Named(name) => f.write_str(name),
+            Self::Variable(name) if name.len() == 1 => f.write_str(name),
+            Self::Variable(name) => write!(f, "${name}"),
             Self::Applied { constructor, args } => {
                 let args = args.iter().map(ToString::to_string).collect::<Vec<_>>();
                 write!(f, "{constructor}<{}>", args.join(","))
@@ -216,13 +218,18 @@ impl Substitutions {
             return Ok(Compatibility::Compatible);
         }
         if let Some(previous) = self.0.get(name).cloned() {
-            return self.unify(&previous, &required).map_err(|_| {
-                TypeUnifyError::VariableConflict {
-                    variable: name.to_owned(),
-                    previous: self.substitute(&previous),
-                    required,
-                }
-            });
+            let compatibility =
+                self.unify(&previous, &required)
+                    .map_err(|_| TypeUnifyError::VariableConflict {
+                        variable: name.to_owned(),
+                        previous: self.substitute(&previous),
+                        required: required.clone(),
+                    })?;
+            // An earlier partial binding (for example, Frame<Unknown>) must
+            // absorb details learned from later ports (Frame<Foo>).
+            let refined = refine_known(&self.substitute(&previous), &self.substitute(&required));
+            self.0.insert(name.to_owned(), refined);
+            return Ok(compatibility);
         }
         if required.contains_variable(name) {
             return Err(TypeUnifyError::RecursiveVariable {
@@ -235,8 +242,33 @@ impl Substitutions {
     }
 }
 
+fn refine_known(left: &TypeExpr, right: &TypeExpr) -> TypeExpr {
+    match (left, right) {
+        (TypeExpr::Unknown, other) | (other, TypeExpr::Unknown) => other.clone(),
+        (
+            TypeExpr::Applied {
+                constructor,
+                args: left_args,
+            },
+            TypeExpr::Applied {
+                args: right_args, ..
+            },
+        ) => TypeExpr::applied(
+            constructor,
+            left_args
+                .iter()
+                .zip(right_args)
+                .map(|(left, right)| refine_known(left, right))
+                .collect(),
+        ),
+        (known, _) => known.clone(),
+    }
+}
+
 /// Product declarations treat bare names as constructors. In operation
 /// signatures, a bare single uppercase letter denotes a local type variable.
+/// A `$` prefix allows longer variable names without confusing them with
+/// named types such as `MRI` or `World`.
 pub fn parse_type_expr(text: &str, signature: bool) -> Result<TypeExpr, String> {
     struct Parser<'a> {
         text: &'a str,
@@ -268,6 +300,10 @@ pub fn parse_type_expr(text: &str, signature: bool) -> Result<TypeExpr, String> 
 
         fn expression(&mut self) -> Result<TypeExpr, String> {
             self.skip_space();
+            let explicit_variable = self.take(b'$');
+            if explicit_variable && !self.signature {
+                return Err("type variables are only allowed in operation signatures".to_owned());
+            }
             let start = self.offset;
             let bytes = self.text.as_bytes();
             let Some(first) = bytes.get(self.offset) else {
@@ -284,7 +320,12 @@ pub fn parse_type_expr(text: &str, signature: bool) -> Result<TypeExpr, String> 
                 self.offset += 1;
             }
             let name = &self.text[start..self.offset];
-            if self.take(b'<') {
+            if explicit_variable {
+                if self.take(b'<') {
+                    return Err("a type variable cannot have type arguments".to_owned());
+                }
+                Ok(TypeExpr::variable(name))
+            } else if self.take(b'<') {
                 let mut args = Vec::new();
                 loop {
                     args.push(self.expression()?);

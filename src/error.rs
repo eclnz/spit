@@ -12,6 +12,7 @@ pub enum ResolveError {
     },
     TypeMismatch {
         operation: String,
+        output_product: String,
         port: String,
         product: String,
         expected: Box<ArtifactType>,
@@ -19,6 +20,7 @@ pub enum ResolveError {
     },
     TypeVariableConflict {
         operation: String,
+        output_product: String,
         port: String,
         variable: String,
         previous: Box<ArtifactType>,
@@ -26,11 +28,13 @@ pub enum ResolveError {
     },
     MissingInput {
         operation: String,
+        output_product: String,
         port: String,
         context: EntityBinding,
     },
     AmbiguousInput {
         operation: String,
+        output_product: String,
         port: String,
         context: EntityBinding,
         candidates: Vec<ArtifactInstance>,
@@ -51,6 +55,7 @@ pub enum ResolveError {
     },
     CoverageViolation {
         product: String,
+        rule_index: usize,
         context: EntityBinding,
         expected: CountRequirement,
         found: usize,
@@ -71,6 +76,7 @@ impl fmt::Display for ResolveError {
                 product,
                 expected,
                 found,
+                ..
             } => write!(
                 f,
                 "type mismatch at `{operation}.{port}`: product `{product}` is {found}, expected {expected}"
@@ -81,6 +87,7 @@ impl fmt::Display for ResolveError {
                 variable,
                 previous,
                 required,
+                ..
             } => write!(
                 f,
                 "type conflict at `{operation}.{port}`: variable `{variable}` was inferred as {previous}, but now requires {required}"
@@ -89,6 +96,7 @@ impl fmt::Display for ResolveError {
                 operation,
                 port,
                 context,
+                ..
             } => write!(
                 f,
                 "missing input `{port}` for `{operation}` at [{context}]"
@@ -98,6 +106,7 @@ impl fmt::Display for ResolveError {
                 port,
                 context,
                 candidates,
+                ..
             } => {
                 let names: Vec<_> = candidates.iter().map(ToString::to_string).collect();
                 write!(
@@ -124,6 +133,7 @@ impl fmt::Display for ResolveError {
                 context,
                 expected,
                 found,
+                ..
             } => write!(
                 f,
                 "source coverage for `{product}` at [{context}]: expected {expected} artifact(s), found {found}"

@@ -212,6 +212,15 @@ impl CommandDef {
 }
 
 #[derive(Clone, Debug, Default)]
+pub struct PipelineSourceMap {
+    pub products: BTreeMap<String, usize>,
+    pub operations: BTreeMap<String, usize>,
+    pub invocations: BTreeMap<String, usize>,
+    pub constraints: BTreeMap<String, usize>,
+    pub constraint_lines: Vec<usize>,
+}
+
+#[derive(Clone, Debug, Default)]
 pub struct Pipeline {
     pub products: Vec<ProductDef>,
     pub operations: Vec<OperationDef>,
@@ -221,6 +230,8 @@ pub struct Pipeline {
     pub shell_sources: Vec<String>,
     pub path_template: Option<String>,
     pub product_paths: BTreeMap<String, String>,
+    /// Parser-populated line locations for semantic diagnostics.
+    pub source_lines: PipelineSourceMap,
 }
 
 /// A source record identifies a logical artifact without binding it to a path.

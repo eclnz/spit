@@ -97,6 +97,59 @@ fn nested_types_unify_recursively() {
 }
 
 #[test]
+fn explicit_long_type_variables_are_distinct_from_named_types() {
+    let signature_type = signature("Stream<Frame<$Kind,$SourceSpace>,$Processing>");
+    assert_eq!(
+        signature_type.to_string(),
+        "Stream<Frame<$Kind,$SourceSpace>,$Processing>"
+    );
+    let mut substitutions = Substitutions::default();
+    substitutions
+        .unify(
+            &signature_type,
+            &product("Stream<Frame<Camera,Sensor>,Raw>"),
+        )
+        .unwrap();
+    assert_eq!(substitutions.0["Kind"], product("Camera"));
+    assert_eq!(substitutions.0["SourceSpace"], product("Sensor"));
+    assert_eq!(substitutions.0["Processing"], product("Raw"));
+    assert_eq!(signature("Frame<Kind>"), product("Frame<Kind>"));
+}
+
+#[test]
+fn explicit_type_variables_are_rejected_in_product_types() {
+    assert!(parse_type_expr("Frame<$Kind>", false).is_err());
+    assert!(parse_type_expr("Frame<$Kind<Native>>", true).is_err());
+}
+
+#[test]
+fn later_known_input_refines_an_earlier_partial_variable_binding() {
+    let mut substitutions = Substitutions::default();
+    substitutions
+        .unify(&signature("A"), &product("Frame<Unknown>"))
+        .unwrap();
+    substitutions
+        .unify(&signature("A"), &product("Frame<Foo>"))
+        .unwrap();
+    assert_eq!(substitutions.substitute(&signature("A")), product("Frame<Foo>"));
+    assert!(matches!(
+        substitutions.unify(&signature("A"), &product("Frame<Bar>")),
+        Err(TypeUnifyError::VariableConflict { .. })
+    ));
+}
+
+#[test]
+fn partial_type_cannot_hide_a_downstream_known_conflict() {
+    let text = "products:\n  partly : Frame<Unknown> [id]\n  known : Frame<Foo> [id]\n  merged [id]\n  final : Frame<Bar> [id]\noperations:\n  merge(A, A) -> A\n  sink(Frame<Bar>) -> Frame<Bar>\npipeline:\n  merged = merge(partly, known)\n  final = sink(merged)\n";
+    let pipeline = parse_pipeline(text).unwrap();
+    let empty = parse_source_inventory("sources:\n").unwrap();
+    assert!(matches!(
+        resolve(&pipeline, &empty),
+        Err(ResolveError::TypeMismatch { operation, .. }) if operation == "sink"
+    ));
+}
+
+#[test]
 fn unknown_is_indeterminate_without_binding_a_variable() {
     let mut substitutions = Substitutions::default();
     assert_eq!(

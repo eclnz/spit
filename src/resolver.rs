@@ -18,11 +18,20 @@ pub fn resolve(
     let producers = index_producers(&pipeline.invocations, &products, &operations)?;
 
     // Check every invocation's local contract before expanding any concrete job.
+    let mut inferred_types = BTreeMap::new();
     for invocation in &pipeline.invocations {
-        validate_invocation(invocation, &products, &operations)?;
+        validate_invocation(invocation, &products, &operations, &inferred_types)?;
     }
 
     let order = invocation_order(&pipeline.invocations, &producers)?;
+    // Inferred intermediate types are also part of the reusable pipeline
+    // contract. Check them in dependency order so a type error does not depend
+    // on whether an inventory happens to contain concrete source artifacts.
+    for &index in &order {
+        let invocation = &pipeline.invocations[index];
+        let inferred = validate_invocation(invocation, &products, &operations, &inferred_types)?;
+        inferred_types.insert(invocation.output_product.clone(), inferred);
+    }
     let mut artifacts: BTreeMap<String, Vec<ArtifactInstance>> = BTreeMap::new();
     let mut artifact_producers: BTreeMap<ArtifactKey, usize> = BTreeMap::new();
     let mut seen: BTreeSet<ArtifactKey> = BTreeSet::new();
@@ -131,7 +140,7 @@ fn validate_coverage(
     producers: &BTreeMap<String, usize>,
     artifacts: &BTreeMap<String, Vec<ArtifactInstance>>,
 ) -> Result<(), ResolveError> {
-    for rule in &pipeline.constraints {
+    for (rule_index, rule) in pipeline.constraints.iter().enumerate() {
         let product = find_product(products, &rule.product)?;
         if producers.contains_key(&rule.product) {
             return Err(ResolveError::InvalidDefinition {
@@ -173,6 +182,7 @@ fn validate_coverage(
             if !valid {
                 return Err(ResolveError::CoverageViolation {
                     product: rule.product.clone(),
+                    rule_index,
                     context,
                     expected: rule.count.clone(),
                     found,
@@ -314,7 +324,8 @@ fn validate_invocation(
     invocation: &Invocation,
     products: &BTreeMap<&str, &ProductDef>,
     operations: &BTreeMap<&str, &OperationDef>,
-) -> Result<(), ResolveError> {
+    inferred_types: &BTreeMap<String, TypeExpr>,
+) -> Result<TypeExpr, ResolveError> {
     let operation = find_operation(operations, &invocation.operation)?;
     let output = find_product(products, &invocation.output_product)?;
     if invocation.inputs.len() != operation.inputs.len() {
@@ -333,15 +344,19 @@ fn validate_invocation(
         unify_port(
             &mut substitutions,
             operation,
+            &invocation.output_product,
             &port.name,
             &product.name,
             &port.artifact_type,
-            &product.artifact_type,
+            inferred_types
+                .get(&product.name)
+                .unwrap_or(&product.artifact_type),
         )?;
     }
     unify_port(
         &mut substitutions,
         operation,
+        &invocation.output_product,
         "output",
         &output.name,
         &operation.output_type,
@@ -426,12 +441,20 @@ fn validate_invocation(
             }
         }
     }
-    Ok(())
+    let inferred = substitutions
+        .substitute(&operation.output_type)
+        .erase_variables();
+    if inferred == TypeExpr::Unknown {
+        Ok(output.artifact_type.clone())
+    } else {
+        Ok(inferred)
+    }
 }
 
 fn unify_port(
     substitutions: &mut Substitutions,
     operation: &OperationDef,
+    output_product: &str,
     port: &str,
     product: &str,
     expected: &TypeExpr,
@@ -447,6 +470,7 @@ fn unify_port(
                 required,
             } => ResolveError::TypeVariableConflict {
                 operation: operation.name.clone(),
+                output_product: output_product.to_owned(),
                 port: port.to_owned(),
                 variable,
                 previous: Box::new(previous),
@@ -454,6 +478,7 @@ fn unify_port(
             },
             _ => ResolveError::TypeMismatch {
                 operation: operation.name.clone(),
+                output_product: output_product.to_owned(),
                 port: port.to_owned(),
                 product: product.to_owned(),
                 expected: Box::new(expected.clone()),
@@ -474,6 +499,7 @@ fn infer_output_type(
                 unify_port(
                     &mut substitutions,
                     operation,
+                    &output_def.name,
                     &port.name,
                     &input.product,
                     &port.artifact_type,
@@ -487,6 +513,7 @@ fn infer_output_type(
                 unify_port(
                     &mut substitutions,
                     operation,
+                    &output_def.name,
                     &port.name,
                     &input.product,
                     &port.artifact_type,
@@ -498,6 +525,7 @@ fn infer_output_type(
     unify_port(
         &mut substitutions,
         operation,
+        &output_def.name,
         "output",
         &output_def.name,
         &operation.output_type,
@@ -597,6 +625,7 @@ fn expand_preserve(
                 0 => {
                     return Err(ResolveError::MissingInput {
                         operation: operation.name.clone(),
+                        output_product: invocation.output_product.clone(),
                         port: port.name.clone(),
                         context: driving_artifact.entities.clone(),
                     })
@@ -623,6 +652,7 @@ fn expand_preserve(
                 _ => {
                     return Err(ResolveError::AmbiguousInput {
                         operation: operation.name.clone(),
+                        output_product: invocation.output_product.clone(),
                         port: port.name.clone(),
                         context: driving_artifact.entities.clone(),
                         candidates,

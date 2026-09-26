@@ -91,17 +91,38 @@ fn parse_sectioned_pipeline(text: &str) -> Result<Pipeline, ParseError> {
             }
             _ => match section {
                 Some(Section::Products) => {
-                    pipeline.products.push(parse_product(line, line_number)?)
+                    let product = parse_product(line, line_number)?;
+                    pipeline
+                        .source_lines
+                        .products
+                        .insert(product.name.clone(), line_number);
+                    pipeline.products.push(product);
                 }
-                Some(Section::Operations) => pipeline
-                    .operations
-                    .push(parse_operation(line, line_number)?),
-                Some(Section::Pipeline) => pipeline
-                    .invocations
-                    .push(parse_invocation(line, line_number)?),
-                Some(Section::Constraints) => pipeline
-                    .constraints
-                    .push(parse_coverage_rule(line, line_number)?),
+                Some(Section::Operations) => {
+                    let operation = parse_operation(line, line_number)?;
+                    pipeline
+                        .source_lines
+                        .operations
+                        .insert(operation.name.clone(), line_number);
+                    pipeline.operations.push(operation);
+                }
+                Some(Section::Pipeline) => {
+                    let invocation = parse_invocation(line, line_number)?;
+                    pipeline
+                        .source_lines
+                        .invocations
+                        .insert(invocation.output_product.clone(), line_number);
+                    pipeline.invocations.push(invocation);
+                }
+                Some(Section::Constraints) => {
+                    let constraint = parse_coverage_rule(line, line_number)?;
+                    pipeline
+                        .source_lines
+                        .constraints
+                        .insert(constraint.product.clone(), line_number);
+                    pipeline.source_lines.constraint_lines.push(line_number);
+                    pipeline.constraints.push(constraint);
+                }
                 Some(Section::Commands) => pipeline
                     .commands
                     .push(parse_command(line, line_number)?),
@@ -127,18 +148,28 @@ fn parse_flow_pipeline(text: &str) -> Result<Pipeline, ParseError> {
         }
 
         if let Some(declaration) = line.strip_prefix("source ") {
+            let product = parse_product(declaration.trim(), line_number)?;
             pipeline
+                .source_lines
                 .products
-                .push(parse_product(declaration.trim(), line_number)?);
+                .insert(product.name.clone(), line_number);
+            pipeline.products.push(product);
         } else if line.starts_with("operation ") {
             let declaration = line.strip_prefix("operation ").unwrap().trim();
+            let operation = parse_operation(declaration, line_number)?;
             pipeline
+                .source_lines
                 .operations
-                .push(parse_operation(declaration, line_number)?);
+                .insert(operation.name.clone(), line_number);
+            pipeline.operations.push(operation);
         } else if line.starts_with("require ") {
+            let constraint = parse_coverage_rule(line, line_number)?;
             pipeline
+                .source_lines
                 .constraints
-                .push(parse_coverage_rule(line, line_number)?);
+                .insert(constraint.product.clone(), line_number);
+            pipeline.source_lines.constraint_lines.push(line_number);
+            pipeline.constraints.push(constraint);
         } else if line.starts_with("command ") {
             let declaration = line.strip_prefix("command ").unwrap().trim();
             pipeline
@@ -150,6 +181,14 @@ fn parse_flow_pipeline(text: &str) -> Result<Pipeline, ParseError> {
             set_path(&mut pipeline, line, line_number)?;
         } else if line.contains('=') {
             let (invocation, product) = parse_flow_invocation(line, line_number, &pipeline)?;
+            pipeline
+                .source_lines
+                .products
+                .insert(product.name.clone(), line_number);
+            pipeline
+                .source_lines
+                .invocations
+                .insert(invocation.output_product.clone(), line_number);
             pipeline.products.push(product);
             pipeline.invocations.push(invocation);
         } else if line.starts_with("use ") {
