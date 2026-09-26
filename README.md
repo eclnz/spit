@@ -1,5 +1,7 @@
 # SPIT — Simple Pipeline in Text
 
+<img src="logo.png" alt="SPIT logo" width="160">
+
 SPIT lets you write a pipeline as a text file, check which jobs it would create, and generate a Bash script to run them. The same pipeline works with any number of observed inputs.
 
 ## Try it
@@ -13,10 +15,12 @@ cargo run -- dag examples/commands/bash_demo.spit --sources examples/commands/ba
 
 Use `cargo build` to get the `target/debug/spit` executable. With `cargo run`, the `--` separates Cargo's arguments from SPIT's arguments.
 
+Live validation in VS Code is maintained in the separate `spit-vscode` repository.
+
 ## CLI commands and options
 
 ```text
-spit <check|dag|bound-dag|paths|bash> <pipeline.spit> [--sources <inventory.spit|->] [--root <directory>] [--strict-paths]
+spit <check|dag|bound-dag|paths|bash|diagnose> <pipeline.spit> [--sources <inventory.spit|->] [--root <directory>] [--strict-paths]
 ```
 
 Choose one command per call. The pipeline file comes next; options follow it.
@@ -28,6 +32,7 @@ Choose one command per call. The pipeline file comes next; options follow it.
 | `bound-dag` | Print the resolved DAG with a path for every artifact. |
 | `paths` | Show which path rule covers each product and validate the resulting paths. |
 | `bash` | Write a Bash script for the resolved jobs to standard output. It does not run the script. |
+| `diagnose` | Read the pipeline from standard input and return JSON diagnostics for editor use. Errors tied to a declaration or call include its source line. A pipeline path is required for CLI consistency, but its file contents are not read. |
 
 | Option | Effect |
 | --- | --- |

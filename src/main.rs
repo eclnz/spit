@@ -5,12 +5,12 @@ use std::io::{self, Read};
 use std::process::ExitCode;
 
 use spit::{
-    inspect_paths, parse_document, parse_source_inventory, render_bash, render_bound_dag,
+    diagnose, inspect_paths, parse_document, parse_source_inventory, render_bash, render_bound_dag,
     render_dag, resolve, validate_concrete_paths, validate_source_files,
 };
 
 const USAGE: &str =
-    "usage: spit <check|dag|bound-dag|paths|bash> <pipeline.spit> [--sources <inventory.spit|->] [--root <directory>] [--strict-paths]";
+    "usage: spit <check|dag|bound-dag|paths|bash|diagnose> <pipeline.spit> [--sources <inventory.spit|->] [--root <directory>] [--strict-paths]";
 
 struct CliArgs {
     command: String,
@@ -25,7 +25,7 @@ fn parse_args() -> Result<CliArgs, Box<dyn Error>> {
     let command = args.next().ok_or(USAGE)?;
     if !matches!(
         command.as_str(),
-        "check" | "dag" | "bound-dag" | "paths" | "bash"
+        "check" | "dag" | "bound-dag" | "paths" | "bash" | "diagnose"
     ) {
         return Err(USAGE.into());
     }
@@ -65,6 +65,9 @@ fn main() -> ExitCode {
 
 fn run() -> Result<(), Box<dyn Error>> {
     let args = parse_args()?;
+    if args.command == "diagnose" {
+        return run_diagnose(&args);
+    }
     let (pipeline, embedded_inventory) = parse_document(&fs::read_to_string(&args.pipeline)?)?;
     let inventory = if let Some(sources) = &args.sources {
         let inventory_text = if sources == "-" {
@@ -107,4 +110,52 @@ fn run() -> Result<(), Box<dyn Error>> {
         _ => unreachable!(),
     }
     Ok(())
+}
+
+fn run_diagnose(args: &CliArgs) -> Result<(), Box<dyn Error>> {
+    if args.strict_paths || args.root.is_some() {
+        return Err("diagnose does not support --strict-paths or --root".into());
+    }
+    let mut text = String::new();
+    io::stdin().read_to_string(&mut text)?;
+    let source_text = match &args.sources {
+        Some(source) if source == "-" => {
+            return Err("diagnose reads the pipeline from stdin; --sources needs a file".into());
+        }
+        Some(source) => Some(fs::read_to_string(source)?),
+        None => None,
+    };
+    let diagnostics = diagnose(&text, source_text.as_deref());
+    print!("{{\"diagnostics\":[");
+    for (index, diagnostic) in diagnostics.iter().enumerate() {
+        if index != 0 {
+            print!(",");
+        }
+        print!(
+            "{{\"source\":\"{}\",\"line\":{},\"message\":\"{}\"}}",
+            diagnostic.source,
+            diagnostic
+                .line
+                .map_or_else(|| "null".to_owned(), |line| line.to_string()),
+            escape_json(&diagnostic.message)
+        );
+    }
+    println!("]}}");
+    Ok(())
+}
+
+fn escape_json(text: &str) -> String {
+    let mut escaped = String::new();
+    for character in text.chars() {
+        match character {
+            '"' => escaped.push_str("\\\""),
+            '\\' => escaped.push_str("\\\\"),
+            '\n' => escaped.push_str("\\n"),
+            '\r' => escaped.push_str("\\r"),
+            '\t' => escaped.push_str("\\t"),
+            c if c < ' ' => escaped.push_str(&format!("\\u{:04x}", c as u32)),
+            c => escaped.push(c),
+        }
+    }
+    escaped
 }

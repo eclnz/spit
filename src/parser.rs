@@ -196,6 +196,11 @@ fn parse_flow_pipeline(text: &str) -> Result<Pipeline, ParseError> {
                 line_number,
                 "imports are not implemented yet; declare the operation before using it",
             ));
+        } else if line.contains('(') && line.ends_with(')') {
+            return Err(ParseError::new(
+                line_number,
+                "expected `=` before operation call",
+            ));
         } else {
             return Err(ParseError::new(
                 line_number,
@@ -244,9 +249,9 @@ fn set_path(pipeline: &mut Pipeline, line: &str, number: usize) -> Result<(), Pa
         (None, template)
     } else {
         let declaration = line.strip_prefix("path ").unwrap_or("");
-        let (product, template) = declaration.split_once(':').ok_or_else(|| {
-            ParseError::new(number, "expected path product: template or path: template")
-        })?;
+        let (product, template) = declaration
+            .split_once(':')
+            .ok_or_else(|| ParseError::new(number, "expected `:` after path product name"))?;
         (
             Some(identifier(product.trim(), number, "path product")?),
             template,
@@ -475,11 +480,13 @@ fn parse_coverage_rule(line: &str, number: usize) -> Result<CoverageRule, ParseE
     } else {
         return Err(ParseError::new(number, syntax));
     };
+    let dimensions = dimensions.trim();
     let dimensions = dimensions
-        .trim()
         .strip_prefix('[')
-        .and_then(|value| value.strip_suffix(']'))
-        .ok_or_else(|| ParseError::new(number, syntax))?;
+        .ok_or_else(|| ParseError::new(number, "expected `[` before constraint dimensions"))?;
+    let dimensions = dimensions
+        .strip_suffix(']')
+        .ok_or_else(|| ParseError::new(number, "expected closing `]` in constraint dimensions"))?;
     let dimensions = comma_items(dimensions, number)?;
     if dimensions.is_empty() {
         return Err(ParseError::new(
@@ -556,7 +563,21 @@ fn parse_operation(line: &str, number: usize) -> Result<OperationDef, ParseError
     } else {
         (line, TypeExpr::Unknown)
     };
-    let (name, inputs) = call_parts(signature.trim(), number)?;
+    let signature = signature.trim();
+    if !signature.contains('(') {
+        return Err(ParseError::new(number, "expected `(` after operation name"));
+    }
+    if !line.contains("->")
+        && signature
+            .split_once(')')
+            .is_some_and(|(_, trailing)| !trailing.trim().is_empty())
+    {
+        return Err(ParseError::new(
+            number,
+            "expected `->` before operation output type",
+        ));
+    }
+    let (name, inputs) = call_parts(signature, number)?;
     let inputs = comma_items(inputs, number)?;
     if inputs.is_empty() {
         return Err(ParseError::new(
@@ -637,12 +658,9 @@ fn parse_operation(line: &str, number: usize) -> Result<OperationDef, ParseError
 }
 
 fn parse_invocation(line: &str, number: usize) -> Result<Invocation, ParseError> {
-    let (output_product, call) = line.split_once('=').ok_or_else(|| {
-        ParseError::new(
-            number,
-            "expected pipeline invocation: output = operation(inputs)",
-        )
-    })?;
+    let (output_product, call) = line
+        .split_once('=')
+        .ok_or_else(|| ParseError::new(number, "expected `=` in pipeline invocation"))?;
     let output_product = identifier(output_product.trim(), number, "output product")?;
     parse_invocation_parts(output_product, call, number)
 }
@@ -729,7 +747,7 @@ fn parse_bindings(bindings: &str, number: usize) -> Result<EntityBinding, ParseE
 fn call_parts(line: &str, number: usize) -> Result<(&str, &str), ParseError> {
     let (name, args) = line
         .split_once('(')
-        .ok_or_else(|| ParseError::new(number, "expected function-like call"))?;
+        .ok_or_else(|| ParseError::new(number, "expected `(` in operation call"))?;
     let name = identifier(name.trim(), number, "operation name")?;
     let args = args
         .strip_suffix(')')
