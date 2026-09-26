@@ -1,6 +1,6 @@
 //! Resolve file imports and merge their selected definitions into a pipeline.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -101,18 +101,43 @@ pub(crate) fn apply_import(
 
 fn select_import(module: &Pipeline, spec: &UseSpec, line: usize) -> Result<Pipeline, ParseError> {
     let mut selected = Pipeline::default();
-    for name in &spec.names {
+    let import_all = spec.names.is_none();
+    let names: Vec<&str> = if let Some(names) = &spec.names {
+        names.iter().map(String::as_str).collect()
+    } else {
+        let mut seen = BTreeSet::new();
+        module
+            .operations
+            .iter()
+            .map(|operation| operation.name.as_str())
+            .chain(module.products.iter().filter_map(|product| {
+                (!module
+                    .invocations
+                    .iter()
+                    .any(|invocation| invocation.output_product == product.name))
+                .then_some(product.name.as_str())
+            }))
+            .filter(|name| seen.insert(*name))
+            .collect()
+    };
+    if names.is_empty() {
+        return Err(ParseError::new(
+            line,
+            format!("`{}` contains no reusable definitions", spec.path),
+        ));
+    }
+    for name in names {
         let mut operations = module
             .operations
             .iter()
-            .filter(|operation| operation.name == *name);
+            .filter(|operation| operation.name == name);
         let operation = operations.next();
         let mut sources = module.products.iter().filter(|product| {
-            product.name == *name
+            product.name == name
                 && !module
                     .invocations
                     .iter()
-                    .any(|invocation| invocation.output_product == *name)
+                    .any(|invocation| invocation.output_product == name)
         });
         let source = sources.next();
         if operations.next().is_some() || sources.next().is_some() {
@@ -121,7 +146,7 @@ fn select_import(module: &Pipeline, spec: &UseSpec, line: usize) -> Result<Pipel
                 format!("imported file has duplicate definition `{name}`"),
             ));
         }
-        if operation.is_some() && source.is_some() {
+        if operation.is_some() && source.is_some() && !import_all {
             return Err(ParseError::new(
                 line,
                 format!("import name `{name}` matches both a source and an operation"),
@@ -130,12 +155,12 @@ fn select_import(module: &Pipeline, spec: &UseSpec, line: usize) -> Result<Pipel
         let qualified = spec
             .alias
             .as_ref()
-            .map_or_else(|| name.clone(), |alias| format!("{alias}::{name}"));
+            .map_or_else(|| name.to_owned(), |alias| format!("{alias}::{name}"));
         if let Some(operation) = operation {
             if module
                 .commands
                 .iter()
-                .filter(|command| command.operation == *name)
+                .filter(|command| command.operation == name)
                 .count()
                 > 1
             {
@@ -157,13 +182,14 @@ fn select_import(module: &Pipeline, spec: &UseSpec, line: usize) -> Result<Pipel
             for command in module
                 .commands
                 .iter()
-                .filter(|command| command.operation == *name)
+                .filter(|command| command.operation == name)
             {
                 let mut command = command.clone();
                 command.operation = qualified.clone();
                 selected.commands.push(command);
             }
-        } else if let Some(source) = source {
+        }
+        if let Some(source) = source {
             if selected
                 .products
                 .iter()
@@ -186,13 +212,14 @@ fn select_import(module: &Pipeline, spec: &UseSpec, line: usize) -> Result<Pipel
             for constraint in module
                 .constraints
                 .iter()
-                .filter(|constraint| constraint.product == *name)
+                .filter(|constraint| constraint.product == name)
             {
                 let mut constraint = constraint.clone();
                 constraint.product = qualified.clone();
                 selected.constraints.push(constraint);
             }
-        } else {
+        }
+        if operation.is_none() && source.is_none() {
             return Err(ParseError::new(
                 line,
                 format!("`{name}` is not a source or operation in `{}`", spec.path),
@@ -202,7 +229,7 @@ fn select_import(module: &Pipeline, spec: &UseSpec, line: usize) -> Result<Pipel
     Ok(selected)
 }
 
-/// Parse a pipeline from a known file location, resolving named imports.
+/// Parse a pipeline from a known file location, resolving imports.
 /// Import paths are relative to the file that contains each `use` line.
 pub fn parse_document_at(
     text: &str,

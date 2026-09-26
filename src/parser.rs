@@ -402,26 +402,30 @@ fn parse_flow_output(left: &str, number: usize) -> Result<FlowOutput, ParseError
 
 #[derive(Debug)]
 pub(crate) struct UseSpec {
-    pub(crate) names: Vec<String>,
+    pub(crate) names: Option<Vec<String>>,
     pub(crate) path: String,
     pub(crate) alias: Option<String>,
 }
 
 pub(crate) fn parse_use(line: &str, number: usize) -> Result<UseSpec, ParseError> {
-    let syntax = "expected `use name[, name] from path [as alias]`";
+    let syntax = "expected `use path [as alias]` or `use name[, name] from path [as alias]`";
     let rest = line
         .strip_prefix("use ")
         .ok_or_else(|| ParseError::new(number, syntax))?;
-    let (names, path_and_alias) = rest
-        .split_once(" from ")
-        .ok_or_else(|| ParseError::new(number, syntax))?;
-    let names = comma_items(names, number)?;
-    if names.is_empty() {
-        return Err(ParseError::new(number, syntax));
-    }
-    for name in &names {
-        qualified_identifier(name, number, "import name")?;
-    }
+    let (names, path_and_alias) = if rest.starts_with('"') || rest.starts_with('\'') {
+        (None, rest)
+    } else if let Some((names, path)) = rest.split_once(" from ") {
+        let names = comma_items(names, number)?;
+        if names.is_empty() {
+            return Err(ParseError::new(number, syntax));
+        }
+        for name in &names {
+            qualified_identifier(name, number, "import name")?;
+        }
+        (Some(names), path)
+    } else {
+        (None, rest)
+    };
     let (path, alias) = parse_use_path(path_and_alias, number)?;
     if path.is_empty() {
         return Err(ParseError::new(number, "import needs a file path"));

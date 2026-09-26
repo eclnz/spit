@@ -167,3 +167,38 @@ fn quoted_import_path_can_contain_as() {
     let (pipeline, _) = parse_document_at(&fs::read_to_string(&main).unwrap(), &main).unwrap();
     assert_eq!(pipeline.operations[0].name, "prep::clean");
 }
+
+#[test]
+fn import_all_skips_pipeline_steps_and_inventory() {
+    let dir = TestDir::new();
+    dir.write(
+        "base.spit",
+        "source raw [id]\noperation clean(one)\ncommand clean: cp {input} {output}\ncleaned = clean(raw)\nsources:\n  raw[id=old]\n",
+    );
+    let main = dir.write(
+        "main.spit",
+        "use base.spit as lib\nresult = lib::clean(lib::raw)\nsources:\n  lib::raw[id=new]\n",
+    );
+    let (pipeline, inventory) =
+        parse_document_at(&fs::read_to_string(&main).unwrap(), &main).unwrap();
+    assert_eq!(pipeline.products.len(), 2);
+    assert_eq!(pipeline.products[0].name, "lib::raw");
+    assert_eq!(pipeline.operations[0].name, "lib::clean");
+    assert_eq!(pipeline.commands[0].operation, "lib::clean");
+    assert_eq!(pipeline.invocations.len(), 1);
+    let inventory = inventory.unwrap();
+    assert_eq!(inventory.artifacts.len(), 1);
+    assert_eq!(resolve(&pipeline, &inventory).unwrap().jobs.len(), 1);
+
+    let unqualified = dir.write(
+        "unqualified.spit",
+        "use base.spit\nresult = clean(raw)\nsources:\n  raw[id=new]\n",
+    );
+    let (pipeline, inventory) =
+        parse_document_at(&fs::read_to_string(&unqualified).unwrap(), &unqualified).unwrap();
+    assert_eq!(pipeline.operations[0].name, "clean");
+    assert_eq!(
+        resolve(&pipeline, &inventory.unwrap()).unwrap().jobs.len(),
+        1
+    );
+}
