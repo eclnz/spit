@@ -99,6 +99,8 @@ SPIT_ROOT=/path/to/data bash run.sh
 
 ## Syntax reference
 
+A `#` that starts a word begins a comment, as in Bash. A `#` inside a word or in quotes is kept, so `--color=#fff` and `'#run'` are ordinary arguments.
+
 ### Products and dimensions
 
 ```text
@@ -131,9 +133,9 @@ operation mean(images: many Image) -> Image @ drop(run)
 command mean: mean_tool {images} --out {output}
 ```
 
-Declare an operation before its first use. Inputs in a call follow the port order in the declaration. A `one` input must resolve to exactly one artifact for each job; SPIT reports missing or ambiguous matches. A `many` input needs `@ vary(dimension)`, and its command placeholder expands to one separately quoted argument per artifact, ordered by entity bindings. A many placeholder must occupy a whole argument.
+Declare an operation before its first use. Inputs in a call follow the port order in the declaration. A `one` input must resolve to exactly one artifact for each job, so every input after the first may only use dimensions the first input has; SPIT rejects a pipeline that breaks this before reading any inventory, and reports a missing match for a job. A `many` input needs `@ vary(dimension)`, and its command placeholder expands to one separately quoted argument per artifact, ordered by entity bindings. A many placeholder must occupy a whole argument.
 
-Input port names are optional. An unnamed single input is `{input}`; multiple unnamed inputs are `{input1}`, `{input2}`, and so on. `{output}` is the output path. Command templates give ordered words and arguments, not shell pipelines or redirection.
+Input port names are optional. An unnamed single input is `{input}`; multiple unnamed inputs are `{input1}`, `{input2}`, and so on. `{output}` is the output path, so `output` cannot name an input port. Command templates give ordered words and arguments, not shell pipelines or redirection. Words are split and quoted as in Bash, and every argument is passed literally: `$` and backticks are not expanded.
 
 The first word of a command must be an executable available on `PATH` (or an executable path). SPIT emits that command without managing its installation or loading shell functions:
 
@@ -160,7 +162,7 @@ path: results/{product}/{entities}.txt
 path image: input/{subject}/{visit}/{run}.txt
 ```
 
-`path:` sets a default. `path image:` overrides it for `image`. Templates can use `{product}`, `{entities}`, or a declared dimension. Paths are relative to `SPIT_ROOT`. SPIT checks missing rules, invalid placeholders, and collisions between resolved artifact paths.
+`path:` sets a default. `path image:` overrides it for `image`. Templates can use `{product}`, `{entities}`, or a declared dimension. In `{product}`, an imported `alias::name` becomes `alias.name`. Paths are relative to `SPIT_ROOT`. SPIT checks missing rules, invalid placeholders, and collisions between resolved artifact paths.
 
 Place a source path beside its `source` line and a derived path beside its assignment. The default can stay near the top of the file.
 

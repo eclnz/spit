@@ -343,3 +343,15 @@ fn undeclared_operation_is_reported_when_its_name_prefixes_an_invalid_one() {
         .message
         .contains("operation `copy` must be declared"));
 }
+
+#[test]
+fn source_with_wrong_dimensions_points_to_its_inventory_line() {
+    let pipeline = "source raw [id]\n";
+    let issues = diagnose(pipeline, Some("sources:\n  raw[id=x]\n  raw[other=y]\n"));
+    assert_eq!(issues.len(), 1, "{issues:?}");
+    assert_eq!(issues[0].source, "inventory");
+    assert_eq!(issues[0].line, Some(3));
+    assert!(issues[0]
+        .message
+        .contains("must bind exactly the dimensions"));
+}

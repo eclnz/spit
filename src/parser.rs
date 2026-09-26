@@ -314,22 +314,27 @@ fn set_path(pipeline: &mut Pipeline, line: &str, number: usize) -> Result<(), Pa
     Ok(())
 }
 
+/// As in Bash, an unquoted `#` starts a comment only at the start of a word,
+/// so arguments such as `--color=#fff` are kept intact.
 pub(crate) fn strip_comment(line: &str) -> &str {
     let mut quote = None;
     let mut escaped = false;
+    let mut word_start = true;
     for (index, character) in line.char_indices() {
         if escaped {
             escaped = false;
-        } else {
-            match (quote, character) {
-                (None, '\\') | (Some('"'), '\\') => escaped = true,
-                (None, '\'') => quote = Some('\''),
-                (None, '"') => quote = Some('"'),
-                (Some('\''), '\'') | (Some('"'), '"') => quote = None,
-                (None, '#') => return &line[..index],
-                _ => {}
-            }
+            word_start = false;
+            continue;
         }
+        match (quote, character) {
+            (None, '\\') | (Some('"'), '\\') => escaped = true,
+            (None, '\'') => quote = Some('\''),
+            (None, '"') => quote = Some('"'),
+            (Some('\''), '\'') | (Some('"'), '"') => quote = None,
+            (None, '#') if word_start => return &line[..index],
+            _ => {}
+        }
+        word_start = quote.is_none() && character.is_whitespace();
     }
     line
 }

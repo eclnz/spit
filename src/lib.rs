@@ -6,16 +6,15 @@ pub mod error;
 mod imports;
 pub mod model;
 pub mod parser;
+pub mod paths;
 pub mod render;
 pub mod resolver;
+mod template;
 pub mod types;
 
-pub use bash::{
-    inspect_paths, render_bash, render_bound_dag, validate_concrete_paths, validate_source_files,
-    BashError, PathCoverage, PathCoverageEntry, PathRule,
-};
+pub use bash::{render_bash, BashError};
 pub use diagnostics::{diagnose, diagnose_at, Diagnostic};
-pub use error::ResolveError;
+pub use error::{DefinitionSubject, ResolveError};
 pub use imports::parse_document_at;
 pub use model::{
     ArtifactInstance, ArtifactType, Cardinality, CommandDef, CountRequirement, CoverageRule,
@@ -23,6 +22,10 @@ pub use model::{
     ResolvedDag, ShapeRule, SourceInventory, SourceRecord,
 };
 pub use parser::{parse_document, parse_pipeline, parse_source_inventory, ParseError};
-pub use render::render_dag;
+pub use paths::{
+    inspect_paths, validate_concrete_paths, validate_source_files, PathCoverage, PathCoverageEntry,
+    PathError, PathRule,
+};
+pub use render::{render_bound_dag, render_dag};
 pub use resolver::resolve;
 pub use types::{parse_type_expr, Compatibility, Substitutions, TypeExpr, TypeUnifyError};

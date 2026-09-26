@@ -316,3 +316,19 @@ fn command_uses_executable_on_path() {
     );
     fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn backslashes_follow_bash_quoting_rules() {
+    let (mut pipeline, _) =
+        parse_document(include_str!("../examples/commands/bash_demo.spit")).unwrap();
+    let inventory =
+        parse_source_inventory(include_str!("../examples/commands/bash_demo.sources")).unwrap();
+    let dag = resolve(&pipeline, &inventory).unwrap();
+    pipeline.commands[0].template =
+        r#"tool "a\b" "q\"x" "s\\t" c\d 'e\f' {input} {output}"#.to_owned();
+    let script = render_bash(&pipeline, &dag).unwrap();
+    assert!(
+        script.contains(r#"'tool' 'a\b' 'q"x' 's\t' 'cd' 'e\f' "#),
+        "{script}"
+    );
+}

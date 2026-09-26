@@ -3,8 +3,8 @@
 use std::path::Path;
 
 use crate::{
-    parse_document, parse_document_at, parse_source_inventory, resolve, InputBinding, ParseError,
-    Pipeline, ResolveError, SourceInventory,
+    parse_document, parse_document_at, parse_source_inventory, resolve, DefinitionSubject,
+    EntityBinding, InputBinding, ParseError, Pipeline, ResolveError, SourceInventory,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -161,8 +161,7 @@ fn error_location(
     let pipeline_line = match error {
         ResolveError::TypeMismatch { output_product, .. }
         | ResolveError::TypeVariableConflict { output_product, .. }
-        | ResolveError::MissingInput { output_product, .. }
-        | ResolveError::AmbiguousInput { output_product, .. } => invocation_line(output_product),
+        | ResolveError::MissingInput { output_product, .. } => invocation_line(output_product),
         ResolveError::UnknownOperation { name } => unique_operation_line(name),
         ResolveError::UnknownProduct { name } => pipeline
             .invocations
@@ -193,26 +192,14 @@ fn error_location(
             lines.constraint_lines.get(*rule_index).copied()
         }
         ResolveError::DuplicateOutputArtifact { artifact } => invocation_line(&artifact.product),
-        ResolveError::InvalidDefinition { detail } => {
-            let name = detail.split('`').nth(1);
-            name.and_then(|name| {
-                if detail.starts_with("coverage rule") {
-                    lines.constraints.get(name).copied()
-                } else if detail.contains("producing invocation") {
-                    invocation_line(name)
-                } else if detail.starts_with("operation `")
-                    || detail.starts_with("duplicate operation name")
-                {
-                    lines.operations.get(name).copied()
-                } else if detail.starts_with("product `")
-                    || detail.starts_with("duplicate product name")
-                {
-                    lines.products.get(name).copied()
-                } else {
-                    None
-                }
-            })
-        }
+        ResolveError::InvalidDefinition { subject, .. } => match subject {
+            DefinitionSubject::Product(name) => lines.products.get(name).copied(),
+            DefinitionSubject::Operation(name) => lines.operations.get(name).copied(),
+            DefinitionSubject::Invocation(output) => invocation_line(output),
+            DefinitionSubject::Constraint(index) => lines.constraint_lines.get(*index).copied(),
+            DefinitionSubject::Source(_) | DefinitionSubject::None => None,
+        },
+        ResolveError::DuplicateSourceArtifact { .. } => None,
     };
     if pipeline_line.is_some() {
         return ("pipeline", pipeline_line);
@@ -222,11 +209,17 @@ fn error_location(
         ResolveError::UnknownProduct { name } => inventory_record_lines(inventory_text, name, None)
             .into_iter()
             .next(),
-        ResolveError::DuplicateOutputArtifact { artifact } => {
+        ResolveError::DuplicateSourceArtifact { artifact } => {
             inventory_record_lines(inventory_text, &artifact.product, Some(&artifact.entities))
                 .into_iter()
                 .nth(1)
         }
+        ResolveError::InvalidDefinition {
+            subject: DefinitionSubject::Source(record),
+            ..
+        } => inventory_record_lines(inventory_text, &record.product, Some(&record.entities))
+            .into_iter()
+            .next(),
         _ => None,
     };
     if inventory_line.is_some() {
@@ -246,7 +239,7 @@ fn error_location(
 fn inventory_record_lines(
     text: &str,
     product: &str,
-    entities: Option<&crate::EntityBinding>,
+    entities: Option<&EntityBinding>,
 ) -> Vec<usize> {
     text.lines()
         .enumerate()
