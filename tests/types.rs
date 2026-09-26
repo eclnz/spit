@@ -57,6 +57,24 @@ fn generic_input_infers_variable_and_substitutes_output() {
 }
 
 #[test]
+fn generic_import_preserves_dwi_space() {
+    let text = "source raw : MRI<DWI,Native> [id]\n\
+source bvec : GradientDirections [id]\n\
+source bval : GradientAmplitudes [id]\n\
+source metadata : AcquisitionMetadata [id]\n\
+operation import_dwi(image: MRI<DWI,$Space>, bvec: GradientDirections, bval: GradientAmplitudes, metadata: AcquisitionMetadata) -> MRI<DWI,$Space>\n\
+result = import_dwi(raw, bvec, bval, metadata)\n\
+sources:\n\
+  raw[id=x]\n\
+  bvec[id=x]\n\
+  bval[id=x]\n\
+  metadata[id=x]\n";
+    let (pipeline, inventory) = parse_document(text).unwrap();
+    let dag = resolve(&pipeline, &inventory.unwrap()).unwrap();
+    assert_eq!(dag.jobs[0].output.artifact_type, product("MRI<DWI,Native>"));
+}
+
+#[test]
 fn multiple_variables_infer_independently() {
     let mut substitutions = Substitutions::default();
     substitutions
