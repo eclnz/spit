@@ -142,6 +142,18 @@ shell-source: scripts/functions.sh
 command process: my_process {image} {output}
 ```
 
+### Reuse definitions
+
+Import named operations or source families from another `.spit` file. The path is relative to the file containing the `use` line. An operation brings its `command`; a source brings its path and coverage rules. Imports do not bring pipeline steps or inventory records.
+
+```text
+use shard, sort_lines from lib/text.spit as text
+
+sorted = text::sort_lines(text::shard)
+```
+
+`as text` gives the imported names a prefix. Without it, the names stay unqualified: `use sort_lines from lib/text.spit` makes `sort_lines(...)` available. A source imported as `text::shard` also uses that name in `sources:` or a separate inventory. SPIT reports missing names, import cycles, and name collisions.
+
 ### Paths
 
 ```text
@@ -188,6 +200,7 @@ operation project(sample: Frame<$Kind,$SourceSpace>, calibration: Calibration<$K
 | [Complex](examples/pipelines/complex.spit) | Nested aggregation |
 | [Analytics](examples/analytics/analytics.spit) | Joins and rollups |
 | [MRtrix3 ACT](examples/commands/mrtrix3_act.spit) | A larger pipeline with commands and paths |
+| [Imports](examples/imports/imported.spit) | Reuse source and operation definitions with `text::` names |
 | [Compiler stress pipelines](examples/stress/README.md) | Deep type inference, deliberate type errors, uneven joins, and large multilevel DAGs |
 
 SPIT also accepts grouped `products:`, `operations:`, `pipeline:`, and `constraints:` sections. The flow style above is intended for writing a pipeline in the order you read it.

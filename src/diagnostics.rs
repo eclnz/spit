@@ -1,8 +1,10 @@
 //! Editor-friendly validation of an in-memory SPIT document.
 
+use std::path::Path;
+
 use crate::{
-    parse_document, parse_source_inventory, resolve, InputBinding, ParseError, Pipeline,
-    ResolveError, SourceInventory,
+    parse_document, parse_document_at, parse_source_inventory, resolve, InputBinding, ParseError,
+    Pipeline, ResolveError, SourceInventory,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -16,7 +18,20 @@ pub struct Diagnostic {
 /// semantics once the document parses. An absent inventory still allows
 /// declaration and invocation checks, but cannot validate concrete jobs.
 pub fn diagnose(text: &str, source_text: Option<&str>) -> Vec<Diagnostic> {
-    let (document, pipeline_errors) = recover_parse_errors(text, parse_document);
+    diagnose_with_parser(text, source_text, parse_document)
+}
+
+/// Diagnose a document with its location available for resolving imports.
+pub fn diagnose_at(text: &str, source_text: Option<&str>, path: &Path) -> Vec<Diagnostic> {
+    diagnose_with_parser(text, source_text, |text| parse_document_at(text, path))
+}
+
+fn diagnose_with_parser(
+    text: &str,
+    source_text: Option<&str>,
+    parser: impl Fn(&str) -> Result<(Pipeline, Option<SourceInventory>), ParseError>,
+) -> Vec<Diagnostic> {
+    let (document, pipeline_errors) = recover_parse_errors(text, parser);
     let (external_inventory, inventory_errors) = if let Some(source_text) = source_text {
         recover_parse_errors(source_text, parse_source_inventory)
     } else {

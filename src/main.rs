@@ -2,11 +2,12 @@ use std::env;
 use std::error::Error;
 use std::fs;
 use std::io::{self, Read};
+use std::path::Path;
 use std::process::ExitCode;
 
 use spit::{
-    diagnose, inspect_paths, parse_document, parse_source_inventory, render_bash, render_bound_dag,
-    render_dag, resolve, validate_concrete_paths, validate_source_files,
+    diagnose_at, inspect_paths, parse_document_at, parse_source_inventory, render_bash,
+    render_bound_dag, render_dag, resolve, validate_concrete_paths, validate_source_files,
 };
 
 const USAGE: &str =
@@ -68,7 +69,10 @@ fn run() -> Result<(), Box<dyn Error>> {
     if args.command == "diagnose" {
         return run_diagnose(&args);
     }
-    let (pipeline, embedded_inventory) = parse_document(&fs::read_to_string(&args.pipeline)?)?;
+    let (pipeline, embedded_inventory) = parse_document_at(
+        &fs::read_to_string(&args.pipeline)?,
+        Path::new(&args.pipeline),
+    )?;
     let inventory = if let Some(sources) = &args.sources {
         let inventory_text = if sources == "-" {
             let mut text = String::new();
@@ -125,7 +129,7 @@ fn run_diagnose(args: &CliArgs) -> Result<(), Box<dyn Error>> {
         Some(source) => Some(fs::read_to_string(source)?),
         None => None,
     };
-    let diagnostics = diagnose(&text, source_text.as_deref());
+    let diagnostics = diagnose_at(&text, source_text.as_deref(), Path::new(&args.pipeline));
     print!("{{\"diagnostics\":[");
     for (index, diagnostic) in diagnostics.iter().enumerate() {
         if index != 0 {

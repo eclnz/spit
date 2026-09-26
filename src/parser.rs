@@ -3,6 +3,7 @@
 use std::collections::BTreeMap;
 use std::fmt;
 
+use crate::imports::apply_import;
 use crate::model::{
     Cardinality, CommandDef, CountRequirement, CoverageRule, EntityBinding, InputBinding,
     InputPort, Invocation, OperationDef, Pipeline, ProductDef, ShapeRule, SourceInventory,
@@ -17,7 +18,7 @@ pub struct ParseError {
 }
 
 impl ParseError {
-    fn new(line: usize, message: impl Into<String>) -> Self {
+    pub(crate) fn new(line: usize, message: impl Into<String>) -> Self {
         Self {
             line,
             message: message.into(),
@@ -43,10 +44,17 @@ enum Section {
 }
 
 pub fn parse_pipeline(text: &str) -> Result<Pipeline, ParseError> {
+    parse_pipeline_with_imports(text, &BTreeMap::new())
+}
+
+fn parse_pipeline_with_imports(
+    text: &str,
+    imports: &BTreeMap<usize, Pipeline>,
+) -> Result<Pipeline, ParseError> {
     if is_sectioned_document(text) {
-        parse_sectioned_pipeline(text)
+        parse_sectioned_pipeline(text, imports)
     } else {
-        parse_flow_pipeline(text)
+        parse_flow_pipeline(text, imports)
     }
 }
 
@@ -59,7 +67,10 @@ fn is_sectioned_document(text: &str) -> bool {
     })
 }
 
-fn parse_sectioned_pipeline(text: &str) -> Result<Pipeline, ParseError> {
+fn parse_sectioned_pipeline(
+    text: &str,
+    imports: &BTreeMap<usize, Pipeline>,
+) -> Result<Pipeline, ParseError> {
     let mut pipeline = Pipeline::default();
     let mut section = None;
 
@@ -75,6 +86,10 @@ fn parse_sectioned_pipeline(text: &str) -> Result<Pipeline, ParseError> {
             "pipeline:" => section = Some(Section::Pipeline),
             "constraints:" => section = Some(Section::Constraints),
             "commands:" => section = Some(Section::Commands),
+            source if source.starts_with("use ") => {
+                apply_import(&mut pipeline, imports, line_number)?;
+                section = None;
+            }
             source if source.starts_with("shell-source:") => {
                 set_shell_source(&mut pipeline, source, line_number)?;
                 section = None;
@@ -137,7 +152,10 @@ fn parse_sectioned_pipeline(text: &str) -> Result<Pipeline, ParseError> {
     Ok(pipeline)
 }
 
-fn parse_flow_pipeline(text: &str) -> Result<Pipeline, ParseError> {
+fn parse_flow_pipeline(
+    text: &str,
+    imports: &BTreeMap<usize, Pipeline>,
+) -> Result<Pipeline, ParseError> {
     let mut pipeline = Pipeline::default();
 
     for (index, original) in text.lines().enumerate() {
@@ -147,7 +165,9 @@ fn parse_flow_pipeline(text: &str) -> Result<Pipeline, ParseError> {
             continue;
         }
 
-        if let Some(declaration) = line.strip_prefix("source ") {
+        if line.starts_with("use ") {
+            apply_import(&mut pipeline, imports, line_number)?;
+        } else if let Some(declaration) = line.strip_prefix("source ") {
             let product = parse_product(declaration.trim(), line_number)?;
             pipeline
                 .source_lines
@@ -191,11 +211,6 @@ fn parse_flow_pipeline(text: &str) -> Result<Pipeline, ParseError> {
                 .insert(invocation.output_product.clone(), line_number);
             pipeline.products.push(product);
             pipeline.invocations.push(invocation);
-        } else if line.starts_with("use ") {
-            return Err(ParseError::new(
-                line_number,
-                "imports are not implemented yet; declare the operation before using it",
-            ));
         } else if line.contains('(') && line.ends_with(')') {
             return Err(ParseError::new(
                 line_number,
@@ -222,18 +237,14 @@ fn set_shell_source(pipeline: &mut Pipeline, line: &str, number: usize) -> Resul
 }
 
 fn parse_command(line: &str, number: usize) -> Result<CommandDef, ParseError> {
-    let delimiter = [line.find(':'), line.find('=')]
-        .into_iter()
-        .flatten()
-        .min()
-        .ok_or_else(|| {
-            ParseError::new(
-                number,
-                "expected command: operation: executable [arguments]",
-            )
-        })?;
+    let delimiter = declaration_delimiter(line).ok_or_else(|| {
+        ParseError::new(
+            number,
+            "expected command: operation: executable [arguments]",
+        )
+    })?;
     let (operation, rest) = line.split_at(delimiter);
-    let operation = identifier(operation.trim(), number, "command operation")?;
+    let operation = qualified_identifier(operation.trim(), number, "command operation")?;
     let template = rest[1..].trim();
     if template.is_empty() {
         return Err(ParseError::new(
@@ -244,17 +255,35 @@ fn parse_command(line: &str, number: usize) -> Result<CommandDef, ParseError> {
     Ok(CommandDef::new(operation, template))
 }
 
+fn declaration_delimiter(line: &str) -> Option<usize> {
+    [single_colon(line), line.find('=')]
+        .into_iter()
+        .flatten()
+        .min()
+}
+
+fn single_colon(line: &str) -> Option<usize> {
+    line.char_indices().find_map(|(index, character)| {
+        (character == ':' && !line[..index].ends_with(':') && !line[index + 1..].starts_with(':'))
+            .then_some(index)
+    })
+}
+
 fn set_path(pipeline: &mut Pipeline, line: &str, number: usize) -> Result<(), ParseError> {
     let (product, template) = if let Some(template) = line.strip_prefix("path:") {
         (None, template)
     } else {
         let declaration = line.strip_prefix("path ").unwrap_or("");
-        let (product, template) = declaration
-            .split_once(':')
+        let delimiter = single_colon(declaration)
             .ok_or_else(|| ParseError::new(number, "expected `:` after path product name"))?;
+        let (product, template) = declaration.split_at(delimiter);
         (
-            Some(identifier(product.trim(), number, "path product")?),
-            template,
+            Some(qualified_identifier(
+                product.trim(),
+                number,
+                "path product",
+            )?),
+            &template[1..],
         )
     };
     let template = template.trim();
@@ -292,7 +321,7 @@ fn set_path(pipeline: &mut Pipeline, line: &str, number: usize) -> Result<(), Pa
     Ok(())
 }
 
-fn strip_comment(line: &str) -> &str {
+pub(crate) fn strip_comment(line: &str) -> &str {
     let mut quote = None;
     let mut escaped = false;
     for (index, character) in line.char_indices() {
@@ -378,9 +407,73 @@ fn parse_flow_output(left: &str, number: usize) -> Result<FlowOutput, ParseError
     }
 }
 
+#[derive(Debug)]
+pub(crate) struct UseSpec {
+    pub(crate) names: Vec<String>,
+    pub(crate) path: String,
+    pub(crate) alias: Option<String>,
+}
+
+pub(crate) fn parse_use(line: &str, number: usize) -> Result<UseSpec, ParseError> {
+    let syntax = "expected `use name[, name] from path [as alias]`";
+    let rest = line
+        .strip_prefix("use ")
+        .ok_or_else(|| ParseError::new(number, syntax))?;
+    let (names, path_and_alias) = rest
+        .split_once(" from ")
+        .ok_or_else(|| ParseError::new(number, syntax))?;
+    let names = comma_items(names, number)?;
+    if names.is_empty() {
+        return Err(ParseError::new(number, syntax));
+    }
+    for name in &names {
+        qualified_identifier(name, number, "import name")?;
+    }
+    let (path, alias) = parse_use_path(path_and_alias, number)?;
+    if path.is_empty() {
+        return Err(ParseError::new(number, "import needs a file path"));
+    }
+    Ok(UseSpec { names, path, alias })
+}
+
+fn parse_use_path(text: &str, number: usize) -> Result<(String, Option<String>), ParseError> {
+    let text = text.trim();
+    if let Some(quote @ ('"' | '\'')) = text.chars().next() {
+        let closing = text[1..]
+            .find(quote)
+            .map(|index| index + 1)
+            .ok_or_else(|| ParseError::new(number, "unterminated quoted import path"))?;
+        let path = &text[1..closing];
+        let tail = text[closing + 1..].trim();
+        let alias = if tail.is_empty() {
+            None
+        } else {
+            let value = tail
+                .strip_prefix("as ")
+                .ok_or_else(|| ParseError::new(number, "expected `as alias` after import path"))?;
+            Some(identifier(value.trim(), number, "import alias")?.to_owned())
+        };
+        Ok((path.to_owned(), alias))
+    } else if let Some((path, alias)) = text.rsplit_once(" as ") {
+        Ok((
+            path.trim().to_owned(),
+            Some(identifier(alias.trim(), number, "import alias")?.to_owned()),
+        ))
+    } else {
+        Ok((text.to_owned(), None))
+    }
+}
+
 /// Parse a text document that may package an inventory alongside its pipeline.
 /// The two remain separate values for resolution.
 pub fn parse_document(text: &str) -> Result<(Pipeline, Option<SourceInventory>), ParseError> {
+    parse_document_with_imports(text, &BTreeMap::new())
+}
+
+pub(crate) fn parse_document_with_imports(
+    text: &str,
+    imports: &BTreeMap<usize, Pipeline>,
+) -> Result<(Pipeline, Option<SourceInventory>), ParseError> {
     let mut pipeline_text = String::new();
     let mut inventory_text = String::new();
     let mut inventory_section = false;
@@ -399,6 +492,7 @@ pub fn parse_document(text: &str) -> Result<(Pipeline, Option<SourceInventory>),
             _ if line.starts_with("path:")
                 || line.starts_with("path ")
                 || line.starts_with("shell-source:")
+                || line.starts_with("use ")
                 || line.starts_with("source ")
                 || line.starts_with("operation ")
                 || line.starts_with("command ")
@@ -419,7 +513,7 @@ pub fn parse_document(text: &str) -> Result<(Pipeline, Option<SourceInventory>),
         }
     }
 
-    let pipeline = parse_pipeline(&pipeline_text)?;
+    let pipeline = parse_pipeline_with_imports(&pipeline_text, imports)?;
     let inventory = if has_inventory {
         Some(parse_source_inventory(&inventory_text)?)
     } else {
@@ -466,7 +560,7 @@ fn parse_coverage_rule(line: &str, number: usize) -> Result<CoverageRule, ParseE
         .split_once(" per ")
         .ok_or_else(|| ParseError::new(number, syntax))?;
     let mut parts = subject.split_whitespace();
-    let product = identifier(parts.next().unwrap_or(""), number, "constraint product")?;
+    let product = qualified_identifier(parts.next().unwrap_or(""), number, "constraint product")?;
     let count_token = parts
         .next()
         .ok_or_else(|| ParseError::new(number, syntax))?;
@@ -578,6 +672,7 @@ fn parse_operation(line: &str, number: usize) -> Result<OperationDef, ParseError
         ));
     }
     let (name, inputs) = call_parts(signature, number)?;
+    identifier(name, number, "operation name")?;
     let inputs = comma_items(inputs, number)?;
     if inputs.is_empty() {
         return Err(ParseError::new(
@@ -674,7 +769,7 @@ fn parse_invocation_parts(
     let mut bindings = Vec::new();
     for arg in comma_items(args, number)? {
         if let Some((product, variation)) = arg.split_once('@') {
-            let product = identifier(product.trim(), number, "input product")?;
+            let product = qualified_identifier(product.trim(), number, "input product")?;
             let (keyword, dimension) = call_parts(variation.trim(), number)?;
             if keyword != "vary" {
                 return Err(ParseError::new(
@@ -685,7 +780,7 @@ fn parse_invocation_parts(
             let dimension = identifier(dimension.trim(), number, "vary dimension")?;
             bindings.push(InputBinding::vary(product, dimension));
         } else {
-            bindings.push(InputBinding::product(identifier(
+            bindings.push(InputBinding::product(qualified_identifier(
                 arg.trim(),
                 number,
                 "input product",
@@ -702,7 +797,7 @@ fn parse_source(line: &str, number: usize) -> Result<SourceRecord, ParseError> {
             "expected source artifact: product[dimension=value,...]",
         )
     })?;
-    let product = identifier(product.trim(), number, "source product")?;
+    let product = qualified_identifier(product.trim(), number, "source product")?;
     let entities = parse_bindings(bindings, number)?;
     Ok(SourceRecord::new(product, entities))
 }
@@ -748,7 +843,7 @@ fn call_parts(line: &str, number: usize) -> Result<(&str, &str), ParseError> {
     let (name, args) = line
         .split_once('(')
         .ok_or_else(|| ParseError::new(number, "expected `(` in operation call"))?;
-    let name = identifier(name.trim(), number, "operation name")?;
+    let name = qualified_identifier(name.trim(), number, "operation name")?;
     let args = args
         .strip_suffix(')')
         .ok_or_else(|| ParseError::new(number, "expected closing `)`"))?;
@@ -809,6 +904,17 @@ fn identifier<'a>(value: &'a str, number: usize, kind: &str) -> Result<&'a str, 
             number,
             format!("invalid {kind} `{value}`; use letters, digits, and underscores"),
         ));
+    }
+    Ok(value)
+}
+
+fn qualified_identifier<'a>(
+    value: &'a str,
+    number: usize,
+    kind: &str,
+) -> Result<&'a str, ParseError> {
+    for part in value.split("::") {
+        identifier(part, number, kind)?;
     }
     Ok(value)
 }

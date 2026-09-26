@@ -3,6 +3,7 @@
 pub mod bash;
 pub mod diagnostics;
 pub mod error;
+mod imports;
 pub mod model;
 pub mod parser;
 pub mod render;
@@ -13,8 +14,9 @@ pub use bash::{
     inspect_paths, render_bash, render_bound_dag, validate_concrete_paths, validate_source_files,
     BashError, PathCoverage, PathCoverageEntry, PathRule,
 };
-pub use diagnostics::{diagnose, Diagnostic};
+pub use diagnostics::{diagnose, diagnose_at, Diagnostic};
 pub use error::ResolveError;
+pub use imports::parse_document_at;
 pub use model::{
     ArtifactInstance, ArtifactType, Cardinality, CommandDef, CountRequirement, CoverageRule,
     EntityBinding, InputBinding, InputPort, Invocation, Job, OperationDef, Pipeline, ProductDef,

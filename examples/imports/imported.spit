@@ -1,0 +1,8 @@
+use shard, sort_lines from lib/text.spit as text
+
+path: output/{product}/{entities}.txt
+sorted = text::sort_lines(text::shard)
+
+sources:
+    text::shard[group=alpha,part=01]
+    text::shard[group=alpha,part=02]
