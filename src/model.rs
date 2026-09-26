@@ -227,7 +227,6 @@ pub struct Pipeline {
     pub invocations: Vec<Invocation>,
     pub constraints: Vec<CoverageRule>,
     pub commands: Vec<CommandDef>,
-    pub shell_sources: Vec<String>,
     pub path_template: Option<String>,
     pub product_paths: BTreeMap<String, String>,
     /// Parser-populated line locations for semantic diagnostics.

@@ -11,6 +11,9 @@ use crate::model::{
 };
 use crate::types::{parse_type_expr, TypeExpr};
 
+const SHELL_SOURCE_REMOVED: &str =
+    "shell-source is no longer supported; make the command executable available on PATH";
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ParseError {
     pub line: usize,
@@ -91,8 +94,7 @@ fn parse_sectioned_pipeline(
                 section = None;
             }
             source if source.starts_with("shell-source:") => {
-                set_shell_source(&mut pipeline, source, line_number)?;
-                section = None;
+                return Err(ParseError::new(line_number, SHELL_SOURCE_REMOVED));
             }
             path if path.starts_with("path:") || path.starts_with("path ") => {
                 set_path(&mut pipeline, path, line_number)?;
@@ -196,7 +198,7 @@ fn parse_flow_pipeline(
                 .commands
                 .push(parse_command(declaration, line_number)?);
         } else if line.starts_with("shell-source:") {
-            set_shell_source(&mut pipeline, line, line_number)?;
+            return Err(ParseError::new(line_number, SHELL_SOURCE_REMOVED));
         } else if line.starts_with("path ") || line.starts_with("path:") {
             set_path(&mut pipeline, line, line_number)?;
         } else if line.contains('=') {
@@ -225,15 +227,6 @@ fn parse_flow_pipeline(
     }
 
     Ok(pipeline)
-}
-
-fn set_shell_source(pipeline: &mut Pipeline, line: &str, number: usize) -> Result<(), ParseError> {
-    let path = line.strip_prefix("shell-source:").unwrap().trim();
-    if path.is_empty() {
-        return Err(ParseError::new(number, "shell-source needs a script path"));
-    }
-    pipeline.shell_sources.push(path.to_owned());
-    Ok(())
 }
 
 fn parse_command(line: &str, number: usize) -> Result<CommandDef, ParseError> {

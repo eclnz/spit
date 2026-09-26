@@ -1,4 +1,5 @@
 use std::fs;
+use std::os::unix::fs::PermissionsExt;
 use std::process::{Command, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -264,8 +265,8 @@ fn named_many_port_expands_in_entity_order_as_separate_arguments() {
 }
 
 #[test]
-fn declared_shell_source_provides_a_callable_function() {
-    let text = "source raw [id]\npath raw: input/{id}.txt\npath result: output/{id}.txt\nshell-source: scripts/functions.sh\noperation copy(data: one)\ncommand copy: copy_data {data} {output}\nresult = copy(raw)\nsources:\n  raw[id=x]\n";
+fn command_uses_executable_on_path() {
+    let text = "source raw [id]\npath raw: input/{id}.txt\npath result: output/{id}.txt\noperation copy(data: one)\ncommand copy: copy_data {data} {output}\nresult = copy(raw)\nsources:\n  raw[id=x]\n";
     let (pipeline, inventory) = parse_document(text).unwrap();
     let dag = resolve(&pipeline, &inventory.unwrap()).unwrap();
     let script = render_bash(&pipeline, &dag).unwrap();
@@ -274,21 +275,27 @@ fn declared_shell_source_provides_a_callable_function() {
         .unwrap()
         .as_nanos();
     let root = std::env::temp_dir().join(format!(
-        "spit sourced function {} {suffix}",
+        "spit path command {} {suffix}",
         std::process::id()
     ));
     fs::create_dir_all(root.join("input")).unwrap();
-    fs::create_dir_all(root.join("scripts")).unwrap();
+    fs::create_dir_all(root.join("bin")).unwrap();
     fs::write(root.join("input/x.txt"), "hello\n").unwrap();
-    fs::write(
-        root.join("scripts/functions.sh"),
-        "copy_data() { cp -- \"$1\" \"$2\"; }\n",
-    )
-    .unwrap();
+    let executable = root.join("bin/copy_data");
+    fs::write(&executable, "#!/bin/sh\ncp \"$1\" \"$2\"\n").unwrap();
+    let mut permissions = fs::metadata(&executable).unwrap().permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&executable, permissions).unwrap();
+    let path = format!(
+        "{}:{}",
+        root.join("bin").display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
     let run = Command::new("bash")
         .arg("-c")
         .arg(&script)
         .env("SPIT_ROOT", &root)
+        .env("PATH", path)
         .output()
         .unwrap();
     assert!(

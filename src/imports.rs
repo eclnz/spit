@@ -96,11 +96,6 @@ pub(crate) fn apply_import(
     pipeline
         .constraints
         .extend(imported.constraints.iter().cloned());
-    for source in &imported.shell_sources {
-        if !pipeline.shell_sources.contains(source) {
-            pipeline.shell_sources.push(source.clone());
-        }
-    }
     Ok(())
 }
 
@@ -167,11 +162,6 @@ fn select_import(module: &Pipeline, spec: &UseSpec, line: usize) -> Result<Pipel
                 let mut command = command.clone();
                 command.operation = qualified.clone();
                 selected.commands.push(command);
-            }
-            for source in &module.shell_sources {
-                if !selected.shell_sources.contains(source) {
-                    selected.shell_sources.push(source.clone());
-                }
             }
         } else if let Some(source) = source {
             if selected

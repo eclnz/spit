@@ -197,15 +197,6 @@ pub fn render_bash(pipeline: &Pipeline, dag: &ResolvedDag) -> Result<String, Bas
     if paths.keys().any(|identity| !outputs.contains(identity)) {
         script.push('\n');
     }
-    for source in &pipeline.shell_sources {
-        validate_shell_source(source)?;
-        writeln!(script, "spit_require {}", shell_path(source)).unwrap();
-        writeln!(script, "source {}", shell_path(source)).unwrap();
-    }
-    if !pipeline.shell_sources.is_empty() {
-        script.push('\n');
-    }
-
     for job in &dag.jobs {
         let operation = operations.get(job.operation.as_str()).ok_or_else(|| {
             error(format!(
@@ -236,21 +227,6 @@ pub fn render_bash(pipeline: &Pipeline, dag: &ResolvedDag) -> Result<String, Bas
         writeln!(script, "spit_require {}\n", shell_path(output_path)).unwrap();
     }
     Ok(script)
-}
-
-fn validate_shell_source(path: &str) -> Result<(), BashError> {
-    if path.starts_with('/')
-        || path
-            .split('/')
-            .any(|part| part.is_empty() || part == "." || part == "..")
-        || path.contains('{')
-        || path.contains('}')
-    {
-        return Err(error(format!(
-            "shell-source must be a literal relative path: `{path}`"
-        )));
-    }
-    Ok(())
 }
 
 /// Validate concrete artifact path bindings without requiring commands.

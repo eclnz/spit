@@ -179,9 +179,14 @@ fn named_ports_and_declared_aggregate_shape_are_checked() {
 }
 
 #[test]
-fn shell_source_stays_in_pipeline_when_following_embedded_inventory() {
+fn shell_source_is_rejected_with_migration_guidance() {
     let text = "source raw [id]\noperation copy(one)\nresult = copy(raw)\nsources:\n  raw[id=x]\nshell-source: scripts/functions.sh\n";
-    let (pipeline, inventory) = parse_document(text).unwrap();
-    assert_eq!(pipeline.shell_sources, vec!["scripts/functions.sh"]);
-    assert_eq!(inventory.unwrap().artifacts.len(), 1);
+    let error = parse_document(text).unwrap_err();
+    assert_eq!(error.line, 6);
+    assert!(error.message.contains("executable available on PATH"));
+
+    let error = parse_pipeline("products:\n  raw [id]\nshell-source: scripts/functions.sh\n")
+        .unwrap_err();
+    assert_eq!(error.line, 3);
+    assert!(error.message.contains("executable available on PATH"));
 }

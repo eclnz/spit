@@ -135,11 +135,10 @@ Declare an operation before its first use. Inputs in a call follow the port orde
 
 Input port names are optional. An unnamed single input is `{input}`; multiple unnamed inputs are `{input1}`, `{input2}`, and so on. `{output}` is the output path. Command templates give ordered words and arguments, not shell pipelines or redirection.
 
-To call a shell function, declare its script and then use the function name in a command:
+The first word of a command must be an executable available on `PATH` (or an executable path). SPIT emits that command without managing its installation or loading shell functions:
 
 ```text
-shell-source: scripts/functions.sh
-command process: my_process {image} {output}
+command process: process_tool {image} {output}
 ```
 
 ### Reuse definitions
