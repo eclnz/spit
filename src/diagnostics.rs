@@ -1,17 +1,40 @@
 //! Editor-friendly validation of an in-memory SPIT document.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::path::Path;
 
 use crate::bash::collect_commands;
-use crate::parser::glued_comment;
+use crate::imports::parse_located_document;
+use crate::parser::{glued_comment, parse_document_with_imports, ParsedDocument, SourceMap};
 use crate::paths::collect_paths;
 use crate::resolver::collect_pipeline;
 use crate::{
-    parse_document, parse_document_at, parse_source_inventory, resolve, DefinitionSubject,
-    EntityBinding, InputBinding, ParseError, Pipeline, ResolveError, SourceInventory,
+    parse_source_inventory, resolve, DefinitionSubject, EntityBinding, InputBinding, ParseError,
+    ParseErrorKind, Pipeline, ResolveError,
 };
+
+/// Which input text a diagnostic refers to.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
+pub enum DiagnosticSource {
+    Pipeline,
+    Inventory,
+}
+
+impl DiagnosticSource {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Pipeline => "pipeline",
+            Self::Inventory => "inventory",
+        }
+    }
+}
+
+impl fmt::Display for DiagnosticSource {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub enum Severity {
@@ -31,14 +54,13 @@ impl Severity {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Diagnostic {
     pub severity: Severity,
-    /// `"pipeline"`, or `"inventory"` for a separate inventory file.
-    pub source: &'static str,
+    pub source: DiagnosticSource,
     pub line: Option<usize>,
     pub message: String,
 }
 
 impl Diagnostic {
-    fn error(source: &'static str, line: Option<usize>, message: String) -> Self {
+    fn error(source: DiagnosticSource, line: Option<usize>, message: String) -> Self {
         Self {
             severity: Severity::Error,
             source,
@@ -57,10 +79,10 @@ impl fmt::Display for Diagnostic {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}: ", self.severity.as_str())?;
         match (self.source, self.line) {
-            ("inventory", Some(line)) => write!(f, "inventory line {line}: ")?,
-            ("inventory", None) => f.write_str("inventory: ")?,
-            (_, Some(line)) => write!(f, "line {line}: ")?,
-            (_, None) => {}
+            (DiagnosticSource::Inventory, Some(line)) => write!(f, "inventory line {line}: ")?,
+            (DiagnosticSource::Inventory, None) => f.write_str("inventory: ")?,
+            (DiagnosticSource::Pipeline, Some(line)) => write!(f, "line {line}: ")?,
+            (DiagnosticSource::Pipeline, None) => {}
         }
         f.write_str(&self.message)
     }
@@ -73,50 +95,57 @@ impl fmt::Display for Diagnostic {
 /// inventory still allows every other check. Diagnostics are ordered by
 /// line, with at most one error per line.
 pub fn diagnose(text: &str, source_text: Option<&str>) -> Vec<Diagnostic> {
-    diagnose_with_parser(text, source_text, parse_document)
+    diagnose_with_parser(text, source_text, |text| {
+        parse_document_with_imports(text, &BTreeMap::new())
+    })
 }
 
 /// Diagnose a document with its location available for resolving imports.
 pub fn diagnose_at(text: &str, source_text: Option<&str>, path: &Path) -> Vec<Diagnostic> {
-    diagnose_with_parser(text, source_text, |text| parse_document_at(text, path))
+    diagnose_with_parser(text, source_text, |text| parse_located_document(text, path))
 }
 
 fn diagnose_with_parser(
     text: &str,
     source_text: Option<&str>,
-    parser: impl Fn(&str) -> Result<(Pipeline, Option<SourceInventory>), ParseError>,
+    parser: impl Fn(&str) -> Result<ParsedDocument, ParseError>,
 ) -> Vec<Diagnostic> {
     let (document, pipeline_errors) = recover_parse_errors(text, parser);
-    let (external_inventory, inventory_errors) = if let Some(source_text) = source_text {
-        recover_parse_errors(source_text, parse_source_inventory)
-    } else {
-        (None, Vec::new())
-    };
+    let (external_inventory, inventory_errors) = source_text.map_or_else(
+        || (None, Vec::new()),
+        |source_text| recover_parse_errors(source_text, parse_source_inventory),
+    );
     let mut diagnostics: Vec<_> = pipeline_errors
         .into_iter()
-        .map(|error| Diagnostic::error("pipeline", Some(error.line), error.message))
+        .map(|error| (DiagnosticSource::Pipeline, error))
         .chain(
             inventory_errors
                 .into_iter()
-                .map(|error| Diagnostic::error("inventory", Some(error.line), error.message)),
+                .map(|error| (DiagnosticSource::Inventory, error)),
         )
+        .map(|(source, error)| Diagnostic::error(source, Some(error.line), error.message))
         .collect();
     if !diagnostics.is_empty() {
         return finish(diagnostics, text, source_text);
     }
 
-    let (pipeline, embedded_inventory) = document.expect("document parsed without errors");
+    let document = document.expect("document parsed without errors");
     let inventory_text = source_text.unwrap_or(text);
-    diagnostics.extend(pipeline_diagnostics(&pipeline, inventory_text));
+    diagnostics.extend(pipeline_diagnostics(&document, inventory_text));
     if diagnostics.iter().any(Diagnostic::is_error) {
         return finish(diagnostics, text, source_text);
     }
     let inventory = external_inventory
-        .or(embedded_inventory)
-        .unwrap_or_else(SourceInventory::default);
-    if let Err(error) = resolve(&pipeline, &inventory) {
-        let (source, line) =
-            error_location(&pipeline, &error, inventory_text, source_text.is_some());
+        .or(document.inventory)
+        .unwrap_or_default();
+    if let Err(error) = resolve(&document.pipeline, &inventory) {
+        let (source, line) = error_location(
+            &document.pipeline,
+            &document.lines,
+            &error,
+            inventory_text,
+            source_text.is_some(),
+        );
         diagnostics.push(Diagnostic::error(source, line, error.to_string()));
     }
     finish(diagnostics, text, source_text)
@@ -128,7 +157,10 @@ fn finish(
     text: &str,
     source_text: Option<&str>,
 ) -> Vec<Diagnostic> {
-    let texts = [("pipeline", Some(text)), ("inventory", source_text)];
+    let texts = [
+        (DiagnosticSource::Pipeline, Some(text)),
+        (DiagnosticSource::Inventory, source_text),
+    ];
     for (source, text) in texts {
         let Some(text) = text else { continue };
         for (index, line) in text.lines().enumerate() {
@@ -164,9 +196,9 @@ fn finish(
 
 /// Every error in the pipeline text, then warnings about names that did not
 /// fail. Needs no inventory.
-fn pipeline_diagnostics(pipeline: &Pipeline, inventory_text: &str) -> Vec<Diagnostic> {
+fn pipeline_diagnostics(document: &ParsedDocument, inventory_text: &str) -> Vec<Diagnostic> {
+    let (pipeline, lines) = (&document.pipeline, &document.lines);
     let checked = collect_pipeline(pipeline);
-    let lines = &pipeline.source_lines;
     let mut diagnostics: Vec<_> = checked
         .errors
         .iter()
@@ -178,17 +210,25 @@ fn pipeline_diagnostics(pipeline: &Pipeline, inventory_text: &str) -> Vec<Diagno
                 DefinitionSubject::Constraint(index) => lines.constraint_lines.get(*index).copied(),
                 DefinitionSubject::Source(_) | DefinitionSubject::None => None,
             }
-            .or_else(|| error_location(pipeline, error, inventory_text, false).1);
-            Diagnostic::error("pipeline", line, error.to_string())
+            .or_else(|| error_location(pipeline, lines, error, inventory_text, false).1);
+            Diagnostic::error(DiagnosticSource::Pipeline, line, error.to_string())
         })
         .collect();
-    for error in collect_commands(pipeline, &checked.poisoned) {
-        diagnostics.push(Diagnostic::error("pipeline", error.line, error.message));
+    for error in collect_commands(pipeline, lines, &checked.poisoned) {
+        diagnostics.push(Diagnostic::error(
+            DiagnosticSource::Pipeline,
+            error.line,
+            error.message,
+        ));
     }
-    for error in collect_paths(pipeline, &checked.poisoned).1 {
-        diagnostics.push(Diagnostic::error("pipeline", error.line, error.message));
+    for error in collect_paths(pipeline, lines, &checked.poisoned).1 {
+        diagnostics.push(Diagnostic::error(
+            DiagnosticSource::Pipeline,
+            error.line,
+            error.message,
+        ));
     }
-    diagnostics.extend(warnings(pipeline, &checked.poisoned));
+    diagnostics.extend(warnings(pipeline, lines, &checked.poisoned));
     diagnostics
 }
 
@@ -197,7 +237,7 @@ fn pipeline_diagnostics(pipeline: &Pipeline, inventory_text: &str) -> Vec<Diagno
 fn order(mut diagnostics: Vec<Diagnostic>) -> Vec<Diagnostic> {
     let key = |diagnostic: &Diagnostic| {
         (
-            diagnostic.source == "inventory",
+            diagnostic.source == DiagnosticSource::Inventory,
             diagnostic.line.is_none(),
             diagnostic.line,
         )
@@ -224,11 +264,10 @@ fn order(mut diagnostics: Vec<Diagnostic>) -> Vec<Diagnostic> {
 /// error. Nothing is reported as unused in a file with no steps, which is a
 /// library of definitions, nor for imported names: a library is imported for
 /// the definitions a pipeline needs, and is linted on its own.
-fn warnings(pipeline: &Pipeline, skip: &BTreeSet<String>) -> Vec<Diagnostic> {
-    let lines = &pipeline.source_lines;
+fn warnings(pipeline: &Pipeline, lines: &SourceMap, skip: &BTreeSet<String>) -> Vec<Diagnostic> {
     let warn = |line, message| Diagnostic {
         severity: Severity::Warning,
-        source: "pipeline",
+        source: DiagnosticSource::Pipeline,
         line,
         message,
     };
@@ -322,18 +361,15 @@ fn recover_parse_errors<T>(
         match parse(&lines.join("\n")) {
             Ok(parsed) => return (Some(parsed), errors),
             Err(error) => {
-                let Some(index) = error.line.checked_sub(1) else {
+                let Some(line) = error
+                    .line
+                    .checked_sub(1)
+                    .and_then(|index| lines.get_mut(index))
+                    .filter(|line| !line.trim().is_empty())
+                else {
                     errors.push(error);
                     return (None, errors);
                 };
-                let Some(line) = lines.get_mut(index) else {
-                    errors.push(error);
-                    return (None, errors);
-                };
-                if line.trim().is_empty() {
-                    errors.push(error);
-                    return (None, errors);
-                }
                 line.clear();
                 if !depends_on_invalid_operation(&error, &errors, &original_lines) {
                     errors.push(error);
@@ -343,23 +379,14 @@ fn recover_parse_errors<T>(
     }
 }
 
+/// A call to an operation whose own declaration already failed to parse would
+/// only repeat that error, so it is not reported separately.
 fn depends_on_invalid_operation(
     error: &ParseError,
     previous_errors: &[ParseError],
     original_lines: &[String],
 ) -> bool {
-    if !error
-        .message
-        .ends_with("must be declared before its first flow step")
-    {
-        return false;
-    }
-    let Some(operation) = error
-        .message
-        .strip_prefix("operation `")
-        .and_then(|message| message.split_once('`'))
-        .map(|(name, _)| name)
-    else {
+    let ParseErrorKind::UndeclaredOperation { name: operation } = &error.kind else {
         return false;
     };
     previous_errors.iter().any(|previous| {
@@ -369,18 +396,18 @@ fn depends_on_invalid_operation(
             .is_some_and(|declaration| match declaration.split_once('(') {
                 Some((name, _)) => name.trim() == operation,
                 // Without `(` the name boundary is unknown, so accept a prefix.
-                None => declaration.starts_with(operation),
+                None => declaration.starts_with(operation.as_str()),
             })
     })
 }
 
 fn error_location(
     pipeline: &Pipeline,
+    lines: &SourceMap,
     error: &ResolveError,
     inventory_text: &str,
     external_inventory: bool,
-) -> (&'static str, Option<usize>) {
-    let lines = &pipeline.source_lines;
+) -> (DiagnosticSource, Option<usize>) {
     let invocation_line = |output: &str| lines.invocations.get(output).copied();
     let unique_operation_line = |operation: &str| {
         let mut matching = pipeline
@@ -435,7 +462,7 @@ fn error_location(
         ResolveError::DuplicateSourceArtifact { .. } => None,
     };
     if pipeline_line.is_some() {
-        return ("pipeline", pipeline_line);
+        return (DiagnosticSource::Pipeline, pipeline_line);
     }
 
     let inventory_line = match error {
@@ -455,17 +482,9 @@ fn error_location(
             .next(),
         _ => None,
     };
-    if inventory_line.is_some() {
-        (
-            if external_inventory {
-                "inventory"
-            } else {
-                "pipeline"
-            },
-            inventory_line,
-        )
-    } else {
-        ("pipeline", None)
+    match inventory_line {
+        Some(_) if external_inventory => (DiagnosticSource::Inventory, inventory_line),
+        _ => (DiagnosticSource::Pipeline, inventory_line),
     }
 }
 

@@ -4,8 +4,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{self, Write};
 use std::path::Path;
 
+use crate::model::ArtifactKey;
 use crate::model::{ArtifactInstance, Cardinality, Job, OperationDef, Pipeline, ResolvedDag};
-use crate::paths::{bound_paths, inspect_paths, key, ArtifactKey, PathError};
+use crate::parser::SourceMap;
+use crate::paths::{bound_paths, inspect_paths, PathError};
 use crate::template::{parse_template, Part};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -50,10 +52,6 @@ fn error(message: impl Into<String>) -> BashError {
     }
 }
 
-fn command_line(pipeline: &Pipeline, index: usize) -> Option<usize> {
-    pipeline.source_lines.command_lines.get(index).copied()
-}
-
 /// Generate a script for the concrete jobs already selected by `resolve`.
 /// Each artifact path is derived from its product and entity bindings.
 pub fn render_bash(pipeline: &Pipeline, dag: &ResolvedDag) -> Result<String, BashError> {
@@ -70,7 +68,7 @@ pub fn render_bash(pipeline: &Pipeline, dag: &ResolvedDag) -> Result<String, Bas
         .enumerate()
         .map(|(index, command)| (command.operation.as_str(), (index, command)))
         .collect();
-    let outputs: BTreeSet<_> = dag.jobs.iter().map(|job| key(&job.output)).collect();
+    let outputs: BTreeSet<_> = dag.jobs.iter().map(|job| job.output.key()).collect();
     let paths = bound_paths(pipeline, dag)?;
 
     let mut script =
@@ -92,18 +90,13 @@ pub fn render_bash(pipeline: &Pipeline, dag: &ResolvedDag) -> Result<String, Bas
                 job.operation
             ))
         })?;
-        let (command_index, command) = commands.get(job.operation.as_str()).ok_or_else(|| {
+        let (_, command) = commands.get(job.operation.as_str()).ok_or_else(|| {
             error(format!(
                 "no command defined for operation `{}`",
                 job.operation
             ))
-            .at(pipeline
-                .source_lines
-                .operations
-                .get(&operation.name)
-                .copied())
         })?;
-        let output_path = paths.get(&key(&job.output)).unwrap();
+        let output_path = &paths[&job.output.key()];
         let parent = Path::new(output_path)
             .parent()
             .and_then(|path| path.to_str())
@@ -114,8 +107,7 @@ pub fn render_bash(pipeline: &Pipeline, dag: &ResolvedDag) -> Result<String, Bas
         writeln!(
             script,
             "{}",
-            render_command(&command.template, operation, job, &paths)
-                .map_err(|e| e.at(command_line(pipeline, *command_index)))?
+            render_command(&command.template, operation, job, &paths)?
         )
         .unwrap();
         writeln!(script, "spit_require {}\n", shell_path(output_path)).unwrap();
@@ -126,7 +118,8 @@ pub fn render_bash(pipeline: &Pipeline, dag: &ResolvedDag) -> Result<String, Bas
 /// Check every declared command against its operation without resolving jobs:
 /// the template must parse, name only known placeholders, and write `{output}`.
 pub fn validate_commands(pipeline: &Pipeline) -> Result<(), BashError> {
-    match collect_commands(pipeline, &BTreeSet::new())
+    let lines = SourceMap::default();
+    match collect_commands(pipeline, &lines, &BTreeSet::new())
         .into_iter()
         .next()
     {
@@ -137,7 +130,11 @@ pub fn validate_commands(pipeline: &Pipeline) -> Result<(), BashError> {
 
 /// Check every command, collecting each error. Commands for operations in
 /// `skip` belong to declarations that already failed and are not checked.
-pub(crate) fn collect_commands(pipeline: &Pipeline, skip: &BTreeSet<String>) -> Vec<BashError> {
+pub(crate) fn collect_commands(
+    pipeline: &Pipeline,
+    lines: &SourceMap,
+    skip: &BTreeSet<String>,
+) -> Vec<BashError> {
     let operations: BTreeMap<_, _> = pipeline
         .operations
         .iter()
@@ -149,7 +146,7 @@ pub(crate) fn collect_commands(pipeline: &Pipeline, skip: &BTreeSet<String>) -> 
         if skip.contains(&command.operation) {
             continue;
         }
-        let line = command_line(pipeline, index);
+        let line = lines.command_line(index);
         let Some(operation) = operations.get(command.operation.as_str()) else {
             errors.push(
                 error(format!(
@@ -255,7 +252,7 @@ fn render_command(
         if let [Part::Placeholder(name)] = parts.as_slice() {
             if let Some(artifacts) = many_input(operation, job, name) {
                 for artifact in artifacts {
-                    args.push(shell_path(paths.get(&key(artifact)).unwrap()));
+                    args.push(shell_path(&paths[&artifact.key()]));
                 }
                 continue;
             }
@@ -266,7 +263,7 @@ fn render_command(
                 Part::Literal(value) => arg.push_str(&shell_quote(&value)),
                 Part::Placeholder(name) if name == "output" => {
                     uses_output = true;
-                    arg.push_str(&shell_path(paths.get(&key(&job.output)).unwrap()));
+                    arg.push_str(&shell_path(&paths[&job.output.key()]));
                 }
                 Part::Placeholder(name) => {
                     if name == "inputs" && many_input(operation, job, &name).is_some() {
@@ -293,7 +290,7 @@ fn render_command(
                         .inputs
                         .get(index)
                         .ok_or_else(|| error(format!("job {} lacks input `{name}`", job.id)))?;
-                    arg.push_str(&shell_path(paths.get(&key(artifact)).unwrap()));
+                    arg.push_str(&shell_path(&paths[&artifact.key()]));
                 }
             }
         }

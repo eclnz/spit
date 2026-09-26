@@ -337,34 +337,23 @@ fn commands_are_validated_even_without_resolved_jobs() {
 }
 
 #[test]
-fn path_rules_that_cannot_separate_artifacts_are_rejected_with_their_line() {
+fn path_rules_that_cannot_separate_artifacts_are_rejected() {
     let check = |text: &str| inspect_paths(&parse_pipeline(text).unwrap()).map(|_| ());
 
     let error = check("source raw [id, batch]\npath: {product}/{entities}.csv\npath raw: raw/{id}.csv\n")
         .unwrap_err();
-    assert_eq!(error.line, Some(3));
     assert!(error.message.contains("omits dimension `batch`"), "{error}");
 
     let error = check("source raw [id]\npath: {entities}.csv\noperation clean(one)\ncleaned = clean(raw)\n")
         .unwrap_err();
-    assert_eq!(error.line, Some(2));
     assert!(error.message.contains("`raw` and `cleaned`"), "{error}");
 
     let error = check("source raw [id]\npath: {product}/{id}/{shard}.csv\n").unwrap_err();
-    assert_eq!(error.to_string(), "line 2: path template for `raw` uses absent dimension `shard`");
+    assert_eq!(error.to_string(), "path template for `raw` uses absent dimension `shard`");
 
     // Rules naming different dimensions are not treated as colliding.
     check("source raw [id]\nsource extra [batch]\npath raw: out/{id}.csv\npath extra: out/{batch}.csv\n")
         .unwrap();
-}
-
-#[test]
-fn command_errors_name_the_command_line() {
-    let pipeline = parse_pipeline(
-        "source raw [id]\noperation clean(one)\n\ncommand clean: tool {raw} {output}\n",
-    )
-    .unwrap();
-    assert_eq!(validate_commands(&pipeline).unwrap_err().line, Some(4));
 }
 
 #[test]

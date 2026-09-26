@@ -1,7 +1,7 @@
 use spit::{
     render_dag, resolve, CountRequirement, CoverageRule, EntityBinding, InputBinding, InputPort,
     Invocation, OperationDef, Pipeline, ProductDef, ResolveError, ShapeRule, SourceInventory,
-    SourceRecord,
+    SourceRecord, TypeExpr,
 };
 
 fn artifact(product: &str, pairs: &[(&str, &str)]) -> SourceRecord {
@@ -19,8 +19,8 @@ fn artifact(product: &str, pairs: &[(&str, &str)]) -> SourceRecord {
 fn denoise_operation() -> OperationDef {
     OperationDef::new(
         "denoise",
-        vec![InputPort::one("input", "BOLD")],
-        "DenoisedBOLD",
+        vec![InputPort::one("input", TypeExpr::named("BOLD"))],
+        TypeExpr::named("DenoisedBOLD"),
         ShapeRule::Preserve,
     )
 }
@@ -29,10 +29,10 @@ fn register_operation() -> OperationDef {
     OperationDef::new(
         "register",
         vec![
-            InputPort::one("moving", "DenoisedBOLD"),
-            InputPort::one("reference", "T1w"),
+            InputPort::one("moving", TypeExpr::named("DenoisedBOLD")),
+            InputPort::one("reference", TypeExpr::named("T1w")),
         ],
-        "RegisteredBOLD",
+        TypeExpr::named("RegisteredBOLD"),
         ShapeRule::Preserve,
     )
 }
@@ -40,9 +40,17 @@ fn register_operation() -> OperationDef {
 fn registration_pipeline() -> Pipeline {
     Pipeline {
         products: vec![
-            ProductDef::new("denoised", "DenoisedBOLD", &["sub", "ses", "run"]),
-            ProductDef::new("t1w", "T1w", &["sub", "ses"]),
-            ProductDef::new("registered", "RegisteredBOLD", &["sub", "ses", "run"]),
+            ProductDef::new(
+                "denoised",
+                TypeExpr::named("DenoisedBOLD"),
+                ["sub", "ses", "run"],
+            ),
+            ProductDef::new("t1w", TypeExpr::named("T1w"), ["sub", "ses"]),
+            ProductDef::new(
+                "registered",
+                TypeExpr::named("RegisteredBOLD"),
+                ["sub", "ses", "run"],
+            ),
         ],
         operations: vec![register_operation()],
         invocations: vec![Invocation::new(
@@ -61,8 +69,12 @@ fn registration_pipeline() -> Pipeline {
 fn expands_one_to_one_over_two_runs() {
     let pipeline = Pipeline {
         products: vec![
-            ProductDef::new("bold", "BOLD", &["sub", "ses", "run"]),
-            ProductDef::new("denoised", "DenoisedBOLD", &["sub", "ses", "run"]),
+            ProductDef::new("bold", TypeExpr::named("BOLD"), ["sub", "ses", "run"]),
+            ProductDef::new(
+                "denoised",
+                TypeExpr::named("DenoisedBOLD"),
+                ["sub", "ses", "run"],
+            ),
         ],
         operations: vec![denoise_operation()],
         invocations: vec![Invocation::new(
@@ -127,7 +139,7 @@ fn reports_missing_input() {
 #[test]
 fn rejects_secondary_input_with_dimensions_absent_from_driver() {
     let mut pipeline = registration_pipeline();
-    pipeline.products[1] = ProductDef::new("t1w", "T1w", &["sub", "ses", "acq"]);
+    pipeline.products[1] = ProductDef::new("t1w", TypeExpr::named("T1w"), ["sub", "ses", "acq"]);
     let inventory = SourceInventory {
         artifacts: vec![
             artifact("denoised", &[("sub", "01"), ("ses", "01"), ("run", "1")]),
@@ -149,9 +161,11 @@ fn rejects_secondary_input_with_dimensions_absent_from_driver() {
 #[test]
 fn checks_types_before_concrete_expansion() {
     let mut pipeline = registration_pipeline();
-    pipeline
-        .products
-        .push(ProductDef::new("bold", "BOLD", &["sub", "ses", "run"]));
+    pipeline.products.push(ProductDef::new(
+        "bold",
+        TypeExpr::named("BOLD"),
+        ["sub", "ses", "run"],
+    ));
     pipeline.invocations[0].inputs[1] = InputBinding::product("bold");
 
     assert!(matches!(
@@ -164,13 +178,17 @@ fn checks_types_before_concrete_expansion() {
 fn aggregates_each_fixed_dimension_group() {
     let pipeline = Pipeline {
         products: vec![
-            ProductDef::new("registered", "RegisteredBOLD", &["sub", "ses", "run"]),
-            ProductDef::new("mean_bold", "MeanBOLD", &["sub", "ses"]),
+            ProductDef::new(
+                "registered",
+                TypeExpr::named("RegisteredBOLD"),
+                ["sub", "ses", "run"],
+            ),
+            ProductDef::new("mean_bold", TypeExpr::named("MeanBOLD"), ["sub", "ses"]),
         ],
         operations: vec![OperationDef::new(
             "mean",
-            vec![InputPort::many("input", "RegisteredBOLD")],
-            "MeanBOLD",
+            vec![InputPort::many("input", TypeExpr::named("RegisteredBOLD"))],
+            TypeExpr::named("MeanBOLD"),
             ShapeRule::Aggregate,
         )],
         invocations: vec![Invocation::new(
@@ -204,14 +222,17 @@ fn aggregates_each_fixed_dimension_group() {
 fn rejects_accidental_cartesian_product() {
     let pipeline = Pipeline {
         products: vec![
-            ProductDef::new("a", "A", &["sub", "run"]),
-            ProductDef::new("b", "B", &["sub", "echo"]),
-            ProductDef::new("c", "C", &["sub", "run"]),
+            ProductDef::new("a", TypeExpr::named("A"), ["sub", "run"]),
+            ProductDef::new("b", TypeExpr::named("B"), ["sub", "echo"]),
+            ProductDef::new("c", TypeExpr::named("C"), ["sub", "run"]),
         ],
         operations: vec![OperationDef::new(
             "combine",
-            vec![InputPort::one("a", "A"), InputPort::one("b", "B")],
-            "C",
+            vec![
+                InputPort::one("a", TypeExpr::named("A")),
+                InputPort::one("b", TypeExpr::named("B")),
+            ],
+            TypeExpr::named("C"),
             ShapeRule::Preserve,
         )],
         invocations: vec![Invocation::new(
@@ -268,13 +289,13 @@ fn catches_duplicate_source_artifact() {
 fn catches_product_cycle() {
     let pipeline = Pipeline {
         products: vec![
-            ProductDef::new("a", "A", &["sub"]),
-            ProductDef::new("b", "A", &["sub"]),
+            ProductDef::new("a", TypeExpr::named("A"), ["sub"]),
+            ProductDef::new("b", TypeExpr::named("A"), ["sub"]),
         ],
         operations: vec![OperationDef::new(
             "copy",
-            vec![InputPort::one("input", "A")],
-            "A",
+            vec![InputPort::one("input", TypeExpr::named("A"))],
+            TypeExpr::named("A"),
             ShapeRule::Preserve,
         )],
         invocations: vec![
@@ -292,10 +313,14 @@ fn catches_product_cycle() {
 #[test]
 fn coverage_checks_each_observed_context_without_a_global_count() {
     let pipeline = Pipeline {
-        products: vec![ProductDef::new("image", "Image", &["subject", "visit"])],
+        products: vec![ProductDef::new(
+            "image",
+            TypeExpr::named("Image"),
+            ["subject", "visit"],
+        )],
         constraints: vec![CoverageRule::new(
             "image",
-            &["subject", "visit"],
+            ["subject", "visit"],
             CountRequirement::Exactly(1),
         )],
         ..Pipeline::default()
@@ -339,19 +364,27 @@ fn source_inventory_changes_job_count_without_changing_pipeline() {
 fn full_pipeline() -> Pipeline {
     Pipeline {
         products: vec![
-            ProductDef::new("bold", "BOLD", &["sub", "ses", "run"]),
-            ProductDef::new("t1w", "T1w", &["sub", "ses"]),
-            ProductDef::new("denoised", "DenoisedBOLD", &["sub", "ses", "run"]),
-            ProductDef::new("registered", "RegisteredBOLD", &["sub", "ses", "run"]),
-            ProductDef::new("mean_bold", "MeanBOLD", &["sub", "ses"]),
+            ProductDef::new("bold", TypeExpr::named("BOLD"), ["sub", "ses", "run"]),
+            ProductDef::new("t1w", TypeExpr::named("T1w"), ["sub", "ses"]),
+            ProductDef::new(
+                "denoised",
+                TypeExpr::named("DenoisedBOLD"),
+                ["sub", "ses", "run"],
+            ),
+            ProductDef::new(
+                "registered",
+                TypeExpr::named("RegisteredBOLD"),
+                ["sub", "ses", "run"],
+            ),
+            ProductDef::new("mean_bold", TypeExpr::named("MeanBOLD"), ["sub", "ses"]),
         ],
         operations: vec![
             denoise_operation(),
             register_operation(),
             OperationDef::new(
                 "mean",
-                vec![InputPort::many("input", "RegisteredBOLD")],
-                "MeanBOLD",
+                vec![InputPort::many("input", TypeExpr::named("RegisteredBOLD"))],
+                TypeExpr::named("MeanBOLD"),
                 ShapeRule::Aggregate,
             ),
         ],

@@ -4,10 +4,11 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{self, Write};
 use std::path::Path;
 
-use crate::model::{ArtifactInstance, EntityBinding, Pipeline, ProductDef, ResolvedDag};
+use crate::model::{
+    ArtifactInstance, ArtifactKey, EntityBinding, Pipeline, ProductDef, ResolvedDag,
+};
+use crate::parser::SourceMap;
 use crate::template::{parse_template, Part};
-
-pub(crate) type ArtifactKey = (String, EntityBinding);
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PathError {
@@ -39,15 +40,6 @@ pub(crate) fn error(message: impl Into<String>) -> PathError {
     PathError {
         line: None,
         message: message.into(),
-    }
-}
-
-/// The pipeline line that declares the path rule used for `product`.
-fn path_rule_line(pipeline: &Pipeline, product: &str) -> Option<usize> {
-    if pipeline.product_paths.contains_key(product) {
-        pipeline.source_lines.paths.get(product).copied()
-    } else {
-        pipeline.source_lines.default_path
     }
 }
 
@@ -126,7 +118,7 @@ impl fmt::Display for PathCoverage {
 
 /// Inspect every declared product, including families with no resolved jobs.
 pub fn inspect_paths(pipeline: &Pipeline) -> Result<PathCoverage, PathError> {
-    let (coverage, errors) = collect_paths(pipeline, &BTreeSet::new());
+    let (coverage, errors) = collect_paths(pipeline, &SourceMap::default(), &BTreeSet::new());
     match errors.into_iter().next() {
         Some(error) => Err(error),
         None => Ok(coverage),
@@ -137,6 +129,7 @@ pub fn inspect_paths(pipeline: &Pipeline) -> Result<PathCoverage, PathError> {
 /// `skip` belong to declarations that already failed and are not checked.
 pub(crate) fn collect_paths(
     pipeline: &Pipeline,
+    lines: &SourceMap,
     skip: &BTreeSet<String>,
 ) -> (PathCoverage, Vec<PathError>) {
     let mut errors = Vec::new();
@@ -148,11 +141,8 @@ pub(crate) fn collect_paths(
                 .any(|product| &product.name == name)
         {
             errors.push(
-                error(format!("path refers to unknown product `{name}`")).at(pipeline
-                    .source_lines
-                    .paths
-                    .get(name)
-                    .copied()),
+                error(format!("path refers to unknown product `{name}`"))
+                    .at(lines.paths.get(name).copied()),
             );
         }
     }
@@ -172,7 +162,7 @@ pub(crate) fn collect_paths(
             PathRule::Missing
         };
         if rule != PathRule::Missing && !skip.contains(&product.name) {
-            let line = path_rule_line(pipeline, &product.name);
+            let line = lines.path_rule_line(pipeline, &product.name);
             match validate_path_template(pipeline, product) {
                 Err(e) => errors.push(e.at(line)),
                 // A repeated product name is reported by the resolver as a duplicate.
@@ -239,13 +229,7 @@ fn validate_path_template(pipeline: &Pipeline, product: &ProductDef) -> Result<S
             .collect(),
     );
     let artifact = ArtifactInstance::new(&product.name, product.artifact_type.clone(), entities);
-    let dag = ResolvedDag {
-        jobs: Vec::new(),
-        product_dimensions: [(product.name.clone(), product.dimensions.clone())]
-            .into_iter()
-            .collect(),
-    };
-    bind_path(pipeline, &dag, &artifact)
+    bind_path(pipeline, &product.dimensions, &artifact)
 }
 
 /// Check placeholder brackets in a path template.
@@ -274,7 +258,7 @@ pub fn validate_source_files(
     }
     inspect_paths(pipeline)?.validate(false)?;
     let paths = bound_paths(pipeline, dag)?;
-    let outputs: BTreeSet<_> = dag.jobs.iter().map(|job| key(&job.output)).collect();
+    let outputs: BTreeSet<_> = dag.jobs.iter().map(|job| job.output.key()).collect();
     let mut checked = 0;
     for (artifact, relative) in paths {
         if outputs.contains(&artifact) {
@@ -305,31 +289,31 @@ pub(crate) fn bound_paths(
         .iter()
         .flat_map(|job| job.inputs.iter().chain(std::iter::once(&job.output)))
     {
-        let identity = key(artifact);
+        let identity = artifact.key();
         if paths.contains_key(&identity) {
             continue;
         }
-        let line = path_rule_line(pipeline, &artifact.product);
-        let relative = bind_path(pipeline, dag, artifact).map_err(|e| e.at(line))?;
+        let dimensions = dag
+            .product_dimensions
+            .get(&artifact.product)
+            .ok_or_else(|| error(format!("unknown product `{}`", artifact.product)))?;
+        let relative = bind_path(pipeline, dimensions, artifact)?;
         if let Some(previous) = owners.insert(relative.clone(), identity.clone()) {
             return Err(error(format!(
                 "artifacts `{}[{}]` and `{}[{}]` bind to the same path `{relative}`",
                 previous.0, previous.1, identity.0, identity.1
-            ))
-            .at(line));
+            )));
         }
         paths.insert(identity, relative);
     }
     Ok(paths)
 }
 
-pub(crate) fn key(artifact: &ArtifactInstance) -> ArtifactKey {
-    (artifact.product.clone(), artifact.entities.clone())
-}
-
+/// Bind `artifact` to its relative path. `dimensions` gives the product's
+/// declared dimension order, which `{entities}` follows.
 fn bind_path(
     pipeline: &Pipeline,
-    dag: &ResolvedDag,
+    dimensions: &[String],
     artifact: &ArtifactInstance,
 ) -> Result<String, PathError> {
     let template = pipeline
@@ -351,10 +335,6 @@ fn bind_path(
                 relative.push_str(&artifact.product.replace("::", "."));
             }
             Part::Placeholder(name) if name == "entities" => {
-                let dimensions = dag
-                    .product_dimensions
-                    .get(&artifact.product)
-                    .ok_or_else(|| error(format!("unknown product `{}`", artifact.product)))?;
                 let bindings = dimensions
                     .iter()
                     .map(|dimension| {
