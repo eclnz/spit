@@ -149,7 +149,10 @@ fn later_known_input_refines_an_earlier_partial_variable_binding() {
     substitutions
         .unify(&signature("A"), &product("Frame<Foo>"))
         .unwrap();
-    assert_eq!(substitutions.substitute(&signature("A")), product("Frame<Foo>"));
+    assert_eq!(
+        substitutions.substitute(&signature("A")),
+        product("Frame<Foo>")
+    );
     assert!(matches!(
         substitutions.unify(&signature("A"), &product("Frame<Bar>")),
         Err(TypeUnifyError::VariableConflict { .. })
@@ -268,7 +271,10 @@ fn analytics_join_key_variables_reject_mismatched_relations() {
     let valid = parse_document(include_str!("../examples/analytics/analytics.spit")).unwrap();
     assert_eq!(resolve(&valid.0, &valid.1.unwrap()).unwrap().jobs.len(), 34);
 
-    let invalid = parse_document(include_str!("../examples/analytics/analytics_bad_join.spit")).unwrap();
+    let invalid = parse_document(include_str!(
+        "../examples/analytics/analytics_bad_join.spit"
+    ))
+    .unwrap();
     assert!(matches!(
         resolve(&invalid.0, &invalid.1.unwrap()),
         Err(ResolveError::TypeVariableConflict { .. })

@@ -166,10 +166,16 @@ pub fn render_bash(pipeline: &Pipeline, dag: &ResolvedDag) -> Result<String, Bas
         .collect();
     let mut commands = BTreeMap::new();
     for command in &pipeline.commands {
-        if !operations.contains_key(command.operation.as_str()) {
+        let Some(operation) = operations.get(command.operation.as_str()) else {
             return Err(error(format!(
                 "command refers to unknown operation `{}`",
                 command.operation
+            )));
+        };
+        if operation.inputs.iter().any(|port| port.name == "output") {
+            return Err(error(format!(
+                "operation `{}` has an input port named `output`, which shadows `{{output}}`",
+                operation.name
             )));
         }
         if commands

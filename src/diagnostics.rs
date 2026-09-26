@@ -133,7 +133,11 @@ fn depends_on_invalid_operation(
         original_lines
             .get(previous.line.saturating_sub(1))
             .and_then(|line| line.trim().strip_prefix("operation "))
-            .is_some_and(|declaration| declaration.starts_with(operation))
+            .is_some_and(|declaration| match declaration.split_once('(') {
+                Some((name, _)) => name.trim() == operation,
+                // Without `(` the name boundary is unknown, so accept a prefix.
+                None => declaration.starts_with(operation),
+            })
     })
 }
 

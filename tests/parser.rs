@@ -63,7 +63,8 @@ fn reports_semantic_type_error_after_parsing() {
 
 #[test]
 fn resolves_untyped_pipeline_by_shape_and_cardinality() {
-    let (pipeline, inventory) = parse_document(include_str!("../examples/types/untyped.spit")).unwrap();
+    let (pipeline, inventory) =
+        parse_document(include_str!("../examples/types/untyped.spit")).unwrap();
     assert!(pipeline
         .products
         .iter()
@@ -95,7 +96,8 @@ fn partially_typed_pipeline_accepts_unknown_and_rejects_known_mismatch() {
 
 #[test]
 fn separate_pipeline_still_parses_without_inventory() {
-    let (pipeline, inventory) = parse_document(include_str!("../examples/types/typed.spit")).unwrap();
+    let (pipeline, inventory) =
+        parse_document(include_str!("../examples/types/typed.spit")).unwrap();
     assert!(inventory.is_none());
     assert!(!pipeline.products.is_empty());
 }
@@ -185,8 +187,26 @@ fn shell_source_is_rejected_with_migration_guidance() {
     assert_eq!(error.line, 6);
     assert!(error.message.contains("executable available on PATH"));
 
-    let error = parse_pipeline("products:\n  raw [id]\nshell-source: scripts/functions.sh\n")
-        .unwrap_err();
+    let error =
+        parse_pipeline("products:\n  raw [id]\nshell-source: scripts/functions.sh\n").unwrap_err();
     assert_eq!(error.line, 3);
     assert!(error.message.contains("executable available on PATH"));
+}
+
+#[test]
+fn input_port_cannot_shadow_output_placeholder() {
+    let error =
+        parse_pipeline("source raw [id]\noperation copy(output: Image) -> Image\n").unwrap_err();
+    assert_eq!(error.line, 2);
+    assert!(error.message.contains("`output` is reserved"));
+}
+
+#[test]
+fn commands_header_alone_selects_sectioned_form() {
+    let pipeline =
+        parse_pipeline("products:\n  raw [id]\ncommands:\n  copy: tool {input} {output}\n")
+            .unwrap();
+    assert_eq!(pipeline.commands.len(), 1);
+    let pipeline = parse_pipeline("commands:\n  copy: tool {input} {output}\n").unwrap();
+    assert_eq!(pipeline.commands[0].operation, "copy");
 }
