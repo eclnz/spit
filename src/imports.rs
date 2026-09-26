@@ -4,14 +4,18 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::model::{Pipeline, SourceInventory};
-use crate::parser::{parse_document_with_imports, parse_use, strip_comment, ParseError, UseSpec};
+use crate::model::{CommandDef, CoverageRule, OperationDef, Pipeline, ProductDef, SourceInventory};
+use crate::parser::{
+    parse_document_with_imports, parse_use, strip_comment, ParseError, ParsedDocument,
+    PipelineBuilder, UseSpec,
+};
 
 pub(crate) fn apply_import(
-    pipeline: &mut Pipeline,
+    builder: &mut PipelineBuilder,
     imports: &BTreeMap<usize, Pipeline>,
     line: usize,
 ) -> Result<(), ParseError> {
+    let pipeline = &mut builder.pipeline;
     let imported = imports.get(&line).ok_or_else(|| {
         ParseError::new(
             line,
@@ -69,19 +73,17 @@ pub(crate) fn apply_import(
             ));
         }
     }
+    for command in &imported.commands {
+        builder.add_command(command.clone(), line);
+    }
     for product in &imported.products {
-        pipeline
-            .source_lines
-            .products
-            .insert(product.name.clone(), line);
+        builder.add_product(product.clone(), line);
     }
     for operation in &imported.operations {
-        pipeline
-            .source_lines
-            .operations
-            .insert(operation.name.clone(), line);
+        builder.add_operation(operation.clone(), line);
     }
-    pipeline.source_lines.imported.extend(
+    let lines = &mut builder.lines;
+    lines.imported.extend(
         imported
             .products
             .iter()
@@ -94,27 +96,11 @@ pub(crate) fn apply_import(
             ),
     );
     for product in imported.product_paths.keys() {
-        pipeline.source_lines.paths.insert(product.clone(), line);
+        lines.paths.insert(product.clone(), line);
     }
-    pipeline
-        .source_lines
-        .command_lines
-        .extend(imported.commands.iter().map(|_| line));
     for constraint in &imported.constraints {
-        pipeline
-            .source_lines
-            .constraints
-            .insert(constraint.product.clone(), line);
-        pipeline.source_lines.constraint_lines.push(line);
+        builder.add_constraint(constraint.clone(), line);
     }
-    pipeline.products.extend(imported.products.iter().cloned());
-    pipeline
-        .operations
-        .extend(imported.operations.iter().cloned());
-    pipeline.commands.extend(imported.commands.iter().cloned());
-    pipeline
-        .constraints
-        .extend(imported.constraints.iter().cloned());
     Ok(())
 }
 
@@ -195,17 +181,19 @@ fn select_import(module: &Pipeline, spec: &UseSpec, line: usize) -> Result<Pipel
             {
                 return Err(ParseError::new(line, format!("duplicate import `{name}`")));
             }
-            let mut operation = operation.clone();
-            operation.name = qualified.clone();
-            selected.operations.push(operation);
+            selected.operations.push(OperationDef {
+                name: qualified.clone(),
+                ..operation.clone()
+            });
             for command in module
                 .commands
                 .iter()
                 .filter(|command| command.operation == name)
             {
-                let mut command = command.clone();
-                command.operation = qualified.clone();
-                selected.commands.push(command);
+                selected.commands.push(CommandDef {
+                    operation: qualified.clone(),
+                    ..command.clone()
+                });
             }
         }
         if let Some(source) = source {
@@ -216,9 +204,10 @@ fn select_import(module: &Pipeline, spec: &UseSpec, line: usize) -> Result<Pipel
             {
                 return Err(ParseError::new(line, format!("duplicate import `{name}`")));
             }
-            let mut source = source.clone();
-            source.name = qualified.clone();
-            selected.products.push(source);
+            selected.products.push(ProductDef {
+                name: qualified.clone(),
+                ..source.clone()
+            });
             if let Some(path) = module
                 .product_paths
                 .get(name)
@@ -233,9 +222,10 @@ fn select_import(module: &Pipeline, spec: &UseSpec, line: usize) -> Result<Pipel
                 .iter()
                 .filter(|constraint| constraint.product == name)
             {
-                let mut constraint = constraint.clone();
-                constraint.product = qualified.clone();
-                selected.constraints.push(constraint);
+                selected.constraints.push(CoverageRule {
+                    product: qualified.clone(),
+                    ..constraint.clone()
+                });
             }
         }
         if operation.is_none() && source.is_none() {
@@ -254,6 +244,14 @@ pub fn parse_document_at(
     text: &str,
     path: &Path,
 ) -> Result<(Pipeline, Option<SourceInventory>), ParseError> {
+    parse_located_document(text, path).map(|document| (document.pipeline, document.inventory))
+}
+
+/// Like [`parse_document_at`], but also keeps declaration line numbers.
+pub(crate) fn parse_located_document(
+    text: &str,
+    path: &Path,
+) -> Result<ParsedDocument, ParseError> {
     let root = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
     parse_document_at_inner(text, &root, &mut vec![root.clone()])
 }
@@ -262,7 +260,7 @@ fn parse_document_at_inner(
     text: &str,
     path: &Path,
     stack: &mut Vec<PathBuf>,
-) -> Result<(Pipeline, Option<SourceInventory>), ParseError> {
+) -> Result<ParsedDocument, ParseError> {
     let mut imports = BTreeMap::new();
     for (index, original) in text.lines().enumerate() {
         let line = strip_comment(original).trim();
@@ -306,8 +304,7 @@ fn parse_document_at_inner(
             )
         });
         stack.pop();
-        let (module, _) = module?;
-        imports.insert(number, select_import(&module, &spec, number)?);
+        imports.insert(number, select_import(&module?.pipeline, &spec, number)?);
     }
     parse_document_with_imports(text, &imports)
 }

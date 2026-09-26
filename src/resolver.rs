@@ -2,12 +2,11 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::error::{DefinitionSubject, ResolveError};
 use crate::model::{
-    ArtifactInstance, Cardinality, CountRequirement, CoverageRule, EntityBinding, InputBinding,
-    Invocation, Job, OperationDef, Pipeline, ProductDef, ResolvedDag, ShapeRule, SourceInventory,
+    ArtifactInstance, ArtifactKey, Cardinality, CountRequirement, CoverageRule, EntityBinding,
+    InputBinding, Invocation, Job, OperationDef, Pipeline, ProductDef, ResolvedDag, ShapeRule,
+    SourceInventory,
 };
 use crate::types::{Substitutions, TypeExpr, TypeUnifyError};
-
-type ArtifactKey = (String, EntityBinding);
 
 /// A pipeline whose declarations, steps, and rules hold without any inventory.
 struct CheckedPipeline<'a> {
@@ -162,7 +161,7 @@ pub fn resolve(
                 ),
             });
         }
-        let key = artifact_key(&source);
+        let key = source.key();
         if !seen.insert(key) {
             return Err(ResolveError::DuplicateSourceArtifact { artifact: source });
         }
@@ -215,7 +214,7 @@ pub fn resolve(
         };
 
         for job in jobs {
-            let key = artifact_key(&job.output);
+            let key = job.output.key();
             if !seen.insert(key.clone()) {
                 return Err(ResolveError::DuplicateOutputArtifact {
                     artifact: job.output,
@@ -833,7 +832,7 @@ fn make_job(
 ) -> Job {
     let dependencies: BTreeSet<_> = inputs
         .iter()
-        .filter_map(|input| artifact_producers.get(&artifact_key(input)).copied())
+        .filter_map(|input| artifact_producers.get(&input.key()).copied())
         .collect();
     Job {
         id,
@@ -848,11 +847,7 @@ fn family<'a>(
     artifacts: &'a BTreeMap<String, Vec<ArtifactInstance>>,
     product: &str,
 ) -> &'a [ArtifactInstance] {
-    artifacts.get(product).map(Vec::as_slice).unwrap_or(&[])
-}
-
-fn artifact_key(artifact: &ArtifactInstance) -> ArtifactKey {
-    (artifact.product.clone(), artifact.entities.clone())
+    artifacts.get(product).map_or(&[], Vec::as_slice)
 }
 
 fn unsupported(operation: &OperationDef, detail: impl Into<String>) -> ResolveError {
