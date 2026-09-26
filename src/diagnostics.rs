@@ -4,11 +4,13 @@ use std::collections::BTreeSet;
 use std::fmt;
 use std::path::Path;
 
-use crate::bash::{collect_commands, collect_paths};
-use crate::resolver::{collect_pipeline, Site};
+use crate::bash::collect_commands;
+use crate::parser::glued_comment;
+use crate::paths::collect_paths;
+use crate::resolver::collect_pipeline;
 use crate::{
-    parse_document, parse_document_at, parse_source_inventory, resolve, InputBinding, ParseError,
-    Pipeline, ResolveError, SourceInventory,
+    parse_document, parse_document_at, parse_source_inventory, resolve, DefinitionSubject,
+    EntityBinding, InputBinding, ParseError, Pipeline, ResolveError, SourceInventory,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
@@ -100,14 +102,14 @@ fn diagnose_with_parser(
         )
         .collect();
     if !diagnostics.is_empty() {
-        return order(diagnostics);
+        return finish(diagnostics, text, source_text);
     }
 
     let (pipeline, embedded_inventory) = document.expect("document parsed without errors");
     let inventory_text = source_text.unwrap_or(text);
     diagnostics.extend(pipeline_diagnostics(&pipeline, inventory_text));
     if diagnostics.iter().any(Diagnostic::is_error) {
-        return order(diagnostics);
+        return finish(diagnostics, text, source_text);
     }
     let inventory = external_inventory
         .or(embedded_inventory)
@@ -116,6 +118,46 @@ fn diagnose_with_parser(
         let (source, line) =
             error_location(&pipeline, &error, inventory_text, source_text.is_some());
         diagnostics.push(Diagnostic::error(source, line, error.to_string()));
+    }
+    finish(diagnostics, text, source_text)
+}
+
+/// Flag each `#` that reads like a comment but is part of a word, then order.
+fn finish(
+    mut diagnostics: Vec<Diagnostic>,
+    text: &str,
+    source_text: Option<&str>,
+) -> Vec<Diagnostic> {
+    let texts = [("pipeline", Some(text)), ("inventory", source_text)];
+    for (source, text) in texts {
+        let Some(text) = text else { continue };
+        for (index, line) in text.lines().enumerate() {
+            let Some(word) = glued_comment(line) else {
+                continue;
+            };
+            let line = Some(index + 1);
+            let explanation = format!(
+                "`#` after `{word}` is part of that word, not a comment; put a space before `#` to start a comment, or quote the text to keep it"
+            );
+            let errors: Vec<_> = diagnostics
+                .iter_mut()
+                .filter(|diagnostic| {
+                    diagnostic.is_error() && diagnostic.source == source && diagnostic.line == line
+                })
+                .collect();
+            if errors.is_empty() {
+                diagnostics.push(Diagnostic {
+                    severity: Severity::Warning,
+                    source,
+                    line,
+                    message: explanation,
+                });
+            } else {
+                for error in errors {
+                    error.message = format!("{} ({explanation})", error.message);
+                }
+            }
+        }
     }
     order(diagnostics)
 }
@@ -130,19 +172,20 @@ fn pipeline_diagnostics(pipeline: &Pipeline, inventory_text: &str) -> Vec<Diagno
         .iter()
         .map(|(site, error)| {
             let line = match site {
-                Site::Product(name) => lines.products.get(name).copied(),
-                Site::Operation(name) => lines.operations.get(name).copied(),
-                Site::Invocation(output) => lines.invocations.get(output).copied(),
-                Site::Rule(index) => lines.constraint_lines.get(*index).copied(),
+                DefinitionSubject::Product(name) => lines.products.get(name).copied(),
+                DefinitionSubject::Operation(name) => lines.operations.get(name).copied(),
+                DefinitionSubject::Invocation(output) => lines.invocations.get(output).copied(),
+                DefinitionSubject::Constraint(index) => lines.constraint_lines.get(*index).copied(),
+                DefinitionSubject::Source(_) | DefinitionSubject::None => None,
             }
             .or_else(|| error_location(pipeline, error, inventory_text, false).1);
             Diagnostic::error("pipeline", line, error.to_string())
         })
         .collect();
-    let bash_errors = collect_commands(pipeline, &checked.poisoned)
-        .into_iter()
-        .chain(collect_paths(pipeline, &checked.poisoned).1);
-    for error in bash_errors {
+    for error in collect_commands(pipeline, &checked.poisoned) {
+        diagnostics.push(Diagnostic::error("pipeline", error.line, error.message));
+    }
+    for error in collect_paths(pipeline, &checked.poisoned).1 {
         diagnostics.push(Diagnostic::error("pipeline", error.line, error.message));
     }
     diagnostics.extend(warnings(pipeline, &checked.poisoned));
@@ -351,8 +394,7 @@ fn error_location(
     let pipeline_line = match error {
         ResolveError::TypeMismatch { output_product, .. }
         | ResolveError::TypeVariableConflict { output_product, .. }
-        | ResolveError::MissingInput { output_product, .. }
-        | ResolveError::AmbiguousInput { output_product, .. } => invocation_line(output_product),
+        | ResolveError::MissingInput { output_product, .. } => invocation_line(output_product),
         ResolveError::UnknownOperation { name } => unique_operation_line(name),
         ResolveError::UnknownProduct { name } => pipeline
             .invocations
@@ -383,26 +425,14 @@ fn error_location(
             lines.constraint_lines.get(*rule_index).copied()
         }
         ResolveError::DuplicateOutputArtifact { artifact } => invocation_line(&artifact.product),
-        ResolveError::InvalidDefinition { detail } => {
-            let name = detail.split('`').nth(1);
-            name.and_then(|name| {
-                if detail.starts_with("coverage rule") {
-                    lines.constraints.get(name).copied()
-                } else if detail.contains("producing invocation") {
-                    invocation_line(name)
-                } else if detail.starts_with("operation `")
-                    || detail.starts_with("duplicate operation name")
-                {
-                    lines.operations.get(name).copied()
-                } else if detail.starts_with("product `")
-                    || detail.starts_with("duplicate product name")
-                {
-                    lines.products.get(name).copied()
-                } else {
-                    None
-                }
-            })
-        }
+        ResolveError::InvalidDefinition { subject, .. } => match subject {
+            DefinitionSubject::Product(name) => lines.products.get(name).copied(),
+            DefinitionSubject::Operation(name) => lines.operations.get(name).copied(),
+            DefinitionSubject::Invocation(output) => invocation_line(output),
+            DefinitionSubject::Constraint(index) => lines.constraint_lines.get(*index).copied(),
+            DefinitionSubject::Source(_) | DefinitionSubject::None => None,
+        },
+        ResolveError::DuplicateSourceArtifact { .. } => None,
     };
     if pipeline_line.is_some() {
         return ("pipeline", pipeline_line);
@@ -412,11 +442,17 @@ fn error_location(
         ResolveError::UnknownProduct { name } => inventory_record_lines(inventory_text, name, None)
             .into_iter()
             .next(),
-        ResolveError::DuplicateOutputArtifact { artifact } => {
+        ResolveError::DuplicateSourceArtifact { artifact } => {
             inventory_record_lines(inventory_text, &artifact.product, Some(&artifact.entities))
                 .into_iter()
                 .nth(1)
         }
+        ResolveError::InvalidDefinition {
+            subject: DefinitionSubject::Source(record),
+            ..
+        } => inventory_record_lines(inventory_text, &record.product, Some(&record.entities))
+            .into_iter()
+            .next(),
         _ => None,
     };
     if inventory_line.is_some() {
@@ -436,7 +472,7 @@ fn error_location(
 fn inventory_record_lines(
     text: &str,
     product: &str,
-    entities: Option<&crate::EntityBinding>,
+    entities: Option<&EntityBinding>,
 ) -> Vec<usize> {
     text.lines()
         .enumerate()

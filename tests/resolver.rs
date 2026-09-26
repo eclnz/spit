@@ -125,7 +125,7 @@ fn reports_missing_input() {
 }
 
 #[test]
-fn reports_ambiguous_input_within_named_family() {
+fn rejects_secondary_input_with_dimensions_absent_from_driver() {
     let mut pipeline = registration_pipeline();
     pipeline.products[1] = ProductDef::new("t1w", "T1w", &["sub", "ses", "acq"]);
     let inventory = SourceInventory {
@@ -137,11 +137,13 @@ fn reports_ambiguous_input_within_named_family() {
         ..SourceInventory::default()
     };
 
-    assert!(matches!(
-        resolve(&pipeline, &inventory),
-        Err(ResolveError::AmbiguousInput { port, candidates, .. })
-            if port == "reference" && candidates.len() == 2
-    ));
+    for inventory in [inventory, SourceInventory::default()] {
+        assert!(matches!(
+            resolve(&pipeline, &inventory),
+            Err(ResolveError::UnsupportedShapeRelationship { detail, .. })
+                if detail.contains("input `t1w` has dimensions absent from driving product `denoised`: acq")
+        ));
+    }
 }
 
 #[test]
@@ -233,7 +235,8 @@ fn rejects_accidental_cartesian_product() {
 
     assert!(matches!(
         resolve(&pipeline, &inventory),
-        Err(ResolveError::AmbiguousInput { port, .. }) if port == "b"
+        Err(ResolveError::UnsupportedShapeRelationship { detail, .. })
+            if detail.contains("input `b` has dimensions absent from driving product `a`: echo")
     ));
 }
 
@@ -257,7 +260,7 @@ fn catches_duplicate_source_artifact() {
     inventory.artifacts.push(inventory.artifacts[0].clone());
     assert!(matches!(
         resolve(&pipeline, &inventory),
-        Err(ResolveError::DuplicateOutputArtifact { .. })
+        Err(ResolveError::DuplicateSourceArtifact { .. })
     ));
 }
 

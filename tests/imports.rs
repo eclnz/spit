@@ -209,3 +209,21 @@ fn imported_definitions_are_not_reported_as_unused() {
     let text = fs::read_to_string(path).unwrap();
     assert!(diagnose_at(&text, None, path).is_empty());
 }
+
+#[test]
+fn qualified_product_names_use_dots_in_default_paths() {
+    let dir = TestDir::new();
+    dir.write("lib.spit", "source shard [part]\n");
+    let main = dir.write(
+        "main.spit",
+        "use lib.spit as lib\npath: {product}/{part}.txt\n\
+operation copy(input) -> Unknown\ncommand copy: cp {input} {output}\n\
+copied = copy(lib::shard)\nsources:\n  lib::shard[part=a]\n",
+    );
+    let (pipeline, inventory) =
+        parse_document_at(&fs::read_to_string(&main).unwrap(), &main).unwrap();
+    let dag = resolve(&pipeline, &inventory.unwrap()).unwrap();
+    let bash = render_bash(&pipeline, &dag).unwrap();
+    assert!(bash.contains("'lib.shard/a.txt'"), "{bash}");
+    assert!(!bash.contains("::"), "{bash}");
+}
