@@ -66,7 +66,7 @@ fn is_sectioned_document(text: &str) -> bool {
     text.lines().map(strip_comment).map(str::trim).any(|line| {
         matches!(
             line,
-            "products:" | "operations:" | "pipeline:" | "constraints:"
+            "products:" | "operations:" | "pipeline:" | "constraints:" | "commands:"
         )
     })
 }
@@ -720,10 +720,14 @@ fn parse_operation(line: &str, number: usize) -> Result<OperationDef, ParseError
     let count = inputs.len();
     for (index, input) in inputs.iter().enumerate() {
         let (declared_name, input) = if let Some((name, value)) = input.split_once(':') {
-            (
-                Some(identifier(name.trim(), number, "input port")?),
-                value.trim(),
-            )
+            let name = identifier(name.trim(), number, "input port")?;
+            if name == "output" {
+                return Err(ParseError::new(
+                    number,
+                    "input port name `output` is reserved for the operation output",
+                ));
+            }
+            (Some(name), value.trim())
         } else {
             (None, input.as_str())
         };

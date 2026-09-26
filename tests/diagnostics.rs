@@ -458,3 +458,14 @@ fn cli_json_includes_each_severity() {
 {\"severity\":\"error\",\"source\":\"pipeline\",\"line\":4,\"message\":\"unknown product `rwa`\"}]}\n"
     );
 }
+
+#[test]
+fn undeclared_operation_is_reported_when_its_name_prefixes_an_invalid_one() {
+    let text = "source raw [id]\noperation copy_all(input) -> Image extra\nresult = copy(raw)\n";
+    let issues = diagnose(text, None);
+    assert_eq!(issues.len(), 2, "{issues:?}");
+    assert_eq!(issues[1].line, Some(3));
+    assert!(issues[1]
+        .message
+        .contains("operation `copy` must be declared"));
+}

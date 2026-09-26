@@ -360,7 +360,15 @@ pub(crate) fn collect_commands(pipeline: &Pipeline, skip: &BTreeSet<String>) -> 
             );
             continue;
         };
-        if !seen.insert(command.operation.as_str()) {
+        if operation.inputs.iter().any(|port| port.name == "output") {
+            errors.push(
+                error(format!(
+                    "operation `{}` has an input port named `output`, which shadows `{{output}}`",
+                    operation.name
+                ))
+                .at(line),
+            );
+        } else if !seen.insert(command.operation.as_str()) {
             errors.push(
                 error(format!(
                     "duplicate command for operation `{}`",

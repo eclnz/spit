@@ -129,7 +129,7 @@ fn run() -> Result<(), Box<dyn Error>> {
     let checked_files = args
         .root
         .as_ref()
-        .map(|root| validate_source_files(&pipeline, &dag, std::path::Path::new(root)))
+        .map(|root| validate_source_files(&pipeline, &dag, Path::new(root)))
         .transpose()?;
     match args.command.as_str() {
         "check" => {

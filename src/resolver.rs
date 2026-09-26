@@ -27,6 +27,8 @@ struct CheckedPipeline<'a> {
     producers: BTreeMap<String, usize>,
     /// Invocation indices with every producer before its consumers.
     order: Vec<usize>,
+    /// The statically inferred output type of each checked step.
+    inferred_types: BTreeMap<String, TypeExpr>,
 }
 
 /// Every pipeline error, plus the names that failed or depend on a failure.
@@ -118,6 +120,7 @@ pub(crate) fn collect_pipeline(pipeline: &Pipeline) -> PipelineCheck<'_> {
             operations,
             producers,
             order,
+            inferred_types,
         },
         errors,
         poisoned,
@@ -133,6 +136,7 @@ pub fn resolve(
         operations,
         producers,
         order,
+        inferred_types,
     } = check_pipeline(pipeline)?;
     let mut artifacts: BTreeMap<String, Vec<ArtifactInstance>> = BTreeMap::new();
     let mut artifact_producers: BTreeMap<ArtifactKey, usize> = BTreeMap::new();
@@ -191,29 +195,28 @@ pub fn resolve(
         let invocation = &pipeline.invocations[index];
         let operation = operations[invocation.operation.as_str()];
         let output_def = products[invocation.output_product.as_str()];
+        // Every artifact in a family has the same type, so the type inferred
+        // statically for the invocation is the type of each job's output.
+        let output_type = &inferred_types[&invocation.output_product];
         let jobs = match &operation.shape_rule {
             ShapeRule::Preserve => expand_preserve(
                 invocation,
                 operation,
                 output_def,
+                output_type,
                 &artifacts,
                 &artifact_producers,
                 dag.jobs.len(),
             )?,
-            ShapeRule::Aggregate => {
-                let InputBinding::Vary { dimension, .. } = &invocation.inputs[0] else {
-                    unreachable!("validated aggregation binding")
-                };
-                expand_aggregate(
-                    invocation,
-                    operation,
-                    output_def,
-                    dimension,
-                    &artifacts,
-                    &artifact_producers,
-                    dag.jobs.len(),
-                )?
-            }
+            ShapeRule::Aggregate => expand_aggregate(
+                invocation,
+                operation,
+                output_def,
+                output_type,
+                &artifacts,
+                &artifact_producers,
+                dag.jobs.len(),
+            ),
         };
 
         for job in jobs {
@@ -641,60 +644,6 @@ fn unify_port(
         })
 }
 
-fn infer_output_type(
-    operation: &OperationDef,
-    inputs: &[ArtifactInstance],
-    output_def: &ProductDef,
-) -> Result<TypeExpr, ResolveError> {
-    let mut substitutions = Substitutions::default();
-    match operation.shape_rule {
-        ShapeRule::Preserve => {
-            for (port, input) in operation.inputs.iter().zip(inputs) {
-                unify_port(
-                    &mut substitutions,
-                    operation,
-                    &output_def.name,
-                    &port.name,
-                    &input.product,
-                    &port.artifact_type,
-                    &input.artifact_type,
-                )?;
-            }
-        }
-        ShapeRule::Aggregate => {
-            let port = &operation.inputs[0];
-            for input in inputs {
-                unify_port(
-                    &mut substitutions,
-                    operation,
-                    &output_def.name,
-                    &port.name,
-                    &input.product,
-                    &port.artifact_type,
-                    &input.artifact_type,
-                )?;
-            }
-        }
-    }
-    unify_port(
-        &mut substitutions,
-        operation,
-        &output_def.name,
-        "output",
-        &output_def.name,
-        &operation.output_type,
-        &output_def.artifact_type,
-    )?;
-    let inferred = substitutions
-        .substitute(&operation.output_type)
-        .erase_variables();
-    if inferred == TypeExpr::Unknown {
-        Ok(output_def.artifact_type.clone())
-    } else {
-        Ok(inferred)
-    }
-}
-
 fn dimension_set(dimensions: &[String]) -> BTreeSet<String> {
     dimensions.iter().cloned().collect()
 }
@@ -757,6 +706,7 @@ fn expand_preserve(
     invocation: &Invocation,
     operation: &OperationDef,
     output_def: &ProductDef,
+    output_type: &TypeExpr,
     artifacts: &BTreeMap<String, Vec<ArtifactInstance>>,
     artifact_producers: &BTreeMap<ArtifactKey, usize>,
     existing_jobs: usize,
@@ -816,7 +766,7 @@ fn expand_preserve(
         }
         let output = ArtifactInstance {
             product: output_def.name.clone(),
-            artifact_type: infer_output_type(operation, &inputs, output_def)?,
+            artifact_type: output_type.clone(),
             entities: driving_artifact.entities.clone(),
         };
         jobs.push(make_job(
@@ -834,11 +784,14 @@ fn expand_aggregate(
     invocation: &Invocation,
     operation: &OperationDef,
     output_def: &ProductDef,
-    dimension: &str,
+    output_type: &TypeExpr,
     artifacts: &BTreeMap<String, Vec<ArtifactInstance>>,
     artifact_producers: &BTreeMap<ArtifactKey, usize>,
     existing_jobs: usize,
-) -> Result<Vec<Job>, ResolveError> {
+) -> Vec<Job> {
+    let InputBinding::Vary { dimension, .. } = &invocation.inputs[0] else {
+        unreachable!("validated aggregation binding")
+    };
     let mut groups: BTreeMap<EntityBinding, Vec<ArtifactInstance>> = BTreeMap::new();
     for artifact in family(artifacts, invocation.inputs[0].product_name()) {
         groups
@@ -852,7 +805,7 @@ fn expand_aggregate(
         inputs.sort_by(|left, right| left.entities.cmp(&right.entities));
         let output = ArtifactInstance {
             product: output_def.name.clone(),
-            artifact_type: infer_output_type(operation, &inputs, output_def)?,
+            artifact_type: output_type.clone(),
             entities,
         };
         jobs.push(make_job(
@@ -863,7 +816,7 @@ fn expand_aggregate(
             artifact_producers,
         ));
     }
-    Ok(jobs)
+    jobs
 }
 
 fn make_job(
