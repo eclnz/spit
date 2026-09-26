@@ -4,10 +4,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{self, Write};
 use std::path::Path;
 
-use crate::model::{ArtifactInstance, EntityBinding, Pipeline, ProductDef, ResolvedDag};
+use crate::model::{
+    ArtifactInstance, ArtifactKey, EntityBinding, Pipeline, ProductDef, ResolvedDag,
+};
 use crate::template::{parse_template, Part};
-
-pub(crate) type ArtifactKey = (String, EntityBinding);
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PathError(pub String);
@@ -142,13 +142,7 @@ fn validate_path_template(pipeline: &Pipeline, product: &ProductDef) -> Result<(
             .collect(),
     );
     let artifact = ArtifactInstance::new(&product.name, product.artifact_type.clone(), entities);
-    let dag = ResolvedDag {
-        jobs: Vec::new(),
-        product_dimensions: [(product.name.clone(), product.dimensions.clone())]
-            .into_iter()
-            .collect(),
-    };
-    bind_path(pipeline, &dag, &artifact)?;
+    bind_path(pipeline, &product.dimensions, &artifact)?;
     Ok(())
 }
 
@@ -173,7 +167,7 @@ pub fn validate_source_files(
     }
     inspect_paths(pipeline)?.validate(false)?;
     let paths = bound_paths(pipeline, dag)?;
-    let outputs: BTreeSet<_> = dag.jobs.iter().map(|job| key(&job.output)).collect();
+    let outputs: BTreeSet<_> = dag.jobs.iter().map(|job| job.output.key()).collect();
     let mut checked = 0;
     for (artifact, relative) in paths {
         if outputs.contains(&artifact) {
@@ -204,11 +198,15 @@ pub(crate) fn bound_paths(
         .iter()
         .flat_map(|job| job.inputs.iter().chain(std::iter::once(&job.output)))
     {
-        let identity = key(artifact);
+        let identity = artifact.key();
         if paths.contains_key(&identity) {
             continue;
         }
-        let relative = bind_path(pipeline, dag, artifact)?;
+        let dimensions = dag
+            .product_dimensions
+            .get(&artifact.product)
+            .ok_or_else(|| error(format!("unknown product `{}`", artifact.product)))?;
+        let relative = bind_path(pipeline, dimensions, artifact)?;
         if let Some(previous) = owners.insert(relative.clone(), identity.clone()) {
             return Err(error(format!(
                 "artifacts `{}[{}]` and `{}[{}]` bind to the same path `{relative}`",
@@ -220,13 +218,11 @@ pub(crate) fn bound_paths(
     Ok(paths)
 }
 
-pub(crate) fn key(artifact: &ArtifactInstance) -> ArtifactKey {
-    (artifact.product.clone(), artifact.entities.clone())
-}
-
+/// Bind `artifact` to its relative path. `dimensions` gives the product's
+/// declared dimension order, which `{entities}` follows.
 fn bind_path(
     pipeline: &Pipeline,
-    dag: &ResolvedDag,
+    dimensions: &[String],
     artifact: &ArtifactInstance,
 ) -> Result<String, PathError> {
     let template = pipeline
@@ -248,10 +244,6 @@ fn bind_path(
                 relative.push_str(&artifact.product.replace("::", "."));
             }
             Part::Placeholder(name) if name == "entities" => {
-                let dimensions = dag
-                    .product_dimensions
-                    .get(&artifact.product)
-                    .ok_or_else(|| error(format!("unknown product `{}`", artifact.product)))?;
                 let bindings = dimensions
                     .iter()
                     .map(|dimension| {

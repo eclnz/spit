@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::fmt::Write;
 
 use crate::model::{ArtifactInstance, Cardinality, Job, Pipeline, ResolvedDag};
-use crate::paths::{bound_paths, inspect_paths, key, PathError};
+use crate::paths::{bound_paths, inspect_paths, PathError};
 use crate::types::TypeExpr;
 
 pub fn render_dag(dag: &ResolvedDag) -> String {
@@ -37,7 +37,7 @@ pub fn render_bound_dag(pipeline: &Pipeline, dag: &ResolvedDag) -> Result<String
         Ok(Some(port.name.as_str()))
     };
     write_jobs(dag, port_name, |artifact| {
-        paths.get(&key(artifact)).map(String::as_str)
+        paths.get(&artifact.key()).map(String::as_str)
     })
 }
 

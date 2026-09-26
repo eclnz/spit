@@ -17,13 +17,25 @@ const SHELL_SOURCE_REMOVED: &str =
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ParseError {
     pub line: usize,
+    pub kind: ParseErrorKind,
     pub message: String,
+}
+
+/// Errors that callers may want to treat specially; everything else is `Syntax`.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ParseErrorKind {
+    Syntax,
+    /// A flow step calls an operation that has not been declared yet.
+    UndeclaredOperation {
+        name: String,
+    },
 }
 
 impl ParseError {
     pub(crate) fn new(line: usize, message: impl Into<String>) -> Self {
         Self {
             line,
+            kind: ParseErrorKind::Syntax,
             message: message.into(),
         }
     }
@@ -37,6 +49,59 @@ impl fmt::Display for ParseError {
 
 impl std::error::Error for ParseError {}
 
+/// Line numbers of declarations, kept beside the parsed [`Pipeline`] so that
+/// diagnostics can point at the source without the model carrying them.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct SourceMap {
+    pub(crate) products: BTreeMap<String, usize>,
+    pub(crate) operations: BTreeMap<String, usize>,
+    pub(crate) invocations: BTreeMap<String, usize>,
+    pub(crate) constraints: BTreeMap<String, usize>,
+    /// One entry per `Pipeline::constraints` element, in the same order.
+    pub(crate) constraint_lines: Vec<usize>,
+}
+
+/// A pipeline under construction together with the lines of its declarations.
+#[derive(Default)]
+pub(crate) struct PipelineBuilder {
+    pub(crate) pipeline: Pipeline,
+    pub(crate) lines: SourceMap,
+}
+
+impl PipelineBuilder {
+    pub(crate) fn add_product(&mut self, product: ProductDef, line: usize) {
+        self.lines.products.insert(product.name.clone(), line);
+        self.pipeline.products.push(product);
+    }
+
+    pub(crate) fn add_operation(&mut self, operation: OperationDef, line: usize) {
+        self.lines.operations.insert(operation.name.clone(), line);
+        self.pipeline.operations.push(operation);
+    }
+
+    pub(crate) fn add_constraint(&mut self, constraint: CoverageRule, line: usize) {
+        self.lines
+            .constraints
+            .insert(constraint.product.clone(), line);
+        self.lines.constraint_lines.push(line);
+        self.pipeline.constraints.push(constraint);
+    }
+
+    fn add_invocation(&mut self, invocation: Invocation, line: usize) {
+        self.lines
+            .invocations
+            .insert(invocation.output_product.clone(), line);
+        self.pipeline.invocations.push(invocation);
+    }
+}
+
+/// A parsed document: its pipeline, any inline inventory, and declaration lines.
+pub(crate) struct ParsedDocument {
+    pub(crate) pipeline: Pipeline,
+    pub(crate) inventory: Option<SourceInventory>,
+    pub(crate) lines: SourceMap,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Section {
     Products,
@@ -47,13 +112,13 @@ enum Section {
 }
 
 pub fn parse_pipeline(text: &str) -> Result<Pipeline, ParseError> {
-    parse_pipeline_with_imports(text, &BTreeMap::new())
+    parse_pipeline_with_imports(text, &BTreeMap::new()).map(|builder| builder.pipeline)
 }
 
 fn parse_pipeline_with_imports(
     text: &str,
     imports: &BTreeMap<usize, Pipeline>,
-) -> Result<Pipeline, ParseError> {
+) -> Result<PipelineBuilder, ParseError> {
     if is_sectioned_document(text) {
         parse_sectioned_pipeline(text, imports)
     } else {
@@ -73,8 +138,8 @@ fn is_sectioned_document(text: &str) -> bool {
 fn parse_sectioned_pipeline(
     text: &str,
     imports: &BTreeMap<usize, Pipeline>,
-) -> Result<Pipeline, ParseError> {
-    let mut pipeline = Pipeline::default();
+) -> Result<PipelineBuilder, ParseError> {
+    let mut builder = PipelineBuilder::default();
     let mut section = None;
 
     for (index, original) in text.lines().enumerate() {
@@ -90,14 +155,14 @@ fn parse_sectioned_pipeline(
             "constraints:" => section = Some(Section::Constraints),
             "commands:" => section = Some(Section::Commands),
             source if source.starts_with("use ") => {
-                apply_import(&mut pipeline, imports, line_number)?;
+                apply_import(&mut builder, imports, line_number)?;
                 section = None;
             }
             source if source.starts_with("shell-source:") => {
                 return Err(ParseError::new(line_number, SHELL_SOURCE_REMOVED));
             }
             path if path.starts_with("path:") || path.starts_with("path ") => {
-                set_path(&mut pipeline, path, line_number)?;
+                set_path(&mut builder.pipeline, path, line_number)?;
                 section = None;
             }
             "sources:" | "contexts:" => {
@@ -108,39 +173,19 @@ fn parse_sectioned_pipeline(
             }
             _ => match section {
                 Some(Section::Products) => {
-                    let product = parse_product(line, line_number)?;
-                    pipeline
-                        .source_lines
-                        .products
-                        .insert(product.name.clone(), line_number);
-                    pipeline.products.push(product);
+                    builder.add_product(parse_product(line, line_number)?, line_number);
                 }
                 Some(Section::Operations) => {
-                    let operation = parse_operation(line, line_number)?;
-                    pipeline
-                        .source_lines
-                        .operations
-                        .insert(operation.name.clone(), line_number);
-                    pipeline.operations.push(operation);
+                    builder.add_operation(parse_operation(line, line_number)?, line_number);
                 }
                 Some(Section::Pipeline) => {
-                    let invocation = parse_invocation(line, line_number)?;
-                    pipeline
-                        .source_lines
-                        .invocations
-                        .insert(invocation.output_product.clone(), line_number);
-                    pipeline.invocations.push(invocation);
+                    builder.add_invocation(parse_invocation(line, line_number)?, line_number);
                 }
                 Some(Section::Constraints) => {
-                    let constraint = parse_coverage_rule(line, line_number)?;
-                    pipeline
-                        .source_lines
-                        .constraints
-                        .insert(constraint.product.clone(), line_number);
-                    pipeline.source_lines.constraint_lines.push(line_number);
-                    pipeline.constraints.push(constraint);
+                    builder.add_constraint(parse_coverage_rule(line, line_number)?, line_number);
                 }
-                Some(Section::Commands) => pipeline
+                Some(Section::Commands) => builder
+                    .pipeline
                     .commands
                     .push(parse_command(line, line_number)?),
                 None => return Err(ParseError::new(
@@ -151,14 +196,14 @@ fn parse_sectioned_pipeline(
         }
     }
 
-    Ok(pipeline)
+    Ok(builder)
 }
 
 fn parse_flow_pipeline(
     text: &str,
     imports: &BTreeMap<usize, Pipeline>,
-) -> Result<Pipeline, ParseError> {
-    let mut pipeline = Pipeline::default();
+) -> Result<PipelineBuilder, ParseError> {
+    let mut builder = PipelineBuilder::default();
 
     for (index, original) in text.lines().enumerate() {
         let line_number = index + 1;
@@ -168,51 +213,30 @@ fn parse_flow_pipeline(
         }
 
         if line.starts_with("use ") {
-            apply_import(&mut pipeline, imports, line_number)?;
+            apply_import(&mut builder, imports, line_number)?;
         } else if let Some(declaration) = line.strip_prefix("source ") {
-            let product = parse_product(declaration.trim(), line_number)?;
-            pipeline
-                .source_lines
-                .products
-                .insert(product.name.clone(), line_number);
-            pipeline.products.push(product);
-        } else if line.starts_with("operation ") {
-            let declaration = line.strip_prefix("operation ").unwrap().trim();
-            let operation = parse_operation(declaration, line_number)?;
-            pipeline
-                .source_lines
-                .operations
-                .insert(operation.name.clone(), line_number);
-            pipeline.operations.push(operation);
+            builder.add_product(parse_product(declaration.trim(), line_number)?, line_number);
+        } else if let Some(declaration) = line.strip_prefix("operation ") {
+            builder.add_operation(
+                parse_operation(declaration.trim(), line_number)?,
+                line_number,
+            );
         } else if line.starts_with("require ") {
-            let constraint = parse_coverage_rule(line, line_number)?;
-            pipeline
-                .source_lines
-                .constraints
-                .insert(constraint.product.clone(), line_number);
-            pipeline.source_lines.constraint_lines.push(line_number);
-            pipeline.constraints.push(constraint);
-        } else if line.starts_with("command ") {
-            let declaration = line.strip_prefix("command ").unwrap().trim();
-            pipeline
+            builder.add_constraint(parse_coverage_rule(line, line_number)?, line_number);
+        } else if let Some(declaration) = line.strip_prefix("command ") {
+            builder
+                .pipeline
                 .commands
-                .push(parse_command(declaration, line_number)?);
+                .push(parse_command(declaration.trim(), line_number)?);
         } else if line.starts_with("shell-source:") {
             return Err(ParseError::new(line_number, SHELL_SOURCE_REMOVED));
         } else if line.starts_with("path ") || line.starts_with("path:") {
-            set_path(&mut pipeline, line, line_number)?;
+            set_path(&mut builder.pipeline, line, line_number)?;
         } else if line.contains('=') {
-            let (invocation, product) = parse_flow_invocation(line, line_number, &pipeline)?;
-            pipeline
-                .source_lines
-                .products
-                .insert(product.name.clone(), line_number);
-            pipeline
-                .source_lines
-                .invocations
-                .insert(invocation.output_product.clone(), line_number);
-            pipeline.products.push(product);
-            pipeline.invocations.push(invocation);
+            let (invocation, product) =
+                parse_flow_invocation(line, line_number, &builder.pipeline)?;
+            builder.add_product(product, line_number);
+            builder.add_invocation(invocation, line_number);
         } else if line.contains('(') && line.ends_with(')') {
             return Err(ParseError::new(
                 line_number,
@@ -226,7 +250,7 @@ fn parse_flow_pipeline(
         }
     }
 
-    Ok(pipeline)
+    Ok(builder)
 }
 
 fn parse_command(line: &str, number: usize) -> Result<CommandDef, ParseError> {
@@ -327,7 +351,7 @@ pub(crate) fn strip_comment(line: &str) -> &str {
             continue;
         }
         match (quote, character) {
-            (None, '\\') | (Some('"'), '\\') => escaped = true,
+            (None | Some('"'), '\\') => escaped = true,
             (None, '\'') => quote = Some('\''),
             (None, '"') => quote = Some('"'),
             (Some('\''), '\'') | (Some('"'), '"') => quote = None,
@@ -353,11 +377,14 @@ fn parse_flow_invocation(
         .operations
         .iter()
         .find(|operation| operation.name == operation_name)
-        .ok_or_else(|| {
-            ParseError::new(
-                number,
-                format!("operation `{operation_name}` must be declared before its first flow step"),
-            )
+        .ok_or_else(|| ParseError {
+            line: number,
+            kind: ParseErrorKind::UndeclaredOperation {
+                name: operation_name.to_owned(),
+            },
+            message: format!(
+                "operation `{operation_name}` must be declared before its first flow step"
+            ),
         })?;
     let invocation = parse_invocation_parts(&output_name, call, number)?;
     let dimensions = output_dimensions.unwrap_or_else(|| {
@@ -381,7 +408,7 @@ fn parse_flow_invocation(
         ProductDef::new(
             &output_name,
             output_type.unwrap_or(TypeExpr::Unknown),
-            &dimensions.iter().map(String::as_str).collect::<Vec<_>>(),
+            &dimensions,
         ),
     ))
 }
@@ -470,12 +497,13 @@ fn parse_use_path(text: &str, number: usize) -> Result<(String, Option<String>),
 /// The two remain separate values for resolution.
 pub fn parse_document(text: &str) -> Result<(Pipeline, Option<SourceInventory>), ParseError> {
     parse_document_with_imports(text, &BTreeMap::new())
+        .map(|document| (document.pipeline, document.inventory))
 }
 
 pub(crate) fn parse_document_with_imports(
     text: &str,
     imports: &BTreeMap<usize, Pipeline>,
-) -> Result<(Pipeline, Option<SourceInventory>), ParseError> {
+) -> Result<ParsedDocument, ParseError> {
     let mut pipeline_text = String::new();
     let mut inventory_text = String::new();
     let mut inventory_section = false;
@@ -504,29 +532,37 @@ pub(crate) fn parse_document_with_imports(
             }
             _ => {}
         }
-        if inventory_section {
-            inventory_text.push_str(original);
-            pipeline_text.push('\n');
-            inventory_text.push('\n');
+        // Each line goes to one side and a blank line to the other, so both
+        // texts keep the document's line numbers.
+        let target = if inventory_section {
+            &mut inventory_text
         } else {
-            pipeline_text.push_str(original);
-            pipeline_text.push('\n');
-            inventory_text.push('\n');
-        }
+            &mut pipeline_text
+        };
+        target.push_str(original);
+        pipeline_text.push('\n');
+        inventory_text.push('\n');
     }
 
-    let pipeline = parse_pipeline_with_imports(&pipeline_text, imports)?;
-    let inventory = if has_inventory {
-        Some(parse_source_inventory(&inventory_text)?)
-    } else {
-        None
-    };
-    Ok((pipeline, inventory))
+    let builder = parse_pipeline_with_imports(&pipeline_text, imports)?;
+    let inventory = has_inventory
+        .then(|| parse_source_inventory(&inventory_text))
+        .transpose()?;
+    Ok(ParsedDocument {
+        pipeline: builder.pipeline,
+        inventory,
+        lines: builder.lines,
+    })
 }
 
 /// Parse an inventory supplied by a dataset indexer or written as a fixture.
 /// The inventory contains logical identities, never paths or artifact types.
 pub fn parse_source_inventory(text: &str) -> Result<SourceInventory, ParseError> {
+    enum InventorySection {
+        Sources,
+        Contexts,
+    }
+
     let mut inventory = SourceInventory::default();
     let mut section = None;
     for (index, original) in text.lines().enumerate() {
@@ -536,12 +572,16 @@ pub fn parse_source_inventory(text: &str) -> Result<SourceInventory, ParseError>
             continue;
         }
         match line {
-            "sources:" => section = Some("sources"),
-            "contexts:" => section = Some("contexts"),
+            "sources:" => section = Some(InventorySection::Sources),
+            "contexts:" => section = Some(InventorySection::Contexts),
             _ => match section {
-                Some("sources") => inventory.artifacts.push(parse_source(line, number)?),
-                Some("contexts") => inventory.contexts.push(parse_context(line, number)?),
-                _ => {
+                Some(InventorySection::Sources) => {
+                    inventory.artifacts.push(parse_source(line, number)?);
+                }
+                Some(InventorySection::Contexts) => {
+                    inventory.contexts.push(parse_context(line, number)?);
+                }
+                None => {
                     return Err(ParseError::new(
                         number,
                         "expected inventory section header: sources: or contexts:",
@@ -593,11 +633,7 @@ fn parse_coverage_rule(line: &str, number: usize) -> Result<CoverageRule, ParseE
     for dimension in &dimensions {
         identifier(dimension, number, "constraint dimension")?;
     }
-    Ok(CoverageRule::new(
-        product,
-        &dimensions.iter().map(String::as_str).collect::<Vec<_>>(),
-        count,
-    ))
+    Ok(CoverageRule::new(product, &dimensions, count))
 }
 
 fn parse_count(value: &str, number: usize) -> Result<usize, ParseError> {
@@ -612,7 +648,7 @@ fn parse_product(line: &str, number: usize) -> Result<ProductDef, ParseError> {
         .ok_or_else(|| ParseError::new(number, "expected product name followed by [dimensions]"))?;
     let (name, artifact_type) = if let Some((name, ty)) = declaration.split_once(':') {
         let ty = parse_type_expr(ty.trim(), false)
-            .map_err(|message| ParseError::new(number, message))?;
+            .map_err(|error| ParseError::new(number, error.message))?;
         (name.trim(), ty)
     } else {
         (declaration.trim(), TypeExpr::Unknown)
@@ -625,11 +661,7 @@ fn parse_product(line: &str, number: usize) -> Result<ProductDef, ParseError> {
     for dimension in &dimensions {
         identifier(dimension, number, "dimension")?;
     }
-    Ok(ProductDef::new(
-        name,
-        artifact_type,
-        &dimensions.iter().map(String::as_str).collect::<Vec<_>>(),
-    ))
+    Ok(ProductDef::new(name, artifact_type, &dimensions))
 }
 
 fn parse_operation(line: &str, number: usize) -> Result<OperationDef, ParseError> {
@@ -654,7 +686,7 @@ fn parse_operation(line: &str, number: usize) -> Result<OperationDef, ParseError
     };
     let (signature, output_type) = if let Some((signature, output_type)) = line.split_once("->") {
         let output_type = parse_type_expr(output_type.trim(), true)
-            .map_err(|message| ParseError::new(number, message))?;
+            .map_err(|error| ParseError::new(number, error.message))?;
         (signature, output_type)
     } else {
         (line, TypeExpr::Unknown)
@@ -705,18 +737,19 @@ fn parse_operation(line: &str, number: usize) -> Result<OperationDef, ParseError
             (
                 Cardinality::Many,
                 parse_type_expr(value.trim(), true)
-                    .map_err(|message| ParseError::new(number, message))?,
+                    .map_err(|error| ParseError::new(number, error.message))?,
             )
         } else if let Some(value) = input.strip_prefix("one ") {
             (
                 Cardinality::One,
                 parse_type_expr(value.trim(), true)
-                    .map_err(|message| ParseError::new(number, message))?,
+                    .map_err(|error| ParseError::new(number, error.message))?,
             )
         } else {
             (
                 Cardinality::One,
-                parse_type_expr(input, true).map_err(|message| ParseError::new(number, message))?,
+                parse_type_expr(input, true)
+                    .map_err(|error| ParseError::new(number, error.message))?,
             )
         };
         let port_name = declared_name.map(str::to_owned).unwrap_or_else(|| {

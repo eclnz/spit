@@ -4,8 +4,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{self, Write};
 use std::path::Path;
 
+use crate::model::ArtifactKey;
 use crate::model::{ArtifactInstance, Cardinality, Job, OperationDef, Pipeline, ResolvedDag};
-use crate::paths::{bound_paths, inspect_paths, key, ArtifactKey, PathError};
+use crate::paths::{bound_paths, inspect_paths, PathError};
 use crate::template::{parse_template, Part};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -62,7 +63,7 @@ pub fn render_bash(pipeline: &Pipeline, dag: &ResolvedDag) -> Result<String, Bas
             )));
         }
     }
-    let outputs: BTreeSet<_> = dag.jobs.iter().map(|job| key(&job.output)).collect();
+    let outputs: BTreeSet<_> = dag.jobs.iter().map(|job| job.output.key()).collect();
     let paths = bound_paths(pipeline, dag)?;
 
     let mut script =
@@ -90,7 +91,7 @@ pub fn render_bash(pipeline: &Pipeline, dag: &ResolvedDag) -> Result<String, Bas
                 job.operation
             ))
         })?;
-        let output_path = paths.get(&key(&job.output)).unwrap();
+        let output_path = &paths[&job.output.key()];
         let parent = Path::new(output_path)
             .parent()
             .and_then(|path| path.to_str())
@@ -126,7 +127,7 @@ fn render_command(
         if let [Part::Placeholder(name)] = parts.as_slice() {
             if let Some(artifacts) = many_input(operation, job, name) {
                 for artifact in artifacts {
-                    args.push(shell_path(paths.get(&key(artifact)).unwrap()));
+                    args.push(shell_path(&paths[&artifact.key()]));
                 }
                 continue;
             }
@@ -137,7 +138,7 @@ fn render_command(
                 Part::Literal(value) => arg.push_str(&shell_quote(&value)),
                 Part::Placeholder(name) if name == "output" => {
                     uses_output = true;
-                    arg.push_str(&shell_path(paths.get(&key(&job.output)).unwrap()));
+                    arg.push_str(&shell_path(&paths[&job.output.key()]));
                 }
                 Part::Placeholder(name) => {
                     if name == "inputs" && many_input(operation, job, &name).is_some() {
@@ -164,7 +165,7 @@ fn render_command(
                         .inputs
                         .get(index)
                         .ok_or_else(|| error(format!("job {} lacks input `{name}`", job.id)))?;
-                    arg.push_str(&shell_path(paths.get(&key(artifact)).unwrap()));
+                    arg.push_str(&shell_path(&paths[&artifact.key()]));
                 }
             }
         }

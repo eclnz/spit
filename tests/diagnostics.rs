@@ -2,14 +2,14 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::io::Write;
 use std::process::{Command, Stdio};
 
-use spit::diagnose;
+use spit::{diagnose, DiagnosticSource};
 
 #[test]
 fn reports_syntax_line_from_unsaved_text() {
     let text = "source raw [id]\noperation copy(one)\nresult = copy(raw @ vary(id, extra))\n";
     let issues = diagnose(text, None);
     assert_eq!(issues.len(), 1);
-    assert_eq!(issues[0].source, "pipeline");
+    assert_eq!(issues[0].source, DiagnosticSource::Pipeline);
     assert_eq!(issues[0].line, Some(3));
 }
 
@@ -22,7 +22,9 @@ fn reports_independent_syntax_errors_across_a_pipeline() {
         issues.iter().map(|issue| issue.line).collect::<Vec<_>>(),
         [Some(2), Some(4)]
     );
-    assert!(issues.iter().all(|issue| issue.source == "pipeline"));
+    assert!(issues
+        .iter()
+        .all(|issue| issue.source == DiagnosticSource::Pipeline));
 }
 
 #[test]
@@ -31,9 +33,18 @@ fn reports_pipeline_and_inventory_syntax_errors_together() {
     let inventory = "sources:\n  raw[id=x,id=y]\n  raw[id=a,id=b]\n";
     let issues = diagnose(pipeline, Some(inventory));
     assert_eq!(issues.len(), 3);
-    assert_eq!((issues[0].source, issues[0].line), ("pipeline", Some(2)));
-    assert_eq!((issues[1].source, issues[1].line), ("inventory", Some(2)));
-    assert_eq!((issues[2].source, issues[2].line), ("inventory", Some(3)));
+    assert_eq!(
+        (issues[0].source, issues[0].line),
+        (DiagnosticSource::Pipeline, Some(2))
+    );
+    assert_eq!(
+        (issues[1].source, issues[1].line),
+        (DiagnosticSource::Inventory, Some(2))
+    );
+    assert_eq!(
+        (issues[2].source, issues[2].line),
+        (DiagnosticSource::Inventory, Some(3))
+    );
 }
 
 #[test]
@@ -119,7 +130,9 @@ fn seeded_deletions_report_every_damaged_inventory_line() {
         let actual: BTreeSet<_> = issues.iter().map(|issue| issue.line.unwrap()).collect();
         let expected: BTreeSet<_> = damaged.iter().map(|index| index + 1).collect();
         assert_eq!(actual, expected, "{damaged_count} damaged inventory lines");
-        assert!(issues.iter().all(|issue| issue.source == "inventory"));
+        assert!(issues
+            .iter()
+            .all(|issue| issue.source == DiagnosticSource::Inventory));
         for issue in &issues {
             assert!(
                 issue
@@ -204,7 +217,7 @@ fn validates_external_inventory_and_semantics() {
     let bad_inventory = "sources:\n  raw[id=x,id=y]\n";
     let issues = diagnose(text, Some(bad_inventory));
     assert_eq!(issues.len(), 1);
-    assert_eq!(issues[0].source, "inventory");
+    assert_eq!(issues[0].source, DiagnosticSource::Inventory);
     assert_eq!(issues[0].line, Some(2));
 
     let good_inventory = "sources:\n  raw[id=x]\n";
@@ -225,7 +238,7 @@ fn type_errors_point_to_the_exact_flow_step_even_when_operation_is_reused() {
                 lidar_checked : Checked<Camera> [id] = inspect(lidar)\n";
     let issues = diagnose(text, None);
     assert_eq!(issues.len(), 1);
-    assert_eq!(issues[0].source, "pipeline");
+    assert_eq!(issues[0].source, DiagnosticSource::Pipeline);
     assert_eq!(issues[0].line, Some(5));
     assert!(issues[0].message.contains("type conflict"));
 }
@@ -244,7 +257,7 @@ fn inferred_type_error_points_to_the_consuming_sectioned_step() {
                   final = second(middle)\n";
     let issues = diagnose(text, Some("sources:\n"));
     assert_eq!(issues.len(), 1);
-    assert_eq!(issues[0].source, "pipeline");
+    assert_eq!(issues[0].source, DiagnosticSource::Pipeline);
     assert_eq!(issues[0].line, Some(10));
     assert!(issues[0].message.contains("B<Native>"));
 }
@@ -253,11 +266,11 @@ fn inferred_type_error_points_to_the_consuming_sectioned_step() {
 fn source_inventory_errors_point_to_the_source_line() {
     let pipeline = "source raw [id]\n";
     let unknown = diagnose(pipeline, Some("sources:\n  other[id=x]\n"));
-    assert_eq!(unknown[0].source, "inventory");
+    assert_eq!(unknown[0].source, DiagnosticSource::Inventory);
     assert_eq!(unknown[0].line, Some(2));
 
     let duplicate = diagnose(pipeline, Some("sources:\n  raw[id=x]\n  raw[id=x]\n"));
-    assert_eq!(duplicate[0].source, "inventory");
+    assert_eq!(duplicate[0].source, DiagnosticSource::Inventory);
     assert_eq!(duplicate[0].line, Some(3));
 }
 
@@ -274,7 +287,7 @@ fn missing_join_input_points_to_the_call() {
     let text = "source raw [id]\nsource reference [id]\noperation join(left: one, right: one)\nresult = join(raw, reference)\n";
     let issues = diagnose(text, Some("sources:\n  raw[id=x]\n"));
     assert_eq!(issues.len(), 1);
-    assert_eq!(issues[0].source, "pipeline");
+    assert_eq!(issues[0].source, DiagnosticSource::Pipeline);
     assert_eq!(issues[0].line, Some(4));
     assert!(issues[0].message.contains("missing input `right`"));
 }
@@ -349,7 +362,7 @@ fn source_with_wrong_dimensions_points_to_its_inventory_line() {
     let pipeline = "source raw [id]\n";
     let issues = diagnose(pipeline, Some("sources:\n  raw[id=x]\n  raw[other=y]\n"));
     assert_eq!(issues.len(), 1, "{issues:?}");
-    assert_eq!(issues[0].source, "inventory");
+    assert_eq!(issues[0].source, DiagnosticSource::Inventory);
     assert_eq!(issues[0].line, Some(3));
     assert!(issues[0]
         .message
