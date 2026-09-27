@@ -2,7 +2,7 @@
 
 These are compile-only fixtures. They model artifact identities and types; the
 `.dat` and `.bin` paths are illustrative, and no commands are supplied to run
-the jobs. Use `check`, `dag`, or `paths` to inspect them.
+the jobs. Use `check`, `dag`, or `check --paths` to inspect them.
 
 ```sh
 cargo run -- check examples/stress/type_lab.spit --sources examples/stress/type_lab.sources

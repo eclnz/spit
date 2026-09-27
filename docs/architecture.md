@@ -32,9 +32,9 @@ concrete DAG + path templates -> bound artifact paths
 bound paths + operation commands -> argument expansion -> Bash script
 ```
 
-`spit paths` reports whether each declared product uses an explicit rule, the default rule, or no rule. It validates template dimensions even for product families with no resolved jobs and checks collisions among concrete paths. `--strict-paths` requires explicit rules for all products during compilation; without it, a default rule can cover multiple families.
+`spit check --paths` reports whether each declared product uses an explicit rule, the default rule, or no rule. It validates template dimensions even for product families with no resolved jobs and checks collisions among concrete paths. `--strict-paths` requires explicit rules for all products during compilation; without it, a default rule can cover multiple families.
 
-`spit bound-dag` reports each concrete job, its named input artifacts and output artifact, and their relative paths. This binds the DAG to paths without reading or expanding command templates.
+`spit dag --paths` reports each concrete job, its named input artifacts and output artifact, and their relative paths. This binds the DAG to paths without reading or expanding command templates.
 
 With `--root <directory>`, SPIT also checks that each source file needed by the resolved DAG exists as a file under that directory. Derived output paths are validated but are not expected to exist before execution. The ACT example has an integration test that creates empty files at its declared source paths and checks both complete and missing-input cases.
 
