@@ -32,7 +32,7 @@ Choose one command per call. The pipeline file comes next; options follow it.
 | `bound-dag` | Print the resolved DAG with a path for every artifact. |
 | `paths` | Show which path rule covers each product and validate the resulting paths. |
 | `bash` | Write a Bash script for the resolved jobs to standard output. It does not run the script. |
-| `diagnose` | Read the pipeline from standard input and return JSON diagnostics for editor use. Each has a `severity` of `error` or `warning`; those tied to a declaration, call, rule, command, or path include its source line. A pipeline path is required for CLI consistency, but its file contents are not read. |
+| `diagnose` | Read the pipeline from standard input and return JSON diagnostics for editor use. Each has a `severity` of `error` or `warning`; those tied to a declaration, call, rule, command, or path include its `line`, and a `column` and `end_column` for the text it is about, such as one input of a call or one `{placeholder}`. Columns are 1-based and count UTF-16 code units, as editors do; `end_column` is one past the last character. A pipeline path is required for CLI consistency, but its file contents are not read. |
 
 | Option | Effect |
 | --- | --- |
@@ -49,12 +49,12 @@ cargo run -- check examples/commands/bash_demo.spit --sources examples/commands/
 
 ### Errors and warnings
 
-Every command first reports all the problems it can find, one error per line, before doing any work:
+Every command first reports all the problems it can find, one error per line, before doing any work. Each names the line and the column where the text at fault starts:
 
 ```text
-error: line 5: command for `clean` uses unknown placeholder `{result}`
-error: line 9: unknown product `rwa`
-warning: line 2: source product `spare` is never used as an input
+warning: line 2, column 8: source product `spare` is never used as an input
+error: line 5, column 29: command for `clean` uses unknown placeholder `{result}`
+error: line 9, column 14: unknown product `rwa`
 ```
 
 Syntax errors are reported throughout the file first; the remaining checks run once every line parses. A step or rule that uses a declaration which failed is not reported again. Errors stop the command; warnings do not. Warnings flag a source product no step uses, an operation no step uses, a used operation with no `command` once the pipeline has commands, an output type variable that no input binds, and a `#` that ends a word, which reads like a comment but is part of the word. A file with no steps is treated as a library of definitions, and imported definitions are never reported as unused. Jobs are resolved against the inventory only when nothing else is wrong.

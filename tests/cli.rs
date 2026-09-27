@@ -221,14 +221,14 @@ fn check_prints_every_diagnostic_and_fails_only_on_errors() {
     assert!(!broken_check.status.success());
     assert_eq!(
         String::from_utf8(broken_check.stderr).unwrap(),
-        "warning: line 1: source product `raw` is never used as an input\nerror: line 3: path template for `raw` omits dimension `batch`; artifacts differing only in `batch` would share a path\nerror: line 5: unknown product `rwa`\n"
+        "warning: line 1, column 8: source product `raw` is never used as an input\nerror: line 3, column 11: path template for `raw` omits dimension `batch`; artifacts differing only in `batch` would share a path\nerror: line 5, column 17: unknown product `rwa`\n"
     );
 
     // Without an inventory, check stops after the pipeline checks; dag needs jobs.
     assert!(warned_check.status.success());
     assert_eq!(
         String::from_utf8(warned_check.stderr).unwrap(),
-        "warning: line 2: source product `spare` is never used as an input\n"
+        "warning: line 2, column 8: source product `spare` is never used as an input\n"
     );
     assert!(String::from_utf8(warned_check.stdout)
         .unwrap()
