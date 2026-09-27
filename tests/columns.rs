@@ -128,6 +128,35 @@ fn rule_and_inventory_errors_point_at_the_rule_and_record() {
 }
 
 #[test]
+fn display_in_counts_the_column_in_characters() {
+    let text = "source raw [id]\noperation copy(one)\nx = copy(résumé)\ny = copy(rwa)\n";
+    let diagnostics = diagnose(text, None);
+    let shown: Vec<_> = diagnostics
+        .iter()
+        .map(|diagnostic| diagnostic.display_in(text, None).to_string())
+        .collect();
+    // `é` is one character, so `résumé` starts at column 10. The unknown
+    // `rwa` waits until the syntax error is fixed.
+    assert_eq!(
+        shown,
+        ["error: line 3, column 10: invalid input product `résumé`; use letters, digits, and underscores"]
+    );
+    assert_eq!(
+        diagnostics[0].to_string(),
+        "error: line 3: invalid input product `résumé`; use letters, digits, and underscores"
+    );
+
+    let inventory = "sources:\n  raw[id=x]\n  raw[id=x]\n";
+    let diagnostics = diagnose("source raw [id]\n", Some(inventory));
+    assert_eq!(
+        diagnostics[0]
+            .display_in("source raw [id]\n", Some(inventory))
+            .to_string(),
+        "error: inventory line 3, column 3: duplicate source artifact `raw[id=x]`"
+    );
+}
+
+#[test]
 fn sectioned_steps_point_at_their_parts() {
     let text = "\
 products:

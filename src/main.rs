@@ -120,7 +120,10 @@ fn run() -> Result<(), Box<dyn Error>> {
     let path = Path::new(&args.pipeline);
     let diagnostics = diagnose_at(&pipeline_text, inventory_text.as_deref(), path);
     for diagnostic in &diagnostics {
-        eprintln!("{diagnostic}");
+        eprintln!(
+            "{}",
+            diagnostic.display_in(&pipeline_text, inventory_text.as_deref())
+        );
     }
     if diagnostics.iter().any(|diagnostic| diagnostic.is_error()) {
         return Err(Reported.into());
