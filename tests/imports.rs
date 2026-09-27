@@ -202,3 +202,10 @@ fn import_all_skips_pipeline_steps_and_inventory() {
         1
     );
 }
+
+#[test]
+fn imported_definitions_are_not_reported_as_unused() {
+    let path = Path::new("examples/imports/imported.spit");
+    let text = fs::read_to_string(path).unwrap();
+    assert!(diagnose_at(&text, None, path).is_empty());
+}

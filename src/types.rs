@@ -1,6 +1,6 @@
 //! Symbolic, domain-agnostic pipeline types and local unification.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
@@ -58,6 +58,15 @@ impl TypeExpr {
                 args: args.iter().map(Self::erase_variables).collect(),
             },
             _ => self.clone(),
+        }
+    }
+
+    /// The names of the type variables this expression mentions.
+    pub fn variables(&self) -> BTreeSet<String> {
+        match self {
+            Self::Variable(name) => BTreeSet::from([name.clone()]),
+            Self::Applied { args, .. } => args.iter().flat_map(Self::variables).collect(),
+            _ => BTreeSet::new(),
         }
     }
 

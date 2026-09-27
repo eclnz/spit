@@ -1,6 +1,6 @@
 use spit::{
     parse_document, parse_pipeline, parse_source_inventory, render_dag, resolve, ParseError,
-    ResolveError, TypeExpr,
+    validate_pipeline, ResolveError, TypeExpr,
 };
 
 const EXAMPLE: &str = include_str!("../examples/basic/basic.spit");
@@ -233,4 +233,26 @@ fn hash_joined_to_text_is_rejected_instead_of_truncating() {
         "source raw [id]\noperation copy(one)\ncommand copy: tool '--color=#fff' {input} {output} # note\n"
     )
     .is_ok());
+}
+
+#[test]
+fn pipeline_checks_need_no_inventory() {
+    let text = "source raw : Table [id]\noperation clean(Table) -> Table\n\ncleaned = clean(rwa)\n";
+    assert_eq!(
+        validate_pipeline(&parse_pipeline(text).unwrap()).unwrap_err(),
+        ResolveError::UnknownProduct {
+            name: "rwa".to_owned()
+        }
+    );
+
+    let text = "source raw : Table [id]\nsource other : Other [id]\noperation clean(Table) -> Table\ncleaned = clean(other)\n";
+    assert!(matches!(
+        validate_pipeline(&parse_pipeline(text).unwrap()),
+        Err(ResolveError::TypeMismatch { .. })
+    ));
+
+    let (pipeline, inventory) =
+        parse_document(include_str!("../examples/commands/bash_demo.spit")).unwrap();
+    assert!(inventory.is_none());
+    validate_pipeline(&pipeline).unwrap();
 }

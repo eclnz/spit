@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use crate::types::TypeExpr;
@@ -224,6 +224,8 @@ pub struct PipelineSourceMap {
     pub paths: BTreeMap<String, usize>,
     /// Line of the default `path:` rule.
     pub default_path: Option<usize>,
+    /// Products and operations brought in by `use` lines.
+    pub imported: BTreeSet<String>,
 }
 
 #[derive(Clone, Debug, Default)]

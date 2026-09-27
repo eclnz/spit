@@ -54,11 +54,25 @@ fn parse_args() -> Result<CliArgs, Box<dyn Error>> {
     })
 }
 
+/// Diagnostics that have already been printed.
+#[derive(Debug)]
+struct Reported;
+
+impl std::fmt::Display for Reported {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("errors reported")
+    }
+}
+
+impl Error for Reported {}
+
 fn main() -> ExitCode {
     match run() {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
-            eprintln!("error: {error}");
+            if !error.is::<Reported>() {
+                eprintln!("error: {error}");
+            }
             ExitCode::FAILURE
         }
     }
@@ -69,26 +83,43 @@ fn run() -> Result<(), Box<dyn Error>> {
     if args.command == "diagnose" {
         return run_diagnose(&args);
     }
-    let (pipeline, embedded_inventory) = parse_document_at(
-        &fs::read_to_string(&args.pipeline)?,
-        Path::new(&args.pipeline),
-    )?;
-    let inventory = if let Some(sources) = &args.sources {
-        let inventory_text = if sources == "-" {
+    let pipeline_text = fs::read_to_string(&args.pipeline)?;
+    let inventory_text = match args.sources.as_deref() {
+        Some("-") => {
             let mut text = String::new();
             io::stdin().read_to_string(&mut text)?;
-            text
-        } else {
-            fs::read_to_string(sources)?
-        };
-        parse_source_inventory(&inventory_text)?
-    } else {
-        embedded_inventory
-            .ok_or("no inline source inventory; supply --sources <inventory.spit|->")?
+            Some(text)
+        }
+        Some(sources) => Some(fs::read_to_string(sources)?),
+        None => None,
+    };
+    // Report every error and warning before doing any work.
+    let path = Path::new(&args.pipeline);
+    let diagnostics = diagnose_at(&pipeline_text, inventory_text.as_deref(), path);
+    for diagnostic in &diagnostics {
+        eprintln!("{diagnostic}");
+    }
+    if diagnostics.iter().any(|diagnostic| diagnostic.is_error()) {
+        return Err(Reported.into());
+    }
+    let (pipeline, embedded_inventory) = parse_document_at(&pipeline_text, path)?;
+    let coverage = inspect_paths(&pipeline)?;
+    let inventory = match &inventory_text {
+        Some(text) => Some(parse_source_inventory(text)?),
+        None => embedded_inventory,
+    };
+    let Some(inventory) = inventory else {
+        if args.command == "check" && args.root.is_none() {
+            if args.strict_paths {
+                coverage.validate(true)?;
+            }
+            println!("Pipeline valid.\n\nNo source inventory; jobs not resolved.");
+            return Ok(());
+        }
+        return Err("no inline source inventory; supply --sources <inventory.spit|->".into());
     };
     let dag = resolve(&pipeline, &inventory)?;
     if args.strict_paths || args.command == "paths" {
-        let coverage = inspect_paths(&pipeline)?;
         if args.command == "paths" {
             print!("{coverage}");
         }
@@ -136,7 +167,8 @@ fn run_diagnose(args: &CliArgs) -> Result<(), Box<dyn Error>> {
             print!(",");
         }
         print!(
-            "{{\"source\":\"{}\",\"line\":{},\"message\":\"{}\"}}",
+            "{{\"severity\":\"{}\",\"source\":\"{}\",\"line\":{},\"message\":\"{}\"}}",
+            diagnostic.severity.as_str(),
             diagnostic.source,
             diagnostic
                 .line
