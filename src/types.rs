@@ -2,6 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
+use std::ops::Range;
 
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub enum TypeExpr {
@@ -267,12 +268,15 @@ fn refine_known(left: &TypeExpr, right: &TypeExpr) -> TypeExpr {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TypeParseError {
     pub message: String,
+    /// The byte range within the parsed text that the error is about.
+    pub span: Range<usize>,
 }
 
 impl TypeParseError {
-    fn new(message: &str) -> Self {
+    fn new(span: Range<usize>, message: &str) -> Self {
         Self {
             message: message.to_owned(),
+            span,
         }
     }
 }
@@ -318,33 +322,43 @@ pub fn parse_type_expr(text: &str, signature: bool) -> Result<TypeExpr, TypePars
             }
         }
 
+        /// A one-byte span at the current offset, or an empty span at the
+        /// end of the text when nothing is left to point at.
+        fn here(&self) -> Range<usize> {
+            let end = (self.offset + 1).min(self.text.len()).max(self.offset);
+            self.offset..end
+        }
+
         fn expression(&mut self) -> Result<TypeExpr, TypeParseError> {
             self.skip_space();
+            let variable_marker = self.offset;
             let explicit_variable = self.take(b'$');
-            if explicit_variable && !self.signature {
-                return Err(TypeParseError::new(
-                    "type variables are only allowed in operation signatures",
-                ));
-            }
-            let start = self.offset;
+            let name_start = self.offset;
             let bytes = self.text.as_bytes();
-            let Some(first) = bytes.get(self.offset) else {
-                return Err(TypeParseError::new("expected type name"));
-            };
-            if !first.is_ascii_alphabetic() && *first != b'_' {
-                return Err(TypeParseError::new("expected type name"));
-            }
-            self.offset += 1;
+            let valid_start = bytes
+                .get(self.offset)
+                .is_some_and(|byte| byte.is_ascii_alphabetic() || *byte == b'_');
             while bytes
                 .get(self.offset)
                 .is_some_and(|byte| byte.is_ascii_alphanumeric() || *byte == b'_')
             {
                 self.offset += 1;
             }
-            let name = &self.text[start..self.offset];
+            let token = variable_marker..self.offset;
+            if explicit_variable && !self.signature {
+                return Err(TypeParseError::new(
+                    token,
+                    "type variables are only allowed in operation signatures",
+                ));
+            }
+            if !valid_start {
+                return Err(TypeParseError::new(token, "expected type name"));
+            }
+            let name = &self.text[name_start..self.offset];
             if explicit_variable {
                 if self.take(b'<') {
                     return Err(TypeParseError::new(
+                        token,
                         "a type variable cannot have type arguments",
                     ));
                 }
@@ -358,6 +372,7 @@ pub fn parse_type_expr(text: &str, signature: bool) -> Result<TypeExpr, TypePars
                     }
                     if !self.take(b',') {
                         return Err(TypeParseError::new(
+                            self.here(),
                             "expected `,` or `>` in parameterized type",
                         ));
                     }
@@ -382,6 +397,7 @@ pub fn parse_type_expr(text: &str, signature: bool) -> Result<TypeExpr, TypePars
     parser.skip_space();
     if parser.offset != text.len() {
         return Err(TypeParseError::new(
+            0..text.len(),
             "unexpected trailing text in type expression",
         ));
     }
