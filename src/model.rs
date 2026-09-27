@@ -218,6 +218,12 @@ pub struct PipelineSourceMap {
     pub invocations: BTreeMap<String, usize>,
     pub constraints: BTreeMap<String, usize>,
     pub constraint_lines: Vec<usize>,
+    /// One line per entry in `Pipeline::commands`, in the same order.
+    pub command_lines: Vec<usize>,
+    /// Lines of `path product:` rules, keyed by product.
+    pub paths: BTreeMap<String, usize>,
+    /// Line of the default `path:` rule.
+    pub default_path: Option<usize>,
 }
 
 #[derive(Clone, Debug, Default)]

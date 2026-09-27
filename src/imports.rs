@@ -81,6 +81,13 @@ pub(crate) fn apply_import(
             .operations
             .insert(operation.name.clone(), line);
     }
+    for product in imported.product_paths.keys() {
+        pipeline.source_lines.paths.insert(product.clone(), line);
+    }
+    pipeline
+        .source_lines
+        .command_lines
+        .extend(imported.commands.iter().map(|_| line));
     for constraint in &imported.constraints {
         pipeline
             .source_lines

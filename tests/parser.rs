@@ -190,3 +190,47 @@ fn shell_source_is_rejected_with_migration_guidance() {
     assert_eq!(error.line, 3);
     assert!(error.message.contains("executable available on PATH"));
 }
+
+#[test]
+fn rejects_unbalanced_command_brackets_with_line_number() {
+    let cases = [
+        ("command normalize: normalize --mode input} {output", "unmatched `}`"),
+        ("command normalize: normalize --mode {input {output}", "unclosed `{`"),
+        ("command normalize: normalize --mode {input} {{output}", "unmatched `}`"),
+        ("command normalize: normalize --mode {} {output}", "empty placeholder"),
+        ("command normalize: normalize '--mode {input} {output}", "unterminated quote"),
+    ];
+    for (line, expected) in cases {
+        let text = format!("source raw : Table [id]\n{line}\n");
+        let error = parse_pipeline(&text).unwrap_err();
+        assert_eq!(error.line, 2, "{line}");
+        assert!(error.message.contains("normalize"), "{error}");
+        assert!(error.message.contains(expected), "{line}: {error}");
+    }
+}
+
+#[test]
+fn path_template_errors_are_reported_while_parsing() {
+    let cases = [
+        ("path: {product}/{entities.csv", "unclosed `{`"),
+        ("path raw: raw/id}.csv", "unmatched `}`"),
+    ];
+    for (line, expected) in cases {
+        let text = format!("source raw : Table [id]\n{line}\n");
+        let error = parse_pipeline(&text).unwrap_err();
+        assert_eq!(error.line, 2, "{line}");
+        assert!(error.message.contains(expected), "{line}: {error}");
+    }
+}
+
+#[test]
+fn hash_joined_to_text_is_rejected_instead_of_truncating() {
+    let text = "source raw [id]\noperation copy(one)\ncommand copy: tool --color=#fff {input} {output}\n";
+    let error = parse_pipeline(text).unwrap_err();
+    assert_eq!(error.line, 3);
+    assert!(error.message.contains("`--color=`"), "{error}");
+    assert!(parse_pipeline(
+        "source raw [id]\noperation copy(one)\ncommand copy: tool '--color=#fff' {input} {output} # note\n"
+    )
+    .is_ok());
+}
