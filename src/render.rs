@@ -11,8 +11,6 @@ pub fn render_dag(dag: &ResolvedDag) -> String {
     write_jobs(dag, |_| Ok(None), |_| None).expect("rendering without ports cannot fail")
 }
 
-/// List every artifact that can be produced, then every one that cannot with
-/// the reasons why, then the coverage rules the sources fail.
 pub fn render_artifacts(report: &ArtifactReport) -> String {
     let dag = &report.dag;
     let held_back: BTreeSet<_> = report

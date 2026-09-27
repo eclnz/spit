@@ -137,15 +137,12 @@ pub(crate) fn collect_pipeline(pipeline: &Pipeline) -> PipelineCheck<'_> {
     }
 }
 
-/// Resolve the jobs an inventory allows, failing if any one cannot run.
-/// [`resolve_artifacts`] reports every such job instead.
 pub fn resolve(
     pipeline: &Pipeline,
     inventory: &SourceInventory,
 ) -> Result<ResolvedDag, ResolveError> {
     let report = resolve_artifacts(pipeline, inventory)?;
-    // A blocked job always follows the gap that blocks it, so the first
-    // unmatched gap is the first failure.
+    // A blocked gap always follows the gap that blocks it.
     let unmatched = report
         .incomplete
         .into_iter()
@@ -166,12 +163,6 @@ pub fn resolve(
     }
 }
 
-/// Resolve every concrete artifact an inventory allows without stopping at a
-/// job that cannot run. Such a job is reported with its gaps, and its outputs
-/// remain candidates for later steps, so a job that needs them is reported as
-/// blocked rather than silently dropped. Sources in a group that fails a
-/// coverage rule are held back in the same way. Fails only when the pipeline
-/// or the inventory is invalid in itself.
 pub fn resolve_artifacts(
     pipeline: &Pipeline,
     inventory: &SourceInventory,
@@ -367,7 +358,6 @@ fn check_coverage_rule(
     Ok(())
 }
 
-/// Every way each group fails a coverage rule, in group order.
 fn coverage_gaps(
     rule_index: usize,
     rule: &CoverageRule,
@@ -1111,8 +1101,7 @@ fn invocation_order(
     Ok(order)
 }
 
-/// One job of a step: the artifacts bound to each input, the outputs, and
-/// why the job cannot run. `inputs` is complete only when `gaps` is empty.
+/// `inputs` is complete only when `gaps` is empty.
 struct Expansion {
     inputs: Vec<Vec<ArtifactInstance>>,
     outputs: Vec<ArtifactInstance>,
