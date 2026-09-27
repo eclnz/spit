@@ -49,12 +49,12 @@ cargo run -- check examples/commands/bash_demo.spit --sources examples/commands/
 
 ### Errors and warnings
 
-Every command first reports all the problems it can find, one error per line, before doing any work:
+Every command first reports all the problems it can find, one error per line, before doing any work. Each names the line and the column where the text at fault starts:
 
 ```text
-error: line 5: command for `clean` uses unknown placeholder `{result}`
-error: line 9: unknown product `rwa`
-warning: line 2: source product `spare` is never used as an input
+warning: line 2, column 8: source product `spare` is never used as an input
+error: line 5, column 29: command for `clean` uses unknown placeholder `{result}`
+error: line 9, column 14: unknown product `rwa`
 ```
 
 Syntax errors are reported throughout the file first; the remaining checks run once every line parses. A step or rule that uses a declaration which failed is not reported again. Errors stop the command; warnings do not. Warnings flag a source product no step uses, an operation no step uses, a used operation with no `command` once the pipeline has commands, an output type variable that no input binds, and a `#` that ends a word, which reads like a comment but is part of the word. A file with no steps is treated as a library of definitions, and imported definitions are never reported as unused. Jobs are resolved against the inventory only when nothing else is wrong.

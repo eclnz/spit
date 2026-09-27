@@ -95,26 +95,70 @@ impl Diagnostic {
     /// the texts that were diagnosed.
     pub fn utf16_columns(&self, text: &str, source_text: Option<&str>) -> Option<Range<usize>> {
         let columns = self.columns.as_ref()?;
+        Some(utf16_columns(self.line_text(text, source_text)?, columns))
+    }
+
+    /// Renders as `error: line 5, column 12: message`, with the 1-based
+    /// column counted in characters of the texts that were diagnosed.
+    pub fn display_in<'a>(
+        &'a self,
+        text: &'a str,
+        source_text: Option<&'a str>,
+    ) -> impl fmt::Display + 'a {
+        let column = self.columns.as_ref().and_then(|columns| {
+            let line = self.line_text(text, source_text)?;
+            Some(line.get(..columns.start)?.chars().count() + 1)
+        });
+        DisplayIn {
+            diagnostic: self,
+            column,
+        }
+    }
+
+    /// The diagnosed line, from the pipeline text or the separate inventory.
+    fn line_text<'a>(&self, text: &'a str, source_text: Option<&'a str>) -> Option<&'a str> {
         let text = match self.source {
             DiagnosticSource::Inventory => source_text?,
             DiagnosticSource::Pipeline => text,
         };
-        let line = text.lines().nth(self.line?.checked_sub(1)?)?;
-        Some(utf16_columns(line, columns))
+        text.lines().nth(self.line?.checked_sub(1)?)
+    }
+
+    fn write(&self, f: &mut fmt::Formatter<'_>, column: Option<usize>) -> fmt::Result {
+        write!(f, "{}: ", self.severity.as_str())?;
+        let inventory = self.source == DiagnosticSource::Inventory;
+        match (self.line, column) {
+            (Some(_), _) if inventory => f.write_str("inventory ")?,
+            (None, _) if inventory => f.write_str("inventory: ")?,
+            _ => {}
+        }
+        match (self.line, column) {
+            (Some(line), Some(column)) => write!(f, "line {line}, column {column}: ")?,
+            (Some(line), None) => write!(f, "line {line}: ")?,
+            (None, _) => {}
+        }
+        f.write_str(&self.message)
+    }
+}
+
+/// A diagnostic rendered with its column; see [`Diagnostic::display_in`].
+struct DisplayIn<'a> {
+    diagnostic: &'a Diagnostic,
+    column: Option<usize>,
+}
+
+impl fmt::Display for DisplayIn<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.diagnostic.write(f, self.column)
     }
 }
 
 /// Reads as `error: line 3: message`, naming the inventory for its lines.
+/// Without the diagnosed text a column cannot be counted in characters; use
+/// [`Diagnostic::display_in`] to include it.
 impl fmt::Display for Diagnostic {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}: ", self.severity.as_str())?;
-        match (self.source, self.line) {
-            (DiagnosticSource::Inventory, Some(line)) => write!(f, "inventory line {line}: ")?,
-            (DiagnosticSource::Inventory, None) => f.write_str("inventory: ")?,
-            (DiagnosticSource::Pipeline, Some(line)) => write!(f, "line {line}: ")?,
-            (DiagnosticSource::Pipeline, None) => {}
-        }
-        f.write_str(&self.message)
+        self.write(f, None)
     }
 }
 
