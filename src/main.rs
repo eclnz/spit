@@ -10,11 +10,11 @@ use spit::{
     diagnose_artifacts_at, diagnose_at, discover_sources, inspect_paths, parse_document_at,
     parse_pipeline_at, parse_source_inventory, render_artifacts, render_bash, render_bound_dag,
     render_dag, render_source_inventory, resolve, resolve_artifacts, validate_concrete_paths,
-    validate_source_files, Diagnostic,
+    validate_source_files, Diagnostic, Pipeline, ResolvedDag,
 };
 
 const USAGE: &str =
-    "usage: spit <check|dag|bash|artifacts|discover> <pipeline.spit> [--sources <inventory.spit|->] [--root <directory>] [--paths] [--strict-paths] [--json] [--stdin]";
+    "usage: spit <check|dag|bash|artifacts|discover> <pipeline.spit> [--sources <inventory.spit|->] [--root <directory>] [--stage <name>] [--paths] [--strict-paths] [--json] [--stdin]";
 
 #[derive(Clone, Copy, PartialEq)]
 enum Command {
@@ -45,6 +45,7 @@ struct CliArgs {
     paths: bool,
     strict_paths: bool,
     root: Option<String>,
+    stage: Option<String>,
     json: bool,
     stdin: bool,
 }
@@ -64,6 +65,7 @@ fn parse_args() -> Result<CliArgs, Box<dyn Error>> {
     let mut paths = false;
     let mut strict_paths = false;
     let mut root = None;
+    let mut stage = None;
     let mut json = false;
     let mut stdin = false;
     while let Some(flag) = args.next() {
@@ -72,6 +74,7 @@ fn parse_args() -> Result<CliArgs, Box<dyn Error>> {
             "--paths" if !paths => paths = true,
             "--strict-paths" if !strict_paths => strict_paths = true,
             "--root" if root.is_none() => root = Some(args.next().ok_or(USAGE)?),
+            "--stage" if stage.is_none() => stage = Some(args.next().ok_or(USAGE)?),
             "--json" if !json => json = true,
             "--stdin" if !stdin => stdin = true,
             _ => return Err(USAGE.into()),
@@ -84,6 +87,7 @@ fn parse_args() -> Result<CliArgs, Box<dyn Error>> {
         paths,
         strict_paths,
         root,
+        stage,
         json,
         stdin,
     })
@@ -143,6 +147,11 @@ fn run() -> Result<(), Box<dyn Error>> {
     if args.paths && !matches!(args.command, Command::Check | Command::Dag) {
         return Err("--paths applies to check and dag".into());
     }
+    if args.stage.is_some()
+        && (!matches!(args.command, Command::Check | Command::Dag | Command::Bash) || args.json)
+    {
+        return Err("--stage applies to check, dag, and bash, without --json".into());
+    }
     let inventory_text = match (args.sources.as_deref(), &args.root) {
         (Some("-"), _) => {
             let mut text = String::new();
@@ -190,6 +199,24 @@ fn run() -> Result<(), Box<dyn Error>> {
         ),
         None => parse_document_at(&pipeline_text, path)?,
     };
+    if let Some(stage) = &args.stage {
+        if !pipeline
+            .stages
+            .iter()
+            .any(|declared| &declared.name == stage)
+        {
+            let names: Vec<_> = pipeline
+                .stages
+                .iter()
+                .map(|stage| format!("`{}`", stage.name))
+                .collect();
+            return Err(if names.is_empty() {
+                format!("unknown stage `{stage}`; this pipeline declares no stages").into()
+            } else {
+                format!("unknown stage `{stage}`; stages: {}", names.join(", ")).into()
+            });
+        }
+    }
     let coverage = inspect_paths(&pipeline)?;
     if args.command == Command::Check && args.paths {
         println!("{coverage}");
@@ -213,6 +240,11 @@ fn run() -> Result<(), Box<dyn Error>> {
         return Ok(());
     }
     let dag = resolve(&pipeline, &inventory)?;
+    // A single stage runs on the files earlier stages already wrote.
+    let dag = match &args.stage {
+        Some(stage) => dag.only_stage(stage),
+        None => dag,
+    };
     if args.strict_paths || args.paths {
         coverage.validate(args.strict_paths)?;
         validate_concrete_paths(&pipeline, &dag)?;
@@ -224,9 +256,17 @@ fn run() -> Result<(), Box<dyn Error>> {
         .transpose()?;
     match args.command {
         Command::Check => {
-            println!("Pipeline valid.\n\n{} jobs resolved.", dag.jobs.len());
+            println!(
+                "Pipeline valid.\n\n{}",
+                job_count(&pipeline, &dag, args.stage.as_deref())
+            );
             if let Some(count) = checked_files {
-                println!("{count} source files verified.");
+                let kind = if args.stage.is_some() {
+                    "input"
+                } else {
+                    "source"
+                };
+                println!("{count} {kind} files verified.");
             }
         }
         Command::Dag if args.paths => print!("{}", render_bound_dag(&pipeline, &dag)?),
@@ -235,6 +275,33 @@ fn run() -> Result<(), Box<dyn Error>> {
         Command::Artifacts | Command::Discover => unreachable!("handled before resolution"),
     }
     Ok(())
+}
+
+/// How many jobs resolved, per stage when the pipeline has stages.
+fn job_count(pipeline: &Pipeline, dag: &ResolvedDag, stage: Option<&str>) -> String {
+    let total = dag.jobs.len();
+    if let Some(stage) = stage {
+        return format!("{total} jobs resolved in stage `{stage}`.");
+    }
+    if pipeline.stages.is_empty() {
+        return format!("{total} jobs resolved.");
+    }
+    let count = |stage: Option<&str>| {
+        dag.jobs
+            .iter()
+            .filter(|job| job.stage.as_deref() == stage)
+            .count()
+    };
+    let mut parts: Vec<_> = pipeline
+        .stages
+        .iter()
+        .map(|stage| format!("{} in {}", count(Some(&stage.name)), stage.name))
+        .collect();
+    let outside = count(None);
+    if outside > 0 {
+        parts.push(format!("{outside} outside stages"));
+    }
+    format!("{total} jobs resolved: {}.", parts.join(", "))
 }
 
 fn has_inline_inventory(text: &str, path: &Path) -> bool {

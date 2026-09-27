@@ -23,7 +23,7 @@ pub use model::{
     natural_cmp, ArtifactInstance, ArtifactKey, ArtifactReport, ArtifactType, Cardinality,
     CommandDef, CommandRole, CountRequirement, CoverageGap, CoverageRule, EntityBinding, Gap,
     IncompleteJob, InputBinding, InputPort, Invocation, Job, OperationDef, OutputPort, Pipeline,
-    ProductDef, ResolvedDag, ShapeRule, SourceInventory, SourceRecord, DEFAULT_OUTPUT,
+    ProductDef, ResolvedDag, ShapeRule, SourceInventory, SourceRecord, StageDef, DEFAULT_OUTPUT,
 };
 pub use parser::{
     parse_document, parse_pipeline, parse_source_inventory, render_source_inventory, ParseError,

@@ -67,6 +67,11 @@ pub(crate) fn error(message: impl Into<String>) -> PathError {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum PathRule {
     Explicit(String),
+    /// The default `path:` rule written inside a stage.
+    Stage {
+        stage: String,
+        template: String,
+    },
     Default(String),
     Missing,
 }
@@ -102,7 +107,7 @@ impl PathCoverage {
             let fallback: Vec<_> = self
                 .entries
                 .iter()
-                .filter(|entry| matches!(entry.rule, PathRule::Default(_)))
+                .filter(|entry| matches!(entry.rule, PathRule::Default(_) | PathRule::Stage { .. }))
                 .map(|entry| entry.product.as_str())
                 .collect();
             if !fallback.is_empty() {
@@ -124,6 +129,13 @@ impl fmt::Display for PathCoverage {
             match &entry.rule {
                 PathRule::Explicit(template) => {
                     writeln!(f, "  {} ({role}): explicit {template}", entry.product)?;
+                }
+                PathRule::Stage { stage, template } => {
+                    writeln!(
+                        f,
+                        "  {} ({role}): stage {stage} default {template}",
+                        entry.product
+                    )?;
                 }
                 PathRule::Default(template) => {
                     writeln!(f, "  {} ({role}): default {template}", entry.product)?;
@@ -177,6 +189,14 @@ pub(crate) fn collect_paths(
     for product in &pipeline.products {
         let rule = if let Some(template) = pipeline.product_paths.get(&product.name) {
             PathRule::Explicit(template.clone())
+        } else if let Some(template) = pipeline.stage_path_template(&product.name) {
+            PathRule::Stage {
+                stage: pipeline
+                    .stage_of(&product.name)
+                    .unwrap_or_default()
+                    .to_owned(),
+                template: template.clone(),
+            }
         } else if let Some(template) = &pipeline.path_template {
             PathRule::Default(template.clone())
         } else {
@@ -216,9 +236,7 @@ pub(crate) fn collect_paths(
 /// cannot tell the product's artifacts apart. Returns the sample path.
 fn validate_path_template(pipeline: &Pipeline, product: &ProductDef) -> Result<String, PathError> {
     let template = pipeline
-        .product_paths
-        .get(&product.name)
-        .or(pipeline.path_template.as_ref())
+        .path_template_for(&product.name)
         .ok_or_else(|| error(format!("no path template for product `{}`", product.name)))?;
     let placeholders: BTreeSet<_> = parse_template(template)
         .map_err(error)?
@@ -287,12 +305,29 @@ pub fn validate_source_files(
         }
         let full_path = root.join(&relative);
         if !full_path.is_file() {
-            return Err(error(format!(
-                "missing source file for `{}[{}]`: `{}`",
-                artifact.0,
-                artifact.1,
-                full_path.display()
-            )));
+            // With `--stage`, an earlier stage's outputs must already exist.
+            let made_by = pipeline
+                .invocations
+                .iter()
+                .find(|invocation| invocation.outputs.contains(&artifact.0));
+            return Err(error(match made_by {
+                Some(invocation) => format!(
+                    "missing file for `{}[{}]`, which {} makes: `{}`",
+                    artifact.0,
+                    artifact.1,
+                    invocation.stage.as_ref().map_or_else(
+                        || "an earlier step".to_owned(),
+                        |stage| format!("stage `{stage}`")
+                    ),
+                    full_path.display()
+                ),
+                None => format!(
+                    "missing source file for `{}[{}]`: `{}`",
+                    artifact.0,
+                    artifact.1,
+                    full_path.display()
+                ),
+            }));
         }
         checked += 1;
     }
@@ -347,9 +382,7 @@ fn bind_path(
     artifact: &ArtifactInstance,
 ) -> Result<String, PathError> {
     let template = pipeline
-        .product_paths
-        .get(&artifact.product)
-        .or(pipeline.path_template.as_ref())
+        .path_template_for(&artifact.product)
         .ok_or_else(|| {
             error(format!(
                 "no path template for product `{}`",
@@ -363,6 +396,17 @@ fn bind_path(
             Part::Placeholder(name) if name == "product" => {
                 // `alias::name` would put colons in file names.
                 relative.push_str(&artifact.product.replace("::", "."));
+            }
+            // A declared dimension named `stage` keeps its meaning.
+            Part::Placeholder(name) if name == "stage" && !dimensions.contains(&name) => {
+                let stage = pipeline.stage_of(&artifact.product).ok_or_else(|| {
+                    error(format!(
+                        "path template for `{}` uses `{{stage}}`, but `{}` is not made in a stage",
+                        artifact.product, artifact.product
+                    ))
+                    .focus("{stage}")
+                })?;
+                relative.push_str(&encode_component(stage));
             }
             Part::Placeholder(name) if name == "entities" => {
                 let bindings = dimensions
@@ -442,16 +486,12 @@ pub fn discover_sources(pipeline: &Pipeline, root: &Path) -> Result<SourceInvent
         if outputs.contains(&product.name) {
             continue;
         }
-        let template = pipeline
-            .product_paths
-            .get(&product.name)
-            .or(pipeline.path_template.as_ref())
-            .ok_or_else(|| {
-                error(format!(
-                    "no path rule for source `{}`, so its files cannot be discovered",
-                    product.name
-                ))
-            })?;
+        let template = pipeline.path_template_for(&product.name).ok_or_else(|| {
+            error(format!(
+                "no path rule for source `{}`, so its files cannot be discovered",
+                product.name
+            ))
+        })?;
         patterns.push((product, path_pattern(template, product)?));
     }
     let mut files = Vec::new();
