@@ -17,7 +17,7 @@ The first ACT draft gave almost every processing stage a new type. The revised e
 
 The analytics example exercises the same constraint mechanism outside imaging. Its relations use `Relation<...,CustomerKey>`, and each join operation repeats a key variable across both inputs. A relation declared with a different key type is rejected before job expansion. Entity dimensions then select the matching tenant and customer records, while explicit `vary(event)`, `vary(day)`, and `vary(customer)` calls change the result grain through successive rollups.
 
-The ACT example uses the flow-first authoring form. Each source path sits beside its declaration, and special output paths sit beside the assignments that produce them. Operation contracts and commands sit beside their first use; intermediate product declarations are inferred from the operation and its input shape. Explicit BIDS import, b=0 extraction, and FLIRT matrix conversion appear as separate DAG jobs.
+The ACT example uses the flow-first authoring form. Each source path sits beside its declaration, and special output paths sit beside the assignments that produce them. Operation contracts and commands sit beside their first use; intermediate product declarations are inferred from the operation and its input shape. Explicit BIDS import, b=0 extraction, and FLIRT matrix conversion appear as separate DAG jobs. Its steps sit in nested stages: `preprocess` (import, denoise, combine, correct), `anatomy` (parcellation, registration, tissue), and `tractography` (fods, tracking, connectome), so `spit bash --stage tractography` runs the tractography once preprocessing and anatomy have run. The stages change no job, path, or command.
 
 ## Resolved bug: partial type information depended on input order
 
