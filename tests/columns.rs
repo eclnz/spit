@@ -128,6 +128,66 @@ fn rule_and_inventory_errors_point_at_the_rule_and_record() {
 }
 
 #[test]
+fn unclosed_brackets_point_from_the_opener_and_missing_arrows_at_the_type() {
+    let text = "\
+source raw : Table [id
+operation copy(input: Table -> Table
+operation tag(Table) Label
+result = copy(raw
+require raw count>=1 per [id
+";
+    assert_eq!(
+        pointed(text, None),
+        [
+            "error 1: [id",
+            "error 2: (input: Table",
+            "error 3: Label",
+            "error 4: (raw",
+            "error 5: [id",
+        ]
+    );
+}
+
+#[test]
+fn rule_errors_point_at_the_product_or_the_grouped_dimensions() {
+    let text = "\
+source raw : Table [id]
+operation clean(Table) -> Table
+cleaned = clean(raw)
+require rwa count>=1 per [id]
+require raw count>=1 per [shard]
+require cleaned count=1 per [id]
+";
+    assert_eq!(
+        pointed(text, None),
+        ["error 4: rwa", "error 5: [shard]", "error 6: cleaned"]
+    );
+}
+
+#[test]
+fn command_errors_about_the_operation_point_at_its_name() {
+    let text = "\
+source raw : Table [id]
+operation clean(Table) -> Table
+command clean: tool {input} {output}
+command cleen: tool {input} {output}
+command clean: other {input} {output}
+cleaned = clean(raw)
+";
+    assert_eq!(pointed(text, None), ["error 4: cleen", "error 5: clean"]);
+}
+
+#[test]
+fn a_step_output_does_not_repeat_its_inputs_dimension_error() {
+    let text = "\
+source raw : Table [id, id]
+operation clean(Table) -> Table
+cleaned = clean(raw)
+";
+    assert_eq!(pointed(text, None), ["error 1: raw"]);
+}
+
+#[test]
 fn display_in_counts_the_column_in_characters() {
     let text = "source raw [id]\noperation copy(one)\nx = copy(résumé)\ny = copy(rwa)\n";
     let diagnostics = diagnose(text, None);

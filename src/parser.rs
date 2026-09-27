@@ -93,9 +93,9 @@ pub(crate) struct SourceMap {
     /// Each step, keyed by the product it produces.
     pub(crate) invocations: BTreeMap<String, Step>,
     /// The last coverage rule for each product.
-    pub(crate) constraints: BTreeMap<String, Place>,
+    pub(crate) constraints: BTreeMap<String, Rule>,
     /// One entry per `Pipeline::constraints` element, in the same order.
-    pub(crate) rules: Vec<Place>,
+    pub(crate) rules: Vec<Rule>,
     /// One template per `Pipeline::commands` element, in the same order.
     pub(crate) commands: Vec<Place>,
     /// Templates of `path product:` rules, keyed by product.
@@ -140,6 +140,40 @@ impl Step {
     }
 }
 
+/// Where the parts of one coverage rule sit on its line.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct Rule {
+    pub(crate) line: usize,
+    pub(crate) whole: Range<usize>,
+    pub(crate) product: Range<usize>,
+    /// The bracketed dimensions the rule groups by.
+    pub(crate) dimensions: Range<usize>,
+}
+
+impl Rule {
+    /// A rule known only as a whole, such as one brought in by an import.
+    pub(crate) fn spanning(place: &Place) -> Self {
+        Self {
+            line: place.line,
+            whole: place.columns.clone(),
+            product: place.columns.clone(),
+            dimensions: place.columns.clone(),
+        }
+    }
+
+    pub(crate) fn whole(&self) -> Place {
+        Place::new(self.line, self.whole.clone())
+    }
+
+    pub(crate) fn product(&self) -> Place {
+        Place::new(self.line, self.product.clone())
+    }
+
+    pub(crate) fn dimensions(&self) -> Place {
+        Place::new(self.line, self.dimensions.clone())
+    }
+}
+
 impl SourceMap {
     pub(crate) fn command(&self, index: usize) -> Option<Place> {
         self.commands.get(index).cloned()
@@ -173,11 +207,11 @@ impl PipelineBuilder {
         self.pipeline.operations.push(operation);
     }
 
-    pub(crate) fn add_constraint(&mut self, constraint: CoverageRule, place: Place) {
+    pub(crate) fn add_constraint(&mut self, constraint: CoverageRule, rule: Rule) {
         self.lines
             .constraints
-            .insert(constraint.product.clone(), place.clone());
-        self.lines.rules.push(place);
+            .insert(constraint.product.clone(), rule.clone());
+        self.lines.rules.push(rule);
         self.pipeline.constraints.push(constraint);
     }
 
@@ -253,6 +287,22 @@ fn tail_place(original: &str, number: usize, tail: &str) -> Place {
             content.start + offset..content.start + offset + tail.len()
         });
     Place::new(number, columns)
+}
+
+/// Where a parsed coverage rule's product and grouped dimensions sit.
+fn rule_place(original: &str, number: usize, rule: &CoverageRule) -> Rule {
+    let whole = content_columns(original);
+    let after_keyword = whole.start + "require".len();
+    let product = find_word(original, after_keyword, &rule.product).unwrap_or(whole.clone());
+    let dimensions = original[product.end..whole.end]
+        .find('[')
+        .map_or(whole.clone(), |offset| product.end + offset..whole.end);
+    Rule {
+        line: number,
+        whole,
+        product,
+        dimensions,
+    }
 }
 
 /// A parsed document: its pipeline, any inline inventory, and declaration lines.
@@ -358,7 +408,8 @@ fn sectioned_line(
             }
             Some(Section::Constraints) => {
                 let rule = parse_coverage_rule(line, number)?;
-                builder.add_constraint(rule, Place::new(number, content_columns(original)));
+                let place = rule_place(original, number, &rule);
+                builder.add_constraint(rule, place);
             }
             Some(Section::Commands) => {
                 let command = parse_command(line, number)?;
@@ -416,7 +467,8 @@ fn flow_line(
         builder.add_operation(operation, place);
     } else if line.starts_with("require ") {
         let rule = parse_coverage_rule(line, number)?;
-        builder.add_constraint(rule, Place::new(number, content_columns(original)));
+        let place = rule_place(original, number, &rule);
+        builder.add_constraint(rule, place);
     } else if let Some(declaration) = line.strip_prefix("command ") {
         let command = parse_command(declaration.trim(), number)?;
         let place = tail_place(original, number, &command.template);
@@ -866,13 +918,13 @@ fn parse_coverage_rule(line: &str, number: usize) -> Result<CoverageRule, ParseE
     } else {
         return Err(ParseError::new(number, syntax));
     };
-    let dimensions = dimensions.trim();
-    let dimensions = dimensions
-        .strip_prefix('[')
-        .ok_or_else(|| ParseError::new(number, "expected `[` before constraint dimensions"))?;
-    let dimensions = dimensions
-        .strip_suffix(']')
-        .ok_or_else(|| ParseError::new(number, "expected closing `]` in constraint dimensions"))?;
+    let bracketed = dimensions.trim();
+    let dimensions = bracketed.strip_prefix('[').ok_or_else(|| {
+        ParseError::new(number, "expected `[` before constraint dimensions").at(bracketed)
+    })?;
+    let dimensions = dimensions.strip_suffix(']').ok_or_else(|| {
+        ParseError::new(number, "expected closing `]` in constraint dimensions").at(bracketed)
+    })?;
     let dimensions = comma_items(dimensions, number)?;
     if dimensions.is_empty() {
         return Err(ParseError::new(
@@ -905,9 +957,11 @@ fn parse_product(line: &str, number: usize) -> Result<ProductDef, ParseError> {
         (declaration.trim(), TypeExpr::Unknown)
     };
     let name = identifier(name, number, "product name")?;
-    let dimensions = dimensions
-        .strip_suffix(']')
-        .ok_or_else(|| ParseError::new(number, "expected closing `]` in product declaration"))?;
+    // From the `[` that is never closed to the end of the declaration.
+    let bracketed = &line[declaration.len()..];
+    let dimensions = dimensions.strip_suffix(']').ok_or_else(|| {
+        ParseError::new(number, "expected closing `]` in product declaration").at(bracketed)
+    })?;
     let dimensions = comma_items(dimensions, number)?;
     for dimension in &dimensions {
         identifier(dimension, number, "dimension")?;
@@ -947,15 +1001,16 @@ fn parse_operation(line: &str, number: usize) -> Result<OperationDef, ParseError
     if !signature.contains('(') {
         return Err(ParseError::new(number, "expected `(` after operation name"));
     }
-    if !line.contains("->")
-        && signature
-            .split_once(')')
-            .is_some_and(|(_, trailing)| !trailing.trim().is_empty())
-    {
-        return Err(ParseError::new(
-            number,
-            "expected `->` before operation output type",
-        ));
+    if !line.contains("->") {
+        if let Some((_, trailing)) = signature.split_once(')') {
+            let trailing = trailing.trim();
+            if !trailing.is_empty() {
+                return Err(
+                    ParseError::new(number, "expected `->` before operation output type")
+                        .at(trailing),
+                );
+            }
+        }
     }
     let (name, inputs) = call_parts(signature, number)?;
     identifier(name, number, "operation name")?;
@@ -1092,10 +1147,17 @@ fn parse_context(line: &str, number: usize) -> Result<EntityBinding, ParseError>
     parse_bindings(bindings, number)
 }
 
+/// Parse `dimension=value, ...]`, the text after a record's opening `[`.
 fn parse_bindings(bindings: &str, number: usize) -> Result<EntityBinding, ParseError> {
-    let bindings = bindings
-        .strip_suffix(']')
-        .ok_or_else(|| ParseError::new(number, "expected closing `]` in source artifact"))?;
+    let open = bindings.trim_end();
+    let bindings = open.strip_suffix(']').ok_or_else(|| {
+        let error = ParseError::new(number, "expected closing `]` in source artifact");
+        if open.is_empty() {
+            error
+        } else {
+            error.at(open)
+        }
+    })?;
     let mut values = BTreeMap::new();
     for item in comma_items(bindings, number)? {
         let (dimension, value) = item.split_once('=').ok_or_else(|| {
@@ -1128,10 +1190,12 @@ fn call_parts(line: &str, number: usize) -> Result<(&str, &str), ParseError> {
     let (name, args) = line
         .split_once('(')
         .ok_or_else(|| ParseError::new(number, "expected `(` in operation call"))?;
+    // From the `(` that is never closed to the end of the call.
+    let opened = &line[name.len()..];
     let name = qualified_identifier(name.trim(), number, "operation name")?;
     let args = args
         .strip_suffix(')')
-        .ok_or_else(|| ParseError::new(number, "expected closing `)`"))?;
+        .ok_or_else(|| ParseError::new(number, "expected closing `)`").at(opened))?;
     Ok((name, args))
 }
 
