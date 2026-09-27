@@ -8,7 +8,7 @@ use std::path::Path;
 use crate::bash::collect_commands;
 use crate::imports::parse_located_document;
 use crate::model::DEFAULT_OUTPUT;
-use crate::model::{CommandRole, ResolvedDag, SourceInventory};
+use crate::model::{CommandRole, Job, SourceInventory};
 use crate::parser::{
     glued_comment, parse_document_with_imports, InlineInventory, ParsedDocument, Rule, SourceMap,
     Step,
@@ -17,8 +17,8 @@ use crate::paths::collect_paths;
 use crate::resolver::collect_pipeline;
 use crate::span::{columns_of, content_columns, find_word, utf16_columns, Place};
 use crate::{
-    parse_source_inventory, resolve, DefinitionSubject, EntityBinding, InputBinding, ParseError,
-    ParseErrorKind, Pipeline, ResolveError,
+    parse_source_inventory, resolve, resolve_artifacts, DefinitionSubject, EntityBinding,
+    InputBinding, ParseError, ParseErrorKind, Pipeline, ResolveError,
 };
 
 /// Which input text a diagnostic refers to.
@@ -175,7 +175,7 @@ impl fmt::Display for Diagnostic {
 /// line, with at most one error per line.
 pub fn diagnose(text: &str, source_text: Option<&str>) -> Vec<Diagnostic> {
     let inline = inline_inventory(source_text);
-    diagnose_with_parser(text, source_text, |text| {
+    diagnose_with_parser(text, source_text, false, |text| {
         parse_document_with_imports(text, &BTreeMap::new(), inline)
     })
 }
@@ -183,7 +183,18 @@ pub fn diagnose(text: &str, source_text: Option<&str>) -> Vec<Diagnostic> {
 /// Diagnose a document with its location available for resolving imports.
 pub fn diagnose_at(text: &str, source_text: Option<&str>, path: &Path) -> Vec<Diagnostic> {
     let inline = inline_inventory(source_text);
-    diagnose_with_parser(text, source_text, |text| {
+    diagnose_with_parser(text, source_text, false, |text| {
+        parse_located_document(text, path, inline)
+    })
+}
+
+pub fn diagnose_artifacts_at(
+    text: &str,
+    source_text: Option<&str>,
+    path: &Path,
+) -> Vec<Diagnostic> {
+    let inline = inline_inventory(source_text);
+    diagnose_with_parser(text, source_text, true, |text| {
         parse_located_document(text, path, inline)
     })
 }
@@ -200,6 +211,7 @@ fn inline_inventory(source_text: Option<&str>) -> InlineInventory {
 fn diagnose_with_parser(
     text: &str,
     source_text: Option<&str>,
+    lenient: bool,
     parser: impl Fn(&str) -> Result<ParsedDocument, ParseError>,
 ) -> Vec<Diagnostic> {
     let (document, pipeline_errors) = recover_parse_errors(text, parser);
@@ -247,7 +259,20 @@ fn diagnose_with_parser(
     }
     let supplied = external_inventory.or(document.inventory);
     let inventory = supplied.clone().unwrap_or_default();
-    match resolve(&document.pipeline, &inventory) {
+    let outputs = |jobs: Vec<Job>| jobs.into_iter().flat_map(|job| job.outputs);
+    let produced: Result<BTreeSet<String>, _> = if lenient {
+        resolve_artifacts(&document.pipeline, &inventory).map(|report| {
+            let incomplete = report.incomplete.into_iter().flat_map(|job| job.outputs);
+            outputs(report.dag.jobs)
+                .chain(incomplete)
+                .map(|artifact| artifact.product)
+                .collect()
+        })
+    } else {
+        resolve(&document.pipeline, &inventory)
+            .map(|dag| outputs(dag.jobs).map(|artifact| artifact.product).collect())
+    };
+    match produced {
         Err(error) => {
             let (source, place) = error_location(
                 &document.pipeline,
@@ -259,12 +284,12 @@ fn diagnose_with_parser(
             diagnostics.push(Diagnostic::error(source, place, error.to_string()));
         }
         // Without an inventory no step is expected to resolve jobs.
-        Ok(dag) => {
+        Ok(produced) => {
             if let Some(inventory) = &supplied {
                 diagnostics.extend(empty_step_warnings(
                     &document.pipeline,
                     &document.lines,
-                    &dag,
+                    &produced,
                     inventory,
                 ));
             }
@@ -589,15 +614,9 @@ fn warnings(pipeline: &Pipeline, lines: &SourceMap, skip: &BTreeSet<String>) -> 
 fn empty_step_warnings(
     pipeline: &Pipeline,
     lines: &SourceMap,
-    dag: &ResolvedDag,
+    produced: &BTreeSet<String>,
     inventory: &SourceInventory,
 ) -> Vec<Diagnostic> {
-    let produced: BTreeSet<_> = dag
-        .jobs
-        .iter()
-        .flat_map(|job| &job.outputs)
-        .map(|artifact| artifact.product.as_str())
-        .collect();
     let observed: BTreeSet<_> = inventory
         .artifacts
         .iter()

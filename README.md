@@ -20,7 +20,7 @@ Live validation in VS Code is maintained in the separate `spit-vscode` repositor
 ## CLI commands and options
 
 ```text
-spit <check|dag|bound-dag|paths|bash|discover|diagnose> <pipeline.spit> [--sources <inventory.spit|->] [--root <directory>] [--strict-paths]
+spit <check|dag|bash|artifacts|discover> <pipeline.spit> [--sources <inventory.spit|->] [--root <directory>] [--paths] [--strict-paths] [--json] [--stdin]
 ```
 
 Choose one command per call. The pipeline file comes next; options follow it.
@@ -29,17 +29,18 @@ Choose one command per call. The pipeline file comes next; options follow it.
 | --- | --- |
 | `check` | Validate the pipeline and report how many jobs resolve. Without an inventory, it checks the pipeline text alone and resolves no jobs. |
 | `dag` | Print the jobs, their artifact identities, and dependencies. |
-| `bound-dag` | Print the resolved DAG with a path for every artifact. |
-| `paths` | Show which path rule covers each product and validate the resulting paths. |
 | `bash` | Write a Bash script for the resolved jobs to standard output. It does not run the script. |
+| `artifacts` | List every concrete artifact the inventory yields: the complete ones, then the incomplete ones with why each cannot be produced. Unlike the other commands, it does not stop at a missing, ambiguous, or too-small input or a coverage gap; see [Find incomplete artifacts](#find-incomplete-artifacts). |
 | `discover` | Print an inventory of the source files under `--root`, found by matching each file against the sources' path rules. |
-| `diagnose` | Read the pipeline from standard input and return JSON diagnostics for editor use. Each has a `severity` of `error` or `warning`; those tied to a declaration, call, rule, command, or path include its `line`, and a `column` and `end_column` for the text it is about, such as one input of a call or one `{placeholder}`. Columns are 1-based and count UTF-16 code units, as editors do; `end_column` is one past the last character. A pipeline path is required for CLI consistency, but its file contents are not read. |
 
 | Option | Effect |
 | --- | --- |
 | `--sources <inventory.spit>` | Read source artifact identities from a separate file. Jobs need an inventory: this file, an inline one, or sources discovered with `--root`; `check` without any checks the pipeline alone. A separate inventory replaces an inline one, which is then skipped with a warning. Use `--sources -` to read standard input. |
 | `--root <directory>` | Check that every required source path points to a regular file under this directory; derived outputs need not exist yet. Without `--sources` or an inline inventory, the sources are discovered under this directory from their path rules. |
+| `--paths` | With `check`, show which path rule covers each product and validate the resulting paths. With `dag`, print a path under every artifact. |
 | `--strict-paths` | Require an explicit `path product:` rule for every product, even if a default `path:` rule exists. |
+| `--json` | With `check`, print the diagnostics as JSON for editor use and stop, succeeding whatever they report. Each has a `severity` of `error` or `warning`; those tied to a declaration, call, rule, command, or path include its `line`, and a `column` and `end_column` for the text it is about, such as one input of a call or one `{placeholder}`. Columns are 1-based and count UTF-16 code units, as editors do; `end_column` is one past the last character. |
+| `--stdin` | Read the pipeline text from standard input instead of the pipeline file, such as an editor's unsaved buffer. The pipeline path is still used to resolve `use` imports. |
 
 For example, `check` resolves the pipeline, while `check --root` also verifies its input files:
 
@@ -102,13 +103,36 @@ An inventory can also be placed in the same `.spit` file for a small example, as
 ## Inspect and generate a script
 
 ```sh
-cargo run -- paths examples/commands/bash_demo.spit --sources examples/commands/bash_demo.sources
-cargo run -- bound-dag examples/commands/bash_demo.spit --sources examples/commands/bash_demo.sources
+cargo run -- check examples/commands/bash_demo.spit --sources examples/commands/bash_demo.sources --paths
+cargo run -- dag examples/commands/bash_demo.spit --sources examples/commands/bash_demo.sources --paths
 cargo run -- bash examples/commands/bash_demo.spit --sources examples/commands/bash_demo.sources > run.sh
 SPIT_ROOT=/path/to/data bash run.sh
 ```
 
-`bound-dag` shows paths before command expansion. The generated script uses `SPIT_ROOT` for relative paths; when unset, it uses the current directory.
+`dag --paths` shows paths before command expansion. The generated script uses `SPIT_ROOT` for relative paths; when unset, it uses the current directory.
+
+### Find incomplete artifacts
+
+Every other command stops at the first job the inventory cannot complete. `artifacts` resolves every job it can and reports the rest:
+
+```sh
+cargo run -- artifacts pipeline.spit --sources inventory.spit
+```
+
+```text
+Complete artifacts: 10
+  scan[subject=01,run=1]  (source)
+  ...
+  merged[subject=01] : Scan  (job 6: merge)
+
+Incomplete artifacts: 2
+  aligned[subject=02,run=1] : Scan  (align)
+    - no `calibration` artifact for input `reference` of `align` at [run=1,subject=02]
+  merged[subject=02] : Scan  (merge)
+    - input `runs` needs aligned[subject=02,run=1], which cannot be produced
+```
+
+An incomplete artifact has a missing or ambiguous input, a collection below its `@ min(count)`, or an input that is itself incomplete, so a gap early in the pipeline is traced through every step that depends on it. A group that fails a `require` rule is listed under `Coverage gaps`, and its sources are held back from every job. A step creates jobs only for the artifacts that drive it, so a context with no driving artifact at all appears only through the coverage gaps and steps that notice it missing. The command succeeds whatever it finds; the complete artifacts are the ones the pipeline could produce from this inventory today.
 
 ## Syntax reference
 
@@ -207,7 +231,7 @@ path image: input/{subject}/{visit}/{run}.txt
 
 `path:` sets a default. `path image:` overrides it for `image`. Each output of a multi-output step has its own product, so its own rule. Templates can use `{product}`, `{entities}`, or a declared dimension. In `{product}`, an imported `alias::name` becomes `alias.name`. Paths are relative to `SPIT_ROOT`.
 
-Path rules are checked when the pipeline is loaded, even for products with no resolved jobs. SPIT rejects unbalanced braces, a dimension the product does not declare, a rule that omits one of the product's dimensions (use `{entities}` or name each one), and two products whose rules give the same path for the same entities, such as a default rule without `{product}`. Missing rules are reported by `paths`, `bound-dag`, `bash`, and `--root`, and collisions between resolved artifact paths once jobs are bound.
+Path rules are checked when the pipeline is loaded, even for products with no resolved jobs. SPIT rejects unbalanced braces, a dimension the product does not declare, a rule that omits one of the product's dimensions (use `{entities}` or name each one), and two products whose rules give the same path for the same entities, such as a default rule without `{product}`. Missing rules are reported by `--paths`, `bash`, and `--root`, and collisions between resolved artifact paths once jobs are bound.
 
 As in Bash, an unquoted `#` starts a comment only at the start of a word, so `--color=#fff` is one argument. A `#` that ends a word, as in `{output}# note`, stays part of the word; SPIT warns about it, since it reads like a comment. Put a space before `#` to start a comment, or quote the text to keep it.
 

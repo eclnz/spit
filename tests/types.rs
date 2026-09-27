@@ -71,7 +71,10 @@ sources:\n\
   metadata[id=x]\n";
     let (pipeline, inventory) = parse_document(text).unwrap();
     let dag = resolve(&pipeline, &inventory.unwrap()).unwrap();
-    assert_eq!(dag.jobs[0].output().artifact_type, product("Image<Photo,Native>"));
+    assert_eq!(
+        dag.jobs[0].output().artifact_type,
+        product("Image<Photo,Native>")
+    );
 }
 
 #[test]
@@ -81,7 +84,10 @@ fn multiple_variables_infer_independently() {
         .unify(&signature("Signal<A>"), &product("Signal<Native>"))
         .unwrap();
     substitutions
-        .unify(&signature("Calibration<B>"), &product("Calibration<Standard>"))
+        .unify(
+            &signature("Calibration<B>"),
+            &product("Calibration<Standard>"),
+        )
         .unwrap();
     assert_eq!(
         substitutions.substitute(&signature("Affine<A,B>")),
@@ -250,8 +256,14 @@ fn field_survey_reuses_image_operations_across_kinds_and_spaces() {
     };
 
     assert_eq!(output_type("dark_frame"), product("Image<Dark,Captured>"));
-    assert_eq!(output_type("visit_dark"), product("Image<Dark,Orthorectified>"));
-    assert_eq!(output_type("map_photo"), product("Image<Map,Orthorectified>"));
+    assert_eq!(
+        output_type("visit_dark"),
+        product("Image<Dark,Orthorectified>")
+    );
+    assert_eq!(
+        output_type("map_photo"),
+        product("Image<Map,Orthorectified>")
+    );
     assert_eq!(
         output_type("regions_photo"),
         product("Image<Classes,Orthorectified>")

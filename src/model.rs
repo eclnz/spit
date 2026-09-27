@@ -2,6 +2,7 @@ use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::fmt;
 
+use crate::error::ResolveError;
 use crate::types::TypeExpr;
 
 pub type ArtifactType = TypeExpr;
@@ -523,6 +524,38 @@ pub struct ResolvedDag {
     pub jobs: Vec<Job>,
     /// Declaration order is retained for readable dry-run output.
     pub product_dimensions: BTreeMap<String, Vec<String>>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum Gap {
+    Unmatched(ResolveError),
+    /// An input is the output of an incomplete job, or a source held back by
+    /// a coverage gap.
+    Blocked {
+        port: String,
+        artifact: ArtifactInstance,
+    },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct IncompleteJob {
+    pub operation: String,
+    pub outputs: Vec<ArtifactInstance>,
+    pub gaps: Vec<Gap>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CoverageGap {
+    pub error: ResolveError,
+    pub sources: Vec<ArtifactInstance>,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct ArtifactReport {
+    pub sources: Vec<ArtifactInstance>,
+    pub dag: ResolvedDag,
+    pub incomplete: Vec<IncompleteJob>,
+    pub coverage: Vec<CoverageGap>,
 }
 
 fn owned_strings(values: impl IntoIterator<Item = impl AsRef<str>>) -> Vec<String> {
