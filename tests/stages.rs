@@ -1,0 +1,320 @@
+use std::fs;
+use std::process::Command;
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use spit::{
+    diagnose, inspect_paths, parse_document, parse_pipeline, render_bash, render_bound_dag,
+    render_dag, resolve, Diagnostic, PathRule,
+};
+
+const PIPELINE: &str = "examples/stages/stages.spit";
+const SOURCES: &str = "examples/stages/stages.sources";
+
+fn staged() -> String {
+    fs::read_to_string(PIPELINE).unwrap() + &fs::read_to_string(SOURCES).unwrap()
+}
+
+fn messages(diagnostics: &[Diagnostic]) -> Vec<(Option<usize>, &str)> {
+    diagnostics
+        .iter()
+        .map(|diagnostic| (diagnostic.line, diagnostic.message.as_str()))
+        .collect()
+}
+
+fn spit(args: &[&str]) -> (bool, String, String) {
+    let output = Command::new(env!("CARGO_BIN_EXE_spit"))
+        .args(args)
+        .output()
+        .unwrap();
+    (
+        output.status.success(),
+        String::from_utf8(output.stdout).unwrap(),
+        String::from_utf8(output.stderr).unwrap(),
+    )
+}
+
+#[test]
+fn steps_belong_to_the_stage_whose_block_holds_them() {
+    let (pipeline, _) = parse_document(&staged()).unwrap();
+    let names: Vec<_> = pipeline.stages.iter().map(|stage| &stage.name).collect();
+    assert_eq!(names, ["preprocess", "analysis"]);
+    assert_eq!(pipeline.stage_of("sorted"), Some("preprocess"));
+    assert_eq!(pipeline.stage_of("merged"), Some("preprocess"));
+    assert_eq!(pipeline.stage_of("tally"), Some("analysis"));
+    assert_eq!(pipeline.stage_of("shard"), None);
+    // Operations stay global.
+    assert_eq!(pipeline.operations.len(), 3);
+}
+
+#[test]
+fn an_unindented_line_ends_a_stage() {
+    let text = "source raw [id]\noperation copy(A) -> A\nstage first:\n    a = copy(raw)\n\n    # a comment keeps the stage open\n    b = copy(a)\nc = copy(b)\n";
+    let pipeline = parse_pipeline(text).unwrap();
+    assert_eq!(pipeline.stage_of("a"), Some("first"));
+    assert_eq!(pipeline.stage_of("b"), Some("first"));
+    assert_eq!(pipeline.stage_of("c"), None);
+}
+
+#[test]
+fn a_product_named_stage_is_still_a_step() {
+    let text = "source raw [id]\noperation copy(A) -> A\nstage = copy(raw)\n";
+    let pipeline = parse_pipeline(text).unwrap();
+    assert!(pipeline.stages.is_empty());
+    assert_eq!(pipeline.invocations[0].outputs, ["stage"]);
+}
+
+#[test]
+fn jobs_carry_their_stage() {
+    let (pipeline, inventory) = parse_document(&staged()).unwrap();
+    let dag = resolve(&pipeline, &inventory.unwrap()).unwrap();
+    let stages: Vec<_> = dag.jobs.iter().map(|job| job.stage.as_deref()).collect();
+    assert_eq!(
+        stages,
+        [
+            Some("preprocess"),
+            Some("preprocess"),
+            Some("preprocess"),
+            Some("preprocess"),
+            Some("preprocess"),
+            Some("analysis"),
+            Some("analysis"),
+        ]
+    );
+    assert!(render_dag(&dag).contains("Job 6\n  stage: analysis\n  operation: tally_lines"));
+}
+
+#[test]
+fn a_stage_path_rule_covers_only_that_stage() {
+    let (pipeline, inventory) = parse_document(&staged()).unwrap();
+    let coverage = inspect_paths(&pipeline).unwrap();
+    let rule = |product: &str| {
+        coverage
+            .entries
+            .iter()
+            .find(|entry| entry.product == product)
+            .map(|entry| entry.rule.clone())
+            .unwrap()
+    };
+    assert_eq!(
+        rule("merged"),
+        PathRule::Default("{stage}/{product}/{entities}.txt".to_owned())
+    );
+    assert_eq!(
+        rule("tally"),
+        PathRule::Stage {
+            stage: "analysis".to_owned(),
+            template: "results/{product}/{entities}.txt".to_owned(),
+        }
+    );
+    assert!(coverage.validate(true).is_err());
+    let dag = resolve(&pipeline, &inventory.unwrap()).unwrap();
+    let bound = render_bound_dag(&pipeline, &dag).unwrap();
+    assert!(bound.contains("path: preprocess/merged/group=alpha.txt"));
+    assert!(bound.contains("path: results/tally/group=alpha.txt"));
+}
+
+#[test]
+fn stage_placeholder_needs_a_stage() {
+    let text = "path: {stage}/{product}/{entities}\nsource raw [id]\npath raw: in/{id}\noperation copy(A) -> A\nloose = copy(raw)\n";
+    let diagnostics = diagnose(text, None);
+    assert_eq!(
+        messages(&diagnostics),
+        [(
+            Some(1),
+            "path template for `loose` uses `{stage}`, but `loose` is not made in a stage"
+        )]
+    );
+}
+
+#[test]
+fn a_dimension_named_stage_keeps_its_meaning() {
+    let text = "source raw [stage]\npath raw: in/{stage}.txt\n";
+    let (pipeline, _) = parse_document(text).unwrap();
+    inspect_paths(&pipeline).unwrap();
+}
+
+#[test]
+fn bash_marks_where_each_stage_starts() {
+    let (pipeline, inventory) = parse_document(&staged()).unwrap();
+    let dag = resolve(&pipeline, &inventory.unwrap()).unwrap();
+    let script = render_bash(&pipeline, &dag).unwrap();
+    let preprocess = script.find("# ===== Stage: preprocess =====").unwrap();
+    let analysis = script.find("# ===== Stage: analysis =====").unwrap();
+    assert!(preprocess < script.find("# Job 1:").unwrap());
+    assert!(script.find("# Job 5:").unwrap() < analysis);
+    assert!(analysis < script.find("# Job 6:").unwrap());
+}
+
+#[test]
+fn one_stage_runs_on_what_earlier_stages_wrote() {
+    let (pipeline, inventory) = parse_document(&staged()).unwrap();
+    let dag = resolve(&pipeline, &inventory.unwrap())
+        .unwrap()
+        .only_stage("analysis");
+    let ids: Vec<_> = dag.jobs.iter().map(|job| job.id).collect();
+    assert_eq!(ids, [6, 7]);
+    assert!(dag.jobs.iter().all(|job| job.dependencies.is_empty()));
+    let script = render_bash(&pipeline, &dag).unwrap();
+    assert!(script.contains("spit_require \"$SPIT_ROOT\"/'preprocess/merged/group=alpha.txt'"));
+    assert!(!script.contains("sort_lines"));
+}
+
+#[test]
+fn stages_must_not_depend_on_each_other_in_a_cycle() {
+    // `glue` sits outside every stage, so `late` reads from `second` through it.
+    let text = "source raw [id]\noperation copy(A) -> A\noperation pair(A, A) -> A\nstage first:\n    a = copy(raw)\n    d = pair(a, late)\nstage second:\n    b = copy(a)\nglue = copy(b)\nstage third:\n    late = copy(glue)\n";
+    let diagnostics = diagnose(text, None);
+    assert_eq!(
+        messages(&diagnostics),
+        [(
+            Some(4),
+            "stages must not depend on each other in a cycle: `d` in `first` reads `late` from `third`, `late` in `third` reads `b` from `second`, and `b` in `second` reads `a` from `first`"
+        )]
+    );
+    let (pipeline, _) = parse_document(text).unwrap();
+    assert!(resolve(&pipeline, &Default::default()).is_err());
+}
+
+#[test]
+fn stages_that_only_read_forward_are_accepted() {
+    let text = "source raw [id]\noperation copy(A) -> A\nstage first:\n    a = copy(raw)\nstage second:\n    b = copy(a)\nstage third:\n    c = copy(a)\n    d = copy(b)\n";
+    assert!(diagnose(text, None).is_empty());
+}
+
+#[test]
+fn stage_syntax_errors() {
+    let cases = [
+        (
+            "stage prep:\n    source raw [id]\n",
+            (
+                Some(2),
+                "`source`, which declares an input, belongs at the top level, outside stage `prep`",
+            ),
+        ),
+        (
+            "source raw [id]\nstage prep:\n    require raw count>=1 per [id]\n",
+            (
+                Some(3),
+                "`require`, which checks sources, belongs at the top level, outside stage `prep`",
+            ),
+        ),
+        (
+            "stage prep:\n    stage inner:\n",
+            (
+                Some(2),
+                "a stage header starts at the beginning of its line; stages do not nest",
+            ),
+        ),
+        (
+            "stage prep\n",
+            (
+                Some(1),
+                "expected `stage name:`, with the stage's lines indented beneath it",
+            ),
+        ),
+        (
+            "stage prep:\nstage prep:\n",
+            (Some(2), "duplicate stage `prep`"),
+        ),
+        (
+            "stage prep:\n    path: a/{product}/{entities}\n    path: b/{product}/{entities}\n",
+            (Some(3), "duplicate default path template for stage `prep`"),
+        ),
+        (
+            "products:\n    raw [id]\nstage prep:\n",
+            (
+                Some(3),
+                "stages are written in the flow form, not in a sectioned document",
+            ),
+        ),
+    ];
+    for (text, expected) in cases {
+        let diagnostics = diagnose(text, None);
+        let errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.is_error())
+            .cloned()
+            .collect();
+        assert_eq!(messages(&errors), [expected], "{text}");
+    }
+}
+
+#[test]
+fn an_empty_stage_is_reported() {
+    let text =
+        "source raw [id]\noperation copy(A) -> A\nstage prep:\n    a = copy(raw)\nstage later:\n";
+    let diagnostics = diagnose(text, None);
+    assert_eq!(
+        messages(&diagnostics),
+        [(Some(5), "stage `later` has no steps")]
+    );
+}
+
+#[test]
+fn check_counts_jobs_per_stage() {
+    let (ok, stdout, stderr) = spit(&["check", PIPELINE, "--sources", SOURCES]);
+    assert!(ok, "{stderr}");
+    assert!(stdout.contains("7 jobs resolved: 5 in preprocess, 2 in analysis."));
+    let (ok, stdout, stderr) = spit(&[
+        "check",
+        PIPELINE,
+        "--sources",
+        SOURCES,
+        "--stage",
+        "analysis",
+    ]);
+    assert!(ok, "{stderr}");
+    assert!(stdout.contains("2 jobs resolved in stage `analysis`."));
+}
+
+#[test]
+fn stage_option_rejects_unknown_stages() {
+    let (ok, _, stderr) = spit(&["bash", PIPELINE, "--sources", SOURCES, "--stage", "report"]);
+    assert!(!ok);
+    assert!(stderr.contains("unknown stage `report`; stages: `preprocess`, `analysis`"));
+    let (ok, _, stderr) = spit(&[
+        "artifacts",
+        PIPELINE,
+        "--sources",
+        SOURCES,
+        "--stage",
+        "analysis",
+    ]);
+    assert!(!ok);
+    assert!(stderr.contains("--stage applies to check, dag, and bash"));
+}
+
+#[test]
+fn root_checks_the_files_a_stage_reads_from_earlier_stages() {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!("spit-stages-{}-{unique}", std::process::id()));
+    for file in [
+        "input/alpha/01.txt",
+        "input/alpha/02.txt",
+        "input/beta/01.txt",
+    ] {
+        let path = root.join(file);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, "line\n").unwrap();
+    }
+    let root_arg = root.to_str().unwrap();
+    let (ok, _, stderr) = spit(&["check", PIPELINE, "--root", root_arg, "--stage", "analysis"]);
+    assert!(!ok);
+    assert!(
+        stderr.contains("missing file for `merged[group=alpha]`, which stage `preprocess` makes"),
+        "{stderr}"
+    );
+    for group in ["alpha", "beta"] {
+        let path = root.join(format!("preprocess/merged/group={group}.txt"));
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, "line\n").unwrap();
+    }
+    let (ok, stdout, stderr) =
+        spit(&["check", PIPELINE, "--root", root_arg, "--stage", "analysis"]);
+    fs::remove_dir_all(&root).unwrap();
+    assert!(ok, "{stderr}");
+    assert!(stdout.contains("2 input files verified."), "{stdout}");
+}

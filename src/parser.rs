@@ -9,7 +9,7 @@ use crate::imports::apply_import;
 use crate::model::{
     Cardinality, CommandDef, CommandRole, CountRequirement, CoverageRule, EntityBinding,
     InputBinding, InputPort, Invocation, OperationDef, OutputPort, Pipeline, ProductDef, ShapeRule,
-    SourceInventory, SourceRecord, DEFAULT_OUTPUT,
+    SourceInventory, SourceRecord, StageDef, DEFAULT_OUTPUT,
 };
 use crate::paths::check_path_template_syntax;
 use crate::resolver::{step_context, BoundInput};
@@ -103,6 +103,10 @@ pub(crate) struct SourceMap {
     pub(crate) paths: BTreeMap<String, Place>,
     /// Template of the default `path:` rule.
     pub(crate) default_path: Option<Place>,
+    /// Each stage's name in its `stage` header.
+    pub(crate) stages: BTreeMap<String, Place>,
+    /// Templates of the `path:` rules inside stages, keyed by stage.
+    pub(crate) stage_paths: BTreeMap<String, Place>,
     /// Products and operations brought in by `use` lines.
     pub(crate) imported: BTreeSet<String>,
 }
@@ -191,6 +195,10 @@ impl SourceMap {
     pub(crate) fn path_rule(&self, pipeline: &Pipeline, product: &str) -> Option<Place> {
         if pipeline.product_paths.contains_key(product) {
             self.paths.get(product).cloned()
+        } else if pipeline.stage_path_template(product).is_some() {
+            pipeline
+                .stage_of(product)
+                .and_then(|stage| self.stage_paths.get(stage).cloned())
         } else {
             self.default_path.clone()
         }
@@ -429,8 +437,14 @@ fn sectioned_line(
         source if source.starts_with("shell-source:") => {
             return Err(ParseError::new(number, SHELL_SOURCE_REMOVED));
         }
+        stage if is_stage_header(stage) => {
+            return Err(ParseError::new(
+                number,
+                "stages are written in the flow form, not in a sectioned document",
+            ));
+        }
         path if path.starts_with("path:") || path.starts_with("path ") => {
-            set_path(builder, original, path, number)?;
+            set_path(builder, None, original, path, number)?;
             *section = None;
         }
         "sources:" | "contexts:" => {
@@ -486,15 +500,54 @@ fn parse_flow_pipeline(
     imports: &BTreeMap<usize, Pipeline>,
 ) -> Result<PipelineBuilder, ParseError> {
     let mut builder = PipelineBuilder::default();
+    let mut stage = None;
     for (index, original) in text.lines().enumerate() {
-        flow_line(&mut builder, imports, original, index + 1)
+        flow_line(&mut builder, &mut stage, imports, original, index + 1)
             .map_err(|error| error.locate(original))?;
     }
     Ok(builder)
 }
 
+/// Whether a line opens a stage, as opposed to a step whose output product
+/// happens to be called `stage`.
+fn is_stage_header(line: &str) -> bool {
+    line.starts_with("stage ") && !line.contains('=')
+}
+
+/// Open a stage for a `stage name:` header. Its lines are indented beneath
+/// it, and the next line that is not ends it.
+fn open_stage(
+    builder: &mut PipelineBuilder,
+    stage: &mut Option<String>,
+    original: &str,
+    declaration: &str,
+    number: usize,
+) -> Result<(), ParseError> {
+    let syntax = "expected `stage name:`, with the stage's lines indented beneath it";
+    if original.starts_with(char::is_whitespace) {
+        return Err(ParseError::new(
+            number,
+            "a stage header starts at the beginning of its line; stages do not nest",
+        ));
+    }
+    let name = declaration
+        .trim()
+        .strip_suffix(':')
+        .ok_or_else(|| ParseError::new(number, syntax))?;
+    let name = identifier(name.trim(), number, "stage name")?;
+    if builder.lines.stages.contains_key(name) {
+        return Err(ParseError::new(number, format!("duplicate stage `{name}`")).at(name));
+    }
+    let place = name_place(original, number, declaration, name);
+    builder.lines.stages.insert(name.to_owned(), place);
+    builder.pipeline.stages.push(StageDef::new(name));
+    *stage = Some(name.to_owned());
+    Ok(())
+}
+
 fn flow_line(
     builder: &mut PipelineBuilder,
+    stage: &mut Option<String>,
     imports: &BTreeMap<usize, Pipeline>,
     original: &str,
     number: usize,
@@ -503,13 +556,31 @@ fn flow_line(
     if line.is_empty() {
         return Ok(());
     }
-    if line.starts_with("use ") {
+    if !original.starts_with(char::is_whitespace) {
+        *stage = None;
+    }
+    let top_level_only = |what: &str| {
+        stage.as_ref().map_or(Ok(()), |name| {
+            Err(ParseError::new(
+                number,
+                format!("{what} belongs at the top level, outside stage `{name}`"),
+            ))
+        })
+    };
+    if let Some(declaration) = line
+        .strip_prefix("stage ")
+        .filter(|_| is_stage_header(line))
+    {
+        open_stage(builder, stage, original, declaration, number)?;
+    } else if line.starts_with("use ") {
+        top_level_only("`use`")?;
         apply_import(
             builder,
             imports,
             Place::new(number, content_columns(original)),
         )?;
     } else if let Some(declaration) = line.strip_prefix("source ") {
+        top_level_only("`source`, which declares an input,")?;
         let declaration = declaration.trim();
         let product = parse_product(declaration, number)?;
         let place = name_place(original, number, declaration, &product.name);
@@ -520,6 +591,7 @@ fn flow_line(
         let place = name_place(original, number, declaration, &operation.name);
         builder.add_operation(operation, place);
     } else if line.starts_with("require ") {
+        top_level_only("`require`, which checks sources,")?;
         let rule = parse_coverage_rule(line, number)?;
         let place = rule_place(original, number, &rule);
         builder.add_constraint(rule, place);
@@ -534,9 +606,10 @@ fn flow_line(
     } else if line.starts_with("shell-source:") {
         return Err(ParseError::new(number, SHELL_SOURCE_REMOVED));
     } else if line.starts_with("path ") || line.starts_with("path:") {
-        set_path(builder, original, line, number)?;
+        set_path(builder, stage.as_deref(), original, line, number)?;
     } else if line.contains('=') {
-        let (invocation, products) = parse_flow_invocation(line, number, &builder.pipeline)?;
+        let (mut invocation, products) = parse_flow_invocation(line, number, &builder.pipeline)?;
+        invocation.stage.clone_from(stage);
         let step = step_place(original, number, &invocation);
         for (index, product) in products.into_iter().enumerate() {
             builder.add_product(product, step.output_at(index));
@@ -550,7 +623,7 @@ fn flow_line(
     } else {
         return Err(ParseError::new(
             number,
-            "expected source, operation, command, verify, require, path, or output = operation(inputs)",
+            "expected source, operation, command, verify, require, path, stage, or output = operation(inputs)",
         ));
     }
     Ok(())
@@ -598,8 +671,11 @@ fn single_colon(line: &str) -> Option<usize> {
     })
 }
 
+/// Record a path rule. A default `path:` inside `stage` covers only that
+/// stage's products.
 fn set_path(
     builder: &mut PipelineBuilder,
+    stage: Option<&str>,
     original: &str,
     line: &str,
     number: usize,
@@ -651,6 +727,25 @@ fn set_path(
                 format!("duplicate path template for product `{product}`"),
             ));
         }
+    } else if let Some(stage) = stage {
+        let definition = pipeline
+            .stages
+            .iter_mut()
+            .find(|definition| definition.name == stage)
+            .expect("an open stage is declared");
+        if definition
+            .path_template
+            .replace(template.to_owned())
+            .is_some()
+        {
+            return Err(ParseError::new(
+                number,
+                format!("duplicate default path template for stage `{stage}`"),
+            ));
+        }
+        lines
+            .stage_paths
+            .insert(stage.to_owned(), tail_place(original, number, template));
     } else if pipeline
         .path_template
         .replace(template.to_owned())
@@ -926,7 +1021,8 @@ pub(crate) fn parse_document_with_imports(
                 || line.starts_with("operation ")
                 || line.starts_with("command ")
                 || line.starts_with("verify ")
-                || line.starts_with("require ") =>
+                || line.starts_with("require ")
+                || is_stage_header(line) =>
             {
                 inventory_section = false;
             }

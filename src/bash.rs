@@ -117,7 +117,15 @@ pub fn render_bash(pipeline: &Pipeline, dag: &ResolvedDag) -> Result<String, Bas
     if paths.keys().any(|identity| !outputs.contains(identity)) {
         script.push('\n');
     }
+    let mut stage = None;
     for job in &dag.jobs {
+        if job.stage.as_deref() != stage {
+            stage = job.stage.as_deref();
+            match stage {
+                Some(name) => writeln!(script, "# ===== Stage: {name} =====\n").unwrap(),
+                None => writeln!(script, "# ===== Outside stages =====\n").unwrap(),
+            }
+        }
         let operation = operations.get(job.operation.as_str()).ok_or_else(|| {
             error(format!(
                 "unknown operation `{}` in resolved DAG",

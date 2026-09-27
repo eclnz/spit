@@ -1,5 +1,5 @@
 use std::cmp::Ordering;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use crate::error::ResolveError;
@@ -346,6 +346,8 @@ pub struct Invocation {
     pub inputs: Vec<InputBinding>,
     /// Products, one per operation output port in declaration order.
     pub outputs: Vec<String>,
+    /// The stage whose block holds this step, if any.
+    pub stage: Option<String>,
 }
 
 impl Invocation {
@@ -366,7 +368,14 @@ impl Invocation {
             operation: operation.into(),
             inputs,
             outputs: outputs.into_iter().map(Into::into).collect(),
+            stage: None,
         }
+    }
+
+    #[must_use]
+    pub fn in_stage(mut self, stage: impl Into<String>) -> Self {
+        self.stage = Some(stage.into());
+        self
     }
 
     /// The first output, which names the step in diagnostics.
@@ -409,6 +418,25 @@ impl CommandDef {
     }
 }
 
+/// A named group of steps, such as preprocessing or analysis. A stage owns
+/// the products its steps assign; operations stay global.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StageDef {
+    pub name: String,
+    /// The default path rule for the stage's products, in place of the
+    /// pipeline's default.
+    pub path_template: Option<String>,
+}
+
+impl StageDef {
+    pub fn new(name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            path_template: None,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct Pipeline {
     pub products: Vec<ProductDef>,
@@ -418,6 +446,37 @@ pub struct Pipeline {
     pub commands: Vec<CommandDef>,
     pub path_template: Option<String>,
     pub product_paths: BTreeMap<String, String>,
+    /// Stages in declaration order.
+    pub stages: Vec<StageDef>,
+}
+
+impl Pipeline {
+    /// The stage of the step that produces `product`; `None` for a source or
+    /// a step outside every stage.
+    pub fn stage_of(&self, product: &str) -> Option<&str> {
+        self.invocations
+            .iter()
+            .find(|invocation| invocation.outputs.iter().any(|output| output == product))
+            .and_then(|invocation| invocation.stage.as_deref())
+    }
+
+    /// The path template `product` uses: its own rule, else its stage's
+    /// default, else the pipeline's default.
+    pub fn path_template_for(&self, product: &str) -> Option<&String> {
+        self.product_paths
+            .get(product)
+            .or_else(|| self.stage_path_template(product))
+            .or(self.path_template.as_ref())
+    }
+
+    /// The default path rule of the stage that produces `product`.
+    pub fn stage_path_template(&self, product: &str) -> Option<&String> {
+        let stage = self.stage_of(product)?;
+        self.stages
+            .iter()
+            .find(|candidate| candidate.name == stage)
+            .and_then(|stage| stage.path_template.as_ref())
+    }
 }
 
 /// A source record identifies a logical artifact without binding it to a path.
@@ -505,6 +564,8 @@ pub struct Job {
     /// One artifact per output port, in port order.
     pub outputs: Vec<ArtifactInstance>,
     pub dependencies: Vec<usize>,
+    /// The stage of the step that made this job, if any.
+    pub stage: Option<String>,
 }
 
 impl Job {
@@ -526,6 +587,32 @@ pub struct ResolvedDag {
     pub product_dimensions: BTreeMap<String, Vec<String>>,
 }
 
+impl ResolvedDag {
+    /// Only the jobs of `stage`. Their inputs from other stages are taken as
+    /// files that already exist, so dependencies on those jobs are dropped;
+    /// every job keeps its number.
+    #[must_use]
+    pub fn only_stage(&self, stage: &str) -> Self {
+        let jobs: Vec<_> = self
+            .jobs
+            .iter()
+            .filter(|job| job.stage.as_deref() == Some(stage))
+            .cloned()
+            .collect();
+        let kept: BTreeSet<_> = jobs.iter().map(|job| job.id).collect();
+        Self {
+            jobs: jobs
+                .into_iter()
+                .map(|mut job| {
+                    job.dependencies.retain(|id| kept.contains(id));
+                    job
+                })
+                .collect(),
+            product_dimensions: self.product_dimensions.clone(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Gap {
     Unmatched(ResolveError),
@@ -540,6 +627,7 @@ pub enum Gap {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct IncompleteJob {
     pub operation: String,
+    pub stage: Option<String>,
     pub outputs: Vec<ArtifactInstance>,
     pub gaps: Vec<Gap>,
 }

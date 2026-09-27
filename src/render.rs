@@ -27,10 +27,11 @@ pub fn render_artifacts(report: &ArtifactReport) -> String {
     for job in &dag.jobs {
         for artifact in &job.outputs {
             complete.push(format!(
-                "{}  (job {}: {})",
+                "{}  (job {}: {}{})",
                 render_typed_artifact(dag, artifact),
                 job.id,
-                job.operation
+                job.operation,
+                in_stage(job.stage.as_deref())
             ));
         }
     }
@@ -45,7 +46,13 @@ pub fn render_artifacts(report: &ArtifactReport) -> String {
     for job in &report.incomplete {
         for artifact in &job.outputs {
             let rendered = render_typed_artifact(dag, artifact);
-            writeln!(output, "  {rendered}  ({})", job.operation).unwrap();
+            writeln!(
+                output,
+                "  {rendered}  ({}{})",
+                job.operation,
+                in_stage(job.stage.as_deref())
+            )
+            .unwrap();
         }
         for gap in &job.gaps {
             match gap {
@@ -132,6 +139,9 @@ fn write_jobs<'a>(
         }
         let operation = operation(job)?;
         writeln!(output, "Job {}", job.id).unwrap();
+        if let Some(stage) = &job.stage {
+            writeln!(output, "  stage: {stage}").unwrap();
+        }
         writeln!(output, "  operation: {}", job.operation).unwrap();
         writeln!(output, "  inputs:").unwrap();
         for (port_index, artifacts) in job.inputs.iter().enumerate() {
@@ -165,6 +175,10 @@ fn write_jobs<'a>(
         }
     }
     Ok(output)
+}
+
+fn in_stage(stage: Option<&str>) -> String {
+    stage.map_or_else(String::new, |stage| format!(", stage {stage}"))
 }
 
 fn render_typed_artifact(dag: &ResolvedDag, artifact: &ArtifactInstance) -> String {

@@ -428,6 +428,7 @@ fn subject_place(
         // A rule's own errors concern its product: unknown, or not a source.
         DefinitionSubject::Constraint(index) => lines.rules.get(*index).map(Rule::product),
         DefinitionSubject::ConstraintGroup(index) => lines.rules.get(*index).map(Rule::dimensions),
+        DefinitionSubject::Stage(name) => lines.stages.get(name).cloned(),
         DefinitionSubject::Source(_) | DefinitionSubject::None => None,
     }
 }
@@ -550,6 +551,19 @@ fn warnings(pipeline: &Pipeline, lines: &SourceMap, skip: &BTreeSet<String>) -> 
 
     let library = pipeline.invocations.is_empty();
     let mut warnings = Vec::new();
+    for stage in &pipeline.stages {
+        let name = stage.name.as_str();
+        if !pipeline
+            .invocations
+            .iter()
+            .any(|invocation| invocation.stage.as_deref() == Some(name))
+        {
+            warnings.push(warn(
+                lines.stages.get(name).cloned(),
+                format!("stage `{name}` has no steps"),
+            ));
+        }
+    }
     for product in &pipeline.products {
         let name = product.name.as_str();
         if library || skip.contains(name) || lines.imported.contains(name) {
