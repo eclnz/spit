@@ -7,11 +7,12 @@ use std::ops::Range;
 use crate::bash::check_command_syntax;
 use crate::imports::apply_import;
 use crate::model::{
-    Cardinality, CommandDef, CountRequirement, CoverageRule, EntityBinding, InputBinding,
-    InputPort, Invocation, OperationDef, Pipeline, ProductDef, ShapeRule, SourceInventory,
-    SourceRecord,
+    Cardinality, CommandDef, CommandRole, CountRequirement, CoverageRule, EntityBinding,
+    InputBinding, InputPort, Invocation, OperationDef, OutputPort, Pipeline, ProductDef, ShapeRule,
+    SourceInventory, SourceRecord, DEFAULT_OUTPUT,
 };
 use crate::paths::check_path_template_syntax;
+use crate::resolver::{step_context, BoundInput};
 use crate::span::{columns_of, content_columns, find_word, Place};
 use crate::types::{parse_type_expr, TypeExpr};
 
@@ -110,11 +111,12 @@ pub(crate) struct SourceMap {
 #[derive(Clone, Debug, Default)]
 pub(crate) struct Step {
     pub(crate) line: usize,
-    pub(crate) output: Range<usize>,
+    /// One range per output product, in call order.
+    pub(crate) outputs: Vec<Range<usize>>,
     pub(crate) operation: Range<usize>,
     /// From the operation name to the closing parenthesis.
     pub(crate) call: Range<usize>,
-    /// One range per input binding, in call order.
+    /// One range per input binding, with its selectors, in call order.
     pub(crate) inputs: Vec<Range<usize>>,
 }
 
@@ -123,8 +125,14 @@ impl Step {
         Place::new(self.line, columns.clone())
     }
 
+    /// The first output product.
     pub(crate) fn output(&self) -> Place {
-        self.place(&self.output)
+        self.output_at(0)
+    }
+
+    pub(crate) fn output_at(&self, index: usize) -> Place {
+        let columns = self.outputs.get(index).or(self.outputs.first());
+        columns.map_or_else(|| self.call(), |columns| self.place(columns))
     }
 
     pub(crate) fn operation(&self) -> Place {
@@ -221,9 +229,9 @@ impl PipelineBuilder {
     }
 
     fn add_invocation(&mut self, invocation: Invocation, step: Step) {
-        self.lines
-            .invocations
-            .insert(invocation.output_product.clone(), step);
+        for output in &invocation.outputs {
+            self.lines.invocations.insert(output.clone(), step.clone());
+        }
         self.pipeline.invocations.push(invocation);
     }
 }
@@ -238,14 +246,23 @@ fn name_place(original: &str, number: usize, from: &str, name: &str) -> Place {
     )
 }
 
-/// Where a parsed step's output, operation, call, and inputs sit on its line.
+/// Where a parsed step's outputs, operation, call, and inputs sit on its line.
 fn step_place(original: &str, number: usize, invocation: &Invocation) -> Step {
     let content = content_columns(original);
     let found = |from: usize, word: &str| find_word(original, from, word);
-    let output = found(content.start, &invocation.output_product).unwrap_or(content.clone());
-    let equals = original[output.end..]
+    let mut from = content.start;
+    let outputs: Vec<_> = invocation
+        .outputs
+        .iter()
+        .map(|output| {
+            let columns = found(from, output).unwrap_or(content.clone());
+            from = columns.end;
+            columns
+        })
+        .collect();
+    let equals = original[from..]
         .find('=')
-        .map_or(output.end, |offset| output.end + offset + 1);
+        .map_or(from, |offset| from + offset + 1);
     let operation = found(equals, &invocation.operation).unwrap_or(content.clone());
     let call_end = original[..content.end]
         .rfind(')')
@@ -258,12 +275,11 @@ fn step_place(original: &str, number: usize, invocation: &Invocation) -> Step {
             let Some(product) = found(from, binding.product_name()) else {
                 return operation.start..call_end;
             };
-            // A `vary` binding runs to the parenthesis that closes it.
-            let end = match binding {
-                InputBinding::Product(_) => product.end,
-                InputBinding::Vary { .. } => original[product.end..call_end]
-                    .find(')')
-                    .map_or(product.end, |offset| product.end + offset + 1),
+            // Selectors run to the end of the argument.
+            let end = if binding.has_selectors() {
+                argument_end(original, product.end, call_end)
+            } else {
+                product.end
             };
             from = end;
             product.start..end
@@ -271,11 +287,34 @@ fn step_place(original: &str, number: usize, invocation: &Invocation) -> Step {
         .collect();
     Step {
         line: number,
-        output,
+        outputs,
         call: operation.start..call_end,
         operation,
         inputs,
     }
+}
+
+/// The end of the call argument that continues at `start`: the next
+/// top-level `,` or the call's closing parenthesis, less trailing space.
+fn argument_end(line: &str, start: usize, call_end: usize) -> usize {
+    let mut depth = 0usize;
+    let mut end = call_end.saturating_sub(1).max(start);
+    for (offset, character) in line[start..call_end].char_indices() {
+        match character {
+            '(' => depth += 1,
+            ')' if depth == 0 => {
+                end = start + offset;
+                break;
+            }
+            ')' => depth -= 1,
+            ',' if depth == 0 => {
+                end = start + offset;
+                break;
+            }
+            _ => {}
+        }
+    }
+    start + line[start..end].trim_end().len()
 }
 
 /// Where the text at the end of a declaration sits, such as a template.
@@ -310,6 +349,16 @@ pub(crate) struct ParsedDocument {
     pub(crate) pipeline: Pipeline,
     pub(crate) inventory: Option<SourceInventory>,
     pub(crate) lines: SourceMap,
+    /// The line of the first inline `sources:` or `contexts:` header.
+    pub(crate) inventory_line: Option<usize>,
+}
+
+/// Whether to read a document's inline inventory. A separate inventory
+/// replaces it, so it is then skipped rather than required to parse.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum InlineInventory {
+    Read,
+    Skip,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -412,7 +461,12 @@ fn sectioned_line(
                 builder.add_constraint(rule, place);
             }
             Some(Section::Commands) => {
-                let command = parse_command(line, number)?;
+                let command = match line.strip_prefix("verify ") {
+                    Some(declaration) => {
+                        parse_command(declaration.trim(), number, CommandRole::Verify)?
+                    }
+                    None => parse_command(line, number, CommandRole::Run)?,
+                };
                 let place = tail_place(original, number, &command.template);
                 builder.add_command(command, place);
             }
@@ -470,7 +524,11 @@ fn flow_line(
         let place = rule_place(original, number, &rule);
         builder.add_constraint(rule, place);
     } else if let Some(declaration) = line.strip_prefix("command ") {
-        let command = parse_command(declaration.trim(), number)?;
+        let command = parse_command(declaration.trim(), number, CommandRole::Run)?;
+        let place = tail_place(original, number, &command.template);
+        builder.add_command(command, place);
+    } else if let Some(declaration) = line.strip_prefix("verify ") {
+        let command = parse_command(declaration.trim(), number, CommandRole::Verify)?;
         let place = tail_place(original, number, &command.template);
         builder.add_command(command, place);
     } else if line.starts_with("shell-source:") {
@@ -478,9 +536,11 @@ fn flow_line(
     } else if line.starts_with("path ") || line.starts_with("path:") {
         set_path(builder, original, line, number)?;
     } else if line.contains('=') {
-        let (invocation, product) = parse_flow_invocation(line, number, &builder.pipeline)?;
+        let (invocation, products) = parse_flow_invocation(line, number, &builder.pipeline)?;
         let step = step_place(original, number, &invocation);
-        builder.add_product(product, step.output());
+        for (index, product) in products.into_iter().enumerate() {
+            builder.add_product(product, step.output_at(index));
+        }
         builder.add_invocation(invocation, step);
     } else if line.contains('(') && line.ends_with(')') {
         return Err(ParseError::new(
@@ -490,17 +550,20 @@ fn flow_line(
     } else {
         return Err(ParseError::new(
             number,
-            "expected source, operation, require, or output = operation(inputs)",
+            "expected source, operation, command, verify, require, path, or output = operation(inputs)",
         ));
     }
     Ok(())
 }
 
-fn parse_command(line: &str, number: usize) -> Result<CommandDef, ParseError> {
+fn parse_command(line: &str, number: usize, role: CommandRole) -> Result<CommandDef, ParseError> {
     let delimiter = declaration_delimiter(line).ok_or_else(|| {
         ParseError::new(
             number,
-            "expected command: operation: executable [arguments]",
+            match role {
+                CommandRole::Run => "expected command: operation: executable [arguments]",
+                CommandRole::Verify => "expected verify operation: executable [arguments]",
+            },
         )
     })?;
     let (operation, rest) = line.split_at(delimiter);
@@ -515,7 +578,10 @@ fn parse_command(line: &str, number: usize) -> Result<CommandDef, ParseError> {
     check_command_syntax(template).map_err(|error| {
         ParseError::new(number, format!("command `{operation}`: {}", error.message)).at(template)
     })?;
-    Ok(CommandDef::new(operation, template))
+    Ok(CommandDef {
+        role,
+        ..CommandDef::new(operation, template)
+    })
 }
 
 fn declaration_delimiter(line: &str) -> Option<usize> {
@@ -664,13 +730,22 @@ fn parse_flow_invocation(
     line: &str,
     number: usize,
     pipeline: &Pipeline,
-) -> Result<(Invocation, ProductDef), ParseError> {
+) -> Result<(Invocation, Vec<ProductDef>), ParseError> {
     let (left, call) = line
         .split_once('=')
         .ok_or_else(|| ParseError::new(number, "expected flow step: output = operation(inputs)"))?;
-    let (output_name, output_type, output_dimensions) = parse_flow_output(left.trim(), number)?;
+    let outputs = comma_items(left, number)?
+        .into_iter()
+        .map(|output| parse_flow_output(output, number))
+        .collect::<Result<Vec<_>, _>>()?;
+    if outputs.is_empty() {
+        return Err(ParseError::new(
+            number,
+            "expected an output product before `=`",
+        ));
+    }
     let (operation_name, _) = call_parts(call.trim(), number)?;
-    pipeline
+    let operation = pipeline
         .operations
         .iter()
         .find(|operation| operation.name == operation_name)
@@ -685,31 +760,55 @@ fn parse_flow_invocation(
             };
             error
         })?;
-    let invocation = parse_invocation_parts(&output_name, call, number)?;
-    let dimensions = output_dimensions.unwrap_or_else(|| {
-        let input = invocation.inputs.first().map(InputBinding::product_name);
-        let input = input.and_then(|name| {
-            pipeline
-                .products
-                .iter()
-                .find(|product| product.name == name)
-        });
-        let mut dimensions = input
-            .map(|product| product.dimensions.clone())
-            .unwrap_or_default();
-        if let Some(InputBinding::Vary { dimension, .. }) = invocation.inputs.first() {
-            dimensions.retain(|value| value != dimension);
-        }
-        dimensions
-    });
-    Ok((
-        invocation,
-        ProductDef::new(
-            &output_name,
-            output_type.unwrap_or(TypeExpr::Unknown),
-            &dimensions,
-        ),
-    ))
+    let names: Vec<_> = outputs.iter().map(|(name, _, _)| name.clone()).collect();
+    let invocation = parse_invocation_parts(names, call, number)?;
+    let dimensions = inferred_dimensions(&invocation, operation, pipeline);
+    let products = outputs
+        .into_iter()
+        .map(|(name, output_type, output_dimensions)| {
+            ProductDef::new(
+                name,
+                output_type.unwrap_or(TypeExpr::Unknown),
+                output_dimensions.unwrap_or_else(|| dimensions.clone()),
+            )
+        })
+        .collect();
+    Ok((invocation, products))
+}
+
+/// The dimensions a flow step's undeclared outputs take: those of the input
+/// that drives it, less a varied or pinned dimension.
+fn inferred_dimensions(
+    invocation: &Invocation,
+    operation: &OperationDef,
+    pipeline: &Pipeline,
+) -> Vec<String> {
+    let dimensions = |binding: &InputBinding| {
+        pipeline
+            .products
+            .iter()
+            .find(|product| product.name == binding.product)
+            .map(|product| binding.free_dimensions(&product.dimensions))
+    };
+    let inputs: Option<Vec<_>> = invocation
+        .inputs
+        .iter()
+        .zip(&operation.inputs)
+        .map(|(binding, port)| {
+            Some(BoundInput {
+                binding,
+                dimensions: dimensions(binding)?,
+                many: port.cardinality == Cardinality::Many,
+            })
+        })
+        .collect();
+    // Otherwise the step is invalid; the resolver reports why.
+    inputs
+        .filter(|inputs| inputs.len() == invocation.inputs.len())
+        .and_then(|inputs| step_context(&inputs))
+        .map(|(_, context)| context)
+        .or_else(|| invocation.inputs.first().and_then(dimensions))
+        .unwrap_or_default()
 }
 
 type FlowOutput = (String, Option<TypeExpr>, Option<Vec<String>>);
@@ -795,20 +894,21 @@ fn parse_use_path(text: &str, number: usize) -> Result<(String, Option<String>),
 /// Parse a text document that may package an inventory alongside its pipeline.
 /// The two remain separate values for resolution.
 pub fn parse_document(text: &str) -> Result<(Pipeline, Option<SourceInventory>), ParseError> {
-    parse_document_with_imports(text, &BTreeMap::new())
+    parse_document_with_imports(text, &BTreeMap::new(), InlineInventory::Read)
         .map(|document| (document.pipeline, document.inventory))
 }
 
 pub(crate) fn parse_document_with_imports(
     text: &str,
     imports: &BTreeMap<usize, Pipeline>,
+    inline: InlineInventory,
 ) -> Result<ParsedDocument, ParseError> {
     let mut pipeline_text = String::new();
     let mut inventory_text = String::new();
     let mut inventory_section = false;
-    let mut has_inventory = false;
+    let mut inventory_line = None;
 
-    for original in text.lines() {
+    for (index, original) in text.lines().enumerate() {
         let line = strip_comment(original).trim();
         match line {
             "products:" | "operations:" | "pipeline:" | "constraints:" | "commands:" => {
@@ -816,7 +916,7 @@ pub(crate) fn parse_document_with_imports(
             }
             "sources:" | "contexts:" => {
                 inventory_section = true;
-                has_inventory = true;
+                inventory_line.get_or_insert(index + 1);
             }
             _ if line.starts_with("path:")
                 || line.starts_with("path ")
@@ -825,6 +925,7 @@ pub(crate) fn parse_document_with_imports(
                 || line.starts_with("source ")
                 || line.starts_with("operation ")
                 || line.starts_with("command ")
+                || line.starts_with("verify ")
                 || line.starts_with("require ") =>
             {
                 inventory_section = false;
@@ -844,14 +945,51 @@ pub(crate) fn parse_document_with_imports(
     }
 
     let builder = parse_pipeline_with_imports(&pipeline_text, imports)?;
-    let inventory = has_inventory
-        .then(|| parse_source_inventory(&inventory_text))
-        .transpose()?;
+    let inventory = match inline {
+        InlineInventory::Read if inventory_line.is_some() => {
+            Some(parse_source_inventory(&inventory_text)?)
+        }
+        _ => None,
+    };
     Ok(ParsedDocument {
         pipeline: builder.pipeline,
         inventory,
         lines: builder.lines,
+        inventory_line,
     })
+}
+
+/// Write an inventory in the text form [`parse_source_inventory`] reads,
+/// with each record's values in its product's declared dimension order.
+pub fn render_source_inventory(inventory: &SourceInventory, pipeline: &Pipeline) -> String {
+    let mut text = String::new();
+    if !inventory.contexts.is_empty() {
+        text.push_str("contexts:\n");
+        for context in &inventory.contexts {
+            text.push_str(&format!("    [{context}]\n"));
+        }
+    }
+    text.push_str("sources:\n");
+    for record in &inventory.artifacts {
+        let declared = pipeline
+            .products
+            .iter()
+            .find(|product| product.name == record.product)
+            .map_or(&[][..], |product| product.dimensions.as_slice());
+        let mut values: Vec<_> = record.entities.0.iter().collect();
+        values.sort_by_key(|(dimension, _)| {
+            declared
+                .iter()
+                .position(|declared| declared == *dimension)
+                .unwrap_or(usize::MAX)
+        });
+        let values: Vec<_> = values
+            .into_iter()
+            .map(|(dimension, value)| format!("{dimension}={value}"))
+            .collect();
+        text.push_str(&format!("    {}[{}]\n", record.product, values.join(",")));
+    }
+    text
 }
 
 /// Parse an inventory supplied by a dataset indexer or written as a fixture.
@@ -896,7 +1034,7 @@ pub fn parse_source_inventory(text: &str) -> Result<SourceInventory, ParseError>
 }
 
 fn parse_coverage_rule(line: &str, number: usize) -> Result<CoverageRule, ParseError> {
-    let syntax = "expected constraint: require product count=1 per [dimensions] or count>=1";
+    let syntax = "expected constraint: require product count=1 per [dimensions], count>=1, or dimension=value,...";
     let rest = line
         .strip_prefix("require ")
         .ok_or_else(|| ParseError::new(number, syntax))?;
@@ -905,19 +1043,40 @@ fn parse_coverage_rule(line: &str, number: usize) -> Result<CoverageRule, ParseE
         .ok_or_else(|| ParseError::new(number, syntax))?;
     let mut parts = subject.split_whitespace();
     let product = qualified_identifier(parts.next().unwrap_or(""), number, "constraint product")?;
-    let count_token = parts
-        .next()
-        .ok_or_else(|| ParseError::new(number, syntax))?;
-    if parts.next().is_some() {
+    let mut count = None;
+    let mut values = BTreeMap::new();
+    for token in parts {
+        let parsed = if let Some(value) = token.strip_prefix("count=") {
+            Some(CountRequirement::Exactly(parse_count(value, number)?))
+        } else if let Some(value) = token.strip_prefix("count>=") {
+            Some(CountRequirement::AtLeast(parse_count(value, number)?))
+        } else {
+            None
+        };
+        if let Some(parsed) = parsed {
+            if count.replace(parsed).is_some() {
+                return Err(ParseError::new(number, "a rule takes one count").at(token));
+            }
+        } else if let Some((dimension, listed)) = token.split_once('=') {
+            let dimension = identifier(dimension, number, "required dimension")?;
+            let listed: Vec<_> = listed.split(',').collect();
+            if listed.iter().any(|value| value.is_empty()) {
+                return Err(ParseError::new(number, "required values must not be empty").at(token));
+            }
+            if values.insert(dimension.to_owned(), listed).is_some() {
+                return Err(ParseError::new(
+                    number,
+                    format!("duplicate required dimension `{dimension}`"),
+                )
+                .at(token));
+            }
+        } else {
+            return Err(ParseError::new(number, syntax).at(token));
+        }
+    }
+    if count.is_none() && values.is_empty() {
         return Err(ParseError::new(number, syntax));
     }
-    let count = if let Some(value) = count_token.strip_prefix("count=") {
-        CountRequirement::Exactly(parse_count(value, number)?)
-    } else if let Some(value) = count_token.strip_prefix("count>=") {
-        CountRequirement::AtLeast(parse_count(value, number)?)
-    } else {
-        return Err(ParseError::new(number, syntax));
-    };
     let bracketed = dimensions.trim();
     let dimensions = bracketed.strip_prefix('[').ok_or_else(|| {
         ParseError::new(number, "expected `[` before constraint dimensions").at(bracketed)
@@ -935,7 +1094,15 @@ fn parse_coverage_rule(line: &str, number: usize) -> Result<CoverageRule, ParseE
     for dimension in &dimensions {
         identifier(dimension, number, "constraint dimension")?;
     }
-    Ok(CoverageRule::new(product, &dimensions, count))
+    let mut rule = CoverageRule::new(
+        product,
+        &dimensions,
+        count.unwrap_or(CountRequirement::AtLeast(1)),
+    );
+    for (dimension, listed) in values {
+        rule = rule.requiring(dimension, listed);
+    }
+    Ok(rule)
 }
 
 fn parse_count(value: &str, number: usize) -> Result<usize, ParseError> {
@@ -970,32 +1137,58 @@ fn parse_product(line: &str, number: usize) -> Result<ProductDef, ParseError> {
 }
 
 fn parse_operation(line: &str, number: usize) -> Result<OperationDef, ParseError> {
-    let (line, aggregated_dimension) = if let Some((signature, tail)) = line.rsplit_once(" @ drop(")
-    {
-        let dimension = tail.strip_suffix(')').ok_or_else(|| {
-            ParseError::new(
-                number,
-                "expected `@ drop(dimension)` after operation signature",
-            )
-        })?;
+    let mut clauses = line.split('@');
+    let line = clauses.next().unwrap_or_default().trim_end();
+    let mut aggregated_dimension = None;
+    let mut minimum = None;
+    for clause in clauses {
+        let clause = clause.trim();
+        let (keyword, argument) = clause
+            .split_once('(')
+            .and_then(|(keyword, rest)| Some((keyword.trim(), rest.strip_suffix(')')?.trim())))
+            .ok_or_else(|| {
+                ParseError::new(
+                    number,
+                    "expected `@ drop(dimension)` or `@ min(count)` after operation signature",
+                )
+                .at(clause)
+            })?;
+        match keyword {
+            "drop" if aggregated_dimension.is_none() => {
+                aggregated_dimension = Some(identifier(argument, number, "aggregated dimension")?);
+            }
+            "min" if minimum.is_none() => {
+                let count: usize = argument
+                    .parse()
+                    .ok()
+                    .filter(|count| *count > 0)
+                    .ok_or_else(|| {
+                        ParseError::new(number, "`@ min(count)` needs a positive integer")
+                            .at(argument)
+                    })?;
+                minimum = Some(count);
+            }
+            "drop" | "min" => {
+                return Err(
+                    ParseError::new(number, format!("duplicate `@ {keyword}(...)`")).at(keyword),
+                )
+            }
+            _ => {
+                return Err(ParseError::new(
+                    number,
+                    "expected `@ drop(dimension)` or `@ min(count)` after operation signature",
+                )
+                .at(keyword))
+            }
+        }
+    }
+    let (signature, outputs) = if let Some((signature, output)) = line.split_once("->") {
+        (signature, parse_outputs(output.trim(), number)?)
+    } else {
         (
-            signature,
-            Some(identifier(
-                dimension.trim(),
-                number,
-                "aggregated dimension",
-            )?),
+            line,
+            vec![OutputPort::new(DEFAULT_OUTPUT, TypeExpr::Unknown)],
         )
-    } else {
-        (line, None)
-    };
-    let (signature, output_type) = if let Some((signature, output_type)) = line.split_once("->") {
-        let output_type = output_type.trim();
-        let output_type = parse_type_expr(output_type, true)
-            .map_err(|error| ParseError::new(number, error.message).at(output_type))?;
-        (signature, output_type)
-    } else {
-        (line, TypeExpr::Unknown)
     };
     let signature = signature.trim();
     if !signature.contains('(') {
@@ -1026,7 +1219,7 @@ fn parse_operation(line: &str, number: usize) -> Result<OperationDef, ParseError
     for (index, input) in inputs.iter().enumerate() {
         let (declared_name, input) = if let Some((name, value)) = input.split_once(':') {
             let name = identifier(name.trim(), number, "input port")?;
-            if name == "output" {
+            if name == DEFAULT_OUTPUT {
                 return Err(ParseError::new(
                     number,
                     "input port name `output` is reserved for the operation output",
@@ -1060,31 +1253,73 @@ fn parse_operation(line: &str, number: usize) -> Result<OperationDef, ParseError
             Cardinality::Many => InputPort::many(&port_name, artifact_type),
         });
     }
-    let shape_rule = if ports
+    let many = ports
         .iter()
-        .any(|port| port.cardinality == Cardinality::Many)
-    {
-        if ports.len() != 1 {
-            return Err(ParseError::new(
-                number,
-                "v0.1 supports `many` only as an operation's sole input",
-            ));
-        }
+        .filter(|port| port.cardinality == Cardinality::Many)
+        .count();
+    if many > 1 {
+        return Err(ParseError::new(
+            number,
+            "an operation takes at most one `many` input; each job groups one collection",
+        ));
+    }
+    let shape_rule = if many == 1 {
         ShapeRule::Aggregate
     } else {
         ShapeRule::Preserve
     };
-    if aggregated_dimension.is_some() && shape_rule != ShapeRule::Aggregate {
-        return Err(ParseError::new(
-            number,
-            "`@ drop(dimension)` requires a many input",
-        ));
+    if shape_rule != ShapeRule::Aggregate {
+        if aggregated_dimension.is_some() {
+            return Err(ParseError::new(
+                number,
+                "`@ drop(dimension)` requires a many input",
+            ));
+        }
+        if minimum.is_some() {
+            return Err(ParseError::new(
+                number,
+                "`@ min(count)` requires a many input",
+            ));
+        }
     }
-    let mut operation = OperationDef::new(name, ports, output_type, shape_rule);
+    let mut operation = OperationDef::with_outputs(name, ports, outputs, shape_rule);
     if let Some(dimension) = aggregated_dimension {
         operation = operation.aggregating(dimension);
     }
+    if let Some(minimum) = minimum {
+        operation = operation.at_least(minimum);
+    }
     Ok(operation)
+}
+
+/// Parse an operation's output: one type, or `(name: Type, ...)` for
+/// several named outputs.
+fn parse_outputs(text: &str, number: usize) -> Result<Vec<OutputPort>, ParseError> {
+    let Some(list) = text.strip_prefix('(') else {
+        let output_type = parse_type_expr(text, true)
+            .map_err(|error| ParseError::new(number, error.message).at(text))?;
+        return Ok(vec![OutputPort::new(DEFAULT_OUTPUT, output_type)]);
+    };
+    let list = list.strip_suffix(')').ok_or_else(|| {
+        ParseError::new(number, "expected closing `)` after output ports").at(text)
+    })?;
+    let items = comma_items(list, number)?;
+    if items.is_empty() {
+        return Err(ParseError::new(number, "expected at least one output port").at(text));
+    }
+    items
+        .into_iter()
+        .map(|item| {
+            let (name, output_type) = match item.split_once(':') {
+                Some((name, output_type)) => (name.trim(), port_type(output_type.trim(), number)?),
+                None => (item, TypeExpr::Unknown),
+            };
+            Ok(OutputPort::new(
+                identifier(name, number, "output port")?,
+                output_type,
+            ))
+        })
+        .collect()
 }
 
 fn port_type(text: &str, number: usize) -> Result<TypeExpr, ParseError> {
@@ -1092,40 +1327,116 @@ fn port_type(text: &str, number: usize) -> Result<TypeExpr, ParseError> {
 }
 
 fn parse_invocation(line: &str, number: usize) -> Result<Invocation, ParseError> {
-    let (output_product, call) = line
+    let (outputs, call) = line
         .split_once('=')
         .ok_or_else(|| ParseError::new(number, "expected `=` in pipeline invocation"))?;
-    let output_product = identifier(output_product.trim(), number, "output product")?;
-    parse_invocation_parts(output_product, call, number)
+    let outputs = comma_items(outputs, number)?
+        .into_iter()
+        .map(|output| identifier(output, number, "output product").map(str::to_owned))
+        .collect::<Result<Vec<_>, _>>()?;
+    if outputs.is_empty() {
+        return Err(ParseError::new(
+            number,
+            "expected an output product before `=`",
+        ));
+    }
+    parse_invocation_parts(outputs, call, number)
 }
 
 fn parse_invocation_parts(
-    output_product: &str,
+    outputs: Vec<String>,
     call: &str,
     number: usize,
 ) -> Result<Invocation, ParseError> {
     let (operation, args) = call_parts(call.trim(), number)?;
-    let mut bindings = Vec::new();
-    for arg in comma_items(args, number)? {
-        if let Some((product, variation)) = arg.split_once('@') {
-            let product = qualified_identifier(product.trim(), number, "input product")?;
-            let (keyword, dimension) = call_parts(variation.trim(), number)?;
-            if keyword != "vary" {
-                return Err(
-                    ParseError::new(number, "only `@ vary(dimension)` is supported").at(keyword),
-                );
+    let bindings = comma_items(args, number)?
+        .into_iter()
+        .map(|arg| parse_binding(arg, number))
+        .collect::<Result<_, _>>()?;
+    Ok(Invocation::with_outputs(operation, bindings, outputs))
+}
+
+const SELECTORS: &str =
+    "expected `@ vary(dimension)`, `@ where(dimension=value, ...)`, or `@ same(dimension, ...)`";
+
+/// Parse `product [@ selector(...)]...`.
+fn parse_binding(arg: &str, number: usize) -> Result<InputBinding, ParseError> {
+    let mut parts = arg.split('@');
+    let product = parts.next().unwrap_or_default().trim();
+    let mut binding =
+        InputBinding::product(qualified_identifier(product, number, "input product")?);
+    for selector in parts {
+        let selector = selector.trim();
+        let (keyword, arguments) = call_parts(selector, number)
+            .map_err(|_| ParseError::new(number, SELECTORS).at(selector))?;
+        let items = comma_items(arguments, number)?;
+        if items.is_empty() {
+            return Err(
+                ParseError::new(number, format!("`@ {keyword}()` needs a dimension")).at(selector),
+            );
+        }
+        let duplicate =
+            || ParseError::new(number, format!("duplicate `@ {keyword}(...)`")).at(keyword);
+        match keyword {
+            "vary" => {
+                let [dimension] = items.as_slice() else {
+                    return Err(
+                        ParseError::new(number, "`@ vary(...)` takes one dimension").at(selector)
+                    );
+                };
+                let dimension = identifier(dimension, number, "vary dimension")?;
+                if binding.vary.replace(dimension.to_owned()).is_some() {
+                    return Err(duplicate());
+                }
             }
-            let dimension = identifier(dimension.trim(), number, "vary dimension")?;
-            bindings.push(InputBinding::vary(product, dimension));
-        } else {
-            bindings.push(InputBinding::product(qualified_identifier(
-                arg.trim(),
-                number,
-                "input product",
-            )?));
+            "where" => {
+                if !binding.pinned.is_empty() {
+                    return Err(duplicate());
+                }
+                for item in items {
+                    let (dimension, value) = item.split_once('=').ok_or_else(|| {
+                        ParseError::new(number, "expected `dimension=value` in `@ where(...)`")
+                            .at(item)
+                    })?;
+                    let dimension = identifier(dimension.trim(), number, "where dimension")?;
+                    let value = value.trim();
+                    if value.is_empty() || value.chars().any(char::is_whitespace) {
+                        return Err(ParseError::new(
+                            number,
+                            "a `@ where` value must be one nonempty token",
+                        )
+                        .at(item));
+                    }
+                    if binding
+                        .pinned
+                        .insert(dimension.to_owned(), value.to_owned())
+                        .is_some()
+                    {
+                        return Err(ParseError::new(
+                            number,
+                            format!("`@ where(...)` pins `{dimension}` twice"),
+                        )
+                        .at(item));
+                    }
+                }
+            }
+            "same" => {
+                let dimensions = items
+                    .into_iter()
+                    .map(|item| identifier(item, number, "same dimension"))
+                    .collect::<Result<Vec<_>, _>>()?;
+                if binding.same.replace(owned(&dimensions)).is_some() {
+                    return Err(duplicate());
+                }
+            }
+            _ => return Err(ParseError::new(number, SELECTORS).at(keyword)),
         }
     }
-    Ok(Invocation::new(operation, bindings, output_product))
+    Ok(binding)
+}
+
+fn owned(values: &[&str]) -> Vec<String> {
+    values.iter().map(|value| (*value).to_owned()).collect()
 }
 
 fn parse_source(line: &str, number: usize) -> Result<SourceRecord, ParseError> {
@@ -1206,9 +1517,16 @@ fn comma_items(text: &str, number: usize) -> Result<Vec<&str>, ParseError> {
     let mut items = Vec::new();
     let mut paren_depth = 0usize;
     let mut angle_depth = 0usize;
+    let mut bracket_depth = 0usize;
     let mut start = 0usize;
     for (index, character) in text.char_indices() {
         match character {
+            '[' => bracket_depth += 1,
+            ']' => {
+                bracket_depth = bracket_depth
+                    .checked_sub(1)
+                    .ok_or_else(|| ParseError::new(number, "unexpected `]`"))?
+            }
             '(' => paren_depth += 1,
             ')' => {
                 paren_depth = paren_depth
@@ -1221,15 +1539,15 @@ fn comma_items(text: &str, number: usize) -> Result<Vec<&str>, ParseError> {
                     .checked_sub(1)
                     .ok_or_else(|| ParseError::new(number, "unexpected `>`"))?
             }
-            ',' if paren_depth == 0 && angle_depth == 0 => {
+            ',' if paren_depth == 0 && angle_depth == 0 && bracket_depth == 0 => {
                 items.push(text[start..index].trim());
                 start = index + 1;
             }
             _ => {}
         }
     }
-    if paren_depth != 0 || angle_depth != 0 {
-        return Err(ParseError::new(number, "unclosed `(` or `<`"));
+    if paren_depth != 0 || angle_depth != 0 || bracket_depth != 0 {
+        return Err(ParseError::new(number, "unclosed `(`, `<`, or `[`"));
     }
     items.push(text[start..].trim());
     if items.iter().any(|item| item.is_empty()) {
