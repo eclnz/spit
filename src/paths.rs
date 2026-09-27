@@ -2,25 +2,42 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{self, Write};
+use std::ops::Range;
 use std::path::Path;
 
 use crate::model::{
     ArtifactInstance, ArtifactKey, EntityBinding, Pipeline, ProductDef, ResolvedDag,
 };
 use crate::parser::SourceMap;
+use crate::span::Place;
 use crate::template::{parse_template, Part};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PathError {
     /// The pipeline line of the path rule at fault, when known.
     pub line: Option<usize>,
+    /// The byte range in that line, when known.
+    pub columns: Option<Range<usize>>,
     pub message: String,
+    /// Text within the path template that the error is about, such as one
+    /// `{placeholder}`.
+    pub(crate) focus: Option<String>,
 }
 
 impl PathError {
-    /// Attach a line unless a more specific one is already recorded.
-    fn at(mut self, line: Option<usize>) -> Self {
-        self.line = self.line.or(line);
+    /// Attach a place unless a more specific one is already recorded.
+    fn at(mut self, place: Option<Place>) -> Self {
+        if self.line.is_none() {
+            if let Some(place) = place {
+                self.line = Some(place.line);
+                self.columns = Some(place.columns);
+            }
+        }
+        self
+    }
+
+    fn focus(mut self, text: impl Into<String>) -> Self {
+        self.focus = Some(text.into());
         self
     }
 }
@@ -39,7 +56,9 @@ impl std::error::Error for PathError {}
 pub(crate) fn error(message: impl Into<String>) -> PathError {
     PathError {
         line: None,
+        columns: None,
         message: message.into(),
+        focus: None,
     }
 }
 
@@ -142,7 +161,7 @@ pub(crate) fn collect_paths(
         {
             errors.push(
                 error(format!("path refers to unknown product `{name}`"))
-                    .at(lines.paths.get(name).copied()),
+                    .at(lines.paths.get(name).cloned()),
             );
         }
     }
@@ -162,7 +181,7 @@ pub(crate) fn collect_paths(
             PathRule::Missing
         };
         if rule != PathRule::Missing && !skip.contains(&product.name) {
-            let line = lines.path_rule_line(pipeline, &product.name);
+            let line = lines.path_rule(pipeline, &product.name);
             match validate_path_template(pipeline, product) {
                 Err(e) => errors.push(e.at(line)),
                 // A repeated product name is reported by the resolver as a duplicate.
@@ -362,6 +381,7 @@ fn bind_path(
                         "path template for `{}` uses absent dimension `{dimension}`",
                         artifact.product
                     ))
+                    .focus(format!("{{{dimension}}}"))
                 })?;
                 relative.push_str(&encode_component(value));
             }

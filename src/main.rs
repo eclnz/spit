@@ -120,7 +120,10 @@ fn run() -> Result<(), Box<dyn Error>> {
     let path = Path::new(&args.pipeline);
     let diagnostics = diagnose_at(&pipeline_text, inventory_text.as_deref(), path);
     for diagnostic in &diagnostics {
-        eprintln!("{diagnostic}");
+        eprintln!(
+            "{}",
+            diagnostic.display_in(&pipeline_text, inventory_text.as_deref())
+        );
     }
     if diagnostics.iter().any(|diagnostic| diagnostic.is_error()) {
         return Err(Reported.into());
@@ -184,18 +187,22 @@ fn run_diagnose(args: &CliArgs) -> Result<(), Box<dyn Error>> {
         None => None,
     };
     let diagnostics = diagnose_at(&text, source_text.as_deref(), Path::new(&args.pipeline));
+    let number = |value: Option<usize>| value.map_or_else(|| "null".to_owned(), |n| n.to_string());
     print!("{{\"diagnostics\":[");
     for (index, diagnostic) in diagnostics.iter().enumerate() {
         if index != 0 {
             print!(",");
         }
+        // Columns are 1-based, in UTF-16 code units as editors count them;
+        // `end_column` is one past the last character.
+        let columns = diagnostic.utf16_columns(&text, source_text.as_deref());
         print!(
-            "{{\"severity\":\"{}\",\"source\":\"{}\",\"line\":{},\"message\":\"{}\"}}",
+            "{{\"severity\":\"{}\",\"source\":\"{}\",\"line\":{},\"column\":{},\"end_column\":{},\"message\":\"{}\"}}",
             diagnostic.severity.as_str(),
             diagnostic.source.as_str(),
-            diagnostic
-                .line
-                .map_or_else(|| "null".to_owned(), |line| line.to_string()),
+            number(diagnostic.line),
+            number(columns.as_ref().map(|columns| columns.start + 1)),
+            number(columns.as_ref().map(|columns| columns.end + 1)),
             escape_json(&diagnostic.message)
         );
     }

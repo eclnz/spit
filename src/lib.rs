@@ -9,6 +9,7 @@ pub mod parser;
 pub mod paths;
 pub mod render;
 pub mod resolver;
+mod span;
 mod template;
 pub mod types;
 
