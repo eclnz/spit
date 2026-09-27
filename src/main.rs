@@ -14,14 +14,12 @@ use spit::{
 };
 
 const USAGE: &str =
-    "usage: spit <check|dag|bound-dag|paths|bash|artifacts|discover|diagnose> <pipeline.spit> [--sources <inventory.spit|->] [--root <directory>] [--strict-paths]";
+    "usage: spit <check|dag|bash|artifacts|discover|diagnose> <pipeline.spit> [--sources <inventory.spit|->] [--root <directory>] [--paths] [--strict-paths]";
 
 #[derive(Clone, Copy, PartialEq)]
 enum Command {
     Check,
     Dag,
-    BoundDag,
-    Paths,
     Bash,
     Artifacts,
     Discover,
@@ -33,8 +31,6 @@ impl Command {
         Some(match name {
             "check" => Self::Check,
             "dag" => Self::Dag,
-            "bound-dag" => Self::BoundDag,
-            "paths" => Self::Paths,
             "bash" => Self::Bash,
             "artifacts" => Self::Artifacts,
             "discover" => Self::Discover,
@@ -48,6 +44,7 @@ struct CliArgs {
     command: Command,
     pipeline: String,
     sources: Option<String>,
+    paths: bool,
     strict_paths: bool,
     root: Option<String>,
 }
@@ -64,11 +61,13 @@ fn parse_args() -> Result<CliArgs, Box<dyn Error>> {
         return Err(USAGE.into());
     }
     let mut sources = None;
+    let mut paths = false;
     let mut strict_paths = false;
     let mut root = None;
     while let Some(flag) = args.next() {
         match flag.as_str() {
             "--sources" if sources.is_none() => sources = Some(args.next().ok_or(USAGE)?),
+            "--paths" if !paths => paths = true,
             "--strict-paths" if !strict_paths => strict_paths = true,
             "--root" if root.is_none() => root = Some(args.next().ok_or(USAGE)?),
             _ => return Err(USAGE.into()),
@@ -78,6 +77,7 @@ fn parse_args() -> Result<CliArgs, Box<dyn Error>> {
         command,
         pipeline,
         sources,
+        paths,
         strict_paths,
         root,
     })
@@ -119,6 +119,9 @@ fn run() -> Result<(), Box<dyn Error>> {
     }
     if args.command == Command::Artifacts && args.strict_paths {
         return Err("artifacts does not support --strict-paths".into());
+    }
+    if args.paths && !matches!(args.command, Command::Check | Command::Dag) {
+        return Err("--paths applies to check and dag".into());
     }
     let inventory_text = match (args.sources.as_deref(), &args.root) {
         (Some("-"), _) => {
@@ -164,10 +167,13 @@ fn run() -> Result<(), Box<dyn Error>> {
         None => parse_document_at(&pipeline_text, path)?,
     };
     let coverage = inspect_paths(&pipeline)?;
+    if args.command == Command::Check && args.paths {
+        println!("{coverage}");
+    }
     let Some(inventory) = inventory else {
         if args.command == Command::Check && args.root.is_none() {
-            if args.strict_paths {
-                coverage.validate(true)?;
+            if args.strict_paths || args.paths {
+                coverage.validate(args.strict_paths)?;
             }
             println!("Pipeline valid.\n\nNo source inventory; jobs not resolved.");
             return Ok(());
@@ -183,10 +189,7 @@ fn run() -> Result<(), Box<dyn Error>> {
         return Ok(());
     }
     let dag = resolve(&pipeline, &inventory)?;
-    if args.strict_paths || args.command == Command::Paths {
-        if args.command == Command::Paths {
-            print!("{coverage}");
-        }
+    if args.strict_paths || args.paths {
         coverage.validate(args.strict_paths)?;
         validate_concrete_paths(&pipeline, &dag)?;
     }
@@ -202,9 +205,8 @@ fn run() -> Result<(), Box<dyn Error>> {
                 println!("{count} source files verified.");
             }
         }
+        Command::Dag if args.paths => print!("{}", render_bound_dag(&pipeline, &dag)?),
         Command::Dag => print!("{}", render_dag(&dag)),
-        Command::BoundDag => print!("{}", render_bound_dag(&pipeline, &dag)?),
-        Command::Paths => {}
         Command::Bash => print!("{}", render_bash(&pipeline, &dag)?),
         Command::Artifacts | Command::Discover | Command::Diagnose => {
             unreachable!("handled before resolution")

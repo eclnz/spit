@@ -62,13 +62,14 @@ fn bash_command_expands_observed_groups() {
 }
 
 #[test]
-fn bound_dag_displays_resolved_paths_before_command_expansion() {
+fn dag_with_paths_displays_resolved_paths_before_command_expansion() {
     let output = Command::new(env!("CARGO_BIN_EXE_spit"))
         .args([
-            "bound-dag",
+            "dag",
             "examples/commands/field_survey.spit",
             "--sources",
             "examples/commands/field_survey.sources",
+            "--paths",
         ])
         .output()
         .unwrap();
@@ -121,13 +122,14 @@ fn expanded_examples_resolve() {
 }
 
 #[test]
-fn paths_reports_fallbacks_and_strict_check_rejects_them() {
+fn check_paths_reports_fallbacks_and_strict_check_rejects_them() {
     let paths = Command::new(env!("CARGO_BIN_EXE_spit"))
         .args([
-            "paths",
+            "check",
             "examples/commands/field_survey.spit",
             "--sources",
             "examples/commands/field_survey.sources",
+            "--paths",
         ])
         .output()
         .unwrap();
@@ -153,7 +155,26 @@ fn paths_reports_fallbacks_and_strict_check_rejects_them() {
 }
 
 #[test]
-fn paths_fails_on_missing_rule_and_strict_check_accepts_complete_rules() {
+fn paths_flag_applies_to_check_and_dag_only() {
+    let output = Command::new(env!("CARGO_BIN_EXE_spit"))
+        .args([
+            "bash",
+            "examples/commands/bash_demo.spit",
+            "--sources",
+            "examples/commands/bash_demo.sources",
+            "--paths",
+        ])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert_eq!(
+        String::from_utf8(output.stderr).unwrap(),
+        "error: --paths applies to check and dag\n"
+    );
+}
+
+#[test]
+fn check_paths_fails_on_missing_rule_and_strict_check_accepts_complete_rules() {
     let suffix = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
@@ -163,7 +184,7 @@ fn paths_fails_on_missing_rule_and_strict_check_accepts_complete_rules() {
     let pipeline = "source raw [id]\npath raw: input/{id}.txt\noperation copy(one)\nresult = copy(raw)\nsources:\n    raw[id=x]\n";
     fs::write(&file, pipeline).unwrap();
     let missing = Command::new(env!("CARGO_BIN_EXE_spit"))
-        .args(["paths", file.to_str().unwrap()])
+        .args(["check", file.to_str().unwrap(), "--paths"])
         .output()
         .unwrap();
     assert!(!missing.status.success());
