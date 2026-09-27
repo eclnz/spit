@@ -1,0 +1,148 @@
+# Crop-row yield table from drone survey photos and a ground map.
+# Each visit has two or more photos with GPS and IMU sidecars, one flat-field
+# frame for calibration, and one surveyed ground map. The commands are
+# illustrative; the pipeline shows how SPIT binds the files they need.
+
+# Default for generated images; formats that differ declare a path below.
+path: derivatives/{product}/{entities}.img
+
+source raw_photo : Image<Photo,Captured> [site, visit, shot]
+path raw_photo: site-{site}/visit-{visit}/photos/site-{site}_visit-{visit}_shot-{shot}_photo.raw
+source photo_gps : GpsTrack [site, visit, shot]
+path photo_gps: site-{site}/visit-{visit}/photos/site-{site}_visit-{visit}_shot-{shot}_photo.gpx
+source photo_imu : ImuTrace [site, visit, shot]
+path photo_imu: site-{site}/visit-{visit}/photos/site-{site}_visit-{visit}_shot-{shot}_photo.imu
+source photo_json : CaptureMetadata [site, visit, shot]
+path photo_json: site-{site}/visit-{visit}/photos/site-{site}_visit-{visit}_shot-{shot}_photo.json
+
+source flat_field : Image<Flat,Captured> [site, visit]
+path flat_field: site-{site}/visit-{visit}/calibration/site-{site}_visit-{visit}_flat.raw
+source flat_field_json : CaptureMetadata [site, visit]
+path flat_field_json: site-{site}/visit-{visit}/calibration/site-{site}_visit-{visit}_flat.json
+source ground_map : Image<Map,Surveyed> [site, visit]
+path ground_map: site-{site}/visit-{visit}/map/site-{site}_visit-{visit}_map.tif
+source source_classes : ClassTable []
+path source_classes: config/source_classes.txt
+source target_classes : ClassTable []
+path target_classes: config/target_classes.txt
+
+require raw_photo count>=2 per [site, visit]
+require flat_field count=1 per [site, visit]
+require ground_map count=1 per [site, visit]
+
+# Import each photo with its pose sidecars and capture metadata.
+operation import_photo(image: Image<Photo,$Space>, gps: GpsTrack, imu: ImuTrace, metadata: CaptureMetadata) -> Image<Photo,$Space>
+command import_photo: imgconvert {image} {output} --pose {gps} {imu} --meta {metadata}
+photo_img = import_photo(raw_photo, photo_gps, photo_imu, photo_json)
+
+operation import_flat(image: Image<Flat,Captured>, metadata: CaptureMetadata) -> Image<Flat,Captured>
+command import_flat: imgconvert {image} {output} --meta {metadata}
+flat_img = import_flat(flat_field, flat_field_json)
+
+operation denoise(Image<Photo,S>) -> Image<Photo,S>
+command denoise: imgdenoise {input} {output}
+denoised_photo = denoise(photo_img)
+
+operation remove_glare(Image<Photo,S>) -> Image<Photo,S>
+command remove_glare: imgdeglare {input} {output}
+deglared_photo = remove_glare(denoised_photo)
+
+# Consume shot to make one image per visit for the corrections that follow.
+operation stack_shots(shots: many Image<Photo,S>) -> Image<Photo,S> @ drop(shot)
+command stack_shots: imgstack {shots} {output}
+visit_photo = stack_shots(deglared_photo @ vary(shot))
+
+# Extract dark frames, then average them. Both stages are reused after
+# correction to make a corrected alignment target.
+operation extract_dark(Image<Photo,S>) -> Image<DarkSeries,S>
+command extract_dark: imgextract {input} {output} --dark
+dark_series = extract_dark(visit_photo)
+
+operation mean_dark(Image<DarkSeries,S>) -> Image<Dark,S>
+command mean_dark: imgmath {input} mean {output}
+dark_frame = mean_dark(dark_series)
+
+operation pair_calibration(dark: Image<Dark,S>, flat: Image<Flat,S>) -> Image<CalibrationPair,S>
+command pair_calibration: imgcat {dark} {flat} {output}
+calibration_pair = pair_calibration(dark_frame, flat_img)
+
+operation correct_photo(photo: Image<Photo,Captured>, calibration: Image<CalibrationPair,Captured>) -> Image<Photo,Orthorectified>
+command correct_photo: imgcorrect {photo} {output} --calibration {calibration}
+corrected_photo = correct_photo(visit_photo, calibration_pair)
+
+operation balance(Image<Photo,S>) -> Image<Photo,S>
+command balance: imgbalance auto {input} {output}
+balanced_photo = balance(corrected_photo)
+visit_dark_series = extract_dark(balanced_photo)
+visit_dark = mean_dark(visit_dark_series)
+
+# Classify the ground map in its own space, then remap its class labels.
+operation classify_map(Image<Map,S>) -> Image<Classes,S>
+command classify_map: mapclassify --in {input} --out {output}
+classes_map = classify_map(ground_map)
+path classes_map: derivatives/classes_map/{entities}.tif
+
+operation relabel(labels: Image<Classes,S>, source_classes: ClassTable, target_classes: ClassTable) -> Image<Classes,S>
+command relabel: relabel {labels} {source_classes} {target_classes} {output}
+regions_map = relabel(classes_map, source_classes, target_classes)
+
+# Align the ground map to the corrected photos, then convert the tool's matrix
+# into a transform using the same moving and reference images.
+operation export_tiff(Image<K,S>) -> Image<K,S>
+command export_tiff: imgconvert {input} {output}
+visit_dark_tiff = export_tiff(visit_dark)
+path visit_dark_tiff: derivatives/visit_dark_tiff/{entities}.tif
+
+operation estimate_alignment(moving: Image<M,S>, reference: Image<N,T>) -> ToolTransform<S,T>
+command estimate_alignment: imgalign -in {moving} -ref {reference} -omat {output} -dof 6
+map_to_photo_matrix = estimate_alignment(ground_map, visit_dark_tiff)
+path map_to_photo_matrix: derivatives/map_to_photo_matrix/{entities}.mat
+
+operation convert_alignment(matrix: ToolTransform<S,T>, moving: Image<M,S>, reference: Image<N,T>) -> Transform<S,T>
+command convert_alignment: xfmconvert {matrix} {moving} {reference} {output}
+map_to_photo = convert_alignment(map_to_photo_matrix, ground_map, visit_dark_tiff)
+path map_to_photo: derivatives/map_to_photo/{entities}.txt
+
+# The reference image sets the target grid. Continuous images use linear
+# interpolation; label images use nearest-neighbour interpolation.
+operation resample(moving: Image<K,S>, transform: Transform<S,T>, reference: Image<N,T>) -> Image<K,T>
+command resample: imgresample {moving} {output} --transform {transform} --template {reference} --interp linear
+map_photo = resample(ground_map, map_to_photo, visit_dark)
+
+operation resample_labels(labels: Image<Classes,S>, transform: Transform<S,T>, reference: Image<N,T>) -> Image<Classes,T>
+command resample_labels: imgresample {labels} {output} --transform {transform} --template {reference} --interp nearest
+regions_photo = resample_labels(regions_map, map_to_photo, visit_dark)
+
+# Segment ground cover in map space before resampling into photo space.
+operation segment_cover(Image<Map,S>) -> Image<Cover,S>
+command segment_cover: coverseg {input} {output}
+cover_map = segment_cover(ground_map)
+cover = resample(cover_map, map_to_photo, visit_dark)
+
+operation cover_boundary(Image<Cover,S>) -> Image<Mask,S>
+command cover_boundary: coveredge {input} {output}
+boundary = cover_boundary(cover)
+
+operation estimate_response(Image<Photo,S>) -> Response<Photo>
+command estimate_response: imgresponse {input} {output}
+photo_response = estimate_response(balanced_photo)
+path photo_response: derivatives/photo_response/{entities}.txt
+
+operation estimate_vegetation(photo: Image<Photo,S>, response: Response<Photo>) -> Image<Vegetation,S>
+command estimate_vegetation: vegindex {photo} {response} {output}
+vegetation = estimate_vegetation(balanced_photo, photo_response)
+
+operation trace_rows(vegetation: Image<Vegetation,S>, cover: Image<Cover,S>, seed: Image<Mask,S>) -> RowSet<S>
+command trace_rows: rowtrace {vegetation} {output} --cover {cover} --seed {seed} --select 1000
+crop_rows = trace_rows(vegetation, cover, boundary)
+path crop_rows: derivatives/crop_rows/{entities}.rows
+
+operation weight_rows(rows: RowSet<S>, vegetation: Image<Vegetation,S>, cover: Image<Cover,S>) -> RowWeights
+command weight_rows: rowweight {rows} {vegetation} {output} --cover {cover}
+row_weights = weight_rows(crop_rows, vegetation, cover)
+path row_weights: derivatives/row_weights/{entities}.txt
+
+operation build_yield_table(rows: RowSet<S>, regions: Image<Classes,S>, weights: RowWeights) -> YieldTable
+command build_yield_table: yieldtable {rows} {regions} {output} --weights {weights}
+yield_table = build_yield_table(crop_rows, regions_photo, row_weights)
+path yield_table: derivatives/yield_table/{entities}.csv

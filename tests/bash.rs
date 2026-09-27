@@ -1,16 +1,19 @@
 use std::fs;
+use std::os::unix::fs::PermissionsExt;
 use std::process::{Command, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use spit::{
     inspect_paths, parse_document, parse_pipeline, parse_source_inventory, render_bash,
-    render_bound_dag, resolve, PathRule,
+    render_bound_dag, resolve, validate_commands, PathRule,
 };
 
 fn demo_script() -> String {
-    let (pipeline, embedded) = parse_document(include_str!("../examples/commands/bash_demo.spit")).unwrap();
+    let (pipeline, embedded) =
+        parse_document(include_str!("../examples/commands/bash_demo.spit")).unwrap();
     assert!(embedded.is_none());
-    let inventory = parse_source_inventory(include_str!("../examples/commands/bash_demo.sources")).unwrap();
+    let inventory =
+        parse_source_inventory(include_str!("../examples/commands/bash_demo.sources")).unwrap();
     let dag = resolve(&pipeline, &inventory).unwrap();
     assert_eq!(dag.jobs.len(), 5);
     render_bash(&pipeline, &dag).unwrap()
@@ -68,8 +71,10 @@ fn generated_script_uses_inventory_groups_and_declared_arguments() {
 
 #[test]
 fn backend_rejects_undeclared_placeholders_and_path_collisions() {
-    let (mut pipeline, _) = parse_document(include_str!("../examples/commands/bash_demo.spit")).unwrap();
-    let inventory = parse_source_inventory(include_str!("../examples/commands/bash_demo.sources")).unwrap();
+    let (mut pipeline, _) =
+        parse_document(include_str!("../examples/commands/bash_demo.spit")).unwrap();
+    let inventory =
+        parse_source_inventory(include_str!("../examples/commands/bash_demo.sources")).unwrap();
     let dag = resolve(&pipeline, &inventory).unwrap();
 
     pipeline.commands[0].template = "sort -o {output} {missing}".to_owned();
@@ -84,7 +89,7 @@ fn backend_rejects_undeclared_placeholders_and_path_collisions() {
     assert!(render_bash(&pipeline, &dag)
         .unwrap_err()
         .to_string()
-        .contains("same path"));
+        .contains("omits dimension"));
 }
 
 #[test]
@@ -105,8 +110,10 @@ path: {product}/{entities}.txt\n";
 
 #[test]
 fn many_input_must_occupy_its_own_argument() {
-    let (mut pipeline, _) = parse_document(include_str!("../examples/commands/bash_demo.spit")).unwrap();
-    let inventory = parse_source_inventory(include_str!("../examples/commands/bash_demo.sources")).unwrap();
+    let (mut pipeline, _) =
+        parse_document(include_str!("../examples/commands/bash_demo.spit")).unwrap();
+    let inventory =
+        parse_source_inventory(include_str!("../examples/commands/bash_demo.sources")).unwrap();
     let dag = resolve(&pipeline, &inventory).unwrap();
     pipeline.commands[1].template = "sort -o {output} --files={inputs}".to_owned();
     assert!(render_bash(&pipeline, &dag)
@@ -117,7 +124,8 @@ fn many_input_must_occupy_its_own_argument() {
 
 #[test]
 fn adding_a_group_to_inventory_expands_the_script() {
-    let (pipeline, _) = parse_document(include_str!("../examples/commands/bash_demo.spit")).unwrap();
+    let (pipeline, _) =
+        parse_document(include_str!("../examples/commands/bash_demo.spit")).unwrap();
     let inventory = parse_source_inventory(&format!(
         "{}    shard[group=gamma,part=01]\n",
         include_str!("../examples/commands/bash_demo.sources")
@@ -131,39 +139,39 @@ fn adding_a_group_to_inventory_expands_the_script() {
 }
 
 #[test]
-fn act_example_generates_valid_bash_for_new_sessions() {
+fn field_survey_generates_valid_bash_for_new_visits() {
     let (pipeline, embedded) =
-        parse_document(include_str!("../examples/commands/mrtrix3_act.spit")).unwrap();
+        parse_document(include_str!("../examples/commands/field_survey.spit")).unwrap();
     assert!(embedded.is_none());
     let inventory =
-        parse_source_inventory(include_str!("../examples/commands/mrtrix3_act.sources")).unwrap();
+        parse_source_inventory(include_str!("../examples/commands/field_survey.sources")).unwrap();
     let dag = resolve(&pipeline, &inventory).unwrap();
     assert_eq!(dag.jobs.len(), 93);
     let script = render_bash(&pipeline, &dag).unwrap();
-    assert!(script.contains("'-fslgrad'"));
-    assert!(script.contains("'-json_import'"));
+    assert!(script.contains("'--pose'"));
+    assert!(script.contains("'--meta'"));
     let import = script
         .lines()
         .find(|line| {
-            line.starts_with("'mrconvert'") && line.contains("dwi_mif/sub=01__ses=01__run=01")
+            line.starts_with("'imgconvert'") && line.contains("photo_img/site=01__visit=01__shot=01")
         })
         .unwrap();
     let positions = [
-        "sub-01_ses-01_run-01_dwi.nii.gz",
-        "'-fslgrad'",
-        "sub-01_ses-01_run-01_dwi.bvec",
-        "sub-01_ses-01_run-01_dwi.bval",
-        "'-json_import'",
-        "sub-01_ses-01_run-01_dwi.json",
+        "site-01_visit-01_shot-01_photo.raw",
+        "'--pose'",
+        "site-01_visit-01_shot-01_photo.gpx",
+        "site-01_visit-01_shot-01_photo.imu",
+        "'--meta'",
+        "site-01_visit-01_shot-01_photo.json",
     ]
     .map(|part| import.find(part).unwrap());
     assert!(positions.windows(2).all(|pair| pair[0] < pair[1]));
-    assert!(script.contains("'dwicat'"));
-    assert!(script.contains("'flirt' '-in'"));
-    assert!(script.contains("'transformconvert'"));
-    assert!(script.contains("'mrtransform'"));
-    assert!(script.contains("'-interp' 'nearest'"));
-    assert!(script.contains("'tck2connectome'"));
+    assert!(script.contains("'imgstack'"));
+    assert!(script.contains("'imgalign' '-in'"));
+    assert!(script.contains("'xfmconvert'"));
+    assert!(script.contains("'imgresample'"));
+    assert!(script.contains("'--interp' 'nearest'"));
+    assert!(script.contains("'yieldtable'"));
     let syntax = Command::new("bash")
         .arg("-n")
         .arg("-c")
@@ -177,34 +185,35 @@ fn act_example_generates_valid_bash_for_new_sessions() {
     );
 
     let inventory = parse_source_inventory(&format!(
-        "{}    raw_dwi[sub=03,ses=01,run=01]\n    raw_dwi[sub=03,ses=01,run=02]\n    dwi_bvec[sub=03,ses=01,run=01]\n    dwi_bvec[sub=03,ses=01,run=02]\n    dwi_bval[sub=03,ses=01,run=01]\n    dwi_bval[sub=03,ses=01,run=02]\n    dwi_json[sub=03,ses=01,run=01]\n    dwi_json[sub=03,ses=01,run=02]\n    reverse_b0[sub=03,ses=01]\n    reverse_b0_json[sub=03,ses=01]\n    t1w[sub=03,ses=01]\n",
-        include_str!("../examples/commands/mrtrix3_act.sources")
+        "{}    raw_photo[site=03,visit=01,shot=01]\n    raw_photo[site=03,visit=01,shot=02]\n    photo_gps[site=03,visit=01,shot=01]\n    photo_gps[site=03,visit=01,shot=02]\n    photo_imu[site=03,visit=01,shot=01]\n    photo_imu[site=03,visit=01,shot=02]\n    photo_json[site=03,visit=01,shot=01]\n    photo_json[site=03,visit=01,shot=02]\n    flat_field[site=03,visit=01]\n    flat_field_json[site=03,visit=01]\n    ground_map[site=03,visit=01]\n",
+        include_str!("../examples/commands/field_survey.sources")
     ))
     .unwrap();
     let expanded = resolve(&pipeline, &inventory).unwrap();
     assert!(expanded.jobs.len() > dag.jobs.len());
     let script = render_bash(&pipeline, &expanded).unwrap();
-    assert!(script.contains("sub-03/ses-01/dwi/sub-03_ses-01_run-01_dwi.nii.gz"));
-    assert!(script.contains("derivatives/weighted_connectome/sub=03__ses=01.csv"));
+    assert!(script.contains("site-03/visit-01/photos/site-03_visit-01_shot-01_photo.raw"));
+    assert!(script.contains("derivatives/yield_table/site=03__visit=01.csv"));
 }
 
 #[test]
 fn path_coverage_exposes_default_fallbacks_and_strict_rejects_them() {
-    let (pipeline, _) = parse_document(include_str!("../examples/commands/mrtrix3_act.spit")).unwrap();
+    let (pipeline, _) =
+        parse_document(include_str!("../examples/commands/field_survey.spit")).unwrap();
     let coverage = inspect_paths(&pipeline).unwrap();
     assert!(coverage
         .entries
         .iter()
-        .any(|entry| { entry.product == "wm_fod" && matches!(entry.rule, PathRule::Default(_)) }));
+        .any(|entry| { entry.product == "vegetation" && matches!(entry.rule, PathRule::Default(_)) }));
     assert!(coverage.entries.iter().any(|entry| {
-        entry.product == "wm_response" && matches!(entry.rule, PathRule::Explicit(_))
+        entry.product == "photo_response" && matches!(entry.rule, PathRule::Explicit(_))
     }));
     coverage.validate(false).unwrap();
     assert!(coverage
         .validate(true)
         .unwrap_err()
         .to_string()
-        .contains("wm_fod"));
+        .contains("vegetation"));
 }
 
 #[test]
@@ -216,7 +225,7 @@ fn path_coverage_catches_missing_and_invalid_rules_without_jobs() {
 
     pipeline
         .product_paths
-        .insert("unused".to_owned(), "input/{missing}.txt".to_owned());
+        .insert("unused".to_owned(), "input/{id}/{missing}.txt".to_owned());
     assert!(inspect_paths(&pipeline)
         .unwrap_err()
         .to_string()
@@ -230,18 +239,19 @@ fn path_coverage_catches_missing_and_invalid_rules_without_jobs() {
 
 #[test]
 fn bound_dag_shows_port_names_and_paths_without_commands() {
-    let (mut pipeline, _) = parse_document(include_str!("../examples/commands/mrtrix3_act.spit")).unwrap();
+    let (mut pipeline, _) =
+        parse_document(include_str!("../examples/commands/field_survey.spit")).unwrap();
     let inventory =
-        parse_source_inventory(include_str!("../examples/commands/mrtrix3_act.sources")).unwrap();
+        parse_source_inventory(include_str!("../examples/commands/field_survey.sources")).unwrap();
     let dag = resolve(&pipeline, &inventory).unwrap();
     pipeline.commands.clear();
     let report = render_bound_dag(&pipeline, &dag).unwrap();
     assert_eq!(report.matches("Job ").count(), 93);
-    assert!(report.contains("moving: t1w[sub=01,ses=01]"));
-    assert!(report.contains("reference: session_b0_nifti[sub=01,ses=01]"));
-    assert!(report.contains("path: derivatives/weighted_connectome/sub=01__ses=01.csv"));
+    assert!(report.contains("moving: ground_map[site=01,visit=01]"));
+    assert!(report.contains("reference: visit_dark_tiff[site=01,visit=01]"));
+    assert!(report.contains("path: derivatives/yield_table/site=01__visit=01.csv"));
 
-    pipeline.product_paths.remove("weighted_connectome");
+    pipeline.product_paths.remove("yield_table");
     pipeline.path_template = None;
     assert!(render_bound_dag(&pipeline, &dag)
         .unwrap_err()
@@ -264,8 +274,8 @@ fn named_many_port_expands_in_entity_order_as_separate_arguments() {
 }
 
 #[test]
-fn declared_shell_source_provides_a_callable_function() {
-    let text = "source raw [id]\npath raw: input/{id}.txt\npath result: output/{id}.txt\nshell-source: scripts/functions.sh\noperation copy(data: one)\ncommand copy: copy_data {data} {output}\nresult = copy(raw)\nsources:\n  raw[id=x]\n";
+fn command_uses_executable_on_path() {
+    let text = "source raw [id]\npath raw: input/{id}.txt\npath result: output/{id}.txt\noperation copy(data: one)\ncommand copy: copy_data {data} {output}\nresult = copy(raw)\nsources:\n  raw[id=x]\n";
     let (pipeline, inventory) = parse_document(text).unwrap();
     let dag = resolve(&pipeline, &inventory.unwrap()).unwrap();
     let script = render_bash(&pipeline, &dag).unwrap();
@@ -273,22 +283,26 @@ fn declared_shell_source_provides_a_callable_function() {
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    let root = std::env::temp_dir().join(format!(
-        "spit sourced function {} {suffix}",
-        std::process::id()
-    ));
+    let root =
+        std::env::temp_dir().join(format!("spit path command {} {suffix}", std::process::id()));
     fs::create_dir_all(root.join("input")).unwrap();
-    fs::create_dir_all(root.join("scripts")).unwrap();
+    fs::create_dir_all(root.join("bin")).unwrap();
     fs::write(root.join("input/x.txt"), "hello\n").unwrap();
-    fs::write(
-        root.join("scripts/functions.sh"),
-        "copy_data() { cp -- \"$1\" \"$2\"; }\n",
-    )
-    .unwrap();
+    let executable = root.join("bin/copy_data");
+    fs::write(&executable, "#!/bin/sh\ncp \"$1\" \"$2\"\n").unwrap();
+    let mut permissions = fs::metadata(&executable).unwrap().permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&executable, permissions).unwrap();
+    let path = format!(
+        "{}:{}",
+        root.join("bin").display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
     let run = Command::new("bash")
         .arg("-c")
         .arg(&script)
         .env("SPIT_ROOT", &root)
+        .env("PATH", path)
         .output()
         .unwrap();
     assert!(
@@ -301,4 +315,59 @@ fn declared_shell_source_provides_a_callable_function() {
         "hello\n"
     );
     fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn commands_are_validated_even_without_resolved_jobs() {
+    let base = "source raw : Table [id]\noperation normalize(Table) -> Table\n";
+    let check = |command: &str| {
+        let pipeline = parse_pipeline(&format!("{base}{command}\n")).unwrap();
+        validate_commands(&pipeline).map_err(|error| error.to_string())
+    };
+    assert!(check("command normalize: normalize --mode {input} {output}").is_ok());
+    assert!(check("command normalize: normalize --mode {raw} {output}")
+        .unwrap_err()
+        .contains("unknown placeholder `{raw}`"));
+    assert!(check("command normalize: normalize --mode {input} out.csv")
+        .unwrap_err()
+        .contains("must use `{output}`"));
+    assert!(check("command dedupe: dedupe {input} {output}")
+        .unwrap_err()
+        .contains("unknown operation `dedupe`"));
+}
+
+#[test]
+fn path_rules_that_cannot_separate_artifacts_are_rejected() {
+    let check = |text: &str| inspect_paths(&parse_pipeline(text).unwrap()).map(|_| ());
+
+    let error = check("source raw [id, batch]\npath: {product}/{entities}.csv\npath raw: raw/{id}.csv\n")
+        .unwrap_err();
+    assert!(error.message.contains("omits dimension `batch`"), "{error}");
+
+    let error = check("source raw [id]\npath: {entities}.csv\noperation clean(one)\ncleaned = clean(raw)\n")
+        .unwrap_err();
+    assert!(error.message.contains("`raw` and `cleaned`"), "{error}");
+
+    let error = check("source raw [id]\npath: {product}/{id}/{shard}.csv\n").unwrap_err();
+    assert_eq!(error.to_string(), "path template for `raw` uses absent dimension `shard`");
+
+    // Rules naming different dimensions are not treated as colliding.
+    check("source raw [id]\nsource extra [batch]\npath raw: out/{id}.csv\npath extra: out/{batch}.csv\n")
+        .unwrap();
+}
+
+#[test]
+fn backslashes_follow_bash_quoting_rules() {
+    let (mut pipeline, _) =
+        parse_document(include_str!("../examples/commands/bash_demo.spit")).unwrap();
+    let inventory =
+        parse_source_inventory(include_str!("../examples/commands/bash_demo.sources")).unwrap();
+    let dag = resolve(&pipeline, &inventory).unwrap();
+    pipeline.commands[0].template =
+        r#"tool "a\b" "q\"x" "s\\t" c\d 'e\f' {input} {output}"#.to_owned();
+    let script = render_bash(&pipeline, &dag).unwrap();
+    assert!(
+        script.contains(r#"'tool' 'a\b' 'q"x' 's\t' 'cd' 'e\f' "#),
+        "{script}"
+    );
 }

@@ -18,9 +18,9 @@ The analytics example exercises the same constraint mechanism outside imaging. I
 
 The ACT example uses the flow-first authoring form. Each source path sits beside its declaration, and special output paths sit beside the assignments that produce them. Operation contracts and commands sit beside their first use; intermediate product declarations are inferred from the operation and its input shape. Explicit BIDS import, b=0 extraction, and FLIRT matrix conversion appear as separate DAG jobs.
 
-## Confirmed bug: partial type information depends on input order
+## Resolved bug: partial type information depended on input order
 
-This pipeline currently passes, though `Foo` and `Bar` are known to conflict:
+This pipeline previously passed, though `Foo` and `Bar` are known to conflict:
 
 ```text
 products:
@@ -39,7 +39,7 @@ sources:
     known[id=x]
 ```
 
-The DAG reports `merged : Frame<Unknown>` and accepts `sink`. Reversing the `merge` arguments correctly rejects `Foo` versus `Bar`. An even stronger variant declares `merged : Frame<Bar>` and still produces `Frame<Unknown>`. The unifier accepts a later, more specific type but does not refine its earlier partial binding. This is a correctness bug in optional typing, not a request for stricter typing.
+The unifier used to keep `merged : Frame<Unknown>` after seeing `Frame<Foo>`, so it accepted `sink`. Reversing the `merge` inputs changed the result. The unifier now refines an earlier partial binding with later known information, and this pipeline fails even with an empty inventory. A regression test covers the behavior.
 
 ## Other limits exposed by authoring
 

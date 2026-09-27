@@ -1,14 +1,50 @@
 use spit::{
     parse_document, parse_pipeline, parse_source_inventory, render_dag, resolve, ParseError,
-    ResolveError, TypeExpr,
+    validate_pipeline, ResolveError, TypeExpr,
 };
 
-const EXAMPLE: &str = include_str!("../examples/basic/basic.spit");
-const INVENTORY: &str = include_str!("../examples/basic/basic.sources");
+/// A sectioned pipeline with the same shape as the basic example.
+const PIPELINE: &str = "\
+products:
+    signal      : Signal         [site, day, run]
+    calibration : Calibration    [site, day]
+    denoised    : FilteredSignal [site, day, run]
+    registered  : AlignedSignal  [site, day, run]
+    mean_signal : MeanSignal     [site, day]
+
+operations:
+    denoise(Signal) -> FilteredSignal
+    register(FilteredSignal, Calibration) -> AlignedSignal
+    mean(many AlignedSignal) -> MeanSignal
+
+pipeline:
+    denoised = denoise(signal)
+    registered = register(denoised, calibration)
+    mean_signal = mean(registered @ vary(run))
+
+constraints:
+    require signal count>=1 per [site, day]
+    require calibration count=1 per [site, day]
+
+";
+const INVENTORY: &str = "\
+contexts:
+    [site=01,day=01]
+
+sources:
+    signal[site=01,day=01,run=1]
+    signal[site=01,day=01,run=2]
+    calibration[site=01,day=01]
+";
+
+/// The pipeline with its inventory in the same document.
+fn document() -> String {
+    format!("{PIPELINE}{INVENTORY}")
+}
 
 #[test]
-fn parses_and_resolves_user_facing_example() {
-    let (pipeline, embedded_inventory) = parse_document(EXAMPLE).unwrap();
+fn parses_and_resolves_a_document_with_its_inventory() {
+    let (pipeline, embedded_inventory) = parse_document(&document()).unwrap();
     assert_eq!(pipeline.products.len(), 5);
     assert_eq!(pipeline.operations.len(), 3);
     assert_eq!(pipeline.invocations.len(), 3);
@@ -24,7 +60,7 @@ fn parses_and_resolves_user_facing_example() {
 
 #[test]
 fn reports_line_for_bad_text() {
-    let text = "products:\n  bold : BOLD [sub, run]\npipeline:\n  denoised = denoise(bold @ vary(run, ses))\n";
+    let text = "products:\n  signal : Signal [site, run]\npipeline:\n  denoised = denoise(signal @ vary(run, day))\n";
     let error = parse_pipeline(text).unwrap_err();
     assert_eq!(error.line, 4);
     assert!(error.to_string().contains("line 4"));
@@ -32,7 +68,7 @@ fn reports_line_for_bad_text() {
 
 #[test]
 fn rejects_duplicate_dimension_in_source() {
-    let text = "sources:\n  bold[sub=01,sub=02]\n";
+    let text = "sources:\n  signal[site=01,site=02]\n";
     assert!(matches!(
         parse_source_inventory(text),
         Err(ParseError { line: 2, .. })
@@ -41,7 +77,7 @@ fn rejects_duplicate_dimension_in_source() {
 
 #[test]
 fn rejects_source_inventory_inside_pipeline_file() {
-    let text = "products:\n  bold : BOLD [sub]\nsources:\n  bold[sub=01]\n";
+    let text = "products:\n  signal : Signal [site]\nsources:\n  signal[site=01]\n";
     assert!(matches!(
         parse_pipeline(text),
         Err(ParseError { line: 3, .. })
@@ -50,9 +86,9 @@ fn rejects_source_inventory_inside_pipeline_file() {
 
 #[test]
 fn reports_semantic_type_error_after_parsing() {
-    let text = EXAMPLE.replace(
-        "registered = register(denoised, t1w)",
-        "registered = register(denoised, bold)",
+    let text = document().replace(
+        "registered = register(denoised, calibration)",
+        "registered = register(denoised, signal)",
     );
     let (pipeline, inventory) = parse_document(&text).unwrap();
     assert!(matches!(
@@ -63,7 +99,8 @@ fn reports_semantic_type_error_after_parsing() {
 
 #[test]
 fn resolves_untyped_pipeline_by_shape_and_cardinality() {
-    let (pipeline, inventory) = parse_document(include_str!("../examples/types/untyped.spit")).unwrap();
+    let (pipeline, inventory) =
+        parse_document(include_str!("../examples/types/untyped.spit")).unwrap();
     assert!(pipeline
         .products
         .iter()
@@ -78,14 +115,14 @@ fn resolves_untyped_pipeline_by_shape_and_cardinality() {
 
 #[test]
 fn partially_typed_pipeline_accepts_unknown_and_rejects_known_mismatch() {
-    let text = "products:\n  raw [sub]\n  output : Result [sub]\noperations:\n  process(Input) -> Result\npipeline:\n  output = process(raw)\nsources:\n  raw[sub=01]\n";
+    let text = "products:\n  raw [site]\n  output : Result [site]\noperations:\n  process(Input) -> Result\npipeline:\n  output = process(raw)\nsources:\n  raw[site=01]\n";
     let (pipeline, inventory) = parse_document(text).unwrap();
     assert_eq!(
         resolve(&pipeline, &inventory.unwrap()).unwrap().jobs.len(),
         1
     );
 
-    let mismatched = text.replace("raw [sub]", "raw : Other [sub]");
+    let mismatched = text.replace("raw [site]", "raw : Other [site]");
     let (pipeline, inventory) = parse_document(&mismatched).unwrap();
     assert!(matches!(
         resolve(&pipeline, &inventory.unwrap()),
@@ -95,22 +132,23 @@ fn partially_typed_pipeline_accepts_unknown_and_rejects_known_mismatch() {
 
 #[test]
 fn separate_pipeline_still_parses_without_inventory() {
-    let (pipeline, inventory) = parse_document(include_str!("../examples/types/typed.spit")).unwrap();
+    let (pipeline, inventory) =
+        parse_document(include_str!("../examples/types/typed.spit")).unwrap();
     assert!(inventory.is_none());
     assert!(!pipeline.products.is_empty());
 }
 
 #[test]
 fn flow_form_infers_intermediate_products_and_keeps_inventory_separate() {
-    let text = "source raw : Image<Native> [subject, run]\n\
+    let text = "source raw : Image<Native> [site, run]\n\
 operation clean(Image<S>) -> Clean<S>\n\
 cleaned = clean(raw)\n\
 operation mean(many Clean<S>) -> Mean<S>\n\
-average : Mean<Native> [subject] = mean(cleaned @ vary(run))\n\
-require raw count>=1 per [subject]\n\
+average : Mean<Native> [site] = mean(cleaned @ vary(run))\n\
+require raw count>=1 per [site]\n\
 sources:\n\
-    raw[subject=A,run=1]\n\
-    raw[subject=A,run=2]\n";
+    raw[site=A,run=1]\n\
+    raw[site=A,run=2]\n";
     let (pipeline, inventory) = parse_document(text).unwrap();
     let inventory = inventory.unwrap();
     assert_eq!(pipeline.products.len(), 3);
@@ -118,14 +156,14 @@ sources:\n\
     assert_eq!(pipeline.invocations.len(), 2);
     assert_eq!(pipeline.constraints.len(), 1);
     assert_eq!(pipeline.products[1].name, "cleaned");
-    assert_eq!(pipeline.products[1].dimensions, vec!["subject", "run"]);
-    assert_eq!(pipeline.products[2].dimensions, vec!["subject"]);
+    assert_eq!(pipeline.products[1].dimensions, vec!["site", "run"]);
+    assert_eq!(pipeline.products[2].dimensions, vec!["site"]);
     assert_eq!(resolve(&pipeline, &inventory).unwrap().jobs.len(), 3);
 }
 
 #[test]
 fn flow_form_requires_operation_declaration_before_use() {
-    let error = parse_pipeline("source raw [subject]\nresult = transform(raw)\n").unwrap_err();
+    let error = parse_pipeline("source raw [site]\nresult = transform(raw)\n").unwrap_err();
     assert!(error
         .to_string()
         .contains("must be declared before its first flow step"));
@@ -133,11 +171,11 @@ fn flow_form_requires_operation_declaration_before_use() {
 
 #[test]
 fn command_arguments_keep_quoted_hashes_and_strip_comments() {
-    let text = "source raw [id]# source comment\noperation copy(one)\ncommand copy: tool --tag '#run' --label \"part#1\" {input} {output}# command comment\nresult = copy(raw)\n";
+    let text = "source raw [id] # source comment\n# whole-line comment\noperation copy(one)\ncommand copy: tool --tag '#run' --label \"part#1\" --color=#fff {input} {output} # command comment\nresult = copy(raw)\n";
     let pipeline = parse_pipeline(text).unwrap();
     assert_eq!(
         pipeline.commands[0].template,
-        "tool --tag '#run' --label \"part#1\" {input} {output}"
+        "tool --tag '#run' --label \"part#1\" --color=#fff {input} {output}"
     );
 }
 
@@ -156,7 +194,7 @@ fn equals_command_keeps_colons_in_arguments() {
 
 #[test]
 fn named_ports_and_declared_aggregate_shape_are_checked() {
-    let text = "source raw [sub, run]\noperation combine(runs: many) @ drop(run)\nresult = combine(raw @ vary(run))\nsources:\n  raw[sub=01,run=2]\n  raw[sub=01,run=1]\n";
+    let text = "source raw [site, run]\noperation combine(runs: many) @ drop(run)\nresult = combine(raw @ vary(run))\nsources:\n  raw[site=01,run=2]\n  raw[site=01,run=1]\n";
     let (pipeline, inventory) = parse_document(text).unwrap();
     assert_eq!(pipeline.operations[0].inputs[0].name, "runs");
     assert_eq!(
@@ -166,22 +204,113 @@ fn named_ports_and_declared_aggregate_shape_are_checked() {
     let dag = resolve(&pipeline, &inventory.unwrap()).unwrap();
     assert_eq!(dag.jobs[0].output.entities.0.len(), 1);
 
-    let wrong_vary = text.replace("vary(run)", "vary(sub)");
+    let wrong_vary = text.replace("vary(run)", "vary(site)");
     let (pipeline, inventory) = parse_document(&wrong_vary).unwrap();
     assert!(resolve(&pipeline, &inventory.unwrap())
         .unwrap_err()
         .to_string()
-        .contains("declares drop(run) but invocation uses vary(sub)"));
+        .contains("declares drop(run) but invocation uses vary(site)"));
 
-    let wrong_shape = text.replace("result =", "result : Data [sub, run] =");
+    let wrong_shape = text.replace("result =", "result : Data [site, run] =");
     let (pipeline, inventory) = parse_document(&wrong_shape).unwrap();
     assert!(resolve(&pipeline, &inventory.unwrap()).is_err());
 }
 
 #[test]
-fn shell_source_stays_in_pipeline_when_following_embedded_inventory() {
+fn shell_source_is_rejected_with_migration_guidance() {
     let text = "source raw [id]\noperation copy(one)\nresult = copy(raw)\nsources:\n  raw[id=x]\nshell-source: scripts/functions.sh\n";
-    let (pipeline, inventory) = parse_document(text).unwrap();
-    assert_eq!(pipeline.shell_sources, vec!["scripts/functions.sh"]);
-    assert_eq!(inventory.unwrap().artifacts.len(), 1);
+    let error = parse_document(text).unwrap_err();
+    assert_eq!(error.line, 6);
+    assert!(error.message.contains("executable available on PATH"));
+
+    let error =
+        parse_pipeline("products:\n  raw [id]\nshell-source: scripts/functions.sh\n").unwrap_err();
+    assert_eq!(error.line, 3);
+    assert!(error.message.contains("executable available on PATH"));
+}
+
+#[test]
+fn rejects_unbalanced_command_brackets_with_line_number() {
+    let cases = [
+        ("command normalize: normalize --mode input} {output", "unmatched `}`"),
+        ("command normalize: normalize --mode {input {output}", "unclosed `{`"),
+        ("command normalize: normalize --mode {input} {{output}", "unmatched `}`"),
+        ("command normalize: normalize --mode {} {output}", "empty placeholder"),
+        ("command normalize: normalize '--mode {input} {output}", "unterminated quote"),
+    ];
+    for (line, expected) in cases {
+        let text = format!("source raw : Table [id]\n{line}\n");
+        let error = parse_pipeline(&text).unwrap_err();
+        assert_eq!(error.line, 2, "{line}");
+        assert!(error.message.contains("normalize"), "{error}");
+        assert!(error.message.contains(expected), "{line}: {error}");
+    }
+}
+
+#[test]
+fn path_template_errors_are_reported_while_parsing() {
+    let cases = [
+        ("path: {product}/{entities.csv", "unclosed `{`"),
+        ("path raw: raw/id}.csv", "unmatched `}`"),
+    ];
+    for (line, expected) in cases {
+        let text = format!("source raw : Table [id]\n{line}\n");
+        let error = parse_pipeline(&text).unwrap_err();
+        assert_eq!(error.line, 2, "{line}");
+        assert!(error.message.contains(expected), "{line}: {error}");
+    }
+}
+
+#[test]
+fn hash_inside_a_word_is_text_as_in_bash() {
+    let pipeline = parse_pipeline(
+        "source raw [id]\noperation copy(one)\ncommand copy: tool --url=https://example.com/#top {input} {output}# note\n",
+    )
+    .unwrap();
+    assert_eq!(
+        pipeline.commands[0].template,
+        "tool --url=https://example.com/#top {input} {output}# note"
+    );
+    let error = parse_pipeline("source raw [id]# note\n").unwrap_err();
+    assert_eq!(error.line, 1);
+}
+
+#[test]
+fn pipeline_checks_need_no_inventory() {
+    let text = "source raw : Table [id]\noperation clean(Table) -> Table\n\ncleaned = clean(rwa)\n";
+    assert_eq!(
+        validate_pipeline(&parse_pipeline(text).unwrap()).unwrap_err(),
+        ResolveError::UnknownProduct {
+            name: "rwa".to_owned()
+        }
+    );
+
+    let text = "source raw : Table [id]\nsource other : Other [id]\noperation clean(Table) -> Table\ncleaned = clean(other)\n";
+    assert!(matches!(
+        validate_pipeline(&parse_pipeline(text).unwrap()),
+        Err(ResolveError::TypeMismatch { .. })
+    ));
+
+    let (pipeline, inventory) =
+        parse_document(include_str!("../examples/commands/bash_demo.spit")).unwrap();
+    assert!(inventory.is_none());
+    validate_pipeline(&pipeline).unwrap();
+}
+
+#[test]
+fn input_port_cannot_shadow_output_placeholder() {
+    let error =
+        parse_pipeline("source raw [id]\noperation copy(output: Image) -> Image\n").unwrap_err();
+    assert_eq!(error.line, 2);
+    assert!(error.message.contains("`output` is reserved"));
+}
+
+#[test]
+fn commands_header_alone_selects_sectioned_form() {
+    let pipeline =
+        parse_pipeline("products:\n  raw [id]\ncommands:\n  copy: tool {input} {output}\n")
+            .unwrap();
+    assert_eq!(pipeline.commands.len(), 1);
+    let pipeline = parse_pipeline("commands:\n  copy: tool {input} {output}\n").unwrap();
+    assert_eq!(pipeline.commands[0].operation, "copy");
 }

@@ -32,7 +32,7 @@ require reverse_b0 count=1 per [sub, ses]
 require t1w count=1 per [sub, ses]
 
 # Import gradients and phase-encoding metadata with their matching NIfTI.
-operation import_dwi(image: MRI<DWI,Acquired>, bvec: GradientDirections, bval: GradientAmplitudes, metadata: AcquisitionMetadata) -> MRI<DWI,Acquired>
+operation import_dwi(image: MRI<DWI,$Space>, bvec: GradientDirections, bval: GradientAmplitudes, metadata: AcquisitionMetadata) -> MRI<DWI,$Space>
 command import_dwi: mrconvert {image} {output} -fslgrad {bvec} {bval} -json_import {metadata}
 dwi_mif = import_dwi(raw_dwi, dwi_bvec, dwi_bval, dwi_json)
 

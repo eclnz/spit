@@ -1,6 +1,20 @@
 use std::fmt;
 
-use crate::model::{ArtifactInstance, ArtifactType, CountRequirement, EntityBinding};
+use crate::model::{ArtifactInstance, ArtifactType, CountRequirement, EntityBinding, SourceRecord};
+
+/// The declaration an [`ResolveError::InvalidDefinition`] refers to, so callers
+/// such as editor diagnostics can locate it without parsing the message.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum DefinitionSubject {
+    Product(String),
+    Operation(String),
+    /// An invocation, named by the product it produces.
+    Invocation(String),
+    /// A coverage rule, by its index in `Pipeline::constraints`.
+    Constraint(usize),
+    Source(SourceRecord),
+    None,
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ResolveError {
@@ -12,6 +26,7 @@ pub enum ResolveError {
     },
     TypeMismatch {
         operation: String,
+        output_product: String,
         port: String,
         product: String,
         expected: Box<ArtifactType>,
@@ -19,6 +34,7 @@ pub enum ResolveError {
     },
     TypeVariableConflict {
         operation: String,
+        output_product: String,
         port: String,
         variable: String,
         previous: Box<ArtifactType>,
@@ -26,18 +42,16 @@ pub enum ResolveError {
     },
     MissingInput {
         operation: String,
+        output_product: String,
         port: String,
         context: EntityBinding,
-    },
-    AmbiguousInput {
-        operation: String,
-        port: String,
-        context: EntityBinding,
-        candidates: Vec<ArtifactInstance>,
     },
     InvalidAggregationDimension {
         product: String,
         dimension: String,
+    },
+    DuplicateSourceArtifact {
+        artifact: ArtifactInstance,
     },
     DuplicateOutputArtifact {
         artifact: ArtifactInstance,
@@ -51,11 +65,13 @@ pub enum ResolveError {
     },
     CoverageViolation {
         product: String,
+        rule_index: usize,
         context: EntityBinding,
         expected: CountRequirement,
         found: usize,
     },
     InvalidDefinition {
+        subject: DefinitionSubject,
         detail: String,
     },
 }
@@ -71,6 +87,7 @@ impl fmt::Display for ResolveError {
                 product,
                 expected,
                 found,
+                ..
             } => write!(
                 f,
                 "type mismatch at `{operation}.{port}`: product `{product}` is {found}, expected {expected}"
@@ -81,6 +98,7 @@ impl fmt::Display for ResolveError {
                 variable,
                 previous,
                 required,
+                ..
             } => write!(
                 f,
                 "type conflict at `{operation}.{port}`: variable `{variable}` was inferred as {previous}, but now requires {required}"
@@ -89,27 +107,18 @@ impl fmt::Display for ResolveError {
                 operation,
                 port,
                 context,
+                ..
             } => write!(
                 f,
                 "missing input `{port}` for `{operation}` at [{context}]"
             ),
-            Self::AmbiguousInput {
-                operation,
-                port,
-                context,
-                candidates,
-            } => {
-                let names: Vec<_> = candidates.iter().map(ToString::to_string).collect();
-                write!(
-                    f,
-                    "ambiguous input `{port}` for `{operation}` at [{context}]: {}; specify a more precise product family or dimension binding",
-                    names.join(", ")
-                )
-            }
             Self::InvalidAggregationDimension { product, dimension } => write!(
                 f,
                 "cannot aggregate `{product}` over absent dimension `{dimension}`"
             ),
+            Self::DuplicateSourceArtifact { artifact } => {
+                write!(f, "duplicate source artifact `{artifact}`")
+            }
             Self::DuplicateOutputArtifact { artifact } => {
                 write!(f, "duplicate output artifact `{artifact}`")
             }
@@ -124,11 +133,12 @@ impl fmt::Display for ResolveError {
                 context,
                 expected,
                 found,
+                ..
             } => write!(
                 f,
                 "source coverage for `{product}` at [{context}]: expected {expected} artifact(s), found {found}"
             ),
-            Self::InvalidDefinition { detail } => f.write_str(detail),
+            Self::InvalidDefinition { detail, .. } => f.write_str(detail),
         }
     }
 }
