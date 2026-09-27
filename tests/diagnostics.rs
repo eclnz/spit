@@ -318,7 +318,7 @@ fn coverage_error_points_to_the_failing_rule_when_rules_share_a_product() {
 #[test]
 fn cli_accepts_stdin_and_returns_json() {
     let mut child = Command::new(env!("CARGO_BIN_EXE_spit"))
-        .args(["diagnose", "unsaved.spit"])
+        .args(["check", "unsaved.spit", "--json", "--stdin"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn()
@@ -340,7 +340,7 @@ fn cli_accepts_stdin_and_returns_json() {
 #[test]
 fn cli_reports_semantic_error_line_in_json() {
     let mut child = Command::new(env!("CARGO_BIN_EXE_spit"))
-        .args(["diagnose", "unsaved.spit"])
+        .args(["check", "unsaved.spit", "--json", "--stdin"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn()
@@ -458,7 +458,7 @@ fn a_line_with_an_error_shows_no_warnings() {
 #[test]
 fn cli_json_includes_each_severity_and_its_columns() {
     let mut child = Command::new(env!("CARGO_BIN_EXE_spit"))
-        .args(["diagnose", "unsaved.spit"])
+        .args(["check", "unsaved.spit", "--json", "--stdin"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn()
@@ -483,7 +483,7 @@ fn cli_json_includes_each_severity_and_its_columns() {
 #[test]
 fn cli_json_columns_count_utf16_code_units() {
     let mut child = Command::new(env!("CARGO_BIN_EXE_spit"))
-        .args(["diagnose", "unsaved.spit"])
+        .args(["check", "unsaved.spit", "--json", "--stdin"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn()
