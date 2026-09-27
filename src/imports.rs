@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use crate::model::{CommandDef, CoverageRule, OperationDef, Pipeline, ProductDef, SourceInventory};
 use crate::parser::{
     parse_document_with_imports, parse_use, strip_comment, ParseError, ParsedDocument,
-    PipelineBuilder, UseSpec,
+    PipelineBuilder, Rule, UseSpec,
 };
 use crate::span::Place;
 
@@ -101,7 +101,7 @@ pub(crate) fn apply_import(
         lines.paths.insert(product.clone(), place.clone());
     }
     for constraint in &imported.constraints {
-        builder.add_constraint(constraint.clone(), place.clone());
+        builder.add_constraint(constraint.clone(), Rule::spanning(&place));
     }
     Ok(())
 }

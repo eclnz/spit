@@ -174,7 +174,8 @@ pub(crate) fn collect_commands(
                     "command refers to unknown operation `{}`",
                     command.operation
                 ))
-                .at(line),
+                .at(line)
+                .focus(&command.operation),
             );
             continue;
         };
@@ -184,7 +185,8 @@ pub(crate) fn collect_commands(
                     "operation `{}` has an input port named `output`, which shadows `{{output}}`",
                     operation.name
                 ))
-                .at(line.clone()),
+                .at(line.clone())
+                .focus(&command.operation),
             );
         } else if !seen.insert(command.operation.as_str()) {
             errors.push(
@@ -192,7 +194,8 @@ pub(crate) fn collect_commands(
                     "duplicate command for operation `{}`",
                     command.operation
                 ))
-                .at(line),
+                .at(line)
+                .focus(&command.operation),
             );
         } else if let Err(e) = check_command_placeholders(&command.template, operation) {
             errors.push(e.at(line));
