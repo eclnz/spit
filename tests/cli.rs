@@ -192,7 +192,10 @@ fn paths_fails_on_missing_rule_and_strict_check_accepts_complete_rules() {
 fn check_prints_every_diagnostic_and_fails_only_on_errors() {
     let directory = std::env::temp_dir().join(format!(
         "spit-cli-diagnostics-{}",
-        SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
     ));
     fs::create_dir_all(&directory).unwrap();
     let broken = directory.join("broken.spit");

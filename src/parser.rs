@@ -1553,12 +1553,16 @@ fn comma_items(text: &str, number: usize) -> Result<Vec<&str>, ParseError> {
             _ => {}
         }
     }
-    if let Some((opener, &index)) = [('(', parens.first()), ('<', angles.first()), ('[', brackets.first())]
-        .into_iter()
-        .find_map(|(opener, index)| index.map(|index| (opener, index)))
+    if let Some((opener, &index)) = [
+        ('(', parens.first()),
+        ('<', angles.first()),
+        ('[', brackets.first()),
+    ]
+    .into_iter()
+    .find_map(|(opener, index)| index.map(|index| (opener, index)))
     {
         return Err(
-            ParseError::new(number, format!("unclosed `{opener}`")).at(&text[index..=index]),
+            ParseError::new(number, format!("unclosed `{opener}`")).at(&text[index..=index])
         );
     }
     items.push(text[start..].trim());

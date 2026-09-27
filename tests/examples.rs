@@ -16,7 +16,10 @@ fn example_pipelines() -> Vec<PathBuf> {
         .unwrap()
         .flat_map(|group| fs::read_dir(group.unwrap().path()).unwrap())
         .map(|entry| entry.unwrap().path())
-        .filter(|path| path.extension().is_some_and(|extension| extension == "spit"))
+        .filter(|path| {
+            path.extension()
+                .is_some_and(|extension| extension == "spit")
+        })
         .collect();
     pipelines.sort();
     pipelines
