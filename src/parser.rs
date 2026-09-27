@@ -14,7 +14,7 @@ use crate::model::{
 use crate::paths::check_path_template_syntax;
 use crate::resolver::{step_context, BoundInput};
 use crate::span::{columns_of, content_columns, find_word, Place};
-use crate::types::{parse_type_expr, TypeExpr};
+use crate::types::{parse_type_expr, TypeExpr, TypeParseError};
 
 const SHELL_SOURCE_REMOVED: &str =
     "shell-source is no longer supported; make the command executable available on PATH";
@@ -1111,14 +1111,19 @@ fn parse_count(value: &str, number: usize) -> Result<usize, ParseError> {
     })
 }
 
+/// Turn a [`TypeParseError`] into a [`ParseError`] pointing at the specific
+/// token within `ty` that the type parser rejected, rather than all of `ty`.
+fn type_error(number: usize, ty: &str, error: TypeParseError) -> ParseError {
+    ParseError::new(number, error.message).at(&ty[error.span])
+}
+
 fn parse_product(line: &str, number: usize) -> Result<ProductDef, ParseError> {
     let (declaration, dimensions) = line
         .split_once('[')
         .ok_or_else(|| ParseError::new(number, "expected product name followed by [dimensions]"))?;
     let (name, artifact_type) = if let Some((name, ty)) = declaration.split_once(':') {
         let ty = ty.trim();
-        let ty = parse_type_expr(ty, false)
-            .map_err(|error| ParseError::new(number, error.message).at(ty))?;
+        let ty = parse_type_expr(ty, false).map_err(|error| type_error(number, ty, error))?;
         (name.trim(), ty)
     } else {
         (declaration.trim(), TypeExpr::Unknown)
@@ -1296,8 +1301,8 @@ fn parse_operation(line: &str, number: usize) -> Result<OperationDef, ParseError
 /// several named outputs.
 fn parse_outputs(text: &str, number: usize) -> Result<Vec<OutputPort>, ParseError> {
     let Some(list) = text.strip_prefix('(') else {
-        let output_type = parse_type_expr(text, true)
-            .map_err(|error| ParseError::new(number, error.message).at(text))?;
+        let output_type =
+            parse_type_expr(text, true).map_err(|error| type_error(number, text, error))?;
         return Ok(vec![OutputPort::new(DEFAULT_OUTPUT, output_type)]);
     };
     let list = list.strip_suffix(')').ok_or_else(|| {
@@ -1323,7 +1328,7 @@ fn parse_outputs(text: &str, number: usize) -> Result<Vec<OutputPort>, ParseErro
 }
 
 fn port_type(text: &str, number: usize) -> Result<TypeExpr, ParseError> {
-    parse_type_expr(text, true).map_err(|error| ParseError::new(number, error.message).at(text))
+    parse_type_expr(text, true).map_err(|error| type_error(number, text, error))
 }
 
 fn parse_invocation(line: &str, number: usize) -> Result<Invocation, ParseError> {
@@ -1515,39 +1520,46 @@ fn comma_items(text: &str, number: usize) -> Result<Vec<&str>, ParseError> {
         return Ok(Vec::new());
     }
     let mut items = Vec::new();
-    let mut paren_depth = 0usize;
-    let mut angle_depth = 0usize;
-    let mut bracket_depth = 0usize;
+    // The byte index of each opener not yet matched by a closer of its kind,
+    // so an unexpected or unclosed bracket can point at the exact character.
+    let mut brackets: Vec<usize> = Vec::new();
+    let mut parens: Vec<usize> = Vec::new();
+    let mut angles: Vec<usize> = Vec::new();
     let mut start = 0usize;
     for (index, character) in text.char_indices() {
         match character {
-            '[' => bracket_depth += 1,
+            '[' => brackets.push(index),
             ']' => {
-                bracket_depth = bracket_depth
-                    .checked_sub(1)
-                    .ok_or_else(|| ParseError::new(number, "unexpected `]`"))?
+                if brackets.pop().is_none() {
+                    return Err(ParseError::new(number, "unexpected `]`").at(&text[index..=index]));
+                }
             }
-            '(' => paren_depth += 1,
+            '(' => parens.push(index),
             ')' => {
-                paren_depth = paren_depth
-                    .checked_sub(1)
-                    .ok_or_else(|| ParseError::new(number, "unexpected `)`"))?
+                if parens.pop().is_none() {
+                    return Err(ParseError::new(number, "unexpected `)`").at(&text[index..=index]));
+                }
             }
-            '<' => angle_depth += 1,
+            '<' => angles.push(index),
             '>' => {
-                angle_depth = angle_depth
-                    .checked_sub(1)
-                    .ok_or_else(|| ParseError::new(number, "unexpected `>`"))?
+                if angles.pop().is_none() {
+                    return Err(ParseError::new(number, "unexpected `>`").at(&text[index..=index]));
+                }
             }
-            ',' if paren_depth == 0 && angle_depth == 0 && bracket_depth == 0 => {
+            ',' if parens.is_empty() && angles.is_empty() && brackets.is_empty() => {
                 items.push(text[start..index].trim());
                 start = index + 1;
             }
             _ => {}
         }
     }
-    if paren_depth != 0 || angle_depth != 0 || bracket_depth != 0 {
-        return Err(ParseError::new(number, "unclosed `(`, `<`, or `[`"));
+    if let Some((opener, &index)) = [('(', parens.first()), ('<', angles.first()), ('[', brackets.first())]
+        .into_iter()
+        .find_map(|(opener, index)| index.map(|index| (opener, index)))
+    {
+        return Err(
+            ParseError::new(number, format!("unclosed `{opener}`")).at(&text[index..=index]),
+        );
     }
     items.push(text[start..].trim());
     if items.iter().any(|item| item.is_empty()) {
