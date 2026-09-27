@@ -1,6 +1,3 @@
-//! Resolving every concrete artifact, complete or not, without stopping at
-//! the first job that cannot run.
-
 use std::fs;
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -173,7 +170,6 @@ sources:
 ";
     let report = report(text, sources).unwrap();
 
-    // Every missing value is reported, not only the first.
     let missing: Vec<_> = report
         .coverage
         .iter()

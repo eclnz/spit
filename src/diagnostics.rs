@@ -188,9 +188,6 @@ pub fn diagnose_at(text: &str, source_text: Option<&str>, path: &Path) -> Vec<Di
     })
 }
 
-/// Diagnose a document as [`diagnose_at`] does, except that a job the
-/// inventory cannot complete is not an error: [`resolve_artifacts`] reports
-/// each one.
 pub fn diagnose_artifacts_at(
     text: &str,
     source_text: Option<&str>,
@@ -263,7 +260,6 @@ fn diagnose_with_parser(
     let supplied = external_inventory.or(document.inventory);
     let inventory = supplied.clone().unwrap_or_default();
     let outputs = |jobs: Vec<Job>| jobs.into_iter().flat_map(|job| job.outputs);
-    // The products that have jobs, runnable or, when lenient, not.
     let produced: Result<BTreeSet<String>, _> = if lenient {
         resolve_artifacts(&document.pipeline, &inventory).map(|report| {
             let incomplete = report.incomplete.into_iter().flat_map(|job| job.outputs);
