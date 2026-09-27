@@ -1,6 +1,6 @@
 //! Symbolic, domain-agnostic pipeline types and local unification.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
@@ -61,21 +61,20 @@ impl TypeExpr {
         }
     }
 
+    /// The names of the type variables this expression mentions.
+    pub fn variables(&self) -> BTreeSet<String> {
+        match self {
+            Self::Variable(name) => BTreeSet::from([name.clone()]),
+            Self::Applied { args, .. } => args.iter().flat_map(Self::variables).collect(),
+            _ => BTreeSet::new(),
+        }
+    }
+
     fn contains_variable(&self, name: &str) -> bool {
         match self {
             Self::Variable(value) => value == name,
             Self::Applied { args, .. } => args.iter().any(|arg| arg.contains_variable(name)),
             _ => false,
-        }
-    }
-}
-
-impl From<&str> for TypeExpr {
-    fn from(value: &str) -> Self {
-        if value == "Unknown" {
-            Self::Unknown
-        } else {
-            Self::named(value)
         }
     }
 }
@@ -265,11 +264,32 @@ fn refine_known(left: &TypeExpr, right: &TypeExpr) -> TypeExpr {
     }
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TypeParseError {
+    pub message: String,
+}
+
+impl TypeParseError {
+    fn new(message: &str) -> Self {
+        Self {
+            message: message.to_owned(),
+        }
+    }
+}
+
+impl fmt::Display for TypeParseError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for TypeParseError {}
+
 /// Product declarations treat bare names as constructors. In operation
 /// signatures, a bare single uppercase letter denotes a local type variable.
 /// A `$` prefix allows longer variable names without confusing them with
-/// named types such as `MRI` or `World`.
-pub fn parse_type_expr(text: &str, signature: bool) -> Result<TypeExpr, String> {
+/// named types such as `Image` or `World`.
+pub fn parse_type_expr(text: &str, signature: bool) -> Result<TypeExpr, TypeParseError> {
     struct Parser<'a> {
         text: &'a str,
         offset: usize,
@@ -298,19 +318,21 @@ pub fn parse_type_expr(text: &str, signature: bool) -> Result<TypeExpr, String> 
             }
         }
 
-        fn expression(&mut self) -> Result<TypeExpr, String> {
+        fn expression(&mut self) -> Result<TypeExpr, TypeParseError> {
             self.skip_space();
             let explicit_variable = self.take(b'$');
             if explicit_variable && !self.signature {
-                return Err("type variables are only allowed in operation signatures".to_owned());
+                return Err(TypeParseError::new(
+                    "type variables are only allowed in operation signatures",
+                ));
             }
             let start = self.offset;
             let bytes = self.text.as_bytes();
             let Some(first) = bytes.get(self.offset) else {
-                return Err("expected type name".to_owned());
+                return Err(TypeParseError::new("expected type name"));
             };
             if !first.is_ascii_alphabetic() && *first != b'_' {
-                return Err("expected type name".to_owned());
+                return Err(TypeParseError::new("expected type name"));
             }
             self.offset += 1;
             while bytes
@@ -322,7 +344,9 @@ pub fn parse_type_expr(text: &str, signature: bool) -> Result<TypeExpr, String> 
             let name = &self.text[start..self.offset];
             if explicit_variable {
                 if self.take(b'<') {
-                    return Err("a type variable cannot have type arguments".to_owned());
+                    return Err(TypeParseError::new(
+                        "a type variable cannot have type arguments",
+                    ));
                 }
                 Ok(TypeExpr::variable(name))
             } else if self.take(b'<') {
@@ -333,7 +357,9 @@ pub fn parse_type_expr(text: &str, signature: bool) -> Result<TypeExpr, String> 
                         break;
                     }
                     if !self.take(b',') {
-                        return Err("expected `,` or `>` in parameterized type".to_owned());
+                        return Err(TypeParseError::new(
+                            "expected `,` or `>` in parameterized type",
+                        ));
                     }
                 }
                 Ok(TypeExpr::applied(name, args))
@@ -355,7 +381,9 @@ pub fn parse_type_expr(text: &str, signature: bool) -> Result<TypeExpr, String> 
     let ty = parser.expression()?;
     parser.skip_space();
     if parser.offset != text.len() {
-        return Err("unexpected trailing text in type expression".to_owned());
+        return Err(TypeParseError::new(
+            "unexpected trailing text in type expression",
+        ));
     }
     Ok(ty)
 }

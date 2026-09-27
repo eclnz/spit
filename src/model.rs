@@ -46,11 +46,15 @@ pub struct ProductDef {
 }
 
 impl ProductDef {
-    pub fn new(name: &str, artifact_type: impl Into<ArtifactType>, dimensions: &[&str]) -> Self {
+    pub fn new(
+        name: impl Into<String>,
+        artifact_type: ArtifactType,
+        dimensions: impl IntoIterator<Item = impl AsRef<str>>,
+    ) -> Self {
         Self {
-            name: name.to_owned(),
-            artifact_type: artifact_type.into(),
-            dimensions: dimensions.iter().map(|value| (*value).to_owned()).collect(),
+            name: name.into(),
+            artifact_type,
+            dimensions: owned_strings(dimensions),
         }
     }
 }
@@ -62,15 +66,22 @@ pub struct ArtifactInstance {
     pub entities: EntityBinding,
 }
 
+/// An artifact's identity: its product and entity bindings, ignoring its type.
+pub type ArtifactKey = (String, EntityBinding);
+
 impl ArtifactInstance {
+    pub fn key(&self) -> ArtifactKey {
+        (self.product.clone(), self.entities.clone())
+    }
+
     pub fn new(
-        product: &str,
-        artifact_type: impl Into<ArtifactType>,
+        product: impl Into<String>,
+        artifact_type: ArtifactType,
         entities: EntityBinding,
     ) -> Self {
         Self {
-            product: product.to_owned(),
-            artifact_type: artifact_type.into(),
+            product: product.into(),
+            artifact_type,
             entities,
         }
     }
@@ -96,18 +107,18 @@ pub struct InputPort {
 }
 
 impl InputPort {
-    pub fn one(name: &str, artifact_type: impl Into<ArtifactType>) -> Self {
+    pub fn one(name: impl Into<String>, artifact_type: ArtifactType) -> Self {
         Self {
-            name: name.to_owned(),
-            artifact_type: artifact_type.into(),
+            name: name.into(),
+            artifact_type,
             cardinality: Cardinality::One,
         }
     }
 
-    pub fn many(name: &str, artifact_type: impl Into<ArtifactType>) -> Self {
+    pub fn many(name: impl Into<String>, artifact_type: ArtifactType) -> Self {
         Self {
-            name: name.to_owned(),
-            artifact_type: artifact_type.into(),
+            name: name.into(),
+            artifact_type,
             cardinality: Cardinality::Many,
         }
     }
@@ -133,22 +144,23 @@ pub struct OperationDef {
 
 impl OperationDef {
     pub fn new(
-        name: &str,
+        name: impl Into<String>,
         inputs: Vec<InputPort>,
-        output_type: impl Into<ArtifactType>,
+        output_type: ArtifactType,
         shape_rule: ShapeRule,
     ) -> Self {
         Self {
-            name: name.to_owned(),
+            name: name.into(),
             inputs,
-            output_type: output_type.into(),
+            output_type,
             shape_rule,
             aggregated_dimension: None,
         }
     }
 
-    pub fn aggregating(mut self, dimension: &str) -> Self {
-        self.aggregated_dimension = Some(dimension.to_owned());
+    #[must_use]
+    pub fn aggregating(mut self, dimension: impl Into<String>) -> Self {
+        self.aggregated_dimension = Some(dimension.into());
         self
     }
 }
@@ -160,14 +172,14 @@ pub enum InputBinding {
 }
 
 impl InputBinding {
-    pub fn product(name: &str) -> Self {
-        Self::Product(name.to_owned())
+    pub fn product(name: impl Into<String>) -> Self {
+        Self::Product(name.into())
     }
 
-    pub fn vary(product: &str, dimension: &str) -> Self {
+    pub fn vary(product: impl Into<String>, dimension: impl Into<String>) -> Self {
         Self::Vary {
-            product: product.to_owned(),
-            dimension: dimension.to_owned(),
+            product: product.into(),
+            dimension: dimension.into(),
         }
     }
 
@@ -187,11 +199,15 @@ pub struct Invocation {
 }
 
 impl Invocation {
-    pub fn new(operation: &str, inputs: Vec<InputBinding>, output_product: &str) -> Self {
+    pub fn new(
+        operation: impl Into<String>,
+        inputs: Vec<InputBinding>,
+        output_product: impl Into<String>,
+    ) -> Self {
         Self {
-            operation: operation.to_owned(),
+            operation: operation.into(),
             inputs,
-            output_product: output_product.to_owned(),
+            output_product: output_product.into(),
         }
     }
 }
@@ -203,21 +219,12 @@ pub struct CommandDef {
 }
 
 impl CommandDef {
-    pub fn new(operation: &str, template: &str) -> Self {
+    pub fn new(operation: impl Into<String>, template: impl Into<String>) -> Self {
         Self {
-            operation: operation.to_owned(),
-            template: template.to_owned(),
+            operation: operation.into(),
+            template: template.into(),
         }
     }
-}
-
-#[derive(Clone, Debug, Default)]
-pub struct PipelineSourceMap {
-    pub products: BTreeMap<String, usize>,
-    pub operations: BTreeMap<String, usize>,
-    pub invocations: BTreeMap<String, usize>,
-    pub constraints: BTreeMap<String, usize>,
-    pub constraint_lines: Vec<usize>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -229,8 +236,6 @@ pub struct Pipeline {
     pub commands: Vec<CommandDef>,
     pub path_template: Option<String>,
     pub product_paths: BTreeMap<String, String>,
-    /// Parser-populated line locations for semantic diagnostics.
-    pub source_lines: PipelineSourceMap,
 }
 
 /// A source record identifies a logical artifact without binding it to a path.
@@ -241,9 +246,9 @@ pub struct SourceRecord {
 }
 
 impl SourceRecord {
-    pub fn new(product: &str, entities: EntityBinding) -> Self {
+    pub fn new(product: impl Into<String>, entities: EntityBinding) -> Self {
         Self {
-            product: product.to_owned(),
+            product: product.into(),
             entities,
         }
     }
@@ -281,10 +286,14 @@ pub struct CoverageRule {
 }
 
 impl CoverageRule {
-    pub fn new(product: &str, group_by: &[&str], count: CountRequirement) -> Self {
+    pub fn new(
+        product: impl Into<String>,
+        group_by: impl IntoIterator<Item = impl AsRef<str>>,
+        count: CountRequirement,
+    ) -> Self {
         Self {
-            product: product.to_owned(),
-            group_by: group_by.iter().map(|value| (*value).to_owned()).collect(),
+            product: product.into(),
+            group_by: owned_strings(group_by),
             count,
         }
     }
@@ -305,4 +314,11 @@ pub struct ResolvedDag {
     pub jobs: Vec<Job>,
     /// Declaration order is retained for readable dry-run output.
     pub product_dimensions: BTreeMap<String, Vec<String>>,
+}
+
+fn owned_strings(values: impl IntoIterator<Item = impl AsRef<str>>) -> Vec<String> {
+    values
+        .into_iter()
+        .map(|value| value.as_ref().to_owned())
+        .collect()
 }
