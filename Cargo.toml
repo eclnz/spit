@@ -5,3 +5,7 @@ edition = "2021"
 description = "A small static compiler for logical artifact pipelines"
 
 [dependencies]
+
+[[example]]
+name = "basic"
+path = "examples/basic/basic.rs"

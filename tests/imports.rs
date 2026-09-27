@@ -77,10 +77,10 @@ fn unqualified_and_nested_imports_work_in_sectioned_files() {
     dir.write("middle.spit", "use clean from base.spit as prep\n");
     let main = dir.write(
         "main.spit",
-        "use prep::clean from middle.spit as mri\n\
+        "use prep::clean from middle.spit as stage\n\
          use clean from base.spit\n\
          products:\n  raw [id]\n  middle [id]\n  final [id]\n\
-         pipeline:\n  middle = clean(raw)\n  final = mri::prep::clean(middle)\n\
+         pipeline:\n  middle = clean(raw)\n  final = stage::prep::clean(middle)\n\
          sources:\n  raw[id=x]\n",
     );
     let text = fs::read_to_string(&main).unwrap();
@@ -201,4 +201,29 @@ fn import_all_skips_pipeline_steps_and_inventory() {
         resolve(&pipeline, &inventory.unwrap()).unwrap().jobs.len(),
         1
     );
+}
+
+#[test]
+fn imported_definitions_are_not_reported_as_unused() {
+    let path = Path::new("examples/imports/imported.spit");
+    let text = fs::read_to_string(path).unwrap();
+    assert!(diagnose_at(&text, None, path).is_empty());
+}
+
+#[test]
+fn qualified_product_names_use_dots_in_default_paths() {
+    let dir = TestDir::new();
+    dir.write("lib.spit", "source shard [part]\n");
+    let main = dir.write(
+        "main.spit",
+        "use lib.spit as lib\npath: {product}/{part}.txt\n\
+operation copy(input) -> Unknown\ncommand copy: cp {input} {output}\n\
+copied = copy(lib::shard)\nsources:\n  lib::shard[part=a]\n",
+    );
+    let (pipeline, inventory) =
+        parse_document_at(&fs::read_to_string(&main).unwrap(), &main).unwrap();
+    let dag = resolve(&pipeline, &inventory.unwrap()).unwrap();
+    let bash = render_bash(&pipeline, &dag).unwrap();
+    assert!(bash.contains("'lib.shard/a.txt'"), "{bash}");
+    assert!(!bash.contains("::"), "{bash}");
 }
