@@ -4,9 +4,20 @@
 
 SPIT lets you write a pipeline as a text file, check which jobs it would create, and generate a Bash script to run them. The same pipeline works with any number of observed inputs.
 
+## Contents
+
+- [Try it](#try-it)
+- [CLI commands and options](#cli-commands-and-options)
+- [Write a pipeline](#write-a-pipeline)
+- [Supply the inputs](#supply-the-inputs)
+- [Inspect and generate a script](#inspect-and-generate-a-script)
+- [Syntax reference](#syntax-reference)
+- [More examples](#more-examples)
+- [How SPIT works](#how-spit-works)
+
 ## Try it
 
-From this repository:
+Requires a [Rust toolchain](https://www.rust-lang.org/tools/install) (stable, via `cargo`). From this repository:
 
 ```sh
 cargo run -- check examples/commands/bash_demo.spit --sources examples/commands/bash_demo.sources
