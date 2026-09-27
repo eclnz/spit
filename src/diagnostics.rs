@@ -8,7 +8,7 @@ use std::path::Path;
 use crate::bash::collect_commands;
 use crate::imports::parse_located_document;
 use crate::model::DEFAULT_OUTPUT;
-use crate::model::{CommandRole, Job, SourceInventory};
+use crate::model::{stage_within, CommandRole, Job, SourceInventory};
 use crate::parser::{
     glued_comment, parse_document_with_imports, InlineInventory, ParsedDocument, Rule, SourceMap,
     Step,
@@ -553,11 +553,13 @@ fn warnings(pipeline: &Pipeline, lines: &SourceMap, skip: &BTreeSet<String>) -> 
     let mut warnings = Vec::new();
     for stage in &pipeline.stages {
         let name = stage.name.as_str();
-        if !pipeline
-            .invocations
-            .iter()
-            .any(|invocation| invocation.stage.as_deref() == Some(name))
-        {
+        // A stage whose steps all sit in stages nested in it is not empty.
+        if !pipeline.invocations.iter().any(|invocation| {
+            invocation
+                .stage
+                .as_deref()
+                .is_some_and(|stage| stage_within(stage, name))
+        }) {
             warnings.push(warn(
                 lines.stages.get(name).cloned(),
                 format!("stage `{name}` has no steps"),

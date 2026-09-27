@@ -38,7 +38,7 @@ Choose one command per call. The pipeline file comes next; options follow it.
 | `--sources <inventory.spit>` | Read source artifact identities from a separate file. Jobs need an inventory: this file, an inline one, or sources discovered with `--root`; `check` without any checks the pipeline alone. A separate inventory replaces an inline one, which is then skipped with a warning. Use `--sources -` to read standard input. |
 | `--root <directory>` | Check that every required source path points to a regular file under this directory; derived outputs need not exist yet. Without `--sources` or an inline inventory, the sources are discovered under this directory from their path rules. |
 | `--paths` | With `check`, show which path rule covers each product and validate the resulting paths. With `dag`, print a path under every artifact. |
-| `--stage <name>` | With `check`, `dag`, or `bash`, keep only the jobs of one [stage](#stages). Outputs of other stages that it reads are treated as files that already exist: `bash` checks for them before the first job, and `--root` checks that they are there. |
+| `--stage <name>` | With `check`, `dag`, or `bash`, keep only the jobs of one [stage](#stages) and the stages nested in it; name a nested stage by its path, such as `preprocess/combine`. Outputs of other stages that it reads are treated as files that already exist: `bash` checks for them before the first job, and `--root` checks that they are there. |
 | `--strict-paths` | Require an explicit `path product:` rule for every product, even if a default `path:` rule exists. |
 | `--json` | With `check`, print the diagnostics as JSON for editor use and stop, succeeding whatever they report. Each has a `severity` of `error` or `warning`; those tied to a declaration, call, rule, command, or path include its `line`, and a `column` and `end_column` for the text it is about, such as one input of a call or one `{placeholder}`. Columns are 1-based and count UTF-16 code units, as editors do; `end_column` is one past the last character. |
 | `--stdin` | Read the pipeline text from standard input instead of the pipeline file, such as an editor's unsaved buffer. The pipeline path is still used to resolve `use` imports. |
@@ -240,7 +240,22 @@ stage analysis:
 
 A stage owns the products its steps assign. Operations and commands stay global, so one declared in a stage can be used anywhere, and product names are not prefixed: `analysis` reads `merged` by name. Sources, `require` rules, and `use` lines belong at the top level. A `path:` line inside a stage is the default for that stage's products only; a `path product:` rule still takes precedence. `{stage}` in a path template is the name of the product's stage, unless the product has a dimension called `stage`.
 
-SPIT orders stages by the products they read, so a stage needs no `after` clause. Stages must not depend on each other in a cycle, even through steps outside every stage. `check` counts the jobs in each stage, `dag` names each job's stage, and `bash` marks where each stage starts. To run one stage, such as the analysis after preprocessing has already run, pass `--stage`:
+Stages nest. A `stage` header inside a stage opens a stage within it, named by its path, such as `preprocess/combine`; a line back at the outer stage's indentation closes it. From the [nested example](examples/stages/nested.spit):
+
+```text
+stage preprocess:
+    stage clean:
+        sorted = sort_lines(shard)
+
+    stage combine:
+        merged = merge(sorted @ vary(part))
+
+    resorted = sort_lines(merged)    # in `preprocess` itself
+```
+
+The lines directly in a stage share one indentation. A nested stage without its own `path:` line uses the nearest one around it, and `{stage}` gives one directory per level, as in `preprocess/combine/merged/...`.
+
+SPIT orders stages by the products they read, so a stage needs no `after` clause. Stages must not depend on each other in a cycle, even through steps outside every stage. A nested stage is compared with its siblings, and counts toward its outer stage's place among the outer stage's siblings; a step written in an outer stage itself, like one outside every stage, passes on what it reads. `check` counts the jobs in each outermost stage, `dag` names each job's stage, and `bash` marks where each stage starts. To run one stage, such as the analysis after preprocessing has already run, pass `--stage`; a stage includes the stages nested in it, and `--stage preprocess/combine` names a nested one:
 
 ```sh
 cargo run -- bash examples/stages/stages.spit --sources examples/stages/stages.sources --stage analysis
@@ -320,6 +335,7 @@ operation project(sample: Frame<$Kind,$SourceSpace>, calibration: Calibration<$K
 | [Field survey](examples/commands/field_survey.spit) | A larger pipeline with sidecar files, calibration, alignment between spaces, and commands |
 | [MRtrix3 ACT](examples/commands/mrtrix3_act.spit) | A larger pipeline with commands and paths |
 | [Stages](examples/stages/stages.spit) | Preprocessing and analysis stages, a stage's own path default, and `{stage}` paths |
+| [Nested stages](examples/stages/nested.spit) | Stages within a stage, beside a step in the outer stage itself |
 | [Imports](examples/imports/imported.spit) | Reuse source and operation definitions with `text::` names |
 | [Compiler stress pipelines](examples/stress/README.md) | Deep type inference, deliberate type errors, uneven joins, and large multilevel DAGs |
 

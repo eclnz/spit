@@ -199,11 +199,29 @@ fn stage_syntax_errors() {
             ),
         ),
         (
-            "stage prep:\n    stage inner:\n",
+            "  stage prep:\n",
             (
-                Some(2),
-                "a stage header starts at the beginning of its line; stages do not nest",
+                Some(1),
+                "a stage header outside every stage starts at the beginning of its line",
             ),
+        ),
+        (
+            "source raw [id]\noperation copy(A) -> A\nstage prep:\n    a = copy(raw)\n      b = copy(a)\n",
+            (
+                Some(5),
+                "this line is indented differently from the other lines of stage `prep`",
+            ),
+        ),
+        (
+            "source raw [id]\noperation copy(A) -> A\nstage prep:\n    stage inner:\n        a = copy(raw)\n  b = copy(a)\n",
+            (
+                Some(6),
+                "this line is indented differently from the other lines of stage `prep`",
+            ),
+        ),
+        (
+            "stage prep:\n    stage inner:\n    stage inner:\n",
+            (Some(3), "duplicate stage `prep/inner`"),
         ),
         (
             "stage prep\n",
@@ -317,4 +335,145 @@ fn root_checks_the_files_a_stage_reads_from_earlier_stages() {
     fs::remove_dir_all(&root).unwrap();
     assert!(ok, "{stderr}");
     assert!(stdout.contains("2 input files verified."), "{stdout}");
+}
+
+const NESTED: &str = "examples/stages/nested.spit";
+const NESTED_SOURCES: &str = "examples/stages/nested.sources";
+
+fn nested() -> String {
+    fs::read_to_string(NESTED).unwrap() + &fs::read_to_string(NESTED_SOURCES).unwrap()
+}
+
+#[test]
+fn nested_stages_are_named_by_their_path() {
+    let (pipeline, _) = parse_document(&nested()).unwrap();
+    let names: Vec<_> = pipeline.stages.iter().map(|stage| &stage.name).collect();
+    assert_eq!(
+        names,
+        [
+            "preprocess",
+            "preprocess/clean",
+            "preprocess/combine",
+            "analysis"
+        ]
+    );
+    assert_eq!(pipeline.stage_of("sorted"), Some("preprocess/clean"));
+    assert_eq!(pipeline.stage_of("merged"), Some("preprocess/combine"));
+    // A line back at the outer stage's indentation closes the nested one.
+    assert_eq!(pipeline.stage_of("resorted"), Some("preprocess"));
+    assert_eq!(pipeline.stage_of("tally"), Some("analysis"));
+}
+
+#[test]
+fn the_same_name_can_be_nested_in_different_stages() {
+    let text = "source raw [id]\noperation copy(A) -> A\nstage one:\n    stage part:\n        a = copy(raw)\nstage two:\n    stage part:\n        b = copy(a)\n";
+    assert!(diagnose(text, None).is_empty());
+    let pipeline = parse_pipeline(text).unwrap();
+    assert_eq!(pipeline.stage_of("b"), Some("two/part"));
+}
+
+#[test]
+fn nested_stages_nest_their_paths_and_inherit_defaults() {
+    let text = "path: {stage}/{product}/{entities}\nsource raw [id]\npath raw: in/{id}\noperation copy(A) -> A\nstage outer:\n    path: out/{stage}/{product}/{entities}\n    stage inner:\n        a = copy(raw)\n    stage own:\n        path: own/{product}/{entities}\n        b = copy(a)\n";
+    let (pipeline, _) = parse_document(text).unwrap();
+    let coverage = inspect_paths(&pipeline).unwrap();
+    let rule = |product: &str| {
+        coverage
+            .entries
+            .iter()
+            .find(|entry| entry.product == product)
+            .map(|entry| entry.rule.clone())
+            .unwrap()
+    };
+    assert_eq!(
+        rule("a"),
+        PathRule::Stage {
+            stage: "outer".to_owned(),
+            template: "out/{stage}/{product}/{entities}".to_owned(),
+        }
+    );
+    assert_eq!(
+        rule("b"),
+        PathRule::Stage {
+            stage: "outer/own".to_owned(),
+            template: "own/{product}/{entities}".to_owned(),
+        }
+    );
+    let inventory = spit::parse_source_inventory("sources:\n    raw[id=1]\n").unwrap();
+    let dag = resolve(&pipeline, &inventory).unwrap();
+    let bound = render_bound_dag(&pipeline, &dag).unwrap();
+    assert!(bound.contains("path: out/outer/inner/a/id=1"), "{bound}");
+    assert!(bound.contains("path: own/b/id=1"), "{bound}");
+}
+
+#[test]
+fn one_stage_includes_the_stages_nested_in_it() {
+    let (pipeline, inventory) = parse_document(&nested()).unwrap();
+    let dag = resolve(&pipeline, &inventory.unwrap()).unwrap();
+    let ids = |stage: &str| -> Vec<_> {
+        dag.only_stage(stage)
+            .jobs
+            .iter()
+            .map(|job| job.id)
+            .collect()
+    };
+    assert_eq!(ids("preprocess"), [1, 2, 3, 4, 5, 6, 7]);
+    assert_eq!(ids("preprocess/combine"), [4, 5]);
+    assert_eq!(ids("pre"), Vec::<usize>::new());
+    let (ok, stdout, stderr) = spit(&["check", NESTED, "--sources", NESTED_SOURCES]);
+    assert!(ok, "{stderr}");
+    assert!(stdout.contains("9 jobs resolved: 7 in preprocess, 2 in analysis."));
+    let (ok, stdout, stderr) = spit(&[
+        "bash",
+        NESTED,
+        "--sources",
+        NESTED_SOURCES,
+        "--stage",
+        "preprocess/combine",
+    ]);
+    assert!(ok, "{stderr}");
+    assert!(stdout.contains("# ===== Stage: preprocess/combine ====="));
+    assert!(stdout.contains(
+        "spit_require \"$SPIT_ROOT\"/'preprocess/clean/sorted/group=alpha__part=01.txt'"
+    ));
+}
+
+#[test]
+fn nested_siblings_must_not_depend_on_each_other_in_a_cycle() {
+    // `glue` sits in `outer` itself, so `b` reads from `first` through it.
+    let text = "source raw [id]\noperation copy(A) -> A\nstage outer:\n    glue : Item [id] = copy(a)\n    stage first:\n        a = copy(raw)\n        c : Item [id] = copy(b)\n    stage second:\n        b = copy(glue)\n";
+    assert_eq!(
+        messages(&diagnose(text, None)),
+        [(
+            Some(5),
+            "stages must not depend on each other in a cycle: `c` in `outer/first` reads `b` from `outer/second` and `b` in `outer/second` reads `a` from `outer/first`"
+        )]
+    );
+}
+
+#[test]
+fn nested_stages_count_toward_their_outer_stages_cycles() {
+    let text = "source raw [id]\noperation copy(A) -> A\nstage prep:\n    stage deep:\n        a : Item [id] = copy(late)\n        c = copy(raw)\nstage later:\n    stage deep:\n        late = copy(c)\n";
+    assert_eq!(
+        messages(&diagnose(text, None)),
+        [(
+            Some(3),
+            "stages must not depend on each other in a cycle: `a` in `prep` reads `late` from `later` and `late` in `later` reads `c` from `prep`"
+        )]
+    );
+}
+
+#[test]
+fn a_nested_stage_may_read_from_its_outer_stage_and_siblings() {
+    let text = "source raw [id]\noperation copy(A) -> A\nstage outer:\n    base = copy(raw)\n    stage first:\n        a = copy(base)\n    stage second:\n        b = copy(a)\n    top = copy(b)\n";
+    assert!(diagnose(text, None).is_empty());
+}
+
+#[test]
+fn a_stage_whose_steps_are_all_nested_is_not_empty() {
+    let text = "source raw [id]\noperation copy(A) -> A\nstage outer:\n    stage inner:\n        a = copy(raw)\n    stage idle:\n";
+    assert_eq!(
+        messages(&diagnose(text, None)),
+        [(Some(6), "stage `outer/idle` has no steps")]
+    );
 }

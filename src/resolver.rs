@@ -611,13 +611,17 @@ fn check_stages(
         }
     }
 
-    // For each stage, the stages it reads from, with one product it makes
-    // and the product it reads for each.
-    let mut upstream: BTreeMap<&str, BTreeMap<&str, (&str, &str)>> = BTreeMap::new();
+    // For each stage, the sibling stages it reads from, with one product it
+    // makes and the product it reads for each. Nested stages are compared
+    // with their siblings only: the stages that split off where two stages'
+    // names part. A step written in an outer stage itself, or outside every
+    // stage, passes on what it reads.
+    let mut upstream: BTreeMap<String, BTreeMap<String, (&str, &str)>> = BTreeMap::new();
     for invocation in &pipeline.invocations {
         let Some(stage) = invocation.stage.as_deref() else {
             continue;
         };
+        let consumer: Vec<_> = stage.split('/').collect();
         let mut pending: Vec<&str> = invocation
             .inputs
             .iter()
@@ -634,18 +638,27 @@ fn check_stages(
             else {
                 continue;
             };
-            match producer.stage.as_deref() {
-                // That step records the stages it reads from itself.
-                Some(other) if other == stage => {}
-                Some(other) => {
-                    upstream
-                        .entry(stage)
-                        .or_default()
-                        .entry(other)
-                        .or_insert((invocation.output_product(), product));
-                }
-                None => pending.extend(producer.inputs.iter().map(InputBinding::product_name)),
+            let made: Vec<_> = producer
+                .stage
+                .as_deref()
+                .map_or_else(Vec::new, |name| name.split('/').collect());
+            let shared = consumer
+                .iter()
+                .zip(&made)
+                .take_while(|(left, right)| left == right)
+                .count();
+            if shared == made.len() && shared < consumer.len() {
+                // Made in a stage around this one, or outside every stage.
+                pending.extend(producer.inputs.iter().map(InputBinding::product_name));
+            } else if shared < made.len() && shared < consumer.len() {
+                upstream
+                    .entry(consumer[..=shared].join("/"))
+                    .or_default()
+                    .entry(made[..=shared].join("/"))
+                    .or_insert((invocation.output_product(), product));
             }
+            // Otherwise the producer is in this stage or one nested in it,
+            // and records what it reads itself.
         }
     }
 
@@ -668,7 +681,7 @@ fn check_stages(
                 )
             })
             .collect();
-        reported.extend(cycle.iter().copied());
+        reported.extend(cycle.iter().map(|stage| stage.to_owned()));
         errors.push(stage_error(
             start,
             format!(
@@ -692,13 +705,18 @@ fn join_list(items: &[String]) -> String {
 /// The stages from `start` back to itself through the stages each reads
 /// from, beginning and ending with `start`, if there is such a path.
 fn stage_cycle<'a>(
-    upstream: &BTreeMap<&'a str, BTreeMap<&'a str, (&'a str, &'a str)>>,
+    upstream: &'a BTreeMap<String, BTreeMap<String, (&str, &str)>>,
     start: &'a str,
 ) -> Option<Vec<&'a str>> {
     let mut previous: BTreeMap<&str, &str> = BTreeMap::new();
     let mut queue = VecDeque::from([start]);
     while let Some(stage) = queue.pop_front() {
-        for &next in upstream.get(stage).into_iter().flat_map(BTreeMap::keys) {
+        for next in upstream
+            .get(stage)
+            .into_iter()
+            .flat_map(BTreeMap::keys)
+            .map(String::as_str)
+        {
             if next == start {
                 let mut path = Vec::new();
                 let mut at = stage;

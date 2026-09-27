@@ -195,10 +195,8 @@ impl SourceMap {
     pub(crate) fn path_rule(&self, pipeline: &Pipeline, product: &str) -> Option<Place> {
         if pipeline.product_paths.contains_key(product) {
             self.paths.get(product).cloned()
-        } else if pipeline.stage_path_template(product).is_some() {
-            pipeline
-                .stage_of(product)
-                .and_then(|stage| self.stage_paths.get(stage).cloned())
+        } else if let Some((stage, _)) = pipeline.stage_path_rule(product) {
+            self.stage_paths.get(stage).cloned()
         } else {
             self.default_path.clone()
         }
@@ -500,9 +498,9 @@ fn parse_flow_pipeline(
     imports: &BTreeMap<usize, Pipeline>,
 ) -> Result<PipelineBuilder, ParseError> {
     let mut builder = PipelineBuilder::default();
-    let mut stage = None;
+    let mut stages = OpenStages::default();
     for (index, original) in text.lines().enumerate() {
-        flow_line(&mut builder, &mut stage, imports, original, index + 1)
+        flow_line(&mut builder, &mut stages, imports, original, index + 1)
             .map_err(|error| error.locate(original))?;
     }
     Ok(builder)
@@ -514,20 +512,67 @@ fn is_stage_header(line: &str) -> bool {
     line.starts_with("stage ") && !line.contains('=')
 }
 
-/// Open a stage for a `stage name:` header. Its lines are indented beneath
-/// it, and the next line that is not ends it.
+/// The stages open at a line of the flow form, outermost first.
+#[derive(Default)]
+struct OpenStages(Vec<OpenStage>);
+
+struct OpenStage {
+    /// The full name, such as `preprocess/denoise`.
+    name: String,
+    /// The indentation of the stage's header.
+    header: usize,
+    /// The indentation the stage's lines share, once the first is read.
+    body: Option<usize>,
+}
+
+impl OpenStages {
+    /// The innermost open stage.
+    fn current(&self) -> Option<&str> {
+        self.0.last().map(|stage| stage.name.as_str())
+    }
+
+    /// Close each stage that a line indented by `indent` is not inside, then
+    /// check that the line lines up with the other lines of its stage.
+    fn enter(&mut self, indent: usize, number: usize) -> Result<(), ParseError> {
+        while self.0.last().is_some_and(|stage| indent <= stage.header) {
+            self.0.pop();
+        }
+        let Some(stage) = self.0.last_mut() else {
+            return Ok(());
+        };
+        match stage.body {
+            None => stage.body = Some(indent),
+            Some(body) if body == indent => {}
+            Some(_) => {
+                return Err(ParseError::new(
+                    number,
+                    format!(
+                        "this line is indented differently from the other lines of stage `{}`",
+                        stage.name
+                    ),
+                ))
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Open a stage for a `stage name:` header, inside the current stage if
+/// there is one. Its lines are indented beneath it, and the next line that
+/// is not ends it.
 fn open_stage(
     builder: &mut PipelineBuilder,
-    stage: &mut Option<String>,
+    stages: &mut OpenStages,
     original: &str,
     declaration: &str,
+    indent: usize,
     number: usize,
 ) -> Result<(), ParseError> {
     let syntax = "expected `stage name:`, with the stage's lines indented beneath it";
-    if original.starts_with(char::is_whitespace) {
+    if stages.current().is_none() && indent > 0 {
         return Err(ParseError::new(
             number,
-            "a stage header starts at the beginning of its line; stages do not nest",
+            "a stage header outside every stage starts at the beginning of its line",
         ));
     }
     let name = declaration
@@ -535,19 +580,27 @@ fn open_stage(
         .strip_suffix(':')
         .ok_or_else(|| ParseError::new(number, syntax))?;
     let name = identifier(name.trim(), number, "stage name")?;
-    if builder.lines.stages.contains_key(name) {
-        return Err(ParseError::new(number, format!("duplicate stage `{name}`")).at(name));
+    let full = match stages.current() {
+        Some(parent) => format!("{parent}/{name}"),
+        None => name.to_owned(),
+    };
+    if builder.lines.stages.contains_key(&full) {
+        return Err(ParseError::new(number, format!("duplicate stage `{full}`")).at(name));
     }
     let place = name_place(original, number, declaration, name);
-    builder.lines.stages.insert(name.to_owned(), place);
-    builder.pipeline.stages.push(StageDef::new(name));
-    *stage = Some(name.to_owned());
+    builder.lines.stages.insert(full.clone(), place);
+    builder.pipeline.stages.push(StageDef::new(full.clone()));
+    stages.0.push(OpenStage {
+        name: full,
+        header: indent,
+        body: None,
+    });
     Ok(())
 }
 
 fn flow_line(
     builder: &mut PipelineBuilder,
-    stage: &mut Option<String>,
+    stages: &mut OpenStages,
     imports: &BTreeMap<usize, Pipeline>,
     original: &str,
     number: usize,
@@ -556,9 +609,9 @@ fn flow_line(
     if line.is_empty() {
         return Ok(());
     }
-    if !original.starts_with(char::is_whitespace) {
-        *stage = None;
-    }
+    let indent = original.len() - original.trim_start().len();
+    stages.enter(indent, number)?;
+    let stage = stages.current().map(str::to_owned);
     let top_level_only = |what: &str| {
         stage.as_ref().map_or(Ok(()), |name| {
             Err(ParseError::new(
@@ -571,7 +624,7 @@ fn flow_line(
         .strip_prefix("stage ")
         .filter(|_| is_stage_header(line))
     {
-        open_stage(builder, stage, original, declaration, number)?;
+        open_stage(builder, stages, original, declaration, indent, number)?;
     } else if line.starts_with("use ") {
         top_level_only("`use`")?;
         apply_import(
@@ -609,7 +662,7 @@ fn flow_line(
         set_path(builder, stage.as_deref(), original, line, number)?;
     } else if line.contains('=') {
         let (mut invocation, products) = parse_flow_invocation(line, number, &builder.pipeline)?;
-        invocation.stage.clone_from(stage);
+        invocation.stage.clone_from(&stage);
         let step = step_place(original, number, &invocation);
         for (index, product) in products.into_iter().enumerate() {
             builder.add_product(product, step.output_at(index));

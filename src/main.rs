@@ -9,8 +9,8 @@ use std::process::ExitCode;
 use spit::{
     diagnose_artifacts_at, diagnose_at, discover_sources, inspect_paths, parse_document_at,
     parse_pipeline_at, parse_source_inventory, render_artifacts, render_bash, render_bound_dag,
-    render_dag, render_source_inventory, resolve, resolve_artifacts, validate_concrete_paths,
-    validate_source_files, Diagnostic, Pipeline, ResolvedDag,
+    render_dag, render_source_inventory, resolve, resolve_artifacts, stage_within,
+    validate_concrete_paths, validate_source_files, Diagnostic, Pipeline, ResolvedDag,
 };
 
 const USAGE: &str =
@@ -286,18 +286,24 @@ fn job_count(pipeline: &Pipeline, dag: &ResolvedDag, stage: Option<&str>) -> Str
     if pipeline.stages.is_empty() {
         return format!("{total} jobs resolved.");
     }
-    let count = |stage: Option<&str>| {
+    // Each outermost stage counts the jobs of the stages nested in it.
+    let within = |stage: &str| {
         dag.jobs
             .iter()
-            .filter(|job| job.stage.as_deref() == stage)
+            .filter(|job| {
+                job.stage
+                    .as_deref()
+                    .is_some_and(|name| stage_within(name, stage))
+            })
             .count()
     };
     let mut parts: Vec<_> = pipeline
         .stages
         .iter()
-        .map(|stage| format!("{} in {}", count(Some(&stage.name)), stage.name))
+        .filter(|stage| !stage.name.contains('/'))
+        .map(|stage| format!("{} in {}", within(&stage.name), stage.name))
         .collect();
-    let outside = count(None);
+    let outside = dag.jobs.iter().filter(|job| job.stage.is_none()).count();
     if outside > 0 {
         parts.push(format!("{outside} outside stages"));
     }

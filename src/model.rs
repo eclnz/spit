@@ -419,12 +419,13 @@ impl CommandDef {
 }
 
 /// A named group of steps, such as preprocessing or analysis. A stage owns
-/// the products its steps assign; operations stay global.
+/// the products its steps assign; operations stay global. A nested stage's
+/// name is its path, as in `preprocess/denoise`.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct StageDef {
     pub name: String,
-    /// The default path rule for the stage's products, in place of the
-    /// pipeline's default.
+    /// The default path rule for the products of this stage and the stages
+    /// nested in it that set none, in place of the pipeline's default.
     pub path_template: Option<String>,
 }
 
@@ -469,14 +470,35 @@ impl Pipeline {
             .or(self.path_template.as_ref())
     }
 
-    /// The default path rule of the stage that produces `product`.
-    pub fn stage_path_template(&self, product: &str) -> Option<&String> {
+    /// The default path rule of the stage that produces `product`, or of the
+    /// nearest stage around it that sets one, with the stage that sets it.
+    pub fn stage_path_rule(&self, product: &str) -> Option<(&str, &String)> {
         let stage = self.stage_of(product)?;
-        self.stages
-            .iter()
-            .find(|candidate| candidate.name == stage)
-            .and_then(|stage| stage.path_template.as_ref())
+        stage_and_parents(stage).find_map(|name| {
+            self.stages
+                .iter()
+                .find(|candidate| candidate.name == name)
+                .and_then(|stage| Some((stage.name.as_str(), stage.path_template.as_ref()?)))
+        })
     }
+
+    pub fn stage_path_template(&self, product: &str) -> Option<&String> {
+        self.stage_path_rule(product).map(|(_, template)| template)
+    }
+}
+
+/// A stage's full name, then each stage around it: `a/b/c`, `a/b`, `a`.
+pub fn stage_and_parents(stage: &str) -> impl Iterator<Item = &str> {
+    std::iter::successors(Some(stage), |name| {
+        name.rsplit_once('/').map(|(parent, _)| parent)
+    })
+}
+
+/// Whether `stage` is `outer` or a stage nested inside it.
+pub fn stage_within(stage: &str, outer: &str) -> bool {
+    stage
+        .strip_prefix(outer)
+        .is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
 }
 
 /// A source record identifies a logical artifact without binding it to a path.
@@ -588,15 +610,19 @@ pub struct ResolvedDag {
 }
 
 impl ResolvedDag {
-    /// Only the jobs of `stage`. Their inputs from other stages are taken as
-    /// files that already exist, so dependencies on those jobs are dropped;
+    /// Only the jobs of `stage` and the stages nested in it. Their inputs from
+    /// other stages are taken as files that already exist, so dependencies on those jobs are dropped;
     /// every job keeps its number.
     #[must_use]
     pub fn only_stage(&self, stage: &str) -> Self {
         let jobs: Vec<_> = self
             .jobs
             .iter()
-            .filter(|job| job.stage.as_deref() == Some(stage))
+            .filter(|job| {
+                job.stage
+                    .as_deref()
+                    .is_some_and(|name| stage_within(name, stage))
+            })
             .cloned()
             .collect();
         let kept: BTreeSet<_> = jobs.iter().map(|job| job.id).collect();
