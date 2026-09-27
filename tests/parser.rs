@@ -1,6 +1,6 @@
 use spit::{
-    parse_document, parse_pipeline, parse_source_inventory, render_dag, resolve, ParseError,
-    validate_pipeline, ResolveError, TypeExpr,
+    parse_document, parse_pipeline, parse_source_inventory, render_dag, resolve, validate_pipeline,
+    ParseError, ResolveError, TypeExpr,
 };
 
 /// A sectioned pipeline with the same shape as the basic example.
@@ -232,11 +232,26 @@ fn shell_source_is_rejected_with_migration_guidance() {
 #[test]
 fn rejects_unbalanced_command_brackets_with_line_number() {
     let cases = [
-        ("command normalize: normalize --mode input} {output", "unmatched `}`"),
-        ("command normalize: normalize --mode {input {output}", "unclosed `{`"),
-        ("command normalize: normalize --mode {input} {{output}", "unmatched `}`"),
-        ("command normalize: normalize --mode {} {output}", "empty placeholder"),
-        ("command normalize: normalize '--mode {input} {output}", "unterminated quote"),
+        (
+            "command normalize: normalize --mode input} {output",
+            "unmatched `}`",
+        ),
+        (
+            "command normalize: normalize --mode {input {output}",
+            "unclosed `{`",
+        ),
+        (
+            "command normalize: normalize --mode {input} {{output}",
+            "unmatched `}`",
+        ),
+        (
+            "command normalize: normalize --mode {} {output}",
+            "empty placeholder",
+        ),
+        (
+            "command normalize: normalize '--mode {input} {output}",
+            "unterminated quote",
+        ),
     ];
     for (line, expected) in cases {
         let text = format!("source raw : Table [id]\n{line}\n");

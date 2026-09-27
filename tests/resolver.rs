@@ -45,7 +45,11 @@ fn registration_pipeline() -> Pipeline {
                 TypeExpr::named("FilteredSignal"),
                 ["site", "day", "run"],
             ),
-            ProductDef::new("calibration", TypeExpr::named("Calibration"), ["site", "day"]),
+            ProductDef::new(
+                "calibration",
+                TypeExpr::named("Calibration"),
+                ["site", "day"],
+            ),
             ProductDef::new(
                 "registered",
                 TypeExpr::named("AlignedSignal"),
@@ -139,12 +143,22 @@ fn reports_missing_input() {
 #[test]
 fn rejects_secondary_input_with_dimensions_absent_from_driver() {
     let mut pipeline = registration_pipeline();
-    pipeline.products[1] = ProductDef::new("calibration", TypeExpr::named("Calibration"), ["site", "day", "mode"]);
+    pipeline.products[1] = ProductDef::new(
+        "calibration",
+        TypeExpr::named("Calibration"),
+        ["site", "day", "mode"],
+    );
     let inventory = SourceInventory {
         artifacts: vec![
             artifact("denoised", &[("site", "01"), ("day", "01"), ("run", "1")]),
-            artifact("calibration", &[("site", "01"), ("day", "01"), ("mode", "A")]),
-            artifact("calibration", &[("site", "01"), ("day", "01"), ("mode", "B")]),
+            artifact(
+                "calibration",
+                &[("site", "01"), ("day", "01"), ("mode", "A")],
+            ),
+            artifact(
+                "calibration",
+                &[("site", "01"), ("day", "01"), ("mode", "B")],
+            ),
         ],
         ..SourceInventory::default()
     };
@@ -183,7 +197,11 @@ fn aggregates_each_fixed_dimension_group() {
                 TypeExpr::named("AlignedSignal"),
                 ["site", "day", "run"],
             ),
-            ProductDef::new("mean_signal", TypeExpr::named("MeanSignal"), ["site", "day"]),
+            ProductDef::new(
+                "mean_signal",
+                TypeExpr::named("MeanSignal"),
+                ["site", "day"],
+            ),
         ],
         operations: vec![OperationDef::new(
             "mean",
@@ -210,7 +228,10 @@ fn aggregates_each_fixed_dimension_group() {
 
     let dag = resolve(&pipeline, &inventory).unwrap();
     assert_eq!(dag.jobs.len(), 2);
-    assert!(dag.jobs.iter().all(|job| job.input_artifacts().count() == 2));
+    assert!(dag
+        .jobs
+        .iter()
+        .all(|job| job.input_artifacts().count() == 2));
     assert!(dag
         .jobs
         .iter()
@@ -365,7 +386,11 @@ fn full_pipeline() -> Pipeline {
     Pipeline {
         products: vec![
             ProductDef::new("signal", TypeExpr::named("Signal"), ["site", "day", "run"]),
-            ProductDef::new("calibration", TypeExpr::named("Calibration"), ["site", "day"]),
+            ProductDef::new(
+                "calibration",
+                TypeExpr::named("Calibration"),
+                ["site", "day"],
+            ),
             ProductDef::new(
                 "denoised",
                 TypeExpr::named("FilteredSignal"),
@@ -376,7 +401,11 @@ fn full_pipeline() -> Pipeline {
                 TypeExpr::named("AlignedSignal"),
                 ["site", "day", "run"],
             ),
-            ProductDef::new("mean_signal", TypeExpr::named("MeanSignal"), ["site", "day"]),
+            ProductDef::new(
+                "mean_signal",
+                TypeExpr::named("MeanSignal"),
+                ["site", "day"],
+            ),
         ],
         operations: vec![
             denoise_operation(),
