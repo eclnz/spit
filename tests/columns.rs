@@ -68,8 +68,8 @@ merged = merge(cleaned @ vary(batch))
             "error 7: other",
             "error 8: rwa",
             "error 9: join(cleaned)",
-            // The call's `vary(batch)` disagrees with the operation's `drop(run)`.
-            "error 10: merge(cleaned @ vary(batch))",
+            // `cleaned` has no `batch` dimension to vary.
+            "error 10: cleaned @ vary(batch)",
         ]
     );
 }

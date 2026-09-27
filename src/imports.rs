@@ -4,10 +4,12 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::model::{CommandDef, CoverageRule, OperationDef, Pipeline, ProductDef, SourceInventory};
+use crate::model::{
+    CommandDef, CommandRole, CoverageRule, OperationDef, Pipeline, ProductDef, SourceInventory,
+};
 use crate::parser::{
-    parse_document_with_imports, parse_use, strip_comment, ParseError, ParsedDocument,
-    PipelineBuilder, Rule, UseSpec,
+    parse_document_with_imports, parse_use, strip_comment, InlineInventory, ParseError,
+    ParsedDocument, PipelineBuilder, Rule, UseSpec,
 };
 use crate::span::Place;
 
@@ -121,7 +123,7 @@ fn select_import(module: &Pipeline, spec: &UseSpec, line: usize) -> Result<Pipel
                 (!module
                     .invocations
                     .iter()
-                    .any(|invocation| invocation.output_product == product.name))
+                    .any(|invocation| invocation.outputs.contains(&product.name)))
                 .then_some(product.name.as_str())
             }))
             .filter(|name| seen.insert(*name))
@@ -144,7 +146,7 @@ fn select_import(module: &Pipeline, spec: &UseSpec, line: usize) -> Result<Pipel
                 && !module
                     .invocations
                     .iter()
-                    .any(|invocation| invocation.output_product == name)
+                    .any(|invocation| invocation.outputs.iter().any(|output| output == name))
         });
         let source = sources.next();
         if operations.next().is_some() || sources.next().is_some() {
@@ -167,7 +169,7 @@ fn select_import(module: &Pipeline, spec: &UseSpec, line: usize) -> Result<Pipel
             if module
                 .commands
                 .iter()
-                .filter(|command| command.operation == name)
+                .filter(|command| command.operation == name && command.role == CommandRole::Run)
                 .count()
                 > 1
             {
@@ -246,22 +248,31 @@ pub fn parse_document_at(
     text: &str,
     path: &Path,
 ) -> Result<(Pipeline, Option<SourceInventory>), ParseError> {
-    parse_located_document(text, path).map(|document| (document.pipeline, document.inventory))
+    parse_located_document(text, path, InlineInventory::Read)
+        .map(|document| (document.pipeline, document.inventory))
+}
+
+/// Like [`parse_document_at`], but skips any inline inventory, for use with a
+/// separate one that replaces it. The inline records need not parse.
+pub fn parse_pipeline_at(text: &str, path: &Path) -> Result<Pipeline, ParseError> {
+    parse_located_document(text, path, InlineInventory::Skip).map(|document| document.pipeline)
 }
 
 /// Like [`parse_document_at`], but also keeps declaration line numbers.
 pub(crate) fn parse_located_document(
     text: &str,
     path: &Path,
+    inline: InlineInventory,
 ) -> Result<ParsedDocument, ParseError> {
     let root = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
-    parse_document_at_inner(text, &root, &mut vec![root.clone()])
+    parse_document_at_inner(text, &root, &mut vec![root.clone()], inline)
 }
 
 fn parse_document_at_inner(
     text: &str,
     path: &Path,
     stack: &mut Vec<PathBuf>,
+    inline: InlineInventory,
 ) -> Result<ParsedDocument, ParseError> {
     let mut imports = BTreeMap::new();
     for (index, original) in text.lines().enumerate() {
@@ -294,19 +305,22 @@ fn parse_document_at_inner(
             )
         })?;
         stack.push(canonical.clone());
-        let module = parse_document_at_inner(&imported_text, &canonical, stack).map_err(|error| {
-            ParseError::new(
-                number,
-                format!(
-                    "in `{}` at line {}: {}",
-                    canonical.display(),
-                    error.line,
-                    error.message
-                ),
-            )
-        });
+        // Imports bring no inventory records, so an imported file's are skipped.
+        let module =
+            parse_document_at_inner(&imported_text, &canonical, stack, InlineInventory::Skip)
+                .map_err(|error| {
+                    ParseError::new(
+                        number,
+                        format!(
+                            "in `{}` at line {}: {}",
+                            canonical.display(),
+                            error.line,
+                            error.message
+                        ),
+                    )
+                });
         stack.pop();
         imports.insert(number, select_import(&module?.pipeline, &spec, number)?);
     }
-    parse_document_with_imports(text, &imports)
+    parse_document_with_imports(text, &imports, inline)
 }

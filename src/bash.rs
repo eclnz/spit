@@ -5,10 +5,11 @@ use std::fmt::{self, Write};
 use std::ops::Range;
 use std::path::Path;
 
-use crate::model::ArtifactKey;
-use crate::model::{ArtifactInstance, Cardinality, Job, OperationDef, Pipeline, ResolvedDag};
+use crate::model::{
+    ArtifactKey, Cardinality, CommandRole, Job, OperationDef, Pipeline, ResolvedDag,
+};
 use crate::parser::SourceMap;
-use crate::paths::{bound_paths, inspect_paths, PathError};
+use crate::paths::{bound_paths, inspect_paths, output_keys, PathError};
 use crate::span::Place;
 use crate::template::{parse_template, Part};
 
@@ -86,15 +87,27 @@ pub fn render_bash(pipeline: &Pipeline, dag: &ResolvedDag) -> Result<String, Bas
     let commands: BTreeMap<_, _> = pipeline
         .commands
         .iter()
-        .enumerate()
-        .map(|(index, command)| (command.operation.as_str(), (index, command)))
+        .filter(|command| command.role == CommandRole::Run)
+        .map(|command| (command.operation.as_str(), command))
         .collect();
-    let outputs: BTreeSet<_> = dag.jobs.iter().map(|job| job.output.key()).collect();
+    let mut verifications: BTreeMap<_, Vec<_>> = BTreeMap::new();
+    for command in &pipeline.commands {
+        if command.role == CommandRole::Verify {
+            verifications
+                .entry(command.operation.as_str())
+                .or_default()
+                .push(command);
+        }
+    }
+    let outputs = output_keys(dag);
     let paths = bound_paths(pipeline, dag)?;
 
     let mut script =
         String::from("#!/usr/bin/env bash\nset -euo pipefail\nSPIT_ROOT=\"${SPIT_ROOT:-.}\"\n\n");
     script.push_str("spit_require() {\n  if [[ ! -e \"$1\" ]]; then\n    printf 'missing artifact: %s\\n' \"$1\" >&2\n    exit 1\n  fi\n}\n\n");
+    if !verifications.is_empty() {
+        script.push_str("spit_verify() {\n  local job=\"$1\"\n  shift\n  if ! \"$@\"; then\n    printf 'verification failed for job %s: %s\\n' \"$job\" \"$*\" >&2\n    exit 1\n  fi\n}\n\n");
+    }
 
     for (identity, relative) in &paths {
         if !outputs.contains(identity) {
@@ -111,33 +124,53 @@ pub fn render_bash(pipeline: &Pipeline, dag: &ResolvedDag) -> Result<String, Bas
                 job.operation
             ))
         })?;
-        let (_, command) = commands.get(job.operation.as_str()).ok_or_else(|| {
+        let command = commands.get(job.operation.as_str()).ok_or_else(|| {
             error(format!(
                 "no command defined for operation `{}`",
                 job.operation
             ))
         })?;
-        let output_path = &paths[&job.output.key()];
-        let parent = Path::new(output_path)
-            .parent()
-            .and_then(|path| path.to_str())
-            .filter(|path| !path.is_empty())
-            .unwrap_or(".");
         writeln!(script, "# Job {}: {}", job.id, job.operation).unwrap();
-        writeln!(script, "mkdir -p -- {}", shell_path(parent)).unwrap();
+        let parents: BTreeSet<_> = job
+            .outputs
+            .iter()
+            .map(|output| {
+                Path::new(&paths[&output.key()])
+                    .parent()
+                    .and_then(|path| path.to_str())
+                    .filter(|path| !path.is_empty())
+                    .unwrap_or(".")
+                    .to_owned()
+            })
+            .collect();
+        for parent in parents {
+            writeln!(script, "mkdir -p -- {}", shell_path(&parent)).unwrap();
+        }
+        for verification in verifications
+            .get(job.operation.as_str())
+            .into_iter()
+            .flatten()
+        {
+            let check = render_command(&verification.template, operation, job, &paths)?;
+            writeln!(script, "spit_verify {} {check}", job.id).unwrap();
+        }
         writeln!(
             script,
             "{}",
             render_command(&command.template, operation, job, &paths)?
         )
         .unwrap();
-        writeln!(script, "spit_require {}\n", shell_path(output_path)).unwrap();
+        for output in &job.outputs {
+            writeln!(script, "spit_require {}", shell_path(&paths[&output.key()])).unwrap();
+        }
+        script.push('\n');
     }
     Ok(script)
 }
 
 /// Check every declared command against its operation without resolving jobs:
-/// the template must parse, name only known placeholders, and write `{output}`.
+/// the template must parse, name only known placeholders, and write every
+/// output; a `verify` command may read inputs only.
 pub fn validate_commands(pipeline: &Pipeline) -> Result<(), BashError> {
     let lines = SourceMap::default();
     match collect_commands(pipeline, &lines, &BTreeSet::new())
@@ -179,16 +212,21 @@ pub(crate) fn collect_commands(
             );
             continue;
         };
-        if operation.inputs.iter().any(|port| port.name == "output") {
+        if let Some(port) = operation.inputs.iter().find(|port| {
+            operation
+                .outputs
+                .iter()
+                .any(|output| output.name == port.name)
+        }) {
             errors.push(
                 error(format!(
-                    "operation `{}` has an input port named `output`, which shadows `{{output}}`",
-                    operation.name
+                    "operation `{}` has an input port named `{}`, which shadows `{{{}}}`",
+                    operation.name, port.name, port.name
                 ))
                 .at(line.clone())
                 .focus(&command.operation),
             );
-        } else if !seen.insert(command.operation.as_str()) {
+        } else if command.role == CommandRole::Run && !seen.insert(command.operation.as_str()) {
             errors.push(
                 error(format!(
                     "duplicate command for operation `{}`",
@@ -197,7 +235,9 @@ pub(crate) fn collect_commands(
                 .at(line)
                 .focus(&command.operation),
             );
-        } else if let Err(e) = check_command_placeholders(&command.template, operation) {
+        } else if let Err(e) =
+            check_command_placeholders(&command.template, operation, command.role)
+        {
             errors.push(e.at(line));
         }
     }
@@ -216,11 +256,33 @@ pub(crate) fn check_command_syntax(template: &str) -> Result<(), BashError> {
     Ok(())
 }
 
-fn check_command_placeholders(template: &str, operation: &OperationDef) -> Result<(), BashError> {
+/// What a placeholder in a command refers to.
+enum Slot {
+    Input(usize),
+    Output(usize),
+}
+
+fn slot(operation: &OperationDef, name: &str) -> Option<Slot> {
+    if let Some(index) = operation.inputs.iter().position(|port| port.name == name) {
+        return Some(Slot::Input(index));
+    }
+    if let Some(index) = operation.outputs.iter().position(|port| port.name == name) {
+        return Some(Slot::Output(index));
+    }
+    // `{inputs}` names an operation's only input when that is a many input.
+    match operation.inputs.as_slice() {
+        [port] if port.cardinality == Cardinality::Many && name == "inputs" => Some(Slot::Input(0)),
+        _ => None,
+    }
+}
+
+fn check_command_placeholders(
+    template: &str,
+    operation: &OperationDef,
+    role: CommandRole,
+) -> Result<(), BashError> {
     check_command_syntax(template)?;
-    let single_many =
-        operation.inputs.len() == 1 && operation.inputs[0].cardinality == Cardinality::Many;
-    let mut uses_output = false;
+    let mut written = BTreeSet::new();
     for word in split_words(template)? {
         let parts = parse_template(&word).map_err(error)?;
         let whole = parts.len() == 1;
@@ -228,35 +290,48 @@ fn check_command_placeholders(template: &str, operation: &OperationDef) -> Resul
             let Part::Placeholder(name) = part else {
                 continue;
             };
-            if name == "output" {
-                uses_output = true;
-                continue;
-            }
-            let port = operation
-                .inputs
-                .iter()
-                .find(|port| port.name == name)
-                .or_else(|| (single_many && name == "inputs").then(|| &operation.inputs[0]))
-                .ok_or_else(|| {
-                    error(format!(
-                        "command for `{}` uses unknown placeholder `{{{name}}}`",
-                        operation.name
-                    ))
-                    .focus(format!("{{{name}}}"))
-                })?;
-            if port.cardinality == Cardinality::Many && !whole {
-                return Err(error(format!(
-                    "many input `{{{name}}}` must be a complete command argument"
+            let unknown = || {
+                error(format!(
+                    "command for `{}` uses unknown placeholder `{{{name}}}`",
+                    operation.name
                 ))
-                .focus(format!("{{{name}}}")));
+                .focus(format!("{{{name}}}"))
+            };
+            match slot(operation, &name).ok_or_else(unknown)? {
+                Slot::Output(index) => {
+                    if role == CommandRole::Verify {
+                        return Err(error(format!(
+                            "verify for `{}` cannot use output `{{{name}}}`, which does not exist until the command runs",
+                            operation.name
+                        ))
+                        .focus(format!("{{{name}}}")));
+                    }
+                    written.insert(index);
+                }
+                Slot::Input(index) => {
+                    if operation.inputs[index].cardinality == Cardinality::Many && !whole {
+                        return Err(error(format!(
+                            "many input `{{{name}}}` must be a complete command argument"
+                        ))
+                        .focus(format!("{{{name}}}")));
+                    }
+                }
             }
         }
     }
-    if !uses_output {
-        return Err(error(format!(
-            "command for `{}` must use `{{output}}`",
-            operation.name
-        )));
+    if role == CommandRole::Run {
+        if let Some(port) = operation
+            .outputs
+            .iter()
+            .enumerate()
+            .find(|(index, _)| !written.contains(index))
+            .map(|(_, port)| port)
+        {
+            return Err(error(format!(
+                "command for `{}` must use `{{{}}}`",
+                operation.name, port.name
+            )));
+        }
     }
     Ok(())
 }
@@ -272,78 +347,51 @@ fn render_command(
         return Err(error(format!("command for `{}` is empty", operation.name)));
     }
     let mut args = Vec::new();
-    let mut uses_output = false;
     for word in words {
         let parts = parse_template(&word).map_err(error)?;
         if let [Part::Placeholder(name)] = parts.as_slice() {
-            if let Some(artifacts) = many_input(operation, job, name) {
-                for artifact in artifacts {
-                    args.push(shell_path(&paths[&artifact.key()]));
+            if let Some(Slot::Input(index)) = slot(operation, name) {
+                if operation.inputs[index].cardinality == Cardinality::Many {
+                    for artifact in &job.inputs[index] {
+                        args.push(shell_path(&paths[&artifact.key()]));
+                    }
+                    continue;
                 }
-                continue;
             }
         }
         let mut arg = String::new();
         for part in parts {
             match part {
                 Part::Literal(value) => arg.push_str(&shell_quote(&value)),
-                Part::Placeholder(name) if name == "output" => {
-                    uses_output = true;
-                    arg.push_str(&shell_path(&paths[&job.output.key()]));
-                }
                 Part::Placeholder(name) => {
-                    if name == "inputs" && many_input(operation, job, &name).is_some() {
-                        return Err(error(
-                            "many input `{inputs}` must be a complete command argument",
-                        ));
-                    }
-                    let index = operation
-                        .inputs
-                        .iter()
-                        .position(|port| port.name == name)
-                        .ok_or_else(|| {
-                            error(format!(
+                    let artifact = match slot(operation, &name) {
+                        Some(Slot::Output(index)) => job.outputs.get(index),
+                        Some(Slot::Input(index)) => {
+                            if operation.inputs[index].cardinality == Cardinality::Many {
+                                return Err(error(format!(
+                                    "many input `{{{name}}}` must be a complete command argument"
+                                )));
+                            }
+                            job.inputs
+                                .get(index)
+                                .and_then(|artifacts| artifacts.first())
+                        }
+                        None => {
+                            return Err(error(format!(
                                 "command for `{}` uses unknown placeholder `{{{name}}}`",
                                 operation.name
-                            ))
-                        })?;
-                    if operation.inputs[index].cardinality == Cardinality::Many {
-                        return Err(error(format!(
-                            "many input `{{{name}}}` must be a complete command argument"
-                        )));
-                    }
-                    let artifact = job
-                        .inputs
-                        .get(index)
-                        .ok_or_else(|| error(format!("job {} lacks input `{name}`", job.id)))?;
+                            )))
+                        }
+                    };
+                    let artifact = artifact
+                        .ok_or_else(|| error(format!("job {} lacks `{{{name}}}`", job.id)))?;
                     arg.push_str(&shell_path(&paths[&artifact.key()]));
                 }
             }
         }
         args.push(arg);
     }
-    if !uses_output {
-        return Err(error(format!(
-            "command for `{}` must use `{{output}}`",
-            operation.name
-        )));
-    }
     Ok(args.join(" "))
-}
-
-fn many_input<'a>(
-    operation: &OperationDef,
-    job: &'a Job,
-    name: &str,
-) -> Option<&'a [ArtifactInstance]> {
-    if operation.inputs.len() == 1
-        && operation.inputs[0].cardinality == Cardinality::Many
-        && (name == operation.inputs[0].name || name == "inputs")
-    {
-        Some(&job.inputs)
-    } else {
-        None
-    }
 }
 
 fn shell_path(relative: &str) -> String {

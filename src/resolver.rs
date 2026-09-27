@@ -1,10 +1,11 @@
+use std::cmp::Reverse;
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::error::{DefinitionSubject, ResolveError};
+use crate::error::{DefinitionSubject, ResolveError, TypeConflict};
 use crate::model::{
     ArtifactInstance, ArtifactKey, Cardinality, CountRequirement, CoverageRule, EntityBinding,
-    InputBinding, Invocation, Job, OperationDef, Pipeline, ProductDef, ResolvedDag, ShapeRule,
-    SourceInventory,
+    InputBinding, InputPort, Invocation, Job, OperationDef, Pipeline, ProductDef, ResolvedDag,
+    ShapeRule, SourceInventory,
 };
 use crate::types::{Substitutions, TypeExpr, TypeUnifyError};
 
@@ -15,8 +16,10 @@ struct CheckedPipeline<'a> {
     producers: BTreeMap<String, usize>,
     /// Invocation indices with every producer before its consumers.
     order: Vec<usize>,
-    /// The statically inferred output type of each checked step.
+    /// The statically inferred type of each checked step's outputs.
     inferred_types: BTreeMap<String, TypeExpr>,
+    /// How each checked step, by invocation index, shapes its jobs.
+    shapes: BTreeMap<usize, StepShape>,
 }
 
 /// Every pipeline error, plus the names that failed or depend on a failure.
@@ -77,28 +80,33 @@ pub(crate) fn collect_pipeline(pipeline: &Pipeline) -> PipelineCheck<'_> {
     // on whether an inventory happens to contain concrete source artifacts.
     // A step that fails, or uses something that failed, quiets its consumers.
     let mut inferred_types = BTreeMap::new();
+    let mut shapes = BTreeMap::new();
     for &index in &order {
         let invocation = &pipeline.invocations[index];
         let depends_on_failure = poisoned.contains(&invocation.operation)
-            || poisoned.contains(&invocation.output_product)
+            || invocation
+                .outputs
+                .iter()
+                .any(|output| poisoned.contains(output))
             || invocation
                 .inputs
                 .iter()
                 .any(|input| poisoned.contains(input.product_name()));
         if depends_on_failure {
-            poisoned.insert(invocation.output_product.clone());
+            poisoned.extend(invocation.outputs.iter().cloned());
             continue;
         }
         match validate_invocation(invocation, &products, &operations, &inferred_types) {
-            Ok(inferred) => {
-                inferred_types.insert(invocation.output_product.clone(), inferred);
+            Ok((inferred, shape)) => {
+                inferred_types.extend(invocation.outputs.iter().cloned().zip(inferred));
+                shapes.insert(index, shape);
             }
             Err(error) => {
                 errors.push((
-                    DefinitionSubject::Invocation(invocation.output_product.clone()),
+                    DefinitionSubject::Invocation(invocation.output_product().to_owned()),
                     error,
                 ));
-                poisoned.insert(invocation.output_product.clone());
+                poisoned.extend(invocation.outputs.iter().cloned());
             }
         }
     }
@@ -122,6 +130,7 @@ pub(crate) fn collect_pipeline(pipeline: &Pipeline) -> PipelineCheck<'_> {
             producers,
             order,
             inferred_types,
+            shapes,
         },
         errors,
         poisoned,
@@ -138,6 +147,7 @@ pub fn resolve(
         producers,
         order,
         inferred_types,
+        shapes,
     } = check_pipeline(pipeline)?;
     let mut artifacts: BTreeMap<String, Vec<ArtifactInstance>> = BTreeMap::new();
     let mut artifact_producers: BTreeMap<ArtifactKey, usize> = BTreeMap::new();
@@ -180,8 +190,8 @@ pub fn resolve(
             .or_default()
             .push(source);
     }
-    for family in artifacts.values_mut() {
-        family.sort();
+    for (name, family) in &mut artifacts {
+        sort_family(family, products[name.as_str()]);
     }
     for (rule_index, rule) in pipeline.constraints.iter().enumerate() {
         validate_coverage(rule_index, rule, inventory, &artifacts)?;
@@ -198,50 +208,50 @@ pub fn resolve(
     for index in order {
         let invocation = &pipeline.invocations[index];
         let operation = operations[invocation.operation.as_str()];
-        let output_def = products[invocation.output_product.as_str()];
         // Every artifact in a family has the same type, so the type inferred
-        // statically for the invocation is the type of each job's output.
-        let output_type = &inferred_types[&invocation.output_product];
-        let jobs = match &operation.shape_rule {
-            ShapeRule::Preserve => expand_preserve(
-                invocation,
-                operation,
-                output_def,
-                output_type,
-                &artifacts,
-                &artifact_producers,
-                dag.jobs.len(),
-            )?,
-            ShapeRule::Aggregate => expand_aggregate(
-                invocation,
-                operation,
-                output_def,
-                output_type,
-                &artifacts,
-                &artifact_producers,
-                dag.jobs.len(),
-            ),
-        };
-
+        // statically for each output is the type of each job's artifact.
+        let outputs: Vec<_> = invocation
+            .outputs
+            .iter()
+            .map(|name| (products[name.as_str()], &inferred_types[name]))
+            .collect();
+        let jobs = expand_step(
+            invocation,
+            operation,
+            &shapes[&index],
+            &outputs,
+            &artifacts,
+            &artifact_producers,
+            dag.jobs.len(),
+        )?;
         for job in jobs {
-            let key = job.output.key();
-            if !seen.insert(key.clone()) {
-                return Err(ResolveError::DuplicateOutputArtifact {
-                    artifact: job.output,
-                });
+            for output in &job.outputs {
+                let key = output.key();
+                if !seen.insert(key.clone()) {
+                    return Err(ResolveError::DuplicateOutputArtifact {
+                        artifact: output.clone(),
+                    });
+                }
+                artifact_producers.insert(key, job.id);
+                artifacts
+                    .entry(output.product.clone())
+                    .or_default()
+                    .push(output.clone());
             }
-            artifact_producers.insert(key, job.id);
-            artifacts
-                .entry(job.output.product.clone())
-                .or_default()
-                .push(job.output.clone());
             dag.jobs.push(job);
         }
-        if let Some(family) = artifacts.get_mut(&invocation.output_product) {
-            family.sort();
+        for (product, _) in &outputs {
+            if let Some(family) = artifacts.get_mut(&product.name) {
+                sort_family(family, product);
+            }
         }
     }
     Ok(dag)
+}
+
+/// Order a family by its declared dimensions, reading numbers as numbers.
+fn sort_family(family: &mut [ArtifactInstance], product: &ProductDef) {
+    family.sort_by(|left, right| left.entities.cmp_in(&right.entities, &product.dimensions));
 }
 
 fn check_coverage_rule(
@@ -272,6 +282,17 @@ fn check_coverage_rule(
             ),
         });
     }
+    for dimension in rule.values.keys() {
+        if !product.dimensions.contains(dimension) || group_by.contains(dimension) {
+            return Err(ResolveError::InvalidDefinition {
+                subject: DefinitionSubject::Constraint(rule_index),
+                detail: format!(
+                    "coverage rule for `{}` requires values of `{dimension}`, which must be a dimension of that product outside its groups",
+                    rule.product
+                ),
+            });
+        }
+    }
     Ok(())
 }
 
@@ -285,13 +306,14 @@ fn validate_coverage(
         .contexts
         .iter()
         .chain(inventory.artifacts.iter().map(|record| &record.entities))
-        .filter_map(|binding| project(binding, &rule.group_by))
+        .filter_map(|binding| binding.project(&rule.group_by))
         .collect();
     for context in groups {
-        let found = family(artifacts, &rule.product)
+        let members: Vec<_> = family(artifacts, &rule.product)
             .iter()
-            .filter(|artifact| project(&artifact.entities, &rule.group_by) == Some(context.clone()))
-            .count();
+            .filter(|artifact| artifact.entities.project(&rule.group_by).as_ref() == Some(&context))
+            .collect();
+        let found = members.len();
         let valid = match rule.count {
             CountRequirement::Exactly(expected) => found == expected,
             CountRequirement::AtLeast(minimum) => found >= minimum,
@@ -305,21 +327,24 @@ fn validate_coverage(
                 found,
             });
         }
+        for (dimension, values) in &rule.values {
+            let missing = values.iter().find(|value| {
+                !members
+                    .iter()
+                    .any(|artifact| artifact.entities.0.get(dimension) == Some(*value))
+            });
+            if let Some(value) = missing {
+                return Err(ResolveError::MissingRequiredValue {
+                    product: rule.product.clone(),
+                    rule_index,
+                    context,
+                    dimension: dimension.clone(),
+                    value: value.clone(),
+                });
+            }
+        }
     }
     Ok(())
-}
-
-fn project(binding: &EntityBinding, dimensions: &[String]) -> Option<EntityBinding> {
-    let values = dimensions
-        .iter()
-        .map(|dimension| {
-            binding
-                .0
-                .get(dimension)
-                .map(|value| (dimension.clone(), value.clone()))
-        })
-        .collect::<Option<BTreeMap<_, _>>>()?;
-    Some(EntityBinding(values))
 }
 
 /// Index valid products by name; the first of several same-named ones wins.
@@ -337,7 +362,7 @@ fn index_products<'a>(
             // input that already failed would only be reported again.
             let inherited = invocations
                 .iter()
-                .filter(|invocation| invocation.output_product == product.name)
+                .filter(|invocation| invocation.outputs.contains(&product.name))
                 .flat_map(|invocation| &invocation.inputs)
                 .any(|input| poisoned.contains(input.product_name()));
             if !inherited {
@@ -418,23 +443,57 @@ fn index_operations<'a>(
 }
 
 fn check_operation(operation: &OperationDef) -> Result<(), ResolveError> {
-    if operation.name.is_empty() || !operation.output_type.is_valid() {
-        return Err(ResolveError::InvalidDefinition {
-            subject: DefinitionSubject::Operation(operation.name.clone()),
-            detail: "operation names and output types must not be empty".to_owned(),
-        });
+    let invalid = |detail: String| ResolveError::InvalidDefinition {
+        subject: DefinitionSubject::Operation(operation.name.clone()),
+        detail,
+    };
+    if operation.name.is_empty()
+        || operation.outputs.is_empty()
+        || operation
+            .outputs
+            .iter()
+            .any(|port| port.name.is_empty() || !port.artifact_type.is_valid())
+    {
+        return Err(invalid(
+            "operation names and output types must not be empty".to_owned(),
+        ));
     }
-    let ports: BTreeSet<_> = operation.inputs.iter().map(|port| &port.name).collect();
-    if ports.len() != operation.inputs.len()
+    let mut names: BTreeSet<_> = operation.inputs.iter().map(|port| &port.name).collect();
+    if names.len() != operation.inputs.len()
         || operation
             .inputs
             .iter()
             .any(|port| port.name.is_empty() || !port.artifact_type.is_valid())
     {
-        return Err(ResolveError::InvalidDefinition {
-            subject: DefinitionSubject::Operation(operation.name.clone()),
-            detail: format!("operation `{}` has invalid input ports", operation.name),
-        });
+        return Err(invalid(format!(
+            "operation `{}` has invalid input ports",
+            operation.name
+        )));
+    }
+    for port in &operation.outputs {
+        if !names.insert(&port.name) {
+            return Err(invalid(format!(
+                "operation `{}` has more than one port named `{}`",
+                operation.name, port.name
+            )));
+        }
+    }
+    let many = operation
+        .inputs
+        .iter()
+        .filter(|port| port.cardinality == Cardinality::Many)
+        .count();
+    if many > 1 {
+        return Err(invalid(format!(
+            "operation `{}` has more than one many input; a job groups one collection",
+            operation.name
+        )));
+    }
+    if operation.minimum_collection == Some(0) {
+        return Err(invalid(format!(
+            "operation `{}` needs `@ min(count)` of at least 1",
+            operation.name
+        )));
     }
     Ok(())
 }
@@ -448,31 +507,41 @@ fn index_producers(
 ) -> BTreeMap<String, usize> {
     let mut producers = BTreeMap::new();
     for (index, invocation) in invocations.iter().enumerate() {
-        let site = DefinitionSubject::Invocation(invocation.output_product.clone());
+        let site = DefinitionSubject::Invocation(invocation.output_product().to_owned());
         if poisoned.contains(&invocation.operation) {
-            poisoned.insert(invocation.output_product.clone());
+            poisoned.extend(invocation.outputs.iter().cloned());
             continue;
         }
-        let known = find_product(products, &invocation.output_product)
-            .and_then(|_| find_operation(operations, &invocation.operation));
+        let known = invocation
+            .outputs
+            .iter()
+            .try_for_each(|output| find_product(products, output).map(|_| ()))
+            .and_then(|()| find_operation(operations, &invocation.operation));
         if let Err(error) = known {
-            if !poisoned.contains(&invocation.output_product) {
+            if !invocation
+                .outputs
+                .iter()
+                .any(|output| poisoned.contains(output))
+            {
                 errors.push((site, error));
             }
-            poisoned.insert(invocation.output_product.clone());
-        } else if producers.contains_key(&invocation.output_product) {
-            errors.push((
-                site,
-                ResolveError::InvalidDefinition {
-                    subject: DefinitionSubject::Invocation(invocation.output_product.clone()),
-                    detail: format!(
-                        "product `{}` has more than one producing invocation",
-                        invocation.output_product
-                    ),
-                },
-            ));
-        } else {
-            producers.insert(invocation.output_product.clone(), index);
+            poisoned.extend(invocation.outputs.iter().cloned());
+            continue;
+        }
+        for output in &invocation.outputs {
+            if producers.contains_key(output) {
+                errors.push((
+                    site.clone(),
+                    ResolveError::InvalidDefinition {
+                        subject: site.clone(),
+                        detail: format!(
+                            "product `{output}` has more than one producing invocation"
+                        ),
+                    },
+                ));
+            } else {
+                producers.insert(output.clone(), index);
+            }
         }
     }
     producers
@@ -502,14 +571,77 @@ fn find_operation<'a>(
         })
 }
 
+/// How one step's inputs shape its jobs, worked out from the pipeline alone.
+#[derive(Clone, Debug)]
+struct StepShape {
+    /// The binding that drives the step: one job per artifact of a preserve
+    /// step's driver, or per group of an aggregate step's many input.
+    driver: usize,
+    /// The dimensions every output takes: each job's context.
+    context: Vec<String>,
+    /// For each binding, the dimensions it is matched to the context on.
+    joins: Vec<Vec<String>>,
+}
+
+/// A binding's product dimensions, less any `where` pins, and whether it
+/// takes many artifacts.
+pub(crate) struct BoundInput<'a> {
+    pub(crate) binding: &'a InputBinding,
+    pub(crate) dimensions: Vec<String>,
+    pub(crate) many: bool,
+}
+
+impl BoundInput<'_> {
+    /// The dimensions this input is matched on when it does not drive.
+    fn joins(&self) -> Vec<String> {
+        self.binding
+            .same
+            .clone()
+            .unwrap_or_else(|| self.dimensions.clone())
+    }
+}
+
+/// The driving input and the dimensions of a step's outputs, or `None`
+/// when no single-artifact input has every dimension the others match on.
+/// The driver is the input with the most dimensions, so the order of an
+/// operation's ports never changes which jobs exist.
+pub(crate) fn step_context(inputs: &[BoundInput<'_>]) -> Option<(usize, Vec<String>)> {
+    if let Some(index) = inputs.iter().position(|input| input.many) {
+        let vary = inputs[index].binding.vary.as_deref();
+        let context = inputs[index]
+            .dimensions
+            .iter()
+            .filter(|dimension| Some(dimension.as_str()) != vary)
+            .cloned()
+            .collect();
+        return Some((index, context));
+    }
+    let covers = |index: usize| {
+        let dimensions = dimension_set(&inputs[index].dimensions);
+        inputs
+            .iter()
+            .enumerate()
+            .filter(|(other, _)| *other != index)
+            .all(|(_, input)| dimension_set(&input.joins()).is_subset(&dimensions))
+    };
+    let index = (0..inputs.len())
+        .filter(|index| inputs[*index].binding.same.is_none() && covers(*index))
+        .min_by_key(|index| (Reverse(inputs[*index].dimensions.len()), *index))?;
+    Some((index, inputs[index].dimensions.clone()))
+}
+
 fn validate_invocation(
     invocation: &Invocation,
     products: &BTreeMap<&str, &ProductDef>,
     operations: &BTreeMap<&str, &OperationDef>,
     inferred_types: &BTreeMap<String, TypeExpr>,
-) -> Result<TypeExpr, ResolveError> {
+) -> Result<(Vec<TypeExpr>, StepShape), ResolveError> {
     let operation = find_operation(operations, &invocation.operation)?;
-    let output = find_product(products, &invocation.output_product)?;
+    let outputs = invocation
+        .outputs
+        .iter()
+        .map(|name| find_product(products, name))
+        .collect::<Result<Vec<_>, _>>()?;
     if invocation.inputs.len() != operation.inputs.len() {
         return Err(unsupported(
             operation,
@@ -520,13 +652,30 @@ fn validate_invocation(
             ),
         ));
     }
+    if invocation.outputs.len() != operation.outputs.len() {
+        let names: Vec<_> = operation
+            .outputs
+            .iter()
+            .map(|port| port.name.as_str())
+            .collect();
+        return Err(unsupported(
+            operation,
+            format!(
+                "expected {} output products ({}), found {}",
+                operation.outputs.len(),
+                names.join(", "),
+                invocation.outputs.len()
+            ),
+        ));
+    }
+    let output_product = invocation.output_product();
     let mut substitutions = Substitutions::default();
     for (port, binding) in operation.inputs.iter().zip(&invocation.inputs) {
         let product = find_product(products, binding.product_name())?;
         unify_port(
             &mut substitutions,
             operation,
-            &invocation.output_product,
+            output_product,
             &port.name,
             &product.name,
             &port.artifact_type,
@@ -535,15 +684,55 @@ fn validate_invocation(
                 .unwrap_or(&product.artifact_type),
         )?;
     }
-    unify_port(
-        &mut substitutions,
-        operation,
-        &invocation.output_product,
-        "output",
-        &output.name,
-        &operation.output_type,
-        &output.artifact_type,
-    )?;
+    for (port, output) in operation.outputs.iter().zip(&outputs) {
+        unify_port(
+            &mut substitutions,
+            operation,
+            output_product,
+            &port.name,
+            &output.name,
+            &port.artifact_type,
+            &output.artifact_type,
+        )?;
+    }
+    let shape = step_shape(invocation, operation, products, &outputs)?;
+    let inferred = operation
+        .outputs
+        .iter()
+        .zip(&outputs)
+        .map(|(port, output)| {
+            let inferred = substitutions
+                .substitute(&port.artifact_type)
+                .erase_variables();
+            if inferred == TypeExpr::Unknown {
+                output.artifact_type.clone()
+            } else {
+                inferred
+            }
+        })
+        .collect();
+    Ok((inferred, shape))
+}
+
+/// Check each binding's selectors against its port and product, then find
+/// the step's driver and the dimensions of its outputs.
+fn step_shape(
+    invocation: &Invocation,
+    operation: &OperationDef,
+    products: &BTreeMap<&str, &ProductDef>,
+    outputs: &[&ProductDef],
+) -> Result<StepShape, ResolveError> {
+    let mut inputs = Vec::new();
+    for (port, binding) in operation.inputs.iter().zip(&invocation.inputs) {
+        let product = find_product(products, binding.product_name())?;
+        check_selectors(operation, port, binding, product)?;
+        inputs.push(BoundInput {
+            binding,
+            dimensions: binding.free_dimensions(&product.dimensions),
+            many: port.cardinality == Cardinality::Many,
+        });
+    }
+    let many_ports = inputs.iter().filter(|input| input.many).count();
     match &operation.shape_rule {
         ShapeRule::Preserve => {
             if operation.aggregated_dimension.is_some() {
@@ -552,108 +741,193 @@ fn validate_invocation(
                     "preserve operation cannot declare a dropped dimension",
                 ));
             }
-            if operation.inputs.is_empty()
-                || operation
-                    .inputs
-                    .iter()
-                    .any(|port| port.cardinality != Cardinality::One)
-                || invocation
-                    .inputs
-                    .iter()
-                    .any(|binding| !matches!(binding, InputBinding::Product(_)))
-            {
+            if operation.minimum_collection.is_some() {
                 return Err(unsupported(
                     operation,
-                    "preserve requires one or more single-artifact ports bound to products",
+                    "`@ min(count)` requires a many input",
                 ));
             }
-            let driver = find_product(products, invocation.inputs[0].product_name())?;
-            let driver_dimensions = dimension_set(&driver.dimensions);
-            if driver_dimensions != dimension_set(&output.dimensions) {
+            if inputs.is_empty() || many_ports != 0 {
                 return Err(unsupported(
                     operation,
-                    format!(
-                        "output `{}` must have the dimensions of driving product `{}`",
-                        output.name, driver.name
-                    ),
+                    "preserve requires one or more single-artifact ports",
                 ));
-            }
-            // A secondary input with a dimension the driver lacks would match
-            // several artifacts per job, which is never a valid binding.
-            for binding in &invocation.inputs[1..] {
-                let input = find_product(products, binding.product_name())?;
-                let extra: Vec<_> = input
-                    .dimensions
-                    .iter()
-                    .filter(|dimension| !driver_dimensions.contains(*dimension))
-                    .map(String::as_str)
-                    .collect();
-                if !extra.is_empty() {
-                    return Err(unsupported(
-                        operation,
-                        format!(
-                            "input `{}` has dimensions absent from driving product `{}`: {}; aggregate them first",
-                            input.name,
-                            driver.name,
-                            extra.join(", ")
-                        ),
-                    ));
-                }
             }
         }
         ShapeRule::Aggregate => {
-            if operation.inputs.len() != 1 || operation.inputs[0].cardinality != Cardinality::Many {
+            if many_ports != 1 {
                 return Err(unsupported(
                     operation,
                     "aggregation requires exactly one many-artifact port",
                 ));
             }
-            let InputBinding::Vary { product, dimension } = &invocation.inputs[0] else {
+        }
+    }
+    let Some((driver, context)) = step_context(&inputs) else {
+        return Err(no_driver(operation, &inputs));
+    };
+    if let Some(dimension) = &inputs[driver].binding.vary {
+        if let Some(declared) = &operation.aggregated_dimension {
+            if declared != dimension {
                 return Err(unsupported(
                     operation,
-                    "aggregation requires an explicit vary(dimension) binding",
+                    format!("declares drop({declared}) but invocation uses vary({dimension})"),
                 ));
-            };
-            if let Some(declared) = &operation.aggregated_dimension {
-                if declared != dimension {
-                    return Err(unsupported(
-                        operation,
-                        format!("declares drop({declared}) but invocation uses vary({dimension})"),
-                    ));
-                }
             }
-            let input = find_product(products, product)?;
-            if !input.dimensions.contains(dimension) {
-                return Err(ResolveError::InvalidAggregationDimension {
-                    product: product.clone(),
-                    dimension: dimension.clone(),
-                });
-            }
-            let expected: BTreeSet<_> = input
-                .dimensions
-                .iter()
-                .filter(|value| *value != dimension)
-                .cloned()
-                .collect();
-            if expected != dimension_set(&output.dimensions) {
+        }
+        // Every other input is matched once per group.
+        let grouped = dimension_set(&context);
+        for (index, input) in inputs.iter().enumerate() {
+            let extra = missing_from(&input.joins(), &grouped);
+            if index != driver && !extra.is_empty() {
                 return Err(unsupported(
                     operation,
                     format!(
-                        "output `{}` must have input dimensions minus `{dimension}`",
-                        output.name
+                        "input `{}` has dimensions absent from the groups of `{}` @ vary({dimension}): {}; aggregate them first, pin them with `@ where(...)`, or match on fewer with `@ same(...)`",
+                        input.binding.product,
+                        inputs[driver].binding.product,
+                        extra.join(", ")
                     ),
                 ));
             }
         }
     }
-    let inferred = substitutions
-        .substitute(&operation.output_type)
-        .erase_variables();
-    if inferred == TypeExpr::Unknown {
-        Ok(output.artifact_type.clone())
-    } else {
-        Ok(inferred)
+    let expected = dimension_set(&context);
+    for output in outputs {
+        if dimension_set(&output.dimensions) != expected {
+            let detail = match &inputs[driver].binding.vary {
+                Some(dimension) => format!(
+                    "output `{}` must have input dimensions minus `{dimension}`",
+                    output.name
+                ),
+                None => format!(
+                    "output `{}` must have the dimensions of driving product `{}`: [{}]",
+                    output.name,
+                    inputs[driver].binding.product,
+                    context.join(", ")
+                ),
+            };
+            return Err(unsupported(operation, detail));
+        }
     }
+    let joins = inputs
+        .iter()
+        .enumerate()
+        .map(|(index, input)| {
+            if index == driver {
+                input.dimensions.clone()
+            } else {
+                input.joins()
+            }
+        })
+        .collect();
+    Ok(StepShape {
+        driver,
+        context,
+        joins,
+    })
+}
+
+fn check_selectors(
+    operation: &OperationDef,
+    port: &InputPort,
+    binding: &InputBinding,
+    product: &ProductDef,
+) -> Result<(), ResolveError> {
+    let selector_error = |detail: String| unsupported(operation, detail);
+    for dimension in binding.pinned.keys() {
+        if !product.dimensions.contains(dimension) {
+            return Err(selector_error(format!(
+                "`@ where({dimension}=...)`: product `{}` has no dimension `{dimension}`",
+                product.name
+            )));
+        }
+    }
+    let free = binding.free_dimensions(&product.dimensions);
+    match port.cardinality {
+        Cardinality::Many => {
+            let Some(dimension) = &binding.vary else {
+                return Err(selector_error(format!(
+                    "many input `{}` requires an explicit vary(dimension) binding",
+                    port.name
+                )));
+            };
+            if !free.contains(dimension) {
+                return Err(ResolveError::InvalidAggregationDimension {
+                    product: product.name.clone(),
+                    dimension: dimension.clone(),
+                });
+            }
+            if binding.same.is_some() {
+                return Err(selector_error(format!(
+                    "`@ same(...)` applies to single-artifact inputs, not many input `{}`",
+                    port.name
+                )));
+            }
+        }
+        Cardinality::One => {
+            if binding.vary.is_some() {
+                return Err(selector_error(format!(
+                    "`@ vary(...)` applies to many inputs; input `{}` takes one artifact",
+                    port.name
+                )));
+            }
+            if let Some(same) = &binding.same {
+                if dimension_set(same).len() != same.len() {
+                    return Err(selector_error(format!(
+                        "`@ same(...)` repeats a dimension of `{}`",
+                        product.name
+                    )));
+                }
+                if let Some(dimension) = same.iter().find(|dimension| !free.contains(*dimension)) {
+                    return Err(selector_error(format!(
+                        "`@ same({dimension})`: product `{}` has no unpinned dimension `{dimension}`",
+                        product.name
+                    )));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Explain why no input can drive a preserve step: the input with the most
+/// dimensions lacks some that another input is matched on.
+fn no_driver(operation: &OperationDef, inputs: &[BoundInput<'_>]) -> ResolveError {
+    let Some(driver) = (0..inputs.len())
+        .filter(|index| inputs[*index].binding.same.is_none())
+        .min_by_key(|index| (Reverse(inputs[*index].dimensions.len()), *index))
+    else {
+        return unsupported(
+            operation,
+            "every input uses `@ same(...)`, so none can drive the step",
+        );
+    };
+    let dimensions = dimension_set(&inputs[driver].dimensions);
+    let (input, extra) = inputs
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| *index != driver)
+        .map(|(_, input)| (input, missing_from(&input.joins(), &dimensions)))
+        .find(|(_, extra)| !extra.is_empty())
+        .expect("a driver is missing only when some input has other dimensions");
+    unsupported(
+        operation,
+        format!(
+            "input `{}` has dimensions absent from driving product `{}`: {}; aggregate them first, pin them with `@ where(...)`, or match on fewer with `@ same(...)`",
+            input.binding.product,
+            inputs[driver].binding.product,
+            extra.join(", ")
+        ),
+    )
+}
+
+fn missing_from(dimensions: &[String], available: &BTreeSet<String>) -> Vec<String> {
+    dimensions
+        .iter()
+        .filter(|dimension| !available.contains(*dimension))
+        .cloned()
+        .collect()
 }
 
 fn unify_port(
@@ -677,9 +951,12 @@ fn unify_port(
                 operation: operation.name.clone(),
                 output_product: output_product.to_owned(),
                 port: port.to_owned(),
-                variable,
-                previous: Box::new(previous),
-                required: Box::new(required),
+                product: product.to_owned(),
+                conflict: Box::new(TypeConflict {
+                    variable,
+                    previous,
+                    required,
+                }),
             },
             _ => ResolveError::TypeMismatch {
                 operation: operation.name.clone(),
@@ -721,9 +998,9 @@ fn invocation_order(
                 let start = stack.iter().position(|value| *value == index).unwrap_or(0);
                 let mut products: Vec<_> = stack[start..]
                     .iter()
-                    .map(|value| invocations[*value].output_product.clone())
+                    .map(|value| invocations[*value].output_product().to_owned())
                     .collect();
-                products.push(invocations[index].output_product.clone());
+                products.push(invocations[index].output_product().to_owned());
                 return Err(ResolveError::Cycle { products });
             }
             State::Unvisited => {}
@@ -757,108 +1034,136 @@ fn invocation_order(
     Ok(order)
 }
 
-fn expand_preserve(
+/// Enumerate one step's jobs: one per driving artifact, or per group of the
+/// many input, with every other input matched to that job's context.
+fn expand_step(
     invocation: &Invocation,
     operation: &OperationDef,
-    output_def: &ProductDef,
-    output_type: &TypeExpr,
+    shape: &StepShape,
+    outputs: &[(&ProductDef, &TypeExpr)],
     artifacts: &BTreeMap<String, Vec<ArtifactInstance>>,
     artifact_producers: &BTreeMap<ArtifactKey, usize>,
     existing_jobs: usize,
 ) -> Result<Vec<Job>, ResolveError> {
-    let driver = family(artifacts, invocation.inputs[0].product_name());
-    let mut jobs = Vec::new();
-    for driving_artifact in driver {
-        let mut inputs = vec![driving_artifact.clone()];
-        for (port, binding) in operation.inputs.iter().zip(&invocation.inputs).skip(1) {
-            // Validation guarantees this product's dimensions are a subset of
-            // the driver's, so at most one artifact agrees with the driver.
-            let input = family(artifacts, binding.product_name())
+    let candidates: Vec<Vec<&ArtifactInstance>> = invocation
+        .inputs
+        .iter()
+        .map(|binding| {
+            family(artifacts, binding.product_name())
                 .iter()
-                .find(|candidate| {
-                    candidate
-                        .entities
-                        .matches_shared(&driving_artifact.entities)
+                .filter(|artifact| {
+                    binding
+                        .pinned
+                        .iter()
+                        .all(|(dimension, value)| artifact.entities.0.get(dimension) == Some(value))
                 })
-                .ok_or_else(|| ResolveError::MissingInput {
+                .collect()
+        })
+        .collect();
+    // Families are sorted, so groups keep the order of their first artifact
+    // and each collection is in natural entity order.
+    let mut groups: Vec<(EntityBinding, Vec<ArtifactInstance>)> = Vec::new();
+    let mut group_index: BTreeMap<EntityBinding, usize> = BTreeMap::new();
+    for artifact in &candidates[shape.driver] {
+        let context = artifact
+            .entities
+            .project(&shape.context)
+            .expect("an artifact binds every dimension of its product");
+        let index = *group_index.entry(context.clone()).or_insert_with(|| {
+            groups.push((context, Vec::new()));
+            groups.len() - 1
+        });
+        groups[index].1.push((*artifact).clone());
+    }
+    let driving_port = &operation.inputs[shape.driver];
+    let mut jobs = Vec::new();
+    for (context, driven) in groups {
+        if let Some(minimum) = operation.minimum_collection {
+            if driven.len() < minimum {
+                return Err(ResolveError::CollectionTooSmall {
                     operation: operation.name.clone(),
-                    output_product: invocation.output_product.clone(),
-                    port: port.name.clone(),
-                    context: driving_artifact.entities.clone(),
-                })?;
-            inputs.push(input.clone());
+                    output_product: invocation.output_product().to_owned(),
+                    port: driving_port.name.clone(),
+                    context,
+                    minimum,
+                    found: driven.len(),
+                });
+            }
         }
-        let output = ArtifactInstance {
-            product: output_def.name.clone(),
-            artifact_type: output_type.clone(),
-            entities: driving_artifact.entities.clone(),
-        };
+        let mut inputs = Vec::new();
+        for (index, port) in operation.inputs.iter().enumerate() {
+            if index == shape.driver {
+                inputs.push(driven.clone());
+                continue;
+            }
+            let joins = &shape.joins[index];
+            let matches: Vec<_> = candidates[index]
+                .iter()
+                .filter(|candidate| {
+                    joins.iter().all(|dimension| {
+                        candidate.entities.0.get(dimension) == context.0.get(dimension)
+                    })
+                })
+                .collect();
+            let product = &invocation.inputs[index].product;
+            match matches.as_slice() {
+                [artifact] => inputs.push(vec![(**artifact).clone()]),
+                [] => {
+                    return Err(ResolveError::MissingInput {
+                        operation: operation.name.clone(),
+                        output_product: invocation.output_product().to_owned(),
+                        port: port.name.clone(),
+                        product: product.clone(),
+                        context: Box::new(context),
+                    })
+                }
+                _ => {
+                    return Err(ResolveError::AmbiguousInput {
+                        operation: operation.name.clone(),
+                        output_product: invocation.output_product().to_owned(),
+                        port: port.name.clone(),
+                        product: product.clone(),
+                        context: Box::new(context),
+                    })
+                }
+            }
+        }
+        let outputs = outputs
+            .iter()
+            .map(|(product, artifact_type)| ArtifactInstance {
+                product: product.name.clone(),
+                artifact_type: (*artifact_type).clone(),
+                entities: context.clone(),
+            })
+            .collect();
         jobs.push(make_job(
             existing_jobs + jobs.len() + 1,
             operation,
             inputs,
-            output,
+            outputs,
             artifact_producers,
         ));
     }
     Ok(jobs)
 }
 
-fn expand_aggregate(
-    invocation: &Invocation,
-    operation: &OperationDef,
-    output_def: &ProductDef,
-    output_type: &TypeExpr,
-    artifacts: &BTreeMap<String, Vec<ArtifactInstance>>,
-    artifact_producers: &BTreeMap<ArtifactKey, usize>,
-    existing_jobs: usize,
-) -> Vec<Job> {
-    let InputBinding::Vary { dimension, .. } = &invocation.inputs[0] else {
-        unreachable!("validated aggregation binding")
-    };
-    let mut groups: BTreeMap<EntityBinding, Vec<ArtifactInstance>> = BTreeMap::new();
-    for artifact in family(artifacts, invocation.inputs[0].product_name()) {
-        groups
-            .entry(artifact.entities.without(dimension))
-            .or_default()
-            .push(artifact.clone());
-    }
-    let mut jobs = Vec::new();
-    for (entities, mut inputs) in groups {
-        // Collection arguments follow entity bindings in lexicographic order.
-        inputs.sort_by(|left, right| left.entities.cmp(&right.entities));
-        let output = ArtifactInstance {
-            product: output_def.name.clone(),
-            artifact_type: output_type.clone(),
-            entities,
-        };
-        jobs.push(make_job(
-            existing_jobs + jobs.len() + 1,
-            operation,
-            inputs,
-            output,
-            artifact_producers,
-        ));
-    }
-    jobs
-}
-
 fn make_job(
     id: usize,
     operation: &OperationDef,
-    inputs: Vec<ArtifactInstance>,
-    output: ArtifactInstance,
+    inputs: Vec<Vec<ArtifactInstance>>,
+    outputs: Vec<ArtifactInstance>,
     artifact_producers: &BTreeMap<ArtifactKey, usize>,
 ) -> Job {
     let dependencies: BTreeSet<_> = inputs
         .iter()
+        .flatten()
         .filter_map(|input| artifact_producers.get(&input.key()).copied())
         .collect();
     Job {
         id,
         operation: operation.name.clone(),
         inputs,
-        output,
+        outputs,
         dependencies: dependencies.into_iter().collect(),
     }
 }

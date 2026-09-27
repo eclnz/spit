@@ -7,8 +7,11 @@ use std::path::Path;
 
 use crate::bash::collect_commands;
 use crate::imports::parse_located_document;
+use crate::model::DEFAULT_OUTPUT;
+use crate::model::{CommandRole, ResolvedDag, SourceInventory};
 use crate::parser::{
-    glued_comment, parse_document_with_imports, ParsedDocument, Rule, SourceMap, Step,
+    glued_comment, parse_document_with_imports, InlineInventory, ParsedDocument, Rule, SourceMap,
+    Step,
 };
 use crate::paths::collect_paths;
 use crate::resolver::collect_pipeline;
@@ -171,14 +174,27 @@ impl fmt::Display for Diagnostic {
 /// inventory still allows every other check. Diagnostics are ordered by
 /// line, with at most one error per line.
 pub fn diagnose(text: &str, source_text: Option<&str>) -> Vec<Diagnostic> {
+    let inline = inline_inventory(source_text);
     diagnose_with_parser(text, source_text, |text| {
-        parse_document_with_imports(text, &BTreeMap::new())
+        parse_document_with_imports(text, &BTreeMap::new(), inline)
     })
 }
 
 /// Diagnose a document with its location available for resolving imports.
 pub fn diagnose_at(text: &str, source_text: Option<&str>, path: &Path) -> Vec<Diagnostic> {
-    diagnose_with_parser(text, source_text, |text| parse_located_document(text, path))
+    let inline = inline_inventory(source_text);
+    diagnose_with_parser(text, source_text, |text| {
+        parse_located_document(text, path, inline)
+    })
+}
+
+/// A separate inventory replaces an inline one, which is then not read.
+fn inline_inventory(source_text: Option<&str>) -> InlineInventory {
+    if source_text.is_some() {
+        InlineInventory::Skip
+    } else {
+        InlineInventory::Read
+    }
 }
 
 fn diagnose_with_parser(
@@ -214,21 +230,45 @@ fn diagnose_with_parser(
     let document = document.expect("document parsed without errors");
     let inventory_text = source_text.unwrap_or(text);
     diagnostics.extend(pipeline_diagnostics(&document, text, inventory_text));
+    if let (Some(line), Some(_)) = (document.inventory_line, source_text) {
+        let place = text
+            .lines()
+            .nth(line - 1)
+            .map(|header| Place::new(line, content_columns(header)));
+        diagnostics.push(Diagnostic::new(
+            Severity::Warning,
+            DiagnosticSource::Pipeline,
+            place,
+            "this inline inventory is ignored because a separate inventory was supplied".to_owned(),
+        ));
+    }
     if diagnostics.iter().any(Diagnostic::is_error) {
         return finish(diagnostics, text, source_text);
     }
-    let inventory = external_inventory
-        .or(document.inventory)
-        .unwrap_or_default();
-    if let Err(error) = resolve(&document.pipeline, &inventory) {
-        let (source, place) = error_location(
-            &document.pipeline,
-            &document.lines,
-            &error,
-            inventory_text,
-            source_text.is_some(),
-        );
-        diagnostics.push(Diagnostic::error(source, place, error.to_string()));
+    let supplied = external_inventory.or(document.inventory);
+    let inventory = supplied.clone().unwrap_or_default();
+    match resolve(&document.pipeline, &inventory) {
+        Err(error) => {
+            let (source, place) = error_location(
+                &document.pipeline,
+                &document.lines,
+                &error,
+                inventory_text,
+                source_text.is_some(),
+            );
+            diagnostics.push(Diagnostic::error(source, place, error.to_string()));
+        }
+        // Without an inventory no step is expected to resolve jobs.
+        Ok(dag) => {
+            if let Some(inventory) = &supplied {
+                diagnostics.extend(empty_step_warnings(
+                    &document.pipeline,
+                    &document.lines,
+                    &dag,
+                    inventory,
+                ));
+            }
+        }
     }
     finish(diagnostics, text, source_text)
 }
@@ -373,7 +413,7 @@ fn step_part(pipeline: &Pipeline, step: &Step, output: &str, error: &ResolveErro
     let invocation = pipeline
         .invocations
         .iter()
-        .find(|invocation| invocation.output_product == output);
+        .find(|invocation| invocation.outputs.iter().any(|name| name == output));
     let input_named = |product: &str| {
         let index = invocation?
             .inputs
@@ -382,14 +422,22 @@ fn step_part(pipeline: &Pipeline, step: &Step, output: &str, error: &ResolveErro
         step.input(index)
     };
     let port = |port: &str| {
-        if port == "output" {
-            return Some(step.output());
-        }
-        let invocation = invocation?;
-        let operation = pipeline
-            .operations
+        let operation = invocation.and_then(|invocation| {
+            pipeline
+                .operations
+                .iter()
+                .find(|operation| operation.name == invocation.operation)
+        });
+        let Some(operation) = operation else {
+            return (port == DEFAULT_OUTPUT).then(|| step.output());
+        };
+        if let Some(index) = operation
+            .outputs
             .iter()
-            .find(|operation| operation.name == invocation.operation)?;
+            .position(|output| output.name == port)
+        {
+            return Some(step.output_at(index));
+        }
         let index = operation
             .inputs
             .iter()
@@ -402,7 +450,9 @@ fn step_part(pipeline: &Pipeline, step: &Step, output: &str, error: &ResolveErro
         ResolveError::UnknownOperation { .. } => Some(step.operation()),
         ResolveError::TypeMismatch { port: name, .. }
         | ResolveError::TypeVariableConflict { port: name, .. }
-        | ResolveError::MissingInput { port: name, .. } => port(name),
+        | ResolveError::MissingInput { port: name, .. }
+        | ResolveError::AmbiguousInput { port: name, .. }
+        | ResolveError::CollectionTooSmall { port: name, .. } => port(name),
         ResolveError::InvalidAggregationDimension { product, .. } => input_named(product),
         ResolveError::UnsupportedShapeRelationship { .. } => Some(step.call()),
         _ => Some(step.output()),
@@ -459,7 +509,7 @@ fn warnings(pipeline: &Pipeline, lines: &SourceMap, skip: &BTreeSet<String>) -> 
     let outputs: BTreeSet<_> = pipeline
         .invocations
         .iter()
-        .map(|invocation| invocation.output_product.as_str())
+        .flat_map(|invocation| invocation.outputs.iter().map(String::as_str))
         .collect();
     let inputs: BTreeSet<_> = pipeline
         .invocations
@@ -469,6 +519,7 @@ fn warnings(pipeline: &Pipeline, lines: &SourceMap, skip: &BTreeSet<String>) -> 
     let commands: BTreeSet<_> = pipeline
         .commands
         .iter()
+        .filter(|command| command.role == CommandRole::Run)
         .map(|command| command.operation.as_str())
         .collect();
 
@@ -515,7 +566,12 @@ fn warnings(pipeline: &Pipeline, lines: &SourceMap, skip: &BTreeSet<String>) -> 
             .iter()
             .flat_map(|port| port.artifact_type.variables())
             .collect();
-        for variable in operation.output_type.variables().difference(&bound) {
+        let produced: BTreeSet<_> = operation
+            .outputs
+            .iter()
+            .flat_map(|port| port.artifact_type.variables())
+            .collect();
+        for variable in produced.difference(&bound) {
             warnings.push(warn(
                 place.clone(),
                 format!(
@@ -523,6 +579,101 @@ fn warnings(pipeline: &Pipeline, lines: &SourceMap, skip: &BTreeSet<String>) -> 
                 ),
             ));
         }
+    }
+    warnings
+}
+
+/// Steps that resolve no jobs from a supplied inventory. A source with no
+/// artifacts is reported once, naming the steps it leaves empty; any other
+/// step that is empty although its inputs are not is reported on its own.
+fn empty_step_warnings(
+    pipeline: &Pipeline,
+    lines: &SourceMap,
+    dag: &ResolvedDag,
+    inventory: &SourceInventory,
+) -> Vec<Diagnostic> {
+    let produced: BTreeSet<_> = dag
+        .jobs
+        .iter()
+        .flat_map(|job| &job.outputs)
+        .map(|artifact| artifact.product.as_str())
+        .collect();
+    let observed: BTreeSet<_> = inventory
+        .artifacts
+        .iter()
+        .map(|record| record.product.as_str())
+        .collect();
+    let producers: BTreeMap<_, _> = pipeline
+        .invocations
+        .iter()
+        .flat_map(|invocation| {
+            invocation
+                .outputs
+                .iter()
+                .map(move |output| (output.as_str(), invocation))
+        })
+        .collect();
+    let empty_input = |name: &str| match producers.get(name) {
+        Some(producer) => !produced.contains(producer.output_product()),
+        None => !observed.contains(name),
+    };
+    // The unobserved sources each product depends on.
+    fn unobserved<'a>(
+        name: &'a str,
+        producers: &BTreeMap<&'a str, &'a crate::Invocation>,
+        observed: &BTreeSet<&str>,
+        found: &mut BTreeSet<&'a str>,
+    ) {
+        match producers.get(name) {
+            Some(invocation) => {
+                for input in &invocation.inputs {
+                    unobserved(&input.product, producers, observed, found);
+                }
+            }
+            None if !observed.contains(name) => {
+                found.insert(name);
+            }
+            None => {}
+        }
+    }
+    let mut left_empty: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+    let mut warnings = Vec::new();
+    for invocation in &pipeline.invocations {
+        let step = invocation.output_product();
+        if produced.contains(step) {
+            continue;
+        }
+        let mut sources = BTreeSet::new();
+        for input in &invocation.inputs {
+            unobserved(&input.product, &producers, &observed, &mut sources);
+        }
+        for source in &sources {
+            left_empty.entry(source).or_default().push(step);
+        }
+        if sources.is_empty()
+            && !invocation
+                .inputs
+                .iter()
+                .any(|input| empty_input(&input.product))
+        {
+            warnings.push(Diagnostic::new(
+                Severity::Warning,
+                DiagnosticSource::Pipeline,
+                lines.invocations.get(step).map(Step::output),
+                format!("`{step}` resolves no jobs: its inputs have artifacts, but none match each other or the step's selectors"),
+            ));
+        }
+    }
+    for (source, steps) in left_empty {
+        warnings.push(Diagnostic::new(
+            Severity::Warning,
+            DiagnosticSource::Pipeline,
+            lines.products.get(source).cloned(),
+            format!(
+                "source `{source}` has no artifacts in the inventory, so these steps resolve no jobs: {}",
+                steps.join(", ")
+            ),
+        ));
     }
     warnings
 }
@@ -598,14 +749,16 @@ fn error_location(
             .invocations
             .iter()
             .filter(|invocation| invocation.operation == operation)
-            .filter_map(|invocation| step(&invocation.output_product));
+            .filter_map(|invocation| step(invocation.output_product()));
         let first = matching.next()?;
         matching.next().is_none().then_some(first)
     };
     let pipeline_place = match error {
         ResolveError::TypeMismatch { output_product, .. }
         | ResolveError::TypeVariableConflict { output_product, .. }
-        | ResolveError::MissingInput { output_product, .. } => step(output_product),
+        | ResolveError::MissingInput { output_product, .. }
+        | ResolveError::AmbiguousInput { output_product, .. }
+        | ResolveError::CollectionTooSmall { output_product, .. } => step(output_product),
         ResolveError::UnknownOperation { name } => unique_step(name),
         ResolveError::UnknownProduct { name } => pipeline
             .invocations
@@ -616,22 +769,22 @@ fn error_location(
                     .iter()
                     .any(|binding| binding.product_name() == name)
             })
-            .and_then(|invocation| step(&invocation.output_product))
+            .and_then(|invocation| step(invocation.output_product()))
             .or_else(|| lines.constraints.get(name).map(Rule::product)),
         ResolveError::InvalidAggregationDimension { product, dimension } => pipeline
             .invocations
             .iter()
             .find(|invocation| {
                 invocation.inputs.iter().any(|binding| {
-                    matches!(binding, InputBinding::Vary { product: name, dimension: axis }
-                        if name == product && axis == dimension)
+                    &binding.product == product && binding.vary.as_ref() == Some(dimension)
                 })
             })
-            .and_then(|invocation| step(&invocation.output_product)),
+            .and_then(|invocation| step(invocation.output_product())),
         ResolveError::Cycle { products } => products.first().and_then(|name| step(name)),
         ResolveError::UnsupportedShapeRelationship { operation, .. } => unique_step(operation),
         // Too few or too many artifacts is about the rule as a whole.
-        ResolveError::CoverageViolation { rule_index, .. } => {
+        ResolveError::CoverageViolation { rule_index, .. }
+        | ResolveError::MissingRequiredValue { rule_index, .. } => {
             lines.rules.get(*rule_index).map(Rule::whole)
         }
         ResolveError::DuplicateOutputArtifact { artifact } => step(&artifact.product),

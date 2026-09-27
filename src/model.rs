@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::fmt;
 
@@ -29,6 +30,73 @@ impl EntityBinding {
             .iter()
             .all(|(dimension, value)| other.0.get(dimension).is_none_or(|other| other == value))
     }
+
+    /// Keep only `dimensions`, or `None` if one of them is unbound.
+    pub fn project(&self, dimensions: &[String]) -> Option<Self> {
+        dimensions
+            .iter()
+            .map(|dimension| {
+                let value = self.0.get(dimension)?;
+                Some((dimension.clone(), value.clone()))
+            })
+            .collect::<Option<_>>()
+            .map(Self)
+    }
+
+    /// Compare values dimension by dimension in `dimensions` order, reading
+    /// runs of digits as numbers, so `run=2` sorts before `run=10`.
+    pub fn cmp_in(&self, other: &Self, dimensions: &[String]) -> Ordering {
+        dimensions
+            .iter()
+            .map(
+                |dimension| match (self.0.get(dimension), other.0.get(dimension)) {
+                    (Some(left), Some(right)) => natural_cmp(left, right),
+                    (left, right) => left.cmp(&right),
+                },
+            )
+            .find(|ordering| ordering.is_ne())
+            .unwrap_or_else(|| self.cmp(other))
+    }
+}
+
+/// Order text as people read it: runs of digits compare by numeric value.
+pub fn natural_cmp(left: &str, right: &str) -> Ordering {
+    let (mut left_rest, mut right_rest) = (left, right);
+    loop {
+        match (left_rest.chars().next(), right_rest.chars().next()) {
+            (None, None) => return left.cmp(right),
+            (None, Some(_)) => return Ordering::Less,
+            (Some(_), None) => return Ordering::Greater,
+            (Some(a), Some(b)) if a.is_ascii_digit() && b.is_ascii_digit() => {
+                let (a_digits, a_tail) = split_digits(left_rest);
+                let (b_digits, b_tail) = split_digits(right_rest);
+                let a_number = a_digits.trim_start_matches('0');
+                let b_number = b_digits.trim_start_matches('0');
+                let ordering = a_number
+                    .len()
+                    .cmp(&b_number.len())
+                    .then_with(|| a_number.cmp(b_number));
+                if ordering.is_ne() {
+                    return ordering;
+                }
+                (left_rest, right_rest) = (a_tail, b_tail);
+            }
+            (Some(a), Some(b)) => {
+                if a != b {
+                    return a.cmp(&b);
+                }
+                left_rest = &left_rest[a.len_utf8()..];
+                right_rest = &right_rest[b.len_utf8()..];
+            }
+        }
+    }
+}
+
+fn split_digits(text: &str) -> (&str, &str) {
+    let end = text
+        .find(|character: char| !character.is_ascii_digit())
+        .unwrap_or(text.len());
+    text.split_at(end)
 }
 
 impl fmt::Display for EntityBinding {
@@ -126,35 +194,74 @@ impl InputPort {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ShapeRule {
-    /// The first input drives one output per artifact and preserves its dimensions.
+    /// The input with every dimension the others join on drives one job per
+    /// artifact, and the outputs keep its dimensions.
     Preserve,
-    /// One many-valued input groups by the dimension named in its `vary` binding.
+    /// The one many-valued input groups by the dimension named in its `vary`
+    /// binding; any single-artifact inputs are matched to each group.
     Aggregate,
 }
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OutputPort {
+    pub name: String,
+    pub artifact_type: ArtifactType,
+}
+
+impl OutputPort {
+    pub fn new(name: impl Into<String>, artifact_type: ArtifactType) -> Self {
+        Self {
+            name: name.into(),
+            artifact_type,
+        }
+    }
+}
+
+/// The port name of an operation's only, unnamed output.
+pub const DEFAULT_OUTPUT: &str = "output";
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct OperationDef {
     pub name: String,
     pub inputs: Vec<InputPort>,
-    pub output_type: ArtifactType,
+    /// Every artifact one job writes, in declaration order.
+    pub outputs: Vec<OutputPort>,
     pub shape_rule: ShapeRule,
     /// An optional declared dimension consumed by an aggregate operation.
     pub aggregated_dimension: Option<String>,
+    /// The fewest artifacts the many input accepts in one job.
+    pub minimum_collection: Option<usize>,
 }
 
 impl OperationDef {
+    /// An operation with one output, named `output`.
     pub fn new(
         name: impl Into<String>,
         inputs: Vec<InputPort>,
         output_type: ArtifactType,
         shape_rule: ShapeRule,
     ) -> Self {
+        Self::with_outputs(
+            name,
+            inputs,
+            vec![OutputPort::new(DEFAULT_OUTPUT, output_type)],
+            shape_rule,
+        )
+    }
+
+    pub fn with_outputs(
+        name: impl Into<String>,
+        inputs: Vec<InputPort>,
+        outputs: Vec<OutputPort>,
+        shape_rule: ShapeRule,
+    ) -> Self {
         Self {
             name: name.into(),
             inputs,
-            output_type,
+            outputs,
             shape_rule,
             aggregated_dimension: None,
+            minimum_collection: None,
         }
     }
 
@@ -163,30 +270,71 @@ impl OperationDef {
         self.aggregated_dimension = Some(dimension.into());
         self
     }
+
+    #[must_use]
+    pub fn at_least(mut self, minimum: usize) -> Self {
+        self.minimum_collection = Some(minimum);
+        self
+    }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum InputBinding {
-    Product(String),
-    Vary { product: String, dimension: String },
+/// How a call binds one product to an operation input.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct InputBinding {
+    pub product: String,
+    /// `@ vary(dimension)`: collect the artifacts that differ in this dimension.
+    pub vary: Option<String>,
+    /// `@ where(dimension=value, ...)`: keep only artifacts with these values.
+    /// A pinned dimension no longer takes part in matching.
+    pub pinned: BTreeMap<String, String>,
+    /// `@ same(dimension, ...)`: match the job on these dimensions only. Any
+    /// other dimension must leave exactly one artifact for each job.
+    pub same: Option<Vec<String>>,
 }
 
 impl InputBinding {
     pub fn product(name: impl Into<String>) -> Self {
-        Self::Product(name.into())
+        Self {
+            product: name.into(),
+            ..Self::default()
+        }
     }
 
     pub fn vary(product: impl Into<String>, dimension: impl Into<String>) -> Self {
-        Self::Vary {
-            product: product.into(),
-            dimension: dimension.into(),
+        Self {
+            vary: Some(dimension.into()),
+            ..Self::product(product)
         }
     }
 
+    #[must_use]
+    pub fn pin(mut self, dimension: impl Into<String>, value: impl Into<String>) -> Self {
+        self.pinned.insert(dimension.into(), value.into());
+        self
+    }
+
+    #[must_use]
+    pub fn same_on(mut self, dimensions: impl IntoIterator<Item = impl AsRef<str>>) -> Self {
+        self.same = Some(owned_strings(dimensions));
+        self
+    }
+
     pub fn product_name(&self) -> &str {
-        match self {
-            Self::Product(name) | Self::Vary { product: name, .. } => name,
-        }
+        &self.product
+    }
+
+    /// Whether any `@` selector is present.
+    pub fn has_selectors(&self) -> bool {
+        self.vary.is_some() || !self.pinned.is_empty() || self.same.is_some()
+    }
+
+    /// The product's dimensions that remain after `where` pins some of them.
+    pub fn free_dimensions(&self, dimensions: &[String]) -> Vec<String> {
+        dimensions
+            .iter()
+            .filter(|dimension| !self.pinned.contains_key(*dimension))
+            .cloned()
+            .collect()
     }
 }
 
@@ -195,7 +343,8 @@ pub struct Invocation {
     pub operation: String,
     /// Bindings correspond to operation ports in declaration order.
     pub inputs: Vec<InputBinding>,
-    pub output_product: String,
+    /// Products, one per operation output port in declaration order.
+    pub outputs: Vec<String>,
 }
 
 impl Invocation {
@@ -204,18 +353,42 @@ impl Invocation {
         inputs: Vec<InputBinding>,
         output_product: impl Into<String>,
     ) -> Self {
+        Self::with_outputs(operation, inputs, [output_product])
+    }
+
+    pub fn with_outputs(
+        operation: impl Into<String>,
+        inputs: Vec<InputBinding>,
+        outputs: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Self {
         Self {
             operation: operation.into(),
             inputs,
-            output_product: output_product.into(),
+            outputs: outputs.into_iter().map(Into::into).collect(),
         }
     }
+
+    /// The first output, which names the step in diagnostics.
+    pub fn output_product(&self) -> &str {
+        self.outputs.first().map_or("", String::as_str)
+    }
+}
+
+/// What a command line does for its operation's jobs.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CommandRole {
+    /// Produce the job's outputs.
+    Run,
+    /// Check the job's inputs before it runs, such as their headers or grids;
+    /// a nonzero exit stops the script.
+    Verify,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CommandDef {
     pub operation: String,
     pub template: String,
+    pub role: CommandRole,
 }
 
 impl CommandDef {
@@ -223,6 +396,14 @@ impl CommandDef {
         Self {
             operation: operation.into(),
             template: template.into(),
+            role: CommandRole::Run,
+        }
+    }
+
+    pub fn verify(operation: impl Into<String>, template: impl Into<String>) -> Self {
+        Self {
+            role: CommandRole::Verify,
+            ..Self::new(operation, template)
         }
     }
 }
@@ -283,6 +464,9 @@ pub struct CoverageRule {
     pub product: String,
     pub group_by: Vec<String>,
     pub count: CountRequirement,
+    /// Entity values that must each be present in every group, such as
+    /// `run=1,2`. Each listed dimension is checked on its own.
+    pub values: BTreeMap<String, Vec<String>>,
 }
 
 impl CoverageRule {
@@ -295,7 +479,18 @@ impl CoverageRule {
             product: product.into(),
             group_by: owned_strings(group_by),
             count,
+            values: BTreeMap::new(),
         }
+    }
+
+    #[must_use]
+    pub fn requiring(
+        mut self,
+        dimension: impl Into<String>,
+        values: impl IntoIterator<Item = impl AsRef<str>>,
+    ) -> Self {
+        self.values.insert(dimension.into(), owned_strings(values));
+        self
     }
 }
 
@@ -303,10 +498,24 @@ impl CoverageRule {
 pub struct Job {
     pub id: usize,
     pub operation: String,
-    /// One port may contribute several artifacts for aggregation.
-    pub inputs: Vec<ArtifactInstance>,
-    pub output: ArtifactInstance,
+    /// The artifacts bound to each input port, in port order. A many port
+    /// holds its collection in order; every other port holds one artifact.
+    pub inputs: Vec<Vec<ArtifactInstance>>,
+    /// One artifact per output port, in port order.
+    pub outputs: Vec<ArtifactInstance>,
     pub dependencies: Vec<usize>,
+}
+
+impl Job {
+    /// The first output artifact.
+    pub fn output(&self) -> &ArtifactInstance {
+        &self.outputs[0]
+    }
+
+    /// Every input artifact, in port order.
+    pub fn input_artifacts(&self) -> impl Iterator<Item = &ArtifactInstance> {
+        self.inputs.iter().flatten()
+    }
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]

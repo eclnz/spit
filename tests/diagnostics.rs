@@ -295,7 +295,7 @@ fn missing_join_input_points_to_the_call() {
     assert_eq!(issues.len(), 1);
     assert_eq!(issues[0].source, DiagnosticSource::Pipeline);
     assert_eq!(issues[0].line, Some(4));
-    assert!(issues[0].message.contains("missing input `right`"));
+    assert!(issues[0].message.contains("no `reference` artifact for input `right` of `join`"));
 }
 
 #[test]
