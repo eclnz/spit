@@ -276,6 +276,6 @@ pipeline text + source inventory
           Bash script
 ```
 
-The inventory supplies artifact identities; the pipeline supplies operations and rules. Resolution checks dimensions, matching, cardinality, constraints, and any known types. Path binding and command expansion happen afterward. SPIT does not inspect file contents or command-specific metadata itself; `verify` commands run those checks with your own tools. See [architecture](docs/architecture.md) for the internal model.
+The inventory supplies artifact identities; the pipeline supplies operations and rules. Resolution checks dimensions, matching, cardinality, constraints, and any known types. Path binding and command expansion happen afterward. SPIT does not inspect file contents or command-specific metadata itself; `verify` commands run those checks with your own tools. See the [style guide](docs/style-guide.md) for how to compose a pipeline, or [architecture](docs/architecture.md) for the internal model.
 
 Run the test suite with `cargo test`.
