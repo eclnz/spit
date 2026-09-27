@@ -2,6 +2,7 @@ use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::fmt;
 
+use crate::error::ResolveError;
 use crate::types::TypeExpr;
 
 pub type ArtifactType = TypeExpr;
@@ -523,6 +524,50 @@ pub struct ResolvedDag {
     pub jobs: Vec<Job>,
     /// Declaration order is retained for readable dry-run output.
     pub product_dimensions: BTreeMap<String, Vec<String>>,
+}
+
+/// Why a job cannot run.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum Gap {
+    /// The inventory does not supply what an input needs:
+    /// [`ResolveError::MissingInput`], [`ResolveError::AmbiguousInput`], or
+    /// [`ResolveError::CollectionTooSmall`].
+    Unmatched(ResolveError),
+    /// An input artifact is itself incomplete: the output of a job that cannot
+    /// run, or a source held back by a coverage rule.
+    Blocked {
+        port: String,
+        artifact: ArtifactInstance,
+    },
+}
+
+/// A job, and the artifacts it would produce, that cannot run.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct IncompleteJob {
+    pub operation: String,
+    pub outputs: Vec<ArtifactInstance>,
+    pub gaps: Vec<Gap>,
+}
+
+/// A group that fails a coverage rule, and the sources it holds back.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CoverageGap {
+    /// [`ResolveError::CoverageViolation`] or
+    /// [`ResolveError::MissingRequiredValue`].
+    pub error: ResolveError,
+    pub sources: Vec<ArtifactInstance>,
+}
+
+/// Every concrete artifact a pipeline yields from an inventory: the jobs
+/// that can run, and those that cannot with the reasons why.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct ArtifactReport {
+    /// Every source artifact, in product declaration order.
+    pub sources: Vec<ArtifactInstance>,
+    /// The jobs that can run once every incomplete one is left out.
+    pub dag: ResolvedDag,
+    pub incomplete: Vec<IncompleteJob>,
+    pub coverage: Vec<CoverageGap>,
 }
 
 fn owned_strings(values: impl IntoIterator<Item = impl AsRef<str>>) -> Vec<String> {

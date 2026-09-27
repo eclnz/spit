@@ -1,12 +1,89 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write;
 
-use crate::model::{ArtifactInstance, Job, OperationDef, Pipeline, ResolvedDag};
+use crate::model::{
+    ArtifactInstance, ArtifactReport, Gap, Job, OperationDef, Pipeline, ResolvedDag,
+};
 use crate::paths::{bound_paths, error, inspect_paths, PathError};
 use crate::types::TypeExpr;
 
 pub fn render_dag(dag: &ResolvedDag) -> String {
     write_jobs(dag, |_| Ok(None), |_| None).expect("rendering without ports cannot fail")
+}
+
+/// List every artifact that can be produced, then every one that cannot with
+/// the reasons why, then the coverage rules the sources fail.
+pub fn render_artifacts(report: &ArtifactReport) -> String {
+    let dag = &report.dag;
+    let held_back: BTreeSet<_> = report
+        .coverage
+        .iter()
+        .flat_map(|gap| &gap.sources)
+        .collect();
+    let mut complete = Vec::new();
+    for source in &report.sources {
+        if !held_back.contains(source) {
+            complete.push(format!("{}  (source)", render_typed_artifact(dag, source)));
+        }
+    }
+    for job in &dag.jobs {
+        for artifact in &job.outputs {
+            complete.push(format!(
+                "{}  (job {}: {})",
+                render_typed_artifact(dag, artifact),
+                job.id,
+                job.operation
+            ));
+        }
+    }
+    let mut output = String::new();
+    writeln!(output, "Complete artifacts: {}", complete.len()).unwrap();
+    for line in complete {
+        writeln!(output, "  {line}").unwrap();
+    }
+
+    let incomplete: usize = report.incomplete.iter().map(|job| job.outputs.len()).sum();
+    writeln!(output, "\nIncomplete artifacts: {incomplete}").unwrap();
+    for job in &report.incomplete {
+        for artifact in &job.outputs {
+            let rendered = render_typed_artifact(dag, artifact);
+            writeln!(output, "  {rendered}  ({})", job.operation).unwrap();
+        }
+        for gap in &job.gaps {
+            match gap {
+                Gap::Unmatched(error) => writeln!(output, "    - {error}").unwrap(),
+                Gap::Blocked { port, artifact } => {
+                    let reason = if held_back.contains(artifact) {
+                        "a coverage gap holds back"
+                    } else {
+                        "cannot be produced"
+                    };
+                    writeln!(
+                        output,
+                        "    - input `{port}` needs {}, which {reason}",
+                        render_artifact(dag, artifact)
+                    )
+                    .unwrap();
+                }
+            }
+        }
+    }
+
+    if !report.coverage.is_empty() {
+        writeln!(output, "\nCoverage gaps: {}", report.coverage.len()).unwrap();
+        for gap in &report.coverage {
+            writeln!(output, "  {}", gap.error).unwrap();
+            if !gap.sources.is_empty() {
+                let sources: Vec<_> = gap
+                    .sources
+                    .iter()
+                    .map(|source| render_artifact(dag, source))
+                    .collect();
+                writeln!(output, "    holds back: {}", sources.join(", ")).unwrap();
+            }
+        }
+    }
+    output
 }
 
 /// Inspect the resolved jobs and bound paths before expanding any commands.

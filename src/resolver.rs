@@ -3,9 +3,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::error::{DefinitionSubject, ResolveError, TypeConflict};
 use crate::model::{
-    ArtifactInstance, ArtifactKey, Cardinality, CountRequirement, CoverageRule, EntityBinding,
-    InputBinding, InputPort, Invocation, Job, OperationDef, Pipeline, ProductDef, ResolvedDag,
-    ShapeRule, SourceInventory,
+    ArtifactInstance, ArtifactKey, ArtifactReport, Cardinality, CountRequirement, CoverageGap,
+    CoverageRule, EntityBinding, Gap, IncompleteJob, InputBinding, InputPort, Invocation, Job,
+    OperationDef, Pipeline, ProductDef, ResolvedDag, ShapeRule, SourceInventory,
 };
 use crate::types::{Substitutions, TypeExpr, TypeUnifyError};
 
@@ -137,10 +137,45 @@ pub(crate) fn collect_pipeline(pipeline: &Pipeline) -> PipelineCheck<'_> {
     }
 }
 
+/// Resolve the jobs an inventory allows, failing if any one cannot run.
+/// [`resolve_artifacts`] reports every such job instead.
 pub fn resolve(
     pipeline: &Pipeline,
     inventory: &SourceInventory,
 ) -> Result<ResolvedDag, ResolveError> {
+    let report = resolve_artifacts(pipeline, inventory)?;
+    // A blocked job always follows the gap that blocks it, so the first
+    // unmatched gap is the first failure.
+    let unmatched = report
+        .incomplete
+        .into_iter()
+        .flat_map(|job| job.gaps)
+        .filter_map(|gap| match gap {
+            Gap::Unmatched(error) => Some(error),
+            Gap::Blocked { .. } => None,
+        });
+    let failure = report
+        .coverage
+        .into_iter()
+        .map(|gap| gap.error)
+        .chain(unmatched)
+        .next();
+    match failure {
+        Some(error) => Err(error),
+        None => Ok(report.dag),
+    }
+}
+
+/// Resolve every concrete artifact an inventory allows without stopping at a
+/// job that cannot run. Such a job is reported with its gaps, and its outputs
+/// remain candidates for later steps, so a job that needs them is reported as
+/// blocked rather than silently dropped. Sources in a group that fails a
+/// coverage rule are held back in the same way. Fails only when the pipeline
+/// or the inventory is invalid in itself.
+pub fn resolve_artifacts(
+    pipeline: &Pipeline,
+    inventory: &SourceInventory,
+) -> Result<ArtifactReport, ResolveError> {
     let CheckedPipeline {
         products,
         operations,
@@ -193,10 +228,25 @@ pub fn resolve(
     for (name, family) in &mut artifacts {
         sort_family(family, products[name.as_str()]);
     }
-    for (rule_index, rule) in pipeline.constraints.iter().enumerate() {
-        validate_coverage(rule_index, rule, inventory, &artifacts)?;
-    }
+    let coverage: Vec<_> = pipeline
+        .constraints
+        .iter()
+        .enumerate()
+        .flat_map(|(rule_index, rule)| coverage_gaps(rule_index, rule, inventory, &artifacts))
+        .collect();
+    let mut incomplete: BTreeSet<ArtifactKey> = coverage
+        .iter()
+        .flat_map(|gap| &gap.sources)
+        .map(ArtifactInstance::key)
+        .collect();
+    let sources = pipeline
+        .products
+        .iter()
+        .flat_map(|product| family(&artifacts, &product.name))
+        .cloned()
+        .collect();
 
+    let mut incomplete_jobs = Vec::new();
     let mut dag = ResolvedDag {
         jobs: Vec::new(),
         product_dimensions: pipeline
@@ -215,30 +265,46 @@ pub fn resolve(
             .iter()
             .map(|name| (products[name.as_str()], &inferred_types[name]))
             .collect();
-        let jobs = expand_step(
+        let expansions = expand_step(
             invocation,
             operation,
             &shapes[&index],
             &outputs,
             &artifacts,
-            &artifact_producers,
-            dag.jobs.len(),
-        )?;
-        for job in jobs {
-            for output in &job.outputs {
-                let key = output.key();
-                if !seen.insert(key.clone()) {
+            &incomplete,
+        );
+        for expansion in expansions {
+            for output in &expansion.outputs {
+                if !seen.insert(output.key()) {
                     return Err(ResolveError::DuplicateOutputArtifact {
                         artifact: output.clone(),
                     });
                 }
-                artifact_producers.insert(key, job.id);
                 artifacts
                     .entry(output.product.clone())
                     .or_default()
                     .push(output.clone());
             }
-            dag.jobs.push(job);
+            if expansion.gaps.is_empty() {
+                let job = make_job(
+                    dag.jobs.len() + 1,
+                    operation,
+                    expansion.inputs,
+                    expansion.outputs,
+                    &artifact_producers,
+                );
+                for output in &job.outputs {
+                    artifact_producers.insert(output.key(), job.id);
+                }
+                dag.jobs.push(job);
+            } else {
+                incomplete.extend(expansion.outputs.iter().map(ArtifactInstance::key));
+                incomplete_jobs.push(IncompleteJob {
+                    operation: operation.name.clone(),
+                    outputs: expansion.outputs,
+                    gaps: expansion.gaps,
+                });
+            }
         }
         for (product, _) in &outputs {
             if let Some(family) = artifacts.get_mut(&product.name) {
@@ -246,7 +312,12 @@ pub fn resolve(
             }
         }
     }
-    Ok(dag)
+    Ok(ArtifactReport {
+        sources,
+        dag,
+        incomplete: incomplete_jobs,
+        coverage,
+    })
 }
 
 /// Order a family by its declared dimensions, reading numbers as numbers.
@@ -296,55 +367,61 @@ fn check_coverage_rule(
     Ok(())
 }
 
-fn validate_coverage(
+/// Every way each group fails a coverage rule, in group order.
+fn coverage_gaps(
     rule_index: usize,
     rule: &CoverageRule,
     inventory: &SourceInventory,
     artifacts: &BTreeMap<String, Vec<ArtifactInstance>>,
-) -> Result<(), ResolveError> {
+) -> Vec<CoverageGap> {
     let groups: BTreeSet<_> = inventory
         .contexts
         .iter()
         .chain(inventory.artifacts.iter().map(|record| &record.entities))
         .filter_map(|binding| binding.project(&rule.group_by))
         .collect();
+    let mut gaps = Vec::new();
     for context in groups {
         let members: Vec<_> = family(artifacts, &rule.product)
             .iter()
             .filter(|artifact| artifact.entities.project(&rule.group_by).as_ref() == Some(&context))
+            .cloned()
             .collect();
         let found = members.len();
         let valid = match rule.count {
             CountRequirement::Exactly(expected) => found == expected,
             CountRequirement::AtLeast(minimum) => found >= minimum,
         };
+        let mut errors = Vec::new();
         if !valid {
-            return Err(ResolveError::CoverageViolation {
+            errors.push(ResolveError::CoverageViolation {
                 product: rule.product.clone(),
                 rule_index,
-                context,
+                context: context.clone(),
                 expected: rule.count.clone(),
                 found,
             });
         }
         for (dimension, values) in &rule.values {
-            let missing = values.iter().find(|value| {
+            let missing = values.iter().filter(|value| {
                 !members
                     .iter()
                     .any(|artifact| artifact.entities.0.get(dimension) == Some(*value))
             });
-            if let Some(value) = missing {
-                return Err(ResolveError::MissingRequiredValue {
-                    product: rule.product.clone(),
-                    rule_index,
-                    context,
-                    dimension: dimension.clone(),
-                    value: value.clone(),
-                });
-            }
+            errors.extend(missing.map(|value| ResolveError::MissingRequiredValue {
+                product: rule.product.clone(),
+                rule_index,
+                context: context.clone(),
+                dimension: dimension.clone(),
+                value: value.clone(),
+            }));
         }
+        gaps.extend(errors.into_iter().map(|error| CoverageGap {
+            error,
+            sources: members.clone(),
+        }));
     }
-    Ok(())
+    gaps
 }
 
 /// Index valid products by name; the first of several same-named ones wins.
@@ -1034,6 +1111,14 @@ fn invocation_order(
     Ok(order)
 }
 
+/// One job of a step: the artifacts bound to each input, the outputs, and
+/// why the job cannot run. `inputs` is complete only when `gaps` is empty.
+struct Expansion {
+    inputs: Vec<Vec<ArtifactInstance>>,
+    outputs: Vec<ArtifactInstance>,
+    gaps: Vec<Gap>,
+}
+
 /// Enumerate one step's jobs: one per driving artifact, or per group of the
 /// many input, with every other input matched to that job's context.
 fn expand_step(
@@ -1042,9 +1127,8 @@ fn expand_step(
     shape: &StepShape,
     outputs: &[(&ProductDef, &TypeExpr)],
     artifacts: &BTreeMap<String, Vec<ArtifactInstance>>,
-    artifact_producers: &BTreeMap<ArtifactKey, usize>,
-    existing_jobs: usize,
-) -> Result<Vec<Job>, ResolveError> {
+    incomplete: &BTreeSet<ArtifactKey>,
+) -> Vec<Expansion> {
     let candidates: Vec<Vec<&ArtifactInstance>> = invocation
         .inputs
         .iter()
@@ -1076,57 +1160,70 @@ fn expand_step(
         groups[index].1.push((*artifact).clone());
     }
     let driving_port = &operation.inputs[shape.driver];
-    let mut jobs = Vec::new();
+    let mut expansions = Vec::new();
     for (context, driven) in groups {
+        let mut gaps = Vec::new();
         if let Some(minimum) = operation.minimum_collection {
             if driven.len() < minimum {
-                return Err(ResolveError::CollectionTooSmall {
+                gaps.push(Gap::Unmatched(ResolveError::CollectionTooSmall {
                     operation: operation.name.clone(),
                     output_product: invocation.output_product().to_owned(),
                     port: driving_port.name.clone(),
-                    context,
+                    context: context.clone(),
                     minimum,
                     found: driven.len(),
-                });
+                }));
             }
         }
         let mut inputs = Vec::new();
         for (index, port) in operation.inputs.iter().enumerate() {
-            if index == shape.driver {
-                inputs.push(driven.clone());
-                continue;
-            }
-            let joins = &shape.joins[index];
-            let matches: Vec<_> = candidates[index]
-                .iter()
-                .filter(|candidate| {
-                    joins.iter().all(|dimension| {
-                        candidate.entities.0.get(dimension) == context.0.get(dimension)
+            let bound = if index == shape.driver {
+                driven.clone()
+            } else {
+                let joins = &shape.joins[index];
+                let matches: Vec<_> = candidates[index]
+                    .iter()
+                    .filter(|candidate| {
+                        joins.iter().all(|dimension| {
+                            candidate.entities.0.get(dimension) == context.0.get(dimension)
+                        })
                     })
-                })
-                .collect();
-            let product = &invocation.inputs[index].product;
-            match matches.as_slice() {
-                [artifact] => inputs.push(vec![(**artifact).clone()]),
-                [] => {
-                    return Err(ResolveError::MissingInput {
-                        operation: operation.name.clone(),
-                        output_product: invocation.output_product().to_owned(),
-                        port: port.name.clone(),
-                        product: product.clone(),
-                        context: Box::new(context),
-                    })
+                    .collect();
+                let product = &invocation.inputs[index].product;
+                match matches.as_slice() {
+                    [artifact] => vec![(**artifact).clone()],
+                    [] => {
+                        gaps.push(Gap::Unmatched(ResolveError::MissingInput {
+                            operation: operation.name.clone(),
+                            output_product: invocation.output_product().to_owned(),
+                            port: port.name.clone(),
+                            product: product.clone(),
+                            context: Box::new(context.clone()),
+                        }));
+                        continue;
+                    }
+                    _ => {
+                        gaps.push(Gap::Unmatched(ResolveError::AmbiguousInput {
+                            operation: operation.name.clone(),
+                            output_product: invocation.output_product().to_owned(),
+                            port: port.name.clone(),
+                            product: product.clone(),
+                            context: Box::new(context.clone()),
+                        }));
+                        continue;
+                    }
                 }
-                _ => {
-                    return Err(ResolveError::AmbiguousInput {
-                        operation: operation.name.clone(),
-                        output_product: invocation.output_product().to_owned(),
+            };
+            gaps.extend(
+                bound
+                    .iter()
+                    .filter(|artifact| incomplete.contains(&artifact.key()))
+                    .map(|artifact| Gap::Blocked {
                         port: port.name.clone(),
-                        product: product.clone(),
-                        context: Box::new(context),
-                    })
-                }
-            }
+                        artifact: artifact.clone(),
+                    }),
+            );
+            inputs.push(bound);
         }
         let outputs = outputs
             .iter()
@@ -1136,15 +1233,13 @@ fn expand_step(
                 entities: context.clone(),
             })
             .collect();
-        jobs.push(make_job(
-            existing_jobs + jobs.len() + 1,
-            operation,
+        expansions.push(Expansion {
             inputs,
             outputs,
-            artifact_producers,
-        ));
+            gaps,
+        });
     }
-    Ok(jobs)
+    expansions
 }
 
 fn make_job(

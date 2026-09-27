@@ -20,7 +20,7 @@ Live validation in VS Code is maintained in the separate `spit-vscode` repositor
 ## CLI commands and options
 
 ```text
-spit <check|dag|bound-dag|paths|bash|discover|diagnose> <pipeline.spit> [--sources <inventory.spit|->] [--root <directory>] [--strict-paths]
+spit <check|dag|bound-dag|paths|bash|artifacts|discover|diagnose> <pipeline.spit> [--sources <inventory.spit|->] [--root <directory>] [--strict-paths]
 ```
 
 Choose one command per call. The pipeline file comes next; options follow it.
@@ -32,6 +32,7 @@ Choose one command per call. The pipeline file comes next; options follow it.
 | `bound-dag` | Print the resolved DAG with a path for every artifact. |
 | `paths` | Show which path rule covers each product and validate the resulting paths. |
 | `bash` | Write a Bash script for the resolved jobs to standard output. It does not run the script. |
+| `artifacts` | List every concrete artifact the inventory yields: the complete ones, then the incomplete ones with why each cannot be produced. Unlike the other commands, it does not stop at a missing, ambiguous, or too-small input or a coverage gap; see [Find incomplete artifacts](#find-incomplete-artifacts). |
 | `discover` | Print an inventory of the source files under `--root`, found by matching each file against the sources' path rules. |
 | `diagnose` | Read the pipeline from standard input and return JSON diagnostics for editor use. Each has a `severity` of `error` or `warning`; those tied to a declaration, call, rule, command, or path include its `line`, and a `column` and `end_column` for the text it is about, such as one input of a call or one `{placeholder}`. Columns are 1-based and count UTF-16 code units, as editors do; `end_column` is one past the last character. A pipeline path is required for CLI consistency, but its file contents are not read. |
 
@@ -109,6 +110,29 @@ SPIT_ROOT=/path/to/data bash run.sh
 ```
 
 `bound-dag` shows paths before command expansion. The generated script uses `SPIT_ROOT` for relative paths; when unset, it uses the current directory.
+
+### Find incomplete artifacts
+
+Every other command stops at the first job the inventory cannot complete. `artifacts` resolves every job it can and reports the rest:
+
+```sh
+cargo run -- artifacts pipeline.spit --sources inventory.spit
+```
+
+```text
+Complete artifacts: 10
+  scan[subject=01,run=1]  (source)
+  ...
+  merged[subject=01] : Scan  (job 6: merge)
+
+Incomplete artifacts: 2
+  aligned[subject=02,run=1] : Scan  (align)
+    - no `calibration` artifact for input `reference` of `align` at [run=1,subject=02]
+  merged[subject=02] : Scan  (merge)
+    - input `runs` needs aligned[subject=02,run=1], which cannot be produced
+```
+
+An incomplete artifact has a missing or ambiguous input, a collection below its `@ min(count)`, or an input that is itself incomplete, so a gap early in the pipeline is traced through every step that depends on it. A group that fails a `require` rule is listed under `Coverage gaps`, and its sources are held back from every job. A step creates jobs only for the artifacts that drive it, so a context with no driving artifact at all appears only through the coverage gaps and steps that notice it missing. The command succeeds whatever it finds; the complete artifacts are the ones the pipeline could produce from this inventory today.
 
 ## Syntax reference
 
