@@ -139,39 +139,39 @@ fn adding_a_group_to_inventory_expands_the_script() {
 }
 
 #[test]
-fn act_example_generates_valid_bash_for_new_sessions() {
+fn field_survey_generates_valid_bash_for_new_visits() {
     let (pipeline, embedded) =
-        parse_document(include_str!("../examples/commands/mrtrix3_act.spit")).unwrap();
+        parse_document(include_str!("../examples/commands/field_survey.spit")).unwrap();
     assert!(embedded.is_none());
     let inventory =
-        parse_source_inventory(include_str!("../examples/commands/mrtrix3_act.sources")).unwrap();
+        parse_source_inventory(include_str!("../examples/commands/field_survey.sources")).unwrap();
     let dag = resolve(&pipeline, &inventory).unwrap();
     assert_eq!(dag.jobs.len(), 93);
     let script = render_bash(&pipeline, &dag).unwrap();
-    assert!(script.contains("'-fslgrad'"));
-    assert!(script.contains("'-json_import'"));
+    assert!(script.contains("'--pose'"));
+    assert!(script.contains("'--meta'"));
     let import = script
         .lines()
         .find(|line| {
-            line.starts_with("'mrconvert'") && line.contains("dwi_mif/sub=01__ses=01__run=01")
+            line.starts_with("'imgconvert'") && line.contains("photo_img/site=01__visit=01__shot=01")
         })
         .unwrap();
     let positions = [
-        "sub-01_ses-01_run-01_dwi.nii.gz",
-        "'-fslgrad'",
-        "sub-01_ses-01_run-01_dwi.bvec",
-        "sub-01_ses-01_run-01_dwi.bval",
-        "'-json_import'",
-        "sub-01_ses-01_run-01_dwi.json",
+        "site-01_visit-01_shot-01_photo.raw",
+        "'--pose'",
+        "site-01_visit-01_shot-01_photo.gpx",
+        "site-01_visit-01_shot-01_photo.imu",
+        "'--meta'",
+        "site-01_visit-01_shot-01_photo.json",
     ]
     .map(|part| import.find(part).unwrap());
     assert!(positions.windows(2).all(|pair| pair[0] < pair[1]));
-    assert!(script.contains("'dwicat'"));
-    assert!(script.contains("'flirt' '-in'"));
-    assert!(script.contains("'transformconvert'"));
-    assert!(script.contains("'mrtransform'"));
-    assert!(script.contains("'-interp' 'nearest'"));
-    assert!(script.contains("'tck2connectome'"));
+    assert!(script.contains("'imgstack'"));
+    assert!(script.contains("'imgalign' '-in'"));
+    assert!(script.contains("'xfmconvert'"));
+    assert!(script.contains("'imgresample'"));
+    assert!(script.contains("'--interp' 'nearest'"));
+    assert!(script.contains("'yieldtable'"));
     let syntax = Command::new("bash")
         .arg("-n")
         .arg("-c")
@@ -185,35 +185,35 @@ fn act_example_generates_valid_bash_for_new_sessions() {
     );
 
     let inventory = parse_source_inventory(&format!(
-        "{}    raw_dwi[sub=03,ses=01,run=01]\n    raw_dwi[sub=03,ses=01,run=02]\n    dwi_bvec[sub=03,ses=01,run=01]\n    dwi_bvec[sub=03,ses=01,run=02]\n    dwi_bval[sub=03,ses=01,run=01]\n    dwi_bval[sub=03,ses=01,run=02]\n    dwi_json[sub=03,ses=01,run=01]\n    dwi_json[sub=03,ses=01,run=02]\n    reverse_b0[sub=03,ses=01]\n    reverse_b0_json[sub=03,ses=01]\n    t1w[sub=03,ses=01]\n",
-        include_str!("../examples/commands/mrtrix3_act.sources")
+        "{}    raw_photo[site=03,visit=01,shot=01]\n    raw_photo[site=03,visit=01,shot=02]\n    photo_gps[site=03,visit=01,shot=01]\n    photo_gps[site=03,visit=01,shot=02]\n    photo_imu[site=03,visit=01,shot=01]\n    photo_imu[site=03,visit=01,shot=02]\n    photo_json[site=03,visit=01,shot=01]\n    photo_json[site=03,visit=01,shot=02]\n    flat_field[site=03,visit=01]\n    flat_field_json[site=03,visit=01]\n    ground_map[site=03,visit=01]\n",
+        include_str!("../examples/commands/field_survey.sources")
     ))
     .unwrap();
     let expanded = resolve(&pipeline, &inventory).unwrap();
     assert!(expanded.jobs.len() > dag.jobs.len());
     let script = render_bash(&pipeline, &expanded).unwrap();
-    assert!(script.contains("sub-03/ses-01/dwi/sub-03_ses-01_run-01_dwi.nii.gz"));
-    assert!(script.contains("derivatives/weighted_connectome/sub=03__ses=01.csv"));
+    assert!(script.contains("site-03/visit-01/photos/site-03_visit-01_shot-01_photo.raw"));
+    assert!(script.contains("derivatives/yield_table/site=03__visit=01.csv"));
 }
 
 #[test]
 fn path_coverage_exposes_default_fallbacks_and_strict_rejects_them() {
     let (pipeline, _) =
-        parse_document(include_str!("../examples/commands/mrtrix3_act.spit")).unwrap();
+        parse_document(include_str!("../examples/commands/field_survey.spit")).unwrap();
     let coverage = inspect_paths(&pipeline).unwrap();
     assert!(coverage
         .entries
         .iter()
-        .any(|entry| { entry.product == "wm_fod" && matches!(entry.rule, PathRule::Default(_)) }));
+        .any(|entry| { entry.product == "vegetation" && matches!(entry.rule, PathRule::Default(_)) }));
     assert!(coverage.entries.iter().any(|entry| {
-        entry.product == "wm_response" && matches!(entry.rule, PathRule::Explicit(_))
+        entry.product == "photo_response" && matches!(entry.rule, PathRule::Explicit(_))
     }));
     coverage.validate(false).unwrap();
     assert!(coverage
         .validate(true)
         .unwrap_err()
         .to_string()
-        .contains("wm_fod"));
+        .contains("vegetation"));
 }
 
 #[test]
@@ -240,18 +240,18 @@ fn path_coverage_catches_missing_and_invalid_rules_without_jobs() {
 #[test]
 fn bound_dag_shows_port_names_and_paths_without_commands() {
     let (mut pipeline, _) =
-        parse_document(include_str!("../examples/commands/mrtrix3_act.spit")).unwrap();
+        parse_document(include_str!("../examples/commands/field_survey.spit")).unwrap();
     let inventory =
-        parse_source_inventory(include_str!("../examples/commands/mrtrix3_act.sources")).unwrap();
+        parse_source_inventory(include_str!("../examples/commands/field_survey.sources")).unwrap();
     let dag = resolve(&pipeline, &inventory).unwrap();
     pipeline.commands.clear();
     let report = render_bound_dag(&pipeline, &dag).unwrap();
     assert_eq!(report.matches("Job ").count(), 93);
-    assert!(report.contains("moving: t1w[sub=01,ses=01]"));
-    assert!(report.contains("reference: session_b0_nifti[sub=01,ses=01]"));
-    assert!(report.contains("path: derivatives/weighted_connectome/sub=01__ses=01.csv"));
+    assert!(report.contains("moving: ground_map[site=01,visit=01]"));
+    assert!(report.contains("reference: visit_dark_tiff[site=01,visit=01]"));
+    assert!(report.contains("path: derivatives/yield_table/site=01__visit=01.csv"));
 
-    pipeline.product_paths.remove("weighted_connectome");
+    pipeline.product_paths.remove("yield_table");
     pipeline.path_template = None;
     assert!(render_bound_dag(&pipeline, &dag)
         .unwrap_err()
