@@ -12,6 +12,8 @@ pub enum DefinitionSubject {
     Invocation(String),
     /// A coverage rule, by its index in `Pipeline::constraints`.
     Constraint(usize),
+    /// The dimensions a coverage rule groups by, by the rule's index.
+    ConstraintGroup(usize),
     Source(SourceRecord),
     None,
 }

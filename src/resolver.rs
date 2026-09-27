@@ -48,7 +48,12 @@ fn check_pipeline(pipeline: &Pipeline) -> Result<CheckedPipeline<'_>, ResolveErr
 pub(crate) fn collect_pipeline(pipeline: &Pipeline) -> PipelineCheck<'_> {
     let mut errors = Vec::new();
     let mut poisoned = BTreeSet::new();
-    let products = index_products(&pipeline.products, &mut errors, &mut poisoned);
+    let products = index_products(
+        &pipeline.products,
+        &pipeline.invocations,
+        &mut errors,
+        &mut poisoned,
+    );
     let operations = index_operations(&pipeline.operations, &mut errors, &mut poisoned);
     let producers = index_producers(
         &pipeline.invocations,
@@ -102,7 +107,12 @@ pub(crate) fn collect_pipeline(pipeline: &Pipeline) -> PipelineCheck<'_> {
             continue;
         }
         if let Err(error) = check_coverage_rule(index, rule, &products, &producers) {
-            errors.push((DefinitionSubject::Constraint(index), error));
+            // Keep the more specific subject a definition error names.
+            let subject = match &error {
+                ResolveError::InvalidDefinition { subject, .. } => subject.clone(),
+                _ => DefinitionSubject::Constraint(index),
+            };
+            errors.push((subject, error));
         }
     }
     PipelineCheck {
@@ -255,7 +265,7 @@ fn check_coverage_rule(
         || !group_by.is_subset(&dimension_set(&product.dimensions))
     {
         return Err(ResolveError::InvalidDefinition {
-            subject: DefinitionSubject::Constraint(rule_index),
+            subject: DefinitionSubject::ConstraintGroup(rule_index),
             detail: format!(
                 "coverage rule for `{}` must group by distinct dimensions of that product",
                 rule.product
@@ -315,6 +325,7 @@ fn project(binding: &EntityBinding, dimensions: &[String]) -> Option<EntityBindi
 /// Index valid products by name; the first of several same-named ones wins.
 fn index_products<'a>(
     products: &'a [ProductDef],
+    invocations: &[Invocation],
     errors: &mut Vec<(DefinitionSubject, ResolveError)>,
     poisoned: &mut BTreeSet<String>,
 ) -> BTreeMap<&'a str, &'a ProductDef> {
@@ -322,7 +333,16 @@ fn index_products<'a>(
     for product in products {
         let site = DefinitionSubject::Product(product.name.clone());
         if let Err(error) = check_product(product) {
-            errors.push((site, error));
+            // A step's output takes its input's dimensions, so a fault in an
+            // input that already failed would only be reported again.
+            let inherited = invocations
+                .iter()
+                .filter(|invocation| invocation.output_product == product.name)
+                .flat_map(|invocation| &invocation.inputs)
+                .any(|input| poisoned.contains(input.product_name()));
+            if !inherited {
+                errors.push((site, error));
+            }
             poisoned.insert(product.name.clone());
         } else if indexed.contains_key(product.name.as_str()) {
             errors.push((
