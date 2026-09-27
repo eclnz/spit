@@ -7,7 +7,10 @@ use spit::{diagnose, Diagnostic, DiagnosticSource};
 /// The errors among `diagnostics`. These tests pin where errors land;
 /// warnings have their own tests.
 fn errors(diagnostics: Vec<Diagnostic>) -> Vec<Diagnostic> {
-    diagnostics.into_iter().filter(Diagnostic::is_error).collect()
+    diagnostics
+        .into_iter()
+        .filter(Diagnostic::is_error)
+        .collect()
 }
 
 #[test]
@@ -275,7 +278,10 @@ fn source_inventory_errors_point_to_the_source_line() {
     assert_eq!(unknown[0].source, DiagnosticSource::Inventory);
     assert_eq!(unknown[0].line, Some(2));
 
-    let duplicate = errors(diagnose(pipeline, Some("sources:\n  raw[id=x]\n  raw[id=x]\n")));
+    let duplicate = errors(diagnose(
+        pipeline,
+        Some("sources:\n  raw[id=x]\n  raw[id=x]\n"),
+    ));
     assert_eq!(duplicate[0].source, DiagnosticSource::Inventory);
     assert_eq!(duplicate[0].line, Some(3));
 }
@@ -295,7 +301,9 @@ fn missing_join_input_points_to_the_call() {
     assert_eq!(issues.len(), 1);
     assert_eq!(issues[0].source, DiagnosticSource::Pipeline);
     assert_eq!(issues[0].line, Some(4));
-    assert!(issues[0].message.contains("no `reference` artifact for input `right` of `join`"));
+    assert!(issues[0]
+        .message
+        .contains("no `reference` artifact for input `right` of `join`"));
 }
 
 #[test]
@@ -489,7 +497,10 @@ fn cli_json_columns_count_utf16_code_units() {
     let output = child.wait_with_output().unwrap();
     let json = String::from_utf8(output.stdout).unwrap();
     // `é` is two bytes but one UTF-16 code unit, so `résumé` spans 10..16.
-    assert!(json.contains("\"line\":3,\"column\":10,\"end_column\":16"), "{json}");
+    assert!(
+        json.contains("\"line\":3,\"column\":10,\"end_column\":16"),
+        "{json}"
+    );
 }
 
 #[test]

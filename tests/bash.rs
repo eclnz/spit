@@ -153,7 +153,8 @@ fn field_survey_generates_valid_bash_for_new_visits() {
     let import = script
         .lines()
         .find(|line| {
-            line.starts_with("'imgconvert'") && line.contains("photo_img/site=01__visit=01__shot=01")
+            line.starts_with("'imgconvert'")
+                && line.contains("photo_img/site=01__visit=01__shot=01")
         })
         .unwrap();
     let positions = [
@@ -201,10 +202,9 @@ fn path_coverage_exposes_default_fallbacks_and_strict_rejects_them() {
     let (pipeline, _) =
         parse_document(include_str!("../examples/commands/field_survey.spit")).unwrap();
     let coverage = inspect_paths(&pipeline).unwrap();
-    assert!(coverage
-        .entries
-        .iter()
-        .any(|entry| { entry.product == "vegetation" && matches!(entry.rule, PathRule::Default(_)) }));
+    assert!(coverage.entries.iter().any(|entry| {
+        entry.product == "vegetation" && matches!(entry.rule, PathRule::Default(_))
+    }));
     assert!(coverage.entries.iter().any(|entry| {
         entry.product == "photo_response" && matches!(entry.rule, PathRule::Explicit(_))
     }));
@@ -340,16 +340,22 @@ fn commands_are_validated_even_without_resolved_jobs() {
 fn path_rules_that_cannot_separate_artifacts_are_rejected() {
     let check = |text: &str| inspect_paths(&parse_pipeline(text).unwrap()).map(|_| ());
 
-    let error = check("source raw [id, batch]\npath: {product}/{entities}.csv\npath raw: raw/{id}.csv\n")
-        .unwrap_err();
+    let error =
+        check("source raw [id, batch]\npath: {product}/{entities}.csv\npath raw: raw/{id}.csv\n")
+            .unwrap_err();
     assert!(error.message.contains("omits dimension `batch`"), "{error}");
 
-    let error = check("source raw [id]\npath: {entities}.csv\noperation clean(one)\ncleaned = clean(raw)\n")
-        .unwrap_err();
+    let error = check(
+        "source raw [id]\npath: {entities}.csv\noperation clean(one)\ncleaned = clean(raw)\n",
+    )
+    .unwrap_err();
     assert!(error.message.contains("`raw` and `cleaned`"), "{error}");
 
     let error = check("source raw [id]\npath: {product}/{id}/{shard}.csv\n").unwrap_err();
-    assert_eq!(error.to_string(), "path template for `raw` uses absent dimension `shard`");
+    assert_eq!(
+        error.to_string(),
+        "path template for `raw` uses absent dimension `shard`"
+    );
 
     // Rules naming different dimensions are not treated as colliding.
     check("source raw [id]\nsource extra [batch]\npath raw: out/{id}.csv\npath extra: out/{batch}.csv\n")
