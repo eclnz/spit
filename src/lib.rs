@@ -20,10 +20,11 @@ pub use diagnostics::{
 pub use error::{DefinitionSubject, ResolveError, TypeConflict};
 pub use imports::{parse_document_at, parse_pipeline_at};
 pub use model::{
-    natural_cmp, ArtifactInstance, ArtifactKey, ArtifactReport, ArtifactType, Cardinality,
-    CommandDef, CommandRole, CountRequirement, CoverageGap, CoverageRule, EntityBinding, Gap,
-    IncompleteJob, InputBinding, InputPort, Invocation, Job, OperationDef, OutputPort, Pipeline,
-    ProductDef, ResolvedDag, ShapeRule, SourceInventory, SourceRecord, StageDef, DEFAULT_OUTPUT,
+    natural_cmp, stage_and_parents, stage_within, ArtifactInstance, ArtifactKey, ArtifactReport,
+    ArtifactType, Cardinality, CommandDef, CommandRole, CountRequirement, CoverageGap,
+    CoverageRule, EntityBinding, Gap, IncompleteJob, InputBinding, InputPort, Invocation, Job,
+    OperationDef, OutputPort, Pipeline, ProductDef, ResolvedDag, ShapeRule, SourceInventory,
+    SourceRecord, StageDef, DEFAULT_OUTPUT,
 };
 pub use parser::{
     parse_document, parse_pipeline, parse_source_inventory, render_source_inventory, ParseError,

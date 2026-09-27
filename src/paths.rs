@@ -189,12 +189,9 @@ pub(crate) fn collect_paths(
     for product in &pipeline.products {
         let rule = if let Some(template) = pipeline.product_paths.get(&product.name) {
             PathRule::Explicit(template.clone())
-        } else if let Some(template) = pipeline.stage_path_template(&product.name) {
+        } else if let Some((stage, template)) = pipeline.stage_path_rule(&product.name) {
             PathRule::Stage {
-                stage: pipeline
-                    .stage_of(&product.name)
-                    .unwrap_or_default()
-                    .to_owned(),
+                stage: stage.to_owned(),
                 template: template.clone(),
             }
         } else if let Some(template) = &pipeline.path_template {
@@ -406,7 +403,9 @@ fn bind_path(
                     ))
                     .focus("{stage}")
                 })?;
-                relative.push_str(&encode_component(stage));
+                // Each nested stage is a directory.
+                let components: Vec<_> = stage.split('/').map(encode_component).collect();
+                relative.push_str(&components.join("/"));
             }
             Part::Placeholder(name) if name == "entities" => {
                 let bindings = dimensions
