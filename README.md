@@ -20,7 +20,7 @@ Live validation in VS Code is maintained in the separate `spit-vscode` repositor
 ## CLI commands and options
 
 ```text
-spit <check|dag|bash|artifacts|discover|diagnose> <pipeline.spit> [--sources <inventory.spit|->] [--root <directory>] [--paths] [--strict-paths]
+spit <check|dag|bash|artifacts|discover> <pipeline.spit> [--sources <inventory.spit|->] [--root <directory>] [--paths] [--strict-paths] [--json] [--stdin]
 ```
 
 Choose one command per call. The pipeline file comes next; options follow it.
@@ -32,7 +32,6 @@ Choose one command per call. The pipeline file comes next; options follow it.
 | `bash` | Write a Bash script for the resolved jobs to standard output. It does not run the script. |
 | `artifacts` | List every concrete artifact the inventory yields: the complete ones, then the incomplete ones with why each cannot be produced. Unlike the other commands, it does not stop at a missing, ambiguous, or too-small input or a coverage gap; see [Find incomplete artifacts](#find-incomplete-artifacts). |
 | `discover` | Print an inventory of the source files under `--root`, found by matching each file against the sources' path rules. |
-| `diagnose` | Read the pipeline from standard input and return JSON diagnostics for editor use. Each has a `severity` of `error` or `warning`; those tied to a declaration, call, rule, command, or path include its `line`, and a `column` and `end_column` for the text it is about, such as one input of a call or one `{placeholder}`. Columns are 1-based and count UTF-16 code units, as editors do; `end_column` is one past the last character. A pipeline path is required for CLI consistency, but its file contents are not read. |
 
 | Option | Effect |
 | --- | --- |
@@ -40,6 +39,8 @@ Choose one command per call. The pipeline file comes next; options follow it.
 | `--root <directory>` | Check that every required source path points to a regular file under this directory; derived outputs need not exist yet. Without `--sources` or an inline inventory, the sources are discovered under this directory from their path rules. |
 | `--paths` | With `check`, show which path rule covers each product and validate the resulting paths. With `dag`, print a path under every artifact. |
 | `--strict-paths` | Require an explicit `path product:` rule for every product, even if a default `path:` rule exists. |
+| `--json` | With `check`, print the diagnostics as JSON for editor use and stop, succeeding whatever they report. Each has a `severity` of `error` or `warning`; those tied to a declaration, call, rule, command, or path include its `line`, and a `column` and `end_column` for the text it is about, such as one input of a call or one `{placeholder}`. Columns are 1-based and count UTF-16 code units, as editors do; `end_column` is one past the last character. |
+| `--stdin` | Read the pipeline text from standard input instead of the pipeline file, such as an editor's unsaved buffer. The pipeline path is still used to resolve `use` imports. |
 
 For example, `check` resolves the pipeline, while `check --root` also verifies its input files:
 

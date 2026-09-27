@@ -174,6 +174,33 @@ fn paths_flag_applies_to_check_and_dag_only() {
 }
 
 #[test]
+fn json_reads_the_pipeline_file_and_applies_to_check_only() {
+    let run = |command: &str| {
+        Command::new(env!("CARGO_BIN_EXE_spit"))
+            .args([
+                command,
+                "examples/commands/bash_demo.spit",
+                "--sources",
+                "examples/commands/bash_demo.sources",
+                "--json",
+            ])
+            .output()
+            .unwrap()
+    };
+    let check = run("check");
+    assert!(check.status.success());
+    assert_eq!(
+        String::from_utf8(check.stdout).unwrap(),
+        "{\"diagnostics\":[]}\n"
+    );
+    let dag = run("dag");
+    assert!(!dag.status.success());
+    assert!(String::from_utf8(dag.stderr)
+        .unwrap()
+        .contains("--json applies to check"));
+}
+
+#[test]
 fn check_paths_fails_on_missing_rule_and_strict_check_accepts_complete_rules() {
     let suffix = SystemTime::now()
         .duration_since(UNIX_EPOCH)

@@ -10,11 +10,11 @@ use spit::{
     diagnose_artifacts_at, diagnose_at, discover_sources, inspect_paths, parse_document_at,
     parse_pipeline_at, parse_source_inventory, render_artifacts, render_bash, render_bound_dag,
     render_dag, render_source_inventory, resolve, resolve_artifacts, validate_concrete_paths,
-    validate_source_files,
+    validate_source_files, Diagnostic,
 };
 
 const USAGE: &str =
-    "usage: spit <check|dag|bash|artifacts|discover|diagnose> <pipeline.spit> [--sources <inventory.spit|->] [--root <directory>] [--paths] [--strict-paths]";
+    "usage: spit <check|dag|bash|artifacts|discover> <pipeline.spit> [--sources <inventory.spit|->] [--root <directory>] [--paths] [--strict-paths] [--json] [--stdin]";
 
 #[derive(Clone, Copy, PartialEq)]
 enum Command {
@@ -23,7 +23,6 @@ enum Command {
     Bash,
     Artifacts,
     Discover,
-    Diagnose,
 }
 
 impl Command {
@@ -34,7 +33,6 @@ impl Command {
             "bash" => Self::Bash,
             "artifacts" => Self::Artifacts,
             "discover" => Self::Discover,
-            "diagnose" => Self::Diagnose,
             _ => return None,
         })
     }
@@ -47,6 +45,8 @@ struct CliArgs {
     paths: bool,
     strict_paths: bool,
     root: Option<String>,
+    json: bool,
+    stdin: bool,
 }
 
 fn parse_args() -> Result<CliArgs, Box<dyn Error>> {
@@ -64,12 +64,16 @@ fn parse_args() -> Result<CliArgs, Box<dyn Error>> {
     let mut paths = false;
     let mut strict_paths = false;
     let mut root = None;
+    let mut json = false;
+    let mut stdin = false;
     while let Some(flag) = args.next() {
         match flag.as_str() {
             "--sources" if sources.is_none() => sources = Some(args.next().ok_or(USAGE)?),
             "--paths" if !paths => paths = true,
             "--strict-paths" if !strict_paths => strict_paths = true,
             "--root" if root.is_none() => root = Some(args.next().ok_or(USAGE)?),
+            "--json" if !json => json = true,
+            "--stdin" if !stdin => stdin = true,
             _ => return Err(USAGE.into()),
         }
     }
@@ -80,6 +84,8 @@ fn parse_args() -> Result<CliArgs, Box<dyn Error>> {
         paths,
         strict_paths,
         root,
+        json,
+        stdin,
     })
 }
 
@@ -109,10 +115,24 @@ fn main() -> ExitCode {
 
 fn run() -> Result<(), Box<dyn Error>> {
     let args = parse_args()?;
-    if args.command == Command::Diagnose {
-        return run_diagnose(&args);
+    if args.json
+        && (args.command != Command::Check
+            || args.paths
+            || args.strict_paths
+            || args.root.is_some())
+    {
+        return Err("--json applies to check without --paths, --strict-paths, or --root".into());
     }
-    let pipeline_text = fs::read_to_string(&args.pipeline)?;
+    if args.stdin && args.sources.as_deref() == Some("-") {
+        return Err("--stdin reads the pipeline, so --sources needs a file".into());
+    }
+    let pipeline_text = if args.stdin {
+        let mut text = String::new();
+        io::stdin().read_to_string(&mut text)?;
+        text
+    } else {
+        fs::read_to_string(&args.pipeline)?
+    };
     let path = Path::new(&args.pipeline);
     if args.command == Command::Discover && (args.root.is_none() || args.sources.is_some()) {
         return Err("discover reads files under --root <directory> and takes no --sources".into());
@@ -145,6 +165,10 @@ fn run() -> Result<(), Box<dyn Error>> {
         diagnose_at
     };
     let diagnostics = diagnose(&pipeline_text, inventory_text.as_deref(), path);
+    if args.json {
+        print_json(&diagnostics, &pipeline_text, inventory_text.as_deref());
+        return Ok(());
+    }
     for diagnostic in &diagnostics {
         eprintln!(
             "{}",
@@ -208,9 +232,7 @@ fn run() -> Result<(), Box<dyn Error>> {
         Command::Dag if args.paths => print!("{}", render_bound_dag(&pipeline, &dag)?),
         Command::Dag => print!("{}", render_dag(&dag)),
         Command::Bash => print!("{}", render_bash(&pipeline, &dag)?),
-        Command::Artifacts | Command::Discover | Command::Diagnose => {
-            unreachable!("handled before resolution")
-        }
+        Command::Artifacts | Command::Discover => unreachable!("handled before resolution"),
     }
     Ok(())
 }
@@ -234,20 +256,7 @@ fn discover(text: &str, path: &Path, root: &Path) -> Result<Option<String>, Box<
     Ok(Some(render_source_inventory(&inventory, &pipeline)))
 }
 
-fn run_diagnose(args: &CliArgs) -> Result<(), Box<dyn Error>> {
-    if args.strict_paths || args.root.is_some() {
-        return Err("diagnose does not support --strict-paths or --root".into());
-    }
-    let mut text = String::new();
-    io::stdin().read_to_string(&mut text)?;
-    let source_text = match &args.sources {
-        Some(source) if source == "-" => {
-            return Err("diagnose reads the pipeline from stdin; --sources needs a file".into());
-        }
-        Some(source) => Some(fs::read_to_string(source)?),
-        None => None,
-    };
-    let diagnostics = diagnose_at(&text, source_text.as_deref(), Path::new(&args.pipeline));
+fn print_json(diagnostics: &[Diagnostic], text: &str, source_text: Option<&str>) {
     let number = |value: Option<usize>| value.map_or_else(|| "null".to_owned(), |n| n.to_string());
     print!("{{\"diagnostics\":[");
     for (index, diagnostic) in diagnostics.iter().enumerate() {
@@ -256,7 +265,7 @@ fn run_diagnose(args: &CliArgs) -> Result<(), Box<dyn Error>> {
         }
         // Columns are 1-based, in UTF-16 code units as editors count them;
         // `end_column` is one past the last character.
-        let columns = diagnostic.utf16_columns(&text, source_text.as_deref());
+        let columns = diagnostic.utf16_columns(text, source_text);
         print!(
             "{{\"severity\":\"{}\",\"source\":\"{}\",\"line\":{},\"column\":{},\"end_column\":{},\"message\":\"{}\"}}",
             diagnostic.severity.as_str(),
@@ -268,7 +277,6 @@ fn run_diagnose(args: &CliArgs) -> Result<(), Box<dyn Error>> {
         );
     }
     println!("]}}");
-    Ok(())
 }
 
 fn escape_json(text: &str) -> String {
