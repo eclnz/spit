@@ -32,7 +32,7 @@ Choose one command per call. The pipeline file comes next; options follow it.
 | `bound-dag` | Print the resolved DAG with a path for every artifact. |
 | `paths` | Show which path rule covers each product and validate the resulting paths. |
 | `bash` | Write a Bash script for the resolved jobs to standard output. It does not run the script. |
-| `diagnose` | Read the pipeline from standard input and return JSON diagnostics for editor use. Each has a `severity` of `error` or `warning`; those tied to a declaration, call, rule, command, or path include its source line. A pipeline path is required for CLI consistency, but its file contents are not read. |
+| `diagnose` | Read the pipeline from standard input and return JSON diagnostics for editor use. Each has a `severity` of `error` or `warning`; those tied to a declaration, call, rule, command, or path include its `line`, and a `column` and `end_column` for the text it is about, such as one input of a call or one `{placeholder}`. Columns are 1-based and count UTF-16 code units, as editors do; `end_column` is one past the last character. A pipeline path is required for CLI consistency, but its file contents are not read. |
 
 | Option | Effect |
 | --- | --- |

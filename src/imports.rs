@@ -9,12 +9,14 @@ use crate::parser::{
     parse_document_with_imports, parse_use, strip_comment, ParseError, ParsedDocument,
     PipelineBuilder, UseSpec,
 };
+use crate::span::Place;
 
 pub(crate) fn apply_import(
     builder: &mut PipelineBuilder,
     imports: &BTreeMap<usize, Pipeline>,
-    line: usize,
+    place: Place,
 ) -> Result<(), ParseError> {
+    let line = place.line;
     let pipeline = &mut builder.pipeline;
     let imported = imports.get(&line).ok_or_else(|| {
         ParseError::new(
@@ -74,13 +76,13 @@ pub(crate) fn apply_import(
         }
     }
     for command in &imported.commands {
-        builder.add_command(command.clone(), line);
+        builder.add_command(command.clone(), place.clone());
     }
     for product in &imported.products {
-        builder.add_product(product.clone(), line);
+        builder.add_product(product.clone(), place.clone());
     }
     for operation in &imported.operations {
-        builder.add_operation(operation.clone(), line);
+        builder.add_operation(operation.clone(), place.clone());
     }
     let lines = &mut builder.lines;
     lines.imported.extend(
@@ -96,10 +98,10 @@ pub(crate) fn apply_import(
             ),
     );
     for product in imported.product_paths.keys() {
-        lines.paths.insert(product.clone(), line);
+        lines.paths.insert(product.clone(), place.clone());
     }
     for constraint in &imported.constraints {
-        builder.add_constraint(constraint.clone(), line);
+        builder.add_constraint(constraint.clone(), place.clone());
     }
     Ok(())
 }
