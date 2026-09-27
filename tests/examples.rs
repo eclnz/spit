@@ -8,7 +8,7 @@ use spit::diagnose_at;
 /// Examples that demonstrate a diagnostic, with exactly what they report.
 const EXPECTED: &[(&str, &[&str])] = &[(
     "examples/analytics/analytics_bad_join.spit",
-    &["error: line 12: type conflict at `join.input2`: variable `K` was inferred as CustomerKey, but now requires AccountKey"],
+    &["error: line 12: type conflict at `join.input2` (product `accounts`): variable `K` was inferred as CustomerKey, but now requires AccountKey"],
 )];
 
 fn example_pipelines() -> Vec<PathBuf> {
@@ -28,8 +28,12 @@ fn examples_have_no_diagnostics() {
     assert!(pipelines.len() >= 10, "{pipelines:?}");
     for path in pipelines {
         let text = fs::read_to_string(&path).unwrap();
-        // A pipeline's inventory, when separate, sits beside it.
-        let sources = fs::read_to_string(path.with_extension("sources")).ok();
+        // A pipeline's inventory, when separate, sits beside it. One kept
+        // inline is checked as it is; a separate copy would replace it.
+        let inline = text.lines().any(|line| line.trim() == "sources:");
+        let sources = fs::read_to_string(path.with_extension("sources"))
+            .ok()
+            .filter(|_| !inline);
         let found: Vec<_> = diagnose_at(&text, sources.as_deref(), &path)
             .iter()
             .map(ToString::to_string)

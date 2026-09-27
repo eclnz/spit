@@ -71,7 +71,7 @@ sources:\n\
   metadata[id=x]\n";
     let (pipeline, inventory) = parse_document(text).unwrap();
     let dag = resolve(&pipeline, &inventory.unwrap()).unwrap();
-    assert_eq!(dag.jobs[0].output.artifact_type, product("Image<Photo,Native>"));
+    assert_eq!(dag.jobs[0].output().artifact_type, product("Image<Photo,Native>"));
 }
 
 #[test]
@@ -192,7 +192,7 @@ fn unresolved_output_variables_become_unknown_at_job_boundary() {
     .unwrap();
     let inventory = parse_source_inventory("sources:\n  raw[site=A]\n").unwrap();
     let dag = resolve(&pipeline, &inventory).unwrap();
-    assert_eq!(dag.jobs[0].output.artifact_type, product("B<Unknown>"));
+    assert_eq!(dag.jobs[0].output().artifact_type, product("B<Unknown>"));
 }
 
 #[test]
@@ -204,7 +204,7 @@ fn generic_pipeline_infers_output_type_without_pipeline_annotations() {
     let inventory = parse_source_inventory("sources:\n  signal[site=A]\n").unwrap();
     let dag = resolve(&pipeline, &inventory).unwrap();
     assert_eq!(
-        dag.jobs[0].output.artifact_type,
+        dag.jobs[0].output().artifact_type,
         product("FilteredSignal<Native>")
     );
 }
@@ -217,8 +217,8 @@ fn chained_generic_operations_propagate_concrete_type() {
     .unwrap();
     let inventory = parse_source_inventory("sources:\n  raw[site=A]\n").unwrap();
     let dag = resolve(&pipeline, &inventory).unwrap();
-    assert_eq!(dag.jobs[0].output.artifact_type, product("B<Native>"));
-    assert_eq!(dag.jobs[1].output.artifact_type, product("C<Native>"));
+    assert_eq!(dag.jobs[0].output().artifact_type, product("B<Native>"));
+    assert_eq!(dag.jobs[1].output().artifact_type, product("C<Native>"));
 }
 
 #[test]
@@ -229,8 +229,8 @@ fn operation_type_variables_do_not_leak_between_invocations() {
     .unwrap();
     let inventory = parse_source_inventory("sources:\n  a[site=01]\n  b[site=01]\n").unwrap();
     let dag = resolve(&pipeline, &inventory).unwrap();
-    assert_eq!(dag.jobs[0].output.artifact_type, product("B<Native>"));
-    assert_eq!(dag.jobs[1].output.artifact_type, product("B<Standard>"));
+    assert_eq!(dag.jobs[0].output().artifact_type, product("B<Native>"));
+    assert_eq!(dag.jobs[1].output().artifact_type, product("B<Standard>"));
 }
 
 #[test]
@@ -242,9 +242,9 @@ fn field_survey_reuses_image_operations_across_kinds_and_spaces() {
     let output_type = |name: &str| {
         dag.jobs
             .iter()
-            .find(|job| job.output.product == name)
+            .find(|job| job.output().product == name)
             .unwrap()
-            .output
+            .output()
             .artifact_type
             .clone()
     };
@@ -290,8 +290,8 @@ fn conflicting_port_bindings_are_a_structured_resolver_error() {
     let inventory = parse_source_inventory("sources:\n  a[site=01]\n  b[site=01]\n").unwrap();
     assert!(matches!(
         resolve(&pipeline, &inventory),
-        Err(ResolveError::TypeVariableConflict { operation, port, variable, .. })
-            if operation == "op" && port == "input2" && variable == "X"
+        Err(ResolveError::TypeVariableConflict { operation, port, conflict, .. })
+            if operation == "op" && port == "input2" && conflict.variable == "X"
     ));
 }
 
@@ -304,7 +304,7 @@ fn declared_output_type_cannot_contradict_inferred_type() {
     let inventory = parse_source_inventory("sources:\n  raw[site=01]\n").unwrap();
     assert!(matches!(
         resolve(&pipeline, &inventory),
-        Err(ResolveError::TypeVariableConflict { port, variable, .. })
-            if port == "output" && variable == "X"
+        Err(ResolveError::TypeVariableConflict { port, conflict, .. })
+            if port == "output" && conflict.variable == "X"
     ));
 }

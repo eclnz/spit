@@ -129,7 +129,7 @@ fn survey_rejects_a_photo_without_an_inventory_sidecar() {
     assert!(!result.status.success());
     let error = String::from_utf8(result.stderr).unwrap();
     assert!(
-        error.contains("missing input `imu` for `import_photo`"),
+        error.contains("no `photo_imu` artifact for input `imu` of `import_photo`"),
         "{error}"
     );
     assert!(error.contains("shot=02,site=01,visit=02"), "{error}");

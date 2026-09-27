@@ -94,9 +94,9 @@ fn expands_one_to_one_over_two_runs() {
 
     let dag = resolve(&pipeline, &inventory).unwrap();
     assert_eq!(dag.jobs.len(), 2);
-    assert_eq!(dag.jobs[0].output.product, "denoised");
-    assert_eq!(dag.jobs[0].output.entities.0["run"], "1");
-    assert_eq!(dag.jobs[1].output.entities.0["run"], "2");
+    assert_eq!(dag.jobs[0].output().product, "denoised");
+    assert_eq!(dag.jobs[0].output().entities.0["run"], "1");
+    assert_eq!(dag.jobs[1].output().entities.0["run"], "2");
 }
 
 #[test]
@@ -114,8 +114,8 @@ fn reuses_less_specific_t1_across_runs() {
     let dag = resolve(&pipeline, &inventory).unwrap();
     assert_eq!(dag.jobs.len(), 2);
     assert_eq!(dag.jobs[0].inputs[1], dag.jobs[1].inputs[1]);
-    assert_eq!(dag.jobs[0].output.entities.0["run"], "1");
-    assert_eq!(dag.jobs[1].output.entities.0["run"], "2");
+    assert_eq!(dag.jobs[0].output().entities.0["run"], "1");
+    assert_eq!(dag.jobs[1].output().entities.0["run"], "2");
 }
 
 #[test]
@@ -210,12 +210,12 @@ fn aggregates_each_fixed_dimension_group() {
 
     let dag = resolve(&pipeline, &inventory).unwrap();
     assert_eq!(dag.jobs.len(), 2);
-    assert!(dag.jobs.iter().all(|job| job.inputs.len() == 2));
+    assert!(dag.jobs.iter().all(|job| job.input_artifacts().count() == 2));
     assert!(dag
         .jobs
         .iter()
-        .all(|job| !job.output.entities.0.contains_key("run")));
-    assert_ne!(dag.jobs[0].output.entities, dag.jobs[1].output.entities);
+        .all(|job| !job.output().entities.0.contains_key("run")));
+    assert_ne!(dag.jobs[0].output().entities, dag.jobs[1].output().entities);
 }
 
 #[test]

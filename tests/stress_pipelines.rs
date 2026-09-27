@@ -10,17 +10,17 @@ fn type_lab() -> (spit::Pipeline, spit::SourceInventory) {
 fn jobs<'a>(dag: &'a spit::ResolvedDag, product: &str) -> Vec<&'a Job> {
     dag.jobs
         .iter()
-        .filter(|job| job.output.product == product)
+        .filter(|job| job.output().product == product)
         .collect()
 }
 
 fn type_of(dag: &spit::ResolvedDag, product: &str) -> spit::TypeExpr {
     let family = jobs(dag, product);
     assert!(!family.is_empty(), "no jobs for {product}");
-    let expected = family[0].output.artifact_type.clone();
+    let expected = family[0].output().artifact_type.clone();
     assert!(family
         .iter()
-        .all(|job| job.output.artifact_type == expected));
+        .all(|job| job.output().artifact_type == expected));
     expected
 }
 
@@ -84,16 +84,15 @@ fn nested_types_propagate_across_polymorphic_branches_and_rollups() {
     let batch = jobs(&dag, "selected_batch")
         .into_iter()
         .find(|job| {
-            job.output.entities.0.get("lab").map(String::as_str) == Some("Alpha")
-                && job.output.entities.0.get("rig").map(String::as_str) == Some("R1")
-                && job.output.entities.0.get("capture").map(String::as_str) == Some("C1")
+            job.output().entities.0.get("lab").map(String::as_str) == Some("Alpha")
+                && job.output().entities.0.get("rig").map(String::as_str) == Some("R1")
+                && job.output().entities.0.get("capture").map(String::as_str) == Some("C1")
         })
         .unwrap();
-    assert_eq!(batch.inputs.len(), 2);
+    assert_eq!(batch.inputs[0].len(), 2);
     assert_eq!(batch.dependencies.len(), 2);
     assert!(batch
-        .inputs
-        .iter()
+        .input_artifacts()
         .all(|input| input.entities.0.get("capture") == Some(&"C1".to_owned())));
     assert_eq!(jobs(&dag, "global_summary")[0].dependencies.len(), 2);
 }
@@ -134,8 +133,8 @@ fn wrong_modality_calibration_fails_after_inferred_type_flows_downstream() {
     let inventory = type_lab().1;
     assert!(matches!(
         resolve(&pipeline, &inventory),
-        Err(ResolveError::TypeVariableConflict { operation, port, variable, .. })
-            if operation == "project" && port == "calibration" && variable == "Kind"
+        Err(ResolveError::TypeVariableConflict { operation, port, conflict, .. })
+            if operation == "project" && port == "calibration" && conflict.variable == "Kind"
     ));
 }
 
@@ -164,8 +163,8 @@ fn declared_nested_output_cannot_override_inferred_reference_space() {
     let inventory = type_lab().1;
     assert!(matches!(
         resolve(&pipeline, &inventory),
-        Err(ResolveError::TypeVariableConflict { operation, port, variable, .. })
-            if operation == "project" && port == "output" && variable == "TargetSpace"
+        Err(ResolveError::TypeVariableConflict { operation, port, conflict, .. })
+            if operation == "project" && port == "output" && conflict.variable == "TargetSpace"
     ));
 }
 
