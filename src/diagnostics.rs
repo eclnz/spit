@@ -1,22 +1,75 @@
 //! Editor-friendly validation of an in-memory SPIT document.
 
+use std::collections::BTreeSet;
+use std::fmt;
 use std::path::Path;
 
+use crate::bash::{collect_commands, collect_paths};
+use crate::resolver::{collect_pipeline, Site};
 use crate::{
     parse_document, parse_document_at, parse_source_inventory, resolve, InputBinding, ParseError,
     Pipeline, ResolveError, SourceInventory,
 };
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
+pub enum Severity {
+    Error,
+    Warning,
+}
+
+impl Severity {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Error => "error",
+            Self::Warning => "warning",
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Diagnostic {
+    pub severity: Severity,
+    /// `"pipeline"`, or `"inventory"` for a separate inventory file.
     pub source: &'static str,
     pub line: Option<usize>,
     pub message: String,
 }
 
+impl Diagnostic {
+    fn error(source: &'static str, line: Option<usize>, message: String) -> Self {
+        Self {
+            severity: Severity::Error,
+            source,
+            line,
+            message,
+        }
+    }
+
+    pub fn is_error(&self) -> bool {
+        self.severity == Severity::Error
+    }
+}
+
+/// Reads as `error: line 3: message`, naming the inventory for its lines.
+impl fmt::Display for Diagnostic {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}: ", self.severity.as_str())?;
+        match (self.source, self.line) {
+            ("inventory", Some(line)) => write!(f, "inventory line {line}: ")?,
+            ("inventory", None) => f.write_str("inventory: ")?,
+            (_, Some(line)) => write!(f, "line {line}: ")?,
+            (_, None) => {}
+        }
+        f.write_str(&self.message)
+    }
+}
+
 /// Collect independent syntax errors throughout the document, then check its
-/// semantics once the document parses. An absent inventory still allows
-/// declaration and invocation checks, but cannot validate concrete jobs.
+/// semantics once the document parses: every declaration, step, rule,
+/// command, and path error, and warnings for likely mistakes. Jobs are
+/// resolved against the inventory only once nothing else is wrong. An absent
+/// inventory still allows every other check. Diagnostics are ordered by
+/// line, with at most one error per line.
 pub fn diagnose(text: &str, source_text: Option<&str>) -> Vec<Diagnostic> {
     diagnose_with_parser(text, source_text, parse_document)
 }
@@ -39,40 +92,177 @@ fn diagnose_with_parser(
     };
     let mut diagnostics: Vec<_> = pipeline_errors
         .into_iter()
-        .map(|error| Diagnostic {
-            source: "pipeline",
-            line: Some(error.line),
-            message: error.message,
-        })
-        .chain(inventory_errors.into_iter().map(|error| Diagnostic {
-            source: "inventory",
-            line: Some(error.line),
-            message: error.message,
-        }))
+        .map(|error| Diagnostic::error("pipeline", Some(error.line), error.message))
+        .chain(
+            inventory_errors
+                .into_iter()
+                .map(|error| Diagnostic::error("inventory", Some(error.line), error.message)),
+        )
         .collect();
     if !diagnostics.is_empty() {
-        return diagnostics;
+        return order(diagnostics);
     }
 
     let (pipeline, embedded_inventory) = document.expect("document parsed without errors");
+    let inventory_text = source_text.unwrap_or(text);
+    diagnostics.extend(pipeline_diagnostics(&pipeline, inventory_text));
+    if diagnostics.iter().any(Diagnostic::is_error) {
+        return order(diagnostics);
+    }
     let inventory = external_inventory
         .or(embedded_inventory)
         .unwrap_or_else(SourceInventory::default);
+    if let Err(error) = resolve(&pipeline, &inventory) {
+        let (source, line) =
+            error_location(&pipeline, &error, inventory_text, source_text.is_some());
+        diagnostics.push(Diagnostic::error(source, line, error.to_string()));
+    }
+    order(diagnostics)
+}
 
-    match resolve(&pipeline, &inventory) {
-        Ok(_) => diagnostics,
-        Err(error) => {
-            let inventory_text = source_text.unwrap_or(text);
-            let (source, line) =
-                error_location(&pipeline, &error, inventory_text, source_text.is_some());
-            diagnostics.push(Diagnostic {
-                source,
-                line,
-                message: error.to_string(),
-            });
-            diagnostics
+/// Every error in the pipeline text, then warnings about names that did not
+/// fail. Needs no inventory.
+fn pipeline_diagnostics(pipeline: &Pipeline, inventory_text: &str) -> Vec<Diagnostic> {
+    let checked = collect_pipeline(pipeline);
+    let lines = &pipeline.source_lines;
+    let mut diagnostics: Vec<_> = checked
+        .errors
+        .iter()
+        .map(|(site, error)| {
+            let line = match site {
+                Site::Product(name) => lines.products.get(name).copied(),
+                Site::Operation(name) => lines.operations.get(name).copied(),
+                Site::Invocation(output) => lines.invocations.get(output).copied(),
+                Site::Rule(index) => lines.constraint_lines.get(*index).copied(),
+            }
+            .or_else(|| error_location(pipeline, error, inventory_text, false).1);
+            Diagnostic::error("pipeline", line, error.to_string())
+        })
+        .collect();
+    let bash_errors = collect_commands(pipeline, &checked.poisoned)
+        .into_iter()
+        .chain(collect_paths(pipeline, &checked.poisoned).1);
+    for error in bash_errors {
+        diagnostics.push(Diagnostic::error("pipeline", error.line, error.message));
+    }
+    diagnostics.extend(warnings(pipeline, &checked.poisoned));
+    diagnostics
+}
+
+/// Order by source and line, keep only the first error on each line, and
+/// drop warnings on a line that already has an error.
+fn order(mut diagnostics: Vec<Diagnostic>) -> Vec<Diagnostic> {
+    let key = |diagnostic: &Diagnostic| {
+        (
+            diagnostic.source == "inventory",
+            diagnostic.line.is_none(),
+            diagnostic.line,
+        )
+    };
+    diagnostics.sort_by_key(|diagnostic| (key(diagnostic), diagnostic.severity));
+    let mut errored = BTreeSet::new();
+    diagnostics.retain(|diagnostic| {
+        let Some(line) = diagnostic.line else {
+            return true;
+        };
+        let place = (diagnostic.source, line);
+        if errored.contains(&place) {
+            return false;
+        }
+        if diagnostic.is_error() {
+            errored.insert(place);
+        }
+        true
+    });
+    diagnostics
+}
+
+/// Legal but likely mistaken pipeline text. Names in `skip` already have an
+/// error. Nothing is reported as unused in a file with no steps, which is a
+/// library of definitions, nor for imported names: a library is imported for
+/// the definitions a pipeline needs, and is linted on its own.
+fn warnings(pipeline: &Pipeline, skip: &BTreeSet<String>) -> Vec<Diagnostic> {
+    let lines = &pipeline.source_lines;
+    let warn = |line, message| Diagnostic {
+        severity: Severity::Warning,
+        source: "pipeline",
+        line,
+        message,
+    };
+    let used_operations: BTreeSet<_> = pipeline
+        .invocations
+        .iter()
+        .map(|invocation| invocation.operation.as_str())
+        .collect();
+    let outputs: BTreeSet<_> = pipeline
+        .invocations
+        .iter()
+        .map(|invocation| invocation.output_product.as_str())
+        .collect();
+    let inputs: BTreeSet<_> = pipeline
+        .invocations
+        .iter()
+        .flat_map(|invocation| invocation.inputs.iter().map(InputBinding::product_name))
+        .collect();
+    let commands: BTreeSet<_> = pipeline
+        .commands
+        .iter()
+        .map(|command| command.operation.as_str())
+        .collect();
+
+    let library = pipeline.invocations.is_empty();
+    let mut warnings = Vec::new();
+    for product in &pipeline.products {
+        let name = product.name.as_str();
+        if library || skip.contains(name) || lines.imported.contains(name) {
+            continue;
+        }
+        if !outputs.contains(name) && !inputs.contains(name) {
+            warnings.push(warn(
+                lines.products.get(name).copied(),
+                format!("source product `{name}` is never used as an input"),
+            ));
         }
     }
+    for operation in &pipeline.operations {
+        let name = operation.name.as_str();
+        if skip.contains(name) {
+            continue;
+        }
+        let line = lines.operations.get(name).copied();
+        let imported = lines.imported.contains(name);
+        if !used_operations.contains(name) {
+            if !imported && !library {
+                warnings.push(warn(
+                    line,
+                    format!("operation `{name}` is declared but never used"),
+                ));
+            }
+        } else if !pipeline.commands.is_empty() && !commands.contains(name) {
+            // Only once commands are in use: a pipeline may be written for its DAG alone.
+            warnings.push(warn(
+                line,
+                format!("operation `{name}` has no command, so `bash` cannot run its jobs"),
+            ));
+        }
+        if imported {
+            continue;
+        }
+        let bound: BTreeSet<_> = operation
+            .inputs
+            .iter()
+            .flat_map(|port| port.artifact_type.variables())
+            .collect();
+        for variable in operation.output_type.variables().difference(&bound) {
+            warnings.push(warn(
+                line,
+                format!(
+                    "output type variable `{variable}` of `{name}` appears in no input; it is known only where the output product declares its type"
+                ),
+            ));
+        }
+    }
+    warnings
 }
 
 /// Blank only the line that failed, preserving all later line numbers. This

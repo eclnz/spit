@@ -187,3 +187,54 @@ fn paths_fails_on_missing_rule_and_strict_check_accepts_complete_rules() {
         String::from_utf8_lossy(&complete.stderr)
     );
 }
+
+#[test]
+fn check_prints_every_diagnostic_and_fails_only_on_errors() {
+    let directory = std::env::temp_dir().join(format!(
+        "spit-cli-diagnostics-{}",
+        SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()
+    ));
+    fs::create_dir_all(&directory).unwrap();
+    let broken = directory.join("broken.spit");
+    fs::write(
+        &broken,
+        "source raw [id, batch]\npath: {product}/{entities}.txt\npath raw: in/{id}.txt\noperation clean(one)\ncleaned = clean(rwa)\n",
+    )
+    .unwrap();
+    let warned = directory.join("warned.spit");
+    fs::write(
+        &warned,
+        "source raw [id]\nsource spare [id]\noperation clean(one)\ncleaned = clean(raw)\n",
+    )
+    .unwrap();
+    let run = |path: &std::path::Path, command: &str| {
+        Command::new(env!("CARGO_BIN_EXE_spit"))
+            .args([command, path.to_str().unwrap()])
+            .output()
+            .unwrap()
+    };
+    let broken_check = run(&broken, "check");
+    let warned_check = run(&warned, "check");
+    let warned_dag = run(&warned, "dag");
+    fs::remove_dir_all(&directory).unwrap();
+
+    assert!(!broken_check.status.success());
+    assert_eq!(
+        String::from_utf8(broken_check.stderr).unwrap(),
+        "warning: line 1: source product `raw` is never used as an input\nerror: line 3: path template for `raw` omits dimension `batch`; artifacts differing only in `batch` would share a path\nerror: line 5: unknown product `rwa`\n"
+    );
+
+    // Without an inventory, check stops after the pipeline checks; dag needs jobs.
+    assert!(warned_check.status.success());
+    assert_eq!(
+        String::from_utf8(warned_check.stderr).unwrap(),
+        "warning: line 2: source product `spare` is never used as an input\n"
+    );
+    assert!(String::from_utf8(warned_check.stdout)
+        .unwrap()
+        .contains("No source inventory; jobs not resolved."));
+    assert!(!warned_dag.status.success());
+    assert!(String::from_utf8(warned_dag.stderr)
+        .unwrap()
+        .ends_with("error: no inline source inventory; supply --sources <inventory.spit|->\n"));
+}

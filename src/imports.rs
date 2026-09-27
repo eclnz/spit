@@ -81,6 +81,18 @@ pub(crate) fn apply_import(
             .operations
             .insert(operation.name.clone(), line);
     }
+    pipeline.source_lines.imported.extend(
+        imported
+            .products
+            .iter()
+            .map(|product| product.name.clone())
+            .chain(
+                imported
+                    .operations
+                    .iter()
+                    .map(|operation| operation.name.clone()),
+            ),
+    );
     for product in imported.product_paths.keys() {
         pipeline.source_lines.paths.insert(product.clone(), line);
     }
