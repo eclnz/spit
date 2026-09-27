@@ -1,7 +1,7 @@
 use spit::{
     render_dag, resolve, CountRequirement, CoverageRule, EntityBinding, InputBinding, InputPort,
     Invocation, OperationDef, Pipeline, ProductDef, ResolveError, ShapeRule, SourceInventory,
-    SourceRecord,
+    SourceRecord, TypeExpr,
 };
 
 fn artifact(product: &str, pairs: &[(&str, &str)]) -> SourceRecord {
@@ -19,8 +19,8 @@ fn artifact(product: &str, pairs: &[(&str, &str)]) -> SourceRecord {
 fn denoise_operation() -> OperationDef {
     OperationDef::new(
         "denoise",
-        vec![InputPort::one("input", "BOLD")],
-        "DenoisedBOLD",
+        vec![InputPort::one("input", TypeExpr::named("Signal"))],
+        TypeExpr::named("FilteredSignal"),
         ShapeRule::Preserve,
     )
 }
@@ -29,10 +29,10 @@ fn register_operation() -> OperationDef {
     OperationDef::new(
         "register",
         vec![
-            InputPort::one("moving", "DenoisedBOLD"),
-            InputPort::one("reference", "T1w"),
+            InputPort::one("moving", TypeExpr::named("FilteredSignal")),
+            InputPort::one("reference", TypeExpr::named("Calibration")),
         ],
-        "RegisteredBOLD",
+        TypeExpr::named("AlignedSignal"),
         ShapeRule::Preserve,
     )
 }
@@ -40,16 +40,24 @@ fn register_operation() -> OperationDef {
 fn registration_pipeline() -> Pipeline {
     Pipeline {
         products: vec![
-            ProductDef::new("denoised", "DenoisedBOLD", &["sub", "ses", "run"]),
-            ProductDef::new("t1w", "T1w", &["sub", "ses"]),
-            ProductDef::new("registered", "RegisteredBOLD", &["sub", "ses", "run"]),
+            ProductDef::new(
+                "denoised",
+                TypeExpr::named("FilteredSignal"),
+                ["site", "day", "run"],
+            ),
+            ProductDef::new("calibration", TypeExpr::named("Calibration"), ["site", "day"]),
+            ProductDef::new(
+                "registered",
+                TypeExpr::named("AlignedSignal"),
+                ["site", "day", "run"],
+            ),
         ],
         operations: vec![register_operation()],
         invocations: vec![Invocation::new(
             "register",
             vec![
                 InputBinding::product("denoised"),
-                InputBinding::product("t1w"),
+                InputBinding::product("calibration"),
             ],
             "registered",
         )],
@@ -61,21 +69,25 @@ fn registration_pipeline() -> Pipeline {
 fn expands_one_to_one_over_two_runs() {
     let pipeline = Pipeline {
         products: vec![
-            ProductDef::new("bold", "BOLD", &["sub", "ses", "run"]),
-            ProductDef::new("denoised", "DenoisedBOLD", &["sub", "ses", "run"]),
+            ProductDef::new("signal", TypeExpr::named("Signal"), ["site", "day", "run"]),
+            ProductDef::new(
+                "denoised",
+                TypeExpr::named("FilteredSignal"),
+                ["site", "day", "run"],
+            ),
         ],
         operations: vec![denoise_operation()],
         invocations: vec![Invocation::new(
             "denoise",
-            vec![InputBinding::product("bold")],
+            vec![InputBinding::product("signal")],
             "denoised",
         )],
         ..Pipeline::default()
     };
     let inventory = SourceInventory {
         artifacts: vec![
-            artifact("bold", &[("sub", "01"), ("ses", "01"), ("run", "1")]),
-            artifact("bold", &[("sub", "01"), ("ses", "01"), ("run", "2")]),
+            artifact("signal", &[("site", "01"), ("day", "01"), ("run", "1")]),
+            artifact("signal", &[("site", "01"), ("day", "01"), ("run", "2")]),
         ],
         ..SourceInventory::default()
     };
@@ -92,9 +104,9 @@ fn reuses_less_specific_t1_across_runs() {
     let pipeline = registration_pipeline();
     let inventory = SourceInventory {
         artifacts: vec![
-            artifact("denoised", &[("sub", "01"), ("ses", "01"), ("run", "1")]),
-            artifact("denoised", &[("sub", "01"), ("ses", "01"), ("run", "2")]),
-            artifact("t1w", &[("sub", "01"), ("ses", "01")]),
+            artifact("denoised", &[("site", "01"), ("day", "01"), ("run", "1")]),
+            artifact("denoised", &[("site", "01"), ("day", "01"), ("run", "2")]),
+            artifact("calibration", &[("site", "01"), ("day", "01")]),
         ],
         ..SourceInventory::default()
     };
@@ -112,11 +124,11 @@ fn reports_missing_input() {
     let mut inventory = SourceInventory::default();
     inventory.artifacts.push(artifact(
         "denoised",
-        &[("sub", "01"), ("ses", "02"), ("run", "1")],
+        &[("site", "01"), ("day", "02"), ("run", "1")],
     ));
     inventory
         .artifacts
-        .push(artifact("t1w", &[("sub", "01"), ("ses", "01")]));
+        .push(artifact("calibration", &[("site", "01"), ("day", "01")]));
 
     assert!(matches!(
         resolve(&pipeline, &inventory),
@@ -125,32 +137,36 @@ fn reports_missing_input() {
 }
 
 #[test]
-fn reports_ambiguous_input_within_named_family() {
+fn rejects_secondary_input_with_dimensions_absent_from_driver() {
     let mut pipeline = registration_pipeline();
-    pipeline.products[1] = ProductDef::new("t1w", "T1w", &["sub", "ses", "acq"]);
+    pipeline.products[1] = ProductDef::new("calibration", TypeExpr::named("Calibration"), ["site", "day", "mode"]);
     let inventory = SourceInventory {
         artifacts: vec![
-            artifact("denoised", &[("sub", "01"), ("ses", "01"), ("run", "1")]),
-            artifact("t1w", &[("sub", "01"), ("ses", "01"), ("acq", "A")]),
-            artifact("t1w", &[("sub", "01"), ("ses", "01"), ("acq", "B")]),
+            artifact("denoised", &[("site", "01"), ("day", "01"), ("run", "1")]),
+            artifact("calibration", &[("site", "01"), ("day", "01"), ("mode", "A")]),
+            artifact("calibration", &[("site", "01"), ("day", "01"), ("mode", "B")]),
         ],
         ..SourceInventory::default()
     };
 
-    assert!(matches!(
-        resolve(&pipeline, &inventory),
-        Err(ResolveError::AmbiguousInput { port, candidates, .. })
-            if port == "reference" && candidates.len() == 2
-    ));
+    for inventory in [inventory, SourceInventory::default()] {
+        assert!(matches!(
+            resolve(&pipeline, &inventory),
+            Err(ResolveError::UnsupportedShapeRelationship { detail, .. })
+                if detail.contains("input `calibration` has dimensions absent from driving product `denoised`: mode")
+        ));
+    }
 }
 
 #[test]
 fn checks_types_before_concrete_expansion() {
     let mut pipeline = registration_pipeline();
-    pipeline
-        .products
-        .push(ProductDef::new("bold", "BOLD", &["sub", "ses", "run"]));
-    pipeline.invocations[0].inputs[1] = InputBinding::product("bold");
+    pipeline.products.push(ProductDef::new(
+        "signal",
+        TypeExpr::named("Signal"),
+        ["site", "day", "run"],
+    ));
+    pipeline.invocations[0].inputs[1] = InputBinding::product("signal");
 
     assert!(matches!(
         resolve(&pipeline, &SourceInventory::default()),
@@ -162,28 +178,32 @@ fn checks_types_before_concrete_expansion() {
 fn aggregates_each_fixed_dimension_group() {
     let pipeline = Pipeline {
         products: vec![
-            ProductDef::new("registered", "RegisteredBOLD", &["sub", "ses", "run"]),
-            ProductDef::new("mean_bold", "MeanBOLD", &["sub", "ses"]),
+            ProductDef::new(
+                "registered",
+                TypeExpr::named("AlignedSignal"),
+                ["site", "day", "run"],
+            ),
+            ProductDef::new("mean_signal", TypeExpr::named("MeanSignal"), ["site", "day"]),
         ],
         operations: vec![OperationDef::new(
             "mean",
-            vec![InputPort::many("input", "RegisteredBOLD")],
-            "MeanBOLD",
+            vec![InputPort::many("input", TypeExpr::named("AlignedSignal"))],
+            TypeExpr::named("MeanSignal"),
             ShapeRule::Aggregate,
         )],
         invocations: vec![Invocation::new(
             "mean",
             vec![InputBinding::vary("registered", "run")],
-            "mean_bold",
+            "mean_signal",
         )],
         ..Pipeline::default()
     };
     let mut inventory = SourceInventory::default();
-    for sub in ["01", "02"] {
+    for site in ["01", "02"] {
         for run in ["1", "2"] {
             inventory.artifacts.push(artifact(
                 "registered",
-                &[("sub", sub), ("ses", "01"), ("run", run)],
+                &[("site", site), ("day", "01"), ("run", run)],
             ));
         }
     }
@@ -202,14 +222,17 @@ fn aggregates_each_fixed_dimension_group() {
 fn rejects_accidental_cartesian_product() {
     let pipeline = Pipeline {
         products: vec![
-            ProductDef::new("a", "A", &["sub", "run"]),
-            ProductDef::new("b", "B", &["sub", "echo"]),
-            ProductDef::new("c", "C", &["sub", "run"]),
+            ProductDef::new("a", TypeExpr::named("A"), ["site", "run"]),
+            ProductDef::new("b", TypeExpr::named("B"), ["site", "echo"]),
+            ProductDef::new("c", TypeExpr::named("C"), ["site", "run"]),
         ],
         operations: vec![OperationDef::new(
             "combine",
-            vec![InputPort::one("a", "A"), InputPort::one("b", "B")],
-            "C",
+            vec![
+                InputPort::one("a", TypeExpr::named("A")),
+                InputPort::one("b", TypeExpr::named("B")),
+            ],
+            TypeExpr::named("C"),
             ShapeRule::Preserve,
         )],
         invocations: vec![Invocation::new(
@@ -223,17 +246,18 @@ fn rejects_accidental_cartesian_product() {
     for run in ["1", "2"] {
         inventory
             .artifacts
-            .push(artifact("a", &[("sub", "01"), ("run", run)]));
+            .push(artifact("a", &[("site", "01"), ("run", run)]));
     }
     for echo in ["1", "2"] {
         inventory
             .artifacts
-            .push(artifact("b", &[("sub", "01"), ("echo", echo)]));
+            .push(artifact("b", &[("site", "01"), ("echo", echo)]));
     }
 
     assert!(matches!(
         resolve(&pipeline, &inventory),
-        Err(ResolveError::AmbiguousInput { port, .. }) if port == "b"
+        Err(ResolveError::UnsupportedShapeRelationship { detail, .. })
+            if detail.contains("input `b` has dimensions absent from driving product `a`: echo")
     ));
 }
 
@@ -246,8 +270,8 @@ fn tracks_dependencies_through_full_pipeline() {
     assert_eq!(dag.jobs[3].dependencies, vec![2]);
     assert_eq!(dag.jobs[4].dependencies, vec![3, 4]);
     let text = render_dag(&dag);
-    assert!(text.contains("bold[sub=01,ses=01,run=1]"));
-    assert!(text.contains("mean_bold[sub=01,ses=01]"));
+    assert!(text.contains("signal[site=01,day=01,run=1]"));
+    assert!(text.contains("mean_signal[site=01,day=01]"));
 }
 
 #[test]
@@ -257,7 +281,7 @@ fn catches_duplicate_source_artifact() {
     inventory.artifacts.push(inventory.artifacts[0].clone());
     assert!(matches!(
         resolve(&pipeline, &inventory),
-        Err(ResolveError::DuplicateOutputArtifact { .. })
+        Err(ResolveError::DuplicateSourceArtifact { .. })
     ));
 }
 
@@ -265,13 +289,13 @@ fn catches_duplicate_source_artifact() {
 fn catches_product_cycle() {
     let pipeline = Pipeline {
         products: vec![
-            ProductDef::new("a", "A", &["sub"]),
-            ProductDef::new("b", "A", &["sub"]),
+            ProductDef::new("a", TypeExpr::named("A"), ["site"]),
+            ProductDef::new("b", TypeExpr::named("A"), ["site"]),
         ],
         operations: vec![OperationDef::new(
             "copy",
-            vec![InputPort::one("input", "A")],
-            "A",
+            vec![InputPort::one("input", TypeExpr::named("A"))],
+            TypeExpr::named("A"),
             ShapeRule::Preserve,
         )],
         invocations: vec![
@@ -289,19 +313,23 @@ fn catches_product_cycle() {
 #[test]
 fn coverage_checks_each_observed_context_without_a_global_count() {
     let pipeline = Pipeline {
-        products: vec![ProductDef::new("image", "Image", &["subject", "visit"])],
+        products: vec![ProductDef::new(
+            "image",
+            TypeExpr::named("Image"),
+            ["site", "visit"],
+        )],
         constraints: vec![CoverageRule::new(
             "image",
-            &["subject", "visit"],
+            ["site", "visit"],
             CountRequirement::Exactly(1),
         )],
         ..Pipeline::default()
     };
     let inventory = SourceInventory {
-        artifacts: vec![artifact("image", &[("subject", "A"), ("visit", "1")])],
+        artifacts: vec![artifact("image", &[("site", "A"), ("visit", "1")])],
         contexts: vec![
-            EntityBinding::from_pairs([("subject", "A"), ("visit", "1")]),
-            EntityBinding::from_pairs([("subject", "B"), ("visit", "1")]),
+            EntityBinding::from_pairs([("site", "A"), ("visit", "1")]),
+            EntityBinding::from_pairs([("site", "B"), ("visit", "1")]),
         ],
     };
     assert!(matches!(
@@ -311,8 +339,8 @@ fn coverage_checks_each_observed_context_without_a_global_count() {
 
     let complete = SourceInventory {
         artifacts: vec![
-            artifact("image", &[("subject", "A"), ("visit", "1")]),
-            artifact("image", &[("subject", "B"), ("visit", "1")]),
+            artifact("image", &[("site", "A"), ("visit", "1")]),
+            artifact("image", &[("site", "B"), ("visit", "1")]),
         ],
         contexts: inventory.contexts,
     };
@@ -324,8 +352,8 @@ fn source_inventory_changes_job_count_without_changing_pipeline() {
     let pipeline = full_pipeline();
     let one_run = SourceInventory {
         artifacts: vec![
-            artifact("bold", &[("sub", "01"), ("ses", "01"), ("run", "1")]),
-            artifact("t1w", &[("sub", "01"), ("ses", "01")]),
+            artifact("signal", &[("site", "01"), ("day", "01"), ("run", "1")]),
+            artifact("calibration", &[("site", "01"), ("day", "01")]),
         ],
         ..SourceInventory::default()
     };
@@ -336,36 +364,44 @@ fn source_inventory_changes_job_count_without_changing_pipeline() {
 fn full_pipeline() -> Pipeline {
     Pipeline {
         products: vec![
-            ProductDef::new("bold", "BOLD", &["sub", "ses", "run"]),
-            ProductDef::new("t1w", "T1w", &["sub", "ses"]),
-            ProductDef::new("denoised", "DenoisedBOLD", &["sub", "ses", "run"]),
-            ProductDef::new("registered", "RegisteredBOLD", &["sub", "ses", "run"]),
-            ProductDef::new("mean_bold", "MeanBOLD", &["sub", "ses"]),
+            ProductDef::new("signal", TypeExpr::named("Signal"), ["site", "day", "run"]),
+            ProductDef::new("calibration", TypeExpr::named("Calibration"), ["site", "day"]),
+            ProductDef::new(
+                "denoised",
+                TypeExpr::named("FilteredSignal"),
+                ["site", "day", "run"],
+            ),
+            ProductDef::new(
+                "registered",
+                TypeExpr::named("AlignedSignal"),
+                ["site", "day", "run"],
+            ),
+            ProductDef::new("mean_signal", TypeExpr::named("MeanSignal"), ["site", "day"]),
         ],
         operations: vec![
             denoise_operation(),
             register_operation(),
             OperationDef::new(
                 "mean",
-                vec![InputPort::many("input", "RegisteredBOLD")],
-                "MeanBOLD",
+                vec![InputPort::many("input", TypeExpr::named("AlignedSignal"))],
+                TypeExpr::named("MeanSignal"),
                 ShapeRule::Aggregate,
             ),
         ],
         invocations: vec![
-            Invocation::new("denoise", vec![InputBinding::product("bold")], "denoised"),
+            Invocation::new("denoise", vec![InputBinding::product("signal")], "denoised"),
             Invocation::new(
                 "register",
                 vec![
                     InputBinding::product("denoised"),
-                    InputBinding::product("t1w"),
+                    InputBinding::product("calibration"),
                 ],
                 "registered",
             ),
             Invocation::new(
                 "mean",
                 vec![InputBinding::vary("registered", "run")],
-                "mean_bold",
+                "mean_signal",
             ),
         ],
         constraints: Vec::new(),
@@ -376,9 +412,9 @@ fn full_pipeline() -> Pipeline {
 fn full_inventory() -> SourceInventory {
     SourceInventory {
         artifacts: vec![
-            artifact("bold", &[("sub", "01"), ("ses", "01"), ("run", "1")]),
-            artifact("bold", &[("sub", "01"), ("ses", "01"), ("run", "2")]),
-            artifact("t1w", &[("sub", "01"), ("ses", "01")]),
+            artifact("signal", &[("site", "01"), ("day", "01"), ("run", "1")]),
+            artifact("signal", &[("site", "01"), ("day", "01"), ("run", "2")]),
+            artifact("calibration", &[("site", "01"), ("day", "01")]),
         ],
         ..SourceInventory::default()
     }
