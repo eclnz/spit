@@ -3,6 +3,7 @@
 use std::collections::BTreeMap;
 use std::fmt;
 
+use crate::bash::{check_command_syntax, check_path_template_syntax};
 use crate::imports::apply_import;
 use crate::model::{
     Cardinality, CommandDef, CountRequirement, CoverageRule, EntityBinding, InputBinding,
@@ -79,7 +80,7 @@ fn parse_sectioned_pipeline(
 
     for (index, original) in text.lines().enumerate() {
         let line_number = index + 1;
-        let line = strip_comment(original).trim();
+        let line = strip_line_comment(original, line_number)?.trim();
         if line.is_empty() {
             continue;
         }
@@ -140,9 +141,10 @@ fn parse_sectioned_pipeline(
                     pipeline.source_lines.constraint_lines.push(line_number);
                     pipeline.constraints.push(constraint);
                 }
-                Some(Section::Commands) => pipeline
-                    .commands
-                    .push(parse_command(line, line_number)?),
+                Some(Section::Commands) => {
+                    pipeline.commands.push(parse_command(line, line_number)?);
+                    pipeline.source_lines.command_lines.push(line_number);
+                }
                 None => return Err(ParseError::new(
                     line_number,
                     "expected a section header: products:, operations:, pipeline:, constraints:, or commands:",
@@ -162,7 +164,7 @@ fn parse_flow_pipeline(
 
     for (index, original) in text.lines().enumerate() {
         let line_number = index + 1;
-        let line = strip_comment(original).trim();
+        let line = strip_line_comment(original, line_number)?.trim();
         if line.is_empty() {
             continue;
         }
@@ -197,6 +199,7 @@ fn parse_flow_pipeline(
             pipeline
                 .commands
                 .push(parse_command(declaration, line_number)?);
+            pipeline.source_lines.command_lines.push(line_number);
         } else if line.starts_with("shell-source:") {
             return Err(ParseError::new(line_number, SHELL_SOURCE_REMOVED));
         } else if line.starts_with("path ") || line.starts_with("path:") {
@@ -245,6 +248,9 @@ fn parse_command(line: &str, number: usize) -> Result<CommandDef, ParseError> {
             "command template must not be empty",
         ));
     }
+    check_command_syntax(template).map_err(|error| {
+        ParseError::new(number, format!("command `{operation}`: {}", error.message))
+    })?;
     Ok(CommandDef::new(operation, template))
 }
 
@@ -293,7 +299,12 @@ fn set_path(pipeline: &mut Pipeline, line: &str, number: usize) -> Result<(), Pa
     if template.is_empty() {
         return Err(ParseError::new(number, "path template must not be empty"));
     }
+    check_path_template_syntax(template).map_err(|error| ParseError::new(number, error.message))?;
     if let Some(product) = product {
+        pipeline
+            .source_lines
+            .paths
+            .insert(product.to_owned(), number);
         if pipeline
             .product_paths
             .insert(product.to_owned(), template.to_owned())
@@ -310,11 +321,39 @@ fn set_path(pipeline: &mut Pipeline, line: &str, number: usize) -> Result<(), Pa
         .is_some()
     {
         return Err(ParseError::new(number, "duplicate default path template"));
+    } else {
+        pipeline.source_lines.default_path = Some(number);
     }
     Ok(())
 }
 
 pub(crate) fn strip_comment(line: &str) -> &str {
+    &line[..comment_start(line).unwrap_or(line.len())]
+}
+
+/// Strip a trailing comment, rejecting a `#` joined to text on both sides.
+/// Such a `#` would silently cut an argument like `--color=#fff` short.
+fn strip_line_comment(line: &str, number: usize) -> Result<&str, ParseError> {
+    let Some(index) = comment_start(line) else {
+        return Ok(line);
+    };
+    let before = line[..index].chars().next_back();
+    let after = line[index + 1..].chars().next();
+    if before.is_some_and(|value| !value.is_whitespace())
+        && after.is_some_and(|value| !value.is_whitespace())
+    {
+        return Err(ParseError::new(
+            number,
+            format!(
+                "`#` inside `{}` starts a comment; quote the text or put a space before the comment",
+                line[..index].split_whitespace().next_back().unwrap_or("")
+            ),
+        ));
+    }
+    Ok(&line[..index])
+}
+
+fn comment_start(line: &str) -> Option<usize> {
     let mut quote = None;
     let mut escaped = false;
     for (index, character) in line.char_indices() {
@@ -326,12 +365,12 @@ pub(crate) fn strip_comment(line: &str) -> &str {
                 (None, '\'') => quote = Some('\''),
                 (None, '"') => quote = Some('"'),
                 (Some('\''), '\'') | (Some('"'), '"') => quote = None,
-                (None, '#') => return &line[..index],
+                (None, '#') => return Some(index),
                 _ => {}
             }
         }
     }
-    line
+    None
 }
 
 fn parse_flow_invocation(
@@ -526,7 +565,7 @@ pub fn parse_source_inventory(text: &str) -> Result<SourceInventory, ParseError>
     let mut section = None;
     for (index, original) in text.lines().enumerate() {
         let number = index + 1;
-        let line = strip_comment(original).trim();
+        let line = strip_line_comment(original, number)?.trim();
         if line.is_empty() {
             continue;
         }

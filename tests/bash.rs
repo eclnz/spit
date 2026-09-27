@@ -5,7 +5,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use spit::{
     inspect_paths, parse_document, parse_pipeline, parse_source_inventory, render_bash,
-    render_bound_dag, resolve, PathRule,
+    render_bound_dag, resolve, validate_commands, PathRule,
 };
 
 fn demo_script() -> String {
@@ -85,7 +85,7 @@ fn backend_rejects_undeclared_placeholders_and_path_collisions() {
     assert!(render_bash(&pipeline, &dag)
         .unwrap_err()
         .to_string()
-        .contains("same path"));
+        .contains("omits dimension"));
 }
 
 #[test]
@@ -217,7 +217,7 @@ fn path_coverage_catches_missing_and_invalid_rules_without_jobs() {
 
     pipeline
         .product_paths
-        .insert("unused".to_owned(), "input/{missing}.txt".to_owned());
+        .insert("unused".to_owned(), "input/{id}/{missing}.txt".to_owned());
     assert!(inspect_paths(&pipeline)
         .unwrap_err()
         .to_string()
@@ -308,4 +308,54 @@ fn command_uses_executable_on_path() {
         "hello\n"
     );
     fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn commands_are_validated_even_without_resolved_jobs() {
+    let base = "source raw : Table [id]\noperation normalize(Table) -> Table\n";
+    let check = |command: &str| {
+        let pipeline = parse_pipeline(&format!("{base}{command}\n")).unwrap();
+        validate_commands(&pipeline).map_err(|error| error.to_string())
+    };
+    assert!(check("command normalize: normalize --mode {input} {output}").is_ok());
+    assert!(check("command normalize: normalize --mode {raw} {output}")
+        .unwrap_err()
+        .contains("unknown placeholder `{raw}`"));
+    assert!(check("command normalize: normalize --mode {input} out.csv")
+        .unwrap_err()
+        .contains("must use `{output}`"));
+    assert!(check("command dedupe: dedupe {input} {output}")
+        .unwrap_err()
+        .contains("unknown operation `dedupe`"));
+}
+
+#[test]
+fn path_rules_that_cannot_separate_artifacts_are_rejected_with_their_line() {
+    let check = |text: &str| inspect_paths(&parse_pipeline(text).unwrap()).map(|_| ());
+
+    let error = check("source raw [id, batch]\npath: {product}/{entities}.csv\npath raw: raw/{id}.csv\n")
+        .unwrap_err();
+    assert_eq!(error.line, Some(3));
+    assert!(error.message.contains("omits dimension `batch`"), "{error}");
+
+    let error = check("source raw [id]\npath: {entities}.csv\noperation clean(one)\ncleaned = clean(raw)\n")
+        .unwrap_err();
+    assert_eq!(error.line, Some(2));
+    assert!(error.message.contains("`raw` and `cleaned`"), "{error}");
+
+    let error = check("source raw [id]\npath: {product}/{id}/{shard}.csv\n").unwrap_err();
+    assert_eq!(error.to_string(), "line 2: path template for `raw` uses absent dimension `shard`");
+
+    // Rules naming different dimensions are not treated as colliding.
+    check("source raw [id]\nsource extra [batch]\npath raw: out/{id}.csv\npath extra: out/{batch}.csv\n")
+        .unwrap();
+}
+
+#[test]
+fn command_errors_name_the_command_line() {
+    let pipeline = parse_pipeline(
+        "source raw [id]\noperation clean(one)\n\ncommand clean: tool {raw} {output}\n",
+    )
+    .unwrap();
+    assert_eq!(validate_commands(&pipeline).unwrap_err().line, Some(4));
 }

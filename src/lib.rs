@@ -11,8 +11,8 @@ pub mod resolver;
 pub mod types;
 
 pub use bash::{
-    inspect_paths, render_bash, render_bound_dag, validate_concrete_paths, validate_source_files,
-    BashError, PathCoverage, PathCoverageEntry, PathRule,
+    inspect_paths, render_bash, render_bound_dag, validate_commands, validate_concrete_paths,
+    validate_source_files, BashError, PathCoverage, PathCoverageEntry, PathRule,
 };
 pub use diagnostics::{diagnose, diagnose_at, Diagnostic};
 pub use error::ResolveError;

@@ -13,18 +13,49 @@ use crate::render::render_typed_artifact;
 type ArtifactKey = (String, EntityBinding);
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct BashError(pub String);
+pub struct BashError {
+    /// The pipeline line of the path rule, command, or operation at fault, when known.
+    pub line: Option<usize>,
+    pub message: String,
+}
+
+impl BashError {
+    /// Attach a line unless a more specific one is already recorded.
+    fn at(mut self, line: Option<usize>) -> Self {
+        self.line = self.line.or(line);
+        self
+    }
+}
 
 impl fmt::Display for BashError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
+        if let Some(line) = self.line {
+            write!(f, "line {line}: ")?;
+        }
+        f.write_str(&self.message)
     }
 }
 
 impl std::error::Error for BashError {}
 
 fn error(message: impl Into<String>) -> BashError {
-    BashError(message.into())
+    BashError {
+        line: None,
+        message: message.into(),
+    }
+}
+
+fn command_line(pipeline: &Pipeline, index: usize) -> Option<usize> {
+    pipeline.source_lines.command_lines.get(index).copied()
+}
+
+/// The pipeline line that declares the path rule used for `product`.
+fn path_rule_line(pipeline: &Pipeline, product: &str) -> Option<usize> {
+    if pipeline.product_paths.contains_key(product) {
+        pipeline.source_lines.paths.get(product).copied()
+    } else {
+        pipeline.source_lines.default_path
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -102,13 +133,34 @@ impl fmt::Display for PathCoverage {
 
 /// Inspect every declared product, including families with no resolved jobs.
 pub fn inspect_paths(pipeline: &Pipeline) -> Result<PathCoverage, BashError> {
+    let (coverage, errors) = collect_paths(pipeline, &BTreeSet::new());
+    match errors.into_iter().next() {
+        Some(error) => Err(error),
+        None => Ok(coverage),
+    }
+}
+
+/// Inspect every path rule, collecting each error. Rules for products in
+/// `skip` belong to declarations that already failed and are not checked.
+pub(crate) fn collect_paths(
+    pipeline: &Pipeline,
+    skip: &BTreeSet<String>,
+) -> (PathCoverage, Vec<BashError>) {
+    let mut errors = Vec::new();
     for name in pipeline.product_paths.keys() {
-        if !pipeline
-            .products
-            .iter()
-            .any(|product| &product.name == name)
+        if !skip.contains(name)
+            && !pipeline
+                .products
+                .iter()
+                .any(|product| &product.name == name)
         {
-            return Err(error(format!("path refers to unknown product `{name}`")));
+            errors.push(
+                error(format!("path refers to unknown product `{name}`")).at(pipeline
+                    .source_lines
+                    .paths
+                    .get(name)
+                    .copied()),
+            );
         }
     }
     let outputs: BTreeSet<_> = pipeline
@@ -117,31 +169,79 @@ pub fn inspect_paths(pipeline: &Pipeline) -> Result<PathCoverage, BashError> {
         .map(|invocation| invocation.output_product.as_str())
         .collect();
     let mut entries = Vec::new();
+    let mut samples: BTreeMap<String, &str> = BTreeMap::new();
     for product in &pipeline.products {
         let rule = if let Some(template) = pipeline.product_paths.get(&product.name) {
-            validate_path_template(pipeline, product)?;
             PathRule::Explicit(template.clone())
         } else if let Some(template) = &pipeline.path_template {
-            validate_path_template(pipeline, product)?;
             PathRule::Default(template.clone())
         } else {
             PathRule::Missing
         };
+        if rule != PathRule::Missing && !skip.contains(&product.name) {
+            let line = path_rule_line(pipeline, &product.name);
+            match validate_path_template(pipeline, product) {
+                Err(e) => errors.push(e.at(line)),
+                // A repeated product name is reported by the resolver as a duplicate.
+                Ok(sample) => {
+                    if let Some(other) = samples
+                        .insert(sample.clone(), &product.name)
+                        .filter(|other| *other != product.name)
+                    {
+                        errors.push(
+                            error(format!(
+                                "products `{other}` and `{}` bind to the same path `{sample}` for the same entities; include `{{product}}` or distinguish their path rules",
+                                product.name
+                            ))
+                            .at(line),
+                        );
+                    }
+                }
+            }
+        }
         entries.push(PathCoverageEntry {
             product: product.name.clone(),
             source: !outputs.contains(product.name.as_str()),
             rule,
         });
     }
-    Ok(PathCoverage { entries })
+    (PathCoverage { entries }, errors)
 }
 
-fn validate_path_template(pipeline: &Pipeline, product: &ProductDef) -> Result<(), BashError> {
+/// Bind a product's path rule to placeholder entities, rejecting rules that
+/// cannot tell the product's artifacts apart. Returns the sample path.
+fn validate_path_template(pipeline: &Pipeline, product: &ProductDef) -> Result<String, BashError> {
+    let template = pipeline
+        .product_paths
+        .get(&product.name)
+        .or(pipeline.path_template.as_ref())
+        .ok_or_else(|| error(format!("no path template for product `{}`", product.name)))?;
+    let placeholders: BTreeSet<_> = parse_template(template)?
+        .into_iter()
+        .filter_map(|part| match part {
+            Part::Placeholder(name) => Some(name),
+            Part::Literal(_) => None,
+        })
+        .collect();
+    if !placeholders.contains("entities") {
+        if let Some(dimension) = product
+            .dimensions
+            .iter()
+            .find(|dimension| !placeholders.contains(*dimension))
+        {
+            return Err(error(format!(
+                "path template for `{}` omits dimension `{dimension}`; artifacts differing only in `{dimension}` would share a path",
+                product.name
+            )));
+        }
+    }
+    // Each dimension gets a distinct sample value so that templates naming
+    // different dimensions are not mistaken for colliding ones.
     let entities = EntityBinding(
         product
             .dimensions
             .iter()
-            .map(|dimension| (dimension.clone(), "sample".to_owned()))
+            .map(|dimension| (dimension.clone(), dimension.clone()))
             .collect(),
     );
     let artifact = ArtifactInstance::new(&product.name, product.artifact_type.clone(), entities);
@@ -151,8 +251,7 @@ fn validate_path_template(pipeline: &Pipeline, product: &ProductDef) -> Result<(
             .into_iter()
             .collect(),
     };
-    bind_path(pipeline, &dag, &artifact)?;
-    Ok(())
+    bind_path(pipeline, &dag, &artifact)
 }
 
 /// Generate a script for the concrete jobs already selected by `resolve`.
@@ -164,24 +263,13 @@ pub fn render_bash(pipeline: &Pipeline, dag: &ResolvedDag) -> Result<String, Bas
         .iter()
         .map(|operation| (operation.name.as_str(), operation))
         .collect();
-    let mut commands = BTreeMap::new();
-    for command in &pipeline.commands {
-        if !operations.contains_key(command.operation.as_str()) {
-            return Err(error(format!(
-                "command refers to unknown operation `{}`",
-                command.operation
-            )));
-        }
-        if commands
-            .insert(command.operation.as_str(), command.template.as_str())
-            .is_some()
-        {
-            return Err(error(format!(
-                "duplicate command for operation `{}`",
-                command.operation
-            )));
-        }
-    }
+    validate_commands(pipeline)?;
+    let commands: BTreeMap<_, _> = pipeline
+        .commands
+        .iter()
+        .enumerate()
+        .map(|(index, command)| (command.operation.as_str(), (index, command)))
+        .collect();
     let outputs: BTreeSet<_> = dag.jobs.iter().map(|job| key(&job.output)).collect();
     let paths = bound_paths(pipeline, dag)?;
 
@@ -204,11 +292,16 @@ pub fn render_bash(pipeline: &Pipeline, dag: &ResolvedDag) -> Result<String, Bas
                 job.operation
             ))
         })?;
-        let template = commands.get(job.operation.as_str()).ok_or_else(|| {
+        let (command_index, command) = commands.get(job.operation.as_str()).ok_or_else(|| {
             error(format!(
                 "no command defined for operation `{}`",
                 job.operation
             ))
+            .at(pipeline
+                .source_lines
+                .operations
+                .get(&operation.name)
+                .copied())
         })?;
         let output_path = paths.get(&key(&job.output)).unwrap();
         let parent = Path::new(output_path)
@@ -221,12 +314,125 @@ pub fn render_bash(pipeline: &Pipeline, dag: &ResolvedDag) -> Result<String, Bas
         writeln!(
             script,
             "{}",
-            render_command(template, operation, job, &paths)?
+            render_command(&command.template, operation, job, &paths)
+                .map_err(|e| e.at(command_line(pipeline, *command_index)))?
         )
         .unwrap();
         writeln!(script, "spit_require {}\n", shell_path(output_path)).unwrap();
     }
     Ok(script)
+}
+
+/// Check every declared command against its operation without resolving jobs:
+/// the template must parse, name only known placeholders, and write `{output}`.
+pub fn validate_commands(pipeline: &Pipeline) -> Result<(), BashError> {
+    match collect_commands(pipeline, &BTreeSet::new())
+        .into_iter()
+        .next()
+    {
+        Some(error) => Err(error),
+        None => Ok(()),
+    }
+}
+
+/// Check every command, collecting each error. Commands for operations in
+/// `skip` belong to declarations that already failed and are not checked.
+pub(crate) fn collect_commands(pipeline: &Pipeline, skip: &BTreeSet<String>) -> Vec<BashError> {
+    let operations: BTreeMap<_, _> = pipeline
+        .operations
+        .iter()
+        .map(|operation| (operation.name.as_str(), operation))
+        .collect();
+    let mut errors = Vec::new();
+    let mut seen = BTreeSet::new();
+    for (index, command) in pipeline.commands.iter().enumerate() {
+        if skip.contains(&command.operation) {
+            continue;
+        }
+        let line = command_line(pipeline, index);
+        let Some(operation) = operations.get(command.operation.as_str()) else {
+            errors.push(
+                error(format!(
+                    "command refers to unknown operation `{}`",
+                    command.operation
+                ))
+                .at(line),
+            );
+            continue;
+        };
+        if !seen.insert(command.operation.as_str()) {
+            errors.push(
+                error(format!(
+                    "duplicate command for operation `{}`",
+                    command.operation
+                ))
+                .at(line),
+            );
+        } else if let Err(e) = check_command_placeholders(&command.template, operation) {
+            errors.push(e.at(line));
+        }
+    }
+    errors
+}
+
+/// Check placeholder brackets in a path template.
+pub(crate) fn check_path_template_syntax(template: &str) -> Result<(), BashError> {
+    parse_template(template).map(|_| ())
+}
+
+/// Check quoting and placeholder brackets in a command template.
+pub(crate) fn check_command_syntax(template: &str) -> Result<(), BashError> {
+    let words = split_words(template)?;
+    if words.is_empty() {
+        return Err(error("command template must not be empty"));
+    }
+    for word in words {
+        parse_template(&word)?;
+    }
+    Ok(())
+}
+
+fn check_command_placeholders(template: &str, operation: &OperationDef) -> Result<(), BashError> {
+    check_command_syntax(template)?;
+    let single_many =
+        operation.inputs.len() == 1 && operation.inputs[0].cardinality == Cardinality::Many;
+    let mut uses_output = false;
+    for word in split_words(template)? {
+        let parts = parse_template(&word)?;
+        let whole = parts.len() == 1;
+        for part in parts {
+            let Part::Placeholder(name) = part else {
+                continue;
+            };
+            if name == "output" {
+                uses_output = true;
+                continue;
+            }
+            let port = operation
+                .inputs
+                .iter()
+                .find(|port| port.name == name)
+                .or_else(|| (single_many && name == "inputs").then(|| &operation.inputs[0]))
+                .ok_or_else(|| {
+                    error(format!(
+                        "command for `{}` uses unknown placeholder `{{{name}}}`",
+                        operation.name
+                    ))
+                })?;
+            if port.cardinality == Cardinality::Many && !whole {
+                return Err(error(format!(
+                    "many input `{{{name}}}` must be a complete command argument"
+                )));
+            }
+        }
+    }
+    if !uses_output {
+        return Err(error(format!(
+            "command for `{}` must use `{{output}}`",
+            operation.name
+        )));
+    }
+    Ok(())
 }
 
 /// Validate concrete artifact path bindings without requiring commands.
@@ -341,12 +547,14 @@ fn bound_paths(
         if paths.contains_key(&identity) {
             continue;
         }
-        let relative = bind_path(pipeline, dag, artifact)?;
+        let line = path_rule_line(pipeline, &artifact.product);
+        let relative = bind_path(pipeline, dag, artifact).map_err(|e| e.at(line))?;
         if let Some(previous) = owners.insert(relative.clone(), identity.clone()) {
             return Err(error(format!(
                 "artifacts `{}[{}]` and `{}[{}]` bind to the same path `{relative}`",
                 previous.0, previous.1, identity.0, identity.1
-            )));
+            ))
+            .at(line));
         }
         paths.insert(identity, relative);
     }
@@ -555,9 +763,17 @@ fn parse_template(template: &str) -> Result<Vec<Part>, BashError> {
                 let mut name = String::new();
                 loop {
                     match chars.next() {
-                        Some('}') if !name.is_empty() => break,
-                        Some(value) if value != '{' => name.push(value),
-                        _ => return Err(error(format!("invalid placeholder in `{template}`"))),
+                        Some('}') if name.is_empty() => {
+                            return Err(error(format!("empty placeholder `{{}}` in `{template}`")))
+                        }
+                        Some('}') => break,
+                        Some('{') => {
+                            return Err(error(format!(
+                                "nested `{{` in placeholder in `{template}`"
+                            )))
+                        }
+                        Some(value) => name.push(value),
+                        None => return Err(error(format!("unclosed `{{` in `{template}`"))),
                     }
                 }
                 parts.push(Part::Placeholder(name));
@@ -566,7 +782,7 @@ fn parse_template(template: &str) -> Result<Vec<Part>, BashError> {
                 chars.next();
                 literal.push('}');
             }
-            '}' => return Err(error(format!("unexpected `}}` in `{template}`"))),
+            '}' => return Err(error(format!("unmatched `}}` in `{template}`"))),
             value => literal.push(value),
         }
     }
