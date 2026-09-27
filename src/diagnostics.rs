@@ -7,10 +7,12 @@ use std::path::Path;
 
 use crate::bash::collect_commands;
 use crate::imports::parse_located_document;
-use crate::parser::{glued_comment, parse_document_with_imports, ParsedDocument, SourceMap, Step};
+use crate::parser::{
+    glued_comment, parse_document_with_imports, ParsedDocument, Rule, SourceMap, Step,
+};
 use crate::paths::collect_paths;
 use crate::resolver::collect_pipeline;
-use crate::span::{columns_of, content_columns, utf16_columns, Place};
+use crate::span::{columns_of, content_columns, find_word, utf16_columns, Place};
 use crate::{
     parse_source_inventory, resolve, DefinitionSubject, EntityBinding, InputBinding, ParseError,
     ParseErrorKind, Pipeline, ResolveError,
@@ -321,11 +323,16 @@ fn pipeline_diagnostics(
         );
     for (line, columns, focus, message) in template_errors {
         let place = line.zip(columns).map(|(line, columns)| {
-            // Narrow to the part of the template the error is about.
+            // Narrow to the part the error is about: a placeholder inside the
+            // template, or else a name elsewhere on the line, such as the
+            // operation a command is declared for.
             let focus = focus.and_then(|focus| {
                 let text = text.lines().nth(line.checked_sub(1)?)?;
-                let offset = text.get(columns.clone())?.find(&focus)?;
-                Some(columns.start + offset..columns.start + offset + focus.len())
+                let inside = text
+                    .get(columns.clone())?
+                    .find(&focus)
+                    .map(|offset| columns.start + offset..columns.start + offset + focus.len());
+                inside.or_else(|| find_word(text, content_columns(text).start, &focus))
             });
             Place::new(line, focus.unwrap_or(columns))
         });
@@ -353,7 +360,9 @@ fn subject_place(
             let step = lines.invocations.get(output)?;
             Some(step_part(pipeline, step, output, error))
         }
-        DefinitionSubject::Constraint(index) => lines.rules.get(*index).cloned(),
+        // A rule's own errors concern its product: unknown, or not a source.
+        DefinitionSubject::Constraint(index) => lines.rules.get(*index).map(Rule::product),
+        DefinitionSubject::ConstraintGroup(index) => lines.rules.get(*index).map(Rule::dimensions),
         DefinitionSubject::Source(_) | DefinitionSubject::None => None,
     }
 }
@@ -608,7 +617,7 @@ fn error_location(
                     .any(|binding| binding.product_name() == name)
             })
             .and_then(|invocation| step(&invocation.output_product))
-            .or_else(|| lines.constraints.get(name).cloned()),
+            .or_else(|| lines.constraints.get(name).map(Rule::product)),
         ResolveError::InvalidAggregationDimension { product, dimension } => pipeline
             .invocations
             .iter()
@@ -621,7 +630,10 @@ fn error_location(
             .and_then(|invocation| step(&invocation.output_product)),
         ResolveError::Cycle { products } => products.first().and_then(|name| step(name)),
         ResolveError::UnsupportedShapeRelationship { operation, .. } => unique_step(operation),
-        ResolveError::CoverageViolation { rule_index, .. } => lines.rules.get(*rule_index).cloned(),
+        // Too few or too many artifacts is about the rule as a whole.
+        ResolveError::CoverageViolation { rule_index, .. } => {
+            lines.rules.get(*rule_index).map(Rule::whole)
+        }
         ResolveError::DuplicateOutputArtifact { artifact } => step(&artifact.product),
         ResolveError::InvalidDefinition { subject, .. } => {
             subject_place(pipeline, lines, subject, error)
