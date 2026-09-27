@@ -54,8 +54,8 @@ fn parses_and_resolves_a_document_with_its_inventory() {
     assert_eq!(inventory.artifacts.len(), 3);
     let dag = resolve(&pipeline, &inventory).unwrap();
     assert_eq!(dag.jobs.len(), 5);
-    assert_eq!(dag.jobs[4].inputs.len(), 2);
-    assert!(!dag.jobs[4].output.entities.0.contains_key("run"));
+    assert_eq!(dag.jobs[4].input_artifacts().count(), 2);
+    assert!(!dag.jobs[4].output().entities.0.contains_key("run"));
 }
 
 #[test]
@@ -107,9 +107,9 @@ fn resolves_untyped_pipeline_by_shape_and_cardinality() {
         .all(|product| product.artifact_type == TypeExpr::Unknown));
     let dag = resolve(&pipeline, &inventory.unwrap()).unwrap();
     assert_eq!(dag.jobs.len(), 3);
-    assert_eq!(dag.jobs[2].inputs.len(), 2);
-    assert_eq!(dag.jobs[2].output.artifact_type, TypeExpr::Unknown);
-    assert!(!dag.jobs[2].output.entities.0.contains_key("repeat"));
+    assert_eq!(dag.jobs[2].input_artifacts().count(), 2);
+    assert_eq!(dag.jobs[2].output().artifact_type, TypeExpr::Unknown);
+    assert!(!dag.jobs[2].output().entities.0.contains_key("repeat"));
     assert!(!render_dag(&dag).contains(": Unknown"));
 }
 
@@ -202,7 +202,7 @@ fn named_ports_and_declared_aggregate_shape_are_checked() {
         Some("run")
     );
     let dag = resolve(&pipeline, &inventory.unwrap()).unwrap();
-    assert_eq!(dag.jobs[0].output.entities.0.len(), 1);
+    assert_eq!(dag.jobs[0].output().entities.0.len(), 1);
 
     let wrong_vary = text.replace("vary(run)", "vary(site)");
     let (pipeline, inventory) = parse_document(&wrong_vary).unwrap();

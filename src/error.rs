@@ -18,6 +18,15 @@ pub enum DefinitionSubject {
     None,
 }
 
+/// A type variable, the type it was inferred as, and the different type a
+/// later port requires of it.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TypeConflict {
+    pub variable: String,
+    pub previous: ArtifactType,
+    pub required: ArtifactType,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ResolveError {
     UnknownProduct {
@@ -38,15 +47,32 @@ pub enum ResolveError {
         operation: String,
         output_product: String,
         port: String,
-        variable: String,
-        previous: Box<ArtifactType>,
-        required: Box<ArtifactType>,
+        product: String,
+        conflict: Box<TypeConflict>,
     },
     MissingInput {
         operation: String,
         output_product: String,
         port: String,
+        product: String,
+        context: Box<EntityBinding>,
+    },
+    /// A `one` input left more than one artifact for a job.
+    AmbiguousInput {
+        operation: String,
+        output_product: String,
+        port: String,
+        product: String,
+        context: Box<EntityBinding>,
+    },
+    /// A many input collected fewer artifacts than the operation accepts.
+    CollectionTooSmall {
+        operation: String,
+        output_product: String,
+        port: String,
         context: EntityBinding,
+        minimum: usize,
+        found: usize,
     },
     InvalidAggregationDimension {
         product: String,
@@ -71,6 +97,14 @@ pub enum ResolveError {
         context: EntityBinding,
         expected: CountRequirement,
         found: usize,
+    },
+    /// A group lacks an entity value its coverage rule requires.
+    MissingRequiredValue {
+        product: String,
+        rule_index: usize,
+        context: EntityBinding,
+        dimension: String,
+        value: String,
     },
     InvalidDefinition {
         subject: DefinitionSubject,
@@ -97,22 +131,46 @@ impl fmt::Display for ResolveError {
             Self::TypeVariableConflict {
                 operation,
                 port,
-                variable,
-                previous,
-                required,
+                product,
+                conflict,
                 ..
             } => write!(
                 f,
-                "type conflict at `{operation}.{port}`: variable `{variable}` was inferred as {previous}, but now requires {required}"
+                "type conflict at `{operation}.{port}` (product `{product}`): variable `{}` was inferred as {}, but now requires {}",
+                conflict.variable,
+                conflict.previous,
+                conflict.required
             ),
             Self::MissingInput {
                 operation,
                 port,
+                product,
                 context,
                 ..
             } => write!(
                 f,
-                "missing input `{port}` for `{operation}` at [{context}]"
+                "no `{product}` artifact for input `{port}` of `{operation}` at [{context}]"
+            ),
+            Self::AmbiguousInput {
+                operation,
+                port,
+                product,
+                context,
+                ..
+            } => write!(
+                f,
+                "more than one `{product}` artifact matches input `{port}` of `{operation}` at [{context}]; select one with `@ where(...)`"
+            ),
+            Self::CollectionTooSmall {
+                operation,
+                port,
+                context,
+                minimum,
+                found,
+                ..
+            } => write!(
+                f,
+                "input `{port}` of `{operation}` needs at least {minimum} artifacts at [{context}], found {found}"
             ),
             Self::InvalidAggregationDimension { product, dimension } => write!(
                 f,
@@ -139,6 +197,16 @@ impl fmt::Display for ResolveError {
             } => write!(
                 f,
                 "source coverage for `{product}` at [{context}]: expected {expected} artifact(s), found {found}"
+            ),
+            Self::MissingRequiredValue {
+                product,
+                context,
+                dimension,
+                value,
+                ..
+            } => write!(
+                f,
+                "source coverage for `{product}` at [{context}]: no artifact with {dimension}={value}"
             ),
             Self::InvalidDefinition { detail, .. } => f.write_str(detail),
         }

@@ -20,7 +20,7 @@ Live validation in VS Code is maintained in the separate `spit-vscode` repositor
 ## CLI commands and options
 
 ```text
-spit <check|dag|bound-dag|paths|bash|diagnose> <pipeline.spit> [--sources <inventory.spit|->] [--root <directory>] [--strict-paths]
+spit <check|dag|bound-dag|paths|bash|discover|diagnose> <pipeline.spit> [--sources <inventory.spit|->] [--root <directory>] [--strict-paths]
 ```
 
 Choose one command per call. The pipeline file comes next; options follow it.
@@ -32,12 +32,13 @@ Choose one command per call. The pipeline file comes next; options follow it.
 | `bound-dag` | Print the resolved DAG with a path for every artifact. |
 | `paths` | Show which path rule covers each product and validate the resulting paths. |
 | `bash` | Write a Bash script for the resolved jobs to standard output. It does not run the script. |
+| `discover` | Print an inventory of the source files under `--root`, found by matching each file against the sources' path rules. |
 | `diagnose` | Read the pipeline from standard input and return JSON diagnostics for editor use. Each has a `severity` of `error` or `warning`; those tied to a declaration, call, rule, command, or path include its `line`, and a `column` and `end_column` for the text it is about, such as one input of a call or one `{placeholder}`. Columns are 1-based and count UTF-16 code units, as editors do; `end_column` is one past the last character. A pipeline path is required for CLI consistency, but its file contents are not read. |
 
 | Option | Effect |
 | --- | --- |
-| `--sources <inventory.spit>` | Read source artifact identities from a separate file. Required unless the pipeline contains an inline inventory, except for `check` without `--root`. Use `--sources -` to read standard input. |
-| `--root <directory>` | Check that every required source path points to a regular file under this directory. Available with any command; derived outputs need not exist yet. |
+| `--sources <inventory.spit>` | Read source artifact identities from a separate file. Jobs need an inventory: this file, an inline one, or sources discovered with `--root`; `check` without any checks the pipeline alone. A separate inventory replaces an inline one, which is then skipped with a warning. Use `--sources -` to read standard input. |
+| `--root <directory>` | Check that every required source path points to a regular file under this directory; derived outputs need not exist yet. Without `--sources` or an inline inventory, the sources are discovered under this directory from their path rules. |
 | `--strict-paths` | Require an explicit `path product:` rule for every product, even if a default `path:` rule exists. |
 
 For example, `check` resolves the pipeline, while `check --root` also verifies its input files:
@@ -57,7 +58,7 @@ error: line 5, column 29: command for `clean` uses unknown placeholder `{result}
 error: line 9, column 14: unknown product `rwa`
 ```
 
-Syntax errors are reported throughout the file first; the remaining checks run once every line parses. A step or rule that uses a declaration which failed is not reported again. Errors stop the command; warnings do not. Warnings flag a source product no step uses, an operation no step uses, a used operation with no `command` once the pipeline has commands, an output type variable that no input binds, and a `#` that ends a word, which reads like a comment but is part of the word. A file with no steps is treated as a library of definitions, and imported definitions are never reported as unused. Jobs are resolved against the inventory only when nothing else is wrong.
+Syntax errors are reported throughout the file first; the remaining checks run once every line parses. A step or rule that uses a declaration which failed is not reported again. Errors stop the command; warnings do not. Warnings flag a source product no step uses, an operation no step uses, a used operation with no `command` once the pipeline has commands, an output type variable that no input binds, and a `#` that ends a word, which reads like a comment but is part of the word. With an inventory, they also flag a source with no artifacts, naming the steps it leaves without jobs, any other step that resolves no jobs, and an inline inventory that `--sources` replaces. A file with no steps is treated as a library of definitions, and imported definitions are never reported as unused. Jobs are resolved against the inventory only when nothing else is wrong.
 
 ## Write a pipeline
 
@@ -129,7 +130,7 @@ processed = process(image)
 average = mean(processed @ vary(run))
 ```
 
-The first input determines a normal operation's output dimensions. For an aggregation, `vary(run)` removes `run` from the output identity. You can write the output type and dimensions explicitly when helpful:
+The input with the most dimensions drives a normal operation and gives its outputs their dimensions, wherever it sits among the ports. For an aggregation, `vary(run)` removes `run` from the output identity. You can write the output type and dimensions explicitly when helpful:
 
 ```text
 average : Image [subject, visit] = mean(processed @ vary(run))
@@ -145,9 +146,39 @@ operation mean(images: many Image) -> Image @ drop(run)
 command mean: mean_tool {images} --out {output}
 ```
 
-Declare an operation before its first use. Inputs in a call follow the port order in the declaration. A `one` input must resolve to exactly one artifact for each job, so every input after the first may only use dimensions the first input has; SPIT rejects a pipeline that breaks this before reading any inventory, and reports a missing match for a job. A `many` input needs `@ vary(dimension)`, and its command placeholder expands to one separately quoted argument per artifact, ordered by entity bindings. A many placeholder must occupy a whole argument.
+Declare an operation before its first use. Inputs in a call follow the port order in the declaration. A `one` input must resolve to exactly one artifact for each job, so every other input may only use dimensions the driving input has; SPIT rejects a pipeline that breaks this before reading any inventory, and reports a missing match for a job. A `many` input needs `@ vary(dimension)`, and its command placeholder expands to one separately quoted argument per artifact, ordered by the product's dimensions with numbers compared as numbers, so `run=2` comes before `run=10`. A many placeholder must occupy a whole argument. An operation takes at most one `many` input, which may sit beside `one` inputs; each of those is matched once per group:
 
-Input port names are optional. An unnamed single input is `{input}`; multiple unnamed inputs are `{input1}`, `{input2}`, and so on. `{output}` is the output path, so `output` cannot name an input port. Command templates give ordered words and arguments, not shell pipelines or redirection. Words are split and quoted as in Bash, and every argument is passed literally: `$` and backticks are not expanded. Write `{{` or `}}` for a literal brace. Every command is checked when the pipeline is loaded: braces and quotes must balance, placeholders must name the operation's ports, and `{output}` must appear.
+```text
+operation summarise(days: many Series, policy: Policy) -> Summary @ drop(day) @ min(2)
+summary = summarise(reading @ vary(day), policy)
+```
+
+`@ min(2)` rejects a group with fewer than two artifacts.
+
+Selectors narrow what an input matches:
+
+```text
+calibrated = calibrate(reading, calibration @ where(revision=2))
+anomaly = compare(calibrated, reference @ same(station))
+```
+
+`where(revision=2)` keeps the artifacts with that value and takes `revision` out of matching, so a family with an extra dimension can join a less specific input. `same(station)` matches on `station` alone; the reference's other dimensions must then leave exactly one artifact for each job. Selectors can be combined, as in `frame @ where(acq=fast) @ vary(run)`.
+
+An operation can write several outputs in one job. Name each output; its name is its placeholder, and the call assigns one product to each:
+
+```text
+operation estimate(dwi: DWI) -> (wm: Response, gm: Response, csf: Response)
+command estimate: dwi2response dhollander {dwi} {wm} {gm} {csf}
+wm_response, gm_response, csf_response = estimate(dwi)
+```
+
+A `verify` command checks a job's inputs before its command runs, using the tools that understand the files; if it fails, the script stops:
+
+```text
+verify register: check_same_grid {moving} {reference}
+```
+
+Input port names are optional. An unnamed single input is `{input}`; multiple unnamed inputs are `{input1}`, `{input2}`, and so on. Named ports give clearer errors, although errors also name the product bound to a port. `{output}` is the path of a single unnamed output, so `output` cannot name an input port. A command must use every output placeholder; a `verify` command may use inputs only. Command templates give ordered words and arguments, not shell pipelines or redirection. Words are split and quoted as in Bash, and every argument is passed literally: `$` and backticks are not expanded. Write `{{` or `}}` for a literal brace. Every command is checked when the pipeline is loaded: braces and quotes must balance, placeholders must name the operation's ports, and `{output}` must appear.
 
 The first word of a command must be an executable available on `PATH` (or an executable path). SPIT emits that command without managing its installation or loading shell functions:
 
@@ -174,13 +205,15 @@ path: results/{product}/{entities}.txt
 path image: input/{subject}/{visit}/{run}.txt
 ```
 
-`path:` sets a default. `path image:` overrides it for `image`. Templates can use `{product}`, `{entities}`, or a declared dimension. In `{product}`, an imported `alias::name` becomes `alias.name`. Paths are relative to `SPIT_ROOT`.
+`path:` sets a default. `path image:` overrides it for `image`. Each output of a multi-output step has its own product, so its own rule. Templates can use `{product}`, `{entities}`, or a declared dimension. In `{product}`, an imported `alias::name` becomes `alias.name`. Paths are relative to `SPIT_ROOT`.
 
 Path rules are checked when the pipeline is loaded, even for products with no resolved jobs. SPIT rejects unbalanced braces, a dimension the product does not declare, a rule that omits one of the product's dimensions (use `{entities}` or name each one), and two products whose rules give the same path for the same entities, such as a default rule without `{product}`. Missing rules are reported by `paths`, `bound-dag`, `bash`, and `--root`, and collisions between resolved artifact paths once jobs are bound.
 
 As in Bash, an unquoted `#` starts a comment only at the start of a word, so `--color=#fff` is one argument. A `#` that ends a word, as in `{output}# note`, stays part of the word; SPIT warns about it, since it reads like a comment. Put a space before `#` to start a comment, or quote the text to keep it.
 
 Place a source path beside its `source` line and a derived path beside its assignment. The default can stay near the top of the file.
+
+Path rules also find sources. `spit discover pipeline.spit --root data` lists each file under `data` whose path matches a source's rule, reading entity values from its placeholders, as inventory text. Other commands given `--root` and no inventory do the same, so `spit bash pipeline.spit --root data` needs no inventory file.
 
 ### Constraints and optional types
 
@@ -189,7 +222,12 @@ require image count>=2 per [subject, visit]
 require reference count=1 per [subject, visit]
 ```
 
-Constraints check each observed group. They do not set a total subject or visit count. An inventory may include `contexts:` to name a group even when one of its required inputs is absent:
+Constraints check each observed group. They do not set a total subject or visit count. A rule can also require particular values in each group, alone or with a count:
+
+```text
+require image run=1,2 per [subject, visit]
+```
+ An inventory may include `contexts:` to name a group even when one of its required inputs is absent:
 
 ```text
 contexts:
@@ -215,6 +253,7 @@ operation project(sample: Frame<$Kind,$SourceSpace>, calibration: Calibration<$K
 | [Typed](examples/types/typed.spit) | Parameterized symbolic types |
 | [Branching](examples/pipelines/branching.spit) | Shared inputs and branches |
 | [Complex](examples/pipelines/complex.spit) | Nested aggregation |
+| [Selectors](examples/pipelines/selectors.spit) | `where`, `same`, a two-output step, a verification, and a many input beside a single input |
 | [Analytics](examples/analytics/analytics.spit) | Joins and rollups |
 | [Field survey](examples/commands/field_survey.spit) | A larger pipeline with sidecar files, calibration, alignment between spaces, and commands |
 | [MRtrix3 ACT](examples/commands/mrtrix3_act.spit) | A larger pipeline with commands and paths |
@@ -237,6 +276,6 @@ pipeline text + source inventory
           Bash script
 ```
 
-The inventory supplies artifact identities; the pipeline supplies operations and rules. Resolution checks dimensions, matching, cardinality, constraints, and any known types. Path binding and command expansion happen afterward. SPIT currently supports one output per operation and does not inspect file contents or command-specific metadata. See [architecture](docs/architecture.md) for the internal model.
+The inventory supplies artifact identities; the pipeline supplies operations and rules. Resolution checks dimensions, matching, cardinality, constraints, and any known types. Path binding and command expansion happen afterward. SPIT does not inspect file contents or command-specific metadata itself; `verify` commands run those checks with your own tools. See [architecture](docs/architecture.md) for the internal model.
 
 Run the test suite with `cargo test`.

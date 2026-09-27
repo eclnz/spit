@@ -2,11 +2,13 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{self, Write};
+use std::fs;
 use std::ops::Range;
 use std::path::Path;
 
 use crate::model::{
     ArtifactInstance, ArtifactKey, EntityBinding, Pipeline, ProductDef, ResolvedDag,
+    SourceInventory, SourceRecord,
 };
 use crate::parser::SourceMap;
 use crate::span::Place;
@@ -168,7 +170,7 @@ pub(crate) fn collect_paths(
     let outputs: BTreeSet<_> = pipeline
         .invocations
         .iter()
-        .map(|invocation| invocation.output_product.as_str())
+        .flat_map(|invocation| invocation.outputs.iter().map(String::as_str))
         .collect();
     let mut entries = Vec::new();
     let mut samples: BTreeMap<String, &str> = BTreeMap::new();
@@ -277,7 +279,7 @@ pub fn validate_source_files(
     }
     inspect_paths(pipeline)?.validate(false)?;
     let paths = bound_paths(pipeline, dag)?;
-    let outputs: BTreeSet<_> = dag.jobs.iter().map(|job| job.output.key()).collect();
+    let outputs = output_keys(dag);
     let mut checked = 0;
     for (artifact, relative) in paths {
         if outputs.contains(&artifact) {
@@ -297,6 +299,15 @@ pub fn validate_source_files(
     Ok(checked)
 }
 
+/// Every artifact the resolved jobs produce.
+pub(crate) fn output_keys(dag: &ResolvedDag) -> BTreeSet<ArtifactKey> {
+    dag.jobs
+        .iter()
+        .flat_map(|job| &job.outputs)
+        .map(ArtifactInstance::key)
+        .collect()
+}
+
 pub(crate) fn bound_paths(
     pipeline: &Pipeline,
     dag: &ResolvedDag,
@@ -306,7 +317,7 @@ pub(crate) fn bound_paths(
     for artifact in dag
         .jobs
         .iter()
-        .flat_map(|job| job.inputs.iter().chain(std::iter::once(&job.output)))
+        .flat_map(|job| job.input_artifacts().chain(&job.outputs))
     {
         let identity = artifact.key();
         if paths.contains_key(&identity) {
@@ -408,4 +419,200 @@ fn encode_component(value: &str) -> String {
         }
     }
     encoded
+}
+
+/// Find the source artifacts under `root`: each regular file whose path
+/// matches the path rule of a source product becomes a record with the
+/// entity values the rule's placeholders capture.
+pub fn discover_sources(pipeline: &Pipeline, root: &Path) -> Result<SourceInventory, PathError> {
+    if !root.is_dir() {
+        return Err(error(format!(
+            "source root is not a directory: `{}`",
+            root.display()
+        )));
+    }
+    inspect_paths(pipeline)?;
+    let outputs: BTreeSet<_> = pipeline
+        .invocations
+        .iter()
+        .flat_map(|invocation| &invocation.outputs)
+        .collect();
+    let mut patterns = Vec::new();
+    for product in &pipeline.products {
+        if outputs.contains(&product.name) {
+            continue;
+        }
+        let template = pipeline
+            .product_paths
+            .get(&product.name)
+            .or(pipeline.path_template.as_ref())
+            .ok_or_else(|| {
+                error(format!(
+                    "no path rule for source `{}`, so its files cannot be discovered",
+                    product.name
+                ))
+            })?;
+        patterns.push((product, path_pattern(template, product)?));
+    }
+    let mut files = Vec::new();
+    walk(root, "", &mut files)?;
+    files.sort();
+    let mut records = Vec::new();
+    for file in &files {
+        let mut owner: Option<&ProductDef> = None;
+        for (product, pattern) in &patterns {
+            let mut bound = BTreeMap::new();
+            if !match_pattern(pattern, file, &mut bound) {
+                continue;
+            }
+            if let Some(other) = owner {
+                return Err(error(format!(
+                    "file `{file}` matches the path rules of both `{}` and `{}`",
+                    other.name, product.name
+                )));
+            }
+            owner = Some(product);
+            let mut entities = BTreeMap::new();
+            for (dimension, encoded) in bound {
+                let value = decode_component(encoded)
+                    .filter(|value| {
+                        !value.is_empty()
+                            && !value.chars().any(|character| {
+                                character.is_whitespace() || ",[]=#".contains(character)
+                            })
+                    })
+                    .ok_or_else(|| {
+                        error(format!(
+                            "file `{file}` gives `{dimension}` the value `{encoded}`, which an inventory cannot hold"
+                        ))
+                    })?;
+                entities.insert(dimension, value);
+            }
+            records.push(SourceRecord::new(&product.name, EntityBinding(entities)));
+        }
+    }
+    let rank: BTreeMap<_, _> = pipeline
+        .products
+        .iter()
+        .enumerate()
+        .map(|(index, product)| (product.name.as_str(), (index, &product.dimensions)))
+        .collect();
+    records.sort_by(|left, right| {
+        let (left_rank, dimensions) = rank[left.product.as_str()];
+        left_rank
+            .cmp(&rank[right.product.as_str()].0)
+            .then_with(|| left.entities.cmp_in(&right.entities, dimensions))
+    });
+    Ok(SourceInventory {
+        artifacts: records,
+        contexts: Vec::new(),
+    })
+}
+
+enum Piece {
+    Literal(String),
+    /// One path component value, as `bind_path` encodes it.
+    Value(String),
+}
+
+fn path_pattern(template: &str, product: &ProductDef) -> Result<Vec<Piece>, PathError> {
+    let mut pieces = Vec::new();
+    for part in parse_template(template).map_err(error)? {
+        match part {
+            Part::Literal(value) => pieces.push(Piece::Literal(value)),
+            Part::Placeholder(name) if name == "product" => {
+                pieces.push(Piece::Literal(product.name.replace("::", ".")));
+            }
+            Part::Placeholder(name) if name == "entities" => {
+                if product.dimensions.is_empty() {
+                    pieces.push(Piece::Literal("global".to_owned()));
+                }
+                for (index, dimension) in product.dimensions.iter().enumerate() {
+                    let separator = if index == 0 { "" } else { "__" };
+                    pieces.push(Piece::Literal(format!(
+                        "{separator}{}=",
+                        encode_component(dimension)
+                    )));
+                    pieces.push(Piece::Value(dimension.clone()));
+                }
+            }
+            Part::Placeholder(dimension) => pieces.push(Piece::Value(dimension)),
+        }
+    }
+    Ok(pieces)
+}
+
+/// Match `text` against `pieces`, binding each dimension to its encoded
+/// value; a dimension used twice must have the same value both times.
+fn match_pattern<'a>(
+    pieces: &[Piece],
+    text: &'a str,
+    bound: &mut BTreeMap<String, &'a str>,
+) -> bool {
+    match pieces.split_first() {
+        None => text.is_empty(),
+        Some((Piece::Literal(literal), rest)) => text
+            .strip_prefix(literal.as_str())
+            .is_some_and(|text| match_pattern(rest, text, bound)),
+        Some((Piece::Value(dimension), rest)) => {
+            if let Some(value) = bound.get(dimension).copied() {
+                return text
+                    .strip_prefix(value)
+                    .is_some_and(|text| match_pattern(rest, text, bound));
+            }
+            let longest = text
+                .find(|character: char| {
+                    !(character.is_ascii_alphanumeric() || character == '-' || character == '%')
+                })
+                .unwrap_or(text.len());
+            for end in 1..=longest {
+                bound.insert(dimension.clone(), &text[..end]);
+                if match_pattern(rest, &text[end..], bound) {
+                    return true;
+                }
+            }
+            bound.remove(dimension);
+            false
+        }
+    }
+}
+
+fn decode_component(encoded: &str) -> Option<String> {
+    let bytes = encoded.as_bytes();
+    let mut decoded = Vec::new();
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%' {
+            let hex = encoded.get(index + 1..index + 3)?;
+            decoded.push(u8::from_str_radix(hex, 16).ok()?);
+            index += 3;
+        } else {
+            decoded.push(bytes[index]);
+            index += 1;
+        }
+    }
+    String::from_utf8(decoded).ok()
+}
+
+/// Collect every regular file under `directory`, as `/`-separated paths
+/// relative to the root. Names that are not UTF-8 cannot match a rule.
+fn walk(directory: &Path, prefix: &str, files: &mut Vec<String>) -> Result<(), PathError> {
+    let entries = fs::read_dir(directory)
+        .map_err(|reason| error(format!("cannot read `{}`: {reason}", directory.display())))?;
+    for entry in entries {
+        let entry = entry
+            .map_err(|reason| error(format!("cannot read `{}`: {reason}", directory.display())))?;
+        let Ok(name) = entry.file_name().into_string() else {
+            continue;
+        };
+        let relative = format!("{prefix}{name}");
+        let path = entry.path();
+        // Directory links are not followed, so a link cycle cannot recurse.
+        if entry.file_type().is_ok_and(|kind| kind.is_dir()) {
+            walk(&path, &format!("{relative}/"), files)?;
+        } else if path.is_file() {
+            files.push(relative);
+        }
+    }
+    Ok(())
 }

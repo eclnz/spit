@@ -1,12 +1,12 @@
 use std::collections::BTreeMap;
 use std::fmt::Write;
 
-use crate::model::{ArtifactInstance, Cardinality, Job, Pipeline, ResolvedDag};
+use crate::model::{ArtifactInstance, Job, OperationDef, Pipeline, ResolvedDag};
 use crate::paths::{bound_paths, error, inspect_paths, PathError};
 use crate::types::TypeExpr;
 
 pub fn render_dag(dag: &ResolvedDag) -> String {
-    write_jobs(dag, |_, _| Ok(None), |_| None).expect("rendering without ports cannot fail")
+    write_jobs(dag, |_| Ok(None), |_| None).expect("rendering without ports cannot fail")
 }
 
 /// Inspect the resolved jobs and bound paths before expanding any commands.
@@ -18,37 +18,34 @@ pub fn render_bound_dag(pipeline: &Pipeline, dag: &ResolvedDag) -> Result<String
         .iter()
         .map(|operation| (operation.name.as_str(), operation))
         .collect();
-    let port_name = |job: &Job, input_index: usize| {
+    let ports = |job: &Job| {
         let operation = operations.get(job.operation.as_str()).ok_or_else(|| {
             error(format!(
                 "unknown operation `{}` in resolved DAG",
                 job.operation
             ))
         })?;
-        let port = match operation.inputs.as_slice() {
-            [port] if port.cardinality == Cardinality::Many => port,
-            ports => ports.get(input_index).ok_or_else(|| {
-                error(format!(
-                    "job {} has more inputs than operation ports",
-                    job.id
-                ))
-            })?,
-        };
-        Ok(Some(port.name.as_str()))
+        Ok(Some(*operation))
     };
-    write_jobs(dag, port_name, |artifact| {
+    write_jobs(dag, ports, |artifact| {
         paths.get(&artifact.key()).map(String::as_str)
     })
 }
 
-/// Shared job listing. `port_name` labels each input and `path` adds a path
-/// line beneath an artifact; either may return `None` to omit it.
+/// Shared job listing. `operation` gives the port names to label inputs and
+/// outputs with, and `path` adds a path line beneath an artifact; either may
+/// return `None` to omit it.
 fn write_jobs<'a>(
     dag: &ResolvedDag,
-    port_name: impl Fn(&Job, usize) -> Result<Option<&'a str>, PathError>,
+    operation: impl Fn(&Job) -> Result<Option<&'a OperationDef>, PathError>,
     path: impl Fn(&ArtifactInstance) -> Option<&'a str>,
 ) -> Result<String, PathError> {
-    let write_path = |output: &mut String, artifact: &ArtifactInstance| {
+    let write_artifact = |output: &mut String, port: Option<&str>, artifact: &ArtifactInstance| {
+        let rendered = render_typed_artifact(dag, artifact);
+        match port {
+            Some(port) => writeln!(output, "    {port}: {rendered}").unwrap(),
+            None => writeln!(output, "    {rendered}").unwrap(),
+        }
         if let Some(path) = path(artifact) {
             writeln!(output, "      path: {path}").unwrap();
         }
@@ -58,20 +55,35 @@ fn write_jobs<'a>(
         if index > 0 {
             output.push('\n');
         }
+        let operation = operation(job)?;
         writeln!(output, "Job {}", job.id).unwrap();
         writeln!(output, "  operation: {}", job.operation).unwrap();
         writeln!(output, "  inputs:").unwrap();
-        for (input_index, input) in job.inputs.iter().enumerate() {
-            let artifact = render_typed_artifact(dag, input);
-            match port_name(job, input_index)? {
-                Some(port) => writeln!(output, "    {port}: {artifact}").unwrap(),
-                None => writeln!(output, "    {artifact}").unwrap(),
+        for (port_index, artifacts) in job.inputs.iter().enumerate() {
+            let port = operation
+                .map(|operation| {
+                    operation.inputs.get(port_index).ok_or_else(|| {
+                        error(format!(
+                            "job {} has more inputs than operation ports",
+                            job.id
+                        ))
+                    })
+                })
+                .transpose()?;
+            for artifact in artifacts {
+                write_artifact(&mut output, port.map(|port| port.name.as_str()), artifact);
             }
-            write_path(&mut output, input);
         }
-        writeln!(output, "  output:").unwrap();
-        writeln!(output, "    {}", render_typed_artifact(dag, &job.output)).unwrap();
-        write_path(&mut output, &job.output);
+        if let [artifact] = job.outputs.as_slice() {
+            writeln!(output, "  output:").unwrap();
+            write_artifact(&mut output, None, artifact);
+        } else {
+            writeln!(output, "  outputs:").unwrap();
+            for (port_index, artifact) in job.outputs.iter().enumerate() {
+                let port = operation.and_then(|operation| operation.outputs.get(port_index));
+                write_artifact(&mut output, port.map(|port| port.name.as_str()), artifact);
+            }
+        }
         if !job.dependencies.is_empty() {
             let dependencies: Vec<_> = job.dependencies.iter().map(ToString::to_string).collect();
             writeln!(output, "  depends_on: {}", dependencies.join(", ")).unwrap();

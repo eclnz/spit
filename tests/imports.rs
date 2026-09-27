@@ -227,3 +227,21 @@ copied = copy(lib::shard)\nsources:\n  lib::shard[part=a]\n",
     assert!(bash.contains("'lib.shard/a.txt'"), "{bash}");
     assert!(!bash.contains("::"), "{bash}");
 }
+
+#[test]
+fn an_operation_imports_with_its_command_and_verifications() {
+    let dir = TestDir::new();
+    dir.write(
+        "library.spit",
+        "operation clean(Table) -> Table\nverify clean: check_table {input}\ncommand clean: clean_table {input} {output}\n",
+    );
+    let pipeline = dir.write(
+        "pipeline.spit",
+        "use library.spit as lib\npath: {product}/{entities}.txt\nsource raw : Table [id]\ncleaned = lib::clean(raw)\nsources:\n  raw[id=a]\n",
+    );
+    let text = fs::read_to_string(&pipeline).unwrap();
+    let (pipeline, inventory) = parse_document_at(&text, &pipeline).unwrap();
+    assert_eq!(pipeline.commands.len(), 2);
+    let bash = render_bash(&pipeline, &resolve(&pipeline, &inventory.unwrap()).unwrap()).unwrap();
+    assert!(bash.contains("spit_verify 1 'check_table'"), "{bash}");
+}

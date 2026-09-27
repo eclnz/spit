@@ -126,15 +126,19 @@ operation make_gmwmi(MRI<Tissue,S>) -> MRI<Mask,S>
 command make_gmwmi: 5tt2gmwmi {input} {output}
 gmwmi = make_gmwmi(five_tt)
 
-# Single-shell, single-tissue response and FOD estimation.
-operation estimate_wm_response(MRI<DWI,S>) -> Response<DWI>
-command estimate_wm_response: dwi2response tournier {input} {output}
-wm_response = estimate_wm_response(corrected_dwi)
+# Multi-tissue responses come from one dwi2response run, and one dwi2fod run
+# fits white matter and CSF FODs, as suits single-shell data. Each job owns
+# every product it writes, and each output has its own path and placeholder.
+operation estimate_responses(MRI<DWI,S>) -> (wm: Response<WM>, gm: Response<GM>, csf: Response<CSF>)
+command estimate_responses: dwi2response dhollander {input} {wm} {gm} {csf}
+wm_response, gm_response, csf_response = estimate_responses(corrected_dwi)
 path wm_response: derivatives/wm_response/{entities}.txt
+path gm_response: derivatives/gm_response/{entities}.txt
+path csf_response: derivatives/csf_response/{entities}.txt
 
-operation estimate_wm_fod(dwi: MRI<DWI,S>, response: Response<DWI>) -> MRI<FOD,S>
-command estimate_wm_fod: dwi2fod csd {dwi} {response} {output}
-wm_fod = estimate_wm_fod(corrected_dwi, wm_response)
+operation estimate_fods(dwi: MRI<DWI,S>, wm_response: Response<WM>, csf_response: Response<CSF>) -> (wm: MRI<FOD,S>, csf: MRI<FOD,S>)
+command estimate_fods: dwi2fod msmt_csd {dwi} {wm_response} {wm} {csf_response} {csf}
+wm_fod, csf_fod = estimate_fods(corrected_dwi, wm_response, csf_response)
 
 operation track_act(fod: MRI<FOD,S>, tissue: MRI<Tissue,S>, seed: MRI<Mask,S>) -> Tractogram<S>
 command track_act: tckgen {fod} {output} -act {tissue} -backtrack -seed_gmwmi {seed} -select 1000000

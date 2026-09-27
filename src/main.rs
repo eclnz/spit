@@ -7,12 +7,13 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use spit::{
-    diagnose_at, inspect_paths, parse_document_at, parse_source_inventory, render_bash,
-    render_bound_dag, render_dag, resolve, validate_concrete_paths, validate_source_files,
+    diagnose_at, discover_sources, inspect_paths, parse_document_at, parse_pipeline_at,
+    parse_source_inventory, render_bash, render_bound_dag, render_dag, render_source_inventory,
+    resolve, validate_concrete_paths, validate_source_files,
 };
 
 const USAGE: &str =
-    "usage: spit <check|dag|bound-dag|paths|bash|diagnose> <pipeline.spit> [--sources <inventory.spit|->] [--root <directory>] [--strict-paths]";
+    "usage: spit <check|dag|bound-dag|paths|bash|discover|diagnose> <pipeline.spit> [--sources <inventory.spit|->] [--root <directory>] [--strict-paths]";
 
 #[derive(Clone, Copy, PartialEq)]
 enum Command {
@@ -21,6 +22,7 @@ enum Command {
     BoundDag,
     Paths,
     Bash,
+    Discover,
     Diagnose,
 }
 
@@ -32,6 +34,7 @@ impl Command {
             "bound-dag" => Self::BoundDag,
             "paths" => Self::Paths,
             "bash" => Self::Bash,
+            "discover" => Self::Discover,
             "diagnose" => Self::Diagnose,
             _ => return None,
         })
@@ -107,17 +110,26 @@ fn run() -> Result<(), Box<dyn Error>> {
         return run_diagnose(&args);
     }
     let pipeline_text = fs::read_to_string(&args.pipeline)?;
-    let inventory_text = match args.sources.as_deref() {
-        Some("-") => {
+    let path = Path::new(&args.pipeline);
+    if args.command == Command::Discover && (args.root.is_none() || args.sources.is_some()) {
+        return Err("discover reads files under --root <directory> and takes no --sources".into());
+    }
+    let inventory_text = match (args.sources.as_deref(), &args.root) {
+        (Some("-"), _) => {
             let mut text = String::new();
             io::stdin().read_to_string(&mut text)?;
             Some(text)
         }
-        Some(sources) => Some(fs::read_to_string(sources)?),
-        None => None,
+        (Some(sources), _) => Some(fs::read_to_string(sources)?),
+        // With a root and no inventory, find the sources by their path rules.
+        (None, Some(root))
+            if args.command == Command::Discover || !has_inline_inventory(&pipeline_text, path) =>
+        {
+            discover(&pipeline_text, path, Path::new(root))?
+        }
+        (None, _) => None,
     };
     // Report every error and warning before doing any work.
-    let path = Path::new(&args.pipeline);
     let diagnostics = diagnose_at(&pipeline_text, inventory_text.as_deref(), path);
     for diagnostic in &diagnostics {
         eprintln!(
@@ -128,12 +140,19 @@ fn run() -> Result<(), Box<dyn Error>> {
     if diagnostics.iter().any(|diagnostic| diagnostic.is_error()) {
         return Err(Reported.into());
     }
-    let (pipeline, embedded_inventory) = parse_document_at(&pipeline_text, path)?;
-    let coverage = inspect_paths(&pipeline)?;
-    let inventory = match &inventory_text {
-        Some(text) => Some(parse_source_inventory(text)?),
-        None => embedded_inventory,
+    if args.command == Command::Discover {
+        print!("{}", inventory_text.unwrap_or_default());
+        return Ok(());
+    }
+    // A separate inventory replaces an inline one, which is then not read.
+    let (pipeline, inventory) = match &inventory_text {
+        Some(text) => (
+            parse_pipeline_at(&pipeline_text, path)?,
+            Some(parse_source_inventory(text)?),
+        ),
+        None => parse_document_at(&pipeline_text, path)?,
     };
+    let coverage = inspect_paths(&pipeline)?;
     let Some(inventory) = inventory else {
         if args.command == Command::Check && args.root.is_none() {
             if args.strict_paths {
@@ -168,9 +187,28 @@ fn run() -> Result<(), Box<dyn Error>> {
         Command::BoundDag => print!("{}", render_bound_dag(&pipeline, &dag)?),
         Command::Paths => {}
         Command::Bash => print!("{}", render_bash(&pipeline, &dag)?),
-        Command::Diagnose => unreachable!("handled before resolution"),
+        Command::Discover | Command::Diagnose => unreachable!("handled before resolution"),
     }
     Ok(())
+}
+
+fn has_inline_inventory(text: &str, path: &Path) -> bool {
+    parse_document_at(text, path).is_ok_and(|(_, inventory)| inventory.is_some())
+}
+
+/// The inventory text for the source files under `root`, or `None` when the
+/// pipeline does not parse; diagnostics then report why.
+fn discover(text: &str, path: &Path, root: &Path) -> Result<Option<String>, Box<dyn Error>> {
+    let Ok(pipeline) = parse_pipeline_at(text, path) else {
+        return Ok(None);
+    };
+    let inventory = discover_sources(&pipeline, root)?;
+    eprintln!(
+        "note: discovered {} source artifacts under `{}`",
+        inventory.artifacts.len(),
+        root.display()
+    );
+    Ok(Some(render_source_inventory(&inventory, &pipeline)))
 }
 
 fn run_diagnose(args: &CliArgs) -> Result<(), Box<dyn Error>> {
