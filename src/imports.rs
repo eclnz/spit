@@ -4,7 +4,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::model::{CommandDef, CoverageRule, OperationDef, Pipeline, ProductDef, SourceInventory};
+use crate::model::{
+    CommandDef, CommandRole, CoverageRule, OperationDef, Pipeline, ProductDef, SourceInventory,
+};
 use crate::parser::{
     parse_document_with_imports, parse_use, strip_comment, InlineInventory, ParseError,
     ParsedDocument, PipelineBuilder, Rule, UseSpec,
@@ -167,7 +169,7 @@ fn select_import(module: &Pipeline, spec: &UseSpec, line: usize) -> Result<Pipel
             if module
                 .commands
                 .iter()
-                .filter(|command| command.operation == name)
+                .filter(|command| command.operation == name && command.role == CommandRole::Run)
                 .count()
                 > 1
             {

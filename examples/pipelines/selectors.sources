@@ -1,0 +1,13 @@
+sources:
+    reading[station=north,day=1]
+    reading[station=north,day=2]
+    reading[station=north,day=10]
+    reading[station=south,day=1]
+    reading[station=south,day=2]
+    calibration[station=north,revision=1]
+    calibration[station=north,revision=2]
+    calibration[station=south,revision=2]
+    reference[station=north,measured=2024-03-01]
+    reference[station=south,measured=2024-02-11]
+    policy[station=north]
+    policy[station=south]

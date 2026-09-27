@@ -115,6 +115,18 @@ fn where_filters_the_driver_and_removes_its_dimension_from_the_output() {
 }
 
 #[test]
+fn selectors_combine_on_one_binding() {
+    let text = "source frame [subject, acq, run]\noperation stack(frames: many Frame) -> Stack @ drop(run)\nstacked = stack(frame @ where(acq=fast) @ vary(run))\n";
+    let dag = resolve_text(
+        text,
+        "sources:\n  frame[subject=a,acq=fast,run=1]\n  frame[subject=a,acq=fast,run=2]\n  frame[subject=a,acq=slow,run=1]\n",
+    )
+    .unwrap();
+    assert_eq!(outputs(&dag), ["stacked[subject=a]"]);
+    assert_eq!(dag.jobs[0].inputs[0].len(), 2);
+}
+
+#[test]
 fn same_matches_on_fewer_dimensions_and_requires_one_artifact() {
     let text = format!("{CALIBRATE}calibrated = apply(signal, calibration @ same(site))\n");
     let dag = resolve_text(
