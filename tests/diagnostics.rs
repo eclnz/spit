@@ -448,7 +448,7 @@ fn a_line_with_an_error_shows_no_warnings() {
 }
 
 #[test]
-fn cli_json_includes_each_severity() {
+fn cli_json_includes_each_severity_and_its_columns() {
     let mut child = Command::new(env!("CARGO_BIN_EXE_spit"))
         .args(["diagnose", "unsaved.spit"])
         .stdin(Stdio::piped())
@@ -466,10 +466,30 @@ fn cli_json_includes_each_severity() {
     assert_eq!(
         String::from_utf8(output.stdout).unwrap(),
         "{\"diagnostics\":[\
-{\"severity\":\"warning\",\"source\":\"pipeline\",\"line\":1,\"message\":\"source product `raw` is never used as an input\"},\
-{\"severity\":\"warning\",\"source\":\"pipeline\",\"line\":2,\"message\":\"source product `spare` is never used as an input\"},\
-{\"severity\":\"error\",\"source\":\"pipeline\",\"line\":4,\"message\":\"unknown product `rwa`\"}]}\n"
+{\"severity\":\"warning\",\"source\":\"pipeline\",\"line\":1,\"column\":8,\"end_column\":11,\"message\":\"source product `raw` is never used as an input\"},\
+{\"severity\":\"warning\",\"source\":\"pipeline\",\"line\":2,\"column\":8,\"end_column\":13,\"message\":\"source product `spare` is never used as an input\"},\
+{\"severity\":\"error\",\"source\":\"pipeline\",\"line\":4,\"column\":15,\"end_column\":18,\"message\":\"unknown product `rwa`\"}]}\n"
     );
+}
+
+#[test]
+fn cli_json_columns_count_utf16_code_units() {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_spit"))
+        .args(["diagnose", "unsaved.spit"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all("source raw [id]\noperation copy(one)\nx = copy(résumé)\n".as_bytes())
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    let json = String::from_utf8(output.stdout).unwrap();
+    // `é` is two bytes but one UTF-16 code unit, so `résumé` spans 10..16.
+    assert!(json.contains("\"line\":3,\"column\":10,\"end_column\":16"), "{json}");
 }
 
 #[test]

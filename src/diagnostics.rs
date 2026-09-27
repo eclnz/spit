@@ -2,13 +2,15 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
+use std::ops::Range;
 use std::path::Path;
 
 use crate::bash::collect_commands;
 use crate::imports::parse_located_document;
-use crate::parser::{glued_comment, parse_document_with_imports, ParsedDocument, SourceMap};
+use crate::parser::{glued_comment, parse_document_with_imports, ParsedDocument, SourceMap, Step};
 use crate::paths::collect_paths;
 use crate::resolver::collect_pipeline;
+use crate::span::{columns_of, content_columns, utf16_columns, Place};
 use crate::{
     parse_source_inventory, resolve, DefinitionSubject, EntityBinding, InputBinding, ParseError,
     ParseErrorKind, Pipeline, ResolveError,
@@ -56,21 +58,49 @@ pub struct Diagnostic {
     pub severity: Severity,
     pub source: DiagnosticSource,
     pub line: Option<usize>,
+    /// The byte range within the line that the diagnostic is about. Every
+    /// diagnostic with a line has one; at least the line's content.
+    pub columns: Option<Range<usize>>,
     pub message: String,
 }
 
 impl Diagnostic {
-    fn error(source: DiagnosticSource, line: Option<usize>, message: String) -> Self {
+    fn new(
+        severity: Severity,
+        source: DiagnosticSource,
+        place: Option<Place>,
+        message: String,
+    ) -> Self {
+        let (line, columns) = place.map_or((None, None), |place| {
+            (Some(place.line), Some(place.columns))
+        });
         Self {
-            severity: Severity::Error,
+            severity,
             source,
             line,
+            columns,
             message,
         }
     }
 
+    fn error(source: DiagnosticSource, place: Option<Place>, message: String) -> Self {
+        Self::new(Severity::Error, source, place, message)
+    }
+
     pub fn is_error(&self) -> bool {
         self.severity == Severity::Error
+    }
+
+    /// The columns counted in UTF-16 code units, as editors count them, given
+    /// the texts that were diagnosed.
+    pub fn utf16_columns(&self, text: &str, source_text: Option<&str>) -> Option<Range<usize>> {
+        let columns = self.columns.as_ref()?;
+        let text = match self.source {
+            DiagnosticSource::Inventory => source_text?,
+            DiagnosticSource::Pipeline => text,
+        };
+        let line = text.lines().nth(self.line?.checked_sub(1)?)?;
+        Some(utf16_columns(line, columns))
     }
 }
 
@@ -123,7 +153,13 @@ fn diagnose_with_parser(
                 .into_iter()
                 .map(|error| (DiagnosticSource::Inventory, error)),
         )
-        .map(|(source, error)| Diagnostic::error(source, Some(error.line), error.message))
+        .map(|(source, error)| Diagnostic {
+            severity: Severity::Error,
+            source,
+            line: Some(error.line),
+            columns: error.columns,
+            message: error.message,
+        })
         .collect();
     if !diagnostics.is_empty() {
         return finish(diagnostics, text, source_text);
@@ -131,7 +167,7 @@ fn diagnose_with_parser(
 
     let document = document.expect("document parsed without errors");
     let inventory_text = source_text.unwrap_or(text);
-    diagnostics.extend(pipeline_diagnostics(&document, inventory_text));
+    diagnostics.extend(pipeline_diagnostics(&document, text, inventory_text));
     if diagnostics.iter().any(Diagnostic::is_error) {
         return finish(diagnostics, text, source_text);
     }
@@ -139,19 +175,20 @@ fn diagnose_with_parser(
         .or(document.inventory)
         .unwrap_or_default();
     if let Err(error) = resolve(&document.pipeline, &inventory) {
-        let (source, line) = error_location(
+        let (source, place) = error_location(
             &document.pipeline,
             &document.lines,
             &error,
             inventory_text,
             source_text.is_some(),
         );
-        diagnostics.push(Diagnostic::error(source, line, error.to_string()));
+        diagnostics.push(Diagnostic::error(source, place, error.to_string()));
     }
     finish(diagnostics, text, source_text)
 }
 
-/// Flag each `#` that reads like a comment but is part of a word, then order.
+/// Flag each `#` that reads like a comment but is part of a word, give every
+/// diagnostic with a line its columns, then order.
 fn finish(
     mut diagnostics: Vec<Diagnostic>,
     text: &str,
@@ -167,23 +204,27 @@ fn finish(
             let Some(word) = glued_comment(line) else {
                 continue;
             };
-            let line = Some(index + 1);
+            let number = Some(index + 1);
             let explanation = format!(
                 "`#` after `{word}` is part of that word, not a comment; put a space before `#` to start a comment, or quote the text to keep it"
             );
             let errors: Vec<_> = diagnostics
                 .iter_mut()
                 .filter(|diagnostic| {
-                    diagnostic.is_error() && diagnostic.source == source && diagnostic.line == line
+                    diagnostic.is_error()
+                        && diagnostic.source == source
+                        && diagnostic.line == number
                 })
                 .collect();
             if errors.is_empty() {
-                diagnostics.push(Diagnostic {
-                    severity: Severity::Warning,
+                // Point at the word and the `#` joined to it.
+                let columns = columns_of(line, word).map(|word| word.start..word.end + 1);
+                diagnostics.push(Diagnostic::new(
+                    Severity::Warning,
                     source,
-                    line,
-                    message: explanation,
-                });
+                    columns.map(|columns| Place::new(index + 1, columns)),
+                    explanation,
+                ));
             } else {
                 for error in errors {
                     error.message = format!("{} ({explanation})", error.message);
@@ -191,45 +232,129 @@ fn finish(
             }
         }
     }
+    for diagnostic in &mut diagnostics {
+        if diagnostic.columns.is_some() {
+            continue;
+        }
+        let text = match diagnostic.source {
+            DiagnosticSource::Inventory => source_text.unwrap_or(text),
+            DiagnosticSource::Pipeline => text,
+        };
+        diagnostic.columns = diagnostic
+            .line
+            .and_then(|line| text.lines().nth(line.checked_sub(1)?))
+            .map(content_columns);
+    }
     order(diagnostics)
 }
 
 /// Every error in the pipeline text, then warnings about names that did not
 /// fail. Needs no inventory.
-fn pipeline_diagnostics(document: &ParsedDocument, inventory_text: &str) -> Vec<Diagnostic> {
+fn pipeline_diagnostics(
+    document: &ParsedDocument,
+    text: &str,
+    inventory_text: &str,
+) -> Vec<Diagnostic> {
     let (pipeline, lines) = (&document.pipeline, &document.lines);
     let checked = collect_pipeline(pipeline);
     let mut diagnostics: Vec<_> = checked
         .errors
         .iter()
-        .map(|(site, error)| {
-            let line = match site {
-                DefinitionSubject::Product(name) => lines.products.get(name).copied(),
-                DefinitionSubject::Operation(name) => lines.operations.get(name).copied(),
-                DefinitionSubject::Invocation(output) => lines.invocations.get(output).copied(),
-                DefinitionSubject::Constraint(index) => lines.constraint_lines.get(*index).copied(),
-                DefinitionSubject::Source(_) | DefinitionSubject::None => None,
-            }
-            .or_else(|| error_location(pipeline, lines, error, inventory_text, false).1);
-            Diagnostic::error(DiagnosticSource::Pipeline, line, error.to_string())
+        .map(|(subject, error)| {
+            let place = subject_place(pipeline, lines, subject, error)
+                .or_else(|| error_location(pipeline, lines, error, inventory_text, false).1);
+            Diagnostic::error(DiagnosticSource::Pipeline, place, error.to_string())
         })
         .collect();
-    for error in collect_commands(pipeline, lines, &checked.poisoned) {
+    let template_errors = collect_commands(pipeline, lines, &checked.poisoned)
+        .into_iter()
+        .map(|error| (error.line, error.columns, error.focus, error.message))
+        .chain(
+            collect_paths(pipeline, lines, &checked.poisoned)
+                .1
+                .into_iter()
+                .map(|error| (error.line, error.columns, error.focus, error.message)),
+        );
+    for (line, columns, focus, message) in template_errors {
+        let place = line.zip(columns).map(|(line, columns)| {
+            // Narrow to the part of the template the error is about.
+            let focus = focus.and_then(|focus| {
+                let text = text.lines().nth(line.checked_sub(1)?)?;
+                let offset = text.get(columns.clone())?.find(&focus)?;
+                Some(columns.start + offset..columns.start + offset + focus.len())
+            });
+            Place::new(line, focus.unwrap_or(columns))
+        });
         diagnostics.push(Diagnostic::error(
             DiagnosticSource::Pipeline,
-            error.line,
-            error.message,
-        ));
-    }
-    for error in collect_paths(pipeline, lines, &checked.poisoned).1 {
-        diagnostics.push(Diagnostic::error(
-            DiagnosticSource::Pipeline,
-            error.line,
-            error.message,
+            place,
+            message,
         ));
     }
     diagnostics.extend(warnings(pipeline, lines, &checked.poisoned));
     diagnostics
+}
+
+/// The part of a declaration, step, or rule that a pipeline error is about.
+fn subject_place(
+    pipeline: &Pipeline,
+    lines: &SourceMap,
+    subject: &DefinitionSubject,
+    error: &ResolveError,
+) -> Option<Place> {
+    match subject {
+        DefinitionSubject::Product(name) => lines.products.get(name).cloned(),
+        DefinitionSubject::Operation(name) => lines.operations.get(name).cloned(),
+        DefinitionSubject::Invocation(output) => {
+            let step = lines.invocations.get(output)?;
+            Some(step_part(pipeline, step, output, error))
+        }
+        DefinitionSubject::Constraint(index) => lines.rules.get(*index).cloned(),
+        DefinitionSubject::Source(_) | DefinitionSubject::None => None,
+    }
+}
+
+/// The part of the step producing `output` that `error` is about: an input,
+/// the output, the operation name, or the whole call.
+fn step_part(pipeline: &Pipeline, step: &Step, output: &str, error: &ResolveError) -> Place {
+    let invocation = pipeline
+        .invocations
+        .iter()
+        .find(|invocation| invocation.output_product == output);
+    let input_named = |product: &str| {
+        let index = invocation?
+            .inputs
+            .iter()
+            .position(|binding| binding.product_name() == product)?;
+        step.input(index)
+    };
+    let port = |port: &str| {
+        if port == "output" {
+            return Some(step.output());
+        }
+        let invocation = invocation?;
+        let operation = pipeline
+            .operations
+            .iter()
+            .find(|operation| operation.name == invocation.operation)?;
+        let index = operation
+            .inputs
+            .iter()
+            .position(|input| input.name == port)?;
+        step.input(index)
+    };
+    let part = match error {
+        ResolveError::UnknownProduct { name } if name == output => Some(step.output()),
+        ResolveError::UnknownProduct { name } => input_named(name),
+        ResolveError::UnknownOperation { .. } => Some(step.operation()),
+        ResolveError::TypeMismatch { port: name, .. }
+        | ResolveError::TypeVariableConflict { port: name, .. }
+        | ResolveError::MissingInput { port: name, .. } => port(name),
+        ResolveError::InvalidAggregationDimension { product, .. } => input_named(product),
+        ResolveError::UnsupportedShapeRelationship { .. } => Some(step.call()),
+        _ => Some(step.output()),
+    };
+    part.unwrap_or_else(|| step.call())
 }
 
 /// Order by source and line, keep only the first error on each line, and
@@ -265,11 +390,13 @@ fn order(mut diagnostics: Vec<Diagnostic>) -> Vec<Diagnostic> {
 /// library of definitions, nor for imported names: a library is imported for
 /// the definitions a pipeline needs, and is linted on its own.
 fn warnings(pipeline: &Pipeline, lines: &SourceMap, skip: &BTreeSet<String>) -> Vec<Diagnostic> {
-    let warn = |line, message| Diagnostic {
-        severity: Severity::Warning,
-        source: DiagnosticSource::Pipeline,
-        line,
-        message,
+    let warn = |place: Option<Place>, message| {
+        Diagnostic::new(
+            Severity::Warning,
+            DiagnosticSource::Pipeline,
+            place,
+            message,
+        )
     };
     let used_operations: BTreeSet<_> = pipeline
         .invocations
@@ -301,7 +428,7 @@ fn warnings(pipeline: &Pipeline, lines: &SourceMap, skip: &BTreeSet<String>) -> 
         }
         if !outputs.contains(name) && !inputs.contains(name) {
             warnings.push(warn(
-                lines.products.get(name).copied(),
+                lines.products.get(name).cloned(),
                 format!("source product `{name}` is never used as an input"),
             ));
         }
@@ -311,19 +438,19 @@ fn warnings(pipeline: &Pipeline, lines: &SourceMap, skip: &BTreeSet<String>) -> 
         if skip.contains(name) {
             continue;
         }
-        let line = lines.operations.get(name).copied();
+        let place = lines.operations.get(name).cloned();
         let imported = lines.imported.contains(name);
         if !used_operations.contains(name) {
             if !imported && !library {
                 warnings.push(warn(
-                    line,
+                    place.clone(),
                     format!("operation `{name}` is declared but never used"),
                 ));
             }
         } else if !pipeline.commands.is_empty() && !commands.contains(name) {
             // Only once commands are in use: a pipeline may be written for its DAG alone.
             warnings.push(warn(
-                line,
+                place.clone(),
                 format!("operation `{name}` has no command, so `bash` cannot run its jobs"),
             ));
         }
@@ -337,7 +464,7 @@ fn warnings(pipeline: &Pipeline, lines: &SourceMap, skip: &BTreeSet<String>) -> 
             .collect();
         for variable in operation.output_type.variables().difference(&bound) {
             warnings.push(warn(
-                line,
+                place.clone(),
                 format!(
                     "output type variable `{variable}` of `{name}` appears in no input; it is known only where the output product declares its type"
                 ),
@@ -407,22 +534,26 @@ fn error_location(
     error: &ResolveError,
     inventory_text: &str,
     external_inventory: bool,
-) -> (DiagnosticSource, Option<usize>) {
-    let invocation_line = |output: &str| lines.invocations.get(output).copied();
-    let unique_operation_line = |operation: &str| {
+) -> (DiagnosticSource, Option<Place>) {
+    // The part of the step producing `output` that `error` is about.
+    let step = |output: &str| {
+        let step = lines.invocations.get(output)?;
+        Some(step_part(pipeline, step, output, error))
+    };
+    let unique_step = |operation: &str| {
         let mut matching = pipeline
             .invocations
             .iter()
             .filter(|invocation| invocation.operation == operation)
-            .filter_map(|invocation| invocation_line(&invocation.output_product));
+            .filter_map(|invocation| step(&invocation.output_product));
         let first = matching.next()?;
         matching.next().is_none().then_some(first)
     };
-    let pipeline_line = match error {
+    let pipeline_place = match error {
         ResolveError::TypeMismatch { output_product, .. }
         | ResolveError::TypeVariableConflict { output_product, .. }
-        | ResolveError::MissingInput { output_product, .. } => invocation_line(output_product),
-        ResolveError::UnknownOperation { name } => unique_operation_line(name),
+        | ResolveError::MissingInput { output_product, .. } => step(output_product),
+        ResolveError::UnknownOperation { name } => unique_step(name),
         ResolveError::UnknownProduct { name } => pipeline
             .invocations
             .iter()
@@ -432,8 +563,8 @@ fn error_location(
                     .iter()
                     .any(|binding| binding.product_name() == name)
             })
-            .and_then(|invocation| invocation_line(&invocation.output_product))
-            .or_else(|| lines.constraints.get(name).copied()),
+            .and_then(|invocation| step(&invocation.output_product))
+            .or_else(|| lines.constraints.get(name).cloned()),
         ResolveError::InvalidAggregationDimension { product, dimension } => pipeline
             .invocations
             .iter()
@@ -443,26 +574,18 @@ fn error_location(
                         if name == product && axis == dimension)
                 })
             })
-            .and_then(|invocation| invocation_line(&invocation.output_product)),
-        ResolveError::Cycle { products } => products.first().and_then(|name| invocation_line(name)),
-        ResolveError::UnsupportedShapeRelationship { operation, .. } => {
-            unique_operation_line(operation)
+            .and_then(|invocation| step(&invocation.output_product)),
+        ResolveError::Cycle { products } => products.first().and_then(|name| step(name)),
+        ResolveError::UnsupportedShapeRelationship { operation, .. } => unique_step(operation),
+        ResolveError::CoverageViolation { rule_index, .. } => lines.rules.get(*rule_index).cloned(),
+        ResolveError::DuplicateOutputArtifact { artifact } => step(&artifact.product),
+        ResolveError::InvalidDefinition { subject, .. } => {
+            subject_place(pipeline, lines, subject, error)
         }
-        ResolveError::CoverageViolation { rule_index, .. } => {
-            lines.constraint_lines.get(*rule_index).copied()
-        }
-        ResolveError::DuplicateOutputArtifact { artifact } => invocation_line(&artifact.product),
-        ResolveError::InvalidDefinition { subject, .. } => match subject {
-            DefinitionSubject::Product(name) => lines.products.get(name).copied(),
-            DefinitionSubject::Operation(name) => lines.operations.get(name).copied(),
-            DefinitionSubject::Invocation(output) => invocation_line(output),
-            DefinitionSubject::Constraint(index) => lines.constraint_lines.get(*index).copied(),
-            DefinitionSubject::Source(_) | DefinitionSubject::None => None,
-        },
         ResolveError::DuplicateSourceArtifact { .. } => None,
     };
-    if pipeline_line.is_some() {
-        return (DiagnosticSource::Pipeline, pipeline_line);
+    if pipeline_place.is_some() {
+        return (DiagnosticSource::Pipeline, pipeline_place);
     }
 
     let inventory_line = match error {
@@ -482,9 +605,14 @@ fn error_location(
             .next(),
         _ => None,
     };
-    match inventory_line {
-        Some(_) if external_inventory => (DiagnosticSource::Inventory, inventory_line),
-        _ => (DiagnosticSource::Pipeline, inventory_line),
+    // A source record is one line; point at all of it.
+    let inventory_place = inventory_line.and_then(|line| {
+        let text = inventory_text.lines().nth(line.checked_sub(1)?)?;
+        Some(Place::new(line, content_columns(text)))
+    });
+    match inventory_place {
+        Some(_) if external_inventory => (DiagnosticSource::Inventory, inventory_place),
+        _ => (DiagnosticSource::Pipeline, inventory_place),
     }
 }
 
