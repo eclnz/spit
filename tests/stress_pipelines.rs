@@ -187,7 +187,7 @@ fn inferred_intermediate_type_mismatch_fails_even_with_no_artifacts() {
     let text = "source raw : A<Native> [id]\n\
                 operation first(A<X>) -> B<X>\n\
                 middle = first(raw)\n\
-                operation second(B<MNI>) -> C\n\
+                operation second(B<Standard>) -> C\n\
                 final = second(middle)\n";
     let pipeline = parse_pipeline(text).unwrap();
     for sources in ["sources:\n", "sources:\n    raw[id=one]\n"] {

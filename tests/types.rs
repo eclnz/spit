@@ -15,7 +15,7 @@ fn signature(text: &str) -> TypeExpr {
 fn exact_named_types_match() {
     let mut substitutions = Substitutions::default();
     assert_eq!(
-        substitutions.unify(&product("BOLD"), &product("BOLD")),
+        substitutions.unify(&product("Signal"), &product("Signal")),
         Ok(Compatibility::Compatible)
     );
 }
@@ -24,7 +24,7 @@ fn exact_named_types_match() {
 fn different_named_types_fail() {
     let mut substitutions = Substitutions::default();
     assert!(matches!(
-        substitutions.unify(&product("BOLD"), &product("T1w")),
+        substitutions.unify(&product("Signal"), &product("Calibration")),
         Err(TypeUnifyError::Mismatch { .. })
     ));
 }
@@ -33,7 +33,7 @@ fn different_named_types_fail() {
 fn different_constructors_and_arities_fail() {
     let mut substitutions = Substitutions::default();
     assert!(matches!(
-        substitutions.unify(&signature("BOLD<S>"), &product("Image<Native>")),
+        substitutions.unify(&signature("Signal<S>"), &product("Image<Native>")),
         Err(TypeUnifyError::Mismatch { .. })
     ));
     assert!(matches!(
@@ -46,46 +46,46 @@ fn different_constructors_and_arities_fail() {
 fn generic_input_infers_variable_and_substitutes_output() {
     let mut substitutions = Substitutions::default();
     assert_eq!(
-        substitutions.unify(&signature("BOLD<S>"), &product("BOLD<Native>")),
+        substitutions.unify(&signature("Signal<S>"), &product("Signal<Native>")),
         Ok(Compatibility::Compatible)
     );
     assert_eq!(substitutions.0["S"], product("Native"));
     assert_eq!(
-        substitutions.substitute(&signature("DenoisedBOLD<S>")),
-        product("DenoisedBOLD<Native>")
+        substitutions.substitute(&signature("FilteredSignal<S>")),
+        product("FilteredSignal<Native>")
     );
 }
 
 #[test]
-fn generic_import_preserves_dwi_space() {
-    let text = "source raw : MRI<DWI,Native> [id]\n\
-source bvec : GradientDirections [id]\n\
-source bval : GradientAmplitudes [id]\n\
-source metadata : AcquisitionMetadata [id]\n\
-operation import_dwi(image: MRI<DWI,$Space>, bvec: GradientDirections, bval: GradientAmplitudes, metadata: AcquisitionMetadata) -> MRI<DWI,$Space>\n\
-result = import_dwi(raw, bvec, bval, metadata)\n\
+fn generic_import_preserves_image_space() {
+    let text = "source raw : Image<Photo,Native> [id]\n\
+source gps : GpsTrack [id]\n\
+source imu : ImuTrace [id]\n\
+source metadata : CaptureMetadata [id]\n\
+operation import_photo(image: Image<Photo,$Space>, gps: GpsTrack, imu: ImuTrace, metadata: CaptureMetadata) -> Image<Photo,$Space>\n\
+result = import_photo(raw, gps, imu, metadata)\n\
 sources:\n\
   raw[id=x]\n\
-  bvec[id=x]\n\
-  bval[id=x]\n\
+  gps[id=x]\n\
+  imu[id=x]\n\
   metadata[id=x]\n";
     let (pipeline, inventory) = parse_document(text).unwrap();
     let dag = resolve(&pipeline, &inventory.unwrap()).unwrap();
-    assert_eq!(dag.jobs[0].output.artifact_type, product("MRI<DWI,Native>"));
+    assert_eq!(dag.jobs[0].output.artifact_type, product("Image<Photo,Native>"));
 }
 
 #[test]
 fn multiple_variables_infer_independently() {
     let mut substitutions = Substitutions::default();
     substitutions
-        .unify(&signature("BOLD<A>"), &product("BOLD<Native>"))
+        .unify(&signature("Signal<A>"), &product("Signal<Native>"))
         .unwrap();
     substitutions
-        .unify(&signature("T1w<B>"), &product("T1w<MNI>"))
+        .unify(&signature("Calibration<B>"), &product("Calibration<Standard>"))
         .unwrap();
     assert_eq!(
         substitutions.substitute(&signature("Affine<A,B>")),
-        product("Affine<Native,MNI>")
+        product("Affine<Native,Standard>")
     );
 }
 
@@ -96,9 +96,9 @@ fn conflicting_variable_reports_previous_and_required_types() {
         .unify(&signature("A<X>"), &product("A<Native>"))
         .unwrap();
     assert!(matches!(
-        substitutions.unify(&signature("B<X>"), &product("B<MNI>")),
+        substitutions.unify(&signature("B<X>"), &product("B<Standard>")),
         Err(TypeUnifyError::VariableConflict { variable, previous, required })
-            if variable == "X" && previous == product("Native") && required == product("MNI")
+            if variable == "X" && previous == product("Native") && required == product("Standard")
     ));
 }
 
@@ -174,23 +174,23 @@ fn partial_type_cannot_hide_a_downstream_known_conflict() {
 fn unknown_is_indeterminate_without_binding_a_variable() {
     let mut substitutions = Substitutions::default();
     assert_eq!(
-        substitutions.unify(&signature("BOLD<S>"), &TypeExpr::Unknown),
+        substitutions.unify(&signature("Signal<S>"), &TypeExpr::Unknown),
         Ok(Compatibility::Unknown)
     );
     assert!(substitutions.0.is_empty());
     assert_eq!(
-        substitutions.substitute(&signature("DenoisedBOLD<S>")),
-        signature("DenoisedBOLD<S>")
+        substitutions.substitute(&signature("FilteredSignal<S>")),
+        signature("FilteredSignal<S>")
     );
 }
 
 #[test]
 fn unresolved_output_variables_become_unknown_at_job_boundary() {
     let pipeline = parse_pipeline(
-        "products:\n  raw : Unknown [subject]\n  result : Unknown [subject]\noperations:\n  transform(A<S>) -> B<S>\npipeline:\n  result = transform(raw)\n",
+        "products:\n  raw : Unknown [site]\n  result : Unknown [site]\noperations:\n  transform(A<S>) -> B<S>\npipeline:\n  result = transform(raw)\n",
     )
     .unwrap();
-    let inventory = parse_source_inventory("sources:\n  raw[subject=A]\n").unwrap();
+    let inventory = parse_source_inventory("sources:\n  raw[site=A]\n").unwrap();
     let dag = resolve(&pipeline, &inventory).unwrap();
     assert_eq!(dag.jobs[0].output.artifact_type, product("B<Unknown>"));
 }
@@ -198,24 +198,24 @@ fn unresolved_output_variables_become_unknown_at_job_boundary() {
 #[test]
 fn generic_pipeline_infers_output_type_without_pipeline_annotations() {
     let pipeline = parse_pipeline(
-        "products:\n  bold : BOLD<Native> [subject]\n  denoised : Unknown [subject]\noperations:\n  denoise(BOLD<S>) -> DenoisedBOLD<S>\npipeline:\n  denoised = denoise(bold)\n",
+        "products:\n  signal : Signal<Native> [site]\n  denoised : Unknown [site]\noperations:\n  denoise(Signal<S>) -> FilteredSignal<S>\npipeline:\n  denoised = denoise(signal)\n",
     )
     .unwrap();
-    let inventory = parse_source_inventory("sources:\n  bold[subject=A]\n").unwrap();
+    let inventory = parse_source_inventory("sources:\n  signal[site=A]\n").unwrap();
     let dag = resolve(&pipeline, &inventory).unwrap();
     assert_eq!(
         dag.jobs[0].output.artifact_type,
-        product("DenoisedBOLD<Native>")
+        product("FilteredSignal<Native>")
     );
 }
 
 #[test]
 fn chained_generic_operations_propagate_concrete_type() {
     let pipeline = parse_pipeline(
-        "products:\n  raw : A<Native> [subject]\n  middle : Unknown [subject]\n  final : Unknown [subject]\noperations:\n  f(A<X>) -> B<X>\n  g(B<Y>) -> C<Y>\npipeline:\n  middle = f(raw)\n  final = g(middle)\n",
+        "products:\n  raw : A<Native> [site]\n  middle : Unknown [site]\n  final : Unknown [site]\noperations:\n  f(A<X>) -> B<X>\n  g(B<Y>) -> C<Y>\npipeline:\n  middle = f(raw)\n  final = g(middle)\n",
     )
     .unwrap();
-    let inventory = parse_source_inventory("sources:\n  raw[subject=A]\n").unwrap();
+    let inventory = parse_source_inventory("sources:\n  raw[site=A]\n").unwrap();
     let dag = resolve(&pipeline, &inventory).unwrap();
     assert_eq!(dag.jobs[0].output.artifact_type, product("B<Native>"));
     assert_eq!(dag.jobs[1].output.artifact_type, product("C<Native>"));
@@ -224,20 +224,20 @@ fn chained_generic_operations_propagate_concrete_type() {
 #[test]
 fn operation_type_variables_do_not_leak_between_invocations() {
     let pipeline = parse_pipeline(
-        "products:\n  a : A<Native> [subject]\n  b : A<MNI> [subject]\n  out_a : Unknown [subject]\n  out_b : Unknown [subject]\noperations:\n  convert(A<X>) -> B<X>\npipeline:\n  out_a = convert(a)\n  out_b = convert(b)\n",
+        "products:\n  a : A<Native> [site]\n  b : A<Standard> [site]\n  out_a : Unknown [site]\n  out_b : Unknown [site]\noperations:\n  convert(A<X>) -> B<X>\npipeline:\n  out_a = convert(a)\n  out_b = convert(b)\n",
     )
     .unwrap();
-    let inventory = parse_source_inventory("sources:\n  a[subject=01]\n  b[subject=01]\n").unwrap();
+    let inventory = parse_source_inventory("sources:\n  a[site=01]\n  b[site=01]\n").unwrap();
     let dag = resolve(&pipeline, &inventory).unwrap();
     assert_eq!(dag.jobs[0].output.artifact_type, product("B<Native>"));
-    assert_eq!(dag.jobs[1].output.artifact_type, product("B<MNI>"));
+    assert_eq!(dag.jobs[1].output.artifact_type, product("B<Standard>"));
 }
 
 #[test]
-fn act_example_reuses_image_operations_across_kinds_and_spaces() {
-    let pipeline = parse_pipeline(include_str!("../examples/commands/mrtrix3_act.spit")).unwrap();
+fn field_survey_reuses_image_operations_across_kinds_and_spaces() {
+    let pipeline = parse_pipeline(include_str!("../examples/commands/field_survey.spit")).unwrap();
     let inventory =
-        parse_source_inventory(include_str!("../examples/commands/mrtrix3_act.sources")).unwrap();
+        parse_source_inventory(include_str!("../examples/commands/field_survey.sources")).unwrap();
     let dag = resolve(&pipeline, &inventory).unwrap();
     let output_type = |name: &str| {
         dag.jobs
@@ -249,18 +249,18 @@ fn act_example_reuses_image_operations_across_kinds_and_spaces() {
             .clone()
     };
 
-    assert_eq!(output_type("forward_b0"), product("MRI<B0,Acquired>"));
-    assert_eq!(output_type("session_b0"), product("MRI<B0,Diffusion>"));
-    assert_eq!(output_type("t1w_dwi"), product("MRI<T1w,Diffusion>"));
+    assert_eq!(output_type("dark_frame"), product("Image<Dark,Captured>"));
+    assert_eq!(output_type("visit_dark"), product("Image<Dark,Orthorectified>"));
+    assert_eq!(output_type("map_photo"), product("Image<Map,Orthorectified>"));
     assert_eq!(
-        output_type("nodes_dwi"),
-        product("MRI<Parcellation,Diffusion>")
+        output_type("regions_photo"),
+        product("Image<Classes,Orthorectified>")
     );
     assert_eq!(
         pipeline
             .operations
             .iter()
-            .filter(|operation| operation.name == "mrtransform")
+            .filter(|operation| operation.name == "resample")
             .count(),
         1
     );
@@ -284,10 +284,10 @@ fn analytics_join_key_variables_reject_mismatched_relations() {
 #[test]
 fn conflicting_port_bindings_are_a_structured_resolver_error() {
     let pipeline = parse_pipeline(
-        "products:\n  a : A<Native> [subject]\n  b : B<MNI> [subject]\n  c : Unknown [subject]\noperations:\n  op(A<X>, B<X>) -> C<X>\npipeline:\n  c = op(a, b)\n",
+        "products:\n  a : A<Native> [site]\n  b : B<Standard> [site]\n  c : Unknown [site]\noperations:\n  op(A<X>, B<X>) -> C<X>\npipeline:\n  c = op(a, b)\n",
     )
     .unwrap();
-    let inventory = parse_source_inventory("sources:\n  a[subject=01]\n  b[subject=01]\n").unwrap();
+    let inventory = parse_source_inventory("sources:\n  a[site=01]\n  b[site=01]\n").unwrap();
     assert!(matches!(
         resolve(&pipeline, &inventory),
         Err(ResolveError::TypeVariableConflict { operation, port, variable, .. })
@@ -298,10 +298,10 @@ fn conflicting_port_bindings_are_a_structured_resolver_error() {
 #[test]
 fn declared_output_type_cannot_contradict_inferred_type() {
     let pipeline = parse_pipeline(
-        "products:\n  raw : A<Native> [subject]\n  result : B<MNI> [subject]\noperations:\n  f(A<X>) -> B<X>\npipeline:\n  result = f(raw)\n",
+        "products:\n  raw : A<Native> [site]\n  result : B<Standard> [site]\noperations:\n  f(A<X>) -> B<X>\npipeline:\n  result = f(raw)\n",
     )
     .unwrap();
-    let inventory = parse_source_inventory("sources:\n  raw[subject=01]\n").unwrap();
+    let inventory = parse_source_inventory("sources:\n  raw[site=01]\n").unwrap();
     assert!(matches!(
         resolve(&pipeline, &inventory),
         Err(ResolveError::TypeVariableConflict { port, variable, .. })

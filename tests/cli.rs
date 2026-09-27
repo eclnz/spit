@@ -5,7 +5,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 #[test]
 fn example_runs_with_embedded_inventory() {
     let output = Command::new(env!("CARGO_BIN_EXE_spit"))
-        .args(["dag", "examples/basic/basic.spit"])
+        .args(["dag", "examples/analytics/analytics.spit"])
         .output()
         .unwrap();
     assert!(
@@ -14,8 +14,8 @@ fn example_runs_with_embedded_inventory() {
         String::from_utf8_lossy(&output.stderr)
     );
     let dag = String::from_utf8(output.stdout).unwrap();
-    assert_eq!(dag.matches("Job ").count(), 5);
-    assert!(dag.contains("mean_bold[sub=01,ses=01]"));
+    assert_eq!(dag.matches("Job ").count(), 34);
+    assert!(dag.contains("tenant_metrics[tenant=acme]"));
 }
 
 #[test]
@@ -66,9 +66,9 @@ fn bound_dag_displays_resolved_paths_before_command_expansion() {
     let output = Command::new(env!("CARGO_BIN_EXE_spit"))
         .args([
             "bound-dag",
-            "examples/commands/mrtrix3_act.spit",
+            "examples/commands/field_survey.spit",
             "--sources",
-            "examples/commands/mrtrix3_act.sources",
+            "examples/commands/field_survey.sources",
         ])
         .output()
         .unwrap();
@@ -79,8 +79,8 @@ fn bound_dag_displays_resolved_paths_before_command_expansion() {
     );
     let report = String::from_utf8(output.stdout).unwrap();
     assert_eq!(report.matches("Job ").count(), 93);
-    assert!(report.contains("moving: t1w[sub=01,ses=01]"));
-    assert!(report.contains("path: sub-01/ses-01/anat/sub-01_ses-01_T1w.nii.gz"));
+    assert!(report.contains("moving: ground_map[site=01,visit=01]"));
+    assert!(report.contains("path: site-01/visit-01/map/site-01_visit-01_map.tif"));
 }
 
 #[test]
@@ -94,8 +94,8 @@ fn expanded_examples_resolve() {
             17,
         ),
         (
-            "examples/commands/mrtrix3_act.spit",
-            Some("examples/commands/mrtrix3_act.sources"),
+            "examples/commands/field_survey.spit",
+            Some("examples/commands/field_survey.sources"),
             93,
         ),
         ("examples/analytics/analytics.spit", None, 34),
@@ -125,24 +125,24 @@ fn paths_reports_fallbacks_and_strict_check_rejects_them() {
     let paths = Command::new(env!("CARGO_BIN_EXE_spit"))
         .args([
             "paths",
-            "examples/commands/mrtrix3_act.spit",
+            "examples/commands/field_survey.spit",
             "--sources",
-            "examples/commands/mrtrix3_act.sources",
+            "examples/commands/field_survey.sources",
         ])
         .output()
         .unwrap();
     assert!(paths.status.success());
     let report = String::from_utf8(paths.stdout).unwrap();
-    assert!(report.contains("wm_response (output): explicit"));
-    assert!(report.contains("wm_fod (output): default"));
+    assert!(report.contains("photo_response (output): explicit"));
+    assert!(report.contains("vegetation (output): default"));
 
     let strict = Command::new(env!("CARGO_BIN_EXE_spit"))
         .args([
             "check",
-            "examples/commands/mrtrix3_act.spit",
+            "examples/commands/field_survey.spit",
             "--strict-paths",
             "--sources",
-            "examples/commands/mrtrix3_act.sources",
+            "examples/commands/field_survey.sources",
         ])
         .output()
         .unwrap();

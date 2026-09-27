@@ -1,4 +1,4 @@
-//! Check the ACT example against a temporary tree of empty source files.
+//! Check the field survey example against a temporary tree of empty source files.
 
 use std::fs::{self, File};
 use std::path::PathBuf;
@@ -8,28 +8,28 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 static NEXT_FIXTURE: AtomicUsize = AtomicUsize::new(0);
 
-// Construct expected BIDS filenames independently of SPIT's path binder.
-fn act_sources() -> Vec<String> {
+// Construct expected filenames independently of SPIT's path binder.
+fn survey_sources() -> Vec<String> {
     let mut paths = Vec::new();
-    for (sub, ses, runs) in [
+    for (site, visit, shots) in [
         ("01", "01", &["01", "02"][..]),
         ("01", "02", &["01", "02"][..]),
         ("02", "01", &["01", "02", "03"][..]),
     ] {
-        let session = format!("sub-{sub}/ses-{ses}");
-        for run in runs {
-            let dwi = format!("{session}/dwi/sub-{sub}_ses-{ses}_run-{run}_dwi");
-            for extension in ["nii.gz", "bvec", "bval", "json"] {
-                paths.push(format!("{dwi}.{extension}"));
+        let folder = format!("site-{site}/visit-{visit}");
+        for shot in shots {
+            let photo = format!("{folder}/photos/site-{site}_visit-{visit}_shot-{shot}_photo");
+            for extension in ["raw", "gpx", "imu", "json"] {
+                paths.push(format!("{photo}.{extension}"));
             }
         }
-        let epi = format!("{session}/fmap/sub-{sub}_ses-{ses}_dir-PA_epi");
-        paths.push(format!("{epi}.nii.gz"));
-        paths.push(format!("{epi}.json"));
-        paths.push(format!("{session}/anat/sub-{sub}_ses-{ses}_T1w.nii.gz"));
+        let flat = format!("{folder}/calibration/site-{site}_visit-{visit}_flat");
+        paths.push(format!("{flat}.raw"));
+        paths.push(format!("{flat}.json"));
+        paths.push(format!("{folder}/map/site-{site}_visit-{visit}_map.tif"));
     }
-    paths.push("config/source_lut.txt".to_owned());
-    paths.push("config/target_lut.txt".to_owned());
+    paths.push("config/source_classes.txt".to_owned());
+    paths.push("config/target_classes.txt".to_owned());
     paths
 }
 
@@ -47,7 +47,7 @@ impl Fixture {
             NEXT_FIXTURE.fetch_add(1, Ordering::Relaxed)
         ));
         fs::create_dir(&root).unwrap();
-        for relative in act_sources() {
+        for relative in survey_sources() {
             if Some(relative.as_str()) == missing {
                 continue;
             }
@@ -62,9 +62,9 @@ impl Fixture {
         Command::new(env!("CARGO_BIN_EXE_spit"))
             .args([
                 "check",
-                "examples/commands/mrtrix3_act.spit",
+                "examples/commands/field_survey.spit",
                 "--sources",
-                "examples/commands/mrtrix3_act.sources",
+                "examples/commands/field_survey.sources",
                 "--root",
                 self.0.to_str().unwrap(),
             ])
@@ -80,7 +80,7 @@ impl Drop for Fixture {
 }
 
 #[test]
-fn act_pipeline_compiles_when_all_required_source_files_exist() {
+fn survey_compiles_when_all_required_source_files_exist() {
     let fixture = Fixture::new(None);
     let result = fixture.check();
     assert!(
@@ -95,30 +95,30 @@ fn act_pipeline_compiles_when_all_required_source_files_exist() {
 }
 
 #[test]
-fn act_pipeline_reports_a_missing_required_file() {
-    let missing = "sub-01/ses-02/dwi/sub-01_ses-02_run-02_dwi.bvec";
+fn survey_reports_a_missing_required_file() {
+    let missing = "site-01/visit-02/photos/site-01_visit-02_shot-02_photo.gpx";
     let fixture = Fixture::new(Some(missing));
     let result = fixture.check();
     assert!(!result.status.success());
     let error = String::from_utf8(result.stderr).unwrap();
     assert!(
-        error.contains("missing source file for `dwi_bvec"),
+        error.contains("missing source file for `photo_gps"),
         "{error}"
     );
     assert!(error.contains(missing));
 }
 
 #[test]
-fn act_pipeline_rejects_a_scan_without_an_inventory_sidecar() {
+fn survey_rejects_a_photo_without_an_inventory_sidecar() {
     let fixture = Fixture::new(None);
-    let inventory = include_str!("../examples/commands/mrtrix3_act.sources")
-        .replace("    dwi_bval[sub=01,ses=02,run=02]\n", "");
+    let inventory = include_str!("../examples/commands/field_survey.sources")
+        .replace("    photo_imu[site=01,visit=02,shot=02]\n", "");
     let inventory_path = fixture.0.join("incomplete.sources");
     fs::write(&inventory_path, inventory).unwrap();
     let result = Command::new(env!("CARGO_BIN_EXE_spit"))
         .args([
             "check",
-            "examples/commands/mrtrix3_act.spit",
+            "examples/commands/field_survey.spit",
             "--sources",
             inventory_path.to_str().unwrap(),
             "--root",
@@ -129,20 +129,20 @@ fn act_pipeline_rejects_a_scan_without_an_inventory_sidecar() {
     assert!(!result.status.success());
     let error = String::from_utf8(result.stderr).unwrap();
     assert!(
-        error.contains("missing input `bval` for `import_dwi`"),
+        error.contains("missing input `imu` for `import_photo`"),
         "{error}"
     );
-    assert!(error.contains("run=02,ses=02,sub=01"), "{error}");
+    assert!(error.contains("shot=02,site=01,visit=02"), "{error}");
 }
 
 #[test]
-fn act_pipeline_reports_a_source_path_that_is_a_directory() {
-    let directory = "config/target_lut.txt";
+fn survey_reports_a_source_path_that_is_a_directory() {
+    let directory = "config/target_classes.txt";
     let fixture = Fixture::new(Some(directory));
     fs::create_dir(fixture.0.join(directory)).unwrap();
     let result = fixture.check();
     assert!(!result.status.success());
     assert!(String::from_utf8(result.stderr)
         .unwrap()
-        .contains("target_lut"));
+        .contains("target_classes"));
 }

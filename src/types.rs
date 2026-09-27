@@ -288,7 +288,7 @@ impl std::error::Error for TypeParseError {}
 /// Product declarations treat bare names as constructors. In operation
 /// signatures, a bare single uppercase letter denotes a local type variable.
 /// A `$` prefix allows longer variable names without confusing them with
-/// named types such as `MRI` or `World`.
+/// named types such as `Image` or `World`.
 pub fn parse_type_expr(text: &str, signature: bool) -> Result<TypeExpr, TypeParseError> {
     struct Parser<'a> {
         text: &'a str,

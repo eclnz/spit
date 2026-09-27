@@ -77,10 +77,10 @@ fn unqualified_and_nested_imports_work_in_sectioned_files() {
     dir.write("middle.spit", "use clean from base.spit as prep\n");
     let main = dir.write(
         "main.spit",
-        "use prep::clean from middle.spit as mri\n\
+        "use prep::clean from middle.spit as stage\n\
          use clean from base.spit\n\
          products:\n  raw [id]\n  middle [id]\n  final [id]\n\
-         pipeline:\n  middle = clean(raw)\n  final = mri::prep::clean(middle)\n\
+         pipeline:\n  middle = clean(raw)\n  final = stage::prep::clean(middle)\n\
          sources:\n  raw[id=x]\n",
     );
     let text = fs::read_to_string(&main).unwrap();

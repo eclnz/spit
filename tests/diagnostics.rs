@@ -257,7 +257,7 @@ fn inferred_type_error_points_to_the_consuming_sectioned_step() {
                   final : Unknown [id]\n\
                 operations:\n\
                   first(A<X>) -> B<X>\n\
-                  second(B<MNI>) -> C\n\
+                  second(B<Standard>) -> C\n\
                 pipeline:\n\
                   middle = first(raw)\n\
                   final = second(middle)\n";
@@ -342,7 +342,7 @@ fn cli_reports_semantic_error_line_in_json() {
         .take()
         .unwrap()
         .write_all(
-            b"source raw : A<Native> [id]\noperation first(A<X>) -> B<X>\nmiddle = first(raw)\noperation second(B<MNI>) -> C\nfinal = second(middle)\n",
+            b"source raw : A<Native> [id]\noperation first(A<X>) -> B<X>\nmiddle = first(raw)\noperation second(B<Standard>) -> C\nfinal = second(middle)\n",
         )
         .unwrap();
     let output = child.wait_with_output().unwrap();
