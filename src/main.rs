@@ -7,13 +7,14 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use spit::{
-    diagnose_at, discover_sources, inspect_paths, parse_document_at, parse_pipeline_at,
-    parse_source_inventory, render_bash, render_bound_dag, render_dag, render_source_inventory,
-    resolve, validate_concrete_paths, validate_source_files,
+    diagnose_artifacts_at, diagnose_at, discover_sources, inspect_paths, parse_document_at,
+    parse_pipeline_at, parse_source_inventory, render_artifacts, render_bash, render_bound_dag,
+    render_dag, render_source_inventory, resolve, resolve_artifacts, validate_concrete_paths,
+    validate_source_files,
 };
 
 const USAGE: &str =
-    "usage: spit <check|dag|bound-dag|paths|bash|discover|diagnose> <pipeline.spit> [--sources <inventory.spit|->] [--root <directory>] [--strict-paths]";
+    "usage: spit <check|dag|bound-dag|paths|bash|artifacts|discover|diagnose> <pipeline.spit> [--sources <inventory.spit|->] [--root <directory>] [--strict-paths]";
 
 #[derive(Clone, Copy, PartialEq)]
 enum Command {
@@ -22,6 +23,7 @@ enum Command {
     BoundDag,
     Paths,
     Bash,
+    Artifacts,
     Discover,
     Diagnose,
 }
@@ -34,6 +36,7 @@ impl Command {
             "bound-dag" => Self::BoundDag,
             "paths" => Self::Paths,
             "bash" => Self::Bash,
+            "artifacts" => Self::Artifacts,
             "discover" => Self::Discover,
             "diagnose" => Self::Diagnose,
             _ => return None,
@@ -114,6 +117,9 @@ fn run() -> Result<(), Box<dyn Error>> {
     if args.command == Command::Discover && (args.root.is_none() || args.sources.is_some()) {
         return Err("discover reads files under --root <directory> and takes no --sources".into());
     }
+    if args.command == Command::Artifacts && args.strict_paths {
+        return Err("artifacts does not support --strict-paths".into());
+    }
     let inventory_text = match (args.sources.as_deref(), &args.root) {
         (Some("-"), _) => {
             let mut text = String::new();
@@ -130,7 +136,12 @@ fn run() -> Result<(), Box<dyn Error>> {
         (None, _) => None,
     };
     // Report every error and warning before doing any work.
-    let diagnostics = diagnose_at(&pipeline_text, inventory_text.as_deref(), path);
+    let diagnose = if args.command == Command::Artifacts {
+        diagnose_artifacts_at
+    } else {
+        diagnose_at
+    };
+    let diagnostics = diagnose(&pipeline_text, inventory_text.as_deref(), path);
     for diagnostic in &diagnostics {
         eprintln!(
             "{}",
@@ -163,6 +174,14 @@ fn run() -> Result<(), Box<dyn Error>> {
         }
         return Err("no inline source inventory; supply --sources <inventory.spit|->".into());
     };
+    if args.command == Command::Artifacts {
+        let report = resolve_artifacts(&pipeline, &inventory)?;
+        if let Some(root) = &args.root {
+            validate_source_files(&pipeline, &report.dag, Path::new(root))?;
+        }
+        print!("{}", render_artifacts(&report));
+        return Ok(());
+    }
     let dag = resolve(&pipeline, &inventory)?;
     if args.strict_paths || args.command == Command::Paths {
         if args.command == Command::Paths {
@@ -187,7 +206,9 @@ fn run() -> Result<(), Box<dyn Error>> {
         Command::BoundDag => print!("{}", render_bound_dag(&pipeline, &dag)?),
         Command::Paths => {}
         Command::Bash => print!("{}", render_bash(&pipeline, &dag)?),
-        Command::Discover | Command::Diagnose => unreachable!("handled before resolution"),
+        Command::Artifacts | Command::Discover | Command::Diagnose => {
+            unreachable!("handled before resolution")
+        }
     }
     Ok(())
 }

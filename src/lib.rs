@@ -14,14 +14,16 @@ mod template;
 pub mod types;
 
 pub use bash::{render_bash, validate_commands, BashError};
-pub use diagnostics::{diagnose, diagnose_at, Diagnostic, DiagnosticSource, Severity};
+pub use diagnostics::{
+    diagnose, diagnose_artifacts_at, diagnose_at, Diagnostic, DiagnosticSource, Severity,
+};
 pub use error::{DefinitionSubject, ResolveError, TypeConflict};
 pub use imports::{parse_document_at, parse_pipeline_at};
 pub use model::{
-    natural_cmp, ArtifactInstance, ArtifactKey, ArtifactType, Cardinality, CommandDef, CommandRole,
-    CountRequirement, CoverageRule, EntityBinding, InputBinding, InputPort, Invocation, Job,
-    OperationDef, OutputPort, Pipeline, ProductDef, ResolvedDag, ShapeRule, SourceInventory,
-    SourceRecord, DEFAULT_OUTPUT,
+    natural_cmp, ArtifactInstance, ArtifactKey, ArtifactReport, ArtifactType, Cardinality,
+    CommandDef, CommandRole, CountRequirement, CoverageGap, CoverageRule, EntityBinding, Gap,
+    IncompleteJob, InputBinding, InputPort, Invocation, Job, OperationDef, OutputPort, Pipeline,
+    ProductDef, ResolvedDag, ShapeRule, SourceInventory, SourceRecord, DEFAULT_OUTPUT,
 };
 pub use parser::{
     parse_document, parse_pipeline, parse_source_inventory, render_source_inventory, ParseError,
@@ -31,8 +33,8 @@ pub use paths::{
     discover_sources, inspect_paths, validate_concrete_paths, validate_source_files, PathCoverage,
     PathCoverageEntry, PathError, PathRule,
 };
-pub use render::{render_bound_dag, render_dag};
-pub use resolver::{resolve, validate_pipeline};
+pub use render::{render_artifacts, render_bound_dag, render_dag};
+pub use resolver::{resolve, resolve_artifacts, validate_pipeline};
 pub use types::{
     parse_type_expr, Compatibility, Substitutions, TypeExpr, TypeParseError, TypeUnifyError,
 };
