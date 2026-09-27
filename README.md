@@ -333,7 +333,7 @@ operation project(sample: Frame<$Kind,$SourceSpace>, calibration: Calibration<$K
 | [Selectors](examples/pipelines/selectors.spit) | `where`, `same`, a two-output step, a verification, and a many input beside a single input |
 | [Analytics](examples/analytics/analytics.spit) | Joins and rollups |
 | [Field survey](examples/commands/field_survey.spit) | A larger pipeline with sidecar files, calibration, alignment between spaces, and commands |
-| [MRtrix3 ACT](examples/commands/mrtrix3_act.spit) | A larger pipeline with commands and paths |
+| [MRtrix3 ACT](examples/commands/mrtrix3_act.spit) | A larger pipeline with commands and paths, in nested preprocessing, anatomy, and tractography stages |
 | [Stages](examples/stages/stages.spit) | Preprocessing and analysis stages, a stage's own path default, and `{stage}` paths |
 | [Nested stages](examples/stages/nested.spit) | Stages within a stage, beside a step in the outer stage itself |
 | [Imports](examples/imports/imported.spit) | Reuse source and operation definitions with `text::` names |
