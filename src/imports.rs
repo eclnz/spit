@@ -219,7 +219,7 @@ fn select_import(module: &Pipeline, spec: &UseSpec, line: usize) -> Result<Pipel
             {
                 selected
                     .product_paths
-                    .insert(qualified.clone(), path.replace("{product}", name));
+                    .insert(qualified.clone(), path.with_product(name));
             }
             for constraint in module
                 .constraints
