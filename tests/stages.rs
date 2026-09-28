@@ -127,10 +127,20 @@ fn stage_placeholder_needs_a_stage() {
 }
 
 #[test]
-fn a_dimension_named_stage_keeps_its_meaning() {
-    let text = "source raw [stage]\npath raw: in/{stage}.txt\n";
-    let (pipeline, _) = parse_document(text).unwrap();
-    inspect_paths(&pipeline).unwrap();
+fn path_placeholder_names_are_reserved() {
+    for name in ["product", "entities", "stage"] {
+        let text = format!("source raw [id, {name}]\n");
+        assert_eq!(
+            messages(&diagnose(&text, None)),
+            [(
+                Some(1),
+                format!(
+                    "product `raw` cannot have a dimension named `{name}`, which path templates reserve for `{{{name}}}`"
+                )
+                .as_str()
+            )]
+        );
+    }
 }
 
 #[test]

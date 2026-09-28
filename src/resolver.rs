@@ -7,6 +7,7 @@ use crate::model::{
     CoverageRule, EntityBinding, Gap, IncompleteJob, InputBinding, InputPort, Invocation, Job,
     OperationDef, Pipeline, ProductDef, ResolvedDag, ShapeRule, SourceInventory,
 };
+use crate::paths::RESERVED_PLACEHOLDERS;
 use crate::types::{Substitutions, TypeExpr, TypeUnifyError};
 
 /// A pipeline whose declarations, steps, and rules hold without any inventory.
@@ -478,6 +479,19 @@ fn check_product(product: &ProductDef) -> Result<(), ResolveError> {
             subject: DefinitionSubject::Product(product.name.clone()),
             detail: format!(
                 "product `{}` has duplicate or empty dimensions",
+                product.name
+            ),
+        });
+    }
+    if let Some(dimension) = product
+        .dimensions
+        .iter()
+        .find(|dimension| RESERVED_PLACEHOLDERS.contains(&dimension.as_str()))
+    {
+        return Err(ResolveError::InvalidDefinition {
+            subject: DefinitionSubject::Product(product.name.clone()),
+            detail: format!(
+                "product `{}` cannot have a dimension named `{dimension}`, which path templates reserve for `{{{dimension}}}`",
                 product.name
             ),
         });
