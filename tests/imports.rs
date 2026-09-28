@@ -99,7 +99,7 @@ fn import_errors_point_to_the_use_line() {
     dir.write("base.spit", "operation clean(one)\n");
     let main = dir.write("main.spit", "use absent from base.spit\n");
     let error = parse_document_at(&fs::read_to_string(&main).unwrap(), &main).unwrap_err();
-    assert_eq!(error.line, 1);
+    assert_eq!(error.line(), 1);
     assert!(error.message.contains("not a source or operation"));
 
     let main = dir.write(
@@ -107,7 +107,7 @@ fn import_errors_point_to_the_use_line() {
         "use clean from base.spit\nuse clean from base.spit\n",
     );
     let error = parse_document_at(&fs::read_to_string(&main).unwrap(), &main).unwrap_err();
-    assert_eq!(error.line, 2);
+    assert_eq!(error.line(), 2);
     assert!(error.message.contains("conflicts with operation"));
 
     dir.write(
@@ -115,7 +115,7 @@ fn import_errors_point_to_the_use_line() {
         "use clean from main.spit\noperation clean(one)\n",
     );
     let error = parse_document_at(&fs::read_to_string(&main).unwrap(), &main).unwrap_err();
-    assert_eq!(error.line, 1);
+    assert_eq!(error.line(), 1);
     assert!(error.message.contains("import cycle"));
 }
 

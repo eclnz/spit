@@ -2,69 +2,23 @@
 //! and rooting artifact paths at `$SPIT_ROOT`.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::fmt::{self, Write};
-use std::ops::Range;
+use std::fmt::Write;
 use std::path::Path;
 
-use crate::command::{slot, validate_commands, CommandError, CommandTemplate, Slot};
+use crate::command::{slot, validate_commands, CommandTemplate, Slot};
 use crate::model::{
     ArtifactKey, Cardinality, CommandRole, Job, OperationDef, Pipeline, ResolvedDag,
 };
-use crate::paths::{bound_paths, inspect_paths, output_keys, PathError};
+use crate::paths::{bound_paths, inspect_paths, output_keys};
+use crate::span::Located;
 use crate::template::Part;
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct BashError {
-    /// The pipeline line of the path rule, command, or operation at fault, when known.
-    pub line: Option<usize>,
-    /// The byte range in that line, when known.
-    pub columns: Option<Range<usize>>,
-    pub message: String,
-    /// Text within the command or path template that the error is about,
-    /// such as one `{placeholder}`.
-    pub(crate) focus: Option<String>,
-}
-
-impl fmt::Display for BashError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if let Some(line) = self.line {
-            write!(f, "line {line}: ")?;
-        }
-        f.write_str(&self.message)
-    }
-}
-
-impl std::error::Error for BashError {}
-
-impl From<CommandError> for BashError {
-    fn from(error: CommandError) -> Self {
-        Self {
-            line: error.line,
-            columns: error.columns,
-            message: error.message,
-            focus: error.focus,
-        }
-    }
-}
-
-impl From<PathError> for BashError {
-    fn from(error: PathError) -> Self {
-        Self {
-            line: error.line,
-            columns: error.columns,
-            message: error.message,
-            focus: error.focus,
-        }
-    }
-}
+/// An error that stops a script being generated. Command and path errors
+/// are the same type, so they pass through unchanged.
+pub type BashError = Located<String>;
 
 fn error(message: impl Into<String>) -> BashError {
-    BashError {
-        line: None,
-        columns: None,
-        message: message.into(),
-        focus: None,
-    }
+    BashError::new(message)
 }
 
 /// Generate a script for the concrete jobs already selected by `resolve`.
