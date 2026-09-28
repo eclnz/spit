@@ -7,7 +7,7 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use spit::{
-    diagnose_artifacts_at, diagnose_at, discover_sources, inspect_paths, parse_document_at,
+    diagnose_artifacts_at, diagnose_at, discover_source_files, inspect_paths, parse_document_at,
     parse_pipeline_at, parse_source_inventory, render_artifacts, render_bash, render_bound_dag,
     render_dag, render_source_inventory, resolve, resolve_artifacts, stage_within,
     validate_concrete_paths, validate_source_files, Diagnostic, PathCoverage, Pipeline,
@@ -184,26 +184,47 @@ fn commands_accepting(flag: Flag) -> String {
     }
 }
 
+/// A usage error: what is wrong, then the usage line.
+fn misuse(problem: impl std::fmt::Display) -> String {
+    format!("{problem}\n{}", usage())
+}
+
 fn parse_args() -> Result<CliArgs, Box<dyn Error>> {
     let mut args = env::args().skip(1);
-    let command = args
+    let command = match args.next() {
+        None => return Err(usage().into()),
+        Some(name) => {
+            Command::parse(&name).ok_or_else(|| misuse(format_args!("unknown command `{name}`")))?
+        }
+    };
+    let pipeline = args
         .next()
-        .as_deref()
-        .and_then(Command::parse)
-        .ok_or_else(usage)?;
-    let pipeline = args.next().ok_or_else(usage)?;
+        .ok_or_else(|| misuse(format_args!("{} needs a pipeline file", command.name())))?;
     if pipeline.starts_with("--") {
-        return Err(usage().into());
+        return Err(misuse(format_args!(
+            "the pipeline file comes before options such as `{pipeline}`"
+        ))
+        .into());
     }
     let mut flags = Flags::default();
     while let Some(name) = args.next() {
-        let flag = Flag::parse(&name)
-            .filter(|flag| !flags.has(*flag))
-            .ok_or_else(usage)?;
-        let value = match flag.value() {
-            Some(_) => Some(args.next().ok_or_else(usage)?),
-            None => None,
-        };
+        let flag = Flag::parse(&name).ok_or_else(|| {
+            misuse(if name.starts_with('-') {
+                format!("unknown option `{name}`")
+            } else {
+                format!("unexpected argument `{name}`; give one pipeline file")
+            })
+        })?;
+        if flags.has(flag) {
+            return Err(misuse(format_args!("{} is given more than once", flag.name())).into());
+        }
+        let value =
+            match flag.value() {
+                Some(value) => Some(args.next().ok_or_else(|| {
+                    misuse(format_args!("{} needs a value: {value}", flag.name()))
+                })?),
+                None => None,
+            };
         flags.0.push((flag, value));
     }
     check_flags(command, &flags)?;
@@ -272,8 +293,24 @@ impl std::fmt::Display for Reported {
 impl Error for Reported {}
 
 fn main() -> ExitCode {
-    match run() {
+    let args = match parse_args() {
+        Ok(args) => args,
+        Err(error) => {
+            eprintln!("error: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let json = args.json;
+    match run(args) {
         Ok(()) => ExitCode::SUCCESS,
+        // Editors expect JSON even when the check cannot run.
+        Err(error) if json => {
+            println!(
+                "{{\"diagnostics\":[{{\"severity\":\"error\",\"source\":\"pipeline\",\"line\":null,\"column\":null,\"end_column\":null,\"message\":\"{}\"}}]}}",
+                escape_json(&error.to_string())
+            );
+            ExitCode::SUCCESS
+        }
         Err(error) => {
             if !error.is::<Reported>() {
                 eprintln!("error: {error}");
@@ -283,12 +320,11 @@ fn main() -> ExitCode {
     }
 }
 
-fn run() -> Result<(), Box<dyn Error>> {
-    let args = parse_args()?;
+fn run(args: CliArgs) -> Result<(), Box<dyn Error>> {
     let pipeline_text = if args.stdin {
         read_stdin()?
     } else {
-        fs::read_to_string(&args.pipeline)?
+        read_file(&args.pipeline)?
     };
     let path = Path::new(&args.pipeline);
     let inventory_text = read_inventory(&args, &pipeline_text, path)?;
@@ -379,6 +415,11 @@ fn run_jobs(
         }
         Command::Dag if args.paths => print!("{}", render_bound_dag(pipeline, &dag)?),
         Command::Dag => print!("{}", render_dag(&dag)),
+        Command::Bash if inventory.artifacts.is_empty() => {
+            return Err(
+                "the inventory lists no source artifacts, so there is nothing to run".into(),
+            )
+        }
         Command::Bash => print!("{}", render_bash(pipeline, &dag)?),
         Command::Artifacts | Command::Discover => unreachable!("handled before resolution"),
     }
@@ -418,10 +459,27 @@ fn job_count(pipeline: &Pipeline, dag: &ResolvedDag, stage: Option<&str>) -> Str
     format!("{total} jobs resolved: {}.", parts.join(", "))
 }
 
-fn read_stdin() -> io::Result<String> {
+fn read_stdin() -> Result<String, String> {
     let mut text = String::new();
-    io::stdin().read_to_string(&mut text)?;
-    Ok(text)
+    io::stdin()
+        .read_to_string(&mut text)
+        .map_err(|reason| format!("cannot read standard input: {reason}"))?;
+    Ok(strip_bom(text))
+}
+
+/// Drop a UTF-8 byte order mark, which some Windows editors write.
+fn strip_bom(text: String) -> String {
+    match text.strip_prefix('\u{feff}') {
+        Some(rest) => rest.to_owned(),
+        None => text,
+    }
+}
+
+/// Read a pipeline or inventory, naming the file if it cannot be read.
+fn read_file(path: &str) -> Result<String, String> {
+    fs::read_to_string(path)
+        .map(strip_bom)
+        .map_err(|reason| format!("cannot read `{path}`: {reason}"))
 }
 
 /// The inventory text: from `--sources`, or else discovered under `--root`
@@ -433,7 +491,7 @@ fn read_inventory(
 ) -> Result<Option<String>, Box<dyn Error>> {
     Ok(match (args.sources.as_deref(), &args.root) {
         (Some("-"), _) => Some(read_stdin()?),
-        (Some(sources), _) => Some(fs::read_to_string(sources)?),
+        (Some(sources), _) => Some(read_file(sources)?),
         // With a root and no inventory, find the sources by their path rules.
         (None, Some(root))
             if args.command == Command::Discover || !has_inline_inventory(pipeline_text, path) =>
@@ -490,13 +548,19 @@ fn discover(text: &str, path: &Path, root: &Path) -> Result<Option<String>, Box<
     let Ok(pipeline) = parse_pipeline_at(text, path) else {
         return Ok(None);
     };
-    let inventory = discover_sources(&pipeline, root)?;
+    let discovery = discover_source_files(&pipeline, root)?;
+    for skipped in &discovery.skipped {
+        eprintln!("warning: skipped {skipped}");
+    }
     eprintln!(
         "note: discovered {} source artifacts under `{}`",
-        inventory.artifacts.len(),
+        discovery.inventory.artifacts.len(),
         root.display()
     );
-    Ok(Some(render_source_inventory(&inventory, &pipeline)))
+    Ok(Some(render_source_inventory(
+        &discovery.inventory,
+        &pipeline,
+    )))
 }
 
 fn print_json(diagnostics: &[Diagnostic], text: &str, source_text: Option<&str>) {

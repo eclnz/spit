@@ -50,7 +50,9 @@ pub fn render_bash(pipeline: &Pipeline, dag: &ResolvedDag) -> Result<String, Bas
     let paths = bound_paths(pipeline, dag)?;
 
     let mut script =
-        String::from("#!/usr/bin/env bash\nset -euo pipefail\nSPIT_ROOT=\"${SPIT_ROOT:-.}\"\n\n");
+        String::from("#!/usr/bin/env bash\nset -euo pipefail\nSPIT_ROOT=\"${SPIT_ROOT:-.}\"\n");
+    // A root such as `-data` would make every path read as an option.
+    script.push_str("case $SPIT_ROOT in -*) SPIT_ROOT=\"./$SPIT_ROOT\" ;; esac\n\n");
     script.push_str("spit_require() {\n  if [[ ! -e \"$1\" ]]; then\n    printf 'missing artifact: %s\\n' \"$1\" >&2\n    exit 1\n  fi\n}\n\n");
     if !verifications.is_empty() {
         script.push_str("spit_verify() {\n  local job=\"$1\"\n  shift\n  if ! \"$@\"; then\n    printf 'verification failed for job %s: %s\\n' \"$job\" \"$*\" >&2\n    exit 1\n  fi\n}\n\n");

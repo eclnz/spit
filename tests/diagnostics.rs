@@ -421,7 +421,7 @@ fourth = copy(third)
     assert_eq!(
         rendered(&diagnose(text, None)),
         [
-            "error: line 2: operation `pair` has invalid input ports",
+            "error: line 2: operation `pair` has more than one port named `a`",
             "error: line 6: unknown product `missing`",
         ]
     );
