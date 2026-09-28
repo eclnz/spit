@@ -336,6 +336,10 @@ pub struct InputBinding {
     /// `@ same(dimension, ...)`: match the job on these dimensions only. Any
     /// other dimension must leave exactly one artifact for each job.
     pub same: Option<Vec<String>>,
+    /// `@ each(dimension, ...)`: broadcast the input over these dimensions.
+    /// The step runs once per value of them found in the product, and its
+    /// outputs gain them.
+    pub each: Vec<String>,
 }
 
 impl InputBinding {
@@ -365,13 +369,22 @@ impl InputBinding {
         self
     }
 
+    #[must_use]
+    pub fn each_of(mut self, dimensions: impl IntoIterator<Item = impl AsRef<str>>) -> Self {
+        self.each = owned_strings(dimensions);
+        self
+    }
+
     pub fn product_name(&self) -> &str {
         &self.product
     }
 
     /// Whether any `@` selector is present.
     pub fn has_selectors(&self) -> bool {
-        self.vary.is_some() || !self.pinned.is_empty() || self.same.is_some()
+        self.vary.is_some()
+            || !self.pinned.is_empty()
+            || self.same.is_some()
+            || !self.each.is_empty()
     }
 
     /// The product's dimensions that remain after `where` pins some of them.

@@ -155,7 +155,7 @@ processed = process(image)
 average = mean(processed @ vary(run))
 ```
 
-The input with the most dimensions drives a normal operation and gives its outputs their dimensions, wherever it sits among the ports. For an aggregation, `vary(run)` removes `run` from the output identity. You can write the output type and dimensions explicitly when helpful:
+The input with the most dimensions drives a normal operation and gives its outputs their dimensions, wherever it sits among the ports. For an aggregation, `vary(run)` removes `run` from the output identity; `@ each(...)` adds a dimension, as described under selectors. You can write the output type and dimensions explicitly when helpful:
 
 ```text
 average : Image [subject, visit] = mean(processed @ vary(run))
@@ -171,7 +171,7 @@ operation mean(images: many Image) -> Image @ drop(run)
 command mean: mean_tool {images} --out {output}
 ```
 
-Declare an operation before its first use. Inputs in a call follow the port order in the declaration. A `one` input must resolve to exactly one artifact for each job, so every other input may only use dimensions the driving input has; SPIT rejects a pipeline that breaks this before reading any inventory, and reports a missing match for a job. A `many` input needs `@ vary(dimension)`, and its command placeholder expands to one separately quoted argument per artifact, ordered by the product's dimensions with numbers compared as numbers, so `run=2` comes before `run=10`. A many placeholder must occupy a whole argument. An operation takes at most one `many` input, which may sit beside `one` inputs; each of those is matched once per group:
+Declare an operation before its first use. Inputs in a call follow the port order in the declaration. A `one` input must resolve to exactly one artifact for each job, so every other input may only use dimensions the driving input has, unless it broadcasts them with `@ each(...)`; SPIT rejects a pipeline that breaks this before reading any inventory, and reports a missing match for a job. A `many` input needs `@ vary(dimension)`, and its command placeholder expands to one separately quoted argument per artifact, ordered by the product's dimensions with numbers compared as numbers, so `run=2` comes before `run=10`. A many placeholder must occupy a whole argument. An operation takes at most one `many` input, which may sit beside `one` inputs; each of those is matched once per group:
 
 ```text
 operation summarise(days: many Series, policy: Policy) -> Summary @ drop(day) @ min(2)
@@ -188,6 +188,23 @@ anomaly = compare(calibrated, reference @ same(station))
 ```
 
 `where(revision=2)` keeps the artifacts with that value and takes `revision` out of matching, so a family with an extra dimension can join a less specific input. `same(station)` matches on `station` alone; the reference's other dimensions must then leave exactly one artifact for each job. Selectors can be combined, as in `frame @ where(acq=fast) @ vary(run)`.
+
+`each` does the reverse of `vary`: it broadcasts an input over a dimension the driving input lacks, so the step runs once for every value and its outputs gain that dimension:
+
+```text
+source tracks : Tracks [subject]
+source parcels : Labels [atlas]
+source lut : LookupTable [atlas]
+
+connectome = connect(tracks, parcels @ each(atlas), lut)
+```
+
+With two subjects and two atlases, this makes four `connectome[subject=...,atlas=...]` jobs. The values come from the artifacts of the broadcast input, so adding an atlas to the inventory adds its jobs. Other inputs are matched on the new dimension as usual; here `lut` supplies the table for each atlas. Only one input may broadcast a given dimension, and the driving input must not already have it. `each` pairs with `vary`, so a sweep can be collected again:
+
+```text
+tracked = track(tracks, seed @ each(rep))
+averaged = average(tracked @ vary(rep))
+```
 
 An operation can write several outputs in one job. Name each output; its name is its placeholder, and the call assigns one product to each:
 
