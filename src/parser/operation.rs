@@ -109,13 +109,13 @@ fn parse_clauses<'a>(
 }
 
 /// Parse input `index` of `count`: `[name:] [one|many] [Type]`.
-fn parse_input_port(
-    input: &str,
+fn parse_input_port<'a>(
+    input: &'a str,
     index: usize,
     count: usize,
     number: usize,
 ) -> Result<InputPort, ParseError> {
-    let (declared_name, input) = if let Some((name, value)) = input.split_once(':') {
+    let port_name = |name: &'a str| -> Result<&'a str, ParseError> {
         let name = identifier(name.trim(), number, "input port")?;
         if name == DEFAULT_OUTPUT {
             return Err(ParseError::new(
@@ -124,20 +124,31 @@ fn parse_input_port(
             )
             .at_token(name));
         }
-        (Some(name), value.trim())
-    } else {
-        (None, input)
+        Ok(name)
     };
-    let (cardinality, artifact_type) = if input == "many" {
-        (Cardinality::Many, TypeExpr::Unknown)
-    } else if input == "one" {
-        (Cardinality::One, TypeExpr::Unknown)
-    } else if let Some(value) = input.strip_prefix("many ") {
-        (Cardinality::Many, port_type(value.trim(), number)?)
-    } else if let Some(value) = input.strip_prefix("one ") {
-        (Cardinality::One, port_type(value.trim(), number)?)
+    let (mut declared_name, input) = match input.split_once(':') {
+        Some((name, value)) => (Some(port_name(name)?), value.trim()),
+        None => (None, input),
+    };
+    let (cardinality, mut value) = match input {
+        "many" => (Cardinality::Many, ""),
+        "one" => (Cardinality::One, ""),
+        _ => match (input.strip_prefix("many "), input.strip_prefix("one ")) {
+            (Some(value), _) => (Cardinality::Many, value.trim()),
+            (_, Some(value)) => (Cardinality::One, value.trim()),
+            _ => (Cardinality::One, input),
+        },
+    };
+    // Without a `name:`, a lowercase word names an untyped port, as for
+    // outputs: type names start with a capital letter.
+    if declared_name.is_none() && value.starts_with(|c: char| c.is_ascii_lowercase()) {
+        declared_name = Some(port_name(value)?);
+        value = "";
+    }
+    let artifact_type = if value.is_empty() {
+        TypeExpr::Unknown
     } else {
-        (Cardinality::One, port_type(input, number)?)
+        port_type(value, number)?
     };
     let port_name = declared_name
         .map(str::to_owned)

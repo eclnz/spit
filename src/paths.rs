@@ -309,6 +309,16 @@ pub(crate) fn collect_paths(
             rule,
         });
     }
+    for (path, product) in &samples {
+        if let Some((directory, other)) = enclosing_path(&samples, path) {
+            errors.push(
+                error(format!(
+                    "path rule for `{product}` puts files inside `{directory}`, the path of a `{other}` file, for the same entities; distinguish their path rules"
+                ))
+                .at(lines.path_rule(pipeline, product)),
+            );
+        }
+    }
     (PathCoverage { entries }, errors)
 }
 
@@ -346,7 +356,9 @@ fn validate_path_template(pipeline: &Pipeline, product: &ProductDef) -> Result<S
             .collect(),
     );
     let artifact = ArtifactInstance::new(&product.name, product.artifact_type.clone(), entities);
-    bind_path(pipeline, &product.dimensions, &artifact)
+    bind_path(pipeline, &product.dimensions, &artifact, || {
+        format!("path rule for `{}`", product.name)
+    })
 }
 
 /// Validate concrete artifact path bindings without requiring commands.
@@ -466,7 +478,9 @@ pub(crate) fn bound_paths(
             .product_dimensions
             .get(&artifact.product)
             .ok_or_else(|| error(format!("unknown product `{}`", artifact.product)))?;
-        let relative = bind_path(pipeline, dimensions, artifact)?;
+        let relative = bind_path(pipeline, dimensions, artifact, || {
+            format!("path for `{artifact}`")
+        })?;
         if let Some(previous) = owners.insert(relative.clone(), identity.clone()) {
             return Err(error(format!(
                 "artifacts `{}[{}]` and `{}[{}]` bind to the same path `{relative}`",
@@ -475,15 +489,58 @@ pub(crate) fn bound_paths(
         }
         paths.insert(identity, relative);
     }
+    for (relative, identity) in &owners {
+        if let Some((directory, other)) = enclosing_path(&owners, relative) {
+            return Err(error(format!(
+                "path of `{}[{}]` puts it inside `{directory}`, the path of `{}[{}]`, which is a file",
+                identity.0, identity.1, other.0, other.1
+            )));
+        }
+    }
     Ok(paths)
 }
 
+/// Pairs of artifacts whose paths differ only in letter case, each with its
+/// path. Nothing is reported when the paths cannot be bound; the commands
+/// that need them report why.
+pub(crate) fn case_collisions(
+    pipeline: &Pipeline,
+    dag: &ResolvedDag,
+) -> Vec<[(ArtifactKey, String); 2]> {
+    let Ok(paths) = bound_paths(pipeline, dag) else {
+        return Vec::new();
+    };
+    let mut folded: BTreeMap<String, (ArtifactKey, String)> = BTreeMap::new();
+    let mut collisions = Vec::new();
+    for (key, path) in paths {
+        match folded.get(&path.to_lowercase()) {
+            Some(first) => collisions.push([first.clone(), (key, path)]),
+            None => {
+                folded.insert(path.to_lowercase(), (key, path));
+            }
+        }
+    }
+    collisions
+}
+
+/// A directory of `path` that is itself a path in `paths`, and its owner:
+/// the same location cannot be both a file and a directory.
+fn enclosing_path<'a, T>(paths: &'a BTreeMap<String, T>, path: &str) -> Option<(&'a str, &'a T)> {
+    path.match_indices('/').find_map(|(end, _)| {
+        paths
+            .get_key_value(&path[..end])
+            .map(|(directory, owner)| (directory.as_str(), owner))
+    })
+}
+
 /// Bind `artifact` to its relative path. `dimensions` gives the product's
-/// declared dimension order, which `{entities}` follows.
+/// declared dimension order, which `{entities}` follows. `label` names the
+/// path in an error about it as a whole: a product's rule, or an artifact's.
 fn bind_path(
     pipeline: &Pipeline,
     dimensions: &[String],
     artifact: &ArtifactInstance,
+    label: impl Fn() -> String,
 ) -> Result<String, PathError> {
     let template = pipeline
         .path_template_for(&artifact.product)
@@ -549,15 +606,28 @@ fn bind_path(
             }
         }
     }
-    if relative
-        .split('/')
-        .any(|component| component.is_empty() || component == "." || component == "..")
-    {
-        return Err(error(format!(
-            "path for `{artifact}` must be a relative path without `.` or `..`: `{relative}`"
-        )));
+    if let Some(reason) = unusable_path(&relative) {
+        return Err(error(format!("{} {reason}: `{relative}`", label())));
     }
     Ok(relative)
+}
+
+/// Why `relative` cannot name a file under the root, if it cannot.
+fn unusable_path(relative: &str) -> Option<&'static str> {
+    if relative.starts_with('/') {
+        Some("must be relative to `SPIT_ROOT`, not start with `/`")
+    } else if relative.ends_with('/') {
+        Some("must name a file, not end with `/`")
+    } else if relative.split('/').any(str::is_empty) {
+        Some("must not contain an empty directory name, as in `//`")
+    } else if relative
+        .split('/')
+        .any(|component| component == "." || component == "..")
+    {
+        Some("must not contain `.` or `..` directories")
+    } else {
+        None
+    }
 }
 
 fn encode_component(value: &str) -> String {
@@ -572,10 +642,26 @@ fn encode_component(value: &str) -> String {
     encoded
 }
 
+/// The source files found under a root, and the files that fit a source's
+/// path rule but could not become records.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct Discovery {
+    pub inventory: SourceInventory,
+    /// Each skipped file, with why, such as `in/%41.txt: ...`.
+    pub skipped: Vec<String>,
+}
+
 /// Find the source artifacts under `root`: each regular file whose path
 /// matches the path rule of a source product becomes a record with the
 /// entity values the rule's placeholders capture.
 pub fn discover_sources(pipeline: &Pipeline, root: &Path) -> Result<SourceInventory, PathError> {
+    discover_source_files(pipeline, root).map(|discovery| discovery.inventory)
+}
+
+/// As [`discover_sources`], also reporting the files that fit a rule but
+/// hold no value an inventory can: a value is read back only when SPIT
+/// would write it the same way, so every record's path is the file found.
+pub fn discover_source_files(pipeline: &Pipeline, root: &Path) -> Result<Discovery, PathError> {
     if !root.is_dir() {
         return Err(error(format!(
             "source root is not a directory: `{}`",
@@ -602,16 +688,17 @@ pub fn discover_sources(pipeline: &Pipeline, root: &Path) -> Result<SourceInvent
         patterns.push((product, path_pattern(template, product)?));
     }
     let mut files = Vec::new();
-    walk(root, "", &mut files)?;
+    let mut visited = BTreeSet::new();
+    walk(root, "", &mut visited, &mut files)?;
     files.sort();
-    let mut records = Vec::new();
-    for file in &files {
+    let mut discovery = Discovery::default();
+    'files: for file in &files {
         let mut owner: Option<&ProductDef> = None;
+        let mut record = None;
         for (product, pattern) in &patterns {
-            let mut bound = BTreeMap::new();
-            if !match_pattern(pattern, file, &mut bound) {
+            let Some(bound) = match_pattern(pattern, file) else {
                 continue;
-            }
+            };
             if let Some(other) = owner {
                 return Err(error(format!(
                     "file `{file}` matches the path rules of both `{}` and `{}`",
@@ -621,22 +708,21 @@ pub fn discover_sources(pipeline: &Pipeline, root: &Path) -> Result<SourceInvent
             owner = Some(product);
             let mut entities = BTreeMap::new();
             for (dimension, encoded) in bound {
-                let value = decode_component(encoded)
-                    .filter(|value| {
-                        !value.is_empty()
-                            && !value.chars().any(|character| {
-                                character.is_whitespace() || ",[]=#".contains(character)
-                            })
-                    })
-                    .ok_or_else(|| {
-                        error(format!(
-                            "file `{file}` gives `{dimension}` the value `{encoded}`, which an inventory cannot hold"
-                        ))
-                    })?;
-                entities.insert(dimension, value);
+                match readable_value(encoded) {
+                    Ok(value) => {
+                        entities.insert(dimension, value);
+                    }
+                    Err(reason) => {
+                        discovery.skipped.push(format!(
+                            "`{file}`: `{dimension}` value `{encoded}` {reason}"
+                        ));
+                        continue 'files;
+                    }
+                }
             }
-            records.push(SourceRecord::new(&product.name, EntityBinding(entities)));
+            record = Some(SourceRecord::new(&product.name, EntityBinding(entities)));
         }
+        discovery.inventory.artifacts.extend(record);
     }
     let rank: BTreeMap<_, _> = pipeline
         .products
@@ -644,16 +730,29 @@ pub fn discover_sources(pipeline: &Pipeline, root: &Path) -> Result<SourceInvent
         .enumerate()
         .map(|(index, product)| (product.name.as_str(), (index, &product.dimensions)))
         .collect();
-    records.sort_by(|left, right| {
+    discovery.inventory.artifacts.sort_by(|left, right| {
         let (left_rank, dimensions) = rank[left.product.as_str()];
         left_rank
             .cmp(&rank[right.product.as_str()].0)
             .then_with(|| left.entities.cmp_in(&right.entities, dimensions))
     });
-    Ok(SourceInventory {
-        artifacts: records,
-        contexts: Vec::new(),
-    })
+    Ok(discovery)
+}
+
+/// The value a path component holds, or why it holds none an inventory
+/// can: it must decode, and SPIT must write the value back the same way.
+fn readable_value(encoded: &str) -> Result<String, &'static str> {
+    let value = decode_component(encoded).ok_or("is not valid `%XX` text")?;
+    if encode_component(&value) != encoded {
+        return Err("is not how SPIT writes a value, so a path made from it would differ");
+    }
+    if value
+        .chars()
+        .any(|character| character.is_whitespace() || ",[]=#".contains(character))
+    {
+        return Err("holds a space or one of `,[]=#`, which an inventory cannot");
+    }
+    Ok(value)
 }
 
 enum Piece {
@@ -702,37 +801,85 @@ fn path_pattern(template: &PathTemplate, product: &ProductDef) -> Result<Vec<Pie
 
 /// Match `text` against `pieces`, binding each dimension to its encoded
 /// value; a dimension used twice must have the same value both times.
-fn match_pattern<'a>(
+fn match_pattern<'a>(pieces: &[Piece], text: &'a str) -> Option<BTreeMap<String, &'a str>> {
+    let mut bound = BTreeMap::new();
+    let mut failed = BTreeSet::new();
+    match_from(pieces, 0, text, 0, &mut bound, &mut failed).then_some(bound)
+}
+
+/// A position that failed to match: the piece, the offset in the text, and
+/// the values bound for dimensions that later pieces repeat.
+type Attempt = (usize, usize, Vec<(usize, usize)>);
+
+/// Match `pieces[index..]` against `text[offset..]`. Each position that
+/// fails is remembered, so a text is matched in polynomial time however
+/// many ways its values could be split.
+fn match_from<'a>(
     pieces: &[Piece],
+    index: usize,
     text: &'a str,
+    offset: usize,
     bound: &mut BTreeMap<String, &'a str>,
+    failed: &mut BTreeSet<Attempt>,
 ) -> bool {
-    match pieces.split_first() {
-        None => text.is_empty(),
-        Some((Piece::Literal(literal), rest)) => text
-            .strip_prefix(literal.as_str())
-            .is_some_and(|text| match_pattern(rest, text, bound)),
-        Some((Piece::Value(dimension), rest)) => {
-            if let Some(value) = bound.get(dimension).copied() {
-                return text
-                    .strip_prefix(value)
-                    .is_some_and(|text| match_pattern(rest, text, bound));
-            }
-            let longest = text
-                .find(|character: char| {
-                    !(character.is_ascii_alphanumeric() || character == '-' || character == '%')
-                })
-                .unwrap_or(text.len());
-            for end in 1..=longest {
-                bound.insert(dimension.clone(), &text[..end]);
-                if match_pattern(rest, &text[end..], bound) {
-                    return true;
-                }
-            }
-            bound.remove(dimension);
-            false
-        }
+    let rest = &text[offset..];
+    let Some(piece) = pieces.get(index) else {
+        return rest.is_empty();
+    };
+    let later: Vec<_> = bound
+        .iter()
+        .filter(|(dimension, _)| {
+            pieces[index..]
+                .iter()
+                .any(|piece| matches!(piece, Piece::Value(name) if name == *dimension))
+        })
+        .map(|(_, value)| {
+            let start = value.as_ptr() as usize - text.as_ptr() as usize;
+            (start, start + value.len())
+        })
+        .collect();
+    let attempt = (index, offset, later);
+    if failed.contains(&attempt) {
+        return false;
     }
+    let matched = match piece {
+        Piece::Literal(literal) => {
+            rest.starts_with(literal.as_str())
+                && match_from(
+                    pieces,
+                    index + 1,
+                    text,
+                    offset + literal.len(),
+                    bound,
+                    failed,
+                )
+        }
+        Piece::Value(dimension) => match bound.get(dimension).copied() {
+            Some(value) => {
+                rest.starts_with(value)
+                    && match_from(pieces, index + 1, text, offset + value.len(), bound, failed)
+            }
+            None => {
+                let longest = rest
+                    .find(|character: char| {
+                        !(character.is_ascii_alphanumeric() || character == '-' || character == '%')
+                    })
+                    .unwrap_or(rest.len());
+                let found = (1..=longest).any(|end| {
+                    bound.insert(dimension.clone(), &rest[..end]);
+                    match_from(pieces, index + 1, text, offset + end, bound, failed)
+                });
+                if !found {
+                    bound.remove(dimension);
+                }
+                found
+            }
+        },
+    };
+    if !matched {
+        failed.insert(attempt);
+    }
+    matched
 }
 
 fn decode_component(encoded: &str) -> Option<String> {
@@ -753,21 +900,31 @@ fn decode_component(encoded: &str) -> Option<String> {
 }
 
 /// Collect every regular file under `directory`, as `/`-separated paths
-/// relative to the root. Names that are not UTF-8 cannot match a rule.
-fn walk(directory: &Path, prefix: &str, files: &mut Vec<String>) -> Result<(), PathError> {
-    let entries = fs::read_dir(directory)
-        .map_err(|reason| error(format!("cannot read `{}`: {reason}", directory.display())))?;
+/// relative to the root. Links are followed, as the other commands follow
+/// them to read a file; `visited` holds each directory entered, so a link
+/// back to one is not followed again. Names that are not UTF-8 cannot
+/// match a rule.
+fn walk(
+    directory: &Path,
+    prefix: &str,
+    visited: &mut BTreeSet<std::path::PathBuf>,
+    files: &mut Vec<String>,
+) -> Result<(), PathError> {
+    let unreadable =
+        |reason: std::io::Error| error(format!("cannot read `{}`: {reason}", directory.display()));
+    if !visited.insert(fs::canonicalize(directory).map_err(unreadable)?) {
+        return Ok(());
+    }
+    let entries = fs::read_dir(directory).map_err(unreadable)?;
     for entry in entries {
-        let entry = entry
-            .map_err(|reason| error(format!("cannot read `{}`: {reason}", directory.display())))?;
+        let entry = entry.map_err(unreadable)?;
         let Ok(name) = entry.file_name().into_string() else {
             continue;
         };
         let relative = format!("{prefix}{name}");
         let path = entry.path();
-        // Directory links are not followed, so a link cycle cannot recurse.
-        if entry.file_type().is_ok_and(|kind| kind.is_dir()) {
-            walk(&path, &format!("{relative}/"), files)?;
+        if path.is_dir() {
+            walk(&path, &format!("{relative}/"), visited, files)?;
         } else if path.is_file() {
             files.push(relative);
         }
