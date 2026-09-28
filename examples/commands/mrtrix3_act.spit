@@ -4,8 +4,10 @@
 # It requires MRtrix3, FSL, and FreeSurfer SynthSeg on the execution host.
 # Supply lookup tables that match the SynthSeg parcellation labels.
 
-# Default for generated MRtrix images; formats that differ declare a path below.
-path: derivatives/{product}/{entities}.mif
+# Generated images default to .mif in a folder per stage, such as
+# derivatives/preprocess/denoise/denoised_dwi/. A stage that writes another
+# format sets its own default; a single product that differs has its own rule.
+path: derivatives/{stage}/{product}/{entities}.mif
 
 source raw_dwi : MRI<DWI,Acquired> [sub, ses, run]
 path raw_dwi: sub-{sub}/ses-{ses}/dwi/sub-{sub}_ses-{ses}_run-{run}_dwi.nii.gz
@@ -89,11 +91,13 @@ stage preprocess:
 # Parcellate and segment the T1w, and align both with the corrected DWI.
 stage anatomy:
     stage parcellation:
+        # SynthSeg writes NIfTI, so the remapped labels stay NIfTI too.
+        path: derivatives/{stage}/{product}/{entities}.nii.gz
+
         # Generate a parcellation in native T1 space, then remap its integer labels.
         operation parcellate_t1(MRI<T1w,S>) -> MRI<Parcellation,S>
         command parcellate_t1: mri_synthseg --i {input} --o {output} --parc
         parcellation_t1 = parcellate_t1(t1w)
-        path parcellation_t1: derivatives/parcellation_t1/{entities}.nii.gz
 
         operation convert_labels(labels: MRI<Parcellation,S>, source_lut: LookupTable, target_lut: LookupTable) -> MRI<Parcellation,S>
         command convert_labels: labelconvert {labels} {source_lut} {target_lut} {output}
@@ -105,17 +109,17 @@ stage anatomy:
         operation export_nifti(MRI<K,S>) -> MRI<K,S>
         command export_nifti: mrconvert {input} {output}
         session_b0_nifti = export_nifti(session_b0)
-        path session_b0_nifti: derivatives/session_b0_nifti/{entities}.nii.gz
+        path session_b0_nifti: derivatives/{stage}/{product}/{entities}.nii.gz
 
         operation flirt_register(moving: MRI<M,S>, reference: MRI<N,T>) -> FSLTransform<S,T>
         command flirt_register: flirt -in {moving} -ref {reference} -omat {output} -dof 6 -cost corratio
         t1_to_dwi_flirt = flirt_register(t1w, session_b0_nifti)
-        path t1_to_dwi_flirt: derivatives/t1_to_dwi_flirt/{entities}.mat
+        path t1_to_dwi_flirt: derivatives/{stage}/{product}/{entities}.mat
 
         operation convert_flirt(matrix: FSLTransform<S,T>, moving: MRI<M,S>, reference: MRI<N,T>) -> Transform<S,T>
         command convert_flirt: transformconvert {matrix} {moving} {reference} flirt_import {output}
         t1_to_dwi = convert_flirt(t1_to_dwi_flirt, t1w, session_b0_nifti)
-        path t1_to_dwi: derivatives/t1_to_dwi/{entities}.txt
+        path t1_to_dwi: derivatives/{stage}/{product}/{entities}.txt
 
         # The reference image determines the target voxel grid. Continuous images
         # use linear interpolation; label images use nearest-neighbor interpolation.
@@ -140,34 +144,36 @@ stage anatomy:
 
 # Fit FODs, track with anatomical constraints, and build the connectome.
 stage tractography:
-    stage fods:
-        # Multi-tissue responses come from one dwi2response run, and one dwi2fod run
-        # fits white matter and CSF FODs, as suits single-shell data. Each job owns
-        # every product it writes, and each output has its own path and placeholder.
+    # Multi-tissue responses come from one dwi2response run, and one dwi2fod run
+    # fits white matter and CSF FODs, as suits single-shell data. Each job owns
+    # every product it writes, and each output has its own path and placeholder.
+    stage responses:
+        path: derivatives/{stage}/{product}/{entities}.txt
+
         operation estimate_responses(MRI<DWI,S>) -> (wm: Response<WM>, gm: Response<GM>, csf: Response<CSF>)
         command estimate_responses: dwi2response dhollander {input} {wm} {gm} {csf}
         wm_response, gm_response, csf_response = estimate_responses(corrected_dwi)
-        path wm_response: derivatives/wm_response/{entities}.txt
-        path gm_response: derivatives/gm_response/{entities}.txt
-        path csf_response: derivatives/csf_response/{entities}.txt
 
+    stage fods:
         operation estimate_fods(dwi: MRI<DWI,S>, wm_response: Response<WM>, csf_response: Response<CSF>) -> (wm: MRI<FOD,S>, csf: MRI<FOD,S>)
         command estimate_fods: dwi2fod msmt_csd {dwi} {wm_response} {wm} {csf_response} {csf}
         wm_fod, csf_fod = estimate_fods(corrected_dwi, wm_response, csf_response)
 
     stage tracking:
+        path: derivatives/{stage}/{product}/{entities}.tck
+
         operation track_act(fod: MRI<FOD,S>, tissue: MRI<Tissue,S>, seed: MRI<Mask,S>) -> Tractogram<S>
         command track_act: tckgen {fod} {output} -act {tissue} -backtrack -seed_gmwmi {seed} -select 1000000
         act_tracks = track_act(wm_fod, five_tt, gmwmi)
-        path act_tracks: derivatives/act_tracks/{entities}.tck
 
         operation weight_streamlines(tracks: Tractogram<S>, fod: MRI<FOD,S>, tissue: MRI<Tissue,S>) -> StreamlineWeights
         command weight_streamlines: tcksift2 {tracks} {fod} {output} -act {tissue}
         sift2_weights = weight_streamlines(act_tracks, wm_fod, five_tt)
-        path sift2_weights: derivatives/sift2_weights/{entities}.txt
+        path sift2_weights: derivatives/{stage}/{product}/{entities}.txt
 
     stage connectome:
+        path: derivatives/{stage}/{product}/{entities}.csv
+
         operation build_connectome(tracks: Tractogram<S>, nodes: MRI<Parcellation,S>, weights: StreamlineWeights) -> Connectome
         command build_connectome: tck2connectome {tracks} {nodes} {output} -tck_weights_in {weights}
         weighted_connectome = build_connectome(act_tracks, nodes_dwi, sift2_weights)
-        path weighted_connectome: derivatives/weighted_connectome/{entities}.csv
