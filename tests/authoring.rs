@@ -1,4 +1,4 @@
-//! Selectors, mixed cardinality, multiple outputs, collection contracts,
+//! Selectors, broadcasts, mixed cardinality, multiple outputs, collection contracts,
 //! coverage values, empty steps, inventory override, and source discovery.
 
 use std::fs;
@@ -173,6 +173,122 @@ fn selectors_are_checked_against_the_port_and_product() {
         error.message.contains("`@ where(dimension=value, ...)`"),
         "{error}"
     );
+}
+
+const CONNECT: &str = "\
+source tracks [subject]
+source parcels [atlas]
+source lut [atlas]
+operation connect(tracks: Tracks, parcels: Labels, lut: Table) -> Matrix
+";
+
+const ATLASES: &str = "sources:\n  tracks[subject=01]\n  tracks[subject=02]\n  parcels[atlas=desikan]\n  parcels[atlas=schaefer]\n  lut[atlas=desikan]\n  lut[atlas=schaefer]\n";
+
+#[test]
+fn each_runs_a_step_for_every_value_an_input_broadcasts() {
+    let text = format!("{CONNECT}connectome = connect(tracks, parcels @ each(atlas), lut)\n");
+    let (pipeline, _) = parse_document(&text).unwrap();
+    assert_eq!(pipeline.products[3].dimensions, ["subject", "atlas"]);
+    let dag = resolve(&pipeline, &parse_source_inventory(ATLASES).unwrap()).unwrap();
+    assert_eq!(
+        outputs(&dag),
+        [
+            "connectome[atlas=desikan,subject=01]",
+            "connectome[atlas=schaefer,subject=01]",
+            "connectome[atlas=desikan,subject=02]",
+            "connectome[atlas=schaefer,subject=02]",
+        ]
+    );
+    // Another input is matched on the broadcast dimension.
+    assert_eq!(dag.jobs[1].inputs[2][0].to_string(), "lut[atlas=schaefer]");
+    let missing = resolve_text(&text, &ATLASES.replace("  lut[atlas=schaefer]\n", ""));
+    assert!(matches!(
+        missing,
+        Err(ResolveError::MissingInput { port, context, .. })
+            if port == "lut" && context.to_string().contains("atlas=schaefer")
+    ));
+}
+
+#[test]
+fn a_broadcast_dimension_can_be_collected_again() {
+    let text = "\
+source tracks [subject]
+source seed [rep]
+operation track(tracks: Tracks, seed: Seed) -> Tracks
+tracked = track(tracks, seed @ each(rep))
+operation average(items: many Tracks) -> Tracks @ drop(rep)
+averaged = average(tracked @ vary(rep))
+";
+    let dag = resolve_text(
+        text,
+        "sources:\n  tracks[subject=01]\n  seed[rep=1]\n  seed[rep=2]\n  seed[rep=10]\n",
+    )
+    .unwrap();
+    assert_eq!(
+        outputs(&dag),
+        [
+            "tracked[rep=1,subject=01]",
+            "tracked[rep=2,subject=01]",
+            "tracked[rep=10,subject=01]",
+            "averaged[subject=01]",
+        ]
+    );
+    assert_eq!(dag.jobs[3].inputs[0].len(), 3);
+}
+
+#[test]
+fn broadcasts_are_checked_against_the_step() {
+    for (call, expected) in [
+        (
+            "connect(tracks, parcels @ each(subject), lut)",
+            "has no unpinned dimension `subject`",
+        ),
+        (
+            "connect(tracks, parcels @ where(atlas=desikan) @ each(atlas), lut)",
+            "has no unpinned dimension `atlas`",
+        ),
+        (
+            "connect(tracks, parcels @ each(atlas), lut @ each(atlas))",
+            "`parcels` and `lut` both broadcast `atlas`",
+        ),
+        (
+            "connect(tracks @ each(subject), parcels @ each(atlas), lut @ same(atlas))",
+            "none can drive the step",
+        ),
+    ] {
+        let text = format!("{CONNECT}connectome = {call}\n");
+        let error = spit::validate_pipeline(&parse_pipeline(&text).unwrap()).unwrap_err();
+        assert!(error.to_string().contains(expected), "{call}: {error}");
+    }
+    let text = "\
+source tracks [subject, atlas]
+source parcels [atlas]
+operation label(tracks: Tracks, parcels: Labels) -> Tracks
+labelled = label(tracks, parcels @ each(atlas))
+operation stack(items: many Tracks, parcels: Labels) -> Stack @ drop(atlas)
+stacked = stack(labelled @ vary(atlas), parcels @ each(atlas))
+";
+    let error = spit::validate_pipeline(&parse_pipeline(text).unwrap()).unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("driving product `tracks` already has `atlas`"),
+        "{error}"
+    );
+    let text = text.replace(
+        "labelled = label(tracks, parcels @ each(atlas))",
+        "labelled = label(tracks, parcels)",
+    );
+    let error = spit::validate_pipeline(&parse_pipeline(&text).unwrap()).unwrap_err();
+    assert!(
+        error.to_string().contains("would restore the dimension"),
+        "{error}"
+    );
+    let error = parse_pipeline(&format!(
+        "{CONNECT}x = connect(tracks, parcels @ each(atlas, atlas), lut)\n"
+    ))
+    .unwrap_err();
+    assert!(error.message.contains("names `atlas` twice"), "{error}");
 }
 
 #[test]
