@@ -5,7 +5,7 @@ use std::fmt;
 use std::ops::Range;
 use std::path::Path;
 
-use crate::bash::collect_commands;
+use crate::command::collect_commands;
 use crate::imports::parse_located_document;
 use crate::model::DEFAULT_OUTPUT;
 use crate::model::{stage_within, CommandRole, Job, SourceInventory};

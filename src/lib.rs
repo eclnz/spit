@@ -1,6 +1,7 @@
 //! SPIT: resolve artifact pipelines, bind paths, and generate Bash scripts.
 
 pub mod bash;
+mod command;
 pub mod diagnostics;
 pub mod error;
 mod imports;
@@ -13,7 +14,8 @@ mod span;
 mod template;
 pub mod types;
 
-pub use bash::{render_bash, validate_commands, BashError, CommandTemplate};
+pub use bash::{render_bash, BashError};
+pub use command::{validate_commands, CommandError, CommandTemplate};
 pub use diagnostics::{
     diagnose, diagnose_artifacts_at, diagnose_at, Diagnostic, DiagnosticSource, Severity,
 };
