@@ -306,8 +306,7 @@ fn diagnose_with_parser(
     finish(diagnostics, text, source_text)
 }
 
-/// Flag artifacts whose paths differ only in letter case: on a file system
-/// that ignores case, as macOS and Windows do by default, they are one file.
+/// Flag paths that differ only in case, which are one file on macOS and Windows.
 fn case_warnings(pipeline: &Pipeline, lines: &SourceMap, dag: &ResolvedDag) -> Vec<Diagnostic> {
     case_collisions(pipeline, dag)
         .into_iter()
@@ -413,8 +412,8 @@ fn pipeline_diagnostics(
     diagnostics
 }
 
-/// Flag each unquoted word of a command that a shell would read as an
-/// operator, such as `>` or `|`: SPIT passes it to the program instead.
+/// Flag unquoted shell operators such as `>` or `|`, which SPIT passes to
+/// the program as arguments.
 fn operator_warnings(pipeline: &Pipeline, lines: &SourceMap, text: &str) -> Vec<Diagnostic> {
     let mut warnings = Vec::new();
     for (index, command) in pipeline.commands.iter().enumerate() {
@@ -426,7 +425,6 @@ fn operator_warnings(pipeline: &Pipeline, lines: &SourceMap, text: &str) -> Vec<
             .as_ref()
             .and_then(|place| text.lines().nth(place.line.checked_sub(1)?));
         for operator in command.template.shell_operators() {
-            // Point at the operator itself, a whole word of the template.
             let columns = place.as_ref().zip(line_text).and_then(|(place, line)| {
                 let start = place.columns.start;
                 let region = line.get(start..place.columns.end)?;

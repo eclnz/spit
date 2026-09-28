@@ -331,7 +331,7 @@ fn parse_document_at_inner(
                 format!("import cycle through `{}`", canonical.display()),
             ));
         }
-        // A device or pipe, such as `/dev/zero`, could be read forever.
+        // A device such as `/dev/zero` would never finish reading.
         if !canonical.is_file() {
             return Err(ParseError::new(
                 number,
@@ -344,7 +344,6 @@ fn parse_document_at_inner(
                 format!("cannot read import `{}`: {error}", canonical.display()),
             )
         })?;
-        // Some editors on Windows begin a UTF-8 file with a byte order mark.
         let imported_text = imported_text
             .strip_prefix('\u{feff}')
             .unwrap_or(&imported_text);
