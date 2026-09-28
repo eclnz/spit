@@ -5,17 +5,15 @@ use std::fmt;
 use std::ops::Range;
 use std::path::Path;
 
-use crate::bash::collect_commands;
+use crate::command::collect_commands;
 use crate::imports::parse_located_document;
+use crate::lower::{parse_document_with_imports, ParsedDocument};
 use crate::model::DEFAULT_OUTPUT;
-use crate::model::{CommandRole, Job, SourceInventory};
-use crate::parser::{
-    glued_comment, parse_document_with_imports, InlineInventory, ParsedDocument, Rule, SourceMap,
-    Step,
-};
+use crate::model::{stage_within, CommandRole, Job, SourceInventory};
+use crate::parser::{glued_comment, InlineInventory, Rule, SourceMap, Step};
 use crate::paths::collect_paths;
 use crate::resolver::collect_pipeline;
-use crate::span::{columns_of, content_columns, find_word, utf16_columns, Place};
+use crate::span::{columns_of, content_columns, utf16_columns, Located, Place};
 use crate::{
     parse_source_inventory, resolve, resolve_artifacts, DefinitionSubject, EntityBinding,
     InputBinding, ParseError, ParseErrorKind, Pipeline, ResolveError,
@@ -85,6 +83,19 @@ impl Diagnostic {
             line,
             columns,
             message,
+        }
+    }
+
+    /// An error that records its own location, narrowed to what it is about
+    /// within `text`, the text it is in.
+    fn located<E: fmt::Display>(source: DiagnosticSource, error: &Located<E>, text: &str) -> Self {
+        let place = error.location.place_in(text);
+        Self {
+            severity: Severity::Error,
+            source,
+            line: error.location.line,
+            columns: place.map(|place| place.columns),
+            message: error.message(),
         }
     }
 
@@ -220,20 +231,15 @@ fn diagnose_with_parser(
         |source_text| recover_parse_errors(source_text, parse_source_inventory),
     );
     let mut diagnostics: Vec<_> = pipeline_errors
-        .into_iter()
-        .map(|error| (DiagnosticSource::Pipeline, error))
-        .chain(
-            inventory_errors
-                .into_iter()
-                .map(|error| (DiagnosticSource::Inventory, error)),
-        )
-        .map(|(source, error)| Diagnostic {
-            severity: Severity::Error,
-            source,
-            line: Some(error.line),
-            columns: error.columns,
-            message: error.message,
-        })
+        .iter()
+        .map(|error| Diagnostic::located(DiagnosticSource::Pipeline, error, text))
+        .chain(inventory_errors.iter().map(|error| {
+            Diagnostic::located(
+                DiagnosticSource::Inventory,
+                error,
+                source_text.unwrap_or(text),
+            )
+        }))
         .collect();
     if !diagnostics.is_empty() {
         return finish(diagnostics, text, source_text);
@@ -379,34 +385,10 @@ fn pipeline_diagnostics(
         .collect();
     let template_errors = collect_commands(pipeline, lines, &checked.poisoned)
         .into_iter()
-        .map(|error| (error.line, error.columns, error.focus, error.message))
-        .chain(
-            collect_paths(pipeline, lines, &checked.poisoned)
-                .1
-                .into_iter()
-                .map(|error| (error.line, error.columns, error.focus, error.message)),
-        );
-    for (line, columns, focus, message) in template_errors {
-        let place = line.zip(columns).map(|(line, columns)| {
-            // Narrow to the part the error is about: a placeholder inside the
-            // template, or else a name elsewhere on the line, such as the
-            // operation a command is declared for.
-            let focus = focus.and_then(|focus| {
-                let text = text.lines().nth(line.checked_sub(1)?)?;
-                let inside = text
-                    .get(columns.clone())?
-                    .find(&focus)
-                    .map(|offset| columns.start + offset..columns.start + offset + focus.len());
-                inside.or_else(|| find_word(text, content_columns(text).start, &focus))
-            });
-            Place::new(line, focus.unwrap_or(columns))
-        });
-        diagnostics.push(Diagnostic::error(
-            DiagnosticSource::Pipeline,
-            place,
-            message,
-        ));
-    }
+        .chain(collect_paths(pipeline, lines, &checked.poisoned).1);
+    diagnostics.extend(
+        template_errors.map(|error| Diagnostic::located(DiagnosticSource::Pipeline, &error, text)),
+    );
     diagnostics.extend(warnings(pipeline, lines, &checked.poisoned));
     diagnostics
 }
@@ -428,6 +410,7 @@ fn subject_place(
         // A rule's own errors concern its product: unknown, or not a source.
         DefinitionSubject::Constraint(index) => lines.rules.get(*index).map(Rule::product),
         DefinitionSubject::ConstraintGroup(index) => lines.rules.get(*index).map(Rule::dimensions),
+        DefinitionSubject::Stage(name) => lines.stages.get(name).cloned(),
         DefinitionSubject::Source(_) | DefinitionSubject::None => None,
     }
 }
@@ -518,28 +501,91 @@ fn order(mut diagnostics: Vec<Diagnostic>) -> Vec<Diagnostic> {
 /// library of definitions, nor for imported names: a library is imported for
 /// the definitions a pipeline needs, and is linted on its own.
 fn warnings(pipeline: &Pipeline, lines: &SourceMap, skip: &BTreeSet<String>) -> Vec<Diagnostic> {
-    let warn = |place: Option<Place>, message| {
-        Diagnostic::new(
-            Severity::Warning,
-            DiagnosticSource::Pipeline,
-            place,
-            message,
-        )
-    };
-    let used_operations: BTreeSet<_> = pipeline
+    // A library, with no steps, may declare what it never uses.
+    if pipeline.invocations.is_empty() {
+        return operation_warnings(pipeline, lines, skip, true);
+    }
+    let mut warnings = stage_warnings(pipeline, lines);
+    warnings.extend(product_warnings(pipeline, lines, skip));
+    warnings.extend(operation_warnings(pipeline, lines, skip, false));
+    warnings
+}
+
+fn warning(place: Option<Place>, message: String) -> Diagnostic {
+    Diagnostic::new(
+        Severity::Warning,
+        DiagnosticSource::Pipeline,
+        place,
+        message,
+    )
+}
+
+/// Stages that hold no steps, directly or in stages nested in them.
+fn stage_warnings(pipeline: &Pipeline, lines: &SourceMap) -> Vec<Diagnostic> {
+    pipeline
+        .stages
+        .iter()
+        .filter(|stage| {
+            !pipeline.invocations.iter().any(|invocation| {
+                invocation
+                    .stage
+                    .as_deref()
+                    .is_some_and(|name| stage_within(name, &stage.name))
+            })
+        })
+        .map(|stage| {
+            warning(
+                lines.stages.get(&stage.name).cloned(),
+                format!("stage `{}` has no steps", stage.name),
+            )
+        })
+        .collect()
+}
+
+/// Source products that no step reads.
+fn product_warnings(
+    pipeline: &Pipeline,
+    lines: &SourceMap,
+    skip: &BTreeSet<String>,
+) -> Vec<Diagnostic> {
+    let used: BTreeSet<_> = pipeline
+        .invocations
+        .iter()
+        .flat_map(|invocation| {
+            invocation
+                .outputs
+                .iter()
+                .map(String::as_str)
+                .chain(invocation.inputs.iter().map(InputBinding::product_name))
+        })
+        .collect();
+    pipeline
+        .products
+        .iter()
+        .map(|product| product.name.as_str())
+        .filter(|name| !skip.contains(*name) && !lines.imported.contains(*name))
+        .filter(|name| !used.contains(name))
+        .map(|name| {
+            warning(
+                lines.products.get(name).cloned(),
+                format!("source product `{name}` is never used as an input"),
+            )
+        })
+        .collect()
+}
+
+/// Operations that no step uses, that have no command while others do, or
+/// whose output types name a variable no input binds.
+fn operation_warnings(
+    pipeline: &Pipeline,
+    lines: &SourceMap,
+    skip: &BTreeSet<String>,
+    library: bool,
+) -> Vec<Diagnostic> {
+    let used: BTreeSet<_> = pipeline
         .invocations
         .iter()
         .map(|invocation| invocation.operation.as_str())
-        .collect();
-    let outputs: BTreeSet<_> = pipeline
-        .invocations
-        .iter()
-        .flat_map(|invocation| invocation.outputs.iter().map(String::as_str))
-        .collect();
-    let inputs: BTreeSet<_> = pipeline
-        .invocations
-        .iter()
-        .flat_map(|invocation| invocation.inputs.iter().map(InputBinding::product_name))
         .collect();
     let commands: BTreeSet<_> = pipeline
         .commands
@@ -547,21 +593,7 @@ fn warnings(pipeline: &Pipeline, lines: &SourceMap, skip: &BTreeSet<String>) -> 
         .filter(|command| command.role == CommandRole::Run)
         .map(|command| command.operation.as_str())
         .collect();
-
-    let library = pipeline.invocations.is_empty();
     let mut warnings = Vec::new();
-    for product in &pipeline.products {
-        let name = product.name.as_str();
-        if library || skip.contains(name) || lines.imported.contains(name) {
-            continue;
-        }
-        if !outputs.contains(name) && !inputs.contains(name) {
-            warnings.push(warn(
-                lines.products.get(name).cloned(),
-                format!("source product `{name}` is never used as an input"),
-            ));
-        }
-    }
     for operation in &pipeline.operations {
         let name = operation.name.as_str();
         if skip.contains(name) {
@@ -569,16 +601,16 @@ fn warnings(pipeline: &Pipeline, lines: &SourceMap, skip: &BTreeSet<String>) -> 
         }
         let place = lines.operations.get(name).cloned();
         let imported = lines.imported.contains(name);
-        if !used_operations.contains(name) {
+        if !used.contains(name) {
             if !imported && !library {
-                warnings.push(warn(
+                warnings.push(warning(
                     place.clone(),
                     format!("operation `{name}` is declared but never used"),
                 ));
             }
         } else if !pipeline.commands.is_empty() && !commands.contains(name) {
             // Only once commands are in use: a pipeline may be written for its DAG alone.
-            warnings.push(warn(
+            warnings.push(warning(
                 place.clone(),
                 format!("operation `{name}` has no command, so `bash` cannot run its jobs"),
             ));
@@ -597,7 +629,7 @@ fn warnings(pipeline: &Pipeline, lines: &SourceMap, skip: &BTreeSet<String>) -> 
             .flat_map(|port| port.artifact_type.variables())
             .collect();
         for variable in produced.difference(&bound) {
-            warnings.push(warn(
+            warnings.push(warning(
                 place.clone(),
                 format!(
                     "output type variable `{variable}` of `{name}` appears in no input; it is known only where the output product declares its type"
@@ -712,7 +744,7 @@ fn recover_parse_errors<T>(
             Ok(parsed) => return (Some(parsed), errors),
             Err(error) => {
                 let Some(line) = error
-                    .line
+                    .line()
                     .checked_sub(1)
                     .and_then(|index| lines.get_mut(index))
                     .filter(|line| !line.trim().is_empty())
@@ -741,7 +773,7 @@ fn depends_on_invalid_operation(
     };
     previous_errors.iter().any(|previous| {
         original_lines
-            .get(previous.line.saturating_sub(1))
+            .get(previous.line().saturating_sub(1))
             .and_then(|line| line.trim().strip_prefix("operation "))
             .is_some_and(|declaration| match declaration.split_once('(') {
                 Some((name, _)) => name.trim() == operation,
