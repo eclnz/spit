@@ -4,13 +4,11 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crate::lower::{parse_document_with_imports, ParsedDocument, PipelineBuilder};
 use crate::model::{
     CommandDef, CommandRole, CoverageRule, OperationDef, Pipeline, ProductDef, SourceInventory,
 };
-use crate::parser::{
-    parse_document_with_imports, parse_use, strip_comment, InlineInventory, ParseError,
-    ParsedDocument, PipelineBuilder, Rule, UseSpec,
-};
+use crate::parser::{parse_use, strip_comment, InlineInventory, ParseError, Rule, UseSpec};
 use crate::span::Place;
 
 pub(crate) fn apply_import(

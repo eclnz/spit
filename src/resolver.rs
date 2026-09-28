@@ -8,6 +8,7 @@ use crate::model::{
     OperationDef, Pipeline, ProductDef, ResolvedDag, ShapeRule, SourceInventory,
 };
 use crate::paths::PathPlaceholder;
+use crate::shape::{broadcast_dimensions, dimension_set, step_context, step_driver, BoundInput};
 use crate::types::{Substitutions, TypeExpr, TypeUnifyError};
 
 /// A pipeline whose declarations, steps, and rules hold without any inventory.
@@ -839,95 +840,6 @@ struct StepShape {
     joins: Vec<Vec<String>>,
 }
 
-/// A binding's product dimensions, less any `where` pins, and whether it
-/// takes many artifacts.
-pub(crate) struct BoundInput<'a> {
-    pub(crate) binding: &'a InputBinding,
-    pub(crate) dimensions: Vec<String>,
-    pub(crate) many: bool,
-}
-
-impl BoundInput<'_> {
-    /// The dimensions this input is matched on when it does not drive,
-    /// including any it broadcasts.
-    fn joins(&self) -> Vec<String> {
-        match &self.binding.same {
-            Some(same) => {
-                let mut joins = same.clone();
-                joins.extend(
-                    self.binding
-                        .each
-                        .iter()
-                        .filter(|dimension| !same.contains(dimension))
-                        .cloned(),
-                );
-                joins
-            }
-            None => self.dimensions.clone(),
-        }
-    }
-
-    /// Whether this input may drive a step: one matched on fewer dimensions
-    /// or broadcast over some cannot.
-    fn can_drive(&self) -> bool {
-        self.binding.same.is_none() && self.binding.each.is_empty()
-    }
-}
-
-/// The dimensions the inputs broadcast with `@ each(...)`, in port order.
-fn broadcast_dimensions(inputs: &[BoundInput<'_>]) -> Vec<String> {
-    let mut dimensions: Vec<String> = Vec::new();
-    for dimension in inputs.iter().flat_map(|input| &input.binding.each) {
-        if !dimensions.contains(dimension) {
-            dimensions.push(dimension.clone());
-        }
-    }
-    dimensions
-}
-
-/// The driving input and the dimensions it groups by, or `None` when no
-/// single-artifact input has every dimension the others match on besides
-/// those broadcast. The driver is the input with the most dimensions, so the
-/// order of an operation's ports never changes which jobs exist.
-fn step_driver(inputs: &[BoundInput<'_>]) -> Option<(usize, Vec<String>)> {
-    if let Some(index) = inputs.iter().position(|input| input.many) {
-        let vary = inputs[index].binding.vary.as_deref();
-        let groups = inputs[index]
-            .dimensions
-            .iter()
-            .filter(|dimension| Some(dimension.as_str()) != vary)
-            .cloned()
-            .collect();
-        return Some((index, groups));
-    }
-    let broadcast = broadcast_dimensions(inputs);
-    let covers = |index: usize| {
-        let mut dimensions = dimension_set(&inputs[index].dimensions);
-        dimensions.extend(broadcast.iter().cloned());
-        inputs
-            .iter()
-            .enumerate()
-            .filter(|(other, _)| *other != index)
-            .all(|(_, input)| dimension_set(&input.joins()).is_subset(&dimensions))
-    };
-    let index = (0..inputs.len())
-        .filter(|index| inputs[*index].can_drive() && covers(*index))
-        .min_by_key(|index| (Reverse(inputs[*index].dimensions.len()), *index))?;
-    Some((index, inputs[index].dimensions.clone()))
-}
-
-/// The driving input and the dimensions of a step's outputs: the driver's
-/// groups, then any dimensions broadcast by another input.
-pub(crate) fn step_context(inputs: &[BoundInput<'_>]) -> Option<(usize, Vec<String>)> {
-    let (driver, mut context) = step_driver(inputs)?;
-    for dimension in broadcast_dimensions(inputs) {
-        if !context.contains(&dimension) {
-            context.push(dimension);
-        }
-    }
-    Some((driver, context))
-}
-
 fn validate_invocation(
     invocation: &Invocation,
     products: &BTreeMap<&str, &ProductDef>,
@@ -1343,10 +1255,6 @@ fn unify_port(
                 found: Box::new(actual.clone()),
             },
         })
-}
-
-fn dimension_set(dimensions: &[String]) -> BTreeSet<String> {
-    dimensions.iter().cloned().collect()
 }
 
 fn invocation_order(
