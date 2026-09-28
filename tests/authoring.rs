@@ -175,62 +175,69 @@ fn selectors_are_checked_against_the_port_and_product() {
     );
 }
 
-const CONNECT: &str = "\
-source tracks [subject]
-source parcels [atlas]
-source lut [atlas]
-operation connect(tracks: Tracks, parcels: Labels, lut: Table) -> Matrix
+const PREDICT: &str = "\
+source reading [station]
+source model [scenario]
+source parameters [scenario]
+operation predict(reading: Series, model: Model, parameters: Parameters) -> Matrix
 ";
 
-const ATLASES: &str = "sources:\n  tracks[subject=01]\n  tracks[subject=02]\n  parcels[atlas=desikan]\n  parcels[atlas=schaefer]\n  lut[atlas=desikan]\n  lut[atlas=schaefer]\n";
+const SCENARIOS: &str = "sources:\n  reading[station=01]\n  reading[station=02]\n  model[scenario=base]\n  model[scenario=high]\n  parameters[scenario=base]\n  parameters[scenario=high]\n";
 
 #[test]
 fn each_runs_a_step_for_every_value_an_input_broadcasts() {
-    let text = format!("{CONNECT}connectome = connect(tracks, parcels @ each(atlas), lut)\n");
+    let text =
+        format!("{PREDICT}forecast = predict(reading, model @ each(scenario), parameters)\n");
     let (pipeline, _) = parse_document(&text).unwrap();
-    assert_eq!(pipeline.products[3].dimensions, ["subject", "atlas"]);
-    let dag = resolve(&pipeline, &parse_source_inventory(ATLASES).unwrap()).unwrap();
+    assert_eq!(pipeline.products[3].dimensions, ["station", "scenario"]);
+    let dag = resolve(&pipeline, &parse_source_inventory(SCENARIOS).unwrap()).unwrap();
     assert_eq!(
         outputs(&dag),
         [
-            "connectome[atlas=desikan,subject=01]",
-            "connectome[atlas=schaefer,subject=01]",
-            "connectome[atlas=desikan,subject=02]",
-            "connectome[atlas=schaefer,subject=02]",
+            "forecast[scenario=base,station=01]",
+            "forecast[scenario=high,station=01]",
+            "forecast[scenario=base,station=02]",
+            "forecast[scenario=high,station=02]",
         ]
     );
     // Another input is matched on the broadcast dimension.
-    assert_eq!(dag.jobs[1].inputs[2][0].to_string(), "lut[atlas=schaefer]");
-    let missing = resolve_text(&text, &ATLASES.replace("  lut[atlas=schaefer]\n", ""));
+    assert_eq!(
+        dag.jobs[1].inputs[2][0].to_string(),
+        "parameters[scenario=high]"
+    );
+    let missing = resolve_text(
+        &text,
+        &SCENARIOS.replace("  parameters[scenario=high]\n", ""),
+    );
     assert!(matches!(
         missing,
         Err(ResolveError::MissingInput { port, context, .. })
-            if port == "lut" && context.to_string().contains("atlas=schaefer")
+            if port == "parameters" && context.to_string().contains("scenario=high")
     ));
 }
 
 #[test]
 fn a_broadcast_dimension_can_be_collected_again() {
     let text = "\
-source tracks [subject]
+source reading [station]
 source seed [rep]
-operation track(tracks: Tracks, seed: Seed) -> Tracks
-tracked = track(tracks, seed @ each(rep))
-operation average(items: many Tracks) -> Tracks @ drop(rep)
-averaged = average(tracked @ vary(rep))
+operation simulate(reading: Series, seed: Seed) -> Series
+trial = simulate(reading, seed @ each(rep))
+operation average(items: many Series) -> Series @ drop(rep)
+summary = average(trial @ vary(rep))
 ";
     let dag = resolve_text(
         text,
-        "sources:\n  tracks[subject=01]\n  seed[rep=1]\n  seed[rep=2]\n  seed[rep=10]\n",
+        "sources:\n  reading[station=01]\n  seed[rep=1]\n  seed[rep=2]\n  seed[rep=10]\n",
     )
     .unwrap();
     assert_eq!(
         outputs(&dag),
         [
-            "tracked[rep=1,subject=01]",
-            "tracked[rep=2,subject=01]",
-            "tracked[rep=10,subject=01]",
-            "averaged[subject=01]",
+            "trial[rep=1,station=01]",
+            "trial[rep=2,station=01]",
+            "trial[rep=10,station=01]",
+            "summary[station=01]",
         ]
     );
     assert_eq!(dag.jobs[3].inputs[0].len(), 3);
@@ -240,44 +247,44 @@ averaged = average(tracked @ vary(rep))
 fn broadcasts_are_checked_against_the_step() {
     for (call, expected) in [
         (
-            "connect(tracks, parcels @ each(subject), lut)",
-            "has no unpinned dimension `subject`",
+            "predict(reading, model @ each(station), parameters)",
+            "has no unpinned dimension `station`",
         ),
         (
-            "connect(tracks, parcels @ where(atlas=desikan) @ each(atlas), lut)",
-            "has no unpinned dimension `atlas`",
+            "predict(reading, model @ where(scenario=base) @ each(scenario), parameters)",
+            "has no unpinned dimension `scenario`",
         ),
         (
-            "connect(tracks, parcels @ each(atlas), lut @ each(atlas))",
-            "`parcels` and `lut` both broadcast `atlas`",
+            "predict(reading, model @ each(scenario), parameters @ each(scenario))",
+            "`model` and `parameters` both broadcast `scenario`",
         ),
         (
-            "connect(tracks @ each(subject), parcels @ each(atlas), lut @ same(atlas))",
+            "predict(reading @ each(station), model @ each(scenario), parameters @ same(scenario))",
             "none can drive the step",
         ),
     ] {
-        let text = format!("{CONNECT}connectome = {call}\n");
+        let text = format!("{PREDICT}forecast = {call}\n");
         let error = spit::validate_pipeline(&parse_pipeline(&text).unwrap()).unwrap_err();
         assert!(error.to_string().contains(expected), "{call}: {error}");
     }
     let text = "\
-source tracks [subject, atlas]
-source parcels [atlas]
-operation label(tracks: Tracks, parcels: Labels) -> Tracks
-labelled = label(tracks, parcels @ each(atlas))
-operation stack(items: many Tracks, parcels: Labels) -> Stack @ drop(atlas)
-stacked = stack(labelled @ vary(atlas), parcels @ each(atlas))
+source reading [station, scenario]
+source model [scenario]
+operation fit(reading: Series, model: Model) -> Series
+fitted = fit(reading, model @ each(scenario))
+operation stack(items: many Series, model: Model) -> Stack @ drop(scenario)
+stacked = stack(fitted @ vary(scenario), model @ each(scenario))
 ";
     let error = spit::validate_pipeline(&parse_pipeline(text).unwrap()).unwrap_err();
     assert!(
         error
             .to_string()
-            .contains("driving product `tracks` already has `atlas`"),
+            .contains("driving product `reading` already has `scenario`"),
         "{error}"
     );
     let text = text.replace(
-        "labelled = label(tracks, parcels @ each(atlas))",
-        "labelled = label(tracks, parcels)",
+        "fitted = fit(reading, model @ each(scenario))",
+        "fitted = fit(reading, model)",
     );
     let error = spit::validate_pipeline(&parse_pipeline(&text).unwrap()).unwrap_err();
     assert!(
@@ -285,10 +292,10 @@ stacked = stack(labelled @ vary(atlas), parcels @ each(atlas))
         "{error}"
     );
     let error = parse_pipeline(&format!(
-        "{CONNECT}x = connect(tracks, parcels @ each(atlas, atlas), lut)\n"
+        "{PREDICT}x = predict(reading, model @ each(scenario, scenario), parameters)\n"
     ))
     .unwrap_err();
-    assert!(error.message.contains("names `atlas` twice"), "{error}");
+    assert!(error.message.contains("names `scenario` twice"), "{error}");
 }
 
 #[test]
