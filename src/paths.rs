@@ -55,6 +55,10 @@ impl fmt::Display for PathError {
 
 impl std::error::Error for PathError {}
 
+/// Placeholders a path template always gives its own meaning, so no
+/// product may declare a dimension with one of these names.
+pub(crate) const RESERVED_PLACEHOLDERS: [&str; 3] = ["product", "entities", "stage"];
+
 pub(crate) fn error(message: impl Into<String>) -> PathError {
     PathError {
         line: None,
@@ -394,8 +398,7 @@ fn bind_path(
                 // `alias::name` would put colons in file names.
                 relative.push_str(&artifact.product.replace("::", "."));
             }
-            // A declared dimension named `stage` keeps its meaning.
-            Part::Placeholder(name) if name == "stage" && !dimensions.contains(&name) => {
+            Part::Placeholder(name) if name == "stage" => {
                 let stage = pipeline.stage_of(&artifact.product).ok_or_else(|| {
                     error(format!(
                         "path template for `{}` uses `{{stage}}`, but `{}` is not made in a stage",
