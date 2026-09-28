@@ -3,7 +3,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{self, Write};
 use std::fs;
-use std::ops::Range;
 use std::path::Path;
 
 use crate::model::{
@@ -11,49 +10,11 @@ use crate::model::{
     SourceInventory, SourceRecord,
 };
 use crate::parser::SourceMap;
-use crate::span::Place;
+use crate::span::Located;
 use crate::template::{parse_template, Part};
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct PathError {
-    /// The pipeline line of the path rule at fault, when known.
-    pub line: Option<usize>,
-    /// The byte range in that line, when known.
-    pub columns: Option<Range<usize>>,
-    pub message: String,
-    /// Text within the path template that the error is about, such as one
-    /// `{placeholder}`.
-    pub(crate) focus: Option<String>,
-}
-
-impl PathError {
-    /// Attach a place unless a more specific one is already recorded.
-    fn at(mut self, place: Option<Place>) -> Self {
-        if self.line.is_none() {
-            if let Some(place) = place {
-                self.line = Some(place.line);
-                self.columns = Some(place.columns);
-            }
-        }
-        self
-    }
-
-    fn focus(mut self, text: impl Into<String>) -> Self {
-        self.focus = Some(text.into());
-        self
-    }
-}
-
-impl fmt::Display for PathError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if let Some(line) = self.line {
-            write!(f, "line {line}: ")?;
-        }
-        f.write_str(&self.message)
-    }
-}
-
-impl std::error::Error for PathError {}
+/// An error in a path rule, or about the paths it gives artifacts.
+pub type PathError = Located<String>;
 
 /// What a `{name}` in a path template stands for.
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
@@ -183,12 +144,7 @@ impl PartialEq<&str> for PathTemplate {
 }
 
 pub(crate) fn error(message: impl Into<String>) -> PathError {
-    PathError {
-        line: None,
-        columns: None,
-        message: message.into(),
-        focus: None,
-    }
+    PathError::new(message)
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

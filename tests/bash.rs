@@ -346,13 +346,16 @@ fn path_rules_that_cannot_separate_artifacts_are_rejected() {
     let error =
         check("source raw [id, batch]\npath: {product}/{entities}.csv\npath raw: raw/{id}.csv\n")
             .unwrap_err();
-    assert!(error.message.contains("omits dimension `batch`"), "{error}");
+    assert!(
+        error.message().contains("omits dimension `batch`"),
+        "{error}"
+    );
 
     let error = check(
         "source raw [id]\npath: {entities}.csv\noperation clean(one)\ncleaned = clean(raw)\n",
     )
     .unwrap_err();
-    assert!(error.message.contains("`raw` and `cleaned`"), "{error}");
+    assert!(error.message().contains("`raw` and `cleaned`"), "{error}");
 
     let error = check("source raw [id]\npath: {product}/{id}/{shard}.csv\n").unwrap_err();
     assert_eq!(
