@@ -4,13 +4,11 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crate::lower::{parse_document_with_imports, ParsedDocument, PipelineBuilder};
 use crate::model::{
     CommandDef, CommandRole, CoverageRule, OperationDef, Pipeline, ProductDef, SourceInventory,
 };
-use crate::parser::{
-    parse_document_with_imports, parse_use, strip_comment, InlineInventory, ParseError,
-    ParsedDocument, PipelineBuilder, Rule, UseSpec,
-};
+use crate::parser::{parse_use, strip_comment, InlineInventory, ParseError, Rule, UseSpec};
 use crate::span::Place;
 
 pub(crate) fn apply_import(
@@ -111,23 +109,9 @@ pub(crate) fn apply_import(
 fn select_import(module: &Pipeline, spec: &UseSpec, line: usize) -> Result<Pipeline, ParseError> {
     let mut selected = Pipeline::default();
     let import_all = spec.names.is_none();
-    let names: Vec<&str> = if let Some(names) = &spec.names {
-        names.iter().map(String::as_str).collect()
-    } else {
-        let mut seen = BTreeSet::new();
-        module
-            .operations
-            .iter()
-            .map(|operation| operation.name.as_str())
-            .chain(module.products.iter().filter_map(|product| {
-                (!module
-                    .invocations
-                    .iter()
-                    .any(|invocation| invocation.outputs.contains(&product.name)))
-                .then_some(product.name.as_str())
-            }))
-            .filter(|name| seen.insert(*name))
-            .collect()
+    let names: Vec<&str> = match &spec.names {
+        Some(names) => names.iter().map(String::as_str).collect(),
+        None => reusable_names(module),
     };
     if names.is_empty() {
         return Err(ParseError::new(
@@ -141,18 +125,21 @@ fn select_import(module: &Pipeline, spec: &UseSpec, line: usize) -> Result<Pipel
             .iter()
             .filter(|operation| operation.name == name);
         let operation = operations.next();
-        let mut sources = module.products.iter().filter(|product| {
-            product.name == name
-                && !module
-                    .invocations
-                    .iter()
-                    .any(|invocation| invocation.outputs.iter().any(|output| output == name))
-        });
+        let mut sources = module
+            .products
+            .iter()
+            .filter(|product| product.name == name && is_source(module, product));
         let source = sources.next();
         if operations.next().is_some() || sources.next().is_some() {
             return Err(ParseError::new(
                 line,
                 format!("imported file has duplicate definition `{name}`"),
+            ));
+        }
+        if operation.is_none() && source.is_none() {
+            return Err(ParseError::new(
+                line,
+                format!("`{name}` is not a source or operation in `{}`", spec.path),
             ));
         }
         if operation.is_some() && source.is_some() && !import_all {
@@ -166,80 +153,126 @@ fn select_import(module: &Pipeline, spec: &UseSpec, line: usize) -> Result<Pipel
             .as_ref()
             .map_or_else(|| name.to_owned(), |alias| format!("{alias}::{name}"));
         if let Some(operation) = operation {
-            if module
-                .commands
-                .iter()
-                .filter(|command| command.operation == name && command.role == CommandRole::Run)
-                .count()
-                > 1
-            {
-                return Err(ParseError::new(
-                    line,
-                    format!("imported file has duplicate command for `{name}`"),
-                ));
-            }
-            if selected
-                .operations
-                .iter()
-                .any(|existing| existing.name == qualified)
-            {
-                return Err(ParseError::new(line, format!("duplicate import `{name}`")));
-            }
-            selected.operations.push(OperationDef {
-                name: qualified.clone(),
-                ..operation.clone()
-            });
-            for command in module
-                .commands
-                .iter()
-                .filter(|command| command.operation == name)
-            {
-                selected.commands.push(CommandDef {
-                    operation: qualified.clone(),
-                    ..command.clone()
-                });
-            }
+            import_operation(&mut selected, module, operation, &qualified, line)?;
         }
         if let Some(source) = source {
-            if selected
-                .products
-                .iter()
-                .any(|existing| existing.name == qualified)
-            {
-                return Err(ParseError::new(line, format!("duplicate import `{name}`")));
-            }
-            selected.products.push(ProductDef {
-                name: qualified.clone(),
-                ..source.clone()
-            });
-            if let Some(path) = module
-                .product_paths
-                .get(name)
-                .or(module.path_template.as_ref())
-            {
-                selected
-                    .product_paths
-                    .insert(qualified.clone(), path.replace("{product}", name));
-            }
-            for constraint in module
-                .constraints
-                .iter()
-                .filter(|constraint| constraint.product == name)
-            {
-                selected.constraints.push(CoverageRule {
-                    product: qualified.clone(),
-                    ..constraint.clone()
-                });
-            }
-        }
-        if operation.is_none() && source.is_none() {
-            return Err(ParseError::new(
-                line,
-                format!("`{name}` is not a source or operation in `{}`", spec.path),
-            ));
+            import_source(&mut selected, module, source, &qualified, line)?;
         }
     }
     Ok(selected)
+}
+
+/// What `use path` brings in: every operation and source, each name once.
+fn reusable_names(module: &Pipeline) -> Vec<&str> {
+    let mut seen = BTreeSet::new();
+    module
+        .operations
+        .iter()
+        .map(|operation| operation.name.as_str())
+        .chain(
+            module
+                .products
+                .iter()
+                .filter(|product| is_source(module, product))
+                .map(|product| product.name.as_str()),
+        )
+        .filter(|name| seen.insert(*name))
+        .collect()
+}
+
+/// Whether `product` is a source, which no step produces.
+fn is_source(module: &Pipeline, product: &ProductDef) -> bool {
+    !module
+        .invocations
+        .iter()
+        .any(|invocation| invocation.outputs.contains(&product.name))
+}
+
+/// Import an operation as `qualified`, with its commands.
+fn import_operation(
+    selected: &mut Pipeline,
+    module: &Pipeline,
+    operation: &OperationDef,
+    qualified: &str,
+    line: usize,
+) -> Result<(), ParseError> {
+    let name = &operation.name;
+    let commands: Vec<_> = module
+        .commands
+        .iter()
+        .filter(|command| &command.operation == name)
+        .collect();
+    if commands
+        .iter()
+        .filter(|command| command.role == CommandRole::Run)
+        .count()
+        > 1
+    {
+        return Err(ParseError::new(
+            line,
+            format!("imported file has duplicate command for `{name}`"),
+        ));
+    }
+    if selected
+        .operations
+        .iter()
+        .any(|existing| existing.name == qualified)
+    {
+        return Err(ParseError::new(line, format!("duplicate import `{name}`")));
+    }
+    selected.operations.push(OperationDef {
+        name: qualified.to_owned(),
+        ..operation.clone()
+    });
+    selected
+        .commands
+        .extend(commands.into_iter().map(|command| CommandDef {
+            operation: qualified.to_owned(),
+            ..command.clone()
+        }));
+    Ok(())
+}
+
+/// Import a source as `qualified`, with its path rule and coverage rules.
+fn import_source(
+    selected: &mut Pipeline,
+    module: &Pipeline,
+    source: &ProductDef,
+    qualified: &str,
+    line: usize,
+) -> Result<(), ParseError> {
+    let name = &source.name;
+    if selected
+        .products
+        .iter()
+        .any(|existing| existing.name == qualified)
+    {
+        return Err(ParseError::new(line, format!("duplicate import `{name}`")));
+    }
+    selected.products.push(ProductDef {
+        name: qualified.to_owned(),
+        ..source.clone()
+    });
+    if let Some(path) = module
+        .product_paths
+        .get(name)
+        .or(module.path_template.as_ref())
+    {
+        selected
+            .product_paths
+            .insert(qualified.to_owned(), path.with_product(name));
+    }
+    selected.constraints.extend(
+        module
+            .constraints
+            .iter()
+            .filter(|constraint| &constraint.product == name)
+            .map(|constraint| CoverageRule {
+                product: qualified.to_owned(),
+                ..constraint.clone()
+            }),
+    );
+    Ok(())
 }
 
 /// Parse a pipeline from a known file location, resolving imports.
@@ -314,7 +347,7 @@ fn parse_document_at_inner(
                         format!(
                             "in `{}` at line {}: {}",
                             canonical.display(),
-                            error.line,
+                            error.line(),
                             error.message
                         ),
                     )

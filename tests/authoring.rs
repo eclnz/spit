@@ -1,4 +1,4 @@
-//! Selectors, mixed cardinality, multiple outputs, collection contracts,
+//! Selectors, broadcasts, mixed cardinality, multiple outputs, collection contracts,
 //! coverage values, empty steps, inventory override, and source discovery.
 
 use std::fs;
@@ -175,6 +175,129 @@ fn selectors_are_checked_against_the_port_and_product() {
     );
 }
 
+const PREDICT: &str = "\
+source reading [station]
+source model [scenario]
+source parameters [scenario]
+operation predict(reading: Series, model: Model, parameters: Parameters) -> Matrix
+";
+
+const SCENARIOS: &str = "sources:\n  reading[station=01]\n  reading[station=02]\n  model[scenario=base]\n  model[scenario=high]\n  parameters[scenario=base]\n  parameters[scenario=high]\n";
+
+#[test]
+fn each_runs_a_step_for_every_value_an_input_broadcasts() {
+    let text =
+        format!("{PREDICT}forecast = predict(reading, model @ each(scenario), parameters)\n");
+    let (pipeline, _) = parse_document(&text).unwrap();
+    assert_eq!(pipeline.products[3].dimensions, ["station", "scenario"]);
+    let dag = resolve(&pipeline, &parse_source_inventory(SCENARIOS).unwrap()).unwrap();
+    assert_eq!(
+        outputs(&dag),
+        [
+            "forecast[scenario=base,station=01]",
+            "forecast[scenario=high,station=01]",
+            "forecast[scenario=base,station=02]",
+            "forecast[scenario=high,station=02]",
+        ]
+    );
+    // Another input is matched on the broadcast dimension.
+    assert_eq!(
+        dag.jobs[1].inputs[2][0].to_string(),
+        "parameters[scenario=high]"
+    );
+    let missing = resolve_text(
+        &text,
+        &SCENARIOS.replace("  parameters[scenario=high]\n", ""),
+    );
+    assert!(matches!(
+        missing,
+        Err(ResolveError::MissingInput { port, context, .. })
+            if port == "parameters" && context.to_string().contains("scenario=high")
+    ));
+}
+
+#[test]
+fn a_broadcast_dimension_can_be_collected_again() {
+    let text = "\
+source reading [station]
+source seed [rep]
+operation simulate(reading: Series, seed: Seed) -> Series
+trial = simulate(reading, seed @ each(rep))
+operation average(items: many Series) -> Series @ drop(rep)
+summary = average(trial @ vary(rep))
+";
+    let dag = resolve_text(
+        text,
+        "sources:\n  reading[station=01]\n  seed[rep=1]\n  seed[rep=2]\n  seed[rep=10]\n",
+    )
+    .unwrap();
+    assert_eq!(
+        outputs(&dag),
+        [
+            "trial[rep=1,station=01]",
+            "trial[rep=2,station=01]",
+            "trial[rep=10,station=01]",
+            "summary[station=01]",
+        ]
+    );
+    assert_eq!(dag.jobs[3].inputs[0].len(), 3);
+}
+
+#[test]
+fn broadcasts_are_checked_against_the_step() {
+    for (call, expected) in [
+        (
+            "predict(reading, model @ each(station), parameters)",
+            "has no unpinned dimension `station`",
+        ),
+        (
+            "predict(reading, model @ where(scenario=base) @ each(scenario), parameters)",
+            "has no unpinned dimension `scenario`",
+        ),
+        (
+            "predict(reading, model @ each(scenario), parameters @ each(scenario))",
+            "`model` and `parameters` both broadcast `scenario`",
+        ),
+        (
+            "predict(reading @ each(station), model @ each(scenario), parameters @ same(scenario))",
+            "none can drive the step",
+        ),
+    ] {
+        let text = format!("{PREDICT}forecast = {call}\n");
+        let error = spit::validate_pipeline(&parse_pipeline(&text).unwrap()).unwrap_err();
+        assert!(error.to_string().contains(expected), "{call}: {error}");
+    }
+    let text = "\
+source reading [station, scenario]
+source model [scenario]
+operation fit(reading: Series, model: Model) -> Series
+fitted = fit(reading, model @ each(scenario))
+operation stack(items: many Series, model: Model) -> Stack @ drop(scenario)
+stacked = stack(fitted @ vary(scenario), model @ each(scenario))
+";
+    let error = spit::validate_pipeline(&parse_pipeline(text).unwrap()).unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("driving product `reading` already has `scenario`"),
+        "{error}"
+    );
+    let text = text.replace(
+        "fitted = fit(reading, model @ each(scenario))",
+        "fitted = fit(reading, model)",
+    );
+    let error = spit::validate_pipeline(&parse_pipeline(&text).unwrap()).unwrap_err();
+    assert!(
+        error.to_string().contains("would restore the dimension"),
+        "{error}"
+    );
+    let error = parse_pipeline(&format!(
+        "{PREDICT}x = predict(reading, model @ each(scenario, scenario), parameters)\n"
+    ))
+    .unwrap_err();
+    assert!(error.message.contains("names `scenario` twice"), "{error}");
+}
+
 #[test]
 fn port_order_does_not_decide_the_driving_input() {
     let text = "\
@@ -308,13 +431,13 @@ fn outputs_and_verifications_are_checked_before_resolution() {
 
     let unwritten = TISSUES.replace(" {csf}\n", "\n");
     let error = validate_commands(&parse_pipeline(&unwritten).unwrap()).unwrap_err();
-    assert!(error.message.contains("must use `{csf}`"), "{error}");
+    assert!(error.message().contains("must use `{csf}`"), "{error}");
 
     let reads_output = TISSUES.replace("same_grid {dwi} {mask}", "same_grid {wm}");
     let error = validate_commands(&parse_pipeline(&reads_output).unwrap()).unwrap_err();
     assert!(
         error
-            .message
+            .message()
             .contains("verify for `fods` cannot use output `{wm}`"),
         "{error}"
     );
@@ -452,7 +575,7 @@ fn a_file_matching_two_source_rules_is_rejected() {
     let error = discover_sources(&parse_pipeline(text).unwrap(), &tree.0).unwrap_err();
     assert!(
         error
-            .message
+            .message()
             .contains("matches the path rules of both `a` and `b`"),
         "{error}"
     );

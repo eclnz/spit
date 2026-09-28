@@ -1,0 +1,22 @@
+# Text shards cleaned in one stage and summarised in the next.
+path: {stage}/{product}/{entities}.txt
+
+source shard : Lines [group, part]
+path shard: input/{group}/{part}.txt
+require shard count>=1 per [group]
+
+stage preprocess:
+    operation sort_lines(input: Lines) -> Lines
+    command sort_lines: sort -u -o {output} {input}
+    sorted = sort_lines(shard)
+
+    operation merge(items: many Lines) -> Lines @ drop(part)
+    command merge: sort -m -u -o {output} {items}
+    merged = merge(sorted @ vary(part))
+
+stage analysis:
+    path: results/{product}/{entities}.txt
+
+    operation tally_lines(input: Lines) -> Tally
+    command tally_lines: uniq -c {input} {output}
+    tally = tally_lines(merged)

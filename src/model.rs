@@ -1,8 +1,10 @@
 use std::cmp::Ordering;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
+use crate::command::CommandTemplate;
 use crate::error::ResolveError;
+use crate::paths::PathTemplate;
 use crate::types::TypeExpr;
 
 pub type ArtifactType = TypeExpr;
@@ -221,6 +223,49 @@ impl OutputPort {
 /// The port name of an operation's only, unnamed output.
 pub const DEFAULT_OUTPUT: &str = "output";
 
+/// A placeholder a command has without its operation naming the port.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DefaultPort {
+    /// `{output}`: an operation's only, unnamed output.
+    Output,
+    /// `{input}`: an operation's only input, when unnamed.
+    Input,
+    /// `{input1}`, `{input2}`, ...: the unnamed inputs of an operation with
+    /// several, numbered from 1.
+    InputAt(usize),
+    /// `{inputs}`: an operation's only input when that is a many input,
+    /// whatever its name.
+    Inputs,
+}
+
+impl DefaultPort {
+    /// The name SPIT gives the unnamed input at `index` of `count` inputs.
+    pub fn for_input(index: usize, count: usize) -> Self {
+        if count == 1 {
+            Self::Input
+        } else {
+            Self::InputAt(index + 1)
+        }
+    }
+
+    /// The name between the braces.
+    pub fn name(self) -> String {
+        match self {
+            Self::Output => DEFAULT_OUTPUT.to_owned(),
+            Self::Input => "input".to_owned(),
+            Self::InputAt(number) => format!("input{number}"),
+            Self::Inputs => "inputs".to_owned(),
+        }
+    }
+}
+
+/// Reads as the placeholder is written, such as `{input2}`.
+impl fmt::Display for DefaultPort {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{{{}}}", self.name())
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct OperationDef {
     pub name: String,
@@ -291,6 +336,10 @@ pub struct InputBinding {
     /// `@ same(dimension, ...)`: match the job on these dimensions only. Any
     /// other dimension must leave exactly one artifact for each job.
     pub same: Option<Vec<String>>,
+    /// `@ each(dimension, ...)`: broadcast the input over these dimensions.
+    /// The step runs once per value of them found in the product, and its
+    /// outputs gain them.
+    pub each: Vec<String>,
 }
 
 impl InputBinding {
@@ -320,13 +369,22 @@ impl InputBinding {
         self
     }
 
+    #[must_use]
+    pub fn each_of(mut self, dimensions: impl IntoIterator<Item = impl AsRef<str>>) -> Self {
+        self.each = owned_strings(dimensions);
+        self
+    }
+
     pub fn product_name(&self) -> &str {
         &self.product
     }
 
     /// Whether any `@` selector is present.
     pub fn has_selectors(&self) -> bool {
-        self.vary.is_some() || !self.pinned.is_empty() || self.same.is_some()
+        self.vary.is_some()
+            || !self.pinned.is_empty()
+            || self.same.is_some()
+            || !self.each.is_empty()
     }
 
     /// The product's dimensions that remain after `where` pins some of them.
@@ -346,6 +404,8 @@ pub struct Invocation {
     pub inputs: Vec<InputBinding>,
     /// Products, one per operation output port in declaration order.
     pub outputs: Vec<String>,
+    /// The stage whose block holds this step, if any.
+    pub stage: Option<String>,
 }
 
 impl Invocation {
@@ -366,7 +426,14 @@ impl Invocation {
             operation: operation.into(),
             inputs,
             outputs: outputs.into_iter().map(Into::into).collect(),
+            stage: None,
         }
+    }
+
+    #[must_use]
+    pub fn in_stage(mut self, stage: impl Into<String>) -> Self {
+        self.stage = Some(stage.into());
+        self
     }
 
     /// The first output, which names the step in diagnostics.
@@ -388,23 +455,43 @@ pub enum CommandRole {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CommandDef {
     pub operation: String,
-    pub template: String,
+    pub template: CommandTemplate,
     pub role: CommandRole,
 }
 
 impl CommandDef {
-    pub fn new(operation: impl Into<String>, template: impl Into<String>) -> Self {
+    pub fn new(operation: impl Into<String>, template: CommandTemplate) -> Self {
         Self {
             operation: operation.into(),
-            template: template.into(),
+            template,
             role: CommandRole::Run,
         }
     }
 
-    pub fn verify(operation: impl Into<String>, template: impl Into<String>) -> Self {
+    pub fn verify(operation: impl Into<String>, template: CommandTemplate) -> Self {
         Self {
             role: CommandRole::Verify,
             ..Self::new(operation, template)
+        }
+    }
+}
+
+/// A named group of steps, such as preprocessing or analysis. A stage owns
+/// the products its steps assign; operations stay global. A nested stage's
+/// name is its path, as in `preprocess/denoise`.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StageDef {
+    pub name: String,
+    /// The default path rule for the products of this stage and the stages
+    /// nested in it that set none, in place of the pipeline's default.
+    pub path_template: Option<PathTemplate>,
+}
+
+impl StageDef {
+    pub fn new(name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            path_template: None,
         }
     }
 }
@@ -416,8 +503,60 @@ pub struct Pipeline {
     pub invocations: Vec<Invocation>,
     pub constraints: Vec<CoverageRule>,
     pub commands: Vec<CommandDef>,
-    pub path_template: Option<String>,
-    pub product_paths: BTreeMap<String, String>,
+    pub path_template: Option<PathTemplate>,
+    pub product_paths: BTreeMap<String, PathTemplate>,
+    /// Stages in declaration order.
+    pub stages: Vec<StageDef>,
+}
+
+impl Pipeline {
+    /// The stage of the step that produces `product`; `None` for a source or
+    /// a step outside every stage.
+    pub fn stage_of(&self, product: &str) -> Option<&str> {
+        self.invocations
+            .iter()
+            .find(|invocation| invocation.outputs.iter().any(|output| output == product))
+            .and_then(|invocation| invocation.stage.as_deref())
+    }
+
+    /// The path template `product` uses: its own rule, else its stage's
+    /// default, else the pipeline's default.
+    pub fn path_template_for(&self, product: &str) -> Option<&PathTemplate> {
+        self.product_paths
+            .get(product)
+            .or_else(|| self.stage_path_template(product))
+            .or(self.path_template.as_ref())
+    }
+
+    /// The default path rule of the stage that produces `product`, or of the
+    /// nearest stage around it that sets one, with the stage that sets it.
+    pub fn stage_path_rule(&self, product: &str) -> Option<(&str, &PathTemplate)> {
+        let stage = self.stage_of(product)?;
+        stage_and_parents(stage).find_map(|name| {
+            self.stages
+                .iter()
+                .find(|candidate| candidate.name == name)
+                .and_then(|stage| Some((stage.name.as_str(), stage.path_template.as_ref()?)))
+        })
+    }
+
+    pub fn stage_path_template(&self, product: &str) -> Option<&PathTemplate> {
+        self.stage_path_rule(product).map(|(_, template)| template)
+    }
+}
+
+/// A stage's full name, then each stage around it: `a/b/c`, `a/b`, `a`.
+pub fn stage_and_parents(stage: &str) -> impl Iterator<Item = &str> {
+    std::iter::successors(Some(stage), |name| {
+        name.rsplit_once('/').map(|(parent, _)| parent)
+    })
+}
+
+/// Whether `stage` is `outer` or a stage nested inside it.
+pub fn stage_within(stage: &str, outer: &str) -> bool {
+    stage
+        .strip_prefix(outer)
+        .is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
 }
 
 /// A source record identifies a logical artifact without binding it to a path.
@@ -505,6 +644,8 @@ pub struct Job {
     /// One artifact per output port, in port order.
     pub outputs: Vec<ArtifactInstance>,
     pub dependencies: Vec<usize>,
+    /// The stage of the step that made this job, if any.
+    pub stage: Option<String>,
 }
 
 impl Job {
@@ -526,6 +667,36 @@ pub struct ResolvedDag {
     pub product_dimensions: BTreeMap<String, Vec<String>>,
 }
 
+impl ResolvedDag {
+    /// Only the jobs of `stage` and the stages nested in it. Their inputs from
+    /// other stages are taken as files that already exist, so dependencies on those jobs are dropped;
+    /// every job keeps its number.
+    #[must_use]
+    pub fn only_stage(&self, stage: &str) -> Self {
+        let jobs: Vec<_> = self
+            .jobs
+            .iter()
+            .filter(|job| {
+                job.stage
+                    .as_deref()
+                    .is_some_and(|name| stage_within(name, stage))
+            })
+            .cloned()
+            .collect();
+        let kept: BTreeSet<_> = jobs.iter().map(|job| job.id).collect();
+        Self {
+            jobs: jobs
+                .into_iter()
+                .map(|mut job| {
+                    job.dependencies.retain(|id| kept.contains(id));
+                    job
+                })
+                .collect(),
+            product_dimensions: self.product_dimensions.clone(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Gap {
     Unmatched(ResolveError),
@@ -540,6 +711,7 @@ pub enum Gap {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct IncompleteJob {
     pub operation: String,
+    pub stage: Option<String>,
     pub outputs: Vec<ArtifactInstance>,
     pub gaps: Vec<Gap>,
 }

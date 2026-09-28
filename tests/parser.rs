@@ -1,6 +1,6 @@
 use spit::{
     parse_document, parse_pipeline, parse_source_inventory, render_dag, resolve, validate_pipeline,
-    ParseError, ResolveError, TypeExpr,
+    ResolveError, TypeExpr,
 };
 
 /// A sectioned pipeline with the same shape as the basic example.
@@ -62,26 +62,20 @@ fn parses_and_resolves_a_document_with_its_inventory() {
 fn reports_line_for_bad_text() {
     let text = "products:\n  signal : Signal [site, run]\npipeline:\n  denoised = denoise(signal @ vary(run, day))\n";
     let error = parse_pipeline(text).unwrap_err();
-    assert_eq!(error.line, 4);
+    assert_eq!(error.line(), 4);
     assert!(error.to_string().contains("line 4"));
 }
 
 #[test]
 fn rejects_duplicate_dimension_in_source() {
     let text = "sources:\n  signal[site=01,site=02]\n";
-    assert!(matches!(
-        parse_source_inventory(text),
-        Err(ParseError { line: 2, .. })
-    ));
+    assert_eq!(parse_source_inventory(text).unwrap_err().line(), 2);
 }
 
 #[test]
 fn rejects_source_inventory_inside_pipeline_file() {
     let text = "products:\n  signal : Signal [site]\nsources:\n  signal[site=01]\n";
-    assert!(matches!(
-        parse_pipeline(text),
-        Err(ParseError { line: 3, .. })
-    ));
+    assert_eq!(parse_pipeline(text).unwrap_err().line(), 3);
 }
 
 #[test]
@@ -220,12 +214,12 @@ fn named_ports_and_declared_aggregate_shape_are_checked() {
 fn shell_source_is_rejected_with_migration_guidance() {
     let text = "source raw [id]\noperation copy(one)\nresult = copy(raw)\nsources:\n  raw[id=x]\nshell-source: scripts/functions.sh\n";
     let error = parse_document(text).unwrap_err();
-    assert_eq!(error.line, 6);
+    assert_eq!(error.line(), 6);
     assert!(error.message.contains("executable available on PATH"));
 
     let error =
         parse_pipeline("products:\n  raw [id]\nshell-source: scripts/functions.sh\n").unwrap_err();
-    assert_eq!(error.line, 3);
+    assert_eq!(error.line(), 3);
     assert!(error.message.contains("executable available on PATH"));
 }
 
@@ -256,7 +250,7 @@ fn rejects_unbalanced_command_brackets_with_line_number() {
     for (line, expected) in cases {
         let text = format!("source raw : Table [id]\n{line}\n");
         let error = parse_pipeline(&text).unwrap_err();
-        assert_eq!(error.line, 2, "{line}");
+        assert_eq!(error.line(), 2, "{line}");
         assert!(error.message.contains("normalize"), "{error}");
         assert!(error.message.contains(expected), "{line}: {error}");
     }
@@ -271,7 +265,7 @@ fn path_template_errors_are_reported_while_parsing() {
     for (line, expected) in cases {
         let text = format!("source raw : Table [id]\n{line}\n");
         let error = parse_pipeline(&text).unwrap_err();
-        assert_eq!(error.line, 2, "{line}");
+        assert_eq!(error.line(), 2, "{line}");
         assert!(error.message.contains(expected), "{line}: {error}");
     }
 }
@@ -287,7 +281,7 @@ fn hash_inside_a_word_is_text_as_in_bash() {
         "tool --url=https://example.com/#top {input} {output}# note"
     );
     let error = parse_pipeline("source raw [id]# note\n").unwrap_err();
-    assert_eq!(error.line, 1);
+    assert_eq!(error.line(), 1);
 }
 
 #[test]
@@ -316,7 +310,7 @@ fn pipeline_checks_need_no_inventory() {
 fn input_port_cannot_shadow_output_placeholder() {
     let error =
         parse_pipeline("source raw [id]\noperation copy(output: Image) -> Image\n").unwrap_err();
-    assert_eq!(error.line, 2);
+    assert_eq!(error.line(), 2);
     assert!(error.message.contains("`output` is reserved"));
 }
 

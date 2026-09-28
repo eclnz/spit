@@ -99,7 +99,7 @@ fn import_errors_point_to_the_use_line() {
     dir.write("base.spit", "operation clean(one)\n");
     let main = dir.write("main.spit", "use absent from base.spit\n");
     let error = parse_document_at(&fs::read_to_string(&main).unwrap(), &main).unwrap_err();
-    assert_eq!(error.line, 1);
+    assert_eq!(error.line(), 1);
     assert!(error.message.contains("not a source or operation"));
 
     let main = dir.write(
@@ -107,7 +107,7 @@ fn import_errors_point_to_the_use_line() {
         "use clean from base.spit\nuse clean from base.spit\n",
     );
     let error = parse_document_at(&fs::read_to_string(&main).unwrap(), &main).unwrap_err();
-    assert_eq!(error.line, 2);
+    assert_eq!(error.line(), 2);
     assert!(error.message.contains("conflicts with operation"));
 
     dir.write(
@@ -115,7 +115,7 @@ fn import_errors_point_to_the_use_line() {
         "use clean from main.spit\noperation clean(one)\n",
     );
     let error = parse_document_at(&fs::read_to_string(&main).unwrap(), &main).unwrap_err();
-    assert_eq!(error.line, 1);
+    assert_eq!(error.line(), 1);
     assert!(error.message.contains("import cycle"));
 }
 
@@ -244,4 +244,20 @@ fn an_operation_imports_with_its_command_and_verifications() {
     assert_eq!(pipeline.commands.len(), 2);
     let bash = render_bash(&pipeline, &resolve(&pipeline, &inventory.unwrap()).unwrap()).unwrap();
     assert!(bash.contains("spit_verify 1 'check_table'"), "{bash}");
+}
+
+#[test]
+fn an_imported_path_keeps_escaped_braces() {
+    let dir = TestDir::new();
+    dir.write(
+        "base.spit",
+        "path: input/{{product}}/{product}/{id}.txt\nsource raw [id]\n",
+    );
+    let main = dir.write("main.spit", "use raw from base.spit as lib\n");
+    let (pipeline, _) = parse_document_at(&fs::read_to_string(&main).unwrap(), &main).unwrap();
+    // Only the placeholder takes the product's name; the escaped braces stay literal.
+    assert_eq!(
+        pipeline.product_paths["lib::raw"],
+        "input/{{product}}/raw/{id}.txt"
+    );
 }
