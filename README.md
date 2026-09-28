@@ -195,7 +195,7 @@ The inventory supplies artifact identities; the pipeline supplies operations and
 
 - [Language reference](docs/language-reference.md) — full `.spit` syntax
 - [Architecture](docs/architecture.md) — the internal model: resolution, typing, and the Bash backend
-- [Exploration notes](docs/exploration.md) — worked examples and design decisions made while building the example pipelines
+- [Examples](docs/examples.md) — how to run each example pipeline, and what the larger ones show
 
 ## Development
 
