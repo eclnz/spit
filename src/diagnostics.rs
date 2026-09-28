@@ -9,9 +9,9 @@ use crate::command::collect_commands;
 use crate::imports::parse_located_document;
 use crate::lower::{parse_document_with_imports, ParsedDocument};
 use crate::model::DEFAULT_OUTPUT;
-use crate::model::{stage_within, CommandRole, Job, SourceInventory};
+use crate::model::{stage_within, CommandRole, Job, ResolvedDag, SourceInventory};
 use crate::parser::{glued_comment, InlineInventory, Rule, SourceMap, Step};
-use crate::paths::collect_paths;
+use crate::paths::{case_collisions, collect_paths};
 use crate::resolver::collect_pipeline;
 use crate::span::{columns_of, content_columns, utf16_columns, Located, Place};
 use crate::{
@@ -275,8 +275,10 @@ fn diagnose_with_parser(
                 .collect()
         })
     } else {
-        resolve(&document.pipeline, &inventory)
-            .map(|dag| outputs(dag.jobs).map(|artifact| artifact.product).collect())
+        resolve(&document.pipeline, &inventory).map(|dag| {
+            diagnostics.extend(case_warnings(&document.pipeline, &document.lines, &dag));
+            outputs(dag.jobs).map(|artifact| artifact.product).collect()
+        })
     };
     match produced {
         Err(error) => {
@@ -302,6 +304,22 @@ fn diagnose_with_parser(
         }
     }
     finish(diagnostics, text, source_text)
+}
+
+/// Flag paths that differ only in case, which are one file on macOS and Windows.
+fn case_warnings(pipeline: &Pipeline, lines: &SourceMap, dag: &ResolvedDag) -> Vec<Diagnostic> {
+    case_collisions(pipeline, dag)
+        .into_iter()
+        .map(|[(first, first_path), (second, second_path)]| {
+            warning(
+                lines.path_rule(pipeline, &second.0),
+                format!(
+                    "`{}[{}]` and `{}[{}]` have paths `{first_path}` and `{second_path}`, which differ only in case, so they are one file where case is ignored, as on macOS and Windows",
+                    first.0, first.1, second.0, second.1
+                ),
+            )
+        })
+        .collect()
 }
 
 /// Flag each `#` that reads like a comment but is part of a word, give every
@@ -390,7 +408,48 @@ fn pipeline_diagnostics(
         template_errors.map(|error| Diagnostic::located(DiagnosticSource::Pipeline, &error, text)),
     );
     diagnostics.extend(warnings(pipeline, lines, &checked.poisoned));
+    diagnostics.extend(operator_warnings(pipeline, lines, text));
     diagnostics
+}
+
+/// Flag unquoted shell operators such as `>` or `|`, which SPIT passes to
+/// the program as arguments.
+fn operator_warnings(pipeline: &Pipeline, lines: &SourceMap, text: &str) -> Vec<Diagnostic> {
+    let mut warnings = Vec::new();
+    for (index, command) in pipeline.commands.iter().enumerate() {
+        if lines.imported.contains(&command.operation) {
+            continue;
+        }
+        let place = lines.command(index);
+        let line_text = place
+            .as_ref()
+            .and_then(|place| text.lines().nth(place.line.checked_sub(1)?));
+        for operator in command.template.shell_operators() {
+            let columns = place.as_ref().zip(line_text).and_then(|(place, line)| {
+                let start = place.columns.start;
+                let region = line.get(start..place.columns.end)?;
+                region
+                    .match_indices(operator.as_str())
+                    .find(|(at, _)| {
+                        let before = region[..*at].chars().next_back();
+                        let after = region[at + operator.len()..].chars().next();
+                        before.is_none_or(char::is_whitespace)
+                            && after.is_none_or(char::is_whitespace)
+                    })
+                    .map(|(at, _)| start + at..start + at + operator.len())
+            });
+            warnings.push(warning(
+                place.as_ref().map(|place| {
+                    Place::new(place.line, columns.unwrap_or(place.columns.clone()))
+                }),
+                format!(
+                    "`{operator}` in the command for `{}` is passed to the program as an argument, not read as a pipe or redirection, since commands do not run through a shell; quote it to pass it on purpose",
+                    command.operation
+                ),
+            ));
+        }
+    }
+    warnings
 }
 
 /// The part of a declaration, step, or rule that a pipeline error is about.

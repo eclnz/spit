@@ -133,23 +133,23 @@ fn check_operation(operation: &OperationDef) -> Result<(), ResolveError> {
             "operation names and output types must not be empty".to_owned(),
         ));
     }
-    let mut names: BTreeSet<_> = operation.inputs.iter().map(|port| &port.name).collect();
-    if names.len() != operation.inputs.len()
-        || operation
-            .inputs
-            .iter()
-            .any(|port| port.name.is_empty() || !port.artifact_type.is_valid())
+    if operation
+        .inputs
+        .iter()
+        .any(|port| port.name.is_empty() || !port.artifact_type.is_valid())
     {
         return Err(invalid(format!(
-            "operation `{}` has invalid input ports",
+            "operation `{}` has an input port with an empty name or type",
             operation.name
         )));
     }
-    for port in &operation.outputs {
-        if !names.insert(&port.name) {
+    let mut names = BTreeSet::new();
+    let ports = operation.inputs.iter().map(|port| &port.name);
+    for name in ports.chain(operation.outputs.iter().map(|port| &port.name)) {
+        if !names.insert(name) {
             return Err(invalid(format!(
-                "operation `{}` has more than one port named `{}`",
-                operation.name, port.name
+                "operation `{}` has more than one port named `{name}`",
+                operation.name
             )));
         }
     }

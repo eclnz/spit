@@ -85,7 +85,7 @@ A `verify` command checks a job's inputs before its command runs, using the tool
 verify register: check_same_grid {moving} {reference}
 ```
 
-Input port names are optional. An unnamed single input is `{input}`; multiple unnamed inputs are `{input1}`, `{input2}`, and so on. An operation whose only input is a `many` input can also reach it as `{inputs}`, whatever its name. Named ports give clearer errors, although errors also name the product bound to a port. `{output}` is the path of a single unnamed output, so `output` cannot name an input port. A command must use every output placeholder; a `verify` command may use inputs only. Command templates give ordered words and arguments, not shell pipelines or redirection. Words are split and quoted as in Bash, and every argument is passed literally: `$` and backticks are not expanded. Write `{{` or `}}` for a literal brace. Every command is checked when the pipeline is loaded: braces and quotes must balance, placeholders must name the operation's ports, and `{output}` must appear.
+Input port names are optional. A port written as a lowercase word alone, as in `operation copy(image)`, is named `image` and untyped; type names start with a capital letter. An unnamed single input is `{input}`; multiple unnamed inputs are `{input1}`, `{input2}`, and so on. An operation whose only input is a `many` input can also reach it as `{inputs}`, whatever its name. Named ports give clearer errors, although errors also name the product bound to a port. `{output}` is the path of a single unnamed output, so `output` cannot name an input port. A command must use every output placeholder; a `verify` command may use inputs only. Command templates give ordered words and arguments, not shell pipelines or redirection; an unquoted `|`, `>`, `&&`, or the like is passed to the program as an argument, and SPIT warns about it. Words are split and quoted as in Bash, and every argument is passed literally: `$` and backticks are not expanded. As in Bash, text in single quotes is literal, so `awk '{print $1}'` needs no escaping; a placeholder is filled in unquoted text or double quotes. Write `{{` or `}}`, or `\{` and `\}`, for a literal brace elsewhere. Every command is checked when the pipeline is loaded: braces and quotes must balance, placeholders must name the operation's ports, and `{output}` must appear.
 
 The first word of a command must be an executable available on `PATH` (or an executable path). SPIT emits that command without managing its installation or loading shell functions:
 
@@ -177,13 +177,13 @@ A template fills these placeholders from the artifact it names, here `aligned[su
 
 `product`, `entities`, and `stage` are reserved: no product may declare a dimension with one of those names. Values keep letters, digits, and `-`; any other byte is written as `%` and two hex digits, so a value never adds a directory.
 
-Path rules are checked when the pipeline is loaded, even for products with no resolved jobs. SPIT rejects unbalanced braces, a dimension the product does not declare, a rule that omits one of the product's dimensions (use `{entities}` or name each one), and two products whose rules give the same path for the same entities, such as a default rule without `{product}`. Missing rules are reported by `--paths`, `bash`, and `--root`, and collisions between resolved artifact paths once jobs are bound.
+Path rules are checked when the pipeline is loaded, even for products with no resolved jobs. SPIT rejects unbalanced braces, a dimension the product does not declare, a rule that omits one of the product's dimensions (use `{entities}` or name each one), two products whose rules give the same path for the same entities, such as a default rule without `{product}`, and a rule that puts files inside another product's file path, such as `in/{id}.txt/out.txt` beside `in/{id}.txt`. A path must be relative, name a file rather than end in `/`, and contain no empty, `.`, or `..` directory. Missing rules are reported by `--paths`, `bash`, and `--root`, and collisions between resolved artifact paths once jobs are bound. SPIT warns when two artifacts' paths differ only in letter case, such as `id=A` and `id=a`: where case is ignored, as by default on macOS and Windows, they are one file.
 
 As in Bash, an unquoted `#` starts a comment only at the start of a word, so `--color=#fff` is one argument. A `#` that ends a word, as in `{output}# note`, stays part of the word; SPIT warns about it, since it reads like a comment. Put a space before `#` to start a comment, or quote the text to keep it.
 
 Place a source path beside its `source` line and a derived path beside its assignment. The default can stay near the top of the file.
 
-Path rules also find sources. `spit discover pipeline.spit --root data` lists each file under `data` whose path matches a source's rule, reading entity values from its placeholders, as inventory text. Other commands given `--root` and no inventory do the same, so `spit bash pipeline.spit --root data` needs no inventory file.
+Path rules also find sources. `spit discover pipeline.spit --root data` lists each file under `data` whose path matches a source's rule, reading entity values from its placeholders, as inventory text. Links to files and directories are followed. A value is read only as SPIT writes it, so a file such as `in/%41.txt`, whose value SPIT would write `A`, is skipped with a warning rather than listed under a path no script would use. Other commands given `--root` and no inventory do the same, so `spit bash pipeline.spit --root data` needs no inventory file.
 
 ## Constraints and optional types
 
@@ -208,7 +208,7 @@ sources:
 
 Types are additive. You can leave them out, add them to selected products and operations, or type the whole pipeline. Known mismatches fail; missing type information does not.
 
-In operation signatures, a single capital letter such as `S` is a local type variable. Use a `$` prefix for longer names, such as `$SourceSpace` or `$Kind`. An unprefixed name such as `World` is a concrete type. Variables are allowed in operation signatures, not product declarations:
+In operation signatures, a single capital letter such as `S` is a local type variable. Use a `$` prefix for longer names, such as `$SourceSpace` or `$Kind`. An unprefixed name such as `World` is a concrete type; every type name starts with a capital letter. Variables are allowed in operation signatures, not product declarations:
 
 ```text
 operation project(sample: Frame<$Kind,$SourceSpace>, calibration: Calibration<$Kind,$SourceSpace,$TargetSpace>) -> Frame<$Kind,$TargetSpace>
