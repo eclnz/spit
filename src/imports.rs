@@ -331,16 +331,27 @@ fn parse_document_at_inner(
                 format!("import cycle through `{}`", canonical.display()),
             ));
         }
+        // A device or pipe, such as `/dev/zero`, could be read forever.
+        if !canonical.is_file() {
+            return Err(ParseError::new(
+                number,
+                format!("import `{}` is not a regular file", canonical.display()),
+            ));
+        }
         let imported_text = fs::read_to_string(&canonical).map_err(|error| {
             ParseError::new(
                 number,
                 format!("cannot read import `{}`: {error}", canonical.display()),
             )
         })?;
+        // Some editors on Windows begin a UTF-8 file with a byte order mark.
+        let imported_text = imported_text
+            .strip_prefix('\u{feff}')
+            .unwrap_or(&imported_text);
         stack.push(canonical.clone());
         // Imports bring no inventory records, so an imported file's are skipped.
         let module =
-            parse_document_at_inner(&imported_text, &canonical, stack, InlineInventory::Skip)
+            parse_document_at_inner(imported_text, &canonical, stack, InlineInventory::Skip)
                 .map_err(|error| {
                     ParseError::new(
                         number,

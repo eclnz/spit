@@ -44,7 +44,8 @@ pub(crate) fn split_document(text: &str) -> DocumentText {
                 || line.starts_with("command ")
                 || line.starts_with("verify ")
                 || line.starts_with("require ")
-                || is_stage_header(line) =>
+                || is_stage_header(line)
+                || is_step(line) =>
             {
                 inventory_section = false;
             }
@@ -66,6 +67,19 @@ pub(crate) fn split_document(text: &str) -> DocumentText {
         inventory: inventory_text,
         inventory_line,
     }
+}
+
+/// Whether `line` reads as a step, `output = operation(inputs)`, rather
+/// than a record such as `image[subject=A]` or a context `[subject=A]`.
+fn is_step(line: &str) -> bool {
+    let record = line.starts_with('[')
+        || line.find('[').is_some_and(|bracket| {
+            qualified_identifier(line[..bracket].trim(), 0, "product").is_ok()
+        });
+    !record
+        && line
+            .find('(')
+            .is_some_and(|paren| line[..paren].contains('='))
 }
 
 /// Write an inventory in the text form [`parse_source_inventory`] reads,

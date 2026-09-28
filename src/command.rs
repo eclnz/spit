@@ -25,6 +25,9 @@ pub(crate) type Argument = Vec<Part>;
 pub struct CommandTemplate {
     text: String,
     arguments: Vec<Argument>,
+    /// Unquoted words such as `|` or `>` that a shell would read as an
+    /// operator; here they are passed to the program as arguments.
+    operators: Vec<String>,
 }
 
 impl CommandTemplate {
@@ -33,14 +36,30 @@ impl CommandTemplate {
     /// whitespace; quotes and backslashes keep text in one argument.
     pub fn parse(text: impl Into<String>) -> Result<Self, CommandError> {
         let text = text.into();
-        let arguments = split_arguments(&text)?
+        let words = split_arguments(&text)?;
+        let operators = words
             .iter()
-            .map(|argument| parse_template(argument).map_err(CommandError::new))
+            .filter(|word| word.bare && is_shell_operator(&word.text))
+            .map(|word| word.text.clone())
+            .collect();
+        let arguments = words
+            .iter()
+            .map(|word| parse_template(&word.text).map_err(CommandError::new))
             .collect::<Result<Vec<_>, _>>()?;
         if arguments.is_empty() {
             return Err(CommandError::new("command template must not be empty"));
         }
-        Ok(Self { text, arguments })
+        Ok(Self {
+            text,
+            arguments,
+            operators,
+        })
+    }
+
+    /// The unquoted words a shell would read as operators, such as `|`,
+    /// `>`, or `&&`, in the order written.
+    pub fn shell_operators(&self) -> &[String] {
+        &self.operators
     }
 
     pub fn as_str(&self) -> &str {
@@ -225,26 +244,50 @@ fn check_command_placeholders(
     Ok(())
 }
 
-/// Split a template into its arguments, removing the quotes and backslashes
-/// that group or escape their text.
-fn split_arguments(template: &str) -> Result<Vec<String>, CommandError> {
+/// A word of a command, before its placeholders are parsed.
+struct Word {
+    /// The text, with `{{` and `}}` for braces that quotes or a backslash
+    /// made literal.
+    text: String,
+    /// Whether the word was written without quotes or backslashes.
+    bare: bool,
+}
+
+/// Whether `word` is a shell operator such as `|`, `&&`, `;`, `>`, or `2>&1`.
+fn is_shell_operator(word: &str) -> bool {
+    let word = word.trim_start_matches(|character: char| character.is_ascii_digit());
+    word.starts_with(['|', '&', ';', '<', '>'])
+        && word
+            .trim_end_matches(|character: char| character.is_ascii_digit() || character == '-')
+            .chars()
+            .all(|character| "|&;<>".contains(character))
+}
+
+/// Split a template into its words, removing the quotes and backslashes
+/// that group or escape their text. As in Bash, text in single quotes is
+/// literal, so a brace there is not a placeholder; nor is a brace after a
+/// backslash.
+fn split_arguments(template: &str) -> Result<Vec<Word>, CommandError> {
     let mut arguments = Vec::new();
     let mut argument = String::new();
     let mut quote = None;
     let mut started = false;
+    let mut bare = true;
+    let literal = |argument: &mut String, value: char| match value {
+        '{' => argument.push_str("{{"),
+        '}' => argument.push_str("}}"),
+        value => argument.push(value),
+    };
     let mut chars = template.chars();
     while let Some(character) = chars.next() {
         match (quote, character) {
-            (None, '\'') => {
-                quote = Some('\'');
+            (None, '\'' | '"') => {
+                quote = Some(character);
                 started = true;
-            }
-            (None, '"') => {
-                quote = Some('"');
-                started = true;
+                bare = false;
             }
             (Some('\''), '\'') | (Some('"'), '"') => quote = None,
-            (Some('\''), value) => argument.push(value),
+            (Some('\''), value) => literal(&mut argument, value),
             (_, '\\') => {
                 let escaped = chars
                     .next()
@@ -254,13 +297,18 @@ fn split_arguments(template: &str) -> Result<Vec<String>, CommandError> {
                 if quote == Some('"') && !matches!(escaped, '"' | '\\' | '$' | '`') {
                     argument.push('\\');
                 }
-                argument.push(escaped);
+                literal(&mut argument, escaped);
                 started = true;
+                bare = false;
             }
             (None, value) if value.is_whitespace() => {
                 if started {
-                    arguments.push(std::mem::take(&mut argument));
+                    arguments.push(Word {
+                        text: std::mem::take(&mut argument),
+                        bare,
+                    });
                     started = false;
+                    bare = true;
                 }
             }
             (_, value) => {
@@ -273,7 +321,10 @@ fn split_arguments(template: &str) -> Result<Vec<String>, CommandError> {
         return Err(CommandError::new("unterminated quote in command"));
     }
     if started {
-        arguments.push(argument);
+        arguments.push(Word {
+            text: argument,
+            bare,
+        });
     }
     Ok(arguments)
 }

@@ -273,9 +273,9 @@ pub struct TypeParseError {
 }
 
 impl TypeParseError {
-    fn new(span: Range<usize>, message: &str) -> Self {
+    fn new(span: Range<usize>, message: impl Into<String>) -> Self {
         Self {
-            message: message.to_owned(),
+            message: message.into(),
             span,
         }
     }
@@ -372,6 +372,13 @@ impl Parser<'_> {
             return Err(TypeParseError::new(token, "expected type name"));
         }
         let name = &self.text[name_start..self.offset];
+        // Types are capitalised, which keeps them apart from port names.
+        if !explicit_variable && !name.starts_with(|c: char| c.is_ascii_uppercase()) {
+            return Err(TypeParseError::new(
+                token,
+                format!("type `{name}` must start with a capital letter"),
+            ));
+        }
         if explicit_variable {
             if self.take(b'<') {
                 return Err(TypeParseError::new(
