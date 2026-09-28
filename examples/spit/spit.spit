@@ -1,0 +1,83 @@
+# SPIT in SPIT: how data flows through the `spit` compiler, written as a
+# SPIT pipeline. Each artifact is one example pipeline in this repository,
+# identified by its folder (`group`) and file name (`name`), so the
+# inventory is the repository's own examples, this file among them.
+#
+# The products are the values `src/main.rs` passes from one function to the
+# next, typed by the Rust types that carry them. Most live only in memory,
+# so this pipeline declares no commands: `check` and `dag` show the flow,
+# and `--root .` checks that the example files really exist.
+#
+#   cargo run -- dag examples/spit/spit.spit --sources examples/spit/spit.sources
+#   cargo run -- check examples/spit/spit.spit --sources examples/spit/spit.sources --root .
+
+# The two texts a user hands to the CLI: the pipeline file, and the separate
+# inventory given with `--sources`. (`--root` without `--sources` builds the
+# inventory text by `discover_sources` instead; imports named by `use` lines
+# are read while parsing.)
+source pipeline_text : Text<Pipeline> [group, name]
+path pipeline_text: examples/{group}/{name}.spit
+source inventory_text : Text<Inventory> [group, name]
+path inventory_text: examples/{group}/{name}.sources
+
+# Where each value would sit if it were written out, one folder per stage.
+path: target/spit/{stage}/{product}/{entities}.txt
+
+require pipeline_text count=1 per [group, name]
+require inventory_text count=1 per [group, name]
+
+stage read:
+    # `diagnose_at` reports every error and warning before any work is
+    # done; `spit check --json` prints exactly this for the editor.
+    operation diagnose_at(pipeline: Text<Pipeline>, inventory: Text<Inventory>) -> Diagnostics
+    diagnostics = diagnose_at(pipeline_text, inventory_text)
+
+    # Parsing runs only once the diagnostics hold no error, so each parse
+    # reads them. Both syntaxes, flow and sectioned, lower to one `Pipeline`.
+    operation parse_pipeline_at(text: Text<Pipeline>, clear: Diagnostics) -> Pipeline
+    pipeline = parse_pipeline_at(pipeline_text, diagnostics)
+
+    operation parse_source_inventory(text: Text<Inventory>, clear: Diagnostics) -> SourceInventory
+    inventory = parse_source_inventory(inventory_text, diagnostics)
+
+stage resolve:
+    # Path rules are checked from the pipeline alone, before any job exists.
+    operation inspect_paths(pipeline: Pipeline) -> PathCoverage
+    coverage = inspect_paths(pipeline)
+
+    # The core: match the inventory's artifacts to each step's ports and
+    # enumerate the jobs. `resolve` stops at the first incomplete job;
+    # `resolve_artifacts` keeps going and reports every gap.
+    operation resolve(pipeline: Pipeline, inventory: SourceInventory) -> ResolvedDag
+    dag = resolve(pipeline, inventory)
+
+    operation resolve_artifacts(pipeline: Pipeline, inventory: SourceInventory) -> ArtifactReport
+    report = resolve_artifacts(pipeline, inventory)
+
+stage render:
+    # Every text the CLI prints is rendered from the logical DAG; paths are
+    # bound only here, at the edge, never during resolution.
+    operation render_dag(dag: ResolvedDag) -> Text<Dag>
+    dag_text = render_dag(dag)
+
+    operation render_bound_dag(pipeline: Pipeline, dag: ResolvedDag) -> Text<BoundDag>
+    bound_dag_text = render_bound_dag(pipeline, dag)
+
+    operation render_bash(pipeline: Pipeline, dag: ResolvedDag) -> Text<Bash>
+    script = render_bash(pipeline, dag)
+
+    # `check --paths` prints which rule covers each product.
+    operation show_coverage(coverage: PathCoverage) -> Text<PathCoverage>
+    coverage_text = show_coverage(coverage)
+
+    operation render_artifacts(report: ArtifactReport) -> Text<Artifacts>
+    artifacts_text = render_artifacts(report)
+
+stage test:
+    # `tests/examples.rs` requires every example to diagnose clean: first
+    # within each folder, then across the whole repository.
+    operation folder_clean(examples: many Diagnostics) -> Verdict @ drop(name)
+    folder_verdict = folder_clean(diagnostics @ vary(name))
+
+    operation examples_clean(folders: many Verdict) -> Verdict @ drop(group)
+    examples_verdict = examples_clean(folder_verdict @ vary(group))

@@ -1,0 +1,17 @@
+# The repository's examples that keep a separate inventory, this one
+# included. Names with `_` are left out: a path writes `_` as `%5F`.
+sources:
+    pipeline_text[group=basic,name=basic]
+    inventory_text[group=basic,name=basic]
+    pipeline_text[group=pipelines,name=selectors]
+    inventory_text[group=pipelines,name=selectors]
+    pipeline_text[group=spit,name=spit]
+    inventory_text[group=spit,name=spit]
+    pipeline_text[group=stages,name=nested]
+    inventory_text[group=stages,name=nested]
+    pipeline_text[group=stages,name=stages]
+    inventory_text[group=stages,name=stages]
+    pipeline_text[group=stress,name=observatory]
+    inventory_text[group=stress,name=observatory]
+    pipeline_text[group=types,name=typed]
+    inventory_text[group=types,name=typed]
