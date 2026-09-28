@@ -1,3 +1,4 @@
 /target/
+/examples/self_host/build/
 
 *.afphoto
