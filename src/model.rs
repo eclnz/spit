@@ -3,6 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use crate::error::ResolveError;
+use crate::paths::PathTemplate;
 use crate::types::TypeExpr;
 
 pub type ArtifactType = TypeExpr;
@@ -221,6 +222,49 @@ impl OutputPort {
 /// The port name of an operation's only, unnamed output.
 pub const DEFAULT_OUTPUT: &str = "output";
 
+/// A placeholder a command has without its operation naming the port.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DefaultPort {
+    /// `{output}`: an operation's only, unnamed output.
+    Output,
+    /// `{input}`: an operation's only input, when unnamed.
+    Input,
+    /// `{input1}`, `{input2}`, ...: the unnamed inputs of an operation with
+    /// several, numbered from 1.
+    InputAt(usize),
+    /// `{inputs}`: an operation's only input when that is a many input,
+    /// whatever its name.
+    Inputs,
+}
+
+impl DefaultPort {
+    /// The name SPIT gives the unnamed input at `index` of `count` inputs.
+    pub fn for_input(index: usize, count: usize) -> Self {
+        if count == 1 {
+            Self::Input
+        } else {
+            Self::InputAt(index + 1)
+        }
+    }
+
+    /// The name between the braces.
+    pub fn name(self) -> String {
+        match self {
+            Self::Output => DEFAULT_OUTPUT.to_owned(),
+            Self::Input => "input".to_owned(),
+            Self::InputAt(number) => format!("input{number}"),
+            Self::Inputs => "inputs".to_owned(),
+        }
+    }
+}
+
+/// Reads as the placeholder is written, such as `{input2}`.
+impl fmt::Display for DefaultPort {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{{{}}}", self.name())
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct OperationDef {
     pub name: String,
@@ -426,7 +470,7 @@ pub struct StageDef {
     pub name: String,
     /// The default path rule for the products of this stage and the stages
     /// nested in it that set none, in place of the pipeline's default.
-    pub path_template: Option<String>,
+    pub path_template: Option<PathTemplate>,
 }
 
 impl StageDef {
@@ -445,8 +489,8 @@ pub struct Pipeline {
     pub invocations: Vec<Invocation>,
     pub constraints: Vec<CoverageRule>,
     pub commands: Vec<CommandDef>,
-    pub path_template: Option<String>,
-    pub product_paths: BTreeMap<String, String>,
+    pub path_template: Option<PathTemplate>,
+    pub product_paths: BTreeMap<String, PathTemplate>,
     /// Stages in declaration order.
     pub stages: Vec<StageDef>,
 }
@@ -463,7 +507,7 @@ impl Pipeline {
 
     /// The path template `product` uses: its own rule, else its stage's
     /// default, else the pipeline's default.
-    pub fn path_template_for(&self, product: &str) -> Option<&String> {
+    pub fn path_template_for(&self, product: &str) -> Option<&PathTemplate> {
         self.product_paths
             .get(product)
             .or_else(|| self.stage_path_template(product))
@@ -472,7 +516,7 @@ impl Pipeline {
 
     /// The default path rule of the stage that produces `product`, or of the
     /// nearest stage around it that sets one, with the stage that sets it.
-    pub fn stage_path_rule(&self, product: &str) -> Option<(&str, &String)> {
+    pub fn stage_path_rule(&self, product: &str) -> Option<(&str, &PathTemplate)> {
         let stage = self.stage_of(product)?;
         stage_and_parents(stage).find_map(|name| {
             self.stages
@@ -482,7 +526,7 @@ impl Pipeline {
         })
     }
 
-    pub fn stage_path_template(&self, product: &str) -> Option<&String> {
+    pub fn stage_path_template(&self, product: &str) -> Option<&PathTemplate> {
         self.stage_path_rule(product).map(|(_, template)| template)
     }
 }

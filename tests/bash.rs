@@ -5,7 +5,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use spit::{
     inspect_paths, parse_document, parse_pipeline, parse_source_inventory, render_bash,
-    render_bound_dag, resolve, validate_commands, PathRule,
+    render_bound_dag, resolve, validate_commands, PathRule, PathTemplate,
 };
 
 fn demo_script() -> String {
@@ -84,7 +84,7 @@ fn backend_rejects_undeclared_placeholders_and_path_collisions() {
         .contains("unknown placeholder"));
 
     pipeline.commands[0].template = "sort -o {output} {input}".to_owned();
-    pipeline.path_template = Some("same.txt".to_owned());
+    pipeline.path_template = Some(PathTemplate::parse("same.txt").unwrap());
     pipeline.product_paths.clear();
     assert!(render_bash(&pipeline, &dag)
         .unwrap_err()
@@ -223,17 +223,19 @@ fn path_coverage_catches_missing_and_invalid_rules_without_jobs() {
     assert_eq!(coverage.entries[0].rule, PathRule::Missing);
     assert!(coverage.validate(false).is_err());
 
-    pipeline
-        .product_paths
-        .insert("unused".to_owned(), "input/{id}/{missing}.txt".to_owned());
+    pipeline.product_paths.insert(
+        "unused".to_owned(),
+        PathTemplate::parse("input/{id}/{missing}.txt").unwrap(),
+    );
     assert!(inspect_paths(&pipeline)
         .unwrap_err()
         .to_string()
         .contains("absent dimension"));
 
-    pipeline
-        .product_paths
-        .insert("unused".to_owned(), "input/{id}.txt".to_owned());
+    pipeline.product_paths.insert(
+        "unused".to_owned(),
+        PathTemplate::parse("input/{id}.txt").unwrap(),
+    );
     inspect_paths(&pipeline).unwrap().validate(true).unwrap();
 }
 

@@ -486,7 +486,7 @@ fn check_product(product: &ProductDef) -> Result<(), ResolveError> {
     if let Some(dimension) = product
         .dimensions
         .iter()
-        .find(|dimension| PathPlaceholder::is_reserved(dimension))
+        .find(|dimension| PathPlaceholder::reserved(dimension).is_some())
     {
         return Err(ResolveError::InvalidDefinition {
             subject: DefinitionSubject::Product(product.name.clone()),
