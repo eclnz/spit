@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::ops::Range;
 
-use crate::bash::CommandTemplate;
+use crate::command::CommandTemplate;
 use crate::imports::apply_import;
 use crate::model::{
     Cardinality, CommandDef, CommandRole, CountRequirement, CoverageRule, DefaultPort,

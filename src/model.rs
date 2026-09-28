@@ -2,7 +2,7 @@ use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
-use crate::bash::CommandTemplate;
+use crate::command::CommandTemplate;
 use crate::error::ResolveError;
 use crate::paths::PathTemplate;
 use crate::types::TypeExpr;
