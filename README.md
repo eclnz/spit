@@ -192,18 +192,18 @@ anomaly = compare(calibrated, reference @ same(station))
 `each` does the reverse of `vary`: it broadcasts an input over a dimension the driving input lacks, so the step runs once for every value and its outputs gain that dimension:
 
 ```text
-source tracks : Tracks [subject]
-source parcels : Labels [atlas]
-source lut : LookupTable [atlas]
+source reading : Series [station]
+source model : Model [scenario]
+source parameters : Parameters [scenario]
 
-connectome = connect(tracks, parcels @ each(atlas), lut)
+forecast = predict(reading, model @ each(scenario), parameters)
 ```
 
-With two subjects and two atlases, this makes four `connectome[subject=...,atlas=...]` jobs. The values come from the artifacts of the broadcast input, so adding an atlas to the inventory adds its jobs. Other inputs are matched on the new dimension as usual; here `lut` supplies the table for each atlas. Only one input may broadcast a given dimension, and the driving input must not already have it. `each` pairs with `vary`, so a sweep can be collected again:
+With two stations and two scenarios, this makes four `forecast[station=...,scenario=...]` jobs. The values come from the artifacts of the broadcast input, so adding a scenario to the inventory adds its jobs. Other inputs are matched on the new dimension as usual; here `parameters` supplies the settings for each scenario. Only one input may broadcast a given dimension, and the driving input must not already have it. `each` pairs with `vary`, so a sweep can be collected again:
 
 ```text
-tracked = track(tracks, seed @ each(rep))
-averaged = average(tracked @ vary(rep))
+trial = simulate(reading, seed @ each(rep))
+summary = average(trial @ vary(rep))
 ```
 
 An operation can write several outputs in one job. Name each output; its name is its placeholder, and the call assigns one product to each:
