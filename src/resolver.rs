@@ -831,8 +831,10 @@ struct StepShape {
     /// The binding that drives the step: one job per artifact of a preserve
     /// step's driver, or per group of an aggregate step's many input.
     driver: usize,
-    /// The dimensions every output takes: each job's context.
-    context: Vec<String>,
+    /// The dimensions the driver groups its artifacts by. Each job's context,
+    /// which every output takes, adds any an input broadcasts with
+    /// `@ each(...)`.
+    groups: Vec<String>,
     /// For each binding, the dimensions it is matched to the context on.
     joins: Vec<Vec<String>>,
 }
@@ -846,32 +848,62 @@ pub(crate) struct BoundInput<'a> {
 }
 
 impl BoundInput<'_> {
-    /// The dimensions this input is matched on when it does not drive.
+    /// The dimensions this input is matched on when it does not drive,
+    /// including any it broadcasts.
     fn joins(&self) -> Vec<String> {
-        self.binding
-            .same
-            .clone()
-            .unwrap_or_else(|| self.dimensions.clone())
+        match &self.binding.same {
+            Some(same) => {
+                let mut joins = same.clone();
+                joins.extend(
+                    self.binding
+                        .each
+                        .iter()
+                        .filter(|dimension| !same.contains(dimension))
+                        .cloned(),
+                );
+                joins
+            }
+            None => self.dimensions.clone(),
+        }
+    }
+
+    /// Whether this input may drive a step: one matched on fewer dimensions
+    /// or broadcast over some cannot.
+    fn can_drive(&self) -> bool {
+        self.binding.same.is_none() && self.binding.each.is_empty()
     }
 }
 
-/// The driving input and the dimensions of a step's outputs, or `None`
-/// when no single-artifact input has every dimension the others match on.
-/// The driver is the input with the most dimensions, so the order of an
-/// operation's ports never changes which jobs exist.
-pub(crate) fn step_context(inputs: &[BoundInput<'_>]) -> Option<(usize, Vec<String>)> {
+/// The dimensions the inputs broadcast with `@ each(...)`, in port order.
+fn broadcast_dimensions(inputs: &[BoundInput<'_>]) -> Vec<String> {
+    let mut dimensions: Vec<String> = Vec::new();
+    for dimension in inputs.iter().flat_map(|input| &input.binding.each) {
+        if !dimensions.contains(dimension) {
+            dimensions.push(dimension.clone());
+        }
+    }
+    dimensions
+}
+
+/// The driving input and the dimensions it groups by, or `None` when no
+/// single-artifact input has every dimension the others match on besides
+/// those broadcast. The driver is the input with the most dimensions, so the
+/// order of an operation's ports never changes which jobs exist.
+fn step_driver(inputs: &[BoundInput<'_>]) -> Option<(usize, Vec<String>)> {
     if let Some(index) = inputs.iter().position(|input| input.many) {
         let vary = inputs[index].binding.vary.as_deref();
-        let context = inputs[index]
+        let groups = inputs[index]
             .dimensions
             .iter()
             .filter(|dimension| Some(dimension.as_str()) != vary)
             .cloned()
             .collect();
-        return Some((index, context));
+        return Some((index, groups));
     }
+    let broadcast = broadcast_dimensions(inputs);
     let covers = |index: usize| {
-        let dimensions = dimension_set(&inputs[index].dimensions);
+        let mut dimensions = dimension_set(&inputs[index].dimensions);
+        dimensions.extend(broadcast.iter().cloned());
         inputs
             .iter()
             .enumerate()
@@ -879,9 +911,21 @@ pub(crate) fn step_context(inputs: &[BoundInput<'_>]) -> Option<(usize, Vec<Stri
             .all(|(_, input)| dimension_set(&input.joins()).is_subset(&dimensions))
     };
     let index = (0..inputs.len())
-        .filter(|index| inputs[*index].binding.same.is_none() && covers(*index))
+        .filter(|index| inputs[*index].can_drive() && covers(*index))
         .min_by_key(|index| (Reverse(inputs[*index].dimensions.len()), *index))?;
     Some((index, inputs[index].dimensions.clone()))
+}
+
+/// The driving input and the dimensions of a step's outputs: the driver's
+/// groups, then any dimensions broadcast by another input.
+pub(crate) fn step_context(inputs: &[BoundInput<'_>]) -> Option<(usize, Vec<String>)> {
+    let (driver, mut context) = step_driver(inputs)?;
+    for dimension in broadcast_dimensions(inputs) {
+        if !context.contains(&dimension) {
+            context.push(dimension);
+        }
+    }
+    Some((driver, context))
 }
 
 fn validate_invocation(
@@ -1017,9 +1061,11 @@ fn step_shape(
             }
         }
     }
-    let Some((driver, context)) = step_context(&inputs) else {
+    let Some((driver, groups)) = step_driver(&inputs) else {
         return Err(no_driver(operation, &inputs));
     };
+    check_broadcasts(operation, &inputs, driver, &groups)?;
+    let (_, context) = step_context(&inputs).expect("the step has a driver");
     if let Some(dimension) = &inputs[driver].binding.vary {
         if let Some(declared) = &operation.aggregated_dimension {
             if declared != dimension {
@@ -1037,7 +1083,7 @@ fn step_shape(
                 return Err(unsupported(
                     operation,
                     format!(
-                        "input `{}` has dimensions absent from the groups of `{}` @ vary({dimension}): {}; aggregate them first, pin them with `@ where(...)`, or match on fewer with `@ same(...)`",
+                        "input `{}` has dimensions absent from the groups of `{}` @ vary({dimension}): {}; aggregate them first, pin them with `@ where(...)`, match on fewer with `@ same(...)`, or broadcast them with `@ each(...)`",
                         input.binding.product,
                         inputs[driver].binding.product,
                         extra.join(", ")
@@ -1050,9 +1096,20 @@ fn step_shape(
     for output in outputs {
         if dimension_set(&output.dimensions) != expected {
             let detail = match &inputs[driver].binding.vary {
+                Some(dimension) if context.len() > groups.len() => format!(
+                    "output `{}` must have input dimensions minus `{dimension}`, plus those broadcast with `@ each(...)`: [{}]",
+                    output.name,
+                    context.join(", ")
+                ),
                 Some(dimension) => format!(
                     "output `{}` must have input dimensions minus `{dimension}`",
                     output.name
+                ),
+                None if context.len() > groups.len() => format!(
+                    "output `{}` must have the dimensions of driving product `{}` and those broadcast with `@ each(...)`: [{}]",
+                    output.name,
+                    inputs[driver].binding.product,
+                    context.join(", ")
                 ),
                 None => format!(
                     "output `{}` must have the dimensions of driving product `{}`: [{}]",
@@ -1077,9 +1134,57 @@ fn step_shape(
         .collect();
     Ok(StepShape {
         driver,
-        context,
+        groups,
         joins,
     })
+}
+
+/// Check that each dimension an input broadcasts is new to the step: the
+/// driver does not already have it, and no other input broadcasts it too.
+fn check_broadcasts(
+    operation: &OperationDef,
+    inputs: &[BoundInput<'_>],
+    driver: usize,
+    groups: &[String],
+) -> Result<(), ResolveError> {
+    let mut broadcast: BTreeMap<&str, &str> = BTreeMap::new();
+    for input in inputs {
+        let product = input.binding.product.as_str();
+        for dimension in &input.binding.each {
+            if let Some(varied) = inputs[driver]
+                .binding
+                .vary
+                .as_ref()
+                .filter(|varied| *varied == dimension)
+            {
+                return Err(unsupported(
+                    operation,
+                    format!(
+                        "`@ each({dimension})` on `{product}` would restore the dimension `{}` @ vary({varied}) collects",
+                        inputs[driver].binding.product
+                    ),
+                ));
+            }
+            if groups.contains(dimension) {
+                return Err(unsupported(
+                    operation,
+                    format!(
+                        "`@ each({dimension})` on `{product}`: driving product `{}` already has `{dimension}`, so it is matched without `@ each`",
+                        inputs[driver].binding.product
+                    ),
+                ));
+            }
+            if let Some(first) = broadcast.insert(dimension, product) {
+                return Err(unsupported(
+                    operation,
+                    format!(
+                        "`{first}` and `{product}` both broadcast `{dimension}`; keep `@ each({dimension})` on one and the other is matched on it"
+                    ),
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 fn check_selectors(
@@ -1118,6 +1223,12 @@ fn check_selectors(
                     port.name
                 )));
             }
+            if !binding.each.is_empty() {
+                return Err(selector_error(format!(
+                    "`@ each(...)` applies to single-artifact inputs, not many input `{}`",
+                    port.name
+                )));
+            }
         }
         Cardinality::One => {
             if binding.vary.is_some() {
@@ -1140,6 +1251,16 @@ fn check_selectors(
                     )));
                 }
             }
+            if let Some(dimension) = binding
+                .each
+                .iter()
+                .find(|dimension| !free.contains(*dimension))
+            {
+                return Err(selector_error(format!(
+                    "`@ each({dimension})`: product `{}` has no unpinned dimension `{dimension}`",
+                    product.name
+                )));
+            }
         }
     }
     Ok(())
@@ -1149,15 +1270,16 @@ fn check_selectors(
 /// dimensions lacks some that another input is matched on.
 fn no_driver(operation: &OperationDef, inputs: &[BoundInput<'_>]) -> ResolveError {
     let Some(driver) = (0..inputs.len())
-        .filter(|index| inputs[*index].binding.same.is_none())
+        .filter(|index| inputs[*index].can_drive())
         .min_by_key(|index| (Reverse(inputs[*index].dimensions.len()), *index))
     else {
         return unsupported(
             operation,
-            "every input uses `@ same(...)`, so none can drive the step",
+            "every input uses `@ same(...)` or `@ each(...)`, so none can drive the step",
         );
     };
-    let dimensions = dimension_set(&inputs[driver].dimensions);
+    let mut dimensions = dimension_set(&inputs[driver].dimensions);
+    dimensions.extend(broadcast_dimensions(inputs));
     let (input, extra) = inputs
         .iter()
         .enumerate()
@@ -1168,7 +1290,7 @@ fn no_driver(operation: &OperationDef, inputs: &[BoundInput<'_>]) -> ResolveErro
     unsupported(
         operation,
         format!(
-            "input `{}` has dimensions absent from driving product `{}`: {}; aggregate them first, pin them with `@ where(...)`, or match on fewer with `@ same(...)`",
+            "input `{}` has dimensions absent from driving product `{}`: {}; aggregate them first, pin them with `@ where(...)`, match on fewer with `@ same(...)`, or broadcast them with `@ each(...)`",
             input.binding.product,
             inputs[driver].binding.product,
             extra.join(", ")
@@ -1327,7 +1449,7 @@ fn expand_step(
     for artifact in &candidates[shape.driver] {
         let context = artifact
             .entities
-            .project(&shape.context)
+            .project(&shape.groups)
             .expect("an artifact binds every dimension of its product");
         let index = *group_index.entry(context.clone()).or_insert_with(|| {
             groups.push((context, Vec::new()));
@@ -1335,9 +1457,17 @@ fn expand_step(
         });
         groups[index].1.push((*artifact).clone());
     }
+    let contexts = broadcast_contexts(invocation, &candidates);
     let driving_port = &operation.inputs[shape.driver];
     let mut expansions = Vec::new();
-    for (context, driven) in groups {
+    let jobs = groups.into_iter().flat_map(|(group, driven)| {
+        contexts.iter().map(move |values| {
+            let mut context = group.clone();
+            context.0.extend(values.0.clone());
+            (context, driven.clone())
+        })
+    });
+    for (context, driven) in jobs {
         let mut gaps = Vec::new();
         if let Some(minimum) = operation.minimum_collection {
             if driven.len() < minimum {
@@ -1416,6 +1546,42 @@ fn expand_step(
         });
     }
     expansions
+}
+
+/// Every combination of the values the inputs broadcast with `@ each(...)`:
+/// for each such input, the values present in its product, in natural order.
+/// A step without broadcasts has one empty combination.
+fn broadcast_contexts(
+    invocation: &Invocation,
+    candidates: &[Vec<&ArtifactInstance>],
+) -> Vec<EntityBinding> {
+    let mut contexts = vec![EntityBinding::default()];
+    for (binding, candidates) in invocation.inputs.iter().zip(candidates) {
+        if binding.each.is_empty() {
+            continue;
+        }
+        let mut values: Vec<EntityBinding> = Vec::new();
+        for candidate in candidates {
+            let value = candidate
+                .entities
+                .project(&binding.each)
+                .expect("an artifact binds every dimension of its product");
+            if !values.contains(&value) {
+                values.push(value);
+            }
+        }
+        contexts = contexts
+            .iter()
+            .flat_map(|context| {
+                values.iter().map(move |value| {
+                    let mut combined = context.clone();
+                    combined.0.extend(value.0.clone());
+                    combined
+                })
+            })
+            .collect();
+    }
+    contexts
 }
 
 fn make_job(
