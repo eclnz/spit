@@ -37,6 +37,22 @@ fn reports_independent_syntax_errors_across_a_pipeline() {
 }
 
 #[test]
+fn an_error_that_closes_a_stage_is_reported_alone() {
+    // The unindented `path:` ends stage `outer`, which would leave the
+    // indented stage header after it outside every stage. Only the first
+    // error is real: without that line, the header is where it belongs.
+    let text = "path: {product}.txt\nsource raw : Table [id]\noperation copy(Table) -> Table\nstage outer:\n    stage first:\n        a = copy(raw)\npath: {product}.csv\n    stage second:\n        b = copy(a)\n";
+    let issues = errors(diagnose(text, None));
+    assert_eq!(
+        issues
+            .iter()
+            .map(|issue| (issue.line, issue.message.as_str()))
+            .collect::<Vec<_>>(),
+        [(Some(7), "duplicate default path template")]
+    );
+}
+
+#[test]
 fn reports_pipeline_and_inventory_syntax_errors_together() {
     let pipeline = "source raw [id]\nthis is invalid\n";
     let inventory = "sources:\n  raw[id=x,id=y]\n  raw[id=a,id=b]\n";
