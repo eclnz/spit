@@ -8,7 +8,7 @@ use std::path::Path;
 use crate::bash::collect_commands;
 use crate::imports::parse_located_document;
 use crate::model::DEFAULT_OUTPUT;
-use crate::model::{CommandRole, Job, SourceInventory};
+use crate::model::{stage_within, CommandRole, Job, SourceInventory};
 use crate::parser::{
     glued_comment, parse_document_with_imports, InlineInventory, ParsedDocument, Rule, SourceMap,
     Step,
@@ -428,6 +428,7 @@ fn subject_place(
         // A rule's own errors concern its product: unknown, or not a source.
         DefinitionSubject::Constraint(index) => lines.rules.get(*index).map(Rule::product),
         DefinitionSubject::ConstraintGroup(index) => lines.rules.get(*index).map(Rule::dimensions),
+        DefinitionSubject::Stage(name) => lines.stages.get(name).cloned(),
         DefinitionSubject::Source(_) | DefinitionSubject::None => None,
     }
 }
@@ -550,6 +551,22 @@ fn warnings(pipeline: &Pipeline, lines: &SourceMap, skip: &BTreeSet<String>) -> 
 
     let library = pipeline.invocations.is_empty();
     let mut warnings = Vec::new();
+    // A library may group its operations in stages that hold no steps.
+    for stage in pipeline.stages.iter().filter(|_| !library) {
+        let name = stage.name.as_str();
+        // A stage whose steps all sit in stages nested in it is not empty.
+        if !pipeline.invocations.iter().any(|invocation| {
+            invocation
+                .stage
+                .as_deref()
+                .is_some_and(|stage| stage_within(stage, name))
+        }) {
+            warnings.push(warn(
+                lines.stages.get(name).cloned(),
+                format!("stage `{name}` has no steps"),
+            ));
+        }
+    }
     for product in &pipeline.products {
         let name = product.name.as_str();
         if library || skip.contains(name) || lines.imported.contains(name) {

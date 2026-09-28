@@ -245,3 +245,19 @@ fn an_operation_imports_with_its_command_and_verifications() {
     let bash = render_bash(&pipeline, &resolve(&pipeline, &inventory.unwrap()).unwrap()).unwrap();
     assert!(bash.contains("spit_verify 1 'check_table'"), "{bash}");
 }
+
+#[test]
+fn an_imported_path_keeps_escaped_braces() {
+    let dir = TestDir::new();
+    dir.write(
+        "base.spit",
+        "path: input/{{product}}/{product}/{id}.txt\nsource raw [id]\n",
+    );
+    let main = dir.write("main.spit", "use raw from base.spit as lib\n");
+    let (pipeline, _) = parse_document_at(&fs::read_to_string(&main).unwrap(), &main).unwrap();
+    // Only the placeholder takes the product's name; the escaped braces stay literal.
+    assert_eq!(
+        pipeline.product_paths["lib::raw"],
+        "input/{{product}}/raw/{id}.txt"
+    );
+}

@@ -1,0 +1,28 @@
+# Nested stages: each stage in `preprocess` is compared only with its siblings.
+path: {stage}/{product}/{entities}.txt
+
+source shard : Lines [group, part]
+path shard: input/{group}/{part}.txt
+require shard count>=1 per [group]
+
+operation sort_lines(input: Lines) -> Lines
+command sort_lines: sort -u -o {output} {input}
+
+stage preprocess:
+    stage clean:
+        sorted = sort_lines(shard)
+
+    stage combine:
+        operation merge(items: many Lines) -> Lines @ drop(part)
+        command merge: sort -m -u -o {output} {items}
+        merged = merge(sorted @ vary(part))
+
+    # Written in `preprocess` itself, after its nested stages.
+    resorted = sort_lines(merged)
+
+stage analysis:
+    path: results/{product}/{entities}.txt
+
+    operation tally_lines(input: Lines) -> Tally
+    command tally_lines: uniq -c {input} {output}
+    tally = tally_lines(resorted)

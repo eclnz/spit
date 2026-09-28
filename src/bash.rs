@@ -6,7 +6,7 @@ use std::ops::Range;
 use std::path::Path;
 
 use crate::model::{
-    ArtifactKey, Cardinality, CommandRole, Job, OperationDef, Pipeline, ResolvedDag,
+    ArtifactKey, Cardinality, CommandRole, DefaultPort, Job, OperationDef, Pipeline, ResolvedDag,
 };
 use crate::parser::SourceMap;
 use crate::paths::{bound_paths, inspect_paths, output_keys, PathError};
@@ -117,7 +117,15 @@ pub fn render_bash(pipeline: &Pipeline, dag: &ResolvedDag) -> Result<String, Bas
     if paths.keys().any(|identity| !outputs.contains(identity)) {
         script.push('\n');
     }
+    let mut stage = None;
     for job in &dag.jobs {
+        if job.stage.as_deref() != stage {
+            stage = job.stage.as_deref();
+            match stage {
+                Some(name) => writeln!(script, "# ===== Stage: {name} =====\n").unwrap(),
+                None => writeln!(script, "# ===== Outside stages =====\n").unwrap(),
+            }
+        }
         let operation = operations.get(job.operation.as_str()).ok_or_else(|| {
             error(format!(
                 "unknown operation `{}` in resolved DAG",
@@ -244,16 +252,56 @@ pub(crate) fn collect_commands(
     errors
 }
 
-/// Check quoting and placeholder brackets in a command template.
-pub(crate) fn check_command_syntax(template: &str) -> Result<(), BashError> {
-    let words = split_words(template)?;
-    if words.is_empty() {
-        return Err(error("command template must not be empty"));
+/// A command's template, split into words and parsed once when the
+/// command is read.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CommandTemplate {
+    text: String,
+    /// Each word as Bash splits and unquotes it, then its literal text and
+    /// `{placeholders}`.
+    words: Vec<Vec<Part>>,
+}
+
+impl CommandTemplate {
+    /// Split and parse a template such as `sort -o {output} {input}`,
+    /// checking its quotes and braces.
+    pub fn parse(text: impl Into<String>) -> Result<Self, BashError> {
+        let text = text.into();
+        let words = split_words(&text)?
+            .iter()
+            .map(|word| parse_template(word).map_err(error))
+            .collect::<Result<Vec<_>, _>>()?;
+        if words.is_empty() {
+            return Err(error("command template must not be empty"));
+        }
+        Ok(Self { text, words })
     }
-    for word in words {
-        parse_template(&word).map_err(error)?;
+
+    pub fn as_str(&self) -> &str {
+        &self.text
     }
-    Ok(())
+
+    fn words(&self) -> &[Vec<Part>] {
+        &self.words
+    }
+}
+
+impl fmt::Display for CommandTemplate {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.text)
+    }
+}
+
+impl PartialEq<str> for CommandTemplate {
+    fn eq(&self, other: &str) -> bool {
+        self.text == other
+    }
+}
+
+impl PartialEq<&str> for CommandTemplate {
+    fn eq(&self, other: &&str) -> bool {
+        self.text == *other
+    }
 }
 
 /// What a placeholder in a command refers to.
@@ -269,22 +317,21 @@ fn slot(operation: &OperationDef, name: &str) -> Option<Slot> {
     if let Some(index) = operation.outputs.iter().position(|port| port.name == name) {
         return Some(Slot::Output(index));
     }
-    // `{inputs}` names an operation's only input when that is a many input.
     match operation.inputs.as_slice() {
-        [port] if port.cardinality == Cardinality::Many && name == "inputs" => Some(Slot::Input(0)),
+        [port] if port.cardinality == Cardinality::Many && name == DefaultPort::Inputs.name() => {
+            Some(Slot::Input(0))
+        }
         _ => None,
     }
 }
 
 fn check_command_placeholders(
-    template: &str,
+    template: &CommandTemplate,
     operation: &OperationDef,
     role: CommandRole,
 ) -> Result<(), BashError> {
-    check_command_syntax(template)?;
     let mut written = BTreeSet::new();
-    for word in split_words(template)? {
-        let parts = parse_template(&word).map_err(error)?;
+    for parts in template.words() {
         let whole = parts.len() == 1;
         for part in parts {
             let Part::Placeholder(name) = part else {
@@ -297,7 +344,7 @@ fn check_command_placeholders(
                 ))
                 .focus(format!("{{{name}}}"))
             };
-            match slot(operation, &name).ok_or_else(unknown)? {
+            match slot(operation, name).ok_or_else(unknown)? {
                 Slot::Output(index) => {
                     if role == CommandRole::Verify {
                         return Err(error(format!(
@@ -337,18 +384,13 @@ fn check_command_placeholders(
 }
 
 fn render_command(
-    template: &str,
+    template: &CommandTemplate,
     operation: &OperationDef,
     job: &Job,
     paths: &BTreeMap<ArtifactKey, String>,
 ) -> Result<String, BashError> {
-    let words = split_words(template)?;
-    if words.is_empty() {
-        return Err(error(format!("command for `{}` is empty", operation.name)));
-    }
     let mut args = Vec::new();
-    for word in words {
-        let parts = parse_template(&word).map_err(error)?;
+    for parts in template.words() {
         if let [Part::Placeholder(name)] = parts.as_slice() {
             if let Some(Slot::Input(index)) = slot(operation, name) {
                 if operation.inputs[index].cardinality == Cardinality::Many {
@@ -362,9 +404,9 @@ fn render_command(
         let mut arg = String::new();
         for part in parts {
             match part {
-                Part::Literal(value) => arg.push_str(&shell_quote(&value)),
+                Part::Literal(value) => arg.push_str(&shell_quote(value)),
                 Part::Placeholder(name) => {
-                    let artifact = match slot(operation, &name) {
+                    let artifact = match slot(operation, name) {
                         Some(Slot::Output(index)) => job.outputs.get(index),
                         Some(Slot::Input(index)) => {
                             if operation.inputs[index].cardinality == Cardinality::Many {

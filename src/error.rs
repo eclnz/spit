@@ -15,6 +15,8 @@ pub enum DefinitionSubject {
     /// The dimensions a coverage rule groups by, by the rule's index.
     ConstraintGroup(usize),
     Source(SourceRecord),
+    /// A stage, by name.
+    Stage(String),
     None,
 }
 

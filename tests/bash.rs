@@ -5,7 +5,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use spit::{
     inspect_paths, parse_document, parse_pipeline, parse_source_inventory, render_bash,
-    render_bound_dag, resolve, validate_commands, PathRule,
+    render_bound_dag, resolve, validate_commands, CommandTemplate, PathRule, PathTemplate,
 };
 
 fn demo_script() -> String {
@@ -77,14 +77,14 @@ fn backend_rejects_undeclared_placeholders_and_path_collisions() {
         parse_source_inventory(include_str!("../examples/commands/bash_demo.sources")).unwrap();
     let dag = resolve(&pipeline, &inventory).unwrap();
 
-    pipeline.commands[0].template = "sort -o {output} {missing}".to_owned();
+    pipeline.commands[0].template = CommandTemplate::parse("sort -o {output} {missing}").unwrap();
     assert!(render_bash(&pipeline, &dag)
         .unwrap_err()
         .to_string()
         .contains("unknown placeholder"));
 
-    pipeline.commands[0].template = "sort -o {output} {input}".to_owned();
-    pipeline.path_template = Some("same.txt".to_owned());
+    pipeline.commands[0].template = CommandTemplate::parse("sort -o {output} {input}").unwrap();
+    pipeline.path_template = Some(PathTemplate::parse("same.txt").unwrap());
     pipeline.product_paths.clear();
     assert!(render_bash(&pipeline, &dag)
         .unwrap_err()
@@ -115,7 +115,8 @@ fn many_input_must_occupy_its_own_argument() {
     let inventory =
         parse_source_inventory(include_str!("../examples/commands/bash_demo.sources")).unwrap();
     let dag = resolve(&pipeline, &inventory).unwrap();
-    pipeline.commands[1].template = "sort -o {output} --files={inputs}".to_owned();
+    pipeline.commands[1].template =
+        CommandTemplate::parse("sort -o {output} --files={inputs}").unwrap();
     assert!(render_bash(&pipeline, &dag)
         .unwrap_err()
         .to_string()
@@ -223,17 +224,19 @@ fn path_coverage_catches_missing_and_invalid_rules_without_jobs() {
     assert_eq!(coverage.entries[0].rule, PathRule::Missing);
     assert!(coverage.validate(false).is_err());
 
-    pipeline
-        .product_paths
-        .insert("unused".to_owned(), "input/{id}/{missing}.txt".to_owned());
+    pipeline.product_paths.insert(
+        "unused".to_owned(),
+        PathTemplate::parse("input/{id}/{missing}.txt").unwrap(),
+    );
     assert!(inspect_paths(&pipeline)
         .unwrap_err()
         .to_string()
         .contains("absent dimension"));
 
-    pipeline
-        .product_paths
-        .insert("unused".to_owned(), "input/{id}.txt".to_owned());
+    pipeline.product_paths.insert(
+        "unused".to_owned(),
+        PathTemplate::parse("input/{id}.txt").unwrap(),
+    );
     inspect_paths(&pipeline).unwrap().validate(true).unwrap();
 }
 
@@ -370,7 +373,7 @@ fn backslashes_follow_bash_quoting_rules() {
         parse_source_inventory(include_str!("../examples/commands/bash_demo.sources")).unwrap();
     let dag = resolve(&pipeline, &inventory).unwrap();
     pipeline.commands[0].template =
-        r#"tool "a\b" "q\"x" "s\\t" c\d 'e\f' {input} {output}"#.to_owned();
+        CommandTemplate::parse(r#"tool "a\b" "q\"x" "s\\t" c\d 'e\f' {input} {output}"#).unwrap();
     let script = render_bash(&pipeline, &dag).unwrap();
     assert!(
         script.contains(r#"'tool' 'a\b' 'q"x' 's\t' 'cd' 'e\f' "#),
