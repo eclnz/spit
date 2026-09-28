@@ -32,7 +32,7 @@ pub use parser::{
 };
 pub use paths::{
     discover_sources, inspect_paths, validate_concrete_paths, validate_source_files, PathCoverage,
-    PathCoverageEntry, PathError, PathRule,
+    PathCoverageEntry, PathError, PathRule, VerifiedFiles,
 };
 pub use render::{render_artifacts, render_bound_dag, render_dag};
 pub use resolver::{resolve, resolve_artifacts, validate_pipeline};

@@ -55,9 +55,52 @@ impl fmt::Display for PathError {
 
 impl std::error::Error for PathError {}
 
-/// Placeholders a path template always gives its own meaning, so no
-/// product may declare a dimension with one of these names.
-pub(crate) const RESERVED_PLACEHOLDERS: [&str; 3] = ["product", "entities", "stage"];
+/// What a `{name}` in a path template stands for.
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
+pub(crate) enum PathPlaceholder {
+    /// `{product}`: the product's name.
+    Product,
+    /// `{entities}`: every dimension as `dim=value`, in declared order.
+    Entities,
+    /// `{stage}`: the stage whose block holds the step.
+    Stage,
+    /// Any other name: a dimension the product declares.
+    Dimension(String),
+}
+
+impl PathPlaceholder {
+    fn parse(name: String) -> Self {
+        match name.as_str() {
+            "product" => Self::Product,
+            "entities" => Self::Entities,
+            "stage" => Self::Stage,
+            _ => Self::Dimension(name),
+        }
+    }
+
+    /// Whether `name` always means a built-in placeholder, so that no
+    /// product may declare a dimension with it.
+    pub(crate) fn is_reserved(name: &str) -> bool {
+        !matches!(Self::parse(name.to_owned()), Self::Dimension(_))
+    }
+}
+
+/// A path template's literal text and placeholders.
+enum PathPart {
+    Literal(String),
+    Placeholder(PathPlaceholder),
+}
+
+fn parse_path_template(template: &str) -> Result<Vec<PathPart>, PathError> {
+    Ok(parse_template(template)
+        .map_err(error)?
+        .into_iter()
+        .map(|part| match part {
+            Part::Literal(value) => PathPart::Literal(value),
+            Part::Placeholder(name) => PathPart::Placeholder(PathPlaceholder::parse(name)),
+        })
+        .collect())
+}
 
 pub(crate) fn error(message: impl Into<String>) -> PathError {
     PathError {
@@ -239,20 +282,17 @@ fn validate_path_template(pipeline: &Pipeline, product: &ProductDef) -> Result<S
     let template = pipeline
         .path_template_for(&product.name)
         .ok_or_else(|| error(format!("no path template for product `{}`", product.name)))?;
-    let placeholders: BTreeSet<_> = parse_template(template)
-        .map_err(error)?
+    let placeholders: BTreeSet<_> = parse_path_template(template)?
         .into_iter()
         .filter_map(|part| match part {
-            Part::Placeholder(name) => Some(name),
-            Part::Literal(_) => None,
+            PathPart::Placeholder(placeholder) => Some(placeholder),
+            PathPart::Literal(_) => None,
         })
         .collect();
-    if !placeholders.contains("entities") {
-        if let Some(dimension) = product
-            .dimensions
-            .iter()
-            .find(|dimension| !placeholders.contains(*dimension))
-        {
+    if !placeholders.contains(&PathPlaceholder::Entities) {
+        if let Some(dimension) = product.dimensions.iter().find(|dimension| {
+            !placeholders.contains(&PathPlaceholder::Dimension((*dimension).clone()))
+        }) {
             return Err(error(format!(
                 "path template for `{}` omits dimension `{dimension}`; artifacts differing only in `{dimension}` would share a path",
                 product.name
@@ -289,7 +329,7 @@ pub fn validate_source_files(
     pipeline: &Pipeline,
     dag: &ResolvedDag,
     root: &Path,
-) -> Result<usize, PathError> {
+) -> Result<VerifiedFiles, PathError> {
     if !root.is_dir() {
         return Err(error(format!(
             "source root is not a directory: `{}`",
@@ -299,18 +339,18 @@ pub fn validate_source_files(
     inspect_paths(pipeline)?.validate(false)?;
     let paths = bound_paths(pipeline, dag)?;
     let outputs = output_keys(dag);
-    let mut checked = 0;
+    let mut verified = VerifiedFiles::default();
     for (artifact, relative) in paths {
         if outputs.contains(&artifact) {
             continue;
         }
+        // With `--stage`, what other stages make must already exist.
+        let made_by = pipeline
+            .invocations
+            .iter()
+            .find(|invocation| invocation.outputs.contains(&artifact.0));
         let full_path = root.join(&relative);
         if !full_path.is_file() {
-            // With `--stage`, an earlier stage's outputs must already exist.
-            let made_by = pipeline
-                .invocations
-                .iter()
-                .find(|invocation| invocation.outputs.contains(&artifact.0));
             return Err(error(match made_by {
                 Some(invocation) => format!(
                     "missing file for `{}[{}]`, which {} makes: `{}`",
@@ -330,9 +370,40 @@ pub fn validate_source_files(
                 ),
             }));
         }
-        checked += 1;
+        if made_by.is_some() {
+            verified.made_elsewhere += 1;
+        } else {
+            verified.sources += 1;
+        }
     }
-    Ok(checked)
+    Ok(verified)
+}
+
+/// The files [`validate_source_files`] found under the root.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct VerifiedFiles {
+    /// Files of source products.
+    pub sources: usize,
+    /// Outputs of steps whose jobs the DAG leaves out, such as another
+    /// stage's when one stage is selected.
+    pub made_elsewhere: usize,
+}
+
+impl fmt::Display for VerifiedFiles {
+    /// Reads as `3 source files verified.`, naming only counts above zero.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut parts = Vec::new();
+        if self.sources > 0 || self.made_elsewhere == 0 {
+            parts.push(format!("{} source files", self.sources));
+        }
+        if self.made_elsewhere > 0 {
+            parts.push(format!(
+                "{} files made outside the stage",
+                self.made_elsewhere
+            ));
+        }
+        write!(f, "{} verified.", parts.join(" and "))
+    }
 }
 
 /// Every artifact the resolved jobs produce.
@@ -391,14 +462,14 @@ fn bind_path(
             ))
         })?;
     let mut relative = String::new();
-    for part in parse_template(template).map_err(error)? {
+    for part in parse_path_template(template)? {
         match part {
-            Part::Literal(value) => relative.push_str(&value),
-            Part::Placeholder(name) if name == "product" => {
+            PathPart::Literal(value) => relative.push_str(&value),
+            PathPart::Placeholder(PathPlaceholder::Product) => {
                 // `alias::name` would put colons in file names.
                 relative.push_str(&artifact.product.replace("::", "."));
             }
-            Part::Placeholder(name) if name == "stage" => {
+            PathPart::Placeholder(PathPlaceholder::Stage) => {
                 let stage = pipeline.stage_of(&artifact.product).ok_or_else(|| {
                     error(format!(
                         "path template for `{}` uses `{{stage}}`, but `{}` is not made in a stage",
@@ -410,7 +481,7 @@ fn bind_path(
                 let components: Vec<_> = stage.split('/').map(encode_component).collect();
                 relative.push_str(&components.join("/"));
             }
-            Part::Placeholder(name) if name == "entities" => {
+            PathPart::Placeholder(PathPlaceholder::Entities) => {
                 let bindings = dimensions
                     .iter()
                     .map(|dimension| {
@@ -432,7 +503,7 @@ fn bind_path(
                     relative.push_str(&bindings.join("__"));
                 }
             }
-            Part::Placeholder(dimension) => {
+            PathPart::Placeholder(PathPlaceholder::Dimension(dimension)) => {
                 let value = artifact.entities.0.get(&dimension).ok_or_else(|| {
                     error(format!(
                         "path template for `{}` uses absent dimension `{dimension}`",
@@ -559,13 +630,13 @@ enum Piece {
 
 fn path_pattern(template: &str, product: &ProductDef) -> Result<Vec<Piece>, PathError> {
     let mut pieces = Vec::new();
-    for part in parse_template(template).map_err(error)? {
+    for part in parse_path_template(template)? {
         match part {
-            Part::Literal(value) => pieces.push(Piece::Literal(value)),
-            Part::Placeholder(name) if name == "product" => {
+            PathPart::Literal(value) => pieces.push(Piece::Literal(value)),
+            PathPart::Placeholder(PathPlaceholder::Product) => {
                 pieces.push(Piece::Literal(product.name.replace("::", ".")));
             }
-            Part::Placeholder(name) if name == "entities" => {
+            PathPart::Placeholder(PathPlaceholder::Entities) => {
                 if product.dimensions.is_empty() {
                     pieces.push(Piece::Literal("global".to_owned()));
                 }
@@ -578,7 +649,17 @@ fn path_pattern(template: &str, product: &ProductDef) -> Result<Vec<Piece>, Path
                     pieces.push(Piece::Value(dimension.clone()));
                 }
             }
-            Part::Placeholder(dimension) => pieces.push(Piece::Value(dimension)),
+            // A source is made in no stage, so its rule never binds
+            // `{stage}`; `inspect_paths` rejects such a rule first.
+            PathPart::Placeholder(PathPlaceholder::Stage) => {
+                return Err(error(format!(
+                "path rule for source `{}` uses `{{stage}}`, but a source is not made in a stage",
+                product.name
+            )))
+            }
+            PathPart::Placeholder(PathPlaceholder::Dimension(dimension)) => {
+                pieces.push(Piece::Value(dimension));
+            }
         }
     }
     Ok(pieces)

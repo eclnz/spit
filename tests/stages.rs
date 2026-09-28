@@ -344,7 +344,10 @@ fn root_checks_the_files_a_stage_reads_from_earlier_stages() {
         spit(&["check", PIPELINE, "--root", root_arg, "--stage", "analysis"]);
     fs::remove_dir_all(&root).unwrap();
     assert!(ok, "{stderr}");
-    assert!(stdout.contains("2 input files verified."), "{stdout}");
+    assert!(
+        stdout.contains("2 files made outside the stage verified."),
+        "{stdout}"
+    );
 }
 
 const NESTED: &str = "examples/stages/nested.spit";
@@ -492,4 +495,21 @@ fn a_stage_whose_steps_are_all_nested_is_not_empty() {
 fn a_library_may_group_operations_in_stages() {
     let text = "stage tools:\n    operation copy(A) -> A\n";
     assert!(diagnose(text, None).is_empty());
+}
+
+#[test]
+fn verified_files_name_what_was_checked() {
+    let verified = |sources, made_elsewhere| {
+        spit::VerifiedFiles {
+            sources,
+            made_elsewhere,
+        }
+        .to_string()
+    };
+    assert_eq!(verified(39, 0), "39 source files verified.");
+    assert_eq!(verified(0, 2), "2 files made outside the stage verified.");
+    assert_eq!(
+        verified(3, 2),
+        "3 source files and 2 files made outside the stage verified."
+    );
 }
