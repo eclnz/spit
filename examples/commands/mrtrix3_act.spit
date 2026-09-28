@@ -4,9 +4,12 @@
 # It requires MRtrix3, FSL, and FreeSurfer SynthSeg on the execution host.
 # Supply lookup tables that match the SynthSeg parcellation labels.
 
-# Generated images default to .mif in a folder per stage, such as
-# derivatives/preprocess/denoise/denoised_dwi/. A stage that writes another
-# format sets its own default; a single product that differs has its own rule.
+# Generated images default to .mif in a folder per stage. In each path,
+# {stage} is the stage holding the step, such as preprocess/denoise;
+# {product} is the product it assigns, such as denoised_dwi; and {entities}
+# is the artifact's own dimension values, such as sub=01__ses=01__run=01.
+# A stage that writes another format sets its own default; a single product
+# that differs has its own rule.
 path: derivatives/{stage}/{product}/{entities}.mif
 
 source raw_dwi : MRI<DWI,Acquired> [sub, ses, run]
