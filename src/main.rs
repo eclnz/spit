@@ -10,11 +10,9 @@ use spit::{
     diagnose_artifacts_at, diagnose_at, discover_sources, inspect_paths, parse_document_at,
     parse_pipeline_at, parse_source_inventory, render_artifacts, render_bash, render_bound_dag,
     render_dag, render_source_inventory, resolve, resolve_artifacts, stage_within,
-    validate_concrete_paths, validate_source_files, Diagnostic, Pipeline, ResolvedDag,
+    validate_concrete_paths, validate_source_files, Diagnostic, PathCoverage, Pipeline,
+    ResolvedDag, SourceInventory,
 };
-
-const USAGE: &str =
-    "usage: spit <check|dag|bash|artifacts|discover> <pipeline.spit> [--sources <inventory.spit|->] [--root <directory>] [--stage <name>] [--paths] [--strict-paths] [--json] [--stdin]";
 
 #[derive(Clone, Copy, PartialEq)]
 enum Command {
@@ -25,16 +23,121 @@ enum Command {
     Discover,
 }
 
+const COMMANDS: [Command; 5] = [
+    Command::Check,
+    Command::Dag,
+    Command::Bash,
+    Command::Artifacts,
+    Command::Discover,
+];
+
 impl Command {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Check => "check",
+            Self::Dag => "dag",
+            Self::Bash => "bash",
+            Self::Artifacts => "artifacts",
+            Self::Discover => "discover",
+        }
+    }
+
     fn parse(name: &str) -> Option<Self> {
-        Some(match name {
-            "check" => Self::Check,
-            "dag" => Self::Dag,
-            "bash" => Self::Bash,
-            "artifacts" => Self::Artifacts,
-            "discover" => Self::Discover,
-            _ => return None,
-        })
+        COMMANDS.into_iter().find(|command| command.name() == name)
+    }
+
+    /// The flags this command accepts.
+    fn flags(self) -> &'static [Flag] {
+        use Flag::*;
+        match self {
+            Self::Check => &[Sources, Root, Stage, Paths, StrictPaths, Json, Stdin],
+            Self::Dag => &[Sources, Root, Stage, Paths, StrictPaths, Stdin],
+            Self::Bash => &[Sources, Root, Stage, StrictPaths, Stdin],
+            Self::Artifacts => &[Sources, Root, Stdin],
+            Self::Discover => &[Root, Stdin],
+        }
+    }
+
+    /// The flags this command cannot run without.
+    fn required(self) -> &'static [Flag] {
+        match self {
+            Self::Discover => &[Flag::Root],
+            _ => &[],
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum Flag {
+    Sources,
+    Root,
+    Stage,
+    Paths,
+    StrictPaths,
+    Json,
+    Stdin,
+}
+
+const FLAGS: [Flag; 7] = [
+    Flag::Sources,
+    Flag::Root,
+    Flag::Stage,
+    Flag::Paths,
+    Flag::StrictPaths,
+    Flag::Json,
+    Flag::Stdin,
+];
+
+/// Pairs of flags that cannot be used together, whatever the command.
+const CONFLICTS: [(Flag, Flag); 4] = [
+    (Flag::Json, Flag::Paths),
+    (Flag::Json, Flag::StrictPaths),
+    (Flag::Json, Flag::Root),
+    (Flag::Json, Flag::Stage),
+];
+
+impl Flag {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Sources => "--sources",
+            Self::Root => "--root",
+            Self::Stage => "--stage",
+            Self::Paths => "--paths",
+            Self::StrictPaths => "--strict-paths",
+            Self::Json => "--json",
+            Self::Stdin => "--stdin",
+        }
+    }
+
+    /// What the flag's value is, for a flag that takes one.
+    fn value(self) -> Option<&'static str> {
+        match self {
+            Self::Sources => Some("<inventory.spit|->"),
+            Self::Root => Some("<directory>"),
+            Self::Stage => Some("<name>"),
+            Self::Paths | Self::StrictPaths | Self::Json | Self::Stdin => None,
+        }
+    }
+
+    fn parse(name: &str) -> Option<Self> {
+        FLAGS.into_iter().find(|flag| flag.name() == name)
+    }
+}
+
+/// The flags given on the command line, and each one's value.
+#[derive(Default)]
+struct Flags(Vec<(Flag, Option<String>)>);
+
+impl Flags {
+    fn has(&self, flag: Flag) -> bool {
+        self.0.iter().any(|(given, _)| *given == flag)
+    }
+
+    fn value(&self, flag: Flag) -> Option<String> {
+        self.0
+            .iter()
+            .find(|(given, _)| *given == flag)
+            .and_then(|(_, value)| value.clone())
     }
 }
 
@@ -50,47 +153,110 @@ struct CliArgs {
     stdin: bool,
 }
 
+fn usage() -> String {
+    let commands: Vec<_> = COMMANDS.iter().map(|command| command.name()).collect();
+    let flags: Vec<_> = FLAGS
+        .iter()
+        .map(|flag| match flag.value() {
+            Some(value) => format!("[{} {value}]", flag.name()),
+            None => format!("[{}]", flag.name()),
+        })
+        .collect();
+    format!(
+        "usage: spit <{}> <pipeline.spit> {}",
+        commands.join("|"),
+        flags.join(" ")
+    )
+}
+
+/// `check, dag, and bash`, for the commands that accept `flag`.
+fn commands_accepting(flag: Flag) -> String {
+    let names: Vec<_> = COMMANDS
+        .iter()
+        .filter(|command| command.flags().contains(&flag))
+        .map(|command| command.name())
+        .collect();
+    match names.as_slice() {
+        [] => String::new(),
+        [one] => (*one).to_owned(),
+        [first, second] => format!("{first} and {second}"),
+        [rest @ .., last] => format!("{}, and {last}", rest.join(", ")),
+    }
+}
+
 fn parse_args() -> Result<CliArgs, Box<dyn Error>> {
     let mut args = env::args().skip(1);
     let command = args
         .next()
         .as_deref()
         .and_then(Command::parse)
-        .ok_or(USAGE)?;
-    let pipeline = args.next().ok_or(USAGE)?;
+        .ok_or_else(usage)?;
+    let pipeline = args.next().ok_or_else(usage)?;
     if pipeline.starts_with("--") {
-        return Err(USAGE.into());
+        return Err(usage().into());
     }
-    let mut sources = None;
-    let mut paths = false;
-    let mut strict_paths = false;
-    let mut root = None;
-    let mut stage = None;
-    let mut json = false;
-    let mut stdin = false;
-    while let Some(flag) = args.next() {
-        match flag.as_str() {
-            "--sources" if sources.is_none() => sources = Some(args.next().ok_or(USAGE)?),
-            "--paths" if !paths => paths = true,
-            "--strict-paths" if !strict_paths => strict_paths = true,
-            "--root" if root.is_none() => root = Some(args.next().ok_or(USAGE)?),
-            "--stage" if stage.is_none() => stage = Some(args.next().ok_or(USAGE)?),
-            "--json" if !json => json = true,
-            "--stdin" if !stdin => stdin = true,
-            _ => return Err(USAGE.into()),
-        }
+    let mut flags = Flags::default();
+    while let Some(name) = args.next() {
+        let flag = Flag::parse(&name)
+            .filter(|flag| !flags.has(*flag))
+            .ok_or_else(usage)?;
+        let value = match flag.value() {
+            Some(_) => Some(args.next().ok_or_else(usage)?),
+            None => None,
+        };
+        flags.0.push((flag, value));
     }
+    check_flags(command, &flags)?;
     Ok(CliArgs {
         command,
         pipeline,
-        sources,
-        paths,
-        strict_paths,
-        root,
-        stage,
-        json,
-        stdin,
+        sources: flags.value(Flag::Sources),
+        paths: flags.has(Flag::Paths),
+        strict_paths: flags.has(Flag::StrictPaths),
+        root: flags.value(Flag::Root),
+        stage: flags.value(Flag::Stage),
+        json: flags.has(Flag::Json),
+        stdin: flags.has(Flag::Stdin),
     })
+}
+
+/// Check the flags against what `command` accepts and requires, and against
+/// each other.
+fn check_flags(command: Command, flags: &Flags) -> Result<(), String> {
+    for (flag, _) in &flags.0 {
+        if !command.flags().contains(flag) {
+            return Err(format!(
+                "{} applies to {}",
+                flag.name(),
+                commands_accepting(*flag)
+            ));
+        }
+    }
+    for flag in command.required() {
+        if !flags.has(*flag) {
+            let value = flag
+                .value()
+                .map_or_else(String::new, |value| format!(" {value}"));
+            return Err(format!(
+                "{} requires {}{value}",
+                command.name(),
+                flag.name()
+            ));
+        }
+    }
+    for (first, second) in CONFLICTS {
+        if flags.has(first) && flags.has(second) {
+            return Err(format!(
+                "{} cannot be used with {}",
+                first.name(),
+                second.name()
+            ));
+        }
+    }
+    if flags.has(Flag::Stdin) && flags.value(Flag::Sources).as_deref() == Some("-") {
+        return Err("--stdin reads the pipeline, so --sources needs a file".into());
+    }
+    Ok(())
 }
 
 /// Diagnostics that have already been printed.
@@ -119,54 +285,13 @@ fn main() -> ExitCode {
 
 fn run() -> Result<(), Box<dyn Error>> {
     let args = parse_args()?;
-    if args.json
-        && (args.command != Command::Check
-            || args.paths
-            || args.strict_paths
-            || args.root.is_some())
-    {
-        return Err("--json applies to check without --paths, --strict-paths, or --root".into());
-    }
-    if args.stdin && args.sources.as_deref() == Some("-") {
-        return Err("--stdin reads the pipeline, so --sources needs a file".into());
-    }
     let pipeline_text = if args.stdin {
-        let mut text = String::new();
-        io::stdin().read_to_string(&mut text)?;
-        text
+        read_stdin()?
     } else {
         fs::read_to_string(&args.pipeline)?
     };
     let path = Path::new(&args.pipeline);
-    if args.command == Command::Discover && (args.root.is_none() || args.sources.is_some()) {
-        return Err("discover reads files under --root <directory> and takes no --sources".into());
-    }
-    if args.command == Command::Artifacts && args.strict_paths {
-        return Err("artifacts does not support --strict-paths".into());
-    }
-    if args.paths && !matches!(args.command, Command::Check | Command::Dag) {
-        return Err("--paths applies to check and dag".into());
-    }
-    if args.stage.is_some()
-        && (!matches!(args.command, Command::Check | Command::Dag | Command::Bash) || args.json)
-    {
-        return Err("--stage applies to check, dag, and bash, without --json".into());
-    }
-    let inventory_text = match (args.sources.as_deref(), &args.root) {
-        (Some("-"), _) => {
-            let mut text = String::new();
-            io::stdin().read_to_string(&mut text)?;
-            Some(text)
-        }
-        (Some(sources), _) => Some(fs::read_to_string(sources)?),
-        // With a root and no inventory, find the sources by their path rules.
-        (None, Some(root))
-            if args.command == Command::Discover || !has_inline_inventory(&pipeline_text, path) =>
-        {
-            discover(&pipeline_text, path, Path::new(root))?
-        }
-        (None, _) => None,
-    };
+    let inventory_text = read_inventory(&args, &pipeline_text, path)?;
     // Report every error and warning before doing any work.
     let diagnose = if args.command == Command::Artifacts {
         diagnose_artifacts_at
@@ -178,15 +303,7 @@ fn run() -> Result<(), Box<dyn Error>> {
         print_json(&diagnostics, &pipeline_text, inventory_text.as_deref());
         return Ok(());
     }
-    for diagnostic in &diagnostics {
-        eprintln!(
-            "{}",
-            diagnostic.display_in(&pipeline_text, inventory_text.as_deref())
-        );
-    }
-    if diagnostics.iter().any(|diagnostic| diagnostic.is_error()) {
-        return Err(Reported.into());
-    }
+    report(&diagnostics, &pipeline_text, inventory_text.as_deref())?;
     if args.command == Command::Discover {
         print!("{}", inventory_text.unwrap_or_default());
         return Ok(());
@@ -200,22 +317,7 @@ fn run() -> Result<(), Box<dyn Error>> {
         None => parse_document_at(&pipeline_text, path)?,
     };
     if let Some(stage) = &args.stage {
-        if !pipeline
-            .stages
-            .iter()
-            .any(|declared| &declared.name == stage)
-        {
-            let names: Vec<_> = pipeline
-                .stages
-                .iter()
-                .map(|stage| format!("`{}`", stage.name))
-                .collect();
-            return Err(if names.is_empty() {
-                format!("unknown stage `{stage}`; this pipeline declares no stages").into()
-            } else {
-                format!("unknown stage `{stage}`; stages: {}", names.join(", ")).into()
-            });
-        }
+        check_stage(&pipeline, stage)?;
     }
     let coverage = inspect_paths(&pipeline)?;
     if args.command == Command::Check && args.paths {
@@ -239,7 +341,18 @@ fn run() -> Result<(), Box<dyn Error>> {
         print!("{}", render_artifacts(&report));
         return Ok(());
     }
-    let dag = resolve(&pipeline, &inventory)?;
+    run_jobs(&args, &pipeline, &inventory, &coverage)
+}
+
+/// Resolve the jobs of `check`, `dag` or `bash`, check their paths and
+/// files as asked, and print the command's output.
+fn run_jobs(
+    args: &CliArgs,
+    pipeline: &Pipeline,
+    inventory: &SourceInventory,
+    coverage: &PathCoverage,
+) -> Result<(), Box<dyn Error>> {
+    let dag = resolve(pipeline, inventory)?;
     // A single stage runs on the files earlier stages already wrote.
     let dag = match &args.stage {
         Some(stage) => dag.only_stage(stage),
@@ -247,26 +360,26 @@ fn run() -> Result<(), Box<dyn Error>> {
     };
     if args.strict_paths || args.paths {
         coverage.validate(args.strict_paths)?;
-        validate_concrete_paths(&pipeline, &dag)?;
+        validate_concrete_paths(pipeline, &dag)?;
     }
     let checked_files = args
         .root
         .as_ref()
-        .map(|root| validate_source_files(&pipeline, &dag, Path::new(root)))
+        .map(|root| validate_source_files(pipeline, &dag, Path::new(root)))
         .transpose()?;
     match args.command {
         Command::Check => {
             println!(
                 "Pipeline valid.\n\n{}",
-                job_count(&pipeline, &dag, args.stage.as_deref())
+                job_count(pipeline, &dag, args.stage.as_deref())
             );
             if let Some(verified) = checked_files {
                 println!("{verified}");
             }
         }
-        Command::Dag if args.paths => print!("{}", render_bound_dag(&pipeline, &dag)?),
+        Command::Dag if args.paths => print!("{}", render_bound_dag(pipeline, &dag)?),
         Command::Dag => print!("{}", render_dag(&dag)),
-        Command::Bash => print!("{}", render_bash(&pipeline, &dag)?),
+        Command::Bash => print!("{}", render_bash(pipeline, &dag)?),
         Command::Artifacts | Command::Discover => unreachable!("handled before resolution"),
     }
     Ok(())
@@ -303,6 +416,68 @@ fn job_count(pipeline: &Pipeline, dag: &ResolvedDag, stage: Option<&str>) -> Str
         parts.push(format!("{outside} outside stages"));
     }
     format!("{total} jobs resolved: {}.", parts.join(", "))
+}
+
+fn read_stdin() -> io::Result<String> {
+    let mut text = String::new();
+    io::stdin().read_to_string(&mut text)?;
+    Ok(text)
+}
+
+/// The inventory text: from `--sources`, or else discovered under `--root`
+/// when the pipeline has no inline inventory.
+fn read_inventory(
+    args: &CliArgs,
+    pipeline_text: &str,
+    path: &Path,
+) -> Result<Option<String>, Box<dyn Error>> {
+    Ok(match (args.sources.as_deref(), &args.root) {
+        (Some("-"), _) => Some(read_stdin()?),
+        (Some(sources), _) => Some(fs::read_to_string(sources)?),
+        // With a root and no inventory, find the sources by their path rules.
+        (None, Some(root))
+            if args.command == Command::Discover || !has_inline_inventory(pipeline_text, path) =>
+        {
+            discover(pipeline_text, path, Path::new(root))?
+        }
+        (None, _) => None,
+    })
+}
+
+/// Print every diagnostic, failing if any is an error.
+fn report(
+    diagnostics: &[Diagnostic],
+    pipeline_text: &str,
+    inventory_text: Option<&str>,
+) -> Result<(), Reported> {
+    for diagnostic in diagnostics {
+        eprintln!("{}", diagnostic.display_in(pipeline_text, inventory_text));
+    }
+    if diagnostics.iter().any(Diagnostic::is_error) {
+        return Err(Reported);
+    }
+    Ok(())
+}
+
+/// `--stage` must name a declared stage.
+fn check_stage(pipeline: &Pipeline, stage: &str) -> Result<(), String> {
+    if pipeline
+        .stages
+        .iter()
+        .any(|declared| declared.name == stage)
+    {
+        return Ok(());
+    }
+    let names: Vec<_> = pipeline
+        .stages
+        .iter()
+        .map(|stage| format!("`{}`", stage.name))
+        .collect();
+    Err(if names.is_empty() {
+        format!("unknown stage `{stage}`; this pipeline declares no stages")
+    } else {
+        format!("unknown stage `{stage}`; stages: {}", names.join(", "))
+    })
 }
 
 fn has_inline_inventory(text: &str, path: &Path) -> bool {

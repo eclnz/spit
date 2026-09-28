@@ -1,6 +1,8 @@
-//! Column ranges within a line of text, in bytes, for pointing at source.
+//! Column ranges within a line of text, in bytes, for pointing at source,
+//! and the location every error in the pipeline text carries.
 
-use std::ops::Range;
+use std::fmt;
+use std::ops::{Deref, DerefMut, Range};
 
 /// A line and a byte range within it.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -14,6 +16,125 @@ impl Place {
         Self { line, columns }
     }
 }
+
+/// Where in the pipeline text an error is, as far as it is known.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct Location {
+    pub line: Option<usize>,
+    /// The byte range in that line.
+    pub columns: Option<Range<usize>>,
+    /// The part of the line the error is about, before its columns are known.
+    pub(crate) focus: Option<Focus>,
+}
+
+/// The part of a line an error is about, before its columns are known.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum Focus {
+    /// Text within the error's columns, or elsewhere on its line, such as
+    /// one `{placeholder}`, found when the error is reported.
+    Text(Box<str>),
+    /// Where a slice of the line being parsed sits in memory, resolved to
+    /// columns before the line is dropped.
+    Slice(Range<usize>),
+}
+
+impl Location {
+    /// The line and columns, narrowed to the focus when `text` contains it:
+    /// first inside the columns, then as a word elsewhere on the line, such
+    /// as the operation a command is declared for.
+    pub(crate) fn place_in(&self, text: &str) -> Option<Place> {
+        let (line, columns) = (self.line?, self.columns.clone()?);
+        let focus = match &self.focus {
+            Some(Focus::Text(focus)) => Some(focus),
+            _ => None,
+        };
+        let focus = focus.and_then(|focus| {
+            let content = text.lines().nth(line.checked_sub(1)?)?;
+            let inside = content
+                .get(columns.clone())?
+                .find(&**focus)
+                .map(|offset| columns.start + offset..columns.start + offset + focus.len());
+            inside.or_else(|| find_word(content, content_columns(content).start, focus))
+        });
+        Some(Place::new(line, focus.unwrap_or(columns)))
+    }
+}
+
+/// An error and where in the pipeline text it is.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Located<E> {
+    pub error: E,
+    pub location: Location,
+}
+
+impl<E> Located<E> {
+    /// An error whose location is not known yet.
+    pub(crate) fn unplaced(error: E) -> Self {
+        Self {
+            error,
+            location: Location::default(),
+        }
+    }
+
+    /// The error's message, without its line.
+    pub fn message(&self) -> String
+    where
+        E: fmt::Display,
+    {
+        self.error.to_string()
+    }
+
+    /// Attach a place unless a more specific one is already recorded.
+    pub(crate) fn at(mut self, place: Option<Place>) -> Self {
+        if self.location.line.is_none() {
+            if let Some(place) = place {
+                self.location.line = Some(place.line);
+                self.location.columns = Some(place.columns);
+            }
+        }
+        self
+    }
+
+    /// Mark text on the error's line as what it is about.
+    pub(crate) fn focus(mut self, text: impl Into<String>) -> Self {
+        self.location.focus = Some(Focus::Text(text.into().into_boxed_str()));
+        self
+    }
+}
+
+impl Located<String> {
+    /// An error that is only a message, such as one about a command or a
+    /// path template, whose location is not known yet.
+    pub(crate) fn new(message: impl Into<String>) -> Self {
+        Self::unplaced(message.into())
+    }
+}
+
+impl<E> Deref for Located<E> {
+    type Target = E;
+
+    fn deref(&self) -> &E {
+        &self.error
+    }
+}
+
+impl<E> DerefMut for Located<E> {
+    fn deref_mut(&mut self) -> &mut E {
+        &mut self.error
+    }
+}
+
+/// Reads as `line 3: message`, or just the message without a line.
+impl<E: fmt::Display> fmt::Display for Located<E> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if let Some(line) = self.location.line {
+            write!(f, "line {line}: ")?;
+        }
+        self.error.fmt(f)
+    }
+}
+
+impl<E: fmt::Debug + fmt::Display> std::error::Error for Located<E> {}
 
 /// The byte range `part` occupies in `line`, when `part` is a slice of `line`.
 ///
