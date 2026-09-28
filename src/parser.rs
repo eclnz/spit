@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::ops::Range;
 
-use crate::bash::check_command_syntax;
+use crate::bash::CommandTemplate;
 use crate::imports::apply_import;
 use crate::model::{
     Cardinality, CommandDef, CommandRole, CountRequirement, CoverageRule, DefaultPort,
@@ -479,7 +479,7 @@ fn sectioned_line(
                     }
                     None => parse_command(line, number, CommandRole::Run)?,
                 };
-                let place = tail_place(original, number, &command.template);
+                let place = tail_place(original, number, command.template.as_str());
                 builder.add_command(command, place);
             }
             None => {
@@ -650,11 +650,11 @@ fn flow_line(
         builder.add_constraint(rule, place);
     } else if let Some(declaration) = line.strip_prefix("command ") {
         let command = parse_command(declaration.trim(), number, CommandRole::Run)?;
-        let place = tail_place(original, number, &command.template);
+        let place = tail_place(original, number, command.template.as_str());
         builder.add_command(command, place);
     } else if let Some(declaration) = line.strip_prefix("verify ") {
         let command = parse_command(declaration.trim(), number, CommandRole::Verify)?;
-        let place = tail_place(original, number, &command.template);
+        let place = tail_place(original, number, command.template.as_str());
         builder.add_command(command, place);
     } else if line.starts_with("shell-source:") {
         return Err(ParseError::new(number, SHELL_SOURCE_REMOVED));
@@ -701,12 +701,12 @@ fn parse_command(line: &str, number: usize, role: CommandRole) -> Result<Command
             "command template must not be empty",
         ));
     }
-    check_command_syntax(template).map_err(|error| {
+    let parsed = CommandTemplate::parse(template).map_err(|error| {
         ParseError::new(number, format!("command `{operation}`: {}", error.message)).at(template)
     })?;
     Ok(CommandDef {
         role,
-        ..CommandDef::new(operation, template)
+        ..CommandDef::new(operation, parsed)
     })
 }
 

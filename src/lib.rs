@@ -13,7 +13,7 @@ mod span;
 mod template;
 pub mod types;
 
-pub use bash::{render_bash, validate_commands, BashError};
+pub use bash::{render_bash, validate_commands, BashError, CommandTemplate};
 pub use diagnostics::{
     diagnose, diagnose_artifacts_at, diagnose_at, Diagnostic, DiagnosticSource, Severity,
 };

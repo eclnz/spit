@@ -5,7 +5,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use spit::{
     inspect_paths, parse_document, parse_pipeline, parse_source_inventory, render_bash,
-    render_bound_dag, resolve, validate_commands, PathRule, PathTemplate,
+    render_bound_dag, resolve, validate_commands, CommandTemplate, PathRule, PathTemplate,
 };
 
 fn demo_script() -> String {
@@ -77,13 +77,13 @@ fn backend_rejects_undeclared_placeholders_and_path_collisions() {
         parse_source_inventory(include_str!("../examples/commands/bash_demo.sources")).unwrap();
     let dag = resolve(&pipeline, &inventory).unwrap();
 
-    pipeline.commands[0].template = "sort -o {output} {missing}".to_owned();
+    pipeline.commands[0].template = CommandTemplate::parse("sort -o {output} {missing}").unwrap();
     assert!(render_bash(&pipeline, &dag)
         .unwrap_err()
         .to_string()
         .contains("unknown placeholder"));
 
-    pipeline.commands[0].template = "sort -o {output} {input}".to_owned();
+    pipeline.commands[0].template = CommandTemplate::parse("sort -o {output} {input}").unwrap();
     pipeline.path_template = Some(PathTemplate::parse("same.txt").unwrap());
     pipeline.product_paths.clear();
     assert!(render_bash(&pipeline, &dag)
@@ -115,7 +115,8 @@ fn many_input_must_occupy_its_own_argument() {
     let inventory =
         parse_source_inventory(include_str!("../examples/commands/bash_demo.sources")).unwrap();
     let dag = resolve(&pipeline, &inventory).unwrap();
-    pipeline.commands[1].template = "sort -o {output} --files={inputs}".to_owned();
+    pipeline.commands[1].template =
+        CommandTemplate::parse("sort -o {output} --files={inputs}").unwrap();
     assert!(render_bash(&pipeline, &dag)
         .unwrap_err()
         .to_string()
@@ -372,7 +373,7 @@ fn backslashes_follow_bash_quoting_rules() {
         parse_source_inventory(include_str!("../examples/commands/bash_demo.sources")).unwrap();
     let dag = resolve(&pipeline, &inventory).unwrap();
     pipeline.commands[0].template =
-        r#"tool "a\b" "q\"x" "s\\t" c\d 'e\f' {input} {output}"#.to_owned();
+        CommandTemplate::parse(r#"tool "a\b" "q\"x" "s\\t" c\d 'e\f' {input} {output}"#).unwrap();
     let script = render_bash(&pipeline, &dag).unwrap();
     assert!(
         script.contains(r#"'tool' 'a\b' 'q"x' 's\t' 'cd' 'e\f' "#),

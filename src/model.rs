@@ -2,6 +2,7 @@ use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
+use crate::bash::CommandTemplate;
 use crate::error::ResolveError;
 use crate::paths::PathTemplate;
 use crate::types::TypeExpr;
@@ -441,20 +442,20 @@ pub enum CommandRole {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CommandDef {
     pub operation: String,
-    pub template: String,
+    pub template: CommandTemplate,
     pub role: CommandRole,
 }
 
 impl CommandDef {
-    pub fn new(operation: impl Into<String>, template: impl Into<String>) -> Self {
+    pub fn new(operation: impl Into<String>, template: CommandTemplate) -> Self {
         Self {
             operation: operation.into(),
-            template: template.into(),
+            template,
             role: CommandRole::Run,
         }
     }
 
-    pub fn verify(operation: impl Into<String>, template: impl Into<String>) -> Self {
+    pub fn verify(operation: impl Into<String>, template: CommandTemplate) -> Self {
         Self {
             role: CommandRole::Verify,
             ..Self::new(operation, template)
