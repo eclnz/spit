@@ -501,28 +501,91 @@ fn order(mut diagnostics: Vec<Diagnostic>) -> Vec<Diagnostic> {
 /// library of definitions, nor for imported names: a library is imported for
 /// the definitions a pipeline needs, and is linted on its own.
 fn warnings(pipeline: &Pipeline, lines: &SourceMap, skip: &BTreeSet<String>) -> Vec<Diagnostic> {
-    let warn = |place: Option<Place>, message| {
-        Diagnostic::new(
-            Severity::Warning,
-            DiagnosticSource::Pipeline,
-            place,
-            message,
-        )
-    };
-    let used_operations: BTreeSet<_> = pipeline
+    // A library, with no steps, may declare what it never uses.
+    if pipeline.invocations.is_empty() {
+        return operation_warnings(pipeline, lines, skip, true);
+    }
+    let mut warnings = stage_warnings(pipeline, lines);
+    warnings.extend(product_warnings(pipeline, lines, skip));
+    warnings.extend(operation_warnings(pipeline, lines, skip, false));
+    warnings
+}
+
+fn warning(place: Option<Place>, message: String) -> Diagnostic {
+    Diagnostic::new(
+        Severity::Warning,
+        DiagnosticSource::Pipeline,
+        place,
+        message,
+    )
+}
+
+/// Stages that hold no steps, directly or in stages nested in them.
+fn stage_warnings(pipeline: &Pipeline, lines: &SourceMap) -> Vec<Diagnostic> {
+    pipeline
+        .stages
+        .iter()
+        .filter(|stage| {
+            !pipeline.invocations.iter().any(|invocation| {
+                invocation
+                    .stage
+                    .as_deref()
+                    .is_some_and(|name| stage_within(name, &stage.name))
+            })
+        })
+        .map(|stage| {
+            warning(
+                lines.stages.get(&stage.name).cloned(),
+                format!("stage `{}` has no steps", stage.name),
+            )
+        })
+        .collect()
+}
+
+/// Source products that no step reads.
+fn product_warnings(
+    pipeline: &Pipeline,
+    lines: &SourceMap,
+    skip: &BTreeSet<String>,
+) -> Vec<Diagnostic> {
+    let used: BTreeSet<_> = pipeline
+        .invocations
+        .iter()
+        .flat_map(|invocation| {
+            invocation
+                .outputs
+                .iter()
+                .map(String::as_str)
+                .chain(invocation.inputs.iter().map(InputBinding::product_name))
+        })
+        .collect();
+    pipeline
+        .products
+        .iter()
+        .map(|product| product.name.as_str())
+        .filter(|name| !skip.contains(*name) && !lines.imported.contains(*name))
+        .filter(|name| !used.contains(name))
+        .map(|name| {
+            warning(
+                lines.products.get(name).cloned(),
+                format!("source product `{name}` is never used as an input"),
+            )
+        })
+        .collect()
+}
+
+/// Operations that no step uses, that have no command while others do, or
+/// whose output types name a variable no input binds.
+fn operation_warnings(
+    pipeline: &Pipeline,
+    lines: &SourceMap,
+    skip: &BTreeSet<String>,
+    library: bool,
+) -> Vec<Diagnostic> {
+    let used: BTreeSet<_> = pipeline
         .invocations
         .iter()
         .map(|invocation| invocation.operation.as_str())
-        .collect();
-    let outputs: BTreeSet<_> = pipeline
-        .invocations
-        .iter()
-        .flat_map(|invocation| invocation.outputs.iter().map(String::as_str))
-        .collect();
-    let inputs: BTreeSet<_> = pipeline
-        .invocations
-        .iter()
-        .flat_map(|invocation| invocation.inputs.iter().map(InputBinding::product_name))
         .collect();
     let commands: BTreeSet<_> = pipeline
         .commands
@@ -530,37 +593,7 @@ fn warnings(pipeline: &Pipeline, lines: &SourceMap, skip: &BTreeSet<String>) -> 
         .filter(|command| command.role == CommandRole::Run)
         .map(|command| command.operation.as_str())
         .collect();
-
-    let library = pipeline.invocations.is_empty();
     let mut warnings = Vec::new();
-    // A library may group its operations in stages that hold no steps.
-    for stage in pipeline.stages.iter().filter(|_| !library) {
-        let name = stage.name.as_str();
-        // A stage whose steps all sit in stages nested in it is not empty.
-        if !pipeline.invocations.iter().any(|invocation| {
-            invocation
-                .stage
-                .as_deref()
-                .is_some_and(|stage| stage_within(stage, name))
-        }) {
-            warnings.push(warn(
-                lines.stages.get(name).cloned(),
-                format!("stage `{name}` has no steps"),
-            ));
-        }
-    }
-    for product in &pipeline.products {
-        let name = product.name.as_str();
-        if library || skip.contains(name) || lines.imported.contains(name) {
-            continue;
-        }
-        if !outputs.contains(name) && !inputs.contains(name) {
-            warnings.push(warn(
-                lines.products.get(name).cloned(),
-                format!("source product `{name}` is never used as an input"),
-            ));
-        }
-    }
     for operation in &pipeline.operations {
         let name = operation.name.as_str();
         if skip.contains(name) {
@@ -568,16 +601,16 @@ fn warnings(pipeline: &Pipeline, lines: &SourceMap, skip: &BTreeSet<String>) -> 
         }
         let place = lines.operations.get(name).cloned();
         let imported = lines.imported.contains(name);
-        if !used_operations.contains(name) {
+        if !used.contains(name) {
             if !imported && !library {
-                warnings.push(warn(
+                warnings.push(warning(
                     place.clone(),
                     format!("operation `{name}` is declared but never used"),
                 ));
             }
         } else if !pipeline.commands.is_empty() && !commands.contains(name) {
             // Only once commands are in use: a pipeline may be written for its DAG alone.
-            warnings.push(warn(
+            warnings.push(warning(
                 place.clone(),
                 format!("operation `{name}` has no command, so `bash` cannot run its jobs"),
             ));
@@ -596,7 +629,7 @@ fn warnings(pipeline: &Pipeline, lines: &SourceMap, skip: &BTreeSet<String>) -> 
             .flat_map(|port| port.artifact_type.variables())
             .collect();
         for variable in produced.difference(&bound) {
-            warnings.push(warn(
+            warnings.push(warning(
                 place.clone(),
                 format!(
                     "output type variable `{variable}` of `{name}` appears in no input; it is known only where the output product declares its type"

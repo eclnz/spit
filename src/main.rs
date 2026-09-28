@@ -10,7 +10,8 @@ use spit::{
     diagnose_artifacts_at, diagnose_at, discover_sources, inspect_paths, parse_document_at,
     parse_pipeline_at, parse_source_inventory, render_artifacts, render_bash, render_bound_dag,
     render_dag, render_source_inventory, resolve, resolve_artifacts, stage_within,
-    validate_concrete_paths, validate_source_files, Diagnostic, Pipeline, ResolvedDag,
+    validate_concrete_paths, validate_source_files, Diagnostic, PathCoverage, Pipeline,
+    ResolvedDag, SourceInventory,
 };
 
 #[derive(Clone, Copy, PartialEq)]
@@ -285,28 +286,12 @@ fn main() -> ExitCode {
 fn run() -> Result<(), Box<dyn Error>> {
     let args = parse_args()?;
     let pipeline_text = if args.stdin {
-        let mut text = String::new();
-        io::stdin().read_to_string(&mut text)?;
-        text
+        read_stdin()?
     } else {
         fs::read_to_string(&args.pipeline)?
     };
     let path = Path::new(&args.pipeline);
-    let inventory_text = match (args.sources.as_deref(), &args.root) {
-        (Some("-"), _) => {
-            let mut text = String::new();
-            io::stdin().read_to_string(&mut text)?;
-            Some(text)
-        }
-        (Some(sources), _) => Some(fs::read_to_string(sources)?),
-        // With a root and no inventory, find the sources by their path rules.
-        (None, Some(root))
-            if args.command == Command::Discover || !has_inline_inventory(&pipeline_text, path) =>
-        {
-            discover(&pipeline_text, path, Path::new(root))?
-        }
-        (None, _) => None,
-    };
+    let inventory_text = read_inventory(&args, &pipeline_text, path)?;
     // Report every error and warning before doing any work.
     let diagnose = if args.command == Command::Artifacts {
         diagnose_artifacts_at
@@ -318,15 +303,7 @@ fn run() -> Result<(), Box<dyn Error>> {
         print_json(&diagnostics, &pipeline_text, inventory_text.as_deref());
         return Ok(());
     }
-    for diagnostic in &diagnostics {
-        eprintln!(
-            "{}",
-            diagnostic.display_in(&pipeline_text, inventory_text.as_deref())
-        );
-    }
-    if diagnostics.iter().any(|diagnostic| diagnostic.is_error()) {
-        return Err(Reported.into());
-    }
+    report(&diagnostics, &pipeline_text, inventory_text.as_deref())?;
     if args.command == Command::Discover {
         print!("{}", inventory_text.unwrap_or_default());
         return Ok(());
@@ -340,22 +317,7 @@ fn run() -> Result<(), Box<dyn Error>> {
         None => parse_document_at(&pipeline_text, path)?,
     };
     if let Some(stage) = &args.stage {
-        if !pipeline
-            .stages
-            .iter()
-            .any(|declared| &declared.name == stage)
-        {
-            let names: Vec<_> = pipeline
-                .stages
-                .iter()
-                .map(|stage| format!("`{}`", stage.name))
-                .collect();
-            return Err(if names.is_empty() {
-                format!("unknown stage `{stage}`; this pipeline declares no stages").into()
-            } else {
-                format!("unknown stage `{stage}`; stages: {}", names.join(", ")).into()
-            });
-        }
+        check_stage(&pipeline, stage)?;
     }
     let coverage = inspect_paths(&pipeline)?;
     if args.command == Command::Check && args.paths {
@@ -379,7 +341,18 @@ fn run() -> Result<(), Box<dyn Error>> {
         print!("{}", render_artifacts(&report));
         return Ok(());
     }
-    let dag = resolve(&pipeline, &inventory)?;
+    run_jobs(&args, &pipeline, &inventory, &coverage)
+}
+
+/// Resolve the jobs of `check`, `dag` or `bash`, check their paths and
+/// files as asked, and print the command's output.
+fn run_jobs(
+    args: &CliArgs,
+    pipeline: &Pipeline,
+    inventory: &SourceInventory,
+    coverage: &PathCoverage,
+) -> Result<(), Box<dyn Error>> {
+    let dag = resolve(pipeline, inventory)?;
     // A single stage runs on the files earlier stages already wrote.
     let dag = match &args.stage {
         Some(stage) => dag.only_stage(stage),
@@ -387,26 +360,26 @@ fn run() -> Result<(), Box<dyn Error>> {
     };
     if args.strict_paths || args.paths {
         coverage.validate(args.strict_paths)?;
-        validate_concrete_paths(&pipeline, &dag)?;
+        validate_concrete_paths(pipeline, &dag)?;
     }
     let checked_files = args
         .root
         .as_ref()
-        .map(|root| validate_source_files(&pipeline, &dag, Path::new(root)))
+        .map(|root| validate_source_files(pipeline, &dag, Path::new(root)))
         .transpose()?;
     match args.command {
         Command::Check => {
             println!(
                 "Pipeline valid.\n\n{}",
-                job_count(&pipeline, &dag, args.stage.as_deref())
+                job_count(pipeline, &dag, args.stage.as_deref())
             );
             if let Some(verified) = checked_files {
                 println!("{verified}");
             }
         }
-        Command::Dag if args.paths => print!("{}", render_bound_dag(&pipeline, &dag)?),
+        Command::Dag if args.paths => print!("{}", render_bound_dag(pipeline, &dag)?),
         Command::Dag => print!("{}", render_dag(&dag)),
-        Command::Bash => print!("{}", render_bash(&pipeline, &dag)?),
+        Command::Bash => print!("{}", render_bash(pipeline, &dag)?),
         Command::Artifacts | Command::Discover => unreachable!("handled before resolution"),
     }
     Ok(())
@@ -443,6 +416,68 @@ fn job_count(pipeline: &Pipeline, dag: &ResolvedDag, stage: Option<&str>) -> Str
         parts.push(format!("{outside} outside stages"));
     }
     format!("{total} jobs resolved: {}.", parts.join(", "))
+}
+
+fn read_stdin() -> io::Result<String> {
+    let mut text = String::new();
+    io::stdin().read_to_string(&mut text)?;
+    Ok(text)
+}
+
+/// The inventory text: from `--sources`, or else discovered under `--root`
+/// when the pipeline has no inline inventory.
+fn read_inventory(
+    args: &CliArgs,
+    pipeline_text: &str,
+    path: &Path,
+) -> Result<Option<String>, Box<dyn Error>> {
+    Ok(match (args.sources.as_deref(), &args.root) {
+        (Some("-"), _) => Some(read_stdin()?),
+        (Some(sources), _) => Some(fs::read_to_string(sources)?),
+        // With a root and no inventory, find the sources by their path rules.
+        (None, Some(root))
+            if args.command == Command::Discover || !has_inline_inventory(pipeline_text, path) =>
+        {
+            discover(pipeline_text, path, Path::new(root))?
+        }
+        (None, _) => None,
+    })
+}
+
+/// Print every diagnostic, failing if any is an error.
+fn report(
+    diagnostics: &[Diagnostic],
+    pipeline_text: &str,
+    inventory_text: Option<&str>,
+) -> Result<(), Reported> {
+    for diagnostic in diagnostics {
+        eprintln!("{}", diagnostic.display_in(pipeline_text, inventory_text));
+    }
+    if diagnostics.iter().any(Diagnostic::is_error) {
+        return Err(Reported);
+    }
+    Ok(())
+}
+
+/// `--stage` must name a declared stage.
+fn check_stage(pipeline: &Pipeline, stage: &str) -> Result<(), String> {
+    if pipeline
+        .stages
+        .iter()
+        .any(|declared| declared.name == stage)
+    {
+        return Ok(());
+    }
+    let names: Vec<_> = pipeline
+        .stages
+        .iter()
+        .map(|stage| format!("`{}`", stage.name))
+        .collect();
+    Err(if names.is_empty() {
+        format!("unknown stage `{stage}`; this pipeline declares no stages")
+    } else {
+        format!("unknown stage `{stage}`; stages: {}", names.join(", "))
+    })
 }
 
 fn has_inline_inventory(text: &str, path: &Path) -> bool {
