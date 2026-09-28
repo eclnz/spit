@@ -7,11 +7,11 @@ use std::ops::Range;
 use crate::bash::check_command_syntax;
 use crate::imports::apply_import;
 use crate::model::{
-    Cardinality, CommandDef, CommandRole, CountRequirement, CoverageRule, EntityBinding,
-    InputBinding, InputPort, Invocation, OperationDef, OutputPort, Pipeline, ProductDef, ShapeRule,
-    SourceInventory, SourceRecord, StageDef, DEFAULT_OUTPUT,
+    Cardinality, CommandDef, CommandRole, CountRequirement, CoverageRule, DefaultPort,
+    EntityBinding, InputBinding, InputPort, Invocation, OperationDef, OutputPort, Pipeline,
+    ProductDef, ShapeRule, SourceInventory, SourceRecord, StageDef, DEFAULT_OUTPUT,
 };
-use crate::paths::check_path_template_syntax;
+use crate::paths::PathTemplate;
 use crate::resolver::{step_context, BoundInput};
 use crate::span::{columns_of, content_columns, find_word, Place};
 use crate::types::{parse_type_expr, TypeExpr, TypeParseError};
@@ -764,7 +764,7 @@ fn set_path(
     if template.is_empty() {
         return Err(ParseError::new(number, "path template must not be empty"));
     }
-    check_path_template_syntax(template)
+    let parsed = PathTemplate::parse(template)
         .map_err(|error| ParseError::new(number, error.message).at(template))?;
     if let Some(product) = product {
         lines
@@ -772,7 +772,7 @@ fn set_path(
             .insert(product.to_owned(), tail_place(original, number, template));
         if pipeline
             .product_paths
-            .insert(product.to_owned(), template.to_owned())
+            .insert(product.to_owned(), parsed)
             .is_some()
         {
             return Err(ParseError::new(
@@ -786,11 +786,7 @@ fn set_path(
             .iter_mut()
             .find(|definition| definition.name == stage)
             .expect("an open stage is declared");
-        if definition
-            .path_template
-            .replace(template.to_owned())
-            .is_some()
-        {
+        if definition.path_template.replace(parsed).is_some() {
             return Err(ParseError::new(
                 number,
                 format!("duplicate default path template for stage `{stage}`"),
@@ -799,11 +795,7 @@ fn set_path(
         lines
             .stage_paths
             .insert(stage.to_owned(), tail_place(original, number, template));
-    } else if pipeline
-        .path_template
-        .replace(template.to_owned())
-        .is_some()
-    {
+    } else if pipeline.path_template.replace(parsed).is_some() {
         return Err(ParseError::new(number, "duplicate default path template"));
     } else {
         lines.default_path = Some(tail_place(original, number, template));
@@ -1376,7 +1368,9 @@ fn parse_operation(line: &str, number: usize) -> Result<OperationDef, ParseError
             if name == DEFAULT_OUTPUT {
                 return Err(ParseError::new(
                     number,
-                    "input port name `output` is reserved for the operation output",
+                    format!(
+                        "input port name `{DEFAULT_OUTPUT}` is reserved for the operation output"
+                    ),
                 )
                 .at(name));
             }
@@ -1395,13 +1389,9 @@ fn parse_operation(line: &str, number: usize) -> Result<OperationDef, ParseError
         } else {
             (Cardinality::One, port_type(input, number)?)
         };
-        let port_name = declared_name.map(str::to_owned).unwrap_or_else(|| {
-            if count == 1 {
-                "input".to_owned()
-            } else {
-                format!("input{}", index + 1)
-            }
-        });
+        let port_name = declared_name
+            .map(str::to_owned)
+            .unwrap_or_else(|| DefaultPort::for_input(index, count).name());
         ports.push(match cardinality {
             Cardinality::One => InputPort::one(&port_name, artifact_type),
             Cardinality::Many => InputPort::many(&port_name, artifact_type),

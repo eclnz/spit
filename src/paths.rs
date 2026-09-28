@@ -69,37 +69,117 @@ pub(crate) enum PathPlaceholder {
 }
 
 impl PathPlaceholder {
-    fn parse(name: String) -> Self {
-        match name.as_str() {
-            "product" => Self::Product,
-            "entities" => Self::Entities,
-            "stage" => Self::Stage,
-            _ => Self::Dimension(name),
+    /// The built-in placeholder `name` always means, if any; no product may
+    /// declare a dimension with such a name.
+    pub(crate) fn reserved(name: &str) -> Option<Self> {
+        match name {
+            "product" => Some(Self::Product),
+            "entities" => Some(Self::Entities),
+            "stage" => Some(Self::Stage),
+            _ => None,
         }
     }
 
-    /// Whether `name` always means a built-in placeholder, so that no
-    /// product may declare a dimension with it.
-    pub(crate) fn is_reserved(name: &str) -> bool {
-        !matches!(Self::parse(name.to_owned()), Self::Dimension(_))
+    fn parse(name: String) -> Self {
+        Self::reserved(&name).unwrap_or(Self::Dimension(name))
+    }
+
+    /// The name between the braces.
+    pub(crate) fn name(&self) -> &str {
+        match self {
+            Self::Product => "product",
+            Self::Entities => "entities",
+            Self::Stage => "stage",
+            Self::Dimension(name) => name,
+        }
+    }
+}
+
+/// Reads as the placeholder is written, such as `{stage}`.
+impl fmt::Display for PathPlaceholder {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{{{}}}", self.name())
     }
 }
 
 /// A path template's literal text and placeholders.
-enum PathPart {
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum PathPart {
     Literal(String),
     Placeholder(PathPlaceholder),
 }
 
-fn parse_path_template(template: &str) -> Result<Vec<PathPart>, PathError> {
-    Ok(parse_template(template)
-        .map_err(error)?
-        .into_iter()
-        .map(|part| match part {
-            Part::Literal(value) => PathPart::Literal(value),
-            Part::Placeholder(name) => PathPart::Placeholder(PathPlaceholder::parse(name)),
-        })
-        .collect())
+/// A path rule's template, parsed once when the rule is read.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PathTemplate {
+    text: String,
+    parts: Vec<PathPart>,
+}
+
+impl PathTemplate {
+    /// Parse a template such as `derivatives/{stage}/{product}/{entities}.mif`.
+    pub fn parse(text: impl Into<String>) -> Result<Self, PathError> {
+        let text = text.into();
+        let parts = parse_template(&text)
+            .map_err(error)?
+            .into_iter()
+            .map(|part| match part {
+                Part::Literal(value) => PathPart::Literal(value),
+                Part::Placeholder(name) => PathPart::Placeholder(PathPlaceholder::parse(name)),
+            })
+            .collect();
+        Ok(Self { text, parts })
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.text
+    }
+
+    pub(crate) fn parts(&self) -> &[PathPart] {
+        &self.parts
+    }
+
+    /// This template with `{product}` written out as `name`, so that an
+    /// imported product keeps the path its own file gives it.
+    #[must_use]
+    pub(crate) fn with_product(&self, name: &str) -> Self {
+        let parts: Vec<_> = self
+            .parts
+            .iter()
+            .map(|part| match part {
+                PathPart::Placeholder(PathPlaceholder::Product) => {
+                    PathPart::Literal(name.to_owned())
+                }
+                part => part.clone(),
+            })
+            .collect();
+        let text = parts
+            .iter()
+            .map(|part| match part {
+                PathPart::Literal(value) => value.replace('{', "{{").replace('}', "}}"),
+                PathPart::Placeholder(placeholder) => placeholder.to_string(),
+            })
+            .collect();
+        Self { text, parts }
+    }
+}
+
+impl fmt::Display for PathTemplate {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.text)
+    }
+}
+
+impl PartialEq<str> for PathTemplate {
+    fn eq(&self, other: &str) -> bool {
+        self.text == other
+    }
+}
+
+impl PartialEq<&str> for PathTemplate {
+    fn eq(&self, other: &&str) -> bool {
+        self.text == *other
+    }
 }
 
 pub(crate) fn error(message: impl Into<String>) -> PathError {
@@ -235,14 +315,14 @@ pub(crate) fn collect_paths(
     let mut samples: BTreeMap<String, &str> = BTreeMap::new();
     for product in &pipeline.products {
         let rule = if let Some(template) = pipeline.product_paths.get(&product.name) {
-            PathRule::Explicit(template.clone())
+            PathRule::Explicit(template.to_string())
         } else if let Some((stage, template)) = pipeline.stage_path_rule(&product.name) {
             PathRule::Stage {
                 stage: stage.to_owned(),
-                template: template.clone(),
+                template: template.to_string(),
             }
         } else if let Some(template) = &pipeline.path_template {
-            PathRule::Default(template.clone())
+            PathRule::Default(template.to_string())
         } else {
             PathRule::Missing
         };
@@ -282,8 +362,9 @@ fn validate_path_template(pipeline: &Pipeline, product: &ProductDef) -> Result<S
     let template = pipeline
         .path_template_for(&product.name)
         .ok_or_else(|| error(format!("no path template for product `{}`", product.name)))?;
-    let placeholders: BTreeSet<_> = parse_path_template(template)?
-        .into_iter()
+    let placeholders: BTreeSet<_> = template
+        .parts()
+        .iter()
         .filter_map(|part| match part {
             PathPart::Placeholder(placeholder) => Some(placeholder),
             PathPart::Literal(_) => None,
@@ -310,11 +391,6 @@ fn validate_path_template(pipeline: &Pipeline, product: &ProductDef) -> Result<S
     );
     let artifact = ArtifactInstance::new(&product.name, product.artifact_type.clone(), entities);
     bind_path(pipeline, &product.dimensions, &artifact)
-}
-
-/// Check placeholder brackets in a path template.
-pub(crate) fn check_path_template_syntax(template: &str) -> Result<(), PathError> {
-    parse_template(template).map(|_| ()).map_err(error)
 }
 
 /// Validate concrete artifact path bindings without requiring commands.
@@ -462,9 +538,9 @@ fn bind_path(
             ))
         })?;
     let mut relative = String::new();
-    for part in parse_path_template(template)? {
+    for part in template.parts() {
         match part {
-            PathPart::Literal(value) => relative.push_str(&value),
+            PathPart::Literal(value) => relative.push_str(value),
             PathPart::Placeholder(PathPlaceholder::Product) => {
                 // `alias::name` would put colons in file names.
                 relative.push_str(&artifact.product.replace("::", "."));
@@ -472,10 +548,12 @@ fn bind_path(
             PathPart::Placeholder(PathPlaceholder::Stage) => {
                 let stage = pipeline.stage_of(&artifact.product).ok_or_else(|| {
                     error(format!(
-                        "path template for `{}` uses `{{stage}}`, but `{}` is not made in a stage",
-                        artifact.product, artifact.product
+                        "path template for `{}` uses `{}`, but `{}` is not made in a stage",
+                        artifact.product,
+                        PathPlaceholder::Stage,
+                        artifact.product
                     ))
-                    .focus("{stage}")
+                    .focus(PathPlaceholder::Stage.to_string())
                 })?;
                 // Each nested stage is a directory.
                 let components: Vec<_> = stage.split('/').map(encode_component).collect();
@@ -503,13 +581,13 @@ fn bind_path(
                     relative.push_str(&bindings.join("__"));
                 }
             }
-            PathPart::Placeholder(PathPlaceholder::Dimension(dimension)) => {
-                let value = artifact.entities.0.get(&dimension).ok_or_else(|| {
+            PathPart::Placeholder(placeholder @ PathPlaceholder::Dimension(dimension)) => {
+                let value = artifact.entities.0.get(dimension).ok_or_else(|| {
                     error(format!(
                         "path template for `{}` uses absent dimension `{dimension}`",
                         artifact.product
                     ))
-                    .focus(format!("{{{dimension}}}"))
+                    .focus(placeholder.to_string())
                 })?;
                 relative.push_str(&encode_component(value));
             }
@@ -628,11 +706,11 @@ enum Piece {
     Value(String),
 }
 
-fn path_pattern(template: &str, product: &ProductDef) -> Result<Vec<Piece>, PathError> {
+fn path_pattern(template: &PathTemplate, product: &ProductDef) -> Result<Vec<Piece>, PathError> {
     let mut pieces = Vec::new();
-    for part in parse_path_template(template)? {
+    for part in template.parts() {
         match part {
-            PathPart::Literal(value) => pieces.push(Piece::Literal(value)),
+            PathPart::Literal(value) => pieces.push(Piece::Literal(value.clone())),
             PathPart::Placeholder(PathPlaceholder::Product) => {
                 pieces.push(Piece::Literal(product.name.replace("::", ".")));
             }
@@ -653,12 +731,13 @@ fn path_pattern(template: &str, product: &ProductDef) -> Result<Vec<Piece>, Path
             // `{stage}`; `inspect_paths` rejects such a rule first.
             PathPart::Placeholder(PathPlaceholder::Stage) => {
                 return Err(error(format!(
-                "path rule for source `{}` uses `{{stage}}`, but a source is not made in a stage",
-                product.name
-            )))
+                    "path rule for source `{}` uses `{}`, but a source is not made in a stage",
+                    product.name,
+                    PathPlaceholder::Stage
+                )))
             }
             PathPart::Placeholder(PathPlaceholder::Dimension(dimension)) => {
-                pieces.push(Piece::Value(dimension));
+                pieces.push(Piece::Value(dimension.clone()));
             }
         }
     }

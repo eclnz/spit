@@ -6,7 +6,7 @@ use std::ops::Range;
 use std::path::Path;
 
 use crate::model::{
-    ArtifactKey, Cardinality, CommandRole, Job, OperationDef, Pipeline, ResolvedDag,
+    ArtifactKey, Cardinality, CommandRole, DefaultPort, Job, OperationDef, Pipeline, ResolvedDag,
 };
 use crate::parser::SourceMap;
 use crate::paths::{bound_paths, inspect_paths, output_keys, PathError};
@@ -277,9 +277,10 @@ fn slot(operation: &OperationDef, name: &str) -> Option<Slot> {
     if let Some(index) = operation.outputs.iter().position(|port| port.name == name) {
         return Some(Slot::Output(index));
     }
-    // `{inputs}` names an operation's only input when that is a many input.
     match operation.inputs.as_slice() {
-        [port] if port.cardinality == Cardinality::Many && name == "inputs" => Some(Slot::Input(0)),
+        [port] if port.cardinality == Cardinality::Many && name == DefaultPort::Inputs.name() => {
+            Some(Slot::Input(0))
+        }
         _ => None,
     }
 }
