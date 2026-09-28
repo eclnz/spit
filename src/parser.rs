@@ -1500,8 +1500,7 @@ fn parse_invocation_parts(
     Ok(Invocation::with_outputs(operation, bindings, outputs))
 }
 
-const SELECTORS: &str =
-    "expected `@ vary(dimension)`, `@ where(dimension=value, ...)`, or `@ same(dimension, ...)`";
+const SELECTORS: &str = "expected `@ vary(dimension)`, `@ where(dimension=value, ...)`, `@ same(dimension, ...)`, or `@ each(dimension, ...)`";
 
 /// Parse `product [@ selector(...)]...`.
 fn parse_binding(arg: &str, number: usize) -> Result<InputBinding, ParseError> {
@@ -1571,6 +1570,22 @@ fn parse_binding(arg: &str, number: usize) -> Result<InputBinding, ParseError> {
                     .collect::<Result<Vec<_>, _>>()?;
                 if binding.same.replace(owned(&dimensions)).is_some() {
                     return Err(duplicate());
+                }
+            }
+            "each" => {
+                if !binding.each.is_empty() {
+                    return Err(duplicate());
+                }
+                for item in items {
+                    let dimension = identifier(item, number, "each dimension")?;
+                    if binding.each.iter().any(|each| each == dimension) {
+                        return Err(ParseError::new(
+                            number,
+                            format!("`@ each(...)` names `{dimension}` twice"),
+                        )
+                        .at(item));
+                    }
+                    binding.each.push(dimension.to_owned());
                 }
             }
             _ => return Err(ParseError::new(number, SELECTORS).at(keyword)),
