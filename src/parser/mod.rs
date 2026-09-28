@@ -110,7 +110,12 @@ impl ParseError {
 /// turns them into a [`Pipeline`]. Each keeps where its parts sit.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct Syntax {
+    /// Every statement before `error`, or in the whole text without one.
     pub(crate) statements: Vec<Statement>,
+    /// The first line that does not parse. Parsing stops there, and lowering
+    /// reports it only when no statement before it fails, so errors are
+    /// found in line order.
+    pub(crate) error: Option<ParseError>,
 }
 
 #[derive(Clone, Debug)]
@@ -178,7 +183,7 @@ pub(crate) enum InlineInventory {
 }
 
 /// Parse a pipeline's statements, in the sectioned or the flow form.
-pub(crate) fn parse_syntax(text: &str) -> Result<Syntax, ParseError> {
+pub(crate) fn parse_syntax(text: &str) -> Syntax {
     if is_sectioned_document(text) {
         parse_sectioned(text)
     } else {

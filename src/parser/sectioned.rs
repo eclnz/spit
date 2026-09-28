@@ -30,14 +30,16 @@ pub(super) fn is_sectioned_document(text: &str) -> bool {
     })
 }
 
-pub(super) fn parse_sectioned(text: &str) -> Result<Syntax, ParseError> {
+pub(super) fn parse_sectioned(text: &str) -> Syntax {
     let mut syntax = Syntax::default();
     let mut section = None;
     for (index, original) in text.lines().enumerate() {
-        sectioned_line(&mut syntax, &mut section, original, index + 1)
-            .map_err(|error| error.locate(original))?;
+        if let Err(error) = sectioned_line(&mut syntax, &mut section, original, index + 1) {
+            syntax.error = Some(error.locate(original));
+            break;
+        }
     }
-    Ok(syntax)
+    syntax
 }
 
 fn sectioned_line(

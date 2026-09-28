@@ -12,14 +12,16 @@ use super::operation::parse_operation;
 use super::source_map::{name_place, rule_place, step_place, tail_place};
 use super::{FlowOutput, FlowStep, ParseError, StatementKind, Syntax, SHELL_SOURCE_REMOVED};
 
-pub(super) fn parse_flow(text: &str) -> Result<Syntax, ParseError> {
+pub(super) fn parse_flow(text: &str) -> Syntax {
     let mut syntax = Syntax::default();
     let mut stages = OpenStages::default();
     for (index, original) in text.lines().enumerate() {
-        flow_line(&mut syntax, &mut stages, original, index + 1)
-            .map_err(|error| error.locate(original))?;
+        if let Err(error) = flow_line(&mut syntax, &mut stages, original, index + 1) {
+            syntax.error = Some(error.locate(original));
+            break;
+        }
     }
-    Ok(syntax)
+    syntax
 }
 
 /// Whether a line opens a stage, as opposed to a step whose output product

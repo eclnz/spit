@@ -144,7 +144,8 @@ impl PipelineBuilder {
 }
 
 /// Lower each statement in order, with `imports` holding the definitions
-/// each `use` line brings in, by line.
+/// each `use` line brings in, by line. The first error by line wins: one in
+/// a statement, or else the syntax error parsing stopped at.
 pub(crate) fn lower(
     syntax: &Syntax,
     imports: &BTreeMap<usize, Pipeline>,
@@ -154,7 +155,10 @@ pub(crate) fn lower(
         lower_statement(&mut builder, imports, statement)
             .map_err(|error| error.within(&statement.place))?;
     }
-    Ok(builder)
+    match &syntax.error {
+        Some(error) => Err(error.clone()),
+        None => Ok(builder),
+    }
 }
 
 fn lower_statement(
@@ -231,7 +235,7 @@ pub(crate) struct ParsedDocument {
 }
 
 pub fn parse_pipeline(text: &str) -> Result<Pipeline, ParseError> {
-    lower(&parse_syntax(text)?, &BTreeMap::new()).map(|builder| builder.pipeline)
+    lower(&parse_syntax(text), &BTreeMap::new()).map(|builder| builder.pipeline)
 }
 
 /// Parse a text document that may package an inventory alongside its pipeline.
@@ -247,7 +251,7 @@ pub(crate) fn parse_document_with_imports(
     inline: InlineInventory,
 ) -> Result<ParsedDocument, ParseError> {
     let document = split_document(text);
-    let builder = lower(&parse_syntax(&document.pipeline)?, imports)?;
+    let builder = lower(&parse_syntax(&document.pipeline), imports)?;
     let inventory = match inline {
         InlineInventory::Read if document.inventory_line.is_some() => {
             Some(parse_source_inventory(&document.inventory)?)
