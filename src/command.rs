@@ -6,62 +6,14 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
-use std::ops::Range;
 
 use crate::model::{Cardinality, CommandRole, DefaultPort, OperationDef, Pipeline};
 use crate::parser::SourceMap;
-use crate::span::Place;
+use crate::span::Located;
 use crate::template::{parse_template, Part};
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct CommandError {
-    /// The pipeline line of the command at fault, when known.
-    pub line: Option<usize>,
-    /// The byte range in that line, when known.
-    pub columns: Option<Range<usize>>,
-    pub message: String,
-    /// Text within the command that the error is about, such as one
-    /// `{placeholder}`.
-    pub(crate) focus: Option<String>,
-}
-
-impl CommandError {
-    pub(crate) fn new(message: impl Into<String>) -> Self {
-        Self {
-            line: None,
-            columns: None,
-            message: message.into(),
-            focus: None,
-        }
-    }
-
-    /// Attach a place unless a more specific one is already recorded.
-    fn at(mut self, place: Option<Place>) -> Self {
-        if self.line.is_none() {
-            if let Some(place) = place {
-                self.line = Some(place.line);
-                self.columns = Some(place.columns);
-            }
-        }
-        self
-    }
-
-    fn focus(mut self, text: impl Into<String>) -> Self {
-        self.focus = Some(text.into());
-        self
-    }
-}
-
-impl fmt::Display for CommandError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if let Some(line) = self.line {
-            write!(f, "line {line}: ")?;
-        }
-        f.write_str(&self.message)
-    }
-}
-
-impl std::error::Error for CommandError {}
+/// An error in a command, such as an unknown `{placeholder}`.
+pub type CommandError = Located<String>;
 
 /// One argument of a command: literal text and `{placeholders}`, joined
 /// without separators.

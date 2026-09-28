@@ -312,7 +312,7 @@ fn parse_document_at_inner(
                         format!(
                             "in `{}` at line {}: {}",
                             canonical.display(),
-                            error.line,
+                            error.line(),
                             error.message
                         ),
                     )

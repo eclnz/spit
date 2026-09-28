@@ -431,13 +431,13 @@ fn outputs_and_verifications_are_checked_before_resolution() {
 
     let unwritten = TISSUES.replace(" {csf}\n", "\n");
     let error = validate_commands(&parse_pipeline(&unwritten).unwrap()).unwrap_err();
-    assert!(error.message.contains("must use `{csf}`"), "{error}");
+    assert!(error.message().contains("must use `{csf}`"), "{error}");
 
     let reads_output = TISSUES.replace("same_grid {dwi} {mask}", "same_grid {wm}");
     let error = validate_commands(&parse_pipeline(&reads_output).unwrap()).unwrap_err();
     assert!(
         error
-            .message
+            .message()
             .contains("verify for `fods` cannot use output `{wm}`"),
         "{error}"
     );
@@ -575,7 +575,7 @@ fn a_file_matching_two_source_rules_is_rejected() {
     let error = discover_sources(&parse_pipeline(text).unwrap(), &tree.0).unwrap_err();
     assert!(
         error
-            .message
+            .message()
             .contains("matches the path rules of both `a` and `b`"),
         "{error}"
     );

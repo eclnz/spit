@@ -11,22 +11,26 @@ use crate::model::{
     ProductDef, ShapeRule, SourceInventory, SourceRecord, DEFAULT_OUTPUT,
 };
 use crate::paths::PathTemplate;
-use crate::span::{columns_of, content_columns, find_word, Place};
+use crate::span::{columns_of, content_columns, find_word, Focus, Located, Place};
 use crate::types::{parse_type_expr, TypeExpr, TypeParseError};
 
 const SHELL_SOURCE_REMOVED: &str =
     "shell-source is no longer supported; make the command executable available on PATH";
 
+/// A parse error, with the line it is on.
+pub type ParseError = Located<ParseFailure>;
+
+/// What went wrong while parsing a line.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ParseError {
-    pub line: usize,
-    /// The byte range in the line that the error is about, when known.
-    pub columns: Option<Range<usize>>,
+pub struct ParseFailure {
     pub kind: ParseErrorKind,
     pub message: String,
-    /// Where the offending token sits in memory, until `locate` turns it into
-    /// columns of the line it was sliced from.
-    token: Option<Range<usize>>,
+}
+
+impl fmt::Display for ParseFailure {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.message)
+    }
 }
 
 /// Errors that callers may want to treat specially; everything else is `Syntax`.
@@ -41,27 +45,33 @@ pub enum ParseErrorKind {
 
 impl ParseError {
     pub(crate) fn new(line: usize, message: impl Into<String>) -> Self {
-        Self {
-            line,
-            columns: None,
+        let mut error = Located::unplaced(ParseFailure {
             kind: ParseErrorKind::Syntax,
             message: message.into(),
-            token: None,
-        }
+        });
+        error.location.line = Some(line);
+        error
+    }
+
+    /// The line the error is on; every parse error has one.
+    pub fn line(&self) -> usize {
+        self.location.line.unwrap_or_default()
     }
 
     /// Mark `token`, a slice of the line being parsed, as what the error is about.
-    pub(crate) fn at(mut self, token: &str) -> Self {
+    pub(crate) fn at_token(mut self, token: &str) -> Self {
         let start = token.as_ptr() as usize;
-        self.token.get_or_insert(start..start + token.len());
+        self.location
+            .focus
+            .get_or_insert(Focus::Slice(start..start + token.len()));
         self
     }
 
     /// Point at `place` unless the error already points somewhere, for an
     /// error found after its line was parsed.
     pub(crate) fn within(mut self, place: &Place) -> Self {
-        if self.columns.is_none() && self.token.is_none() {
-            self.columns = Some(place.columns.clone());
+        if self.location.columns.is_none() && self.location.focus.is_none() {
+            self.location.columns = Some(place.columns.clone());
         }
         self
     }
@@ -69,26 +79,22 @@ impl ParseError {
     /// Resolve the marked token to columns of `line`, the text it was sliced
     /// from; without one, point at the line's content.
     pub(crate) fn locate(mut self, line: &str) -> Self {
-        if self.columns.is_none() {
+        if self.location.columns.is_none() {
             let base = line.as_ptr() as usize;
-            let token = self.token.take().and_then(|token| {
+            let token = match self.location.focus.take() {
+                Some(Focus::Slice(token)) => Some(token),
+                _ => None,
+            };
+            let token = token.and_then(|token| {
                 let start = token.start.checked_sub(base)?;
                 let end = token.end.checked_sub(base)?;
                 (end <= line.len()).then_some(start..end)
             });
-            self.columns = Some(token.unwrap_or_else(|| content_columns(line)));
+            self.location.columns = Some(token.unwrap_or_else(|| content_columns(line)));
         }
         self
     }
 }
-
-impl fmt::Display for ParseError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "line {}: {}", self.line, self.message)
-    }
-}
-
-impl std::error::Error for ParseError {}
 
 /// Where declarations sit in the source, kept beside the parsed [`Pipeline`]
 /// so that diagnostics can point at them without the model carrying them.
@@ -711,7 +717,11 @@ fn parse_command(line: &str, number: usize, role: CommandRole) -> Result<Command
         ));
     }
     let parsed = CommandTemplate::parse(template).map_err(|error| {
-        ParseError::new(number, format!("command `{operation}`: {}", error.message)).at(template)
+        ParseError::new(
+            number,
+            format!("command `{operation}`: {}", error.message()),
+        )
+        .at_token(template)
     })?;
     Ok(CommandDef {
         role,
@@ -768,7 +778,7 @@ fn parse_path(
         return Err(ParseError::new(number, "path template must not be empty"));
     }
     let parsed = PathTemplate::parse(template)
-        .map_err(|error| ParseError::new(number, error.message).at(template))?;
+        .map_err(|error| ParseError::new(number, error.message()).at_token(template))?;
     Ok(PathRule {
         stage: stage.filter(|_| product.is_none()),
         product,
@@ -1094,23 +1104,25 @@ fn parse_coverage_rule(line: &str, number: usize) -> Result<CoverageRule, ParseE
         };
         if let Some(parsed) = parsed {
             if count.replace(parsed).is_some() {
-                return Err(ParseError::new(number, "a rule takes one count").at(token));
+                return Err(ParseError::new(number, "a rule takes one count").at_token(token));
             }
         } else if let Some((dimension, listed)) = token.split_once('=') {
             let dimension = identifier(dimension, number, "required dimension")?;
             let listed: Vec<_> = listed.split(',').collect();
             if listed.iter().any(|value| value.is_empty()) {
-                return Err(ParseError::new(number, "required values must not be empty").at(token));
+                return Err(
+                    ParseError::new(number, "required values must not be empty").at_token(token)
+                );
             }
             if values.insert(dimension.to_owned(), listed).is_some() {
                 return Err(ParseError::new(
                     number,
                     format!("duplicate required dimension `{dimension}`"),
                 )
-                .at(token));
+                .at_token(token));
             }
         } else {
-            return Err(ParseError::new(number, syntax).at(token));
+            return Err(ParseError::new(number, syntax).at_token(token));
         }
     }
     if count.is_none() && values.is_empty() {
@@ -1118,10 +1130,10 @@ fn parse_coverage_rule(line: &str, number: usize) -> Result<CoverageRule, ParseE
     }
     let bracketed = dimensions.trim();
     let dimensions = bracketed.strip_prefix('[').ok_or_else(|| {
-        ParseError::new(number, "expected `[` before constraint dimensions").at(bracketed)
+        ParseError::new(number, "expected `[` before constraint dimensions").at_token(bracketed)
     })?;
     let dimensions = dimensions.strip_suffix(']').ok_or_else(|| {
-        ParseError::new(number, "expected closing `]` in constraint dimensions").at(bracketed)
+        ParseError::new(number, "expected closing `]` in constraint dimensions").at_token(bracketed)
     })?;
     let dimensions = comma_items(dimensions, number)?;
     if dimensions.is_empty() {
@@ -1146,14 +1158,14 @@ fn parse_coverage_rule(line: &str, number: usize) -> Result<CoverageRule, ParseE
 
 fn parse_count(value: &str, number: usize) -> Result<usize, ParseError> {
     value.parse().map_err(|_| {
-        ParseError::new(number, "constraint count must be a nonnegative integer").at(value)
+        ParseError::new(number, "constraint count must be a nonnegative integer").at_token(value)
     })
 }
 
 /// Turn a [`TypeParseError`] into a [`ParseError`] pointing at the specific
 /// token within `ty` that the type parser rejected, rather than all of `ty`.
 fn type_error(number: usize, ty: &str, error: TypeParseError) -> ParseError {
-    ParseError::new(number, error.message).at(&ty[error.span])
+    ParseError::new(number, error.message).at_token(&ty[error.span])
 }
 
 fn parse_product(line: &str, number: usize) -> Result<ProductDef, ParseError> {
@@ -1171,7 +1183,7 @@ fn parse_product(line: &str, number: usize) -> Result<ProductDef, ParseError> {
     // From the `[` that is never closed to the end of the declaration.
     let bracketed = &line[declaration.len()..];
     let dimensions = dimensions.strip_suffix(']').ok_or_else(|| {
-        ParseError::new(number, "expected closing `]` in product declaration").at(bracketed)
+        ParseError::new(number, "expected closing `]` in product declaration").at_token(bracketed)
     })?;
     let dimensions = comma_items(dimensions, number)?;
     for dimension in &dimensions {
@@ -1195,7 +1207,7 @@ fn parse_operation(line: &str, number: usize) -> Result<OperationDef, ParseError
                     number,
                     "expected `@ drop(dimension)` or `@ min(count)` after operation signature",
                 )
-                .at(clause)
+                .at_token(clause)
             })?;
         match keyword {
             "drop" if aggregated_dimension.is_none() => {
@@ -1208,13 +1220,14 @@ fn parse_operation(line: &str, number: usize) -> Result<OperationDef, ParseError
                     .filter(|count| *count > 0)
                     .ok_or_else(|| {
                         ParseError::new(number, "`@ min(count)` needs a positive integer")
-                            .at(argument)
+                            .at_token(argument)
                     })?;
                 minimum = Some(count);
             }
             "drop" | "min" => {
                 return Err(
-                    ParseError::new(number, format!("duplicate `@ {keyword}(...)`")).at(keyword),
+                    ParseError::new(number, format!("duplicate `@ {keyword}(...)`"))
+                        .at_token(keyword),
                 )
             }
             _ => {
@@ -1222,7 +1235,7 @@ fn parse_operation(line: &str, number: usize) -> Result<OperationDef, ParseError
                     number,
                     "expected `@ drop(dimension)` or `@ min(count)` after operation signature",
                 )
-                .at(keyword))
+                .at_token(keyword))
             }
         }
     }
@@ -1244,7 +1257,7 @@ fn parse_operation(line: &str, number: usize) -> Result<OperationDef, ParseError
             if !trailing.is_empty() {
                 return Err(
                     ParseError::new(number, "expected `->` before operation output type")
-                        .at(trailing),
+                        .at_token(trailing),
                 );
             }
         }
@@ -1270,7 +1283,7 @@ fn parse_operation(line: &str, number: usize) -> Result<OperationDef, ParseError
                         "input port name `{DEFAULT_OUTPUT}` is reserved for the operation output"
                     ),
                 )
-                .at(name));
+                .at_token(name));
             }
             (Some(name), value.trim())
         } else {
@@ -1343,11 +1356,11 @@ fn parse_outputs(text: &str, number: usize) -> Result<Vec<OutputPort>, ParseErro
         return Ok(vec![OutputPort::new(DEFAULT_OUTPUT, output_type)]);
     };
     let list = list.strip_suffix(')').ok_or_else(|| {
-        ParseError::new(number, "expected closing `)` after output ports").at(text)
+        ParseError::new(number, "expected closing `)` after output ports").at_token(text)
     })?;
     let items = comma_items(list, number)?;
     if items.is_empty() {
-        return Err(ParseError::new(number, "expected at least one output port").at(text));
+        return Err(ParseError::new(number, "expected at least one output port").at_token(text));
     }
     items
         .into_iter()
@@ -1409,21 +1422,21 @@ fn parse_binding(arg: &str, number: usize) -> Result<InputBinding, ParseError> {
     for selector in parts {
         let selector = selector.trim();
         let (keyword, arguments) = call_parts(selector, number)
-            .map_err(|_| ParseError::new(number, SELECTORS).at(selector))?;
+            .map_err(|_| ParseError::new(number, SELECTORS).at_token(selector))?;
         let items = comma_items(arguments, number)?;
         if items.is_empty() {
             return Err(
-                ParseError::new(number, format!("`@ {keyword}()` needs a dimension")).at(selector),
+                ParseError::new(number, format!("`@ {keyword}()` needs a dimension"))
+                    .at_token(selector),
             );
         }
         let duplicate =
-            || ParseError::new(number, format!("duplicate `@ {keyword}(...)`")).at(keyword);
+            || ParseError::new(number, format!("duplicate `@ {keyword}(...)`")).at_token(keyword);
         match keyword {
             "vary" => {
                 let [dimension] = items.as_slice() else {
-                    return Err(
-                        ParseError::new(number, "`@ vary(...)` takes one dimension").at(selector)
-                    );
+                    return Err(ParseError::new(number, "`@ vary(...)` takes one dimension")
+                        .at_token(selector));
                 };
                 let dimension = identifier(dimension, number, "vary dimension")?;
                 if binding.vary.replace(dimension.to_owned()).is_some() {
@@ -1437,7 +1450,7 @@ fn parse_binding(arg: &str, number: usize) -> Result<InputBinding, ParseError> {
                 for item in items {
                     let (dimension, value) = item.split_once('=').ok_or_else(|| {
                         ParseError::new(number, "expected `dimension=value` in `@ where(...)`")
-                            .at(item)
+                            .at_token(item)
                     })?;
                     let dimension = identifier(dimension.trim(), number, "where dimension")?;
                     let value = value.trim();
@@ -1446,7 +1459,7 @@ fn parse_binding(arg: &str, number: usize) -> Result<InputBinding, ParseError> {
                             number,
                             "a `@ where` value must be one nonempty token",
                         )
-                        .at(item));
+                        .at_token(item));
                     }
                     if binding
                         .pinned
@@ -1457,7 +1470,7 @@ fn parse_binding(arg: &str, number: usize) -> Result<InputBinding, ParseError> {
                             number,
                             format!("`@ where(...)` pins `{dimension}` twice"),
                         )
-                        .at(item));
+                        .at_token(item));
                     }
                 }
             }
@@ -1481,12 +1494,12 @@ fn parse_binding(arg: &str, number: usize) -> Result<InputBinding, ParseError> {
                             number,
                             format!("`@ each(...)` names `{dimension}` twice"),
                         )
-                        .at(item));
+                        .at_token(item));
                     }
                     binding.each.push(dimension.to_owned());
                 }
             }
-            _ => return Err(ParseError::new(number, SELECTORS).at(keyword)),
+            _ => return Err(ParseError::new(number, SELECTORS).at_token(keyword)),
         }
     }
     Ok(binding)
@@ -1523,7 +1536,7 @@ fn parse_bindings(bindings: &str, number: usize) -> Result<EntityBinding, ParseE
         if open.is_empty() {
             error
         } else {
-            error.at(open)
+            error.at_token(open)
         }
     })?;
     let mut values = BTreeMap::new();
@@ -1538,7 +1551,7 @@ fn parse_bindings(bindings: &str, number: usize) -> Result<EntityBinding, ParseE
                 number,
                 "source dimension value must be one nonempty token",
             )
-            .at(item));
+            .at_token(item));
         }
         if values
             .insert(dimension.to_owned(), value.to_owned())
@@ -1548,7 +1561,7 @@ fn parse_bindings(bindings: &str, number: usize) -> Result<EntityBinding, ParseE
                 number,
                 format!("duplicate source dimension `{dimension}`"),
             )
-            .at(item));
+            .at_token(item));
         }
     }
     Ok(EntityBinding(values))
@@ -1563,7 +1576,7 @@ fn call_parts(line: &str, number: usize) -> Result<(&str, &str), ParseError> {
     let name = qualified_identifier(name.trim(), number, "operation name")?;
     let args = args
         .strip_suffix(')')
-        .ok_or_else(|| ParseError::new(number, "expected closing `)`").at(opened))?;
+        .ok_or_else(|| ParseError::new(number, "expected closing `)`").at_token(opened))?;
     Ok((name, args))
 }
 
@@ -1583,19 +1596,25 @@ fn comma_items(text: &str, number: usize) -> Result<Vec<&str>, ParseError> {
             '[' => brackets.push(index),
             ']' => {
                 if brackets.pop().is_none() {
-                    return Err(ParseError::new(number, "unexpected `]`").at(&text[index..=index]));
+                    return Err(
+                        ParseError::new(number, "unexpected `]`").at_token(&text[index..=index])
+                    );
                 }
             }
             '(' => parens.push(index),
             ')' => {
                 if parens.pop().is_none() {
-                    return Err(ParseError::new(number, "unexpected `)`").at(&text[index..=index]));
+                    return Err(
+                        ParseError::new(number, "unexpected `)`").at_token(&text[index..=index])
+                    );
                 }
             }
             '<' => angles.push(index),
             '>' => {
                 if angles.pop().is_none() {
-                    return Err(ParseError::new(number, "unexpected `>`").at(&text[index..=index]));
+                    return Err(
+                        ParseError::new(number, "unexpected `>`").at_token(&text[index..=index])
+                    );
                 }
             }
             ',' if parens.is_empty() && angles.is_empty() && brackets.is_empty() => {
@@ -1614,7 +1633,7 @@ fn comma_items(text: &str, number: usize) -> Result<Vec<&str>, ParseError> {
     .find_map(|(opener, index)| index.map(|index| (opener, index)))
     {
         return Err(
-            ParseError::new(number, format!("unclosed `{opener}`")).at(&text[index..=index])
+            ParseError::new(number, format!("unclosed `{opener}`")).at_token(&text[index..=index])
         );
     }
     items.push(text[start..].trim());
@@ -1639,7 +1658,7 @@ fn identifier<'a>(value: &'a str, number: usize, kind: &str) -> Result<&'a str, 
             number,
             format!("invalid {kind} `{value}`; use letters, digits, and underscores"),
         )
-        .at(value));
+        .at_token(value));
     }
     Ok(value)
 }
