@@ -500,9 +500,7 @@ pub(crate) fn bound_paths(
     Ok(paths)
 }
 
-/// Pairs of artifacts whose paths differ only in letter case, each with its
-/// path. Nothing is reported when the paths cannot be bound; the commands
-/// that need them report why.
+/// Pairs of artifacts, with their paths, whose paths differ only in case.
 pub(crate) fn case_collisions(
     pipeline: &Pipeline,
     dag: &ResolvedDag,
@@ -523,8 +521,7 @@ pub(crate) fn case_collisions(
     collisions
 }
 
-/// A directory of `path` that is itself a path in `paths`, and its owner:
-/// the same location cannot be both a file and a directory.
+/// A directory of `path` that is itself a file in `paths`, with its owner.
 fn enclosing_path<'a, T>(paths: &'a BTreeMap<String, T>, path: &str) -> Option<(&'a str, &'a T)> {
     path.match_indices('/').find_map(|(end, _)| {
         paths
@@ -535,7 +532,7 @@ fn enclosing_path<'a, T>(paths: &'a BTreeMap<String, T>, path: &str) -> Option<(
 
 /// Bind `artifact` to its relative path. `dimensions` gives the product's
 /// declared dimension order, which `{entities}` follows. `label` names the
-/// path in an error about it as a whole: a product's rule, or an artifact's.
+/// path in errors: a product's rule, or an artifact.
 fn bind_path(
     pipeline: &Pipeline,
     dimensions: &[String],
@@ -642,12 +639,11 @@ fn encode_component(value: &str) -> String {
     encoded
 }
 
-/// The source files found under a root, and the files that fit a source's
-/// path rule but could not become records.
+/// The source files found under a root, and those skipped.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Discovery {
     pub inventory: SourceInventory,
-    /// Each skipped file, with why, such as `in/%41.txt: ...`.
+    /// Each skipped file and why.
     pub skipped: Vec<String>,
 }
 
@@ -658,9 +654,8 @@ pub fn discover_sources(pipeline: &Pipeline, root: &Path) -> Result<SourceInvent
     discover_source_files(pipeline, root).map(|discovery| discovery.inventory)
 }
 
-/// As [`discover_sources`], also reporting the files that fit a rule but
-/// hold no value an inventory can: a value is read back only when SPIT
-/// would write it the same way, so every record's path is the file found.
+/// As [`discover_sources`], also listing files that fit a rule but hold no
+/// readable value.
 pub fn discover_source_files(pipeline: &Pipeline, root: &Path) -> Result<Discovery, PathError> {
     if !root.is_dir() {
         return Err(error(format!(
@@ -739,8 +734,8 @@ pub fn discover_source_files(pipeline: &Pipeline, root: &Path) -> Result<Discove
     Ok(discovery)
 }
 
-/// The value a path component holds, or why it holds none an inventory
-/// can: it must decode, and SPIT must write the value back the same way.
+/// Decode a path component. It must be written exactly as SPIT would write
+/// it, so the record's path is the file found.
 fn readable_value(encoded: &str) -> Result<String, &'static str> {
     let value = decode_component(encoded).ok_or("is not valid `%XX` text")?;
     if encode_component(&value) != encoded {
@@ -811,9 +806,8 @@ fn match_pattern<'a>(pieces: &[Piece], text: &'a str) -> Option<BTreeMap<String,
 /// the values bound for dimensions that later pieces repeat.
 type Attempt = (usize, usize, Vec<(usize, usize)>);
 
-/// Match `pieces[index..]` against `text[offset..]`. Each position that
-/// fails is remembered, so a text is matched in polynomial time however
-/// many ways its values could be split.
+/// Match `pieces[index..]` against `text[offset..]`. Failed positions are
+/// remembered, which keeps ambiguous splits from taking exponential time.
 fn match_from<'a>(
     pieces: &[Piece],
     index: usize,
@@ -900,10 +894,8 @@ fn decode_component(encoded: &str) -> Option<String> {
 }
 
 /// Collect every regular file under `directory`, as `/`-separated paths
-/// relative to the root. Links are followed, as the other commands follow
-/// them to read a file; `visited` holds each directory entered, so a link
-/// back to one is not followed again. Names that are not UTF-8 cannot
-/// match a rule.
+/// relative to the root, following links. `visited` stops link cycles.
+/// Names that are not UTF-8 cannot match a rule.
 fn walk(
     directory: &Path,
     prefix: &str,

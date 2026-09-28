@@ -372,7 +372,6 @@ impl Parser<'_> {
             return Err(TypeParseError::new(token, "expected type name"));
         }
         let name = &self.text[name_start..self.offset];
-        // Types are capitalised, which keeps them apart from port names.
         if !explicit_variable && !name.starts_with(|c: char| c.is_ascii_uppercase()) {
             return Err(TypeParseError::new(
                 token,

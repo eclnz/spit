@@ -303,7 +303,7 @@ fn main() -> ExitCode {
     let json = args.json;
     match run(args) {
         Ok(()) => ExitCode::SUCCESS,
-        // An editor reads JSON whatever went wrong, such as an unreadable file.
+        // Editors expect JSON even when the check cannot run.
         Err(error) if json => {
             println!(
                 "{{\"diagnostics\":[{{\"severity\":\"error\",\"source\":\"pipeline\",\"line\":null,\"column\":null,\"end_column\":null,\"message\":\"{}\"}}]}}",
@@ -467,7 +467,7 @@ fn read_stdin() -> Result<String, String> {
     Ok(strip_bom(text))
 }
 
-/// Drop the byte order mark some editors on Windows begin a UTF-8 file with.
+/// Drop a UTF-8 byte order mark, which some Windows editors write.
 fn strip_bom(text: String) -> String {
     match text.strip_prefix('\u{feff}') {
         Some(rest) => rest.to_owned(),

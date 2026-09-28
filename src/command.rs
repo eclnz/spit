@@ -25,8 +25,7 @@ pub(crate) type Argument = Vec<Part>;
 pub struct CommandTemplate {
     text: String,
     arguments: Vec<Argument>,
-    /// Unquoted words such as `|` or `>` that a shell would read as an
-    /// operator; here they are passed to the program as arguments.
+    /// Unquoted words a shell would read as operators, such as `|` or `>`.
     operators: Vec<String>,
 }
 
@@ -56,8 +55,7 @@ impl CommandTemplate {
         })
     }
 
-    /// The unquoted words a shell would read as operators, such as `|`,
-    /// `>`, or `&&`, in the order written.
+    /// Unquoted words a shell would read as operators, such as `|` or `>`.
     pub fn shell_operators(&self) -> &[String] {
         &self.operators
     }
@@ -246,8 +244,7 @@ fn check_command_placeholders(
 
 /// A word of a command, before its placeholders are parsed.
 struct Word {
-    /// The text, with `{{` and `}}` for braces that quotes or a backslash
-    /// made literal.
+    /// The text, with quoted or escaped braces written `{{` and `}}`.
     text: String,
     /// Whether the word was written without quotes or backslashes.
     bare: bool,
@@ -263,10 +260,8 @@ fn is_shell_operator(word: &str) -> bool {
             .all(|character| "|&;<>".contains(character))
 }
 
-/// Split a template into its words, removing the quotes and backslashes
-/// that group or escape their text. As in Bash, text in single quotes is
-/// literal, so a brace there is not a placeholder; nor is a brace after a
-/// backslash.
+/// Split a template into its words, removing quotes and backslashes. As in
+/// Bash, single-quoted and backslash-escaped braces are literal.
 fn split_arguments(template: &str) -> Result<Vec<Word>, CommandError> {
     let mut arguments = Vec::new();
     let mut argument = String::new();

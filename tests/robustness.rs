@@ -71,8 +71,7 @@ const ONE_SOURCE: &str = "source x [s]\npath x: in/{s}.txt\n";
 
 #[test]
 fn discovery_skips_values_spit_would_write_differently() {
-    // `%41` decodes to `A`, but SPIT writes `A` as `A`: a script would look
-    // for `in/A.txt`, not the file found.
+    // `%41` decodes to `A`, whose path SPIT writes as `in/A.txt`.
     let tree = Tree::new(
         "canonical",
         &[
@@ -175,8 +174,7 @@ fn a_path_inside_another_artifacts_file_is_rejected() {
         rendered(&diagnose(text, None), text),
         ["error: line 5, column 9: path rule for `y` puts files inside `in/s.txt`, the path of a `x` file, for the same entities; distinguish their path rules"]
     );
-    // Different dimension names hide the overlap from the rules alone; the
-    // bound paths still show it.
+    // Different dimension names hide the overlap until paths are bound.
     let text = "source x [s]\npath x: in/{s}.txt\nsource z [t]\npath z: in/{t}.txt/out.txt\noperation f(a, b) -> Text\ncommand f: cp {a} {b} {output}\npath: o/{product}/{entities}\ny = f(x, z @ where(t=1))\nsources:\n    x[s=1]\n    z[t=1]\n";
     let (pipeline, inventory) = parse_document(text).unwrap();
     let error =

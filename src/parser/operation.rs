@@ -139,8 +139,7 @@ fn parse_input_port<'a>(
             _ => (Cardinality::One, input),
         },
     };
-    // Without a `name:`, a lowercase word names an untyped port, as for
-    // outputs: type names start with a capital letter.
+    // A lowercase word alone names an untyped port; types are capitalised.
     if declared_name.is_none() && value.starts_with(|c: char| c.is_ascii_lowercase()) {
         declared_name = Some(port_name(value)?);
         value = "";
