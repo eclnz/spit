@@ -208,3 +208,11 @@ Runs the full test suite, including the integration tests under `tests/` that ch
 ## Contributing
 
 Issues and pull requests are welcome. For a change to the language or resolver, add or update a test under `tests/` and, if it changes behavior described here, update this README or the [language reference](docs/language-reference.md) alongside it.
+
+## Disclaimer
+
+SPIT was developed with the help of generative AI tools. Code and documentation have been reviewed and are covered by the test suite, but may still contain errors. SPIT generates Bash scripts that run commands on your system: review a generated script before running it, especially on data you cannot easily replace. The software is provided as is, without warranty of any kind; see the [license](LICENSE).
+
+## License
+
+SPIT is released under the [MIT License](LICENSE).
