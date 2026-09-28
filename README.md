@@ -47,9 +47,9 @@ Choose one command per call. The pipeline file comes next; options follow it.
 | --- | --- |
 | `check` | Validate the pipeline and report how many jobs resolve. Without an inventory, it checks the pipeline text alone and resolves no jobs. |
 | `dag` | Print the jobs, their artifact identities, and dependencies. |
-| `bash` | Write a Bash script for the resolved jobs to standard output. It does not run the script, and it fails when the inventory lists no source artifacts, as when discovery found none, rather than write a script that does nothing. |
+| `bash` | Write a Bash script for the resolved jobs to standard output. It does not run the script, and fails if the inventory lists no source artifacts. |
 | `artifacts` | List every concrete artifact the inventory yields: the complete ones, then the incomplete ones with why each cannot be produced. Unlike the other commands, it does not stop at a missing, ambiguous, or too-small input or a coverage gap; see [Find incomplete artifacts](#find-incomplete-artifacts). |
-| `discover` | Print an inventory of the source files under `--root`, found by matching each file against the sources' path rules. A file that fits a rule but holds a value SPIT would write differently, such as `%41` for `A`, is skipped with a warning. |
+| `discover` | Print an inventory of the source files under `--root`, found by matching each file against the sources' path rules. |
 
 | Option | Effect |
 | --- | --- |
