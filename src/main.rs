@@ -260,13 +260,8 @@ fn run() -> Result<(), Box<dyn Error>> {
                 "Pipeline valid.\n\n{}",
                 job_count(&pipeline, &dag, args.stage.as_deref())
             );
-            if let Some(count) = checked_files {
-                let kind = if args.stage.is_some() {
-                    "input"
-                } else {
-                    "source"
-                };
-                println!("{count} {kind} files verified.");
+            if let Some(verified) = checked_files {
+                println!("{verified}");
             }
         }
         Command::Dag if args.paths => print!("{}", render_bound_dag(&pipeline, &dag)?),
