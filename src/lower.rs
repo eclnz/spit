@@ -1,0 +1,263 @@
+//! Lower a parsed [`Syntax`] to a [`Pipeline`]: merge imports, check that
+//! names are declared once and before they are used, and infer the
+//! dimensions of the products a flow step declares without them.
+
+use std::collections::BTreeMap;
+
+use crate::imports::apply_import;
+use crate::model::{
+    Cardinality, CommandDef, CoverageRule, InputBinding, Invocation, OperationDef, Pipeline,
+    ProductDef, SourceInventory, StageDef,
+};
+use crate::parser::{
+    parse_source_inventory, parse_syntax, split_document, FlowStep, InlineInventory, ParseError,
+    ParseErrorKind, PathRule, Rule, SourceMap, Statement, StatementKind, Step, Syntax,
+};
+use crate::shape::{step_context, BoundInput};
+use crate::span::Place;
+use crate::types::TypeExpr;
+
+/// A pipeline under construction together with where its declarations sit.
+#[derive(Default)]
+pub(crate) struct PipelineBuilder {
+    pub(crate) pipeline: Pipeline,
+    pub(crate) lines: SourceMap,
+}
+
+impl PipelineBuilder {
+    pub(crate) fn add_product(&mut self, product: ProductDef, place: Place) {
+        self.lines.products.insert(product.name.clone(), place);
+        self.pipeline.products.push(product);
+    }
+
+    pub(crate) fn add_operation(&mut self, operation: OperationDef, place: Place) {
+        self.lines.operations.insert(operation.name.clone(), place);
+        self.pipeline.operations.push(operation);
+    }
+
+    pub(crate) fn add_constraint(&mut self, constraint: CoverageRule, rule: Rule) {
+        self.lines
+            .constraints
+            .insert(constraint.product.clone(), rule.clone());
+        self.lines.rules.push(rule);
+        self.pipeline.constraints.push(constraint);
+    }
+
+    pub(crate) fn add_command(&mut self, command: CommandDef, place: Place) {
+        self.lines.commands.push(place);
+        self.pipeline.commands.push(command);
+    }
+
+    fn add_invocation(&mut self, invocation: Invocation, step: Step) {
+        for output in &invocation.outputs {
+            self.lines.invocations.insert(output.clone(), step.clone());
+        }
+        self.pipeline.invocations.push(invocation);
+    }
+
+    fn add_stage(&mut self, name: &str, place: Place) -> Result<(), ParseError> {
+        if self.lines.stages.contains_key(name) {
+            return Err(
+                ParseError::new(place.line, format!("duplicate stage `{name}`")).within(&place),
+            );
+        }
+        self.lines.stages.insert(name.to_owned(), place);
+        self.pipeline.stages.push(StageDef::new(name));
+        Ok(())
+    }
+
+    fn add_path(&mut self, rule: &PathRule, line: usize) -> Result<(), ParseError> {
+        let Self { pipeline, lines } = self;
+        let template = rule.template.clone();
+        if let Some(product) = &rule.product {
+            lines.paths.insert(product.clone(), rule.place.clone());
+            if pipeline
+                .product_paths
+                .insert(product.clone(), template)
+                .is_some()
+            {
+                return Err(ParseError::new(
+                    line,
+                    format!("duplicate path template for product `{product}`"),
+                ));
+            }
+        } else if let Some(stage) = &rule.stage {
+            let definition = pipeline
+                .stages
+                .iter_mut()
+                .find(|definition| &definition.name == stage)
+                .expect("a stage is declared before its lines");
+            if definition.path_template.replace(template).is_some() {
+                return Err(ParseError::new(
+                    line,
+                    format!("duplicate default path template for stage `{stage}`"),
+                ));
+            }
+            lines.stage_paths.insert(stage.clone(), rule.place.clone());
+        } else if pipeline.path_template.replace(template).is_some() {
+            return Err(ParseError::new(line, "duplicate default path template"));
+        } else {
+            lines.default_path = Some(rule.place.clone());
+        }
+        Ok(())
+    }
+
+    /// Add a flow step and the products it declares, inferring the
+    /// dimensions of those declared without them.
+    fn add_flow_step(&mut self, flow: &FlowStep) -> Result<(), ParseError> {
+        let FlowStep {
+            invocation,
+            outputs,
+            step,
+        } = flow;
+        let name = &invocation.operation;
+        let operation = self
+            .pipeline
+            .operations
+            .iter()
+            .find(|operation| &operation.name == name)
+            .ok_or_else(|| {
+                let place = step.operation();
+                let mut error = ParseError::new(
+                    place.line,
+                    format!("operation `{name}` must be declared before its first flow step"),
+                )
+                .within(&place);
+                error.kind = ParseErrorKind::UndeclaredOperation { name: name.clone() };
+                error
+            })?;
+        let dimensions = inferred_dimensions(invocation, operation, &self.pipeline);
+        for (index, output) in outputs.iter().enumerate() {
+            let product = ProductDef::new(
+                output.name.clone(),
+                output.artifact_type.clone().unwrap_or(TypeExpr::Unknown),
+                output
+                    .dimensions
+                    .clone()
+                    .unwrap_or_else(|| dimensions.clone()),
+            );
+            self.add_product(product, step.output_at(index));
+        }
+        self.add_invocation(invocation.clone(), step.clone());
+        Ok(())
+    }
+}
+
+/// Lower each statement in order, with `imports` holding the definitions
+/// each `use` line brings in, by line.
+pub(crate) fn lower(
+    syntax: &Syntax,
+    imports: &BTreeMap<usize, Pipeline>,
+) -> Result<PipelineBuilder, ParseError> {
+    let mut builder = PipelineBuilder::default();
+    for statement in &syntax.statements {
+        lower_statement(&mut builder, imports, statement)
+            .map_err(|error| error.within(&statement.place))?;
+    }
+    Ok(builder)
+}
+
+fn lower_statement(
+    builder: &mut PipelineBuilder,
+    imports: &BTreeMap<usize, Pipeline>,
+    statement: &Statement,
+) -> Result<(), ParseError> {
+    match &statement.kind {
+        StatementKind::Import => apply_import(builder, imports, statement.place.clone())?,
+        StatementKind::Stage { name, place } => builder.add_stage(name, place.clone())?,
+        StatementKind::Product(product, place) => {
+            builder.add_product(product.clone(), place.clone())
+        }
+        StatementKind::Operation(operation, place) => {
+            builder.add_operation(operation.clone(), place.clone())
+        }
+        StatementKind::Constraint(constraint, rule) => {
+            builder.add_constraint(constraint.clone(), rule.clone())
+        }
+        StatementKind::Command(command, place) => {
+            builder.add_command(command.clone(), place.clone())
+        }
+        StatementKind::Path(rule) => builder.add_path(rule, statement.place.line)?,
+        StatementKind::Step(invocation, step) => {
+            builder.add_invocation(invocation.clone(), step.clone())
+        }
+        StatementKind::FlowStep(flow) => builder.add_flow_step(flow)?,
+    }
+    Ok(())
+}
+
+/// The dimensions a flow step's undeclared outputs take: those of the input
+/// that drives it, less a varied or pinned dimension.
+fn inferred_dimensions(
+    invocation: &Invocation,
+    operation: &OperationDef,
+    pipeline: &Pipeline,
+) -> Vec<String> {
+    let dimensions = |binding: &InputBinding| {
+        pipeline
+            .products
+            .iter()
+            .find(|product| product.name == binding.product)
+            .map(|product| binding.free_dimensions(&product.dimensions))
+    };
+    let inputs: Option<Vec<_>> = invocation
+        .inputs
+        .iter()
+        .zip(&operation.inputs)
+        .map(|(binding, port)| {
+            Some(BoundInput {
+                binding,
+                dimensions: dimensions(binding)?,
+                many: port.cardinality == Cardinality::Many,
+            })
+        })
+        .collect();
+    // Otherwise the step is invalid; the resolver reports why.
+    inputs
+        .filter(|inputs| inputs.len() == invocation.inputs.len())
+        .and_then(|inputs| step_context(&inputs))
+        .map(|(_, context)| context)
+        .or_else(|| invocation.inputs.first().and_then(dimensions))
+        .unwrap_or_default()
+}
+
+/// A parsed document: its pipeline, any inline inventory, and declaration lines.
+pub(crate) struct ParsedDocument {
+    pub(crate) pipeline: Pipeline,
+    pub(crate) inventory: Option<SourceInventory>,
+    pub(crate) lines: SourceMap,
+    /// The line of the first inline `sources:` or `contexts:` header.
+    pub(crate) inventory_line: Option<usize>,
+}
+
+pub fn parse_pipeline(text: &str) -> Result<Pipeline, ParseError> {
+    lower(&parse_syntax(text)?, &BTreeMap::new()).map(|builder| builder.pipeline)
+}
+
+/// Parse a text document that may package an inventory alongside its pipeline.
+/// The two remain separate values for resolution.
+pub fn parse_document(text: &str) -> Result<(Pipeline, Option<SourceInventory>), ParseError> {
+    parse_document_with_imports(text, &BTreeMap::new(), InlineInventory::Read)
+        .map(|document| (document.pipeline, document.inventory))
+}
+
+pub(crate) fn parse_document_with_imports(
+    text: &str,
+    imports: &BTreeMap<usize, Pipeline>,
+    inline: InlineInventory,
+) -> Result<ParsedDocument, ParseError> {
+    let document = split_document(text);
+    let builder = lower(&parse_syntax(&document.pipeline)?, imports)?;
+    let inventory = match inline {
+        InlineInventory::Read if document.inventory_line.is_some() => {
+            Some(parse_source_inventory(&document.inventory)?)
+        }
+        _ => None,
+    };
+    Ok(ParsedDocument {
+        pipeline: builder.pipeline,
+        inventory,
+        lines: builder.lines,
+        inventory_line: document.inventory_line,
+    })
+}

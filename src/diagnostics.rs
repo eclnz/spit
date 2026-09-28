@@ -7,12 +7,10 @@ use std::path::Path;
 
 use crate::command::collect_commands;
 use crate::imports::parse_located_document;
+use crate::lower::{parse_document_with_imports, ParsedDocument};
 use crate::model::DEFAULT_OUTPUT;
 use crate::model::{stage_within, CommandRole, Job, SourceInventory};
-use crate::parser::{
-    glued_comment, parse_document_with_imports, InlineInventory, ParsedDocument, Rule, SourceMap,
-    Step,
-};
+use crate::parser::{glued_comment, InlineInventory, Rule, SourceMap, Step};
 use crate::paths::collect_paths;
 use crate::resolver::collect_pipeline;
 use crate::span::{columns_of, content_columns, find_word, utf16_columns, Place};
