@@ -487,3 +487,9 @@ fn a_stage_whose_steps_are_all_nested_is_not_empty() {
         [(Some(6), "stage `outer/idle` has no steps")]
     );
 }
+
+#[test]
+fn a_library_may_group_operations_in_stages() {
+    let text = "stage tools:\n    operation copy(A) -> A\n";
+    assert!(diagnose(text, None).is_empty());
+}

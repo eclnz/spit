@@ -551,7 +551,8 @@ fn warnings(pipeline: &Pipeline, lines: &SourceMap, skip: &BTreeSet<String>) -> 
 
     let library = pipeline.invocations.is_empty();
     let mut warnings = Vec::new();
-    for stage in &pipeline.stages {
+    // A library may group its operations in stages that hold no steps.
+    for stage in pipeline.stages.iter().filter(|_| !library) {
         let name = stage.name.as_str();
         // A stage whose steps all sit in stages nested in it is not empty.
         if !pipeline.invocations.iter().any(|invocation| {
