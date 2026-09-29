@@ -32,16 +32,17 @@ fn checked_diagnosis_retains_the_original_pipeline_and_inventory() {
     let pipeline = "source raw [id]\noperation copy(one)\nresult = copy(raw)\n";
     let inventory = "sources:\n  raw[id=x]: data/x.txt\n";
     let recipe = spit::parse_input_spec("path raw: data/{id}.txt\n").unwrap();
-    let checked = spit::diagnose_at_checked(
+    let (checked, inventory) = spit::diagnose_at_checked_with_records(
         pipeline,
-        Some(inventory),
+        inventory,
         std::path::Path::new("pipeline.spit"),
         Some(&recipe),
         false,
-    );
-    assert!(errors(checked.diagnostics).is_empty());
-    assert!(checked.pipeline.unwrap().product_paths.is_empty());
-    assert_eq!(checked.inventory.unwrap().artifacts.len(), 1);
+    )
+    .unwrap();
+    assert!(errors(checked.warnings).is_empty());
+    assert!(checked.pipeline.product_paths.is_empty());
+    assert_eq!(inventory.artifacts.len(), 1);
 }
 
 #[test]
