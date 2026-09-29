@@ -4,8 +4,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::Path;
 
+use super::coverage::apply_skips;
 use crate::model::{
-    ArtifactInstance, EntityBinding, Pipeline, ProductDef, SourceInventory, SourceRecord,
+    ArtifactInstance, EntityBinding, InputRules, Pipeline, ProductDef, SourceInventory,
+    SourceRecord,
 };
 use crate::paths::{
     bind_path, decode_component, encode_component, error, inspect_paths, validate_discovery_rule,
@@ -23,13 +25,27 @@ pub struct Discovery {
 /// Find source artifacts and contexts under `root`. Directory rules provide
 /// contexts and require files for source products whose dimensions they cover;
 /// other source products are found by matching their file path rules.
-pub fn discover_sources(pipeline: &Pipeline, root: &Path) -> Result<SourceInventory, PathError> {
-    discover_source_files(pipeline, root).map(|discovery| discovery.inventory)
+pub fn discover_sources(
+    pipeline: &Pipeline,
+    rules: &InputRules,
+    root: &Path,
+) -> Result<SourceInventory, PathError> {
+    discover_source_files(pipeline, rules, root).map(|discovery| discovery.inventory)
 }
 
 /// As [`discover_sources`], also listing files that fit a rule but hold no
 /// readable value.
-pub fn discover_source_files(pipeline: &Pipeline, root: &Path) -> Result<Discovery, PathError> {
+///
+/// Source files are found by the path rules of `pipeline`, with any in
+/// `rules.source_paths` taking precedence.
+pub fn discover_source_files(
+    pipeline: &Pipeline,
+    rules: &InputRules,
+    root: &Path,
+) -> Result<Discovery, PathError> {
+    let mut pipeline = pipeline.clone();
+    pipeline.product_paths.extend(rules.source_paths.clone());
+    let pipeline = &pipeline;
     if !root.is_dir() {
         return Err(error(format!(
             "source root is not a directory: `{}`",
@@ -37,7 +53,7 @@ pub fn discover_source_files(pipeline: &Pipeline, root: &Path) -> Result<Discove
         )));
     }
     inspect_paths(pipeline)?;
-    for rule in &pipeline.discoveries {
+    for rule in &rules.discoveries {
         validate_discovery_rule(rule)?;
     }
     let outputs: BTreeSet<_> = pipeline
@@ -65,7 +81,7 @@ pub fn discover_source_files(pipeline: &Pipeline, root: &Path) -> Result<Discove
     files.sort();
     directories.sort();
     let mut discovery = Discovery::default();
-    let directory_patterns: Vec<_> = pipeline
+    let directory_patterns: Vec<_> = rules
         .discoveries
         .iter()
         .map(|rule| {
@@ -130,7 +146,7 @@ pub fn discover_source_files(pipeline: &Pipeline, root: &Path) -> Result<Discove
         .zip(&rule_contexts)
         .map(|((rule, _), bindings)| (rule.name.clone(), bindings.iter().cloned().collect()))
         .collect();
-    let skipped_groups = crate::resolver::apply_skips(pipeline, &mut discovery.inventory, true);
+    let skipped_groups = apply_skips(rules, &mut discovery.inventory, true);
     for group in &skipped_groups {
         discovery.skipped.push(format!(
             "[{}] because `skip {}` rejected the group",
@@ -210,7 +226,7 @@ pub fn discover_source_files(pipeline: &Pipeline, root: &Path) -> Result<Discove
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect();
-    let additional_skips = crate::resolver::apply_skips(pipeline, &mut discovery.inventory, false);
+    let additional_skips = apply_skips(rules, &mut discovery.inventory, false);
     for group in &additional_skips {
         discovery.skipped.push(format!(
             "[{}] because `skip {}` rejected the group",

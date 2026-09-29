@@ -1,39 +1,49 @@
-//! Dataset input recipes kept separate from the logical pipeline.
+//! The input stage: settle which contexts and sources a dataset holds.
+//!
+//! It reads a recipe of `discover`, `require`, `skip` and source path rules,
+//! whether written in a `.spitin` file or beside the pipeline in a `.spit`
+//! document, and the pipeline's source declarations. It scans a root or takes
+//! records already written, and returns a plain inventory with what it
+//! skipped and what the `require` rules find missing. Resolving jobs needs
+//! nothing else from it.
+
+mod coverage;
+mod discover;
 
 use std::collections::BTreeSet;
 use std::error::Error;
 use std::path::{Path, PathBuf};
 
 use crate::error::ResolveError;
-use crate::model::{Pipeline, SourceInventory};
+use crate::lower::Document;
+use crate::model::{ArtifactInstance, CoverageGap, InputRules, Pipeline, SourceInventory};
 use crate::parser::ParseError;
-mod discover;
-
-pub use self::discover::{discover_source_files, discover_sources, Discovery};
 use crate::paths::PathTemplate;
-use crate::resolver::{check_inventory, validate_pipeline};
-use crate::{parse_document, parse_document_at};
+use crate::resolver::validate_pipeline;
+use crate::{parse_spit, parse_spit_at};
 
-/// A `.spitin` recipe and any inventory records written in it.
-#[derive(Clone, Debug)]
+pub(crate) use self::coverage::check_inventory;
+pub(crate) use self::coverage::collect_rule_errors;
+pub use self::discover::{discover_source_files, discover_sources, Discovery};
+
+/// A recipe's rules and any inventory records written with them.
+#[derive(Clone, Debug, Default)]
 pub struct InputSpec {
-    rules: Pipeline,
+    pub rules: InputRules,
     pub inventory: Option<SourceInventory>,
 }
 
 /// Parse a `.spitin` file without resolving imports.
 pub fn parse_input_spec(text: &str) -> Result<InputSpec, ParseError> {
     check_input_lines(text)?;
-    let (rules, inventory) = parse_document(text)?;
-    finish_spec(rules, inventory)
+    finish_spec(parse_spit(text)?)
 }
 
 /// Parse a `.spitin` file at `path`. Paths inside the recipe are relative to
 /// its containing directory unless the CLI supplies `--root`.
 pub fn parse_input_spec_at(text: &str, path: &Path) -> Result<InputSpec, ParseError> {
     check_input_lines(text)?;
-    let (rules, inventory) = parse_document_at(text, path)?;
-    finish_spec(rules, inventory)
+    finish_spec(parse_spit_at(text, path)?)
 }
 
 fn check_input_lines(text: &str) -> Result<(), ParseError> {
@@ -65,128 +75,144 @@ fn check_input_lines(text: &str) -> Result<(), ParseError> {
     Ok(())
 }
 
-fn finish_spec(
-    rules: Pipeline,
-    inventory: Option<SourceInventory>,
-) -> Result<InputSpec, ParseError> {
-    if !rules.products.is_empty()
-        || !rules.operations.is_empty()
-        || !rules.invocations.is_empty()
-        || !rules.commands.is_empty()
-        || !rules.stages.is_empty()
-        || rules.path_template.is_some()
+/// A recipe holds rules and records, and paths only for sources.
+fn finish_spec(document: Document) -> Result<InputSpec, ParseError> {
+    let Document {
+        pipeline,
+        mut inputs,
+        inventory,
+    } = document;
+    if !pipeline.products.is_empty()
+        || !pipeline.operations.is_empty()
+        || !pipeline.invocations.is_empty()
+        || !pipeline.commands.is_empty()
+        || !pipeline.stages.is_empty()
+        || pipeline.path_template.is_some()
     {
         return Err(ParseError::new(1, "a .spitin file may contain discovery, coverage, source paths, and inventory records only"));
     }
-    Ok(InputSpec { rules, inventory })
+    inputs.source_paths = pipeline.product_paths;
+    Ok(InputSpec {
+        rules: inputs,
+        inventory,
+    })
 }
 
 impl InputSpec {
-    /// Run the input stage: find the contexts and source files a dataset
-    /// holds, apply the recipe's `skip` rules, and check its `require` rules.
-    ///
-    /// The stage reads the logical `pipeline` only for its source products and
-    /// leaves it untouched. What it returns is a plain inventory, so resolving
-    /// jobs never sees a discovery, coverage or skip rule.
-    pub fn resolve(
-        &self,
-        pipeline: &Pipeline,
-        source: InputSource<'_>,
-    ) -> Result<ResolvedInputs, Box<dyn Error>> {
-        let mut recipe = pipeline.clone();
-        self.apply_to(&mut recipe)?;
-        validate_pipeline(&recipe)?;
-        let (inventory, skipped, root) = match source {
-            InputSource::Discover(root) => {
-                let found = discover_source_files(&recipe, root)?;
-                (found.inventory, found.skipped, Some(root.to_owned()))
-            }
-            InputSource::Inventory(inventory) => (inventory, Vec::new(), None),
-        };
-        let checked = check_inventory(&recipe, &inventory)?;
-        Ok(ResolvedInputs {
-            inventory: checked.inventory,
-            skipped,
-            missing: checked.coverage.into_iter().map(|gap| gap.error).collect(),
-            root,
-        })
+    /// The rules and records a `.spit` document writes beside its pipeline.
+    pub fn embedded_in(document: &Document) -> Self {
+        Self {
+            rules: document.inputs.clone(),
+            inventory: document.inventory.clone(),
+        }
     }
 
-    /// Check the recipe against the pipeline's source products.
-    fn check_against(&self, pipeline: &Pipeline) -> Result<(), String> {
-        let sources: BTreeSet<_> = pipeline
-            .products
-            .iter()
-            .map(|product| product.name.as_str())
-            .collect();
-        let outputs: BTreeSet<_> = pipeline
-            .invocations
-            .iter()
-            .flat_map(|step| step.outputs.iter().map(String::as_str))
-            .collect();
-        for name in self.rules.product_paths.keys() {
-            if !sources.contains(name.as_str()) || outputs.contains(name.as_str()) {
-                return Err(format!(
-                    "input path `{name}` must name a source product in the pipeline"
-                ));
-            }
-            if pipeline.product_paths.contains_key(name) {
-                return Err(format!(
-                    "source `{name}` has path rules in both .spit and .spitin"
-                ));
-            }
-        }
-        for rule in &self.rules.discoveries {
-            if pipeline
-                .discoveries
-                .iter()
-                .any(|existing| existing.name == rule.name)
-            {
+    /// Add the rules and records of `other`, such as a `.spitin` recipe's to
+    /// those written in the pipeline document. No name may be given twice.
+    pub fn merge(&mut self, other: Self) -> Result<(), String> {
+        for rule in &other.rules.discoveries {
+            if self.rules.discovery(&rule.name).is_some() {
                 return Err(format!(
                     "discovery `{}` is declared in both .spit and .spitin",
                     rule.name
                 ));
             }
         }
-        if !self.rules.discoveries.is_empty() && pipeline.path_template.is_none() {
-            for name in &sources {
-                if !outputs.contains(name)
-                    && !self.rules.product_paths.contains_key(*name)
-                    && !pipeline.product_paths.contains_key(*name)
+        for name in other.rules.source_paths.keys() {
+            if self.rules.source_paths.contains_key(name) {
+                return Err(format!("source `{name}` has two .spitin path rules"));
+            }
+        }
+        if self.inventory.is_some() && other.inventory.is_some() {
+            return Err("inventory records are written in both .spit and .spitin".into());
+        }
+        self.rules.discoveries.extend(other.rules.discoveries);
+        self.rules.constraints.extend(other.rules.constraints);
+        self.rules.source_paths.extend(other.rules.source_paths);
+        self.inventory = self.inventory.take().or(other.inventory);
+        Ok(())
+    }
+
+    /// Check the recipe against the pipeline's source declarations, without
+    /// reading any file or record.
+    pub fn check(&self, pipeline: &Pipeline) -> Result<(), Box<dyn Error>> {
+        for name in self.rules.source_paths.keys() {
+            if !pipeline.is_source(name) {
+                return Err(format!(
+                    "input path `{name}` must name a source product in the pipeline"
+                )
+                .into());
+            }
+            if pipeline.product_paths.contains_key(name) {
+                return Err(
+                    format!("source `{name}` has path rules in both .spit and .spitin").into(),
+                );
+            }
+        }
+        if !self.rules.discoveries.is_empty() {
+            for product in &pipeline.products {
+                if pipeline.is_source(&product.name)
+                    && !self.rules.source_paths.contains_key(&product.name)
+                    && pipeline.path_template_for(&product.name).is_none()
                 {
                     return Err(format!(
-                        "source `{name}` needs a path rule in .spitin for directory discovery"
-                    ));
+                        "source `{}` needs a path rule in .spitin for directory discovery",
+                        product.name
+                    )
+                    .into());
                 }
             }
+        }
+        if let Some((_, error)) = collect_rule_errors(pipeline, &self.rules, &BTreeSet::new())
+            .into_iter()
+            .next()
+        {
+            return Err(error.into());
         }
         Ok(())
     }
 
+    /// Run the input stage: find the contexts and source files a dataset
+    /// holds, apply the `skip` rules, and check the `require` rules.
+    ///
+    /// The stage reads `pipeline` only for its source products and leaves it
+    /// untouched. What it returns is a plain inventory, so resolving jobs
+    /// never sees a discovery, coverage or skip rule.
+    pub fn resolve(
+        &self,
+        pipeline: &Pipeline,
+        source: InputSource<'_>,
+    ) -> Result<ResolvedInputs, Box<dyn Error>> {
+        validate_pipeline(pipeline)?;
+        self.check(pipeline)?;
+        let (inventory, skipped, root) = match source {
+            InputSource::Discover(root) => {
+                let found = discover_source_files(pipeline, &self.rules, root)?;
+                (found.inventory, found.skipped, Some(root.to_owned()))
+            }
+            InputSource::Inventory(inventory) => (inventory, Vec::new(), None),
+        };
+        let checked = check_inventory(pipeline, &self.rules, &inventory)?;
+        Ok(ResolvedInputs {
+            inventory: checked.inventory,
+            skipped,
+            gaps: checked.gaps,
+            root,
+        })
+    }
+
     /// Give a pipeline the recipe's source paths, and the built-in output
-    /// path when it declares none, so paths can be bound to its jobs. This
-    /// adds no discovery, coverage or skip rule.
-    pub fn apply_paths(&self, pipeline: &mut Pipeline) -> Result<(), String> {
-        self.check_against(pipeline)?;
+    /// path when it declares none, so paths can be bound to its jobs.
+    pub fn apply_paths(&self, pipeline: &mut Pipeline) {
         pipeline
             .product_paths
-            .extend(self.rules.product_paths.clone());
+            .extend(self.rules.source_paths.clone());
         if pipeline.path_template.is_none() {
             pipeline.path_template = Some(
                 PathTemplate::parse("out/{product}/{entities}")
                     .expect("built-in output path is valid"),
             );
         }
-        Ok(())
-    }
-
-    /// Attach every declaration of the recipe to a pipeline, for the input
-    /// stage and for diagnostics that check both files together.
-    pub fn apply_to(&self, pipeline: &mut Pipeline) -> Result<(), String> {
-        self.apply_paths(pipeline)?;
-        pipeline.discoveries.extend(self.rules.discoveries.clone());
-        pipeline.constraints.extend(self.rules.constraints.clone());
-        Ok(())
     }
 }
 
@@ -206,8 +232,8 @@ pub struct ResolvedInputs {
     pub inventory: SourceInventory,
     /// Each file or group left out, and why.
     pub skipped: Vec<String>,
-    /// What the recipe's `require` rules find missing.
-    pub missing: Vec<ResolveError>,
+    /// What the `require` rules find missing, with the sources each holds back.
+    pub gaps: Vec<CoverageGap>,
     /// The directory that was scanned, when the stage scanned one.
     pub root: Option<PathBuf>,
 }
@@ -215,7 +241,17 @@ pub struct ResolvedInputs {
 impl ResolvedInputs {
     /// The first missing requirement, as an error.
     pub fn require_complete(&self) -> Result<(), ResolveError> {
-        self.missing.first().cloned().map_or(Ok(()), Err)
+        self.gaps
+            .first()
+            .map_or(Ok(()), |gap| Err(gap.error.clone()))
+    }
+
+    /// The sources a missing requirement holds back, which no job can use.
+    pub fn unavailable(&self) -> Vec<ArtifactInstance> {
+        self.gaps
+            .iter()
+            .flat_map(|gap| gap.sources.iter().cloned())
+            .collect()
     }
 
     /// The inventory for resolving jobs: the same contexts and sources without

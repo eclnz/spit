@@ -59,7 +59,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "mean_bold",
             ),
         ],
-        constraints: Vec::new(),
         ..Pipeline::default()
     };
 

@@ -7,8 +7,9 @@ use std::process::Command;
 use std::time::{Duration, Instant};
 
 use spit::{
-    discover_source_files, discover_sources, parse_document, parse_pipeline,
-    parse_source_inventory, resolve, ResolveError, ResolvedDag,
+    discover_source_files, discover_sources, parse_pipeline, parse_source_inventory, parse_spit,
+    resolve, InputSource, InputSpec, Pipeline, ResolveError, ResolvedDag, ResolvedInputs,
+    SourceInventory,
 };
 
 struct Tree(PathBuf);
@@ -57,6 +58,19 @@ fn spit(args: &[&str]) -> std::process::Output {
         .unwrap()
 }
 
+/// A document's pipeline, and the input rules written beside it.
+fn parse(text: &str) -> (Pipeline, InputSpec) {
+    let document = parse_spit(text).unwrap();
+    let spec = InputSpec::embedded_in(&document);
+    (document.pipeline, spec)
+}
+
+/// Run the input stage over records already found.
+fn settle(pipeline: &Pipeline, spec: &InputSpec, inventory: &SourceInventory) -> ResolvedInputs {
+    spec.resolve(pipeline, InputSource::Inventory(inventory.clone()))
+        .unwrap()
+}
+
 const ONE_SOURCE: &str = "source x [s]\npath x: in/{s}.txt\n";
 
 const DISCOVERED: &str = "\
@@ -83,8 +97,8 @@ fn sources_are_discovered_from_their_path_rules() {
             "derived/stacked/subject=a.txt",
         ],
     );
-    let pipeline = parse_pipeline(DISCOVERED).unwrap();
-    let inventory = discover_sources(&pipeline, &tree.0).unwrap();
+    let (pipeline, spec) = parse(DISCOVERED);
+    let inventory = discover_sources(&pipeline, &spec.rules, &tree.0).unwrap();
     let records: Vec<_> = inventory
         .artifacts
         .iter()
@@ -121,8 +135,8 @@ path image: data/sub-{sub}/ses-{ses}/image.nii.gz
 operation process(image) -> Output
 output = process(image)
 ";
-    let pipeline = parse_pipeline(text).unwrap();
-    let inventory = discover_sources(&pipeline, &tree.0).unwrap();
+    let (pipeline, spec) = parse(text);
+    let inventory = discover_sources(&pipeline, &spec.rules, &tree.0).unwrap();
     let contexts: Vec<_> = inventory.contexts.iter().map(ToString::to_string).collect();
     assert_eq!(
         contexts,
@@ -208,8 +222,8 @@ discover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}
 source image [sub, ses]
 path image: data/sub-{sub}/ses-{ses}/image.nii.gz
 ";
-    let pipeline = parse_pipeline(text).unwrap();
-    let error = discover_sources(&pipeline, &tree.0).unwrap_err();
+    let (pipeline, spec) = parse(text);
+    let error = discover_sources(&pipeline, &spec.rules, &tree.0).unwrap_err();
     assert!(
         error
             .message()
@@ -230,15 +244,14 @@ fn directory_bindings_expand_sources_at_their_declared_dimensions() {
             "data/sub-B/reference.nii.gz",
         ],
     );
-    let pipeline = parse_pipeline(
+    let (pipeline, spec) = parse(
         "discover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}\n\
          source image [sub, ses]\n\
          path image: data/sub-{sub}/ses-{ses}/image.nii.gz\n\
          source reference [sub]\n\
          path reference: data/sub-{sub}/reference.nii.gz\n",
-    )
-    .unwrap();
-    let inventory = discover_sources(&pipeline, &tree.0).unwrap();
+    );
+    let inventory = discover_sources(&pipeline, &spec.rules, &tree.0).unwrap();
     let references: Vec<_> = inventory
         .artifacts
         .iter()
@@ -267,18 +280,18 @@ fn coverage_can_target_the_named_discovery_rule() {
     );
     let text = "discover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}\n\
                 require sessions count>=2 per [sub]\n";
-    let pipeline = parse_pipeline(text).unwrap();
-    let inventory = discover_sources(&pipeline, &tree.0).unwrap();
+    let (pipeline, spec) = parse(text);
+    let inventory = discover_sources(&pipeline, &spec.rules, &tree.0).unwrap();
     assert_eq!(inventory.discovered["sessions"].len(), 9);
     let rendered = spit::render_source_inventory(&inventory, &pipeline);
     assert!(rendered.starts_with("contexts sessions:\n"), "{rendered}");
     assert_eq!(parse_source_inventory(&rendered).unwrap(), inventory);
     let inline = format!("{text}{rendered}");
-    let (inline_pipeline, Some(inline_inventory)) = parse_document(&inline).unwrap() else {
-        panic!("expected inline named contexts");
-    };
+    let document = parse_spit(&inline).unwrap();
+    let inline_inventory = document.inventory.clone().expect("inline named contexts");
+    let inline_spec = InputSpec::embedded_in(&document);
     assert!(matches!(
-        resolve(&inline_pipeline, &inline_inventory),
+        settle(&document.pipeline, &inline_spec, &inline_inventory).require_complete(),
         Err(ResolveError::CoverageViolation {
             found: 1,
             discovery: true,
@@ -286,7 +299,7 @@ fn coverage_can_target_the_named_discovery_rule() {
         })
     ));
     assert!(matches!(
-        resolve(&pipeline, &inventory),
+        settle(&pipeline, &spec, &inventory).require_complete(),
         Err(ResolveError::CoverageViolation { product, context, found: 1, discovery: true, .. })
             if product == "sessions" && context.0.get("sub").map(String::as_str) == Some("5")
     ));
@@ -317,9 +330,9 @@ fn coverage_can_target_the_named_discovery_rule() {
     );
 
     let values = text.replace("count>=2", "ses=1,2");
-    let pipeline = parse_pipeline(&values).unwrap();
+    let (pipeline, spec) = parse(&values);
     assert!(matches!(
-        resolve(&pipeline, &inventory),
+        settle(&pipeline, &spec, &inventory).require_complete(),
         Err(ResolveError::MissingRequiredValue { product, context, dimension, value, discovery: true, .. })
             if product == "sessions" && context.0.get("sub").map(String::as_str) == Some("5") && dimension == "ses" && value == "2"
     ));
@@ -349,8 +362,8 @@ fn skip_discovery_group_removes_subject_before_source_checks_and_jobs() {
                 operation process(Image) -> Image\n\
                 result = process(image)\n\
                 path result: out/sub-{sub}/ses-{ses}/result.nii.gz\n";
-    let pipeline = parse_pipeline(text).unwrap();
-    let inventory = discover_sources(&pipeline, &tree.0).unwrap();
+    let (pipeline, spec) = parse(text);
+    let inventory = discover_sources(&pipeline, &spec.rules, &tree.0).unwrap();
     assert_eq!(inventory.discovered["sessions"].len(), 8);
     assert_eq!(inventory.artifacts.len(), 8);
     assert!(!inventory
@@ -381,7 +394,8 @@ fn skip_discovery_group_removes_subject_before_source_checks_and_jobs() {
         explicit.push_str(&format!("image[sub={sub},ses={ses}]\n"));
     }
     let explicit = parse_source_inventory(&explicit).unwrap();
-    let dag = resolve(&pipeline, &explicit).unwrap();
+    let settled = settle(&pipeline, &spec, &explicit);
+    let dag = resolve(&pipeline, &settled.dag_inventory()).unwrap();
     assert_eq!(dag.jobs.len(), 8);
     assert!(!outputs(&dag).iter().any(|output| output.contains("sub=5")));
 
@@ -420,16 +434,15 @@ fn skip_source_group_can_omit_missing_files_in_a_discovered_context() {
             "data/sub-5/ses-2/.keep",
         ],
     );
-    let pipeline = parse_pipeline(
+    let (pipeline, spec) = parse(
         "discover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}\n\
          source image [sub, ses]\n\
          path image: data/sub-{sub}/ses-{ses}/image.nii.gz\n\
          skip image count>=2 per [sub]\n\
          operation process(Image) -> Image\n\
          result = process(image)\n",
-    )
-    .unwrap();
-    let inventory = discover_sources(&pipeline, &tree.0).unwrap();
+    );
+    let inventory = discover_sources(&pipeline, &spec.rules, &tree.0).unwrap();
     assert_eq!(inventory.artifacts.len(), 2);
     assert!(inventory
         .contexts
@@ -440,16 +453,18 @@ fn skip_source_group_can_omit_missing_files_in_a_discovered_context() {
 
 #[test]
 fn skip_does_not_hide_invalid_inventory_bindings() {
-    let pipeline = parse_pipeline(
+    let (pipeline, spec) = parse(
         "discover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}\n\
          skip sessions count>=2 per [sub]\n",
-    )
-    .unwrap();
+    );
     let inventory = parse_source_inventory("contexts sessions:\n[sub=5]\n").unwrap();
-    assert!(matches!(
-        resolve(&pipeline, &inventory),
-        Err(ResolveError::InvalidDefinition { detail, .. }) if detail.contains("must bind [sub, ses]")
-    ));
+    let error = spec
+        .resolve(&pipeline, InputSource::Inventory(inventory))
+        .unwrap_err();
+    assert!(
+        error.to_string().contains("must bind [sub, ses]"),
+        "{error}"
+    );
 }
 
 #[test]
@@ -462,18 +477,17 @@ fn discovery_coverage_uses_only_its_own_bindings() {
             "controls/sub-A/ses-2/.keep",
         ],
     );
-    let pipeline = parse_pipeline(
+    let (pipeline, spec) = parse(
         "discover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}\n\
          discover controls: [sub, ses] from dirs controls/sub-{sub}/ses-{ses}\n\
          require sessions count>=2 per [sub]\n",
-    )
-    .unwrap();
-    let inventory = discover_sources(&pipeline, &tree.0).unwrap();
+    );
+    let inventory = discover_sources(&pipeline, &spec.rules, &tree.0).unwrap();
     assert_eq!(inventory.contexts.len(), 2);
     assert_eq!(inventory.discovered["sessions"].len(), 1);
     assert_eq!(inventory.discovered["controls"].len(), 2);
     assert!(matches!(
-        resolve(&pipeline, &inventory),
+        settle(&pipeline, &spec, &inventory).require_complete(),
         Err(ResolveError::CoverageViolation {
             found: 1,
             discovery: true,
@@ -498,10 +512,9 @@ fn directory_discovery_rejects_unsafe_or_incomplete_patterns() {
 #[test]
 fn directory_discovery_errors_when_no_directories_match() {
     let tree = Tree::new("directory-empty", &["data/unrelated/file.txt"]);
-    let pipeline =
-        parse_pipeline("discover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}\n")
-            .unwrap();
-    let error = discover_sources(&pipeline, &tree.0).unwrap_err();
+    let (pipeline, spec) =
+        parse("discover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}\n");
+    let error = discover_sources(&pipeline, &spec.rules, &tree.0).unwrap_err();
     assert!(
         error
             .message()
@@ -541,7 +554,8 @@ fn a_file_matching_two_source_rules_is_rejected() {
     // Distinct rules that both fit `in/q-x.txt`: `a` with id=q-x, `b` with id=q.
     let text = "source a [id]\npath a: in/{id}.txt\nsource b [id]\npath b: in/{id}-x.txt\n";
     let tree = Tree::new("ambiguous", &["in/q-x.txt"]);
-    let error = discover_sources(&parse_pipeline(text).unwrap(), &tree.0).unwrap_err();
+    let (pipeline, spec) = parse(text);
+    let error = discover_sources(&pipeline, &spec.rules, &tree.0).unwrap_err();
     assert!(
         error
             .message()
@@ -597,8 +611,8 @@ fn discovery_skips_values_spit_would_write_differently() {
             "in/b.txt",
         ],
     );
-    let pipeline = parse_pipeline(ONE_SOURCE).unwrap();
-    let discovery = discover_source_files(&pipeline, tree.path()).unwrap();
+    let (pipeline, spec) = parse(ONE_SOURCE);
+    let discovery = discover_source_files(&pipeline, &spec.rules, tree.path()).unwrap();
     let records: Vec<_> = discovery
         .inventory
         .artifacts
@@ -640,7 +654,8 @@ fn discovery_is_fast_however_values_could_be_split() {
         "source x [a, b, c, d, e]\npath x: in/{a}-{b}-{c}-{d}-{e}.dat\n",
     ] {
         let started = Instant::now();
-        let discovery = discover_source_files(&parse_pipeline(rule).unwrap(), tree.path()).unwrap();
+        let (pipeline, spec) = parse(rule);
+        let discovery = discover_source_files(&pipeline, &spec.rules, tree.path()).unwrap();
         assert!(discovery.inventory.artifacts.is_empty());
         assert!(
             started.elapsed() < Duration::from_secs(5),
@@ -651,7 +666,8 @@ fn discovery_is_fast_however_values_could_be_split() {
     // A match still finds its values, including a repeated dimension.
     let tree = Tree::new("repeat", &["in/ab-x/ab.txt", "in/ab-x/cd.txt"]);
     let rule = "source x [s, t]\npath x: in/{s}-{t}/{s}.txt\n";
-    let discovery = discover_source_files(&parse_pipeline(rule).unwrap(), tree.path()).unwrap();
+    let (pipeline, spec) = parse(rule);
+    let discovery = discover_source_files(&pipeline, &spec.rules, tree.path()).unwrap();
     let records: Vec<_> = discovery
         .inventory
         .artifacts
@@ -668,8 +684,8 @@ fn discovery_follows_links_without_looping() {
     let data = tree.path().join("data");
     std::os::unix::fs::symlink(tree.path().join("elsewhere/c.txt"), data.join("in/b.txt")).unwrap();
     std::os::unix::fs::symlink(&data, data.join("in/loop")).unwrap();
-    let pipeline = parse_pipeline(ONE_SOURCE).unwrap();
-    let discovery = discover_source_files(&pipeline, &data).unwrap();
+    let (pipeline, spec) = parse(ONE_SOURCE);
+    let discovery = discover_source_files(&pipeline, &spec.rules, &data).unwrap();
     let records: Vec<_> = discovery
         .inventory
         .artifacts

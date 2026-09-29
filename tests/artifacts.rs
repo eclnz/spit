@@ -3,18 +3,44 @@ use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use spit::{
-    diagnose, parse_pipeline, parse_source_inventory, render_artifacts, resolve, resolve_artifacts,
-    ArtifactReport, Gap, ResolveError, Severity,
+    diagnose, parse_source_inventory, parse_spit, render_artifacts, resolve,
+    resolve_artifacts_excluding, ArtifactReport, Gap, InputSource, InputSpec, ResolveError,
+    ResolvedInputs, Severity,
 };
 
-fn report(text: &str, inventory: &str) -> Result<ArtifactReport, ResolveError> {
-    let pipeline = parse_pipeline(text).unwrap();
-    resolve_artifacts(&pipeline, &parse_source_inventory(inventory).unwrap())
+/// The document's pipeline, and `inventory` after the input stage.
+fn settle(text: &str, inventory: &str) -> Result<(spit::Pipeline, ResolvedInputs), ResolveError> {
+    let document = parse_spit(text).unwrap();
+    let records = parse_source_inventory(inventory).unwrap();
+    let settled = InputSpec::embedded_in(&document)
+        .resolve(&document.pipeline, InputSource::Inventory(records))
+        .map_err(|error| match error.downcast::<ResolveError>() {
+            Ok(error) => *error,
+            Err(error) => panic!("{error}"),
+        })?;
+    Ok((document.pipeline, settled))
 }
 
+/// What `spit artifacts` reports: jobs over the settled inventory, with the
+/// sources a coverage gap holds back.
+fn report(text: &str, inventory: &str) -> Result<ArtifactReport, ResolveError> {
+    let (pipeline, settled) = settle(text, inventory)?;
+    let mut report =
+        resolve_artifacts_excluding(&pipeline, &settled.dag_inventory(), &settled.unavailable())?;
+    report.coverage = settled.gaps;
+    Ok(report)
+}
+
+/// The error `spit dag` stops at: a missing requirement, else a job.
 fn first_error(text: &str, inventory: &str) -> ResolveError {
-    let pipeline = parse_pipeline(text).unwrap();
-    resolve(&pipeline, &parse_source_inventory(inventory).unwrap()).unwrap_err()
+    let (pipeline, settled) = match settle(text, inventory) {
+        Ok(settled) => settled,
+        Err(error) => return error,
+    };
+    if let Err(error) = settled.require_complete() {
+        return error;
+    }
+    resolve(&pipeline, &settled.dag_inventory()).unwrap_err()
 }
 
 fn complete(report: &ArtifactReport) -> Vec<String> {

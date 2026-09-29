@@ -4,26 +4,30 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::lower::{parse_document_with_imports, ParsedDocument, PipelineBuilder};
+use crate::lower::{
+    parse_document_with_imports, Document, Module, ParsedDocument, PipelineBuilder,
+};
 use crate::model::{
-    CommandDef, CommandRole, CoverageRule, OperationDef, Pipeline, ProductDef, SourceInventory,
+    CommandDef, CommandRole, CoverageRule, InputRules, OperationDef, Pipeline, ProductDef,
+    SourceInventory,
 };
 use crate::parser::{parse_use, strip_comment, InlineInventory, ParseError, Rule, UseSpec};
 use crate::span::Place;
 
 pub(crate) fn apply_import(
     builder: &mut PipelineBuilder,
-    imports: &BTreeMap<usize, Pipeline>,
+    imports: &BTreeMap<usize, Module>,
     place: Place,
 ) -> Result<(), ParseError> {
     let line = place.line;
     let pipeline = &mut builder.pipeline;
-    let imported = imports.get(&line).ok_or_else(|| {
+    let module = imports.get(&line).ok_or_else(|| {
         ParseError::new(
             line,
             "imports require a document path; use parse_document_at",
         )
     })?;
+    let imported = &module.pipeline;
     for product in &imported.products {
         if pipeline
             .products
@@ -100,14 +104,19 @@ pub(crate) fn apply_import(
     for product in imported.product_paths.keys() {
         lines.paths.insert(product.clone(), place.clone());
     }
-    for constraint in &imported.constraints {
+    for constraint in &module.inputs.constraints {
         builder.add_constraint(constraint.clone(), Rule::spanning(&place));
     }
     Ok(())
 }
 
-fn select_import(module: &Pipeline, spec: &UseSpec, line: usize) -> Result<Pipeline, ParseError> {
-    let mut selected = Pipeline::default();
+fn select_import(
+    module: &Pipeline,
+    inputs: &InputRules,
+    spec: &UseSpec,
+    line: usize,
+) -> Result<Module, ParseError> {
+    let mut selected = Module::default();
     let import_all = spec.names.is_none();
     let names: Vec<&str> = match &spec.names {
         Some(names) => names.iter().map(String::as_str).collect(),
@@ -153,10 +162,10 @@ fn select_import(module: &Pipeline, spec: &UseSpec, line: usize) -> Result<Pipel
             .as_ref()
             .map_or_else(|| name.to_owned(), |alias| format!("{alias}::{name}"));
         if let Some(operation) = operation {
-            import_operation(&mut selected, module, operation, &qualified, line)?;
+            import_operation(&mut selected.pipeline, module, operation, &qualified, line)?;
         }
         if let Some(source) = source {
-            import_source(&mut selected, module, source, &qualified, line)?;
+            import_source(&mut selected, module, inputs, source, &qualified, line)?;
         }
     }
     Ok(selected)
@@ -235,13 +244,18 @@ fn import_operation(
 
 /// Import a source as `qualified`, with its path rule and coverage rules.
 fn import_source(
-    selected: &mut Pipeline,
+    selected: &mut Module,
     module: &Pipeline,
+    inputs: &InputRules,
     source: &ProductDef,
     qualified: &str,
     line: usize,
 ) -> Result<(), ParseError> {
     let name = &source.name;
+    let Module {
+        pipeline: selected,
+        inputs: selected_inputs,
+    } = selected;
     if selected
         .products
         .iter()
@@ -262,8 +276,8 @@ fn import_source(
             .product_paths
             .insert(qualified.to_owned(), path.with_product(name));
     }
-    selected.constraints.extend(
-        module
+    selected_inputs.constraints.extend(
+        inputs
             .constraints
             .iter()
             .filter(|constraint| &constraint.product == name)
@@ -289,6 +303,18 @@ pub fn parse_document_at(
 /// separate one that replaces it. The inline records need not parse.
 pub fn parse_pipeline_at(text: &str, path: &Path) -> Result<Pipeline, ParseError> {
     parse_located_document(text, path, InlineInventory::Skip).map(|document| document.pipeline)
+}
+
+/// Parse a whole document at a known location: its pipeline, input rules,
+/// and inline records, resolving imports.
+pub fn parse_spit_at(text: &str, path: &Path) -> Result<Document, ParseError> {
+    parse_located_document(text, path, InlineInventory::Read).map(Document::from)
+}
+
+/// Like [`parse_spit_at`], but skips any inline inventory, for use with a
+/// separate one that replaces it. The inline records need not parse.
+pub fn parse_spit_without_records_at(text: &str, path: &Path) -> Result<Document, ParseError> {
+    parse_located_document(text, path, InlineInventory::Skip).map(Document::from)
 }
 
 /// Like [`parse_document_at`], but also keeps declaration line numbers.
@@ -363,7 +389,11 @@ fn parse_document_at_inner(
                     )
                 });
         stack.pop();
-        imports.insert(number, select_import(&module?.pipeline, &spec, number)?);
+        let module = module?;
+        imports.insert(
+            number,
+            select_import(&module.pipeline, &module.inputs, &spec, number)?,
+        );
     }
     parse_document_with_imports(text, &imports, inline)
 }
