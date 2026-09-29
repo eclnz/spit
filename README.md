@@ -54,7 +54,7 @@ SPIT runs in three steps. Each is one command, and each reads the files the prev
 | `.spitout` | A dataset's settled inputs: each source artifact, with its file. |
 | `.spitdag` | The resolved jobs, each with its artifacts' files and its command, as JSON: all a backend needs to run them. |
 
-A later step may also take an earlier step's input and run that step in memory: `dag` and `artifacts` take a `.spitin` in place of the `.spitout`.
+A later step may also take an earlier step's input and run that step in memory: `dag` and `artifacts` take a `.spitin` in place of the `.spitout`. A `.spitin` names its pipeline, so `spit dag dataset.spitin` needs no `.spit` beside it; if you give both and they differ, the command stops.
 
 SPIT has no backend yet: nothing in this repository runs a `.spitdag`.
 
@@ -63,8 +63,8 @@ SPIT has no backend yet: nothing in this repository runs a `.spitdag`.
 ```text
 spit check <pipeline.spit | recipe.spitin> [--path-rules] [--strict-paths] [--json] [--stdin]
 spit inputs <recipe.spitin> [--root <directory>] [-o <file>]
-spit dag <pipeline.spit> <inputs.spitout | recipe.spitin | -> [--root <directory>] [--strict-paths] [--paths | --json | -o <file>]
-spit artifacts <pipeline.spit> <inputs.spitout | recipe.spitin | -> [--root <directory>]
+spit dag <recipe.spitin> | <pipeline.spit> <inputs.spitout | recipe.spitin | -> [--root <directory>] [--strict-paths] [--paths | --json | -o <file>]
+spit artifacts <recipe.spitin> | <pipeline.spit> <inputs.spitout | recipe.spitin | -> [--root <directory>]
 ```
 
 Files come first; options follow them. `spit help` lists the commands, and `spit help <command>` or `spit <command> --help` gives one command's options.
