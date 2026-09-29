@@ -279,7 +279,7 @@ fn stage_dependencies<'a>(
                     .entry(consumer[..=shared].join("/"))
                     .or_default()
                     .entry(made[..=shared].join("/"))
-                    .or_insert((invocation.output_product(), product));
+                    .or_insert_with(|| (invocation.output_product(), product));
             }
             // Otherwise the producer is in this stage or one nested in it,
             // and records what it reads itself.
@@ -313,7 +313,7 @@ fn check_stage_cycles(
                 )
             })
             .collect();
-        reported.extend(cycle.iter().map(|stage| stage.to_owned()));
+        reported.extend(cycle.iter().map(std::borrow::ToOwned::to_owned));
         errors.push(stage_error(
             start,
             format!(

@@ -61,7 +61,7 @@ impl Step {
     }
 
     pub(crate) fn output_at(&self, index: usize) -> Place {
-        let columns = self.outputs.get(index).or(self.outputs.first());
+        let columns = self.outputs.get(index).or_else(|| self.outputs.first());
         columns.map_or_else(|| self.call(), |columns| self.place(columns))
     }
 
@@ -138,7 +138,7 @@ pub(super) fn step_place(original: &str, number: usize, invocation: &Invocation)
         .outputs
         .iter()
         .map(|output| {
-            let columns = found(from, output).unwrap_or(content.clone());
+            let columns = found(from, output).unwrap_or_else(|| content.clone());
             from = columns.end;
             columns
         })
@@ -146,7 +146,7 @@ pub(super) fn step_place(original: &str, number: usize, invocation: &Invocation)
     let equals = original[from..]
         .find('=')
         .map_or(from, |offset| from + offset + 1);
-    let operation = found(equals, &invocation.operation).unwrap_or(content.clone());
+    let operation = found(equals, &invocation.operation).unwrap_or_else(|| content.clone());
     let call_end = original[..content.end]
         .rfind(')')
         .map_or(content.end, |index| index + 1);
@@ -185,15 +185,11 @@ fn argument_end(line: &str, start: usize, call_end: usize) -> usize {
     for (offset, character) in line[start..call_end].char_indices() {
         match character {
             '(' => depth += 1,
-            ')' if depth == 0 => {
+            ')' | ',' if depth == 0 => {
                 end = start + offset;
                 break;
             }
             ')' => depth -= 1,
-            ',' if depth == 0 => {
-                end = start + offset;
-                break;
-            }
             _ => {}
         }
     }
@@ -203,11 +199,10 @@ fn argument_end(line: &str, start: usize, call_end: usize) -> usize {
 /// Where the text at the end of a declaration sits, such as a template.
 pub(super) fn tail_place(original: &str, number: usize, tail: &str) -> Place {
     let content = content_columns(original);
-    let columns = original[content.clone()]
-        .rfind(tail)
-        .map_or(content.clone(), |offset| {
-            content.start + offset..content.start + offset + tail.len()
-        });
+    let columns = original[content.clone()].rfind(tail).map_or_else(
+        || content.clone(),
+        |offset| content.start + offset..content.start + offset + tail.len(),
+    );
     Place::new(number, columns)
 }
 
@@ -217,10 +212,11 @@ pub(super) fn rule_place(original: &str, number: usize, rule: &CoverageRule) -> 
     let content = &original[whole.clone()];
     let after_keyword =
         whole.end - Keyword::split(content).map_or(content.len(), |(_, rest)| rest.len());
-    let product = find_word(original, after_keyword, &rule.product).unwrap_or(whole.clone());
+    let product =
+        find_word(original, after_keyword, &rule.product).unwrap_or_else(|| whole.clone());
     let dimensions = original[product.end..whole.end]
         .find('[')
-        .map_or(whole.clone(), |offset| product.end + offset..whole.end);
+        .map_or_else(|| whole.clone(), |offset| product.end + offset..whole.end);
     Rule {
         line: number,
         whole,

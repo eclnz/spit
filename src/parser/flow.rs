@@ -171,7 +171,7 @@ fn flow_line(
             return Err(ParseError::new(number, SHELL_SOURCE_REMOVED));
         }
         Some((Keyword::Path, _)) => StatementKind::Path(parse_path(stage, original, line, number)?),
-        None => flow_statement(original, line, number, stage)?,
+        None => flow_statement(original, line, number, stage.as_deref())?,
     };
     syntax.push(original, number, kind);
     Ok(())
@@ -182,11 +182,11 @@ fn flow_statement(
     original: &str,
     line: &str,
     number: usize,
-    stage: Option<String>,
+    stage: Option<&str>,
 ) -> Result<StatementKind, ParseError> {
     if line.contains('=') {
         let (mut invocation, outputs) = parse_flow_step(line, number)?;
-        invocation.stage.clone_from(&stage);
+        invocation.stage = stage.map(str::to_owned);
         let step = step_place(original, number, &invocation);
         Ok(StatementKind::FlowStep(FlowStep {
             invocation,

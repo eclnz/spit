@@ -49,7 +49,7 @@ struct CommandSpec {
 
 impl Command {
     fn spec(self) -> CommandSpec {
-        use Flag::*;
+        use Flag::{Json, Output, PathRules, Paths, Root, Stdin, StrictPaths};
         match self {
             Self::Check => CommandSpec {
                 name: "check",

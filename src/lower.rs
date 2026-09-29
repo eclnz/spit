@@ -50,7 +50,7 @@ impl PipelineBuilder {
         self.pipeline.commands.push(command);
     }
 
-    fn add_invocation(&mut self, invocation: Invocation, step: Step) {
+    fn add_invocation(&mut self, invocation: Invocation, step: &Step) {
         for output in &invocation.outputs {
             self.lines.invocations.insert(output.clone(), step.clone());
         }
@@ -141,7 +141,7 @@ impl PipelineBuilder {
             );
             self.add_product(product, step.output_at(index));
         }
-        self.add_invocation(invocation.clone(), step.clone());
+        self.add_invocation(invocation.clone(), step);
         Ok(())
     }
 }
@@ -182,10 +182,10 @@ fn lower_statement(
     statement: &Statement,
 ) -> Result<(), ParseError> {
     match &statement.kind {
-        StatementKind::Import => apply_import(builder, imports, statement.place.clone())?,
+        StatementKind::Import => apply_import(builder, imports, &statement.place)?,
         StatementKind::Stage { name, place } => builder.add_stage(name, place.clone())?,
         StatementKind::Product(product, place) => {
-            builder.add_product(product.clone(), place.clone())
+            builder.add_product(product.clone(), place.clone());
         }
         StatementKind::Discover(discovery) => {
             if builder.inputs.discovery(&discovery.name).is_some() {
@@ -197,17 +197,17 @@ fn lower_statement(
             builder.inputs.discoveries.push(discovery.clone());
         }
         StatementKind::Operation(operation, place) => {
-            builder.add_operation(operation.clone(), place.clone())
+            builder.add_operation(operation.clone(), place.clone());
         }
         StatementKind::Constraint(constraint, rule) => {
-            builder.add_constraint(constraint.clone(), rule.clone())
+            builder.add_constraint(constraint.clone(), rule.clone());
         }
         StatementKind::Command(command, place) => {
-            builder.add_command(command.clone(), place.clone())
+            builder.add_command(command.clone(), place.clone());
         }
         StatementKind::Path(rule) => builder.add_path(rule, statement.place.line)?,
         StatementKind::Step(invocation, step) => {
-            builder.add_invocation(invocation.clone(), step.clone())
+            builder.add_invocation(invocation.clone(), step);
         }
         StatementKind::FlowStep(flow) => builder.add_flow_step(flow)?,
     }

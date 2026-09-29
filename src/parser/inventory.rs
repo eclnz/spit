@@ -2,6 +2,7 @@
 //! `.spitout` or written in a `.spitin` recipe.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt;
 
 use crate::model::{EntityBinding, InputRules, Pipeline, SourceInventory, SourceRecord};
 use crate::paths::unusable_path;
@@ -82,70 +83,91 @@ pub fn render_source_inventory(
     pipeline: &Pipeline,
     rules: &InputRules,
 ) -> String {
-    let mut pipeline_order: Vec<String> = Vec::new();
-    for dimension in pipeline
-        .products
-        .iter()
-        .flat_map(|product| &product.dimensions)
-    {
-        if !pipeline_order.contains(dimension) {
-            pipeline_order.push(dimension.clone());
+    InventoryText {
+        inventory,
+        pipeline,
+        rules,
+    }
+    .to_string()
+}
+
+/// A `.spitout`: its contexts, unnamed then by discovery rule, and its
+/// source records.
+struct InventoryText<'a> {
+    inventory: &'a SourceInventory,
+    pipeline: &'a Pipeline,
+    rules: &'a InputRules,
+}
+
+impl fmt::Display for InventoryText<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let inventory = self.inventory;
+        let named: BTreeSet<_> = inventory.discovered.values().flatten().collect();
+        let unnamed: Vec<_> = inventory
+            .contexts
+            .iter()
+            .filter(|context| !named.contains(context))
+            .collect();
+        if !unnamed.is_empty() {
+            writeln!(f, "contexts:")?;
+            self.write_contexts(f, unnamed, &[])?;
         }
-    }
-    let context_lines = |contexts: Vec<&EntityBinding>, first: &[String]| {
-        let mut order = first.to_vec();
-        order.extend(
-            pipeline_order
+        for (name, bindings) in &inventory.discovered {
+            writeln!(f, "contexts {name}:")?;
+            let declared = self
+                .rules
+                .discovery(name)
+                .map_or(&[][..], |rule| rule.dimensions.as_slice());
+            self.write_contexts(f, bindings.iter().collect(), declared)?;
+        }
+        writeln!(f, "sources:")?;
+        for record in &inventory.artifacts {
+            let declared: Vec<_> = self
+                .pipeline
+                .products
                 .iter()
-                .filter(|d| !first.contains(d))
-                .cloned(),
-        );
-        let mut contexts = contexts;
-        contexts.sort_by(|left, right| left.cmp_in(right, &order));
-        let order: Vec<&str> = order.iter().map(String::as_str).collect();
-        contexts
-            .into_iter()
-            .map(|context| format!("    [{}]\n", in_order(context, &order)))
-            .collect::<String>()
-    };
-    let mut text = String::new();
-    let named: BTreeSet<_> = inventory.discovered.values().flatten().collect();
-    let unnamed: Vec<_> = inventory
-        .contexts
-        .iter()
-        .filter(|context| !named.contains(context))
-        .collect();
-    if !unnamed.is_empty() {
-        text.push_str("contexts:\n");
-        text.push_str(&context_lines(unnamed, &[]));
+                .find(|product| product.name == record.product)
+                .map_or_else(Vec::new, |product| {
+                    product.dimensions.iter().map(String::as_str).collect()
+                });
+            let entities = in_order(&record.entities, &declared);
+            write!(f, "    {}[{entities}]", record.product)?;
+            if let Some(path) = &record.path {
+                write!(f, ": {path}")?;
+            }
+            writeln!(f)?;
+        }
+        Ok(())
     }
-    for (name, bindings) in &inventory.discovered {
-        text.push_str(&format!("contexts {name}:\n"));
-        let declared = rules
-            .discovery(name)
-            .map_or(&[][..], |rule| rule.dimensions.as_slice());
-        text.push_str(&context_lines(bindings.iter().collect(), declared));
-    }
-    text.push_str("sources:\n");
-    for record in &inventory.artifacts {
-        let declared: Vec<_> = pipeline
+}
+
+impl InventoryText<'_> {
+    /// Each of `contexts` on its own line, ordered and written by `first`'s
+    /// dimensions, then the pipeline's in the order its products name them.
+    fn write_contexts(
+        &self,
+        f: &mut fmt::Formatter<'_>,
+        mut contexts: Vec<&EntityBinding>,
+        first: &[String],
+    ) -> fmt::Result {
+        let mut order = first.to_vec();
+        for dimension in self
+            .pipeline
             .products
             .iter()
-            .find(|product| product.name == record.product)
-            .map_or(Vec::new(), |product| {
-                product.dimensions.iter().map(String::as_str).collect()
-            });
-        text.push_str(&format!(
-            "    {}[{}]",
-            record.product,
-            in_order(&record.entities, &declared)
-        ));
-        if let Some(path) = &record.path {
-            text.push_str(&format!(": {path}"));
+            .flat_map(|product| &product.dimensions)
+        {
+            if !order.contains(dimension) {
+                order.push(dimension.clone());
+            }
         }
-        text.push('\n');
+        contexts.sort_by(|left, right| left.cmp_in(right, &order));
+        let order: Vec<&str> = order.iter().map(String::as_str).collect();
+        for context in contexts {
+            writeln!(f, "    [{}]", in_order(context, &order))?;
+        }
+        Ok(())
     }
-    text
 }
 
 /// `binding` as `dim=value,...`, in the order of `declared`, then any
@@ -169,12 +191,12 @@ fn in_order(binding: &EntityBinding, declared: &[&str]) -> String {
 /// Records are logical identities, each optionally followed by `: path`, the
 /// file relative to the dataset root. They never hold artifact types.
 pub fn parse_source_inventory(text: &str) -> Result<SourceInventory, ParseError> {
-    let text = super::without_bom(text);
     enum InventorySection {
         Sources,
         Contexts(Option<String>),
     }
 
+    let text = super::without_bom(text);
     let mut inventory = SourceInventory::default();
     let mut section = None;
     for (index, original) in text.lines().enumerate() {

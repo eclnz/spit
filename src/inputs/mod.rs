@@ -336,7 +336,7 @@ impl ResolvedInputs {
     /// the bookkeeping that ties them to discovery rules.
     pub fn dag_inventory(&self) -> SourceInventory {
         SourceInventory {
-            discovered: Default::default(),
+            discovered: BTreeMap::new(),
             ..self.inventory.clone()
         }
     }

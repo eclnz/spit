@@ -50,7 +50,7 @@ pub(super) fn expand_step(
                 (context, driven.clone())
             })
         });
-    jobs.map(|(context, driven)| expand_job(step, &candidates, incomplete, context, driven))
+    jobs.map(|(context, driven)| expand_job(step, &candidates, incomplete, &context, &driven))
         .collect()
 }
 
@@ -60,8 +60,8 @@ fn expand_job(
     step: &CompiledStep<'_>,
     candidates: &[Vec<&ArtifactInstance>],
     incomplete: &BTreeSet<ArtifactKey>,
-    context: EntityBinding,
-    driven: Vec<ArtifactInstance>,
+    context: &EntityBinding,
+    driven: &[ArtifactInstance],
 ) -> Expansion {
     let (invocation, operation, shape) = (step.invocation, step.operation, &step.shape);
     let mut gaps = Vec::new();
@@ -78,7 +78,7 @@ fn expand_job(
     let mut inputs = Vec::new();
     for (index, port) in operation.inputs.iter().enumerate() {
         let bound = if index == shape.driver {
-            driven.clone()
+            driven.to_vec()
         } else {
             let joins = &shape.joins[index];
             match match_input(
@@ -87,7 +87,7 @@ fn expand_job(
                 index,
                 joins,
                 &candidates[index],
-                &context,
+                context,
             ) {
                 Ok(artifact) => vec![artifact],
                 Err(gap) => {

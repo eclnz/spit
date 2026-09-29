@@ -378,7 +378,7 @@ pub fn diagnose_recipe(text: &str, path: &Path) -> Vec<Diagnostic> {
             return finish(vec![diagnostic], text, None);
         }
     };
-    let Some(pipeline_path) = spec.pipeline.clone() else {
+    let Some(pipeline_path) = spec.pipeline else {
         let message =
             "name the pipeline this recipe is for, with a line such as `pipeline analysis.spit`";
         return finish(vec![error(message.to_owned())], text, None);
@@ -679,7 +679,7 @@ fn operator_warnings(pipeline: &Pipeline, lines: &SourceMap, text: &str) -> Vec<
             });
             warnings.push(warning(
                 place.as_ref().map(|place| {
-                    Place::new(place.line, columns.unwrap_or(place.columns.clone()))
+                    Place::new(place.line, columns.unwrap_or_else(|| place.columns.clone()))
                 }),
                 format!(
                     "`{operator}` in the command for `{}` is passed to the program as an argument, not read as a pipe or redirection, since commands do not run through a shell; quote it to pass it on purpose",

@@ -173,6 +173,8 @@ Dead public API (item 5, 15) is not visible to the compiler because `lib.rs` re-
 - Needless by-value params: `imports.rs:15` (`Place`), `lower.rs:53` (`Step`), `parser/flow.rs:199` (`Option<String>`).
 - Identical arms in `parser/source_map.rs` ~188 (`')' if depth == 0` and `',' if depth == 0`).
 - Pedantic: `map_or`/`map_or_else` suggestions, `format!` appended to `String`, missing `#[must_use]`.
+- **Status: done.** By-value parameters that were only borrowed now take references (`apply_import`'s `Place`, `add_invocation`'s `Step`, `flow_statement`'s stage, `expand_job`'s context and driven artifacts). The identical `')'`/`','` arms are one arm. Fallbacks that were evaluated eagerly (`unwrap_or(x.clone())`, `map_or(x.clone(), ..)`, `or(..)`, `get_or_insert(..)`, `or_insert(..)`) are lazy. `render_source_inventory` writes the `.spitout` through a `Display` type instead of `push_str(&format!(..))`. Also: a glob `use Flag::*`, an item after statements, `Default::default()` for a `BTreeMap`, and mechanical fixes clippy applied itself (17 lines). Output unchanged.
+  - **Left by decision:** the nursery lints `missing_const_for_fn` (16) and `option_if_let_else` (15), and `use_self` (6), `too_long_first_doc_paragraph` (6) and `similar_names` (2): style preferences that would churn many lines for no clarity gain. `redundant_pub_crate`, `must_use_candidate` and `missing_errors_doc` were out of scope from the start.
 
 ### 18. Panic-capable indexing
 - Where an earlier stage's validation is the only guarantee: `resolver/matching.rs`, `compile/definitions.rs`, `shape.rs`, `resolver/bind.rs` (`dag.product_dimensions[&artifact.product]`, `paths[&artifact.key()]`), `compile/mod.rs` and `resolver/mod.rs` (`shapes[&index]`).
