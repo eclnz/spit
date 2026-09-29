@@ -17,10 +17,9 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use spit::{
-    bind_dag, diagnose_artifacts_at, diagnose_at, diagnose_at_with_inputs, diagnose_recipe,
-    inspect_paths, parse_input_spec_at, parse_pipeline_at, parse_source_inventory,
+    bind_dag, diagnose_at_checked, diagnose_recipe, inspect_paths, parse_input_spec_at,
     render_artifacts, render_bound_dag, render_dag, render_diagnostics_json,
-    render_source_inventory, resolve, resolve_artifacts_excluding, stage_within, validate_pipeline,
+    render_source_inventory, resolve, resolve_artifacts_excluding, stage_within,
     validate_source_files, Diagnostic, DiagnosticSource, InputSource, InputSpec, PathTemplate,
     Pipeline, ResolvedDag, ResolvedInputs, Severity,
 };
@@ -40,14 +39,51 @@ const COMMANDS: [Command; 4] = [
     Command::Artifacts,
 ];
 
+struct CommandSpec {
+    name: &'static str,
+    files: &'static str,
+    summary: &'static str,
+    example: &'static str,
+    flags: &'static [Flag],
+}
+
 impl Command {
-    fn name(self) -> &'static str {
+    fn spec(self) -> CommandSpec {
+        use Flag::*;
         match self {
-            Self::Check => "check",
-            Self::Inputs => "inputs",
-            Self::Dag => "dag",
-            Self::Artifacts => "artifacts",
+            Self::Check => CommandSpec {
+                name: "check",
+                files: "<pipeline.spit | recipe.spitin>",
+                summary: "step 1: compile a pipeline, or check a recipe against its pipeline; reads no data",
+                example: "spit check analysis.spit\n  spit check dataset.spitin",
+                flags: &[PathRules, StrictPaths, Json, Stdin],
+            },
+            Self::Inputs => CommandSpec {
+                name: "inputs",
+                files: "<recipe.spitin>",
+                summary: "step 2: find a dataset's sources with a recipe, apply `skip` and `require`, and write a .spitout",
+                example: "spit inputs dataset.spitin -o dataset.spitout",
+                flags: &[Root, Output],
+            },
+            Self::Dag => CommandSpec {
+                name: "dag",
+                files: "<pipeline.spit> <inputs.spitout | recipe.spitin | ->",
+                summary: "step 3: resolve a pipeline's jobs over a dataset's inputs; -o writes the .spitdag",
+                example: "spit dag analysis.spit dataset.spitout -o analysis.spitdag\n  spit dag analysis.spit dataset.spitout --paths",
+                flags: &[Root, StrictPaths, Paths, Json, Output],
+            },
+            Self::Artifacts => CommandSpec {
+                name: "artifacts",
+                files: "<pipeline.spit> <inputs.spitout | recipe.spitin | ->",
+                summary: "step 3: report what can and cannot be made from a dataset's inputs, and why",
+                example: "spit artifacts analysis.spit dataset.spitout",
+                flags: &[Root],
+            },
         }
+    }
+
+    fn name(self) -> &'static str {
+        self.spec().name
     }
 
     fn parse(name: &str) -> Option<Self> {
@@ -56,11 +92,7 @@ impl Command {
 
     /// The files it takes, as the usage line shows them.
     fn files(self) -> &'static str {
-        match self {
-            Self::Check => "<pipeline.spit | recipe.spitin>",
-            Self::Inputs => "<recipe.spitin>",
-            Self::Dag | Self::Artifacts => "<pipeline.spit> <inputs.spitout | recipe.spitin | ->",
-        }
+        self.spec().files
     }
 
     /// The fewest and most files it takes.
@@ -72,21 +104,11 @@ impl Command {
     }
 
     fn summary(self) -> &'static str {
-        match self {
-            Self::Check => "step 1: compile a pipeline, or check a recipe against its pipeline; reads no data",
-            Self::Inputs => "step 2: find a dataset's sources with a recipe, apply `skip` and `require`, and write a .spitout",
-            Self::Dag => "step 3: resolve a pipeline's jobs over a dataset's inputs; -o writes the .spitdag",
-            Self::Artifacts => "step 3: report what can and cannot be made from a dataset's inputs, and why",
-        }
+        self.spec().summary
     }
 
     fn example(self) -> &'static str {
-        match self {
-            Self::Check => "spit check analysis.spit\n  spit check dataset.spitin",
-            Self::Inputs => "spit inputs dataset.spitin -o dataset.spitout",
-            Self::Dag => "spit dag analysis.spit dataset.spitout -o analysis.spitdag\n  spit dag analysis.spit dataset.spitout --paths",
-            Self::Artifacts => "spit artifacts analysis.spit dataset.spitout",
-        }
+        self.spec().example
     }
 
     /// Given a recipe in place of a `.spitout`, or earlier files in place of
@@ -102,13 +124,7 @@ impl Command {
 
     /// The flags this command accepts.
     fn flags(self) -> &'static [Flag] {
-        use Flag::*;
-        match self {
-            Self::Check => &[PathRules, StrictPaths, Json, Stdin],
-            Self::Inputs => &[Root, Output],
-            Self::Dag => &[Root, StrictPaths, Paths, Json, Output],
-            Self::Artifacts => &[Root],
-        }
+        self.spec().flags
     }
 }
 
@@ -447,13 +463,16 @@ fn check(args: &CliArgs) -> Result<(), Box<dyn Error>> {
         println!("Recipe valid.");
         return Ok(());
     }
-    let diagnostics = diagnose_at(&text, None, path);
+    let checked = diagnose_at_checked(&text, None, path, None, false);
     if args.has(Flag::Json) {
-        print!("{}", render_diagnostics_json(&diagnostics, &text, None));
+        print!(
+            "{}",
+            render_diagnostics_json(&checked.diagnostics, &text, None)
+        );
         return Ok(());
     }
-    report(&diagnostics, &text, None)?;
-    let coverage = inspect_paths(&parse_pipeline_at(&text, path)?)?;
+    report(&checked.diagnostics, &text, None)?;
+    let coverage = inspect_paths(&checked.pipeline.expect("pipeline passed diagnosis"))?;
     if args.has(Flag::PathRules) {
         println!("{coverage}");
     }
@@ -517,13 +536,9 @@ fn run_inputs(
         }
     };
     let pipeline_text = read_file(&pipeline_file.display().to_string())?;
-    report(
-        &diagnose_at(&pipeline_text, None, &pipeline_file),
-        &pipeline_text,
-        None,
-    )?;
-    let pipeline = parse_pipeline_at(&pipeline_text, &pipeline_file)?;
-    validate_pipeline(&pipeline)?;
+    let checked = diagnose_at_checked(&pipeline_text, None, &pipeline_file, None, false);
+    report(&checked.diagnostics, &pipeline_text, None)?;
+    let pipeline = checked.pipeline.expect("pipeline passed diagnosis");
     // Records written in the recipe stand in for a scan, unless a root to
     // scan is given.
     let source = match &recipe.inventory {
@@ -582,16 +597,16 @@ fn prepare(args: &CliArgs, pipeline_file: &str, inputs: &str) -> Result<Prepared
     } else {
         (read_file(inputs)?, None)
     };
-    let diagnostics = match &recipe {
-        Some(recipe) => {
-            diagnose_at_with_inputs(&pipeline_text, Some(&records_text), path, recipe, lenient)
-        }
-        None if lenient => diagnose_artifacts_at(&pipeline_text, Some(&records_text), path),
-        None => diagnose_at(&pipeline_text, Some(&records_text), path),
-    };
-    report(&diagnostics, &pipeline_text, Some(&records_text))?;
-    let pipeline = parse_pipeline_at(&pipeline_text, path)?;
-    let records = parse_source_inventory(&records_text)?;
+    let checked = diagnose_at_checked(
+        &pipeline_text,
+        Some(&records_text),
+        path,
+        recipe.as_ref(),
+        lenient,
+    );
+    report(&checked.diagnostics, &pipeline_text, Some(&records_text))?;
+    let pipeline = checked.pipeline.expect("pipeline passed diagnosis");
+    let records = checked.inventory.expect("inventory passed diagnosis");
     let settled = recipe
         .unwrap_or_default()
         .resolve(&pipeline, InputSource::Inventory(records))?;
