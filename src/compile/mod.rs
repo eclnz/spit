@@ -22,14 +22,17 @@ use self::types::infer_types;
 
 /// A pipeline whose declarations and steps hold without any inventory.
 pub(crate) struct CompiledPipeline<'a> {
-    pub(crate) products: BTreeMap<&'a str, &'a ProductDef>,
-    pub(crate) operations: BTreeMap<&'a str, &'a OperationDef>,
-    /// Invocation indices with every producer before its consumers.
-    pub(crate) order: Vec<usize>,
-    /// The statically inferred type of each checked step's outputs.
-    pub(crate) inferred_types: BTreeMap<String, TypeExpr>,
-    /// How each checked step, by invocation index, shapes its jobs.
-    pub(crate) shapes: BTreeMap<usize, StepShape>,
+    /// Each checked step, with every producer before its consumers.
+    pub(crate) steps: Vec<CompiledStep<'a>>,
+}
+
+/// A step that checked: everything the resolver needs to expand it.
+pub(crate) struct CompiledStep<'a> {
+    pub(crate) invocation: &'a Invocation,
+    pub(crate) operation: &'a OperationDef,
+    /// Each output's product, with the type inferred for its artifacts.
+    pub(crate) outputs: Vec<(&'a ProductDef, TypeExpr)>,
+    pub(crate) shape: StepShape,
 }
 
 /// Every pipeline error, plus the names that failed or depend on a failure.
@@ -89,7 +92,7 @@ pub(crate) fn collect_pipeline(pipeline: &Pipeline) -> PipelineCheck<'_> {
     // on whether an inventory happens to contain concrete source artifacts.
     // A step that fails, or uses something that failed, quiets its consumers.
     let mut inferred_types = BTreeMap::new();
-    let mut shapes = BTreeMap::new();
+    let mut steps = Vec::new();
     for &index in &order {
         let invocation = &pipeline.invocations[index];
         let depends_on_failure = poisoned.contains(&invocation.operation)
@@ -106,9 +109,11 @@ pub(crate) fn collect_pipeline(pipeline: &Pipeline) -> PipelineCheck<'_> {
             continue;
         }
         match validate_invocation(invocation, &products, &operations, &inferred_types) {
-            Ok((inferred, shape)) => {
-                inferred_types.extend(invocation.outputs.iter().cloned().zip(inferred));
-                shapes.insert(index, shape);
+            Ok(step) => {
+                let names = invocation.outputs.iter().cloned();
+                let types = step.outputs.iter().map(|(_, inferred)| inferred.clone());
+                inferred_types.extend(names.zip(types));
+                steps.push(step);
             }
             Err(error) => {
                 errors.push((
@@ -120,20 +125,14 @@ pub(crate) fn collect_pipeline(pipeline: &Pipeline) -> PipelineCheck<'_> {
         }
     }
     PipelineCheck {
-        pipeline: CompiledPipeline {
-            products,
-            operations,
-            order,
-            inferred_types,
-            shapes,
-        },
+        pipeline: CompiledPipeline { steps },
         errors,
         poisoned,
     }
 }
 
 pub(crate) fn find_product<'a>(
-    products: &'a BTreeMap<&str, &ProductDef>,
+    products: &BTreeMap<&str, &'a ProductDef>,
     name: &str,
 ) -> Result<&'a ProductDef, ResolveError> {
     products
@@ -145,7 +144,7 @@ pub(crate) fn find_product<'a>(
 }
 
 pub(crate) fn find_operation<'a>(
-    operations: &'a BTreeMap<&str, &OperationDef>,
+    operations: &BTreeMap<&str, &'a OperationDef>,
     name: &str,
 ) -> Result<&'a OperationDef, ResolveError> {
     operations
@@ -156,12 +155,12 @@ pub(crate) fn find_operation<'a>(
         })
 }
 
-fn validate_invocation(
-    invocation: &Invocation,
-    products: &BTreeMap<&str, &ProductDef>,
-    operations: &BTreeMap<&str, &OperationDef>,
+fn validate_invocation<'a>(
+    invocation: &'a Invocation,
+    products: &BTreeMap<&str, &'a ProductDef>,
+    operations: &BTreeMap<&str, &'a OperationDef>,
     inferred_types: &BTreeMap<String, TypeExpr>,
-) -> Result<(Vec<TypeExpr>, StepShape), ResolveError> {
+) -> Result<CompiledStep<'a>, ResolveError> {
     let operation = find_operation(operations, &invocation.operation)?;
     let outputs = invocation
         .outputs
@@ -196,7 +195,12 @@ fn validate_invocation(
     }
     let inferred = infer_types(invocation, operation, products, &outputs, inferred_types)?;
     let shape = step_shape(invocation, operation, products, &outputs)?;
-    Ok((inferred, shape))
+    Ok(CompiledStep {
+        invocation,
+        operation,
+        outputs: outputs.into_iter().zip(inferred).collect(),
+        shape,
+    })
 }
 
 pub(crate) fn unsupported(operation: &OperationDef, detail: impl Into<String>) -> ResolveError {

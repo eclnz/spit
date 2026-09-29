@@ -849,6 +849,11 @@ pub struct Job {
 
 impl Job {
     /// The first output artifact.
+    ///
+    /// # Panics
+    ///
+    /// If the job has no outputs. A resolved job always has one, since
+    /// every operation declares at least one output.
     pub fn output(&self) -> &ArtifactInstance {
         &self.outputs[0]
     }

@@ -177,6 +177,8 @@ Dead public API (item 5, 15) is not visible to the compiler because `lib.rs` re-
 ### 18. Panic-capable indexing
 - Where an earlier stage's validation is the only guarantee: `resolver/matching.rs`, `compile/definitions.rs`, `shape.rs`, `resolver/bind.rs` (`dag.product_dimensions[&artifact.product]`, `paths[&artifact.key()]`), `compile/mod.rs` and `resolver/mod.rs` (`shapes[&index]`).
 - Use `get()` with a real error, or carry validated data in a typed struct (e.g. store the shape on the compiled step).
+- **Status: done for indexing that relies on another stage.** `compile` returns `CompiledPipeline { steps }`, each `CompiledStep` holding its invocation, operation, output products with their inferred types, and shape, in dependency order; the resolver iterates them, so its five map and vector lookups (`invocations[index]`, `operations[..]`, `products[..]`, `inferred_types[..]`, `shapes[&index]`) are gone. `bind_dag` looks up each artifact's dimensions and path with `get`, so a hand-built `ResolvedDag` that lacks one gets `BindError::Dag` instead of a panic; command expansion does the same for paths and a many input. `Job::output` documents its panic (every resolved job has an output). Output unchanged; scale tests pass.
+  - **Left as is (42 sites clippy lists):** indices taken from `enumerate`/`position` over the same collection a line or two above, a step's shape indexing its own inputs (now held together in `CompiledStep`), the cycle search's own bookkeeping in `compile/definitions.rs`, and bounds-checked byte loops. Converting them to `get` would add error paths that cannot be reached.
 
 ## Minor
 

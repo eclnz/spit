@@ -3,12 +3,11 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::compile::StepShape;
+use crate::compile::{CompiledStep, StepShape};
 use crate::error::{PortSite, ResolveError};
 use crate::model::{
-    ArtifactInstance, ArtifactKey, EntityBinding, Gap, Invocation, Job, OperationDef, ProductDef,
+    ArtifactInstance, ArtifactKey, EntityBinding, Gap, Invocation, Job, OperationDef,
 };
-use crate::types::TypeExpr;
 
 use super::family;
 
@@ -22,13 +21,11 @@ pub(super) struct Expansion {
 /// Enumerate one step's jobs: one per driving artifact, or per group of the
 /// many input, with every other input matched to that job's context.
 pub(super) fn expand_step(
-    invocation: &Invocation,
-    operation: &OperationDef,
-    shape: &StepShape,
-    outputs: &[(&ProductDef, &TypeExpr)],
+    step: &CompiledStep<'_>,
     artifacts: &BTreeMap<String, Vec<ArtifactInstance>>,
     incomplete: &BTreeSet<ArtifactKey>,
 ) -> Vec<Expansion> {
+    let (invocation, operation, shape) = (step.invocation, step.operation, &step.shape);
     let candidates: Vec<Vec<&ArtifactInstance>> = invocation
         .inputs
         .iter()
@@ -97,11 +94,14 @@ pub(super) fn expand_step(
             );
             inputs.push(bound);
         }
-        let outputs = outputs
+        // Every artifact in a family has the same type, so the type inferred
+        // statically for each output is the type of each job's artifact.
+        let outputs = step
+            .outputs
             .iter()
             .map(|(product, artifact_type)| ArtifactInstance {
                 product: product.name.clone(),
-                artifact_type: (*artifact_type).clone(),
+                artifact_type: artifact_type.clone(),
                 entities: context.clone(),
             })
             .collect();

@@ -26,9 +26,15 @@ pub fn bind_dag(pipeline: &Pipeline, dag: &ResolvedDag) -> Result<BoundDag, Bind
         .iter()
         .map(|operation| (operation.name.as_str(), operation))
         .collect();
-    let artifact = |artifact: &ArtifactInstance| {
-        let dimensions = &dag.product_dimensions[&artifact.product];
-        BoundArtifact {
+    // `bound_paths` binds every artifact of every job, so each is found.
+    let artifact = |artifact: &ArtifactInstance| -> Result<BoundArtifact, BindError> {
+        let unbound = || BindError::Dag(format!("no path is bound for `{artifact}`"));
+        let dimensions = dag
+            .product_dimensions
+            .get(&artifact.product)
+            .ok_or_else(unbound)?;
+        let path = paths.get(&artifact.key()).ok_or_else(unbound)?;
+        Ok(BoundArtifact {
             product: artifact.product.clone(),
             entities: dimensions
                 .iter()
@@ -38,8 +44,8 @@ pub fn bind_dag(pipeline: &Pipeline, dag: &ResolvedDag) -> Result<BoundDag, Bind
                 })
                 .collect(),
             artifact_type: artifact.artifact_type.clone(),
-            path: paths[&artifact.key()].clone(),
-        }
+            path: path.clone(),
+        })
     };
     let mut jobs = Vec::new();
     for job in &dag.jobs {
@@ -73,15 +79,16 @@ pub fn bind_dag(pipeline: &Pipeline, dag: &ResolvedDag) -> Result<BoundDag, Bind
                 .iter()
                 .zip(&job.inputs)
                 .map(|(port, artifacts)| {
-                    (port.name.clone(), artifacts.iter().map(artifact).collect())
+                    let artifacts = artifacts.iter().map(artifact).collect::<Result<_, _>>()?;
+                    Ok((port.name.clone(), artifacts))
                 })
-                .collect(),
+                .collect::<Result<_, BindError>>()?,
             outputs: operation
                 .outputs
                 .iter()
                 .zip(&job.outputs)
-                .map(|(port, output)| (port.name.clone(), artifact(output)))
-                .collect(),
+                .map(|(port, output)| Ok((port.name.clone(), artifact(output)?)))
+                .collect::<Result<_, BindError>>()?,
             depends_on: job.dependencies.clone(),
             command: commands(CommandRole::Run).next().transpose()?,
             verify: commands(CommandRole::Verify).collect::<Result<_, _>>()?,
@@ -97,18 +104,23 @@ fn expand(
     operation: &OperationDef,
     job: &Job,
     paths: &BTreeMap<ArtifactKey, String>,
-) -> Result<Vec<Argument>, CommandError> {
-    let path = |artifact: &ArtifactInstance| ArgPart::Path(paths[&artifact.key()].clone());
+) -> Result<Vec<Argument>, BindError> {
+    let path = |artifact: &ArtifactInstance| {
+        let path = paths
+            .get(&artifact.key())
+            .ok_or_else(|| BindError::Dag(format!("no path is bound for `{artifact}`")))?;
+        Ok::<_, BindError>(ArgPart::Path(path.clone()))
+    };
+    let lacks = |name: &str| CommandError::new(format!("job {} lacks `{{{name}}}`", job.id));
     let mut arguments = Vec::new();
     for parts in template {
         if let [Part::Placeholder(name)] = parts.as_slice() {
             if let Some(Slot::Input(index)) = slot(operation, name) {
                 if operation.inputs[index].cardinality == Cardinality::Many {
-                    arguments.extend(
-                        job.inputs[index]
-                            .iter()
-                            .map(|artifact| vec![path(artifact)]),
-                    );
+                    let artifacts = job.inputs.get(index).ok_or_else(|| lacks(name))?;
+                    for artifact in artifacts {
+                        arguments.push(vec![path(artifact)?]);
+                    }
                     continue;
                 }
             }
@@ -124,10 +136,8 @@ fn expand(
                         // `validate_commands` rejects unknown placeholders.
                         None => None,
                     };
-                    let artifact = artifact.ok_or_else(|| {
-                        CommandError::new(format!("job {} lacks `{{{name}}}`", job.id))
-                    })?;
-                    argument.push(path(artifact));
+                    let artifact = artifact.ok_or_else(|| lacks(name))?;
+                    argument.push(path(artifact)?);
                 }
             }
         }
