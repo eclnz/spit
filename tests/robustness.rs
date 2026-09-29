@@ -4,7 +4,7 @@
 
 mod support;
 
-use support::Tree;
+use support::{text, Tree};
 
 use std::fs;
 use std::io::Write;
@@ -32,10 +32,6 @@ fn spit(args: &[&str], stdin: Option<&[u8]>) -> Output {
         .write_all(stdin.unwrap_or_default())
         .unwrap();
     child.wait_with_output().unwrap()
-}
-
-fn text(bytes: &[u8]) -> String {
-    String::from_utf8_lossy(bytes).into_owned()
 }
 
 fn rendered(diagnostics: &[Diagnostic], text: &str) -> Vec<String> {
