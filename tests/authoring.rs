@@ -918,6 +918,97 @@ fn skip_does_not_hide_invalid_inventory_bindings() {
 }
 
 #[test]
+fn sibling_spitin_discovers_inputs_and_defaults_output_paths() {
+    let tree = Tree::new(
+        "spitin-sibling",
+        &[
+            "data/sub-1/ses-1/image.nii.gz",
+            "data/sub-1/ses-2/image.nii.gz",
+            "data/sub-5/ses-1/.keep",
+        ],
+    );
+    let pipeline_file = tree.0.join("analysis.spit");
+    fs::write(
+        &pipeline_file,
+        "source image: Image [sub, ses]\n\
+         operation process(Image) -> Image\n\
+         result = process(image)\n",
+    )
+    .unwrap();
+    fs::write(
+        tree.0.join("analysis.spitin"),
+        "discover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}\n\
+         skip sessions count>=2 per [sub]\n\
+         require sessions count>=2 per [sub]\n\
+         path image: data/sub-{sub}/ses-{ses}/image.nii.gz\n",
+    )
+    .unwrap();
+    let check = Command::new(env!("CARGO_BIN_EXE_spit"))
+        .args(["check", pipeline_file.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(
+        check.status.success(),
+        "{}",
+        String::from_utf8_lossy(&check.stderr)
+    );
+    assert!(String::from_utf8_lossy(&check.stderr).contains("skip sessions"));
+    assert!(String::from_utf8_lossy(&check.stdout).contains("2 jobs resolved"));
+    let paths = Command::new(env!("CARGO_BIN_EXE_spit"))
+        .args(["dag", pipeline_file.to_str().unwrap(), "--paths"])
+        .output()
+        .unwrap();
+    assert!(
+        paths.status.success(),
+        "{}",
+        String::from_utf8_lossy(&paths.stderr)
+    );
+    let paths = String::from_utf8(paths.stdout).unwrap();
+    assert!(paths.contains("out/result/sub=1__ses=1"), "{paths}");
+    assert!(!paths.contains("sub=5"), "{paths}");
+}
+
+#[test]
+fn explicit_spitin_uses_its_own_directory_and_require_reports_gaps() {
+    let tree = Tree::new(
+        "spitin-explicit",
+        &[
+            "dataset/data/sub-1/ses-1/image.nii.gz",
+            "dataset/data/sub-1/ses-2/image.nii.gz",
+            "dataset/data/sub-5/ses-1/image.nii.gz",
+        ],
+    );
+    let pipeline_file = tree.0.join("pipeline.spit");
+    fs::write(
+        &pipeline_file,
+        "source image [sub, ses]\n\
+         operation process(Image) -> Image\n\
+         result = process(image)\n",
+    )
+    .unwrap();
+    let recipe = tree.0.join("dataset/inputs.spitin");
+    fs::write(
+        &recipe,
+        "discover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}\n\
+         require sessions count>=2 per [sub]\n\
+         path image: data/sub-{sub}/ses-{ses}/image.nii.gz\n",
+    )
+    .unwrap();
+    let checked = Command::new(env!("CARGO_BIN_EXE_spit"))
+        .args([
+            "check",
+            pipeline_file.to_str().unwrap(),
+            "--inputs",
+            recipe.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(!checked.status.success());
+    assert!(String::from_utf8_lossy(&checked.stderr)
+        .contains("discovery coverage for `sessions` at [sub=5]"));
+}
+
+#[test]
 fn discovery_coverage_uses_only_its_own_bindings() {
     let tree = Tree::new(
         "directory-rule-scope",

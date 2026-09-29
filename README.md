@@ -111,6 +111,16 @@ merged = merge(sorted @ vary(part))
 
 ## Supply the inputs
 
+For a dataset on disk, keep file discovery in a sibling `.spitin` recipe. For example, `analysis.spit` can declare `source image: Image [sub, ses]` and the operation that reads it, while `analysis.spitin` contains:
+
+```text
+discover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}
+skip sessions count>=2 per [sub]
+path image: data/sub-{sub}/ses-{ses}/image.nii.gz
+```
+
+`spit check analysis.spit` and `spit dag analysis.spit --json` load that sibling recipe automatically, discover source files, and resolve the pipeline. Use `--inputs other/cohort.spitin` for another dataset; relative paths then start at that recipe's folder unless `--root` is given. A pipeline with a `.spitin` recipe can omit output path rules: outputs default to `out/{product}/{entities}`. The `.spitin` file may also contain `require` rules or explicit `sources:` and `contexts:` records. Logical source types and operations stay in `.spit`.
+
 The pipeline describes what to do; an inventory describes what is present. The example uses [bash_demo.sources](examples/commands/bash_demo.sources):
 
 ```text
