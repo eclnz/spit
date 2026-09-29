@@ -1,7 +1,9 @@
+mod support;
+
 use spit::{
-    parse_document, parse_pipeline, render_dag, resolve, validate_pipeline, EntityBinding,
-    InputBinding, InputPort, Invocation, OperationDef, Pipeline, ProductDef, ResolveError,
-    ShapeRule, SourceInventory, SourceRecord, TypeExpr,
+    parse_pipeline, render_dag, resolve, validate_pipeline, EntityBinding, InputBinding, InputPort,
+    Invocation, OperationDef, Pipeline, ProductDef, ResolveError, ShapeRule, SourceInventory,
+    SourceRecord, TypeExpr,
 };
 
 fn artifact(product: &str, pairs: &[(&str, &str)]) -> SourceRecord {
@@ -414,7 +416,7 @@ fn full_inventory() -> SourceInventory {
 #[test]
 fn named_ports_and_declared_aggregate_shape_are_checked() {
     let text = "source raw [site, run]\noperation combine(runs: many) @ drop(run)\nresult = combine(raw @ vary(run))\nsources:\n  raw[site=01,run=2]\n  raw[site=01,run=1]\n";
-    let (pipeline, inventory) = parse_document(text).unwrap();
+    let (pipeline, inventory) = support::parse_fixture(text).unwrap();
     assert_eq!(pipeline.operations[0].inputs[0].name, "runs");
     assert_eq!(
         pipeline.operations[0].aggregated_dimension.as_deref(),
@@ -424,14 +426,14 @@ fn named_ports_and_declared_aggregate_shape_are_checked() {
     assert_eq!(dag.jobs[0].output().entities.0.len(), 1);
 
     let wrong_vary = text.replace("vary(run)", "vary(site)");
-    let (pipeline, inventory) = parse_document(&wrong_vary).unwrap();
+    let (pipeline, inventory) = support::parse_fixture(&wrong_vary).unwrap();
     assert!(resolve(&pipeline, &inventory.unwrap())
         .unwrap_err()
         .to_string()
         .contains("declares drop(run) but invocation uses vary(site)"));
 
     let wrong_shape = text.replace("result =", "result : Data [site, run] =");
-    let (pipeline, inventory) = parse_document(&wrong_shape).unwrap();
+    let (pipeline, inventory) = support::parse_fixture(&wrong_shape).unwrap();
     assert!(resolve(&pipeline, &inventory.unwrap()).is_err());
 }
 
@@ -452,7 +454,7 @@ fn pipeline_checks_need_no_inventory() {
     ));
 
     let (pipeline, inventory) =
-        parse_document(include_str!("../examples/commands/bash_demo.spit")).unwrap();
+        support::parse_fixture(include_str!("../examples/commands/bash_demo.spit")).unwrap();
     assert!(inventory.is_none());
     validate_pipeline(&pipeline).unwrap();
 }

@@ -1,4 +1,6 @@
-use spit::{parse_document, parse_pipeline, parse_source_inventory, parse_spit, resolve};
+mod support;
+
+use spit::{parse_input_spec, parse_pipeline, parse_source_inventory, resolve};
 
 /// A sectioned pipeline with the same shape as the basic example.
 const PIPELINE: &str = "\
@@ -19,10 +21,10 @@ pipeline:
     registered = register(denoised, calibration)
     mean_signal = mean(registered @ vary(run))
 
-constraints:
-    require signal count>=1 per [site, day]
-    require calibration count=1 per [site, day]
-
+";
+const RECIPE: &str = "\
+require signal count>=1 per [site, day]
+require calibration count=1 per [site, day]
 ";
 const INVENTORY: &str = "\
 contexts:
@@ -34,23 +36,41 @@ sources:
     calibration[site=01,day=01]
 ";
 
-/// The pipeline with its inventory in the same document.
-fn document() -> String {
-    format!("{PIPELINE}{INVENTORY}")
-}
-
 #[test]
-fn parses_a_document_with_its_inventory() {
-    let document = parse_spit(&document()).unwrap();
-    let pipeline = &document.pipeline;
+fn parses_a_sectioned_pipeline_its_recipe_and_its_records() {
+    let pipeline = parse_pipeline(PIPELINE).unwrap();
     assert_eq!(pipeline.products.len(), 5);
     assert_eq!(pipeline.operations.len(), 3);
     assert_eq!(pipeline.invocations.len(), 3);
-    // `require` rules are for the input stage, not the pipeline.
-    assert_eq!(document.inputs.constraints.len(), 2);
-    let inventory = document.inventory.clone().unwrap();
-    assert_eq!(inventory, parse_source_inventory(INVENTORY).unwrap());
-    assert_eq!(inventory.artifacts.len(), 3);
+    assert_eq!(parse_input_spec(RECIPE).unwrap().rules.constraints.len(), 2);
+    assert_eq!(
+        parse_source_inventory(INVENTORY).unwrap().artifacts.len(),
+        3
+    );
+}
+
+#[test]
+fn rules_and_records_belong_outside_the_pipeline() {
+    for (text, line, file) in [
+        ("source x [a]\nrequire x count>=1 per [a]\n", 2, ".spitin"),
+        ("source x [a]\nskip x count>=1 per [a]\n", 2, ".spitin"),
+        (
+            "discover s: [a] from dirs d/{a}\nsource x [a]\n",
+            1,
+            ".spitin",
+        ),
+        ("source x [a]\nsources:\n    x[a=1]\n", 2, ".spitout"),
+        ("source x [a]\ncontexts:\n    [a=1]\n", 2, ".spitout"),
+        (
+            "products:\n    x : X [a]\nconstraints:\n    require x count>=1 per [a]\n",
+            4,
+            ".spitin",
+        ),
+    ] {
+        let error = parse_pipeline(text).unwrap_err();
+        assert_eq!(error.line(), line, "{text}");
+        assert!(error.to_string().contains(file), "{text}: {error}");
+    }
 }
 
 #[test]
@@ -76,7 +96,7 @@ fn rejects_source_inventory_inside_pipeline_file() {
 #[test]
 fn separate_pipeline_still_parses_without_inventory() {
     let (pipeline, inventory) =
-        parse_document(include_str!("../examples/types/typed.spit")).unwrap();
+        support::parse_fixture(include_str!("../examples/types/typed.spit")).unwrap();
     assert!(inventory.is_none());
     assert!(!pipeline.products.is_empty());
 }
@@ -88,16 +108,14 @@ operation clean(Image<S>) -> Clean<S>\n\
 cleaned = clean(raw)\n\
 operation mean(many Clean<S>) -> Mean<S>\n\
 average : Mean<Native> [site] = mean(cleaned @ vary(run))\n\
-require raw count>=1 per [site]\n\
 sources:\n\
     raw[site=A,run=1]\n\
     raw[site=A,run=2]\n";
-    let document = parse_spit(text).unwrap();
-    let (pipeline, inventory) = (&document.pipeline, document.inventory.clone().unwrap());
+    let (pipeline, inventory) = support::parse_fixture(text).unwrap();
+    let (pipeline, inventory) = (&pipeline, inventory.unwrap());
     assert_eq!(pipeline.products.len(), 3);
     assert_eq!(pipeline.operations.len(), 2);
     assert_eq!(pipeline.invocations.len(), 2);
-    assert_eq!(document.inputs.constraints.len(), 1);
     assert_eq!(pipeline.products[1].name, "cleaned");
     assert_eq!(pipeline.products[1].dimensions, vec!["site", "run"]);
     assert_eq!(pipeline.products[2].dimensions, vec!["site"]);
@@ -138,7 +156,7 @@ fn equals_command_keeps_colons_in_arguments() {
 #[test]
 fn shell_source_is_rejected_with_migration_guidance() {
     let text = "source raw [id]\noperation copy(one)\nresult = copy(raw)\nsources:\n  raw[id=x]\nshell-source: scripts/functions.sh\n";
-    let error = parse_document(text).unwrap_err();
+    let error = support::parse_fixture(text).unwrap_err();
     assert_eq!(error.line(), 6);
     assert!(error.message.contains("executable available on PATH"));
 

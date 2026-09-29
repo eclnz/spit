@@ -10,7 +10,3 @@ operations:
 
 pipeline:
     joined = join(events, accounts)
-
-sources:
-    events[tenant=acme,customer=alice,event=e1]
-    accounts[tenant=acme]

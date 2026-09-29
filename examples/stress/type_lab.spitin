@@ -1,0 +1,8 @@
+pipeline type_lab.spit
+
+require lidar count>=1 per [lab, rig, capture]
+require camera count>=1 per [lab, rig, capture]
+require lidar_cal count=1 per [lab, rig]
+require camera_cal count=1 per [lab, rig]
+require reference count=1 per [lab, rig]
+require policy count=1 per [lab]

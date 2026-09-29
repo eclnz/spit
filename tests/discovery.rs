@@ -1,15 +1,16 @@
 //! Source discovery: building an inventory from the files and directories
 //! under a root, including named discovery rules, their coverage and skips.
 
+mod support;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
 
 use spit::{
-    discover_source_files, discover_sources, parse_pipeline, parse_source_inventory, parse_spit,
-    resolve, InputSource, InputSpec, Pipeline, ResolveError, ResolvedDag, ResolvedInputs,
-    SourceInventory,
+    discover_source_files, discover_sources, parse_pipeline, parse_source_inventory, resolve,
+    InputSource, InputSpec, Pipeline, ResolveError, ResolvedDag, ResolvedInputs, SourceInventory,
 };
 
 struct Tree(PathBuf);
@@ -60,9 +61,8 @@ fn spit(args: &[&str]) -> std::process::Output {
 
 /// A document's pipeline, and the input rules written beside it.
 fn parse(text: &str) -> (Pipeline, InputSpec) {
-    let document = parse_spit(text).unwrap();
-    let spec = InputSpec::embedded_in(&document);
-    (document.pipeline, spec)
+    let (pipeline, spec, _) = support::parse_with_rules(text).unwrap();
+    (pipeline, spec)
 }
 
 /// Run the input stage over records already found.
@@ -279,11 +279,11 @@ fn coverage_can_target_the_named_discovery_rule() {
     assert!(rendered.starts_with("contexts sessions:\n"), "{rendered}");
     assert_eq!(parse_source_inventory(&rendered).unwrap(), inventory);
     let inline = format!("{text}{rendered}");
-    let document = parse_spit(&inline).unwrap();
-    let inline_inventory = document.inventory.clone().expect("inline named contexts");
-    let inline_spec = InputSpec::embedded_in(&document);
+    let (inline_pipeline, inline_spec, inline_inventory) =
+        support::parse_with_rules(&inline).unwrap();
+    let inline_inventory = inline_inventory.expect("named contexts");
     assert!(matches!(
-        settle(&document.pipeline, &inline_spec, &inline_inventory).require_complete(),
+        settle(&inline_pipeline, &inline_spec, &inline_inventory).require_complete(),
         Err(ResolveError::CoverageViolation {
             found: 1,
             discovery: true,

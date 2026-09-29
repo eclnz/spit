@@ -1,0 +1,7 @@
+pipeline analytics.spit
+
+require events count>=1 per [tenant, customer, day]
+require customers count=1 per [tenant, customer]
+require subscriptions count=1 per [tenant, customer]
+require purchases count=1 per [tenant, customer]
+require campaigns count=1 per [tenant, customer]

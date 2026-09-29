@@ -96,11 +96,19 @@ fn missing_join_input_points_to_the_call() {
 }
 
 #[test]
-fn coverage_error_points_to_the_failing_rule_when_rules_share_a_product() {
-    let text = "source raw [site, run]\nrequire raw count>=1 per [site]\nrequire raw count>=2 per [site]\n";
-    let issues = errors(diagnose(text, Some("sources:\n  raw[site=A,run=1]\n")));
+fn a_coverage_error_names_the_failing_rule_when_rules_share_a_product() {
+    let recipe = spit::parse_input_spec(
+        "require raw count>=1 per [site]\nrequire raw count>=2 per [site]\n",
+    )
+    .unwrap();
+    let issues = errors(spit::diagnose_at_with_inputs(
+        "source raw [site, run]\n",
+        Some("sources:\n  raw[site=A,run=1]\n"),
+        std::path::Path::new("a.spit"),
+        &recipe,
+        false,
+    ));
     assert_eq!(issues.len(), 1);
-    assert_eq!(issues[0].line, Some(3));
     assert!(issues[0].message.contains("expected at least 2"));
 }
 
@@ -120,7 +128,6 @@ operation join(Table, Table) -> Table
 cleaned = clean(raw)
 joined = join(cleaned)
 typo = clean(rwa)
-require raw count=1 per [shard]
 ";
     assert_eq!(
         rendered(&diagnose(text, None)),
@@ -130,7 +137,6 @@ require raw count=1 per [shard]
             "warning: line 6: operation `join` has no command, so `bash` cannot run its jobs",
             "error: line 8: unsupported shape for `join`: expected 2 input bindings, found 1",
             "error: line 9: unknown product `rwa`",
-            "error: line 10: coverage rule for `raw` must group by distinct dimensions of that product",
         ]
     );
 }

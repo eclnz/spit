@@ -11,14 +11,6 @@ source target : SiteTarget [org, site]
 source policy : OrgPolicy [org]
 source schema : Schema []
 
-require raw count>=1 per [org, site, device, window, channel]
-require calibration count=1 per [org, site, device, channel]
-require clock count=1 per [org, site]
-require window_policy count=1 per [org, site, window]
-require model count=1 per [org, site, device]
-require target count=1 per [org, site]
-require policy count=1 per [org]
-
 path: results/{product}/{entities}.dat
 path raw: input/{org}/{site}/{device}/{window}/{channel}/{segment}.dat
 path schema: config/schema.dat

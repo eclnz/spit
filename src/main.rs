@@ -19,11 +19,10 @@ use std::process::ExitCode;
 
 use spit::{
     bind_dag, diagnose_artifacts_at, diagnose_at, diagnose_at_with_inputs, diagnose_recipe,
-    inspect_paths, parse_input_spec_at, parse_source_inventory, parse_spit_at,
-    parse_spit_without_records_at, render_artifacts, render_bash, render_bound_dag, render_dag,
-    render_source_inventory, resolve, resolve_artifacts_excluding, stage_within, validate_pipeline,
-    validate_source_files, BoundDag, CoverageAction, Diagnostic, Document, InputSource, InputSpec,
-    PathTemplate, Pipeline, ResolvedDag, ResolvedInputs,
+    inspect_paths, parse_input_spec_at, parse_pipeline_at, parse_source_inventory,
+    render_artifacts, render_bash, render_bound_dag, render_dag, render_source_inventory, resolve,
+    resolve_artifacts_excluding, stage_within, validate_pipeline, validate_source_files, BoundDag,
+    Diagnostic, InputSource, InputSpec, PathTemplate, Pipeline, ResolvedDag, ResolvedInputs,
 };
 
 #[derive(Clone, Copy, PartialEq)]
@@ -72,7 +71,8 @@ impl Command {
     fn arity(self) -> (usize, usize) {
         match self {
             Self::Check | Self::Inputs => (1, 1),
-            Self::Dag | Self::Artifacts | Self::Bash => (1, 2),
+            Self::Dag | Self::Artifacts => (2, 2),
+            Self::Bash => (1, 2),
         }
     }
 
@@ -312,12 +312,6 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> Result<Request, String>
             };
         }
         Some("--version" | "-V") => return Ok(Request::Version),
-        Some("discover") => {
-            eprintln!(
-                "warning: `spit discover` is now `spit inputs`; the old name will be removed"
-            );
-            Command::Inputs
-        }
         Some(name) => Command::parse(name)
             .ok_or_else(|| misuse(format_args!("unknown command `{name}`"), None))?,
     };
@@ -487,26 +481,14 @@ fn check(args: &CliArgs) -> Result<(), Box<dyn Error>> {
         return Ok(());
     }
     report(&diagnostics, &text, None)?;
-    let document = parse_spit_at(&text, path)?;
-    warn_old_forms(file, &document);
-    let coverage = inspect_paths(&document.pipeline)?;
+    let coverage = inspect_paths(&parse_pipeline_at(&text, path)?)?;
     if args.has(Flag::PathRules) {
         println!("{coverage}");
     }
     if args.has(Flag::StrictPaths) {
         coverage.validate(true)?;
     }
-    // Records written in the pipeline itself are still resolved.
-    match document.inventory.clone() {
-        Some(records) => {
-            let settled = InputSpec::embedded_in(&document)
-                .resolve(&document.pipeline, InputSource::Inventory(records))?;
-            settled.require_complete()?;
-            let dag = resolve(&document.pipeline, &settled.dag_inventory())?;
-            println!("Pipeline valid.\n\n{}", job_count(&document.pipeline, &dag));
-        }
-        None => println!("Pipeline valid."),
-    }
+    println!("Pipeline valid.");
     Ok(())
 }
 
@@ -521,71 +503,64 @@ fn inputs(args: &CliArgs) -> Result<(), Box<dyn Error>> {
 /// A settled dataset, with the pipeline it was settled for.
 struct Settled {
     pipeline: Pipeline,
-    recipe: Option<InputSpec>,
+    recipe: InputSpec,
     inputs: ResolvedInputs,
 }
 
-/// Run step 2 for `file`: a `.spitin`, or a `.spit` that writes its own
-/// rules. `pipeline` is the pipeline the caller was given, which a recipe's
-/// `pipeline` line must match.
+/// Run step 2 for the recipe `file`. `pipeline` is the pipeline the caller
+/// was given, which the recipe's `pipeline` line must match.
 fn run_inputs(
     file: &str,
     pipeline: Option<&Path>,
     root: Option<&str>,
 ) -> Result<Settled, Box<dyn Error>> {
+    if !is_recipe(file) {
+        return Err(format!("spit inputs reads a .spitin recipe, not `{file}`").into());
+    }
     let folder = Path::new(file)
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
         .unwrap_or_else(|| Path::new("."))
         .to_owned();
     let root = root.map_or(folder, PathBuf::from);
-    let (pipeline_file, recipe) = if is_recipe(file) {
-        let text = read_file(file)?;
-        let recipe = parse_input_spec_at(&text, Path::new(file))
-            .map_err(|error| format!("{file}: {error}"))?;
-        let pipeline_file = match (recipe.pipeline.clone(), pipeline) {
-            (Some(named), Some(given)) if !same_file(&named, given) => {
-                return Err(format!(
-                    "{file} is a recipe for `{}`, not `{}`",
-                    named.display(),
-                    given.display()
-                )
-                .into())
-            }
-            (_, Some(given)) => given.to_owned(),
-            (Some(named), None) => named,
-            (None, None) => {
-                return Err(format!(
-                    "{file} does not name its pipeline; add a line such as `pipeline analysis.spit`"
-                )
-                .into())
-            }
-        };
-        (pipeline_file, Some(recipe))
-    } else {
-        (PathBuf::from(file), None)
+    let recipe = parse_input_spec_at(&read_file(file)?, Path::new(file))
+        .map_err(|error| format!("{file}: {error}"))?;
+    let pipeline_file = match (recipe.pipeline.clone(), pipeline) {
+        (Some(named), Some(given)) if !same_file(&named, given) => {
+            return Err(format!(
+                "{file} is a recipe for `{}`, not `{}`",
+                named.display(),
+                given.display()
+            )
+            .into())
+        }
+        (_, Some(given)) => given.to_owned(),
+        (Some(named), None) => named,
+        (None, None) => {
+            return Err(format!(
+                "{file} does not name its pipeline; add a line such as `pipeline analysis.spit`"
+            )
+            .into())
+        }
     };
-    let shown = pipeline_file.display().to_string();
-    let pipeline_text = read_file(&shown)?;
+    let pipeline_text = read_file(&pipeline_file.display().to_string())?;
     report(
         &diagnose_at(&pipeline_text, None, &pipeline_file),
         &pipeline_text,
         None,
     )?;
-    let document = parse_spit_at(&pipeline_text, &pipeline_file)?;
-    warn_old_forms(&shown, &document);
-    let spec = input_spec(&document, recipe.as_ref())?;
-    validate_pipeline(&document.pipeline)?;
-    let source = match &spec.inventory {
+    let pipeline = parse_pipeline_at(&pipeline_text, &pipeline_file)?;
+    validate_pipeline(&pipeline)?;
+    let source = match &recipe.inventory {
         Some(records) => InputSource::Inventory(records.clone()),
         None => InputSource::Discover(&root),
     };
-    let resolved = spec.resolve(&document.pipeline, source)?;
+    let resolved = recipe.resolve(&pipeline, source)?;
     for skipped in &resolved.skipped {
         eprintln!("warning: skipped {skipped}");
     }
     if let Some(root) = &resolved.root {
-        let contexts = if spec.rules.discoveries.is_empty() {
+        let contexts = if recipe.rules.discoveries.is_empty() {
             String::new()
         } else {
             format!(" and {} contexts", resolved.inventory.contexts.len())
@@ -597,7 +572,7 @@ fn run_inputs(
         );
     }
     Ok(Settled {
-        pipeline: document.pipeline,
+        pipeline,
         recipe,
         inputs: resolved,
     })
@@ -615,68 +590,44 @@ struct Prepared {
 
 /// Read the pipeline and its inputs for step 3, running step 2 in memory
 /// for a recipe, and report every diagnostic first.
-fn prepare(
-    args: &CliArgs,
-    pipeline_file: &str,
-    inputs: Option<&str>,
-) -> Result<Prepared, Box<dyn Error>> {
+fn prepare(args: &CliArgs, pipeline_file: &str, inputs: &str) -> Result<Prepared, Box<dyn Error>> {
     let path = Path::new(pipeline_file);
     let pipeline_text = read_file(pipeline_file)?;
     let lenient = args.command == Command::Artifacts;
     let mut root = args.value(Flag::Root).map(PathBuf::from);
-    let (records_text, recipe) = match inputs {
-        None => (None, None),
-        Some("-") => (Some(read_stdin()?), None),
-        Some(file) if is_recipe(file) => {
-            let given_root = root.as_ref().and_then(|root| root.to_str());
-            let settled = run_inputs(file, Some(path), given_root)?;
-            eprintln!("note: ran `spit inputs {file}` in memory");
-            root = root.or_else(|| settled.inputs.root.clone());
-            let text = render_source_inventory(&settled.inputs.inventory, &settled.pipeline);
-            (Some(text), settled.recipe)
-        }
-        Some(file) => (Some(read_file(file)?), None),
+    let (records_text, recipe) = if inputs == "-" {
+        (read_stdin()?, None)
+    } else if is_recipe(inputs) {
+        let given_root = root.as_ref().and_then(|root| root.to_str());
+        let settled = run_inputs(inputs, Some(path), given_root)?;
+        eprintln!("note: ran `spit inputs {inputs}` in memory");
+        root = root.or_else(|| settled.inputs.root.clone());
+        let text = render_source_inventory(&settled.inputs.inventory, &settled.pipeline);
+        (text, Some(settled.recipe))
+    } else {
+        (read_file(inputs)?, None)
     };
     let diagnostics = match &recipe {
-        Some(recipe) => diagnose_at_with_inputs(
-            &pipeline_text,
-            records_text.as_deref(),
-            path,
-            recipe,
-            lenient,
-        ),
-        None if lenient => diagnose_artifacts_at(&pipeline_text, records_text.as_deref(), path),
-        None => diagnose_at(&pipeline_text, records_text.as_deref(), path),
+        Some(recipe) => {
+            diagnose_at_with_inputs(&pipeline_text, Some(&records_text), path, recipe, lenient)
+        }
+        None if lenient => diagnose_artifacts_at(&pipeline_text, Some(&records_text), path),
+        None => diagnose_at(&pipeline_text, Some(&records_text), path),
     };
-    report(&diagnostics, &pipeline_text, records_text.as_deref())?;
-    let document = match records_text {
-        Some(_) => parse_spit_without_records_at(&pipeline_text, path)?,
-        None => parse_spit_at(&pipeline_text, path)?,
-    };
-    if recipe.is_none() {
-        warn_old_forms(pipeline_file, &document);
-    }
-    let records = match &records_text {
-        Some(text) => parse_source_inventory(text)?,
-        None => document.inventory.clone().ok_or_else(|| {
-            format!(
-                "spit {name} needs the dataset's inputs: spit {name} {pipeline_file} dataset.spitout (or a .spitin)",
-                name = args.command.name()
-            )
-        })?,
-    };
-    let spec = input_spec(&document, recipe.as_ref())?;
-    let settled = spec.resolve(&document.pipeline, InputSource::Inventory(records))?;
-    // Records from a .spitout give every source its file; outputs with no
-    // rule take the built-in layout.
-    let mut bound = document.pipeline.clone();
-    if inputs.is_some() {
-        bound
-            .path_template
-            .get_or_insert_with(PathTemplate::default_output);
-    }
+    report(&diagnostics, &pipeline_text, Some(&records_text))?;
+    let pipeline = parse_pipeline_at(&pipeline_text, path)?;
+    let records = parse_source_inventory(&records_text)?;
+    let settled = recipe
+        .unwrap_or_default()
+        .resolve(&pipeline, InputSource::Inventory(records))?;
+    // Records give every source its file; outputs with no rule take the
+    // built-in layout.
+    let mut bound = pipeline.clone();
+    bound
+        .path_template
+        .get_or_insert_with(PathTemplate::default_output);
     Ok(Prepared {
-        pipeline: document.pipeline,
+        pipeline,
         bound,
         inputs: settled,
         root,
@@ -685,7 +636,7 @@ fn prepare(
 
 /// Step 3: resolve the jobs and print them, or write the `.spitdag`.
 fn dag(args: &CliArgs) -> Result<(), Box<dyn Error>> {
-    let prepared = prepare(args, &args.files[0], args.files.get(1).map(String::as_str))?;
+    let prepared = prepare(args, &args.files[0], &args.files[1])?;
     prepared.inputs.require_complete()?;
     let dag = resolve(&prepared.pipeline, &prepared.inputs.dag_inventory())?;
     if args.has(Flag::StrictPaths) {
@@ -717,7 +668,7 @@ fn dag(args: &CliArgs) -> Result<(), Box<dyn Error>> {
 
 /// Step 3: what can be made, what cannot, and why.
 fn artifacts(args: &CliArgs) -> Result<(), Box<dyn Error>> {
-    let prepared = prepare(args, &args.files[0], args.files.get(1).map(String::as_str))?;
+    let prepared = prepare(args, &args.files[0], &args.files[1])?;
     let mut report = resolve_artifacts_excluding(
         &prepared.pipeline,
         &prepared.inputs.dag_inventory(),
@@ -740,15 +691,16 @@ fn bash(args: &CliArgs) -> Result<(), Box<dyn Error>> {
         }
         BoundDag::from_json(&read_file(first)?).map_err(|error| format!("{first}: {error}"))?
     } else {
-        let prepared = prepare(args, first, args.files.get(1).map(String::as_str))?;
+        let inputs = args.files.get(1).ok_or_else(|| {
+            format!("spit bash needs a .spitdag, or a pipeline and its inputs, not `{first}` alone")
+        })?;
+        let prepared = prepare(args, first, inputs)?;
         prepared.inputs.require_complete()?;
         let dag = resolve(&prepared.pipeline, &prepared.inputs.dag_inventory())?;
         if let Some(root) = &prepared.root {
             validate_source_files(&prepared.bound, &dag, root)?;
         }
-        if args.files.len() > 1 {
-            eprintln!("note: ran `spit dag` in memory");
-        }
+        eprintln!("note: ran `spit dag` in memory");
         bind_dag(&prepared.bound, &dag)?
     };
     let bound = match args.value(Flag::Stage) {
@@ -781,44 +733,6 @@ fn located(inputs: &ResolvedInputs) -> impl Iterator<Item = &str> {
         .iter()
         .filter(|record| record.path.is_some())
         .map(|record| record.product.as_str())
-}
-
-/// The rules and records written beside the pipeline, with a recipe's.
-fn input_spec(document: &Document, recipe: Option<&InputSpec>) -> Result<InputSpec, String> {
-    let mut spec = InputSpec::embedded_in(document);
-    if let Some(recipe) = recipe {
-        spec.merge(recipe.clone())?;
-    }
-    Ok(spec)
-}
-
-/// Say that rules and records in a `.spit` have moved, while still reading
-/// them.
-fn warn_old_forms(file: &str, document: &Document) {
-    let rules = &document.inputs;
-    let mut kinds = Vec::new();
-    if !rules.discoveries.is_empty() {
-        kinds.push("`discover`");
-    }
-    for (action, kind) in [
-        (CoverageAction::Require, "`require`"),
-        (CoverageAction::Skip, "`skip`"),
-    ] {
-        if rules.constraints.iter().any(|rule| rule.action == action) {
-            kinds.push(kind);
-        }
-    }
-    if !kinds.is_empty() {
-        eprintln!(
-            "warning: {file}: {} rules belong in a .spitin recipe; rules in a .spit are still read, but not for long",
-            kinds.join(" and ")
-        );
-    }
-    if document.inventory.is_some() {
-        eprintln!(
-            "warning: {file}: `sources:` and `contexts:` records belong in a .spitout; records in a .spit are still read, but not for long"
-        );
-    }
 }
 
 fn is_recipe(file: &str) -> bool {

@@ -1,11 +1,11 @@
+mod support;
+
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::process::{Command, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use spit::{
-    parse_document, parse_pipeline, parse_source_inventory, resolve, CommandTemplate, PathTemplate,
-};
+use spit::{parse_pipeline, parse_source_inventory, resolve, CommandTemplate, PathTemplate};
 
 /// Step 3's binding, then the Bash backend, with either's error as text.
 fn bash_script(pipeline: &spit::Pipeline, dag: &spit::ResolvedDag) -> Result<String, String> {
@@ -15,7 +15,7 @@ fn bash_script(pipeline: &spit::Pipeline, dag: &spit::ResolvedDag) -> Result<Str
 
 fn demo_script() -> String {
     let (pipeline, embedded) =
-        parse_document(include_str!("../examples/commands/bash_demo.spit")).unwrap();
+        support::parse_fixture(include_str!("../examples/commands/bash_demo.spit")).unwrap();
     assert!(embedded.is_none());
     let inventory =
         parse_source_inventory(include_str!("../examples/commands/bash_demo.spitout")).unwrap();
@@ -79,7 +79,7 @@ fn generated_script_uses_inventory_groups_and_declared_arguments() {
 #[ignore = "the Bash backend is paused"]
 fn backend_rejects_undeclared_placeholders_and_path_collisions() {
     let (mut pipeline, _) =
-        parse_document(include_str!("../examples/commands/bash_demo.spit")).unwrap();
+        support::parse_fixture(include_str!("../examples/commands/bash_demo.spit")).unwrap();
     let inventory =
         parse_source_inventory(include_str!("../examples/commands/bash_demo.spitout")).unwrap();
     let dag = resolve(&pipeline, &inventory).unwrap();
@@ -120,7 +120,7 @@ path: {product}/{entities}.txt\n";
 #[ignore = "the Bash backend is paused"]
 fn many_input_must_occupy_its_own_argument() {
     let (mut pipeline, _) =
-        parse_document(include_str!("../examples/commands/bash_demo.spit")).unwrap();
+        support::parse_fixture(include_str!("../examples/commands/bash_demo.spit")).unwrap();
     let inventory =
         parse_source_inventory(include_str!("../examples/commands/bash_demo.spitout")).unwrap();
     let dag = resolve(&pipeline, &inventory).unwrap();
@@ -136,7 +136,7 @@ fn many_input_must_occupy_its_own_argument() {
 #[ignore = "the Bash backend is paused"]
 fn adding_a_group_to_inventory_expands_the_script() {
     let (pipeline, _) =
-        parse_document(include_str!("../examples/commands/bash_demo.spit")).unwrap();
+        support::parse_fixture(include_str!("../examples/commands/bash_demo.spit")).unwrap();
     let inventory = parse_source_inventory(&format!(
         "{}    shard[group=gamma,part=01]\n",
         include_str!("../examples/commands/bash_demo.spitout")
@@ -153,7 +153,7 @@ fn adding_a_group_to_inventory_expands_the_script() {
 #[ignore = "the Bash backend is paused"]
 fn field_survey_generates_valid_bash_for_new_visits() {
     let (pipeline, embedded) =
-        parse_document(include_str!("../examples/commands/field_survey.spit")).unwrap();
+        support::parse_fixture(include_str!("../examples/commands/field_survey.spit")).unwrap();
     assert!(embedded.is_none());
     let inventory =
         parse_source_inventory(include_str!("../examples/commands/field_survey.spitout")).unwrap();
@@ -213,7 +213,7 @@ fn field_survey_generates_valid_bash_for_new_visits() {
 #[ignore = "the Bash backend is paused"]
 fn named_many_port_expands_in_entity_order_as_separate_arguments() {
     let text = "source raw [group, part]\npath: {product}/{entities}.txt\noperation gather(items: many) @ drop(part)\ncommand gather: collect {items} {output}\nresult = gather(raw @ vary(part))\nsources:\n  raw[group=a,part=2]\n  raw[group=a,part=1]\n";
-    let (pipeline, inventory) = parse_document(text).unwrap();
+    let (pipeline, inventory) = support::parse_fixture(text).unwrap();
     let dag = resolve(&pipeline, &inventory.unwrap()).unwrap();
     let script = bash_script(&pipeline, &dag).unwrap();
     let command = script
@@ -228,7 +228,7 @@ fn named_many_port_expands_in_entity_order_as_separate_arguments() {
 #[ignore = "the Bash backend is paused"]
 fn command_uses_executable_on_path() {
     let text = "source raw [id]\npath raw: input/{id}.txt\npath result: output/{id}.txt\noperation copy(data: one)\ncommand copy: copy_data {data} {output}\nresult = copy(raw)\nsources:\n  raw[id=x]\n";
-    let (pipeline, inventory) = parse_document(text).unwrap();
+    let (pipeline, inventory) = support::parse_fixture(text).unwrap();
     let dag = resolve(&pipeline, &inventory.unwrap()).unwrap();
     let script = bash_script(&pipeline, &dag).unwrap();
     let suffix = SystemTime::now()
@@ -273,7 +273,7 @@ fn command_uses_executable_on_path() {
 #[ignore = "the Bash backend is paused"]
 fn backslashes_follow_bash_quoting_rules() {
     let (mut pipeline, _) =
-        parse_document(include_str!("../examples/commands/bash_demo.spit")).unwrap();
+        support::parse_fixture(include_str!("../examples/commands/bash_demo.spit")).unwrap();
     let inventory =
         parse_source_inventory(include_str!("../examples/commands/bash_demo.spitout")).unwrap();
     let dag = resolve(&pipeline, &inventory).unwrap();

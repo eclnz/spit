@@ -1,0 +1,5 @@
+pipeline field_survey.spit
+
+require raw_photo count>=2 per [site, visit]
+require flat_field count=1 per [site, visit]
+require ground_map count=1 per [site, visit]

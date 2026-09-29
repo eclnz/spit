@@ -12,7 +12,7 @@ use crate::inputs::{check_inventory, collect_rule_errors, InputSpec};
 use crate::lower::{parse_document_with_imports, ParsedDocument};
 use crate::model::DEFAULT_OUTPUT;
 use crate::model::{stage_within, CommandRole, Job, ResolvedDag, SourceInventory};
-use crate::parser::{glued_comment, InlineInventory, Rule, SourceMap, Step};
+use crate::parser::{glued_comment, Kind, Rule, SourceMap, Step};
 use crate::paths::{case_collisions, collect_paths};
 use crate::span::{columns_of, content_columns, utf16_columns, Located, Place};
 use crate::{
@@ -186,17 +186,15 @@ impl fmt::Display for Diagnostic {
 /// inventory still allows every other check. Diagnostics are ordered by
 /// line, with at most one error per line.
 pub fn diagnose(text: &str, source_text: Option<&str>) -> Vec<Diagnostic> {
-    let inline = inline_inventory(source_text);
     diagnose_with_parser(text, source_text, false, |text| {
-        parse_document_with_imports(text, &BTreeMap::new(), inline)
+        parse_document_with_imports(text, &BTreeMap::new(), Kind::Pipeline)
     })
 }
 
 /// Diagnose a document with its location available for resolving imports.
 pub fn diagnose_at(text: &str, source_text: Option<&str>, path: &Path) -> Vec<Diagnostic> {
-    let inline = inline_inventory(source_text);
     diagnose_with_parser(text, source_text, false, |text| {
-        parse_located_document(text, path, inline)
+        parse_located_document(text, path, Kind::Pipeline)
     })
 }
 
@@ -208,23 +206,13 @@ pub fn diagnose_at_with_inputs(
     inputs: &InputSpec,
     lenient: bool,
 ) -> Vec<Diagnostic> {
-    let inline = inline_inventory(source_text);
     diagnose_with_parser(text, source_text, lenient, |text| {
-        let mut document = parse_located_document(text, path, inline)?;
-        let mut spec = InputSpec {
-            rules: document.inputs.clone(),
-            ..InputSpec::default()
-        };
-        let recipe = InputSpec {
-            rules: inputs.rules.clone(),
-            ..InputSpec::default()
-        };
-        spec.merge(recipe)
-            .map_err(|message| ParseError::new(1, message))?;
-        spec.check(&document.pipeline)
+        let mut document = parse_located_document(text, path, Kind::Pipeline)?;
+        inputs
+            .check(&document.pipeline)
             .map_err(|error| ParseError::new(1, error.to_string()))?;
         inputs.apply_paths(&mut document.pipeline);
-        document.inputs = spec.rules;
+        document.inputs = inputs.rules.clone();
         Ok(document)
     })
 }
@@ -271,28 +259,51 @@ pub fn diagnose_recipe(text: &str, path: &Path) -> Vec<Diagnostic> {
     if !pipeline_errors.is_empty() {
         return finish(pipeline_errors, text, None);
     }
-    let document = match crate::parse_spit_at(&pipeline_text, &pipeline_path) {
-        Ok(document) => document,
-        Err(parse) => return finish(vec![error(format!("in `{shown}`: {parse}"))], text, None),
+    match crate::parse_pipeline_at(&pipeline_text, &pipeline_path) {
+        Ok(pipeline) => diagnose_recipe_against(text, &pipeline),
+        Err(parse) => finish(vec![error(format!("in `{shown}`: {parse}"))], text, None),
+    }
+}
+
+/// Diagnose the text of a `.spitin` recipe against `pipeline`, reading no
+/// data: every rule's error at the rule, then its source paths and records.
+pub fn diagnose_recipe_against(text: &str, pipeline: &Pipeline) -> Vec<Diagnostic> {
+    let (spec, lines) = match crate::inputs::parse_recipe_lines(text) {
+        Ok(parsed) => parsed,
+        Err(parse) => {
+            let diagnostic = Diagnostic::located(DiagnosticSource::Pipeline, &parse, text);
+            return finish(vec![diagnostic], text, None);
+        }
     };
-    let mut combined = InputSpec::embedded_in(&document);
-    combined.inventory = None;
-    let checked = combined
-        .merge(spec.clone())
-        .map_err(|message| message.into())
-        .and_then(|()| match &combined.inventory {
-            Some(records) => combined
-                .resolve(
-                    &document.pipeline,
-                    crate::InputSource::Inventory(records.clone()),
-                )
+    let mut diagnostics: Vec<_> = collect_rule_errors(pipeline, &spec.rules, &BTreeSet::new())
+        .into_iter()
+        .map(|(subject, error)| {
+            // A rule's own errors concern its product, or its groups.
+            let place = match &subject {
+                DefinitionSubject::Constraint(index) => lines.rules.get(*index).map(Rule::product),
+                DefinitionSubject::ConstraintGroup(index) => {
+                    lines.rules.get(*index).map(Rule::dimensions)
+                }
+                _ => None,
+            };
+            Diagnostic::error(DiagnosticSource::Pipeline, place, error.to_string())
+        })
+        .collect();
+    if diagnostics.is_empty() {
+        let checked = match &spec.inventory {
+            Some(records) => spec
+                .resolve(pipeline, crate::InputSource::Inventory(records.clone()))
                 .map(|_| ()),
-            None => combined.check(&document.pipeline),
-        });
-    let diagnostics = match checked {
-        Ok(()) => Vec::new(),
-        Err(problem) => vec![error(problem.to_string())],
-    };
+            None => spec.check(pipeline),
+        };
+        if let Err(problem) = checked {
+            diagnostics.push(Diagnostic::error(
+                DiagnosticSource::Pipeline,
+                None,
+                problem.to_string(),
+            ));
+        }
+    }
     finish(diagnostics, text, None)
 }
 
@@ -301,19 +312,9 @@ pub fn diagnose_artifacts_at(
     source_text: Option<&str>,
     path: &Path,
 ) -> Vec<Diagnostic> {
-    let inline = inline_inventory(source_text);
     diagnose_with_parser(text, source_text, true, |text| {
-        parse_located_document(text, path, inline)
+        parse_located_document(text, path, Kind::Pipeline)
     })
-}
-
-/// A separate inventory replaces an inline one, which is then not read.
-fn inline_inventory(source_text: Option<&str>) -> InlineInventory {
-    if source_text.is_some() {
-        InlineInventory::Skip
-    } else {
-        InlineInventory::Read
-    }
 }
 
 fn diagnose_with_parser(
@@ -345,23 +346,11 @@ fn diagnose_with_parser(
     let document = document.expect("document parsed without errors");
     let inventory_text = source_text.unwrap_or(text);
     diagnostics.extend(pipeline_diagnostics(&document, text, inventory_text));
-    if let (Some(line), Some(_)) = (document.inventory_line, source_text) {
-        let place = text
-            .lines()
-            .nth(line - 1)
-            .map(|header| Place::new(line, content_columns(header)));
-        diagnostics.push(Diagnostic::new(
-            Severity::Warning,
-            DiagnosticSource::Pipeline,
-            place,
-            "this inline inventory is ignored because a separate inventory was supplied".to_owned(),
-        ));
-    }
     if diagnostics.iter().any(Diagnostic::is_error) {
         return finish(diagnostics, text, source_text);
     }
     // Without records the input stage and jobs have nothing to work on.
-    let Some(supplied) = external_inventory.or(document.inventory) else {
+    let Some(supplied) = external_inventory else {
         return finish(diagnostics, text, source_text);
     };
     let inventory = supplied.clone();
