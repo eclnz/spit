@@ -14,9 +14,9 @@ fn settle(text: &str, inventory: &str) -> Result<(spit::Pipeline, ResolvedInputs
     let records = parse_source_inventory(inventory).unwrap();
     let settled = spec
         .resolve(&pipeline, InputSource::Inventory(records))
-        .map_err(|error| match error.downcast::<ResolveError>() {
-            Ok(error) => *error,
-            Err(error) => panic!("{error}"),
+        .map_err(|error| match error {
+            spit::InputError::Resolve(error) => error,
+            error => panic!("{error}"),
         })?;
     Ok((pipeline, settled))
 }
@@ -106,7 +106,7 @@ fn keeps_complete_jobs_and_blocks_consumers_of_incomplete_ones() {
     );
     assert!(matches!(
         report.incomplete[0].gaps.as_slice(),
-        [Gap::Unmatched(ResolveError::MissingInput { port, product, .. })]
+        [Gap::Unmatched(ResolveError::MissingInput { site: spit::PortSite { port, product, .. }, .. })]
             if port == "reference" && product == "calibration"
     ));
     assert!(matches!(
@@ -147,8 +147,8 @@ sources:
     assert!(matches!(
         report.incomplete[0].gaps.as_slice(),
         [
-            Gap::Unmatched(ResolveError::AmbiguousInput { port: ambiguous, .. }),
-            Gap::Unmatched(ResolveError::MissingInput { port: missing, .. }),
+            Gap::Unmatched(ResolveError::AmbiguousInput { site: spit::PortSite { port: ambiguous, .. }, .. }),
+            Gap::Unmatched(ResolveError::MissingInput { site: spit::PortSite { port: missing, .. }, .. }),
         ] if ambiguous == "reference" && missing == "mask"
     ));
 }

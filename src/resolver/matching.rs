@@ -4,7 +4,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::compile::StepShape;
-use crate::error::ResolveError;
+use crate::error::{PortSite, ResolveError};
 use crate::model::{
     ArtifactInstance, ArtifactKey, EntityBinding, Gap, Invocation, Job, OperationDef, ProductDef,
 };
@@ -60,10 +60,8 @@ pub(super) fn expand_step(
         if let Some(minimum) = operation.minimum_collection {
             if driven.len() < minimum {
                 gaps.push(Gap::Unmatched(ResolveError::CollectionTooSmall {
-                    operation: operation.name.clone(),
-                    output_product: invocation.output_product().to_owned(),
-                    port: operation.inputs[shape.driver].name.clone(),
-                    context: context.clone(),
+                    site: port_site(invocation, operation, shape.driver),
+                    context: Box::new(context.clone()),
                     minimum,
                     found: driven.len(),
                 }));
@@ -160,32 +158,25 @@ fn match_input(
         })
         .collect();
     let [artifact] = matches.as_slice() else {
-        let (operation, output_product, port, product, context) = (
-            operation.name.clone(),
-            invocation.output_product().to_owned(),
-            operation.inputs[index].name.clone(),
-            invocation.inputs[index].product.clone(),
-            Box::new(context.clone()),
-        );
+        let site = port_site(invocation, operation, index);
+        let context = Box::new(context.clone());
         return Err(Gap::Unmatched(if matches.is_empty() {
-            ResolveError::MissingInput {
-                operation,
-                output_product,
-                port,
-                product,
-                context,
-            }
+            ResolveError::MissingInput { site, context }
         } else {
-            ResolveError::AmbiguousInput {
-                operation,
-                output_product,
-                port,
-                product,
-                context,
-            }
+            ResolveError::AmbiguousInput { site, context }
         }));
     };
     Ok((**artifact).clone())
+}
+
+/// Where input `index` of a step is bound.
+fn port_site(invocation: &Invocation, operation: &OperationDef, index: usize) -> PortSite {
+    PortSite {
+        operation: operation.name.clone(),
+        output_product: invocation.output_product().to_owned(),
+        port: operation.inputs[index].name.clone(),
+        product: invocation.inputs[index].product.clone(),
+    }
 }
 
 /// Every combination of the values the inputs broadcast with `@ each(...)`:

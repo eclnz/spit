@@ -174,7 +174,7 @@ fn partial_type_cannot_hide_a_downstream_known_conflict() {
     let empty = parse_source_inventory("sources:\n").unwrap();
     assert!(matches!(
         resolve(&pipeline, &empty),
-        Err(ResolveError::TypeMismatch { operation, .. }) if operation == "sink"
+        Err(ResolveError::TypeMismatch { site: spit::PortSite { operation, .. }, .. }) if operation == "sink"
     ));
 }
 
@@ -307,7 +307,7 @@ fn conflicting_port_bindings_are_a_structured_resolver_error() {
     let inventory = parse_source_inventory("sources:\n  a[site=01]\n  b[site=01]\n").unwrap();
     assert!(matches!(
         resolve(&pipeline, &inventory),
-        Err(ResolveError::TypeVariableConflict { operation, port, conflict, .. })
+        Err(ResolveError::TypeVariableConflict { site: spit::PortSite { operation, port, .. }, conflict, .. })
             if operation == "op" && port == "input2" && conflict.variable == "X"
     ));
 }
@@ -321,7 +321,7 @@ fn declared_output_type_cannot_contradict_inferred_type() {
     let inventory = parse_source_inventory("sources:\n  raw[site=01]\n").unwrap();
     assert!(matches!(
         resolve(&pipeline, &inventory),
-        Err(ResolveError::TypeVariableConflict { port, conflict, .. })
+        Err(ResolveError::TypeVariableConflict { site: spit::PortSite { port, .. }, conflict, .. })
             if port == "output" && conflict.variable == "X"
     ));
 }

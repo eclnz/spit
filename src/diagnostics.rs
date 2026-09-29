@@ -8,7 +8,7 @@ use std::path::Path;
 use crate::command::collect_commands;
 use crate::compile::collect_pipeline;
 use crate::imports::parse_located_document;
-use crate::inputs::{check_inventory, collect_rule_errors, InputSpec};
+use crate::inputs::{check_inventory, collect_rule_errors, InputError, InputSpec};
 use crate::json::Json;
 use crate::lower::{parse_document_with_imports, ParsedDocument};
 use crate::model::DEFAULT_OUTPUT;
@@ -446,9 +446,12 @@ pub fn diagnose_recipe_against(text: &str, pipeline: &Pipeline) -> Vec<Diagnosti
         };
         if let Err(problem) = checked {
             // Records written in the recipe keep its line numbers.
-            let place = problem
-                .downcast_ref::<ResolveError>()
-                .and_then(|error| error_location(pipeline, &lines, error, text, false).1);
+            let place = match &problem {
+                InputError::Resolve(error) => {
+                    error_location(pipeline, &lines, error, text, false).1
+                }
+                _ => None,
+            };
             diagnostics.push(Diagnostic::error(
                 DiagnosticSource::Pipeline,
                 place,
@@ -748,14 +751,14 @@ fn step_part(pipeline: &Pipeline, step: &Step, output: &str, error: &ResolveErro
         step.input(index)
     };
     let part = match error {
+        ResolveError::TypeMismatch { site, .. }
+        | ResolveError::TypeVariableConflict { site, .. }
+        | ResolveError::MissingInput { site, .. }
+        | ResolveError::AmbiguousInput { site, .. }
+        | ResolveError::CollectionTooSmall { site, .. } => port(&site.port),
         ResolveError::UnknownProduct { name } if name == output => Some(step.output()),
         ResolveError::UnknownProduct { name } => input_named(name),
         ResolveError::UnknownOperation { .. } => Some(step.operation()),
-        ResolveError::TypeMismatch { port: name, .. }
-        | ResolveError::TypeVariableConflict { port: name, .. }
-        | ResolveError::MissingInput { port: name, .. }
-        | ResolveError::AmbiguousInput { port: name, .. }
-        | ResolveError::CollectionTooSmall { port: name, .. } => port(name),
         ResolveError::InvalidAggregationDimension { product, .. } => input_named(product),
         ResolveError::UnsupportedShapeRelationship { .. } => Some(step.call()),
         _ => Some(step.output()),
@@ -1118,11 +1121,11 @@ fn error_location(
         matching.next().is_none().then_some(first)
     };
     let pipeline_place = match error {
-        ResolveError::TypeMismatch { output_product, .. }
-        | ResolveError::TypeVariableConflict { output_product, .. }
-        | ResolveError::MissingInput { output_product, .. }
-        | ResolveError::AmbiguousInput { output_product, .. }
-        | ResolveError::CollectionTooSmall { output_product, .. } => step(output_product),
+        ResolveError::TypeMismatch { site, .. }
+        | ResolveError::TypeVariableConflict { site, .. }
+        | ResolveError::MissingInput { site, .. }
+        | ResolveError::AmbiguousInput { site, .. }
+        | ResolveError::CollectionTooSmall { site, .. } => step(&site.output_product),
         ResolveError::UnknownOperation { name } => unique_step(name),
         ResolveError::UnknownProduct { name } => pipeline
             .invocations

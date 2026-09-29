@@ -29,6 +29,16 @@ pub struct TypeConflict {
     pub required: ArtifactType,
 }
 
+/// Where an input is bound: the step, by its operation and first output,
+/// the operation's port, and the product bound to it.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PortSite {
+    pub operation: String,
+    pub output_product: String,
+    pub port: String,
+    pub product: String,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ResolveError {
     UnknownProduct {
@@ -38,41 +48,27 @@ pub enum ResolveError {
         name: String,
     },
     TypeMismatch {
-        operation: String,
-        output_product: String,
-        port: String,
-        product: String,
+        site: PortSite,
         expected: Box<ArtifactType>,
         found: Box<ArtifactType>,
     },
     TypeVariableConflict {
-        operation: String,
-        output_product: String,
-        port: String,
-        product: String,
+        site: PortSite,
         conflict: Box<TypeConflict>,
     },
     MissingInput {
-        operation: String,
-        output_product: String,
-        port: String,
-        product: String,
+        site: PortSite,
         context: Box<EntityBinding>,
     },
     /// A `one` input left more than one artifact for a job.
     AmbiguousInput {
-        operation: String,
-        output_product: String,
-        port: String,
-        product: String,
+        site: PortSite,
         context: Box<EntityBinding>,
     },
     /// A many input collected fewer artifacts than the operation accepts.
     CollectionTooSmall {
-        operation: String,
-        output_product: String,
-        port: String,
-        context: EntityBinding,
+        site: PortSite,
+        context: Box<EntityBinding>,
         minimum: usize,
         found: usize,
     },
@@ -122,22 +118,28 @@ impl fmt::Display for ResolveError {
             Self::UnknownProduct { name } => write!(f, "unknown product `{name}`"),
             Self::UnknownOperation { name } => write!(f, "unknown operation `{name}`"),
             Self::TypeMismatch {
-                operation,
-                port,
-                product,
+                site:
+                    PortSite {
+                        operation,
+                        port,
+                        product,
+                        ..
+                    },
                 expected,
                 found,
-                ..
             } => write!(
                 f,
                 "type mismatch at `{operation}.{port}`: product `{product}` is {found}, expected {expected}"
             ),
             Self::TypeVariableConflict {
-                operation,
-                port,
-                product,
+                site:
+                    PortSite {
+                        operation,
+                        port,
+                        product,
+                        ..
+                    },
                 conflict,
-                ..
             } => write!(
                 f,
                 "type conflict at `{operation}.{port}` (product `{product}`): variable `{}` was inferred as {}, but now requires {}",
@@ -146,32 +148,38 @@ impl fmt::Display for ResolveError {
                 conflict.required
             ),
             Self::MissingInput {
-                operation,
-                port,
-                product,
+                site:
+                    PortSite {
+                        operation,
+                        port,
+                        product,
+                        ..
+                    },
                 context,
-                ..
             } => write!(
                 f,
                 "no `{product}` artifact for input `{port}` of `{operation}` at [{context}]"
             ),
             Self::AmbiguousInput {
-                operation,
-                port,
-                product,
+                site:
+                    PortSite {
+                        operation,
+                        port,
+                        product,
+                        ..
+                    },
                 context,
-                ..
             } => write!(
                 f,
                 "more than one `{product}` artifact matches input `{port}` of `{operation}` at [{context}]; select one with `@ where(...)`"
             ),
             Self::CollectionTooSmall {
-                operation,
-                port,
+                site: PortSite {
+                    operation, port, ..
+                },
                 context,
                 minimum,
                 found,
-                ..
             } => write!(
                 f,
                 "input `{port}` of `{operation}` needs at least {minimum} artifacts at [{context}], found {found}"
