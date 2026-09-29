@@ -157,3 +157,34 @@ fn an_imported_path_keeps_escaped_braces() {
         "input/{{product}}/raw/{id}.txt"
     );
 }
+
+#[test]
+fn an_import_may_not_define_again_what_the_file_defines() {
+    let dir = Tree::new("imports", &[]);
+    dir.write(
+        "base.spit",
+        "source raw [id]\npath raw: in/{id}.txt\noperation clean(one)\n\
+         command clean: tool {input} {output}\n",
+    );
+    for (first, name, kind) in [
+        ("source raw [id]", "raw", "product"),
+        ("operation clean(one)", "clean", "operation"),
+        (
+            "command clean: tool {input} {output}",
+            "clean",
+            "command for operation",
+        ),
+        ("path raw: x/{id}.txt", "raw", "path for product"),
+    ] {
+        let main = dir.write(
+            "main.spit",
+            &format!("{first}\nuse {name} from base.spit\n"),
+        );
+        let error = parse_pipeline_at(&fs::read_to_string(&main).unwrap(), &main).unwrap_err();
+        assert_eq!(error.line(), 2);
+        assert_eq!(
+            error.message,
+            format!("import conflicts with {kind} `{name}`")
+        );
+    }
+}

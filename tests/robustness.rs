@@ -217,3 +217,30 @@ fn command_line_mistakes_are_named() {
     let output = spit(&["check", "/no/such/pipeline.spit"], None);
     assert!(text(&output.stderr).starts_with("error: cannot read `/no/such/pipeline.spit`: "));
 }
+
+#[test]
+fn a_byte_order_mark_is_ignored_by_every_entry_point() {
+    let bom = |text: &str| format!("\u{feff}{text}");
+    let valid = "source raw : Raw [id]\noperation clean(Raw) -> Clean\ncleaned = clean(raw)\n";
+    let records = "sources:\n  raw[id=a]\n";
+    parse_pipeline(&bom(valid)).unwrap();
+    spit::parse_source_inventory(&bom(records)).unwrap();
+    spit::parse_input_spec(&bom("pipeline analysis.spit\npath raw: in/{id}.txt\n")).unwrap();
+    assert_eq!(
+        diagnose(&bom(valid), Some(&bom(records))),
+        diagnose(valid, Some(records))
+    );
+    // An error on the first line has the same columns, counted without it.
+    let broken = "source bad [id id]\n";
+    let found = diagnose(&bom(broken), None);
+    assert_eq!(found, diagnose(broken, None));
+    assert!(found[0].is_error());
+    assert_eq!(
+        spit::render_diagnostics_json(&found, &bom(broken), None),
+        spit::render_diagnostics_json(&found, broken, None)
+    );
+    assert_eq!(
+        found[0].display_in(&bom(broken), None).to_string(),
+        found[0].display_in(broken, None).to_string()
+    );
+}

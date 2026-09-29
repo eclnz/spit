@@ -25,7 +25,7 @@ pub(crate) use self::declarations::{parse_use, UseSpec};
 pub use self::inventory::{parse_source_inventory, render_source_inventory};
 pub(crate) use self::inventory::{source_record_lines, split_document};
 pub(crate) use self::keyword::{Header, Keyword};
-pub(crate) use self::lexical::{glued_comment, strip_comment};
+pub(crate) use self::lexical::{glued_comment, strip_comment, without_bom};
 pub(crate) use self::source_map::{Rule, SourceMap, Step};
 
 const SHELL_SOURCE_REMOVED: &str =

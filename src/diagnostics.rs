@@ -13,7 +13,7 @@ use crate::json::Json;
 use crate::lower::{parse_document_with_imports, ParsedDocument};
 use crate::model::DEFAULT_OUTPUT;
 use crate::model::{stage_within, CommandRole, Job, ResolvedDag, SourceInventory};
-use crate::parser::{glued_comment, source_record_lines, Kind, Rule, SourceMap, Step};
+use crate::parser::{glued_comment, source_record_lines, without_bom, Kind, Rule, SourceMap, Step};
 use crate::paths::{case_collisions, collect_paths};
 use crate::span::{content_columns, utf16_columns, Located, Place};
 use crate::{
@@ -151,7 +151,7 @@ impl Diagnostic {
             DiagnosticSource::Inventory => source_text?,
             DiagnosticSource::Pipeline => text,
         };
-        text.lines().nth(self.line?.checked_sub(1)?)
+        without_bom(text).lines().nth(self.line?.checked_sub(1)?)
     }
 
     fn write(&self, f: &mut fmt::Formatter<'_>, column: Option<usize>) -> fmt::Result {
@@ -312,6 +312,7 @@ pub fn diagnose_in(text: &str, source_text: Option<&str>, context: Context<'_>) 
 /// and path. The pipeline is returned as written, without the source paths
 /// a recipe adds.
 pub fn diagnose_checked(text: &str, context: Context<'_>) -> Diagnosis {
+    let text = without_bom(text);
     let parsed = recover_parse_errors(text, |text| context.parse(text)).map_err(|errors| {
         let diagnostics = located_all(DiagnosticSource::Pipeline, errors, text);
         finish(diagnostics.collect(), text, None)
@@ -328,6 +329,7 @@ pub fn diagnose_checked_with_records(
     records: &str,
     context: Context<'_>,
 ) -> Diagnosis<(Checked, SourceInventory)> {
+    let (text, records) = (without_bom(text), without_bom(records));
     let parsed = (
         recover_parse_errors(text, |text| context.parse(text)),
         recover_parse_errors(records, parse_source_inventory),
@@ -367,6 +369,7 @@ pub fn diagnose_checked_with_records(
 /// any records against that pipeline. The pipeline's own errors are named
 /// by file and line, since they are not in `text`.
 pub fn diagnose_recipe(text: &str, path: &Path) -> Vec<Diagnostic> {
+    let text = without_bom(text);
     let error = |message: String| Diagnostic::error(DiagnosticSource::Pipeline, None, message);
     let spec = match crate::inputs::parse_input_spec_at(text, path) {
         Ok(spec) => spec,
@@ -412,6 +415,7 @@ pub fn diagnose_recipe(text: &str, path: &Path) -> Vec<Diagnostic> {
 /// Diagnose the text of a `.spitin` recipe against `pipeline`, reading no
 /// data: every rule's error at the rule, then its source paths and records.
 pub fn diagnose_recipe_against(text: &str, pipeline: &Pipeline) -> Vec<Diagnostic> {
+    let text = without_bom(text);
     let (spec, lines) = match crate::inputs::parse_recipe_lines(text) {
         Ok(parsed) => parsed,
         Err(parse) => {

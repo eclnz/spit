@@ -10,7 +10,7 @@ use crate::model::{
     Pipeline, ProductDef, SourceInventory, StageDef,
 };
 use crate::parser::{
-    parse_source_inventory, parse_syntax, split_document, FlowStep, Kind, ParseError,
+    parse_source_inventory, parse_syntax, split_document, without_bom, FlowStep, Kind, ParseError,
     ParseErrorKind, PathRule, Rule, SourceMap, Statement, StatementKind, Step, Syntax,
 };
 use crate::shape::{step_context, step_driver, BoundInput};
@@ -264,7 +264,7 @@ pub(crate) struct ParsedDocument {
 /// Parse a pipeline. Input rules and records are not part of one: they
 /// belong in a `.spitin` recipe and a `.spitout`.
 pub fn parse_pipeline(text: &str) -> Result<Pipeline, ParseError> {
-    parse_document_with_imports(text, &BTreeMap::new(), Kind::Pipeline)
+    parse_document_with_imports(without_bom(text), &BTreeMap::new(), Kind::Pipeline)
         .map(|document| document.pipeline)
 }
 

@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use crate::lower::{parse_document_with_imports, ParsedDocument, PipelineBuilder};
 use crate::model::{CommandDef, CommandRole, OperationDef, Pipeline, ProductDef};
-use crate::parser::{parse_use, strip_comment, Keyword, Kind, ParseError, UseSpec};
+use crate::parser::{parse_use, strip_comment, without_bom, Keyword, Kind, ParseError, UseSpec};
 use crate::span::Place;
 
 pub(crate) fn apply_import(
@@ -22,57 +22,20 @@ pub(crate) fn apply_import(
             "imports require a document path; use parse_pipeline_at",
         )
     })?;
-    for product in &imported.products {
-        if pipeline
-            .products
-            .iter()
-            .any(|existing| existing.name == product.name)
-        {
+    for ((kind, existing), (_, imported)) in defined(pipeline).into_iter().zip(defined(imported)) {
+        if let Some(name) = imported.into_iter().find(|name| existing.contains(name)) {
             return Err(ParseError::new(
                 line,
-                format!("import conflicts with product `{}`", product.name),
+                format!("import conflicts with {kind} `{name}`"),
             ));
         }
     }
-    for operation in &imported.operations {
-        if pipeline
-            .operations
-            .iter()
-            .any(|existing| existing.name == operation.name)
-        {
-            return Err(ParseError::new(
-                line,
-                format!("import conflicts with operation `{}`", operation.name),
-            ));
-        }
-    }
-    for command in &imported.commands {
-        if pipeline
-            .commands
-            .iter()
-            .any(|existing| existing.operation == command.operation)
-        {
-            return Err(ParseError::new(
-                line,
-                format!(
-                    "import conflicts with command for operation `{}`",
-                    command.operation
-                ),
-            ));
-        }
-    }
-    for (product, template) in &imported.product_paths {
-        if pipeline
+    pipeline.product_paths.extend(
+        imported
             .product_paths
-            .insert(product.clone(), template.clone())
-            .is_some()
-        {
-            return Err(ParseError::new(
-                line,
-                format!("import conflicts with path for product `{product}`"),
-            ));
-        }
-    }
+            .iter()
+            .map(|(product, template)| (product.clone(), template.clone())),
+    );
     for command in &imported.commands {
         builder.add_command(command.clone(), place.clone());
     }
@@ -99,6 +62,33 @@ pub(crate) fn apply_import(
         lines.paths.insert(product.clone(), place.clone());
     }
     Ok(())
+}
+
+/// What `pipeline` defines that an import may not define again, by kind.
+fn defined(pipeline: &Pipeline) -> [(&'static str, Vec<&str>); 4] {
+    let products = pipeline
+        .products
+        .iter()
+        .map(|product| product.name.as_str());
+    let operations = pipeline.operations.iter();
+    let commands = pipeline.commands.iter();
+    [
+        ("product", products.collect()),
+        (
+            "operation",
+            operations
+                .map(|operation| operation.name.as_str())
+                .collect(),
+        ),
+        (
+            "command for operation",
+            commands.map(|command| command.operation.as_str()).collect(),
+        ),
+        (
+            "path for product",
+            pipeline.product_paths.keys().map(String::as_str).collect(),
+        ),
+    ]
 }
 
 fn select_import(module: &Pipeline, spec: &UseSpec, line: usize) -> Result<Pipeline, ParseError> {
@@ -273,7 +263,7 @@ pub(crate) fn parse_located_document(
     kind: Kind,
 ) -> Result<ParsedDocument, ParseError> {
     let root = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
-    parse_document_at_inner(text, &root, &mut vec![root.clone()], kind)
+    parse_document_at_inner(without_bom(text), &root, &mut vec![root.clone()], kind)
 }
 
 fn parse_document_at_inner(
@@ -319,9 +309,7 @@ fn parse_document_at_inner(
                 format!("cannot read import `{}`: {error}", canonical.display()),
             )
         })?;
-        let imported_text = imported_text
-            .strip_prefix('\u{feff}')
-            .unwrap_or(&imported_text);
+        let imported_text = without_bom(&imported_text);
         stack.push(canonical.clone());
         let module = parse_document_at_inner(imported_text, &canonical, stack, Kind::Pipeline)
             .map_err(|error| {

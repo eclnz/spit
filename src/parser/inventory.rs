@@ -169,6 +169,7 @@ fn in_order(binding: &EntityBinding, declared: &[&str]) -> String {
 /// Records are logical identities, each optionally followed by `: path`, the
 /// file relative to the dataset root. They never hold artifact types.
 pub fn parse_source_inventory(text: &str) -> Result<SourceInventory, ParseError> {
+    let text = super::without_bom(text);
     enum InventorySection {
         Sources,
         Contexts(Option<String>),
