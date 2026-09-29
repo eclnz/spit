@@ -1,23 +1,27 @@
 //! `require` rules: the input stage checks each group of an inventory
 //! against them before any job is resolved.
 
+mod support;
+
+use std::path::Path;
+
 use spit::{
-    diagnose, parse_source_inventory, parse_spit, resolve, CountRequirement, CoverageRule,
+    diagnose_at_with_inputs, parse_source_inventory, resolve, CountRequirement, CoverageRule,
     EntityBinding, InputRules, InputSource, InputSpec, Pipeline, ProductDef, ResolveError,
     ResolvedDag, SourceInventory, SourceRecord, TypeExpr,
 };
 
 /// Settle `inventory` with the rules written in `text`, then resolve jobs.
 fn resolve_text(text: &str, inventory: &str) -> Result<ResolvedDag, ResolveError> {
-    let document = parse_spit(text).unwrap();
-    let settled = InputSpec::embedded_in(&document)
+    let (pipeline, spec, _) = support::parse_with_rules(text).unwrap();
+    let settled = spec
         .resolve(
-            &document.pipeline,
+            &pipeline,
             InputSource::Inventory(parse_source_inventory(inventory).unwrap()),
         )
         .unwrap();
     settled.require_complete()?;
-    resolve(&document.pipeline, &settled.dag_inventory())
+    resolve(&pipeline, &settled.dag_inventory())
 }
 
 fn record(product: &str, pairs: &[(&str, &str)]) -> SourceRecord {
@@ -43,23 +47,30 @@ fn coverage_rules_can_require_entity_values() {
         Err(ResolveError::MissingRequiredValue { dimension, value, .. })
             if dimension == "run" && value == "2"
     ));
-    let issues: Vec<_> = diagnose(text, Some(incomplete))
-        .iter()
-        .map(ToString::to_string)
-        .collect();
+    // The rule is in the recipe, so the error names no pipeline line.
+    let (pipeline, recipe) = support::split_rules(text);
+    let spec = spit::parse_input_spec(&recipe).unwrap();
+    let issues: Vec<_> = diagnose_at_with_inputs(
+        &pipeline,
+        Some(incomplete),
+        Path::new("a.spit"),
+        &spec,
+        false,
+    )
+    .iter()
+    .map(ToString::to_string)
+    .collect();
     assert_eq!(
         issues,
-        ["error: line 2: source coverage for `image` at [subject=a]: no artifact with run=2"]
+        ["error: source coverage for `image` at [subject=a]: no artifact with run=2"]
     );
 }
 
 #[test]
 fn a_rule_is_checked_against_the_pipeline_without_an_inventory() {
     let text = "source image [subject, run]\nrequire image subject=a per [subject]\n";
-    let document = parse_spit(text).unwrap();
-    let error = InputSpec::embedded_in(&document)
-        .check(&document.pipeline)
-        .unwrap_err();
+    let (pipeline, spec, _) = support::parse_with_rules(text).unwrap();
+    let error = spec.check(&pipeline).unwrap_err();
     assert!(error.to_string().contains("outside its groups"), "{error}");
 }
 
@@ -82,7 +93,7 @@ fn coverage_checks_each_observed_context_without_a_global_count() {
             )],
             ..InputRules::default()
         },
-        inventory: None,
+        ..InputSpec::default()
     };
     let settle = |inventory: SourceInventory| {
         spec.resolve(&pipeline, InputSource::Inventory(inventory))

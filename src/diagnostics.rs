@@ -12,7 +12,7 @@ use crate::inputs::{check_inventory, collect_rule_errors, InputSpec};
 use crate::lower::{parse_document_with_imports, ParsedDocument};
 use crate::model::DEFAULT_OUTPUT;
 use crate::model::{stage_within, CommandRole, Job, ResolvedDag, SourceInventory};
-use crate::parser::{glued_comment, InlineInventory, Rule, SourceMap, Step};
+use crate::parser::{glued_comment, Kind, Rule, SourceMap, Step};
 use crate::paths::{case_collisions, collect_paths};
 use crate::span::{columns_of, content_columns, utf16_columns, Located, Place};
 use crate::{
@@ -186,17 +186,15 @@ impl fmt::Display for Diagnostic {
 /// inventory still allows every other check. Diagnostics are ordered by
 /// line, with at most one error per line.
 pub fn diagnose(text: &str, source_text: Option<&str>) -> Vec<Diagnostic> {
-    let inline = inline_inventory(source_text);
     diagnose_with_parser(text, source_text, false, |text| {
-        parse_document_with_imports(text, &BTreeMap::new(), inline)
+        parse_document_with_imports(text, &BTreeMap::new(), Kind::Pipeline)
     })
 }
 
 /// Diagnose a document with its location available for resolving imports.
 pub fn diagnose_at(text: &str, source_text: Option<&str>, path: &Path) -> Vec<Diagnostic> {
-    let inline = inline_inventory(source_text);
     diagnose_with_parser(text, source_text, false, |text| {
-        parse_located_document(text, path, inline)
+        parse_located_document(text, path, Kind::Pipeline)
     })
 }
 
@@ -208,25 +206,105 @@ pub fn diagnose_at_with_inputs(
     inputs: &InputSpec,
     lenient: bool,
 ) -> Vec<Diagnostic> {
-    let inline = inline_inventory(source_text);
     diagnose_with_parser(text, source_text, lenient, |text| {
-        let mut document = parse_located_document(text, path, inline)?;
-        let mut spec = InputSpec {
-            rules: document.inputs.clone(),
-            inventory: None,
-        };
-        let recipe = InputSpec {
-            rules: inputs.rules.clone(),
-            inventory: None,
-        };
-        spec.merge(recipe)
-            .map_err(|message| ParseError::new(1, message))?;
-        spec.check(&document.pipeline)
+        let mut document = parse_located_document(text, path, Kind::Pipeline)?;
+        inputs
+            .check(&document.pipeline)
             .map_err(|error| ParseError::new(1, error.to_string()))?;
         inputs.apply_paths(&mut document.pipeline);
-        document.inputs = spec.rules;
+        document.inputs = inputs.rules.clone();
         Ok(document)
     })
+}
+
+/// Diagnose a `.spitin` recipe at `path` without reading any data: its own
+/// lines, then the pipeline its `pipeline` line names, then its rules and
+/// any records against that pipeline. The pipeline's own errors are named
+/// by file and line, since they are not in `text`.
+pub fn diagnose_recipe(text: &str, path: &Path) -> Vec<Diagnostic> {
+    let error = |message: String| Diagnostic::error(DiagnosticSource::Pipeline, None, message);
+    let spec = match crate::inputs::parse_input_spec_at(text, path) {
+        Ok(spec) => spec,
+        Err(parse) => {
+            let diagnostic = Diagnostic::located(DiagnosticSource::Pipeline, &parse, text);
+            return finish(vec![diagnostic], text, None);
+        }
+    };
+    let Some(pipeline_path) = spec.pipeline.clone() else {
+        let message =
+            "name the pipeline this recipe is for, with a line such as `pipeline analysis.spit`";
+        return finish(vec![error(message.to_owned())], text, None);
+    };
+    let shown = pipeline_path.display();
+    let pipeline_text = match std::fs::read_to_string(&pipeline_path) {
+        Ok(pipeline_text) => pipeline_text,
+        Err(reason) => {
+            return finish(
+                vec![error(format!("cannot read pipeline `{shown}`: {reason}"))],
+                text,
+                None,
+            )
+        }
+    };
+    let pipeline_errors: Vec<_> = diagnose_at(&pipeline_text, None, &pipeline_path)
+        .into_iter()
+        .filter(Diagnostic::is_error)
+        .map(|diagnostic| {
+            let line = diagnostic
+                .line
+                .map_or_else(String::new, |line| format!(" line {line}"));
+            error(format!("in `{shown}`{line}: {}", diagnostic.message))
+        })
+        .collect();
+    if !pipeline_errors.is_empty() {
+        return finish(pipeline_errors, text, None);
+    }
+    match crate::parse_pipeline_at(&pipeline_text, &pipeline_path) {
+        Ok(pipeline) => diagnose_recipe_against(text, &pipeline),
+        Err(parse) => finish(vec![error(format!("in `{shown}`: {parse}"))], text, None),
+    }
+}
+
+/// Diagnose the text of a `.spitin` recipe against `pipeline`, reading no
+/// data: every rule's error at the rule, then its source paths and records.
+pub fn diagnose_recipe_against(text: &str, pipeline: &Pipeline) -> Vec<Diagnostic> {
+    let (spec, lines) = match crate::inputs::parse_recipe_lines(text) {
+        Ok(parsed) => parsed,
+        Err(parse) => {
+            let diagnostic = Diagnostic::located(DiagnosticSource::Pipeline, &parse, text);
+            return finish(vec![diagnostic], text, None);
+        }
+    };
+    let mut diagnostics: Vec<_> = collect_rule_errors(pipeline, &spec.rules, &BTreeSet::new())
+        .into_iter()
+        .map(|(subject, error)| {
+            // A rule's own errors concern its product, or its groups.
+            let place = match &subject {
+                DefinitionSubject::Constraint(index) => lines.rules.get(*index).map(Rule::product),
+                DefinitionSubject::ConstraintGroup(index) => {
+                    lines.rules.get(*index).map(Rule::dimensions)
+                }
+                _ => None,
+            };
+            Diagnostic::error(DiagnosticSource::Pipeline, place, error.to_string())
+        })
+        .collect();
+    if diagnostics.is_empty() {
+        let checked = match &spec.inventory {
+            Some(records) => spec
+                .resolve(pipeline, crate::InputSource::Inventory(records.clone()))
+                .map(|_| ()),
+            None => spec.check(pipeline),
+        };
+        if let Err(problem) = checked {
+            diagnostics.push(Diagnostic::error(
+                DiagnosticSource::Pipeline,
+                None,
+                problem.to_string(),
+            ));
+        }
+    }
+    finish(diagnostics, text, None)
 }
 
 pub fn diagnose_artifacts_at(
@@ -234,19 +312,9 @@ pub fn diagnose_artifacts_at(
     source_text: Option<&str>,
     path: &Path,
 ) -> Vec<Diagnostic> {
-    let inline = inline_inventory(source_text);
     diagnose_with_parser(text, source_text, true, |text| {
-        parse_located_document(text, path, inline)
+        parse_located_document(text, path, Kind::Pipeline)
     })
-}
-
-/// A separate inventory replaces an inline one, which is then not read.
-fn inline_inventory(source_text: Option<&str>) -> InlineInventory {
-    if source_text.is_some() {
-        InlineInventory::Skip
-    } else {
-        InlineInventory::Read
-    }
 }
 
 fn diagnose_with_parser(
@@ -278,23 +346,14 @@ fn diagnose_with_parser(
     let document = document.expect("document parsed without errors");
     let inventory_text = source_text.unwrap_or(text);
     diagnostics.extend(pipeline_diagnostics(&document, text, inventory_text));
-    if let (Some(line), Some(_)) = (document.inventory_line, source_text) {
-        let place = text
-            .lines()
-            .nth(line - 1)
-            .map(|header| Place::new(line, content_columns(header)));
-        diagnostics.push(Diagnostic::new(
-            Severity::Warning,
-            DiagnosticSource::Pipeline,
-            place,
-            "this inline inventory is ignored because a separate inventory was supplied".to_owned(),
-        ));
-    }
     if diagnostics.iter().any(Diagnostic::is_error) {
         return finish(diagnostics, text, source_text);
     }
-    let supplied = external_inventory.or(document.inventory);
-    let inventory = supplied.clone().unwrap_or_default();
+    // Without records the input stage and jobs have nothing to work on.
+    let Some(supplied) = external_inventory else {
+        return finish(diagnostics, text, source_text);
+    };
+    let inventory = supplied.clone();
     let outputs = |jobs: Vec<Job>| jobs.into_iter().flat_map(|job| job.outputs);
     // The input stage settles the inventory; only then are jobs resolved.
     let produced: Result<BTreeSet<String>, _> =
@@ -337,14 +396,12 @@ fn diagnose_with_parser(
         }
         // Without an inventory no step is expected to resolve jobs.
         Ok(produced) => {
-            if let Some(inventory) = &supplied {
-                diagnostics.extend(empty_step_warnings(
-                    &document.pipeline,
-                    &document.lines,
-                    &produced,
-                    inventory,
-                ));
-            }
+            diagnostics.extend(empty_step_warnings(
+                &document.pipeline,
+                &document.lines,
+                &produced,
+                &supplied,
+            ));
         }
     }
     finish(diagnostics, text, source_text)
@@ -858,6 +915,14 @@ fn recover_parse_errors<T>(
                     return (None, errors);
                 };
                 line.clear();
+                // Misplaced records are one error, however many lines.
+                if let ParseErrorKind::MisplacedRecords { lines: records } = &error.kind {
+                    for record in records {
+                        if let Some(line) = lines.get_mut(record - 1) {
+                            line.clear();
+                        }
+                    }
+                }
                 if !depends_on_invalid_operation(&error, &errors, &original_lines) {
                     errors.push(error);
                 }

@@ -172,7 +172,7 @@ fn an_empty_inventory_is_still_a_valid_stage_result() {
 }
 
 #[test]
-fn sibling_spitin_discovers_inputs_and_defaults_output_paths() {
+fn a_named_recipe_runs_in_memory_and_defaults_output_paths() {
     let tree = Tree::new(
         "spitin-sibling",
         &[
@@ -197,6 +197,7 @@ fn sibling_spitin_discovers_inputs_and_defaults_output_paths() {
          path image: data/sub-{sub}/ses-{ses}/image.nii.gz\n",
     )
     .unwrap();
+    // A recipe beside the pipeline is not loaded unless named.
     let check = Command::new(env!("CARGO_BIN_EXE_spit"))
         .args(["check", pipeline_file.to_str().unwrap()])
         .output()
@@ -206,17 +207,23 @@ fn sibling_spitin_discovers_inputs_and_defaults_output_paths() {
         "{}",
         String::from_utf8_lossy(&check.stderr)
     );
-    assert!(String::from_utf8_lossy(&check.stderr).contains("skip sessions"));
-    assert!(String::from_utf8_lossy(&check.stdout).contains("2 jobs resolved"));
+    assert_eq!(String::from_utf8_lossy(&check.stdout), "Pipeline valid.\n");
+    // Named in place of a .spitout, it runs the input stage in memory, and
+    // outputs with no rule take the built-in layout.
+    let recipe = tree.0.join("analysis.spitin");
     let paths = Command::new(env!("CARGO_BIN_EXE_spit"))
-        .args(["dag", pipeline_file.to_str().unwrap(), "--paths"])
+        .args([
+            "dag",
+            pipeline_file.to_str().unwrap(),
+            recipe.to_str().unwrap(),
+            "--paths",
+        ])
         .output()
         .unwrap();
-    assert!(
-        paths.status.success(),
-        "{}",
-        String::from_utf8_lossy(&paths.stderr)
-    );
+    let notes = String::from_utf8_lossy(&paths.stderr).into_owned();
+    assert!(paths.status.success(), "{notes}");
+    assert!(notes.contains("skip sessions"), "{notes}");
+    assert!(notes.contains("note: 2 jobs resolved."), "{notes}");
     let paths = String::from_utf8(paths.stdout).unwrap();
     assert!(paths.contains("out/result/sub=1__ses=1"), "{paths}");
     assert!(!paths.contains("sub=5"), "{paths}");
@@ -243,23 +250,40 @@ fn explicit_spitin_uses_its_own_directory_and_require_reports_gaps() {
     let recipe = tree.0.join("dataset/inputs.spitin");
     fs::write(
         &recipe,
-        "discover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}\n\
+        "pipeline ../pipeline.spit\n\
+         discover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}\n\
          require sessions count>=2 per [sub]\n\
          path image: data/sub-{sub}/ses-{ses}/image.nii.gz\n",
     )
     .unwrap();
-    let checked = Command::new(env!("CARGO_BIN_EXE_spit"))
-        .args([
-            "check",
-            pipeline_file.to_str().unwrap(),
-            "--inputs",
-            recipe.to_str().unwrap(),
-        ])
-        .output()
-        .unwrap();
-    assert!(!checked.status.success());
-    assert!(String::from_utf8_lossy(&checked.stderr)
-        .contains("discovery coverage for `sessions` at [sub=5]"));
+    let run = |args: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_spit"))
+            .args(args)
+            .output()
+            .unwrap()
+    };
+    let recipe = recipe.to_str().unwrap();
+    // The recipe's `pipeline` line is relative to the recipe's folder, as
+    // are the folders it scans.
+    let checked = run(&["check", recipe]);
+    assert!(
+        checked.status.success(),
+        "{}",
+        String::from_utf8_lossy(&checked.stderr)
+    );
+    for args in [
+        &["inputs", recipe][..],
+        &["dag", pipeline_file.to_str().unwrap(), recipe],
+    ] {
+        let output = run(args);
+        assert!(!output.status.success(), "{args:?}");
+        assert!(
+            String::from_utf8_lossy(&output.stderr)
+                .contains("discovery coverage for `sessions` at [sub=5]"),
+            "{args:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
 }
 
 #[test]
@@ -299,7 +323,7 @@ fn a_spitout_alone_drives_jobs_without_its_recipe() {
     )
     .unwrap();
     let recipe = tree.path().join("dataset.spitin");
-    fs::write(&recipe, RECIPE).unwrap();
+    fs::write(&recipe, format!("pipeline analysis.spit\n{RECIPE}")).unwrap();
     let spit = |args: &[&str]| {
         Command::new(env!("CARGO_BIN_EXE_spit"))
             .args(args)
@@ -307,24 +331,23 @@ fn a_spitout_alone_drives_jobs_without_its_recipe() {
             .unwrap()
     };
     let (pipeline, recipe) = (pipeline.to_str().unwrap(), recipe.to_str().unwrap());
-    let discovered = spit(&["discover", pipeline, "--inputs", recipe]);
+    let saved = tree.path().join("dataset.spitout");
+    let saved = saved.to_str().unwrap();
+    let written = spit(&["inputs", recipe, "-o", saved]);
     assert!(
-        discovered.status.success(),
+        written.status.success(),
         "{}",
-        String::from_utf8_lossy(&discovered.stderr)
+        String::from_utf8_lossy(&written.stderr)
     );
-    let spitout = String::from_utf8(discovered.stdout).unwrap();
+    let spitout = fs::read_to_string(saved).unwrap();
     assert!(
         spitout.contains("image[sub=1,ses=2]: data/sub-1/ses-2/image.nii.gz"),
         "{spitout}"
     );
     // Step 3 from the .spitout and the pipeline, with the recipe removed.
-    let saved = tree.path().join("dataset.spitout");
-    fs::write(&saved, &spitout).unwrap();
     fs::remove_file(recipe).unwrap();
-    let saved = saved.to_str().unwrap();
     let root = tree.path().to_str().unwrap();
-    let dag = spit(&["dag", pipeline, "--sources", saved, "--paths"]);
+    let dag = spit(&["dag", pipeline, saved, "--paths"]);
     assert!(
         dag.status.success(),
         "{}",
@@ -333,33 +356,13 @@ fn a_spitout_alone_drives_jobs_without_its_recipe() {
     let dag = String::from_utf8(dag.stdout).unwrap();
     assert!(dag.contains("data/sub-5/ses-1/image.nii.gz"), "{dag}");
     assert!(dag.contains("results/5_1.nii.gz"), "{dag}");
-    let checked = spit(&[
-        "check",
-        pipeline,
-        "--sources",
-        saved,
-        "--root",
-        root,
-        "--paths",
-    ]);
+    // The records give every source its file, so no source needs a rule.
+    let checked = spit(&["dag", pipeline, saved, "--root", root, "--strict-paths"]);
     assert!(
         checked.status.success(),
         "{}",
         String::from_utf8_lossy(&checked.stderr)
     );
-    let report = String::from_utf8(checked.stdout).unwrap();
-    assert!(
-        report.contains("image (source): from the inventory"),
-        "{report}"
-    );
-    assert!(report.contains("3 source files verified."), "{report}");
-    let bash = spit(&["bash", pipeline, "--sources", saved]);
-    assert!(
-        bash.status.success(),
-        "{}",
-        String::from_utf8_lossy(&bash.stderr)
-    );
-    assert!(String::from_utf8(bash.stdout)
-        .unwrap()
-        .contains("'data/sub-1/ses-1/image.nii.gz'"));
+    let notes = String::from_utf8(checked.stderr).unwrap();
+    assert!(notes.contains("3 source files verified."), "{notes}");
 }

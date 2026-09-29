@@ -1,5 +1,5 @@
-//! Source inventories: `sources:` records and `contexts:`, whether in their
-//! own text or inline in a pipeline document.
+//! Source inventories: `sources:` records and `contexts:`, whether in a
+//! `.spitout` or written in a `.spitin` recipe.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -10,13 +10,13 @@ use super::flow::is_stage_header;
 use super::lexical::{comma_items, identifier, qualified_identifier, strip_comment};
 use super::ParseError;
 
-/// A document's text split in two: the pipeline, and any inline inventory
+/// A document's text split in two: the rest, and any records
 /// under `sources:` or `contexts:` headers. Each keeps the document's line
 /// numbers, with blank lines where the other's lines were.
 pub(crate) struct DocumentText {
     pub(crate) pipeline: String,
     pub(crate) inventory: String,
-    /// The line of the first inline `sources:` or `contexts:` header.
+    /// The line of the first `sources:` or `contexts:` header.
     pub(crate) inventory_line: Option<usize>,
 }
 

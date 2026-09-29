@@ -1,24 +1,25 @@
+mod support;
+
 use std::fs;
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use spit::{
-    diagnose, parse_source_inventory, parse_spit, render_artifacts, resolve,
-    resolve_artifacts_excluding, ArtifactReport, Gap, InputSource, InputSpec, ResolveError,
-    ResolvedInputs, Severity,
+    diagnose, parse_source_inventory, render_artifacts, resolve, resolve_artifacts_excluding,
+    ArtifactReport, Gap, InputSource, ResolveError, ResolvedInputs, Severity,
 };
 
 /// The document's pipeline, and `inventory` after the input stage.
 fn settle(text: &str, inventory: &str) -> Result<(spit::Pipeline, ResolvedInputs), ResolveError> {
-    let document = parse_spit(text).unwrap();
+    let (pipeline, spec, _) = support::parse_with_rules(text).unwrap();
     let records = parse_source_inventory(inventory).unwrap();
-    let settled = InputSpec::embedded_in(&document)
-        .resolve(&document.pipeline, InputSource::Inventory(records))
+    let settled = spec
+        .resolve(&pipeline, InputSource::Inventory(records))
         .map_err(|error| match error.downcast::<ResolveError>() {
             Ok(error) => *error,
             Err(error) => panic!("{error}"),
         })?;
-    Ok((document.pipeline, settled))
+    Ok((pipeline, settled))
 }
 
 /// What `spit artifacts` reports: jobs over the settled inventory, with the
@@ -298,14 +299,13 @@ fn cli_lists_incomplete_artifacts_where_check_fails() {
             .args([
                 command,
                 pipeline.to_str().unwrap(),
-                "--sources",
                 sources.to_str().unwrap(),
             ])
             .output()
             .unwrap()
     };
     let artifacts = run("artifacts");
-    let check = run("check");
+    let check = run("dag");
     fs::remove_dir_all(&directory).unwrap();
 
     assert!(

@@ -4,30 +4,24 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::lower::{
-    parse_document_with_imports, Document, Module, ParsedDocument, PipelineBuilder,
-};
-use crate::model::{
-    CommandDef, CommandRole, CoverageRule, InputRules, OperationDef, Pipeline, ProductDef,
-    SourceInventory,
-};
-use crate::parser::{parse_use, strip_comment, InlineInventory, ParseError, Rule, UseSpec};
+use crate::lower::{parse_document_with_imports, ParsedDocument, PipelineBuilder};
+use crate::model::{CommandDef, CommandRole, OperationDef, Pipeline, ProductDef};
+use crate::parser::{parse_use, strip_comment, Kind, ParseError, UseSpec};
 use crate::span::Place;
 
 pub(crate) fn apply_import(
     builder: &mut PipelineBuilder,
-    imports: &BTreeMap<usize, Module>,
+    imports: &BTreeMap<usize, Pipeline>,
     place: Place,
 ) -> Result<(), ParseError> {
     let line = place.line;
     let pipeline = &mut builder.pipeline;
-    let module = imports.get(&line).ok_or_else(|| {
+    let imported = imports.get(&line).ok_or_else(|| {
         ParseError::new(
             line,
-            "imports require a document path; use parse_document_at",
+            "imports require a document path; use parse_pipeline_at",
         )
     })?;
-    let imported = &module.pipeline;
     for product in &imported.products {
         if pipeline
             .products
@@ -104,19 +98,11 @@ pub(crate) fn apply_import(
     for product in imported.product_paths.keys() {
         lines.paths.insert(product.clone(), place.clone());
     }
-    for constraint in &module.inputs.constraints {
-        builder.add_constraint(constraint.clone(), Rule::spanning(&place));
-    }
     Ok(())
 }
 
-fn select_import(
-    module: &Pipeline,
-    inputs: &InputRules,
-    spec: &UseSpec,
-    line: usize,
-) -> Result<Module, ParseError> {
-    let mut selected = Module::default();
+fn select_import(module: &Pipeline, spec: &UseSpec, line: usize) -> Result<Pipeline, ParseError> {
+    let mut selected = Pipeline::default();
     let import_all = spec.names.is_none();
     let names: Vec<&str> = match &spec.names {
         Some(names) => names.iter().map(String::as_str).collect(),
@@ -162,10 +148,10 @@ fn select_import(
             .as_ref()
             .map_or_else(|| name.to_owned(), |alias| format!("{alias}::{name}"));
         if let Some(operation) = operation {
-            import_operation(&mut selected.pipeline, module, operation, &qualified, line)?;
+            import_operation(&mut selected, module, operation, &qualified, line)?;
         }
         if let Some(source) = source {
-            import_source(&mut selected, module, inputs, source, &qualified, line)?;
+            import_source(&mut selected, module, source, &qualified, line)?;
         }
     }
     Ok(selected)
@@ -242,20 +228,15 @@ fn import_operation(
     Ok(())
 }
 
-/// Import a source as `qualified`, with its path rule and coverage rules.
+/// Import a source as `qualified`, with its path rule.
 fn import_source(
-    selected: &mut Module,
+    selected: &mut Pipeline,
     module: &Pipeline,
-    inputs: &InputRules,
     source: &ProductDef,
     qualified: &str,
     line: usize,
 ) -> Result<(), ParseError> {
     let name = &source.name;
-    let Module {
-        pipeline: selected,
-        inputs: selected_inputs,
-    } = selected;
     if selected
         .products
         .iter()
@@ -276,62 +257,30 @@ fn import_source(
             .product_paths
             .insert(qualified.to_owned(), path.with_product(name));
     }
-    selected_inputs.constraints.extend(
-        inputs
-            .constraints
-            .iter()
-            .filter(|constraint| &constraint.product == name)
-            .map(|constraint| CoverageRule {
-                product: qualified.to_owned(),
-                ..constraint.clone()
-            }),
-    );
     Ok(())
 }
 
 /// Parse a pipeline from a known file location, resolving imports.
 /// Import paths are relative to the file that contains each `use` line.
-pub fn parse_document_at(
-    text: &str,
-    path: &Path,
-) -> Result<(Pipeline, Option<SourceInventory>), ParseError> {
-    parse_located_document(text, path, InlineInventory::Read)
-        .map(|document| (document.pipeline, document.inventory))
-}
-
-/// Like [`parse_document_at`], but skips any inline inventory, for use with a
-/// separate one that replaces it. The inline records need not parse.
 pub fn parse_pipeline_at(text: &str, path: &Path) -> Result<Pipeline, ParseError> {
-    parse_located_document(text, path, InlineInventory::Skip).map(|document| document.pipeline)
+    parse_located_document(text, path, Kind::Pipeline).map(|document| document.pipeline)
 }
 
-/// Parse a whole document at a known location: its pipeline, input rules,
-/// and inline records, resolving imports.
-pub fn parse_spit_at(text: &str, path: &Path) -> Result<Document, ParseError> {
-    parse_located_document(text, path, InlineInventory::Read).map(Document::from)
-}
-
-/// Like [`parse_spit_at`], but skips any inline inventory, for use with a
-/// separate one that replaces it. The inline records need not parse.
-pub fn parse_spit_without_records_at(text: &str, path: &Path) -> Result<Document, ParseError> {
-    parse_located_document(text, path, InlineInventory::Skip).map(Document::from)
-}
-
-/// Like [`parse_document_at`], but also keeps declaration line numbers.
+/// Parse a pipeline or a recipe at `path`, keeping declaration lines.
 pub(crate) fn parse_located_document(
     text: &str,
     path: &Path,
-    inline: InlineInventory,
+    kind: Kind,
 ) -> Result<ParsedDocument, ParseError> {
     let root = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
-    parse_document_at_inner(text, &root, &mut vec![root.clone()], inline)
+    parse_document_at_inner(text, &root, &mut vec![root.clone()], kind)
 }
 
 fn parse_document_at_inner(
     text: &str,
     path: &Path,
     stack: &mut Vec<PathBuf>,
-    inline: InlineInventory,
+    kind: Kind,
 ) -> Result<ParsedDocument, ParseError> {
     let mut imports = BTreeMap::new();
     for (index, original) in text.lines().enumerate() {
@@ -374,26 +323,20 @@ fn parse_document_at_inner(
             .strip_prefix('\u{feff}')
             .unwrap_or(&imported_text);
         stack.push(canonical.clone());
-        // Imports bring no inventory records, so an imported file's are skipped.
-        let module =
-            parse_document_at_inner(imported_text, &canonical, stack, InlineInventory::Skip)
-                .map_err(|error| {
-                    ParseError::new(
-                        number,
-                        format!(
-                            "in `{}` at line {}: {}",
-                            canonical.display(),
-                            error.line(),
-                            error.message
-                        ),
-                    )
-                });
+        let module = parse_document_at_inner(imported_text, &canonical, stack, Kind::Pipeline)
+            .map_err(|error| {
+                ParseError::new(
+                    number,
+                    format!(
+                        "in `{}` at line {}: {}",
+                        canonical.display(),
+                        error.line(),
+                        error.message
+                    ),
+                )
+            });
         stack.pop();
-        let module = module?;
-        imports.insert(
-            number,
-            select_import(&module.pipeline, &module.inputs, &spec, number)?,
-        );
+        imports.insert(number, select_import(&module?.pipeline, &spec, number)?);
     }
-    parse_document_with_imports(text, &imports, inline)
+    parse_document_with_imports(text, &imports, kind)
 }

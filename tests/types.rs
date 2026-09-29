@@ -1,6 +1,8 @@
+mod support;
+
 use spit::{
-    parse_document, parse_pipeline, parse_source_inventory, parse_type_expr, render_dag, resolve,
-    Compatibility, ResolveError, Substitutions, TypeExpr, TypeUnifyError,
+    parse_pipeline, parse_source_inventory, parse_type_expr, render_dag, resolve, Compatibility,
+    ResolveError, Substitutions, TypeExpr, TypeUnifyError,
 };
 
 fn product(text: &str) -> TypeExpr {
@@ -69,7 +71,7 @@ sources:\n\
   gps[id=x]\n\
   imu[id=x]\n\
   metadata[id=x]\n";
-    let (pipeline, inventory) = parse_document(text).unwrap();
+    let (pipeline, inventory) = support::parse_fixture(text).unwrap();
     let dag = resolve(&pipeline, &inventory.unwrap()).unwrap();
     assert_eq!(
         dag.jobs[0].output().artifact_type,
@@ -280,15 +282,18 @@ fn field_survey_reuses_image_operations_across_kinds_and_spaces() {
 
 #[test]
 fn analytics_join_key_variables_reject_mismatched_relations() {
-    let valid = parse_document(include_str!("../examples/analytics/analytics.spit")).unwrap();
-    assert_eq!(resolve(&valid.0, &valid.1.unwrap()).unwrap().jobs.len(), 34);
+    let valid = parse_pipeline(include_str!("../examples/analytics/analytics.spit")).unwrap();
+    let inventory =
+        parse_source_inventory(include_str!("../examples/analytics/analytics.spitout")).unwrap();
+    assert_eq!(resolve(&valid, &inventory).unwrap().jobs.len(), 34);
 
-    let invalid = parse_document(include_str!(
+    // The conflict is in the pipeline itself, before any inventory.
+    let invalid = parse_pipeline(include_str!(
         "../examples/analytics/analytics_bad_join.spit"
     ))
     .unwrap();
     assert!(matches!(
-        resolve(&invalid.0, &invalid.1.unwrap()),
+        spit::validate_pipeline(&invalid),
         Err(ResolveError::TypeVariableConflict { .. })
     ));
 }
@@ -323,13 +328,14 @@ fn declared_output_type_cannot_contradict_inferred_type() {
 
 #[test]
 fn resolves_untyped_pipeline_by_shape_and_cardinality() {
-    let (pipeline, inventory) =
-        parse_document(include_str!("../examples/types/untyped.spit")).unwrap();
+    let pipeline = parse_pipeline(include_str!("../examples/types/untyped.spit")).unwrap();
+    let inventory =
+        parse_source_inventory(include_str!("../examples/types/untyped.spitout")).unwrap();
     assert!(pipeline
         .products
         .iter()
         .all(|product| product.artifact_type == TypeExpr::Unknown));
-    let dag = resolve(&pipeline, &inventory.unwrap()).unwrap();
+    let dag = resolve(&pipeline, &inventory).unwrap();
     assert_eq!(dag.jobs.len(), 3);
     assert_eq!(dag.jobs[2].input_artifacts().count(), 2);
     assert_eq!(dag.jobs[2].output().artifact_type, TypeExpr::Unknown);
@@ -340,14 +346,14 @@ fn resolves_untyped_pipeline_by_shape_and_cardinality() {
 #[test]
 fn partially_typed_pipeline_accepts_unknown_and_rejects_known_mismatch() {
     let text = "products:\n  raw [site]\n  output : Result [site]\noperations:\n  process(Input) -> Result\npipeline:\n  output = process(raw)\nsources:\n  raw[site=01]\n";
-    let (pipeline, inventory) = parse_document(text).unwrap();
+    let (pipeline, inventory) = support::parse_fixture(text).unwrap();
     assert_eq!(
         resolve(&pipeline, &inventory.unwrap()).unwrap().jobs.len(),
         1
     );
 
     let mismatched = text.replace("raw [site]", "raw : Other [site]");
-    let (pipeline, inventory) = parse_document(&mismatched).unwrap();
+    let (pipeline, inventory) = support::parse_fixture(&mismatched).unwrap();
     assert!(matches!(
         resolve(&pipeline, &inventory.unwrap()),
         Err(ResolveError::TypeMismatch { .. })

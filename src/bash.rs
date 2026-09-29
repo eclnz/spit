@@ -1,69 +1,48 @@
-//! Bash script generation for resolved DAGs: quoting each command argument,
-//! and rooting artifact paths at `$SPIT_ROOT`.
+//! Step 4, the Bash backend: turn a bound DAG into a script, quoting each
+//! argument and rooting every path at `$SPIT_ROOT`. It reads only the
+//! `.spitdag`: no pipeline, path rule or command template.
 
-use std::collections::{BTreeMap, BTreeSet};
-use std::fmt::Write;
+use std::collections::BTreeSet;
+use std::fmt::{self, Write};
 use std::path::Path;
 
-use crate::command::{slot, validate_commands, CommandTemplate, Slot};
-use crate::model::{
-    ArtifactKey, Cardinality, CommandRole, Job, OperationDef, Pipeline, ResolvedDag,
-};
-use crate::paths::{bound_paths, check_rules, output_keys};
-use crate::span::Located;
-use crate::template::Part;
+use crate::spitdag::{ArgPart, Argument, BoundDag};
 
-/// An error that stops a script being generated. Command and path errors
-/// are the same type, so they pass through unchanged.
-pub type BashError = Located<String>;
+/// Why a script cannot be written.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BashError(String);
 
-fn error(message: impl Into<String>) -> BashError {
-    BashError::new(message)
+impl BashError {
+    pub fn message(&self) -> &str {
+        &self.0
+    }
 }
 
-/// Generate a script for the concrete jobs already selected by `resolve`.
-/// Each artifact path is derived from its product and entity bindings.
-pub fn render_bash(pipeline: &Pipeline, dag: &ResolvedDag) -> Result<String, BashError> {
-    check_rules(pipeline, dag)?;
-    let operations: BTreeMap<_, _> = pipeline
-        .operations
-        .iter()
-        .map(|operation| (operation.name.as_str(), operation))
-        .collect();
-    validate_commands(pipeline)?;
-    let commands: BTreeMap<_, _> = pipeline
-        .commands
-        .iter()
-        .filter(|command| command.role == CommandRole::Run)
-        .map(|command| (command.operation.as_str(), command))
-        .collect();
-    let mut verifications: BTreeMap<_, Vec<_>> = BTreeMap::new();
-    for command in &pipeline.commands {
-        if command.role == CommandRole::Verify {
-            verifications
-                .entry(command.operation.as_str())
-                .or_default()
-                .push(command);
-        }
+impl fmt::Display for BashError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
     }
-    let outputs = output_keys(dag);
-    let paths = bound_paths(pipeline, dag)?;
+}
 
+impl std::error::Error for BashError {}
+
+/// A script that runs every job of `dag` in order.
+pub fn render_bash(dag: &BoundDag) -> Result<String, BashError> {
+    let verifies = dag.jobs.iter().any(|job| !job.verify.is_empty());
     let mut script =
         String::from("#!/usr/bin/env bash\nset -euo pipefail\nSPIT_ROOT=\"${SPIT_ROOT:-.}\"\n");
     // A root such as `-data` would make every path read as an option.
     script.push_str("case $SPIT_ROOT in -*) SPIT_ROOT=\"./$SPIT_ROOT\" ;; esac\n\n");
     script.push_str("spit_require() {\n  if [[ ! -e \"$1\" ]]; then\n    printf 'missing artifact: %s\\n' \"$1\" >&2\n    exit 1\n  fi\n}\n\n");
-    if !verifications.is_empty() {
+    if verifies {
         script.push_str("spit_verify() {\n  local job=\"$1\"\n  shift\n  if ! \"$@\"; then\n    printf 'verification failed for job %s: %s\\n' \"$job\" \"$*\" >&2\n    exit 1\n  fi\n}\n\n");
     }
 
-    for (identity, relative) in &paths {
-        if !outputs.contains(identity) {
-            writeln!(script, "spit_require {}", shell_path(relative)).unwrap();
-        }
+    let external = dag.external_inputs();
+    for artifact in &external {
+        writeln!(script, "spit_require {}", shell_path(&artifact.path)).unwrap();
     }
-    if paths.keys().any(|identity| !outputs.contains(identity)) {
+    if !external.is_empty() {
         script.push('\n');
     }
     let mut stage = None;
@@ -75,14 +54,8 @@ pub fn render_bash(pipeline: &Pipeline, dag: &ResolvedDag) -> Result<String, Bas
                 None => writeln!(script, "# ===== Outside stages =====\n").unwrap(),
             }
         }
-        let operation = operations.get(job.operation.as_str()).ok_or_else(|| {
-            error(format!(
-                "unknown operation `{}` in resolved DAG",
-                job.operation
-            ))
-        })?;
-        let command = commands.get(job.operation.as_str()).ok_or_else(|| {
-            error(format!(
+        let command = job.command.as_ref().ok_or_else(|| {
+            BashError(format!(
                 "no command defined for operation `{}`",
                 job.operation
             ))
@@ -91,8 +64,8 @@ pub fn render_bash(pipeline: &Pipeline, dag: &ResolvedDag) -> Result<String, Bas
         let parents: BTreeSet<_> = job
             .outputs
             .iter()
-            .map(|output| {
-                Path::new(&paths[&output.key()])
+            .map(|(_, output)| {
+                Path::new(&output.path)
                     .parent()
                     .and_then(|path| path.to_str())
                     .filter(|path| !path.is_empty())
@@ -103,79 +76,32 @@ pub fn render_bash(pipeline: &Pipeline, dag: &ResolvedDag) -> Result<String, Bas
         for parent in parents {
             writeln!(script, "mkdir -p -- {}", shell_path(&parent)).unwrap();
         }
-        for verification in verifications
-            .get(job.operation.as_str())
-            .into_iter()
-            .flatten()
-        {
-            let check = render_command(&verification.template, operation, job, &paths)?;
-            writeln!(script, "spit_verify {} {check}", job.id).unwrap();
+        for check in &job.verify {
+            writeln!(script, "spit_verify {} {}", job.id, shell_command(check)).unwrap();
         }
-        writeln!(
-            script,
-            "{}",
-            render_command(&command.template, operation, job, &paths)?
-        )
-        .unwrap();
-        for output in &job.outputs {
-            writeln!(script, "spit_require {}", shell_path(&paths[&output.key()])).unwrap();
+        writeln!(script, "{}", shell_command(command)).unwrap();
+        for (_, output) in &job.outputs {
+            writeln!(script, "spit_require {}", shell_path(&output.path)).unwrap();
         }
         script.push('\n');
     }
     Ok(script)
 }
 
-fn render_command(
-    template: &CommandTemplate,
-    operation: &OperationDef,
-    job: &Job,
-    paths: &BTreeMap<ArtifactKey, String>,
-) -> Result<String, BashError> {
-    let mut args = Vec::new();
-    for parts in template.arguments() {
-        if let [Part::Placeholder(name)] = parts.as_slice() {
-            if let Some(Slot::Input(index)) = slot(operation, name) {
-                if operation.inputs[index].cardinality == Cardinality::Many {
-                    for artifact in &job.inputs[index] {
-                        args.push(shell_path(&paths[&artifact.key()]));
-                    }
-                    continue;
-                }
-            }
-        }
-        let mut arg = String::new();
-        for part in parts {
-            match part {
-                Part::Literal(value) => arg.push_str(&shell_quote(value)),
-                Part::Placeholder(name) => {
-                    let artifact = match slot(operation, name) {
-                        Some(Slot::Output(index)) => job.outputs.get(index),
-                        Some(Slot::Input(index)) => {
-                            if operation.inputs[index].cardinality == Cardinality::Many {
-                                return Err(error(format!(
-                                    "many input `{{{name}}}` must be a complete command argument"
-                                )));
-                            }
-                            job.inputs
-                                .get(index)
-                                .and_then(|artifacts| artifacts.first())
-                        }
-                        None => {
-                            return Err(error(format!(
-                                "command for `{}` uses unknown placeholder `{{{name}}}`",
-                                operation.name
-                            )))
-                        }
-                    };
-                    let artifact = artifact
-                        .ok_or_else(|| error(format!("job {} lacks `{{{name}}}`", job.id)))?;
-                    arg.push_str(&shell_path(&paths[&artifact.key()]));
-                }
-            }
-        }
-        args.push(arg);
-    }
-    Ok(args.join(" "))
+fn shell_command(arguments: &[Argument]) -> String {
+    let arguments: Vec<_> = arguments
+        .iter()
+        .map(|argument| {
+            argument
+                .iter()
+                .map(|part| match part {
+                    ArgPart::Text(text) => shell_quote(text),
+                    ArgPart::Path(path) => shell_path(path),
+                })
+                .collect::<String>()
+        })
+        .collect();
+    arguments.join(" ")
 }
 
 fn shell_path(relative: &str) -> String {

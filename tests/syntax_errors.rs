@@ -73,12 +73,21 @@ fn reports_pipeline_and_inventory_syntax_errors_together() {
 }
 
 #[test]
-fn reports_multiple_errors_in_sectioned_and_embedded_inventory_text() {
-    let text = "products:\n  raw [id]\n  bad product\noperations:\n  copy(one)\n  bad operation\npipeline:\n  result = copy(raw)\nsources:\n  raw[id=x,id=y]\n  raw[id=a,id=b]\n";
-    let issues = errors(diagnose(text, None));
+fn reports_multiple_errors_in_a_sectioned_pipeline_and_its_inventory() {
+    let text = "products:\n  raw [id]\n  bad product\noperations:\n  copy(one)\n  bad operation\npipeline:\n  result = copy(raw)\n";
+    let inventory = "sources:\n  raw[id=x,id=y]\n  raw[id=a,id=b]\n";
+    let issues = errors(diagnose(text, Some(inventory)));
     assert_eq!(
-        issues.iter().map(|issue| issue.line).collect::<Vec<_>>(),
-        [Some(3), Some(6), Some(10), Some(11)]
+        issues
+            .iter()
+            .map(|issue| (issue.source, issue.line))
+            .collect::<Vec<_>>(),
+        [
+            (DiagnosticSource::Pipeline, Some(3)),
+            (DiagnosticSource::Pipeline, Some(6)),
+            (DiagnosticSource::Inventory, Some(2)),
+            (DiagnosticSource::Inventory, Some(3)),
+        ]
     );
 }
 
@@ -173,51 +182,102 @@ fn seeded_deletions_report_every_damaged_inventory_line() {
 
 #[test]
 fn deletion_messages_name_the_missing_syntax_without_cascading() {
-    let original: Vec<String> = [
+    let pipeline: Vec<String> = [
         "source raw : Image [id]",
-        "require raw count>=1 per [id]",
         "path: out/{product}/{id}.txt",
         "operation copy(input: Image) -> Image",
         "command copy: tool {input} {output}",
         "result = copy(raw)",
-        "sources:",
-        "  raw[id=A]",
     ]
     .into_iter()
     .map(str::to_owned)
     .collect();
-    assert!(errors(diagnose(&original.join("\n"), None)).is_empty());
+    let inventory = ["sources:", "  raw[id=A]"].map(str::to_owned);
+    let diagnose_both = |pipeline: &[String], inventory: &[String]| {
+        errors(diagnose(
+            &pipeline.join("\n"),
+            Some(&(inventory.join("\n") + "\n")),
+        ))
+    };
+    assert!(diagnose_both(&pipeline, &inventory).is_empty());
+    // A line of the pipeline, or of the inventory, with one piece deleted.
     let cases = [
-        (0, "]", "closing `]` in product declaration"),
-        (0, "Image", "expected type name"),
-        (1, "]", "closing `]` in constraint dimensions"),
-        (2, ":", "expected `:` after path product"),
-        (3, "(", "expected `(` after operation name"),
-        (3, "->", "expected `->` before operation output type"),
-        (4, ":", "expected command"),
-        (5, "=", "expected `=` before operation call"),
-        (5, ")", "expected closing `)`"),
-        (7, "=", "expected `dimension=value`"),
-        (7, "]", "expected closing `]` in source artifact"),
+        (
+            DiagnosticSource::Pipeline,
+            0,
+            "]",
+            "closing `]` in product declaration",
+        ),
+        (DiagnosticSource::Pipeline, 0, "Image", "expected type name"),
+        (
+            DiagnosticSource::Pipeline,
+            1,
+            ":",
+            "expected `:` after path product",
+        ),
+        (
+            DiagnosticSource::Pipeline,
+            2,
+            "(",
+            "expected `(` after operation name",
+        ),
+        (
+            DiagnosticSource::Pipeline,
+            2,
+            "->",
+            "expected `->` before operation output type",
+        ),
+        (DiagnosticSource::Pipeline, 3, ":", "expected command"),
+        (
+            DiagnosticSource::Pipeline,
+            4,
+            "=",
+            "expected `=` before operation call",
+        ),
+        (DiagnosticSource::Pipeline, 4, ")", "expected closing `)`"),
+        (
+            DiagnosticSource::Inventory,
+            1,
+            "=",
+            "expected `dimension=value`",
+        ),
+        (
+            DiagnosticSource::Inventory,
+            1,
+            "]",
+            "expected closing `]` in source artifact",
+        ),
     ];
-    for (line, deleted, expected) in cases {
-        let mut lines = original.clone();
+    for (source, line, deleted, expected) in cases {
+        let (mut damaged_pipeline, mut damaged_inventory) = (pipeline.clone(), inventory.clone());
+        let lines = match source {
+            DiagnosticSource::Pipeline => &mut damaged_pipeline[..],
+            DiagnosticSource::Inventory => &mut damaged_inventory[..],
+        };
         lines[line] = lines[line].replacen(deleted, "", 1);
-        let issues = errors(diagnose(&lines.join("\n"), None));
+        let issues = diagnose_both(&damaged_pipeline, &damaged_inventory);
         assert_eq!(
             issues.len(),
             1,
-            "deleting {deleted:?} on line {}: {issues:?}",
+            "deleting {deleted:?} on {source} line {}: {issues:?}",
             line + 1
         );
-        assert_eq!(issues[0].line, Some(line + 1));
+        assert_eq!((issues[0].source, issues[0].line), (source, Some(line + 1)));
         assert!(
             issues[0].message.contains(expected),
-            "deleting {deleted:?} on line {}: {}",
+            "deleting {deleted:?} on {source} line {}: {}",
             line + 1,
             issues[0].message
         );
     }
+    // A recipe's rules are parsed the same way.
+    let error = spit::parse_input_spec("require raw count>=1 per [id\n").unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("closing `]` in constraint dimensions"),
+        "{error}"
+    );
 }
 
 #[test]
@@ -234,4 +294,19 @@ fn next_random(seed: &mut u64) -> u64 {
     *seed ^= *seed >> 7;
     *seed ^= *seed << 17;
     *seed
+}
+
+#[test]
+fn records_in_a_pipeline_are_one_error_however_many_lines() {
+    let text =
+        "source x [s]\nsources:\n    x[s=1]\n    x[s=2\ncontexts:\n    [s=3]\noperation f(one\n";
+    let issues = errors(diagnose(text, None));
+    let found: Vec<_> = issues
+        .iter()
+        .map(|issue| (issue.line, issue.message.as_str()))
+        .collect();
+    assert_eq!(found.len(), 2, "{found:?}");
+    assert_eq!(found[0].0, Some(2));
+    assert!(found[0].1.contains("belong in a .spitout"), "{found:?}");
+    assert_eq!(found[1].0, Some(7));
 }

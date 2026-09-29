@@ -12,13 +12,6 @@ source reference : Reference<World> [lab, rig]
 source policy : Policy<World> [lab]
 source atlas : Atlas<World> []
 
-require lidar count>=1 per [lab, rig, capture]
-require camera count>=1 per [lab, rig, capture]
-require lidar_cal count=1 per [lab, rig]
-require camera_cal count=1 per [lab, rig]
-require reference count=1 per [lab, rig]
-require policy count=1 per [lab]
-
 path: artifacts/{product}/{entities}.bin
 path atlas: config/world-atlas.bin
 
