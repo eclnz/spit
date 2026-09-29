@@ -941,6 +941,47 @@ fn operation_warnings(
 /// Steps that resolve no jobs from a supplied inventory. A source with no
 /// artifacts is reported once, naming the steps it leaves empty; any other
 /// step that is empty although its inputs are not is reported on its own.
+/// For each product, the sources it depends on that have no artifacts.
+/// Each product's set is found once, from its inputs' sets, so a step that
+/// reads the same product twice costs no more than one that reads it once.
+fn unobserved_sources<'a>(
+    producers: &BTreeMap<&'a str, &'a crate::Invocation>,
+    observed: &BTreeSet<&str>,
+) -> BTreeMap<&'a str, BTreeSet<&'a str>> {
+    let mut found: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
+    let products = producers
+        .values()
+        .flat_map(|invocation| &invocation.inputs)
+        .map(|input| input.product.as_str());
+    for product in products {
+        // Depth first with an explicit stack: a product is finished once
+        // every product it reads is.
+        let mut stack = vec![(product, false)];
+        while let Some((name, inputs_done)) = stack.pop() {
+            if found.contains_key(name) {
+                continue;
+            }
+            let Some(invocation) = producers.get(name) else {
+                let sources = (!observed.contains(name)).then_some(name);
+                found.insert(name, sources.into_iter().collect());
+                continue;
+            };
+            let inputs = invocation.inputs.iter().map(|input| input.product.as_str());
+            if inputs_done {
+                let sources = inputs
+                    .flat_map(|input| found.get(input).into_iter().flatten())
+                    .copied()
+                    .collect();
+                found.insert(name, sources);
+            } else {
+                stack.push((name, true));
+                stack.extend(inputs.map(|input| (input, false)));
+            }
+        }
+    }
+    found
+}
+
 fn empty_step_warnings(
     pipeline: &Pipeline,
     lines: &SourceMap,
@@ -966,25 +1007,7 @@ fn empty_step_warnings(
         Some(producer) => !produced.contains(producer.output_product()),
         None => !observed.contains(name),
     };
-    // The unobserved sources each product depends on.
-    fn unobserved<'a>(
-        name: &'a str,
-        producers: &BTreeMap<&'a str, &'a crate::Invocation>,
-        observed: &BTreeSet<&str>,
-        found: &mut BTreeSet<&'a str>,
-    ) {
-        match producers.get(name) {
-            Some(invocation) => {
-                for input in &invocation.inputs {
-                    unobserved(&input.product, producers, observed, found);
-                }
-            }
-            None if !observed.contains(name) => {
-                found.insert(name);
-            }
-            None => {}
-        }
-    }
+    let unobserved = unobserved_sources(&producers, &observed);
     let mut left_empty: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
     let mut warnings = Vec::new();
     for invocation in &pipeline.invocations {
@@ -992,10 +1015,12 @@ fn empty_step_warnings(
         if produced.contains(step) {
             continue;
         }
-        let mut sources = BTreeSet::new();
-        for input in &invocation.inputs {
-            unobserved(&input.product, &producers, &observed, &mut sources);
-        }
+        let sources: BTreeSet<_> = invocation
+            .inputs
+            .iter()
+            .flat_map(|input| unobserved.get(input.product.as_str()).into_iter().flatten())
+            .copied()
+            .collect();
         for source in &sources {
             left_empty.entry(source).or_default().push(step);
         }
@@ -1106,6 +1131,19 @@ fn error_location(
     inventory_text: &str,
     external_inventory: bool,
 ) -> (DiagnosticSource, Option<Place>) {
+    if let Some(place) = pipeline_place(pipeline, lines, error) {
+        return (DiagnosticSource::Pipeline, Some(place));
+    }
+    let inventory_place = inventory_place(error, inventory_text);
+    match inventory_place {
+        Some(_) if external_inventory => (DiagnosticSource::Inventory, inventory_place),
+        _ => (DiagnosticSource::Pipeline, inventory_place),
+    }
+}
+
+/// Where in the pipeline `error` is, when it is about a step, rule or
+/// declaration there.
+fn pipeline_place(pipeline: &Pipeline, lines: &SourceMap, error: &ResolveError) -> Option<Place> {
     // The part of the step producing `output` that `error` is about.
     let step = |output: &str| {
         let step = lines.invocations.get(output)?;
@@ -1120,7 +1158,7 @@ fn error_location(
         let first = matching.next()?;
         matching.next().is_none().then_some(first)
     };
-    let pipeline_place = match error {
+    match error {
         ResolveError::TypeMismatch { site, .. }
         | ResolveError::TypeVariableConflict { site, .. }
         | ResolveError::MissingInput { site, .. }
@@ -1159,11 +1197,12 @@ fn error_location(
             subject_place(pipeline, lines, subject, error)
         }
         ResolveError::DuplicateSourceArtifact { .. } => None,
-    };
-    if pipeline_place.is_some() {
-        return (DiagnosticSource::Pipeline, pipeline_place);
     }
+}
 
+/// The inventory record `error` is about, when it is about one: the whole
+/// line.
+fn inventory_place(error: &ResolveError, inventory_text: &str) -> Option<Place> {
     let inventory_line = match error {
         ResolveError::UnknownProduct { name } => inventory_record_lines(inventory_text, name, None)
             .into_iter()
@@ -1182,14 +1221,10 @@ fn error_location(
         _ => None,
     };
     // A source record is one line; point at all of it.
-    let inventory_place = inventory_line.and_then(|line| {
+    inventory_line.and_then(|line| {
         let text = inventory_text.lines().nth(line.checked_sub(1)?)?;
         Some(Place::new(line, content_columns(text)))
-    });
-    match inventory_place {
-        Some(_) if external_inventory => (DiagnosticSource::Inventory, inventory_place),
-        _ => (DiagnosticSource::Pipeline, inventory_place),
-    }
+    })
 }
 
 fn inventory_record_lines(
