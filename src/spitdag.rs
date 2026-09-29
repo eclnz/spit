@@ -4,7 +4,6 @@
 //! template. Written as a `.spitdag`, a JSON document.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::fmt::Write;
 
 use crate::json::Json;
 use crate::types::TypeExpr;
@@ -61,12 +60,11 @@ pub enum ArgPart {
 impl BoundArtifact {
     /// Its product and bindings, as `image[sub=1,ses=2]`.
     pub fn identity(&self) -> String {
-        let bindings: Vec<_> = self
+        let entities = self
             .entities
             .iter()
-            .map(|(dimension, value)| format!("{dimension}={value}"))
-            .collect();
-        format!("{}[{}]", self.product, bindings.join(","))
+            .map(|(dimension, value)| (dimension.as_str(), value.as_str()));
+        crate::model::identity(&self.product, entities)
     }
 }
 
@@ -182,54 +180,6 @@ impl BoundDag {
             ]);
         format!("{document}\n")
     }
-}
-
-/// The jobs as text, each artifact with its path when `paths` is set.
-pub fn render_bound_dag(dag: &BoundDag, paths: bool) -> String {
-    let mut output = String::new();
-    let write_artifact = |output: &mut String, port: Option<&str>, artifact: &BoundArtifact| {
-        let mut rendered = artifact.identity();
-        if artifact.artifact_type != TypeExpr::Unknown {
-            write!(rendered, " : {}", artifact.artifact_type).unwrap();
-        }
-        match port {
-            Some(port) => writeln!(output, "    {port}: {rendered}").unwrap(),
-            None => writeln!(output, "    {rendered}").unwrap(),
-        }
-        if paths {
-            writeln!(output, "      path: {}", artifact.path).unwrap();
-        }
-    };
-    for (index, job) in dag.jobs.iter().enumerate() {
-        if index > 0 {
-            output.push('\n');
-        }
-        writeln!(output, "Job {}", job.id).unwrap();
-        if let Some(stage) = &job.stage {
-            writeln!(output, "  stage: {stage}").unwrap();
-        }
-        writeln!(output, "  operation: {}", job.operation).unwrap();
-        writeln!(output, "  inputs:").unwrap();
-        for (port, artifacts) in &job.inputs {
-            for artifact in artifacts {
-                write_artifact(&mut output, Some(port), artifact);
-            }
-        }
-        if let [(_, artifact)] = job.outputs.as_slice() {
-            writeln!(output, "  output:").unwrap();
-            write_artifact(&mut output, None, artifact);
-        } else {
-            writeln!(output, "  outputs:").unwrap();
-            for (port, artifact) in &job.outputs {
-                write_artifact(&mut output, Some(port), artifact);
-            }
-        }
-        if !job.depends_on.is_empty() {
-            let dependencies: Vec<_> = job.depends_on.iter().map(ToString::to_string).collect();
-            writeln!(output, "  depends_on: {}", dependencies.join(", ")).unwrap();
-        }
-    }
-    output
 }
 
 fn job_json(job: &BoundJob, dependents: &[usize]) -> Json {

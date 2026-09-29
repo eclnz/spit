@@ -2,7 +2,7 @@
 //! shares this: it knows the model, and nothing about resolving or discovery.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::fmt::{self, Write};
+use std::fmt;
 
 use crate::model::{ArtifactInstance, DirectoryDiscovery, Pipeline};
 use crate::span::Located;
@@ -244,16 +244,19 @@ pub(crate) fn unusable_path(relative: &str) -> Option<&'static str> {
     }
 }
 
+/// `value` as one path component: ASCII letters, digits and `-` as they
+/// are, every other byte as `%XX`.
 pub(crate) fn encode_component(value: &str) -> String {
-    let mut encoded = String::new();
-    for byte in value.bytes() {
-        if byte.is_ascii_alphanumeric() || byte == b'-' {
-            encoded.push(char::from(byte));
-        } else {
-            write!(encoded, "%{byte:02X}").unwrap();
-        }
-    }
-    encoded
+    value
+        .bytes()
+        .map(|byte| {
+            if byte.is_ascii_alphanumeric() || byte == b'-' {
+                char::from(byte).to_string()
+            } else {
+                format!("%{byte:02X}")
+            }
+        })
+        .collect()
 }
 
 pub(crate) fn decode_component(encoded: &str) -> Option<String> {
