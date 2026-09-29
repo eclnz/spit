@@ -11,8 +11,10 @@ use spit::{
 
 #[test]
 fn path_coverage_exposes_default_fallbacks_and_strict_rejects_them() {
-    let (pipeline, _) =
-        support::parse_fixture(include_str!("../examples/commands/field_survey.spit")).unwrap();
+    let (pipeline, _) = support::parse_fixture(include_str!(
+        "../examples/commands/field_survey/field_survey.spit"
+    ))
+    .unwrap();
     let coverage = inspect_paths(&pipeline).unwrap();
     assert!(coverage.entries.iter().any(|entry| {
         entry.product == "vegetation" && matches!(entry.rule, PathRule::Default(_))
@@ -53,10 +55,14 @@ fn path_coverage_catches_missing_and_invalid_rules_without_jobs() {
 
 #[test]
 fn bound_dag_shows_port_names_and_paths_without_commands() {
-    let (mut pipeline, _) =
-        support::parse_fixture(include_str!("../examples/commands/field_survey.spit")).unwrap();
-    let inventory =
-        parse_source_inventory(include_str!("../examples/commands/field_survey.spitout")).unwrap();
+    let (mut pipeline, _) = support::parse_fixture(include_str!(
+        "../examples/commands/field_survey/field_survey.spit"
+    ))
+    .unwrap();
+    let inventory = parse_source_inventory(include_str!(
+        "../examples/commands/field_survey/field_survey.spitout"
+    ))
+    .unwrap();
     let dag = resolve(&pipeline, &inventory).unwrap();
     pipeline.commands.clear();
     let report = bound(&pipeline, &dag).unwrap();

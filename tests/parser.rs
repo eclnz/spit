@@ -273,3 +273,22 @@ fn an_empty_named_contexts_section_records_its_discovery() {
     assert_eq!(inventory.discovered.get("sessions"), Some(&Vec::new()));
     assert!(inventory.contexts.is_empty());
 }
+
+#[test]
+fn nested_sources_expand_each_product_and_run() {
+    let text = "sources:\n    lut\n\ncontexts sessions:\n    [sub=01,ses=01]:\n        t1w\n        [run=01,02]:\n            dwi, bvec\n";
+    let inventory = parse_source_inventory(text).unwrap();
+    assert_eq!(inventory.contexts.len(), 1);
+    assert_eq!(inventory.artifacts.len(), 6);
+    assert!(inventory
+        .artifacts
+        .iter()
+        .any(|record| record.product == "bvec" && record.entities.get("run") == Some("02")));
+    for bad in [
+        "contexts sessions:\n    [sub=01]:\n        [sub=02]:\n            image\n",
+        "contexts sessions:\n    [sub=01]:\n        [run=01,]:\n            image\n",
+        "contexts sessions:\n    image\n",
+    ] {
+        assert!(parse_source_inventory(bad).is_err(), "{bad}");
+    }
+}

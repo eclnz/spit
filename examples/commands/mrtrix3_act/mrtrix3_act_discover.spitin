@@ -1,0 +1,6 @@
+pipeline mrtrix3_act.spit
+
+discover sessions: [sub, ses] from dirs sub-{sub}/ses-{ses}
+require raw_dwi count>=2 per [sub, ses]
+require reverse_b0 count=1 per [sub, ses]
+require t1w count=1 per [sub, ses]

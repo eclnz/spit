@@ -67,6 +67,7 @@ pub(crate) enum Header<'a> {
     Constraints,
     Commands,
     Sources,
+    SourcePaths,
     /// `contexts:`, or `contexts name:` for a named discovery's contexts.
     Contexts(Option<&'a str>),
 }
@@ -81,6 +82,7 @@ impl<'a> Header<'a> {
             "constraints:" => Self::Constraints,
             "commands:" => Self::Commands,
             "sources:" => Self::Sources,
+            "source_paths:" => Self::SourcePaths,
             "contexts:" => Self::Contexts(None),
             _ => Self::Contexts(Some(
                 line.strip_prefix("contexts ")?.strip_suffix(':')?.trim(),
@@ -91,7 +93,7 @@ impl<'a> Header<'a> {
     /// Whether it opens records, which belong in a `.spitout`, rather than a
     /// section of a sectioned pipeline.
     pub(crate) fn is_records(self) -> bool {
-        matches!(self, Self::Sources | Self::Contexts(_))
+        matches!(self, Self::Sources | Self::SourcePaths | Self::Contexts(_))
     }
 }
 

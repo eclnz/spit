@@ -45,20 +45,24 @@ pub fn discover_source_files(
     rules: &InputRules,
     root: &Path,
 ) -> Result<Discovery, PathError> {
-    discover(&with_source_paths(pipeline, rules), rules, root)
+    discover(
+        &with_source_paths(pipeline, &rules.source_paths),
+        rules,
+        root,
+    )
 }
 
-/// `pipeline` with the path rules `rules` sets for its sources, which take
-/// precedence; borrowed when there are none.
+/// `pipeline` with `source_paths`, rules for its sources that it does not
+/// set itself; borrowed when there are none.
 pub(super) fn with_source_paths<'a>(
     pipeline: &'a Pipeline,
-    rules: &InputRules,
+    source_paths: &BTreeMap<String, PathTemplate>,
 ) -> Cow<'a, Pipeline> {
-    if rules.source_paths.is_empty() {
+    if source_paths.is_empty() {
         return Cow::Borrowed(pipeline);
     }
     let mut merged = pipeline.clone();
-    merged.product_paths.extend(rules.source_paths.clone());
+    merged.product_paths.extend(source_paths.clone());
     Cow::Owned(merged)
 }
 
@@ -584,16 +588,22 @@ impl Listing {
     }
 }
 
-/// Give each record without a path the one its source's rule gives it, so
-/// that resolving jobs needs no rule for a source. `pipeline` has the
-/// recipe's source paths, from [`with_source_paths`]. A source with no rule
-/// keeps no path.
+/// Bind each source to its one declared path, so that resolving jobs needs
+/// no rule for a source. `pipeline` has every source path rule: its own, the
+/// recipe's and the inventory's. Older inventories may include record paths;
+/// accept those only when they agree with the rule.
 pub(crate) fn locate_sources(
     pipeline: &Pipeline,
     inventory: &mut SourceInventory,
 ) -> Result<(), PathError> {
     for record in &mut inventory.artifacts {
-        if record.path.is_some() || pipeline.path_template_for(&record.product).is_none() {
+        if pipeline.path_template_for(&record.product).is_none() {
+            if record.path.is_some() {
+                return Err(error(format!(
+                    "source `{}` has a record path but no path rule",
+                    record.product
+                )));
+            }
             continue;
         }
         let Some(product) = pipeline
@@ -611,6 +621,13 @@ pub(crate) fn locate_sources(
         let path = bind_path(pipeline, &product.dimensions, &artifact, || {
             format!("source `{artifact}`")
         })?;
+        if let Some(given) = &record.path {
+            if *given != path {
+                return Err(error(format!(
+                    "source `{artifact}` record path `{given}` differs from its path rule `{path}`"
+                )));
+            }
+        }
         record.path = Some(path);
     }
     Ok(())
