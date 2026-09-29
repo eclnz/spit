@@ -167,6 +167,7 @@ Dead public API (item 5, 15) is not visible to the compiler because `lib.rs` re-
 
 ### 16. Make `TypeExpr` `Display` unambiguous
 - `src/types.rs`: `Variable("T")` and `Named("T")` both print `T` (`Variable` prints bare when the name has one character). Diagnostics cannot distinguish them; the JSON encoder does. **Output change:** update expected messages in tests and docs.
+- **Status: done.** A variable always prints with its `$` marker, which the parser accepts in signatures, so each type reads back as itself where it can be written. **Output change:** for example `type mismatch at \`f.input\`: product \`raw\` is T, expected List<T>` (the second `T` a variable) now reads `... expected List<$T>`. No existing test, golden output or doc depended on the old form; new test `a_type_variable_prints_marked_so_it_differs_from_a_named_type` pins the round trip and that message.
 
 ### 17. Small clippy and idiom findings
 - Needless by-value params: `imports.rs:15` (`Place`), `lower.rs:53` (`Step`), `parser/flow.rs:199` (`Option<String>`).
