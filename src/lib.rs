@@ -25,7 +25,7 @@ pub use diagnostics::{
 };
 pub use error::{DefinitionSubject, ResolveError, TypeConflict};
 pub use imports::{parse_document_at, parse_pipeline_at};
-pub use inputs::{parse_input_spec, parse_input_spec_at, InputSpec};
+pub use inputs::{parse_input_spec, parse_input_spec_at, InputSource, InputSpec, ResolvedInputs};
 pub use lower::{parse_document, parse_pipeline};
 pub use model::{
     natural_cmp, stage_and_parents, stage_within, ArtifactInstance, ArtifactKey, ArtifactReport,
