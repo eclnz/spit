@@ -4,14 +4,10 @@
 
 use crate::model::{CommandRole, Invocation};
 
-use super::declarations::{
-    parse_command, parse_coverage_rule, parse_discover, parse_invocation_parts, parse_path,
-    parse_product,
-};
+use super::declarations::{parse_discover, parse_invocation_parts, parse_path, parse_product};
 use super::keyword::Keyword;
 use super::lexical::{comma_items, identifier, strip_comment};
-use super::operation::parse_operation;
-use super::source_map::{name_place, rule_place, step_place, tail_place};
+use super::source_map::{name_place, step_place};
 use super::{FlowOutput, FlowStep, ParseError, StatementKind, Syntax, SHELL_SOURCE_REMOVED};
 
 pub(super) fn parse_flow(text: &str) -> Syntax {
@@ -146,20 +142,14 @@ fn flow_line(
         }
         Some((Keyword::Source, declaration)) => {
             top_level_only("`source`, which declares an input,")?;
-            let declaration = declaration.trim();
-            let product = parse_product(declaration, number)?;
-            let place = name_place(original, number, declaration, &product.name);
-            StatementKind::Product(product, place)
+            StatementKind::product(original, declaration.trim(), number)?
         }
         Some((Keyword::Discover, declaration)) => {
             top_level_only("`discover`")?;
             StatementKind::Discover(parse_discover(declaration.trim(), number)?)
         }
         Some((Keyword::Operation, declaration)) => {
-            let declaration = declaration.trim();
-            let operation = parse_operation(declaration, number)?;
-            let place = name_place(original, number, declaration, &operation.name);
-            StatementKind::Operation(operation, place)
+            StatementKind::operation(original, declaration.trim(), number)?
         }
         Some((keyword @ (Keyword::Require | Keyword::Skip), _)) => {
             top_level_only(if keyword == Keyword::Require {
@@ -167,9 +157,7 @@ fn flow_line(
             } else {
                 "`skip`, which filters sources,"
             })?;
-            let rule = parse_coverage_rule(line, number)?;
-            let place = rule_place(original, number, &rule);
-            StatementKind::Constraint(rule, place)
+            StatementKind::constraint(original, line, number)?
         }
         Some((keyword @ (Keyword::Command | Keyword::Verify), declaration)) => {
             let role = if keyword == Keyword::Command {
@@ -177,9 +165,7 @@ fn flow_line(
             } else {
                 CommandRole::Verify
             };
-            let command = parse_command(declaration.trim(), number, role)?;
-            let place = tail_place(original, number, command.template.as_str());
-            StatementKind::Command(command, place)
+            StatementKind::command(original, declaration.trim(), number, role)?
         }
         Some((Keyword::ShellSource, _)) => {
             return Err(ParseError::new(number, SHELL_SOURCE_REMOVED));

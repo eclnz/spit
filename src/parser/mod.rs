@@ -12,7 +12,7 @@ mod source_map;
 use std::fmt;
 
 use crate::model::{
-    CommandDef, CoverageRule, DirectoryDiscovery, Invocation, OperationDef, ProductDef,
+    CommandDef, CommandRole, CoverageRule, DirectoryDiscovery, Invocation, OperationDef, ProductDef,
 };
 use crate::paths::PathTemplate;
 use crate::span::{address_of, columns_at, content_columns, Focus, Located, Place};
@@ -202,6 +202,41 @@ pub(crate) fn parse_syntax(text: &str) -> Syntax {
         parse_sectioned(text)
     } else {
         parse_flow(text)
+    }
+}
+
+impl StatementKind {
+    /// A product declared by `declaration`, a slice of the line `original`.
+    fn product(original: &str, declaration: &str, number: usize) -> Result<Self, ParseError> {
+        let product = declarations::parse_product(declaration, number)?;
+        let place = source_map::name_place(original, number, declaration, &product.name);
+        Ok(Self::Product(product, place))
+    }
+
+    /// An operation declared by `declaration`, a slice of `original`.
+    fn operation(original: &str, declaration: &str, number: usize) -> Result<Self, ParseError> {
+        let operation = operation::parse_operation(declaration, number)?;
+        let place = source_map::name_place(original, number, declaration, &operation.name);
+        Ok(Self::Operation(operation, place))
+    }
+
+    /// A `require` or `skip` rule, the whole content `line` of `original`.
+    fn constraint(original: &str, line: &str, number: usize) -> Result<Self, ParseError> {
+        let rule = declarations::parse_coverage_rule(line, number)?;
+        let place = source_map::rule_place(original, number, &rule);
+        Ok(Self::Constraint(rule, place))
+    }
+
+    /// A command, or a `verify` command, for an operation.
+    fn command(
+        original: &str,
+        declaration: &str,
+        number: usize,
+        role: CommandRole,
+    ) -> Result<Self, ParseError> {
+        let command = declarations::parse_command(declaration, number, role)?;
+        let place = source_map::tail_place(original, number, command.template.as_str());
+        Ok(Self::Command(command, place))
     }
 }
 
