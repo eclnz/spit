@@ -7,7 +7,10 @@ use std::path::{Path, PathBuf};
 use crate::error::ResolveError;
 use crate::model::{Pipeline, SourceInventory};
 use crate::parser::ParseError;
-use crate::paths::{discover_source_files, PathTemplate};
+mod discover;
+
+pub use self::discover::{discover_source_files, discover_sources, Discovery};
+use crate::paths::PathTemplate;
 use crate::resolver::{check_inventory, validate_pipeline};
 use crate::{parse_document, parse_document_at};
 
