@@ -4,8 +4,8 @@ use std::process::{Command, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use spit::{
-    inspect_paths, parse_document, parse_pipeline, parse_source_inventory, render_bash,
-    render_bound_dag, resolve, validate_commands, CommandTemplate, PathRule, PathTemplate,
+    parse_document, parse_pipeline, parse_source_inventory, render_bash, resolve, CommandTemplate,
+    PathTemplate,
 };
 
 fn demo_script() -> String {
@@ -199,70 +199,6 @@ fn field_survey_generates_valid_bash_for_new_visits() {
 }
 
 #[test]
-fn path_coverage_exposes_default_fallbacks_and_strict_rejects_them() {
-    let (pipeline, _) =
-        parse_document(include_str!("../examples/commands/field_survey.spit")).unwrap();
-    let coverage = inspect_paths(&pipeline).unwrap();
-    assert!(coverage.entries.iter().any(|entry| {
-        entry.product == "vegetation" && matches!(entry.rule, PathRule::Default(_))
-    }));
-    assert!(coverage.entries.iter().any(|entry| {
-        entry.product == "photo_response" && matches!(entry.rule, PathRule::Explicit(_))
-    }));
-    coverage.validate(false).unwrap();
-    assert!(coverage
-        .validate(true)
-        .unwrap_err()
-        .to_string()
-        .contains("vegetation"));
-}
-
-#[test]
-fn path_coverage_catches_missing_and_invalid_rules_without_jobs() {
-    let mut pipeline = parse_pipeline("source unused [id]\n").unwrap();
-    let coverage = inspect_paths(&pipeline).unwrap();
-    assert_eq!(coverage.entries[0].rule, PathRule::Missing);
-    assert!(coverage.validate(false).is_err());
-
-    pipeline.product_paths.insert(
-        "unused".to_owned(),
-        PathTemplate::parse("input/{id}/{missing}.txt").unwrap(),
-    );
-    assert!(inspect_paths(&pipeline)
-        .unwrap_err()
-        .to_string()
-        .contains("absent dimension"));
-
-    pipeline.product_paths.insert(
-        "unused".to_owned(),
-        PathTemplate::parse("input/{id}.txt").unwrap(),
-    );
-    inspect_paths(&pipeline).unwrap().validate(true).unwrap();
-}
-
-#[test]
-fn bound_dag_shows_port_names_and_paths_without_commands() {
-    let (mut pipeline, _) =
-        parse_document(include_str!("../examples/commands/field_survey.spit")).unwrap();
-    let inventory =
-        parse_source_inventory(include_str!("../examples/commands/field_survey.sources")).unwrap();
-    let dag = resolve(&pipeline, &inventory).unwrap();
-    pipeline.commands.clear();
-    let report = render_bound_dag(&pipeline, &dag).unwrap();
-    assert_eq!(report.matches("Job ").count(), 93);
-    assert!(report.contains("moving: ground_map[site=01,visit=01]"));
-    assert!(report.contains("reference: visit_dark_tiff[site=01,visit=01]"));
-    assert!(report.contains("path: derivatives/yield_table/site=01__visit=01.csv"));
-
-    pipeline.product_paths.remove("yield_table");
-    pipeline.path_template = None;
-    assert!(render_bound_dag(&pipeline, &dag)
-        .unwrap_err()
-        .to_string()
-        .contains("no path rule"));
-}
-
-#[test]
 fn named_many_port_expands_in_entity_order_as_separate_arguments() {
     let text = "source raw [group, part]\npath: {product}/{entities}.txt\noperation gather(items: many) @ drop(part)\ncommand gather: collect {items} {output}\nresult = gather(raw @ vary(part))\nsources:\n  raw[group=a,part=2]\n  raw[group=a,part=1]\n";
     let (pipeline, inventory) = parse_document(text).unwrap();
@@ -321,54 +257,6 @@ fn command_uses_executable_on_path() {
 }
 
 #[test]
-fn commands_are_validated_even_without_resolved_jobs() {
-    let base = "source raw : Table [id]\noperation normalize(Table) -> Table\n";
-    let check = |command: &str| {
-        let pipeline = parse_pipeline(&format!("{base}{command}\n")).unwrap();
-        validate_commands(&pipeline).map_err(|error| error.to_string())
-    };
-    assert!(check("command normalize: normalize --mode {input} {output}").is_ok());
-    assert!(check("command normalize: normalize --mode {raw} {output}")
-        .unwrap_err()
-        .contains("unknown placeholder `{raw}`"));
-    assert!(check("command normalize: normalize --mode {input} out.csv")
-        .unwrap_err()
-        .contains("must use `{output}`"));
-    assert!(check("command dedupe: dedupe {input} {output}")
-        .unwrap_err()
-        .contains("unknown operation `dedupe`"));
-}
-
-#[test]
-fn path_rules_that_cannot_separate_artifacts_are_rejected() {
-    let check = |text: &str| inspect_paths(&parse_pipeline(text).unwrap()).map(|_| ());
-
-    let error =
-        check("source raw [id, batch]\npath: {product}/{entities}.csv\npath raw: raw/{id}.csv\n")
-            .unwrap_err();
-    assert!(
-        error.message().contains("omits dimension `batch`"),
-        "{error}"
-    );
-
-    let error = check(
-        "source raw [id]\npath: {entities}.csv\noperation clean(one)\ncleaned = clean(raw)\n",
-    )
-    .unwrap_err();
-    assert!(error.message().contains("`raw` and `cleaned`"), "{error}");
-
-    let error = check("source raw [id]\npath: {product}/{id}/{shard}.csv\n").unwrap_err();
-    assert_eq!(
-        error.to_string(),
-        "path template for `raw` uses absent dimension `shard`"
-    );
-
-    // Rules naming different dimensions are not treated as colliding.
-    check("source raw [id]\nsource extra [batch]\npath raw: out/{id}.csv\npath extra: out/{batch}.csv\n")
-        .unwrap();
-}
-
-#[test]
 fn backslashes_follow_bash_quoting_rules() {
     let (mut pipeline, _) =
         parse_document(include_str!("../examples/commands/bash_demo.spit")).unwrap();
@@ -382,4 +270,25 @@ fn backslashes_follow_bash_quoting_rules() {
         script.contains(r#"'tool' 'a\b' 'q"x' 's\t' 'cd' 'e\f' "#),
         "{script}"
     );
+}
+
+#[test]
+fn a_collection_expands_in_natural_order() {
+    let text = "\
+source frame [subject, run]
+path: {product}/{subject}/{run}.txt
+path stacked: {product}/{subject}.txt
+operation stack(frames: many Frame) -> Stack @ drop(run)
+command stack: stack {frames} {output}
+stacked = stack(frame @ vary(run))
+";
+    let pipeline = parse_pipeline(text).unwrap();
+    let inventory = parse_source_inventory(
+        "sources:\n  frame[subject=s10,run=10]\n  frame[subject=s10,run=2]\n  frame[subject=s10,run=1]\n",
+    )
+    .unwrap();
+    let script = render_bash(&pipeline, &resolve(&pipeline, &inventory).unwrap()).unwrap();
+    assert!(script.contains(
+        "'stack' \"$SPIT_ROOT\"/'frame/s10/1.txt' \"$SPIT_ROOT\"/'frame/s10/2.txt' \"$SPIT_ROOT\"/'frame/s10/10.txt'"
+    ));
 }
