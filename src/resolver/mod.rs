@@ -1,6 +1,7 @@
 //! Resolve jobs: expand each step of a compiled pipeline, in dependency
 //! order, into concrete jobs over an inventory's artifacts.
 
+mod bind;
 mod matching;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -13,6 +14,7 @@ use crate::model::{
 
 use crate::compile::{compile, CompiledPipeline};
 
+pub use self::bind::bind_dag;
 use self::matching::{expand_step, make_job, Expansion};
 
 /// Resolve every job of `pipeline` over the sources in `inventory`, failing

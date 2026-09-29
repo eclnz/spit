@@ -3,7 +3,13 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use spit::{diagnose_at, parse_document_at, render_bash, resolve};
+use spit::{diagnose_at, parse_document_at, resolve};
+
+/// Step 3's binding, then the Bash backend, with either's error as text.
+fn bash_script(pipeline: &spit::Pipeline, dag: &spit::ResolvedDag) -> Result<String, String> {
+    let bound = spit::bind_dag(pipeline, dag).map_err(|error| error.to_string())?;
+    spit::render_bash(&bound).map_err(|error| error.to_string())
+}
 
 static NEXT_DIR: AtomicUsize = AtomicUsize::new(0);
 
@@ -50,7 +56,7 @@ fn aliased_source_and_operation_work_through_cli_and_bash() {
     );
     let dag = resolve(&pipeline, &inventory).unwrap();
     assert_eq!(dag.jobs.len(), 2);
-    let bash = render_bash(&pipeline, &dag).unwrap();
+    let bash = bash_script(&pipeline, &dag).unwrap();
     assert!(bash.contains("'sort' '-u' '-o'"));
     assert!(bash.contains("input/alpha/01.txt"));
 
@@ -224,7 +230,7 @@ copied = copy(lib::shard)\nsources:\n  lib::shard[part=a]\n",
     let (pipeline, inventory) =
         parse_document_at(&fs::read_to_string(&main).unwrap(), &main).unwrap();
     let dag = resolve(&pipeline, &inventory.unwrap()).unwrap();
-    let bash = render_bash(&pipeline, &dag).unwrap();
+    let bash = bash_script(&pipeline, &dag).unwrap();
     assert!(bash.contains("'lib.shard/a.txt'"), "{bash}");
     assert!(!bash.contains("::"), "{bash}");
 }
@@ -243,7 +249,7 @@ fn an_operation_imports_with_its_command_and_verifications() {
     let text = fs::read_to_string(&pipeline).unwrap();
     let (pipeline, inventory) = parse_document_at(&text, &pipeline).unwrap();
     assert_eq!(pipeline.commands.len(), 2);
-    let bash = render_bash(&pipeline, &resolve(&pipeline, &inventory.unwrap()).unwrap()).unwrap();
+    let bash = bash_script(&pipeline, &resolve(&pipeline, &inventory.unwrap()).unwrap()).unwrap();
     assert!(bash.contains("spit_verify 1 'check_table'"), "{bash}");
 }
 

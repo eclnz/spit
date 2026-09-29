@@ -15,6 +15,7 @@ pub mod render;
 pub mod resolver;
 mod shape;
 mod span;
+pub mod spitdag;
 mod template;
 pub mod types;
 
@@ -43,11 +44,12 @@ pub use model::{
 };
 pub use parser::{parse_source_inventory, render_source_inventory, ParseError, ParseErrorKind};
 pub use paths::{
-    inspect_paths, validate_concrete_paths, validate_source_files, PathCoverage, PathCoverageEntry,
-    PathError, PathRule, PathTemplate, VerifiedFiles,
+    inspect_paths, validate_source_files, PathCoverage, PathCoverageEntry, PathError, PathRule,
+    PathTemplate, VerifiedFiles,
 };
-pub use render::{render_artifacts, render_bound_dag, render_dag, render_dag_json};
-pub use resolver::{resolve, resolve_artifacts, resolve_artifacts_excluding};
+pub use render::{render_artifacts, render_dag};
+pub use resolver::{bind_dag, resolve, resolve_artifacts, resolve_artifacts_excluding};
+pub use spitdag::{render_bound_dag, ArgPart, Argument, BoundArtifact, BoundDag, BoundJob};
 pub use types::{
     parse_type_expr, Compatibility, Substitutions, TypeExpr, TypeParseError, TypeUnifyError,
 };
