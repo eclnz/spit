@@ -127,7 +127,50 @@ pub fn render_source_inventory(
         text.push_str(&context_lines(bindings.iter().collect(), declared));
     }
     text.push_str("sources:\n");
-    for record in &inventory.artifacts {
+    // With one directory discovery, show the files together by discovered
+    // context. Shared files appear first; records still carry their full
+    // identities and paths, so the result remains a standalone inventory.
+    let group_dimensions = if inventory.discovered.len() == 1 {
+        inventory
+            .discovered
+            .keys()
+            .next()
+            .and_then(|name| rules.discovery(name))
+            .map(|rule| &rule.dimensions)
+    } else {
+        None
+    };
+    let mut records: Vec<_> = inventory.artifacts.iter().collect();
+    if let Some(dimensions) = group_dimensions {
+        records.sort_by(|left, right| {
+            let left_group = left.entities.project(dimensions);
+            let right_group = right.entities.project(dimensions);
+            left_group
+                .as_ref()
+                .zip(right_group.as_ref())
+                .map_or_else(
+                    || left_group.is_some().cmp(&right_group.is_some()),
+                    |(left, right)| left.cmp_in(right, dimensions),
+                )
+                .then_with(|| left.entities.cmp_in(&right.entities, &pipeline_order))
+                .then_with(|| left.product.cmp(&right.product))
+        });
+    }
+    let mut previous_group = None;
+    for record in records {
+        if let Some(dimensions) = group_dimensions {
+            let group = record.entities.project(dimensions);
+            if group != previous_group {
+                if !text.ends_with("sources:\n") {
+                    text.push('\n');
+                }
+                if let Some(binding) = &group {
+                    let order: Vec<_> = dimensions.iter().map(String::as_str).collect();
+                    text.push_str(&format!("    # [{}]\n", in_order(binding, &order)));
+                }
+                previous_group = group;
+            }
+        }
         let declared: Vec<_> = pipeline
             .products
             .iter()
