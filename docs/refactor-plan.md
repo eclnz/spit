@@ -4,7 +4,7 @@ Findings from a read-through of `src/` (about 11k lines) plus targeted checks. L
 
 ## Outcome
 
-All 22 items are done; each item below has a **Status** saying what changed, and where the scope was narrowed or something left, why. Every change was checked with clippy (clean), the full test suite (253 tests, up from 239) and a byte-for-byte comparison of CLI output over 76 command groups against the previous commit; larger changes were also compared with the old code on randomized inputs.
+All 22 items are done; each item below has a **Status** saying what changed, and where the scope was narrowed or something left, why. Every change was checked with clippy (clean), the full test suite (255 tests, up from 239) and a byte-for-byte comparison of CLI output over 76 command groups against the previous commit; larger changes were also compared with the old code on randomized inputs.
 
 **Behaviour changes, all deliberate:**
 - `dag`/`artifacts` on a recipe print each pipeline warning once, not twice (item 7).
@@ -20,7 +20,7 @@ All 22 items are done; each item below has a **Status** saying what changed, and
 - Type arguments nested about 10,000 deep crashed `spit check` with a stack overflow (item 19).
 - `spit-vscode` treated a `#` after a byte order mark as a comment where SPIT does not (item 22).
 
-**Found and not fixed:** `spit dag recipe.spitin` fails where `spit inputs recipe.spitin` succeeds when a `skip` rule removes every context of a discovery that a `require` rule names (see item 7).
+- `spit dag recipe.spitin` failed where `spit inputs recipe.spitin` succeeded when a `skip` rule removed every context of a discovery that a `require` rule names (found in item 7, fixed after the list). The `.spitout` wrote an empty `contexts sessions:` section, but reading it back recorded nothing for an empty section, so the `require` rule reported the discovery missing. A named section now records its discovery even when empty. Tests: `a_recipe_whose_skip_leaves_a_discovery_empty_runs_in_memory_as_it_settles`, `an_empty_named_contexts_section_records_its_discovery`; on the 3,000 random trees, all 910 settled datasets now round-trip through `.spitout` text unchanged (158 refused before).
 
 ## Baseline
 
@@ -135,7 +135,7 @@ Dead public API (item 5, 15) is not visible to the compiler because `lib.rs` re-
 - **Status: done, with a narrower scope.** Found while doing it: `dag`/`artifacts` on a recipe printed every pipeline warning twice, once per diagnosis. `run_inputs` is now `load_recipe` (read and check the pipeline once, printing only when it fails) and `settle` (resolve the recipe once). `spit inputs` prints the pipeline's warnings itself; `dag`/`artifacts` print the one records diagnosis, which includes them. `prepare` reuses the pipeline text and the settled inputs instead of reading the file and resolving the recipe again. **Output change:** the duplicated warnings are gone; nothing else differs (golden diff is only those lines). New test `a_recipe_run_in_memory_prints_each_pipeline_warning_once`, which fails on the old build.
   - Reusing the settled inputs was checked on the 3,000 random trees: settling once equals settle, render, parse, settle again (inventory for jobs, unavailable sources, gaps) in all 752 cases where the second settle succeeds.
   - **Not done:** the pipeline is still parsed and checked twice internally (alone, to discover sources; then with the records), and the settled inventory still goes through `.spitout` text, because record errors are located in that text. Doing either needs a two-phase diagnosis API (check a pipeline, then records against it) that `Checked` would carry its parsed document for.
-  - **Pre-existing bug found (not fixed):** in the other 158 cases the second settle refuses what the first accepted. When a `skip` rule removes every context of a discovery that a `require` rule names, the rendered `.spitout` has no section for that discovery, and reading it back fails with "coverage rule for discovery `…` needs named contexts in the inventory". So `spit dag x.spitin` can fail where `spit inputs x.spitin` succeeds. Before and after this change alike.
+  - **Pre-existing bug found (fixed after the list; see Outcome):** in the other 158 cases the second settle refuses what the first accepted. When a `skip` rule removes every context of a discovery that a `require` rule names, the rendered `.spitout` has no section for that discovery, and reading it back fails with "coverage rule for discovery `…` needs named contexts in the inventory". So `spit dag x.spitin` can fail where `spit inputs x.spitin` succeeds. Before and after this change alike.
 
 ### 8. Collapse the three recipe parsers
 - **Where:** `src/inputs/mod.rs`: `parse_input_spec`, `parse_input_spec_at`, `parse_recipe_lines` share `pipeline_line` -> `check_input_lines` -> `finish_spec`. Extract the shared step.

@@ -266,3 +266,10 @@ fn a_source_record_may_give_its_file() {
         assert_eq!(error.line(), 2, "{bad}");
     }
 }
+
+#[test]
+fn an_empty_named_contexts_section_records_its_discovery() {
+    let inventory = spit::parse_source_inventory("contexts sessions:\nsources:\n").unwrap();
+    assert_eq!(inventory.discovered.get("sessions"), Some(&Vec::new()));
+    assert!(inventory.contexts.is_empty());
+}
