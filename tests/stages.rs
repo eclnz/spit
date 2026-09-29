@@ -421,8 +421,8 @@ fn every_job_follows_the_jobs_it_depends_on() {
         (PIPELINE, SOURCES),
         (NESTED, NESTED_SOURCES),
         (
-            "examples/commands/mrtrix3_act.spit",
-            "examples/commands/mrtrix3_act.spitout",
+            "examples/commands/mrtrix3_act/mrtrix3_act.spit",
+            "examples/commands/mrtrix3_act/mrtrix3_act.spitout",
         ),
     ] {
         let text = fs::read_to_string(pipeline).unwrap() + &fs::read_to_string(sources).unwrap();
