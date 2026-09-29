@@ -37,7 +37,9 @@ fn help_lists_each_step_and_each_command_explains_itself() {
     for args in [&["help", "dag"][..], &["dag", "--help"]] {
         let text = stdout(&spit(args));
         assert!(
-            text.contains("usage: spit dag [<pipeline.spit>] <recipe.spitin | inputs.spitout | ->"),
+            text.contains(
+                "usage: spit dag <recipe.spitin> or <pipeline.spit> <inputs.spitout | ->"
+            ),
             "{text}"
         );
         assert!(text.contains("-o <file>"), "{text}");
@@ -258,27 +260,28 @@ fn check_prints_every_diagnostic_and_fails_only_on_errors() {
 }
 
 #[test]
-fn a_recipe_alone_names_its_pipeline_for_dag_and_artifacts() {
+fn a_recipe_names_its_own_pipeline_for_dag_and_artifacts() {
     let recipe = "examples/commands/command_demo.spitin";
     let pipeline = "examples/commands/command_demo.spit";
+    let inventory = "examples/commands/command_demo.spitout";
     for command in ["dag", "artifacts"] {
         let alone = spit(&[command, recipe]);
         assert!(alone.status.success(), "{}", stderr(&alone));
-        // Naming the pipeline as well gives the same result.
+        // The pipeline is the recipe's to name, not the command line's, even
+        // when it names the same one.
         let named = spit(&[command, pipeline, recipe]);
-        assert!(named.status.success(), "{}", stderr(&named));
-        assert_eq!(stdout(&alone), stdout(&named), "{command}");
+        assert!(!named.status.success(), "{command}");
+        assert_eq!(
+            stderr(&named),
+            format!(
+                "error: `{recipe}` names its own pipeline; run `spit {command} {recipe}` without `{pipeline}`\n"
+            )
+        );
+        // A .spitout names none, so it takes the pipeline.
+        let settled = spit(&[command, pipeline, inventory]);
+        assert!(settled.status.success(), "{}", stderr(&settled));
     }
-    // A pipeline other than the one the recipe names is still refused.
-    let other = spit(&["dag", "examples/commands/mrtrix3_act.spit", recipe]);
-    assert!(!other.status.success());
-    assert!(
-        stderr(&other).contains("is a recipe for"),
-        "{}",
-        stderr(&other)
-    );
-    // Other inputs do not name a pipeline, so it must be given.
-    let spitout = spit(&["dag", "examples/commands/command_demo.spitout"]);
+    let spitout = spit(&["dag", inventory]);
     assert!(!spitout.status.success());
     assert!(
         stderr(&spitout).starts_with(

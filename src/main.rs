@@ -67,14 +67,14 @@ impl Command {
             },
             Self::Dag => CommandSpec {
                 name: "dag",
-                files: "[<pipeline.spit>] <recipe.spitin | inputs.spitout | ->",
+                files: "<recipe.spitin> or <pipeline.spit> <inputs.spitout | ->",
                 summary: "step 3: resolve a pipeline's jobs over a dataset's inputs; -o writes the .spitdag",
                 example: "spit dag dataset.spitin -o analysis.spitdag\n  spit dag analysis.spit dataset.spitout -o analysis.spitdag\n  spit dag analysis.spit dataset.spitout --paths",
                 flags: &[Root, StrictPaths, Paths, Json, Output],
             },
             Self::Artifacts => CommandSpec {
                 name: "artifacts",
-                files: "[<pipeline.spit>] <recipe.spitin | inputs.spitout | ->",
+                files: "<recipe.spitin> or <pipeline.spit> <inputs.spitout | ->",
                 summary: "step 3: report what can and cannot be made from a dataset's inputs, and why",
                 example: "spit artifacts dataset.spitin\n  spit artifacts analysis.spit dataset.spitout",
                 flags: &[Root],
@@ -116,7 +116,7 @@ impl Command {
     fn shortcut(self) -> Option<&'static str> {
         match self {
             Self::Dag | Self::Artifacts => Some(
-                "Given a .spitin in place of the .spitout, it runs `spit inputs` in memory first.\nThe pipeline can be left out when a .spitin is given, since it names its own; a .spitout or `-` needs it first.",
+                "Given a .spitin in place of the .spitout, it runs `spit inputs` in memory first.\nA .spitin names its own pipeline, so it is given alone; a .spitout or `-` needs the pipeline first.",
             ),
             Self::Check | Self::Inputs => None,
         }
@@ -485,7 +485,7 @@ fn check(args: &CliArgs) -> Result<(), Box<dyn Error>> {
 
 /// Step 2: settle a dataset from a recipe and write its `.spitout`.
 fn inputs(args: &CliArgs) -> Result<(), Box<dyn Error>> {
-    let settled = run_inputs(&args.files[0], None, args.value(Flag::Root).as_deref())?;
+    let settled = run_inputs(&args.files[0], args.value(Flag::Root).as_deref())?;
     settled.inputs.require_complete()?;
     let text = render_source_inventory(
         &settled.inputs.inventory,
@@ -497,20 +497,16 @@ fn inputs(args: &CliArgs) -> Result<(), Box<dyn Error>> {
 
 /// A settled dataset, with the pipeline it was settled for.
 struct Settled {
-    /// The file the recipe's `pipeline` line, or the caller, named.
+    /// The file the recipe's `pipeline` line names.
     pipeline_file: PathBuf,
     pipeline: Pipeline,
     recipe: InputSpec,
     inputs: ResolvedInputs,
 }
 
-/// Run step 2 for the recipe `file`. `pipeline` is the pipeline the caller
-/// was given, which the recipe's `pipeline` line must match.
-fn run_inputs(
-    file: &str,
-    pipeline: Option<&Path>,
-    root: Option<&str>,
-) -> Result<Settled, Box<dyn Error>> {
+/// Run step 2 for the recipe `file`, over the pipeline its `pipeline` line
+/// names.
+fn run_inputs(file: &str, root: Option<&str>) -> Result<Settled, Box<dyn Error>> {
     if !is_recipe(file) {
         return Err(format!("spit inputs reads a .spitin recipe, not `{file}`").into());
     }
@@ -523,24 +519,9 @@ fn run_inputs(
     let root = root.map_or(folder, PathBuf::from);
     let recipe = parse_input_spec_at(&read_file(file)?, Path::new(file))
         .map_err(|error| format!("{file}: {error}"))?;
-    let pipeline_file = match (recipe.pipeline.clone(), pipeline) {
-        (Some(named), Some(given)) if !same_file(&named, given) => {
-            return Err(format!(
-                "{file} is a recipe for `{}`, not `{}`",
-                named.display(),
-                given.display()
-            )
-            .into())
-        }
-        (_, Some(given)) => given.to_owned(),
-        (Some(named), None) => named,
-        (None, None) => {
-            return Err(format!(
-                "{file} does not name its pipeline; add a line such as `pipeline analysis.spit`"
-            )
-            .into())
-        }
-    };
+    let pipeline_file = recipe.pipeline.clone().ok_or_else(|| {
+        format!("{file} does not name its pipeline; add a line such as `pipeline analysis.spit`")
+    })?;
     let pipeline_text = read_file(&pipeline_file.display().to_string())?;
     let checked = diagnose_at_checked(&pipeline_text, None, &pipeline_file, None, false);
     report(&checked.diagnostics, &pipeline_text, None)?;
@@ -588,18 +569,25 @@ struct Prepared {
 /// Read the pipeline and its inputs for step 3, running step 2 in memory
 /// for a recipe, and report every diagnostic first.
 fn prepare(args: &CliArgs) -> Result<Prepared, Box<dyn Error>> {
-    // A recipe names its pipeline, so it can stand alone; any other inputs
+    // A recipe names its own pipeline, so it stands alone; any other inputs
     // need the pipeline they are for.
     let (given, inputs) = match args.files.as_slice() {
         [inputs] => (None, inputs),
         [pipeline, inputs] => (Some(pipeline.as_str()), inputs),
         _ => unreachable!("the command takes one or two files"),
     };
+    let command = args.command.name();
+    if let (Some(pipeline), true) = (given, is_recipe(inputs)) {
+        return Err(format!(
+            "`{inputs}` names its own pipeline; run `spit {command} {inputs}` without `{pipeline}`"
+        )
+        .into());
+    }
     let lenient = args.command == Command::Artifacts;
     let mut root = args.value(Flag::Root).map(PathBuf::from);
     let (path, records_text, recipe) = if is_recipe(inputs) {
         let given_root = root.as_ref().and_then(|root| root.to_str());
-        let settled = run_inputs(inputs, given.map(Path::new), given_root)?;
+        let settled = run_inputs(inputs, given_root)?;
         eprintln!("note: ran `spit inputs {inputs}` in memory");
         root = root.or_else(|| settled.inputs.root.clone());
         let text = render_source_inventory(
@@ -611,8 +599,7 @@ fn prepare(args: &CliArgs) -> Result<Prepared, Box<dyn Error>> {
     } else {
         let Some(pipeline) = given else {
             return Err(format!(
-                "{} needs a pipeline before `{inputs}`; only a .spitin recipe names its own",
-                args.command.name()
+                "{command} needs a pipeline before `{inputs}`; only a .spitin recipe names its own"
             )
             .into());
         };
@@ -726,13 +713,6 @@ fn is_recipe(file: &str) -> bool {
     Path::new(file)
         .extension()
         .is_some_and(|extension| extension == "spitin")
-}
-
-fn same_file(first: &Path, second: &Path) -> bool {
-    match (fs::canonicalize(first), fs::canonicalize(second)) {
-        (Ok(first), Ok(second)) => first == second,
-        _ => first == second,
-    }
 }
 
 /// How many jobs resolved, per stage when the pipeline has stages.
