@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use spit::{diagnose_at, resolve};
+use spit::{diagnose_at, parse_pipeline_at, parse_source_inventory, resolve};
 
 /// Step 3's binding, then the Bash backend, with either's error as text.
 fn bash_script(pipeline: &spit::Pipeline, dag: &spit::ResolvedDag) -> Result<String, String> {
@@ -136,7 +136,7 @@ fn diagnostics_resolve_imports_using_pipeline_location() {
     dir.write("base.spit", "operation clean(one)\n");
     let main = dir.write(
         "main.spit",
-        "source raw [id]\nuse clean from base.spit as prep\nresult = prep::clean(raw)\nsources:\n  raw[id=x]\n",
+        "source raw [id]\nuse clean from base.spit as prep\nresult = prep::clean(raw)\n",
     );
     let text = fs::read_to_string(&main).unwrap();
     assert!(diagnose_at(&text, None, &main).is_empty());
@@ -147,7 +147,7 @@ fn diagnostics_resolve_imports_using_pipeline_location() {
 }
 
 #[test]
-fn import_after_inventory_keeps_inventory_separate() {
+fn an_imported_source_keeps_its_path_rule_under_its_alias() {
     let dir = TestDir::new();
     dir.write(
         "base.spit",
@@ -155,16 +155,12 @@ fn import_after_inventory_keeps_inventory_separate() {
     );
     let main = dir.write(
         "main.spit",
-        "sources:\n  lib::raw[id=x]\nuse raw, clean from base.spit as lib\nresult = lib::clean(lib::raw)\n",
+        "use raw, clean from base.spit as lib\nresult = lib::clean(lib::raw)\n",
     );
-    let (pipeline, inventory) =
-        support::parse_fixture_at(&fs::read_to_string(&main).unwrap(), &main).unwrap();
+    let pipeline = parse_pipeline_at(&fs::read_to_string(&main).unwrap(), &main).unwrap();
     assert_eq!(pipeline.product_paths["lib::raw"], "input/raw/{id}.txt");
-    assert_eq!(inventory.as_ref().unwrap().artifacts[0].product, "lib::raw");
-    assert_eq!(
-        resolve(&pipeline, &inventory.unwrap()).unwrap().jobs.len(),
-        1
-    );
+    let inventory = parse_source_inventory("sources:\n  lib::raw[id=x]\n").unwrap();
+    assert_eq!(resolve(&pipeline, &inventory).unwrap().jobs.len(), 1);
 }
 
 #[test]
@@ -181,39 +177,32 @@ fn quoted_import_path_can_contain_as() {
 }
 
 #[test]
-fn import_all_skips_pipeline_steps_and_inventory() {
+fn import_all_brings_definitions_but_not_steps() {
     let dir = TestDir::new();
     dir.write(
         "base.spit",
-        "source raw [id]\noperation clean(one)\ncommand clean: cp {input} {output}\ncleaned = clean(raw)\nsources:\n  raw[id=old]\n",
+        "source raw [id]\noperation clean(one)\ncommand clean: cp {input} {output}\ncleaned = clean(raw)\n",
     );
     let main = dir.write(
         "main.spit",
-        "use base.spit as lib\nresult = lib::clean(lib::raw)\nsources:\n  lib::raw[id=new]\n",
+        "use base.spit as lib\nresult = lib::clean(lib::raw)\n",
     );
-    let (pipeline, inventory) =
-        support::parse_fixture_at(&fs::read_to_string(&main).unwrap(), &main).unwrap();
+    let pipeline = parse_pipeline_at(&fs::read_to_string(&main).unwrap(), &main).unwrap();
+    let inventory = parse_source_inventory("sources:\n  lib::raw[id=new]\n").unwrap();
     assert_eq!(pipeline.products.len(), 2);
     assert_eq!(pipeline.products[0].name, "lib::raw");
     assert_eq!(pipeline.operations[0].name, "lib::clean");
     assert_eq!(pipeline.commands[0].operation, "lib::clean");
     assert_eq!(pipeline.invocations.len(), 1);
-    let inventory = inventory.unwrap();
     assert_eq!(inventory.artifacts.len(), 1);
     assert_eq!(resolve(&pipeline, &inventory).unwrap().jobs.len(), 1);
 
-    let unqualified = dir.write(
-        "unqualified.spit",
-        "use base.spit\nresult = clean(raw)\nsources:\n  raw[id=new]\n",
-    );
-    let (pipeline, inventory) =
-        support::parse_fixture_at(&fs::read_to_string(&unqualified).unwrap(), &unqualified)
-            .unwrap();
+    let unqualified = dir.write("unqualified.spit", "use base.spit\nresult = clean(raw)\n");
+    let pipeline =
+        parse_pipeline_at(&fs::read_to_string(&unqualified).unwrap(), &unqualified).unwrap();
+    let inventory = parse_source_inventory("sources:\n  raw[id=new]\n").unwrap();
     assert_eq!(pipeline.operations[0].name, "clean");
-    assert_eq!(
-        resolve(&pipeline, &inventory.unwrap()).unwrap().jobs.len(),
-        1
-    );
+    assert_eq!(resolve(&pipeline, &inventory).unwrap().jobs.len(), 1);
 }
 
 #[test]

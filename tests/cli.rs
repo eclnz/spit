@@ -76,15 +76,6 @@ fn removed_options_say_what_replaced_them() {
 }
 
 #[test]
-fn example_runs_with_embedded_inventory() {
-    let output = spit(&["dag", "examples/analytics/analytics.spit"]);
-    assert!(output.status.success(), "{}", stderr(&output));
-    let dag = stdout(&output);
-    assert_eq!(dag.matches("Job ").count(), 34);
-    assert!(dag.contains("tenant_metrics[tenant=acme]"));
-}
-
-#[test]
 fn check_compiles_the_pipeline_without_its_inputs() {
     let output = spit(&["check", "examples/types/typed.spit"]);
     assert!(output.status.success(), "{}", stderr(&output));
@@ -160,24 +151,15 @@ fn dag_with_paths_displays_resolved_paths_before_command_expansion() {
 
 #[test]
 fn expanded_examples_resolve() {
-    for (pipeline, sources, expected_jobs) in [
-        ("examples/pipelines/branching.spit", None, 21),
-        ("examples/pipelines/complex.spit", None, 25),
-        (
-            "examples/pipelines/rich_shapes.spit",
-            Some("examples/pipelines/rich_shapes.spitout"),
-            17,
-        ),
-        (
-            "examples/commands/field_survey.spit",
-            Some("examples/commands/field_survey.spitout"),
-            93,
-        ),
-        ("examples/analytics/analytics.spit", None, 34),
+    for (example, expected_jobs) in [
+        ("examples/pipelines/branching", 21),
+        ("examples/pipelines/complex", 25),
+        ("examples/pipelines/rich_shapes", 17),
+        ("examples/commands/field_survey", 93),
+        ("examples/analytics/analytics", 34),
     ] {
-        let mut args = vec!["dag", pipeline];
-        args.extend(sources);
-        let output = spit(&args);
+        let (pipeline, sources) = (format!("{example}.spit"), format!("{example}.spitout"));
+        let output = spit(&["dag", &pipeline, &sources]);
         assert!(output.status.success(), "{pipeline}: {}", stderr(&output));
         assert!(
             stderr(&output).contains(&format!("note: {expected_jobs} jobs resolved.")),
@@ -368,46 +350,8 @@ fn check_prints_every_diagnostic_and_fails_only_on_errors() {
     assert_eq!(stdout(&warned_check), "Pipeline valid.\n");
     assert!(!warned_dag.status.success());
     assert!(
-        stderr(&warned_dag).contains("needs the dataset's inputs"),
+        stderr(&warned_dag).starts_with("error: dag needs <pipeline.spit> <inputs.spitout"),
         "{}",
         stderr(&warned_dag)
-    );
-}
-
-#[test]
-fn a_spitout_replaces_records_written_in_the_pipeline() {
-    let directory = scratch("override");
-    let pipeline = directory.join("pipeline.spit");
-    fs::write(
-        &pipeline,
-        "source image [subject]\noperation f(Image) -> Image\nout = f(image)\nsources:\n  image[subject=a\n",
-    )
-    .unwrap();
-    let inventory = directory.join("inventory.spitout");
-    fs::write(&inventory, "sources:\n  image[subject=b]\n").unwrap();
-    let result = spit(&[
-        "dag",
-        pipeline.to_str().unwrap(),
-        inventory.to_str().unwrap(),
-    ]);
-    fs::remove_dir_all(&directory).unwrap();
-    assert!(result.status.success(), "{result:?}");
-    assert!(stderr(&result).contains("note: 1 jobs resolved."));
-    assert!(stderr(&result).contains("this inline inventory is ignored"));
-}
-
-#[test]
-fn rules_and_records_in_a_pipeline_still_work_with_a_warning() {
-    let output = spit(&["check", "examples/basic/basic.spit"]);
-    assert!(output.status.success(), "{}", stderr(&output));
-    assert!(stdout(&output).contains("5 jobs resolved."));
-    let warnings = stderr(&output);
-    assert!(
-        warnings.contains("`require` rules belong in a .spitin recipe"),
-        "{warnings}"
-    );
-    assert!(
-        warnings.contains("records belong in a .spitout"),
-        "{warnings}"
     );
 }

@@ -87,16 +87,6 @@ pub(crate) struct Rule {
 }
 
 impl Rule {
-    /// A rule known only as a whole, such as one brought in by an import.
-    pub(crate) fn spanning(place: &Place) -> Self {
-        Self {
-            line: place.line,
-            whole: place.columns.clone(),
-            product: place.columns.clone(),
-            dimensions: place.columns.clone(),
-        }
-    }
-
     pub(crate) fn whole(&self) -> Place {
         Place::new(self.line, self.whole.clone())
     }

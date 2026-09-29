@@ -115,9 +115,10 @@ fn a_path_rule_that_cannot_name_a_file_says_why() {
 
 #[test]
 fn paths_that_differ_only_in_case_are_flagged() {
-    let text = "source x [s]\npath x: in/{s}.txt\noperation f(a) -> Text\npath y: out/{s}.txt\ny = f(x)\nsources:\n    x[s=A]\n    x[s=a]\n";
+    let text =
+        "source x [s]\npath x: in/{s}.txt\noperation f(a) -> Text\npath y: out/{s}.txt\ny = f(x)\n";
     assert_eq!(
-        rendered(&diagnose(text, None), text),
+        rendered(&diagnose(text, Some("sources:\n    x[s=A]\n    x[s=a]\n")), text),
         [
             "warning: line 2, column 9: `x[s=A]` and `x[s=a]` have paths `in/A.txt` and `in/a.txt`, which differ only in case, so they are one file where case is ignored, as on macOS and Windows",
             "warning: line 4, column 9: `y[s=A]` and `y[s=a]` have paths `out/A.txt` and `out/a.txt`, which differ only in case, so they are one file where case is ignored, as on macOS and Windows",
@@ -175,14 +176,6 @@ fn shell_operators_in_a_command_are_flagged() {
     assert_eq!(messages.len(), 2, "{messages:?}");
     assert!(messages[0].starts_with("warning: line 4, column 30: `2>&1` in the command for `f` is passed to the program as an argument"));
     assert!(messages[1].starts_with("warning: line 4, column 35: `|` in the command"));
-}
-
-#[test]
-fn a_step_after_an_inline_inventory_is_read_as_a_step() {
-    let text = "source x [s]\noperation f(a) -> Text\nsources:\n    x[s=1]\ny = f(x)\naverage : Text [s] = f(x)\n";
-    let (pipeline, inventory) = support::parse_fixture(text).unwrap();
-    assert_eq!(pipeline.invocations.len(), 2);
-    assert_eq!(inventory.unwrap().artifacts.len(), 1);
 }
 
 #[test]
