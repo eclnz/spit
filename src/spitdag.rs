@@ -3,11 +3,13 @@
 //! nothing else; it never sees the pipeline, a path rule or a command
 //! template. Written as a `.spitdag`, a JSON document.
 
-use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
-use std::fmt;
+use std::io;
+use std::sync::Arc;
 
-use crate::json::{write_array, Json, ObjectRef, ObjectWriter};
+use crate::hash::{QuickMap, QuickSet};
+
+use crate::json::{write_array, write_number, write_string, ObjectWriter, Out};
 use crate::types::TypeExpr;
 
 /// The schema version a `.spitdag` is written with.
@@ -28,10 +30,11 @@ pub struct BoundJob {
     pub operation: String,
     /// The stage of the step that made this job, as `outer/inner`.
     pub stage: Option<String>,
-    /// Each input port and its artifacts, in port order.
-    pub inputs: Vec<(String, Vec<BoundArtifact>)>,
+    /// Each input port and its artifacts, in port order. Jobs that use the
+    /// same artifact share it.
+    pub inputs: Vec<(String, Vec<Arc<BoundArtifact>>)>,
     /// Each output port and its artifact, in port order.
-    pub outputs: Vec<(String, BoundArtifact)>,
+    pub outputs: Vec<(String, Arc<BoundArtifact>)>,
     pub depends_on: Vec<usize>,
     /// The command that makes the outputs; `None` when the operation has none.
     pub command: Option<Vec<Argument>>,
@@ -73,7 +76,10 @@ impl BoundArtifact {
 impl BoundJob {
     /// Every input artifact, in port order.
     pub fn input_artifacts(&self) -> impl Iterator<Item = &BoundArtifact> {
-        self.inputs.iter().flat_map(|(_, artifacts)| artifacts)
+        self.inputs
+            .iter()
+            .flat_map(|(_, artifacts)| artifacts)
+            .map(Arc::as_ref)
     }
 }
 
@@ -81,25 +87,27 @@ impl BoundDag {
     /// The inputs no job here makes, each once, by path: sources, and the
     /// outputs of stages left out.
     pub fn external_inputs(&self) -> Vec<&BoundArtifact> {
-        let produced: BTreeSet<_> = self
+        let produced: QuickSet<_> = self
             .jobs
             .iter()
             .flat_map(|job| &job.outputs)
             .map(|(_, artifact)| artifact.path.as_str())
             .collect();
-        let mut external = BTreeMap::new();
+        let mut external = QuickMap::default();
         for artifact in self.jobs.iter().flat_map(BoundJob::input_artifacts) {
             if !produced.contains(artifact.path.as_str()) {
                 external.entry(artifact.path.as_str()).or_insert(artifact);
             }
         }
-        external.into_values().collect()
+        let mut external: Vec<_> = external.into_iter().collect();
+        external.sort_unstable_by_key(|&(path, _)| path);
+        external.into_iter().map(|(_, artifact)| artifact).collect()
     }
 
     /// The outputs no job here reads: what a full run leaves behind, in job
     /// order.
     pub fn targets(&self) -> Vec<&BoundArtifact> {
-        let read: BTreeSet<_> = self
+        let read: QuickSet<_> = self
             .jobs
             .iter()
             .flat_map(BoundJob::input_artifacts)
@@ -108,7 +116,7 @@ impl BoundDag {
         self.jobs
             .iter()
             .flat_map(|job| &job.outputs)
-            .map(|(_, artifact)| artifact)
+            .map(|(_, artifact)| artifact.as_ref())
             .filter(|artifact| !read.contains(artifact.path.as_str()))
             .collect()
     }
@@ -146,109 +154,157 @@ impl BoundDag {
 
     /// The `.spitdag` document.
     pub fn to_json(&self) -> String {
-        format!("{}\n", Document(self))
+        let mut out = String::new();
+        // The text is kept whole, so there is nothing to hand on.
+        let kept: io::Result<()> = write_document(self, &mut out, |_| Ok(()));
+        debug_assert!(kept.is_ok());
+        out
     }
-}
 
-/// A bound DAG as a `.spitdag`, written a job at a time.
-struct Document<'a>(&'a BoundDag);
-
-impl fmt::Display for Document<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let dag = self.0;
-        let dependents = dag.dependents();
-        let mut document = ObjectWriter::start(f)?;
-        document.field("version", &Json::Number(SPITDAG_VERSION))?;
-        document.field(
-            "generator",
-            &Json::object([
-                ("name", Json::string("spit")),
-                ("version", Json::string(env!("CARGO_PKG_VERSION"))),
-            ]),
-        )?;
-        document.field(
-            "root",
-            &dag.root.as_deref().map_or(Json::Null, Json::string),
-        )?;
-        document.field(
-            "external_inputs",
-            &Json::array(dag.external_inputs().into_iter().map(artifact_json)),
-        )?;
-        document.field(
-            "targets",
-            &Json::array(dag.targets().into_iter().map(artifact_json)),
-        )?;
-        document.field(
-            "executables",
-            &Json::array(dag.executables().into_iter().map(Json::string)),
-        )?;
-        document.field_with("jobs", |out| {
-            write_array(out, &dag.jobs, |out, job| {
-                let dependents = dependents.get(&job.id).map_or(&[][..], Vec::as_slice);
-                job_json(job, dependents)?.write_to(out)
-            })
+    /// Write the `.spitdag` document to `writer` a piece at a time, without
+    /// holding it all.
+    pub fn write_json(&self, writer: &mut impl io::Write) -> io::Result<()> {
+        let mut out = String::with_capacity(2 * PIECE);
+        write_document(self, &mut out, |out| {
+            writer.write_all(out.as_bytes())?;
+            out.clear();
+            Ok(())
         })?;
-        document.finish()
+        writer.write_all(out.as_bytes())?;
+        writer.flush()
     }
 }
 
-fn job_json<'a>(job: &'a BoundJob, dependents: &[usize]) -> Result<Json<'a>, fmt::Error> {
-    let stage = job.stage.as_deref().map_or(Vec::new(), |stage| {
-        stage.split('/').map(Json::string).collect()
+/// How much of a document [`BoundDag::write_json`] holds before writing it.
+const PIECE: usize = 1 << 16;
+
+/// A bound DAG as a `.spitdag`, ending in a newline, written a job at a
+/// time into `out`. Whenever `out` holds a piece, `hand_on` may take what it
+/// holds; the first error it returns stops the writing.
+fn write_document(
+    dag: &BoundDag,
+    out: &mut String,
+    mut hand_on: impl FnMut(&mut String) -> io::Result<()>,
+) -> io::Result<()> {
+    let mut handed = Ok(());
+    let dependents = dag.dependents();
+    let mut document = ObjectWriter::start(out);
+    document.field("version", |out| write_number(out, SPITDAG_VERSION));
+    document.field("generator", |out| {
+        let mut generator = ObjectWriter::start(out);
+        generator.string("name", "spit");
+        generator.string("version", env!("CARGO_PKG_VERSION"));
+        generator.finish();
     });
-    let inputs = job.inputs.iter().map(|(port, artifacts)| {
-        (
-            Cow::Borrowed(port.as_str()),
-            Json::array(artifacts.iter().map(artifact_json)),
-        )
+    document.field("root", |out| match &dag.root {
+        Some(root) => write_string(out, root),
+        None => out.push_str("null"),
     });
-    let outputs = job
-        .outputs
-        .iter()
-        .map(|(port, artifact)| (Cow::Borrowed(port.as_str()), artifact_json(artifact)));
-    let operation = Json::string(&job.operation);
-    let inputs = Json::Object(inputs.collect());
-    let outputs = Json::Object(outputs.collect());
-    let command = job.command.as_deref().map_or(Json::Null, command_json);
-    let verify = Json::array(job.verify.iter().map(|command| command_json(command)));
-    // What the job reads, writes and runs, but not its ID, stage or
-    // neighbours, which can change while the work stays the same.
-    let work = ObjectRef(&[
-        ("operation", &operation),
-        ("inputs", &inputs),
-        ("outputs", &outputs),
-        ("command", &command),
-        ("verify", &verify),
-    ]);
-    let fingerprint = fingerprint(&work)?;
-    Ok(Json::object([
-        ("id", Json::Number(job.id)),
-        ("operation", operation),
-        ("stage", Json::Array(stage)),
-        ("fingerprint", Json::string(fingerprint)),
-        ("inputs", inputs),
-        ("outputs", outputs),
-        (
-            "depends_on",
-            Json::array(job.depends_on.iter().copied().map(Json::Number)),
-        ),
-        (
-            "dependents",
-            Json::array(dependents.iter().copied().map(Json::Number)),
-        ),
-        ("command", command),
-        ("verify", verify),
-    ]))
+    document.field("external_inputs", |out| {
+        write_array(out, dag.external_inputs(), write_artifact);
+    });
+    document.field("targets", |out| {
+        write_array(out, dag.targets(), write_artifact);
+    });
+    document.field("executables", |out| {
+        write_array(out, dag.executables(), |out, name| write_string(out, &name));
+    });
+    let mut work = String::new();
+    document.field("jobs", |out| {
+        write_array(out, &dag.jobs, |out, job| {
+            if handed.is_err() {
+                return;
+            }
+            let dependents = dependents.get(&job.id).map_or(&[][..], Vec::as_slice);
+            write_job(out, job, dependents, &mut work);
+            if out.len() >= PIECE {
+                handed = hand_on(out);
+            }
+        });
+    });
+    document.finish();
+    out.push('\n');
+    handed
 }
 
-/// A 64-bit FNV-1a hash of `work` written as compact JSON, as 16
+/// One job. What it reads, writes and runs is written first into `work`, a
+/// buffer reused between jobs, as the object its fingerprint hashes; the
+/// job's own fields then copy from it.
+fn write_job(out: &mut String, job: &BoundJob, dependents: &[usize], work: &mut String) {
+    work.clear();
+    let mut object = ObjectWriter::start(work);
+    let operation = object.field_at("operation", |out| write_string(out, &job.operation));
+    let inputs = object.field_at("inputs", |out| {
+        let mut inputs = ObjectWriter::start(out);
+        for (port, artifacts) in &job.inputs {
+            inputs.field(port, |out| {
+                write_array(out, artifacts, |out, artifact| {
+                    write_artifact(out, artifact)
+                });
+            });
+        }
+        inputs.finish();
+    });
+    let outputs = object.field_at("outputs", |out| {
+        let mut outputs = ObjectWriter::start(out);
+        for (port, artifact) in &job.outputs {
+            outputs.field(port, |out| write_artifact(out, artifact));
+        }
+        outputs.finish();
+    });
+    let command = object.field_at("command", |out| match &job.command {
+        Some(command) => write_command(out, command),
+        None => out.push_str("null"),
+    });
+    let verify = object.field_at("verify", |out| {
+        write_array(out, &job.verify, |out, command| write_command(out, command));
+    });
+    object.finish();
+
+    let mut object = ObjectWriter::start(out);
+    object.field("id", |out| write_number(out, job.id));
+    object.raw("operation", &work[operation]);
+    object.field("stage", |out| {
+        write_array(
+            out,
+            job.stage.iter().flat_map(|stage| stage.split('/')),
+            write_string,
+        );
+    });
+    object.field("fingerprint", |out| {
+        out.push('"');
+        write_hex(out, fingerprint(work));
+        out.push('"');
+    });
+    object.raw("inputs", &work[inputs]);
+    object.raw("outputs", &work[outputs]);
+    object.field("depends_on", |out| {
+        write_array(out, job.depends_on.iter().copied(), write_number);
+    });
+    object.field("dependents", |out| {
+        write_array(out, dependents.iter().copied(), write_number);
+    });
+    object.raw("command", &work[command]);
+    object.raw("verify", &work[verify]);
+    object.finish();
+}
+
+/// A 64-bit FNV-1a hash of a job's work written as compact JSON, as 16
 /// hexadecimal digits: the same on every platform and in every release,
 /// unlike the standard library's. The JSON writer's format is part of the
 /// `.spitdag` contract; a test pins a job's value.
-fn fingerprint(work: &ObjectRef<'_, '_>) -> Result<String, fmt::Error> {
+fn fingerprint(work: &str) -> u64 {
     let mut hash = Fnv::new();
-    work.write_to(&mut hash)?;
-    Ok(hash.hex())
+    hash.push_str(work);
+    hash.0
+}
+
+/// `value` as 16 hexadecimal digits.
+fn write_hex(out: &mut String, value: u64) {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    for shift in (0..16).rev() {
+        out.push(char::from(HEX[(value >> (4 * shift)) as usize & 0xf]));
+    }
 }
 
 /// FNV-1a over the text written to it, so nothing is kept but the hash.
@@ -258,57 +314,73 @@ impl Fnv {
     fn new() -> Self {
         Self(0xcbf2_9ce4_8422_2325)
     }
-
-    /// The hash as 16 hexadecimal digits.
-    fn hex(&self) -> String {
-        format!("{:016x}", self.0)
-    }
 }
 
-impl fmt::Write for Fnv {
-    fn write_str(&mut self, text: &str) -> fmt::Result {
+impl Out for Fnv {
+    fn push_str(&mut self, text: &str) {
         for byte in text.bytes() {
             self.0 = (self.0 ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3);
         }
-        Ok(())
     }
 }
 
 /// An argument is an array of parts: a string for text, `{"path": ...}` for
 /// a file.
-fn command_json(command: &[Argument]) -> Json<'_> {
-    Json::array(command.iter().map(|argument| {
-        Json::array(argument.iter().map(|part| match part {
-            ArgPart::Text(text) => Json::string(text),
-            ArgPart::Path(path) => Json::object([("path", Json::string(path))]),
-        }))
-    }))
+fn write_command(out: &mut String, command: &[Argument]) {
+    write_array(out, command, |out, argument| {
+        write_array(out, argument, |out, part| match part {
+            ArgPart::Text(text) => write_string(out, text),
+            ArgPart::Path(path) => {
+                out.push_str("{\"path\":");
+                write_string(out, path);
+                out.push('}');
+            }
+        });
+    });
 }
 
-fn artifact_json(artifact: &BoundArtifact) -> Json<'_> {
-    let entities = artifact
-        .entities
-        .iter()
-        .map(|(dimension, value)| (Cow::Borrowed(dimension.as_str()), Json::string(value)));
-    Json::object([
-        ("product", Json::string(&artifact.product)),
-        ("entities", Json::Object(entities.collect())),
-        ("type", type_json(&artifact.artifact_type)),
-        ("path", Json::string(&artifact.path)),
-    ])
-}
+// Artifacts are most of a `.spitdag`, so their fixed keys are written as
+// whole pieces rather than a field at a time.
 
-fn type_json(artifact_type: &TypeExpr) -> Json<'_> {
-    match artifact_type {
-        TypeExpr::Unknown => Json::Null,
-        TypeExpr::Variable(name) => Json::object([("variable", Json::string(name))]),
-        TypeExpr::Named(name) => {
-            Json::object([("name", Json::string(name)), ("args", Json::array([]))])
+fn write_artifact(out: &mut String, artifact: &BoundArtifact) {
+    out.push_str("{\"product\":");
+    write_string(out, &artifact.product);
+    out.push_str(",\"entities\":{");
+    for (index, (dimension, value)) in artifact.entities.iter().enumerate() {
+        if index > 0 {
+            out.push(',');
         }
-        TypeExpr::Applied { constructor, args } => Json::object([
-            ("name", Json::string(constructor)),
-            ("args", Json::array(args.iter().map(type_json))),
-        ]),
+        write_string(out, dimension);
+        out.push(':');
+        write_string(out, value);
+    }
+    out.push_str("},\"type\":");
+    write_type(out, &artifact.artifact_type);
+    out.push_str(",\"path\":");
+    write_string(out, &artifact.path);
+    out.push('}');
+}
+
+fn write_type(out: &mut String, artifact_type: &TypeExpr) {
+    match artifact_type {
+        TypeExpr::Unknown => out.push_str("null"),
+        TypeExpr::Variable(name) => {
+            out.push_str("{\"variable\":");
+            write_string(out, name);
+            out.push('}');
+        }
+        TypeExpr::Named(name) => {
+            out.push_str("{\"name\":");
+            write_string(out, name);
+            out.push_str(",\"args\":[]}");
+        }
+        TypeExpr::Applied { constructor, args } => {
+            out.push_str("{\"name\":");
+            write_string(out, constructor);
+            out.push_str(",\"args\":");
+            write_array(out, args, write_type);
+            out.push('}');
+        }
     }
 }
 
@@ -316,8 +388,8 @@ fn type_json(artifact_type: &TypeExpr) -> Json<'_> {
 mod tests {
     use super::*;
 
-    fn artifact(product: &str, path: &str) -> BoundArtifact {
-        BoundArtifact {
+    fn artifact(product: &str, path: &str) -> Arc<BoundArtifact> {
+        Arc::new(BoundArtifact {
             product: product.into(),
             entities: vec![
                 ("sub".into(), "1".into()),
@@ -331,7 +403,7 @@ mod tests {
                 ],
             ),
             path: path.into(),
-        }
+        })
     }
 
     #[test]
@@ -435,9 +507,9 @@ mod tests {
         // changes every fingerprint, so it must be deliberate.
         assert_eq!(print(&job), "72f6d8ecbacfd9ad");
         let fnv = |text: &str| {
-            let mut hash = Fnv::new();
-            fmt::Write::write_str(&mut hash, text).unwrap();
-            hash.hex()
+            let mut hex = String::new();
+            write_hex(&mut hex, fingerprint(text));
+            hex
         };
         assert_eq!(fnv(""), "cbf29ce484222325");
         assert_eq!(fnv("a"), "af63dc4c8601ec8c");

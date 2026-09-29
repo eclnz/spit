@@ -12,8 +12,8 @@ use crate::model::{
     SourceInventory, SourceRecord,
 };
 use crate::paths::{
-    bind_path, decode_component, encode_component, error, inspect_paths, require_directory,
-    validate_discovery_rule, PathError, PathPart, PathPlaceholder, PathTemplate,
+    decode_component, encode_component, error, inspect_paths, require_directory,
+    validate_discovery_rule, PathBinder, PathError, PathPart, PathPlaceholder, PathTemplate,
 };
 
 /// The source files found under a root, and those skipped.
@@ -329,6 +329,7 @@ fn require_source_files(
     skipped: &[SkippedGroup],
 ) -> Result<(), PathError> {
     let skipped = SkipIndex::new(skipped);
+    let mut binder = PathBinder::new(pipeline);
     for product in sources.iter().map(|source| source.product) {
         let bindings = expected.get(product.name.as_str()).into_iter().flatten();
         for binding in bindings.filter(|binding| !skipped.matches(binding)) {
@@ -337,7 +338,7 @@ fn require_source_files(
                 product.artifact_type.clone(),
                 binding.clone(),
             );
-            let relative = bind_path(pipeline, &product.dimensions, &artifact, || {
+            let relative = binder.bind(&product.dimensions, &artifact, || {
                 format!("source `{artifact}`")
             })?;
             let full = root.join(&relative);
@@ -608,6 +609,7 @@ pub(crate) fn locate_sources(
     pipeline: &Pipeline,
     inventory: &mut SourceInventory,
 ) -> Result<(), PathError> {
+    let mut binder = PathBinder::new(pipeline);
     for record in &mut inventory.artifacts {
         if pipeline.path_template_for(&record.product).is_none() {
             if record.path.is_some() {
@@ -630,7 +632,7 @@ pub(crate) fn locate_sources(
             product.artifact_type.clone(),
             record.entities.clone(),
         );
-        let path = bind_path(pipeline, &product.dimensions, &artifact, || {
+        let path = binder.bind(&product.dimensions, &artifact, || {
             format!("source `{artifact}`")
         })?;
         if let Some(given) = &record.path {

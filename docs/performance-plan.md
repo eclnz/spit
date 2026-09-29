@@ -51,17 +51,17 @@ there; every stage now takes under 5.
 
 ## Where it stands
 
-| Command, 1,000 subjects | Before | Now |
-| --- | --- | --- |
-| `spit inputs` | 5.1 s | 0.63 s |
-| `spit dag` over a `.spitout` | 14.5 s | 0.96 s |
-| `spit dag` over a recipe | 25.0 s | 2.0 s |
-| `spit dag --json` | 21.9 s | 2.3 s |
-| `spit artifacts` | 13.7 s | 0.56 s |
+| Command, 1,000 subjects | Before | First round | Now |
+| --- | --- | --- | --- |
+| `spit inputs` | 5.1 s | 0.63 s | 0.52 s |
+| `spit dag` over a `.spitout` | 14.5 s | 0.96 s | 0.68 s |
+| `spit dag` over a recipe | 25.0 s | 2.0 s | 1.5 s |
+| `spit dag --json` | 21.9 s | 2.3 s | 1.4 s |
+| `spit artifacts` | 13.7 s | 0.56 s | 0.42 s |
 
-At 5,000 subjects (110,002 files, 300,000 jobs), `inputs` takes 3.9 s, `dag`
-6.0 s in 778 MB, a recipe 13.0 s, and `dag --json` 16.3 s in 2.5 GB. Before,
-`dag --json` ran for minutes and passed 2.3 GB.
+At 5,000 subjects (110,002 files, 300,000 jobs), `dag` takes 4.8 s and
+`dag --json` 12.1 s in 1.5 GB. After the first round they took 6.0 s and
+16.3 s in 2.5 GB; before it, `dag --json` ran for minutes.
 
 ## Done
 
@@ -87,39 +87,29 @@ reach each error whose choice depends on order.
   - The `.spitdag` is written a job at a time.
 - **Discovery tests fewer patterns.** It rejects a path pattern whose literal start or end a file lacks before searching.
 
+In the second round:
+
+- **The `.spitdag` is written straight into a `String`.** No `Formatter` and no JSON tree per job: each job's work is written once into a reused buffer, hashed for its fingerprint and copied into the document, and artifacts are written with their fixed keys as whole pieces. `BoundDag::write_json` hands the document to a writer 64 KB at a time, so the CLI never holds all of it. Checking for characters to escape reads eight bytes at a time.
+- **Jobs share their bound artifacts.** `bind_dag` binds each artifact once and every job that uses it holds the same `Arc<BoundArtifact>`, a quarter fewer allocations, and less memory to walk when writing.
+- **Paths bind with each product's template and stage found once** (`PathBinder`), rather than once per artifact, in `bound_paths` and in discovery.
+- **Internal maps use a quick hasher.** Keys come from the user's own files, so `QuickMap` and `QuickSet` (FxHash with a final mix) replace SipHash where order does not matter: artifact maps, the join index, path owners, and the duplicate check in `source_artifacts`, which compared whole entity maps about fifteen times per record in a `BTreeSet`.
+- **The CLI does not free its DAGs on exit,** which took a sixth of a large run.
+
 ## What is left
 
-Profiled at 300 subjects, `dag` over a `.spitout` now executes 1.7 billion
-instructions (it was 6.5 billion), `dag --json` 4.0 billion and `dag` over a
-recipe 3.1 billion. In order of what each would save:
+Profiled at 300 subjects, `dag` over a `.spitout` now executes 1.3 billion
+instructions (6.5 billion before the first round). In order of what each
+would save:
 
-### 1. Write JSON through a buffer, not the formatter
-
-`dag --json` takes 2.3 times as long as `dag`. The JSON writer is generic
-over `fmt::Write`, but the `.spitdag` is written through a `Formatter`, so
-every comma, quote and key is a dynamic call: about 45 instructions per byte
-of output. Writing each job into a reused `String` and handing the formatter
-one piece per job should bring that near the cost of copying the bytes.
-
-### 2. Bind each artifact's path once per run
-
-`bound_paths` binds every artifact of every job, and a `dag` run can call it
-three times: for the case-collision warning in the diagnosis, for
-`validate_source_files` with `--root`, and in `bind_dag` for `--json`, `-o`
-and `--paths`. Each call is about 18% of `dag`. Within it, `bind_path` looks
-up the product's template and stage again for every artifact (about 7,000
-instructions each), and the map that detects shared paths copies every path.
-Binding once, with the template and stage found once per product, and passing
-the paths on would remove most of this.
-
-### 3. Settle a `.spitout` once
+### 1. Settle a `.spitout` once
 
 `dag` checks the inventory in its diagnosis (`check_inventory`), then settles
-it again in `prepare` with `InputSpec::resolve`, which checks it a second
-time: about 18% of `dag`. The diagnosis could return what it settled, as it
-now returns what it resolved.
+it again in `prepare` with `InputSpec::resolve`: about a tenth of `dag`.
+`check_inventory` also clones the whole inventory to apply skip rules, even
+when there are none. The diagnosis could return what it settled, as it
+returns what it resolved.
 
-### 4. Diagnose a recipe's records in memory
+### 2. Diagnose a recipe's records in memory
 
 `dag recipe.spitin` settles the dataset, writes the `.spitout` text, parses it
 back and diagnoses that, so it takes twice as long as `dag` over the written
@@ -127,49 +117,58 @@ back and diagnoses that, so it takes twice as long as `dag` over the written
 round trip and a second settle; errors about records would still need a place
 to point, which today is a line of that text.
 
-### 5. Group records without copying their bindings
+### 3. Print jobs without building their lines
+
+`render_dag` builds a `Line` with owned strings for every artifact of every
+job, and formats each artifact's type again: about a fifth of `dag`. Writing
+each line as it is formatted, with each product's type formatted once, would
+remove most of it.
+
+### 4. Resolve with fewer copies
+
+`expand_step` is a quarter of `dag`. Each job holds its own copy of every
+input artifact, and each copy allocates its product name and type. Sharing
+them (`Arc<str>`, an `Arc` around the type), or having jobs refer to artifacts
+by index, would cut the copies and the memory: at 300,000 jobs, `dag` still
+peaks near 600 MB.
+
+### 5. Bind command arguments without copies
+
+After sharing artifacts, most of `bind_dag`'s allocations are command
+arguments: each is a `Vec` of parts that own their text and paths. Sharing the
+literal text and paths would cut them, at the cost of changing `ArgPart`.
+
+### 6. Warn about paths that differ only in case without binding again
+
+The diagnosis binds every path to look for case collisions, and `bind_dag`
+binds them again: about a seventh of `dag`. The two differ in general (the
+diagnosis uses the pipeline as written and sources not yet located), so
+reusing one for the other needs care.
+
+### 7. Group records without copying their bindings
 
 `coverage_gaps`, `rejected_groups` and `SkipIndex` project every record onto
-the rule's dimensions to find its group, which builds a new map per record per
-rule: 460 million instructions for the three `require` rules of a 300-subject
-recipe. Grouping by the borrowed values, and building a binding only for each
+the rule's dimensions to find its group, building a new map per record per
+rule. Grouping by the borrowed values, and building a binding only for each
 distinct group, would make this a fraction of that. The order groups are
 reported in must stay the order of their bindings.
 
-### 6. Print jobs without building their lines
-
-`render_dag` builds a `Line` with owned strings for every artifact of every
-job before writing it: about 15,000 instructions per job, 17% of `dag`.
-Writing each line as it is formatted would remove the copies.
-
-### 7. Use less memory for large DAGs
-
-At 300,000 jobs, `dag` peaks at 778 MB and `dag --json` at 2.5 GB. Each job
-holds its own copy of every input artifact, including its product name and
-type, and the bound DAG copies each again as owned strings, with its path.
-Options, from least to most change to the library's API:
-- share product names and types between artifacts (`Arc<str>`, an `Arc` around `TypeExpr`);
-- write the `.spitdag` straight from the resolved DAG and its paths, without a `BoundDag`;
-- have jobs refer to artifacts by index.
-
-### 8. Read source records once per run
-
-`Pipeline::source_artifacts` turns records into artifacts, copying each
-product name and type and checking for duplicates in an ordered set. A `dag`
-run calls it several times: in each `check_inventory` and in resolving.
-Items 3 and 4 remove most calls; the remaining one could share names and
-types, as in item 7.
-
-### 9. Match source file paths with less bookkeeping
+### 8. Match source file paths with less bookkeeping
 
 After the literal start and end checks, discovery's `match_from` still
-allocates for every attempt it remembers (a list of bound values per attempt)
-and recomputes which dimensions later pieces repeat: 12% of `dag` over a
-recipe. The repeated dimensions can be found once per pattern, and patterns
-that repeat none need no list.
+allocates for every attempt it remembers and recomputes which dimensions
+later pieces repeat. The repeated dimensions can be found once per pattern.
 
-### 10. Key a DAG's source paths without copies
+### 9. Key a DAG's source paths without copies
 
 `ResolvedDag::source_paths` is a public `BTreeMap<ArtifactKey, String>`, so
 finding a source's file builds an owned key and compares strings. Moving it
 to a map found by borrowed product and entities changes the public type.
+
+### 10. A faster fingerprint
+
+A fingerprint is FNV-1a over the job's work, one dependent multiply per byte:
+about a quarter of writing the `.spitdag`. A hash that takes eight bytes at a
+time would be several times faster, but changes every fingerprint, so a
+backend would see every job as changed once. It belongs with a `.spitdag`
+version change.

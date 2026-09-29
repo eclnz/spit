@@ -19,9 +19,9 @@ use std::process::ExitCode;
 use spit::{
     bind_dag, diagnose_checked, diagnose_checked_with_records, diagnose_recipe, inspect_paths,
     parse_input_spec_at, render_artifacts, render_bound_dag, render_dag, render_diagnostics_json,
-    render_source_inventory, stage_within, validate_source_files, ArtifactReport, Checked, Context,
-    Diagnosis, Diagnostic, DiagnosticSource, InputSource, InputSpec, PathTemplate, Pipeline,
-    ResolvedDag, ResolvedInputs, Severity,
+    render_source_inventory, stage_within, validate_source_files, ArtifactReport, BoundDag,
+    Checked, Context, Diagnosis, Diagnostic, DiagnosticSource, InputSource, InputSpec,
+    PathTemplate, Pipeline, ResolvedDag, ResolvedInputs, Severity,
 };
 
 #[derive(Clone, Copy, PartialEq)]
@@ -762,17 +762,26 @@ fn dag(args: &CliArgs) -> Result<(), Box<dyn Error>> {
                 .to_string_lossy()
                 .into_owned()
         });
-        return write_output(args, &bound.to_json(), "the .spitdag");
+        write_spitdag(args, &bound)?;
+        exit_without_freeing((prepared, bound));
+        return Ok(());
     }
     if args.has(Flag::Paths) {
-        print!(
-            "{}",
-            render_bound_dag(&bind_dag(&prepared.bound, dag)?, true)
-        );
+        let bound = bind_dag(&prepared.bound, dag)?;
+        print!("{}", render_bound_dag(&bound, true));
+        exit_without_freeing(bound);
     } else {
         print!("{}", render_dag(dag));
     }
+    exit_without_freeing(prepared);
     Ok(())
+}
+
+/// Leave `value` for the operating system to reclaim when the process
+/// exits, which it is about to: freeing a large DAG piece by piece takes a
+/// sixth of a run.
+fn exit_without_freeing<T>(value: T) {
+    std::mem::forget(value);
 }
 
 /// Step 3: what can be made, what cannot, and why.
@@ -784,6 +793,20 @@ fn artifacts(args: &CliArgs) -> Result<(), Box<dyn Error>> {
         validate_source_files(&prepared.bound, &report.dag, root)?;
     }
     print!("{}", render_artifacts(&report));
+    exit_without_freeing(report);
+    Ok(())
+}
+
+/// Print the `.spitdag`, or write it to the `-o` file, a piece at a time.
+fn write_spitdag(args: &CliArgs, bound: &BoundDag) -> Result<(), Box<dyn Error>> {
+    match args.value(Flag::Output) {
+        Some(file) => {
+            let written = fs::File::create(&file).and_then(|mut out| bound.write_json(&mut out));
+            written.map_err(|reason| format!("cannot write `{file}`: {reason}"))?;
+            eprintln!("note: wrote the .spitdag to `{file}`");
+        }
+        None => bound.write_json(&mut io::stdout().lock())?,
+    }
     Ok(())
 }
 

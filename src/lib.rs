@@ -5,6 +5,7 @@ mod command;
 mod compile;
 mod diagnostics;
 mod error;
+mod hash;
 mod imports;
 mod inputs;
 mod json;

@@ -4,6 +4,7 @@
 use std::collections::BTreeMap;
 
 use std::fmt;
+use std::sync::Arc;
 
 use crate::command::{slot, validate_commands, CommandError, Slot};
 use crate::model::{
@@ -20,10 +21,11 @@ use crate::template::Part;
 pub fn bind_dag(pipeline: &Pipeline, dag: &ResolvedDag) -> Result<BoundDag, BindError> {
     check_rules(pipeline, dag)?;
     validate_commands(pipeline)?;
-    let binder = Binder {
+    let mut binder = Binder {
         pipeline,
         dag,
         paths: bound_paths(pipeline, dag)?,
+        artifacts: ArtifactMap::default(),
         operations: pipeline
             .operations
             .iter()
@@ -39,22 +41,28 @@ pub fn bind_dag(pipeline: &Pipeline, dag: &ResolvedDag) -> Result<BoundDag, Bind
 }
 
 /// What binding each job of a DAG needs: every artifact's path, and each
-/// operation by name.
+/// operation by name. Each artifact is bound once, for every job that uses
+/// it.
 struct Binder<'a> {
     pipeline: &'a Pipeline,
     dag: &'a ResolvedDag,
     paths: ArtifactMap<String>,
+    artifacts: ArtifactMap<Arc<BoundArtifact>>,
     operations: BTreeMap<&'a str, &'a OperationDef>,
 }
 
-impl Binder<'_> {
-    fn job(&self, job: &Job) -> Result<BoundJob, BindError> {
-        let operation = self.operations.get(job.operation.as_str()).ok_or_else(|| {
-            BindError::Dag(format!(
-                "unknown operation `{}` in resolved DAG",
-                job.operation
-            ))
-        })?;
+impl<'a> Binder<'a> {
+    fn job(&mut self, job: &Job) -> Result<BoundJob, BindError> {
+        let operation: &'a OperationDef = self
+            .operations
+            .get(job.operation.as_str())
+            .copied()
+            .ok_or_else(|| {
+                BindError::Dag(format!(
+                    "unknown operation `{}` in resolved DAG",
+                    job.operation
+                ))
+            })?;
         if job.inputs.len() != operation.inputs.len()
             || job.outputs.len() != operation.outputs.len()
         {
@@ -63,6 +71,18 @@ impl Binder<'_> {
                 job.id, job.operation
             )));
         }
+        let mut inputs = Vec::with_capacity(job.inputs.len());
+        for (port, artifacts) in operation.inputs.iter().zip(&job.inputs) {
+            let artifacts = artifacts
+                .iter()
+                .map(|artifact| self.artifact(artifact))
+                .collect::<Result<_, _>>()?;
+            inputs.push((port.name.clone(), artifacts));
+        }
+        let mut outputs = Vec::with_capacity(job.outputs.len());
+        for (port, output) in operation.outputs.iter().zip(&job.outputs) {
+            outputs.push((port.name.clone(), self.artifact(output)?));
+        }
         let commands = |role: CommandRole| {
             self.pipeline
                 .commands
@@ -70,34 +90,31 @@ impl Binder<'_> {
                 .filter(move |command| command.operation == job.operation && command.role == role)
                 .map(|command| expand(command.template.arguments(), operation, job, &self.paths))
         };
-        let inputs = operation
-            .inputs
-            .iter()
-            .zip(&job.inputs)
-            .map(|(port, artifacts)| {
-                let artifacts = artifacts
-                    .iter()
-                    .map(|artifact| self.artifact(artifact))
-                    .collect::<Result<_, _>>()?;
-                Ok((port.name.clone(), artifacts))
-            });
-        let outputs = (operation.outputs.iter().zip(&job.outputs))
-            .map(|(port, output)| Ok((port.name.clone(), self.artifact(output)?)));
         Ok(BoundJob {
             id: job.id,
             operation: job.operation.clone(),
             stage: job.stage.clone(),
-            inputs: inputs.collect::<Result<_, BindError>>()?,
-            outputs: outputs.collect::<Result<_, BindError>>()?,
+            inputs,
+            outputs,
             depends_on: job.dependencies.clone(),
             command: commands(CommandRole::Run).next().transpose()?,
             verify: commands(CommandRole::Verify).collect::<Result<_, _>>()?,
         })
     }
 
-    /// `artifact` with its path and its entities in declared order.
+    /// `artifact` with its path and its entities in declared order, shared
+    /// with every job that uses it.
+    fn artifact(&mut self, artifact: &ArtifactInstance) -> Result<Arc<BoundArtifact>, BindError> {
+        if let Some(bound) = self.artifacts.get(artifact) {
+            return Ok(Arc::clone(bound));
+        }
+        let bound = Arc::new(self.bind(artifact)?);
+        self.artifacts.insert(artifact, Arc::clone(&bound));
+        Ok(bound)
+    }
+
     /// `bound_paths` binds every artifact of every job, so each is found.
-    fn artifact(&self, artifact: &ArtifactInstance) -> Result<BoundArtifact, BindError> {
+    fn bind(&self, artifact: &ArtifactInstance) -> Result<BoundArtifact, BindError> {
         let unbound = || BindError::Dag(format!("no path is bound for `{artifact}`"));
         let dimensions = self
             .dag

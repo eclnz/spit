@@ -1,10 +1,11 @@
 //! Expanding a checked step into jobs: one per driving artifact or group,
 //! with every other input matched to that job.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::compile::{CompiledStep, StepShape};
 use crate::error::{PortSite, ResolveError};
+use crate::hash::QuickMap;
 use crate::model::{
     ArtifactInstance, ArtifactMap, ArtifactSet, EntityBinding, Gap, Invocation, Job, OperationDef,
 };
@@ -46,9 +47,9 @@ pub(super) fn expand_step(
         .enumerate()
         .map(|(index, candidates)| {
             if index == shape.driver {
-                return JoinIndex::new();
+                return JoinIndex::default();
             }
-            let mut by_values = JoinIndex::new();
+            let mut by_values = JoinIndex::default();
             for &candidate in candidates {
                 by_values
                     .entry(join_values(&shape.joins[index], &candidate.entities))
@@ -73,7 +74,7 @@ pub(super) fn expand_step(
 
 /// One input's candidates, by their values for the dimensions it joins on,
 /// so each job finds its match without scanning them all.
-type JoinIndex<'a> = HashMap<Vec<Option<&'a str>>, Vec<&'a ArtifactInstance>>;
+type JoinIndex<'a> = QuickMap<Vec<Option<&'a str>>, Vec<&'a ArtifactInstance>>;
 
 /// `entities`' values for `joins`, in order; `None` where one is unbound.
 fn join_values<'a>(joins: &[String], entities: &'a EntityBinding) -> Vec<Option<&'a str>> {
