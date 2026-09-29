@@ -102,13 +102,36 @@ impl<E> Located<E> {
     }
 }
 
-impl Located<String> {
+impl<E: From<String>> Located<E> {
     /// An error that is only a message, such as one about a command or a
     /// path template, whose location is not known yet.
     pub(crate) fn new(message: impl Into<String>) -> Self {
-        Self::unplaced(message.into())
+        Self::unplaced(E::from(message.into()))
     }
 }
+
+/// Declare an error that is a message about one kind of thing, so that
+/// errors about different things are different types.
+macro_rules! message_error {
+    ($(#[$doc:meta])* $name:ident) => {
+        $(#[$doc])*
+        #[derive(Clone, Debug, Eq, PartialEq)]
+        pub struct $name(pub String);
+
+        impl From<String> for $name {
+            fn from(message: String) -> Self {
+                Self(message)
+            }
+        }
+
+        impl std::fmt::Display for $name {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str(&self.0)
+            }
+        }
+    };
+}
+pub(crate) use message_error;
 
 /// Reads as `line 3: message`, or just the message without a line.
 impl<E: fmt::Display> fmt::Display for Located<E> {

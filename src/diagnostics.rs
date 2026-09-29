@@ -630,11 +630,18 @@ fn pipeline_diagnostics(
             Diagnostic::error(DiagnosticSource::Pipeline, place, error.to_string())
         })
         .collect();
-    let template_errors = collect_commands(pipeline, lines, &checked.poisoned)
-        .into_iter()
-        .chain(collect_paths(pipeline, lines, &checked.poisoned).1);
+    let source = DiagnosticSource::Pipeline;
+    let command_errors = collect_commands(pipeline, lines, &checked.poisoned);
+    let path_errors = collect_paths(pipeline, lines, &checked.poisoned).1;
     diagnostics.extend(
-        template_errors.map(|error| Diagnostic::located(DiagnosticSource::Pipeline, &error, text)),
+        command_errors
+            .iter()
+            .map(|error| Diagnostic::located(source, error, text)),
+    );
+    diagnostics.extend(
+        path_errors
+            .iter()
+            .map(|error| Diagnostic::located(source, error, text)),
     );
     diagnostics.extend(warnings(pipeline, lines, &checked.poisoned));
     diagnostics.extend(operator_warnings(pipeline, lines, text));

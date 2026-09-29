@@ -14,7 +14,7 @@ use crate::model::{
 
 use crate::compile::{compile, CompiledPipeline};
 
-pub use self::bind::bind_dag;
+pub use self::bind::{bind_dag, BindError};
 use self::matching::{expand_step, make_job, Expansion};
 
 /// Resolve every job of `pipeline` over the sources in `inventory`, failing

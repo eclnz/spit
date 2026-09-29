@@ -13,4 +13,4 @@ pub(crate) use self::template::{
     bind_path, decode_component, encode_component, error, require_directory, unusable_path,
     validate_discovery_rule, PathPart, PathPlaceholder,
 };
-pub use self::template::{PathError, PathTemplate};
+pub use self::template::{PathError, PathProblem, PathTemplate};
