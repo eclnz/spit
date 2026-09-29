@@ -7,6 +7,7 @@ mod diagnostics;
 mod error;
 mod imports;
 mod inputs;
+mod json;
 mod lower;
 mod model;
 mod parser;
@@ -23,7 +24,7 @@ pub use command::{validate_commands, CommandError, CommandTemplate};
 pub use compile::validate_pipeline;
 pub use diagnostics::{
     diagnose, diagnose_artifacts_at, diagnose_at, diagnose_at_with_inputs, diagnose_recipe,
-    diagnose_recipe_against, Diagnostic, DiagnosticSource, Severity,
+    diagnose_recipe_against, render_diagnostics_json, Diagnostic, DiagnosticSource, Severity,
 };
 pub use error::{DefinitionSubject, ResolveError, TypeConflict};
 pub use imports::parse_pipeline_at;

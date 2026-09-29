@@ -6,10 +6,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write;
 
+use crate::json::Json;
 use crate::types::TypeExpr;
 
 /// The schema version a `.spitdag` is written with.
-pub const SPITDAG_VERSION: u64 = 2;
+pub const SPITDAG_VERSION: usize = 2;
 
 /// A resolved DAG with its paths bound and its commands expanded.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -94,22 +95,15 @@ impl BoundDag {
 
     /// The `.spitdag` document.
     pub fn to_json(&self) -> String {
-        let mut output = format!("{{\"version\":{SPITDAG_VERSION},\"external_inputs\":[");
-        for (index, artifact) in self.external_inputs().into_iter().enumerate() {
-            if index > 0 {
-                output.push(',');
-            }
-            write_artifact(&mut output, artifact);
-        }
-        output.push_str("],\"jobs\":[");
-        for (index, job) in self.jobs.iter().enumerate() {
-            if index > 0 {
-                output.push(',');
-            }
-            write_job(&mut output, job);
-        }
-        output.push_str("]}\n");
-        output
+        let document = Json::object([
+            ("version", Json::Number(SPITDAG_VERSION)),
+            (
+                "external_inputs",
+                Json::array(self.external_inputs().into_iter().map(artifact_json)),
+            ),
+            ("jobs", Json::array(self.jobs.iter().map(job_json))),
+        ]);
+        format!("{document}\n")
     }
 }
 
@@ -161,152 +155,76 @@ pub fn render_bound_dag(dag: &BoundDag, paths: bool) -> String {
     output
 }
 
-fn write_job(output: &mut String, job: &BoundJob) {
-    write!(output, "{{\"id\":{},\"operation\":", job.id).unwrap();
-    json::write_string(output, &job.operation);
-    output.push_str(",\"stage\":[");
-    if let Some(stage) = &job.stage {
-        for (index, component) in stage.split('/').enumerate() {
-            if index > 0 {
-                output.push(',');
-            }
-            json::write_string(output, component);
-        }
-    }
-    output.push_str("],\"inputs\":{");
-    for (index, (port, artifacts)) in job.inputs.iter().enumerate() {
-        if index > 0 {
-            output.push(',');
-        }
-        json::write_string(output, port);
-        output.push_str(":[");
-        for (index, artifact) in artifacts.iter().enumerate() {
-            if index > 0 {
-                output.push(',');
-            }
-            write_artifact(output, artifact);
-        }
-        output.push(']');
-    }
-    output.push_str("},\"outputs\":{");
-    for (index, (port, artifact)) in job.outputs.iter().enumerate() {
-        if index > 0 {
-            output.push(',');
-        }
-        json::write_string(output, port);
-        output.push(':');
-        write_artifact(output, artifact);
-    }
-    output.push_str("},\"depends_on\":[");
-    let dependencies: Vec<_> = job.depends_on.iter().map(ToString::to_string).collect();
-    output.push_str(&dependencies.join(","));
-    output.push_str("],\"command\":");
-    match &job.command {
-        Some(command) => write_command(output, command),
-        None => output.push_str("null"),
-    }
-    output.push_str(",\"verify\":[");
-    for (index, command) in job.verify.iter().enumerate() {
-        if index > 0 {
-            output.push(',');
-        }
-        write_command(output, command);
-    }
-    output.push_str("]}");
+fn job_json(job: &BoundJob) -> Json {
+    let stage = job.stage.as_deref().map_or(Vec::new(), |stage| {
+        stage.split('/').map(Json::string).collect()
+    });
+    let inputs = job.inputs.iter().map(|(port, artifacts)| {
+        (
+            port.clone(),
+            Json::array(artifacts.iter().map(artifact_json)),
+        )
+    });
+    let outputs = job
+        .outputs
+        .iter()
+        .map(|(port, artifact)| (port.clone(), artifact_json(artifact)));
+    Json::object([
+        ("id", Json::Number(job.id)),
+        ("operation", Json::string(&job.operation)),
+        ("stage", Json::Array(stage)),
+        ("inputs", Json::Object(inputs.collect())),
+        ("outputs", Json::Object(outputs.collect())),
+        (
+            "depends_on",
+            Json::array(job.depends_on.iter().copied().map(Json::Number)),
+        ),
+        (
+            "command",
+            job.command.as_deref().map_or(Json::Null, command_json),
+        ),
+        (
+            "verify",
+            Json::array(job.verify.iter().map(|command| command_json(command))),
+        ),
+    ])
 }
 
 /// An argument is an array of parts: a string for text, `{"path": ...}` for
 /// a file.
-fn write_command(output: &mut String, command: &[Argument]) {
-    output.push('[');
-    for (index, argument) in command.iter().enumerate() {
-        if index > 0 {
-            output.push(',');
-        }
-        output.push('[');
-        for (index, part) in argument.iter().enumerate() {
-            if index > 0 {
-                output.push(',');
-            }
-            match part {
-                ArgPart::Text(text) => json::write_string(output, text),
-                ArgPart::Path(path) => {
-                    output.push_str("{\"path\":");
-                    json::write_string(output, path);
-                    output.push('}');
-                }
-            }
-        }
-        output.push(']');
-    }
-    output.push(']');
+fn command_json(command: &[Argument]) -> Json {
+    Json::array(command.iter().map(|argument| {
+        Json::array(argument.iter().map(|part| match part {
+            ArgPart::Text(text) => Json::string(text),
+            ArgPart::Path(path) => Json::object([("path", Json::string(path))]),
+        }))
+    }))
 }
 
-fn write_artifact(output: &mut String, artifact: &BoundArtifact) {
-    output.push_str("{\"product\":");
-    json::write_string(output, &artifact.product);
-    output.push_str(",\"entities\":{");
-    for (index, (dimension, value)) in artifact.entities.iter().enumerate() {
-        if index > 0 {
-            output.push(',');
-        }
-        json::write_string(output, dimension);
-        output.push(':');
-        json::write_string(output, value);
-    }
-    output.push_str("},\"type\":");
-    write_type(output, &artifact.artifact_type);
-    output.push_str(",\"path\":");
-    json::write_string(output, &artifact.path);
-    output.push('}');
+fn artifact_json(artifact: &BoundArtifact) -> Json {
+    let entities = artifact
+        .entities
+        .iter()
+        .map(|(dimension, value)| (dimension.clone(), Json::string(value)));
+    Json::object([
+        ("product", Json::string(&artifact.product)),
+        ("entities", Json::Object(entities.collect())),
+        ("type", type_json(&artifact.artifact_type)),
+        ("path", Json::string(&artifact.path)),
+    ])
 }
 
-fn write_type(output: &mut String, artifact_type: &TypeExpr) {
+fn type_json(artifact_type: &TypeExpr) -> Json {
     match artifact_type {
-        TypeExpr::Unknown => output.push_str("null"),
-        TypeExpr::Variable(name) => {
-            output.push_str("{\"variable\":");
-            json::write_string(output, name);
-            output.push('}');
-        }
+        TypeExpr::Unknown => Json::Null,
+        TypeExpr::Variable(name) => Json::object([("variable", Json::string(name))]),
         TypeExpr::Named(name) => {
-            output.push_str("{\"name\":");
-            json::write_string(output, name);
-            output.push_str(",\"args\":[]}");
+            Json::object([("name", Json::string(name)), ("args", Json::array([]))])
         }
-        TypeExpr::Applied { constructor, args } => {
-            output.push_str("{\"name\":");
-            json::write_string(output, constructor);
-            output.push_str(",\"args\":[");
-            for (index, arg) in args.iter().enumerate() {
-                if index > 0 {
-                    output.push(',');
-                }
-                write_type(output, arg);
-            }
-            output.push_str("]}");
-        }
-    }
-}
-
-/// Just enough JSON for a `.spitdag`.
-mod json {
-    use std::fmt::Write;
-
-    pub(super) fn write_string(output: &mut String, value: &str) {
-        output.push('"');
-        for character in value.chars() {
-            match character {
-                '"' => output.push_str("\\\""),
-                '\\' => output.push_str("\\\\"),
-                '\n' => output.push_str("\\n"),
-                '\r' => output.push_str("\\r"),
-                '\t' => output.push_str("\\t"),
-                c if c < ' ' => write!(output, "\\u{:04x}", u32::from(c)).unwrap(),
-                c => output.push(c),
-            }
-        }
-        output.push('"');
+        TypeExpr::Applied { constructor, args } => Json::object([
+            ("name", Json::string(constructor)),
+            ("args", Json::array(args.iter().map(type_json))),
+        ]),
     }
 }
 
