@@ -228,13 +228,13 @@ Constraints check each observed group. They do not set a total subject or visit 
 ```text
 require image run=1,2 per [subject, visit]
 ```
- An inventory may include `contexts:` to name a group even when one of its required inputs is absent:
+ An inventory may include `contexts:` to name a group even when one of its required inputs is absent. A record may end with `: path`, its file relative to the dataset root; `spit discover` writes one for each file it finds, and a record without one takes its product's path rule:
 
 ```text
 contexts:
     [subject=A,visit=1]
 sources:
-    image[subject=A,visit=1,run=1]
+    image[subject=A,visit=1,run=1]: raw/A/1/run-1.nii.gz
 ```
 
 Types are additive. You can leave them out, add them to selected products and operations, or type the whole pipeline. Known mismatches fail; missing type information does not.

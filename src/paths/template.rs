@@ -1,10 +1,10 @@
 //! Path templates and the path one template gives one artifact. Every step
 //! shares this: it knows the model, and nothing about resolving or discovery.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{self, Write};
 
-use crate::model::{ArtifactInstance, Pipeline};
+use crate::model::{ArtifactInstance, DirectoryDiscovery, Pipeline};
 use crate::span::Located;
 use crate::template::{parse_template, Part};
 
@@ -283,4 +283,54 @@ pub(crate) fn enclosing_path<'a, T>(
             .get_key_value(&path[..end])
             .map(|(directory, owner)| (directory.as_str(), owner))
     })
+}
+
+/// Check that a directory rule names a valid context path.
+pub(crate) fn validate_discovery_rule(rule: &DirectoryDiscovery) -> Result<(), PathError> {
+    let dimensions: BTreeSet<_> = rule.dimensions.iter().collect();
+    if rule.dimensions.is_empty() || dimensions.len() != rule.dimensions.len() {
+        return Err(error(format!(
+            "discovery `{}` needs distinct dimensions",
+            rule.name
+        )));
+    }
+    let mut used = BTreeSet::new();
+    let mut sample = String::new();
+    for part in rule.template.parts() {
+        match part {
+            PathPart::Literal(value) => sample.push_str(value),
+            PathPart::Placeholder(PathPlaceholder::Dimension(name))
+                if dimensions.contains(name) =>
+            {
+                used.insert(name);
+                sample.push_str(name);
+            }
+            PathPart::Placeholder(placeholder) => {
+                return Err(error(format!(
+                    "discovery `{}` uses undeclared or reserved placeholder `{placeholder}`",
+                    rule.name
+                )));
+            }
+        }
+    }
+    if let Some(missing) = rule
+        .dimensions
+        .iter()
+        .find(|dimension| !used.contains(dimension))
+    {
+        return Err(error(format!(
+            "discovery `{}` pattern omits dimension `{missing}`",
+            rule.name
+        )));
+    }
+    if sample.is_empty() || sample.ends_with('/') {
+        return Err(error(format!(
+            "discovery `{}` must name a directory without a trailing `/`",
+            rule.name
+        )));
+    }
+    if let Some(reason) = unusable_path(&sample) {
+        return Err(error(format!("discovery `{}` pattern {reason}", rule.name)));
+    }
+    Ok(())
 }

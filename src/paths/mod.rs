@@ -7,9 +7,10 @@ mod template;
 
 pub(crate) use self::bind::{bound_paths, case_collisions, check_rules, output_keys};
 pub use self::bind::{validate_concrete_paths, validate_source_files, VerifiedFiles};
-pub(crate) use self::rules::{collect_paths, validate_discovery_rule};
+pub(crate) use self::rules::collect_paths;
 pub use self::rules::{inspect_paths, PathCoverage, PathCoverageEntry, PathRule};
 pub(crate) use self::template::{
-    bind_path, decode_component, encode_component, error, unusable_path, PathPart, PathPlaceholder,
+    bind_path, decode_component, encode_component, error, unusable_path, validate_discovery_rule,
+    PathPart, PathPlaceholder,
 };
 pub use self::template::{PathError, PathTemplate};

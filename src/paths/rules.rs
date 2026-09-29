@@ -4,11 +4,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
-use super::template::{
-    bind_path, enclosing_path, error, unusable_path, PathError, PathPart, PathPlaceholder,
-};
-use crate::model::{ArtifactInstance, DirectoryDiscovery, EntityBinding, Pipeline, ProductDef};
+use crate::model::{ArtifactInstance, EntityBinding, Pipeline, ProductDef};
 use crate::parser::SourceMap;
+
+use super::template::{bind_path, enclosing_path, error, PathError, PathPart, PathPlaceholder};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum PathRule {
@@ -243,54 +242,4 @@ fn validate_path_template(pipeline: &Pipeline, product: &ProductDef) -> Result<S
     bind_path(pipeline, &product.dimensions, &artifact, || {
         format!("path rule for `{}`", product.name)
     })
-}
-
-/// Check that a directory rule names a valid context path.
-pub(crate) fn validate_discovery_rule(rule: &DirectoryDiscovery) -> Result<(), PathError> {
-    let dimensions: BTreeSet<_> = rule.dimensions.iter().collect();
-    if rule.dimensions.is_empty() || dimensions.len() != rule.dimensions.len() {
-        return Err(error(format!(
-            "discovery `{}` needs distinct dimensions",
-            rule.name
-        )));
-    }
-    let mut used = BTreeSet::new();
-    let mut sample = String::new();
-    for part in rule.template.parts() {
-        match part {
-            PathPart::Literal(value) => sample.push_str(value),
-            PathPart::Placeholder(PathPlaceholder::Dimension(name))
-                if dimensions.contains(name) =>
-            {
-                used.insert(name);
-                sample.push_str(name);
-            }
-            PathPart::Placeholder(placeholder) => {
-                return Err(error(format!(
-                    "discovery `{}` uses undeclared or reserved placeholder `{placeholder}`",
-                    rule.name
-                )));
-            }
-        }
-    }
-    if let Some(missing) = rule
-        .dimensions
-        .iter()
-        .find(|dimension| !used.contains(dimension))
-    {
-        return Err(error(format!(
-            "discovery `{}` pattern omits dimension `{missing}`",
-            rule.name
-        )));
-    }
-    if sample.is_empty() || sample.ends_with('/') {
-        return Err(error(format!(
-            "discovery `{}` must name a directory without a trailing `/`",
-            rule.name
-        )));
-    }
-    if let Some(reason) = unusable_path(&sample) {
-        return Err(error(format!("discovery `{}` pattern {reason}", rule.name)));
-    }
-    Ok(())
 }
