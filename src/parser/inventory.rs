@@ -235,6 +235,27 @@ fn parse_source(line: &str, number: usize) -> Result<SourceRecord, ParseError> {
     Ok(record.at(path))
 }
 
+/// Locate valid source records in an inventory without parsing each line as
+/// a separate document. Used only to place diagnostics after a failed check.
+pub(crate) fn source_record_lines(text: &str) -> Vec<(usize, SourceRecord)> {
+    let mut sources = false;
+    let mut records = Vec::new();
+    for (index, original) in text.lines().enumerate() {
+        let line = strip_comment(original).trim();
+        match Header::of(line) {
+            Some(Header::Sources) => sources = true,
+            Some(Header::Contexts(_)) => sources = false,
+            _ if sources => {
+                if let Ok(record) = parse_source(line, index + 1) {
+                    records.push((index + 1, record));
+                }
+            }
+            _ => {}
+        }
+    }
+    records
+}
+
 fn parse_context(line: &str, number: usize) -> Result<EntityBinding, ParseError> {
     let bindings = line
         .strip_prefix('[')

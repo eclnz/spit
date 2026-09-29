@@ -23,8 +23,9 @@ mod types;
 pub use command::{validate_commands, CommandError, CommandTemplate};
 pub use compile::validate_pipeline;
 pub use diagnostics::{
-    diagnose, diagnose_artifacts_at, diagnose_at, diagnose_at_with_inputs, diagnose_recipe,
-    diagnose_recipe_against, render_diagnostics_json, Diagnostic, DiagnosticSource, Severity,
+    diagnose, diagnose_artifacts_at, diagnose_at, diagnose_at_checked, diagnose_at_with_inputs,
+    diagnose_recipe, diagnose_recipe_against, render_diagnostics_json, Diagnosis, Diagnostic,
+    DiagnosticSource, Severity,
 };
 pub use error::{DefinitionSubject, ResolveError, TypeConflict};
 pub use imports::parse_pipeline_at;

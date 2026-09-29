@@ -22,8 +22,8 @@ use self::flow::parse_flow;
 use self::sectioned::{is_sectioned_document, parse_sectioned};
 
 pub(crate) use self::declarations::{parse_use, UseSpec};
-pub(crate) use self::inventory::split_document;
 pub use self::inventory::{parse_source_inventory, render_source_inventory};
+pub(crate) use self::inventory::{source_record_lines, split_document};
 pub(crate) use self::keyword::{Header, Keyword};
 pub(crate) use self::lexical::{glued_comment, strip_comment};
 pub(crate) use self::source_map::{Rule, SourceMap, Step};
