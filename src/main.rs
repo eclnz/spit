@@ -95,11 +95,11 @@ impl Command {
         self.spec().files
     }
 
-    /// The fewest and most files it takes.
-    fn arity(self) -> (usize, usize) {
+    /// The most files it takes; every command takes at least one.
+    fn most_files(self) -> usize {
         match self {
-            Self::Check | Self::Inputs => (1, 1),
-            Self::Dag | Self::Artifacts => (1, 2),
+            Self::Check | Self::Inputs => 1,
+            Self::Dag | Self::Artifacts => 2,
         }
     }
 
@@ -224,7 +224,10 @@ impl Flags {
 
 struct CliArgs {
     command: Command,
-    files: Vec<String>,
+    /// The file every command takes.
+    file: String,
+    /// The inputs after a pipeline, for a command that takes two files.
+    second: Option<String>,
     flags: Flags,
 }
 
@@ -362,22 +365,29 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> Result<Request, String>
             ));
         }
     }
-    let (fewest, most) = command.arity();
-    if files.len() < fewest {
+    let mut files = files.into_iter();
+    let Some(file) = files.next() else {
         return Err(misuse(
             format_args!("{} needs {}", command.name(), command.files()),
             Some(command),
         ));
-    }
-    if files.len() > most {
+    };
+    let second = files.next();
+    let extra = if command.most_files() == 1 {
+        second.as_ref()
+    } else {
+        files.as_slice().first()
+    };
+    if let Some(extra) = extra {
         return Err(misuse(
-            format_args!("unexpected file `{}`", files[most]),
+            format_args!("unexpected file `{extra}`"),
             Some(command),
         ));
     }
     Ok(Request::Run(CliArgs {
         command,
-        files,
+        file,
+        second,
         flags,
     }))
 }
@@ -443,7 +453,7 @@ fn main() -> ExitCode {
 /// Step 1: compile a pipeline, or check a recipe against the pipeline it
 /// names. Reads no data.
 fn check(args: &CliArgs) -> Result<(), Box<dyn Error>> {
-    let file = &args.files[0];
+    let file = &args.file;
     let path = Path::new(file);
     let text = if args.has(Flag::Stdin) {
         read_stdin()?
@@ -486,7 +496,7 @@ fn check(args: &CliArgs) -> Result<(), Box<dyn Error>> {
 
 /// Step 2: settle a dataset from a recipe and write its `.spitout`.
 fn inputs(args: &CliArgs) -> Result<(), Box<dyn Error>> {
-    let settled = run_inputs(&args.files[0], args.value(Flag::Root).as_deref())?;
+    let settled = run_inputs(&args.file, args.value(Flag::Root).as_deref())?;
     settled.inputs.require_complete()?;
     let text = render_source_inventory(
         &settled.inputs.inventory,
@@ -571,10 +581,9 @@ struct Prepared {
 fn prepare(args: &CliArgs) -> Result<Prepared, Box<dyn Error>> {
     // A recipe names its own pipeline, so it stands alone; any other inputs
     // need the pipeline they are for.
-    let (given, inputs) = match args.files.as_slice() {
-        [inputs] => (None, inputs),
-        [pipeline, inputs] => (Some(pipeline.as_str()), inputs),
-        _ => unreachable!("the command takes one or two files"),
+    let (given, inputs) = match &args.second {
+        None => (None, &args.file),
+        Some(inputs) => (Some(args.file.as_str()), inputs),
     };
     let command = args.command.name();
     if let (Some(pipeline), true) = (given, is_recipe(inputs)) {

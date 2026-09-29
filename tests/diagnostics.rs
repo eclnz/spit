@@ -246,3 +246,15 @@ path other: {product}/{id}/{shard}.csv
         ]
     );
 }
+
+#[test]
+fn a_cycle_is_reported_once_at_the_step_it_was_found_at() {
+    let text = "products:\n  a : A [site]\n  b : A [site]\n  c : A [site]\n\n\
+                operations:\n  copy(A) -> A\n\n\
+                pipeline:\n  a = copy(b)\n  b = copy(c)\n  c = copy(a)\n";
+    let issues = errors(diagnose(text, None));
+    assert_eq!(issues.len(), 1);
+    assert_eq!(issues[0].line, Some(10));
+    assert_eq!(issues[0].columns, Some(2..3));
+    assert_eq!(issues[0].message, "pipeline cycle: a -> b -> c -> a");
+}

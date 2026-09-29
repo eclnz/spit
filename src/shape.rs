@@ -84,16 +84,16 @@ pub(crate) fn step_driver(inputs: &[BoundInput<'_>]) -> Option<(usize, Vec<Strin
     Some((index, inputs[index].dimensions.clone()))
 }
 
-/// The driving input and the dimensions of a step's outputs: the driver's
-/// groups, then any dimensions broadcast by another input.
-pub(crate) fn step_context(inputs: &[BoundInput<'_>]) -> Option<(usize, Vec<String>)> {
-    let (driver, mut context) = step_driver(inputs)?;
+/// The dimensions of a step's outputs: `groups`, the driver's from
+/// [`step_driver`], then any dimensions broadcast by another input.
+pub(crate) fn step_context(inputs: &[BoundInput<'_>], groups: &[String]) -> Vec<String> {
+    let mut context = groups.to_vec();
     for dimension in broadcast_dimensions(inputs) {
         if !context.contains(&dimension) {
             context.push(dimension);
         }
     }
-    Some((driver, context))
+    context
 }
 
 pub(crate) fn dimension_set(dimensions: &[String]) -> BTreeSet<String> {

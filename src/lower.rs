@@ -13,7 +13,7 @@ use crate::parser::{
     parse_source_inventory, parse_syntax, split_document, FlowStep, Kind, ParseError,
     ParseErrorKind, PathRule, Rule, SourceMap, Statement, StatementKind, Step, Syntax,
 };
-use crate::shape::{step_context, BoundInput};
+use crate::shape::{step_context, step_driver, BoundInput};
 use crate::span::Place;
 use crate::types::TypeExpr;
 
@@ -244,8 +244,10 @@ fn inferred_dimensions(
     // Otherwise the step is invalid; the resolver reports why.
     inputs
         .filter(|inputs| inputs.len() == invocation.inputs.len())
-        .and_then(|inputs| step_context(&inputs))
-        .map(|(_, context)| context)
+        .and_then(|inputs| {
+            let (_, groups) = step_driver(&inputs)?;
+            Some(step_context(&inputs, &groups))
+        })
         .or_else(|| invocation.inputs.first().and_then(dimensions))
         .unwrap_or_default()
 }

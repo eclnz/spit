@@ -79,11 +79,8 @@ pub(crate) fn collect_pipeline(pipeline: &Pipeline) -> PipelineCheck<'_> {
     check_stages(pipeline, &producers, &mut errors);
     let order = match invocation_order(&pipeline.invocations, &producers) {
         Ok(order) => order,
-        Err(error) => {
-            let ResolveError::Cycle { products } = &error else {
-                unreachable!("ordering only reports cycles")
-            };
-            errors.push((DefinitionSubject::Invocation(products[0].clone()), error));
+        Err(cycle) => {
+            errors.push(cycle.into_error());
             (0..pipeline.invocations.len()).collect()
         }
     };
