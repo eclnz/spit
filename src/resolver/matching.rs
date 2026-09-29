@@ -6,7 +6,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use crate::compile::{CompiledStep, StepShape};
 use crate::error::{PortSite, ResolveError};
 use crate::model::{
-    ArtifactInstance, ArtifactKey, EntityBinding, Gap, Invocation, Job, OperationDef,
+    ArtifactInstance, ArtifactMap, ArtifactSet, EntityBinding, Gap, Invocation, Job, OperationDef,
 };
 
 use super::family;
@@ -23,7 +23,7 @@ pub(super) struct Expansion {
 pub(super) fn expand_step(
     step: &CompiledStep<'_>,
     artifacts: &BTreeMap<String, Vec<ArtifactInstance>>,
-    incomplete: &BTreeSet<ArtifactKey>,
+    incomplete: &ArtifactSet,
 ) -> Vec<Expansion> {
     let (invocation, shape) = (step.invocation, &step.shape);
     let candidates: Vec<Vec<&ArtifactInstance>> = invocation
@@ -88,7 +88,7 @@ fn join_values<'a>(joins: &[String], entities: &'a EntityBinding) -> Vec<Option<
 fn expand_job(
     step: &CompiledStep<'_>,
     indexes: &[JoinIndex<'_>],
-    incomplete: &BTreeSet<ArtifactKey>,
+    incomplete: &ArtifactSet,
     context: &EntityBinding,
     driven: &[ArtifactInstance],
 ) -> Expansion {
@@ -123,7 +123,7 @@ fn expand_job(
         gaps.extend(
             bound
                 .iter()
-                .filter(|artifact| incomplete.contains(&artifact.key()))
+                .filter(|artifact| incomplete.contains(artifact))
                 .map(|artifact| Gap::Blocked {
                     port: port.name.clone(),
                     artifact: artifact.clone(),
@@ -248,12 +248,12 @@ pub(super) fn make_job(
     stage: Option<String>,
     inputs: Vec<Vec<ArtifactInstance>>,
     outputs: Vec<ArtifactInstance>,
-    artifact_producers: &BTreeMap<ArtifactKey, usize>,
+    artifact_producers: &ArtifactMap<usize>,
 ) -> Job {
     let dependencies: BTreeSet<_> = inputs
         .iter()
         .flatten()
-        .filter_map(|input| artifact_producers.get(&input.key()).copied())
+        .filter_map(|input| artifact_producers.get(input).copied())
         .collect();
     Job {
         id,

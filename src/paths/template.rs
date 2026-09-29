@@ -199,11 +199,15 @@ pub(crate) fn bind_path(
                     .focus(PathPlaceholder::Stage.to_string())
                 })?;
                 // Each nested stage is a directory.
-                let components: Vec<_> = stage.split('/').map(encode_component).collect();
-                relative.push_str(&components.join("/"));
+                for (index, component) in stage.split('/').enumerate() {
+                    if index > 0 {
+                        relative.push('/');
+                    }
+                    push_encoded(&mut relative, component);
+                }
             }
             PathPart::Placeholder(PathPlaceholder::Entities) => {
-                relative.push_str(&entities_component(artifact, dimensions)?);
+                push_entities(&mut relative, artifact, dimensions)?;
             }
             PathPart::Placeholder(placeholder @ PathPlaceholder::Dimension(dimension)) => {
                 let value = artifact.entities.get(dimension).ok_or_else(|| {
@@ -213,7 +217,7 @@ pub(crate) fn bind_path(
                     ))
                     .focus(placeholder.to_string())
                 })?;
-                relative.push_str(&encode_component(value));
+                push_encoded(&mut relative, value);
             }
         }
     }
@@ -223,31 +227,30 @@ pub(crate) fn bind_path(
     Ok(relative)
 }
 
-/// What `{entities}` binds to: each dimension as `dimension=value`, in
+/// Add what `{entities}` binds to: each dimension as `dimension=value`, in
 /// declared order and joined by `__`, or `global` for none.
-fn entities_component(
+fn push_entities(
+    relative: &mut String,
     artifact: &ArtifactInstance,
     dimensions: &[String],
-) -> Result<String, PathError> {
-    let bindings = dimensions
-        .iter()
-        .map(|dimension| {
-            let value = artifact.entities.get(dimension).ok_or_else(|| {
-                error(format!(
-                    "artifact `{artifact}` lacks dimension `{dimension}`"
-                ))
-            })?;
-            Ok(format!(
-                "{}={}",
-                encode_component(dimension),
-                encode_component(value)
-            ))
-        })
-        .collect::<Result<Vec<_>, PathError>>()?;
-    if bindings.is_empty() {
-        return Ok("global".to_owned());
+) -> Result<(), PathError> {
+    if dimensions.is_empty() {
+        relative.push_str("global");
     }
-    Ok(bindings.join("__"))
+    for (index, dimension) in dimensions.iter().enumerate() {
+        let value = artifact.entities.get(dimension).ok_or_else(|| {
+            error(format!(
+                "artifact `{artifact}` lacks dimension `{dimension}`"
+            ))
+        })?;
+        if index > 0 {
+            relative.push_str("__");
+        }
+        push_encoded(relative, dimension);
+        relative.push('=');
+        push_encoded(relative, value);
+    }
+    Ok(())
 }
 
 /// Why `relative` cannot name a file under the root, if it cannot.
@@ -271,16 +274,23 @@ pub(crate) fn unusable_path(relative: &str) -> Option<&'static str> {
 /// `value` as one path component: ASCII letters, digits and `-` as they
 /// are, every other byte as `%XX`.
 pub(crate) fn encode_component(value: &str) -> String {
-    value
-        .bytes()
-        .map(|byte| {
-            if byte.is_ascii_alphanumeric() || byte == b'-' {
-                char::from(byte).to_string()
-            } else {
-                format!("%{byte:02X}")
-            }
-        })
-        .collect()
+    let mut encoded = String::with_capacity(value.len());
+    push_encoded(&mut encoded, value);
+    encoded
+}
+
+/// Add `value` to `text` as [`encode_component`] encodes it.
+fn push_encoded(text: &mut String, value: &str) {
+    const HEX: &[u8; 16] = b"0123456789ABCDEF";
+    for byte in value.bytes() {
+        if byte.is_ascii_alphanumeric() || byte == b'-' {
+            text.push(char::from(byte));
+        } else {
+            text.push('%');
+            text.push(char::from(HEX[usize::from(byte >> 4)]));
+            text.push(char::from(HEX[usize::from(byte & 0xF)]));
+        }
+    }
 }
 
 pub(crate) fn decode_component(encoded: &str) -> Option<String> {

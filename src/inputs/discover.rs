@@ -6,7 +6,7 @@ use std::fs;
 use std::ops::Range;
 use std::path::Path;
 
-use super::coverage::{apply_skips, SkippedGroup};
+use super::coverage::{apply_skips, SkipIndex, SkippedGroup};
 use crate::model::{
     ArtifactInstance, DirectoryDiscovery, EntityBinding, InputRules, Pipeline, ProductDef,
     SourceInventory, SourceRecord,
@@ -265,8 +265,9 @@ fn find_source_files(
     expected: &BTreeMap<&str, BTreeSet<EntityBinding>>,
     discovery: &mut Discovery,
 ) -> Result<(), PathError> {
+    let skipped = SkipIndex::new(skipped);
     for file in files {
-        let found = source_record(sources, file, skipped, expected, &mut discovery.skipped)?;
+        let found = source_record(sources, file, &skipped, expected, &mut discovery.skipped)?;
         discovery.inventory.artifacts.extend(found);
     }
     let artifacts = &mut discovery.inventory.artifacts;
@@ -280,7 +281,7 @@ fn find_source_files(
 fn source_record(
     sources: &[SourcePattern<'_>],
     file: &str,
-    skipped: &[SkippedGroup],
+    skipped: &SkipIndex<'_>,
     expected: &BTreeMap<&str, BTreeSet<EntityBinding>>,
     notes: &mut Vec<String>,
 ) -> Result<Option<SourceRecord>, PathError> {
@@ -297,7 +298,7 @@ fn source_record(
             return Ok(None);
         }
     };
-    if skipped.iter().any(|group| group.matches(&binding)) {
+    if skipped.matches(&binding) {
         return Ok(None);
     }
     let name = product.name.as_str();
@@ -327,11 +328,10 @@ fn require_source_files(
     expected: &BTreeMap<&str, BTreeSet<EntityBinding>>,
     skipped: &[SkippedGroup],
 ) -> Result<(), PathError> {
+    let skipped = SkipIndex::new(skipped);
     for product in sources.iter().map(|source| source.product) {
         let bindings = expected.get(product.name.as_str()).into_iter().flatten();
-        for binding in
-            bindings.filter(|binding| !skipped.iter().any(|group| group.matches(binding)))
-        {
+        for binding in bindings.filter(|binding| !skipped.matches(binding)) {
             let artifact = ArtifactInstance::new(
                 &product.name,
                 product.artifact_type.clone(),

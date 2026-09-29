@@ -50,7 +50,7 @@ impl fmt::Display for Json {
                     if index > 0 {
                         f.write_str(",")?;
                     }
-                    write!(f, "{item}")?;
+                    fmt::Display::fmt(item, f)?;
                 }
                 f.write_str("]")
             }
@@ -81,24 +81,35 @@ fn write_object<'a>(
             f.write_str(",")?;
         }
         write_string(f, key)?;
-        write!(f, ":{value}")?;
+        f.write_str(":")?;
+        fmt::Display::fmt(value, f)?;
     }
     f.write_str("}")
 }
 
+/// `text` as a JSON string. Runs that need no escape are written whole.
 fn write_string(f: &mut fmt::Formatter<'_>, text: &str) -> fmt::Result {
     f.write_str("\"")?;
-    for character in text.chars() {
-        match character {
-            '"' => f.write_str("\\\"")?,
-            '\\' => f.write_str("\\\\")?,
-            '\n' => f.write_str("\\n")?,
-            '\r' => f.write_str("\\r")?,
-            '\t' => f.write_str("\\t")?,
-            c if c < ' ' => write!(f, "\\u{:04x}", u32::from(c))?,
-            c => write!(f, "{c}")?,
+    let mut plain = 0;
+    for (index, character) in text.char_indices() {
+        let escape = match character {
+            '"' => "\\\"",
+            '\\' => "\\\\",
+            '\n' => "\\n",
+            '\r' => "\\r",
+            '\t' => "\\t",
+            c if c < ' ' => "",
+            _ => continue,
+        };
+        f.write_str(&text[plain..index])?;
+        if escape.is_empty() {
+            write!(f, "\\u{:04x}", u32::from(character))?;
+        } else {
+            f.write_str(escape)?;
         }
+        plain = index + character.len_utf8();
     }
+    f.write_str(&text[plain..])?;
     f.write_str("\"")
 }
 
