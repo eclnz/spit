@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use crate::command::CommandTemplate;
-use crate::error::ResolveError;
+use crate::error::{DefinitionSubject, ResolveError};
 use crate::paths::PathTemplate;
 use crate::types::TypeExpr;
 
@@ -504,13 +504,13 @@ impl StageDef {
     }
 }
 
+/// The logical pipeline: what to make from which sources. It says nothing
+/// about how a dataset's sources are found or filtered; see [`InputRules`].
 #[derive(Clone, Debug, Default)]
 pub struct Pipeline {
-    pub discoveries: Vec<DirectoryDiscovery>,
     pub products: Vec<ProductDef>,
     pub operations: Vec<OperationDef>,
     pub invocations: Vec<Invocation>,
-    pub constraints: Vec<CoverageRule>,
     pub commands: Vec<CommandDef>,
     pub path_template: Option<PathTemplate>,
     pub product_paths: BTreeMap<String, PathTemplate>,
@@ -552,6 +552,108 @@ impl Pipeline {
     pub fn stage_path_template(&self, product: &str) -> Option<&PathTemplate> {
         self.stage_path_rule(product).map(|(_, template)| template)
     }
+
+    /// Whether `product` is a source family, which no step produces.
+    pub fn is_source(&self, product: &str) -> bool {
+        self.products
+            .iter()
+            .any(|declared| declared.name == product)
+            && !self
+                .invocations
+                .iter()
+                .any(|invocation| invocation.outputs.iter().any(|output| output == product))
+    }
+
+    /// Each record of `inventory` as an artifact, by product and in order,
+    /// after checking that it names a source, binds exactly its dimensions,
+    /// and appears once.
+    pub fn source_artifacts(
+        &self,
+        inventory: &SourceInventory,
+    ) -> Result<BTreeMap<String, Vec<ArtifactInstance>>, ResolveError> {
+        let mut artifacts: BTreeMap<String, Vec<ArtifactInstance>> = BTreeMap::new();
+        let mut seen = BTreeSet::new();
+        for record in &inventory.artifacts {
+            let product = self
+                .products
+                .iter()
+                .find(|product| product.name == record.product)
+                .ok_or_else(|| ResolveError::UnknownProduct {
+                    name: record.product.clone(),
+                })?;
+            if !self.is_source(&record.product) {
+                return Err(ResolveError::InvalidDefinition {
+                    subject: DefinitionSubject::Product(record.product.clone()),
+                    detail: format!(
+                        "product `{}` cannot be both a source family and an invocation output",
+                        record.product
+                    ),
+                });
+            }
+            let source = ArtifactInstance {
+                product: record.product.clone(),
+                artifact_type: product.artifact_type.clone(),
+                entities: record.entities.clone(),
+            };
+            let actual: BTreeSet<_> = record.entities.0.keys().collect();
+            let expected: BTreeSet<_> = product.dimensions.iter().collect();
+            if actual != expected {
+                return Err(ResolveError::InvalidDefinition {
+                    subject: DefinitionSubject::Source(record.clone()),
+                    detail: format!(
+                        "source `{source}` must bind exactly the dimensions of product `{}`: [{}]",
+                        product.name,
+                        product.dimensions.join(", ")
+                    ),
+                });
+            }
+            if !seen.insert(source.key()) {
+                return Err(ResolveError::DuplicateSourceArtifact { artifact: source });
+            }
+            artifacts
+                .entry(source.product.clone())
+                .or_default()
+                .push(source);
+        }
+        for (name, family) in &mut artifacts {
+            let product = self.products.iter().find(|product| &product.name == name);
+            if let Some(product) = product {
+                product.sort_family(family);
+            }
+        }
+        Ok(artifacts)
+    }
+}
+
+impl ProductDef {
+    /// Order this product's artifacts by its declared dimensions, reading
+    /// numbers as numbers.
+    pub fn sort_family(&self, family: &mut [ArtifactInstance]) {
+        family.sort_by(|left, right| left.entities.cmp_in(&right.entities, &self.dimensions));
+    }
+}
+
+/// How a dataset's sources are found and filtered: directory discovery,
+/// `require` and `skip` rules, and where source files live. The input stage
+/// reads these; job resolution never does.
+#[derive(Clone, Debug, Default)]
+pub struct InputRules {
+    pub discoveries: Vec<DirectoryDiscovery>,
+    /// `require` and `skip` rules, in declaration order.
+    pub constraints: Vec<CoverageRule>,
+    /// Path rules for source products that the recipe, not the pipeline, sets.
+    pub source_paths: BTreeMap<String, PathTemplate>,
+}
+
+impl InputRules {
+    pub fn is_empty(&self) -> bool {
+        self.discoveries.is_empty() && self.constraints.is_empty() && self.source_paths.is_empty()
+    }
+
+    /// The discovery rule named `name`, if any.
+    pub fn discovery(&self, name: &str) -> Option<&DirectoryDiscovery> {
+        self.discoveries.iter().find(|rule| rule.name == name)
+    }
 }
 
 /// A stage's full name, then each stage around it: `a/b/c`, `a/b`, `a`.
@@ -568,11 +670,13 @@ pub fn stage_within(stage: &str, outer: &str) -> bool {
         .is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
 }
 
-/// A source record identifies a logical artifact without binding it to a path.
+/// A source record identifies a logical artifact, and may say where its file
+/// is, relative to the dataset root, as the input stage found it.
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub struct SourceRecord {
     pub product: String,
     pub entities: EntityBinding,
+    pub path: Option<String>,
 }
 
 impl SourceRecord {
@@ -580,6 +684,16 @@ impl SourceRecord {
         Self {
             product: product.into(),
             entities,
+            path: None,
+        }
+    }
+
+    /// This record with its file at `path`, relative to the dataset root.
+    #[must_use]
+    pub fn at(self, path: impl Into<String>) -> Self {
+        Self {
+            path: Some(path.into()),
+            ..self
         }
     }
 }
@@ -686,6 +800,9 @@ pub struct ResolvedDag {
     pub jobs: Vec<Job>,
     /// Declaration order is retained for readable dry-run output.
     pub product_dimensions: BTreeMap<String, Vec<String>>,
+    /// The file of each source whose inventory record gave one. Other
+    /// artifacts take the path their product's rule gives them.
+    pub source_paths: BTreeMap<ArtifactKey, String>,
 }
 
 impl ResolvedDag {
@@ -714,6 +831,7 @@ impl ResolvedDag {
                 })
                 .collect(),
             product_dimensions: self.product_dimensions.clone(),
+            source_paths: self.source_paths.clone(),
         }
     }
 }

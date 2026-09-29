@@ -3,7 +3,7 @@ use spit::{parse_pipeline, parse_source_inventory, parse_type_expr, resolve, Job
 fn type_lab() -> (spit::Pipeline, spit::SourceInventory) {
     (
         parse_pipeline(include_str!("../examples/stress/type_lab.spit")).unwrap(),
-        parse_source_inventory(include_str!("../examples/stress/type_lab.sources")).unwrap(),
+        parse_source_inventory(include_str!("../examples/stress/type_lab.spitout")).unwrap(),
     )
 }
 
@@ -101,7 +101,7 @@ fn nested_types_propagate_across_polymorphic_branches_and_rollups() {
 fn observatory_resolves_each_scope_and_reuses_generic_evidence() {
     let pipeline = parse_pipeline(include_str!("../examples/stress/observatory.spit")).unwrap();
     let inventory =
-        parse_source_inventory(include_str!("../examples/stress/observatory.sources")).unwrap();
+        parse_source_inventory(include_str!("../examples/stress/observatory.spitout")).unwrap();
     let dag = resolve(&pipeline, &inventory).unwrap();
     assert_eq!(dag.jobs.len(), 153);
     assert_eq!(jobs(&dag, "channel_signal").len(), 7);
@@ -170,7 +170,7 @@ fn declared_nested_output_cannot_override_inferred_reference_space() {
 
 #[test]
 fn missing_peer_at_one_slice_does_not_cross_join_another_capture() {
-    let sources = include_str!("../examples/stress/type_lab.sources")
+    let sources = include_str!("../examples/stress/type_lab.spitout")
         .replace("    camera[lab=Alpha,rig=R1,capture=C1,slice=02]\n", "");
     let inventory = parse_source_inventory(&sources).unwrap();
     let pipeline = type_lab().0;

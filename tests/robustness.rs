@@ -142,7 +142,7 @@ fn a_root_starting_with_a_dash_is_not_read_as_an_option() {
             "bash",
             "examples/commands/bash_demo.spit",
             "--sources",
-            "examples/commands/bash_demo.sources",
+            "examples/commands/bash_demo.spitout",
         ],
         None,
     );
@@ -257,7 +257,7 @@ fn command_line_mistakes_are_named() {
         ),
         (
             &["check", "p.spit", "--sources"][..],
-            "--sources needs a value: <inventory.spit|->",
+            "--sources needs a value: <inventory.spitout|->",
         ),
     ] {
         let output = spit(args, None);

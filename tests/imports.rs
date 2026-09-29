@@ -37,12 +37,13 @@ impl Drop for TestDir {
 fn aliased_source_and_operation_work_through_cli_and_bash() {
     let path = Path::new("examples/imports/imported.spit");
     let text = fs::read_to_string(path).unwrap();
-    let (pipeline, inventory) = parse_document_at(&text, path).unwrap();
-    let inventory = inventory.unwrap();
+    let document = spit::parse_spit_at(&text, path).unwrap();
+    let (pipeline, inventory) = (document.pipeline, document.inventory.unwrap());
     assert_eq!(pipeline.products[0].name, "text::shard");
     assert_eq!(pipeline.operations[0].name, "text::sort_lines");
     assert_eq!(pipeline.commands[0].operation, "text::sort_lines");
-    assert_eq!(pipeline.constraints[0].product, "text::shard");
+    // The imported source's rules come with it, for the input stage.
+    assert_eq!(document.inputs.constraints[0].product, "text::shard");
     assert_eq!(
         pipeline.product_paths["text::shard"],
         "input/{group}/{part}.txt"

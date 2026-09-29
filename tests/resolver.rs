@@ -1,7 +1,7 @@
 use spit::{
-    parse_document, parse_pipeline, render_dag, resolve, validate_pipeline, CountRequirement,
-    CoverageRule, EntityBinding, InputBinding, InputPort, Invocation, OperationDef, Pipeline,
-    ProductDef, ResolveError, ShapeRule, SourceInventory, SourceRecord, TypeExpr,
+    parse_document, parse_pipeline, render_dag, resolve, validate_pipeline, EntityBinding,
+    InputBinding, InputPort, Invocation, OperationDef, Pipeline, ProductDef, ResolveError,
+    ShapeRule, SourceInventory, SourceRecord, TypeExpr,
 };
 
 fn artifact(product: &str, pairs: &[(&str, &str)]) -> SourceRecord {
@@ -332,45 +332,6 @@ fn catches_product_cycle() {
 }
 
 #[test]
-fn coverage_checks_each_observed_context_without_a_global_count() {
-    let pipeline = Pipeline {
-        products: vec![ProductDef::new(
-            "image",
-            TypeExpr::named("Image"),
-            ["site", "visit"],
-        )],
-        constraints: vec![CoverageRule::new(
-            "image",
-            ["site", "visit"],
-            CountRequirement::Exactly(1),
-        )],
-        ..Pipeline::default()
-    };
-    let inventory = SourceInventory {
-        artifacts: vec![artifact("image", &[("site", "A"), ("visit", "1")])],
-        contexts: vec![
-            EntityBinding::from_pairs([("site", "A"), ("visit", "1")]),
-            EntityBinding::from_pairs([("site", "B"), ("visit", "1")]),
-        ],
-        ..SourceInventory::default()
-    };
-    assert!(matches!(
-        resolve(&pipeline, &inventory),
-        Err(ResolveError::CoverageViolation { product, found: 0, .. }) if product == "image"
-    ));
-
-    let complete = SourceInventory {
-        artifacts: vec![
-            artifact("image", &[("site", "A"), ("visit", "1")]),
-            artifact("image", &[("site", "B"), ("visit", "1")]),
-        ],
-        contexts: inventory.contexts,
-        ..SourceInventory::default()
-    };
-    assert!(resolve(&pipeline, &complete).is_ok());
-}
-
-#[test]
 fn source_inventory_changes_job_count_without_changing_pipeline() {
     let pipeline = full_pipeline();
     let one_run = SourceInventory {
@@ -435,7 +396,6 @@ fn full_pipeline() -> Pipeline {
                 "mean_signal",
             ),
         ],
-        constraints: Vec::new(),
         ..Pipeline::default()
     }
 }

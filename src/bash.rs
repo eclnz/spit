@@ -9,7 +9,7 @@ use crate::command::{slot, validate_commands, CommandTemplate, Slot};
 use crate::model::{
     ArtifactKey, Cardinality, CommandRole, Job, OperationDef, Pipeline, ResolvedDag,
 };
-use crate::paths::{bound_paths, inspect_paths, output_keys};
+use crate::paths::{bound_paths, check_rules, output_keys};
 use crate::span::Located;
 use crate::template::Part;
 
@@ -24,7 +24,7 @@ fn error(message: impl Into<String>) -> BashError {
 /// Generate a script for the concrete jobs already selected by `resolve`.
 /// Each artifact path is derived from its product and entity bindings.
 pub fn render_bash(pipeline: &Pipeline, dag: &ResolvedDag) -> Result<String, BashError> {
-    inspect_paths(pipeline)?.validate(false)?;
+    check_rules(pipeline, dag)?;
     let operations: BTreeMap<_, _> = pipeline
         .operations
         .iter()

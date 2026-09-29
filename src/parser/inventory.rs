@@ -4,6 +4,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::model::{EntityBinding, Pipeline, SourceInventory, SourceRecord};
+use crate::paths::unusable_path;
 
 use super::flow::is_stage_header;
 use super::lexical::{comma_items, identifier, qualified_identifier, strip_comment};
@@ -128,13 +129,18 @@ pub fn render_source_inventory(inventory: &SourceInventory, pipeline: &Pipeline)
             .into_iter()
             .map(|(dimension, value)| format!("{dimension}={value}"))
             .collect();
-        text.push_str(&format!("    {}[{}]\n", record.product, values.join(",")));
+        text.push_str(&format!("    {}[{}]", record.product, values.join(",")));
+        if let Some(path) = &record.path {
+            text.push_str(&format!(": {path}"));
+        }
+        text.push('\n');
     }
     text
 }
 
 /// Parse an inventory supplied by a dataset indexer or written as a fixture.
-/// The inventory contains logical identities, never paths or artifact types.
+/// Records are logical identities, each optionally followed by `: path`, the
+/// file relative to the dataset root. They never hold artifact types.
 pub fn parse_source_inventory(text: &str) -> Result<SourceInventory, ParseError> {
     enum InventorySection {
         Sources,
@@ -201,8 +207,28 @@ fn parse_source(line: &str, number: usize) -> Result<SourceRecord, ParseError> {
         )
     })?;
     let product = qualified_identifier(product.trim(), number, "source product")?;
+    // A value holds no `]`, so the first one closes the record.
+    let (bindings, path) = match bindings.find(']') {
+        Some(end) => bindings.split_at(end + 1),
+        None => (bindings, ""),
+    };
     let entities = parse_bindings(bindings, number)?;
-    Ok(SourceRecord::new(product, entities))
+    let record = SourceRecord::new(product, entities);
+    let path = path.trim();
+    if path.is_empty() {
+        return Ok(record);
+    }
+    let path = path
+        .strip_prefix(':')
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+        .ok_or_else(|| {
+            ParseError::new(number, "expected `: path` after a source record").at_token(path)
+        })?;
+    if let Some(reason) = unusable_path(path) {
+        return Err(ParseError::new(number, format!("source path {reason}")).at_token(path));
+    }
+    Ok(record.at(path))
 }
 
 fn parse_context(line: &str, number: usize) -> Result<EntityBinding, ParseError> {

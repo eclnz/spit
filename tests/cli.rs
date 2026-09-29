@@ -25,7 +25,7 @@ fn separate_inventory_remains_supported() {
             "check",
             "examples/types/typed.spit",
             "--sources",
-            "examples/types/typed.sources",
+            "examples/types/typed.spitout",
         ])
         .output()
         .unwrap();
@@ -46,7 +46,7 @@ fn bash_command_expands_observed_groups() {
             "bash",
             "examples/commands/bash_demo.spit",
             "--sources",
-            "examples/commands/bash_demo.sources",
+            "examples/commands/bash_demo.spitout",
         ])
         .output()
         .unwrap();
@@ -68,7 +68,7 @@ fn dag_with_paths_displays_resolved_paths_before_command_expansion() {
             "dag",
             "examples/commands/field_survey.spit",
             "--sources",
-            "examples/commands/field_survey.sources",
+            "examples/commands/field_survey.spitout",
             "--paths",
         ])
         .output()
@@ -91,12 +91,12 @@ fn expanded_examples_resolve() {
         ("examples/pipelines/complex.spit", None, 25),
         (
             "examples/pipelines/rich_shapes.spit",
-            Some("examples/pipelines/rich_shapes.sources"),
+            Some("examples/pipelines/rich_shapes.spitout"),
             17,
         ),
         (
             "examples/commands/field_survey.spit",
-            Some("examples/commands/field_survey.sources"),
+            Some("examples/commands/field_survey.spitout"),
             93,
         ),
         ("examples/analytics/analytics.spit", None, 34),
@@ -128,7 +128,7 @@ fn check_paths_reports_fallbacks_and_strict_check_rejects_them() {
             "check",
             "examples/commands/field_survey.spit",
             "--sources",
-            "examples/commands/field_survey.sources",
+            "examples/commands/field_survey.spitout",
             "--paths",
         ])
         .output()
@@ -144,7 +144,7 @@ fn check_paths_reports_fallbacks_and_strict_check_rejects_them() {
             "examples/commands/field_survey.spit",
             "--strict-paths",
             "--sources",
-            "examples/commands/field_survey.sources",
+            "examples/commands/field_survey.spitout",
         ])
         .output()
         .unwrap();
@@ -161,7 +161,7 @@ fn paths_flag_applies_to_check_and_dag_only() {
             "bash",
             "examples/commands/bash_demo.spit",
             "--sources",
-            "examples/commands/bash_demo.sources",
+            "examples/commands/bash_demo.spitout",
             "--paths",
         ])
         .output()
@@ -181,7 +181,7 @@ fn check_json_reads_the_pipeline_file_and_dag_json_emits_jobs() {
                 command,
                 "examples/commands/bash_demo.spit",
                 "--sources",
-                "examples/commands/bash_demo.sources",
+                "examples/commands/bash_demo.spitout",
                 "--json",
             ])
             .output()
@@ -211,7 +211,7 @@ fn dag_json_stage_lists_earlier_outputs_as_external_inputs() {
             "dag",
             "examples/stages/stages.spit",
             "--sources",
-            "examples/commands/bash_demo.sources",
+            "examples/commands/bash_demo.spitout",
             "--stage",
             "analysis",
             "--json",
@@ -237,7 +237,7 @@ fn dag_json_names_every_output_port() {
             "dag",
             "examples/pipelines/selectors.spit",
             "--sources",
-            "examples/pipelines/selectors.sources",
+            "examples/pipelines/selectors.spitout",
             "--json",
         ])
         .output()
@@ -259,7 +259,7 @@ fn dag_json_stage_is_an_array_of_names() {
             "dag",
             "examples/stages/nested.spit",
             "--sources",
-            "examples/stages/nested.sources",
+            "examples/stages/nested.spitout",
             "--json",
         ])
         .output()
@@ -361,7 +361,7 @@ fn check_prints_every_diagnostic_and_fails_only_on_errors() {
     assert!(!warned_dag.status.success());
     assert!(String::from_utf8(warned_dag.stderr)
         .unwrap()
-        .ends_with("error: no inline source inventory; supply --sources <inventory.spit|->\n"));
+        .ends_with("error: no inline source inventory; supply --sources <inventory.spitout|->\n"));
 }
 
 #[test]
@@ -380,7 +380,7 @@ fn cli_skips_an_inline_inventory_that_sources_replaces() {
         "source image [subject]\noperation f(Image) -> Image\nout = f(image)\nsources:\n  image[subject=a\n",
     )
     .unwrap();
-    let inventory = directory.join("inventory.sources");
+    let inventory = directory.join("inventory.spitout");
     fs::write(&inventory, "sources:\n  image[subject=b]\n").unwrap();
     let result = Command::new(env!("CARGO_BIN_EXE_spit"))
         .args([

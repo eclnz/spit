@@ -5,14 +5,14 @@ Each example pipeline under [`examples/`](../examples) checks cleanly. Run the c
 | Pipeline | Shows | Command | Jobs |
 | --- | --- | --- | --- |
 | [Branching](../examples/pipelines/branching.spit) | A shared policy, two branches with their own aggregations, and a recombination | `cargo run -- check examples/pipelines/branching.spit` | 21 |
-| [Observed groups](../examples/pipelines/rich_shapes.spit) | Several subjects and sessions, a reused reference, and two successive aggregations, with a separate inventory | `cargo run -- check examples/pipelines/rich_shapes.spit --sources examples/pipelines/rich_shapes.sources` | 17 |
+| [Observed groups](../examples/pipelines/rich_shapes.spit) | Several subjects and sessions, a reused reference, and two successive aggregations, with a separate inventory | `cargo run -- check examples/pipelines/rich_shapes.spit --sources examples/pipelines/rich_shapes.spitout` | 17 |
 | [Nested aggregation](../examples/pipelines/complex.spit) | Partial types, irregular groups, and three successive aggregations | `cargo run -- check examples/pipelines/complex.spit` | 25 |
-| [Selectors](../examples/pipelines/selectors.spit) | `where`, `same`, a verification, a two-output step, and a many input beside a single input | `cargo run -- check examples/pipelines/selectors.spit --sources examples/pipelines/selectors.sources` | 17 |
+| [Selectors](../examples/pipelines/selectors.spit) | `where`, `same`, a verification, a two-output step, and a many input beside a single input | `cargo run -- check examples/pipelines/selectors.spit --sources examples/pipelines/selectors.spitout` | 17 |
 | [Analytics](../examples/analytics/analytics.spit) | Five keyed joins, then day, customer, and tenant rollups | `cargo run -- check examples/analytics/analytics.spit` | 34 |
-| [Stages](../examples/stages/stages.spit) | Preprocessing and analysis stages with `{stage}` paths | `cargo run -- check examples/stages/stages.spit --sources examples/stages/stages.sources` | 7 |
-| [Nested stages](../examples/stages/nested.spit) | Stages within a stage | `cargo run -- check examples/stages/nested.spit --sources examples/stages/nested.sources` | 9 |
-| [Field survey](../examples/commands/field_survey.spit) | Sidecar files, calibration, alignment between spaces, and commands | `cargo run -- check examples/commands/field_survey.spit --sources examples/commands/field_survey.sources` | 93 |
-| [MRtrix3 ACT](../examples/commands/mrtrix3_act.spit) | A diffusion MRI pipeline in nested stages, from BIDS import to connectome | `cargo run -- check examples/commands/mrtrix3_act.spit --sources examples/commands/mrtrix3_act.sources` | 93 |
+| [Stages](../examples/stages/stages.spit) | Preprocessing and analysis stages with `{stage}` paths | `cargo run -- check examples/stages/stages.spit --sources examples/stages/stages.spitout` | 7 |
+| [Nested stages](../examples/stages/nested.spit) | Stages within a stage | `cargo run -- check examples/stages/nested.spit --sources examples/stages/nested.spitout` | 9 |
+| [Field survey](../examples/commands/field_survey.spit) | Sidecar files, calibration, alignment between spaces, and commands | `cargo run -- check examples/commands/field_survey.spit --sources examples/commands/field_survey.spitout` | 93 |
+| [MRtrix3 ACT](../examples/commands/mrtrix3_act.spit) | A diffusion MRI pipeline in nested stages, from BIDS import to connectome | `cargo run -- check examples/commands/mrtrix3_act.spit --sources examples/commands/mrtrix3_act.spitout` | 93 |
 
 ## Analytics
 

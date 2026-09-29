@@ -6,8 +6,8 @@ use std::collections::BTreeMap;
 
 use crate::imports::apply_import;
 use crate::model::{
-    Cardinality, CommandDef, CoverageRule, InputBinding, Invocation, OperationDef, Pipeline,
-    ProductDef, SourceInventory, StageDef,
+    Cardinality, CommandDef, CoverageRule, InputBinding, InputRules, Invocation, OperationDef,
+    Pipeline, ProductDef, SourceInventory, StageDef,
 };
 use crate::parser::{
     parse_source_inventory, parse_syntax, split_document, FlowStep, InlineInventory, ParseError,
@@ -17,11 +17,21 @@ use crate::shape::{step_context, BoundInput};
 use crate::span::Place;
 use crate::types::TypeExpr;
 
-/// A pipeline under construction together with where its declarations sit.
+/// A pipeline under construction, the input rules its document declares
+/// beside it, and where its declarations sit.
 #[derive(Default)]
 pub(crate) struct PipelineBuilder {
     pub(crate) pipeline: Pipeline,
+    pub(crate) inputs: InputRules,
     pub(crate) lines: SourceMap,
+}
+
+/// What a `use` line brings in: definitions, and the input rules of the
+/// sources among them.
+#[derive(Default)]
+pub(crate) struct Module {
+    pub(crate) pipeline: Pipeline,
+    pub(crate) inputs: InputRules,
 }
 
 impl PipelineBuilder {
@@ -40,7 +50,7 @@ impl PipelineBuilder {
             .constraints
             .insert(constraint.product.clone(), rule.clone());
         self.lines.rules.push(rule);
-        self.pipeline.constraints.push(constraint);
+        self.inputs.constraints.push(constraint);
     }
 
     pub(crate) fn add_command(&mut self, command: CommandDef, place: Place) {
@@ -67,7 +77,9 @@ impl PipelineBuilder {
     }
 
     fn add_path(&mut self, rule: &PathRule, line: usize) -> Result<(), ParseError> {
-        let Self { pipeline, lines } = self;
+        let Self {
+            pipeline, lines, ..
+        } = self;
         let template = rule.template.clone();
         if let Some(product) = &rule.product {
             lines.paths.insert(product.clone(), rule.place.clone());
@@ -148,7 +160,7 @@ impl PipelineBuilder {
 /// a statement, or else the syntax error parsing stopped at.
 pub(crate) fn lower(
     syntax: &Syntax,
-    imports: &BTreeMap<usize, Pipeline>,
+    imports: &BTreeMap<usize, Module>,
 ) -> Result<PipelineBuilder, ParseError> {
     let mut builder = PipelineBuilder::default();
     for statement in &syntax.statements {
@@ -163,7 +175,7 @@ pub(crate) fn lower(
 
 fn lower_statement(
     builder: &mut PipelineBuilder,
-    imports: &BTreeMap<usize, Pipeline>,
+    imports: &BTreeMap<usize, Module>,
     statement: &Statement,
 ) -> Result<(), ParseError> {
     match &statement.kind {
@@ -173,18 +185,13 @@ fn lower_statement(
             builder.add_product(product.clone(), place.clone())
         }
         StatementKind::Discover(discovery) => {
-            if builder
-                .pipeline
-                .discoveries
-                .iter()
-                .any(|existing| existing.name == discovery.name)
-            {
+            if builder.inputs.discovery(&discovery.name).is_some() {
                 return Err(ParseError::new(
                     statement.place.line,
                     format!("duplicate discovery `{}`", discovery.name),
                 ));
             }
-            builder.pipeline.discoveries.push(discovery.clone());
+            builder.inputs.discoveries.push(discovery.clone());
         }
         StatementKind::Operation(operation, place) => {
             builder.add_operation(operation.clone(), place.clone())
@@ -239,29 +246,59 @@ fn inferred_dimensions(
         .unwrap_or_default()
 }
 
-/// A parsed document: its pipeline, any inline inventory, and declaration lines.
+/// A parsed document: its pipeline, the input rules and inline inventory
+/// beside it, and declaration lines.
 pub(crate) struct ParsedDocument {
     pub(crate) pipeline: Pipeline,
+    pub(crate) inputs: InputRules,
     pub(crate) inventory: Option<SourceInventory>,
     pub(crate) lines: SourceMap,
     /// The line of the first inline `sources:` or `contexts:` header.
     pub(crate) inventory_line: Option<usize>,
 }
 
+/// A `.spit` document separated by step: the logical pipeline for compiling
+/// and resolving jobs, and what the input stage reads.
+#[derive(Clone, Debug, Default)]
+pub struct Document {
+    pub pipeline: Pipeline,
+    /// The `discover`, `require` and `skip` rules written in the document.
+    pub inputs: InputRules,
+    /// Inline `sources:` and `contexts:` records.
+    pub inventory: Option<SourceInventory>,
+}
+
+impl From<ParsedDocument> for Document {
+    fn from(document: ParsedDocument) -> Self {
+        Self {
+            pipeline: document.pipeline,
+            inputs: document.inputs,
+            inventory: document.inventory,
+        }
+    }
+}
+
+/// Parse the logical pipeline of a document. Input rules and records written
+/// in it are left out; [`parse_spit`] keeps them.
 pub fn parse_pipeline(text: &str) -> Result<Pipeline, ParseError> {
     lower(&parse_syntax(text), &BTreeMap::new()).map(|builder| builder.pipeline)
 }
 
 /// Parse a text document that may package an inventory alongside its pipeline.
-/// The two remain separate values for resolution.
+/// The two remain separate values for resolution. Input rules are left out;
+/// [`parse_spit`] keeps them.
 pub fn parse_document(text: &str) -> Result<(Pipeline, Option<SourceInventory>), ParseError> {
-    parse_document_with_imports(text, &BTreeMap::new(), InlineInventory::Read)
-        .map(|document| (document.pipeline, document.inventory))
+    parse_spit(text).map(|document| (document.pipeline, document.inventory))
+}
+
+/// Parse a whole document: its pipeline, input rules, and inline records.
+pub fn parse_spit(text: &str) -> Result<Document, ParseError> {
+    parse_document_with_imports(text, &BTreeMap::new(), InlineInventory::Read).map(Document::from)
 }
 
 pub(crate) fn parse_document_with_imports(
     text: &str,
-    imports: &BTreeMap<usize, Pipeline>,
+    imports: &BTreeMap<usize, Module>,
     inline: InlineInventory,
 ) -> Result<ParsedDocument, ParseError> {
     let document = split_document(text);
@@ -274,6 +311,7 @@ pub(crate) fn parse_document_with_imports(
     };
     Ok(ParsedDocument {
         pipeline: builder.pipeline,
+        inputs: builder.inputs,
         inventory,
         lines: builder.lines,
         inventory_line: document.inventory_line,

@@ -13,7 +13,7 @@ fn demo_script() -> String {
         parse_document(include_str!("../examples/commands/bash_demo.spit")).unwrap();
     assert!(embedded.is_none());
     let inventory =
-        parse_source_inventory(include_str!("../examples/commands/bash_demo.sources")).unwrap();
+        parse_source_inventory(include_str!("../examples/commands/bash_demo.spitout")).unwrap();
     let dag = resolve(&pipeline, &inventory).unwrap();
     assert_eq!(dag.jobs.len(), 5);
     render_bash(&pipeline, &dag).unwrap()
@@ -74,7 +74,7 @@ fn backend_rejects_undeclared_placeholders_and_path_collisions() {
     let (mut pipeline, _) =
         parse_document(include_str!("../examples/commands/bash_demo.spit")).unwrap();
     let inventory =
-        parse_source_inventory(include_str!("../examples/commands/bash_demo.sources")).unwrap();
+        parse_source_inventory(include_str!("../examples/commands/bash_demo.spitout")).unwrap();
     let dag = resolve(&pipeline, &inventory).unwrap();
 
     pipeline.commands[0].template = CommandTemplate::parse("sort -o {output} {missing}").unwrap();
@@ -113,7 +113,7 @@ fn many_input_must_occupy_its_own_argument() {
     let (mut pipeline, _) =
         parse_document(include_str!("../examples/commands/bash_demo.spit")).unwrap();
     let inventory =
-        parse_source_inventory(include_str!("../examples/commands/bash_demo.sources")).unwrap();
+        parse_source_inventory(include_str!("../examples/commands/bash_demo.spitout")).unwrap();
     let dag = resolve(&pipeline, &inventory).unwrap();
     pipeline.commands[1].template =
         CommandTemplate::parse("sort -o {output} --files={inputs}").unwrap();
@@ -129,7 +129,7 @@ fn adding_a_group_to_inventory_expands_the_script() {
         parse_document(include_str!("../examples/commands/bash_demo.spit")).unwrap();
     let inventory = parse_source_inventory(&format!(
         "{}    shard[group=gamma,part=01]\n",
-        include_str!("../examples/commands/bash_demo.sources")
+        include_str!("../examples/commands/bash_demo.spitout")
     ))
     .unwrap();
     let dag = resolve(&pipeline, &inventory).unwrap();
@@ -145,7 +145,7 @@ fn field_survey_generates_valid_bash_for_new_visits() {
         parse_document(include_str!("../examples/commands/field_survey.spit")).unwrap();
     assert!(embedded.is_none());
     let inventory =
-        parse_source_inventory(include_str!("../examples/commands/field_survey.sources")).unwrap();
+        parse_source_inventory(include_str!("../examples/commands/field_survey.spitout")).unwrap();
     let dag = resolve(&pipeline, &inventory).unwrap();
     assert_eq!(dag.jobs.len(), 93);
     let script = render_bash(&pipeline, &dag).unwrap();
@@ -188,7 +188,7 @@ fn field_survey_generates_valid_bash_for_new_visits() {
 
     let inventory = parse_source_inventory(&format!(
         "{}    raw_photo[site=03,visit=01,shot=01]\n    raw_photo[site=03,visit=01,shot=02]\n    photo_gps[site=03,visit=01,shot=01]\n    photo_gps[site=03,visit=01,shot=02]\n    photo_imu[site=03,visit=01,shot=01]\n    photo_imu[site=03,visit=01,shot=02]\n    photo_json[site=03,visit=01,shot=01]\n    photo_json[site=03,visit=01,shot=02]\n    flat_field[site=03,visit=01]\n    flat_field_json[site=03,visit=01]\n    ground_map[site=03,visit=01]\n",
-        include_str!("../examples/commands/field_survey.sources")
+        include_str!("../examples/commands/field_survey.spitout")
     ))
     .unwrap();
     let expanded = resolve(&pipeline, &inventory).unwrap();
@@ -261,7 +261,7 @@ fn backslashes_follow_bash_quoting_rules() {
     let (mut pipeline, _) =
         parse_document(include_str!("../examples/commands/bash_demo.spit")).unwrap();
     let inventory =
-        parse_source_inventory(include_str!("../examples/commands/bash_demo.sources")).unwrap();
+        parse_source_inventory(include_str!("../examples/commands/bash_demo.spitout")).unwrap();
     let dag = resolve(&pipeline, &inventory).unwrap();
     pipeline.commands[0].template =
         CommandTemplate::parse(r#"tool "a\b" "q\"x" "s\\t" c\d 'e\f' {input} {output}"#).unwrap();
