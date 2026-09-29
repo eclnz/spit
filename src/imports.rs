@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use crate::lower::{parse_document_with_imports, ParsedDocument, PipelineBuilder};
 use crate::model::{CommandDef, CommandRole, OperationDef, Pipeline, ProductDef};
-use crate::parser::{parse_use, strip_comment, Kind, ParseError, UseSpec};
+use crate::parser::{parse_use, strip_comment, Keyword, Kind, ParseError, UseSpec};
 use crate::span::Place;
 
 pub(crate) fn apply_import(
@@ -285,7 +285,7 @@ fn parse_document_at_inner(
     let mut imports = BTreeMap::new();
     for (index, original) in text.lines().enumerate() {
         let line = strip_comment(original).trim();
-        if !line.starts_with("use ") {
+        if Keyword::of(line) != Some(Keyword::Use) {
             continue;
         }
         let number = index + 1;

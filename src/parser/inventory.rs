@@ -6,7 +6,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::model::{EntityBinding, Pipeline, SourceInventory, SourceRecord};
 use crate::paths::unusable_path;
 
-use super::flow::is_stage_header;
+use super::keyword::{Header, Keyword};
 use super::lexical::{comma_items, identifier, qualified_identifier, strip_comment};
 use super::ParseError;
 
@@ -28,35 +28,16 @@ pub(crate) fn split_document(text: &str) -> DocumentText {
 
     for (index, original) in text.lines().enumerate() {
         let line = strip_comment(original).trim();
-        match line {
-            "products:" | "operations:" | "pipeline:" | "constraints:" | "commands:" => {
-                inventory_section = false;
-            }
-            "sources:" | "contexts:" => {
+        // Records run from a `sources:` or `contexts:` header to the next
+        // header, statement or step.
+        match Header::of(line) {
+            Some(header) if header.is_records() => {
                 inventory_section = true;
                 inventory_line.get_or_insert(index + 1);
             }
-            _ if line.starts_with("contexts ") && line.ends_with(':') => {
-                inventory_section = true;
-                inventory_line.get_or_insert(index + 1);
-            }
-            _ if line.starts_with("path:")
-                || line.starts_with("path ")
-                || line.starts_with("shell-source:")
-                || line.starts_with("use ")
-                || line.starts_with("source ")
-                || line.starts_with("discover ")
-                || line.starts_with("operation ")
-                || line.starts_with("command ")
-                || line.starts_with("verify ")
-                || line.starts_with("require ")
-                || line.starts_with("skip ")
-                || is_stage_header(line)
-                || is_step(line) =>
-            {
-                inventory_section = false;
-            }
-            _ => {}
+            Some(_) => inventory_section = false,
+            None if Keyword::of(line).is_some() || is_step(line) => inventory_section = false,
+            None => {}
         }
         // Each line goes to one side and a blank line to the other, so both
         // texts keep the document's line numbers.
@@ -155,11 +136,10 @@ pub fn parse_source_inventory(text: &str) -> Result<SourceInventory, ParseError>
         if line.is_empty() {
             continue;
         }
-        match line {
-            "sources:" => section = Some(InventorySection::Sources),
-            "contexts:" => section = Some(InventorySection::Contexts(None)),
-            _ if line.starts_with("contexts ") && line.ends_with(':') => {
-                let name = line["contexts ".len()..line.len() - 1].trim();
+        match Header::of(line) {
+            Some(Header::Sources) => section = Some(InventorySection::Sources),
+            Some(Header::Contexts(None)) => section = Some(InventorySection::Contexts(None)),
+            Some(Header::Contexts(Some(name))) => {
                 let name = identifier(name, number, "discovery name")
                     .map_err(|error| error.locate(original))?;
                 section = Some(InventorySection::Contexts(Some(name.to_owned())));

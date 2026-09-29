@@ -7,7 +7,7 @@ use super::declarations::{
     parse_command, parse_coverage_rule, parse_discover, parse_invocation_parts, parse_path,
     parse_product,
 };
-use super::flow::is_stage_header;
+use super::keyword::{Header, Keyword};
 use super::lexical::{comma_items, identifier, strip_comment};
 use super::operation::parse_operation;
 use super::source_map::{name_place, rule_place, step_place, tail_place};
@@ -23,12 +23,10 @@ enum Section {
 }
 
 pub(super) fn is_sectioned_document(text: &str) -> bool {
-    text.lines().map(strip_comment).map(str::trim).any(|line| {
-        matches!(
-            line,
-            "products:" | "operations:" | "pipeline:" | "constraints:" | "commands:"
-        )
-    })
+    text.lines()
+        .map(strip_comment)
+        .map(str::trim)
+        .any(|line| Header::of(line).is_some_and(|header| !header.is_records()))
 }
 
 pub(super) fn parse_sectioned(text: &str) -> Syntax {
@@ -51,41 +49,47 @@ fn sectioned_line(
 ) -> Result<(), ParseError> {
     let line = strip_comment(original).trim();
     let mut push = |kind| syntax.push(original, number, kind);
-    match line {
-        "" => {}
-        "products:" => *section = Some(Section::Products),
-        "operations:" => *section = Some(Section::Operations),
-        "pipeline:" => *section = Some(Section::Pipeline),
-        "constraints:" => *section = Some(Section::Constraints),
-        "commands:" => *section = Some(Section::Commands),
-        source if source.starts_with("use ") => {
+    if line.is_empty() {
+        return Ok(());
+    }
+    if let Some(header) = Header::of(line) {
+        *section = Some(match header {
+            Header::Products => Section::Products,
+            Header::Operations => Section::Operations,
+            Header::Pipeline => Section::Pipeline,
+            Header::Constraints => Section::Constraints,
+            Header::Commands => Section::Commands,
+            Header::Sources | Header::Contexts(_) => {
+                return Err(ParseError::new(
+                    number,
+                    "`sources:` and `contexts:` records belong in a .spitout, not a pipeline",
+                ))
+            }
+        });
+        return Ok(());
+    }
+    match Keyword::split(line) {
+        Some((Keyword::Use, _)) => {
             push(StatementKind::Import);
             *section = None;
         }
-        declaration if declaration.starts_with("discover ") => {
-            let declaration = declaration.trim_start_matches("discover ");
-            let discovery = parse_discover(declaration, number)?;
+        Some((Keyword::Discover, declaration)) => {
+            let discovery = parse_discover(declaration.trim(), number)?;
             push(StatementKind::Discover(discovery));
             *section = None;
         }
-        source if source.starts_with("shell-source:") => {
+        Some((Keyword::ShellSource, _)) => {
             return Err(ParseError::new(number, SHELL_SOURCE_REMOVED));
         }
-        stage if is_stage_header(stage) => {
+        Some((Keyword::Stage, _)) => {
             return Err(ParseError::new(
                 number,
                 "stages are written in the flow form, not in a sectioned document",
             ));
         }
-        path if path.starts_with("path:") || path.starts_with("path ") => {
-            push(StatementKind::Path(parse_path(None, original, path, number)?));
+        Some((Keyword::Path, _)) => {
+            push(StatementKind::Path(parse_path(None, original, line, number)?));
             *section = None;
-        }
-        "sources:" | "contexts:" => {
-            return Err(ParseError::new(
-                number,
-                "`sources:` and `contexts:` records belong in a .spitout, not a pipeline",
-            ))
         }
         _ => match section {
             Some(Section::Products) => {
