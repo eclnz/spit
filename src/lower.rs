@@ -250,8 +250,8 @@ fn inferred_dimensions(
         .unwrap_or_default()
 }
 
-/// A parsed document: its pipeline, the input rules and inline inventory
-/// beside it, and declaration lines.
+/// A parsed document: its pipeline, or a recipe's input rules and records,
+/// and declaration lines.
 pub(crate) struct ParsedDocument {
     pub(crate) pipeline: Pipeline,
     pub(crate) inputs: InputRules,

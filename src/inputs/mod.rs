@@ -1,9 +1,8 @@
 //! The input stage: settle which contexts and sources a dataset holds.
 //!
-//! It reads a recipe of `discover`, `require`, `skip` and source path rules,
-//! whether written in a `.spitin` file or beside the pipeline in a `.spit`
-//! document, and the pipeline's source declarations. It scans a root or takes
-//! records already written, and returns a plain inventory with what it
+//! It reads a `.spitin` recipe of `discover`, `require`, `skip` and source
+//! path rules, and the pipeline's source declarations. It scans a root or
+//! takes records already written, and returns a plain inventory with what it
 //! skipped and what the `require` rules find missing. Resolving jobs needs
 //! nothing else from it.
 
@@ -241,7 +240,7 @@ impl InputSpec {
 pub enum InputSource<'a> {
     /// Scan the directory the recipe's rules describe.
     Discover(&'a Path),
-    /// Use records already written, from `--sources` or the recipe itself.
+    /// Use records already written, from a `.spitout` or the recipe itself.
     Inventory(SourceInventory),
 }
 
@@ -249,7 +248,7 @@ pub enum InputSource<'a> {
 #[derive(Debug)]
 pub struct ResolvedInputs {
     /// The contexts and sources that remain after `skip` rules, with the named
-    /// discovery contexts kept for `spit discover`.
+    /// discovery contexts kept for the `.spitout`.
     pub inventory: SourceInventory,
     /// Each file or group left out, and why.
     pub skipped: Vec<String>,

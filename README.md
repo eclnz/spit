@@ -11,10 +11,11 @@ Add or remove inputs and the same pipeline definition produces the right jobs, w
 ## Contents
 
 - [Try it](#try-it)
+- [The four steps and their files](#the-four-steps-and-their-files)
 - [CLI commands and options](#cli-commands-and-options)
 - [Write a pipeline](#write-a-pipeline)
 - [Supply the inputs](#supply-the-inputs)
-- [Inspect and generate a script](#inspect-and-generate-a-script)
+- [Resolve jobs and generate a script](#resolve-jobs-and-generate-a-script)
 - [Language reference](#language-reference)
 - [More examples](#more-examples)
 - [How SPIT works](#how-spit-works)
@@ -27,51 +28,71 @@ Add or remove inputs and the same pipeline definition produces the right jobs, w
 Requires a [Rust toolchain](https://www.rust-lang.org/tools/install) (stable, via `cargo`). From this repository:
 
 ```sh
-cargo run -- check examples/commands/bash_demo.spit --sources examples/commands/bash_demo.spitout
-cargo run -- dag examples/commands/bash_demo.spit --sources examples/commands/bash_demo.spitout
-cargo run -- dag examples/commands/bash_demo.spit --sources examples/commands/bash_demo.spitout --json
+cargo run -- check examples/commands/bash_demo.spit
+cargo run -- dag examples/commands/bash_demo.spit examples/commands/bash_demo.spitout
+cargo run -- dag examples/commands/bash_demo.spit examples/commands/bash_demo.spitout -o bash_demo.spitdag
 ```
 
 Use `cargo build` to get the `target/debug/spit` executable. With `cargo run`, the `--` separates Cargo's arguments from SPIT's arguments.
 
 Live validation in VS Code is maintained in the separate `spit-vscode` repository.
 
+## The four steps and their files
+
+SPIT runs in four steps. Each is one command, and each reads the files the previous step wrote:
+
+| Step | Command | Reads | Writes |
+| --- | --- | --- | --- |
+| 1. Compile | `spit check` | a `.spit` pipeline, or a `.spitin` recipe | nothing: it reports errors and warnings |
+| 2. Build inputs | `spit inputs` | a `.spitin` recipe, its pipeline, and the dataset folder | a `.spitout` |
+| 3. Resolve jobs | `spit dag`, `spit artifacts` | a `.spit` pipeline and a `.spitout` | a `.spitdag` |
+| 4. Backend | `spit bash` | a `.spitdag` | a Bash script |
+
+| File | Holds |
+| --- | --- |
+| `.spit` | A pipeline: sources, operations, steps, commands, and path rules. No dataset appears in it. |
+| `.spitin` | A recipe for a dataset's inputs: the pipeline it serves, and its `discover`, `require` and `skip` rules and source paths. |
+| `.spitout` | A dataset's settled inputs: each source artifact, with its file. |
+| `.spitdag` | The resolved jobs, each with its artifacts' files and its command, as JSON. |
+
+A later step may also take an earlier step's input and run that step in memory: `dag` takes a `.spitin` in place of the `.spitout`, and `bash` takes a pipeline and its inputs in place of the `.spitdag`.
+
 ## CLI commands and options
 
 ```text
-spit <check|dag|bash|artifacts|discover> <pipeline.spit> [--sources <inventory.spitout|->] [--root <directory>] [--stage <name>] [--paths] [--strict-paths] [--json] [--stdin]
+spit check <pipeline.spit | recipe.spitin> [--path-rules] [--strict-paths] [--json] [--stdin]
+spit inputs <recipe.spitin> [--root <directory>] [-o <file>]
+spit dag <pipeline.spit> <inputs.spitout | recipe.spitin | -> [--root <directory>] [--strict-paths] [--paths | --json | -o <file>]
+spit artifacts <pipeline.spit> <inputs.spitout | recipe.spitin | -> [--root <directory>]
+spit bash <plan.spitdag | pipeline.spit inputs.spitout> [--stage <name>] [--root <directory>] [-o <file>]
 ```
 
-Choose one command per call. The pipeline file comes next; options follow it.
+Files come first; options follow them. `spit help` lists the commands, and `spit help <command>` or `spit <command> --help` gives one command's options.
 
 | Command | Result |
 | --- | --- |
-| `check` | Validate the pipeline and report how many jobs resolve. Without an inventory, it checks the pipeline text alone and resolves no jobs. |
-| `dag` | Print the jobs, their artifact identities, and dependencies. Use `--json` for a versioned logical graph. |
-| `bash` | Write a Bash script for the resolved jobs to standard output. It does not run the script. |
-| `artifacts` | List every concrete artifact the inventory yields: the complete ones, then the incomplete ones with why each cannot be produced. Unlike the other commands, it does not stop at a missing, ambiguous, or too-small input or a coverage gap; see [Find incomplete artifacts](#find-incomplete-artifacts). |
-| `discover` | Print an inventory of source files and discovered directory contexts under `--root`. |
+| `check` | Compile a pipeline and report every problem the text shows, reading no data. Given a recipe, check its rules against the pipeline its `pipeline` line names. |
+| `inputs` | Scan the dataset folder with a recipe, apply its `skip` rules, check its `require` rules, and print the `.spitout`. It writes nothing if a `require` rule fails. |
+| `dag` | Resolve the jobs, and print each with its artifacts and dependencies. With `-o`, write them as a `.spitdag`. |
+| `artifacts` | List every concrete artifact the inputs yield: the complete ones, then the incomplete ones with why each cannot be produced. Unlike `dag`, it does not stop at a missing, ambiguous, or too-small input or a coverage gap; see [Find incomplete artifacts](#find-incomplete-artifacts). |
+| `bash` | Write a Bash script that runs a `.spitdag`. It does not run the script. |
 
 | Option | Effect |
 | --- | --- |
-| `--sources <inventory.spitout>` | Read source artifact identities from a separate file. Jobs need an inventory: this file, an inline one, or sources discovered with `--root`; `check` without any checks the pipeline alone. A separate inventory replaces an inline one, which is then skipped with a warning. Use `--sources -` to read standard input. |
-| `--root <directory>` | Check source paths under this directory and use it as the discovery root. A `discover` rule uses the pipeline file's folder when `--root` is omitted. Without an inventory, sources are found or expected from their path rules and discovered bindings. |
-| `--paths` | With `check`, show which path rule covers each product and validate the resulting paths. With `dag`, print a path under every artifact. |
-| `--stage <name>` | With `check`, `dag`, or `bash`, keep only the jobs of one [stage](docs/language-reference.md#stages) and the stages nested in it; name a nested stage by its path, such as `preprocess/combine`. Outputs of other stages that it reads are treated as files that already exist: `bash` checks for them before the first job, and `--root` checks that they are there. |
-| `--strict-paths` | Require an explicit `path product:` rule for every product, even if a default `path:` rule exists. |
-| `--json` | With `dag`, print the resolved logical graph as JSON; it works with `--stage`, `--root`, and `--strict-paths`, but not `--paths`. With `check`, print diagnostics as JSON for editor use and stop, succeeding whatever they report. Each diagnostic has a `severity` of `error` or `warning`; those tied to a declaration, call, rule, command, or path include its `line`, and a `column` and `end_column` for the text it is about, such as one input of a call or one `{placeholder}`. Columns are 1-based and count UTF-16 code units, as editors do; `end_column` is one past the last character. |
-| `--stdin` | Read the pipeline text from standard input instead of the pipeline file, such as an editor's unsaved buffer. The pipeline path is still used to resolve `use` imports. |
+| `-o <file>`, `--output <file>` | With `inputs` and `bash`, write to the file instead of standard output. With `dag`, write the `.spitdag`. |
+| `--root <directory>` | With `inputs`, the folder to scan; the recipe's folder by default. With `dag`, `artifacts`, and `bash`, the dataset folder, to check that each source file exists there. |
+| `--path-rules` | With `check`, list the path rule each product uses. |
+| `--paths` | With `dag`, print the file under every artifact. |
+| `--strict-paths` | With `check` and `dag`, require an explicit `path product:` rule for every product, even if a default `path:` rule exists. With `dag`, a source whose record gives its file needs none. |
+| `--stage <name>` | With `bash`, keep only the jobs of one [stage](docs/language-reference.md#stages) and the stages nested in it; name a nested stage by its path, such as `preprocess/combine`. Outputs of other stages that it reads are treated as files that already exist, and the script checks for them before the first job. |
+| `--json` | With `dag`, print the `.spitdag`. With `check`, print diagnostics as JSON for editor use and stop, succeeding whatever they report. Each diagnostic has a `severity` of `error` or `warning`; those tied to a declaration, call, rule, command, or path include its `line`, and a `column` and `end_column` for the text it is about, such as one input of a call or one `{placeholder}`. Columns are 1-based and count UTF-16 code units, as editors do; `end_column` is one past the last character. |
+| `--stdin` | With `check`, read the file's text from standard input, such as an editor's unsaved buffer. The file's path is still used to resolve `use` imports and a recipe's `pipeline` line. |
 
-For example, `check` resolves the pipeline, while `check --root` also verifies its input files:
-
-```sh
-cargo run -- check examples/commands/bash_demo.spit --sources examples/commands/bash_demo.spitout
-cargo run -- check examples/commands/bash_demo.spit --sources examples/commands/bash_demo.spitout --root /path/to/data
-```
+Pass `-` in place of the `.spitout` to read it from standard input.
 
 ### Errors and warnings
 
-Every command first reports all the problems it can find, one error per line, before doing any work. Each names the line and the column where the text at fault starts:
+Every command first reports all the problems it can find, one per line, before doing any work. Each names the line and the column where the text at fault starts:
 
 ```text
 warning: line 2, column 8: source product `spare` is never used as an input
@@ -79,7 +100,7 @@ error: line 5, column 29: command for `clean` uses unknown placeholder `{result}
 error: line 9, column 14: unknown product `rwa`
 ```
 
-Syntax errors are reported throughout the file first; the remaining checks run once every line parses. A step or rule that uses a declaration which failed is not reported again. Errors stop the command; warnings do not. Warnings flag a source product no step uses, an operation no step uses, a used operation with no `command` once the pipeline has commands, an output type variable that no input binds, a stage with no steps, a shell operator such as `|` or `>` in a command, and a `#` that ends a word, which reads like a comment but is part of the word. With an inventory, they also flag a source with no artifacts, naming the steps it leaves without jobs, any other step that resolves no jobs, paths that differ only in letter case, and an inline inventory that `--sources` replaces. A file with no steps is treated as a library of definitions, and imported definitions are never reported as unused. Jobs are resolved against the inventory only when nothing else is wrong.
+Syntax errors are reported throughout the file first; the remaining checks run once every line parses. A step or rule that uses a declaration which failed is not reported again. Errors stop the command; warnings do not. Warnings flag a source product no step uses, an operation no step uses, a used operation with no `command` once the pipeline has commands, an output type variable that no input binds, a stage with no steps, a shell operator such as `|` or `>` in a command, and a `#` that ends a word, which reads like a comment but is part of the word. With inputs, as in `dag`, they also flag a source with no artifacts, naming the steps it leaves without jobs, any other step that resolves no jobs, and paths that differ only in letter case. A file with no steps is treated as a library of definitions, and imported definitions are never reported as unused. Jobs are resolved only when nothing else is wrong.
 
 ## Write a pipeline
 
@@ -87,7 +108,6 @@ Here is the complete [text processing example](examples/commands/bash_demo.spit)
 
 ```text
 source shard : Lines [group, part]
-require shard count>=1 per [group]
 
 path: {product}/{entities}.txt
 path shard: input/{group}/{part}.txt
@@ -101,27 +121,38 @@ command merge: sort -m -u -o {output} {items}
 merged = merge(sorted @ vary(part))
 ```
 
-`source` declares a family of input artifacts. A `shard` is identified by its `group` and `part` values. `sorted` keeps those dimensions. `merge` collects all parts of each group and produces one `merged[group=...]` artifact per group. The `@ drop(part)` contract and `@ vary(part)` call must agree. For datasets whose subject and session values are unknown in advance, `discover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}` reads the observed pairs from folders and expands source artifacts over them.
+`source` declares a family of input artifacts. A `shard` is identified by its `group` and `part` values. `sorted` keeps those dimensions. `merge` collects all parts of each group and produces one `merged[group=...]` artifact per group. The `@ drop(part)` contract and `@ vary(part)` call must agree.
 
-`require sessions count>=2 per [sub]` checks the discovered folders themselves. If subject `5` has only one session, SPIT reports that group with a count of one; `sessions` remains a discovery rule name, not a product.
+`path` lines say where artifacts live; an output with no rule goes to `out/{product}/{entities}`. `command` lines give the exact executable and argument order. SPIT decides which artifacts belong to each job before filling their paths into a command.
 
-`skip sessions count>=2 per [sub]` instead removes subjects with fewer than two sessions before checking source files or expanding jobs. During filesystem discovery, SPIT reports each skipped subject on stderr while keeping DAG JSON on stdout.
-
-`path` lines say where artifacts live. `command` lines give the exact executable and argument order. SPIT decides which artifacts belong to each job before filling their paths into a command.
+A pipeline names no dataset. Rules about what a dataset must hold, and records of what it does hold, go in the files of step 2: `spit check` rejects a `require` rule or a `sources:` record written in a `.spit`.
 
 ## Supply the inputs
 
-For a dataset on disk, keep file discovery in a sibling `.spitin` recipe. For example, `analysis.spit` can declare `source image: Image [sub, ses]` and the operation that reads it, while `analysis.spitin` contains:
+A `.spitin` recipe describes how to find a dataset's inputs. Its first line names the pipeline it serves, relative to the recipe's folder. For example, beside an `analysis.spit` that declares `source image: Image [sub, ses]`, `cohort.spitin` might read:
 
 ```text
+pipeline analysis.spit
+
 discover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}
 skip sessions count>=2 per [sub]
 path image: data/sub-{sub}/ses-{ses}/image.nii.gz
 ```
 
-`spit check analysis.spit` and `spit dag analysis.spit --json` load that sibling recipe automatically, discover source files, and resolve the pipeline. Use `--inputs other/cohort.spitin` for another dataset; relative paths then start at that recipe's folder unless `--root` is given. A pipeline with a `.spitin` recipe can omit output path rules: outputs default to `out/{product}/{entities}`. The `.spitin` file may also contain `require` rules or explicit `sources:` and `contexts:` records. Logical source types and operations stay in `.spit`. To keep what a recipe found, save `spit discover analysis.spit > dataset.spitout`: each record carries its file's path, so `spit dag analysis.spit --sources dataset.spitout` needs neither the recipe nor a rescan.
+`discover` reads the observed subject and session pairs from folders, and the image source expands over them. `skip` removes subjects with fewer than two sessions, reporting each on stderr. `require` instead fails such a group: `require sessions count>=2 per [sub]` names the subject with one session and its count. `sessions` remains a discovery rule name, not a product. Logical source types and operations stay in the `.spit`.
 
-The pipeline describes what to do; an inventory describes what is present. The example uses [bash_demo.spitout](examples/commands/bash_demo.spitout):
+`spit check cohort.spitin` checks the rules against the pipeline without reading the dataset. `spit inputs cohort.spitin -o cohort.spitout` scans the recipe's folder, or `--root`, and writes what it found:
+
+```text
+contexts sessions:
+    [ses=01,sub=01]
+    [ses=02,sub=01]
+sources:
+    image[sub=01,ses=01]: data/sub-01/ses-01/image.nii.gz
+    image[sub=01,ses=02]: data/sub-01/ses-02/image.nii.gz
+```
+
+Each record carries its file's path, so later steps need neither the recipe nor a rescan. A `.spitout` can also come from a dataset indexer or be written by hand; a record without a path takes its product's path rule. The text processing example uses [bash_demo.spitout](examples/commands/bash_demo.spitout):
 
 ```text
 sources:
@@ -130,27 +161,28 @@ sources:
     shard[group=beta,part=01]
 ```
 
-This creates two sort jobs for `alpha`, one for `beta`, and one merge job for each group. Add another shard to the inventory and SPIT creates the corresponding job without changing the pipeline.
+This creates two sort jobs for `alpha`, one for `beta`, and one merge job for each group. Add another shard and SPIT creates the corresponding job without changing the pipeline.
 
-An inventory can also be placed in the same `.spit` file for a small example, as in [basic.spit](examples/basic/basic.spit). For reusable pipelines, keep it separate and pass `--sources inventory.spitout`. Use `--sources -` to read an inventory from standard input.
-
-## Inspect and generate a script
+## Resolve jobs and generate a script
 
 ```sh
-cargo run -- check examples/commands/bash_demo.spit --sources examples/commands/bash_demo.spitout --paths
-cargo run -- dag examples/commands/bash_demo.spit --sources examples/commands/bash_demo.spitout --paths
-cargo run -- bash examples/commands/bash_demo.spit --sources examples/commands/bash_demo.spitout > run.sh
+cargo run -- check examples/commands/bash_demo.spit --path-rules
+cargo run -- dag examples/commands/bash_demo.spit examples/commands/bash_demo.spitout --paths
+cargo run -- dag examples/commands/bash_demo.spit examples/commands/bash_demo.spitout -o bash_demo.spitdag
+cargo run -- bash bash_demo.spitdag -o run.sh
 SPIT_ROOT=/path/to/data bash run.sh
 ```
 
-`dag --paths` shows paths before command expansion. The generated script uses `SPIT_ROOT` for relative paths; when unset, it uses the current directory.
+`dag --paths` shows each artifact's file. The `.spitdag` holds everything a backend needs, so `bash` reads nothing else: no pipeline, path rule or command template. The generated script uses `SPIT_ROOT` for relative paths; when unset, it uses the current directory.
+
+The Bash backend is paused while the steps before it settle: it works as described here, but its tests are disabled.
 
 ### Find incomplete artifacts
 
-Every other command stops at the first job the inventory cannot complete. `artifacts` resolves every job it can and reports the rest:
+`dag` stops at the first job the inputs cannot complete. `artifacts` resolves every job it can and reports the rest:
 
 ```sh
-cargo run -- artifacts pipeline.spit --sources inventory.spitout
+cargo run -- artifacts pipeline.spit inputs.spitout
 ```
 
 ```text
@@ -166,17 +198,17 @@ Incomplete artifacts: 2
     - input `runs` needs aligned[subject=02,run=1], which cannot be produced
 ```
 
-An incomplete artifact has a missing or ambiguous input, a collection below its `@ min(count)`, or an input that is itself incomplete, so a gap early in the pipeline is traced through every step that depends on it. A group that fails a `require` rule is listed under `Coverage gaps`, and its sources are held back from every job. A step creates jobs only for the artifacts that drive it, so a context with no driving artifact at all appears only through the coverage gaps and steps that notice it missing. The command succeeds whatever it finds; the complete artifacts are the ones the pipeline could produce from this inventory today.
+An incomplete artifact has a missing or ambiguous input, a collection below its `@ min(count)`, or an input that is itself incomplete, so a gap early in the pipeline is traced through every step that depends on it. Given a recipe, a group that fails a `require` rule is listed under `Coverage gaps`, and its sources are held back from every job. A step creates jobs only for the artifacts that drive it, so a context with no driving artifact at all appears only through the coverage gaps and steps that notice it missing. The command succeeds whatever it finds; the complete artifacts are the ones the pipeline could produce from these inputs today.
 
 ## Language reference
 
-Beyond the basics above, `.spit` files support typed products, multi-output operations, `many`/aggregation inputs with selectors (`where`, `same`, `vary`, `each`), coverage constraints (`require`, `contexts`), symbolic type variables, stages, path placeholders, and `use` imports for sharing definitions across files. See the [full language reference](docs/language-reference.md) for syntax and rules for each of these.
+Beyond the basics above, `.spit` files support typed products, multi-output operations, `many`/aggregation inputs with selectors (`where`, `same`, `vary`, `each`), symbolic type variables, stages, path placeholders, and `use` imports for sharing definitions across files; `.spitin` recipes add directory discovery and coverage rules (`require`, `skip`). See the [full language reference](docs/language-reference.md) for syntax and rules for each of these.
 
 ## More examples
 
 | Example | Shows |
 | --- | --- |
-| [Basic](examples/basic/basic.spit) | Sectioned syntax and an inventory in one file |
+| [Basic](examples/basic/basic.spit) | Sectioned syntax, with its recipe and inputs in separate files |
 | [Untyped](examples/types/untyped.spit) | Resolution without types |
 | [Typed](examples/types/typed.spit) | Parameterized symbolic types |
 | [Branching](examples/pipelines/branching.spit) | Shared inputs and branches |
@@ -195,20 +227,19 @@ Run `cargo test --test source_files` to see the field survey example checked aga
 ## How SPIT works
 
 ```text
-pipeline text + source inventory
-              ↓
-       resolved logical DAG
-              ↓
-       paths and commands
-              ↓
-          Bash script
+.spit ──► 1. check ──► compiled pipeline
+                            │
+.spitin + data ──► 2. inputs ──► .spitout
+                            │        │
+                            ▼        ▼
+                        3. dag ──► .spitdag ──► 4. bash ──► script
 ```
 
-The inventory supplies artifact identities; the pipeline supplies operations and rules. Resolution checks dimensions, matching, cardinality, constraints, and any known types. Path binding and command expansion happen afterward. SPIT does not inspect file contents or command-specific metadata itself; `verify` commands run those checks with your own tools.
+The pipeline supplies operations and rules; the `.spitout` supplies artifact identities and their files. Resolution checks dimensions, matching, cardinality, and any known types, then binds each artifact to its file and expands each command into its arguments. Step 2 and step 3 each build on step 1 and never on each other, and a backend reads only the `.spitdag`. SPIT does not inspect file contents or command-specific metadata itself; `verify` commands run those checks with your own tools.
 
 ## Documentation
 
-- [Language reference](docs/language-reference.md) — full `.spit` syntax
+- [Language reference](docs/language-reference.md) — full `.spit`, `.spitin` and `.spitout` syntax
 - [Architecture](docs/architecture.md) — the internal model: resolution, typing, and the Bash backend
 - [Examples](docs/examples.md) — how to run each example pipeline, and what the larger ones show
 
