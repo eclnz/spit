@@ -126,3 +126,29 @@ fn survey_reports_a_source_path_that_is_a_directory() {
         .unwrap()
         .contains("target_classes"));
 }
+
+#[test]
+fn the_spitdag_records_the_root_as_an_absolute_path() {
+    let fixture = survey_tree(None);
+    let example = |file: &str| format!("{}/examples/commands/{file}", env!("CARGO_MANIFEST_DIR"));
+    let result = Command::new(env!("CARGO_BIN_EXE_spit"))
+        .current_dir(fixture.path().parent().unwrap())
+        .args([
+            "dag",
+            &example("field_survey.spit"),
+            &example("field_survey.spitout"),
+            "--root",
+            fixture.path().file_name().unwrap().to_str().unwrap(),
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let graph = String::from_utf8(result.stdout).unwrap();
+    let root = fixture.path().to_str().unwrap().replace('\\', "\\\\");
+    assert!(graph.contains(&format!("\"root\":\"{root}\"")), "{graph}");
+}

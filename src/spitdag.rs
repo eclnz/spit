@@ -10,11 +10,14 @@ use crate::json::Json;
 use crate::types::TypeExpr;
 
 /// The schema version a `.spitdag` is written with.
-pub const SPITDAG_VERSION: usize = 2;
+pub const SPITDAG_VERSION: usize = 3;
 
 /// A resolved DAG with its paths bound and its commands expanded.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct BoundDag {
+    /// The absolute dataset folder every path is relative to, when known.
+    pub root: Option<String>,
+    /// Each job after the jobs it depends on.
     pub jobs: Vec<BoundJob>,
 }
 
@@ -93,16 +96,90 @@ impl BoundDag {
         external.into_values().collect()
     }
 
+    /// The outputs no job here reads: what a full run leaves behind, in job
+    /// order.
+    pub fn targets(&self) -> Vec<&BoundArtifact> {
+        let read: BTreeSet<_> = self
+            .jobs
+            .iter()
+            .flat_map(BoundJob::input_artifacts)
+            .map(|artifact| artifact.path.as_str())
+            .collect();
+        self.jobs
+            .iter()
+            .flat_map(|job| &job.outputs)
+            .map(|(_, artifact)| artifact)
+            .filter(|artifact| !read.contains(artifact.path.as_str()))
+            .collect()
+    }
+
+    /// The programs the commands run, each once: every command's first
+    /// argument that is plain text, so a backend can look for them before it
+    /// starts.
+    pub fn executables(&self) -> BTreeSet<String> {
+        self.jobs
+            .iter()
+            .flat_map(|job| job.command.iter().chain(&job.verify))
+            .filter_map(|command| {
+                command
+                    .first()?
+                    .iter()
+                    .map(|part| match part {
+                        ArgPart::Text(text) => Some(text.as_str()),
+                        ArgPart::Path(_) => None,
+                    })
+                    .collect()
+            })
+            .collect()
+    }
+
+    /// The jobs that depend on each job, by ID.
+    pub fn dependents(&self) -> BTreeMap<usize, Vec<usize>> {
+        let mut dependents: BTreeMap<_, Vec<_>> = BTreeMap::new();
+        for job in &self.jobs {
+            for &dependency in &job.depends_on {
+                dependents.entry(dependency).or_default().push(job.id);
+            }
+        }
+        dependents
+    }
+
     /// The `.spitdag` document.
     pub fn to_json(&self) -> String {
-        let document = Json::object([
-            ("version", Json::Number(SPITDAG_VERSION)),
-            (
-                "external_inputs",
-                Json::array(self.external_inputs().into_iter().map(artifact_json)),
-            ),
-            ("jobs", Json::array(self.jobs.iter().map(job_json))),
-        ]);
+        let dependents = self.dependents();
+        let document =
+            Json::object([
+                ("version", Json::Number(SPITDAG_VERSION)),
+                (
+                    "generator",
+                    Json::object([
+                        ("name", Json::string("spit")),
+                        ("version", Json::string(env!("CARGO_PKG_VERSION"))),
+                    ]),
+                ),
+                (
+                    "root",
+                    self.root.as_deref().map_or(Json::Null, Json::string),
+                ),
+                (
+                    "external_inputs",
+                    Json::array(self.external_inputs().into_iter().map(artifact_json)),
+                ),
+                (
+                    "targets",
+                    Json::array(self.targets().into_iter().map(artifact_json)),
+                ),
+                (
+                    "executables",
+                    Json::array(self.executables().into_iter().map(Json::String)),
+                ),
+                (
+                    "jobs",
+                    Json::array(self.jobs.iter().map(|job| {
+                        job_json(job, dependents.get(&job.id).map_or(&[], Vec::as_slice))
+                    })),
+                ),
+            ]);
         format!("{document}\n")
     }
 }
@@ -155,7 +232,7 @@ pub fn render_bound_dag(dag: &BoundDag, paths: bool) -> String {
     output
 }
 
-fn job_json(job: &BoundJob) -> Json {
+fn job_json(job: &BoundJob, dependents: &[usize]) -> Json {
     let stage = job.stage.as_deref().map_or(Vec::new(), |stage| {
         stage.split('/').map(Json::string).collect()
     });
@@ -169,25 +246,46 @@ fn job_json(job: &BoundJob) -> Json {
         .outputs
         .iter()
         .map(|(port, artifact)| (port.clone(), artifact_json(artifact)));
+    let inputs = Json::Object(inputs.collect());
+    let outputs = Json::Object(outputs.collect());
+    let command = job.command.as_deref().map_or(Json::Null, command_json);
+    let verify = Json::array(job.verify.iter().map(|command| command_json(command)));
+    // What the job reads, writes and runs, but not its ID, stage or
+    // neighbours, which can change while the work stays the same.
+    let work = Json::object([
+        ("operation", Json::string(&job.operation)),
+        ("inputs", inputs.clone()),
+        ("outputs", outputs.clone()),
+        ("command", command.clone()),
+        ("verify", verify.clone()),
+    ]);
     Json::object([
         ("id", Json::Number(job.id)),
         ("operation", Json::string(&job.operation)),
         ("stage", Json::Array(stage)),
-        ("inputs", Json::Object(inputs.collect())),
-        ("outputs", Json::Object(outputs.collect())),
+        ("fingerprint", Json::String(fingerprint(&work.to_string()))),
+        ("inputs", inputs),
+        ("outputs", outputs),
         (
             "depends_on",
             Json::array(job.depends_on.iter().copied().map(Json::Number)),
         ),
         (
-            "command",
-            job.command.as_deref().map_or(Json::Null, command_json),
+            "dependents",
+            Json::array(dependents.iter().copied().map(Json::Number)),
         ),
-        (
-            "verify",
-            Json::array(job.verify.iter().map(|command| command_json(command))),
-        ),
+        ("command", command),
+        ("verify", verify),
     ])
+}
+
+/// A 64-bit FNV-1a hash of `text`, as 16 hexadecimal digits: the same on
+/// every platform and in every release, unlike the standard library's.
+fn fingerprint(text: &str) -> String {
+    let hash = text.bytes().fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
+        (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3)
+    });
+    format!("{hash:016x}")
 }
 
 /// An argument is an array of parts: a string for text, `{"path": ...}` for
@@ -253,6 +351,7 @@ mod tests {
     #[test]
     fn a_spitdag_is_written_with_its_version_and_escapes() {
         let dag = BoundDag {
+            root: Some("/data/study".into()),
             jobs: vec![
                 BoundJob {
                     id: 1,
@@ -283,11 +382,70 @@ mod tests {
             ],
         };
         let text = dag.to_json();
-        assert!(text.starts_with("{\"version\":2,\"external_inputs\":[{\"product\":\"raw\""));
+        assert!(text.starts_with(&format!(
+            "{{\"version\":3,\"generator\":{{\"name\":\"spit\",\"version\":\"{}\"}},\
+\"root\":\"/data/study\",\"external_inputs\":[{{\"product\":\"raw\"",
+            env!("CARGO_PKG_VERSION")
+        )));
         assert!(
             text.contains("\"entities\":{\"sub\":\"1\",\"run\":\"a\\\"\\\\\\n\\u0001é\"}"),
             "{text}"
         );
         assert!(text.contains("\"command\":null"), "{text}");
+        // A verify command that starts with a path names no program.
+        assert!(
+            text.contains("\"executables\":[\"tool\"],\"jobs\""),
+            "{text}"
+        );
+        assert!(
+            text.contains("\"targets\":[{\"product\":\"mean\""),
+            "{text}"
+        );
+        assert_eq!(dag.targets().len(), 1);
+        assert!(
+            text.contains("\"depends_on\":[],\"dependents\":[2]"),
+            "{text}"
+        );
+        assert!(
+            text.contains("\"depends_on\":[1],\"dependents\":[]"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn a_fingerprint_follows_the_work_not_the_job_number() {
+        let job = BoundJob {
+            id: 1,
+            operation: "clean".into(),
+            stage: None,
+            inputs: vec![("raw".into(), vec![artifact("raw", "in/1.txt")])],
+            outputs: vec![("output".into(), artifact("clean", "out/1.txt"))],
+            depends_on: vec![],
+            command: Some(vec![vec![ArgPart::Text("tool".into())]]),
+            verify: vec![],
+        };
+        let print = |job: &BoundJob| {
+            let text = BoundDag {
+                root: None,
+                jobs: vec![job.clone()],
+            }
+            .to_json();
+            let start = text.find("\"fingerprint\":\"").unwrap() + 15;
+            text[start..start + 16].to_owned()
+        };
+        let renumbered = BoundJob {
+            id: 7,
+            stage: Some("prep".into()),
+            ..job.clone()
+        };
+        assert_eq!(print(&job), print(&renumbered));
+        let changed = BoundJob {
+            command: Some(vec![vec![ArgPart::Text("other".into())]]),
+            ..job.clone()
+        };
+        assert_ne!(print(&job), print(&changed));
+        assert!(print(&job).bytes().all(|byte| byte.is_ascii_hexdigit()));
+        assert_eq!(fingerprint(""), "cbf29ce484222325");
+        assert_eq!(fingerprint("a"), "af63dc4c8601ec8c");
     }
 }

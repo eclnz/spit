@@ -413,3 +413,32 @@ fn verified_files_name_what_was_checked() {
         "3 source files and 2 files made outside the stage verified."
     );
 }
+
+#[test]
+fn every_job_follows_the_jobs_it_depends_on() {
+    // A backend may run a `.spitdag`'s jobs in the order it lists them.
+    for (pipeline, sources) in [
+        (PIPELINE, SOURCES),
+        (NESTED, NESTED_SOURCES),
+        (
+            "examples/commands/mrtrix3_act.spit",
+            "examples/commands/mrtrix3_act.spitout",
+        ),
+    ] {
+        let text = fs::read_to_string(pipeline).unwrap() + &fs::read_to_string(sources).unwrap();
+        let (parsed, inventory) = support::parse_fixture(&text).unwrap();
+        let dag = resolve(&parsed, &inventory.unwrap()).unwrap();
+        assert!(dag.jobs.len() > 1, "{pipeline}");
+        for (index, job) in dag.jobs.iter().enumerate() {
+            assert_eq!(job.id, index + 1, "{pipeline}");
+            assert!(
+                job.dependencies
+                    .iter()
+                    .all(|&dependency| dependency < job.id),
+                "{pipeline}: job {} depends on {:?}",
+                job.id,
+                job.dependencies
+            );
+        }
+    }
+}
