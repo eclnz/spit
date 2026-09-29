@@ -373,32 +373,7 @@ fn parse_binding(arg: &str, number: usize) -> Result<InputBinding, ParseError> {
                 if !binding.pinned.is_empty() {
                     return Err(duplicate());
                 }
-                for item in items {
-                    let (dimension, value) = item.split_once('=').ok_or_else(|| {
-                        ParseError::new(number, "expected `dimension=value` in `@ where(...)`")
-                            .at_token(item)
-                    })?;
-                    let dimension = identifier(dimension.trim(), number, "where dimension")?;
-                    let value = value.trim();
-                    if value.is_empty() || value.chars().any(char::is_whitespace) {
-                        return Err(ParseError::new(
-                            number,
-                            "a `@ where` value must be one nonempty token",
-                        )
-                        .at_token(item));
-                    }
-                    if binding
-                        .pinned
-                        .insert(dimension.to_owned(), value.to_owned())
-                        .is_some()
-                    {
-                        return Err(ParseError::new(
-                            number,
-                            format!("`@ where(...)` pins `{dimension}` twice"),
-                        )
-                        .at_token(item));
-                    }
-                }
+                binding.pinned = parse_pins(&items, number)?;
             }
             "same" => {
                 let dimensions = items
@@ -413,22 +388,58 @@ fn parse_binding(arg: &str, number: usize) -> Result<InputBinding, ParseError> {
                 if !binding.each.is_empty() {
                     return Err(duplicate());
                 }
-                for item in items {
-                    let dimension = identifier(item, number, "each dimension")?;
-                    if binding.each.iter().any(|each| each == dimension) {
-                        return Err(ParseError::new(
-                            number,
-                            format!("`@ each(...)` names `{dimension}` twice"),
-                        )
-                        .at_token(item));
-                    }
-                    binding.each.push(dimension.to_owned());
-                }
+                binding.each = parse_each(&items, number)?;
             }
             _ => return Err(ParseError::new(number, SELECTORS).at_token(keyword)),
         }
     }
     Ok(binding)
+}
+
+/// The `dimension=value` pins of `@ where(...)`, each dimension once.
+fn parse_pins(items: &[&str], number: usize) -> Result<BTreeMap<String, String>, ParseError> {
+    let mut pinned = BTreeMap::new();
+    for &item in items {
+        let (dimension, value) = item.split_once('=').ok_or_else(|| {
+            ParseError::new(number, "expected `dimension=value` in `@ where(...)`").at_token(item)
+        })?;
+        let dimension = identifier(dimension.trim(), number, "where dimension")?;
+        let value = value.trim();
+        if value.is_empty() || value.chars().any(char::is_whitespace) {
+            return Err(
+                ParseError::new(number, "a `@ where` value must be one nonempty token")
+                    .at_token(item),
+            );
+        }
+        if pinned
+            .insert(dimension.to_owned(), value.to_owned())
+            .is_some()
+        {
+            return Err(ParseError::new(
+                number,
+                format!("`@ where(...)` pins `{dimension}` twice"),
+            )
+            .at_token(item));
+        }
+    }
+    Ok(pinned)
+}
+
+/// The dimensions of `@ each(...)`, each once.
+fn parse_each(items: &[&str], number: usize) -> Result<Vec<String>, ParseError> {
+    let mut each: Vec<String> = Vec::new();
+    for &item in items {
+        let dimension = identifier(item, number, "each dimension")?;
+        if each.iter().any(|named| named == dimension) {
+            return Err(ParseError::new(
+                number,
+                format!("`@ each(...)` names `{dimension}` twice"),
+            )
+            .at_token(item));
+        }
+        each.push(dimension.to_owned());
+    }
+    Ok(each)
 }
 
 fn owned(values: &[&str]) -> Vec<String> {

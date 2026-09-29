@@ -789,6 +789,16 @@ pub enum CountRequirement {
     AtLeast(usize),
 }
 
+impl CountRequirement {
+    /// Whether `found` artifacts or bindings meet the requirement.
+    pub fn allows(&self, found: usize) -> bool {
+        match *self {
+            Self::Exactly(count) => found == count,
+            Self::AtLeast(count) => found >= count,
+        }
+    }
+}
+
 impl fmt::Display for CountRequirement {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {

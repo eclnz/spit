@@ -20,36 +20,36 @@ use crate::template::Part;
 pub fn bind_dag(pipeline: &Pipeline, dag: &ResolvedDag) -> Result<BoundDag, BindError> {
     check_rules(pipeline, dag)?;
     validate_commands(pipeline)?;
-    let paths = bound_paths(pipeline, dag)?;
-    let operations: BTreeMap<_, _> = pipeline
-        .operations
-        .iter()
-        .map(|operation| (operation.name.as_str(), operation))
-        .collect();
-    // `bound_paths` binds every artifact of every job, so each is found.
-    let artifact = |artifact: &ArtifactInstance| -> Result<BoundArtifact, BindError> {
-        let unbound = || BindError::Dag(format!("no path is bound for `{artifact}`"));
-        let dimensions = dag
-            .product_dimensions
-            .get(&artifact.product)
-            .ok_or_else(unbound)?;
-        let path = paths.get(&artifact.key()).ok_or_else(unbound)?;
-        Ok(BoundArtifact {
-            product: artifact.product.clone(),
-            entities: dimensions
-                .iter()
-                .filter_map(|dimension| {
-                    let value = artifact.entities.get(dimension)?;
-                    Some((dimension.clone(), value.to_owned()))
-                })
-                .collect(),
-            artifact_type: artifact.artifact_type.clone(),
-            path: path.clone(),
-        })
+    let binder = Binder {
+        pipeline,
+        dag,
+        paths: bound_paths(pipeline, dag)?,
+        operations: pipeline
+            .operations
+            .iter()
+            .map(|operation| (operation.name.as_str(), operation))
+            .collect(),
     };
-    let mut jobs = Vec::new();
-    for job in &dag.jobs {
-        let operation = operations.get(job.operation.as_str()).ok_or_else(|| {
+    let jobs = dag
+        .jobs
+        .iter()
+        .map(|job| binder.job(job))
+        .collect::<Result<_, _>>()?;
+    Ok(BoundDag { root: None, jobs })
+}
+
+/// What binding each job of a DAG needs: every artifact's path, and each
+/// operation by name.
+struct Binder<'a> {
+    pipeline: &'a Pipeline,
+    dag: &'a ResolvedDag,
+    paths: BTreeMap<ArtifactKey, String>,
+    operations: BTreeMap<&'a str, &'a OperationDef>,
+}
+
+impl Binder<'_> {
+    fn job(&self, job: &Job) -> Result<BoundJob, BindError> {
+        let operation = self.operations.get(job.operation.as_str()).ok_or_else(|| {
             BindError::Dag(format!(
                 "unknown operation `{}` in resolved DAG",
                 job.operation
@@ -64,37 +64,60 @@ pub fn bind_dag(pipeline: &Pipeline, dag: &ResolvedDag) -> Result<BoundDag, Bind
             )));
         }
         let commands = |role: CommandRole| {
-            pipeline
+            self.pipeline
                 .commands
                 .iter()
                 .filter(move |command| command.operation == job.operation && command.role == role)
-                .map(|command| expand(command.template.arguments(), operation, job, &paths))
+                .map(|command| expand(command.template.arguments(), operation, job, &self.paths))
         };
-        jobs.push(BoundJob {
+        let inputs = operation
+            .inputs
+            .iter()
+            .zip(&job.inputs)
+            .map(|(port, artifacts)| {
+                let artifacts = artifacts
+                    .iter()
+                    .map(|artifact| self.artifact(artifact))
+                    .collect::<Result<_, _>>()?;
+                Ok((port.name.clone(), artifacts))
+            });
+        let outputs = (operation.outputs.iter().zip(&job.outputs))
+            .map(|(port, output)| Ok((port.name.clone(), self.artifact(output)?)));
+        Ok(BoundJob {
             id: job.id,
             operation: job.operation.clone(),
             stage: job.stage.clone(),
-            inputs: operation
-                .inputs
-                .iter()
-                .zip(&job.inputs)
-                .map(|(port, artifacts)| {
-                    let artifacts = artifacts.iter().map(artifact).collect::<Result<_, _>>()?;
-                    Ok((port.name.clone(), artifacts))
-                })
-                .collect::<Result<_, BindError>>()?,
-            outputs: operation
-                .outputs
-                .iter()
-                .zip(&job.outputs)
-                .map(|(port, output)| Ok((port.name.clone(), artifact(output)?)))
-                .collect::<Result<_, BindError>>()?,
+            inputs: inputs.collect::<Result<_, BindError>>()?,
+            outputs: outputs.collect::<Result<_, BindError>>()?,
             depends_on: job.dependencies.clone(),
             command: commands(CommandRole::Run).next().transpose()?,
             verify: commands(CommandRole::Verify).collect::<Result<_, _>>()?,
-        });
+        })
     }
-    Ok(BoundDag { root: None, jobs })
+
+    /// `artifact` with its path and its entities in declared order.
+    /// `bound_paths` binds every artifact of every job, so each is found.
+    fn artifact(&self, artifact: &ArtifactInstance) -> Result<BoundArtifact, BindError> {
+        let unbound = || BindError::Dag(format!("no path is bound for `{artifact}`"));
+        let dimensions = self
+            .dag
+            .product_dimensions
+            .get(&artifact.product)
+            .ok_or_else(unbound)?;
+        let path = self.paths.get(&artifact.key()).ok_or_else(unbound)?;
+        Ok(BoundArtifact {
+            product: artifact.product.clone(),
+            entities: dimensions
+                .iter()
+                .filter_map(|dimension| {
+                    let value = artifact.entities.get(dimension)?;
+                    Some((dimension.clone(), value.to_owned()))
+                })
+                .collect(),
+            artifact_type: artifact.artifact_type.clone(),
+            path: path.clone(),
+        })
+    }
 }
 
 /// A command's arguments for one job. A many input's placeholder, which is a

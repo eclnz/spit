@@ -5,8 +5,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::error::{DefinitionSubject, ResolveError};
 use crate::model::{
-    ArtifactInstance, CountRequirement, CoverageAction, CoverageGap, CoverageRule, EntityBinding,
-    InputRules, Pipeline, SourceInventory,
+    ArtifactInstance, CoverageAction, CoverageGap, CoverageRule, EntityBinding, InputRules,
+    Pipeline, SourceInventory,
 };
 use crate::shape::dimension_set;
 
@@ -47,75 +47,96 @@ pub(crate) fn apply_skips(
         if discovery_only && !is_discovery {
             continue;
         }
-        let bindings: Vec<_> = if is_discovery {
-            inventory
-                .discovered
-                .get(&rule.product)
-                .into_iter()
-                .flatten()
-                .collect()
-        } else {
-            inventory
-                .artifacts
-                .iter()
-                .filter(|record| record.product == rule.product)
-                .map(|record| &record.entities)
-                .collect()
-        };
-        let groups: BTreeSet<_> = if is_discovery {
-            bindings
-                .iter()
-                .filter_map(|binding| binding.project(&rule.group_by))
-                .collect()
-        } else {
-            inventory
-                .contexts
-                .iter()
-                .chain(inventory.artifacts.iter().map(|record| &record.entities))
-                .filter_map(|binding| binding.project(&rule.group_by))
-                .collect()
-        };
-        for context in groups {
-            let members: Vec<_> = bindings
-                .iter()
-                .filter(|binding| binding.project(&rule.group_by).as_ref() == Some(&context))
-                .collect();
-            let valid_count = match rule.count {
-                CountRequirement::Exactly(n) => members.len() == n,
-                CountRequirement::AtLeast(n) => members.len() >= n,
-            };
-            let valid_values = rule.values.iter().all(|(dimension, values)| {
-                values.iter().all(|value| {
-                    members
-                        .iter()
-                        .any(|binding| binding.get(dimension) == Some(value.as_str()))
-                })
-            });
-            if !valid_count || !valid_values {
-                skipped.push(SkippedGroup {
-                    target: rule.product.clone(),
-                    context,
-                    group_by: rule.group_by.clone(),
-                });
-            }
-        }
-        let current: Vec<_> = skipped
-            .iter()
-            .filter(|group| group.target == rule.product)
-            .collect();
-        if !current.is_empty() {
-            inventory
-                .contexts
-                .retain(|binding| !current.iter().any(|group| group.matches(binding)));
-            for bindings in inventory.discovered.values_mut() {
-                bindings.retain(|binding| !current.iter().any(|group| group.matches(binding)));
-            }
-            inventory
-                .artifacts
-                .retain(|record| !current.iter().any(|group| group.matches(&record.entities)));
-        }
+        let rejected = rejected_groups(rule, inventory, is_discovery);
+        remove_groups(inventory, &rejected);
+        skipped.extend(rejected);
     }
     skipped
+}
+
+/// The groups of `inventory` that skip `rule` rejects: too few or too many
+/// members, or a required value missing.
+fn rejected_groups(
+    rule: &CoverageRule,
+    inventory: &SourceInventory,
+    is_discovery: bool,
+) -> Vec<SkippedGroup> {
+    let bindings: Vec<_> = if is_discovery {
+        inventory
+            .discovered
+            .get(&rule.product)
+            .into_iter()
+            .flatten()
+            .collect()
+    } else {
+        inventory
+            .artifacts
+            .iter()
+            .filter(|record| record.product == rule.product)
+            .map(|record| &record.entities)
+            .collect()
+    };
+    let groups: BTreeSet<_> = if is_discovery {
+        bindings
+            .iter()
+            .filter_map(|binding| binding.project(&rule.group_by))
+            .collect()
+    } else {
+        inventory
+            .contexts
+            .iter()
+            .chain(inventory.artifacts.iter().map(|record| &record.entities))
+            .filter_map(|binding| binding.project(&rule.group_by))
+            .collect()
+    };
+    groups
+        .into_iter()
+        .filter(|context| {
+            let members: Vec<_> = bindings
+                .iter()
+                .copied()
+                .filter(|binding| binding.project(&rule.group_by).as_ref() == Some(context))
+                .collect();
+            !rule.count.allows(members.len()) || missing_values(rule, &members).next().is_some()
+        })
+        .map(|context| SkippedGroup {
+            target: rule.product.clone(),
+            context,
+            group_by: rule.group_by.clone(),
+        })
+        .collect()
+}
+
+/// Remove every context, discovered binding and source record in `groups`.
+fn remove_groups(inventory: &mut SourceInventory, groups: &[SkippedGroup]) {
+    if groups.is_empty() {
+        return;
+    }
+    let skipped = |binding: &EntityBinding| groups.iter().any(|group| group.matches(binding));
+    inventory.contexts.retain(|binding| !skipped(binding));
+    for bindings in inventory.discovered.values_mut() {
+        bindings.retain(|binding| !skipped(binding));
+    }
+    inventory
+        .artifacts
+        .retain(|record| !skipped(&record.entities));
+}
+
+/// Each value `rule` requires, by dimension, that no binding in a group has.
+fn missing_values<'a>(
+    rule: &'a CoverageRule,
+    bindings: &'a [&EntityBinding],
+) -> impl Iterator<Item = (&'a String, &'a String)> + 'a {
+    rule.values.iter().flat_map(move |(dimension, values)| {
+        values
+            .iter()
+            .filter(move |value| {
+                !bindings
+                    .iter()
+                    .any(|binding| binding.get(dimension) == Some(value.as_str()))
+            })
+            .map(move |value| (dimension, value))
+    })
 }
 
 /// Check that a rule names a source or discovery rule and groups by its
@@ -235,12 +256,8 @@ pub(crate) fn coverage_gaps(
             members.iter().map(|artifact| &artifact.entities).collect()
         };
         let found = bindings.len();
-        let valid = match rule.count {
-            CountRequirement::Exactly(expected) => found == expected,
-            CountRequirement::AtLeast(minimum) => found >= minimum,
-        };
         let mut errors = Vec::new();
-        if !valid {
+        if !rule.count.allows(found) {
             errors.push(ResolveError::CoverageViolation {
                 product: rule.product.clone(),
                 rule_index,
@@ -250,21 +267,16 @@ pub(crate) fn coverage_gaps(
                 discovery,
             });
         }
-        for (dimension, values) in &rule.values {
-            let missing = values.iter().filter(|value| {
-                !bindings
-                    .iter()
-                    .any(|binding| binding.get(dimension) == Some(value.as_str()))
-            });
-            errors.extend(missing.map(|value| ResolveError::MissingRequiredValue {
+        errors.extend(missing_values(rule, &bindings).map(|(dimension, value)| {
+            ResolveError::MissingRequiredValue {
                 product: rule.product.clone(),
                 rule_index,
                 context: context.clone(),
                 dimension: dimension.clone(),
                 value: value.clone(),
                 discovery,
-            }));
-        }
+            }
+        }));
         gaps.extend(errors.into_iter().map(|error| CoverageGap {
             error,
             sources: members.clone(),
