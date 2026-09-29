@@ -454,7 +454,7 @@ fn pipeline_checks_need_no_inventory() {
     ));
 
     let (pipeline, inventory) =
-        support::parse_fixture(include_str!("../examples/commands/bash_demo.spit")).unwrap();
+        support::parse_fixture(include_str!("../examples/commands/command_demo.spit")).unwrap();
     assert!(inventory.is_none());
     validate_pipeline(&pipeline).unwrap();
 }

@@ -11,12 +11,6 @@ fn bound(pipeline: &spit::Pipeline, dag: &spit::ResolvedDag) -> Result<String, S
     Ok(spit::render_bound_dag(&bound, true))
 }
 
-/// Step 3's binding, then the Bash backend, with either's error as text.
-fn bash_script(pipeline: &spit::Pipeline, dag: &spit::ResolvedDag) -> Result<String, String> {
-    let bound = spit::bind_dag(pipeline, dag).map_err(|error| error.to_string())?;
-    spit::render_bash(&bound).map_err(|error| error.to_string())
-}
-
 fn outputs(dag: &ResolvedDag) -> Vec<String> {
     dag.jobs
         .iter()
@@ -59,22 +53,6 @@ fn one_job_owns_every_output_of_an_operation() {
     assert!(bound(&pipeline, &dag)
         .unwrap()
         .contains("    csf: csf_fod[subject=a] : FOD\n      path: csf_fod/subject=a.txt\n"));
-}
-
-#[test]
-#[ignore = "the Bash backend is paused"]
-fn a_multi_output_job_runs_one_command_after_its_verification() {
-    let pipeline = parse_pipeline(TISSUES).unwrap();
-    let inventory =
-        parse_source_inventory("sources:\n  dwi[subject=a]\n  mask[subject=a]\n").unwrap();
-    let dag = resolve(&pipeline, &inventory).unwrap();
-    let script = bash_script(&pipeline, &dag).unwrap();
-    assert_eq!(script.matches("'estimate'").count(), 1);
-    assert!(script.contains("'estimate' \"$SPIT_ROOT\"/'dwi/subject=a.txt' \"$SPIT_ROOT\"/'wm_response/subject=a.txt' \"$SPIT_ROOT\"/'csf_response/subject=a.txt'"));
-    assert!(script.contains("spit_require \"$SPIT_ROOT\"/'csf_response/subject=a.txt'"));
-    // The verification runs before the job's command.
-    let verify = script.find("spit_verify 2 'same_grid'").unwrap();
-    assert!(verify < script.find("'fit'").unwrap());
 }
 
 #[test]

@@ -1,6 +1,6 @@
-//! SPIT: resolve artifact pipelines, bind paths, and generate Bash scripts.
+//! SPIT: compile artifact pipelines, settle their inputs, and resolve and
+//! bind their jobs into a `.spitdag`.
 
-mod bash;
 mod command;
 mod compile;
 mod diagnostics;
@@ -19,7 +19,6 @@ mod spitdag;
 mod template;
 mod types;
 
-pub use bash::{render_bash, BashError};
 pub use command::{validate_commands, CommandError, CommandTemplate};
 pub use compile::validate_pipeline;
 pub use diagnostics::{

@@ -39,7 +39,7 @@ tagged : Tagged<Label> [id] = tag(cleaned)
         rendered(&diagnostics),
         [
             "warning: line 2: source product `spare` is never used as an input",
-            "warning: line 4: operation `tag` has no command, so `bash` cannot run its jobs",
+            "warning: line 4: operation `tag` has no command, so its jobs cannot run",
             "warning: line 4: output type variable `Key` of `tag` appears in no input; it is known only where the output product declares its type",
             "warning: line 5: operation `unused` is declared but never used",
         ]

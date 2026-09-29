@@ -2,7 +2,7 @@
 //!
 //! A command is stored as a list of arguments, each made of literal text and
 //! `{placeholders}`. How the arguments are quoted for a shell, and where the
-//! artifact paths are rooted, is left to a backend such as Bash.
+//! artifact paths are rooted, is left to a backend.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;

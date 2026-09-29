@@ -79,7 +79,7 @@ command estimate: dwi2response dhollander {dwi} {wm} {gm} {csf}
 wm_response, gm_response, csf_response = estimate(dwi)
 ```
 
-A `verify` command checks a job's inputs before its command runs, using the tools that understand the files; if it fails, the script stops:
+A `verify` command checks a job's inputs before its command runs, using the tools that understand the files; if it fails, the job does not run:
 
 ```text
 verify register: check_same_grid {moving} {reference}
@@ -137,11 +137,10 @@ stage preprocess:
 
 The lines directly in a stage share one indentation. A nested stage without its own `path:` line uses the nearest one around it, and `{stage}` gives one directory per level, as in `preprocess/combine/merged/...`.
 
-SPIT orders stages by the products they read, so a stage needs no `after` clause. Stages must not depend on each other in a cycle, even through steps outside every stage. A nested stage is compared with its siblings, and counts toward its outer stage's place among the outer stage's siblings; a step written in an outer stage itself, like one outside every stage, passes on what it reads. `dag` counts the jobs in each outermost stage and names each job's stage, and `bash` marks where each stage starts. To run one stage, such as the analysis after preprocessing has already run, pass `--stage` to `bash`; a stage includes the stages nested in it, and `--stage preprocess/combine` names a nested one:
+SPIT orders stages by the products they read, so a stage needs no `after` clause. Stages must not depend on each other in a cycle, even through steps outside every stage. A nested stage is compared with its siblings, and counts toward its outer stage's place among the outer stage's siblings; a step written in an outer stage itself, like one outside every stage, passes on what it reads. `dag` counts the jobs in each outermost stage and names each job's stage, and the `.spitdag` gives each job its stage as a list of names from outermost to innermost:
 
 ```sh
-cargo run -- dag examples/stages/stages.spit examples/stages/stages.spitout -o stages.spitdag
-cargo run -- bash stages.spitdag --stage analysis
+cargo run -- dag examples/stages/stages.spit examples/stages/stages.spitout
 ```
 
 Stages are written in the flow form; a sectioned document cannot declare them. A step outside every stage stays valid.
@@ -178,13 +177,13 @@ A template fills these placeholders from the artifact it names, here `aligned[su
 
 `product`, `entities`, and `stage` are reserved: no product may declare a dimension with one of those names. Values keep letters, digits, and `-`; any other byte is written as `%` and two hex digits, so a value never adds a directory.
 
-Path rules are checked when the pipeline is loaded, even for products with no resolved jobs. SPIT rejects unbalanced braces, a dimension the product does not declare, a rule that omits one of the product's dimensions (use `{entities}` or name each one), two products whose rules give the same path for the same entities, such as a default rule without `{product}`, and a rule that puts files inside another product's file path, such as `in/{id}.txt/out.txt` beside `in/{id}.txt`. A path must be relative, name a file rather than end in `/`, and contain no empty, `.`, or `..` directory. Missing rules are reported by `--paths`, `bash`, and `--root`, and collisions between resolved artifact paths once jobs are bound. SPIT warns when two artifacts' paths differ only in letter case, such as `id=A` and `id=a`: where case is ignored, as by default on macOS and Windows, they are one file.
+Path rules are checked when the pipeline is loaded, even for products with no resolved jobs. SPIT rejects unbalanced braces, a dimension the product does not declare, a rule that omits one of the product's dimensions (use `{entities}` or name each one), two products whose rules give the same path for the same entities, such as a default rule without `{product}`, and a rule that puts files inside another product's file path, such as `in/{id}.txt/out.txt` beside `in/{id}.txt`. A path must be relative, name a file rather than end in `/`, and contain no empty, `.`, or `..` directory. Missing rules are reported by `--paths` and `--root`, and collisions between resolved artifact paths once jobs are bound. SPIT warns when two artifacts' paths differ only in letter case, such as `id=A` and `id=a`: where case is ignored, as by default on macOS and Windows, they are one file.
 
 As in Bash, an unquoted `#` starts a comment only at the start of a word, so `--color=#fff` is one argument. A `#` that ends a word, as in `{output}# note`, stays part of the word; SPIT warns about it, since it reads like a comment. Put a space before `#` to start a comment, or quote the text to keep it.
 
 Place a source path beside its `source` line and a derived path beside its assignment. The default can stay near the top of the file.
 
-Path rules also find sources. `spit inputs recipe.spitin --root data` lists each file under `data` whose path matches a source's rule, in the pipeline or the recipe, reading entity values from its placeholders. Links to files and directories are followed. A value is read only as SPIT writes it, so a file such as `in/%41.txt`, whose value SPIT would write `A`, is skipped with a warning rather than listed under a path no script would use.
+Path rules also find sources. `spit inputs recipe.spitin --root data` lists each file under `data` whose path matches a source's rule, in the pipeline or the recipe, reading entity values from its placeholders. Links to files and directories are followed. A value is read only as SPIT writes it, so a file such as `in/%41.txt`, whose value SPIT would write `A`, is skipped with a warning rather than listed under a path no job would use.
 
 ## Recipes
 

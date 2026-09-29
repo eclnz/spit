@@ -3,8 +3,7 @@
 //!
 //! 1. `check` compiles a pipeline, or checks a recipe against its pipeline;
 //! 2. `inputs` settles a dataset from a recipe, writing a `.spitout`;
-//! 3. `dag` and `artifacts` resolve a pipeline's jobs over a `.spitout`;
-//! 4. `bash` writes a script from a `.spitdag`.
+//! 3. `dag` and `artifacts` resolve a pipeline's jobs over a `.spitout`.
 //!
 //! A command given files from an earlier step runs the steps between in
 //! memory. Nothing is loaded that the command line does not name.
@@ -20,8 +19,8 @@ use std::process::ExitCode;
 use spit::{
     bind_dag, diagnose_artifacts_at, diagnose_at, diagnose_at_with_inputs, diagnose_recipe,
     inspect_paths, parse_input_spec_at, parse_pipeline_at, parse_source_inventory,
-    render_artifacts, render_bash, render_bound_dag, render_dag, render_source_inventory, resolve,
-    resolve_artifacts_excluding, stage_within, validate_pipeline, validate_source_files, BoundDag,
+    render_artifacts, render_bound_dag, render_dag, render_source_inventory, resolve,
+    resolve_artifacts_excluding, stage_within, validate_pipeline, validate_source_files,
     Diagnostic, InputSource, InputSpec, PathTemplate, Pipeline, ResolvedDag, ResolvedInputs,
 };
 
@@ -31,15 +30,13 @@ enum Command {
     Inputs,
     Dag,
     Artifacts,
-    Bash,
 }
 
-const COMMANDS: [Command; 5] = [
+const COMMANDS: [Command; 4] = [
     Command::Check,
     Command::Inputs,
     Command::Dag,
     Command::Artifacts,
-    Command::Bash,
 ];
 
 impl Command {
@@ -49,7 +46,6 @@ impl Command {
             Self::Inputs => "inputs",
             Self::Dag => "dag",
             Self::Artifacts => "artifacts",
-            Self::Bash => "bash",
         }
     }
 
@@ -63,7 +59,6 @@ impl Command {
             Self::Check => "<pipeline.spit | recipe.spitin>",
             Self::Inputs => "<recipe.spitin>",
             Self::Dag | Self::Artifacts => "<pipeline.spit> <inputs.spitout | recipe.spitin | ->",
-            Self::Bash => "<plan.spitdag | pipeline.spit inputs.spitout>",
         }
     }
 
@@ -72,7 +67,6 @@ impl Command {
         match self {
             Self::Check | Self::Inputs => (1, 1),
             Self::Dag | Self::Artifacts => (2, 2),
-            Self::Bash => (1, 2),
         }
     }
 
@@ -82,7 +76,6 @@ impl Command {
             Self::Inputs => "step 2: find a dataset's sources with a recipe, apply `skip` and `require`, and write a .spitout",
             Self::Dag => "step 3: resolve a pipeline's jobs over a dataset's inputs; -o writes the .spitdag",
             Self::Artifacts => "step 3: report what can and cannot be made from a dataset's inputs, and why",
-            Self::Bash => "step 4: write a Bash script that runs a .spitdag",
         }
     }
 
@@ -92,7 +85,6 @@ impl Command {
             Self::Inputs => "spit inputs dataset.spitin -o dataset.spitout",
             Self::Dag => "spit dag analysis.spit dataset.spitout -o analysis.spitdag\n  spit dag analysis.spit dataset.spitout --paths",
             Self::Artifacts => "spit artifacts analysis.spit dataset.spitout",
-            Self::Bash => "spit bash analysis.spitdag -o run.sh\n  spit bash analysis.spitdag --stage preprocess",
         }
     }
 
@@ -102,9 +94,6 @@ impl Command {
         match self {
             Self::Dag | Self::Artifacts => Some(
                 "Given a .spitin in place of the .spitout, it runs `spit inputs` in memory first.",
-            ),
-            Self::Bash => Some(
-                "Given a pipeline and its inputs in place of the .spitdag, it runs `spit dag` in memory first.",
             ),
             Self::Check | Self::Inputs => None,
         }
@@ -118,7 +107,6 @@ impl Command {
             Self::Inputs => &[Root, Output],
             Self::Dag => &[Root, StrictPaths, Paths, Json, Output],
             Self::Artifacts => &[Root],
-            Self::Bash => &[Stage, Root, Output],
         }
     }
 }
@@ -127,7 +115,6 @@ impl Command {
 enum Flag {
     Root,
     Output,
-    Stage,
     Paths,
     PathRules,
     StrictPaths,
@@ -135,10 +122,9 @@ enum Flag {
     Stdin,
 }
 
-const FLAGS: [Flag; 8] = [
+const FLAGS: [Flag; 7] = [
     Flag::Root,
     Flag::Output,
-    Flag::Stage,
     Flag::Paths,
     Flag::PathRules,
     Flag::StrictPaths,
@@ -160,7 +146,6 @@ impl Flag {
         match self {
             Self::Root => "--root",
             Self::Output => "-o",
-            Self::Stage => "--stage",
             Self::Paths => "--paths",
             Self::PathRules => "--path-rules",
             Self::StrictPaths => "--strict-paths",
@@ -174,7 +159,6 @@ impl Flag {
         match self {
             Self::Root => Some("<directory>"),
             Self::Output => Some("<file>"),
-            Self::Stage => Some("<name>"),
             _ => None,
         }
     }
@@ -184,9 +168,7 @@ impl Flag {
             (Self::Root, Command::Inputs) => "the folder to scan; the recipe's folder by default",
             (Self::Root, _) => "the dataset folder, to check that each source file exists",
             (Self::Output, Command::Inputs) => "write the .spitout to <file>, not standard output",
-            (Self::Output, Command::Dag) => "write the .spitdag to <file>",
-            (Self::Output, _) => "write the script to <file>, not standard output",
-            (Self::Stage, _) => "only the jobs of this stage and the stages within it",
+            (Self::Output, _) => "write the .spitdag to <file>",
             (Self::Paths, _) => "show each artifact's file",
             (Self::PathRules, _) => "list the path rule each product uses",
             (Self::StrictPaths, _) => "require an explicit path rule for every product",
@@ -431,7 +413,6 @@ fn main() -> ExitCode {
         Command::Inputs => inputs(&args),
         Command::Dag => dag(&args),
         Command::Artifacts => artifacts(&args),
-        Command::Bash => bash(&args),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
@@ -680,37 +661,6 @@ fn artifacts(args: &CliArgs) -> Result<(), Box<dyn Error>> {
     }
     print!("{}", render_artifacts(&report));
     Ok(())
-}
-
-/// Step 4: a Bash script for a `.spitdag`, or for a pipeline and its inputs.
-fn bash(args: &CliArgs) -> Result<(), Box<dyn Error>> {
-    let first = &args.files[0];
-    let bound = if first.ends_with(".spitdag") {
-        if args.files.len() > 1 {
-            return Err("a .spitdag is complete; give no other file with it".into());
-        }
-        BoundDag::from_json(&read_file(first)?).map_err(|error| format!("{first}: {error}"))?
-    } else {
-        let inputs = args.files.get(1).ok_or_else(|| {
-            format!("spit bash needs a .spitdag, or a pipeline and its inputs, not `{first}` alone")
-        })?;
-        let prepared = prepare(args, first, inputs)?;
-        prepared.inputs.require_complete()?;
-        let dag = resolve(&prepared.pipeline, &prepared.inputs.dag_inventory())?;
-        if let Some(root) = &prepared.root {
-            validate_source_files(&prepared.bound, &dag, root)?;
-        }
-        eprintln!("note: ran `spit dag` in memory");
-        bind_dag(&prepared.bound, &dag)?
-    };
-    let bound = match args.value(Flag::Stage) {
-        Some(stage) => bound.only_stage(&stage)?,
-        None => bound,
-    };
-    if bound.jobs.is_empty() {
-        return Err("there are no jobs, so there is nothing to run".into());
-    }
-    write_output(args, &render_bash(&bound)?, "the script")
 }
 
 /// Print `text`, or write it to the `-o` file.
