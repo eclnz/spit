@@ -361,6 +361,43 @@ fn a_spitout_writes_values_in_the_declared_dimension_order() {
 }
 
 #[test]
+fn a_discovered_spitout_groups_sources_by_session() {
+    let pipeline = parse_pipeline(
+        "source image: Image [sub, ses, run]\nsource t1w: Image [sub, ses]\nsource lut: Table []\n",
+    )
+    .unwrap();
+    let recipe =
+        parse_input_spec("discover sessions: [sub, ses] from dirs sub-{sub}/ses-{ses}\n").unwrap();
+    let inventory = spit::parse_source_inventory(
+        "contexts sessions:\n    [sub=02,ses=01]\n    [sub=01,ses=02]\n    [sub=01,ses=01]\n\
+sources:\n    image[sub=02,ses=01,run=01]: sub-02/ses-01/dwi.nii.gz\n\
+    image[sub=01,ses=02,run=01]: sub-01/ses-02/dwi.nii.gz\n\
+    image[sub=01,ses=01,run=02]: sub-01/ses-01/run-02.nii.gz\n\
+    lut[]: config/lut.txt\n\
+    t1w[sub=01,ses=01]: sub-01/ses-01/T1w.nii.gz\n\
+    image[sub=01,ses=01,run=01]: sub-01/ses-01/run-01.nii.gz\n",
+    )
+    .unwrap();
+    let rendered = spit::render_source_inventory(&inventory, &pipeline, &recipe.rules);
+    let shared = rendered.find("lut[]").unwrap();
+    let first = rendered.find("# [sub=01,ses=01]").unwrap();
+    let second = rendered.find("# [sub=01,ses=02]").unwrap();
+    let third = rendered.find("# [sub=02,ses=01]").unwrap();
+    assert!(
+        shared < first && first < second && second < third,
+        "{rendered}"
+    );
+    assert!(rendered.find("run=01]").unwrap() < rendered.find("run=02]").unwrap());
+    let reparsed = spit::parse_source_inventory(&rendered).unwrap();
+    let mut actual = reparsed.artifacts;
+    let mut expected = inventory.artifacts;
+    actual.sort_by(|a, b| a.product.cmp(&b.product).then(a.entities.cmp(&b.entities)));
+    expected.sort_by(|a, b| a.product.cmp(&b.product).then(a.entities.cmp(&b.entities)));
+    assert_eq!(actual, expected);
+    assert_eq!(reparsed.discovered, inventory.discovered);
+}
+
+#[test]
 fn a_spitout_alone_drives_jobs_without_its_recipe() {
     let tree = Tree::new("spitout", &FILES);
     // Sources have no path rule in the pipeline: only the recipe knows them.
