@@ -8,8 +8,13 @@ use crate::model::{ArtifactInstance, DirectoryDiscovery, Pipeline};
 use crate::span::Located;
 use crate::template::{parse_template, Part};
 
+crate::span::message_error!(
+    /// What is wrong with a path rule, or with the paths it gives artifacts.
+    PathProblem
+);
+
 /// An error in a path rule, or about the paths it gives artifacts.
-pub type PathError = Located<String>;
+pub type PathError = Located<PathProblem>;
 
 /// What a `{name}` in a path template stands for.
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]

@@ -20,7 +20,7 @@ mod spitdag;
 mod template;
 mod types;
 
-pub use command::{validate_commands, CommandError, CommandTemplate};
+pub use command::{validate_commands, CommandError, CommandProblem, CommandTemplate};
 pub use compile::validate_pipeline;
 pub use diagnostics::{
     diagnose, diagnose_checked, diagnose_checked_with_records, diagnose_in, diagnose_recipe,
@@ -43,11 +43,11 @@ pub use model::{
 };
 pub use parser::{parse_source_inventory, render_source_inventory, ParseError, ParseErrorKind};
 pub use paths::{
-    inspect_paths, validate_source_files, PathCoverage, PathCoverageEntry, PathError, PathRule,
-    PathTemplate, VerifiedFiles,
+    inspect_paths, validate_source_files, PathCoverage, PathCoverageEntry, PathError, PathProblem,
+    PathRule, PathTemplate, VerifiedFiles,
 };
 pub use render::{render_artifacts, render_bound_dag, render_dag};
-pub use resolver::{bind_dag, resolve, resolve_artifacts_excluding};
+pub use resolver::{bind_dag, resolve, resolve_artifacts_excluding, BindError};
 pub use spitdag::{ArgPart, Argument, BoundArtifact, BoundDag, BoundJob};
 pub use types::{
     parse_type_expr, Compatibility, Substitutions, TypeExpr, TypeParseError, TypeUnifyError,

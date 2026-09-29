@@ -148,6 +148,7 @@ Dead public API (item 5, 15) is not visible to the compiler because `lib.rs` re-
 
 ### 13. Give `PathError` and `CommandError` distinct types
 - Both are `Located<String>` (`paths/template.rs` ~12, `command.rs`), so they mix silently: `bind_dag` `?`s a command error into a path error. Introduce distinct types; keep the public error text.
+- **Status: done.** `PathError = Located<PathProblem>` and `CommandError = Located<CommandProblem>`; each problem is a message newtype declared with a small `span::message_error!` macro (the two would otherwise be identical boilerplate), and `Located::new` is generic over `E: From<String>`. The compiler then found the two places they mixed: diagnostics chained both into one list (now mapped separately), and `bind_dag` returned command errors as path errors. **Public API change:** `bind_dag` returns `BindError { Path, Command, Dag }`; its "job lacks `{placeholder}`" error is a `Command` error, and the two DAG-does-not-match-its-pipeline errors are `Dag`. `Display` text is unchanged; CLI output identical.
 
 ### 14. Replace stringly and `Box<dyn Error>` library errors
 - `InputSpec::check`/`resolve` return `Box<dyn Error>` from `format!().into()`; `ResolveError::InvalidDefinition { detail: String }` carries prose. `main.rs` needs the `Reported` marker and `downcast_ref` as a workaround.

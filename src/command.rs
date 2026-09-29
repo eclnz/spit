@@ -13,7 +13,12 @@ use crate::span::Located;
 use crate::template::{parse_template, Part};
 
 /// An error in a command, such as an unknown `{placeholder}`.
-pub type CommandError = Located<String>;
+pub type CommandError = Located<CommandProblem>;
+
+crate::span::message_error!(
+    /// What is wrong with a command template.
+    CommandProblem
+);
 
 /// One argument of a command: literal text and `{placeholders}`, joined
 /// without separators.
