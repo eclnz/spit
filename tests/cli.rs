@@ -161,7 +161,31 @@ fn check_json_reads_the_pipeline_file_and_dag_json_emits_the_spitdag() {
     let dag = run();
     assert!(dag.status.success(), "{}", stderr(&dag));
     let graph = stdout(&dag);
-    assert!(graph.starts_with("{\"version\":2,\"external_inputs\":["));
+    assert!(graph.starts_with("{\"version\":3,\"generator\":{\"name\":\"spit\",\"version\":\""));
+    // A `.spitout` alone says nothing of where its files are.
+    assert!(
+        graph.contains("\"root\":null,\"external_inputs\":["),
+        "{graph}"
+    );
+    // What a full run leaves behind, and the one program it needs.
+    assert!(
+        graph.contains("\"targets\":[{\"product\":\"merged\""),
+        "{graph}"
+    );
+    assert_eq!(graph.matches("{\"product\":\"merged\"").count(), 4);
+    assert!(
+        graph.contains("\"executables\":[\"sort\"],\"jobs\":["),
+        "{graph}"
+    );
+    assert!(
+        graph.contains("\"depends_on\":[],\"dependents\":[4]"),
+        "{graph}"
+    );
+    assert!(
+        graph.contains("\"depends_on\":[1,2],\"dependents\":[]"),
+        "{graph}"
+    );
+    assert_eq!(graph.matches("\"fingerprint\":\"").count(), 5);
     // A bound DAG: every artifact has its path and every job its command.
     assert!(graph.contains("\"path\":\"input/alpha/01.txt\""), "{graph}");
     assert!(graph.contains("\"command\":[[\"sort\"]"), "{graph}");
