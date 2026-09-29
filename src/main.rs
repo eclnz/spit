@@ -12,7 +12,7 @@ use spit::{
     parse_spit_without_records_at, render_artifacts, render_bash, render_bound_dag, render_dag,
     render_dag_json, render_source_inventory, resolve, resolve_artifacts_excluding, stage_within,
     validate_concrete_paths, validate_source_files, Diagnostic, Document, InputSource, InputSpec,
-    PathCoverage, Pipeline, ResolvedDag, SourceInventory,
+    PathCoverage, PathTemplate, Pipeline, ResolvedDag, SourceInventory,
 };
 
 #[derive(Clone, Copy, PartialEq)]
@@ -444,16 +444,27 @@ fn run(mut args: CliArgs) -> Result<(), Box<dyn Error>> {
     let settled = records
         .map(|records| spec.resolve(&pipeline, InputSource::Inventory(records)))
         .transpose()?;
-    // Step 3 sees the logical pipeline and the settled inventory. A recipe's
-    // source paths are attached only to bind paths to the jobs.
+    // Step 3 sees the logical pipeline and the settled inventory, whose
+    // records give each source's file. A pipeline run from a recipe may set
+    // no output path; outputs then take the built-in layout.
     let mut bound = pipeline.clone();
-    if let Some(recipe) = &recipe {
-        recipe.apply_paths(&mut bound);
+    if recipe.is_some() {
+        bound
+            .path_template
+            .get_or_insert_with(PathTemplate::default_output);
     }
     if let Some(stage) = &args.stage {
         check_stage(&pipeline, stage)?;
     }
-    let coverage = inspect_paths(&bound)?;
+    let located = settled.iter().flat_map(|settled| {
+        settled
+            .inventory
+            .artifacts
+            .iter()
+            .filter(|record| record.path.is_some())
+            .map(|record| record.product.as_str())
+    });
+    let coverage = inspect_paths(&bound)?.with_inventory_paths(located);
     if args.command == Command::Check && args.paths {
         println!("{coverage}");
     }

@@ -73,6 +73,11 @@ pub struct PathTemplate {
 }
 
 impl PathTemplate {
+    /// Where outputs go when a pipeline run from a recipe sets no `path:`.
+    pub fn default_output() -> Self {
+        Self::parse("out/{product}/{entities}").expect("built-in output path is valid")
+    }
+
     /// Parse a template such as `derivatives/{stage}/{product}/{entities}.mif`.
     pub fn parse(text: impl Into<String>) -> Result<Self, PathError> {
         let text = text.into();
