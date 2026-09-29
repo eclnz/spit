@@ -264,7 +264,7 @@ fn cli_lists_incomplete_artifacts_where_check_fails() {
     ));
     fs::create_dir_all(&directory).unwrap();
     let pipeline = directory.join("align.spit");
-    let sources = directory.join("align.sources");
+    let sources = directory.join("align.spitout");
     fs::write(&pipeline, ALIGN).unwrap();
     fs::write(&sources, ALIGN_SOURCES).unwrap();
     let run = |command: &str| {

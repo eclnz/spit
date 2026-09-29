@@ -243,7 +243,7 @@ fn operation_type_variables_do_not_leak_between_invocations() {
 fn field_survey_reuses_image_operations_across_kinds_and_spaces() {
     let pipeline = parse_pipeline(include_str!("../examples/commands/field_survey.spit")).unwrap();
     let inventory =
-        parse_source_inventory(include_str!("../examples/commands/field_survey.sources")).unwrap();
+        parse_source_inventory(include_str!("../examples/commands/field_survey.spitout")).unwrap();
     let dag = resolve(&pipeline, &inventory).unwrap();
     let output_type = |name: &str| {
         dag.jobs

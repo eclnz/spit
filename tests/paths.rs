@@ -53,7 +53,7 @@ fn bound_dag_shows_port_names_and_paths_without_commands() {
     let (mut pipeline, _) =
         parse_document(include_str!("../examples/commands/field_survey.spit")).unwrap();
     let inventory =
-        parse_source_inventory(include_str!("../examples/commands/field_survey.sources")).unwrap();
+        parse_source_inventory(include_str!("../examples/commands/field_survey.spitout")).unwrap();
     let dag = resolve(&pipeline, &inventory).unwrap();
     pipeline.commands.clear();
     let report = render_bound_dag(&pipeline, &dag).unwrap();
