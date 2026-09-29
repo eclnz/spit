@@ -164,7 +164,7 @@ path: results/{product}/{entities}.txt
 path image: input/{subject}/{visit}/{run}.txt
 ```
 
-`path:` sets a default; without one, outputs go to `out/{product}/{entities}`. `path image:` overrides it for `image`. Each output of a multi-output step has its own product, so its own rule. A `path:` line inside a [stage](#stages) sets the default for that stage's products. Paths are relative to `SPIT_ROOT`.
+`path:` sets a default; without one, outputs go to `out/{product}/{entities}`. `path image:` overrides it for `image`. Each output of a multi-output step has its own product, so its own rule. A `path:` line inside a [stage](#stages) sets the default for that stage's products. Paths are relative to the dataset root: the recipe's folder, or `--root` when given.
 
 A template fills these placeholders from the artifact it names, here `aligned[subject=A,run=2]` made in stage `preprocess/align`:
 

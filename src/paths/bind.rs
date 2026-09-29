@@ -24,7 +24,8 @@ pub fn validate_source_files(
         if outputs.contains(&artifact) {
             continue;
         }
-        // With `--stage`, what other stages make must already exist.
+        // In a DAG cut to one stage, as by `ResolvedDag::only_stage`, what
+        // other stages make must already exist.
         let made_by = pipeline
             .invocations
             .iter()

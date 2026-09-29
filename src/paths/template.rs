@@ -245,7 +245,7 @@ pub(crate) fn bind_path(
 /// Why `relative` cannot name a file under the root, if it cannot.
 pub(crate) fn unusable_path(relative: &str) -> Option<&'static str> {
     if relative.starts_with('/') {
-        Some("must be relative to `SPIT_ROOT`, not start with `/`")
+        Some("must be relative to the dataset root, not start with `/`")
     } else if relative.ends_with('/') {
         Some("must name a file, not end with `/`")
     } else if relative.split('/').any(str::is_empty) {

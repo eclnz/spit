@@ -63,7 +63,7 @@ fn a_path_rule_that_cannot_name_a_file_says_why() {
     for (rule, reason) in [
         (
             "/tmp/{s}.txt",
-            "must be relative to `SPIT_ROOT`, not start with `/`",
+            "must be relative to the dataset root, not start with `/`",
         ),
         ("out/{s}/", "must name a file, not end with `/`"),
         (
