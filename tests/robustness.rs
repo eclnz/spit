@@ -11,10 +11,9 @@ use std::process::{Command, Output, Stdio};
 
 use spit::{diagnose, parse_pipeline, resolve, Cardinality, Diagnostic};
 
-/// Step 3's binding, then the Bash backend, with either's error as text.
-fn bash_script(pipeline: &spit::Pipeline, dag: &spit::ResolvedDag) -> Result<String, String> {
-    let bound = spit::bind_dag(pipeline, dag).map_err(|error| error.to_string())?;
-    spit::render_bash(&bound).map_err(|error| error.to_string())
+/// Step 3's binding, with its error as text.
+fn bind(pipeline: &spit::Pipeline, dag: &spit::ResolvedDag) -> Result<spit::BoundDag, String> {
+    spit::bind_dag(pipeline, dag).map_err(|error| error.to_string())
 }
 
 struct Tree(PathBuf);
@@ -81,8 +80,7 @@ fn a_path_inside_another_artifacts_file_is_rejected() {
     // Different dimension names hide the overlap until paths are bound.
     let text = "source x [s]\npath x: in/{s}.txt\nsource z [t]\npath z: in/{t}.txt/out.txt\noperation f(a, b) -> Text\ncommand f: cp {a} {b} {output}\npath: o/{product}/{entities}\ny = f(x, z @ where(t=1))\nsources:\n    x[s=1]\n    z[t=1]\n";
     let (pipeline, inventory) = support::parse_fixture(text).unwrap();
-    let error =
-        bash_script(&pipeline, &resolve(&pipeline, &inventory.unwrap()).unwrap()).unwrap_err();
+    let error = bind(&pipeline, &resolve(&pipeline, &inventory.unwrap()).unwrap()).unwrap_err();
     assert!(
         error.contains("puts it inside `in/1.txt`, the path of `x[s=1]`, which is a file"),
         "{error}"
@@ -123,49 +121,6 @@ fn paths_that_differ_only_in_case_are_flagged() {
             "warning: line 2, column 9: `x[s=A]` and `x[s=a]` have paths `in/A.txt` and `in/a.txt`, which differ only in case, so they are one file where case is ignored, as on macOS and Windows",
             "warning: line 4, column 9: `y[s=A]` and `y[s=a]` have paths `out/A.txt` and `out/a.txt`, which differ only in case, so they are one file where case is ignored, as on macOS and Windows",
         ]
-    );
-}
-
-#[test]
-#[ignore = "the Bash backend is paused"]
-fn bash_refuses_an_empty_inventory() {
-    let output = spit(
-        &["bash", "examples/commands/bash_demo.spit", "--sources", "-"],
-        Some(b"sources:\n"),
-    );
-    assert!(!output.status.success());
-    assert!(
-        text(&output.stderr).contains("the inventory lists no source artifacts"),
-        "{}",
-        text(&output.stderr)
-    );
-}
-
-#[test]
-#[ignore = "the Bash backend is paused"]
-fn a_root_starting_with_a_dash_is_not_read_as_an_option() {
-    let output = spit(
-        &[
-            "bash",
-            "examples/commands/bash_demo.spit",
-            "--sources",
-            "examples/commands/bash_demo.spitout",
-        ],
-        None,
-    );
-    assert!(text(&output.stdout)
-        .contains("case $SPIT_ROOT in -*) SPIT_ROOT=\"./$SPIT_ROOT\" ;; esac\n"));
-}
-
-#[test]
-#[ignore = "the Bash backend is paused"]
-fn single_quotes_and_backslashes_keep_braces_literal() {
-    let text = "source x [s]\npath: {product}/{entities}\noperation f(a) -> Text\ncommand f: awk '{print $1}' \\{a\\} \"{a}\" {output}\ny = f(x)\nsources:\n    x[s=1]\n";
-    let (pipeline, inventory) = support::parse_fixture(text).unwrap();
-    let script = bash_script(&pipeline, &resolve(&pipeline, &inventory.unwrap()).unwrap()).unwrap();
-    assert!(
-        script.contains("'awk' '{print $1}' '{a}' \"$SPIT_ROOT\"/'x/s=1' \"$SPIT_ROOT\"/'y/s=1'"),
-        "{script}"
     );
 }
 

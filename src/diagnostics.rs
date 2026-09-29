@@ -774,7 +774,7 @@ fn operation_warnings(
             // Only once commands are in use: a pipeline may be written for its DAG alone.
             warnings.push(warning(
                 place.clone(),
-                format!("operation `{name}` has no command, so `bash` cannot run its jobs"),
+                format!("operation `{name}` has no command, so its jobs cannot run"),
             ));
         }
         if imported {

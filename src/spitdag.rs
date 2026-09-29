@@ -1,12 +1,11 @@
 //! The bound DAG: what step 3 hands a backend. Every job carries its
-//! artifacts' paths and its commands as argument lists, so a backend such as
-//! Bash needs nothing else; it never sees the pipeline, a path rule or a
-//! command template. Written as a `.spitdag`, a JSON document.
+//! artifacts' paths and its commands as argument lists, so a backend needs
+//! nothing else; it never sees the pipeline, a path rule or a command
+//! template. Written as a `.spitdag`, a JSON document.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write;
 
-use crate::model::stage_within;
 use crate::types::TypeExpr;
 
 /// The schema version a `.spitdag` is written with.
@@ -93,48 +92,6 @@ impl BoundDag {
         external.into_values().collect()
     }
 
-    /// Only the jobs of `stage` and the stages nested in it. What they read
-    /// from other stages becomes an external input that must already exist.
-    pub fn only_stage(&self, stage: &str) -> Result<Self, String> {
-        let jobs: Vec<_> = self
-            .jobs
-            .iter()
-            .filter(|job| {
-                job.stage
-                    .as_deref()
-                    .is_some_and(|name| stage_within(name, stage))
-            })
-            .cloned()
-            .collect();
-        if jobs.is_empty() {
-            let stages: BTreeSet<_> = self
-                .jobs
-                .iter()
-                .filter_map(|job| job.stage.as_deref())
-                .map(|name| format!("`{name}`"))
-                .collect();
-            return Err(if stages.is_empty() {
-                format!("no jobs in stage `{stage}`; these jobs are in no stage")
-            } else {
-                let stages: Vec<_> = stages.into_iter().collect();
-                format!(
-                    "no jobs in stage `{stage}`; stages with jobs: {}",
-                    stages.join(", ")
-                )
-            });
-        }
-        let kept: BTreeSet<_> = jobs.iter().map(|job| job.id).collect();
-        Ok(Self {
-            jobs: jobs
-                .into_iter()
-                .map(|mut job| {
-                    job.depends_on.retain(|id| kept.contains(id));
-                    job
-                })
-                .collect(),
-        })
-    }
-
     /// The `.spitdag` document.
     pub fn to_json(&self) -> String {
         let mut output = format!("{{\"version\":{SPITDAG_VERSION},\"external_inputs\":[");
@@ -153,24 +110,6 @@ impl BoundDag {
         }
         output.push_str("]}\n");
         output
-    }
-
-    /// Read a `.spitdag` document.
-    pub fn from_json(text: &str) -> Result<Self, String> {
-        let document = json::parse(text)?;
-        let version = document.field("version")?.number()?;
-        if version != SPITDAG_VERSION {
-            return Err(format!(
-                "this .spitdag has schema version {version}; this SPIT reads version {SPITDAG_VERSION}"
-            ));
-        }
-        let jobs = document
-            .field("jobs")?
-            .array()?
-            .iter()
-            .map(read_job)
-            .collect::<Result<_, _>>()?;
-        Ok(Self { jobs })
     }
 }
 
@@ -350,354 +289,9 @@ fn write_type(output: &mut String, artifact_type: &TypeExpr) {
     }
 }
 
-fn read_job(value: &json::Value) -> Result<BoundJob, String> {
-    let id = usize::try_from(value.field("id")?.number()?).map_err(|_| "job id is too large")?;
-    let stage: Vec<_> = value
-        .field("stage")?
-        .array()?
-        .iter()
-        .map(|component| component.string().map(str::to_owned))
-        .collect::<Result<_, _>>()?;
-    let inputs = value
-        .field("inputs")?
-        .object()?
-        .iter()
-        .map(|(port, artifacts)| {
-            let artifacts = artifacts
-                .array()?
-                .iter()
-                .map(read_artifact)
-                .collect::<Result<_, _>>()?;
-            Ok((port.clone(), artifacts))
-        })
-        .collect::<Result<_, String>>()?;
-    let outputs = value
-        .field("outputs")?
-        .object()?
-        .iter()
-        .map(|(port, artifact)| Ok((port.clone(), read_artifact(artifact)?)))
-        .collect::<Result<_, String>>()?;
-    let depends_on = value
-        .field("depends_on")?
-        .array()?
-        .iter()
-        .map(|id| {
-            id.number()
-                .and_then(|id| usize::try_from(id).map_err(|_| "job id is too large".to_owned()))
-        })
-        .collect::<Result<_, _>>()?;
-    let command = match value.field("command")? {
-        json::Value::Null => None,
-        command => Some(read_command(command)?),
-    };
-    let verify = value
-        .field("verify")?
-        .array()?
-        .iter()
-        .map(read_command)
-        .collect::<Result<_, _>>()?;
-    Ok(BoundJob {
-        id,
-        operation: value.field("operation")?.string()?.to_owned(),
-        stage: (!stage.is_empty()).then(|| stage.join("/")),
-        inputs,
-        outputs,
-        depends_on,
-        command,
-        verify,
-    })
-}
-
-fn read_command(value: &json::Value) -> Result<Vec<Argument>, String> {
-    value
-        .array()?
-        .iter()
-        .map(|argument| {
-            argument
-                .array()?
-                .iter()
-                .map(|part| match part {
-                    json::Value::String(text) => Ok(ArgPart::Text(text.clone())),
-                    part => Ok(ArgPart::Path(part.field("path")?.string()?.to_owned())),
-                })
-                .collect()
-        })
-        .collect()
-}
-
-fn read_artifact(value: &json::Value) -> Result<BoundArtifact, String> {
-    let entities = value
-        .field("entities")?
-        .object()?
-        .iter()
-        .map(|(dimension, value)| Ok((dimension.clone(), value.string()?.to_owned())))
-        .collect::<Result<_, String>>()?;
-    Ok(BoundArtifact {
-        product: value.field("product")?.string()?.to_owned(),
-        entities,
-        artifact_type: read_type(value.field("type")?)?,
-        path: value.field("path")?.string()?.to_owned(),
-    })
-}
-
-fn read_type(value: &json::Value) -> Result<TypeExpr, String> {
-    if let json::Value::Null = value {
-        return Ok(TypeExpr::Unknown);
-    }
-    if let Ok(variable) = value.field("variable") {
-        return Ok(TypeExpr::Variable(variable.string()?.to_owned()));
-    }
-    let name = value.field("name")?.string()?.to_owned();
-    let args: Vec<_> = value
-        .field("args")?
-        .array()?
-        .iter()
-        .map(read_type)
-        .collect::<Result<_, _>>()?;
-    Ok(if args.is_empty() {
-        TypeExpr::Named(name)
-    } else {
-        TypeExpr::Applied {
-            constructor: name,
-            args,
-        }
-    })
-}
-
-/// Just enough JSON for a `.spitdag`: objects keep their key order.
+/// Just enough JSON for a `.spitdag`.
 mod json {
     use std::fmt::Write;
-
-    #[derive(Debug)]
-    pub(super) enum Value {
-        Null,
-        Bool,
-        Number(f64),
-        String(String),
-        Array(Vec<Value>),
-        Object(Vec<(String, Value)>),
-    }
-
-    impl Value {
-        pub(super) fn field(&self, name: &str) -> Result<&Value, String> {
-            self.object()?
-                .iter()
-                .find(|(key, _)| key == name)
-                .map(|(_, value)| value)
-                .ok_or_else(|| format!("expected a `{name}` field"))
-        }
-
-        pub(super) fn object(&self) -> Result<&[(String, Value)], String> {
-            match self {
-                Self::Object(fields) => Ok(fields),
-                _ => Err("expected a JSON object".into()),
-            }
-        }
-
-        pub(super) fn array(&self) -> Result<&[Value], String> {
-            match self {
-                Self::Array(items) => Ok(items),
-                _ => Err("expected a JSON array".into()),
-            }
-        }
-
-        pub(super) fn string(&self) -> Result<&str, String> {
-            match self {
-                Self::String(text) => Ok(text),
-                _ => Err("expected a JSON string".into()),
-            }
-        }
-
-        /// A whole number, as every number in a `.spitdag` is.
-        pub(super) fn number(&self) -> Result<u64, String> {
-            match self {
-                #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-                Self::Number(number) if number.fract() == 0.0 && *number >= 0.0 => {
-                    Ok(*number as u64)
-                }
-                _ => Err("expected a whole number".into()),
-            }
-        }
-    }
-
-    pub(super) fn parse(text: &str) -> Result<Value, String> {
-        let mut parser = Parser {
-            chars: text.char_indices().peekable(),
-            text,
-        };
-        let value = parser.value()?;
-        parser.space();
-        match parser.chars.next() {
-            None => Ok(value),
-            Some((at, _)) => Err(format!(
-                "unexpected text at byte {at} after the JSON document"
-            )),
-        }
-    }
-
-    struct Parser<'a> {
-        chars: std::iter::Peekable<std::str::CharIndices<'a>>,
-        text: &'a str,
-    }
-
-    impl Parser<'_> {
-        fn space(&mut self) {
-            while self
-                .chars
-                .peek()
-                .is_some_and(|(_, character)| character.is_whitespace())
-            {
-                self.chars.next();
-            }
-        }
-
-        fn expect(&mut self, wanted: char) -> Result<(), String> {
-            self.space();
-            match self.chars.next() {
-                Some((_, character)) if character == wanted => Ok(()),
-                Some((at, character)) => Err(format!(
-                    "expected `{wanted}` at byte {at}, found `{character}`"
-                )),
-                None => Err(format!("expected `{wanted}`, found the end of the text")),
-            }
-        }
-
-        fn word(&mut self, word: &str, value: Value) -> Result<Value, String> {
-            for wanted in word.chars() {
-                match self.chars.next() {
-                    Some((_, character)) if character == wanted => {}
-                    _ => return Err(format!("expected `{word}`")),
-                }
-            }
-            Ok(value)
-        }
-
-        fn value(&mut self) -> Result<Value, String> {
-            self.space();
-            match self.chars.peek().copied() {
-                Some((_, '{')) => self.object(),
-                Some((_, '[')) => self.array(),
-                Some((_, '"')) => self.string().map(Value::String),
-                Some((_, 'n')) => self.word("null", Value::Null),
-                Some((_, 't')) => self.word("true", Value::Bool),
-                Some((_, 'f')) => self.word("false", Value::Bool),
-                Some((start, character)) if character == '-' || character.is_ascii_digit() => {
-                    let mut end = start;
-                    while let Some(&(at, character)) = self.chars.peek() {
-                        if !(character.is_ascii_digit() || "+-.eE".contains(character)) {
-                            break;
-                        }
-                        end = at + character.len_utf8();
-                        self.chars.next();
-                    }
-                    self.text[start..end]
-                        .parse()
-                        .map(Value::Number)
-                        .map_err(|_| format!("bad number at byte {start}"))
-                }
-                Some((at, character)) => Err(format!("unexpected `{character}` at byte {at}")),
-                None => Err("unexpected end of the text".into()),
-            }
-        }
-
-        fn object(&mut self) -> Result<Value, String> {
-            self.expect('{')?;
-            let mut fields = Vec::new();
-            self.space();
-            if self
-                .chars
-                .peek()
-                .is_some_and(|(_, character)| *character == '}')
-            {
-                self.chars.next();
-                return Ok(Value::Object(fields));
-            }
-            loop {
-                self.space();
-                let key = self.string()?;
-                self.expect(':')?;
-                fields.push((key, self.value()?));
-                self.space();
-                match self.chars.next() {
-                    Some((_, ',')) => {}
-                    Some((_, '}')) => return Ok(Value::Object(fields)),
-                    _ => return Err("expected `,` or `}` in an object".into()),
-                }
-            }
-        }
-
-        fn array(&mut self) -> Result<Value, String> {
-            self.expect('[')?;
-            let mut items = Vec::new();
-            self.space();
-            if self
-                .chars
-                .peek()
-                .is_some_and(|(_, character)| *character == ']')
-            {
-                self.chars.next();
-                return Ok(Value::Array(items));
-            }
-            loop {
-                items.push(self.value()?);
-                self.space();
-                match self.chars.next() {
-                    Some((_, ',')) => {}
-                    Some((_, ']')) => return Ok(Value::Array(items)),
-                    _ => return Err("expected `,` or `]` in an array".into()),
-                }
-            }
-        }
-
-        fn string(&mut self) -> Result<String, String> {
-            self.expect('"')?;
-            let mut text = String::new();
-            loop {
-                match self.chars.next() {
-                    Some((_, '"')) => return Ok(text),
-                    Some((_, '\\')) => match self.chars.next() {
-                        Some((_, '"')) => text.push('"'),
-                        Some((_, '\\')) => text.push('\\'),
-                        Some((_, '/')) => text.push('/'),
-                        Some((_, 'n')) => text.push('\n'),
-                        Some((_, 'r')) => text.push('\r'),
-                        Some((_, 't')) => text.push('\t'),
-                        Some((_, 'b')) => text.push('\u{8}'),
-                        Some((_, 'f')) => text.push('\u{c}'),
-                        Some((_, 'u')) => text.push(self.unicode()?),
-                        _ => return Err("bad escape in a JSON string".into()),
-                    },
-                    Some((_, character)) => text.push(character),
-                    None => return Err("unterminated JSON string".into()),
-                }
-            }
-        }
-
-        /// The character after `\u`, joining a surrogate pair.
-        fn unicode(&mut self) -> Result<char, String> {
-            let first = self.hex()?;
-            if !(0xD800..0xDC00).contains(&first) {
-                return char::from_u32(first).ok_or_else(|| "bad `\\u` escape".into());
-            }
-            self.word("\\u", Value::Null)?;
-            let second = self.hex()?;
-            char::from_u32(0x10000 + ((first - 0xD800) << 10) + (second.wrapping_sub(0xDC00)))
-                .ok_or_else(|| "bad surrogate pair".into())
-        }
-
-        fn hex(&mut self) -> Result<u32, String> {
-            let mut value = 0;
-            for _ in 0..4 {
-                let digit = self
-                    .chars
-                    .next()
-                    .and_then(|(_, character)| character.to_digit(16))
-                    .ok_or("bad `\\u` escape")?;
-                value = value * 16 + digit;
-            }
-            Ok(value)
-        }
-    }
 
     pub(super) fn write_string(output: &mut String, value: &str) {
         output.push('"');
@@ -739,7 +333,7 @@ mod tests {
     }
 
     #[test]
-    fn a_spitdag_reads_back_as_written() {
+    fn a_spitdag_is_written_with_its_version_and_escapes() {
         let dag = BoundDag {
             jobs: vec![
                 BoundJob {
@@ -772,12 +366,10 @@ mod tests {
         };
         let text = dag.to_json();
         assert!(text.starts_with("{\"version\":2,\"external_inputs\":[{\"product\":\"raw\""));
-        assert_eq!(BoundDag::from_json(&text).unwrap(), dag);
-    }
-
-    #[test]
-    fn another_schema_version_is_refused() {
-        let error = BoundDag::from_json("{\"version\":1,\"jobs\":[]}").unwrap_err();
-        assert!(error.contains("schema version 1"), "{error}");
+        assert!(
+            text.contains("\"entities\":{\"sub\":\"1\",\"run\":\"a\\\"\\\\\\n\\u0001é\"}"),
+            "{text}"
+        );
+        assert!(text.contains("\"command\":null"), "{text}");
     }
 }
