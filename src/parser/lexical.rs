@@ -4,6 +4,13 @@ use std::ops::Range;
 
 use super::ParseError;
 
+/// `text` without a UTF-8 byte order mark, which some Windows editors write.
+/// Every public entry point that takes a document's text strips it, so the
+/// rest of SPIT, and every column it reports, sees the text without one.
+pub(crate) fn without_bom(text: &str) -> &str {
+    text.strip_prefix('\u{feff}').unwrap_or(text)
+}
+
 /// As in Bash, an unquoted `#` starts a comment only at the start of a word,
 /// so arguments such as `--color=#fff` are kept intact.
 pub(crate) fn strip_comment(line: &str) -> &str {

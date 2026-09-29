@@ -18,7 +18,7 @@ use crate::error::ResolveError;
 use crate::imports::parse_located_document;
 use crate::lower::{parse_document_with_imports, ParsedDocument};
 use crate::model::{ArtifactInstance, CoverageGap, InputRules, Pipeline, SourceInventory};
-use crate::parser::{strip_comment, Header, Keyword, Kind, ParseError, SourceMap};
+use crate::parser::{strip_comment, without_bom, Header, Keyword, Kind, ParseError, SourceMap};
 use crate::paths::PathTemplate;
 
 pub(crate) use self::coverage::check_inventory;
@@ -69,7 +69,7 @@ fn parse_recipe(
     text: &str,
     parse: impl FnOnce(&str) -> Result<ParsedDocument, ParseError>,
 ) -> Result<(Option<PathBuf>, ParsedDocument), ParseError> {
-    let (pipeline, text) = pipeline_line(text)?;
+    let (pipeline, text) = pipeline_line(without_bom(text))?;
     check_input_lines(&text)?;
     Ok((pipeline, parse(&text)?))
 }

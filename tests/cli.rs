@@ -337,3 +337,16 @@ fn a_recipe_run_in_memory_prints_each_pipeline_warning_once() {
         );
     }
 }
+
+#[test]
+fn a_recipe_checks_a_pipeline_saved_with_a_byte_order_mark() {
+    let tree = Tree::new("bom-recipe", &[]);
+    tree.write(
+        "analysis.spit",
+        "\u{feff}source raw [id]\npath raw: in/{id}.txt\n",
+    );
+    let recipe = tree.write("data.spitin", "\u{feff}pipeline analysis.spit\n");
+    let output = spit(&["check", recipe.to_str().unwrap()]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(stdout(&output), "Recipe valid.\n");
+}

@@ -12,8 +12,8 @@ use crate::model::{
     SourceInventory, SourceRecord,
 };
 use crate::paths::{
-    bind_path, decode_component, encode_component, error, inspect_paths, validate_discovery_rule,
-    PathError, PathPart, PathPlaceholder, PathTemplate,
+    bind_path, decode_component, encode_component, error, inspect_paths, require_directory,
+    validate_discovery_rule, PathError, PathPart, PathPlaceholder, PathTemplate,
 };
 
 /// The source files found under a root, and those skipped.
@@ -69,12 +69,7 @@ pub(super) fn discover(
     rules: &InputRules,
     root: &Path,
 ) -> Result<Discovery, PathError> {
-    if !root.is_dir() {
-        return Err(error(format!(
-            "source root is not a directory: `{}`",
-            root.display()
-        )));
-    }
+    require_directory(root)?;
     inspect_paths(pipeline)?;
     let directory_patterns = rules
         .discoveries

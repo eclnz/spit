@@ -147,6 +147,17 @@ pub(crate) fn error(message: impl Into<String>) -> PathError {
     PathError::new(message)
 }
 
+/// Fail unless `root`, where a dataset's source files are, is a directory.
+pub(crate) fn require_directory(root: &std::path::Path) -> Result<(), PathError> {
+    if root.is_dir() {
+        return Ok(());
+    }
+    Err(error(format!(
+        "source root is not a directory: `{}`",
+        root.display()
+    )))
+}
+
 /// Bind `artifact` to its relative path. `dimensions` gives the product's
 /// declared dimension order, which `{entities}` follows. `label` names the
 /// path in errors: a product's rule, or an artifact.

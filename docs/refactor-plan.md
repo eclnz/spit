@@ -126,6 +126,9 @@ Dead public API (item 5, 15) is not visible to the compiler because `lib.rs` re-
 - "source root is not a directory" duplicated in `paths/bind.rs` (~20) and `inputs/discover.rs` (~51).
 - `imports.rs::apply_import` has four copy-pasted "conflicts with existing X" loops.
 - **Behaviour change to note:** library parsing of BOM-prefixed text changes; add a test.
+- **Status: done.** `parser::without_bom` is the one helper. Every public entry point that takes a document's text strips it (`parse_pipeline`, `parse_pipeline_at` and every located parse via `parse_located_document`, the three recipe parsers via `parse_recipe`, `parse_source_inventory`, `diagnose_checked`, `diagnose_checked_with_records`, `diagnose_recipe`, `diagnose_recipe_against`), and `Diagnostic::line_text` strips too, so `display_in`, `utf16_columns` and `render_diagnostics_json` count columns the same way. The CLI no longer strips on its own. **Bug fixed:** `spit check r.spitin` rejected a pipeline file saved with a BOM that `spit check p.spit` and `spit inputs r.spitin` accepted, because `diagnose_recipe` read the file without stripping. Tests: `a_byte_order_mark_is_ignored_by_every_entry_point` (including line-1 error columns), `a_recipe_checks_a_pipeline_saved_with_a_byte_order_mark`.
+  - `paths::require_directory` is the one "source root is not a directory" check.
+  - `apply_import` checks conflicts through `defined(pipeline)`, one list per kind, instead of four loops (85 to 50 lines). No test covered those messages; `an_import_may_not_define_again_what_the_file_defines` now does, and all four were compared with the old build.
 
 ### 10. Fix `job_json` cloning and fingerprint coupling
 - **Where:** `src/spitdag.rs` `job_json`, `fingerprint`.

@@ -810,22 +810,12 @@ fn read_stdin() -> Result<String, String> {
     io::stdin()
         .read_to_string(&mut text)
         .map_err(|reason| format!("cannot read standard input: {reason}"))?;
-    Ok(strip_bom(text))
-}
-
-/// Drop a UTF-8 byte order mark, which some Windows editors write.
-fn strip_bom(text: String) -> String {
-    match text.strip_prefix('\u{feff}') {
-        Some(rest) => rest.to_owned(),
-        None => text,
-    }
+    Ok(text)
 }
 
 /// Read a file, naming it if it cannot be read.
 fn read_file(path: &str) -> Result<String, String> {
-    fs::read_to_string(path)
-        .map(strip_bom)
-        .map_err(|reason| format!("cannot read `{path}`: {reason}"))
+    fs::read_to_string(path).map_err(|reason| format!("cannot read `{path}`: {reason}"))
 }
 
 /// Print every diagnostic, failing if any is an error.
