@@ -17,10 +17,10 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use spit::{
-    bind_dag, diagnose_at_checked, diagnose_at_checked_with_records, diagnose_recipe,
-    inspect_paths, parse_input_spec_at, render_artifacts, render_bound_dag, render_dag,
-    render_diagnostics_json, render_source_inventory, resolve, resolve_artifacts_excluding,
-    stage_within, validate_source_files, Diagnosis, Diagnostic, DiagnosticSource, InputSource,
+    bind_dag, diagnose_checked, diagnose_checked_with_records, diagnose_recipe, inspect_paths,
+    parse_input_spec_at, render_artifacts, render_bound_dag, render_dag, render_diagnostics_json,
+    render_source_inventory, resolve, resolve_artifacts_excluding, stage_within,
+    validate_source_files, Context, Diagnosis, Diagnostic, DiagnosticSource, InputSource,
     InputSpec, PathTemplate, Pipeline, ResolvedDag, ResolvedInputs, Severity,
 };
 
@@ -473,7 +473,7 @@ fn check(args: &CliArgs) -> Result<(), Box<dyn Error>> {
         println!("Recipe valid.");
         return Ok(());
     }
-    let diagnosis = diagnose_at_checked(&text, path, None);
+    let diagnosis = diagnose_checked(&text, Context::at(path));
     if args.has(Flag::Json) {
         let diagnostics = match &diagnosis {
             Ok(checked) => &checked.warnings,
@@ -534,7 +534,7 @@ fn run_inputs(file: &str, root: Option<&str>) -> Result<Settled, Box<dyn Error>>
         format!("{file} does not name its pipeline; add a line such as `pipeline analysis.spit`")
     })?;
     let pipeline_text = read_file(&pipeline_file.display().to_string())?;
-    let diagnosis = diagnose_at_checked(&pipeline_text, &pipeline_file, None);
+    let diagnosis = diagnose_checked(&pipeline_text, Context::at(&pipeline_file));
     let pipeline = passed(diagnosis, |checked| &checked.warnings, &pipeline_text, None)?.pipeline;
     // Records written in the recipe stand in for a scan, unless a root to
     // scan is given.
@@ -621,13 +621,12 @@ fn prepare(args: &CliArgs) -> Result<Prepared, Box<dyn Error>> {
     };
     let path = path.as_path();
     let pipeline_text = read_file(&path.display().to_string())?;
-    let diagnosis = diagnose_at_checked_with_records(
-        &pipeline_text,
-        &records_text,
-        path,
-        recipe.as_ref(),
+    let context = Context {
+        path: Some(path),
+        recipe: recipe.as_ref(),
         lenient,
-    );
+    };
+    let diagnosis = diagnose_checked_with_records(&pipeline_text, &records_text, context);
     let (checked, records) = passed(
         diagnosis,
         |(checked, _)| &checked.warnings,

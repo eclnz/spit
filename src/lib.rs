@@ -23,9 +23,8 @@ mod types;
 pub use command::{validate_commands, CommandError, CommandTemplate};
 pub use compile::validate_pipeline;
 pub use diagnostics::{
-    diagnose, diagnose_artifacts_at, diagnose_at, diagnose_at_checked,
-    diagnose_at_checked_with_records, diagnose_at_with_inputs, diagnose_recipe,
-    diagnose_recipe_against, render_diagnostics_json, Checked, Diagnosis, Diagnostic,
+    diagnose, diagnose_checked, diagnose_checked_with_records, diagnose_in, diagnose_recipe,
+    diagnose_recipe_against, render_diagnostics_json, Checked, Context, Diagnosis, Diagnostic,
     DiagnosticSource, Severity,
 };
 pub use error::{DefinitionSubject, ResolveError, TypeConflict};

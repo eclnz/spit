@@ -1,6 +1,5 @@
 //! Editor-friendly validation of an in-memory SPIT document.
 
-use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::ops::Range;
@@ -221,6 +220,72 @@ pub fn render_diagnostics_json(
     format!("{}\n", Json::object([("diagnostics", Json::array(items))]))
 }
 
+/// Where a pipeline is, and what applies to it, when diagnosing it.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Context<'a> {
+    /// The pipeline's file, so that its `use` lines can be resolved. Without
+    /// one, a `use` line is an error.
+    pub path: Option<&'a Path>,
+    /// A `.spitin` recipe whose rules and source paths are checked with the
+    /// pipeline.
+    pub recipe: Option<&'a InputSpec>,
+    /// Report records that leave jobs unmade without failing, as
+    /// `spit artifacts` does.
+    pub lenient: bool,
+}
+
+impl<'a> Context<'a> {
+    /// The pipeline in the file at `path`.
+    pub fn at(path: &'a Path) -> Self {
+        Self {
+            path: Some(path),
+            ..Self::default()
+        }
+    }
+
+    /// Parse a pipeline in this context: with its imports resolved from its
+    /// path, and its recipe checked and applied.
+    fn parse(&self, text: &str) -> Result<Parsed, ParseError> {
+        let mut document = match self.path {
+            Some(path) => parse_located_document(text, path, Kind::Pipeline)?,
+            None => parse_document_with_imports(text, &BTreeMap::new(), Kind::Pipeline)?,
+        };
+        let Some(recipe) = self.recipe else {
+            return Ok(Parsed {
+                document,
+                as_written: None,
+            });
+        };
+        recipe
+            .check(&document.pipeline)
+            .map_err(|error| ParseError::new(1, error.to_string()))?;
+        let as_written = document.pipeline.clone();
+        recipe.apply_paths(&mut document.pipeline);
+        document.inputs = recipe.rules.clone();
+        Ok(Parsed {
+            document,
+            as_written: Some(as_written),
+        })
+    }
+}
+
+/// A parsed pipeline, and the pipeline as written when a recipe added its
+/// source paths.
+struct Parsed {
+    document: ParsedDocument,
+    as_written: Option<Pipeline>,
+}
+
+impl Parsed {
+    /// The document checked with `warnings`, its pipeline as written.
+    fn checked(self, warnings: Vec<Diagnostic>) -> Checked {
+        Checked {
+            pipeline: self.as_written.unwrap_or(self.document.pipeline),
+            warnings,
+        }
+    }
+}
+
 /// Collect independent syntax errors throughout the document, then check its
 /// semantics once the document parses: every declaration, step, rule,
 /// command, and path error, and warnings for likely mistakes. Jobs are
@@ -228,95 +293,73 @@ pub fn render_diagnostics_json(
 /// inventory still allows every other check. Diagnostics are ordered by
 /// line, with at most one error per line.
 pub fn diagnose(text: &str, source_text: Option<&str>) -> Vec<Diagnostic> {
-    diagnose_list(text, source_text, false, |text| {
-        parse_document_with_imports(text, &BTreeMap::new(), Kind::Pipeline)
-    })
+    diagnose_in(text, source_text, Context::default())
 }
 
-/// Diagnose a document with its location available for resolving imports.
-pub fn diagnose_at(text: &str, source_text: Option<&str>, path: &Path) -> Vec<Diagnostic> {
-    let original = RefCell::new(None);
-    diagnose_list(
-        text,
-        source_text,
-        false,
-        located_parser(path, None, &original),
-    )
+/// As [`diagnose`], in `context`.
+pub fn diagnose_in(text: &str, source_text: Option<&str>, context: Context<'_>) -> Vec<Diagnostic> {
+    let diagnosis = match source_text {
+        None => diagnose_checked(text, context),
+        Some(records) => {
+            diagnose_checked_with_records(text, records, context).map(|(checked, _)| checked)
+        }
+    };
+    diagnosis.map_or_else(|all| all, |checked| checked.warnings)
 }
 
-/// Diagnose the pipeline at `path`, with `inputs` applied when given, and
-/// return it once it passes. The pipeline is returned as written, without
-/// the source paths `inputs` adds.
-pub fn diagnose_at_checked(text: &str, path: &Path, inputs: Option<&InputSpec>) -> Diagnosis {
-    let original = RefCell::new(None);
-    let diagnosis = diagnose_document(text, located_parser(path, inputs, &original));
-    let original = original.into_inner();
-    diagnosis.map(|checked| as_written(checked, original))
+/// Diagnose a pipeline without records, and return it once it passes: every
+/// parse error, or once it parses, every declaration, step, rule, command
+/// and path. The pipeline is returned as written, without the source paths
+/// a recipe adds.
+pub fn diagnose_checked(text: &str, context: Context<'_>) -> Diagnosis {
+    let parsed = recover_parse_errors(text, |text| context.parse(text)).map_err(|errors| {
+        let diagnostics = located_all(DiagnosticSource::Pipeline, errors, text);
+        finish(diagnostics.collect(), text, None)
+    })?;
+    let warnings = check_document(&parsed.document, text, None)?;
+    Ok(parsed.checked(finish(warnings, text, None)))
 }
 
-/// As [`diagnose_at_checked`], with the records in `records` settled and
-/// resolved over the pipeline; the inventory they parse to is returned with
-/// it. `lenient` reports jobs that cannot be made without failing.
-pub fn diagnose_at_checked_with_records(
+/// As [`diagnose_checked`], with the records in `records` settled and
+/// resolved over the pipeline once it passes on its own; the inventory they
+/// parse to is returned with it.
+pub fn diagnose_checked_with_records(
     text: &str,
     records: &str,
-    path: &Path,
-    inputs: Option<&InputSpec>,
-    lenient: bool,
+    context: Context<'_>,
 ) -> Diagnosis<(Checked, SourceInventory)> {
-    let original = RefCell::new(None);
-    let parser = located_parser(path, inputs, &original);
-    let diagnosis = diagnose_with_records(text, records, lenient, parser);
-    let original = original.into_inner();
-    diagnosis.map(|(checked, inventory)| (as_written(checked, original), inventory))
-}
-
-/// Diagnose a pipeline after attaching a separately parsed `.spitin` recipe.
-pub fn diagnose_at_with_inputs(
-    text: &str,
-    source_text: Option<&str>,
-    path: &Path,
-    inputs: &InputSpec,
-    lenient: bool,
-) -> Vec<Diagnostic> {
-    let original = RefCell::new(None);
-    diagnose_list(
-        text,
-        source_text,
-        lenient,
-        located_parser(path, Some(inputs), &original),
-    )
-}
-
-/// Parse a pipeline at `path`, resolving its imports, with `inputs` checked
-/// and applied when given. The pipeline as written, before `inputs` added
-/// its source paths, is kept in `original`.
-fn located_parser<'a>(
-    path: &'a Path,
-    inputs: Option<&'a InputSpec>,
-    original: &'a RefCell<Option<Pipeline>>,
-) -> impl Fn(&str) -> Result<ParsedDocument, ParseError> + 'a {
-    move |text| {
-        let mut document = parse_located_document(text, path, Kind::Pipeline)?;
-        if let Some(inputs) = inputs {
-            inputs
-                .check(&document.pipeline)
-                .map_err(|error| ParseError::new(1, error.to_string()))?;
-            *original.borrow_mut() = Some(document.pipeline.clone());
-            inputs.apply_paths(&mut document.pipeline);
-            document.inputs = inputs.rules.clone();
+    let parsed = (
+        recover_parse_errors(text, |text| context.parse(text)),
+        recover_parse_errors(records, parse_source_inventory),
+    );
+    let (parsed, inventory) = match parsed {
+        (Ok(parsed), Ok(inventory)) => (parsed, inventory),
+        (parsed, inventory) => {
+            let pipeline_errors = parsed.err().into_iter().flatten();
+            let record_errors = inventory.err().into_iter().flatten();
+            let diagnostics = located_all(DiagnosticSource::Pipeline, pipeline_errors, text)
+                .chain(located_all(
+                    DiagnosticSource::Inventory,
+                    record_errors,
+                    records,
+                ))
+                .collect();
+            return Err(finish(diagnostics, text, Some(records)));
         }
-        Ok(document)
+    };
+    let document = &parsed.document;
+    let mut diagnostics = check_document(document, text, Some(records))?;
+    diagnostics.extend(record_diagnostics(
+        document,
+        &inventory,
+        records,
+        context.lenient,
+    ));
+    let diagnostics = finish(diagnostics, text, Some(records));
+    if diagnostics.iter().any(Diagnostic::is_error) {
+        return Err(diagnostics);
     }
-}
-
-/// `checked` with its pipeline as written, when the parser kept that before
-/// applying a recipe.
-fn as_written(checked: Checked, original: Option<Pipeline>) -> Checked {
-    Checked {
-        pipeline: original.unwrap_or(checked.pipeline),
-        ..checked
-    }
+    Ok((parsed.checked(diagnostics), inventory))
 }
 
 /// Diagnose a `.spitin` recipe at `path` without reading any data: its own
@@ -348,7 +391,7 @@ pub fn diagnose_recipe(text: &str, path: &Path) -> Vec<Diagnostic> {
             )
         }
     };
-    match diagnose_at_checked(&pipeline_text, &pipeline_path, None) {
+    match diagnose_checked(&pipeline_text, Context::at(&pipeline_path)) {
         Ok(checked) => diagnose_recipe_against(text, &checked.pipeline),
         Err(diagnostics) => {
             let pipeline_errors = diagnostics
@@ -410,95 +453,6 @@ pub fn diagnose_recipe_against(text: &str, pipeline: &Pipeline) -> Vec<Diagnosti
         }
     }
     finish(diagnostics, text, None)
-}
-
-pub fn diagnose_artifacts_at(
-    text: &str,
-    source_text: Option<&str>,
-    path: &Path,
-) -> Vec<Diagnostic> {
-    let original = RefCell::new(None);
-    diagnose_list(
-        text,
-        source_text,
-        true,
-        located_parser(path, None, &original),
-    )
-}
-
-/// Every diagnostic for `text`, and for the records in `source_text` when
-/// given, whether or not the document passes.
-fn diagnose_list(
-    text: &str,
-    source_text: Option<&str>,
-    lenient: bool,
-    parser: impl Fn(&str) -> Result<ParsedDocument, ParseError>,
-) -> Vec<Diagnostic> {
-    let diagnosis = match source_text {
-        None => diagnose_document(text, parser),
-        Some(records) => {
-            diagnose_with_records(text, records, lenient, parser).map(|(checked, _)| checked)
-        }
-    };
-    diagnosis.map_or_else(|all| all, |checked| checked.warnings)
-}
-
-/// Diagnose a pipeline without records: every parse error, or once it
-/// parses, every declaration, step, rule, command and path.
-fn diagnose_document(
-    text: &str,
-    parser: impl Fn(&str) -> Result<ParsedDocument, ParseError>,
-) -> Diagnosis {
-    let document = recover_parse_errors(text, parser).map_err(|errors| {
-        let diagnostics = located_all(DiagnosticSource::Pipeline, errors, text);
-        finish(diagnostics.collect(), text, None)
-    })?;
-    let warnings = check_document(&document, text, None)?;
-    Ok(Checked {
-        pipeline: document.pipeline,
-        warnings: finish(warnings, text, None),
-    })
-}
-
-/// Diagnose a pipeline and the records in `records`: parse errors in
-/// either, then the pipeline on its own, then the input stage and jobs over
-/// the records. `lenient` reports jobs that cannot be made without failing.
-fn diagnose_with_records(
-    text: &str,
-    records: &str,
-    lenient: bool,
-    parser: impl Fn(&str) -> Result<ParsedDocument, ParseError>,
-) -> Diagnosis<(Checked, SourceInventory)> {
-    let parsed = (
-        recover_parse_errors(text, parser),
-        recover_parse_errors(records, parse_source_inventory),
-    );
-    let (document, inventory) = match parsed {
-        (Ok(document), Ok(inventory)) => (document, inventory),
-        (document, inventory) => {
-            let pipeline_errors = document.err().into_iter().flatten();
-            let record_errors = inventory.err().into_iter().flatten();
-            let diagnostics = located_all(DiagnosticSource::Pipeline, pipeline_errors, text)
-                .chain(located_all(
-                    DiagnosticSource::Inventory,
-                    record_errors,
-                    records,
-                ))
-                .collect();
-            return Err(finish(diagnostics, text, Some(records)));
-        }
-    };
-    let mut diagnostics = check_document(&document, text, Some(records))?;
-    diagnostics.extend(record_diagnostics(&document, &inventory, records, lenient));
-    let diagnostics = finish(diagnostics, text, Some(records));
-    if diagnostics.iter().any(Diagnostic::is_error) {
-        return Err(diagnostics);
-    }
-    let checked = Checked {
-        pipeline: document.pipeline,
-        warnings: diagnostics,
-    };
-    Ok((checked, inventory))
 }
 
 /// Each parse error in `text` as a diagnostic.

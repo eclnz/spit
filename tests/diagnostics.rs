@@ -32,14 +32,12 @@ fn checked_diagnosis_retains_the_original_pipeline_and_inventory() {
     let pipeline = "source raw [id]\noperation copy(one)\nresult = copy(raw)\n";
     let inventory = "sources:\n  raw[id=x]: data/x.txt\n";
     let recipe = spit::parse_input_spec("path raw: data/{id}.txt\n").unwrap();
-    let (checked, inventory) = spit::diagnose_at_checked_with_records(
-        pipeline,
-        inventory,
-        std::path::Path::new("pipeline.spit"),
-        Some(&recipe),
-        false,
-    )
-    .unwrap();
+    let context = spit::Context {
+        recipe: Some(&recipe),
+        ..spit::Context::at(std::path::Path::new("pipeline.spit"))
+    };
+    let (checked, inventory) =
+        spit::diagnose_checked_with_records(pipeline, inventory, context).unwrap();
     assert!(errors(checked.warnings).is_empty());
     assert!(checked.pipeline.product_paths.is_empty());
     assert_eq!(inventory.artifacts.len(), 1);
@@ -119,12 +117,14 @@ fn a_coverage_error_names_the_failing_rule_when_rules_share_a_product() {
         "require raw count>=1 per [site]\nrequire raw count>=2 per [site]\n",
     )
     .unwrap();
-    let issues = errors(spit::diagnose_at_with_inputs(
+    let context = spit::Context {
+        recipe: Some(&recipe),
+        ..spit::Context::at(std::path::Path::new("a.spit"))
+    };
+    let issues = errors(spit::diagnose_in(
         "source raw [site, run]\n",
         Some("sources:\n  raw[site=A,run=1]\n"),
-        std::path::Path::new("a.spit"),
-        &recipe,
-        false,
+        context,
     ));
     assert_eq!(issues.len(), 1);
     assert!(issues[0].message.contains("expected at least 2"));
