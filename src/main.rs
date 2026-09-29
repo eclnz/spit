@@ -307,30 +307,16 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> Result<Request, String>
             files.push(argument);
             continue;
         }
-        let flag = Flag::parse(&argument).ok_or_else(|| {
-            let hint = match argument.as_str() {
-                "--sources" => "; give the .spitout as a file after the pipeline",
-                "--inputs" => "; give the .spitin as a file",
-                _ => "",
-            };
-            misuse(
-                format_args!("unknown option `{argument}`{hint}"),
-                Some(command),
-            )
-        })?;
+        let flag = Flag::parse(&argument)
+            .ok_or_else(|| misuse(format_args!("unknown option `{argument}`"), Some(command)))?;
         if !command.flags().contains(&flag) {
             let accepting: Vec<_> = COMMANDS
                 .iter()
                 .filter(|other| other.flags().contains(&flag))
                 .map(|other| other.name())
                 .collect();
-            let hint = if flag == Flag::Paths && command == Command::Check {
-                "; use --path-rules"
-            } else {
-                ""
-            };
             return Err(misuse(
-                format_args!("{} applies to {}{hint}", flag.name(), accepting.join(", ")),
+                format_args!("{} applies to {}", flag.name(), accepting.join(", ")),
                 Some(command),
             ));
         }

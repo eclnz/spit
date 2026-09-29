@@ -226,8 +226,8 @@ fn command_line_mistakes_are_named() {
             "usage: spit dag ",
         ),
         (
-            &["check", "p.spit", "--sources", "d.spitout"][..],
-            "unknown option `--sources`; give the .spitout as a file after the pipeline",
+            &["check", "p.spit", "--frobnicate"][..],
+            "unknown option `--frobnicate`",
             "usage: spit check ",
         ),
     ] {
