@@ -52,7 +52,7 @@ SPIT runs in three steps. Each is one command, and each reads the files the prev
 | `.spit` | A pipeline: sources, operations, steps, commands, and path rules. No dataset appears in it. |
 | `.spitin` | A recipe for a dataset's inputs: the pipeline it serves, and its `discover`, `require` and `skip` rules and source paths. |
 | `.spitout` | A dataset's settled inputs: each source artifact, with its file. |
-| `.spitdag` | The resolved jobs, each with its artifacts' files and its command, as JSON: all a backend needs to run them. |
+| `.spitdag` | The resolved jobs, each with its artifacts' files and its command, as JSON, in an order they can run in: all a backend needs to run them, with the dataset folder, the programs the commands need, and a fingerprint of each job's work to tell when it must run again. |
 
 A later step may also take an earlier step's input and run that step in memory: `dag` and `artifacts` take a `.spitin` in place of the `.spitout`.
 
