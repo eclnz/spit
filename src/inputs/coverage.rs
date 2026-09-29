@@ -21,6 +21,13 @@ impl SkippedGroup {
     pub(crate) fn matches(&self, binding: &EntityBinding) -> bool {
         binding.project(&self.group_by).as_ref() == Some(&self.context)
     }
+
+    pub(crate) fn note(&self) -> String {
+        format!(
+            "[{}] because `skip {}` rejected the group",
+            self.context, self.target
+        )
+    }
 }
 
 /// Apply skip rules in declaration order. A failed group is removed from all
@@ -294,6 +301,7 @@ pub(crate) fn collect_rule_errors(
 pub(crate) struct InputCheck {
     pub(crate) inventory: SourceInventory,
     pub(crate) gaps: Vec<CoverageGap>,
+    pub(crate) skipped: Vec<SkippedGroup>,
 }
 
 /// Check an inventory's records against the pipeline's sources and its
@@ -327,7 +335,7 @@ pub(crate) fn check_inventory(
     // Validate every supplied record, including records a skip rule may omit.
     pipeline.source_artifacts(inventory)?;
     let mut inventory = inventory.clone();
-    apply_skips(rules, &mut inventory, false);
+    let skipped = apply_skips(rules, &mut inventory, false);
     let artifacts = pipeline.source_artifacts(&inventory)?;
     for (rule_index, rule) in rules.constraints.iter().enumerate() {
         if rules.discovery(&rule.product).is_some()
@@ -352,5 +360,9 @@ pub(crate) fn check_inventory(
             coverage_gaps(rule_index, rule, &inventory, &artifacts, discovery)
         })
         .collect();
-    Ok(InputCheck { inventory, gaps })
+    Ok(InputCheck {
+        inventory,
+        gaps,
+        skipped,
+    })
 }

@@ -621,11 +621,15 @@ fn read_inventory(
     Ok(match (args.sources.as_deref(), &args.root) {
         (Some("-"), _) => Some(read_stdin()?),
         (Some(sources), _) => Some(read_file(sources)?),
+        (None, Some(root)) if args.command == Command::Discover => document
+            .zip(spec)
+            .map(|(document, spec)| discover(&document.pipeline, spec, Path::new(root)))
+            .transpose()?,
         (None, _) if recipe_records.is_some() => document
             .zip(recipe_records)
             .map(|(document, records)| render_source_inventory(records, &document.pipeline)),
         // With a root and no inventory, find the sources by their path rules.
-        (None, Some(root)) if args.command == Command::Discover || !inline => {
+        (None, Some(root)) if !inline => {
             match document.zip(spec) {
                 Some((document, spec)) => {
                     Some(discover(&document.pipeline, spec, Path::new(root))?)

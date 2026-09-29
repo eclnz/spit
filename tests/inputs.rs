@@ -142,8 +142,48 @@ fn a_recipe_can_settle_records_that_were_already_written() {
             InputSource::Inventory(inventory),
         )
         .unwrap();
-    assert!(resolved.root.is_none());
     assert_eq!(resolved.gaps.len(), 1);
+}
+
+#[test]
+fn skipping_written_records_reports_the_removed_group() {
+    let recipe = parse_input_spec("skip image count>=2 per [sub]\n").unwrap();
+    let inventory = spit::parse_source_inventory(
+        "sources:\n  image[sub=1,ses=1]\n  image[sub=2,ses=1]\n  image[sub=2,ses=2]\n",
+    )
+    .unwrap();
+    let resolved = recipe
+        .resolve(
+            &parse_pipeline(PIPELINE).unwrap(),
+            InputSource::Inventory(inventory),
+        )
+        .unwrap();
+    assert_eq!(resolved.inventory.artifacts.len(), 2);
+    assert_eq!(
+        resolved.skipped,
+        ["[sub=1] because `skip image` rejected the group"]
+    );
+}
+
+#[test]
+fn discover_scans_the_root_when_a_recipe_has_written_records() {
+    let tree = Tree::new("discover-records", &FILES);
+    let pipeline = tree.path().join("analysis.spit");
+    let recipe = tree.path().join("analysis.spitin");
+    fs::write(&pipeline, PIPELINE).unwrap();
+    fs::write(
+        &recipe,
+        format!("{RECIPE}sources:\n  image[sub=old,ses=1]: data/old/image.nii.gz\n"),
+    )
+    .unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_spit"))
+        .args(["discover", pipeline.to_str().unwrap(), "--root", tree.path().to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let inventory = String::from_utf8(output.stdout).unwrap();
+    assert!(inventory.contains("image[sub=1,ses=1]"), "{inventory}");
+    assert!(!inventory.contains("sub=old"), "{inventory}");
 }
 
 #[test]

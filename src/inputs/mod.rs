@@ -12,7 +12,7 @@ mod discover;
 
 use std::collections::BTreeSet;
 use std::error::Error;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use crate::compile::validate_pipeline;
 use crate::error::ResolveError;
@@ -187,20 +187,20 @@ impl InputSpec {
     ) -> Result<ResolvedInputs, Box<dyn Error>> {
         validate_pipeline(pipeline)?;
         self.check(pipeline)?;
-        let (inventory, skipped, root) = match source {
+        let (inventory, mut skipped) = match source {
             InputSource::Discover(root) => {
                 let found = discover_source_files(pipeline, &self.rules, root)?;
-                (found.inventory, found.skipped, Some(root.to_owned()))
+                (found.inventory, found.skipped)
             }
-            InputSource::Inventory(inventory) => (inventory, Vec::new(), None),
+            InputSource::Inventory(inventory) => (inventory, Vec::new()),
         };
         let mut checked = check_inventory(pipeline, &self.rules, &inventory)?;
+        skipped.extend(checked.skipped.iter().map(|group| group.note()));
         locate_sources(pipeline, &self.rules, &mut checked.inventory)?;
         Ok(ResolvedInputs {
             inventory: checked.inventory,
             skipped,
             gaps: checked.gaps,
-            root,
         })
     }
 
@@ -236,8 +236,6 @@ pub struct ResolvedInputs {
     pub skipped: Vec<String>,
     /// What the `require` rules find missing, with the sources each holds back.
     pub gaps: Vec<CoverageGap>,
-    /// The directory that was scanned, when the stage scanned one.
-    pub root: Option<PathBuf>,
 }
 
 impl ResolvedInputs {

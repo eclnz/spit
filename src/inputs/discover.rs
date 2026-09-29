@@ -148,10 +148,7 @@ pub fn discover_source_files(
         .collect();
     let skipped_groups = apply_skips(rules, &mut discovery.inventory, true);
     for group in &skipped_groups {
-        discovery.skipped.push(format!(
-            "[{}] because `skip {}` rejected the group",
-            group.context, group.target
-        ));
+        discovery.skipped.push(group.note());
     }
     let mut expected: BTreeMap<String, BTreeSet<EntityBinding>> = BTreeMap::new();
     for product in &pipeline.products {
@@ -228,10 +225,7 @@ pub fn discover_source_files(
         .collect();
     let additional_skips = apply_skips(rules, &mut discovery.inventory, false);
     for group in &additional_skips {
-        discovery.skipped.push(format!(
-            "[{}] because `skip {}` rejected the group",
-            group.context, group.target
-        ));
+        discovery.skipped.push(group.note());
     }
     for product in &pipeline.products {
         let Some(bindings) = expected.get(&product.name) else {
