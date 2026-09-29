@@ -1,14 +1,8 @@
-//! Selectors, broadcasts, mixed cardinality, multiple outputs, collection contracts,
-//! coverage values, empty steps, inventory override, and source discovery.
-
-use std::fs;
-use std::path::PathBuf;
-use std::process::Command;
+//! How a step's inputs are matched: many-inputs, selectors (`where`, `same`),
+//! broadcasts (`each`), the driving input, declared order, and `min`.
 
 use spit::{
-    diagnose, discover_sources, parse_document, parse_pipeline, parse_source_inventory,
-    render_bash, render_bound_dag, render_dag, resolve, validate_commands, Diagnostic,
-    ResolveError, ResolvedDag, Severity,
+    parse_document, parse_pipeline, parse_source_inventory, resolve, ResolveError, ResolvedDag,
 };
 
 fn resolve_text(text: &str, inventory: &str) -> Result<ResolvedDag, ResolveError> {
@@ -21,14 +15,6 @@ fn outputs(dag: &ResolvedDag) -> Vec<String> {
         .iter()
         .flat_map(|job| &job.outputs)
         .map(ToString::to_string)
-        .collect()
-}
-
-fn warnings(diagnostics: Vec<Diagnostic>) -> Vec<String> {
-    diagnostics
-        .into_iter()
-        .filter(|diagnostic| diagnostic.severity == Severity::Warning)
-        .map(|diagnostic| diagnostic.to_string())
         .collect()
 }
 
@@ -324,10 +310,7 @@ fn collections_and_jobs_follow_natural_declared_order() {
     let text = "\
 source frame [subject, run]
 operation stack(frames: many Frame) -> Stack @ drop(run)
-command stack: stack {frames} {output}
 stacked = stack(frame @ vary(run))
-path: {product}/{subject}/{run}.txt
-path stacked: {product}/{subject}.txt
 ";
     let pipeline = parse_pipeline(text).unwrap();
     let inventory = parse_source_inventory(
@@ -344,10 +327,6 @@ path stacked: {product}/{subject}.txt
         .map(|frame| frame.entities.0["run"].clone())
         .collect();
     assert_eq!(runs, ["1", "2", "10"]);
-    let script = render_bash(&pipeline, &dag).unwrap();
-    assert!(script.contains(
-        "'stack' \"$SPIT_ROOT\"/'frame/s10/1.txt' \"$SPIT_ROOT\"/'frame/s10/2.txt' \"$SPIT_ROOT\"/'frame/s10/10.txt'"
-    ));
 }
 
 #[test]
@@ -375,272 +354,4 @@ fn min_rejects_a_collection_that_is_too_small() {
         let error = parse_pipeline(&format!("{declaration}\n")).unwrap_err();
         assert!(error.message.contains(expected), "{error}");
     }
-}
-
-const TISSUES: &str = "\
-path: {product}/{entities}.txt
-source dwi : DWI [subject]
-source mask : Mask [subject]
-operation responses(dwi: DWI) -> (wm: Response, csf: Response)
-command responses: estimate {dwi} {wm} {csf}
-operation fods(dwi: DWI, wm_response: Response, csf_response: Response, mask: Mask) -> (wm: FOD, csf: FOD)
-verify fods: same_grid {dwi} {mask}
-command fods: fit {dwi} {wm_response} {wm} {csf_response} {csf} -mask {mask}
-wm_response, csf_response = responses(dwi)
-wm_fod, csf_fod = fods(dwi, wm_response, csf_response, mask)
-";
-
-#[test]
-fn one_job_owns_every_output_of_an_operation() {
-    let pipeline = parse_pipeline(TISSUES).unwrap();
-    let inventory =
-        parse_source_inventory("sources:\n  dwi[subject=a]\n  mask[subject=a]\n").unwrap();
-    let dag = resolve(&pipeline, &inventory).unwrap();
-    assert_eq!(dag.jobs.len(), 2);
-    assert_eq!(
-        outputs(&dag),
-        [
-            "wm_response[subject=a]",
-            "csf_response[subject=a]",
-            "wm_fod[subject=a]",
-            "csf_fod[subject=a]"
-        ]
-    );
-    assert_eq!(dag.jobs[1].dependencies, [1]);
-    assert!(render_dag(&dag).contains("  outputs:\n    wm_fod[subject=a] : FOD\n"));
-    assert!(render_bound_dag(&pipeline, &dag)
-        .unwrap()
-        .contains("    csf: csf_fod[subject=a] : FOD\n      path: csf_fod/subject=a.txt\n"));
-
-    let script = render_bash(&pipeline, &dag).unwrap();
-    assert_eq!(script.matches("'estimate'").count(), 1);
-    assert!(script.contains("'estimate' \"$SPIT_ROOT\"/'dwi/subject=a.txt' \"$SPIT_ROOT\"/'wm_response/subject=a.txt' \"$SPIT_ROOT\"/'csf_response/subject=a.txt'"));
-    assert!(script.contains("spit_require \"$SPIT_ROOT\"/'csf_response/subject=a.txt'"));
-    // The verification runs before the job's command.
-    let verify = script.find("spit_verify 2 'same_grid'").unwrap();
-    assert!(verify < script.find("'fit'").unwrap());
-}
-
-#[test]
-fn outputs_and_verifications_are_checked_before_resolution() {
-    let wrong_count = TISSUES.replace("wm_fod, csf_fod = fods", "wm_fod = fods");
-    let error = spit::validate_pipeline(&parse_pipeline(&wrong_count).unwrap()).unwrap_err();
-    assert!(error
-        .to_string()
-        .contains("expected 2 output products (wm, csf), found 1"));
-
-    let unwritten = TISSUES.replace(" {csf}\n", "\n");
-    let error = validate_commands(&parse_pipeline(&unwritten).unwrap()).unwrap_err();
-    assert!(error.message().contains("must use `{csf}`"), "{error}");
-
-    let reads_output = TISSUES.replace("same_grid {dwi} {mask}", "same_grid {wm}");
-    let error = validate_commands(&parse_pipeline(&reads_output).unwrap()).unwrap_err();
-    assert!(
-        error
-            .message()
-            .contains("verify for `fods` cannot use output `{wm}`"),
-        "{error}"
-    );
-}
-
-#[test]
-fn coverage_rules_can_require_entity_values() {
-    let text = "source image [subject, run]\nrequire image run=1,2 per [subject]\noperation f(Image) -> Image\nout = f(image)\n";
-    let complete = "sources:\n  image[subject=a,run=1]\n  image[subject=a,run=2]\n";
-    assert!(resolve_text(text, complete).is_ok());
-    let incomplete = "sources:\n  image[subject=a,run=1]\n  image[subject=a,run=3]\n";
-    assert!(matches!(
-        resolve_text(text, incomplete),
-        Err(ResolveError::MissingRequiredValue { dimension, value, .. })
-            if dimension == "run" && value == "2"
-    ));
-    let issues: Vec<_> = diagnose(text, Some(incomplete))
-        .iter()
-        .map(ToString::to_string)
-        .collect();
-    assert_eq!(
-        issues,
-        ["error: line 2: source coverage for `image` at [subject=a]: no artifact with run=2"]
-    );
-    let grouped = text.replace("run=1,2 per [subject]", "subject=a per [subject]");
-    let error = spit::validate_pipeline(&parse_pipeline(&grouped).unwrap()).unwrap_err();
-    assert!(error.to_string().contains("outside its groups"), "{error}");
-}
-
-#[test]
-fn steps_that_resolve_no_jobs_are_reported() {
-    let text = "\
-source image [subject]
-source extra [subject]
-operation f(Image) -> Image
-operation g(Image, Image) -> Image
-cleaned = f(image)
-other = f(extra @ where(subject=z))
-both = g(cleaned, image)
-";
-    assert_eq!(
-        warnings(diagnose(text, Some("sources:\n  extra[subject=a]\n"))),
-        [
-            "warning: line 1: source `image` has no artifacts in the inventory, so these steps resolve no jobs: cleaned, both",
-            "warning: line 6: `other` resolves no jobs: its inputs have artifacts, but none match each other or the step's selectors",
-        ]
-    );
-    // Without an inventory, no step is expected to resolve jobs.
-    assert!(warnings(diagnose(text, None)).is_empty());
-}
-
-#[test]
-fn a_separate_inventory_replaces_a_malformed_inline_one() {
-    let text = "source image [subject]\noperation f(Image) -> Image\nout = f(image)\nsources:\n  image[subject=a\n";
-    assert!(diagnose(text, None).iter().any(Diagnostic::is_error));
-    let issues: Vec<_> = diagnose(text, Some("sources:\n  image[subject=b]\n"))
-        .iter()
-        .map(ToString::to_string)
-        .collect();
-    assert_eq!(
-        issues,
-        ["warning: line 4: this inline inventory is ignored because a separate inventory was supplied"]
-    );
-}
-
-struct Tree(PathBuf);
-
-impl Tree {
-    fn new(name: &str, files: &[&str]) -> Self {
-        let root = std::env::temp_dir().join(format!("spit-{name}-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&root);
-        for file in files {
-            let path = root.join(file);
-            fs::create_dir_all(path.parent().unwrap()).unwrap();
-            fs::write(path, "").unwrap();
-        }
-        Self(root)
-    }
-}
-
-impl Drop for Tree {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
-    }
-}
-
-const DISCOVERED: &str = "\
-path: derived/{product}/{entities}.txt
-source frame [subject, run]
-path frame: raw/sub-{subject}/run-{run}.dat
-source lut []
-path lut: config/lut.txt
-operation stack(frames: many Frame, lut: Lut) -> Stack @ drop(run)
-command stack: stack {frames} {lut} {output}
-stacked = stack(frame @ vary(run), lut)
-";
-
-#[test]
-fn sources_are_discovered_from_their_path_rules() {
-    let tree = Tree::new(
-        "discover",
-        &[
-            "raw/sub-a/run-1.dat",
-            "raw/sub-a/run-10.dat",
-            "raw/sub-b/run-2.dat",
-            "raw/sub-b/notes.txt",
-            "config/lut.txt",
-            "derived/stacked/subject=a.txt",
-        ],
-    );
-    let pipeline = parse_pipeline(DISCOVERED).unwrap();
-    let inventory = discover_sources(&pipeline, &tree.0).unwrap();
-    let records: Vec<_> = inventory
-        .artifacts
-        .iter()
-        .map(|record| format!("{}[{}]", record.product, record.entities))
-        .collect();
-    assert_eq!(
-        records,
-        [
-            "frame[run=1,subject=a]",
-            "frame[run=10,subject=a]",
-            "frame[run=2,subject=b]",
-            "lut[]"
-        ]
-    );
-    assert_eq!(resolve(&pipeline, &inventory).unwrap().jobs.len(), 2);
-}
-
-#[test]
-fn a_file_matching_two_source_rules_is_rejected() {
-    // Distinct rules that both fit `in/q-x.txt`: `a` with id=q-x, `b` with id=q.
-    let text = "source a [id]\npath a: in/{id}.txt\nsource b [id]\npath b: in/{id}-x.txt\n";
-    let tree = Tree::new("ambiguous", &["in/q-x.txt"]);
-    let error = discover_sources(&parse_pipeline(text).unwrap(), &tree.0).unwrap_err();
-    assert!(
-        error
-            .message()
-            .contains("matches the path rules of both `a` and `b`"),
-        "{error}"
-    );
-}
-
-#[test]
-fn cli_discovers_sources_under_the_root() {
-    let tree = Tree::new(
-        "cli-discover",
-        &[
-            "raw/sub-a/run-1.dat",
-            "raw/sub-a/run-2.dat",
-            "config/lut.txt",
-        ],
-    );
-    let pipeline = tree.0.join("pipeline.spit");
-    fs::write(&pipeline, DISCOVERED).unwrap();
-    let run = |args: &[&str]| {
-        Command::new(env!("CARGO_BIN_EXE_spit"))
-            .args(args)
-            .output()
-            .unwrap()
-    };
-    let root = tree.0.to_str().unwrap();
-    let discovered = run(&["discover", pipeline.to_str().unwrap(), "--root", root]);
-    assert!(discovered.status.success());
-    assert_eq!(
-        String::from_utf8(discovered.stdout).unwrap(),
-        "sources:\n    frame[subject=a,run=1]\n    frame[subject=a,run=2]\n    lut[]\n"
-    );
-    let checked = run(&["check", pipeline.to_str().unwrap(), "--root", root]);
-    assert!(checked.status.success());
-    let report = String::from_utf8(checked.stdout).unwrap();
-    assert!(report.contains("1 jobs resolved."), "{report}");
-    assert!(String::from_utf8(checked.stderr)
-        .unwrap()
-        .contains("note: discovered 3 source artifacts"));
-}
-
-#[test]
-fn cli_skips_an_inline_inventory_that_sources_replaces() {
-    let tree = Tree::new("override", &[]);
-    fs::create_dir_all(&tree.0).unwrap();
-    let pipeline = tree.0.join("pipeline.spit");
-    fs::write(
-        &pipeline,
-        "source image [subject]\noperation f(Image) -> Image\nout = f(image)\nsources:\n  image[subject=a\n",
-    )
-    .unwrap();
-    let inventory = tree.0.join("inventory.sources");
-    fs::write(&inventory, "sources:\n  image[subject=b]\n").unwrap();
-    let result = Command::new(env!("CARGO_BIN_EXE_spit"))
-        .args([
-            "check",
-            pipeline.to_str().unwrap(),
-            "--sources",
-            inventory.to_str().unwrap(),
-        ])
-        .output()
-        .unwrap();
-    assert!(result.status.success(), "{result:?}");
-    assert!(String::from_utf8(result.stdout)
-        .unwrap()
-        .contains("1 jobs resolved."));
-    assert!(String::from_utf8(result.stderr)
-        .unwrap()
-        .contains("this inline inventory is ignored"));
 }

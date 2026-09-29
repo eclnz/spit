@@ -383,3 +383,24 @@ fn backslashes_follow_bash_quoting_rules() {
         "{script}"
     );
 }
+
+#[test]
+fn a_collection_expands_in_natural_order() {
+    let text = "\
+source frame [subject, run]
+path: {product}/{subject}/{run}.txt
+path stacked: {product}/{subject}.txt
+operation stack(frames: many Frame) -> Stack @ drop(run)
+command stack: stack {frames} {output}
+stacked = stack(frame @ vary(run))
+";
+    let pipeline = parse_pipeline(text).unwrap();
+    let inventory = parse_source_inventory(
+        "sources:\n  frame[subject=s10,run=10]\n  frame[subject=s10,run=2]\n  frame[subject=s10,run=1]\n",
+    )
+    .unwrap();
+    let script = render_bash(&pipeline, &resolve(&pipeline, &inventory).unwrap()).unwrap();
+    assert!(script.contains(
+        "'stack' \"$SPIT_ROOT\"/'frame/s10/1.txt' \"$SPIT_ROOT\"/'frame/s10/2.txt' \"$SPIT_ROOT\"/'frame/s10/10.txt'"
+    ));
+}
