@@ -226,3 +226,25 @@ fn commands_header_alone_selects_sectioned_form() {
     let pipeline = parse_pipeline("commands:\n  copy: tool {input} {output}\n").unwrap();
     assert_eq!(pipeline.commands[0].operation, "copy");
 }
+
+#[test]
+fn a_source_record_may_give_its_file() {
+    let text = "sources:\n    raw[site=A]: data/A/raw.txt\n    raw[site=B]\n";
+    let inventory = parse_source_inventory(text).unwrap();
+    assert_eq!(
+        inventory.artifacts[0].path.as_deref(),
+        Some("data/A/raw.txt")
+    );
+    assert_eq!(inventory.artifacts[1].path, None);
+    let pipeline = parse_pipeline("source raw [site]\n").unwrap();
+    let rendered = spit::render_source_inventory(&inventory, &pipeline);
+    assert_eq!(parse_source_inventory(&rendered).unwrap(), inventory);
+    for bad in [
+        "raw[site=A] data.txt",
+        "raw[site=A]:",
+        "raw[site=A]: /abs.txt",
+    ] {
+        let error = parse_source_inventory(&format!("sources:\n{bad}\n")).unwrap_err();
+        assert_eq!(error.line(), 2, "{bad}");
+    }
+}

@@ -304,12 +304,11 @@ pub(crate) fn check_inventory(
     rules: &InputRules,
     inventory: &SourceInventory,
 ) -> Result<InputCheck, ResolveError> {
+    // A settled `.spitout` keeps the names of the rules that found its
+    // contexts; without those rules the names are only a record of that.
     for (name, bindings) in &inventory.discovered {
         let Some(discovery) = rules.discovery(name) else {
-            return Err(ResolveError::InvalidDefinition {
-                subject: DefinitionSubject::None,
-                detail: format!("inventory names unknown discovery rule `{name}`"),
-            });
+            continue;
         };
         let expected: BTreeSet<_> = discovery.dimensions.iter().collect();
         for binding in bindings {
