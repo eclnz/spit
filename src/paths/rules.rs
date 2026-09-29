@@ -23,6 +23,25 @@ pub enum PathRule {
     Missing,
 }
 
+impl PathRule {
+    /// The rule `product` takes: its own, else its stage's default, else
+    /// the pipeline's default.
+    fn for_product(pipeline: &Pipeline, product: &str) -> Self {
+        if let Some(template) = pipeline.product_paths.get(product) {
+            Self::Explicit(template.to_string())
+        } else if let Some((stage, template)) = pipeline.stage_path_rule(product) {
+            Self::Stage {
+                stage: stage.to_owned(),
+                template: template.to_string(),
+            }
+        } else if let Some(template) = &pipeline.path_template {
+            Self::Default(template.to_string())
+        } else {
+            Self::Missing
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PathCoverageEntry {
     pub product: String,
@@ -151,18 +170,7 @@ pub(crate) fn collect_paths(
     let mut entries = Vec::new();
     let mut samples: BTreeMap<String, &str> = BTreeMap::new();
     for product in &pipeline.products {
-        let rule = if let Some(template) = pipeline.product_paths.get(&product.name) {
-            PathRule::Explicit(template.to_string())
-        } else if let Some((stage, template)) = pipeline.stage_path_rule(&product.name) {
-            PathRule::Stage {
-                stage: stage.to_owned(),
-                template: template.to_string(),
-            }
-        } else if let Some(template) = &pipeline.path_template {
-            PathRule::Default(template.to_string())
-        } else {
-            PathRule::Missing
-        };
+        let rule = PathRule::for_product(pipeline, &product.name);
         if rule != PathRule::Missing && !skip.contains(&product.name) {
             let line = lines.path_rule(pipeline, &product.name);
             match validate_path_template(pipeline, product) {

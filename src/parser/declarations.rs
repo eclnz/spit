@@ -223,9 +223,35 @@ pub(super) fn parse_coverage_rule(line: &str, number: usize) -> Result<CoverageR
         .ok_or_else(|| ParseError::new(number, syntax))?;
     let mut parts = subject.split_whitespace();
     let product = qualified_identifier(parts.next().unwrap_or(""), number, "constraint product")?;
+    let RuleTerms { count, values } = parse_rule_terms(parts, number, syntax)?;
+    let dimensions = parse_group_dimensions(dimensions, number)?;
+    let mut rule = CoverageRule::new(
+        product,
+        &dimensions,
+        count.unwrap_or(CountRequirement::AtLeast(1)),
+    );
+    rule.action = action;
+    for (dimension, listed) in values {
+        rule = rule.requiring(dimension, listed);
+    }
+    Ok(rule)
+}
+
+/// A rule's `count=`/`count>=` term and its `dimension=value,...` terms.
+struct RuleTerms<'a> {
+    count: Option<CountRequirement>,
+    values: BTreeMap<String, Vec<&'a str>>,
+}
+
+/// A rule's terms after its product; it needs at least one.
+fn parse_rule_terms<'a>(
+    terms: impl Iterator<Item = &'a str>,
+    number: usize,
+    syntax: &str,
+) -> Result<RuleTerms<'a>, ParseError> {
     let mut count = None;
     let mut values = BTreeMap::new();
-    for token in parts {
+    for token in terms {
         let parsed = if let Some(value) = token.strip_prefix("count=") {
             Some(CountRequirement::Exactly(parse_count(value, number)?))
         } else if let Some(value) = token.strip_prefix("count>=") {
@@ -259,6 +285,11 @@ pub(super) fn parse_coverage_rule(line: &str, number: usize) -> Result<CoverageR
     if count.is_none() && values.is_empty() {
         return Err(ParseError::new(number, syntax));
     }
+    Ok(RuleTerms { count, values })
+}
+
+/// The `[dimension, ...]` a rule groups by.
+fn parse_group_dimensions(dimensions: &str, number: usize) -> Result<Vec<&str>, ParseError> {
     let bracketed = dimensions.trim();
     let dimensions = bracketed.strip_prefix('[').ok_or_else(|| {
         ParseError::new(number, "expected `[` before constraint dimensions").at_token(bracketed)
@@ -276,16 +307,7 @@ pub(super) fn parse_coverage_rule(line: &str, number: usize) -> Result<CoverageR
     for dimension in &dimensions {
         identifier(dimension, number, "constraint dimension")?;
     }
-    let mut rule = CoverageRule::new(
-        product,
-        &dimensions,
-        count.unwrap_or(CountRequirement::AtLeast(1)),
-    );
-    rule.action = action;
-    for (dimension, listed) in values {
-        rule = rule.requiring(dimension, listed);
-    }
-    Ok(rule)
+    Ok(dimensions)
 }
 
 fn parse_count(value: &str, number: usize) -> Result<usize, ParseError> {

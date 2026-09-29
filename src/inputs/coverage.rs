@@ -255,34 +255,47 @@ pub(crate) fn coverage_gaps(
         } else {
             members.iter().map(|artifact| &artifact.entities).collect()
         };
-        let found = bindings.len();
-        let mut errors = Vec::new();
-        if !rule.count.allows(found) {
-            errors.push(ResolveError::CoverageViolation {
-                product: rule.product.clone(),
-                rule_index,
-                context: context.clone(),
-                expected: rule.count.clone(),
-                found,
-                discovery,
-            });
-        }
-        errors.extend(missing_values(rule, &bindings).map(|(dimension, value)| {
-            ResolveError::MissingRequiredValue {
-                product: rule.product.clone(),
-                rule_index,
-                context: context.clone(),
-                dimension: dimension.clone(),
-                value: value.clone(),
-                discovery,
-            }
-        }));
+        let errors = group_errors(rule_index, rule, &context, &bindings, discovery);
         gaps.extend(errors.into_iter().map(|error| CoverageGap {
             error,
             sources: members.clone(),
         }));
     }
     gaps
+}
+
+/// What `rule` finds wrong with one group, whose members have `bindings`:
+/// too few or too many, and each required value none of them has.
+fn group_errors(
+    rule_index: usize,
+    rule: &CoverageRule,
+    context: &EntityBinding,
+    bindings: &[&EntityBinding],
+    discovery: bool,
+) -> Vec<ResolveError> {
+    let found = bindings.len();
+    let mut errors = Vec::new();
+    if !rule.count.allows(found) {
+        errors.push(ResolveError::CoverageViolation {
+            product: rule.product.clone(),
+            rule_index,
+            context: context.clone(),
+            expected: rule.count.clone(),
+            found,
+            discovery,
+        });
+    }
+    errors.extend(missing_values(rule, bindings).map(|(dimension, value)| {
+        ResolveError::MissingRequiredValue {
+            product: rule.product.clone(),
+            rule_index,
+            context: context.clone(),
+            dimension: dimension.clone(),
+            value: value.clone(),
+            discovery,
+        }
+    }));
+    errors
 }
 
 /// Check every rule against the pipeline, needing no inventory, with the

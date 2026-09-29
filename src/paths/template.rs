@@ -203,26 +203,7 @@ pub(crate) fn bind_path(
                 relative.push_str(&components.join("/"));
             }
             PathPart::Placeholder(PathPlaceholder::Entities) => {
-                let bindings = dimensions
-                    .iter()
-                    .map(|dimension| {
-                        let value = artifact.entities.get(dimension).ok_or_else(|| {
-                            error(format!(
-                                "artifact `{artifact}` lacks dimension `{dimension}`"
-                            ))
-                        })?;
-                        Ok(format!(
-                            "{}={}",
-                            encode_component(dimension),
-                            encode_component(value)
-                        ))
-                    })
-                    .collect::<Result<Vec<_>, PathError>>()?;
-                if bindings.is_empty() {
-                    relative.push_str("global");
-                } else {
-                    relative.push_str(&bindings.join("__"));
-                }
+                relative.push_str(&entities_component(artifact, dimensions)?);
             }
             PathPart::Placeholder(placeholder @ PathPlaceholder::Dimension(dimension)) => {
                 let value = artifact.entities.get(dimension).ok_or_else(|| {
@@ -240,6 +221,33 @@ pub(crate) fn bind_path(
         return Err(error(format!("{} {reason}: `{relative}`", label())));
     }
     Ok(relative)
+}
+
+/// What `{entities}` binds to: each dimension as `dimension=value`, in
+/// declared order and joined by `__`, or `global` for none.
+fn entities_component(
+    artifact: &ArtifactInstance,
+    dimensions: &[String],
+) -> Result<String, PathError> {
+    let bindings = dimensions
+        .iter()
+        .map(|dimension| {
+            let value = artifact.entities.get(dimension).ok_or_else(|| {
+                error(format!(
+                    "artifact `{artifact}` lacks dimension `{dimension}`"
+                ))
+            })?;
+            Ok(format!(
+                "{}={}",
+                encode_component(dimension),
+                encode_component(value)
+            ))
+        })
+        .collect::<Result<Vec<_>, PathError>>()?;
+    if bindings.is_empty() {
+        return Ok("global".to_owned());
+    }
+    Ok(bindings.join("__"))
 }
 
 /// Why `relative` cannot name a file under the root, if it cannot.

@@ -185,6 +185,14 @@ Dead public API (item 5, 15) is not visible to the compiler because `lib.rs` re-
 ### 19. Split other long functions (over 60 lines)
 `diagnostics.rs` ~376 (94), ~1037 (80), ~880 (77); `error.rs` `Display::fmt` (100); `main.rs` ~302 (80), ~571 (64); `resolver/matching.rs` ~24 (86); `resolver/mod.rs` ~45 (72); `resolver/bind.rs` ~18 (70); `imports.rs` ~12 (85); `inputs/coverage.rs` ~36 (78), ~190 (77); `parser/declarations.rs` ~212 (76), ~343 (88); `parser/sectioned.rs` ~44 (84); `render.rs` ~14 (75); `paths/rules.rs` ~127 (71); `compile/mod.rs` ~62 (69). Regenerate with `clippy::too_many_lines` and `too-many-lines-threshold = 60`.
 
+**Status: done; 24 functions over 60 lines down to 6, which are left by decision.** Split where a function had separable phases: `expand_step`/`expand_job`, `bind_dag` via a `Binder`, `apply_skips` into `rejected_groups`/`remove_groups` (with `CountRequirement::allows` and `missing_values` shared with `coverage_gaps`, which had copies of both, and `group_errors`), `parse_binding` (`parse_pins`, `parse_each`), `parse_coverage_rule` (`parse_rule_terms`, `parse_group_dimensions`), `parse_args` (`Flags::add`, `Flags::check_conflicts`, `take_files`), `prepare` (`prepare_recipe`), `sectioned_line` (`section_statement`), `error_location` (`pipeline_place`, `inventory_place`), `collect_paths` (`PathRule::for_product`) and `bind_path` (`entities_component`). The sectioned and flow parsers now share `StatementKind::{product, operation, constraint, command}`, which each built with the same code. Items 2, 3 and 4 had already split the three longest.
+
+Left over 60: `ResolveError`'s `Display` (112: one flat arm per variant, clearest in one place), and five at 61–65 lines (`check_selectors`, `render_source_inventory`, `empty_step_warnings`, `collect_pipeline`, `comma_items`) that are a list of checks or one state machine, where a split would move code without clarifying it.
+
+**Bugs found while splitting, both fixed with tests:**
+- `empty_step_warnings` followed every path from a step back to its sources, so a chain of steps each reading the previous one twice took exponential time (14 s at 24 steps, hours at 40). Each product's missing sources are now found once. Test: `steps_that_read_a_product_twice_are_checked_in_linear_time`.
+- Type arguments nested about 10,000 deep (`A<A<...>>`) crashed `spit check` with a stack overflow, since parsing and unification recurse per level. Nesting past 64 levels is now a parse error. Test: `deeply_nested_type_arguments_are_an_error_not_a_crash`.
+
 ### 20. Stale references
 - `paths/template.rs` ~232 and `docs/language-reference.md` ~167 mention `SPIT_ROOT`, which nothing reads (the dataset root is `--root` / the recipe folder).
 - `paths/bind.rs` ~32 comment mentions a `--stage` flag the CLI does not have (only `ResolvedDag::only_stage`, used by `tests/stages.rs`).
