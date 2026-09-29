@@ -897,6 +897,20 @@ pub struct ResolvedDag {
 }
 
 impl ResolvedDag {
+    /// Take each source's file from its record in `inventory`, replacing the
+    /// files known before: a DAG resolved before its inventory's sources
+    /// were located gets their files this way, without resolving it again.
+    pub fn locate_sources(&mut self, inventory: &SourceInventory) {
+        self.source_paths = inventory
+            .artifacts
+            .iter()
+            .filter_map(|record| {
+                let key = (record.product.clone(), record.entities.clone());
+                Some((key, record.path.clone()?))
+            })
+            .collect();
+    }
+
     /// Only the jobs of `stage` and the stages nested in it. Their inputs from
     /// other stages are taken as files that already exist, so dependencies on those jobs are dropped;
     /// every job keeps its number.

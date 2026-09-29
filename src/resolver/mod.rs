@@ -24,19 +24,23 @@ pub fn resolve(
     inventory: &SourceInventory,
 ) -> Result<ResolvedDag, ResolveError> {
     let report = resolve_artifacts_excluding(pipeline, inventory, &[])?;
-    // A blocked gap always follows the gap that blocks it.
-    let failure = report
-        .incomplete
-        .into_iter()
-        .flat_map(|job| job.gaps)
-        .find_map(|gap| match gap {
-            Gap::Unmatched(error) => Some(error),
-            Gap::Blocked { .. } => None,
-        });
-    match failure {
+    match first_failure(&report.incomplete) {
         Some(error) => Err(error),
         None => Ok(report.dag),
     }
+}
+
+/// Why the first of `incomplete` cannot be made; a blocked gap always
+/// follows the gap that blocks it, so there is one whenever any job is
+/// incomplete.
+pub(crate) fn first_failure(incomplete: &[IncompleteJob]) -> Option<ResolveError> {
+    incomplete
+        .iter()
+        .flat_map(|job| &job.gaps)
+        .find_map(|gap| match gap {
+            Gap::Unmatched(error) => Some(error.clone()),
+            Gap::Blocked { .. } => None,
+        })
 }
 
 /// Resolve what can be made, reporting each job that cannot and why. Some
@@ -71,14 +75,7 @@ pub fn resolve_artifacts_excluding(
                 .iter()
                 .map(|product| (product.name.clone(), product.dimensions.clone()))
                 .collect(),
-            source_paths: inventory
-                .artifacts
-                .iter()
-                .filter_map(|record| {
-                    let key = (record.product.clone(), record.entities.clone());
-                    Some((key, record.path.clone()?))
-                })
-                .collect(),
+            source_paths: BTreeMap::new(),
         },
         incomplete_jobs: Vec::new(),
     };
@@ -93,9 +90,11 @@ pub fn resolve_artifacts_excluding(
             }
         }
     }
+    let mut dag = resolution.dag;
+    dag.locate_sources(inventory);
     Ok(ArtifactReport {
         sources,
-        dag: resolution.dag,
+        dag,
         incomplete: resolution.incomplete_jobs,
         coverage: Vec::new(),
     })
