@@ -2,6 +2,7 @@
 
 pub mod bash;
 mod command;
+mod compile;
 pub mod diagnostics;
 pub mod error;
 mod imports;
@@ -19,6 +20,7 @@ pub mod types;
 
 pub use bash::{render_bash, BashError};
 pub use command::{validate_commands, CommandError, CommandTemplate};
+pub use compile::validate_pipeline;
 pub use diagnostics::{
     diagnose, diagnose_artifacts_at, diagnose_at, diagnose_at_with_inputs, Diagnostic,
     DiagnosticSource, Severity,
@@ -45,7 +47,7 @@ pub use paths::{
     PathError, PathRule, PathTemplate, VerifiedFiles,
 };
 pub use render::{render_artifacts, render_bound_dag, render_dag, render_dag_json};
-pub use resolver::{resolve, resolve_artifacts, resolve_artifacts_excluding, validate_pipeline};
+pub use resolver::{resolve, resolve_artifacts, resolve_artifacts_excluding};
 pub use types::{
     parse_type_expr, Compatibility, Substitutions, TypeExpr, TypeParseError, TypeUnifyError,
 };

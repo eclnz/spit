@@ -14,12 +14,12 @@ use std::collections::BTreeSet;
 use std::error::Error;
 use std::path::{Path, PathBuf};
 
+use crate::compile::validate_pipeline;
 use crate::error::ResolveError;
 use crate::lower::Document;
 use crate::model::{ArtifactInstance, CoverageGap, InputRules, Pipeline, SourceInventory};
 use crate::parser::ParseError;
 use crate::paths::PathTemplate;
-use crate::resolver::validate_pipeline;
 use crate::{parse_spit, parse_spit_at};
 
 pub(crate) use self::coverage::check_inventory;
