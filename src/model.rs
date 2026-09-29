@@ -708,6 +708,9 @@ pub struct SourceInventory {
     /// Bindings from each named directory discovery rule. These are also
     /// present in `contexts`, but retain their origin for coverage rules.
     pub discovered: BTreeMap<String, Vec<EntityBinding>>,
+    /// Source path rules settled from a recipe, when the pipeline does not
+    /// declare them. A .spitout carries each rule once for standalone DAGs.
+    pub source_paths: BTreeMap<String, PathTemplate>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

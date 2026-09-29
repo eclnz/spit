@@ -90,6 +90,13 @@ fn source_inventory_errors_point_to_the_source_line() {
     ));
     assert_eq!(duplicate[0].source, DiagnosticSource::Inventory);
     assert_eq!(duplicate[0].line, Some(3));
+
+    let nested = errors(diagnose(
+        "source raw [sub, run]\n",
+        Some("contexts sessions:\n    [sub=01]:\n        [run=01]:\n            raw, raw\n"),
+    ));
+    assert_eq!(nested[0].source, DiagnosticSource::Inventory);
+    assert_eq!(nested[0].line, Some(4));
 }
 
 #[test]
