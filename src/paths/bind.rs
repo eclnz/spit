@@ -1,11 +1,12 @@
 //! Paths bound to the artifacts of resolved jobs, and the files they name.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::BTreeSet;
 use std::fmt;
 use std::path::Path;
 
 use super::rules::inspect_paths;
-use super::template::{bind_path, error, require_directory, PathError};
+use super::template::{error, require_directory, PathBinder, PathError};
+use crate::hash::QuickMap;
 use crate::model::{
     ArtifactInstance, ArtifactKey, ArtifactMap, ArtifactSet, EntityBinding, Pipeline, ResolvedDag,
 };
@@ -117,8 +118,9 @@ pub(crate) fn bound_paths(
         .keys()
         .map(|(product, _)| product.as_str())
         .collect();
+    let mut binder = PathBinder::new(pipeline);
     let mut paths = ArtifactMap::default();
-    let mut owners: HashMap<String, &ArtifactInstance> = HashMap::new();
+    let mut owners: QuickMap<String, &ArtifactInstance> = QuickMap::default();
     for artifact in dag
         .jobs
         .iter()
@@ -137,9 +139,7 @@ pub(crate) fn bound_paths(
             .flatten();
         let relative = match given {
             Some(path) => path.clone(),
-            None => bind_path(pipeline, dimensions, artifact, || {
-                format!("path for `{artifact}`")
-            })?,
+            None => binder.bind(dimensions, artifact, || format!("path for `{artifact}`"))?,
         };
         if let Some(previous) = owners.insert(relative.clone(), artifact) {
             return Err(error(format!(
@@ -181,7 +181,7 @@ pub(crate) fn case_collisions(
     let Ok(paths) = bound_paths(pipeline, dag) else {
         return Vec::new();
     };
-    let mut folded: HashMap<String, Vec<(Artifact<'_>, &String)>> = HashMap::new();
+    let mut folded: QuickMap<String, Vec<(Artifact<'_>, &String)>> = QuickMap::default();
     for (product, entities, path) in paths.iter() {
         folded
             .entry(path.to_lowercase())
