@@ -4,9 +4,14 @@ use std::process::{Command, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use spit::{
-    parse_document, parse_pipeline, parse_source_inventory, render_bash, resolve, CommandTemplate,
-    PathTemplate,
+    parse_document, parse_pipeline, parse_source_inventory, resolve, CommandTemplate, PathTemplate,
 };
+
+/// Step 3's binding, then the Bash backend, with either's error as text.
+fn bash_script(pipeline: &spit::Pipeline, dag: &spit::ResolvedDag) -> Result<String, String> {
+    let bound = spit::bind_dag(pipeline, dag).map_err(|error| error.to_string())?;
+    spit::render_bash(&bound).map_err(|error| error.to_string())
+}
 
 fn demo_script() -> String {
     let (pipeline, embedded) =
@@ -16,7 +21,7 @@ fn demo_script() -> String {
         parse_source_inventory(include_str!("../examples/commands/bash_demo.spitout")).unwrap();
     let dag = resolve(&pipeline, &inventory).unwrap();
     assert_eq!(dag.jobs.len(), 5);
-    render_bash(&pipeline, &dag).unwrap()
+    bash_script(&pipeline, &dag).unwrap()
 }
 
 #[test]
@@ -78,7 +83,7 @@ fn backend_rejects_undeclared_placeholders_and_path_collisions() {
     let dag = resolve(&pipeline, &inventory).unwrap();
 
     pipeline.commands[0].template = CommandTemplate::parse("sort -o {output} {missing}").unwrap();
-    assert!(render_bash(&pipeline, &dag)
+    assert!(bash_script(&pipeline, &dag)
         .unwrap_err()
         .to_string()
         .contains("unknown placeholder"));
@@ -86,7 +91,7 @@ fn backend_rejects_undeclared_placeholders_and_path_collisions() {
     pipeline.commands[0].template = CommandTemplate::parse("sort -o {output} {input}").unwrap();
     pipeline.path_template = Some(PathTemplate::parse("same.txt").unwrap());
     pipeline.product_paths.clear();
-    assert!(render_bash(&pipeline, &dag)
+    assert!(bash_script(&pipeline, &dag)
         .unwrap_err()
         .to_string()
         .contains("omits dimension"));
@@ -102,7 +107,7 @@ path: {product}/{entities}.txt\n";
     let pipeline = parse_pipeline(text).unwrap();
     let inventory = parse_source_inventory("sources:\n  left[id=x]\n  right[id=x]\n").unwrap();
     let dag = resolve(&pipeline, &inventory).unwrap();
-    let script = render_bash(&pipeline, &dag).unwrap();
+    let script = bash_script(&pipeline, &dag).unwrap();
     assert!(script.contains("'--left='\"$SPIT_ROOT\"/'left/id=x.txt'"));
     assert!(script.contains("'--right' \"$SPIT_ROOT\"/'right/id=x.txt'"));
     assert!(script.contains("'--out' \"$SPIT_ROOT\"/'result/id=x.txt'"));
@@ -117,7 +122,7 @@ fn many_input_must_occupy_its_own_argument() {
     let dag = resolve(&pipeline, &inventory).unwrap();
     pipeline.commands[1].template =
         CommandTemplate::parse("sort -o {output} --files={inputs}").unwrap();
-    assert!(render_bash(&pipeline, &dag)
+    assert!(bash_script(&pipeline, &dag)
         .unwrap_err()
         .to_string()
         .contains("must be a complete command argument"));
@@ -134,7 +139,7 @@ fn adding_a_group_to_inventory_expands_the_script() {
     .unwrap();
     let dag = resolve(&pipeline, &inventory).unwrap();
     assert_eq!(dag.jobs.len(), 7);
-    let script = render_bash(&pipeline, &dag).unwrap();
+    let script = bash_script(&pipeline, &dag).unwrap();
     assert!(script.contains("input/gamma/01.txt"));
     assert!(script.contains("merged/group=gamma.txt"));
 }
@@ -148,7 +153,7 @@ fn field_survey_generates_valid_bash_for_new_visits() {
         parse_source_inventory(include_str!("../examples/commands/field_survey.spitout")).unwrap();
     let dag = resolve(&pipeline, &inventory).unwrap();
     assert_eq!(dag.jobs.len(), 93);
-    let script = render_bash(&pipeline, &dag).unwrap();
+    let script = bash_script(&pipeline, &dag).unwrap();
     assert!(script.contains("'--pose'"));
     assert!(script.contains("'--meta'"));
     let import = script
@@ -193,7 +198,7 @@ fn field_survey_generates_valid_bash_for_new_visits() {
     .unwrap();
     let expanded = resolve(&pipeline, &inventory).unwrap();
     assert!(expanded.jobs.len() > dag.jobs.len());
-    let script = render_bash(&pipeline, &expanded).unwrap();
+    let script = bash_script(&pipeline, &expanded).unwrap();
     assert!(script.contains("site-03/visit-01/photos/site-03_visit-01_shot-01_photo.raw"));
     assert!(script.contains("derivatives/yield_table/site=03__visit=01.csv"));
 }
@@ -203,7 +208,7 @@ fn named_many_port_expands_in_entity_order_as_separate_arguments() {
     let text = "source raw [group, part]\npath: {product}/{entities}.txt\noperation gather(items: many) @ drop(part)\ncommand gather: collect {items} {output}\nresult = gather(raw @ vary(part))\nsources:\n  raw[group=a,part=2]\n  raw[group=a,part=1]\n";
     let (pipeline, inventory) = parse_document(text).unwrap();
     let dag = resolve(&pipeline, &inventory.unwrap()).unwrap();
-    let script = render_bash(&pipeline, &dag).unwrap();
+    let script = bash_script(&pipeline, &dag).unwrap();
     let command = script
         .lines()
         .find(|line| line.starts_with("'collect'"))
@@ -217,7 +222,7 @@ fn command_uses_executable_on_path() {
     let text = "source raw [id]\npath raw: input/{id}.txt\npath result: output/{id}.txt\noperation copy(data: one)\ncommand copy: copy_data {data} {output}\nresult = copy(raw)\nsources:\n  raw[id=x]\n";
     let (pipeline, inventory) = parse_document(text).unwrap();
     let dag = resolve(&pipeline, &inventory.unwrap()).unwrap();
-    let script = render_bash(&pipeline, &dag).unwrap();
+    let script = bash_script(&pipeline, &dag).unwrap();
     let suffix = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
@@ -265,7 +270,7 @@ fn backslashes_follow_bash_quoting_rules() {
     let dag = resolve(&pipeline, &inventory).unwrap();
     pipeline.commands[0].template =
         CommandTemplate::parse(r#"tool "a\b" "q\"x" "s\\t" c\d 'e\f' {input} {output}"#).unwrap();
-    let script = render_bash(&pipeline, &dag).unwrap();
+    let script = bash_script(&pipeline, &dag).unwrap();
     assert!(
         script.contains(r#"'tool' 'a\b' 'q"x' 's\t' 'cd' 'e\f' "#),
         "{script}"
@@ -287,7 +292,7 @@ stacked = stack(frame @ vary(run))
         "sources:\n  frame[subject=s10,run=10]\n  frame[subject=s10,run=2]\n  frame[subject=s10,run=1]\n",
     )
     .unwrap();
-    let script = render_bash(&pipeline, &resolve(&pipeline, &inventory).unwrap()).unwrap();
+    let script = bash_script(&pipeline, &resolve(&pipeline, &inventory).unwrap()).unwrap();
     assert!(script.contains(
         "'stack' \"$SPIT_ROOT\"/'frame/s10/1.txt' \"$SPIT_ROOT\"/'frame/s10/2.txt' \"$SPIT_ROOT\"/'frame/s10/10.txt'"
     ));

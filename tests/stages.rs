@@ -3,9 +3,21 @@ use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use spit::{
-    diagnose, inspect_paths, parse_document, parse_pipeline, render_bash, render_bound_dag,
-    render_dag, resolve, Diagnostic, PathRule,
+    diagnose, inspect_paths, parse_document, parse_pipeline, render_dag, resolve, Diagnostic,
+    PathRule,
 };
+
+/// The jobs with their bound paths, or the binding error as text.
+fn bound(pipeline: &spit::Pipeline, dag: &spit::ResolvedDag) -> Result<String, String> {
+    let bound = spit::bind_dag(pipeline, dag).map_err(|error| error.to_string())?;
+    Ok(spit::render_bound_dag(&bound, true))
+}
+
+/// Step 3's binding, then the Bash backend, with either's error as text.
+fn bash_script(pipeline: &spit::Pipeline, dag: &spit::ResolvedDag) -> Result<String, String> {
+    let bound = spit::bind_dag(pipeline, dag).map_err(|error| error.to_string())?;
+    spit::render_bash(&bound).map_err(|error| error.to_string())
+}
 
 const PIPELINE: &str = "examples/stages/stages.spit";
 const SOURCES: &str = "examples/stages/stages.spitout";
@@ -108,7 +120,7 @@ fn a_stage_path_rule_covers_only_that_stage() {
     );
     assert!(coverage.validate(true).is_err());
     let dag = resolve(&pipeline, &inventory.unwrap()).unwrap();
-    let bound = render_bound_dag(&pipeline, &dag).unwrap();
+    let bound = bound(&pipeline, &dag).unwrap();
     assert!(bound.contains("path: preprocess/merged/group=alpha.txt"));
     assert!(bound.contains("path: results/tally/group=alpha.txt"));
 }
@@ -147,7 +159,7 @@ fn path_placeholder_names_are_reserved() {
 fn bash_marks_where_each_stage_starts() {
     let (pipeline, inventory) = parse_document(&staged()).unwrap();
     let dag = resolve(&pipeline, &inventory.unwrap()).unwrap();
-    let script = render_bash(&pipeline, &dag).unwrap();
+    let script = bash_script(&pipeline, &dag).unwrap();
     let preprocess = script.find("# ===== Stage: preprocess =====").unwrap();
     let analysis = script.find("# ===== Stage: analysis =====").unwrap();
     assert!(preprocess < script.find("# Job 1:").unwrap());
@@ -164,7 +176,7 @@ fn one_stage_runs_on_what_earlier_stages_wrote() {
     let ids: Vec<_> = dag.jobs.iter().map(|job| job.id).collect();
     assert_eq!(ids, [6, 7]);
     assert!(dag.jobs.iter().all(|job| job.dependencies.is_empty()));
-    let script = render_bash(&pipeline, &dag).unwrap();
+    let script = bash_script(&pipeline, &dag).unwrap();
     assert!(script.contains("spit_require \"$SPIT_ROOT\"/'preprocess/merged/group=alpha.txt'"));
     assert!(!script.contains("sort_lines"));
 }
@@ -414,7 +426,7 @@ fn nested_stages_nest_their_paths_and_inherit_defaults() {
     );
     let inventory = spit::parse_source_inventory("sources:\n    raw[id=1]\n").unwrap();
     let dag = resolve(&pipeline, &inventory).unwrap();
-    let bound = render_bound_dag(&pipeline, &dag).unwrap();
+    let bound = bound(&pipeline, &dag).unwrap();
     assert!(bound.contains("path: out/outer/inner/a/id=1"), "{bound}");
     assert!(bound.contains("path: own/b/id=1"), "{bound}");
 }

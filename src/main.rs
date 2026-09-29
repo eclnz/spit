@@ -7,12 +7,12 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use spit::{
-    diagnose_artifacts_at, diagnose_at, diagnose_at_with_inputs, discover_source_files,
+    bind_dag, diagnose_artifacts_at, diagnose_at, diagnose_at_with_inputs, discover_source_files,
     inspect_paths, parse_document_at, parse_input_spec_at, parse_source_inventory, parse_spit_at,
     parse_spit_without_records_at, render_artifacts, render_bash, render_bound_dag, render_dag,
-    render_dag_json, render_source_inventory, resolve, resolve_artifacts_excluding, stage_within,
-    validate_concrete_paths, validate_source_files, Diagnostic, Document, InputSource, InputSpec,
-    PathCoverage, PathTemplate, Pipeline, ResolvedDag, SourceInventory,
+    render_source_inventory, resolve, resolve_artifacts_excluding, stage_within,
+    validate_source_files, Diagnostic, Document, InputSource, InputSpec, PathCoverage,
+    PathTemplate, Pipeline, ResolvedDag, SourceInventory,
 };
 
 #[derive(Clone, Copy, PartialEq)]
@@ -520,7 +520,7 @@ fn run_jobs(
     };
     if args.strict_paths || args.paths {
         coverage.validate(args.strict_paths)?;
-        validate_concrete_paths(bound, &dag)?;
+        bind_dag(bound, &dag)?;
     }
     let checked_files = args
         .root
@@ -537,15 +537,15 @@ fn run_jobs(
                 println!("{verified}");
             }
         }
-        Command::Dag if args.json => print!("{}", render_dag_json(bound, &dag)?),
-        Command::Dag if args.paths => print!("{}", render_bound_dag(bound, &dag)?),
+        Command::Dag if args.json => print!("{}", bind_dag(bound, &dag)?.to_json()),
+        Command::Dag if args.paths => print!("{}", render_bound_dag(&bind_dag(bound, &dag)?, true)),
         Command::Dag => print!("{}", render_dag(&dag)),
         Command::Bash if inventory.artifacts.is_empty() => {
             return Err(
                 "the inventory lists no source artifacts, so there is nothing to run".into(),
             )
         }
-        Command::Bash => print!("{}", render_bash(bound, &dag)?),
+        Command::Bash => print!("{}", render_bash(&bind_dag(bound, &dag)?)?),
         Command::Artifacts | Command::Discover => unreachable!("handled before resolution"),
     }
     Ok(())

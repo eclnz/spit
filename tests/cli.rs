@@ -196,7 +196,15 @@ fn check_json_reads_the_pipeline_file_and_dag_json_emits_jobs() {
     let dag = run("dag");
     assert!(dag.status.success());
     let graph = String::from_utf8(dag.stdout).unwrap();
-    assert!(graph.starts_with("{\"version\":1,\"external_inputs\":["));
+    assert!(graph.starts_with("{\"version\":2,\"external_inputs\":["));
+    // A bound DAG: every artifact has its path and every job its command.
+    assert!(graph.contains("\"path\":\"input/alpha/01.txt\""), "{graph}");
+    assert!(graph.contains("\"command\":[[\"sort\"]"), "{graph}");
+    assert_eq!(
+        spit::BoundDag::from_json(&graph).unwrap().to_json(),
+        graph,
+        "a .spitdag reads back as written"
+    );
     assert!(graph.contains("\"product\":\"shard\",\"entities\":{\"group\":\"alpha\",\"part\":\"01\"},\"type\":{\"name\":\"Lines\",\"args\":[]}"));
     assert!(graph.contains("\"inputs\":{\"items\":["));
     assert!(graph.contains("\"depends_on\":[1,2]"));

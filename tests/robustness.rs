@@ -7,9 +7,13 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
-use spit::{
-    diagnose, parse_document, parse_pipeline, render_bash, resolve, Cardinality, Diagnostic,
-};
+use spit::{diagnose, parse_document, parse_pipeline, resolve, Cardinality, Diagnostic};
+
+/// Step 3's binding, then the Bash backend, with either's error as text.
+fn bash_script(pipeline: &spit::Pipeline, dag: &spit::ResolvedDag) -> Result<String, String> {
+    let bound = spit::bind_dag(pipeline, dag).map_err(|error| error.to_string())?;
+    spit::render_bash(&bound).map_err(|error| error.to_string())
+}
 
 struct Tree(PathBuf);
 
@@ -76,11 +80,9 @@ fn a_path_inside_another_artifacts_file_is_rejected() {
     let text = "source x [s]\npath x: in/{s}.txt\nsource z [t]\npath z: in/{t}.txt/out.txt\noperation f(a, b) -> Text\ncommand f: cp {a} {b} {output}\npath: o/{product}/{entities}\ny = f(x, z @ where(t=1))\nsources:\n    x[s=1]\n    z[t=1]\n";
     let (pipeline, inventory) = parse_document(text).unwrap();
     let error =
-        render_bash(&pipeline, &resolve(&pipeline, &inventory.unwrap()).unwrap()).unwrap_err();
+        bash_script(&pipeline, &resolve(&pipeline, &inventory.unwrap()).unwrap()).unwrap_err();
     assert!(
-        error
-            .message()
-            .contains("puts it inside `in/1.txt`, the path of `x[s=1]`, which is a file"),
+        error.contains("puts it inside `in/1.txt`, the path of `x[s=1]`, which is a file"),
         "{error}"
     );
 }
@@ -154,7 +156,7 @@ fn a_root_starting_with_a_dash_is_not_read_as_an_option() {
 fn single_quotes_and_backslashes_keep_braces_literal() {
     let text = "source x [s]\npath: {product}/{entities}\noperation f(a) -> Text\ncommand f: awk '{print $1}' \\{a\\} \"{a}\" {output}\ny = f(x)\nsources:\n    x[s=1]\n";
     let (pipeline, inventory) = parse_document(text).unwrap();
-    let script = render_bash(&pipeline, &resolve(&pipeline, &inventory.unwrap()).unwrap()).unwrap();
+    let script = bash_script(&pipeline, &resolve(&pipeline, &inventory.unwrap()).unwrap()).unwrap();
     assert!(
         script.contains("'awk' '{print $1}' '{a}' \"$SPIT_ROOT\"/'x/s=1' \"$SPIT_ROOT\"/'y/s=1'"),
         "{script}"

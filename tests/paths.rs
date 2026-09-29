@@ -2,9 +2,15 @@
 //! artifacts apart.
 
 use spit::{
-    inspect_paths, parse_document, parse_pipeline, parse_source_inventory, render_bound_dag,
-    resolve, PathRule, PathTemplate,
+    inspect_paths, parse_document, parse_pipeline, parse_source_inventory, resolve, PathRule,
+    PathTemplate,
 };
+
+/// The jobs with their bound paths, or the binding error as text.
+fn bound(pipeline: &spit::Pipeline, dag: &spit::ResolvedDag) -> Result<String, String> {
+    let bound = spit::bind_dag(pipeline, dag).map_err(|error| error.to_string())?;
+    Ok(spit::render_bound_dag(&bound, true))
+}
 
 #[test]
 fn path_coverage_exposes_default_fallbacks_and_strict_rejects_them() {
@@ -56,7 +62,7 @@ fn bound_dag_shows_port_names_and_paths_without_commands() {
         parse_source_inventory(include_str!("../examples/commands/field_survey.spitout")).unwrap();
     let dag = resolve(&pipeline, &inventory).unwrap();
     pipeline.commands.clear();
-    let report = render_bound_dag(&pipeline, &dag).unwrap();
+    let report = bound(&pipeline, &dag).unwrap();
     assert_eq!(report.matches("Job ").count(), 93);
     assert!(report.contains("moving: ground_map[site=01,visit=01]"));
     assert!(report.contains("reference: visit_dark_tiff[site=01,visit=01]"));
@@ -64,7 +70,7 @@ fn bound_dag_shows_port_names_and_paths_without_commands() {
 
     pipeline.product_paths.remove("yield_table");
     pipeline.path_template = None;
-    assert!(render_bound_dag(&pipeline, &dag)
+    assert!(bound(&pipeline, &dag)
         .unwrap_err()
         .to_string()
         .contains("no path rule"));
