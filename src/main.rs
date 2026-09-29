@@ -17,11 +17,11 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use spit::{
-    bind_dag, diagnose_at_checked, diagnose_recipe, inspect_paths, parse_input_spec_at,
-    render_artifacts, render_bound_dag, render_dag, render_diagnostics_json,
-    render_source_inventory, resolve, resolve_artifacts_excluding, stage_within,
-    validate_source_files, Diagnostic, DiagnosticSource, InputSource, InputSpec, PathTemplate,
-    Pipeline, ResolvedDag, ResolvedInputs, Severity,
+    bind_dag, diagnose_at_checked, diagnose_at_checked_with_records, diagnose_recipe,
+    inspect_paths, parse_input_spec_at, render_artifacts, render_bound_dag, render_dag,
+    render_diagnostics_json, render_source_inventory, resolve, resolve_artifacts_excluding,
+    stage_within, validate_source_files, Diagnosis, Diagnostic, DiagnosticSource, InputSource,
+    InputSpec, PathTemplate, Pipeline, ResolvedDag, ResolvedInputs, Severity,
 };
 
 #[derive(Clone, Copy, PartialEq)]
@@ -463,16 +463,17 @@ fn check(args: &CliArgs) -> Result<(), Box<dyn Error>> {
         println!("Recipe valid.");
         return Ok(());
     }
-    let checked = diagnose_at_checked(&text, None, path, None, false);
+    let diagnosis = diagnose_at_checked(&text, path, None);
     if args.has(Flag::Json) {
-        print!(
-            "{}",
-            render_diagnostics_json(&checked.diagnostics, &text, None)
-        );
+        let diagnostics = match &diagnosis {
+            Ok(checked) => &checked.warnings,
+            Err(all) => all,
+        };
+        print!("{}", render_diagnostics_json(diagnostics, &text, None));
         return Ok(());
     }
-    report(&checked.diagnostics, &text, None)?;
-    let coverage = inspect_paths(&checked.pipeline.expect("pipeline passed diagnosis"))?;
+    let checked = passed(diagnosis, |checked| &checked.warnings, &text, None)?;
+    let coverage = inspect_paths(&checked.pipeline)?;
     if args.has(Flag::PathRules) {
         println!("{coverage}");
     }
@@ -523,9 +524,8 @@ fn run_inputs(file: &str, root: Option<&str>) -> Result<Settled, Box<dyn Error>>
         format!("{file} does not name its pipeline; add a line such as `pipeline analysis.spit`")
     })?;
     let pipeline_text = read_file(&pipeline_file.display().to_string())?;
-    let checked = diagnose_at_checked(&pipeline_text, None, &pipeline_file, None, false);
-    report(&checked.diagnostics, &pipeline_text, None)?;
-    let pipeline = checked.pipeline.expect("pipeline passed diagnosis");
+    let diagnosis = diagnose_at_checked(&pipeline_text, &pipeline_file, None);
+    let pipeline = passed(diagnosis, |checked| &checked.warnings, &pipeline_text, None)?.pipeline;
     // Records written in the recipe stand in for a scan, unless a root to
     // scan is given.
     let source = match &recipe.inventory {
@@ -612,16 +612,20 @@ fn prepare(args: &CliArgs) -> Result<Prepared, Box<dyn Error>> {
     };
     let path = path.as_path();
     let pipeline_text = read_file(&path.display().to_string())?;
-    let checked = diagnose_at_checked(
+    let diagnosis = diagnose_at_checked_with_records(
         &pipeline_text,
-        Some(&records_text),
+        &records_text,
         path,
         recipe.as_ref(),
         lenient,
     );
-    report(&checked.diagnostics, &pipeline_text, Some(&records_text))?;
-    let pipeline = checked.pipeline.expect("pipeline passed diagnosis");
-    let records = checked.inventory.expect("inventory passed diagnosis");
+    let (checked, records) = passed(
+        diagnosis,
+        |(checked, _)| &checked.warnings,
+        &pipeline_text,
+        Some(&records_text),
+    )?;
+    let pipeline = checked.pipeline;
     let settled = recipe
         .unwrap_or_default()
         .resolve(&pipeline, InputSource::Inventory(records))?;
@@ -785,4 +789,24 @@ fn report(
         return Err(Reported);
     }
     Ok(())
+}
+
+/// Print what `diagnosis` found, and pass on what it checked; `warnings`
+/// finds its warnings.
+fn passed<T>(
+    diagnosis: Diagnosis<T>,
+    warnings: fn(&T) -> &[Diagnostic],
+    text: &str,
+    inventory_text: Option<&str>,
+) -> Result<T, Reported> {
+    match diagnosis {
+        Ok(checked) => {
+            report(warnings(&checked), text, inventory_text)?;
+            Ok(checked)
+        }
+        Err(all) => {
+            report(&all, text, inventory_text)?;
+            Err(Reported)
+        }
+    }
 }

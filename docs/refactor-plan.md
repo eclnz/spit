@@ -82,6 +82,9 @@ Dead public API (item 5, 15) is not visible to the compiler because `lib.rs` re-
 - **Problem:** `Diagnosis { diagnostics, pipeline: Option, inventory: Option }` forces `.expect("pipeline passed diagnosis")` at each caller.
 - **Fix:** e.g. `Result<Checked, Vec<Diagnostic>>` with warnings carried alongside, so success holds the pipeline/inventory.
 - **Done when:** none of those `expect`s remain; JSON diagnostics output byte-identical (editor contract, `tests/json.rs`).
+- **Status: done.** `Diagnosis<T = Checked>` is `Result<T, Vec<Diagnostic>>`: `Ok` exactly when no diagnostic is an error, holding `Checked { pipeline, warnings }`; `Err` holds every diagnostic in line order. It is a plain `Result`, so no new sum type. The inventory's presence depended only on whether records were passed, so records have their own entry point, `diagnose_at_checked_with_records`, returning `(Checked, SourceInventory)`; `diagnose_at_checked` lost its records and `lenient` parameters. `recover_parse_errors` returns a `Result`, and the old 94-line `diagnose_with_parser` is now `diagnose_document`, `diagnose_with_records`, `check_document`, `record_diagnostics` and `diagnose_list`. The CLI's `passed` helper prints a diagnosis and returns what it checked.
+  - No `expect` remains in `diagnostics.rs` or `main.rs`. CLI stdout, stderr and exit codes compared byte-for-byte with the previous commit over 55 runs: `check` and `check --json` on pipelines and recipes, `inputs`, `dag`, `dag --json` and `artifacts`, with parse errors in both files, resolve errors, lenient mode, a missing file, and every kind of warning. Identical.
+  - **For item 5:** this adds one public entry point (8 in all) and leaves the `RefCell` in `located_parser`.
 
 ### 4. Remove invariant-guarding `expect`/`unreachable!` in compile and CLI
 - `compile/mod.rs` (~84) `unreachable!("ordering only reports cycles")`: make `invocation_order` return a dedicated cycle error.
@@ -91,7 +94,7 @@ Dead public API (item 5, 15) is not visible to the compiler because `lib.rs` re-
 
 ### 5. Simplify the diagnostics API
 - **Where:** `src/diagnostics.rs` ~226-376, re-exported in `lib.rs`.
-- **Problem:** seven public entry points. `diagnose_artifacts_at` has no callers; `diagnose_at` and `diagnose_at_with_inputs` are test-only. `diagnose_at_checked(text, source_text, path, Option<&InputSpec>, lenient: bool)` takes a bare bool and two `Option`s. A `RefCell<Option<Pipeline>>` (~243) smuggles a value out of a closure. Redundant `.clone()` at ~288.
+- **Problem:** seven public entry points (eight after item 3). `diagnose_artifacts_at` has no callers; `diagnose_at` and `diagnose_at_with_inputs` are test-only. `diagnose_at_checked(text, source_text, path, Option<&InputSpec>, lenient: bool)` takes a bare bool and two `Option`s. A `RefCell<Option<Pipeline>>` (~243) smuggles a value out of a closure. Redundant `.clone()` at ~288.
 - **Fix:** an options struct or `enum Mode { Pipeline, Artifacts }`; the parser closure returns the value instead of the `RefCell`; drop the dead entry point and update tests that use the test-only ones.
 - **Done when:** fewer entry points, no `RefCell`, no bare `bool` parameter.
 
