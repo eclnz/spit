@@ -63,8 +63,8 @@ SPIT has no backend yet: nothing in this repository runs a `.spitdag`.
 ```text
 spit check <pipeline.spit | recipe.spitin> [--path-rules] [--strict-paths] [--json] [--stdin]
 spit inputs <recipe.spitin> [--root <directory>] [-o <file>]
-spit dag <recipe.spitin> | <pipeline.spit> <inputs.spitout | recipe.spitin | -> [--root <directory>] [--strict-paths] [--paths | --json | -o <file>]
-spit artifacts <recipe.spitin> | <pipeline.spit> <inputs.spitout | recipe.spitin | -> [--root <directory>]
+spit dag [<pipeline.spit>] <recipe.spitin | inputs.spitout | -> [--root <directory>] [--strict-paths] [--paths | --json | -o <file>]
+spit artifacts [<pipeline.spit>] <recipe.spitin | inputs.spitout | -> [--root <directory>]
 ```
 
 Files come first; options follow them. `spit help` lists the commands, and `spit help <command>` or `spit <command> --help` gives one command's options.
