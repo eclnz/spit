@@ -215,7 +215,7 @@ pub fn discover_source_files(
                     )));
                 }
             }
-            record = Some(SourceRecord::new(&product.name, binding));
+            record = Some(SourceRecord::new(&product.name, binding).at(file.clone()));
         }
         discovery.inventory.artifacts.extend(record);
     }
@@ -444,6 +444,40 @@ fn walk(
         } else if path.is_file() {
             files.push(relative);
         }
+    }
+    Ok(())
+}
+
+/// Give each record without a path the one its source's rule gives it, so
+/// that resolving jobs needs no rule for a source. `rules.source_paths` take
+/// precedence over the pipeline's. A source with no rule keeps no path.
+pub(crate) fn locate_sources(
+    pipeline: &Pipeline,
+    rules: &InputRules,
+    inventory: &mut SourceInventory,
+) -> Result<(), PathError> {
+    let mut pipeline = pipeline.clone();
+    pipeline.product_paths.extend(rules.source_paths.clone());
+    for record in &mut inventory.artifacts {
+        if record.path.is_some() || pipeline.path_template_for(&record.product).is_none() {
+            continue;
+        }
+        let Some(product) = pipeline
+            .products
+            .iter()
+            .find(|product| product.name == record.product)
+        else {
+            continue;
+        };
+        let artifact = ArtifactInstance::new(
+            &product.name,
+            product.artifact_type.clone(),
+            record.entities.clone(),
+        );
+        let path = bind_path(&pipeline, &product.dimensions, &artifact, || {
+            format!("source `{artifact}`")
+        })?;
+        record.path = Some(path);
     }
     Ok(())
 }

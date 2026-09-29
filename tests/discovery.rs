@@ -587,7 +587,7 @@ fn cli_discovers_sources_under_the_root() {
     assert!(discovered.status.success());
     assert_eq!(
         String::from_utf8(discovered.stdout).unwrap(),
-        "sources:\n    frame[subject=a,run=1]\n    frame[subject=a,run=2]\n    lut[]\n"
+        "sources:\n    frame[subject=a,run=1]: raw/sub-a/run-1.dat\n    frame[subject=a,run=2]: raw/sub-a/run-2.dat\n    lut[]: config/lut.txt\n"
     );
     let checked = run(&["check", pipeline.to_str().unwrap(), "--root", root]);
     assert!(checked.status.success());
@@ -638,7 +638,7 @@ fn discovery_reports_skipped_files_and_still_succeeds() {
         tree.path().to_str().unwrap(),
     ]);
     assert!(output.status.success(), "{}", text(&output.stderr));
-    assert_eq!(text(&output.stdout), "sources:\n    x[s=a]\n");
+    assert_eq!(text(&output.stdout), "sources:\n    x[s=a]: in/a.txt\n");
     assert!(text(&output.stderr).contains("warning: skipped `in/%41.txt`"));
 }
 
