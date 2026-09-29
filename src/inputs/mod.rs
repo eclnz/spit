@@ -23,6 +23,7 @@ use crate::paths::PathTemplate;
 
 pub(crate) use self::coverage::check_inventory;
 pub(crate) use self::coverage::collect_rule_errors;
+use self::coverage::SkippedGroup;
 use self::discover::locate_sources;
 pub use self::discover::{discover_source_files, discover_sources, Discovery};
 
@@ -209,7 +210,7 @@ impl InputSpec {
     ) -> Result<ResolvedInputs, Box<dyn Error>> {
         validate_pipeline(pipeline)?;
         self.check(pipeline)?;
-        let (inventory, skipped, root) = match source {
+        let (inventory, mut skipped, root) = match source {
             InputSource::Discover(root) => {
                 let found = discover_source_files(pipeline, &self.rules, root)?;
                 (found.inventory, found.skipped, Some(root.to_owned()))
@@ -217,6 +218,7 @@ impl InputSpec {
             InputSource::Inventory(inventory) => (inventory, Vec::new(), None),
         };
         let mut checked = check_inventory(pipeline, &self.rules, &inventory)?;
+        skipped.extend(checked.skipped.iter().map(SkippedGroup::note));
         locate_sources(pipeline, &self.rules, &mut checked.inventory)?;
         Ok(ResolvedInputs {
             inventory: checked.inventory,

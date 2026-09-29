@@ -1,42 +1,15 @@
 mod support;
 
+use support::Tree;
+
 use std::fs;
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::path::Path;
 
 use spit::{diagnose_at, parse_pipeline_at, parse_source_inventory, resolve};
 
-static NEXT_DIR: AtomicUsize = AtomicUsize::new(0);
-
-struct TestDir(PathBuf);
-
-impl TestDir {
-    fn new() -> Self {
-        let path = std::env::temp_dir().join(format!(
-            "spit-imports-{}-{}",
-            std::process::id(),
-            NEXT_DIR.fetch_add(1, Ordering::Relaxed)
-        ));
-        fs::create_dir(&path).unwrap();
-        Self(path)
-    }
-
-    fn write(&self, name: &str, contents: &str) -> PathBuf {
-        let path = self.0.join(name);
-        fs::write(&path, contents).unwrap();
-        path
-    }
-}
-
-impl Drop for TestDir {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
-    }
-}
-
 #[test]
 fn unqualified_and_nested_imports_work_in_sectioned_files() {
-    let dir = TestDir::new();
+    let dir = Tree::new("imports", &[]);
     dir.write(
         "base.spit",
         "operation clean(one)\ncommand clean: cp {input} {output}\n",
@@ -62,7 +35,7 @@ fn unqualified_and_nested_imports_work_in_sectioned_files() {
 
 #[test]
 fn import_errors_point_to_the_use_line() {
-    let dir = TestDir::new();
+    let dir = Tree::new("imports", &[]);
     dir.write("base.spit", "operation clean(one)\n");
     let main = dir.write("main.spit", "use absent from base.spit\n");
     let error = support::parse_fixture_at(&fs::read_to_string(&main).unwrap(), &main).unwrap_err();
@@ -88,7 +61,7 @@ fn import_errors_point_to_the_use_line() {
 
 #[test]
 fn diagnostics_resolve_imports_using_pipeline_location() {
-    let dir = TestDir::new();
+    let dir = Tree::new("imports", &[]);
     dir.write("base.spit", "operation clean(one)\n");
     let main = dir.write(
         "main.spit",
@@ -104,7 +77,7 @@ fn diagnostics_resolve_imports_using_pipeline_location() {
 
 #[test]
 fn an_imported_source_keeps_its_path_rule_under_its_alias() {
-    let dir = TestDir::new();
+    let dir = Tree::new("imports", &[]);
     dir.write(
         "base.spit",
         "path: input/{product}/{id}.txt\nsource raw [id]\noperation clean(one)\n",
@@ -121,7 +94,7 @@ fn an_imported_source_keeps_its_path_rule_under_its_alias() {
 
 #[test]
 fn quoted_import_path_can_contain_as() {
-    let dir = TestDir::new();
+    let dir = Tree::new("imports", &[]);
     dir.write("base as draft.spit", "operation clean(one)\n");
     let main = dir.write(
         "main.spit",
@@ -134,7 +107,7 @@ fn quoted_import_path_can_contain_as() {
 
 #[test]
 fn import_all_brings_definitions_but_not_steps() {
-    let dir = TestDir::new();
+    let dir = Tree::new("imports", &[]);
     dir.write(
         "base.spit",
         "source raw [id]\noperation clean(one)\ncommand clean: cp {input} {output}\ncleaned = clean(raw)\n",
@@ -170,7 +143,7 @@ fn imported_definitions_are_not_reported_as_unused() {
 
 #[test]
 fn an_imported_path_keeps_escaped_braces() {
-    let dir = TestDir::new();
+    let dir = Tree::new("imports", &[]);
     dir.write(
         "base.spit",
         "path: input/{{product}}/{product}/{id}.txt\nsource raw [id]\n",

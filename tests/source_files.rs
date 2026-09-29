@@ -1,12 +1,11 @@
 //! Check the field survey example against a temporary tree of empty source files.
 
-use std::fs::{self, File};
-use std::path::PathBuf;
-use std::process::{Command, Output};
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
+mod support;
 
-static NEXT_FIXTURE: AtomicUsize = AtomicUsize::new(0);
+use std::fs;
+use std::process::{Command, Output};
+
+use support::Tree;
 
 // Construct expected filenames independently of SPIT's path binder.
 fn survey_sources() -> Vec<String> {
@@ -33,55 +32,35 @@ fn survey_sources() -> Vec<String> {
     paths
 }
 
-struct Fixture(PathBuf);
-
-impl Fixture {
-    fn new(missing: Option<&str>) -> Self {
-        let suffix = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let root = std::env::temp_dir().join(format!(
-            "spit mock source tree {} {suffix} {} with spaces",
-            std::process::id(),
-            NEXT_FIXTURE.fetch_add(1, Ordering::Relaxed)
-        ));
-        fs::create_dir(&root).unwrap();
-        for relative in survey_sources() {
-            if Some(relative.as_str()) == missing {
-                continue;
-            }
-            let path = root.join(&relative);
-            fs::create_dir_all(path.parent().unwrap()).unwrap();
-            File::create(path).unwrap();
-        }
-        Self(root)
-    }
-
-    fn check(&self) -> Output {
-        Command::new(env!("CARGO_BIN_EXE_spit"))
-            .args([
-                "dag",
-                "examples/commands/field_survey.spit",
-                "examples/commands/field_survey.spitout",
-                "--root",
-                self.0.to_str().unwrap(),
-            ])
-            .output()
-            .unwrap()
-    }
+/// The survey's source files, but `missing`, in a folder whose name has
+/// spaces.
+fn survey_tree(missing: Option<&str>) -> Tree {
+    let files = survey_sources();
+    let files: Vec<_> = files
+        .iter()
+        .map(String::as_str)
+        .filter(|file| Some(*file) != missing)
+        .collect();
+    Tree::new("mock source tree with spaces", &files)
 }
 
-impl Drop for Fixture {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
-    }
+fn check(tree: &Tree) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_spit"))
+        .args([
+            "dag",
+            "examples/commands/field_survey.spit",
+            "examples/commands/field_survey.spitout",
+            "--root",
+            tree.path().to_str().unwrap(),
+        ])
+        .output()
+        .unwrap()
 }
 
 #[test]
 fn survey_compiles_when_all_required_source_files_exist() {
-    let fixture = Fixture::new(None);
-    let result = fixture.check();
+    let fixture = survey_tree(None);
+    let result = check(&fixture);
     assert!(
         result.status.success(),
         "{}",
@@ -99,8 +78,8 @@ fn survey_compiles_when_all_required_source_files_exist() {
 #[test]
 fn survey_reports_a_missing_required_file() {
     let missing = "site-01/visit-02/photos/site-01_visit-02_shot-02_photo.gpx";
-    let fixture = Fixture::new(Some(missing));
-    let result = fixture.check();
+    let fixture = survey_tree(Some(missing));
+    let result = check(&fixture);
     assert!(!result.status.success());
     let error = String::from_utf8(result.stderr).unwrap();
     assert!(
@@ -112,7 +91,7 @@ fn survey_reports_a_missing_required_file() {
 
 #[test]
 fn survey_rejects_a_photo_without_an_inventory_sidecar() {
-    let fixture = Fixture::new(None);
+    let fixture = survey_tree(None);
     let inventory = include_str!("../examples/commands/field_survey.spitout")
         .replace("    photo_imu[site=01,visit=02,shot=02]\n", "");
     let inventory_path = fixture.0.join("incomplete.spitout");
@@ -139,9 +118,9 @@ fn survey_rejects_a_photo_without_an_inventory_sidecar() {
 #[test]
 fn survey_reports_a_source_path_that_is_a_directory() {
     let directory = "config/target_classes.txt";
-    let fixture = Fixture::new(Some(directory));
+    let fixture = survey_tree(Some(directory));
     fs::create_dir(fixture.0.join(directory)).unwrap();
-    let result = fixture.check();
+    let result = check(&fixture);
     assert!(!result.status.success());
     assert!(String::from_utf8(result.stderr)
         .unwrap()
