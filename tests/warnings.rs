@@ -87,17 +87,3 @@ both = g(cleaned, image)
     // Without an inventory, no step is expected to resolve jobs.
     assert!(warnings(diagnose(text, None)).is_empty());
 }
-
-#[test]
-fn a_separate_inventory_replaces_a_malformed_inline_one() {
-    let text = "source image [subject]\noperation f(Image) -> Image\nout = f(image)\nsources:\n  image[subject=a\n";
-    assert!(diagnose(text, None).iter().any(Diagnostic::is_error));
-    let issues: Vec<_> = diagnose(text, Some("sources:\n  image[subject=b]\n"))
-        .iter()
-        .map(ToString::to_string)
-        .collect();
-    assert_eq!(
-        issues,
-        ["warning: line 4: this inline inventory is ignored because a separate inventory was supplied"]
-    );
-}

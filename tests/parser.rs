@@ -155,9 +155,9 @@ fn equals_command_keeps_colons_in_arguments() {
 
 #[test]
 fn shell_source_is_rejected_with_migration_guidance() {
-    let text = "source raw [id]\noperation copy(one)\nresult = copy(raw)\nsources:\n  raw[id=x]\nshell-source: scripts/functions.sh\n";
-    let error = support::parse_fixture(text).unwrap_err();
-    assert_eq!(error.line(), 6);
+    let text = "source raw [id]\noperation copy(one)\nresult = copy(raw)\nshell-source: scripts/functions.sh\n";
+    let error = parse_pipeline(text).unwrap_err();
+    assert_eq!(error.line(), 4);
     assert!(error.message.contains("executable available on PATH"));
 
     let error =

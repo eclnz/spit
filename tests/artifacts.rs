@@ -6,7 +6,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use spit::{
     diagnose, parse_source_inventory, render_artifacts, resolve, resolve_artifacts_excluding,
-    ArtifactReport, Gap, InputSource, InputSpec, ResolveError, ResolvedInputs, Severity,
+    ArtifactReport, Gap, InputSource, ResolveError, ResolvedInputs, Severity,
 };
 
 /// The document's pipeline, and `inventory` after the input stage.

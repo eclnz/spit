@@ -282,16 +282,18 @@ fn field_survey_reuses_image_operations_across_kinds_and_spaces() {
 
 #[test]
 fn analytics_join_key_variables_reject_mismatched_relations() {
-    let valid =
-        support::parse_fixture(include_str!("../examples/analytics/analytics.spit")).unwrap();
-    assert_eq!(resolve(&valid.0, &valid.1.unwrap()).unwrap().jobs.len(), 34);
+    let valid = parse_pipeline(include_str!("../examples/analytics/analytics.spit")).unwrap();
+    let inventory =
+        parse_source_inventory(include_str!("../examples/analytics/analytics.spitout")).unwrap();
+    assert_eq!(resolve(&valid, &inventory).unwrap().jobs.len(), 34);
 
-    let invalid = support::parse_fixture(include_str!(
+    // The conflict is in the pipeline itself, before any inventory.
+    let invalid = parse_pipeline(include_str!(
         "../examples/analytics/analytics_bad_join.spit"
     ))
     .unwrap();
     assert!(matches!(
-        resolve(&invalid.0, &invalid.1.unwrap()),
+        spit::validate_pipeline(&invalid),
         Err(ResolveError::TypeVariableConflict { .. })
     ));
 }
@@ -326,13 +328,14 @@ fn declared_output_type_cannot_contradict_inferred_type() {
 
 #[test]
 fn resolves_untyped_pipeline_by_shape_and_cardinality() {
-    let (pipeline, inventory) =
-        support::parse_fixture(include_str!("../examples/types/untyped.spit")).unwrap();
+    let pipeline = parse_pipeline(include_str!("../examples/types/untyped.spit")).unwrap();
+    let inventory =
+        parse_source_inventory(include_str!("../examples/types/untyped.spitout")).unwrap();
     assert!(pipeline
         .products
         .iter()
         .all(|product| product.artifact_type == TypeExpr::Unknown));
-    let dag = resolve(&pipeline, &inventory.unwrap()).unwrap();
+    let dag = resolve(&pipeline, &inventory).unwrap();
     assert_eq!(dag.jobs.len(), 3);
     assert_eq!(dag.jobs[2].input_artifacts().count(), 2);
     assert_eq!(dag.jobs[2].output().artifact_type, TypeExpr::Unknown);
