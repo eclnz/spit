@@ -53,6 +53,11 @@ pub enum ParseErrorKind {
     UndeclaredOperation {
         name: String,
     },
+    /// Records written in a pipeline; they belong in a `.spitout`. Each
+    /// line they take, so that one error covers them all.
+    MisplacedRecords {
+        lines: Vec<usize>,
+    },
 }
 
 impl ParseError {

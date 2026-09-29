@@ -915,6 +915,14 @@ fn recover_parse_errors<T>(
                     return (None, errors);
                 };
                 line.clear();
+                // Misplaced records are one error, however many lines.
+                if let ParseErrorKind::MisplacedRecords { lines: records } = &error.kind {
+                    for record in records {
+                        if let Some(line) = lines.get_mut(record - 1) {
+                            line.clear();
+                        }
+                    }
+                }
                 if !depends_on_invalid_operation(&error, &errors, &original_lines) {
                     errors.push(error);
                 }
