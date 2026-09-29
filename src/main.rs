@@ -647,13 +647,17 @@ fn dag(args: &CliArgs) -> Result<(), Box<dyn Error>> {
         eprintln!("note: {verified}");
     }
     eprintln!("note: {}", job_count(&prepared.pipeline, &dag));
-    if args.has(Flag::Output) {
-        let bound = bind_dag(&prepared.bound, &dag)?;
+    if args.has(Flag::Output) || args.has(Flag::Json) {
+        let mut bound = bind_dag(&prepared.bound, &dag)?;
+        bound.root = prepared.root.as_deref().map(|root| {
+            std::path::absolute(root)
+                .unwrap_or_else(|_| root.to_path_buf())
+                .to_string_lossy()
+                .into_owned()
+        });
         return write_output(args, &bound.to_json(), "the .spitdag");
     }
-    if args.has(Flag::Json) {
-        print!("{}", bind_dag(&prepared.bound, &dag)?.to_json());
-    } else if args.has(Flag::Paths) {
+    if args.has(Flag::Paths) {
         print!(
             "{}",
             render_bound_dag(&bind_dag(&prepared.bound, &dag)?, true)

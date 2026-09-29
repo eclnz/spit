@@ -85,7 +85,7 @@ pub fn bind_dag(pipeline: &Pipeline, dag: &ResolvedDag) -> Result<BoundDag, Path
             verify: commands(CommandRole::Verify).collect::<Result<_, _>>()?,
         });
     }
-    Ok(BoundDag { jobs })
+    Ok(BoundDag { root: None, jobs })
 }
 
 /// A command's arguments for one job. A many input's placeholder, which is a
