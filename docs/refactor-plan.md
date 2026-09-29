@@ -8,10 +8,42 @@ What held at audit time, so a refactor can be checked against it:
 
 - `cargo clippy --all-targets` is clean at default lints; `cargo test` passes.
 - No `unsafe`, no `#[allow]`.
-- Mutation fuzzing found no panics: the `examples/basic` files, each with one character inserted (`é`, `日`, `😀`, BOM, `# " ' \ { } ( ) [ ] < > @ ,`), deleted or truncated, run through `parse_pipeline`, `diagnose`, `parse_input_spec`, `diagnose_recipe_against`, `parse_source_inventory` (about 15k cases). The harness was throwaway; re-create it before touching item 1 or any parser code, since byte-offset slicing is the main panic risk.
-- Scale: a 200k-step chain parses and validates (about 1.5 s and 0.9 s, release); 40k source records resolve in about 0.5 s.
+- Mutation fuzzing found no panics: the `examples/basic` files, each with one character inserted (`é`, `日`, `😀`, BOM, `# " ' \ { } ( ) [ ] < > @ ,`), deleted or truncated at every position, run through `parse_pipeline`, `diagnose`, `parse_input_spec`, `diagnose_recipe_against`, `parse_source_inventory` (about 15k cases). This is now `tests/mutation_fuzz.rs`, part of the normal `cargo test` (about 5 s in a debug build). Byte-offset slicing is the main panic risk, so it is the safety net for item 1 and any parser change.
+- Scale: a 200k-step chain parses and validates (about 1.5 s and 0.9 s, release); 40k source records resolve in about 0.5 s. This is now `tests/scale.rs`, ignored by default: `cargo test --release --test scale -- --ignored`. Its bounds are loose (30 s and 10 s); they catch a stage turning quadratic or recursive, not a slow machine.
 
-**Every item is done only when** clippy and the full test suite are still clean, and, for items touching the parser or spans, the fuzz harness still reports no panics. Behaviour and output text should not change unless an item says so.
+**Every item is done only when** clippy and the full test suite (including `mutation_fuzz`) are still clean, and, for items touching `discover`, `compile`, `resolver` or `Pipeline` lookups (2, 18, 21), the scale tests still pass. Behaviour and output text should not change unless an item says so.
+
+## How to re-run the audit
+
+Run from the repo root. The lints are off by default, so they show what a refactor removed or added.
+
+```sh
+# Default lints: should stay clean.
+cargo clippy --all-targets
+
+# Everything pedantic. Noisy: mostly redundant_pub_crate, must_use and
+# missing `# Errors` docs. Count by kind to see movement.
+cargo clippy --all-targets -- -W clippy::pedantic -W clippy::nursery 2>&1 \
+  | grep -E '^(warning|error)' | sort | uniq -c | sort -rn
+
+# The structural lints behind items 2, 4, 17 and 18. Library and binary only;
+# tests index freely on purpose.
+cargo clippy --lib --bins -- \
+  -W clippy::too_many_lines -W clippy::cognitive_complexity \
+  -W clippy::indexing_slicing -W clippy::string_slice \
+  -W clippy::needless_pass_by_value -W clippy::fn_params_excessive_bools \
+  -W clippy::map_unwrap_or -W clippy::manual_let_else
+
+# Functions over 60 lines (item 19): clippy's default threshold is 100, so
+# lower it with a clippy.toml containing `too-many-lines-threshold = 60`,
+# run the too_many_lines lint above, then delete the file.
+
+# Things clippy does not flag:
+grep -rnE '\.unwrap\(\)|\.expect\(|unreachable!|as_ptr\(\)' src   # items 1, 3, 4, 6
+grep -rn 'feff' src                                                # item 9
+```
+
+Dead public API (item 5, 15) is not visible to the compiler because `lib.rs` re-exports it. Check a name with `grep -rw <name> src tests examples` and look for a use other than its definition and its `pub use`.
 
 ## Order and dependencies
 
