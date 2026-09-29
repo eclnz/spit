@@ -103,6 +103,10 @@ merged = merge(sorted @ vary(part))
 
 `source` declares a family of input artifacts. A `shard` is identified by its `group` and `part` values. `sorted` keeps those dimensions. `merge` collects all parts of each group and produces one `merged[group=...]` artifact per group. The `@ drop(part)` contract and `@ vary(part)` call must agree. For datasets whose subject and session values are unknown in advance, `discover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}` reads the observed pairs from folders and expands source artifacts over them.
 
+`require sessions count>=2 per [sub]` checks the discovered folders themselves. If subject `5` has only one session, SPIT reports that group with a count of one; `sessions` remains a discovery rule name, not a product.
+
+`skip sessions count>=2 per [sub]` instead removes subjects with fewer than two sessions before checking source files or expanding jobs. During filesystem discovery, SPIT reports each skipped subject on stderr while keeping DAG JSON on stdout.
+
 `path` lines say where artifacts live. `command` lines give the exact executable and argument order. SPIT decides which artifacts belong to each job before filling their paths into a command.
 
 ## Supply the inputs

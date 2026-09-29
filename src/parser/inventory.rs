@@ -1,7 +1,7 @@
 //! Source inventories: `sources:` records and `contexts:`, whether in their
 //! own text or inline in a pipeline document.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::model::{EntityBinding, Pipeline, SourceInventory, SourceRecord};
 
@@ -35,6 +35,10 @@ pub(crate) fn split_document(text: &str) -> DocumentText {
                 inventory_section = true;
                 inventory_line.get_or_insert(index + 1);
             }
+            _ if line.starts_with("contexts ") && line.ends_with(':') => {
+                inventory_section = true;
+                inventory_line.get_or_insert(index + 1);
+            }
             _ if line.starts_with("path:")
                 || line.starts_with("path ")
                 || line.starts_with("shell-source:")
@@ -45,6 +49,7 @@ pub(crate) fn split_document(text: &str) -> DocumentText {
                 || line.starts_with("command ")
                 || line.starts_with("verify ")
                 || line.starts_with("require ")
+                || line.starts_with("skip ")
                 || is_stage_header(line)
                 || is_step(line) =>
             {
@@ -87,9 +92,21 @@ fn is_step(line: &str) -> bool {
 /// with each record's values in its product's declared dimension order.
 pub fn render_source_inventory(inventory: &SourceInventory, pipeline: &Pipeline) -> String {
     let mut text = String::new();
-    if !inventory.contexts.is_empty() {
+    let named: BTreeSet<_> = inventory.discovered.values().flatten().collect();
+    let unnamed: Vec<_> = inventory
+        .contexts
+        .iter()
+        .filter(|context| !named.contains(context))
+        .collect();
+    if !unnamed.is_empty() {
         text.push_str("contexts:\n");
-        for context in &inventory.contexts {
+        for context in unnamed {
+            text.push_str(&format!("    [{context}]\n"));
+        }
+    }
+    for (name, bindings) in &inventory.discovered {
+        text.push_str(&format!("contexts {name}:\n"));
+        for context in bindings {
             text.push_str(&format!("    [{context}]\n"));
         }
     }
@@ -121,7 +138,7 @@ pub fn render_source_inventory(inventory: &SourceInventory, pipeline: &Pipeline)
 pub fn parse_source_inventory(text: &str) -> Result<SourceInventory, ParseError> {
     enum InventorySection {
         Sources,
-        Contexts,
+        Contexts(Option<String>),
     }
 
     let mut inventory = SourceInventory::default();
@@ -134,25 +151,44 @@ pub fn parse_source_inventory(text: &str) -> Result<SourceInventory, ParseError>
         }
         match line {
             "sources:" => section = Some(InventorySection::Sources),
-            "contexts:" => section = Some(InventorySection::Contexts),
+            "contexts:" => section = Some(InventorySection::Contexts(None)),
+            _ if line.starts_with("contexts ") && line.ends_with(':') => {
+                let name = line["contexts ".len()..line.len() - 1].trim();
+                let name = identifier(name, number, "discovery name")
+                    .map_err(|error| error.locate(original))?;
+                section = Some(InventorySection::Contexts(Some(name.to_owned())));
+            }
             _ => match section {
                 Some(InventorySection::Sources) => {
                     let record = parse_source(line, number).map_err(|e| e.locate(original))?;
                     inventory.artifacts.push(record);
                 }
-                Some(InventorySection::Contexts) => {
+                Some(InventorySection::Contexts(ref name)) => {
                     let context = parse_context(line, number).map_err(|e| e.locate(original))?;
-                    inventory.contexts.push(context);
+                    inventory.contexts.push(context.clone());
+                    if let Some(name) = name {
+                        inventory
+                            .discovered
+                            .entry(name.clone())
+                            .or_default()
+                            .push(context);
+                    }
                 }
                 None => {
                     return Err(ParseError::new(
                         number,
-                        "expected inventory section header: sources: or contexts:",
+                        "expected inventory section header: sources:, contexts:, or contexts name:",
                     )
                     .locate(original))
                 }
             },
         }
+    }
+    inventory.contexts.sort();
+    inventory.contexts.dedup();
+    for bindings in inventory.discovered.values_mut() {
+        bindings.sort();
+        bindings.dedup();
     }
     Ok(inventory)
 }
