@@ -1052,7 +1052,7 @@ fn recover_parse_errors<T>(
                 };
                 recovered.replace_range(range.clone(), &" ".repeat(range.len()));
                 // Misplaced records are one error, however many lines.
-                if let ParseErrorKind::MisplacedRecords { lines: records } = &error.kind {
+                if let ParseErrorKind::MisplacedRecords { lines: records } = error.kind() {
                     for record in records {
                         if let Some(range) = ranges.get(record - 1) {
                             recovered.replace_range(range.clone(), &" ".repeat(range.len()));
@@ -1074,7 +1074,7 @@ fn depends_on_invalid_operation(
     previous_errors: &[ParseError],
     original_lines: &[String],
 ) -> bool {
-    let ParseErrorKind::UndeclaredOperation { name: operation } = &error.kind else {
+    let ParseErrorKind::UndeclaredOperation { name: operation } = error.kind() else {
         return false;
     };
     previous_errors.iter().any(|previous| {

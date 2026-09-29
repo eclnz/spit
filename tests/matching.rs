@@ -53,7 +53,7 @@ fn a_single_input_of_an_aggregate_must_match_each_group() {
 fn an_operation_takes_at_most_one_many_input() {
     let error = parse_pipeline("operation pair(a: many A, b: many B) -> C\n").unwrap_err();
     assert!(
-        error.message.contains("at most one `many` input"),
+        error.message().contains("at most one `many` input"),
         "{error}"
     );
 }
@@ -150,7 +150,7 @@ fn selectors_are_checked_against_the_port_and_product() {
     ))
     .unwrap_err();
     assert!(
-        error.message.contains("`@ where(dimension=value, ...)`"),
+        error.message().contains("`@ where(dimension=value, ...)`"),
         "{error}"
     );
 }
@@ -275,7 +275,10 @@ stacked = stack(fitted @ vary(scenario), model @ each(scenario))
         "{PREDICT}x = predict(reading, model @ each(scenario, scenario), parameters)\n"
     ))
     .unwrap_err();
-    assert!(error.message.contains("names `scenario` twice"), "{error}");
+    assert!(
+        error.message().contains("names `scenario` twice"),
+        "{error}"
+    );
 }
 
 #[test]
@@ -346,6 +349,6 @@ fn min_rejects_a_collection_that_is_too_small() {
         ),
     ] {
         let error = parse_pipeline(&format!("{declaration}\n")).unwrap_err();
-        assert!(error.message.contains(expected), "{error}");
+        assert!(error.message().contains(expected), "{error}");
     }
 }

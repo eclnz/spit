@@ -77,6 +77,17 @@ impl ParseError {
         self.location.line.unwrap_or_default()
     }
 
+    /// Which kind of error it is, for callers that treat some specially.
+    pub fn kind(&self) -> &ParseErrorKind {
+        &self.error.kind
+    }
+
+    /// This error, as `kind`.
+    pub(crate) fn with_kind(mut self, kind: ParseErrorKind) -> Self {
+        self.error.kind = kind;
+        self
+    }
+
     /// Mark `token`, a slice of the line being parsed, as what the error is about.
     pub(crate) fn at_token(mut self, token: &str) -> Self {
         self.location

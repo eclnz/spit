@@ -158,12 +158,12 @@ fn shell_source_is_rejected_with_migration_guidance() {
     let text = "source raw [id]\noperation copy(one)\nresult = copy(raw)\nshell-source: scripts/functions.sh\n";
     let error = parse_pipeline(text).unwrap_err();
     assert_eq!(error.line(), 4);
-    assert!(error.message.contains("executable available on PATH"));
+    assert!(error.message().contains("executable available on PATH"));
 
     let error =
         parse_pipeline("products:\n  raw [id]\nshell-source: scripts/functions.sh\n").unwrap_err();
     assert_eq!(error.line(), 3);
-    assert!(error.message.contains("executable available on PATH"));
+    assert!(error.message().contains("executable available on PATH"));
 }
 
 #[test]
@@ -194,8 +194,8 @@ fn rejects_unbalanced_command_brackets_with_line_number() {
         let text = format!("source raw : Table [id]\n{line}\n");
         let error = parse_pipeline(&text).unwrap_err();
         assert_eq!(error.line(), 2, "{line}");
-        assert!(error.message.contains("normalize"), "{error}");
-        assert!(error.message.contains(expected), "{line}: {error}");
+        assert!(error.message().contains("normalize"), "{error}");
+        assert!(error.message().contains(expected), "{line}: {error}");
     }
 }
 
@@ -209,7 +209,7 @@ fn path_template_errors_are_reported_while_parsing() {
         let text = format!("source raw : Table [id]\n{line}\n");
         let error = parse_pipeline(&text).unwrap_err();
         assert_eq!(error.line(), 2, "{line}");
-        assert!(error.message.contains(expected), "{line}: {error}");
+        assert!(error.message().contains(expected), "{line}: {error}");
     }
 }
 
@@ -232,7 +232,7 @@ fn input_port_cannot_shadow_output_placeholder() {
     let error =
         parse_pipeline("source raw [id]\noperation copy(output: Image) -> Image\n").unwrap_err();
     assert_eq!(error.line(), 2);
-    assert!(error.message.contains("`output` is reserved"));
+    assert!(error.message().contains("`output` is reserved"));
 }
 
 #[test]

@@ -144,6 +144,7 @@ Dead public API (item 5, 15) is not visible to the compiler because `lib.rs` re-
 
 ### 12. Remove `Deref`/`DerefMut` from `Located<E>`
 - `src/span.rs` ~113-127 (Deref polymorphism). Replace with explicit field access/accessors and fix call sites.
+- **Status: done.** The impls are gone. The library leaned on them in five places, all for a `ParseError`'s `kind` or `message`: `ParseError::kind()` reads the kind, `with_kind` sets it as a builder, and `message()` already existed. **Public API change:** callers write `error.kind()` and `error.message()` instead of reaching `ParseFailure`'s fields through `Deref`; 14 test lines changed accordingly (fixed only where the compiler flagged them, since `Diagnostic` has a real `message` field).
 
 ### 13. Give `PathError` and `CommandError` distinct types
 - Both are `Located<String>` (`paths/template.rs` ~12, `command.rs`), so they mix silently: `bind_dag` `?`s a command error into a path error. Introduce distinct types; keep the public error text.

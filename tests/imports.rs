@@ -40,7 +40,7 @@ fn import_errors_point_to_the_use_line() {
     let main = dir.write("main.spit", "use absent from base.spit\n");
     let error = support::parse_fixture_at(&fs::read_to_string(&main).unwrap(), &main).unwrap_err();
     assert_eq!(error.line(), 1);
-    assert!(error.message.contains("not a source or operation"));
+    assert!(error.message().contains("not a source or operation"));
 
     let main = dir.write(
         "main.spit",
@@ -48,7 +48,7 @@ fn import_errors_point_to_the_use_line() {
     );
     let error = support::parse_fixture_at(&fs::read_to_string(&main).unwrap(), &main).unwrap_err();
     assert_eq!(error.line(), 2);
-    assert!(error.message.contains("conflicts with operation"));
+    assert!(error.message().contains("conflicts with operation"));
 
     dir.write(
         "base.spit",
@@ -56,7 +56,7 @@ fn import_errors_point_to_the_use_line() {
     );
     let error = support::parse_fixture_at(&fs::read_to_string(&main).unwrap(), &main).unwrap_err();
     assert_eq!(error.line(), 1);
-    assert!(error.message.contains("import cycle"));
+    assert!(error.message().contains("import cycle"));
 }
 
 #[test]
@@ -183,7 +183,7 @@ fn an_import_may_not_define_again_what_the_file_defines() {
         let error = parse_pipeline_at(&fs::read_to_string(&main).unwrap(), &main).unwrap_err();
         assert_eq!(error.line(), 2);
         assert_eq!(
-            error.message,
+            error.message(),
             format!("import conflicts with {kind} `{name}`")
         );
     }
