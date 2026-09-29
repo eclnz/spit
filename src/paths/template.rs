@@ -2,14 +2,19 @@
 //! shares this: it knows the model, and nothing about resolving or discovery.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::fmt::{self, Write};
+use std::fmt;
 
 use crate::model::{ArtifactInstance, DirectoryDiscovery, Pipeline};
 use crate::span::Located;
 use crate::template::{parse_template, Part};
 
+crate::span::message_error!(
+    /// What is wrong with a path rule, or with the paths it gives artifacts.
+    PathProblem
+);
+
 /// An error in a path rule, or about the paths it gives artifacts.
-pub type PathError = Located<String>;
+pub type PathError = Located<PathProblem>;
 
 /// What a `{name}` in a path template stands for.
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
@@ -147,6 +152,17 @@ pub(crate) fn error(message: impl Into<String>) -> PathError {
     PathError::new(message)
 }
 
+/// Fail unless `root`, where a dataset's source files are, is a directory.
+pub(crate) fn require_directory(root: &std::path::Path) -> Result<(), PathError> {
+    if root.is_dir() {
+        return Ok(());
+    }
+    Err(error(format!(
+        "source root is not a directory: `{}`",
+        root.display()
+    )))
+}
+
 /// Bind `artifact` to its relative path. `dimensions` gives the product's
 /// declared dimension order, which `{entities}` follows. `label` names the
 /// path in errors: a product's rule, or an artifact.
@@ -187,29 +203,10 @@ pub(crate) fn bind_path(
                 relative.push_str(&components.join("/"));
             }
             PathPart::Placeholder(PathPlaceholder::Entities) => {
-                let bindings = dimensions
-                    .iter()
-                    .map(|dimension| {
-                        let value = artifact.entities.0.get(dimension).ok_or_else(|| {
-                            error(format!(
-                                "artifact `{artifact}` lacks dimension `{dimension}`"
-                            ))
-                        })?;
-                        Ok(format!(
-                            "{}={}",
-                            encode_component(dimension),
-                            encode_component(value)
-                        ))
-                    })
-                    .collect::<Result<Vec<_>, PathError>>()?;
-                if bindings.is_empty() {
-                    relative.push_str("global");
-                } else {
-                    relative.push_str(&bindings.join("__"));
-                }
+                relative.push_str(&entities_component(artifact, dimensions)?);
             }
             PathPart::Placeholder(placeholder @ PathPlaceholder::Dimension(dimension)) => {
-                let value = artifact.entities.0.get(dimension).ok_or_else(|| {
+                let value = artifact.entities.get(dimension).ok_or_else(|| {
                     error(format!(
                         "path template for `{}` uses absent dimension `{dimension}`",
                         artifact.product
@@ -226,10 +223,37 @@ pub(crate) fn bind_path(
     Ok(relative)
 }
 
+/// What `{entities}` binds to: each dimension as `dimension=value`, in
+/// declared order and joined by `__`, or `global` for none.
+fn entities_component(
+    artifact: &ArtifactInstance,
+    dimensions: &[String],
+) -> Result<String, PathError> {
+    let bindings = dimensions
+        .iter()
+        .map(|dimension| {
+            let value = artifact.entities.get(dimension).ok_or_else(|| {
+                error(format!(
+                    "artifact `{artifact}` lacks dimension `{dimension}`"
+                ))
+            })?;
+            Ok(format!(
+                "{}={}",
+                encode_component(dimension),
+                encode_component(value)
+            ))
+        })
+        .collect::<Result<Vec<_>, PathError>>()?;
+    if bindings.is_empty() {
+        return Ok("global".to_owned());
+    }
+    Ok(bindings.join("__"))
+}
+
 /// Why `relative` cannot name a file under the root, if it cannot.
 pub(crate) fn unusable_path(relative: &str) -> Option<&'static str> {
     if relative.starts_with('/') {
-        Some("must be relative to `SPIT_ROOT`, not start with `/`")
+        Some("must be relative to the dataset root, not start with `/`")
     } else if relative.ends_with('/') {
         Some("must name a file, not end with `/`")
     } else if relative.split('/').any(str::is_empty) {
@@ -244,16 +268,19 @@ pub(crate) fn unusable_path(relative: &str) -> Option<&'static str> {
     }
 }
 
+/// `value` as one path component: ASCII letters, digits and `-` as they
+/// are, every other byte as `%XX`.
 pub(crate) fn encode_component(value: &str) -> String {
-    let mut encoded = String::new();
-    for byte in value.bytes() {
-        if byte.is_ascii_alphanumeric() || byte == b'-' {
-            encoded.push(char::from(byte));
-        } else {
-            write!(encoded, "%{byte:02X}").unwrap();
-        }
-    }
-    encoded
+    value
+        .bytes()
+        .map(|byte| {
+            if byte.is_ascii_alphanumeric() || byte == b'-' {
+                char::from(byte).to_string()
+            } else {
+                format!("%{byte:02X}")
+            }
+        })
+        .collect()
 }
 
 pub(crate) fn decode_component(encoded: &str) -> Option<String> {

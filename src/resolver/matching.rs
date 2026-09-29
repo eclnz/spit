@@ -3,12 +3,11 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::compile::StepShape;
-use crate::error::ResolveError;
+use crate::compile::{CompiledStep, StepShape};
+use crate::error::{PortSite, ResolveError};
 use crate::model::{
-    ArtifactInstance, ArtifactKey, EntityBinding, Gap, Invocation, Job, OperationDef, ProductDef,
+    ArtifactInstance, ArtifactKey, EntityBinding, Gap, Invocation, Job, OperationDef,
 };
-use crate::types::TypeExpr;
 
 use super::family;
 
@@ -22,13 +21,11 @@ pub(super) struct Expansion {
 /// Enumerate one step's jobs: one per driving artifact, or per group of the
 /// many input, with every other input matched to that job's context.
 pub(super) fn expand_step(
-    invocation: &Invocation,
-    operation: &OperationDef,
-    shape: &StepShape,
-    outputs: &[(&ProductDef, &TypeExpr)],
+    step: &CompiledStep<'_>,
     artifacts: &BTreeMap<String, Vec<ArtifactInstance>>,
     incomplete: &BTreeSet<ArtifactKey>,
 ) -> Vec<Expansion> {
+    let (invocation, shape) = (step.invocation, &step.shape);
     let candidates: Vec<Vec<&ArtifactInstance>> = invocation
         .inputs
         .iter()
@@ -36,10 +33,9 @@ pub(super) fn expand_step(
             family(artifacts, binding.product_name())
                 .iter()
                 .filter(|artifact| {
-                    binding
-                        .pinned
-                        .iter()
-                        .all(|(dimension, value)| artifact.entities.0.get(dimension) == Some(value))
+                    binding.pinned.iter().all(|(dimension, value)| {
+                        artifact.entities.get(dimension) == Some(value.as_str())
+                    })
                 })
                 .collect()
         })
@@ -50,71 +46,83 @@ pub(super) fn expand_step(
         .flat_map(|(group, driven)| {
             contexts.iter().map(move |values| {
                 let mut context = group.clone();
-                context.0.extend(values.0.clone());
+                context.extend(values);
                 (context, driven.clone())
             })
         });
-    let mut expansions = Vec::new();
-    for (context, driven) in jobs {
-        let mut gaps = Vec::new();
-        if let Some(minimum) = operation.minimum_collection {
-            if driven.len() < minimum {
-                gaps.push(Gap::Unmatched(ResolveError::CollectionTooSmall {
-                    operation: operation.name.clone(),
-                    output_product: invocation.output_product().to_owned(),
-                    port: operation.inputs[shape.driver].name.clone(),
-                    context: context.clone(),
-                    minimum,
-                    found: driven.len(),
-                }));
-            }
+    jobs.map(|(context, driven)| expand_job(step, &candidates, incomplete, &context, &driven))
+        .collect()
+}
+
+/// One job of `step`: the driver's `driven` artifacts, every other input
+/// matched to `context`, and the gaps that leave it incomplete.
+fn expand_job(
+    step: &CompiledStep<'_>,
+    candidates: &[Vec<&ArtifactInstance>],
+    incomplete: &BTreeSet<ArtifactKey>,
+    context: &EntityBinding,
+    driven: &[ArtifactInstance],
+) -> Expansion {
+    let (invocation, operation, shape) = (step.invocation, step.operation, &step.shape);
+    let mut gaps = Vec::new();
+    if let Some(minimum) = operation.minimum_collection {
+        if driven.len() < minimum {
+            gaps.push(Gap::Unmatched(ResolveError::CollectionTooSmall {
+                site: port_site(invocation, operation, shape.driver),
+                context: Box::new(context.clone()),
+                minimum,
+                found: driven.len(),
+            }));
         }
-        let mut inputs = Vec::new();
-        for (index, port) in operation.inputs.iter().enumerate() {
-            let bound = if index == shape.driver {
-                driven.clone()
-            } else {
-                match match_input(
-                    invocation,
-                    operation,
-                    index,
-                    &shape.joins[index],
-                    &candidates[index],
-                    &context,
-                ) {
-                    Ok(artifact) => vec![artifact],
-                    Err(gap) => {
-                        gaps.push(gap);
-                        continue;
-                    }
-                }
-            };
-            gaps.extend(
-                bound
-                    .iter()
-                    .filter(|artifact| incomplete.contains(&artifact.key()))
-                    .map(|artifact| Gap::Blocked {
-                        port: port.name.clone(),
-                        artifact: artifact.clone(),
-                    }),
-            );
-            inputs.push(bound);
-        }
-        let outputs = outputs
-            .iter()
-            .map(|(product, artifact_type)| ArtifactInstance {
-                product: product.name.clone(),
-                artifact_type: (*artifact_type).clone(),
-                entities: context.clone(),
-            })
-            .collect();
-        expansions.push(Expansion {
-            inputs,
-            outputs,
-            gaps,
-        });
     }
-    expansions
+    let mut inputs = Vec::new();
+    for (index, port) in operation.inputs.iter().enumerate() {
+        let bound = if index == shape.driver {
+            driven.to_vec()
+        } else {
+            let joins = &shape.joins[index];
+            match match_input(
+                invocation,
+                operation,
+                index,
+                joins,
+                &candidates[index],
+                context,
+            ) {
+                Ok(artifact) => vec![artifact],
+                Err(gap) => {
+                    gaps.push(gap);
+                    continue;
+                }
+            }
+        };
+        gaps.extend(
+            bound
+                .iter()
+                .filter(|artifact| incomplete.contains(&artifact.key()))
+                .map(|artifact| Gap::Blocked {
+                    port: port.name.clone(),
+                    artifact: artifact.clone(),
+                }),
+        );
+        inputs.push(bound);
+    }
+    // Every artifact in a family has the same type, so the type inferred
+    // statically for each output is the type of each job's artifact.
+    let outputs = step
+        .outputs
+        .iter()
+        .map(|(product, artifact_type)| ArtifactInstance {
+            product: product.name.clone(),
+            artifact_type: artifact_type.clone(),
+            entities: context.clone(),
+        })
+        .collect();
+    Expansion {
+        inputs,
+        outputs,
+        gaps,
+    }
 }
 
 /// The driver's artifacts grouped by the step's groups: one artifact per
@@ -156,36 +164,29 @@ fn match_input(
         .filter(|candidate| {
             joins
                 .iter()
-                .all(|dimension| candidate.entities.0.get(dimension) == context.0.get(dimension))
+                .all(|dimension| candidate.entities.get(dimension) == context.get(dimension))
         })
         .collect();
     let [artifact] = matches.as_slice() else {
-        let (operation, output_product, port, product, context) = (
-            operation.name.clone(),
-            invocation.output_product().to_owned(),
-            operation.inputs[index].name.clone(),
-            invocation.inputs[index].product.clone(),
-            Box::new(context.clone()),
-        );
+        let site = port_site(invocation, operation, index);
+        let context = Box::new(context.clone());
         return Err(Gap::Unmatched(if matches.is_empty() {
-            ResolveError::MissingInput {
-                operation,
-                output_product,
-                port,
-                product,
-                context,
-            }
+            ResolveError::MissingInput { site, context }
         } else {
-            ResolveError::AmbiguousInput {
-                operation,
-                output_product,
-                port,
-                product,
-                context,
-            }
+            ResolveError::AmbiguousInput { site, context }
         }));
     };
     Ok((**artifact).clone())
+}
+
+/// Where input `index` of a step is bound.
+fn port_site(invocation: &Invocation, operation: &OperationDef, index: usize) -> PortSite {
+    PortSite {
+        operation: operation.name.clone(),
+        output_product: invocation.output_product().to_owned(),
+        port: operation.inputs[index].name.clone(),
+        product: invocation.inputs[index].product.clone(),
+    }
 }
 
 /// Every combination of the values the inputs broadcast with `@ each(...)`:
@@ -215,7 +216,7 @@ fn broadcast_contexts(
             .flat_map(|context| {
                 values.iter().map(move |value| {
                     let mut combined = context.clone();
-                    combined.0.extend(value.0.clone());
+                    combined.extend(value);
                     combined
                 })
             })

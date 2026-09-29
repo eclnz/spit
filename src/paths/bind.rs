@@ -5,7 +5,7 @@ use std::fmt;
 use std::path::Path;
 
 use super::rules::inspect_paths;
-use super::template::{bind_path, enclosing_path, error, PathError};
+use super::template::{bind_path, enclosing_path, error, require_directory, PathError};
 use crate::model::{ArtifactInstance, ArtifactKey, Pipeline, ResolvedDag};
 
 /// Check the files needed to start the resolved DAG under a dataset root.
@@ -15,12 +15,7 @@ pub fn validate_source_files(
     dag: &ResolvedDag,
     root: &Path,
 ) -> Result<VerifiedFiles, PathError> {
-    if !root.is_dir() {
-        return Err(error(format!(
-            "source root is not a directory: `{}`",
-            root.display()
-        )));
-    }
+    require_directory(root)?;
     check_rules(pipeline, dag)?;
     let paths = bound_paths(pipeline, dag)?;
     let outputs = output_keys(dag);
@@ -29,7 +24,8 @@ pub fn validate_source_files(
         if outputs.contains(&artifact) {
             continue;
         }
-        // With `--stage`, what other stages make must already exist.
+        // In a DAG cut to one stage, as by `ResolvedDag::only_stage`, what
+        // other stages make must already exist.
         let made_by = pipeline
             .invocations
             .iter()

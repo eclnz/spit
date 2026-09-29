@@ -3,15 +3,11 @@
 
 mod support;
 
+use support::bound;
+
 use spit::{
     inspect_paths, parse_pipeline, parse_source_inventory, resolve, PathRule, PathTemplate,
 };
-
-/// The jobs with their bound paths, or the binding error as text.
-fn bound(pipeline: &spit::Pipeline, dag: &spit::ResolvedDag) -> Result<String, String> {
-    let bound = spit::bind_dag(pipeline, dag).map_err(|error| error.to_string())?;
-    Ok(spit::render_bound_dag(&bound, true))
-}
 
 #[test]
 fn path_coverage_exposes_default_fallbacks_and_strict_rejects_them() {

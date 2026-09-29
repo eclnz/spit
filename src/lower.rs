@@ -10,10 +10,10 @@ use crate::model::{
     Pipeline, ProductDef, SourceInventory, StageDef,
 };
 use crate::parser::{
-    parse_source_inventory, parse_syntax, split_document, FlowStep, Kind, ParseError,
+    parse_source_inventory, parse_syntax, split_document, without_bom, FlowStep, Kind, ParseError,
     ParseErrorKind, PathRule, Rule, SourceMap, Statement, StatementKind, Step, Syntax,
 };
-use crate::shape::{step_context, BoundInput};
+use crate::shape::{step_context, step_driver, BoundInput};
 use crate::span::Place;
 use crate::types::TypeExpr;
 
@@ -50,7 +50,7 @@ impl PipelineBuilder {
         self.pipeline.commands.push(command);
     }
 
-    fn add_invocation(&mut self, invocation: Invocation, step: Step) {
+    fn add_invocation(&mut self, invocation: Invocation, step: &Step) {
         for output in &invocation.outputs {
             self.lines.invocations.insert(output.clone(), step.clone());
         }
@@ -122,13 +122,12 @@ impl PipelineBuilder {
             .find(|operation| &operation.name == name)
             .ok_or_else(|| {
                 let place = step.operation();
-                let mut error = ParseError::new(
+                ParseError::new(
                     place.line,
                     format!("operation `{name}` must be declared before its first flow step"),
                 )
-                .within(&place);
-                error.kind = ParseErrorKind::UndeclaredOperation { name: name.clone() };
-                error
+                .within(&place)
+                .with_kind(ParseErrorKind::UndeclaredOperation { name: name.clone() })
             })?;
         let dimensions = inferred_dimensions(invocation, operation, &self.pipeline);
         for (index, output) in outputs.iter().enumerate() {
@@ -142,7 +141,7 @@ impl PipelineBuilder {
             );
             self.add_product(product, step.output_at(index));
         }
-        self.add_invocation(invocation.clone(), step.clone());
+        self.add_invocation(invocation.clone(), step);
         Ok(())
     }
 }
@@ -183,10 +182,10 @@ fn lower_statement(
     statement: &Statement,
 ) -> Result<(), ParseError> {
     match &statement.kind {
-        StatementKind::Import => apply_import(builder, imports, statement.place.clone())?,
+        StatementKind::Import => apply_import(builder, imports, &statement.place)?,
         StatementKind::Stage { name, place } => builder.add_stage(name, place.clone())?,
         StatementKind::Product(product, place) => {
-            builder.add_product(product.clone(), place.clone())
+            builder.add_product(product.clone(), place.clone());
         }
         StatementKind::Discover(discovery) => {
             if builder.inputs.discovery(&discovery.name).is_some() {
@@ -198,17 +197,17 @@ fn lower_statement(
             builder.inputs.discoveries.push(discovery.clone());
         }
         StatementKind::Operation(operation, place) => {
-            builder.add_operation(operation.clone(), place.clone())
+            builder.add_operation(operation.clone(), place.clone());
         }
         StatementKind::Constraint(constraint, rule) => {
-            builder.add_constraint(constraint.clone(), rule.clone())
+            builder.add_constraint(constraint.clone(), rule.clone());
         }
         StatementKind::Command(command, place) => {
-            builder.add_command(command.clone(), place.clone())
+            builder.add_command(command.clone(), place.clone());
         }
         StatementKind::Path(rule) => builder.add_path(rule, statement.place.line)?,
         StatementKind::Step(invocation, step) => {
-            builder.add_invocation(invocation.clone(), step.clone())
+            builder.add_invocation(invocation.clone(), step);
         }
         StatementKind::FlowStep(flow) => builder.add_flow_step(flow)?,
     }
@@ -244,8 +243,10 @@ fn inferred_dimensions(
     // Otherwise the step is invalid; the resolver reports why.
     inputs
         .filter(|inputs| inputs.len() == invocation.inputs.len())
-        .and_then(|inputs| step_context(&inputs))
-        .map(|(_, context)| context)
+        .and_then(|inputs| {
+            let (_, groups) = step_driver(&inputs)?;
+            Some(step_context(&inputs, &groups))
+        })
         .or_else(|| invocation.inputs.first().and_then(dimensions))
         .unwrap_or_default()
 }
@@ -262,7 +263,7 @@ pub(crate) struct ParsedDocument {
 /// Parse a pipeline. Input rules and records are not part of one: they
 /// belong in a `.spitin` recipe and a `.spitout`.
 pub fn parse_pipeline(text: &str) -> Result<Pipeline, ParseError> {
-    parse_document_with_imports(text, &BTreeMap::new(), Kind::Pipeline)
+    parse_document_with_imports(without_bom(text), &BTreeMap::new(), Kind::Pipeline)
         .map(|document| document.pipeline)
 }
 
@@ -283,20 +284,18 @@ pub(crate) fn parse_document_with_imports(
                 .err()
                 .is_some_and(|error| error.line() < line);
             if !earlier {
-                let mut error = ParseError::new(
+                let records = document
+                    .inventory
+                    .lines()
+                    .enumerate()
+                    .filter(|(_, text)| !text.trim().is_empty())
+                    .map(|(index, _)| index + 1)
+                    .collect();
+                return Err(ParseError::new(
                     line,
                     "`sources:` and `contexts:` records belong in a .spitout, not a pipeline",
-                );
-                error.kind = ParseErrorKind::MisplacedRecords {
-                    lines: document
-                        .inventory
-                        .lines()
-                        .enumerate()
-                        .filter(|(_, text)| !text.trim().is_empty())
-                        .map(|(index, _)| index + 1)
-                        .collect(),
-                };
-                return Err(error);
+                )
+                .with_kind(ParseErrorKind::MisplacedRecords { lines: records }));
             }
             None
         }

@@ -9,12 +9,10 @@ use spit::{
 fn artifact(product: &str, pairs: &[(&str, &str)]) -> SourceRecord {
     SourceRecord::new(
         product,
-        EntityBinding(
-            pairs
-                .iter()
-                .map(|(k, v)| ((*k).into(), (*v).into()))
-                .collect(),
-        ),
+        pairs
+            .iter()
+            .map(|(k, v)| ((*k).into(), (*v).into()))
+            .collect::<EntityBinding>(),
     )
 }
 
@@ -101,8 +99,8 @@ fn expands_one_to_one_over_two_runs() {
     let dag = resolve(&pipeline, &inventory).unwrap();
     assert_eq!(dag.jobs.len(), 2);
     assert_eq!(dag.jobs[0].output().product, "denoised");
-    assert_eq!(dag.jobs[0].output().entities.0["run"], "1");
-    assert_eq!(dag.jobs[1].output().entities.0["run"], "2");
+    assert_eq!(dag.jobs[0].output().entities.get("run"), Some("1"));
+    assert_eq!(dag.jobs[1].output().entities.get("run"), Some("2"));
 }
 
 #[test]
@@ -120,8 +118,8 @@ fn reuses_less_specific_t1_across_runs() {
     let dag = resolve(&pipeline, &inventory).unwrap();
     assert_eq!(dag.jobs.len(), 2);
     assert_eq!(dag.jobs[0].inputs[1], dag.jobs[1].inputs[1]);
-    assert_eq!(dag.jobs[0].output().entities.0["run"], "1");
-    assert_eq!(dag.jobs[1].output().entities.0["run"], "2");
+    assert_eq!(dag.jobs[0].output().entities.get("run"), Some("1"));
+    assert_eq!(dag.jobs[1].output().entities.get("run"), Some("2"));
 }
 
 #[test]
@@ -138,7 +136,7 @@ fn reports_missing_input() {
 
     assert!(matches!(
         resolve(&pipeline, &inventory),
-        Err(ResolveError::MissingInput { port, .. }) if port == "reference"
+        Err(ResolveError::MissingInput { site: spit::PortSite { port, .. }, .. }) if port == "reference"
     ));
 }
 
@@ -186,7 +184,7 @@ fn checks_types_before_concrete_expansion() {
 
     assert!(matches!(
         resolve(&pipeline, &SourceInventory::default()),
-        Err(ResolveError::TypeMismatch { port, .. }) if port == "reference"
+        Err(ResolveError::TypeMismatch { site: spit::PortSite { port, .. }, .. }) if port == "reference"
     ));
 }
 
@@ -237,7 +235,7 @@ fn aggregates_each_fixed_dimension_group() {
     assert!(dag
         .jobs
         .iter()
-        .all(|job| !job.output().entities.0.contains_key("run")));
+        .all(|job| !job.output().entities.binds("run")));
     assert_ne!(dag.jobs[0].output().entities, dag.jobs[1].output().entities);
 }
 
@@ -423,7 +421,7 @@ fn named_ports_and_declared_aggregate_shape_are_checked() {
         Some("run")
     );
     let dag = resolve(&pipeline, &inventory.unwrap()).unwrap();
-    assert_eq!(dag.jobs[0].output().entities.0.len(), 1);
+    assert_eq!(dag.jobs[0].output().entities.len(), 1);
 
     let wrong_vary = text.replace("vary(run)", "vary(site)");
     let (pipeline, inventory) = support::parse_fixture(&wrong_vary).unwrap();

@@ -9,10 +9,64 @@ use crate::types::TypeExpr;
 
 pub type ArtifactType = TypeExpr;
 
+/// The value an artifact has for each of its product's dimensions.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Ord, PartialOrd)]
-pub struct EntityBinding(pub BTreeMap<String, String>);
+pub struct EntityBinding(BTreeMap<String, String>);
+
+impl From<BTreeMap<String, String>> for EntityBinding {
+    fn from(values: BTreeMap<String, String>) -> Self {
+        Self(values)
+    }
+}
+
+impl FromIterator<(String, String)> for EntityBinding {
+    fn from_iter<I: IntoIterator<Item = (String, String)>>(values: I) -> Self {
+        Self(values.into_iter().collect())
+    }
+}
 
 impl EntityBinding {
+    /// The value bound to `dimension`, if any.
+    pub fn get(&self, dimension: &str) -> Option<&str> {
+        self.0.get(dimension).map(String::as_str)
+    }
+
+    /// Whether `dimension` has a value.
+    pub fn binds(&self, dimension: &str) -> bool {
+        self.0.contains_key(dimension)
+    }
+
+    /// Each dimension and its value, in dimension name order.
+    pub fn iter(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.0
+            .iter()
+            .map(|(dimension, value)| (dimension.as_str(), value.as_str()))
+    }
+
+    /// The dimensions with a value, in name order.
+    pub fn dimensions(&self) -> impl Iterator<Item = &str> {
+        self.0.keys().map(String::as_str)
+    }
+
+    /// How many dimensions have a value.
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    /// Add `other`'s values, replacing any this has for the same dimensions.
+    pub(crate) fn extend(&mut self, other: &Self) {
+        self.0.extend(
+            other
+                .0
+                .iter()
+                .map(|(key, value)| (key.clone(), value.clone())),
+        );
+    }
+
     pub fn from_pairs<const N: usize>(pairs: [(&str, &str); N]) -> Self {
         Self(
             pairs
@@ -107,6 +161,19 @@ impl fmt::Display for EntityBinding {
         let parts: Vec<_> = self.0.iter().map(|(k, v)| format!("{k}={v}")).collect();
         f.write_str(&parts.join(","))
     }
+}
+
+/// An artifact as `product[dimension=value,...]`, its entities in the order
+/// given.
+pub(crate) fn identity<'a>(
+    product: &str,
+    entities: impl IntoIterator<Item = (&'a str, &'a str)>,
+) -> String {
+    let bindings: Vec<_> = entities
+        .into_iter()
+        .map(|(dimension, value)| format!("{dimension}={value}"))
+        .collect();
+    format!("{product}[{}]", bindings.join(","))
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -225,9 +292,7 @@ pub(crate) const DEFAULT_OUTPUT: &str = "output";
 
 /// A placeholder a command has without its operation naming the port.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum DefaultPort {
-    /// `{output}`: an operation's only, unnamed output.
-    Output,
+pub(crate) enum DefaultPort {
     /// `{input}`: an operation's only input, when unnamed.
     Input,
     /// `{input1}`, `{input2}`, ...: the unnamed inputs of an operation with
@@ -251,7 +316,6 @@ impl DefaultPort {
     /// The name between the braces.
     pub fn name(self) -> String {
         match self {
-            Self::Output => DEFAULT_OUTPUT.to_owned(),
             Self::Input => "input".to_owned(),
             Self::InputAt(number) => format!("input{number}"),
             Self::Inputs => "inputs".to_owned(),
@@ -571,17 +635,27 @@ impl Pipeline {
         &self,
         inventory: &SourceInventory,
     ) -> Result<BTreeMap<String, Vec<ArtifactInstance>>, ResolveError> {
+        // Looked up once, not once per record; the first declaration of a
+        // name wins, as when searching.
+        let mut products = BTreeMap::new();
+        for product in &self.products {
+            products.entry(product.name.as_str()).or_insert(product);
+        }
+        let produced: BTreeSet<_> = self
+            .invocations
+            .iter()
+            .flat_map(|invocation| &invocation.outputs)
+            .map(String::as_str)
+            .collect();
         let mut artifacts: BTreeMap<String, Vec<ArtifactInstance>> = BTreeMap::new();
         let mut seen = BTreeSet::new();
         for record in &inventory.artifacts {
-            let product = self
-                .products
-                .iter()
-                .find(|product| product.name == record.product)
-                .ok_or_else(|| ResolveError::UnknownProduct {
+            let product = products.get(record.product.as_str()).ok_or_else(|| {
+                ResolveError::UnknownProduct {
                     name: record.product.clone(),
-                })?;
-            if !self.is_source(&record.product) {
+                }
+            })?;
+            if produced.contains(record.product.as_str()) {
                 return Err(ResolveError::InvalidDefinition {
                     subject: DefinitionSubject::Product(record.product.clone()),
                     detail: format!(
@@ -616,8 +690,7 @@ impl Pipeline {
                 .push(source);
         }
         for (name, family) in &mut artifacts {
-            let product = self.products.iter().find(|product| &product.name == name);
-            if let Some(product) = product {
+            if let Some(product) = products.get(name.as_str()) {
                 product.sort_family(family);
             }
         }
@@ -719,6 +792,16 @@ pub enum CountRequirement {
     AtLeast(usize),
 }
 
+impl CountRequirement {
+    /// Whether `found` artifacts or bindings meet the requirement.
+    pub fn allows(&self, found: usize) -> bool {
+        match *self {
+            Self::Exactly(count) => found == count,
+            Self::AtLeast(count) => found >= count,
+        }
+    }
+}
+
 impl fmt::Display for CountRequirement {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -788,6 +871,11 @@ pub struct Job {
 
 impl Job {
     /// The first output artifact.
+    ///
+    /// # Panics
+    ///
+    /// If the job has no outputs. A resolved job always has one, since
+    /// every operation declares at least one output.
     pub fn output(&self) -> &ArtifactInstance {
         &self.outputs[0]
     }

@@ -55,18 +55,35 @@ impl fmt::Display for Json {
                 f.write_str("]")
             }
             Self::Object(fields) => {
-                f.write_str("{")?;
-                for (index, (key, value)) in fields.iter().enumerate() {
-                    if index > 0 {
-                        f.write_str(",")?;
-                    }
-                    write_string(f, key)?;
-                    write!(f, ":{value}")?;
-                }
-                f.write_str("}")
+                write_object(f, fields.iter().map(|(key, value)| (key.as_str(), value)))
             }
         }
     }
+}
+
+/// An object of borrowed fields, written exactly as the same fields in a
+/// [`Json::Object`], without copying them into one.
+pub(crate) struct ObjectRef<'a>(pub(crate) &'a [(&'a str, &'a Json)]);
+
+impl fmt::Display for ObjectRef<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write_object(f, self.0.iter().map(|&(key, value)| (key, value)))
+    }
+}
+
+fn write_object<'a>(
+    f: &mut fmt::Formatter<'_>,
+    fields: impl Iterator<Item = (&'a str, &'a Json)>,
+) -> fmt::Result {
+    f.write_str("{")?;
+    for (index, (key, value)) in fields.enumerate() {
+        if index > 0 {
+            f.write_str(",")?;
+        }
+        write_string(f, key)?;
+        write!(f, ":{value}")?;
+    }
+    f.write_str("}")
 }
 
 fn write_string(f: &mut fmt::Formatter<'_>, text: &str) -> fmt::Result {

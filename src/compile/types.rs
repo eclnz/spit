@@ -3,7 +3,7 @@
 
 use std::collections::BTreeMap;
 
-use crate::error::{ResolveError, TypeConflict};
+use crate::error::{PortSite, ResolveError, TypeConflict};
 use crate::model::{Invocation, OperationDef, ProductDef};
 use crate::types::{Substitutions, TypeExpr, TypeUnifyError};
 
@@ -72,6 +72,12 @@ fn unify_port(
     expected: &TypeExpr,
     actual: &TypeExpr,
 ) -> Result<(), ResolveError> {
+    let site = || PortSite {
+        operation: operation.name.clone(),
+        output_product: output_product.to_owned(),
+        port: port.to_owned(),
+        product: product.to_owned(),
+    };
     substitutions
         .unify(expected, actual)
         .map(|_| ())
@@ -81,10 +87,7 @@ fn unify_port(
                 previous,
                 required,
             } => ResolveError::TypeVariableConflict {
-                operation: operation.name.clone(),
-                output_product: output_product.to_owned(),
-                port: port.to_owned(),
-                product: product.to_owned(),
+                site: site(),
                 conflict: Box::new(TypeConflict {
                     variable,
                     previous,
@@ -92,10 +95,7 @@ fn unify_port(
                 }),
             },
             _ => ResolveError::TypeMismatch {
-                operation: operation.name.clone(),
-                output_product: output_product.to_owned(),
-                port: port.to_owned(),
-                product: product.to_owned(),
+                site: site(),
                 expected: Box::new(expected.clone()),
                 found: Box::new(actual.clone()),
             },

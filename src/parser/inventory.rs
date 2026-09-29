@@ -2,6 +2,7 @@
 //! `.spitout` or written in a `.spitin` recipe.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt;
 
 use crate::model::{
     ArtifactInstance, EntityBinding, InputRules, Pipeline, SourceInventory, SourceRecord,
@@ -84,160 +85,245 @@ pub fn render_source_inventory(
     pipeline: &Pipeline,
     rules: &InputRules,
 ) -> String {
-    let mut pipeline_order: Vec<String> = Vec::new();
-    for dimension in pipeline
-        .products
-        .iter()
-        .flat_map(|product| &product.dimensions)
-    {
-        if !pipeline_order.contains(dimension) {
-            pipeline_order.push(dimension.clone());
-        }
+    InventoryText {
+        inventory,
+        pipeline,
+        rules,
     }
-    let context_lines = |contexts: Vec<&EntityBinding>, first: &[String]| {
-        let mut order = first.to_vec();
-        order.extend(
-            pipeline_order
-                .iter()
-                .filter(|d| !first.contains(d))
-                .cloned(),
-        );
-        let mut contexts = contexts;
-        contexts.sort_by(|left, right| left.cmp_in(right, &order));
-        let order: Vec<&str> = order.iter().map(String::as_str).collect();
-        contexts
-            .into_iter()
-            .map(|context| format!("    [{}]\n", in_order(context, &order)))
-            .collect::<String>()
-    };
-    let mut text = String::new();
-    let mut source_paths = inventory.source_paths.clone();
-    source_paths.extend(rules.source_paths.clone());
-    let mut path_pipeline = pipeline.clone();
-    path_pipeline.product_paths.extend(source_paths.clone());
-    if !source_paths.is_empty() {
-        text.push_str("source_paths:\n");
-        for (name, template) in &source_paths {
-            text.push_str(&format!("    {name}: {template}\n"));
+    .to_string()
+}
+
+/// A `.spitout`: its contexts, unnamed then by discovery rule, and its
+/// source records.
+struct InventoryText<'a> {
+    inventory: &'a SourceInventory,
+    pipeline: &'a Pipeline,
+    rules: &'a InputRules,
+}
+
+/// The records a `.spitout` writes under a discovered context instead of
+/// under `sources:`: for each context, each remaining dimension's value (or
+/// none) and the products with a record there.
+type Nested<'a> = BTreeMap<EntityBinding, BTreeMap<EntityBinding, Vec<&'a str>>>;
+
+impl fmt::Display for InventoryText<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let inventory = self.inventory;
+        let mut source_paths = inventory.source_paths.clone();
+        source_paths.extend(self.rules.source_paths.clone());
+        if !source_paths.is_empty() {
+            writeln!(f, "source_paths:")?;
+            for (name, template) in &source_paths {
+                writeln!(f, "    {name}: {template}")?;
+            }
+            writeln!(f)?;
         }
-        text.push('\n');
+        let mut located = self.pipeline.clone();
+        located.product_paths.extend(source_paths);
+        let (nested, flat) = self.nest_records(&located);
+        if !flat.is_empty() {
+            writeln!(f, "sources:")?;
+            for record in flat {
+                self.write_record(f, record, &located)?;
+            }
+            if !inventory.contexts.is_empty() {
+                writeln!(f)?;
+            }
+        }
+        let named: BTreeSet<_> = inventory.discovered.values().flatten().collect();
+        let unnamed: Vec<_> = inventory
+            .contexts
+            .iter()
+            .filter(|context| !named.contains(context))
+            .collect();
+        if !unnamed.is_empty() {
+            writeln!(f, "contexts:")?;
+            self.write_contexts(f, unnamed, &[])?;
+            writeln!(f)?;
+        }
+        for (name, bindings) in &inventory.discovered {
+            writeln!(f, "contexts {name}:")?;
+            let declared = self
+                .rules
+                .discovery(name)
+                .map_or(&[][..], |rule| rule.dimensions.as_slice());
+            let mut bindings: Vec<_> = bindings.iter().collect();
+            bindings.sort_by(|left, right| left.cmp_in(right, declared));
+            let order: Vec<_> = declared.iter().map(String::as_str).collect();
+            for (index, binding) in bindings.into_iter().enumerate() {
+                if index > 0 {
+                    writeln!(f)?;
+                }
+                let groups = nested.get(binding);
+                let colon = if groups.is_some() { ":" } else { "" };
+                writeln!(f, "    [{}]{colon}", in_order(binding, &order))?;
+                if let Some(groups) = groups {
+                    self.write_groups(f, groups)?;
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+impl InventoryText<'_> {
+    /// The pipeline's dimensions, each once, in the order its products
+    /// declare them.
+    fn pipeline_order(&self) -> Vec<String> {
+        let mut order: Vec<String> = Vec::new();
+        for dimension in self
+            .pipeline
+            .products
+            .iter()
+            .flat_map(|product| &product.dimensions)
+        {
+            if !order.contains(dimension) {
+                order.push(dimension.clone());
+            }
+        }
+        order
     }
 
-    // A single named discovery supplies one unambiguous parent for records
-    // with those dimensions. At most one remaining dimension can be grouped.
-    let nested = if inventory.discovered.len() == 1 {
-        inventory
-            .discovered
-            .iter()
-            .next()
-            .and_then(|(name, contexts)| {
-                rules
-                    .discovery(name)
-                    .map(|rule| (name, contexts, &rule.dimensions))
-            })
-    } else {
-        None
-    };
-    let mut by_context: BTreeMap<EntityBinding, BTreeMap<EntityBinding, Vec<&str>>> =
-        BTreeMap::new();
-    let mut flat = Vec::new();
-    for record in &inventory.artifacts {
-        if unexpected_path(record, &path_pipeline).is_some() {
-            flat.push(record);
-            continue;
-        }
-        let Some((_, contexts, dimensions)) = nested else {
-            flat.push(record);
-            continue;
+    /// Split the records into those written under their discovered context
+    /// and those written under `sources:`. A single named discovery gives
+    /// each record with its dimensions one unambiguous context, and at most
+    /// one remaining dimension can be grouped under it. A record whose path
+    /// is not the one its rule gives stays flat, so the path is kept.
+    fn nest_records<'a>(&'a self, located: &Pipeline) -> (Nested<'a>, Vec<&'a SourceRecord>) {
+        let inventory = self.inventory;
+        let discovery = match inventory.discovered.iter().next() {
+            Some((name, contexts)) if inventory.discovered.len() == 1 => self
+                .rules
+                .discovery(name)
+                .map(|rule| (contexts, &rule.dimensions)),
+            _ => None,
         };
-        let Some(parent) = record.entities.project(dimensions) else {
-            flat.push(record);
-            continue;
-        };
-        let remainder = EntityBinding(
-            record
-                .entities
-                .0
-                .iter()
-                .filter(|(dimension, _)| !dimensions.contains(dimension))
-                .map(|(dimension, value)| (dimension.clone(), value.clone()))
-                .collect(),
-        );
-        if !contexts.contains(&parent) || remainder.0.len() > 1 {
-            flat.push(record);
-            continue;
+        let mut nested: Nested<'a> = BTreeMap::new();
+        let mut flat = Vec::new();
+        for record in &inventory.artifacts {
+            let under = discovery.and_then(|(contexts, dimensions)| {
+                if unexpected_path(record, located).is_some() {
+                    return None;
+                }
+                let parent = record.entities.project(dimensions)?;
+                let remainder: EntityBinding = record
+                    .entities
+                    .iter()
+                    .filter(|(dimension, _)| !dimensions.iter().any(|named| named == dimension))
+                    .map(|(dimension, value)| (dimension.to_owned(), value.to_owned()))
+                    .collect();
+                (contexts.contains(&parent) && remainder.len() <= 1).then_some((parent, remainder))
+            });
+            match under {
+                Some((parent, remainder)) => nested
+                    .entry(parent)
+                    .or_default()
+                    .entry(remainder)
+                    .or_default()
+                    .push(&record.product),
+                None => flat.push(record),
+            }
         }
-        by_context
-            .entry(parent)
-            .or_default()
-            .entry(remainder)
-            .or_default()
-            .push(&record.product);
+        (nested, flat)
     }
-    if !flat.is_empty() {
-        text.push_str("sources:\n");
-        for record in flat {
-            let declared: Vec<_> = pipeline
+
+    /// A record under `sources:`, with its path only when its rule does not
+    /// give that path.
+    fn write_record(
+        &self,
+        f: &mut fmt::Formatter<'_>,
+        record: &SourceRecord,
+        located: &Pipeline,
+    ) -> fmt::Result {
+        if record.entities.is_empty() {
+            write!(f, "    {}", record.product)?;
+        } else {
+            let declared: Vec<_> = self
+                .pipeline
                 .products
                 .iter()
                 .find(|product| product.name == record.product)
-                .map_or(Vec::new(), |product| {
+                .map_or_else(Vec::new, |product| {
                     product.dimensions.iter().map(String::as_str).collect()
                 });
-            if record.entities.0.is_empty() {
-                text.push_str(&format!("    {}", record.product));
-            } else {
-                text.push_str(&format!(
-                    "    {}[{}]",
-                    record.product,
-                    in_order(&record.entities, &declared)
-                ));
-            }
-            if let Some(path) = unexpected_path(record, &path_pipeline) {
-                text.push_str(&format!(": {path}"));
-            }
-            text.push('\n');
+            let entities = in_order(&record.entities, &declared);
+            write!(f, "    {}[{entities}]", record.product)?;
         }
-        if !inventory.contexts.is_empty() {
-            text.push('\n');
+        if let Some(path) = unexpected_path(record, located) {
+            write!(f, ": {path}")?;
         }
+        writeln!(f)
     }
 
-    let named: BTreeSet<_> = inventory.discovered.values().flatten().collect();
-    let unnamed: Vec<_> = inventory
-        .contexts
-        .iter()
-        .filter(|context| !named.contains(context))
-        .collect();
-    if !unnamed.is_empty() {
-        text.push_str("contexts:\n");
-        text.push_str(&context_lines(unnamed, &[]));
-        text.push('\n');
-    }
-    for (name, bindings) in &inventory.discovered {
-        text.push_str(&format!("contexts {name}:\n"));
-        let declared = rules
-            .discovery(name)
-            .map_or(&[][..], |rule| rule.dimensions.as_slice());
-        let mut bindings: Vec<_> = bindings.iter().collect();
-        bindings.sort_by(|left, right| left.cmp_in(right, declared));
-        let order: Vec<_> = declared.iter().map(String::as_str).collect();
-        for (index, binding) in bindings.into_iter().enumerate() {
-            if index > 0 {
-                text.push('\n');
-            }
-            let groups = by_context.get(binding);
-            text.push_str(&format!(
-                "    [{}]{}\n",
-                in_order(binding, &order),
-                if groups.is_some() { ":" } else { "" }
-            ));
-            if let Some(groups) = groups {
-                render_nested_groups(&mut text, groups, pipeline, &pipeline_order);
+    /// Each of `contexts` on its own line, ordered and written by `first`'s
+    /// dimensions, then the pipeline's in the order its products name them.
+    fn write_contexts(
+        &self,
+        f: &mut fmt::Formatter<'_>,
+        mut contexts: Vec<&EntityBinding>,
+        first: &[String],
+    ) -> fmt::Result {
+        let mut order = first.to_vec();
+        for dimension in self.pipeline_order() {
+            if !order.contains(&dimension) {
+                order.push(dimension);
             }
         }
+        contexts.sort_by(|left, right| left.cmp_in(right, &order));
+        let order: Vec<&str> = order.iter().map(String::as_str).collect();
+        for context in contexts {
+            writeln!(f, "    [{}]", in_order(context, &order))?;
+        }
+        Ok(())
     }
-    text
+
+    /// The products under one context: those with no further dimension, then
+    /// each further value, with runs of values that list the same products
+    /// written as one group, such as `[run=1,2]:`.
+    fn write_groups(
+        &self,
+        f: &mut fmt::Formatter<'_>,
+        groups: &BTreeMap<EntityBinding, Vec<&str>>,
+    ) -> fmt::Result {
+        let products = &self.pipeline.products;
+        let sorted_names = |names: &[&str]| {
+            let mut names = names.to_vec();
+            names.sort_by_key(|name| {
+                products
+                    .iter()
+                    .position(|product| product.name == *name)
+                    .unwrap_or(usize::MAX)
+            });
+            names.join(", ")
+        };
+        if let Some(names) = groups.get(&EntityBinding::default()) {
+            writeln!(f, "        {}", sorted_names(names))?;
+        }
+        let pipeline_order = self.pipeline_order();
+        let mut remaining: Vec<_> = groups
+            .iter()
+            .filter(|(binding, _)| !binding.is_empty())
+            .collect();
+        remaining.sort_by(|(left, _), (right, _)| left.cmp_in(right, &pipeline_order));
+        let mut remaining = remaining
+            .into_iter()
+            .filter_map(|(binding, names)| {
+                let (dimension, value) = binding.iter().next()?;
+                Some((dimension, value, sorted_names(names)))
+            })
+            .peekable();
+        while let Some((dimension, value, names)) = remaining.next() {
+            let mut values = vec![value];
+            while let Some((_, next, _)) = remaining.next_if(|(next_dimension, _, next_names)| {
+                *next_dimension == dimension && *next_names == names
+            }) {
+                values.push(next);
+            }
+            writeln!(f, "        [{dimension}={}]:", values.join(","))?;
+            writeln!(f, "            {names}")?;
+        }
+        Ok(())
+    }
 }
 
 /// Preserve a legacy record path without a matching rule so rendering an
@@ -262,58 +348,10 @@ fn unexpected_path<'a>(record: &'a SourceRecord, pipeline: &Pipeline) -> Option<
     (expected.as_deref() != Some(given)).then_some(given)
 }
 
-fn render_nested_groups(
-    text: &mut String,
-    groups: &BTreeMap<EntityBinding, Vec<&str>>,
-    pipeline: &Pipeline,
-    pipeline_order: &[String],
-) {
-    let sorted_names = |names: &[&str]| {
-        let mut names = names.to_vec();
-        names.sort_by_key(|name| {
-            pipeline
-                .products
-                .iter()
-                .position(|product| product.name == *name)
-                .unwrap_or(usize::MAX)
-        });
-        names.join(", ")
-    };
-    if let Some(names) = groups.get(&EntityBinding::default()) {
-        text.push_str(&format!("        {}\n", sorted_names(names)));
-    }
-    let mut remaining: Vec<_> = groups
-        .iter()
-        .filter(|(binding, _)| !binding.0.is_empty())
-        .collect();
-    remaining.sort_by(|(left, _), (right, _)| left.cmp_in(right, pipeline_order));
-    let mut index = 0;
-    while index < remaining.len() {
-        let (binding, names) = remaining[index];
-        let (dimension, value) = binding.0.iter().next().expect("one remaining dimension");
-        let names = sorted_names(names);
-        let mut values = vec![value.as_str()];
-        index += 1;
-        while index < remaining.len() {
-            let (next, next_names) = remaining[index];
-            let Some((next_dimension, next_value)) = next.0.iter().next() else {
-                break;
-            };
-            if next_dimension != dimension || sorted_names(next_names) != names {
-                break;
-            }
-            values.push(next_value);
-            index += 1;
-        }
-        text.push_str(&format!("        [{dimension}={}]:\n", values.join(",")));
-        text.push_str(&format!("            {names}\n"));
-    }
-}
-
 /// `binding` as `dim=value,...`, in the order of `declared`, then any
 /// dimension it does not name.
 fn in_order(binding: &EntityBinding, declared: &[&str]) -> String {
-    let mut values: Vec<_> = binding.0.iter().collect();
+    let mut values: Vec<_> = binding.iter().collect();
     values.sort_by_key(|(dimension, _)| {
         declared
             .iter()
@@ -343,6 +381,7 @@ fn parse_inventory_with_lines(
         Contexts(Option<String>),
     }
 
+    let text = super::without_bom(text);
     let mut inventory = SourceInventory::default();
     let mut record_lines = Vec::new();
     let mut section = None;
@@ -374,6 +413,9 @@ fn parse_inventory_with_lines(
             Some(Header::Contexts(Some(name))) => {
                 let name = identifier(name, number, "discovery name")
                     .map_err(|error| error.locate(original))?;
+                // A named section says the discovery ran, even when every
+                // context it found was skipped and the section is empty.
+                inventory.discovered.entry(name.to_owned()).or_default();
                 section = Some(InventorySection::Contexts(Some(name.to_owned())));
                 parent = None;
                 group = None;
@@ -413,9 +455,10 @@ fn parse_inventory_with_lines(
                     }
                 }
                 Some(InventorySection::Contexts(ref name)) => {
-                    if line.starts_with('[') && parent.as_ref().is_some_and(|(_, at)| indent > *at)
-                    {
-                        let (context, _) = parent.as_ref().expect("checked above");
+                    let nests_under = parent
+                        .as_ref()
+                        .filter(|(_, at)| line.starts_with('[') && indent > *at);
+                    if let Some((context, _)) = nests_under {
                         let values =
                             parse_group(line, number, context).map_err(|e| e.locate(original))?;
                         group = Some((values, indent));
@@ -544,7 +587,7 @@ fn parse_group(
         .split_once('=')
         .ok_or_else(|| ParseError::new(number, "expected nested group: [dimension=value,...]:"))?;
     let dimension = identifier(dimension.trim(), number, "source dimension")?;
-    if parent.0.contains_key(dimension) {
+    if parent.binds(dimension) {
         return Err(ParseError::new(
             number,
             format!("nested group repeats dimension `{dimension}`"),
@@ -554,7 +597,7 @@ fn parse_group(
     for value in comma_items(values, number)? {
         let one = parse_bindings(&format!("{dimension}={value}]"), number)?;
         let mut combined = parent.clone();
-        combined.0.extend(one.0);
+        combined.extend(&one);
         if expanded.contains(&combined) {
             return Err(ParseError::new(
                 number,
@@ -619,5 +662,5 @@ fn parse_bindings(bindings: &str, number: usize) -> Result<EntityBinding, ParseE
             .at_token(item));
         }
     }
-    Ok(EntityBinding(values))
+    Ok(EntityBinding::from(values))
 }

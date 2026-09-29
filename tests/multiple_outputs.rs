@@ -1,23 +1,11 @@
 //! An operation with several outputs: one job owns them all, and the outputs
 //! and verifications are checked before resolution.
 
-use spit::{
-    parse_pipeline, parse_source_inventory, render_dag, resolve, validate_commands, ResolvedDag,
-};
+mod support;
 
-/// The jobs with their bound paths, or the binding error as text.
-fn bound(pipeline: &spit::Pipeline, dag: &spit::ResolvedDag) -> Result<String, String> {
-    let bound = spit::bind_dag(pipeline, dag).map_err(|error| error.to_string())?;
-    Ok(spit::render_bound_dag(&bound, true))
-}
+use support::{bound, outputs};
 
-fn outputs(dag: &ResolvedDag) -> Vec<String> {
-    dag.jobs
-        .iter()
-        .flat_map(|job| &job.outputs)
-        .map(ToString::to_string)
-        .collect()
-}
+use spit::{parse_pipeline, parse_source_inventory, render_dag, resolve, validate_commands};
 
 const TISSUES: &str = "\
 path: {product}/{entities}.txt

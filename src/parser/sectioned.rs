@@ -3,14 +3,10 @@
 
 use crate::model::{CommandRole, Invocation};
 
-use super::declarations::{
-    parse_command, parse_coverage_rule, parse_discover, parse_invocation_parts, parse_path,
-    parse_product,
-};
+use super::declarations::{parse_discover, parse_invocation_parts, parse_path};
 use super::keyword::{Header, Keyword};
 use super::lexical::{comma_items, identifier, strip_comment};
-use super::operation::parse_operation;
-use super::source_map::{name_place, rule_place, step_place, tail_place};
+use super::source_map::step_place;
 use super::{ParseError, StatementKind, Syntax, SHELL_SOURCE_REMOVED};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -88,49 +84,47 @@ fn sectioned_line(
             ));
         }
         Some((Keyword::Path, _)) => {
-            push(StatementKind::Path(parse_path(None, original, line, number)?));
+            push(StatementKind::Path(parse_path(
+                None, original, line, number,
+            )?));
             *section = None;
         }
-        _ => match section {
-            Some(Section::Products) => {
-                let product = parse_product(line, number)?;
-                let place = name_place(original, number, line, &product.name);
-                push(StatementKind::Product(product, place));
-            }
-            Some(Section::Operations) => {
-                let operation = parse_operation(line, number)?;
-                let place = name_place(original, number, line, &operation.name);
-                push(StatementKind::Operation(operation, place));
-            }
-            Some(Section::Pipeline) => {
-                let invocation = parse_invocation(line, number)?;
-                let step = step_place(original, number, &invocation);
-                push(StatementKind::Step(invocation, step));
-            }
-            Some(Section::Constraints) => {
-                let rule = parse_coverage_rule(line, number)?;
-                let place = rule_place(original, number, &rule);
-                push(StatementKind::Constraint(rule, place));
-            }
-            Some(Section::Commands) => {
-                let command = match line.strip_prefix("verify ") {
-                    Some(declaration) => {
-                        parse_command(declaration.trim(), number, CommandRole::Verify)?
-                    }
-                    None => parse_command(line, number, CommandRole::Run)?,
-                };
-                let place = tail_place(original, number, command.template.as_str());
-                push(StatementKind::Command(command, place));
-            }
-            None => {
+        _ => {
+            let Some(section) = *section else {
                 return Err(ParseError::new(
                     number,
                     "expected a section header: products:, operations:, pipeline:, constraints:, or commands:",
-                ))
-            }
-        },
+                ));
+            };
+            push(section_statement(section, original, line, number)?);
+        }
     }
     Ok(())
+}
+
+/// A line inside `section`, as the statement that section holds.
+fn section_statement(
+    section: Section,
+    original: &str,
+    line: &str,
+    number: usize,
+) -> Result<StatementKind, ParseError> {
+    match section {
+        Section::Products => StatementKind::product(original, line, number),
+        Section::Operations => StatementKind::operation(original, line, number),
+        Section::Pipeline => {
+            let invocation = parse_invocation(line, number)?;
+            let step = step_place(original, number, &invocation);
+            Ok(StatementKind::Step(invocation, step))
+        }
+        Section::Constraints => StatementKind::constraint(original, line, number),
+        Section::Commands => match line.strip_prefix("verify ") {
+            Some(declaration) => {
+                StatementKind::command(original, declaration.trim(), number, CommandRole::Verify)
+            }
+            None => StatementKind::command(original, line, number, CommandRole::Run),
+        },
+    }
 }
 
 fn parse_invocation(line: &str, number: usize) -> Result<Invocation, ParseError> {

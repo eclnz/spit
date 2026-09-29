@@ -4,7 +4,12 @@
 
 #![allow(dead_code)]
 
-use spit::{parse_pipeline, parse_source_inventory, ParseError, Pipeline, SourceInventory};
+use std::process::{Command, Output};
+
+use spit::{
+    parse_pipeline, parse_source_inventory, Diagnostic, ParseError, Pipeline, ResolvedDag,
+    SourceInventory,
+};
 
 /// The pipeline part of `text`, and its records, if any. The pipeline keeps
 /// its line numbers; the records are numbered from their own first line.
@@ -124,4 +129,45 @@ impl Drop for Tree {
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.0);
     }
+}
+
+/// The jobs with their bound paths, or the binding error as text.
+pub fn bound(pipeline: &spit::Pipeline, dag: &spit::ResolvedDag) -> Result<String, String> {
+    let bound = spit::bind_dag(pipeline, dag).map_err(|error| error.to_string())?;
+    Ok(spit::render_bound_dag(&bound, true))
+}
+
+/// Only the diagnostics that are errors.
+pub fn errors(diagnostics: Vec<Diagnostic>) -> Vec<Diagnostic> {
+    diagnostics
+        .into_iter()
+        .filter(Diagnostic::is_error)
+        .collect()
+}
+
+/// Every job output, as `product[entities]`, in job order.
+pub fn outputs(dag: &ResolvedDag) -> Vec<String> {
+    dag.jobs
+        .iter()
+        .flat_map(|job| &job.outputs)
+        .map(ToString::to_string)
+        .collect()
+}
+
+/// Each diagnostic as the command line prints it, without columns.
+pub fn rendered(diagnostics: &[Diagnostic]) -> Vec<String> {
+    diagnostics.iter().map(ToString::to_string).collect()
+}
+
+/// Command output as text.
+pub fn text(bytes: &[u8]) -> String {
+    String::from_utf8_lossy(bytes).into_owned()
+}
+
+/// Run the `spit` binary with `args`.
+pub fn spit(args: &[&str]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_spit"))
+        .args(args)
+        .output()
+        .unwrap()
 }
