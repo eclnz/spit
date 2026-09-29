@@ -240,3 +240,23 @@ fn a_byte_order_mark_is_ignored_by_every_entry_point() {
         found[0].display_in(broken, None).to_string()
     );
 }
+
+#[test]
+fn deeply_nested_type_arguments_are_an_error_not_a_crash() {
+    let nested = |depth: usize| {
+        format!(
+            "source raw : {}B{} [id]\n",
+            "A<".repeat(depth),
+            ">".repeat(depth)
+        )
+    };
+    assert!(diagnose(&nested(64), None).is_empty());
+    for depth in [65, 100_000] {
+        let found = diagnose(&nested(depth), None);
+        assert_eq!(found.len(), 1);
+        assert_eq!(
+            found[0].message,
+            "type arguments nest more than 64 levels deep"
+        );
+    }
+}

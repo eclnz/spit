@@ -299,6 +299,7 @@ pub fn parse_type_expr(text: &str, signature: bool) -> Result<TypeExpr, TypePars
         text,
         offset: 0,
         signature,
+        depth: 0,
     };
     let ty = parser.expression()?;
     parser.skip_space();
@@ -312,10 +313,17 @@ pub fn parse_type_expr(text: &str, signature: bool) -> Result<TypeExpr, TypePars
 }
 
 /// Reads one type expression from `text`, from `offset` on.
+/// How deeply type arguments may nest. Real types nest a few levels; the
+/// limit keeps parsing and unification, which recurse once per level, from
+/// exhausting the stack on text such as `A<A<A<...>>>`.
+const MAX_TYPE_DEPTH: usize = 64;
+
 struct Parser<'a> {
     text: &'a str,
     offset: usize,
     signature: bool,
+    /// How many `<` the parser is inside.
+    depth: usize,
 }
 
 impl Parser<'_> {
@@ -400,6 +408,19 @@ impl Parser<'_> {
 
     /// The type arguments after `<`, through the closing `>`.
     fn arguments(&mut self) -> Result<Vec<TypeExpr>, TypeParseError> {
+        if self.depth == MAX_TYPE_DEPTH {
+            return Err(TypeParseError::new(
+                self.here(),
+                format!("type arguments nest more than {MAX_TYPE_DEPTH} levels deep"),
+            ));
+        }
+        self.depth += 1;
+        let args = self.argument_list();
+        self.depth -= 1;
+        args
+    }
+
+    fn argument_list(&mut self) -> Result<Vec<TypeExpr>, TypeParseError> {
         let mut args = Vec::new();
         loop {
             args.push(self.expression()?);
