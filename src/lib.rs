@@ -27,11 +27,11 @@ pub use diagnostics::{
     diagnose_recipe_against, render_diagnostics_json, Checked, Context, Diagnosis, Diagnostic,
     DiagnosticSource, Severity,
 };
-pub use error::{DefinitionSubject, ResolveError, TypeConflict};
+pub use error::{DefinitionSubject, PortSite, ResolveError, TypeConflict};
 pub use imports::parse_pipeline_at;
 pub use inputs::{
     discover_source_files, discover_sources, parse_input_spec, parse_input_spec_at, Discovery,
-    InputSource, InputSpec, ResolvedInputs,
+    InputError, InputSource, InputSpec, ResolvedInputs,
 };
 pub use lower::parse_pipeline;
 pub use model::{

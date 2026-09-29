@@ -138,7 +138,7 @@ fn reports_missing_input() {
 
     assert!(matches!(
         resolve(&pipeline, &inventory),
-        Err(ResolveError::MissingInput { port, .. }) if port == "reference"
+        Err(ResolveError::MissingInput { site: spit::PortSite { port, .. }, .. }) if port == "reference"
     ));
 }
 
@@ -186,7 +186,7 @@ fn checks_types_before_concrete_expansion() {
 
     assert!(matches!(
         resolve(&pipeline, &SourceInventory::default()),
-        Err(ResolveError::TypeMismatch { port, .. }) if port == "reference"
+        Err(ResolveError::TypeMismatch { site: spit::PortSite { port, .. }, .. }) if port == "reference"
     ));
 }
 

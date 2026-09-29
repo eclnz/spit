@@ -11,6 +11,7 @@ mod discover;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
+use std::fmt;
 use std::path::{Path, PathBuf};
 
 use crate::compile::validate_pipeline;
@@ -19,7 +20,7 @@ use crate::imports::parse_located_document;
 use crate::lower::{parse_document_with_imports, ParsedDocument};
 use crate::model::{ArtifactInstance, CoverageGap, InputRules, Pipeline, SourceInventory};
 use crate::parser::{strip_comment, without_bom, Header, Keyword, Kind, ParseError, SourceMap};
-use crate::paths::PathTemplate;
+use crate::paths::{PathError, PathTemplate};
 
 pub(crate) use self::coverage::check_inventory;
 pub(crate) use self::coverage::collect_rule_errors;
@@ -163,18 +164,14 @@ fn finish_spec(
 impl InputSpec {
     /// Check the recipe against the pipeline's source declarations, without
     /// reading any file or record.
-    pub fn check(&self, pipeline: &Pipeline) -> Result<(), Box<dyn Error>> {
+    pub fn check(&self, pipeline: &Pipeline) -> Result<(), InputError> {
         for name in self.rules.source_paths.keys() {
+            let product = name.clone();
             if !pipeline.is_source(name) {
-                return Err(format!(
-                    "input path `{name}` must name a source product in the pipeline"
-                )
-                .into());
+                return Err(InputError::NotASource { product });
             }
             if pipeline.product_paths.contains_key(name) {
-                return Err(
-                    format!("source `{name}` has path rules in both .spit and .spitin").into(),
-                );
+                return Err(InputError::PathInBoth { product });
             }
         }
         if !self.rules.discoveries.is_empty() {
@@ -183,11 +180,8 @@ impl InputSpec {
                     && !self.rules.source_paths.contains_key(&product.name)
                     && pipeline.path_template_for(&product.name).is_none()
                 {
-                    return Err(format!(
-                        "source `{}` needs a path rule in .spitin for directory discovery",
-                        product.name
-                    )
-                    .into());
+                    let product = product.name.clone();
+                    return Err(InputError::NoDiscoveryPath { product });
                 }
             }
         }
@@ -211,7 +205,7 @@ impl InputSpec {
         &self,
         pipeline: &Pipeline,
         source: InputSource<'_>,
-    ) -> Result<ResolvedInputs, Box<dyn Error>> {
+    ) -> Result<ResolvedInputs, InputError> {
         validate_pipeline(pipeline)?;
         self.check(pipeline)?;
         let located = with_source_paths(pipeline, &self.rules);
@@ -246,6 +240,59 @@ impl InputSpec {
             .get_or_insert_with(PathTemplate::default_output);
     }
 }
+
+/// Why a recipe cannot be applied to a pipeline, or to a dataset.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum InputError {
+    /// The pipeline does not compile, a rule does not fit it, or the
+    /// records break a rule.
+    Resolve(ResolveError),
+    /// A path rule is invalid, or a file under the root is missing or
+    /// cannot be read.
+    Path(PathError),
+    /// The recipe sets a path for a product that is not a source.
+    NotASource { product: String },
+    /// A source has a path rule in both the pipeline and the recipe.
+    PathInBoth { product: String },
+    /// Directory discovery finds every source's files, and this one has no
+    /// path rule to find them by.
+    NoDiscoveryPath { product: String },
+}
+
+impl From<ResolveError> for InputError {
+    fn from(error: ResolveError) -> Self {
+        Self::Resolve(error)
+    }
+}
+
+impl From<PathError> for InputError {
+    fn from(error: PathError) -> Self {
+        Self::Path(error)
+    }
+}
+
+impl fmt::Display for InputError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Resolve(error) => error.fmt(f),
+            Self::Path(error) => error.fmt(f),
+            Self::NotASource { product } => write!(
+                f,
+                "input path `{product}` must name a source product in the pipeline"
+            ),
+            Self::PathInBoth { product } => write!(
+                f,
+                "source `{product}` has path rules in both .spit and .spitin"
+            ),
+            Self::NoDiscoveryPath { product } => write!(
+                f,
+                "source `{product}` needs a path rule in .spitin for directory discovery"
+            ),
+        }
+    }
+}
+
+impl Error for InputError {}
 
 /// Where the input stage gets its inventory.
 pub enum InputSource<'a> {

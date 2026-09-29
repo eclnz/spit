@@ -443,3 +443,42 @@ fn contexts_follow_the_discover_rule_and_list_in_the_order_written() {
     // Records keep their own product's declared order.
     assert!(text.contains("    image[ses=1,sub=1]: "), "{text}");
 }
+
+#[test]
+fn a_recipe_that_does_not_fit_its_pipeline_says_why() {
+    let pipeline = spit::parse_pipeline(
+        "source raw [sub]\nsource other [sub]\npath other: o/{sub}.txt\n\
+         operation f(raw) -> Out\nout = f(raw)\n",
+    )
+    .unwrap();
+    for (recipe, error, message) in [
+        (
+            "path out: x/{sub}.txt\n",
+            spit::InputError::NotASource {
+                product: "out".into(),
+            },
+            "input path `out` must name a source product in the pipeline",
+        ),
+        (
+            "path other: y/{sub}.txt\n",
+            spit::InputError::PathInBoth {
+                product: "other".into(),
+            },
+            "source `other` has path rules in both .spit and .spitin",
+        ),
+        (
+            "discover subs: [sub] from dirs data/sub-{sub}\n",
+            spit::InputError::NoDiscoveryPath {
+                product: "raw".into(),
+            },
+            "source `raw` needs a path rule in .spitin for directory discovery",
+        ),
+    ] {
+        let found = spit::parse_input_spec(recipe)
+            .unwrap()
+            .check(&pipeline)
+            .unwrap_err();
+        assert_eq!(found, error);
+        assert_eq!(found.to_string(), message);
+    }
+}

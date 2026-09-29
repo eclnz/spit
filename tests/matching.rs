@@ -38,7 +38,7 @@ fn a_single_input_of_an_aggregate_must_match_each_group() {
     let missing = resolve_text(COMBINE, "sources:\n  result[site=A,run=1]\n");
     assert!(matches!(
         missing,
-        Err(ResolveError::MissingInput { port, product, .. }) if port == "policy" && product == "policy"
+        Err(ResolveError::MissingInput { site: spit::PortSite { port, product, .. }, .. }) if port == "policy" && product == "policy"
     ));
     let text = COMBINE.replace("source policy [site]", "source policy [site, run]");
     let pipeline = parse_pipeline(&text).unwrap();
@@ -121,7 +121,7 @@ fn same_matches_on_fewer_dimensions_and_requires_one_artifact() {
     );
     assert!(matches!(
         ambiguous,
-        Err(ResolveError::AmbiguousInput { port, .. }) if port == "calibration"
+        Err(ResolveError::AmbiguousInput { site: spit::PortSite { port, .. }, .. }) if port == "calibration"
     ));
 }
 
@@ -191,7 +191,7 @@ fn each_runs_a_step_for_every_value_an_input_broadcasts() {
     );
     assert!(matches!(
         missing,
-        Err(ResolveError::MissingInput { port, context, .. })
+        Err(ResolveError::MissingInput { site: spit::PortSite { port, .. }, context, .. })
             if port == "parameters" && context.to_string().contains("scenario=high")
     ));
 }
