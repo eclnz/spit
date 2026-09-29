@@ -82,16 +82,27 @@ pub(super) fn discover(
         .map(DiscoveryPattern::new)
         .collect::<Result<Vec<_>, _>>()?;
     let sources = source_patterns(pipeline)?;
-    let tree = Tree::scan(root)?;
+    let listing = Listing::of(root)?;
     let mut discovery = Discovery::default();
-    find_contexts(&directory_patterns, &tree.directories, root, &mut discovery)?;
+    find_contexts(
+        &directory_patterns,
+        &listing.directories,
+        root,
+        &mut discovery,
+    )?;
     let skipped = skip(rules, &mut discovery, true);
     let expected = expected_bindings(
         &sources,
         &directory_patterns,
         &discovery.inventory.discovered,
     );
-    find_source_files(&sources, &tree.files, &skipped, &expected, &mut discovery)?;
+    find_source_files(
+        &sources,
+        &listing.files,
+        &skipped,
+        &expected,
+        &mut discovery,
+    )?;
     let skipped = skip(rules, &mut discovery, false);
     require_source_files(pipeline, root, &sources, &expected, &skipped)?;
     sort_records(&sources, &mut discovery.inventory.artifacts);
@@ -164,32 +175,6 @@ fn source_patterns(pipeline: &Pipeline) -> Result<Vec<SourcePattern<'_>>, PathEr
             Ok(SourcePattern { product, pieces })
         })
         .collect()
-}
-
-/// The directories and files under a root, each sorted, as `/`-separated
-/// paths relative to it.
-struct Tree {
-    directories: Vec<String>,
-    files: Vec<String>,
-}
-
-impl Tree {
-    fn scan(root: &Path) -> Result<Self, PathError> {
-        let mut tree = Self {
-            directories: Vec::new(),
-            files: Vec::new(),
-        };
-        walk(
-            root,
-            "",
-            &mut BTreeSet::new(),
-            &mut tree.files,
-            &mut tree.directories,
-        )?;
-        tree.files.sort();
-        tree.directories.sort();
-        Ok(tree)
-    }
 }
 
 /// Bind each directory that a discovery rule matches, recording the
@@ -556,37 +541,54 @@ fn match_from(
     matched
 }
 
-/// Collect every regular file under `directory`, as `/`-separated paths
-/// relative to the root, following links. `visited` stops link cycles.
-/// Names that are not UTF-8 cannot match a rule.
-fn walk(
-    directory: &Path,
-    prefix: &str,
-    visited: &mut BTreeSet<std::path::PathBuf>,
-    files: &mut Vec<String>,
-    directories: &mut Vec<String>,
-) -> Result<(), PathError> {
-    let unreadable =
-        |reason: std::io::Error| error(format!("cannot read `{}`: {reason}", directory.display()));
-    if !visited.insert(fs::canonicalize(directory).map_err(unreadable)?) {
-        return Ok(());
+/// The directories and files under a root, each sorted, as `/`-separated
+/// paths relative to it.
+#[derive(Default)]
+struct Listing {
+    directories: Vec<String>,
+    files: Vec<String>,
+}
+
+impl Listing {
+    fn of(root: &Path) -> Result<Self, PathError> {
+        let mut listing = Self::default();
+        listing.walk(root, "", &mut BTreeSet::new())?;
+        listing.directories.sort();
+        listing.files.sort();
+        Ok(listing)
     }
-    let entries = fs::read_dir(directory).map_err(unreadable)?;
-    for entry in entries {
-        let entry = entry.map_err(unreadable)?;
-        let Ok(name) = entry.file_name().into_string() else {
-            continue;
+
+    /// Add every directory and regular file under `directory`, following
+    /// links. `visited` stops link cycles. Names that are not UTF-8 cannot
+    /// match a rule.
+    fn walk(
+        &mut self,
+        directory: &Path,
+        prefix: &str,
+        visited: &mut BTreeSet<std::path::PathBuf>,
+    ) -> Result<(), PathError> {
+        let unreadable = |reason: std::io::Error| {
+            error(format!("cannot read `{}`: {reason}", directory.display()))
         };
-        let relative = format!("{prefix}{name}");
-        let path = entry.path();
-        if path.is_dir() {
-            directories.push(relative.clone());
-            walk(&path, &format!("{relative}/"), visited, files, directories)?;
-        } else if path.is_file() {
-            files.push(relative);
+        if !visited.insert(fs::canonicalize(directory).map_err(unreadable)?) {
+            return Ok(());
         }
+        for entry in fs::read_dir(directory).map_err(unreadable)? {
+            let entry = entry.map_err(unreadable)?;
+            let Ok(name) = entry.file_name().into_string() else {
+                continue;
+            };
+            let relative = format!("{prefix}{name}");
+            let path = entry.path();
+            if path.is_dir() {
+                self.walk(&path, &format!("{relative}/"), visited)?;
+                self.directories.push(relative);
+            } else if path.is_file() {
+                self.files.push(relative);
+            }
+        }
+        Ok(())
     }
-    Ok(())
 }
 
 /// Give each record without a path the one its source's rule gives it, so
