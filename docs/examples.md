@@ -31,3 +31,14 @@ Outputs land in a folder per stage through one `{stage}` path default.
 Image products share one type, `MRI<Kind,Space>`, and product names carry the processing state, so `raw_dwi` and `denoised_dwi` are both `MRI<DWI,Acquired>`. Type variables let one operation serve several products: `extract_b0` and `mean_b0` run on both acquired and corrected DWI, and `mrtransform` moves both T1w and tissue images. Label images use their own operation for nearest-neighbor resampling.
 
 SPIT emits these command lines; it does not read acquisition metadata, check transforms, or judge image quality.
+
+To try source discovery with empty placeholder files, run:
+
+```sh
+sh examples/commands/mock_mrtrix3_inputs.sh
+cargo run -- inputs examples/commands/mrtrix3_act_discover.spitin --root examples/commands/mrtrix3_mock_data -o examples/commands/mrtrix3_mock_data/inputs.spitout
+cargo run -- dag examples/commands/mrtrix3_act.spit examples/commands/mrtrix3_mock_data/inputs.spitout --root examples/commands/mrtrix3_mock_data --paths
+cargo run -- dag examples/commands/mrtrix3_act.spit examples/commands/mrtrix3_mock_data/inputs.spitout --root examples/commands/mrtrix3_mock_data -o examples/commands/mrtrix3_mock_data/jobs.spitdag
+```
+
+The script creates the three sessions and seven DWI runs listed in the example inventory. The recipe has no hand-written context or source records: it discovers session directories and scans the files. `inputs.spitout` should contain three `contexts sessions` records and 39 source records; the DAG contains 93 planned jobs. The files are empty, so the generated MRtrix3, FSL, and SynthSeg commands are for inspection only and cannot process this mock dataset.

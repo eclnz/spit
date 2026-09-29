@@ -1,0 +1,44 @@
+contexts sessions:
+    [sub=01,ses=01]
+    [sub=02,ses=01]
+    [sub=01,ses=02]
+sources:
+    raw_dwi[sub=01,ses=01,run=01]: sub-01/ses-01/dwi/sub-01_ses-01_run-01_dwi.nii.gz
+    raw_dwi[sub=01,ses=01,run=02]: sub-01/ses-01/dwi/sub-01_ses-01_run-02_dwi.nii.gz
+    raw_dwi[sub=01,ses=02,run=01]: sub-01/ses-02/dwi/sub-01_ses-02_run-01_dwi.nii.gz
+    raw_dwi[sub=01,ses=02,run=02]: sub-01/ses-02/dwi/sub-01_ses-02_run-02_dwi.nii.gz
+    raw_dwi[sub=02,ses=01,run=01]: sub-02/ses-01/dwi/sub-02_ses-01_run-01_dwi.nii.gz
+    raw_dwi[sub=02,ses=01,run=02]: sub-02/ses-01/dwi/sub-02_ses-01_run-02_dwi.nii.gz
+    raw_dwi[sub=02,ses=01,run=03]: sub-02/ses-01/dwi/sub-02_ses-01_run-03_dwi.nii.gz
+    dwi_bvec[sub=01,ses=01,run=01]: sub-01/ses-01/dwi/sub-01_ses-01_run-01_dwi.bvec
+    dwi_bvec[sub=01,ses=01,run=02]: sub-01/ses-01/dwi/sub-01_ses-01_run-02_dwi.bvec
+    dwi_bvec[sub=01,ses=02,run=01]: sub-01/ses-02/dwi/sub-01_ses-02_run-01_dwi.bvec
+    dwi_bvec[sub=01,ses=02,run=02]: sub-01/ses-02/dwi/sub-01_ses-02_run-02_dwi.bvec
+    dwi_bvec[sub=02,ses=01,run=01]: sub-02/ses-01/dwi/sub-02_ses-01_run-01_dwi.bvec
+    dwi_bvec[sub=02,ses=01,run=02]: sub-02/ses-01/dwi/sub-02_ses-01_run-02_dwi.bvec
+    dwi_bvec[sub=02,ses=01,run=03]: sub-02/ses-01/dwi/sub-02_ses-01_run-03_dwi.bvec
+    dwi_bval[sub=01,ses=01,run=01]: sub-01/ses-01/dwi/sub-01_ses-01_run-01_dwi.bval
+    dwi_bval[sub=01,ses=01,run=02]: sub-01/ses-01/dwi/sub-01_ses-01_run-02_dwi.bval
+    dwi_bval[sub=01,ses=02,run=01]: sub-01/ses-02/dwi/sub-01_ses-02_run-01_dwi.bval
+    dwi_bval[sub=01,ses=02,run=02]: sub-01/ses-02/dwi/sub-01_ses-02_run-02_dwi.bval
+    dwi_bval[sub=02,ses=01,run=01]: sub-02/ses-01/dwi/sub-02_ses-01_run-01_dwi.bval
+    dwi_bval[sub=02,ses=01,run=02]: sub-02/ses-01/dwi/sub-02_ses-01_run-02_dwi.bval
+    dwi_bval[sub=02,ses=01,run=03]: sub-02/ses-01/dwi/sub-02_ses-01_run-03_dwi.bval
+    dwi_json[sub=01,ses=01,run=01]: sub-01/ses-01/dwi/sub-01_ses-01_run-01_dwi.json
+    dwi_json[sub=01,ses=01,run=02]: sub-01/ses-01/dwi/sub-01_ses-01_run-02_dwi.json
+    dwi_json[sub=01,ses=02,run=01]: sub-01/ses-02/dwi/sub-01_ses-02_run-01_dwi.json
+    dwi_json[sub=01,ses=02,run=02]: sub-01/ses-02/dwi/sub-01_ses-02_run-02_dwi.json
+    dwi_json[sub=02,ses=01,run=01]: sub-02/ses-01/dwi/sub-02_ses-01_run-01_dwi.json
+    dwi_json[sub=02,ses=01,run=02]: sub-02/ses-01/dwi/sub-02_ses-01_run-02_dwi.json
+    dwi_json[sub=02,ses=01,run=03]: sub-02/ses-01/dwi/sub-02_ses-01_run-03_dwi.json
+    reverse_b0[sub=01,ses=01]: sub-01/ses-01/fmap/sub-01_ses-01_dir-PA_epi.nii.gz
+    reverse_b0[sub=01,ses=02]: sub-01/ses-02/fmap/sub-01_ses-02_dir-PA_epi.nii.gz
+    reverse_b0[sub=02,ses=01]: sub-02/ses-01/fmap/sub-02_ses-01_dir-PA_epi.nii.gz
+    reverse_b0_json[sub=01,ses=01]: sub-01/ses-01/fmap/sub-01_ses-01_dir-PA_epi.json
+    reverse_b0_json[sub=01,ses=02]: sub-01/ses-02/fmap/sub-01_ses-02_dir-PA_epi.json
+    reverse_b0_json[sub=02,ses=01]: sub-02/ses-01/fmap/sub-02_ses-01_dir-PA_epi.json
+    t1w[sub=01,ses=01]: sub-01/ses-01/anat/sub-01_ses-01_T1w.nii.gz
+    t1w[sub=01,ses=02]: sub-01/ses-02/anat/sub-01_ses-02_T1w.nii.gz
+    t1w[sub=02,ses=01]: sub-02/ses-01/anat/sub-02_ses-01_T1w.nii.gz
+    source_lut[]: config/source_lut.txt
+    target_lut[]: config/target_lut.txt
