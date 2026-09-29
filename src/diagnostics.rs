@@ -9,6 +9,7 @@ use crate::command::collect_commands;
 use crate::compile::collect_pipeline;
 use crate::imports::parse_located_document;
 use crate::inputs::{check_inventory, collect_rule_errors, InputSpec};
+use crate::json::Json;
 use crate::lower::{parse_document_with_imports, ParsedDocument};
 use crate::model::DEFAULT_OUTPUT;
 use crate::model::{stage_within, CommandRole, Job, ResolvedDag, SourceInventory};
@@ -179,6 +180,34 @@ impl fmt::Display for Diagnostic {
     }
 }
 
+/// The diagnostics as the JSON `check --json` prints, for editors. Columns
+/// are 1-based, in UTF-16 code units as editors count them; `end_column` is
+/// one past the last character.
+pub fn render_diagnostics_json(
+    diagnostics: &[Diagnostic],
+    text: &str,
+    source_text: Option<&str>,
+) -> String {
+    let items = diagnostics.iter().map(|diagnostic| {
+        let columns = diagnostic.utf16_columns(text, source_text);
+        Json::object([
+            ("severity", Json::string(diagnostic.severity.as_str())),
+            ("source", Json::string(diagnostic.source.as_str())),
+            ("line", Json::number_or_null(diagnostic.line)),
+            (
+                "column",
+                Json::number_or_null(columns.as_ref().map(|columns| columns.start + 1)),
+            ),
+            (
+                "end_column",
+                Json::number_or_null(columns.as_ref().map(|columns| columns.end + 1)),
+            ),
+            ("message", Json::string(&diagnostic.message)),
+        ])
+    });
+    format!("{}\n", Json::object([("diagnostics", Json::array(items))]))
+}
+
 /// Collect independent syntax errors throughout the document, then check its
 /// semantics once the document parses: every declaration, step, rule,
 /// command, and path error, and warnings for likely mistakes. Jobs are
@@ -297,9 +326,13 @@ pub fn diagnose_recipe_against(text: &str, pipeline: &Pipeline) -> Vec<Diagnosti
             None => spec.check(pipeline),
         };
         if let Err(problem) = checked {
+            // Records written in the recipe keep its line numbers.
+            let place = problem
+                .downcast_ref::<ResolveError>()
+                .and_then(|error| error_location(pipeline, &lines, error, text, false).1);
             diagnostics.push(Diagnostic::error(
                 DiagnosticSource::Pipeline,
-                None,
+                place,
                 problem.to_string(),
             ));
         }
@@ -774,7 +807,7 @@ fn operation_warnings(
             // Only once commands are in use: a pipeline may be written for its DAG alone.
             warnings.push(warning(
                 place.clone(),
-                format!("operation `{name}` has no command, so `bash` cannot run its jobs"),
+                format!("operation `{name}` has no command, so its jobs cannot run"),
             ));
         }
         if imported {

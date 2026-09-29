@@ -202,6 +202,30 @@ require cleaned count=1 per [id]
 }
 
 #[test]
+fn errors_in_records_written_in_a_recipe_point_at_the_record() {
+    let pipeline = spit::parse_pipeline(
+        "source raw : Table [id, run]\noperation clean(Table) -> Table\ncleaned = clean(raw)\n",
+    )
+    .unwrap();
+    for (record, message) in [
+        ("rwa[id=1,run=1]", "unknown product `rwa`"),
+        ("raw[id=2]", "must bind exactly the dimensions"),
+        ("raw[id=1,run=1]", "duplicate source artifact"),
+    ] {
+        let recipe =
+            format!("pipeline analysis.spit\nsources:\n    raw[id=1,run=1]\n    {record}\n");
+        let diagnostics = spit::diagnose_recipe_against(&recipe, &pipeline);
+        let [diagnostic] = diagnostics.as_slice() else {
+            panic!("{diagnostics:?}");
+        };
+        assert!(diagnostic.message.contains(message), "{diagnostic:?}");
+        let columns = diagnostic.columns.clone().unwrap();
+        assert_eq!(diagnostic.line, Some(4));
+        assert_eq!(&recipe.lines().nth(3).unwrap()[columns], record);
+    }
+}
+
+#[test]
 fn command_errors_about_the_operation_point_at_its_name() {
     let text = "\
 source raw : Table [id]

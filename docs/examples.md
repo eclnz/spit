@@ -1,6 +1,6 @@
 # Examples
 
-Each pipeline below, under [`examples/`](../examples), checks cleanly and sits beside a `.spitin` recipe with its `require` rules and a `.spitout` of its inputs. Run the command from the repository root to see its jobs; add `-o plan.spitdag` and run `spit bash plan.spitdag` to see the script, or run `spit check` on the `.spit` or `.spitin` alone.
+Each pipeline below, under [`examples/`](../examples), checks cleanly and sits beside a `.spitin` recipe with its `require` rules and a `.spitout` of its inputs. Run the command from the repository root to see its jobs; add `--paths` to see each artifact's file or `-o plan.spitdag` to write them, or run `spit check` on the `.spit` or `.spitin` alone.
 
 | Pipeline | Shows | Command | Jobs |
 | --- | --- | --- | --- |
@@ -26,7 +26,7 @@ The ACT example starts from BIDS NIfTI DWI runs with their gradient and JSON sid
 - `anatomy` makes a [SynthSeg parcellation](https://surfer.nmr.mgh.harvard.edu/fswiki/SynthSeg), aligns T1w to b=0 with [FLIRT](https://fsl.fmrib.ox.ac.uk/fsl/docs/registration/flirt/user_guide.html), [transformconvert](https://userdocs.mrtrix.org/en/latest/reference/commands/transformconvert.html), and [mrtransform](https://userdocs.mrtrix.org/en/latest/reference/commands/mrtransform.html), and builds the [tissue segmentation](https://userdocs.mrtrix.org/en/latest/reference/commands/5ttgen.html) and [seed interface](https://userdocs.mrtrix.org/en/latest/reference/commands/5tt2gmwmi.html).
 - `tractography` estimates [responses](https://userdocs.mrtrix.org/en/latest/reference/commands/dwi2response.html) and [FODs](https://userdocs.mrtrix.org/en/latest/reference/commands/dwi2fod.html), then runs [ACT tracking](https://userdocs.mrtrix.org/en/latest/reference/commands/tckgen.html), [SIFT2](https://userdocs.mrtrix.org/en/latest/reference/commands/tcksift2.html), and [connectome construction](https://userdocs.mrtrix.org/en/latest/reference/commands/tck2connectome.html).
 
-Once the first two stages have run, `spit bash mrtrix3_act.spitdag --stage tractography` runs the last on its own. Outputs land in a folder per stage through one `{stage}` path default.
+Outputs land in a folder per stage through one `{stage}` path default.
 
 Image products share one type, `MRI<Kind,Space>`, and product names carry the processing state, so `raw_dwi` and `denoised_dwi` are both `MRI<DWI,Acquired>`. Type variables let one operation serve several products: `extract_b0` and `mean_b0` run on both acquired and corrected DWI, and `mrtransform` moves both T1w and tissue images. Label images use their own operation for nearest-neighbor resampling.
 

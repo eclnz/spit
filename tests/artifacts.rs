@@ -1,13 +1,12 @@
 mod support;
 
-use std::fs;
 use std::process::Command;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use spit::{
     diagnose, parse_source_inventory, render_artifacts, resolve, resolve_artifacts_excluding,
     ArtifactReport, Gap, InputSource, ResolveError, ResolvedInputs, Severity,
 };
+use support::Tree;
 
 /// The document's pipeline, and `inventory` after the input stage.
 fn settle(text: &str, inventory: &str) -> Result<(spit::Pipeline, ResolvedInputs), ResolveError> {
@@ -282,18 +281,9 @@ fn diagnose_still_reports_the_gap_as_an_error() {
 
 #[test]
 fn cli_lists_incomplete_artifacts_where_check_fails() {
-    let directory = std::env::temp_dir().join(format!(
-        "spit-cli-artifacts-{}",
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
-    ));
-    fs::create_dir_all(&directory).unwrap();
-    let pipeline = directory.join("align.spit");
-    let sources = directory.join("align.spitout");
-    fs::write(&pipeline, ALIGN).unwrap();
-    fs::write(&sources, ALIGN_SOURCES).unwrap();
+    let tree = Tree::new("cli-artifacts", &[]);
+    let pipeline = tree.write("align.spit", ALIGN);
+    let sources = tree.write("align.spitout", ALIGN_SOURCES);
     let run = |command: &str| {
         Command::new(env!("CARGO_BIN_EXE_spit"))
             .args([
@@ -306,7 +296,6 @@ fn cli_lists_incomplete_artifacts_where_check_fails() {
     };
     let artifacts = run("artifacts");
     let check = run("dag");
-    fs::remove_dir_all(&directory).unwrap();
 
     assert!(
         artifacts.status.success(),

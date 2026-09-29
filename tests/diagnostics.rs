@@ -134,7 +134,7 @@ typo = clean(rwa)
         [
             "error: line 3: path template for `raw` omits dimension `batch`; artifacts differing only in `batch` would share a path",
             "error: line 5: command for `clean` uses unknown placeholder `{result}`",
-            "warning: line 6: operation `join` has no command, so `bash` cannot run its jobs",
+            "warning: line 6: operation `join` has no command, so its jobs cannot run",
             "error: line 8: unsupported shape for `join`: expected 2 input bindings, found 1",
             "error: line 9: unknown product `rwa`",
         ]

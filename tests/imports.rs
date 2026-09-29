@@ -1,86 +1,15 @@
 mod support;
 
+use support::Tree;
+
 use std::fs;
-use std::path::{Path, PathBuf};
-use std::process::Command;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::path::Path;
 
 use spit::{diagnose_at, parse_pipeline_at, parse_source_inventory, resolve};
 
-/// Step 3's binding, then the Bash backend, with either's error as text.
-fn bash_script(pipeline: &spit::Pipeline, dag: &spit::ResolvedDag) -> Result<String, String> {
-    let bound = spit::bind_dag(pipeline, dag).map_err(|error| error.to_string())?;
-    spit::render_bash(&bound).map_err(|error| error.to_string())
-}
-
-static NEXT_DIR: AtomicUsize = AtomicUsize::new(0);
-
-struct TestDir(PathBuf);
-
-impl TestDir {
-    fn new() -> Self {
-        let path = std::env::temp_dir().join(format!(
-            "spit-imports-{}-{}",
-            std::process::id(),
-            NEXT_DIR.fetch_add(1, Ordering::Relaxed)
-        ));
-        fs::create_dir(&path).unwrap();
-        Self(path)
-    }
-
-    fn write(&self, name: &str, contents: &str) -> PathBuf {
-        let path = self.0.join(name);
-        fs::write(&path, contents).unwrap();
-        path
-    }
-}
-
-impl Drop for TestDir {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
-    }
-}
-
-#[test]
-#[ignore = "the Bash backend is paused"]
-fn aliased_source_and_operation_work_through_cli_and_bash() {
-    let path = Path::new("examples/imports/imported.spit");
-    let text = fs::read_to_string(path).unwrap();
-    let pipeline = spit::parse_pipeline_at(&text, path).unwrap();
-    let inventory = spit::parse_source_inventory(
-        &fs::read_to_string("examples/imports/imported.spitout").unwrap(),
-    )
-    .unwrap();
-    assert_eq!(pipeline.products[0].name, "text::shard");
-    assert_eq!(pipeline.operations[0].name, "text::sort_lines");
-    assert_eq!(pipeline.commands[0].operation, "text::sort_lines");
-    assert_eq!(
-        pipeline.product_paths["text::shard"],
-        "input/{group}/{part}.txt"
-    );
-    let dag = resolve(&pipeline, &inventory).unwrap();
-    assert_eq!(dag.jobs.len(), 2);
-    let bash = bash_script(&pipeline, &dag).unwrap();
-    assert!(bash.contains("'sort' '-u' '-o'"));
-    assert!(bash.contains("input/alpha/01.txt"));
-
-    let check = Command::new(env!("CARGO_BIN_EXE_spit"))
-        .args(["check", path.to_str().unwrap()])
-        .output()
-        .unwrap();
-    assert!(
-        check.status.success(),
-        "{}",
-        String::from_utf8_lossy(&check.stderr)
-    );
-    assert!(String::from_utf8(check.stdout)
-        .unwrap()
-        .contains("2 jobs resolved"));
-}
-
 #[test]
 fn unqualified_and_nested_imports_work_in_sectioned_files() {
-    let dir = TestDir::new();
+    let dir = Tree::new("imports", &[]);
     dir.write(
         "base.spit",
         "operation clean(one)\ncommand clean: cp {input} {output}\n",
@@ -106,7 +35,7 @@ fn unqualified_and_nested_imports_work_in_sectioned_files() {
 
 #[test]
 fn import_errors_point_to_the_use_line() {
-    let dir = TestDir::new();
+    let dir = Tree::new("imports", &[]);
     dir.write("base.spit", "operation clean(one)\n");
     let main = dir.write("main.spit", "use absent from base.spit\n");
     let error = support::parse_fixture_at(&fs::read_to_string(&main).unwrap(), &main).unwrap_err();
@@ -132,7 +61,7 @@ fn import_errors_point_to_the_use_line() {
 
 #[test]
 fn diagnostics_resolve_imports_using_pipeline_location() {
-    let dir = TestDir::new();
+    let dir = Tree::new("imports", &[]);
     dir.write("base.spit", "operation clean(one)\n");
     let main = dir.write(
         "main.spit",
@@ -148,7 +77,7 @@ fn diagnostics_resolve_imports_using_pipeline_location() {
 
 #[test]
 fn an_imported_source_keeps_its_path_rule_under_its_alias() {
-    let dir = TestDir::new();
+    let dir = Tree::new("imports", &[]);
     dir.write(
         "base.spit",
         "path: input/{product}/{id}.txt\nsource raw [id]\noperation clean(one)\n",
@@ -165,7 +94,7 @@ fn an_imported_source_keeps_its_path_rule_under_its_alias() {
 
 #[test]
 fn quoted_import_path_can_contain_as() {
-    let dir = TestDir::new();
+    let dir = Tree::new("imports", &[]);
     dir.write("base as draft.spit", "operation clean(one)\n");
     let main = dir.write(
         "main.spit",
@@ -178,7 +107,7 @@ fn quoted_import_path_can_contain_as() {
 
 #[test]
 fn import_all_brings_definitions_but_not_steps() {
-    let dir = TestDir::new();
+    let dir = Tree::new("imports", &[]);
     dir.write(
         "base.spit",
         "source raw [id]\noperation clean(one)\ncommand clean: cp {input} {output}\ncleaned = clean(raw)\n",
@@ -213,46 +142,8 @@ fn imported_definitions_are_not_reported_as_unused() {
 }
 
 #[test]
-#[ignore = "the Bash backend is paused"]
-fn qualified_product_names_use_dots_in_default_paths() {
-    let dir = TestDir::new();
-    dir.write("lib.spit", "source shard [part]\n");
-    let main = dir.write(
-        "main.spit",
-        "use lib.spit as lib\npath: {product}/{part}.txt\n\
-operation copy(input) -> Unknown\ncommand copy: cp {input} {output}\n\
-copied = copy(lib::shard)\nsources:\n  lib::shard[part=a]\n",
-    );
-    let (pipeline, inventory) =
-        support::parse_fixture_at(&fs::read_to_string(&main).unwrap(), &main).unwrap();
-    let dag = resolve(&pipeline, &inventory.unwrap()).unwrap();
-    let bash = bash_script(&pipeline, &dag).unwrap();
-    assert!(bash.contains("'lib.shard/a.txt'"), "{bash}");
-    assert!(!bash.contains("::"), "{bash}");
-}
-
-#[test]
-#[ignore = "the Bash backend is paused"]
-fn an_operation_imports_with_its_command_and_verifications() {
-    let dir = TestDir::new();
-    dir.write(
-        "library.spit",
-        "operation clean(Table) -> Table\nverify clean: check_table {input}\ncommand clean: clean_table {input} {output}\n",
-    );
-    let pipeline = dir.write(
-        "pipeline.spit",
-        "use library.spit as lib\npath: {product}/{entities}.txt\nsource raw : Table [id]\ncleaned = lib::clean(raw)\nsources:\n  raw[id=a]\n",
-    );
-    let text = fs::read_to_string(&pipeline).unwrap();
-    let (pipeline, inventory) = support::parse_fixture_at(&text, &pipeline).unwrap();
-    assert_eq!(pipeline.commands.len(), 2);
-    let bash = bash_script(&pipeline, &resolve(&pipeline, &inventory.unwrap()).unwrap()).unwrap();
-    assert!(bash.contains("spit_verify 1 'check_table'"), "{bash}");
-}
-
-#[test]
 fn an_imported_path_keeps_escaped_braces() {
-    let dir = TestDir::new();
+    let dir = Tree::new("imports", &[]);
     dir.write(
         "base.spit",
         "path: input/{{product}}/{product}/{id}.txt\nsource raw [id]\n",

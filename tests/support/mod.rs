@@ -84,3 +84,44 @@ pub fn parse_fixture_at(
         .transpose()?;
     Ok((spit::parse_pipeline_at(&pipeline, path)?, records))
 }
+
+/// A folder under the system's temporary directory, with empty files at the
+/// paths given, removed when dropped. Each is new, whichever test makes it.
+pub struct Tree(pub std::path::PathBuf);
+
+impl Tree {
+    pub fn new(name: &str, files: &[&str]) -> Self {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static NEXT: AtomicUsize = AtomicUsize::new(0);
+        let root = std::env::temp_dir().join(format!(
+            "spit-{name}-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let tree = Self(root);
+        for file in files {
+            tree.write(file, "");
+        }
+        tree
+    }
+
+    pub fn path(&self) -> &std::path::Path {
+        &self.0
+    }
+
+    /// Write `contents` to `name` in the tree, making its folders.
+    pub fn write(&self, name: &str, contents: &str) -> std::path::PathBuf {
+        let path = self.0.join(name);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, contents).unwrap();
+        path
+    }
+}
+
+impl Drop for Tree {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}

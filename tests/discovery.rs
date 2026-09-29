@@ -3,8 +3,9 @@
 
 mod support;
 
+use support::Tree;
+
 use std::fs;
-use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
 
@@ -12,33 +13,6 @@ use spit::{
     discover_source_files, discover_sources, parse_pipeline, parse_source_inventory, resolve,
     InputSource, InputSpec, Pipeline, ResolveError, ResolvedDag, ResolvedInputs, SourceInventory,
 };
-
-struct Tree(PathBuf);
-
-impl Tree {
-    fn new(name: &str, files: &[&str]) -> Self {
-        let root =
-            std::env::temp_dir().join(format!("spit-discover-{name}-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&root);
-        fs::create_dir_all(&root).unwrap();
-        for file in files {
-            let path = root.join(file);
-            fs::create_dir_all(path.parent().unwrap()).unwrap();
-            fs::write(path, "").unwrap();
-        }
-        Self(root)
-    }
-
-    fn path(&self) -> &Path {
-        &self.0
-    }
-}
-
-impl Drop for Tree {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
-    }
-}
 
 fn outputs(dag: &ResolvedDag) -> Vec<String> {
     dag.jobs

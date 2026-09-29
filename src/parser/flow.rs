@@ -8,6 +8,7 @@ use super::declarations::{
     parse_command, parse_coverage_rule, parse_discover, parse_invocation_parts, parse_path,
     parse_product,
 };
+use super::keyword::Keyword;
 use super::lexical::{comma_items, identifier, strip_comment};
 use super::operation::parse_operation;
 use super::source_map::{name_place, rule_place, step_place, tail_place};
@@ -23,12 +24,6 @@ pub(super) fn parse_flow(text: &str) -> Syntax {
         }
     }
     syntax
-}
-
-/// Whether a line opens a stage, as opposed to a step whose output product
-/// happens to be called `stage`.
-pub(super) fn is_stage_header(line: &str) -> bool {
-    line.starts_with("stage ") && !line.contains('=')
 }
 
 /// The stages open at a line of the flow form, outermost first.
@@ -141,72 +136,88 @@ fn flow_line(
             ))
         })
     };
-    let kind = if let Some(declaration) = line
-        .strip_prefix("stage ")
-        .filter(|_| is_stage_header(line))
-    {
-        return open_stage(syntax, stages, original, declaration, indent, number);
-    } else if line.starts_with("use ") {
-        top_level_only("`use`")?;
-        StatementKind::Import
-    } else if let Some(declaration) = line.strip_prefix("source ") {
-        top_level_only("`source`, which declares an input,")?;
-        let declaration = declaration.trim();
-        let product = parse_product(declaration, number)?;
-        let place = name_place(original, number, declaration, &product.name);
-        StatementKind::Product(product, place)
-    } else if let Some(declaration) = line.strip_prefix("discover ") {
-        top_level_only("`discover`")?;
-        let discovery = parse_discover(declaration.trim(), number)?;
-        StatementKind::Discover(discovery)
-    } else if let Some(declaration) = line.strip_prefix("operation ") {
-        let declaration = declaration.trim();
-        let operation = parse_operation(declaration, number)?;
-        let place = name_place(original, number, declaration, &operation.name);
-        StatementKind::Operation(operation, place)
-    } else if line.starts_with("require ") || line.starts_with("skip ") {
-        top_level_only(if line.starts_with("require ") {
-            "`require`, which checks sources,"
-        } else {
-            "`skip`, which filters sources,"
-        })?;
-        let rule = parse_coverage_rule(line, number)?;
-        let place = rule_place(original, number, &rule);
-        StatementKind::Constraint(rule, place)
-    } else if let Some(declaration) = line.strip_prefix("command ") {
-        let command = parse_command(declaration.trim(), number, CommandRole::Run)?;
-        let place = tail_place(original, number, command.template.as_str());
-        StatementKind::Command(command, place)
-    } else if let Some(declaration) = line.strip_prefix("verify ") {
-        let command = parse_command(declaration.trim(), number, CommandRole::Verify)?;
-        let place = tail_place(original, number, command.template.as_str());
-        StatementKind::Command(command, place)
-    } else if line.starts_with("shell-source:") {
-        return Err(ParseError::new(number, SHELL_SOURCE_REMOVED));
-    } else if line.starts_with("path ") || line.starts_with("path:") {
-        StatementKind::Path(parse_path(stage, original, line, number)?)
-    } else if line.contains('=') {
-        let (mut invocation, outputs) = parse_flow_step(line, number)?;
-        invocation.stage.clone_from(&stage);
-        let step = step_place(original, number, &invocation);
-        StatementKind::FlowStep(FlowStep {
-            invocation,
-            outputs,
-            step,
-        })
-    } else if line.contains('(') && line.ends_with(')') {
-        return Err(ParseError::new(
-            number,
-            "expected `=` before operation call",
-        ));
-    } else {
-        return Err(ParseError::new(
-            number,
-            "expected source, discover, operation, command, verify, require, path, stage, or output = operation(inputs)",
-        ));
+    let kind = match Keyword::split(line) {
+        Some((Keyword::Stage, declaration)) => {
+            return open_stage(syntax, stages, original, declaration, indent, number);
+        }
+        Some((Keyword::Use, _)) => {
+            top_level_only("`use`")?;
+            StatementKind::Import
+        }
+        Some((Keyword::Source, declaration)) => {
+            top_level_only("`source`, which declares an input,")?;
+            let declaration = declaration.trim();
+            let product = parse_product(declaration, number)?;
+            let place = name_place(original, number, declaration, &product.name);
+            StatementKind::Product(product, place)
+        }
+        Some((Keyword::Discover, declaration)) => {
+            top_level_only("`discover`")?;
+            StatementKind::Discover(parse_discover(declaration.trim(), number)?)
+        }
+        Some((Keyword::Operation, declaration)) => {
+            let declaration = declaration.trim();
+            let operation = parse_operation(declaration, number)?;
+            let place = name_place(original, number, declaration, &operation.name);
+            StatementKind::Operation(operation, place)
+        }
+        Some((keyword @ (Keyword::Require | Keyword::Skip), _)) => {
+            top_level_only(if keyword == Keyword::Require {
+                "`require`, which checks sources,"
+            } else {
+                "`skip`, which filters sources,"
+            })?;
+            let rule = parse_coverage_rule(line, number)?;
+            let place = rule_place(original, number, &rule);
+            StatementKind::Constraint(rule, place)
+        }
+        Some((keyword @ (Keyword::Command | Keyword::Verify), declaration)) => {
+            let role = if keyword == Keyword::Command {
+                CommandRole::Run
+            } else {
+                CommandRole::Verify
+            };
+            let command = parse_command(declaration.trim(), number, role)?;
+            let place = tail_place(original, number, command.template.as_str());
+            StatementKind::Command(command, place)
+        }
+        Some((Keyword::ShellSource, _)) => {
+            return Err(ParseError::new(number, SHELL_SOURCE_REMOVED));
+        }
+        Some((Keyword::Path, _)) => StatementKind::Path(parse_path(stage, original, line, number)?),
+        None => flow_statement(original, line, number, stage)?,
     };
     syntax.push(original, number, kind);
     Ok(())
+}
+
+/// A line that starts with no keyword: a step, or a mistake.
+fn flow_statement(
+    original: &str,
+    line: &str,
+    number: usize,
+    stage: Option<String>,
+) -> Result<StatementKind, ParseError> {
+    if line.contains('=') {
+        let (mut invocation, outputs) = parse_flow_step(line, number)?;
+        invocation.stage.clone_from(&stage);
+        let step = step_place(original, number, &invocation);
+        Ok(StatementKind::FlowStep(FlowStep {
+            invocation,
+            outputs,
+            step,
+        }))
+    } else if line.contains('(') && line.ends_with(')') {
+        Err(ParseError::new(
+            number,
+            "expected `=` before operation call",
+        ))
+    } else {
+        Err(ParseError::new(
+            number,
+            "expected source, discover, operation, command, verify, require, path, stage, or output = operation(inputs)",
+        ))
+    }
 }
 
 /// Parse `outputs = operation(inputs)`, where each output may declare its
