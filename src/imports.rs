@@ -12,7 +12,7 @@ use crate::span::Place;
 pub(crate) fn apply_import(
     builder: &mut PipelineBuilder,
     imports: &BTreeMap<usize, Pipeline>,
-    place: Place,
+    place: &Place,
 ) -> Result<(), ParseError> {
     let line = place.line;
     let pipeline = &mut builder.pipeline;

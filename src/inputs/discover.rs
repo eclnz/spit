@@ -507,12 +507,11 @@ fn match_from(
                     failed,
                 )
         }
-        Piece::Value(dimension) => match bound.get(dimension).map(|value| &text[value.clone()]) {
-            Some(value) => {
+        Piece::Value(dimension) => {
+            if let Some(value) = bound.get(dimension).map(|value| &text[value.clone()]) {
                 rest.starts_with(value)
                     && match_from(pieces, index + 1, text, offset + value.len(), bound, failed)
-            }
-            None => {
+            } else {
                 let longest = rest
                     .find(|character: char| {
                         !(character.is_ascii_alphanumeric() || character == '-' || character == '%')
@@ -527,7 +526,7 @@ fn match_from(
                 }
                 found
             }
-        },
+        }
     };
     if !matched {
         failed.insert(attempt);

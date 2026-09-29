@@ -92,7 +92,7 @@ impl ParseError {
     pub(crate) fn at_token(mut self, token: &str) -> Self {
         self.location
             .focus
-            .get_or_insert(Focus::Address(address_of(token)));
+            .get_or_insert_with(|| Focus::Address(address_of(token)));
         self
     }
 

@@ -203,8 +203,7 @@ impl Substitutions {
             TypeExpr::Variable(name) => self
                 .0
                 .get(name)
-                .map(|bound| self.substitute(bound))
-                .unwrap_or_else(|| ty.clone()),
+                .map_or_else(|| ty.clone(), |bound| self.substitute(bound)),
             TypeExpr::Applied { constructor, args } => TypeExpr::Applied {
                 constructor: constructor.clone(),
                 args: args.iter().map(|arg| self.substitute(arg)).collect(),
