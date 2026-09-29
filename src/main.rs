@@ -9,7 +9,7 @@ use std::process::ExitCode;
 use spit::{
     diagnose_artifacts_at, diagnose_at, discover_source_files, inspect_paths, parse_document_at,
     parse_pipeline_at, parse_source_inventory, render_artifacts, render_bash, render_bound_dag,
-    render_dag, render_source_inventory, resolve, resolve_artifacts, stage_within,
+    render_dag, render_dag_json, render_source_inventory, resolve, resolve_artifacts, stage_within,
     validate_concrete_paths, validate_source_files, Diagnostic, PathCoverage, Pipeline,
     ResolvedDag, SourceInventory,
 };
@@ -51,7 +51,7 @@ impl Command {
         use Flag::*;
         match self {
             Self::Check => &[Sources, Root, Stage, Paths, StrictPaths, Json, Stdin],
-            Self::Dag => &[Sources, Root, Stage, Paths, StrictPaths, Stdin],
+            Self::Dag => &[Sources, Root, Stage, Paths, StrictPaths, Json, Stdin],
             Self::Bash => &[Sources, Root, Stage, StrictPaths, Stdin],
             Self::Artifacts => &[Sources, Root, Stdin],
             Self::Discover => &[Root, Stdin],
@@ -266,7 +266,10 @@ fn check_flags(command: Command, flags: &Flags) -> Result<(), String> {
         }
     }
     for (first, second) in CONFLICTS {
-        if flags.has(first) && flags.has(second) {
+        if flags.has(first)
+            && flags.has(second)
+            && (command == Command::Check || (command == Command::Dag && second == Flag::Paths))
+        {
             return Err(format!(
                 "{} cannot be used with {}",
                 first.name(),
@@ -300,11 +303,11 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let json = args.json;
+    let diagnostics_json = args.json && args.command == Command::Check;
     match run(args) {
         Ok(()) => ExitCode::SUCCESS,
         // Editors expect JSON even when the check cannot run.
-        Err(error) if json => {
+        Err(error) if diagnostics_json => {
             println!(
                 "{{\"diagnostics\":[{{\"severity\":\"error\",\"source\":\"pipeline\",\"line\":null,\"column\":null,\"end_column\":null,\"message\":\"{}\"}}]}}",
                 escape_json(&error.to_string())
@@ -335,7 +338,7 @@ fn run(args: CliArgs) -> Result<(), Box<dyn Error>> {
         diagnose_at
     };
     let diagnostics = diagnose(&pipeline_text, inventory_text.as_deref(), path);
-    if args.json {
+    if args.json && args.command == Command::Check {
         print_json(&diagnostics, &pipeline_text, inventory_text.as_deref());
         return Ok(());
     }
@@ -413,6 +416,7 @@ fn run_jobs(
                 println!("{verified}");
             }
         }
+        Command::Dag if args.json => print!("{}", render_dag_json(pipeline, &dag)?),
         Command::Dag if args.paths => print!("{}", render_bound_dag(pipeline, &dag)?),
         Command::Dag => print!("{}", render_dag(&dag)),
         Command::Bash if inventory.artifacts.is_empty() => {
