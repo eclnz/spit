@@ -416,10 +416,31 @@ pub(super) fn index_producers(
     producers
 }
 
+/// Steps that read each other's outputs in a loop, so none can go first.
+pub(super) struct Cycle {
+    /// The step the loop was found at, by its first output.
+    pub(super) start: String,
+    /// The first output of each step in the loop, from `start` back to it.
+    pub(super) products: Vec<String>,
+}
+
+impl Cycle {
+    /// The error, and the step to report it at.
+    pub(super) fn into_error(self) -> (DefinitionSubject, ResolveError) {
+        let Self { start, products } = self;
+        (
+            DefinitionSubject::Invocation(start),
+            ResolveError::Cycle { products },
+        )
+    }
+}
+
+/// Invocation indices with every producer before its consumers, or the
+/// first cycle that makes that impossible.
 pub(super) fn invocation_order(
     invocations: &[Invocation],
     producers: &BTreeMap<String, usize>,
-) -> Result<Vec<usize>, ResolveError> {
+) -> Result<Vec<usize>, Cycle> {
     #[derive(Clone, Copy, PartialEq)]
     enum State {
         Unvisited,
@@ -434,7 +455,7 @@ pub(super) fn invocation_order(
         states: &mut [State],
         stack: &mut Vec<usize>,
         order: &mut Vec<usize>,
-    ) -> Result<(), ResolveError> {
+    ) -> Result<(), Cycle> {
         match states[index] {
             State::Done => return Ok(()),
             State::InProgress => {
@@ -443,8 +464,9 @@ pub(super) fn invocation_order(
                     .iter()
                     .map(|value| invocations[*value].output_product().to_owned())
                     .collect();
-                products.push(invocations[index].output_product().to_owned());
-                return Err(ResolveError::Cycle { products });
+                let start = invocations[index].output_product().to_owned();
+                products.push(start.clone());
+                return Err(Cycle { start, products });
             }
             State::Unvisited => {}
         }

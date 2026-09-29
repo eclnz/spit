@@ -91,6 +91,7 @@ Dead public API (item 5, 15) is not visible to the compiler because `lib.rs` re-
 - `compile/steps.rs` (~53): `step_shape` calls `step_driver`, then `step_context` (which calls `step_driver` again) and `expect("the step has a driver")`. Have `step_context` take the driver. `lower.rs::inferred_dimensions` also calls `step_context`; keep it working.
 - `main.rs` (~577) `unreachable!("the command takes one or two files")`: model one-vs-two files as an enum.
 - **Done when:** those three panics are gone and the driver is computed once per step.
+- **Status: done.** `invocation_order` returns a `Cycle { start, products }`, which gives its own error and the step to report it at, so compile no longer matches a general `ResolveError`. `step_context` takes the driver's groups instead of finding the driver again. The CLI keeps its files as `file` and `second: Option<String>`, so `prepare` matches an `Option` and `check`/`inputs` no longer index. CLI output unchanged, including arity errors; added a test that a cycle is reported once, at the step it was found at.
 
 ### 5. Simplify the diagnostics API
 - **Where:** `src/diagnostics.rs` ~226-376, re-exported in `lib.rs`.
