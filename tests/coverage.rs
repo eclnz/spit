@@ -6,9 +6,9 @@ mod support;
 use std::path::Path;
 
 use spit::{
-    diagnose_at_with_inputs, parse_source_inventory, resolve, CountRequirement, CoverageRule,
-    EntityBinding, InputRules, InputSource, InputSpec, Pipeline, ProductDef, ResolveError,
-    ResolvedDag, SourceInventory, SourceRecord, TypeExpr,
+    diagnose_in, parse_source_inventory, resolve, CountRequirement, CoverageRule, EntityBinding,
+    InputRules, InputSource, InputSpec, Pipeline, ProductDef, ResolveError, ResolvedDag,
+    SourceInventory, SourceRecord, TypeExpr,
 };
 
 /// Settle `inventory` with the rules written in `text`, then resolve jobs.
@@ -50,16 +50,14 @@ fn coverage_rules_can_require_entity_values() {
     // The rule is in the recipe, so the error names no pipeline line.
     let (pipeline, recipe) = support::split_rules(text);
     let spec = spit::parse_input_spec(&recipe).unwrap();
-    let issues: Vec<_> = diagnose_at_with_inputs(
-        &pipeline,
-        Some(incomplete),
-        Path::new("a.spit"),
-        &spec,
-        false,
-    )
-    .iter()
-    .map(ToString::to_string)
-    .collect();
+    let context = spit::Context {
+        recipe: Some(&spec),
+        ..spit::Context::at(Path::new("a.spit"))
+    };
+    let issues: Vec<_> = diagnose_in(&pipeline, Some(incomplete), context)
+        .iter()
+        .map(ToString::to_string)
+        .collect();
     assert_eq!(
         issues,
         ["error: source coverage for `image` at [subject=a]: no artifact with run=2"]

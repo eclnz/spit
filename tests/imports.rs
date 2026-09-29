@@ -5,7 +5,7 @@ use support::Tree;
 use std::fs;
 use std::path::Path;
 
-use spit::{diagnose_at, parse_pipeline_at, parse_source_inventory, resolve};
+use spit::{diagnose_in, parse_pipeline_at, parse_source_inventory, resolve, Context};
 
 #[test]
 fn unqualified_and_nested_imports_work_in_sectioned_files() {
@@ -68,9 +68,9 @@ fn diagnostics_resolve_imports_using_pipeline_location() {
         "source raw [id]\nuse clean from base.spit as prep\nresult = prep::clean(raw)\n",
     );
     let text = fs::read_to_string(&main).unwrap();
-    assert!(diagnose_at(&text, None, &main).is_empty());
+    assert!(diagnose_in(&text, None, Context::at(&main)).is_empty());
     let broken = text.replace("base.spit", "missing.spit");
-    let errors = diagnose_at(&broken, None, &main);
+    let errors = diagnose_in(&broken, None, Context::at(&main));
     assert_eq!(errors[0].line, Some(2));
     assert!(errors[0].message.contains("cannot load import"));
 }
@@ -138,7 +138,7 @@ fn import_all_brings_definitions_but_not_steps() {
 fn imported_definitions_are_not_reported_as_unused() {
     let path = Path::new("examples/imports/imported.spit");
     let text = fs::read_to_string(path).unwrap();
-    assert!(diagnose_at(&text, None, path).is_empty());
+    assert!(diagnose_in(&text, None, Context::at(path)).is_empty());
 }
 
 #[test]

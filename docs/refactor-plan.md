@@ -98,6 +98,7 @@ Dead public API (item 5, 15) is not visible to the compiler because `lib.rs` re-
 - **Problem:** seven public entry points (eight after item 3). `diagnose_artifacts_at` has no callers; `diagnose_at` and `diagnose_at_with_inputs` are test-only. `diagnose_at_checked(text, source_text, path, Option<&InputSpec>, lenient: bool)` takes a bare bool and two `Option`s. A `RefCell<Option<Pipeline>>` (~243) smuggles a value out of a closure. Redundant `.clone()` at ~288.
 - **Fix:** an options struct or `enum Mode { Pipeline, Artifacts }`; the parser closure returns the value instead of the `RefCell`; drop the dead entry point and update tests that use the test-only ones.
 - **Done when:** fewer entry points, no `RefCell`, no bare `bool` parameter.
+- **Status: done.** A `Context { path, recipe, lenient }` (with `Context::at(path)`) replaces the positional path, recipe and bool. Six entry points instead of eight: `diagnose` and `diagnose_in` return every diagnostic; `diagnose_checked` and `diagnose_checked_with_records` return a `Diagnosis`; `diagnose_recipe` and `diagnose_recipe_against` are unchanged. Removed `diagnose_at`, `diagnose_at_with_inputs`, `diagnose_artifacts_at` (no callers), `diagnose_at_checked` and `diagnose_at_checked_with_records`. `Context::parse` returns the pipeline as written beside the document, so the `RefCell` is gone; the recipe check stays inside the parser, so error recovery is as before. `lenient` remains, as a named field of `Context`. CLI output unchanged.
 
 ## Redundancy
 
