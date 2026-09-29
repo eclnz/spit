@@ -191,11 +191,28 @@ Path rules also find sources. `spit discover pipeline.spit --root data` lists ea
 discover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}
 ```
 
-At the top level of a pipeline, `discover` extracts global entity bindings from directories. `sessions` names the rule; it is not an artifact or an input to a step. Each matching directory contributes one `[sub=...,ses=...]` binding, including an empty directory. Values can be strings and need not be sequential. Only pairs found on disk are included; SPIT does not form a Cartesian product of subjects and sessions. The pattern is relative to the pipeline file's folder by default, or to `--root` when given. `spit discover` prints the bindings under `contexts:`.
+At the top level of a pipeline, `discover` extracts global entity bindings from directories. `sessions` names the rule; it is not an artifact or an input to a step. Each matching directory contributes one `[sub=...,ses=...]` binding, including an empty directory. Values can be strings and need not be sequential. Only pairs found on disk are included; SPIT does not form a Cartesian product of subjects and sessions. The pattern is relative to the pipeline file's folder by default, or to `--root` when given. `spit discover` prints the bindings under `contexts sessions:`.
 
 If a `discover` declaration matches no directories, discovery fails and names that declaration and its pattern.
 
 Sources whose dimensions fit within the rule's dimensions expand over the observed bindings. For example, `source image [sub, ses]` expects one image per discovered pair, while `source reference [sub]` expects one per observed subject. Their `path` rules must name regular files; a missing file is an error. A source with another dimension, such as `run`, is still found by scanning its file path rule and can use `require` to check run coverage. The directory pattern must use every declared dimension, contain no other placeholders, and name a relative directory without `.` or `..` components. Values that cannot be represented faithfully in an inventory are skipped with a warning. An explicit `--sources` inventory or inline inventory takes precedence over filesystem discovery.
+
+`require` can target the name of a discovery rule directly:
+
+```text
+require sessions count>=2 per [sub]
+require sessions ses=1,2 per [sub]
+```
+
+The first rule needs at least two observed session bindings per subject. The second specifically needs sessions `1` and `2`. These rules count the directories matched by `sessions`, not artifacts from a product called `sessions`. With an explicit inventory, preserve the rule name using `contexts sessions:` followed by its `[sub=...,ses=...]` records. `spit discover` writes that form automatically.
+
+Use `skip` with the same count or value clauses to omit a group instead of failing it:
+
+```text
+skip sessions count>=2 per [sub]
+```
+
+If subject `5` has one session, SPIT removes that subject's contexts and source artifacts before checking expected source files or expanding jobs. A later `require` rule sees the remaining groups. Filesystem discovery reports skipped groups on stderr; `dag --json` remains JSON on stdout. `spit check` and `spit dag` run discovery automatically, so `spit discover` is only needed to inspect or export the inventory.
 
 ## Constraints and optional types
 

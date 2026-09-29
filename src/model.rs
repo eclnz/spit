@@ -591,6 +591,9 @@ pub struct SourceInventory {
     /// Observed contexts can expose missing artifacts even when no other source
     /// family has an artifact for that context.
     pub contexts: Vec<EntityBinding>,
+    /// Bindings from each named directory discovery rule. These are also
+    /// present in `contexts`, but retain their origin for coverage rules.
+    pub discovered: BTreeMap<String, Vec<EntityBinding>>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -610,12 +613,20 @@ impl fmt::Display for CountRequirement {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CoverageRule {
+    pub action: CoverageAction,
     pub product: String,
     pub group_by: Vec<String>,
     pub count: CountRequirement,
     /// Entity values that must each be present in every group, such as
     /// `run=1,2`. Each listed dimension is checked on its own.
     pub values: BTreeMap<String, Vec<String>>,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum CoverageAction {
+    #[default]
+    Require,
+    Skip,
 }
 
 impl CoverageRule {
@@ -625,6 +636,7 @@ impl CoverageRule {
         count: CountRequirement,
     ) -> Self {
         Self {
+            action: CoverageAction::Require,
             product: product.into(),
             group_by: owned_strings(group_by),
             count,

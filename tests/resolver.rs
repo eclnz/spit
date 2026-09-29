@@ -352,6 +352,7 @@ fn coverage_checks_each_observed_context_without_a_global_count() {
             EntityBinding::from_pairs([("site", "A"), ("visit", "1")]),
             EntityBinding::from_pairs([("site", "B"), ("visit", "1")]),
         ],
+        ..SourceInventory::default()
     };
     assert!(matches!(
         resolve(&pipeline, &inventory),
@@ -364,6 +365,7 @@ fn coverage_checks_each_observed_context_without_a_global_count() {
             artifact("image", &[("site", "B"), ("visit", "1")]),
         ],
         contexts: inventory.contexts,
+        ..SourceInventory::default()
     };
     assert!(resolve(&pipeline, &complete).is_ok());
 }

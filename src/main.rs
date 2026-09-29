@@ -347,7 +347,11 @@ fn run(mut args: CliArgs) -> Result<(), Box<dyn Error>> {
     } else {
         diagnose_at
     };
-    let diagnostics = diagnose(&pipeline_text, inventory_text.as_deref(), path);
+    let diagnostics = if args.command == Command::Discover && inventory_text.is_some() {
+        Vec::new()
+    } else {
+        diagnose(&pipeline_text, inventory_text.as_deref(), path)
+    };
     if args.json && args.command == Command::Check {
         print_json(&diagnostics, &pipeline_text, inventory_text.as_deref());
         return Ok(());
@@ -567,6 +571,7 @@ fn discover(text: &str, path: &Path, root: &Path) -> Result<Option<String>, Box<
     let Ok(pipeline) = parse_pipeline_at(text, path) else {
         return Ok(None);
     };
+    spit::validate_pipeline(&pipeline)?;
     let discovery = discover_source_files(&pipeline, root)?;
     for skipped in &discovery.skipped {
         eprintln!("warning: skipped {skipped}");
