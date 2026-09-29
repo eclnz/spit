@@ -2,37 +2,14 @@
 //! source path rules are settled before jobs are resolved, so resolving jobs
 //! sees only the logical pipeline and a plain inventory.
 
+mod support;
+
+use support::Tree;
+
 use std::fs;
-use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use spit::{parse_input_spec, parse_pipeline, resolve, InputSource, ResolveError, SourceInventory};
-
-struct Tree(PathBuf);
-
-impl Tree {
-    fn new(name: &str, files: &[&str]) -> Self {
-        let root = std::env::temp_dir().join(format!("spit-inputs-{name}-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&root);
-        fs::create_dir_all(&root).unwrap();
-        for file in files {
-            let path = root.join(file);
-            fs::create_dir_all(path.parent().unwrap()).unwrap();
-            fs::write(path, "").unwrap();
-        }
-        Self(root)
-    }
-
-    fn path(&self) -> &Path {
-        &self.0
-    }
-}
-
-impl Drop for Tree {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
-    }
-}
 
 const PIPELINE: &str = "\
 source image: Image [sub, ses]
@@ -144,6 +121,60 @@ fn a_recipe_can_settle_records_that_were_already_written() {
         .unwrap();
     assert!(resolved.root.is_none());
     assert_eq!(resolved.gaps.len(), 1);
+}
+
+#[test]
+fn skipping_written_records_reports_the_removed_group() {
+    let recipe = parse_input_spec("skip image count>=2 per [sub]\n").unwrap();
+    let inventory = spit::parse_source_inventory(
+        "sources:\n  image[sub=1,ses=1]\n  image[sub=2,ses=1]\n  image[sub=2,ses=2]\n",
+    )
+    .unwrap();
+    let resolved = recipe
+        .resolve(
+            &parse_pipeline(PIPELINE).unwrap(),
+            InputSource::Inventory(inventory),
+        )
+        .unwrap();
+    assert_eq!(resolved.inventory.artifacts.len(), 2);
+    assert_eq!(
+        resolved.skipped,
+        ["[sub=1] because `skip image` rejected the group"]
+    );
+}
+
+#[test]
+fn a_given_root_is_scanned_even_when_the_recipe_has_records() {
+    let tree = Tree::new("inputs-records", &FILES);
+    tree.write("analysis.spit", PIPELINE);
+    let recipe = tree.write(
+        "analysis.spitin",
+        &format!(
+            "pipeline analysis.spit\n{RECIPE}sources:\n  image[sub=old,ses=1]: data/old/image.nii.gz\n"
+        ),
+    );
+    let run = |root: Option<&str>| {
+        let mut args = vec!["inputs", recipe.to_str().unwrap()];
+        args.extend(root.iter().flat_map(|root| ["--root", *root]));
+        Command::new(env!("CARGO_BIN_EXE_spit"))
+            .args(args)
+            .output()
+            .unwrap()
+    };
+    // Without a root, the written records are the inputs.
+    let records = run(None);
+    let records = String::from_utf8(records.stdout).unwrap();
+    assert!(records.contains("sub=old"), "{records}");
+    // Given one, the scan replaces them.
+    let scanned = run(tree.path().to_str());
+    assert!(
+        scanned.status.success(),
+        "{}",
+        String::from_utf8_lossy(&scanned.stderr)
+    );
+    let scanned = String::from_utf8(scanned.stdout).unwrap();
+    assert!(scanned.contains("image[sub=1,ses=1]"), "{scanned}");
+    assert!(!scanned.contains("sub=old"), "{scanned}");
 }
 
 #[test]

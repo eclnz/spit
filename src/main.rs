@@ -494,6 +494,7 @@ fn run_inputs(
         .filter(|parent| !parent.as_os_str().is_empty())
         .unwrap_or_else(|| Path::new("."))
         .to_owned();
+    let scan = root.is_some();
     let root = root.map_or(folder, PathBuf::from);
     let recipe = parse_input_spec_at(&read_file(file)?, Path::new(file))
         .map_err(|error| format!("{file}: {error}"))?;
@@ -523,9 +524,11 @@ fn run_inputs(
     )?;
     let pipeline = parse_pipeline_at(&pipeline_text, &pipeline_file)?;
     validate_pipeline(&pipeline)?;
+    // Records written in the recipe stand in for a scan, unless a root to
+    // scan is given.
     let source = match &recipe.inventory {
-        Some(records) => InputSource::Inventory(records.clone()),
-        None => InputSource::Discover(&root),
+        Some(records) if !scan => InputSource::Inventory(records.clone()),
+        _ => InputSource::Discover(&root),
     };
     let resolved = recipe.resolve(&pipeline, source)?;
     for skipped in &resolved.skipped {

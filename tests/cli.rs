@@ -1,10 +1,12 @@
 //! The command line: one command per step, with the files it works on given
 //! as arguments.
 
+mod support;
+
 use std::fs;
-use std::path::PathBuf;
 use std::process::{Command, Output};
-use std::time::{SystemTime, UNIX_EPOCH};
+
+use support::Tree;
 
 fn spit(args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_spit"))
@@ -19,17 +21,6 @@ fn stdout(output: &Output) -> String {
 
 fn stderr(output: &Output) -> String {
     String::from_utf8_lossy(&output.stderr).into_owned()
-}
-
-/// A fresh folder under the system's temporary directory.
-fn scratch(name: &str) -> PathBuf {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    let directory = std::env::temp_dir().join(format!("spit-cli-{name}-{nanos}"));
-    fs::create_dir_all(&directory).unwrap();
-    directory
 }
 
 #[test]
@@ -211,7 +202,8 @@ fn dag_json_stage_is_an_array_of_names() {
 
 #[test]
 fn path_rules_show_a_missing_rule_and_strict_paths_accept_complete_rules() {
-    let directory = scratch("paths");
+    let tree = Tree::new("cli-paths", &[]);
+    let directory = tree.path();
     let file = directory.join("spit paths.spit");
     let pipeline =
         "source raw [id]\npath raw: input/{id}.txt\noperation copy(one)\nresult = copy(raw)\n";
@@ -221,13 +213,13 @@ fn path_rules_show_a_missing_rule_and_strict_paths_accept_complete_rules() {
 
     fs::write(&file, format!("{pipeline}path result: output/{{id}}.txt\n")).unwrap();
     let complete = spit(&["check", file.to_str().unwrap(), "--strict-paths"]);
-    fs::remove_dir_all(&directory).unwrap();
     assert!(complete.status.success(), "{}", stderr(&complete));
 }
 
 #[test]
 fn check_prints_every_diagnostic_and_fails_only_on_errors() {
-    let directory = scratch("diagnostics");
+    let tree = Tree::new("cli-diagnostics", &[]);
+    let directory = tree.path();
     let broken = directory.join("broken.spit");
     fs::write(
         &broken,
@@ -243,7 +235,6 @@ fn check_prints_every_diagnostic_and_fails_only_on_errors() {
     let broken_check = spit(&["check", broken.to_str().unwrap()]);
     let warned_check = spit(&["check", warned.to_str().unwrap()]);
     let warned_dag = spit(&["dag", warned.to_str().unwrap()]);
-    fs::remove_dir_all(&directory).unwrap();
 
     assert!(!broken_check.status.success());
     assert_eq!(

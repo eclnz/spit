@@ -200,7 +200,7 @@ path image: data/sub-{sub}/ses-{ses}/image.nii.gz
 
 A recipe may contain `discover`, `require` and `skip` rules, `path product:` rules for source products, and `sources:`/`contexts:` records. It cannot declare sources, operations, steps, commands, stages, imports, or a default `path:` rule; the pipeline still declares each logical `source` with its dimensions and optional type. Rules in a pipeline are an error, and so are records.
 
-`spit check recipe.spitin` checks the rules against the pipeline without reading any data: each rule must name a source or discovery with the dimensions it counts. `spit inputs recipe.spitin` scans the recipe's folder, or `--root`, applies `skip`, checks `require`, and prints the `.spitout`. A recipe that writes its own `sources:` records is not scanned. `spit dag pipeline.spit recipe.spitin` runs the same step in memory before resolving jobs.
+`spit check recipe.spitin` checks the rules against the pipeline without reading any data: each rule must name a source or discovery with the dimensions it counts. `spit inputs recipe.spitin` scans the recipe's folder, or `--root`, applies `skip`, checks `require`, and prints the `.spitout`. A recipe that writes its own `sources:` records is not scanned unless `--root` is given; the scan then replaces them. `spit dag pipeline.spit recipe.spitin` runs the same step in memory before resolving jobs.
 
 ### Discover contexts from directories
 

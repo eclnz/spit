@@ -4,9 +4,10 @@
 
 mod support;
 
+use support::Tree;
+
 use std::fs;
 use std::io::Write;
-use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
 use spit::{diagnose, parse_pipeline, resolve, Cardinality, Diagnostic};
@@ -14,32 +15,6 @@ use spit::{diagnose, parse_pipeline, resolve, Cardinality, Diagnostic};
 /// Step 3's binding, with its error as text.
 fn bind(pipeline: &spit::Pipeline, dag: &spit::ResolvedDag) -> Result<spit::BoundDag, String> {
     spit::bind_dag(pipeline, dag).map_err(|error| error.to_string())
-}
-
-struct Tree(PathBuf);
-
-impl Tree {
-    fn new(name: &str, files: &[&str]) -> Self {
-        let root = std::env::temp_dir().join(format!("spit-robust-{name}-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&root);
-        fs::create_dir_all(&root).unwrap();
-        for file in files {
-            let path = root.join(file);
-            fs::create_dir_all(path.parent().unwrap()).unwrap();
-            fs::write(path, "").unwrap();
-        }
-        Self(root)
-    }
-
-    fn path(&self) -> &Path {
-        &self.0
-    }
-}
-
-impl Drop for Tree {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
-    }
 }
 
 fn spit(args: &[&str], stdin: Option<&[u8]>) -> Output {
