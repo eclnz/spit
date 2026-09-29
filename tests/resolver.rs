@@ -451,8 +451,10 @@ fn pipeline_checks_need_no_inventory() {
         Err(ResolveError::TypeMismatch { .. })
     ));
 
-    let (pipeline, inventory) =
-        support::parse_fixture(include_str!("../examples/commands/command_demo.spit")).unwrap();
+    let (pipeline, inventory) = support::parse_fixture(include_str!(
+        "../examples/commands/command_demo/command_demo.spit"
+    ))
+    .unwrap();
     assert!(inventory.is_none());
     validate_pipeline(&pipeline).unwrap();
 }

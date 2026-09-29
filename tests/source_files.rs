@@ -48,8 +48,8 @@ fn check(tree: &Tree) -> Output {
     Command::new(env!("CARGO_BIN_EXE_spit"))
         .args([
             "dag",
-            "examples/commands/field_survey.spit",
-            "examples/commands/field_survey.spitout",
+            "examples/commands/field_survey/field_survey.spit",
+            "examples/commands/field_survey/field_survey.spitout",
             "--root",
             tree.path().to_str().unwrap(),
         ])
@@ -92,14 +92,14 @@ fn survey_reports_a_missing_required_file() {
 #[test]
 fn survey_rejects_a_photo_without_an_inventory_sidecar() {
     let fixture = survey_tree(None);
-    let inventory = include_str!("../examples/commands/field_survey.spitout")
+    let inventory = include_str!("../examples/commands/field_survey/field_survey.spitout")
         .replace("    photo_imu[site=01,visit=02,shot=02]\n", "");
     let inventory_path = fixture.0.join("incomplete.spitout");
     fs::write(&inventory_path, inventory).unwrap();
     let result = Command::new(env!("CARGO_BIN_EXE_spit"))
         .args([
             "dag",
-            "examples/commands/field_survey.spit",
+            "examples/commands/field_survey/field_survey.spit",
             inventory_path.to_str().unwrap(),
             "--root",
             fixture.0.to_str().unwrap(),
@@ -130,7 +130,12 @@ fn survey_reports_a_source_path_that_is_a_directory() {
 #[test]
 fn the_spitdag_records_the_root_as_an_absolute_path() {
     let fixture = survey_tree(None);
-    let example = |file: &str| format!("{}/examples/commands/{file}", env!("CARGO_MANIFEST_DIR"));
+    let example = |file: &str| {
+        format!(
+            "{}/examples/commands/field_survey/{file}",
+            env!("CARGO_MANIFEST_DIR")
+        )
+    };
     let result = Command::new(env!("CARGO_BIN_EXE_spit"))
         .current_dir(fixture.path().parent().unwrap())
         .args([
@@ -149,6 +154,12 @@ fn the_spitdag_records_the_root_as_an_absolute_path() {
         String::from_utf8_lossy(&result.stderr)
     );
     let graph = String::from_utf8(result.stdout).unwrap();
-    let root = fixture.path().to_str().unwrap().replace('\\', "\\\\");
+    let root = fixture
+        .path()
+        .canonicalize()
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .replace('\\', "\\\\");
     assert!(graph.contains(&format!("\"root\":\"{root}\"")), "{graph}");
 }

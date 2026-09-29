@@ -246,14 +246,35 @@ require image run=1,2 per [subject, visit]
 
 ## Inputs
 
-A `.spitout` lists a dataset's settled inputs: each source artifact, by product and entity values. `spit inputs` writes one, and a dataset indexer or a person can write one too. A record may end with `: path`, its file relative to the dataset root; `spit inputs` writes one for each file it finds, and a record without one takes its product's path rule. `contexts:` names a group even when one of its required inputs is absent:
+A `.spitout` lists a dataset's settled source identities. `spit inputs` writes one, and a dataset indexer or a person can write one too. Paths come from rules in the pipeline or, if a recipe supplies a source rule, a `source_paths:` section written once in the `.spitout`. A record ending in `: path` is accepted for older inventories only if that path agrees with its rule. `contexts:` names a group even when one of its required inputs is absent:
 
 ```text
 contexts:
     [subject=A,visit=1]
 sources:
-    image[subject=A,visit=1,run=1]: raw/A/1/run-1.nii.gz
+    image[subject=A,visit=1,run=1]
 ```
+
+For one named directory discovery, `spit inputs` nests source identities under each context. A list of values in a nested dimension expands each listed product for every value:
+
+```text
+sources:
+    source_lut
+contexts sessions:
+    [sub=01,ses=01]:
+        reverse_b0, t1w
+        [run=01,02]:
+            raw_dwi, dwi_bvec, dwi_bval, dwi_json
+```
+
+This declares two runs of each listed DWI source. Flat `product[dimension=value,...]` records remain valid. A source path rule declared only in a recipe is written once in the `.spitout`:
+
+```text
+source_paths:
+    image: data/sub-{sub}/image.nii.gz
+```
+
+The DAG can then use the rule without loading the recipe. Per-record paths cannot redirect an artifact away from it.
 
 ## Optional types
 

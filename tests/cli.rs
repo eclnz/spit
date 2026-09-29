@@ -67,8 +67,8 @@ fn dag_resolves_a_pipeline_over_a_spitout() {
 fn dag_with_paths_displays_resolved_paths_before_command_expansion() {
     let output = spit(&[
         "dag",
-        "examples/commands/field_survey.spit",
-        "examples/commands/field_survey.spitout",
+        "examples/commands/field_survey/field_survey.spit",
+        "examples/commands/field_survey/field_survey.spitout",
         "--paths",
     ]);
     assert!(output.status.success(), "{}", stderr(&output));
@@ -84,7 +84,7 @@ fn expanded_examples_resolve() {
         ("examples/pipelines/branching", 21),
         ("examples/pipelines/complex", 25),
         ("examples/pipelines/rich_shapes", 17),
-        ("examples/commands/field_survey", 93),
+        ("examples/commands/field_survey/field_survey", 93),
         ("examples/analytics/analytics", 34),
     ] {
         let (pipeline, sources) = (format!("{example}.spit"), format!("{example}.spitout"));
@@ -101,7 +101,7 @@ fn expanded_examples_resolve() {
 fn path_rules_report_fallbacks_and_strict_paths_reject_them() {
     let rules = spit(&[
         "check",
-        "examples/commands/field_survey.spit",
+        "examples/commands/field_survey/field_survey.spit",
         "--path-rules",
     ]);
     assert!(rules.status.success(), "{}", stderr(&rules));
@@ -110,9 +110,9 @@ fn path_rules_report_fallbacks_and_strict_paths_reject_them() {
     assert!(report.contains("vegetation (output): default"));
 
     for command in ["check", "dag"] {
-        let mut args = vec![command, "examples/commands/field_survey.spit"];
+        let mut args = vec![command, "examples/commands/field_survey/field_survey.spit"];
         if command == "dag" {
-            args.push("examples/commands/field_survey.spitout");
+            args.push("examples/commands/field_survey/field_survey.spitout");
         }
         args.push("--strict-paths");
         let strict = spit(&args);
@@ -128,8 +128,8 @@ fn path_rules_report_fallbacks_and_strict_paths_reject_them() {
 fn each_option_applies_to_its_commands() {
     let output = spit(&[
         "artifacts",
-        "examples/commands/command_demo.spit",
-        "examples/commands/command_demo.spitout",
+        "examples/commands/command_demo/command_demo.spit",
+        "examples/commands/command_demo/command_demo.spitout",
         "--paths",
     ]);
     assert!(!output.status.success());
@@ -142,14 +142,18 @@ fn each_option_applies_to_its_commands() {
 
 #[test]
 fn check_json_reads_the_pipeline_file_and_dag_json_emits_the_spitdag() {
-    let check = spit(&["check", "examples/commands/command_demo.spit", "--json"]);
+    let check = spit(&[
+        "check",
+        "examples/commands/command_demo/command_demo.spit",
+        "--json",
+    ]);
     assert!(check.status.success());
     assert_eq!(stdout(&check), "{\"diagnostics\":[]}\n");
     let run = || {
         spit(&[
             "dag",
-            "examples/commands/command_demo.spit",
-            "examples/commands/command_demo.spitout",
+            "examples/commands/command_demo/command_demo.spit",
+            "examples/commands/command_demo/command_demo.spitout",
             "--json",
         ])
     };
@@ -278,9 +282,9 @@ fn check_prints_every_diagnostic_and_fails_only_on_errors() {
 
 #[test]
 fn a_recipe_names_its_own_pipeline_for_dag_and_artifacts() {
-    let recipe = "examples/commands/command_demo.spitin";
-    let pipeline = "examples/commands/command_demo.spit";
-    let inventory = "examples/commands/command_demo.spitout";
+    let recipe = "examples/commands/command_demo/command_demo.spitin";
+    let pipeline = "examples/commands/command_demo/command_demo.spit";
+    let inventory = "examples/commands/command_demo/command_demo.spitout";
     for command in ["dag", "artifacts"] {
         let alone = spit(&[command, recipe]);
         assert!(alone.status.success(), "{}", stderr(&alone));
@@ -302,7 +306,7 @@ fn a_recipe_names_its_own_pipeline_for_dag_and_artifacts() {
     assert!(!spitout.status.success());
     assert!(
         stderr(&spitout).starts_with(
-            "error: dag needs a pipeline before `examples/commands/command_demo.spitout`"
+            "error: dag needs a pipeline before `examples/commands/command_demo/command_demo.spitout`"
         ),
         "{}",
         stderr(&spitout)

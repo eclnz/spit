@@ -149,9 +149,7 @@ fn a_given_root_is_scanned_even_when_the_recipe_has_records() {
     tree.write("analysis.spit", PIPELINE);
     let recipe = tree.write(
         "analysis.spitin",
-        &format!(
-            "pipeline analysis.spit\n{RECIPE}sources:\n  image[sub=old,ses=1]: data/old/image.nii.gz\n"
-        ),
+        &format!("pipeline analysis.spit\n{RECIPE}sources:\n  image[sub=old,ses=1]\n"),
     );
     let run = |root: Option<&str>| {
         let mut args = vec!["inputs", recipe.to_str().unwrap()];
@@ -173,7 +171,10 @@ fn a_given_root_is_scanned_even_when_the_recipe_has_records() {
         String::from_utf8_lossy(&scanned.stderr)
     );
     let scanned = String::from_utf8(scanned.stdout).unwrap();
-    assert!(scanned.contains("image[sub=1,ses=1]"), "{scanned}");
+    assert!(
+        scanned.contains("[sub=1,ses=1]:\n        image"),
+        "{scanned}"
+    );
     assert!(!scanned.contains("sub=old"), "{scanned}");
 }
 
@@ -346,11 +347,45 @@ fn a_spitout_writes_values_in_the_declared_dimension_order() {
         &Default::default(),
     );
     // `image` declares [sub, ses]: its records and the contexts follow suit.
+    assert!(text.contains("contexts sessions:\n"), "{text}");
+    assert!(text.contains("    image[sub=1,ses=1]\n"), "{text}");
+}
+
+#[test]
+fn a_discovered_spitout_groups_sources_by_session() {
+    let pipeline = parse_pipeline(
+        "source image: Image [sub, ses, run]\nsource t1w: Image [sub, ses]\nsource lut: Table []\n",
+    )
+    .unwrap();
+    let recipe =
+        parse_input_spec("discover sessions: [sub, ses] from dirs sub-{sub}/ses-{ses}\n").unwrap();
+    let inventory = spit::parse_source_inventory(
+        "contexts sessions:\n    [sub=02,ses=01]\n    [sub=01,ses=02]\n    [sub=01,ses=01]\n\
+sources:\n    image[sub=02,ses=01,run=01]\n\
+    image[sub=01,ses=02,run=01]\n\
+    image[sub=01,ses=01,run=02]\n\
+    lut[]\n\
+    t1w[sub=01,ses=01]\n\
+    image[sub=01,ses=01,run=01]\n",
+    )
+    .unwrap();
+    let rendered = spit::render_source_inventory(&inventory, &pipeline, &recipe.rules);
+    let shared = rendered.find("    lut\n").unwrap();
+    let first = rendered.find("    [sub=01,ses=01]:").unwrap();
+    let second = rendered.find("    [sub=01,ses=02]:").unwrap();
+    let third = rendered.find("    [sub=02,ses=01]:").unwrap();
     assert!(
-        text.starts_with("contexts sessions:\n    [sub=1,ses=1]\n"),
-        "{text}"
+        shared < first && first < second && second < third,
+        "{rendered}"
     );
-    assert!(text.contains("    image[sub=1,ses=1]: "), "{text}");
+    assert!(rendered.contains("[run=01,02]:"), "{rendered}");
+    let reparsed = spit::parse_source_inventory(&rendered).unwrap();
+    let mut actual = reparsed.artifacts;
+    let mut expected = inventory.artifacts;
+    actual.sort_by(|a, b| a.product.cmp(&b.product).then(a.entities.cmp(&b.entities)));
+    expected.sort_by(|a, b| a.product.cmp(&b.product).then(a.entities.cmp(&b.entities)));
+    assert_eq!(actual, expected);
+    assert_eq!(reparsed.discovered, inventory.discovered);
 }
 
 #[test]
@@ -382,7 +417,11 @@ fn a_spitout_alone_drives_jobs_without_its_recipe() {
     );
     let spitout = fs::read_to_string(saved).unwrap();
     assert!(
-        spitout.contains("image[sub=1,ses=2]: data/sub-1/ses-2/image.nii.gz"),
+        spitout.contains("source_paths:\n    image: data/sub-{sub}/ses-{ses}/image.nii.gz"),
+        "{spitout}"
+    );
+    assert!(
+        spitout.contains("[sub=1,ses=2]:\n        image"),
         "{spitout}"
     );
     // Step 3 from the .spitout and the pipeline, with the recipe removed.
@@ -409,6 +448,63 @@ fn a_spitout_alone_drives_jobs_without_its_recipe() {
 }
 
 #[test]
+fn a_record_cannot_redirect_one_source_away_from_its_path_rule() {
+    let pipeline =
+        parse_pipeline("source image: Image [sub]\npath image: data/sub-{sub}/image.nii.gz\n")
+            .unwrap();
+    let inventory =
+        spit::parse_source_inventory("sources:\n    image[sub=01]: elsewhere/image.nii.gz\n")
+            .unwrap();
+    let error = parse_input_spec("")
+        .unwrap()
+        .resolve(&pipeline, InputSource::Inventory(inventory))
+        .unwrap_err();
+    assert!(
+        error.to_string().contains("differs from its path rule"),
+        "{error}"
+    );
+
+    let tree = Tree::new("reject-record-path", &[]);
+    let pipeline_file = tree.write(
+        "pipeline.spit",
+        "source image: Image [sub]\npath image: data/sub-{sub}/image.nii.gz\n",
+    );
+    let inputs_file = tree.write(
+        "inputs.spitout",
+        "sources:\n    image[sub=01]: elsewhere/image.nii.gz\n",
+    );
+    let output = Command::new(env!("CARGO_BIN_EXE_spit"))
+        .args([
+            "dag",
+            pipeline_file.to_str().unwrap(),
+            inputs_file.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("differs from its path rule"));
+}
+
+#[test]
+fn a_spitout_source_path_rule_cannot_override_the_pipeline() {
+    let pipeline =
+        parse_pipeline("source image: Image [sub]\npath image: data/sub-{sub}/image.nii.gz\n")
+            .unwrap();
+    let inventory = spit::parse_source_inventory(
+        "source_paths:\n    image: elsewhere/{sub}.nii.gz\nsources:\n    image[sub=01]\n",
+    )
+    .unwrap();
+    let error = parse_input_spec("")
+        .unwrap()
+        .resolve(&pipeline, InputSource::Inventory(inventory))
+        .unwrap_err();
+    assert!(
+        error.to_string().contains("both .spit and .spitout"),
+        "{error}"
+    );
+}
+
+#[test]
 fn contexts_follow_the_discover_rule_and_list_in_the_order_written() {
     // The pipeline declares [ses, sub] and, with the alphabetical fallback,
     // used to put `ses` first in the contexts and sort by it.
@@ -427,21 +523,22 @@ fn contexts_follow_the_discover_rule_and_list_in_the_order_written() {
     let text = spit::render_source_inventory(&resolved.inventory, &pipeline, &spec.rules);
     let contexts: Vec<_> = text
         .lines()
+        .skip_while(|line| *line != "contexts sessions:")
         .skip(1)
-        .take_while(|line| line.starts_with("    ["))
+        .filter(|line| line.starts_with("    ["))
         .collect();
     assert_eq!(
         contexts,
         [
-            "    [sub=1,ses=1]",
-            "    [sub=1,ses=2]",
-            "    [sub=2,ses=1]",
-            "    [sub=10,ses=1]",
+            "    [sub=1,ses=1]:",
+            "    [sub=1,ses=2]:",
+            "    [sub=2,ses=1]:",
+            "    [sub=10,ses=1]:",
         ],
         "{text}"
     );
     // Records keep their own product's declared order.
-    assert!(text.contains("    image[ses=1,sub=1]: "), "{text}");
+    assert!(text.contains("        image\n"), "{text}");
 }
 
 #[test]
