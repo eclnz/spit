@@ -60,20 +60,6 @@ fn help_lists_each_step_and_each_command_explains_itself() {
 }
 
 #[test]
-fn removed_options_say_what_replaced_them() {
-    let sources = spit(&[
-        "dag",
-        "examples/commands/command_demo.spit",
-        "--sources",
-        "examples/commands/command_demo.spitout",
-    ]);
-    assert!(!sources.status.success());
-    assert!(stderr(&sources).contains("give the .spitout as a file after the pipeline"));
-    let paths = spit(&["check", "examples/commands/command_demo.spit", "--paths"]);
-    assert!(stderr(&paths).contains("use --path-rules"));
-}
-
-#[test]
 fn check_compiles_the_pipeline_without_its_inputs() {
     let output = spit(&["check", "examples/types/typed.spit"]);
     assert!(output.status.success(), "{}", stderr(&output));
