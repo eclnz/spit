@@ -11,8 +11,8 @@ Each pipeline below, under [`examples/`](../examples), checks cleanly and sits b
 | [Analytics](../examples/analytics/analytics.spit) | Five keyed joins, then day, customer, and tenant rollups | `cargo run -- dag examples/analytics/analytics.spit examples/analytics/analytics.spitout` | 34 |
 | [Stages](../examples/stages/stages.spit) | Preprocessing and analysis stages with `{stage}` paths | `cargo run -- dag examples/stages/stages.spit examples/stages/stages.spitout` | 7 |
 | [Nested stages](../examples/stages/nested.spit) | Stages within a stage | `cargo run -- dag examples/stages/nested.spit examples/stages/nested.spitout` | 9 |
-| [Field survey](../examples/commands/field_survey.spit) | Sidecar files, calibration, alignment between spaces, and commands | `cargo run -- dag examples/commands/field_survey.spit examples/commands/field_survey.spitout` | 93 |
-| [MRtrix3 ACT](../examples/commands/mrtrix3_act.spit) | A diffusion MRI pipeline in nested stages, from BIDS import to connectome | `cargo run -- dag examples/commands/mrtrix3_act.spit examples/commands/mrtrix3_act.spitout` | 93 |
+| [Field survey](../examples/commands/field_survey/field_survey.spit) | Sidecar files, calibration, alignment between spaces, and commands | `cargo run -- dag examples/commands/field_survey/field_survey.spit examples/commands/field_survey/field_survey.spitout` | 93 |
+| [MRtrix3 ACT](../examples/commands/mrtrix3_act/mrtrix3_act.spit) | A diffusion MRI pipeline in nested stages, from BIDS import to connectome | `cargo run -- dag examples/commands/mrtrix3_act/mrtrix3_act.spit examples/commands/mrtrix3_act/mrtrix3_act.spitout` | 93 |
 
 ## Analytics
 
@@ -35,10 +35,10 @@ SPIT emits these command lines; it does not read acquisition metadata, check tra
 To try source discovery with empty placeholder files, run:
 
 ```sh
-sh examples/commands/mock_mrtrix3_inputs.sh
-cargo run -- inputs examples/commands/mrtrix3_act_discover.spitin --root examples/commands/mrtrix3_mock_data -o examples/commands/mrtrix3_mock_data/inputs.spitout
-cargo run -- dag examples/commands/mrtrix3_act.spit examples/commands/mrtrix3_mock_data/inputs.spitout --root examples/commands/mrtrix3_mock_data --paths
-cargo run -- dag examples/commands/mrtrix3_act.spit examples/commands/mrtrix3_mock_data/inputs.spitout --root examples/commands/mrtrix3_mock_data -o examples/commands/mrtrix3_mock_data/jobs.spitdag
+sh examples/commands/mrtrix3_act/mock_mrtrix3_inputs.sh
+cargo run -- inputs examples/commands/mrtrix3_act/mrtrix3_act_discover.spitin --root examples/commands/mrtrix3_act/mrtrix3_mock_data -o examples/commands/mrtrix3_act/mrtrix3_mock_data/inputs.spitout
+cargo run -- dag examples/commands/mrtrix3_act/mrtrix3_act.spit examples/commands/mrtrix3_act/mrtrix3_mock_data/inputs.spitout --root examples/commands/mrtrix3_act/mrtrix3_mock_data --paths
+cargo run -- dag examples/commands/mrtrix3_act/mrtrix3_act.spit examples/commands/mrtrix3_act/mrtrix3_mock_data/inputs.spitout --root examples/commands/mrtrix3_act/mrtrix3_mock_data -o examples/commands/mrtrix3_act/mrtrix3_mock_data/jobs.spitdag
 ```
 
 The script creates the three sessions and seven DWI runs listed in the example inventory. The recipe has no hand-written context or source records: it discovers session directories and scans the files. `inputs.spitout` nests 39 source identities under three session contexts, with no repeated paths because the pipeline declares them. The DAG contains 93 planned jobs. The files are empty, so the generated MRtrix3, FSL, and SynthSeg commands are for inspection only and cannot process this mock dataset.

@@ -28,9 +28,9 @@ Add or remove inputs and the same pipeline definition produces the right jobs, w
 Requires a [Rust toolchain](https://www.rust-lang.org/tools/install) (stable, via `cargo`). From this repository:
 
 ```sh
-cargo run -- check examples/commands/command_demo.spit
-cargo run -- dag examples/commands/command_demo.spit examples/commands/command_demo.spitout
-cargo run -- dag examples/commands/command_demo.spit examples/commands/command_demo.spitout -o command_demo.spitdag
+cargo run -- check examples/commands/command_demo/command_demo.spit
+cargo run -- dag examples/commands/command_demo/command_demo.spit examples/commands/command_demo/command_demo.spitout
+cargo run -- dag examples/commands/command_demo/command_demo.spit examples/commands/command_demo/command_demo.spitout -o command_demo.spitdag
 ```
 
 Use `cargo build` to get the `target/debug/spit` executable. With `cargo run`, the `--` separates Cargo's arguments from SPIT's arguments.
@@ -104,7 +104,7 @@ Syntax errors are reported throughout the file first; the remaining checks run o
 
 ## Write a pipeline
 
-Here is the complete [text processing example](examples/commands/command_demo.spit):
+Here is the complete [text processing example](examples/commands/command_demo/command_demo.spit):
 
 ```text
 source shard : Lines [group, part]
@@ -155,7 +155,7 @@ contexts sessions:
         image
 ```
 
-The `.spitout` lists the source identities found in the dataset. Paths come from the pipeline's source rules; when a recipe defines a source rule instead, the `.spitout` carries that rule once in `source_paths:`. Later steps need neither the recipe nor a rescan. A dataset indexer or person can write the same inventory. Older records with `: path` are accepted only when the path agrees with the declared rule. The text processing example uses [command_demo.spitout](examples/commands/command_demo.spitout):
+The `.spitout` lists the source identities found in the dataset. Paths come from the pipeline's source rules; when a recipe defines a source rule instead, the `.spitout` carries that rule once in `source_paths:`. Later steps need neither the recipe nor a rescan. A dataset indexer or person can write the same inventory. Older records with `: path` are accepted only when the path agrees with the declared rule. The text processing example uses [command_demo.spitout](examples/commands/command_demo/command_demo.spitout):
 
 ```text
 sources:
@@ -169,9 +169,9 @@ This creates two sort jobs for `alpha`, one for `beta`, and one merge job for ea
 ## Resolve jobs
 
 ```sh
-cargo run -- check examples/commands/command_demo.spit --path-rules
-cargo run -- dag examples/commands/command_demo.spit examples/commands/command_demo.spitout --paths
-cargo run -- dag examples/commands/command_demo.spit examples/commands/command_demo.spitout -o command_demo.spitdag
+cargo run -- check examples/commands/command_demo/command_demo.spit --path-rules
+cargo run -- dag examples/commands/command_demo/command_demo.spit examples/commands/command_demo/command_demo.spitout --paths
+cargo run -- dag examples/commands/command_demo/command_demo.spit examples/commands/command_demo/command_demo.spitout -o command_demo.spitdag
 ```
 
 `dag --paths` shows each artifact's file, and `-o` writes the `.spitdag`. It holds everything a backend needs to run the jobs, so a backend reads nothing else: no pipeline, path rule or command template. Paths in it are relative to the dataset folder.
@@ -214,8 +214,8 @@ Beyond the basics above, `.spit` files support typed products, multi-output oper
 | [Complex](examples/pipelines/complex.spit) | Nested aggregation |
 | [Selectors](examples/pipelines/selectors.spit) | `where`, `same`, a two-output step, a verification, and a many input beside a single input |
 | [Analytics](examples/analytics/analytics.spit) | Joins and rollups |
-| [Field survey](examples/commands/field_survey.spit) | A larger pipeline with sidecar files, calibration, alignment between spaces, and commands |
-| [MRtrix3 ACT](examples/commands/mrtrix3_act.spit) | A larger pipeline with commands in nested preprocessing, anatomy, and tractography stages, with a folder per stage and per-stage file formats |
+| [Field survey](examples/commands/field_survey/field_survey.spit) | A larger pipeline with sidecar files, calibration, alignment between spaces, and commands |
+| [MRtrix3 ACT](examples/commands/mrtrix3_act/mrtrix3_act.spit) | A larger pipeline with commands in nested preprocessing, anatomy, and tractography stages, with a folder per stage and per-stage file formats |
 | [Stages](examples/stages/stages.spit) | Preprocessing and analysis stages, a stage's own path default, and `{stage}` paths |
 | [Nested stages](examples/stages/nested.spit) | Stages within a stage, beside a step in the outer stage itself |
 | [Imports](examples/imports/imported.spit) | Reuse source and operation definitions with `text::` names |
