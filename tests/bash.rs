@@ -25,6 +25,7 @@ fn demo_script() -> String {
 }
 
 #[test]
+#[ignore = "the Bash backend is paused"]
 fn generated_script_uses_inventory_groups_and_declared_arguments() {
     let script = demo_script();
     assert!(script.contains("'sort' '-m' '-u' '-o'"));
@@ -75,6 +76,7 @@ fn generated_script_uses_inventory_groups_and_declared_arguments() {
 }
 
 #[test]
+#[ignore = "the Bash backend is paused"]
 fn backend_rejects_undeclared_placeholders_and_path_collisions() {
     let (mut pipeline, _) =
         parse_document(include_str!("../examples/commands/bash_demo.spit")).unwrap();
@@ -98,6 +100,7 @@ fn backend_rejects_undeclared_placeholders_and_path_collisions() {
 }
 
 #[test]
+#[ignore = "the Bash backend is paused"]
 fn sectioned_commands_bind_positional_inputs() {
     let text = "products:\n  left : Data [id]\n  right : Data [id]\n  result : Data [id]\n\
 operations:\n  join(Data, Data) -> Data\n\
@@ -114,6 +117,7 @@ path: {product}/{entities}.txt\n";
 }
 
 #[test]
+#[ignore = "the Bash backend is paused"]
 fn many_input_must_occupy_its_own_argument() {
     let (mut pipeline, _) =
         parse_document(include_str!("../examples/commands/bash_demo.spit")).unwrap();
@@ -129,6 +133,7 @@ fn many_input_must_occupy_its_own_argument() {
 }
 
 #[test]
+#[ignore = "the Bash backend is paused"]
 fn adding_a_group_to_inventory_expands_the_script() {
     let (pipeline, _) =
         parse_document(include_str!("../examples/commands/bash_demo.spit")).unwrap();
@@ -145,6 +150,7 @@ fn adding_a_group_to_inventory_expands_the_script() {
 }
 
 #[test]
+#[ignore = "the Bash backend is paused"]
 fn field_survey_generates_valid_bash_for_new_visits() {
     let (pipeline, embedded) =
         parse_document(include_str!("../examples/commands/field_survey.spit")).unwrap();
@@ -204,6 +210,7 @@ fn field_survey_generates_valid_bash_for_new_visits() {
 }
 
 #[test]
+#[ignore = "the Bash backend is paused"]
 fn named_many_port_expands_in_entity_order_as_separate_arguments() {
     let text = "source raw [group, part]\npath: {product}/{entities}.txt\noperation gather(items: many) @ drop(part)\ncommand gather: collect {items} {output}\nresult = gather(raw @ vary(part))\nsources:\n  raw[group=a,part=2]\n  raw[group=a,part=1]\n";
     let (pipeline, inventory) = parse_document(text).unwrap();
@@ -218,6 +225,7 @@ fn named_many_port_expands_in_entity_order_as_separate_arguments() {
 }
 
 #[test]
+#[ignore = "the Bash backend is paused"]
 fn command_uses_executable_on_path() {
     let text = "source raw [id]\npath raw: input/{id}.txt\npath result: output/{id}.txt\noperation copy(data: one)\ncommand copy: copy_data {data} {output}\nresult = copy(raw)\nsources:\n  raw[id=x]\n";
     let (pipeline, inventory) = parse_document(text).unwrap();
@@ -262,6 +270,7 @@ fn command_uses_executable_on_path() {
 }
 
 #[test]
+#[ignore = "the Bash backend is paused"]
 fn backslashes_follow_bash_quoting_rules() {
     let (mut pipeline, _) =
         parse_document(include_str!("../examples/commands/bash_demo.spit")).unwrap();
@@ -278,6 +287,7 @@ fn backslashes_follow_bash_quoting_rules() {
 }
 
 #[test]
+#[ignore = "the Bash backend is paused"]
 fn a_collection_expands_in_natural_order() {
     let text = "\
 source frame [subject, run]

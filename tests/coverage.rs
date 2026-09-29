@@ -82,7 +82,7 @@ fn coverage_checks_each_observed_context_without_a_global_count() {
             )],
             ..InputRules::default()
         },
-        inventory: None,
+        ..InputSpec::default()
     };
     let settle = |inventory: SourceInventory| {
         spec.resolve(&pipeline, InputSource::Inventory(inventory))

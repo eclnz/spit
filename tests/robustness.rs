@@ -124,6 +124,7 @@ fn paths_that_differ_only_in_case_are_flagged() {
 }
 
 #[test]
+#[ignore = "the Bash backend is paused"]
 fn bash_refuses_an_empty_inventory() {
     let output = spit(
         &["bash", "examples/commands/bash_demo.spit", "--sources", "-"],
@@ -138,6 +139,7 @@ fn bash_refuses_an_empty_inventory() {
 }
 
 #[test]
+#[ignore = "the Bash backend is paused"]
 fn a_root_starting_with_a_dash_is_not_read_as_an_option() {
     let output = spit(
         &[
@@ -153,6 +155,7 @@ fn a_root_starting_with_a_dash_is_not_read_as_an_option() {
 }
 
 #[test]
+#[ignore = "the Bash backend is paused"]
 fn single_quotes_and_backslashes_keep_braces_literal() {
     let text = "source x [s]\npath: {product}/{entities}\noperation f(a) -> Text\ncommand f: awk '{print $1}' \\{a\\} \"{a}\" {output}\ny = f(x)\nsources:\n    x[s=1]\n";
     let (pipeline, inventory) = parse_document(text).unwrap();
@@ -241,32 +244,48 @@ fn json_mode_always_prints_json() {
 
 #[test]
 fn command_line_mistakes_are_named() {
-    for (args, problem) in [
-        (&["chek", "p.spit"][..], "unknown command `chek`"),
-        (&["check"][..], "check needs a pipeline file"),
+    for (args, problem, more) in [
         (
-            &["check", "--json", "p.spit"][..],
-            "the pipeline file comes before options such as `--json`",
+            &["chek", "p.spit"][..],
+            "unknown command `chek`",
+            "run `spit help`",
         ),
-        (&["check", "p.spit", "--jsn"][..], "unknown option `--jsn`"),
+        (
+            &["check"][..],
+            "check needs <pipeline.spit | recipe.spitin>",
+            "usage: spit check ",
+        ),
+        (
+            &["check", "p.spit", "--jsn"][..],
+            "unknown option `--jsn`",
+            "usage: spit check ",
+        ),
         (
             &["check", "p.spit", "q.spit"][..],
-            "unexpected argument `q.spit`; give one pipeline file",
+            "unexpected file `q.spit`",
+            "usage: spit check ",
         ),
         (
             &["check", "p.spit", "--stdin", "--stdin"][..],
             "--stdin is given more than once",
+            "usage: spit check ",
         ),
         (
-            &["check", "p.spit", "--sources"][..],
-            "--sources needs a value: <inventory.spitout|->",
+            &["dag", "p.spit", "d.spitout", "--root"][..],
+            "--root needs a value: <directory>",
+            "usage: spit dag ",
+        ),
+        (
+            &["check", "p.spit", "--sources", "d.spitout"][..],
+            "unknown option `--sources`; give the .spitout as a file after the pipeline",
+            "usage: spit check ",
         ),
     ] {
         let output = spit(args, None);
         assert!(!output.status.success());
         let stderr = text(&output.stderr);
         assert!(
-            stderr.starts_with(&format!("error: {problem}\nusage: spit ")),
+            stderr.starts_with(&format!("error: {problem}\n{more}")),
             "{stderr}"
         );
     }

@@ -18,7 +18,7 @@ use crate::compile::validate_pipeline;
 use crate::error::ResolveError;
 use crate::lower::Document;
 use crate::model::{ArtifactInstance, CoverageGap, InputRules, Pipeline, SourceInventory};
-use crate::parser::ParseError;
+use crate::parser::{strip_comment, ParseError};
 use crate::paths::PathTemplate;
 use crate::{parse_spit, parse_spit_at};
 
@@ -30,21 +30,57 @@ pub use self::discover::{discover_source_files, discover_sources, Discovery};
 /// A recipe's rules and any inventory records written with them.
 #[derive(Clone, Debug, Default)]
 pub struct InputSpec {
+    /// The pipeline a recipe's `pipeline analysis.spit` line names: relative
+    /// to the recipe's folder when parsed at a path.
+    pub pipeline: Option<PathBuf>,
     pub rules: InputRules,
     pub inventory: Option<SourceInventory>,
 }
 
 /// Parse a `.spitin` file without resolving imports.
 pub fn parse_input_spec(text: &str) -> Result<InputSpec, ParseError> {
-    check_input_lines(text)?;
-    finish_spec(parse_spit(text)?)
+    let (pipeline, text) = pipeline_line(text)?;
+    check_input_lines(&text)?;
+    let spec = finish_spec(parse_spit(&text)?)?;
+    Ok(InputSpec { pipeline, ..spec })
 }
 
-/// Parse a `.spitin` file at `path`. Paths inside the recipe are relative to
-/// its containing directory unless the CLI supplies `--root`.
+/// Parse a `.spitin` file at `path`. Paths inside the recipe, and the
+/// pipeline it names, are relative to its folder unless the CLI supplies
+/// `--root`.
 pub fn parse_input_spec_at(text: &str, path: &Path) -> Result<InputSpec, ParseError> {
-    check_input_lines(text)?;
-    finish_spec(parse_spit_at(text, path)?)
+    let (pipeline, text) = pipeline_line(text)?;
+    check_input_lines(&text)?;
+    let spec = finish_spec(parse_spit_at(&text, path)?)?;
+    let folder = path.parent().unwrap_or_else(|| Path::new(""));
+    Ok(InputSpec {
+        pipeline: pipeline.map(|pipeline| folder.join(pipeline)),
+        ..spec
+    })
+}
+
+/// The pipeline a recipe names with `pipeline analysis.spit`, and the text
+/// with that line blanked so that other lines keep their numbers.
+fn pipeline_line(text: &str) -> Result<(Option<PathBuf>, String), ParseError> {
+    let mut pipeline = None;
+    let mut rest = String::new();
+    for (index, original) in text.lines().enumerate() {
+        let line = strip_comment(original).trim();
+        match line.strip_prefix("pipeline ") {
+            Some(file) => {
+                if pipeline.is_some() {
+                    return Err(ParseError::new(
+                        index + 1,
+                        "a .spitin names its pipeline once",
+                    ));
+                }
+                pipeline = Some(PathBuf::from(file.trim()));
+            }
+            None => rest.push_str(original),
+        }
+        rest.push('\n');
+    }
+    Ok((pipeline, rest))
 }
 
 fn check_input_lines(text: &str) -> Result<(), ParseError> {
@@ -94,6 +130,7 @@ fn finish_spec(document: Document) -> Result<InputSpec, ParseError> {
     }
     inputs.source_paths = pipeline.product_paths;
     Ok(InputSpec {
+        pipeline: None,
         rules: inputs,
         inventory,
     })
@@ -103,6 +140,7 @@ impl InputSpec {
     /// The rules and records a `.spit` document writes beside its pipeline.
     pub fn embedded_in(document: &Document) -> Self {
         Self {
+            pipeline: None,
             rules: document.inputs.clone(),
             inventory: document.inventory.clone(),
         }

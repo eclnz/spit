@@ -23,8 +23,8 @@ pub use bash::{render_bash, BashError};
 pub use command::{validate_commands, CommandError, CommandTemplate};
 pub use compile::validate_pipeline;
 pub use diagnostics::{
-    diagnose, diagnose_artifacts_at, diagnose_at, diagnose_at_with_inputs, Diagnostic,
-    DiagnosticSource, Severity,
+    diagnose, diagnose_artifacts_at, diagnose_at, diagnose_at_with_inputs, diagnose_recipe,
+    Diagnostic, DiagnosticSource, Severity,
 };
 pub use error::{DefinitionSubject, ResolveError, TypeConflict};
 pub use imports::{

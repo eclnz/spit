@@ -213,11 +213,11 @@ pub fn diagnose_at_with_inputs(
         let mut document = parse_located_document(text, path, inline)?;
         let mut spec = InputSpec {
             rules: document.inputs.clone(),
-            inventory: None,
+            ..InputSpec::default()
         };
         let recipe = InputSpec {
             rules: inputs.rules.clone(),
-            inventory: None,
+            ..InputSpec::default()
         };
         spec.merge(recipe)
             .map_err(|message| ParseError::new(1, message))?;
@@ -227,6 +227,73 @@ pub fn diagnose_at_with_inputs(
         document.inputs = spec.rules;
         Ok(document)
     })
+}
+
+/// Diagnose a `.spitin` recipe at `path` without reading any data: its own
+/// lines, then the pipeline its `pipeline` line names, then its rules and
+/// any records against that pipeline. The pipeline's own errors are named
+/// by file and line, since they are not in `text`.
+pub fn diagnose_recipe(text: &str, path: &Path) -> Vec<Diagnostic> {
+    let error = |message: String| Diagnostic::error(DiagnosticSource::Pipeline, None, message);
+    let spec = match crate::inputs::parse_input_spec_at(text, path) {
+        Ok(spec) => spec,
+        Err(parse) => {
+            let diagnostic = Diagnostic::located(DiagnosticSource::Pipeline, &parse, text);
+            return finish(vec![diagnostic], text, None);
+        }
+    };
+    let Some(pipeline_path) = spec.pipeline.clone() else {
+        let message =
+            "name the pipeline this recipe is for, with a line such as `pipeline analysis.spit`";
+        return finish(vec![error(message.to_owned())], text, None);
+    };
+    let shown = pipeline_path.display();
+    let pipeline_text = match std::fs::read_to_string(&pipeline_path) {
+        Ok(pipeline_text) => pipeline_text,
+        Err(reason) => {
+            return finish(
+                vec![error(format!("cannot read pipeline `{shown}`: {reason}"))],
+                text,
+                None,
+            )
+        }
+    };
+    let pipeline_errors: Vec<_> = diagnose_at(&pipeline_text, None, &pipeline_path)
+        .into_iter()
+        .filter(Diagnostic::is_error)
+        .map(|diagnostic| {
+            let line = diagnostic
+                .line
+                .map_or_else(String::new, |line| format!(" line {line}"));
+            error(format!("in `{shown}`{line}: {}", diagnostic.message))
+        })
+        .collect();
+    if !pipeline_errors.is_empty() {
+        return finish(pipeline_errors, text, None);
+    }
+    let document = match crate::parse_spit_at(&pipeline_text, &pipeline_path) {
+        Ok(document) => document,
+        Err(parse) => return finish(vec![error(format!("in `{shown}`: {parse}"))], text, None),
+    };
+    let mut combined = InputSpec::embedded_in(&document);
+    combined.inventory = None;
+    let checked = combined
+        .merge(spec.clone())
+        .map_err(|message| message.into())
+        .and_then(|()| match &combined.inventory {
+            Some(records) => combined
+                .resolve(
+                    &document.pipeline,
+                    crate::InputSource::Inventory(records.clone()),
+                )
+                .map(|_| ()),
+            None => combined.check(&document.pipeline),
+        });
+    let diagnostics = match checked {
+        Ok(()) => Vec::new(),
+        Err(problem) => vec![error(problem.to_string())],
+    };
+    finish(diagnostics, text, None)
 }
 
 pub fn diagnose_artifacts_at(
@@ -293,8 +360,11 @@ fn diagnose_with_parser(
     if diagnostics.iter().any(Diagnostic::is_error) {
         return finish(diagnostics, text, source_text);
     }
-    let supplied = external_inventory.or(document.inventory);
-    let inventory = supplied.clone().unwrap_or_default();
+    // Without records the input stage and jobs have nothing to work on.
+    let Some(supplied) = external_inventory.or(document.inventory) else {
+        return finish(diagnostics, text, source_text);
+    };
+    let inventory = supplied.clone();
     let outputs = |jobs: Vec<Job>| jobs.into_iter().flat_map(|job| job.outputs);
     // The input stage settles the inventory; only then are jobs resolved.
     let produced: Result<BTreeSet<String>, _> =
@@ -337,14 +407,12 @@ fn diagnose_with_parser(
         }
         // Without an inventory no step is expected to resolve jobs.
         Ok(produced) => {
-            if let Some(inventory) = &supplied {
-                diagnostics.extend(empty_step_warnings(
-                    &document.pipeline,
-                    &document.lines,
-                    &produced,
-                    inventory,
-                ));
-            }
+            diagnostics.extend(empty_step_warnings(
+                &document.pipeline,
+                &document.lines,
+                &produced,
+                &supplied,
+            ));
         }
     }
     finish(diagnostics, text, source_text)

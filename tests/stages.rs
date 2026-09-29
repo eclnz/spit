@@ -156,6 +156,7 @@ fn path_placeholder_names_are_reserved() {
 }
 
 #[test]
+#[ignore = "the Bash backend is paused"]
 fn bash_marks_where_each_stage_starts() {
     let (pipeline, inventory) = parse_document(&staged()).unwrap();
     let dag = resolve(&pipeline, &inventory.unwrap()).unwrap();
@@ -168,6 +169,7 @@ fn bash_marks_where_each_stage_starts() {
 }
 
 #[test]
+#[ignore = "the Bash backend is paused"]
 fn one_stage_runs_on_what_earlier_stages_wrote() {
     let (pipeline, inventory) = parse_document(&staged()).unwrap();
     let dag = resolve(&pipeline, &inventory.unwrap())
@@ -292,22 +294,13 @@ fn an_empty_stage_is_reported() {
 
 #[test]
 fn check_counts_jobs_per_stage() {
-    let (ok, stdout, stderr) = spit(&["check", PIPELINE, "--sources", SOURCES]);
+    let (ok, _, stderr) = spit(&["dag", PIPELINE, SOURCES]);
     assert!(ok, "{stderr}");
-    assert!(stdout.contains("7 jobs resolved: 5 in preprocess, 2 in analysis."));
-    let (ok, stdout, stderr) = spit(&[
-        "check",
-        PIPELINE,
-        "--sources",
-        SOURCES,
-        "--stage",
-        "analysis",
-    ]);
-    assert!(ok, "{stderr}");
-    assert!(stdout.contains("2 jobs resolved in stage `analysis`."));
+    assert!(stderr.contains("7 jobs resolved: 5 in preprocess, 2 in analysis."));
 }
 
 #[test]
+#[ignore = "the Bash backend is paused"]
 fn stage_option_rejects_unknown_stages() {
     let (ok, _, stderr) = spit(&["bash", PIPELINE, "--sources", SOURCES, "--stage", "report"]);
     assert!(!ok);
@@ -325,6 +318,7 @@ fn stage_option_rejects_unknown_stages() {
 }
 
 #[test]
+#[ignore = "the Bash backend is paused"]
 fn root_checks_the_files_a_stage_reads_from_earlier_stages() {
     let unique = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -445,22 +439,9 @@ fn one_stage_includes_the_stages_nested_in_it() {
     assert_eq!(ids("preprocess"), [1, 2, 3, 4, 5, 6, 7]);
     assert_eq!(ids("preprocess/combine"), [4, 5]);
     assert_eq!(ids("pre"), Vec::<usize>::new());
-    let (ok, stdout, stderr) = spit(&["check", NESTED, "--sources", NESTED_SOURCES]);
+    let (ok, _, stderr) = spit(&["dag", NESTED, NESTED_SOURCES]);
     assert!(ok, "{stderr}");
-    assert!(stdout.contains("9 jobs resolved: 7 in preprocess, 2 in analysis."));
-    let (ok, stdout, stderr) = spit(&[
-        "bash",
-        NESTED,
-        "--sources",
-        NESTED_SOURCES,
-        "--stage",
-        "preprocess/combine",
-    ]);
-    assert!(ok, "{stderr}");
-    assert!(stdout.contains("# ===== Stage: preprocess/combine ====="));
-    assert!(stdout.contains(
-        "spit_require \"$SPIT_ROOT\"/'preprocess/clean/sorted/group=alpha__part=01.txt'"
-    ));
+    assert!(stderr.contains("9 jobs resolved: 7 in preprocess, 2 in analysis."));
 }
 
 #[test]

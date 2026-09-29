@@ -298,14 +298,13 @@ fn cli_lists_incomplete_artifacts_where_check_fails() {
             .args([
                 command,
                 pipeline.to_str().unwrap(),
-                "--sources",
                 sources.to_str().unwrap(),
             ])
             .output()
             .unwrap()
     };
     let artifacts = run("artifacts");
-    let check = run("check");
+    let check = run("dag");
     fs::remove_dir_all(&directory).unwrap();
 
     assert!(
