@@ -119,7 +119,7 @@ skip sessions count>=2 per [sub]
 path image: data/sub-{sub}/ses-{ses}/image.nii.gz
 ```
 
-`spit check analysis.spit` and `spit dag analysis.spit --json` load that sibling recipe automatically, discover source files, and resolve the pipeline. Use `--inputs other/cohort.spitin` for another dataset; relative paths then start at that recipe's folder unless `--root` is given. A pipeline with a `.spitin` recipe can omit output path rules: outputs default to `out/{product}/{entities}`. The `.spitin` file may also contain `require` rules or explicit `sources:` and `contexts:` records. Logical source types and operations stay in `.spit`.
+`spit check analysis.spit` and `spit dag analysis.spit --json` load that sibling recipe automatically, discover source files, and resolve the pipeline. Use `--inputs other/cohort.spitin` for another dataset; relative paths then start at that recipe's folder unless `--root` is given. A pipeline with a `.spitin` recipe can omit output path rules: outputs default to `out/{product}/{entities}`. The `.spitin` file may also contain `require` rules or explicit `sources:` and `contexts:` records. Logical source types and operations stay in `.spit`. To keep what a recipe found, save `spit discover analysis.spit > dataset.spitout`: each record carries its file's path, so `spit dag analysis.spit --sources dataset.spitout` needs neither the recipe nor a rescan.
 
 The pipeline describes what to do; an inventory describes what is present. The example uses [bash_demo.spitout](examples/commands/bash_demo.spitout):
 
