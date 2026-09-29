@@ -5,7 +5,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::json::Json;
+use crate::json::{Json, ObjectRef};
 use crate::types::TypeExpr;
 
 /// The schema version a `.spitdag` is written with.
@@ -196,24 +196,26 @@ fn job_json(job: &BoundJob, dependents: &[usize]) -> Json {
         .outputs
         .iter()
         .map(|(port, artifact)| (port.clone(), artifact_json(artifact)));
+    let operation = Json::string(&job.operation);
     let inputs = Json::Object(inputs.collect());
     let outputs = Json::Object(outputs.collect());
     let command = job.command.as_deref().map_or(Json::Null, command_json);
     let verify = Json::array(job.verify.iter().map(|command| command_json(command)));
     // What the job reads, writes and runs, but not its ID, stage or
     // neighbours, which can change while the work stays the same.
-    let work = Json::object([
-        ("operation", Json::string(&job.operation)),
-        ("inputs", inputs.clone()),
-        ("outputs", outputs.clone()),
-        ("command", command.clone()),
-        ("verify", verify.clone()),
+    let work = ObjectRef(&[
+        ("operation", &operation),
+        ("inputs", &inputs),
+        ("outputs", &outputs),
+        ("command", &command),
+        ("verify", &verify),
     ]);
+    let fingerprint = fingerprint(&work.to_string());
     Json::object([
         ("id", Json::Number(job.id)),
-        ("operation", Json::string(&job.operation)),
+        ("operation", operation),
         ("stage", Json::Array(stage)),
-        ("fingerprint", Json::String(fingerprint(&work.to_string()))),
+        ("fingerprint", Json::String(fingerprint)),
         ("inputs", inputs),
         ("outputs", outputs),
         (
@@ -230,7 +232,9 @@ fn job_json(job: &BoundJob, dependents: &[usize]) -> Json {
 }
 
 /// A 64-bit FNV-1a hash of `text`, as 16 hexadecimal digits: the same on
-/// every platform and in every release, unlike the standard library's.
+/// every platform and in every release, unlike the standard library's. A
+/// job's fingerprint hashes its work as compact JSON, so the JSON writer's
+/// format is part of the `.spitdag` contract; a test pins a job's value.
 fn fingerprint(text: &str) -> String {
     let hash = text.bytes().fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
         (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3)
@@ -395,6 +399,9 @@ mod tests {
         };
         assert_ne!(print(&job), print(&changed));
         assert!(print(&job).bytes().all(|byte| byte.is_ascii_hexdigit()));
+        // The hash of the work as compact JSON: a change to the JSON writer
+        // changes every fingerprint, so it must be deliberate.
+        assert_eq!(print(&job), "72f6d8ecbacfd9ad");
         assert_eq!(fingerprint(""), "cbf29ce484222325");
         assert_eq!(fingerprint("a"), "af63dc4c8601ec8c");
     }

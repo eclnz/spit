@@ -134,6 +134,7 @@ Dead public API (item 5, 15) is not visible to the compiler because `lib.rs` re-
 - **Where:** `src/spitdag.rs` `job_json`, `fingerprint`.
 - **Problem:** `inputs`/`outputs`/`command`/`verify` Json trees are cloned to build the fingerprint payload, and the FNV hash is over serialized JSON text, so formatting changes silently change fingerprints.
 - **Constraint:** fingerprints are part of the `.spitdag` contract. If the hashed representation changes, bump `SPITDAG_VERSION` and say so; otherwise keep values identical. Tests assert known FNV values.
+- **Status: done; fingerprints unchanged.** The work payload is a borrowed `json::ObjectRef` over the job's own values, written by the same `write_object` as `Json::Object`, so the four deep clones are gone and the hashed bytes are identical. The coupling to the JSON format is now explicit rather than silent: `fingerprint` documents it, and a test pins a whole job's fingerprint (`72f6d8ecbacfd9ad`, taken from the previous commit's code), so a change to the writer fails a test instead of changing every fingerprint. No `SPITDAG_VERSION` bump. `dag --json` output identical.
 
 ### 11. Deduplicate test helpers
 - `spit` is defined 4x across `tests/`; `rendered`, `outputs`, `errors`, `bound` 3x each; `text`, `settle`, `resolve_text` 2x. Move to `tests/support/mod.rs`.
