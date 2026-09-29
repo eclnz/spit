@@ -266,3 +266,29 @@ fn a_source_record_may_give_its_file() {
         assert_eq!(error.line(), 2, "{bad}");
     }
 }
+
+#[test]
+fn an_inventory_may_name_its_pipeline_before_its_first_section() {
+    let text = "pipeline ../analysis.spit\n\ncontexts:\n    [a=1]\n\nsources:\n    raw[a=1]\n";
+    assert_eq!(
+        spit::inventory_pipeline(text).unwrap(),
+        Some(std::path::PathBuf::from("../analysis.spit"))
+    );
+    // The records read the same with or without the line.
+    let bare = text.split_once("contexts:").unwrap().1;
+    assert_eq!(
+        parse_source_inventory(text).unwrap(),
+        parse_source_inventory(&format!("contexts:{bare}")).unwrap()
+    );
+    // An inventory from an indexer names none, and names one only once.
+    assert_eq!(
+        spit::inventory_pipeline("sources:\n    raw[a=1]\n").unwrap(),
+        None
+    );
+    let twice =
+        spit::inventory_pipeline("pipeline a.spit\npipeline b.spit\nsources:\n").unwrap_err();
+    assert!(
+        twice.to_string().contains("names its pipeline once"),
+        "{twice}"
+    );
+}

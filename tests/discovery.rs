@@ -428,20 +428,18 @@ fn cli_discovers_sources_under_the_root() {
     let root = tree.0.to_str().unwrap();
     let discovered = run(&["inputs", recipe.to_str().unwrap(), "--root", root]);
     assert!(discovered.status.success());
+    // The .spitout names the pipeline its recipe names.
     assert_eq!(
         String::from_utf8_lossy(&discovered.stdout),
-        "sources:\n    frame[subject=a,run=1]: raw/sub-a/run-1.dat\n    frame[subject=a,run=2]: raw/sub-a/run-2.dat\n    lut[]: config/lut.txt\n"
+        format!(
+            "pipeline {}\n\nsources:\n    frame[subject=a,run=1]: raw/sub-a/run-1.dat\n    frame[subject=a,run=2]: raw/sub-a/run-2.dat\n    lut[]: config/lut.txt\n",
+            pipeline.display()
+        )
     );
     assert!(String::from_utf8_lossy(&discovered.stderr).contains("note: found 3 source artifacts"));
     let spitout = tree.0.join("found.spitout");
     fs::write(&spitout, &discovered.stdout).unwrap();
-    let dag = run(&[
-        "dag",
-        pipeline.to_str().unwrap(),
-        spitout.to_str().unwrap(),
-        "--root",
-        root,
-    ]);
+    let dag = run(&["dag", spitout.to_str().unwrap(), "--root", root]);
     let notes = String::from_utf8(dag.stderr).unwrap();
     assert!(dag.status.success(), "{notes}");
     assert!(notes.contains("note: 1 jobs resolved."), "{notes}");
@@ -489,7 +487,13 @@ fn discovery_reports_skipped_files_and_still_succeeds() {
         tree.path().to_str().unwrap(),
     ]);
     assert!(output.status.success(), "{}", text(&output.stderr));
-    assert_eq!(text(&output.stdout), "sources:\n    x[s=a]: in/a.txt\n");
+    assert_eq!(
+        text(&output.stdout),
+        format!(
+            "pipeline {}\n\nsources:\n    x[s=a]: in/a.txt\n",
+            tree.path().join("pipeline.spit").display()
+        )
+    );
     assert!(text(&output.stderr).contains("warning: skipped `in/%41.txt`"));
 }
 

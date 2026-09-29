@@ -2,6 +2,7 @@
 //! `.spitout` or written in a `.spitin` recipe.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::path::PathBuf;
 
 use crate::model::{EntityBinding, InputRules, Pipeline, SourceInventory, SourceRecord};
 use crate::paths::unusable_path;
@@ -165,9 +166,34 @@ fn in_order(binding: &EntityBinding, declared: &[&str]) -> String {
         .join(",")
 }
 
+/// The pipeline an inventory names with a `pipeline analysis.spit` line
+/// before its first section, as written by `spit inputs`, exactly as
+/// written. An inventory from a dataset indexer or a fixture names none.
+pub fn inventory_pipeline(text: &str) -> Result<Option<PathBuf>, ParseError> {
+    let mut pipeline = None;
+    for (index, original) in text.lines().enumerate() {
+        let line = strip_comment(original).trim();
+        if Header::of(line).is_some() {
+            break;
+        }
+        if let Some(file) = line.strip_prefix("pipeline ") {
+            if pipeline.is_some() {
+                return Err(
+                    ParseError::new(index + 1, "an inventory names its pipeline once")
+                        .locate(original),
+                );
+            }
+            pipeline = Some(PathBuf::from(file.trim()));
+        }
+    }
+    Ok(pipeline)
+}
+
 /// Parse an inventory supplied by a dataset indexer or written as a fixture.
 /// Records are logical identities, each optionally followed by `: path`, the
-/// file relative to the dataset root. They never hold artifact types.
+/// file relative to the dataset root. They never hold artifact types. A
+/// `pipeline` line before the first section is read by [`inventory_pipeline`]
+/// and skipped here.
 pub fn parse_source_inventory(text: &str) -> Result<SourceInventory, ParseError> {
     enum InventorySection {
         Sources,
@@ -180,6 +206,9 @@ pub fn parse_source_inventory(text: &str) -> Result<SourceInventory, ParseError>
         let number = index + 1;
         let line = strip_comment(original).trim();
         if line.is_empty() {
+            continue;
+        }
+        if section.is_none() && line.starts_with("pipeline ") {
             continue;
         }
         match Header::of(line) {

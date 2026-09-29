@@ -17,8 +17,8 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use spit::{
-    bind_dag, diagnose_at_checked, diagnose_recipe, inspect_paths, parse_input_spec_at,
-    render_artifacts, render_bound_dag, render_dag, render_diagnostics_json,
+    bind_dag, diagnose_at_checked, diagnose_recipe, inspect_paths, inventory_pipeline,
+    parse_input_spec_at, render_artifacts, render_bound_dag, render_dag, render_diagnostics_json,
     render_source_inventory, resolve, resolve_artifacts_excluding, stage_within,
     validate_source_files, Diagnostic, DiagnosticSource, InputSource, InputSpec, PathTemplate,
     Pipeline, ResolvedDag, ResolvedInputs, Severity,
@@ -67,14 +67,14 @@ impl Command {
             },
             Self::Dag => CommandSpec {
                 name: "dag",
-                files: "<recipe.spitin> or <pipeline.spit> <inputs.spitout | ->",
+                files: "<recipe.spitin | inputs.spitout> or <pipeline.spit> <inputs.spitout | ->",
                 summary: "step 3: resolve a pipeline's jobs over a dataset's inputs; -o writes the .spitdag",
                 example: "spit dag dataset.spitin -o analysis.spitdag\n  spit dag analysis.spit dataset.spitout -o analysis.spitdag\n  spit dag analysis.spit dataset.spitout --paths",
                 flags: &[Root, StrictPaths, Paths, Json, Output],
             },
             Self::Artifacts => CommandSpec {
                 name: "artifacts",
-                files: "<recipe.spitin> or <pipeline.spit> <inputs.spitout | ->",
+                files: "<recipe.spitin | inputs.spitout> or <pipeline.spit> <inputs.spitout | ->",
                 summary: "step 3: report what can and cannot be made from a dataset's inputs, and why",
                 example: "spit artifacts dataset.spitin\n  spit artifacts analysis.spit dataset.spitout",
                 flags: &[Root],
@@ -116,7 +116,7 @@ impl Command {
     fn shortcut(self) -> Option<&'static str> {
         match self {
             Self::Dag | Self::Artifacts => Some(
-                "Given a .spitin in place of the .spitout, it runs `spit inputs` in memory first.\nA .spitin names its own pipeline, so it is given alone; a .spitout or `-` needs the pipeline first.",
+                "Given a .spitin in place of the .spitout, it runs `spit inputs` in memory first.\nA .spitin, and a .spitout written by `spit inputs`, name their own pipeline, so they are given alone; a .spitout that does not, or `-`, needs the pipeline first.",
             ),
             Self::Check | Self::Inputs => None,
         }
@@ -487,11 +487,18 @@ fn check(args: &CliArgs) -> Result<(), Box<dyn Error>> {
 fn inputs(args: &CliArgs) -> Result<(), Box<dyn Error>> {
     let settled = run_inputs(&args.files[0], args.value(Flag::Root).as_deref())?;
     settled.inputs.require_complete()?;
-    let text = render_source_inventory(
+    let records = render_source_inventory(
         &settled.inputs.inventory,
         &settled.pipeline,
         &settled.recipe.rules,
     );
+    // The pipeline is named as the recipe names it: from the folder of the
+    // file written, so the two can move together.
+    let pipeline = match args.value(Flag::Output) {
+        Some(file) => relative_to(Path::new(&file), &settled.pipeline_file),
+        None => settled.pipeline_file.clone(),
+    };
+    let text = format!("pipeline {}\n\n{records}", pipeline.display());
     write_output(args, &text, "the .spitout")
 }
 
@@ -569,23 +576,27 @@ struct Prepared {
 /// Read the pipeline and its inputs for step 3, running step 2 in memory
 /// for a recipe, and report every diagnostic first.
 fn prepare(args: &CliArgs) -> Result<Prepared, Box<dyn Error>> {
-    // A recipe names its own pipeline, so it stands alone; any other inputs
-    // need the pipeline they are for.
+    // A file that names its own pipeline stands alone, and is not given a
+    // second one to disagree with; any other inputs need the pipeline they
+    // are for.
     let (given, inputs) = match args.files.as_slice() {
         [inputs] => (None, inputs),
         [pipeline, inputs] => (Some(pipeline.as_str()), inputs),
         _ => unreachable!("the command takes one or two files"),
     };
     let command = args.command.name();
-    if let (Some(pipeline), true) = (given, is_recipe(inputs)) {
-        return Err(format!(
-            "`{inputs}` names its own pipeline; run `spit {command} {inputs}` without `{pipeline}`"
+    let names_its_own = |inputs: &str| {
+        format!(
+            "`{inputs}` names its own pipeline; run `spit {command} {inputs}` without `{}`",
+            given.unwrap_or_default()
         )
-        .into());
-    }
+    };
     let lenient = args.command == Command::Artifacts;
     let mut root = args.value(Flag::Root).map(PathBuf::from);
     let (path, records_text, recipe) = if is_recipe(inputs) {
+        if given.is_some() {
+            return Err(names_its_own(inputs).into());
+        }
         let given_root = root.as_ref().and_then(|root| root.to_str());
         let settled = run_inputs(inputs, given_root)?;
         eprintln!("note: ran `spit inputs {inputs}` in memory");
@@ -597,18 +608,28 @@ fn prepare(args: &CliArgs) -> Result<Prepared, Box<dyn Error>> {
         );
         (settled.pipeline_file, text, Some(settled.recipe))
     } else {
-        let Some(pipeline) = given else {
-            return Err(format!(
-                "{command} needs a pipeline before `{inputs}`; only a .spitin recipe names its own"
-            )
-            .into());
-        };
         let text = if inputs == "-" {
             read_stdin()?
         } else {
             read_file(inputs)?
         };
-        (PathBuf::from(pipeline), text, None)
+        let named = inventory_pipeline(&text).map_err(|error| format!("{inputs}: {error}"))?;
+        let path = match (given, named) {
+            (Some(_), Some(_)) => return Err(names_its_own(inputs).into()),
+            (Some(pipeline), None) => PathBuf::from(pipeline),
+            // Named from the folder of the file that names it.
+            (None, Some(named)) => match Path::new(inputs).parent() {
+                Some(folder) if inputs != "-" => folder.join(named),
+                _ => named,
+            },
+            (None, None) => {
+                return Err(format!(
+                    "`{inputs}` does not name its pipeline; give it first: spit {command} <pipeline.spit> {inputs}"
+                )
+                .into())
+            }
+        };
+        (path, text, None)
     };
     let path = path.as_path();
     let pipeline_text = read_file(&path.display().to_string())?;
@@ -707,6 +728,29 @@ fn located(inputs: &ResolvedInputs) -> impl Iterator<Item = &str> {
         .iter()
         .filter(|record| record.path.is_some())
         .map(|record| record.product.as_str())
+}
+
+/// `target` as a path from the folder `file` is in, or as given when either
+/// cannot be resolved.
+fn relative_to(file: &Path, target: &Path) -> PathBuf {
+    let folder = file
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let (Ok(folder), Ok(target_full)) = (fs::canonicalize(folder), fs::canonicalize(target)) else {
+        return target.to_owned();
+    };
+    let from: Vec<_> = folder.components().collect();
+    let to: Vec<_> = target_full.components().collect();
+    let shared = from.iter().zip(&to).take_while(|(a, b)| a == b).count();
+    let mut relative = PathBuf::new();
+    for _ in shared..from.len() {
+        relative.push("..");
+    }
+    for part in &to[shared..] {
+        relative.push(part);
+    }
+    relative
 }
 
 fn is_recipe(file: &str) -> bool {

@@ -38,7 +38,7 @@ fn help_lists_each_step_and_each_command_explains_itself() {
         let text = stdout(&spit(args));
         assert!(
             text.contains(
-                "usage: spit dag <recipe.spitin> or <pipeline.spit> <inputs.spitout | ->"
+                "usage: spit dag <recipe.spitin | inputs.spitout> or <pipeline.spit> <inputs.spitout | ->"
             ),
             "{text}"
         );
@@ -253,7 +253,8 @@ fn check_prints_every_diagnostic_and_fails_only_on_errors() {
     assert_eq!(stdout(&warned_check), "Pipeline valid.\n");
     assert!(!warned_dag.status.success());
     assert!(
-        stderr(&warned_dag).starts_with("error: dag needs a pipeline before"),
+        stderr(&warned_dag)
+            .contains("does not name its pipeline; give it first: spit dag <pipeline.spit>"),
         "{}",
         stderr(&warned_dag)
     );
@@ -285,7 +286,7 @@ fn a_recipe_names_its_own_pipeline_for_dag_and_artifacts() {
     assert!(!spitout.status.success());
     assert!(
         stderr(&spitout).starts_with(
-            "error: dag needs a pipeline before `examples/commands/command_demo.spitout`"
+            "error: `examples/commands/command_demo.spitout` does not name its pipeline; give it first: spit dag <pipeline.spit> examples/commands/command_demo.spitout"
         ),
         "{}",
         stderr(&spitout)

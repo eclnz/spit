@@ -385,10 +385,12 @@ fn a_spitout_alone_drives_jobs_without_its_recipe() {
         spitout.contains("image[sub=1,ses=2]: data/sub-1/ses-2/image.nii.gz"),
         "{spitout}"
     );
-    // Step 3 from the .spitout and the pipeline, with the recipe removed.
+    // The .spitout names its pipeline, from its own folder, so step 3 needs
+    // neither the recipe nor the pipeline given again.
+    assert!(spitout.starts_with("pipeline analysis.spit\n"), "{spitout}");
     fs::remove_file(recipe).unwrap();
     let root = tree.path().to_str().unwrap();
-    let dag = spit(&["dag", pipeline, saved, "--paths"]);
+    let dag = spit(&["dag", saved, "--paths"]);
     assert!(
         dag.status.success(),
         "{}",
@@ -398,7 +400,15 @@ fn a_spitout_alone_drives_jobs_without_its_recipe() {
     assert!(dag.contains("data/sub-5/ses-1/image.nii.gz"), "{dag}");
     assert!(dag.contains("results/5_1.nii.gz"), "{dag}");
     // The records give every source its file, so no source needs a rule.
-    let checked = spit(&["dag", pipeline, saved, "--root", root, "--strict-paths"]);
+    let checked = spit(&["dag", saved, "--root", root, "--strict-paths"]);
+    // Naming the pipeline as well is an error: the .spitout already does.
+    let doubled = spit(&["dag", pipeline, saved]);
+    assert!(!doubled.status.success());
+    assert!(
+        String::from_utf8_lossy(&doubled.stderr).contains("names its own pipeline"),
+        "{}",
+        String::from_utf8_lossy(&doubled.stderr)
+    );
     assert!(
         checked.status.success(),
         "{}",

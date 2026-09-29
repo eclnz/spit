@@ -51,10 +51,12 @@ SPIT runs in three steps. Each is one command, and each reads the files the prev
 | --- | --- |
 | `.spit` | A pipeline: sources, operations, steps, commands, and path rules. No dataset appears in it. |
 | `.spitin` | A recipe for a dataset's inputs: the pipeline it serves, and its `discover`, `require` and `skip` rules and source paths. |
-| `.spitout` | A dataset's settled inputs: each source artifact, with its file. |
+| `.spitout` | A dataset's settled inputs: each source artifact, with its file, and the pipeline they are for. |
 | `.spitdag` | The resolved jobs, each with its artifacts' files and its command, as JSON: all a backend needs to run them. |
 
-A later step may also take an earlier step's input and run that step in memory: `dag` and `artifacts` take a `.spitin` in place of the `.spitout`. A `.spitin` names its own pipeline, so it is given alone: `spit dag dataset.spitin`. Giving a `.spit` beside it is an error, so the two cannot disagree. A `.spitout` names no pipeline, so it takes one: `spit dag analysis.spit dataset.spitout`.
+A later step may also take an earlier step's input and run that step in memory: `dag` and `artifacts` take a `.spitin` in place of the `.spitout`.
+
+A `.spitin` names its own pipeline, and so does a `.spitout` that `spit inputs` wrote: it starts with a `pipeline` line, relative to its own folder. Such a file is given alone (`spit dag dataset.spitout`), and a `.spit` beside it is an error, so the two cannot disagree. A `.spitout` from a dataset indexer or written by hand names no pipeline, so it takes one first: `spit dag analysis.spit dataset.spitout`.
 
 SPIT has no backend yet: nothing in this repository runs a `.spitdag`.
 
@@ -63,9 +65,9 @@ SPIT has no backend yet: nothing in this repository runs a `.spitdag`.
 ```text
 spit check <pipeline.spit | recipe.spitin> [--path-rules] [--strict-paths] [--json] [--stdin]
 spit inputs <recipe.spitin> [--root <directory>] [-o <file>]
-spit dag <recipe.spitin> [--root <directory>] [--strict-paths] [--paths | --json | -o <file>]
-spit dag <pipeline.spit> <inputs.spitout | -> [--strict-paths] [--paths | --json | -o <file>]
-spit artifacts <recipe.spitin> [--root <directory>]
+spit dag <recipe.spitin | inputs.spitout> [--root <directory>] [--strict-paths] [--paths | --json | -o <file>]
+spit dag <pipeline.spit> <inputs.spitout | -> [--root <directory>] [--strict-paths] [--paths | --json | -o <file>]
+spit artifacts <recipe.spitin | inputs.spitout> [--root <directory>]
 spit artifacts <pipeline.spit> <inputs.spitout | -> [--root <directory>]
 ```
 
@@ -144,6 +146,8 @@ path image: data/sub-{sub}/ses-{ses}/image.nii.gz
 `spit check cohort.spitin` checks the rules against the pipeline without reading the dataset. `spit inputs cohort.spitin -o cohort.spitout` scans the recipe's folder, or `--root`, and writes what it found:
 
 ```text
+pipeline cohort.spit
+
 contexts sessions:
     [sub=01,ses=01]
     [sub=01,ses=02]

@@ -246,7 +246,7 @@ require image run=1,2 per [subject, visit]
 
 ## Inputs
 
-A `.spitout` lists a dataset's settled inputs: each source artifact, by product and entity values. `spit inputs` writes one, and a dataset indexer or a person can write one too. A record may end with `: path`, its file relative to the dataset root; `spit inputs` writes one for each file it finds, and a record without one takes its product's path rule. `contexts:` names a group even when one of its required inputs is absent:
+A `.spitout` lists a dataset's settled inputs: each source artifact, by product and entity values. `spit inputs` writes one, and a dataset indexer or a person can write one too. A `.spitout` from `spit inputs` begins with `pipeline analysis.spit`, the pipeline it was made for, relative to the `.spitout`'s own folder; `spit dag` and `spit artifacts` then take the file alone, and refuse a pipeline named beside it. A `.spitout` with no `pipeline` line takes its pipeline on the command line. A record may end with `: path`, its file relative to the dataset root; `spit inputs` writes one for each file it finds, and a record without one takes its product's path rule. `contexts:` names a group even when one of its required inputs is absent:
 
 ```text
 contexts:

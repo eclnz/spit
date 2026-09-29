@@ -41,7 +41,9 @@ pub use model::{
     InputRules, Invocation, Job, OperationDef, OutputPort, Pipeline, ProductDef, ResolvedDag,
     ShapeRule, SourceInventory, SourceRecord, StageDef,
 };
-pub use parser::{parse_source_inventory, render_source_inventory, ParseError, ParseErrorKind};
+pub use parser::{
+    inventory_pipeline, parse_source_inventory, render_source_inventory, ParseError, ParseErrorKind,
+};
 pub use paths::{
     inspect_paths, validate_source_files, PathCoverage, PathCoverageEntry, PathError, PathRule,
     PathTemplate, VerifiedFiles,
