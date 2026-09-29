@@ -50,7 +50,7 @@ pub(super) fn step_shape(
         return Err(no_driver(operation, &inputs));
     };
     check_broadcasts(operation, &inputs, driver, &groups)?;
-    let (_, context) = step_context(&inputs).expect("the step has a driver");
+    let context = step_context(&inputs, &groups);
     check_vary(operation, &inputs, driver, &context)?;
     check_output_dimensions(operation, &inputs, driver, &groups, &context, outputs)?;
     let joins = inputs

@@ -279,7 +279,7 @@ fn stage_dependencies<'a>(
                     .entry(consumer[..=shared].join("/"))
                     .or_default()
                     .entry(made[..=shared].join("/"))
-                    .or_insert((invocation.output_product(), product));
+                    .or_insert_with(|| (invocation.output_product(), product));
             }
             // Otherwise the producer is in this stage or one nested in it,
             // and records what it reads itself.
@@ -313,7 +313,7 @@ fn check_stage_cycles(
                 )
             })
             .collect();
-        reported.extend(cycle.iter().map(|stage| stage.to_owned()));
+        reported.extend(cycle.iter().map(std::borrow::ToOwned::to_owned));
         errors.push(stage_error(
             start,
             format!(
@@ -416,10 +416,31 @@ pub(super) fn index_producers(
     producers
 }
 
+/// Steps that read each other's outputs in a loop, so none can go first.
+pub(super) struct Cycle {
+    /// The step the loop was found at, by its first output.
+    pub(super) start: String,
+    /// The first output of each step in the loop, from `start` back to it.
+    pub(super) products: Vec<String>,
+}
+
+impl Cycle {
+    /// The error, and the step to report it at.
+    pub(super) fn into_error(self) -> (DefinitionSubject, ResolveError) {
+        let Self { start, products } = self;
+        (
+            DefinitionSubject::Invocation(start),
+            ResolveError::Cycle { products },
+        )
+    }
+}
+
+/// Invocation indices with every producer before its consumers, or the
+/// first cycle that makes that impossible.
 pub(super) fn invocation_order(
     invocations: &[Invocation],
     producers: &BTreeMap<String, usize>,
-) -> Result<Vec<usize>, ResolveError> {
+) -> Result<Vec<usize>, Cycle> {
     #[derive(Clone, Copy, PartialEq)]
     enum State {
         Unvisited,
@@ -427,52 +448,91 @@ pub(super) fn invocation_order(
         Done,
     }
 
-    fn visit(
-        index: usize,
-        invocations: &[Invocation],
-        producers: &BTreeMap<String, usize>,
-        states: &mut [State],
-        stack: &mut Vec<usize>,
-        order: &mut Vec<usize>,
-    ) -> Result<(), ResolveError> {
-        match states[index] {
-            State::Done => return Ok(()),
-            State::InProgress => {
-                let start = stack.iter().position(|value| *value == index).unwrap_or(0);
-                let mut products: Vec<_> = stack[start..]
-                    .iter()
-                    .map(|value| invocations[*value].output_product().to_owned())
-                    .collect();
-                products.push(invocations[index].output_product().to_owned());
-                return Err(ResolveError::Cycle { products });
-            }
-            State::Unvisited => {}
-        }
-        states[index] = State::InProgress;
-        stack.push(index);
-        for input in &invocations[index].inputs {
-            if let Some(producer) = producers.get(input.product_name()) {
-                visit(*producer, invocations, producers, states, stack, order)?;
-            }
-        }
-        stack.pop();
-        states[index] = State::Done;
-        order.push(index);
-        Ok(())
-    }
-
     let mut states = vec![State::Unvisited; invocations.len()];
-    let mut stack = Vec::new();
     let mut order = Vec::new();
-    for index in 0..invocations.len() {
-        visit(
-            index,
-            invocations,
-            producers,
-            &mut states,
-            &mut stack,
-            &mut order,
-        )?;
+    for root in 0..invocations.len() {
+        if states[root] != State::Unvisited {
+            continue;
+        }
+        // Depth first, with an explicit stack so a long chain of steps
+        // cannot overflow the call stack: each frame is a step being
+        // visited and how many of its inputs have been followed.
+        states[root] = State::InProgress;
+        let mut frames = vec![(root, 0)];
+        while let Some((index, next)) = frames.last_mut() {
+            let index = *index;
+            let Some(input) = invocations[index].inputs.get(*next) else {
+                frames.pop();
+                states[index] = State::Done;
+                order.push(index);
+                continue;
+            };
+            *next += 1;
+            let Some(&producer) = producers.get(input.product_name()) else {
+                continue;
+            };
+            match states[producer] {
+                State::Done => {}
+                State::InProgress => {
+                    let start = frames
+                        .iter()
+                        .position(|&(value, _)| value == producer)
+                        .unwrap_or(0);
+                    let start_product = invocations[producer].output_product().to_owned();
+                    let mut products: Vec<_> = frames[start..]
+                        .iter()
+                        .map(|&(value, _)| invocations[value].output_product().to_owned())
+                        .collect();
+                    products.push(start_product.clone());
+                    return Err(Cycle {
+                        start: start_product,
+                        products,
+                    });
+                }
+                State::Unvisited => {
+                    states[producer] = State::InProgress;
+                    frames.push((producer, 0));
+                }
+            }
+        }
     }
     Ok(order)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use super::invocation_order;
+    use crate::model::{InputBinding, Invocation};
+
+    /// A chain of `steps`, each reading the product of the one before and
+    /// written in reverse, so ordering must walk the whole chain at once.
+    fn chain(steps: usize) -> (Vec<Invocation>, BTreeMap<String, usize>) {
+        let invocations: Vec<_> = (1..=steps)
+            .rev()
+            .map(|step| {
+                let input = InputBinding::product(format!("p{}", step - 1));
+                Invocation::new("step", vec![input], format!("p{step}"))
+            })
+            .collect();
+        let producers = invocations
+            .iter()
+            .enumerate()
+            .map(|(index, invocation)| (invocation.output_product().to_owned(), index))
+            .collect();
+        (invocations, producers)
+    }
+
+    #[test]
+    fn a_long_chain_is_ordered_without_deep_recursion() {
+        // Test threads have small stacks; recursing once per step would
+        // overflow long before this.
+        let (invocations, producers) = chain(100_000);
+        let Ok(order) = invocation_order(&invocations, &producers) else {
+            panic!("a chain has no cycle");
+        };
+        assert_eq!(order.first(), Some(&(invocations.len() - 1)));
+        assert_eq!(order.last(), Some(&0));
+    }
 }

@@ -4,16 +4,9 @@
 mod support;
 
 use std::fs;
-use std::process::{Command, Output};
+use std::process::Output;
 
-use support::Tree;
-
-fn spit(args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_spit"))
-        .args(args)
-        .output()
-        .unwrap()
-}
+use support::{spit, Tree};
 
 fn stdout(output: &Output) -> String {
     String::from_utf8_lossy(&output.stdout).into_owned()
@@ -318,4 +311,63 @@ fn a_recipe_names_its_own_pipeline_for_dag_and_artifacts() {
         "{}",
         stderr(&spitout)
     );
+}
+
+#[test]
+fn a_recipe_run_in_memory_prints_each_pipeline_warning_once() {
+    let tree = Tree::new("warn-once", &["in/a.txt"]);
+    tree.write(
+        "analysis.spit",
+        "source raw : Raw [id]\nsource spare : Raw [id]\npath raw: in/{id}.txt\n\
+         path spare: sp/{id}.txt\npath: out/{product}/{id}.txt\n\
+         operation clean(Raw) -> Clean\ncommand clean: tool {input} {output}\ncleaned = clean(raw)\n",
+    );
+    let recipe = tree.write("data.spitin", "pipeline analysis.spit\n");
+    for command in ["inputs", "dag", "artifacts"] {
+        let output = spit(&[command, recipe.to_str().unwrap()]);
+        let errors = stderr(&output);
+        assert!(output.status.success(), "{command}: {errors}");
+        assert_eq!(
+            errors.matches("`spare` is never used").count(),
+            1,
+            "{command}: {errors}"
+        );
+    }
+}
+
+#[test]
+fn a_recipe_checks_a_pipeline_saved_with_a_byte_order_mark() {
+    let tree = Tree::new("bom-recipe", &[]);
+    tree.write(
+        "analysis.spit",
+        "\u{feff}source raw [id]\npath raw: in/{id}.txt\n",
+    );
+    let recipe = tree.write("data.spitin", "\u{feff}pipeline analysis.spit\n");
+    let output = spit(&["check", recipe.to_str().unwrap()]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(stdout(&output), "Recipe valid.\n");
+}
+
+#[test]
+fn a_recipe_whose_skip_leaves_a_discovery_empty_runs_in_memory_as_it_settles() {
+    let tree = Tree::new(
+        "skip-all",
+        &["data/sub-1/ses-1/image.nii", "data/sub-2/ses-1/image.nii"],
+    );
+    tree.write(
+        "analysis.spit",
+        "source image : Img [sub, ses]\npath image: data/sub-{sub}/ses-{ses}/image.nii\n\
+         operation clean(Img) -> Clean\ncommand clean: tool {input} {output}\n\
+         path: out/{product}/{sub}_{ses}.txt\ncleaned = clean(image)\n",
+    );
+    // Every subject has one session, so the skip rejects every group.
+    let recipe = tree.write(
+        "data.spitin",
+        "pipeline analysis.spit\ndiscover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}\n\
+         skip sessions count>=2 per [sub]\nrequire sessions count>=1 per [sub]\n",
+    );
+    for command in ["inputs", "dag", "artifacts"] {
+        let output = spit(&[command, recipe.to_str().unwrap()]);
+        assert!(output.status.success(), "{command}: {}", stderr(&output));
+    }
 }

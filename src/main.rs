@@ -10,18 +10,18 @@
 
 use std::env;
 use std::error::Error;
-use std::fmt::Write;
+use std::fmt;
 use std::fs;
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use spit::{
-    bind_dag, diagnose_at_checked, diagnose_recipe, inspect_paths, parse_input_spec_at,
-    render_artifacts, render_bound_dag, render_dag, render_diagnostics_json,
+    bind_dag, diagnose_checked, diagnose_checked_with_records, diagnose_recipe, inspect_paths,
+    parse_input_spec_at, render_artifacts, render_bound_dag, render_dag, render_diagnostics_json,
     render_source_inventory, resolve, resolve_artifacts_excluding, stage_within,
-    validate_source_files, Diagnostic, DiagnosticSource, InputSource, InputSpec, PathTemplate,
-    Pipeline, ResolvedDag, ResolvedInputs, Severity,
+    validate_source_files, Checked, Context, Diagnosis, Diagnostic, DiagnosticSource, InputSource,
+    InputSpec, PathTemplate, Pipeline, ResolvedDag, ResolvedInputs, Severity,
 };
 
 #[derive(Clone, Copy, PartialEq)]
@@ -49,7 +49,7 @@ struct CommandSpec {
 
 impl Command {
     fn spec(self) -> CommandSpec {
-        use Flag::*;
+        use Flag::{Json, Output, PathRules, Paths, Root, Stdin, StrictPaths};
         match self {
             Self::Check => CommandSpec {
                 name: "check",
@@ -95,11 +95,11 @@ impl Command {
         self.spec().files
     }
 
-    /// The fewest and most files it takes.
-    fn arity(self) -> (usize, usize) {
+    /// The most files it takes; every command takes at least one.
+    fn most_files(self) -> usize {
         match self {
-            Self::Check | Self::Inputs => (1, 1),
-            Self::Dag | Self::Artifacts => (1, 2),
+            Self::Check | Self::Inputs => 1,
+            Self::Dag | Self::Artifacts => 2,
         }
     }
 
@@ -210,6 +210,59 @@ impl Flag {
 struct Flags(Vec<(Flag, Option<String>)>);
 
 impl Flags {
+    /// Add the flag `argument` for `command`, taking its value from `rest`
+    /// when it has one.
+    fn add(
+        &mut self,
+        command: Command,
+        argument: &str,
+        rest: &mut impl Iterator<Item = String>,
+    ) -> Result<(), String> {
+        let flag = Flag::parse(argument)
+            .ok_or_else(|| misuse(format_args!("unknown option `{argument}`"), Some(command)))?;
+        if !command.flags().contains(&flag) {
+            let accepting: Vec<_> = COMMANDS
+                .iter()
+                .filter(|other| other.flags().contains(&flag))
+                .map(|other| other.name())
+                .collect();
+            return Err(misuse(
+                format_args!("{} applies to {}", flag.name(), accepting.join(", ")),
+                Some(command),
+            ));
+        }
+        if self.has(flag) {
+            return Err(misuse(
+                format_args!("{} is given more than once", flag.name()),
+                Some(command),
+            ));
+        }
+        let value = match flag.value() {
+            Some(value) => Some(rest.next().ok_or_else(|| {
+                misuse(
+                    format_args!("{} needs a value: {value}", flag.name()),
+                    Some(command),
+                )
+            })?),
+            None => None,
+        };
+        self.0.push((flag, value));
+        Ok(())
+    }
+
+    /// Fail if two flags that cannot be used together were both given.
+    fn check_conflicts(&self, command: Command) -> Result<(), String> {
+        for (first, second) in CONFLICTS {
+            if self.has(first) && self.has(second) {
+                return Err(misuse(
+                    format_args!("{} cannot be used with {}", first.name(), second.name()),
+                    Some(command),
+                ));
+            }
+        }
+        Ok(())
+    }
+
     fn has(&self, flag: Flag) -> bool {
         self.0.iter().any(|(given, _)| *given == flag)
     }
@@ -224,7 +277,10 @@ impl Flags {
 
 struct CliArgs {
     command: Command,
-    files: Vec<String>,
+    /// The file every command takes.
+    file: String,
+    /// The inputs after a pipeline, for a command that takes two files.
+    second: Option<String>,
     flags: Flags,
 }
 
@@ -245,42 +301,48 @@ enum Request {
     Version,
 }
 
-fn overview() -> String {
-    let mut text = String::from(
-        "spit: compile a pipeline, settle a dataset's inputs, resolve jobs, and write a script\n\nusage: spit <command> <files> [options]\n\ncommands:\n",
-    );
-    for command in COMMANDS {
-        writeln!(text, "  {:<10} {}", command.name(), command.summary()).unwrap();
+/// `spit help`, or `spit help <command>`.
+struct Help(Option<Command>);
+
+impl fmt::Display for Help {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.0 {
+            None => overview(f),
+            Some(command) => command_help(f, command),
+        }
     }
-    text.push_str(
-        "\nfiles:\n  .spit      a pipeline: sources, operations, steps, commands, path rules\n  .spitin    a recipe for a dataset's inputs, naming its pipeline\n  .spitout   a dataset's settled inputs, each source with its file\n  .spitdag   the resolved jobs, each with its files and command\n\nRun `spit help <command>` for its options.\n",
-    );
-    text
 }
 
-fn command_help(command: Command) -> String {
-    let mut text = format!(
-        "spit {}: {}\n\nusage: spit {} {} [options]\n",
-        command.name(),
-        command.summary(),
-        command.name(),
-        command.files()
-    );
+fn overview(f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    f.write_str(
+        "spit: compile a pipeline, settle a dataset's inputs, resolve jobs, and write a script\n\nusage: spit <command> <files> [options]\n\ncommands:\n",
+    )?;
+    for command in COMMANDS {
+        writeln!(f, "  {:<10} {}", command.name(), command.summary())?;
+    }
+    f.write_str(
+        "\nfiles:\n  .spit      a pipeline: sources, operations, steps, commands, path rules\n  .spitin    a recipe for a dataset's inputs, naming its pipeline\n  .spitout   a dataset's settled inputs, each source with its file\n  .spitdag   the resolved jobs, each with its files and command\n\nRun `spit help <command>` for its options.\n",
+    )
+}
+
+fn command_help(f: &mut fmt::Formatter<'_>, command: Command) -> fmt::Result {
+    let name = command.name();
+    writeln!(f, "spit {name}: {}\n", command.summary())?;
+    writeln!(f, "usage: spit {name} {} [options]", command.files())?;
     if let Some(shortcut) = command.shortcut() {
-        writeln!(text, "\n{shortcut}").unwrap();
+        writeln!(f, "\n{shortcut}")?;
     }
     if !command.flags().is_empty() {
-        text.push_str("\noptions:\n");
+        writeln!(f, "\noptions:")?;
         for flag in command.flags() {
             let name = match flag.value() {
                 Some(value) => format!("{} {value}", flag.name()),
                 None => flag.name().to_owned(),
             };
-            writeln!(text, "  {name:<20} {}", flag.help(command)).unwrap();
+            writeln!(f, "  {name:<20} {}", flag.help(command))?;
         }
     }
-    writeln!(text, "\nexample:\n  {}", command.example()).unwrap();
-    text
+    writeln!(f, "\nexample:\n  {}", command.example())
 }
 
 /// A usage error: what is wrong, and where to read more.
@@ -324,62 +386,40 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> Result<Request, String>
             files.push(argument);
             continue;
         }
-        let flag = Flag::parse(&argument)
-            .ok_or_else(|| misuse(format_args!("unknown option `{argument}`"), Some(command)))?;
-        if !command.flags().contains(&flag) {
-            let accepting: Vec<_> = COMMANDS
-                .iter()
-                .filter(|other| other.flags().contains(&flag))
-                .map(|other| other.name())
-                .collect();
-            return Err(misuse(
-                format_args!("{} applies to {}", flag.name(), accepting.join(", ")),
-                Some(command),
-            ));
-        }
-        if flags.has(flag) {
-            return Err(misuse(
-                format_args!("{} is given more than once", flag.name()),
-                Some(command),
-            ));
-        }
-        let value = match flag.value() {
-            Some(value) => Some(args.next().ok_or_else(|| {
-                misuse(
-                    format_args!("{} needs a value: {value}", flag.name()),
-                    Some(command),
-                )
-            })?),
-            None => None,
-        };
-        flags.0.push((flag, value));
+        flags.add(command, &argument, &mut args)?;
     }
-    for (first, second) in CONFLICTS {
-        if flags.has(first) && flags.has(second) {
-            return Err(misuse(
-                format_args!("{} cannot be used with {}", first.name(), second.name()),
-                Some(command),
-            ));
-        }
-    }
-    let (fewest, most) = command.arity();
-    if files.len() < fewest {
+    flags.check_conflicts(command)?;
+    let (file, second) = take_files(command, files)?;
+    Ok(Request::Run(CliArgs {
+        command,
+        file,
+        second,
+        flags,
+    }))
+}
+
+/// The file `command` takes, and a second when it takes two.
+fn take_files(command: Command, files: Vec<String>) -> Result<(String, Option<String>), String> {
+    let mut files = files.into_iter();
+    let Some(file) = files.next() else {
         return Err(misuse(
             format_args!("{} needs {}", command.name(), command.files()),
             Some(command),
         ));
-    }
-    if files.len() > most {
+    };
+    let second = files.next();
+    let extra = if command.most_files() == 1 {
+        second.as_ref()
+    } else {
+        files.as_slice().first()
+    };
+    if let Some(extra) = extra {
         return Err(misuse(
-            format_args!("unexpected file `{}`", files[most]),
+            format_args!("unexpected file `{extra}`"),
             Some(command),
         ));
     }
-    Ok(Request::Run(CliArgs {
-        command,
-        files,
-        flags,
-    }))
+    Ok((file, second))
 }
 
 /// Diagnostics that have already been printed.
@@ -398,7 +438,7 @@ fn main() -> ExitCode {
     let args = match parse_args(env::args().skip(1)) {
         Ok(Request::Run(args)) => args,
         Ok(Request::Help(command)) => {
-            print!("{}", command.map_or_else(overview, command_help));
+            print!("{}", Help(command));
             return ExitCode::SUCCESS;
         }
         Ok(Request::Version) => {
@@ -443,7 +483,7 @@ fn main() -> ExitCode {
 /// Step 1: compile a pipeline, or check a recipe against the pipeline it
 /// names. Reads no data.
 fn check(args: &CliArgs) -> Result<(), Box<dyn Error>> {
-    let file = &args.files[0];
+    let file = &args.file;
     let path = Path::new(file);
     let text = if args.has(Flag::Stdin) {
         read_stdin()?
@@ -463,16 +503,17 @@ fn check(args: &CliArgs) -> Result<(), Box<dyn Error>> {
         println!("Recipe valid.");
         return Ok(());
     }
-    let checked = diagnose_at_checked(&text, None, path, None, false);
+    let diagnosis = diagnose_checked(&text, Context::at(path));
     if args.has(Flag::Json) {
-        print!(
-            "{}",
-            render_diagnostics_json(&checked.diagnostics, &text, None)
-        );
+        let diagnostics = match &diagnosis {
+            Ok(checked) => &checked.warnings,
+            Err(all) => all,
+        };
+        print!("{}", render_diagnostics_json(diagnostics, &text, None));
         return Ok(());
     }
-    report(&checked.diagnostics, &text, None)?;
-    let coverage = inspect_paths(&checked.pipeline.expect("pipeline passed diagnosis"))?;
+    let checked = passed(diagnosis, |checked| &checked.warnings, &text, None)?;
+    let coverage = inspect_paths(&checked.pipeline)?;
     if args.has(Flag::PathRules) {
         println!("{coverage}");
     }
@@ -485,54 +526,78 @@ fn check(args: &CliArgs) -> Result<(), Box<dyn Error>> {
 
 /// Step 2: settle a dataset from a recipe and write its `.spitout`.
 fn inputs(args: &CliArgs) -> Result<(), Box<dyn Error>> {
-    let settled = run_inputs(&args.files[0], args.value(Flag::Root).as_deref())?;
-    settled.inputs.require_complete()?;
+    let loaded = load_recipe(&args.file)?;
+    report(&loaded.checked.warnings, &loaded.pipeline_text, None)?;
+    let root = args.value(Flag::Root).map(PathBuf::from);
+    let settled = settle(&loaded, &args.file, root.as_deref())?;
+    settled.require_complete()?;
     let text = render_source_inventory(
-        &settled.inputs.inventory,
-        &settled.pipeline,
-        &settled.recipe.rules,
+        &settled.inventory,
+        &loaded.checked.pipeline,
+        &loaded.recipe.rules,
     );
     write_output(args, &text, "the .spitout")
 }
 
-/// A settled dataset, with the pipeline it was settled for.
-struct Settled {
+/// A recipe, and the pipeline its `pipeline` line names, checked.
+struct Loaded {
+    recipe: InputSpec,
     /// The file the recipe's `pipeline` line names.
     pipeline_file: PathBuf,
-    pipeline: Pipeline,
-    recipe: InputSpec,
-    inputs: ResolvedInputs,
+    pipeline_text: String,
+    checked: Checked,
 }
 
-/// Run step 2 for the recipe `file`, over the pipeline its `pipeline` line
-/// names.
-fn run_inputs(file: &str, root: Option<&str>) -> Result<Settled, Box<dyn Error>> {
+/// Read the recipe `file` and check the pipeline it names, printing the
+/// pipeline's diagnostics only when it fails; its warnings are left to the
+/// caller.
+fn load_recipe(file: &str) -> Result<Loaded, Box<dyn Error>> {
     if !is_recipe(file) {
         return Err(format!("spit inputs reads a .spitin recipe, not `{file}`").into());
     }
-    let folder = Path::new(file)
-        .parent()
-        .filter(|parent| !parent.as_os_str().is_empty())
-        .unwrap_or_else(|| Path::new("."))
-        .to_owned();
-    let scan = root.is_some();
-    let root = root.map_or(folder, PathBuf::from);
     let recipe = parse_input_spec_at(&read_file(file)?, Path::new(file))
         .map_err(|error| format!("{file}: {error}"))?;
     let pipeline_file = recipe.pipeline.clone().ok_or_else(|| {
         format!("{file} does not name its pipeline; add a line such as `pipeline analysis.spit`")
     })?;
     let pipeline_text = read_file(&pipeline_file.display().to_string())?;
-    let checked = diagnose_at_checked(&pipeline_text, None, &pipeline_file, None, false);
-    report(&checked.diagnostics, &pipeline_text, None)?;
-    let pipeline = checked.pipeline.expect("pipeline passed diagnosis");
+    let checked = match diagnose_checked(&pipeline_text, Context::at(&pipeline_file)) {
+        Ok(checked) => checked,
+        Err(all) => {
+            report(&all, &pipeline_text, None)?;
+            return Err(Reported.into());
+        }
+    };
+    Ok(Loaded {
+        recipe,
+        pipeline_file,
+        pipeline_text,
+        checked,
+    })
+}
+
+/// Run step 2 for the recipe `file`: scan `root`, or the recipe's folder,
+/// or take the records written in the recipe when no root is given.
+fn settle(
+    loaded: &Loaded,
+    file: &str,
+    root: Option<&Path>,
+) -> Result<ResolvedInputs, Box<dyn Error>> {
+    let folder = Path::new(file)
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."))
+        .to_owned();
+    let scan = root.is_some();
+    let root = root.map_or(folder, Path::to_path_buf);
+    let recipe = &loaded.recipe;
     // Records written in the recipe stand in for a scan, unless a root to
     // scan is given.
     let source = match &recipe.inventory {
         Some(records) if !scan => InputSource::Inventory(records.clone()),
         _ => InputSource::Discover(&root),
     };
-    let resolved = recipe.resolve(&pipeline, source)?;
+    let resolved = recipe.resolve(&loaded.checked.pipeline, source)?;
     for skipped in &resolved.skipped {
         eprintln!("warning: skipped {skipped}");
     }
@@ -548,12 +613,7 @@ fn run_inputs(file: &str, root: Option<&str>) -> Result<Settled, Box<dyn Error>>
             root.display()
         );
     }
-    Ok(Settled {
-        pipeline_file,
-        pipeline,
-        recipe,
-        inputs: resolved,
-    })
+    Ok(resolved)
 }
 
 /// A pipeline ready for step 3: its settled inputs, and the pipeline used
@@ -571,10 +631,9 @@ struct Prepared {
 fn prepare(args: &CliArgs) -> Result<Prepared, Box<dyn Error>> {
     // A recipe names its own pipeline, so it stands alone; any other inputs
     // need the pipeline they are for.
-    let (given, inputs) = match args.files.as_slice() {
-        [inputs] => (None, inputs),
-        [pipeline, inputs] => (Some(pipeline.as_str()), inputs),
-        _ => unreachable!("the command takes one or two files"),
+    let (given, inputs) = match &args.second {
+        None => (None, &args.file),
+        Some(inputs) => (Some(args.file.as_str()), inputs),
     };
     let command = args.command.name();
     if let (Some(pipeline), true) = (given, is_recipe(inputs)) {
@@ -584,59 +643,85 @@ fn prepare(args: &CliArgs) -> Result<Prepared, Box<dyn Error>> {
         .into());
     }
     let lenient = args.command == Command::Artifacts;
-    let mut root = args.value(Flag::Root).map(PathBuf::from);
-    let (path, records_text, recipe) = if is_recipe(inputs) {
-        let given_root = root.as_ref().and_then(|root| root.to_str());
-        let settled = run_inputs(inputs, given_root)?;
-        eprintln!("note: ran `spit inputs {inputs}` in memory");
-        root = root.or_else(|| settled.inputs.root.clone());
-        let text = render_source_inventory(
-            &settled.inputs.inventory,
-            &settled.pipeline,
-            &settled.recipe.rules,
-        );
-        (settled.pipeline_file, text, Some(settled.recipe))
-    } else {
-        let Some(pipeline) = given else {
-            return Err(format!(
-                "{command} needs a pipeline before `{inputs}`; only a .spitin recipe names its own"
-            )
-            .into());
-        };
-        let text = if inputs == "-" {
-            read_stdin()?
-        } else {
-            read_file(inputs)?
-        };
-        (PathBuf::from(pipeline), text, None)
+    let root = args.value(Flag::Root).map(PathBuf::from);
+    if is_recipe(inputs) {
+        return prepare_recipe(inputs, root, lenient);
+    }
+    let Some(pipeline) = given else {
+        return Err(format!(
+            "{command} needs a pipeline before `{inputs}`; only a .spitin recipe names its own"
+        )
+        .into());
     };
-    let path = path.as_path();
-    let pipeline_text = read_file(&path.display().to_string())?;
-    let checked = diagnose_at_checked(
+    let records_text = if inputs == "-" {
+        read_stdin()?
+    } else {
+        read_file(inputs)?
+    };
+    let pipeline_text = read_file(pipeline)?;
+    let context = Context {
+        path: Some(Path::new(pipeline)),
+        recipe: None,
+        lenient,
+    };
+    let diagnosis = diagnose_checked_with_records(&pipeline_text, &records_text, context);
+    let (checked, records) = passed(
+        diagnosis,
+        |(checked, _)| &checked.warnings,
         &pipeline_text,
         Some(&records_text),
-        path,
-        recipe.as_ref(),
-        lenient,
+    )?;
+    let settled =
+        InputSpec::default().resolve(&checked.pipeline, InputSource::Inventory(records))?;
+    Ok(prepared(checked.pipeline, settled, root))
+}
+
+/// Step 2 in memory for the recipe `file`, then step 3's diagnosis of the
+/// records it settles. The pipeline is read and settled once, and its
+/// warnings are printed once, with the records'.
+fn prepare_recipe(
+    file: &str,
+    root: Option<PathBuf>,
+    lenient: bool,
+) -> Result<Prepared, Box<dyn Error>> {
+    let loaded = load_recipe(file)?;
+    let settled = settle(&loaded, file, root.as_deref())?;
+    eprintln!("note: ran `spit inputs {file}` in memory");
+    let records_text = render_source_inventory(
+        &settled.inventory,
+        &loaded.checked.pipeline,
+        &loaded.recipe.rules,
     );
-    report(&checked.diagnostics, &pipeline_text, Some(&records_text))?;
-    let pipeline = checked.pipeline.expect("pipeline passed diagnosis");
-    let records = checked.inventory.expect("inventory passed diagnosis");
-    let settled = recipe
-        .unwrap_or_default()
-        .resolve(&pipeline, InputSource::Inventory(records))?;
+    let context = Context {
+        path: Some(&loaded.pipeline_file),
+        recipe: Some(&loaded.recipe),
+        lenient,
+    };
+    let diagnosis = diagnose_checked_with_records(&loaded.pipeline_text, &records_text, context);
+    passed(
+        diagnosis,
+        |(checked, _)| &checked.warnings,
+        &loaded.pipeline_text,
+        Some(&records_text),
+    )?;
+    let root = root.or_else(|| settled.root.clone());
+    Ok(prepared(loaded.checked.pipeline, settled, root))
+}
+
+/// `pipeline` ready for step 3 with its `inputs`.
+fn prepared(pipeline: Pipeline, inputs: ResolvedInputs, root: Option<PathBuf>) -> Prepared {
     // Records give every source its file; outputs with no rule take the
     // built-in layout.
     let mut bound = pipeline.clone();
     bound
         .path_template
         .get_or_insert_with(PathTemplate::default_output);
-    Ok(Prepared {
+    Prepared {
         pipeline,
         bound,
-        inputs: settled,
+        inputs,
         root,
-    })
+    }
 }
 
 /// Step 3: resolve the jobs and print them, or write the `.spitdag`.
@@ -754,22 +839,12 @@ fn read_stdin() -> Result<String, String> {
     io::stdin()
         .read_to_string(&mut text)
         .map_err(|reason| format!("cannot read standard input: {reason}"))?;
-    Ok(strip_bom(text))
-}
-
-/// Drop a UTF-8 byte order mark, which some Windows editors write.
-fn strip_bom(text: String) -> String {
-    match text.strip_prefix('\u{feff}') {
-        Some(rest) => rest.to_owned(),
-        None => text,
-    }
+    Ok(text)
 }
 
 /// Read a file, naming it if it cannot be read.
 fn read_file(path: &str) -> Result<String, String> {
-    fs::read_to_string(path)
-        .map(strip_bom)
-        .map_err(|reason| format!("cannot read `{path}`: {reason}"))
+    fs::read_to_string(path).map_err(|reason| format!("cannot read `{path}`: {reason}"))
 }
 
 /// Print every diagnostic, failing if any is an error.
@@ -785,4 +860,24 @@ fn report(
         return Err(Reported);
     }
     Ok(())
+}
+
+/// Print what `diagnosis` found, and pass on what it checked; `warnings`
+/// finds its warnings.
+fn passed<T>(
+    diagnosis: Diagnosis<T>,
+    warnings: fn(&T) -> &[Diagnostic],
+    text: &str,
+    inventory_text: Option<&str>,
+) -> Result<T, Reported> {
+    match diagnosis {
+        Ok(checked) => {
+            report(warnings(&checked), text, inventory_text)?;
+            Ok(checked)
+        }
+        Err(all) => {
+            report(&all, text, inventory_text)?;
+            Err(Reported)
+        }
+    }
 }

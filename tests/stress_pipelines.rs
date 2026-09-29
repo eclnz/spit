@@ -84,16 +84,16 @@ fn nested_types_propagate_across_polymorphic_branches_and_rollups() {
     let batch = jobs(&dag, "selected_batch")
         .into_iter()
         .find(|job| {
-            job.output().entities.0.get("lab").map(String::as_str) == Some("Alpha")
-                && job.output().entities.0.get("rig").map(String::as_str) == Some("R1")
-                && job.output().entities.0.get("capture").map(String::as_str) == Some("C1")
+            job.output().entities.get("lab") == Some("Alpha")
+                && job.output().entities.get("rig") == Some("R1")
+                && job.output().entities.get("capture") == Some("C1")
         })
         .unwrap();
     assert_eq!(batch.inputs[0].len(), 2);
     assert_eq!(batch.dependencies.len(), 2);
     assert!(batch
         .input_artifacts()
-        .all(|input| input.entities.0.get("capture") == Some(&"C1".to_owned())));
+        .all(|input| input.entities.get("capture") == Some("C1")));
     assert_eq!(jobs(&dag, "global_summary")[0].dependencies.len(), 2);
 }
 
@@ -133,7 +133,7 @@ fn wrong_modality_calibration_fails_after_inferred_type_flows_downstream() {
     let inventory = type_lab().1;
     assert!(matches!(
         resolve(&pipeline, &inventory),
-        Err(ResolveError::TypeVariableConflict { operation, port, conflict, .. })
+        Err(ResolveError::TypeVariableConflict { site: spit::PortSite { operation, port, .. }, conflict, .. })
             if operation == "project" && port == "calibration" && conflict.variable == "Kind"
     ));
 }
@@ -148,7 +148,7 @@ fn nested_pair_rejects_a_second_lidar_stream() {
     let inventory = type_lab().1;
     assert!(matches!(
         resolve(&pipeline, &inventory),
-        Err(ResolveError::TypeMismatch { operation, port, .. })
+        Err(ResolveError::TypeMismatch { site: spit::PortSite { operation, port, .. }, .. })
             if operation == "pair" && port == "right"
     ));
 }
@@ -163,7 +163,7 @@ fn declared_nested_output_cannot_override_inferred_reference_space() {
     let inventory = type_lab().1;
     assert!(matches!(
         resolve(&pipeline, &inventory),
-        Err(ResolveError::TypeVariableConflict { operation, port, conflict, .. })
+        Err(ResolveError::TypeVariableConflict { site: spit::PortSite { operation, port, .. }, conflict, .. })
             if operation == "project" && port == "output" && conflict.variable == "TargetSpace"
     ));
 }
@@ -176,7 +176,7 @@ fn missing_peer_at_one_slice_does_not_cross_join_another_capture() {
     let pipeline = type_lab().0;
     assert!(matches!(
         resolve(&pipeline, &inventory),
-        Err(ResolveError::MissingInput { operation, port, .. })
+        Err(ResolveError::MissingInput { site: spit::PortSite { operation, port, .. }, .. })
             if operation == "pair" && port == "right"
     ));
 }
@@ -193,7 +193,7 @@ fn inferred_intermediate_type_mismatch_fails_even_with_no_artifacts() {
         let inventory = parse_source_inventory(sources).unwrap();
         assert!(matches!(
             resolve(&pipeline, &inventory),
-            Err(ResolveError::TypeMismatch { operation, port, .. })
+            Err(ResolveError::TypeMismatch { site: spit::PortSite { operation, port, .. }, .. })
                 if operation == "second" && port == "input"
         ));
     }

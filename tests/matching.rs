@@ -3,19 +3,13 @@
 
 mod support;
 
+use support::outputs;
+
 use spit::{parse_pipeline, parse_source_inventory, resolve, ResolveError, ResolvedDag};
 
 fn resolve_text(text: &str, inventory: &str) -> Result<ResolvedDag, ResolveError> {
     let pipeline = parse_pipeline(text).unwrap();
     resolve(&pipeline, &parse_source_inventory(inventory).unwrap())
-}
-
-fn outputs(dag: &ResolvedDag) -> Vec<String> {
-    dag.jobs
-        .iter()
-        .flat_map(|job| &job.outputs)
-        .map(ToString::to_string)
-        .collect()
 }
 
 const COMBINE: &str = "\
@@ -44,7 +38,7 @@ fn a_single_input_of_an_aggregate_must_match_each_group() {
     let missing = resolve_text(COMBINE, "sources:\n  result[site=A,run=1]\n");
     assert!(matches!(
         missing,
-        Err(ResolveError::MissingInput { port, product, .. }) if port == "policy" && product == "policy"
+        Err(ResolveError::MissingInput { site: spit::PortSite { port, product, .. }, .. }) if port == "policy" && product == "policy"
     ));
     let text = COMBINE.replace("source policy [site]", "source policy [site, run]");
     let pipeline = parse_pipeline(&text).unwrap();
@@ -59,7 +53,7 @@ fn a_single_input_of_an_aggregate_must_match_each_group() {
 fn an_operation_takes_at_most_one_many_input() {
     let error = parse_pipeline("operation pair(a: many A, b: many B) -> C\n").unwrap_err();
     assert!(
-        error.message.contains("at most one `many` input"),
+        error.message().contains("at most one `many` input"),
         "{error}"
     );
 }
@@ -127,7 +121,7 @@ fn same_matches_on_fewer_dimensions_and_requires_one_artifact() {
     );
     assert!(matches!(
         ambiguous,
-        Err(ResolveError::AmbiguousInput { port, .. }) if port == "calibration"
+        Err(ResolveError::AmbiguousInput { site: spit::PortSite { port, .. }, .. }) if port == "calibration"
     ));
 }
 
@@ -156,7 +150,7 @@ fn selectors_are_checked_against_the_port_and_product() {
     ))
     .unwrap_err();
     assert!(
-        error.message.contains("`@ where(dimension=value, ...)`"),
+        error.message().contains("`@ where(dimension=value, ...)`"),
         "{error}"
     );
 }
@@ -197,7 +191,7 @@ fn each_runs_a_step_for_every_value_an_input_broadcasts() {
     );
     assert!(matches!(
         missing,
-        Err(ResolveError::MissingInput { port, context, .. })
+        Err(ResolveError::MissingInput { site: spit::PortSite { port, .. }, context, .. })
             if port == "parameters" && context.to_string().contains("scenario=high")
     ));
 }
@@ -281,7 +275,10 @@ stacked = stack(fitted @ vary(scenario), model @ each(scenario))
         "{PREDICT}x = predict(reading, model @ each(scenario, scenario), parameters)\n"
     ))
     .unwrap_err();
-    assert!(error.message.contains("names `scenario` twice"), "{error}");
+    assert!(
+        error.message().contains("names `scenario` twice"),
+        "{error}"
+    );
 }
 
 #[test]
@@ -324,7 +321,7 @@ stacked = stack(frame @ vary(run))
     );
     let runs: Vec<_> = dag.jobs[1].inputs[0]
         .iter()
-        .map(|frame| frame.entities.0["run"].clone())
+        .map(|frame| frame.entities.get("run").unwrap().to_owned())
         .collect();
     assert_eq!(runs, ["1", "2", "10"]);
 }
@@ -352,6 +349,6 @@ fn min_rejects_a_collection_that_is_too_small() {
         ),
     ] {
         let error = parse_pipeline(&format!("{declaration}\n")).unwrap_err();
-        assert!(error.message.contains(expected), "{error}");
+        assert!(error.message().contains(expected), "{error}");
     }
 }

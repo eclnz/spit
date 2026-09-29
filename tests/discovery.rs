@@ -3,7 +3,7 @@
 
 mod support;
 
-use support::Tree;
+use support::{outputs, spit, text, Tree};
 
 use std::fs;
 use std::process::Command;
@@ -11,27 +11,8 @@ use std::time::{Duration, Instant};
 
 use spit::{
     discover_source_files, discover_sources, parse_pipeline, parse_source_inventory, resolve,
-    InputSource, InputSpec, Pipeline, ResolveError, ResolvedDag, ResolvedInputs, SourceInventory,
+    InputSource, InputSpec, Pipeline, ResolveError, ResolvedInputs, SourceInventory,
 };
-
-fn outputs(dag: &ResolvedDag) -> Vec<String> {
-    dag.jobs
-        .iter()
-        .flat_map(|job| &job.outputs)
-        .map(ToString::to_string)
-        .collect()
-}
-
-fn text(bytes: &[u8]) -> String {
-    String::from_utf8_lossy(bytes).into_owned()
-}
-
-fn spit(args: &[&str]) -> std::process::Output {
-    Command::new(env!("CARGO_BIN_EXE_spit"))
-        .args(args)
-        .output()
-        .unwrap()
-}
 
 /// A document's pipeline, and the input rules written beside it.
 fn parse(text: &str) -> (Pipeline, InputSpec) {
@@ -167,7 +148,7 @@ fn directory_bindings_expand_sources_at_their_declared_dimensions() {
         .artifacts
         .iter()
         .filter(|record| record.product == "reference")
-        .map(|record| record.entities.0["sub"].as_str())
+        .map(|record| record.entities.get("sub").unwrap())
         .collect();
     assert_eq!(inventory.artifacts.len(), 5);
     assert_eq!(references, ["A", "B"]);
@@ -212,14 +193,14 @@ fn coverage_can_target_the_named_discovery_rule() {
     assert!(matches!(
         settle(&pipeline, &spec, &inventory).require_complete(),
         Err(ResolveError::CoverageViolation { product, context, found: 1, discovery: true, .. })
-            if product == "sessions" && context.0.get("sub").map(String::as_str) == Some("5")
+            if product == "sessions" && context.get("sub") == Some("5")
     ));
     let values = text.replace("count>=2", "ses=1,2");
     let (pipeline, spec) = parse(&values);
     assert!(matches!(
         settle(&pipeline, &spec, &inventory).require_complete(),
         Err(ResolveError::MissingRequiredValue { product, context, dimension, value, discovery: true, .. })
-            if product == "sessions" && context.0.get("sub").map(String::as_str) == Some("5") && dimension == "ses" && value == "2"
+            if product == "sessions" && context.get("sub") == Some("5") && dimension == "ses" && value == "2"
     ));
 }
 
@@ -254,7 +235,7 @@ fn skip_discovery_group_removes_subject_before_source_checks_and_jobs() {
     assert!(!inventory
         .contexts
         .iter()
-        .any(|binding| binding.0["sub"] == "5"));
+        .any(|binding| binding.get("sub") == Some("5")));
     let dag = resolve(&pipeline, &inventory).unwrap();
     assert_eq!(dag.jobs.len(), 8);
     assert!(!outputs(&dag).iter().any(|output| output.contains("sub=5")));
@@ -309,7 +290,7 @@ fn skip_source_group_can_omit_missing_files_in_a_discovered_context() {
     assert!(inventory
         .contexts
         .iter()
-        .all(|binding| binding.0["sub"] == "1"));
+        .all(|binding| binding.get("sub") == Some("1")));
     assert_eq!(resolve(&pipeline, &inventory).unwrap().jobs.len(), 2);
 }
 

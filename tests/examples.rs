@@ -3,7 +3,7 @@
 use std::fs;
 use std::path::PathBuf;
 
-use spit::diagnose_at;
+use spit::{diagnose_in, Context};
 
 /// Examples that demonstrate a diagnostic, with exactly what they report.
 const EXPECTED: &[(&str, &[&str])] = &[(
@@ -37,7 +37,7 @@ fn examples_have_no_diagnostics() {
         let sources = fs::read_to_string(path.with_extension("sources"))
             .ok()
             .filter(|_| !inline);
-        let found: Vec<_> = diagnose_at(&text, sources.as_deref(), &path)
+        let found: Vec<_> = diagnose_in(&text, sources.as_deref(), Context::at(&path))
             .iter()
             .map(ToString::to_string)
             .collect();

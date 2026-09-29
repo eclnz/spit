@@ -1,0 +1,37 @@
+# Comment stripping that SPIT and the editor extension must agree on.
+# Each case is an `in:` line, then the `out:` line SPIT keeps as code.
+# Read by src/parser/lexical.rs and by spit-vscode's tests.
+in:source raw [id]
+out:source raw [id]
+in:source raw [id] # a note
+out:source raw [id] 
+in:# a whole-line comment
+out:
+in:  # indented comment
+out:  
+in:command c: tool --color=#fff {input}
+out:command c: tool --color=#fff {input}
+in:command c: tool word# note
+out:command c: tool word# note
+in:command c: tool '# quoted' {input}
+out:command c: tool '# quoted' {input}
+in:command c: tool "# quoted" {input}
+out:command c: tool "# quoted" {input}
+in:command c: tool "a \" # still quoted" # then a comment
+out:command c: tool "a \" # still quoted" 
+in:command c: tool 'it\' # a backslash does not escape in single quotes
+out:command c: tool 'it\' 
+in:command c: tool \# escaped
+out:command c: tool \# escaped
+in:tab	# after a tab
+out:tab	
+in:nbsp # after a no-break space
+out:nbsp 
+in:bom﻿# after a byte order mark
+out:bom﻿# after a byte order mark
+in:ideographic　# after an ideographic space
+out:ideographic　
+in:unclosed 'quote # no comment
+out:unclosed 'quote # no comment
+in:
+out:

@@ -9,8 +9,9 @@
 mod coverage;
 mod discover;
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
+use std::fmt;
 use std::path::{Path, PathBuf};
 
 use crate::compile::validate_pipeline;
@@ -18,13 +19,13 @@ use crate::error::ResolveError;
 use crate::imports::parse_located_document;
 use crate::lower::{parse_document_with_imports, ParsedDocument};
 use crate::model::{ArtifactInstance, CoverageGap, InputRules, Pipeline, SourceInventory};
-use crate::parser::{strip_comment, Header, Keyword, Kind, ParseError, SourceMap};
-use crate::paths::{inspect_paths, PathTemplate};
+use crate::parser::{strip_comment, without_bom, Header, Keyword, Kind, ParseError, SourceMap};
+use crate::paths::{inspect_paths, PathError, PathTemplate};
 
 pub(crate) use self::coverage::check_inventory;
 pub(crate) use self::coverage::collect_rule_errors;
 use self::coverage::SkippedGroup;
-use self::discover::locate_sources;
+use self::discover::{discover, locate_sources, with_source_paths};
 pub use self::discover::{discover_source_files, discover_sources, Discovery};
 
 /// A recipe's rules and any inventory records written with them.
@@ -39,39 +40,39 @@ pub struct InputSpec {
 
 /// Parse a `.spitin` file without resolving imports.
 pub fn parse_input_spec(text: &str) -> Result<InputSpec, ParseError> {
-    let (pipeline, text) = pipeline_line(text)?;
-    check_input_lines(&text)?;
-    let spec = finish_spec(parse_document_with_imports(
-        &text,
-        &Default::default(),
-        Kind::Recipe,
-    )?)?;
-    Ok(InputSpec { pipeline, ..spec })
+    parse_recipe_lines(text).map(|(spec, _)| spec)
 }
 
 /// Parse a `.spitin` file at `path`. Paths inside the recipe, and the
 /// pipeline it names, are relative to its folder unless the CLI supplies
 /// `--root`.
 pub fn parse_input_spec_at(text: &str, path: &Path) -> Result<InputSpec, ParseError> {
-    let (pipeline, text) = pipeline_line(text)?;
-    check_input_lines(&text)?;
-    let spec = finish_spec(parse_located_document(&text, path, Kind::Recipe)?)?;
+    let (pipeline, document) = parse_recipe(text, |text| {
+        parse_located_document(text, path, Kind::Recipe)
+    })?;
     let folder = path.parent().unwrap_or_else(|| Path::new(""));
-    Ok(InputSpec {
-        pipeline: pipeline.map(|pipeline| folder.join(pipeline)),
-        ..spec
-    })
+    finish_spec(document, pipeline.map(|pipeline| folder.join(pipeline)))
 }
 
 /// Parse a `.spitin` without resolving imports, with where each of its
 /// rules is written, for diagnostics.
 pub(crate) fn parse_recipe_lines(text: &str) -> Result<(InputSpec, SourceMap), ParseError> {
-    let (pipeline, text) = pipeline_line(text)?;
-    check_input_lines(&text)?;
-    let mut document = parse_document_with_imports(&text, &Default::default(), Kind::Recipe)?;
+    let (pipeline, mut document) = parse_recipe(text, |text| {
+        parse_document_with_imports(text, &BTreeMap::new(), Kind::Recipe)
+    })?;
     let lines = std::mem::take(&mut document.lines);
-    let spec = finish_spec(document)?;
-    Ok((InputSpec { pipeline, ..spec }, lines))
+    Ok((finish_spec(document, pipeline)?, lines))
+}
+
+/// A recipe's `pipeline` line, and the document its other lines parse to
+/// with `parse` once each is checked to belong in a recipe.
+fn parse_recipe(
+    text: &str,
+    parse: impl FnOnce(&str) -> Result<ParsedDocument, ParseError>,
+) -> Result<(Option<PathBuf>, ParsedDocument), ParseError> {
+    let (pipeline, text) = pipeline_line(without_bom(text))?;
+    check_input_lines(&text)?;
+    Ok((pipeline, parse(&text)?))
 }
 
 /// The pipeline a recipe names with `pipeline analysis.spit`, and the text
@@ -137,8 +138,12 @@ fn check_input_lines(text: &str) -> Result<(), ParseError> {
     Ok(())
 }
 
-/// A recipe holds rules and records, and paths only for sources.
-fn finish_spec(document: ParsedDocument) -> Result<InputSpec, ParseError> {
+/// A recipe holds rules and records, and paths only for sources; it names
+/// `pipeline`.
+fn finish_spec(
+    document: ParsedDocument,
+    pipeline_file: Option<PathBuf>,
+) -> Result<InputSpec, ParseError> {
     let ParsedDocument {
         pipeline,
         mut inputs,
@@ -156,7 +161,7 @@ fn finish_spec(document: ParsedDocument) -> Result<InputSpec, ParseError> {
     }
     inputs.source_paths = pipeline.product_paths;
     Ok(InputSpec {
-        pipeline: None,
+        pipeline: pipeline_file,
         rules: inputs,
         inventory,
     })
@@ -165,18 +170,14 @@ fn finish_spec(document: ParsedDocument) -> Result<InputSpec, ParseError> {
 impl InputSpec {
     /// Check the recipe against the pipeline's source declarations, without
     /// reading any file or record.
-    pub fn check(&self, pipeline: &Pipeline) -> Result<(), Box<dyn Error>> {
+    pub fn check(&self, pipeline: &Pipeline) -> Result<(), InputError> {
         for name in self.rules.source_paths.keys() {
+            let product = name.clone();
             if !pipeline.is_source(name) {
-                return Err(format!(
-                    "input path `{name}` must name a source product in the pipeline"
-                )
-                .into());
+                return Err(InputError::NotASource { product });
             }
             if pipeline.product_paths.contains_key(name) {
-                return Err(
-                    format!("source `{name}` has path rules in both .spit and .spitin").into(),
-                );
+                return Err(InputError::PathInBoth { product });
             }
         }
         if !self.rules.discoveries.is_empty() {
@@ -185,11 +186,8 @@ impl InputSpec {
                     && !self.rules.source_paths.contains_key(&product.name)
                     && pipeline.path_template_for(&product.name).is_none()
                 {
-                    return Err(format!(
-                        "source `{}` needs a path rule in .spitin for directory discovery",
-                        product.name
-                    )
-                    .into());
+                    let product = product.name.clone();
+                    return Err(InputError::NoDiscoveryPath { product });
                 }
             }
         }
@@ -213,55 +211,64 @@ impl InputSpec {
         &self,
         pipeline: &Pipeline,
         source: InputSource<'_>,
-    ) -> Result<ResolvedInputs, Box<dyn Error>> {
+    ) -> Result<ResolvedInputs, InputError> {
         validate_pipeline(pipeline)?;
         self.check(pipeline)?;
         let (mut inventory, mut skipped, root) = match source {
             InputSource::Discover(root) => {
-                let found = discover_source_files(pipeline, &self.rules, root)?;
+                let located = with_source_paths(pipeline, &self.rules.source_paths);
+                let found = discover(&located, &self.rules, root)?;
                 (found.inventory, found.skipped, Some(root.to_owned()))
             }
             InputSource::Inventory(inventory) => (inventory, Vec::new(), None),
         };
-        for (name, template) in &self.rules.source_paths {
-            if let Some(existing) = inventory.source_paths.get(name) {
-                if existing != template {
-                    return Err(format!(
-                        "source `{name}` has conflicting path rules in .spitin and .spitout"
-                    )
-                    .into());
-                }
-            }
-            inventory
-                .source_paths
-                .insert(name.clone(), template.clone());
-        }
-        for name in inventory.source_paths.keys() {
-            if !pipeline.is_source(name) {
-                return Err(format!("source path rule names unknown source `{name}`").into());
-            }
-            if pipeline.product_paths.contains_key(name) {
-                return Err(
-                    format!("source `{name}` has path rules in both .spit and .spitout").into(),
-                );
-            }
-        }
-        let mut path_pipeline = pipeline.clone();
-        path_pipeline
-            .product_paths
-            .extend(inventory.source_paths.clone());
-        inspect_paths(&path_pipeline)?;
+        self.merge_source_paths(pipeline, &mut inventory)?;
+        let located = with_source_paths(pipeline, &inventory.source_paths);
+        inspect_paths(&located)?;
         let mut checked = check_inventory(pipeline, &self.rules, &inventory)?;
         skipped.extend(checked.skipped.iter().map(SkippedGroup::note));
-        let mut path_rules = self.rules.clone();
-        path_rules.source_paths = checked.inventory.source_paths.clone();
-        locate_sources(pipeline, &path_rules, &mut checked.inventory)?;
+        locate_sources(&located, &mut checked.inventory)?;
         Ok(ResolvedInputs {
             inventory: checked.inventory,
             skipped,
             gaps: checked.gaps,
             root,
         })
+    }
+
+    /// Add the recipe's source path rules to those `inventory` carries, as a
+    /// `.spitout` does, so the inventory holds every rule for its sources.
+    /// Each must name a source the pipeline declares no rule for, and the
+    /// two files must not disagree.
+    fn merge_source_paths(
+        &self,
+        pipeline: &Pipeline,
+        inventory: &mut SourceInventory,
+    ) -> Result<(), InputError> {
+        for (name, template) in &self.rules.source_paths {
+            if inventory
+                .source_paths
+                .get(name)
+                .is_some_and(|existing| existing != template)
+            {
+                return Err(InputError::ConflictingSourcePaths {
+                    product: name.clone(),
+                });
+            }
+            inventory
+                .source_paths
+                .insert(name.clone(), template.clone());
+        }
+        for name in inventory.source_paths.keys() {
+            let product = name.clone();
+            if !pipeline.is_source(name) {
+                return Err(InputError::UnknownSourcePath { product });
+            }
+            if pipeline.product_paths.contains_key(name) {
+                return Err(InputError::InventoryPathInBoth { product });
+            }
+        }
+        Ok(())
     }
 
     /// Give a pipeline the recipe's source paths, and the built-in output
@@ -277,6 +284,76 @@ impl InputSpec {
             .get_or_insert_with(PathTemplate::default_output);
     }
 }
+
+/// Why a recipe cannot be applied to a pipeline, or to a dataset.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum InputError {
+    /// The pipeline does not compile, a rule does not fit it, or the
+    /// records break a rule.
+    Resolve(ResolveError),
+    /// A path rule is invalid, or a file under the root is missing or
+    /// cannot be read.
+    Path(PathError),
+    /// The recipe sets a path for a product that is not a source.
+    NotASource { product: String },
+    /// A source has a path rule in both the pipeline and the recipe.
+    PathInBoth { product: String },
+    /// Directory discovery finds every source's files, and this one has no
+    /// path rule to find them by.
+    NoDiscoveryPath { product: String },
+    /// The recipe and the `.spitout` give a source different path rules.
+    ConflictingSourcePaths { product: String },
+    /// A `.spitout` gives a path rule for a product that is not a source.
+    UnknownSourcePath { product: String },
+    /// A source has a path rule in both the pipeline and the `.spitout`.
+    InventoryPathInBoth { product: String },
+}
+
+impl From<ResolveError> for InputError {
+    fn from(error: ResolveError) -> Self {
+        Self::Resolve(error)
+    }
+}
+
+impl From<PathError> for InputError {
+    fn from(error: PathError) -> Self {
+        Self::Path(error)
+    }
+}
+
+impl fmt::Display for InputError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Resolve(error) => error.fmt(f),
+            Self::Path(error) => error.fmt(f),
+            Self::NotASource { product } => write!(
+                f,
+                "input path `{product}` must name a source product in the pipeline"
+            ),
+            Self::PathInBoth { product } => write!(
+                f,
+                "source `{product}` has path rules in both .spit and .spitin"
+            ),
+            Self::NoDiscoveryPath { product } => write!(
+                f,
+                "source `{product}` needs a path rule in .spitin for directory discovery"
+            ),
+            Self::ConflictingSourcePaths { product } => write!(
+                f,
+                "source `{product}` has conflicting path rules in .spitin and .spitout"
+            ),
+            Self::UnknownSourcePath { product } => {
+                write!(f, "source path rule names unknown source `{product}`")
+            }
+            Self::InventoryPathInBoth { product } => write!(
+                f,
+                "source `{product}` has path rules in both .spit and .spitout"
+            ),
+        }
+    }
+}
+
+impl Error for InputError {}
 
 /// Where the input stage gets its inventory.
 pub enum InputSource<'a> {
@@ -320,7 +397,7 @@ impl ResolvedInputs {
     /// the bookkeeping that ties them to discovery rules.
     pub fn dag_inventory(&self) -> SourceInventory {
         SourceInventory {
-            discovered: Default::default(),
+            discovered: BTreeMap::new(),
             ..self.inventory.clone()
         }
     }

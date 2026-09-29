@@ -1,15 +1,11 @@
 mod support;
 
+use support::bound;
+
 use std::fs;
 use std::process::Command;
 
 use spit::{diagnose, inspect_paths, parse_pipeline, render_dag, resolve, Diagnostic, PathRule};
-
-/// The jobs with their bound paths, or the binding error as text.
-fn bound(pipeline: &spit::Pipeline, dag: &spit::ResolvedDag) -> Result<String, String> {
-    let bound = spit::bind_dag(pipeline, dag).map_err(|error| error.to_string())?;
-    Ok(spit::render_bound_dag(&bound, true))
-}
 
 const PIPELINE: &str = "examples/stages/stages.spit";
 const SOURCES: &str = "examples/stages/stages.spitout";

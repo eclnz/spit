@@ -1,18 +1,11 @@
 //! Warnings: unused definitions, missing commands, steps that resolve no
 //! jobs, and an inline inventory a separate one replaces.
 
+mod support;
+
+use support::{errors, rendered};
+
 use spit::{diagnose, Diagnostic, Severity};
-
-fn rendered(diagnostics: &[Diagnostic]) -> Vec<String> {
-    diagnostics.iter().map(ToString::to_string).collect()
-}
-
-fn errors(diagnostics: Vec<Diagnostic>) -> Vec<Diagnostic> {
-    diagnostics
-        .into_iter()
-        .filter(Diagnostic::is_error)
-        .collect()
-}
 
 fn warnings(diagnostics: Vec<Diagnostic>) -> Vec<String> {
     diagnostics
@@ -86,4 +79,28 @@ both = g(cleaned, image)
     );
     // Without an inventory, no step is expected to resolve jobs.
     assert!(warnings(diagnose(text, None)).is_empty());
+}
+
+#[test]
+fn steps_that_read_a_product_twice_are_checked_in_linear_time() {
+    // Each step reads the one before twice. Following every path from a
+    // step back to its sources would take 2^40 visits here.
+    let mut text = String::from(
+        "source s0 : T [id]\nsource other : T [id]\noperation g(T, T) -> T\n\
+         path: out/{product}/{id}.txt\npath s0: in/{id}.txt\npath other: o/{id}.txt\n",
+    );
+    for step in 1..=40 {
+        let input = if step == 1 {
+            "s0".to_owned()
+        } else {
+            format!("p{}", step - 1)
+        };
+        text += &format!("p{step} : T [id] = g({input}, {input})\n");
+    }
+    let found = warnings(diagnose(&text, Some("sources:\n  other[id=a]\n")));
+    assert!(
+        found[0].contains("source `s0` has no artifacts in the inventory")
+            && found[0].ends_with("p39, p40"),
+        "{found:?}"
+    );
 }

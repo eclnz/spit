@@ -1,17 +1,13 @@
 //! Syntax errors: each independent one is reported on its own line, however
 //! the text was damaged, and without cascading into later lines.
 
+mod support;
+
+use support::errors;
+
 use std::collections::{BTreeMap, BTreeSet};
 
-use spit::{diagnose, Diagnostic, DiagnosticSource};
-
-/// The errors among `diagnostics`.
-fn errors(diagnostics: Vec<Diagnostic>) -> Vec<Diagnostic> {
-    diagnostics
-        .into_iter()
-        .filter(Diagnostic::is_error)
-        .collect()
-}
+use spit::{diagnose, DiagnosticSource};
 
 #[test]
 fn reports_syntax_line_from_unsaved_text() {

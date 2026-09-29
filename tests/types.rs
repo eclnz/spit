@@ -174,7 +174,7 @@ fn partial_type_cannot_hide_a_downstream_known_conflict() {
     let empty = parse_source_inventory("sources:\n").unwrap();
     assert!(matches!(
         resolve(&pipeline, &empty),
-        Err(ResolveError::TypeMismatch { operation, .. }) if operation == "sink"
+        Err(ResolveError::TypeMismatch { site: spit::PortSite { operation, .. }, .. }) if operation == "sink"
     ));
 }
 
@@ -312,7 +312,7 @@ fn conflicting_port_bindings_are_a_structured_resolver_error() {
     let inventory = parse_source_inventory("sources:\n  a[site=01]\n  b[site=01]\n").unwrap();
     assert!(matches!(
         resolve(&pipeline, &inventory),
-        Err(ResolveError::TypeVariableConflict { operation, port, conflict, .. })
+        Err(ResolveError::TypeVariableConflict { site: spit::PortSite { operation, port, .. }, conflict, .. })
             if operation == "op" && port == "input2" && conflict.variable == "X"
     ));
 }
@@ -326,7 +326,7 @@ fn declared_output_type_cannot_contradict_inferred_type() {
     let inventory = parse_source_inventory("sources:\n  raw[site=01]\n").unwrap();
     assert!(matches!(
         resolve(&pipeline, &inventory),
-        Err(ResolveError::TypeVariableConflict { port, conflict, .. })
+        Err(ResolveError::TypeVariableConflict { site: spit::PortSite { port, .. }, conflict, .. })
             if port == "output" && conflict.variable == "X"
     ));
 }
@@ -344,7 +344,7 @@ fn resolves_untyped_pipeline_by_shape_and_cardinality() {
     assert_eq!(dag.jobs.len(), 3);
     assert_eq!(dag.jobs[2].input_artifacts().count(), 2);
     assert_eq!(dag.jobs[2].output().artifact_type, TypeExpr::Unknown);
-    assert!(!dag.jobs[2].output().entities.0.contains_key("repeat"));
+    assert!(!dag.jobs[2].output().entities.binds("repeat"));
     assert!(!render_dag(&dag).contains(": Unknown"));
 }
 
@@ -363,4 +363,29 @@ fn partially_typed_pipeline_accepts_unknown_and_rejects_known_mismatch() {
         resolve(&pipeline, &inventory.unwrap()),
         Err(ResolveError::TypeMismatch { .. })
     ));
+}
+
+#[test]
+fn a_type_variable_prints_marked_so_it_differs_from_a_named_type() {
+    let variable = spit::parse_type_expr("List<T>", true).unwrap();
+    let named = spit::parse_type_expr("List<T>", false).unwrap();
+    assert_eq!(variable.to_string(), "List<$T>");
+    assert_eq!(named.to_string(), "List<T>");
+    // Each reads back as itself where it can be written.
+    assert_eq!(
+        spit::parse_type_expr(&variable.to_string(), true).unwrap(),
+        variable
+    );
+    assert_eq!(
+        spit::parse_type_expr(&named.to_string(), false).unwrap(),
+        named
+    );
+    let text = "source raw : T [id]\noperation f(List<T>) -> T\nout = f(raw)\n";
+    let found = spit::diagnose(text, None);
+    assert!(
+        found[0]
+            .message
+            .contains("product `raw` is T, expected List<$T>"),
+        "{found:?}"
+    );
 }

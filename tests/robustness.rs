@@ -4,7 +4,7 @@
 
 mod support;
 
-use support::Tree;
+use support::{text, Tree};
 
 use std::fs;
 use std::io::Write;
@@ -32,10 +32,6 @@ fn spit(args: &[&str], stdin: Option<&[u8]>) -> Output {
         .write_all(stdin.unwrap_or_default())
         .unwrap();
     child.wait_with_output().unwrap()
-}
-
-fn text(bytes: &[u8]) -> String {
-    String::from_utf8_lossy(bytes).into_owned()
 }
 
 fn rendered(diagnostics: &[Diagnostic], text: &str) -> Vec<String> {
@@ -67,7 +63,7 @@ fn a_path_rule_that_cannot_name_a_file_says_why() {
     for (rule, reason) in [
         (
             "/tmp/{s}.txt",
-            "must be relative to `SPIT_ROOT`, not start with `/`",
+            "must be relative to the dataset root, not start with `/`",
         ),
         ("out/{s}/", "must name a file, not end with `/`"),
         (
@@ -216,4 +212,51 @@ fn command_line_mistakes_are_named() {
     }
     let output = spit(&["check", "/no/such/pipeline.spit"], None);
     assert!(text(&output.stderr).starts_with("error: cannot read `/no/such/pipeline.spit`: "));
+}
+
+#[test]
+fn a_byte_order_mark_is_ignored_by_every_entry_point() {
+    let bom = |text: &str| format!("\u{feff}{text}");
+    let valid = "source raw : Raw [id]\noperation clean(Raw) -> Clean\ncleaned = clean(raw)\n";
+    let records = "sources:\n  raw[id=a]\n";
+    parse_pipeline(&bom(valid)).unwrap();
+    spit::parse_source_inventory(&bom(records)).unwrap();
+    spit::parse_input_spec(&bom("pipeline analysis.spit\npath raw: in/{id}.txt\n")).unwrap();
+    assert_eq!(
+        diagnose(&bom(valid), Some(&bom(records))),
+        diagnose(valid, Some(records))
+    );
+    // An error on the first line has the same columns, counted without it.
+    let broken = "source bad [id id]\n";
+    let found = diagnose(&bom(broken), None);
+    assert_eq!(found, diagnose(broken, None));
+    assert!(found[0].is_error());
+    assert_eq!(
+        spit::render_diagnostics_json(&found, &bom(broken), None),
+        spit::render_diagnostics_json(&found, broken, None)
+    );
+    assert_eq!(
+        found[0].display_in(&bom(broken), None).to_string(),
+        found[0].display_in(broken, None).to_string()
+    );
+}
+
+#[test]
+fn deeply_nested_type_arguments_are_an_error_not_a_crash() {
+    let nested = |depth: usize| {
+        format!(
+            "source raw : {}B{} [id]\n",
+            "A<".repeat(depth),
+            ">".repeat(depth)
+        )
+    };
+    assert!(diagnose(&nested(64), None).is_empty());
+    for depth in [65, 100_000] {
+        let found = diagnose(&nested(depth), None);
+        assert_eq!(found.len(), 1);
+        assert_eq!(
+            found[0].message,
+            "type arguments nest more than 64 levels deep"
+        );
+    }
 }

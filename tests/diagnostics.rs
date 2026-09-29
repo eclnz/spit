@@ -1,13 +1,8 @@
-use spit::{diagnose, Diagnostic, DiagnosticSource};
+mod support;
 
-/// The errors among `diagnostics`. These tests pin where errors land;
-/// warnings have their own tests.
-fn errors(diagnostics: Vec<Diagnostic>) -> Vec<Diagnostic> {
-    diagnostics
-        .into_iter()
-        .filter(Diagnostic::is_error)
-        .collect()
-}
+use support::{errors, rendered};
+
+use spit::{diagnose, DiagnosticSource};
 
 #[test]
 fn validates_external_inventory_and_semantics() {
@@ -32,16 +27,15 @@ fn checked_diagnosis_retains_the_original_pipeline_and_inventory() {
     let pipeline = "source raw [id]\noperation copy(one)\nresult = copy(raw)\n";
     let inventory = "sources:\n  raw[id=x]: data/x.txt\n";
     let recipe = spit::parse_input_spec("path raw: data/{id}.txt\n").unwrap();
-    let checked = spit::diagnose_at_checked(
-        pipeline,
-        Some(inventory),
-        std::path::Path::new("pipeline.spit"),
-        Some(&recipe),
-        false,
-    );
-    assert!(errors(checked.diagnostics).is_empty());
-    assert!(checked.pipeline.unwrap().product_paths.is_empty());
-    assert_eq!(checked.inventory.unwrap().artifacts.len(), 1);
+    let context = spit::Context {
+        recipe: Some(&recipe),
+        ..spit::Context::at(std::path::Path::new("pipeline.spit"))
+    };
+    let (checked, inventory) =
+        spit::diagnose_checked_with_records(pipeline, inventory, context).unwrap();
+    assert!(errors(checked.warnings).is_empty());
+    assert!(checked.pipeline.product_paths.is_empty());
+    assert_eq!(inventory.artifacts.len(), 1);
 }
 
 #[test]
@@ -125,19 +119,17 @@ fn a_coverage_error_names_the_failing_rule_when_rules_share_a_product() {
         "require raw count>=1 per [site]\nrequire raw count>=2 per [site]\n",
     )
     .unwrap();
-    let issues = errors(spit::diagnose_at_with_inputs(
+    let context = spit::Context {
+        recipe: Some(&recipe),
+        ..spit::Context::at(std::path::Path::new("a.spit"))
+    };
+    let issues = errors(spit::diagnose_in(
         "source raw [site, run]\n",
         Some("sources:\n  raw[site=A,run=1]\n"),
-        std::path::Path::new("a.spit"),
-        &recipe,
-        false,
+        context,
     ));
     assert_eq!(issues.len(), 1);
     assert!(issues[0].message.contains("expected at least 2"));
-}
-
-fn rendered(diagnostics: &[Diagnostic]) -> Vec<String> {
-    diagnostics.iter().map(ToString::to_string).collect()
 }
 
 #[test]
@@ -251,4 +243,16 @@ path other: {product}/{id}/{shard}.csv
             "error: line 6: path template for `other` uses absent dimension `shard`",
         ]
     );
+}
+
+#[test]
+fn a_cycle_is_reported_once_at_the_step_it_was_found_at() {
+    let text = "products:\n  a : A [site]\n  b : A [site]\n  c : A [site]\n\n\
+                operations:\n  copy(A) -> A\n\n\
+                pipeline:\n  a = copy(b)\n  b = copy(c)\n  c = copy(a)\n";
+    let issues = errors(diagnose(text, None));
+    assert_eq!(issues.len(), 1);
+    assert_eq!(issues[0].line, Some(10));
+    assert_eq!(issues[0].columns, Some(2..3));
+    assert_eq!(issues[0].message, "pipeline cycle: a -> b -> c -> a");
 }
