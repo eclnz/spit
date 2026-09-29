@@ -27,9 +27,9 @@ pub use lower::{parse_document, parse_pipeline};
 pub use model::{
     natural_cmp, stage_and_parents, stage_within, ArtifactInstance, ArtifactKey, ArtifactReport,
     ArtifactType, Cardinality, CommandDef, CommandRole, CountRequirement, CoverageGap,
-    CoverageRule, DefaultPort, EntityBinding, Gap, IncompleteJob, InputBinding, InputPort,
-    Invocation, Job, OperationDef, OutputPort, Pipeline, ProductDef, ResolvedDag, ShapeRule,
-    SourceInventory, SourceRecord, StageDef, DEFAULT_OUTPUT,
+    CoverageRule, DefaultPort, DirectoryDiscovery, EntityBinding, Gap, IncompleteJob, InputBinding,
+    InputPort, Invocation, Job, OperationDef, OutputPort, Pipeline, ProductDef, ResolvedDag,
+    ShapeRule, SourceInventory, SourceRecord, StageDef, DEFAULT_OUTPUT,
 };
 pub use parser::{parse_source_inventory, render_source_inventory, ParseError, ParseErrorKind};
 pub use paths::{
@@ -37,7 +37,7 @@ pub use paths::{
     validate_source_files, PathCoverage, PathCoverageEntry, PathError, PathRule, PathTemplate,
     VerifiedFiles,
 };
-pub use render::{render_artifacts, render_bound_dag, render_dag};
+pub use render::{render_artifacts, render_bound_dag, render_dag, render_dag_json};
 pub use resolver::{resolve, resolve_artifacts, validate_pipeline};
 pub use types::{
     parse_type_expr, Compatibility, Substitutions, TypeExpr, TypeParseError, TypeUnifyError,

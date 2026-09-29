@@ -174,7 +174,7 @@ fn paths_flag_applies_to_check_and_dag_only() {
 }
 
 #[test]
-fn json_reads_the_pipeline_file_and_applies_to_check_only() {
+fn check_json_reads_the_pipeline_file_and_dag_json_emits_jobs() {
     let run = |command: &str| {
         Command::new(env!("CARGO_BIN_EXE_spit"))
             .args([
@@ -194,10 +194,84 @@ fn json_reads_the_pipeline_file_and_applies_to_check_only() {
         "{\"diagnostics\":[]}\n"
     );
     let dag = run("dag");
-    assert!(!dag.status.success());
-    assert!(String::from_utf8(dag.stderr)
-        .unwrap()
-        .contains("--json applies to check"));
+    assert!(dag.status.success());
+    let graph = String::from_utf8(dag.stdout).unwrap();
+    assert!(graph.starts_with("{\"version\":1,\"external_inputs\":["));
+    assert!(graph.contains("\"product\":\"shard\",\"entities\":{\"group\":\"alpha\",\"part\":\"01\"},\"type\":{\"name\":\"Lines\",\"args\":[]}"));
+    assert!(graph.contains("\"inputs\":{\"items\":["));
+    assert!(graph.contains("\"depends_on\":[1,2]"));
+    assert_eq!(graph.matches("\"operation\":").count(), 5);
+    assert_eq!(graph, String::from_utf8(run("dag").stdout).unwrap());
+}
+
+#[test]
+fn dag_json_stage_lists_earlier_outputs_as_external_inputs() {
+    let output = Command::new(env!("CARGO_BIN_EXE_spit"))
+        .args([
+            "dag",
+            "examples/stages/stages.spit",
+            "--sources",
+            "examples/commands/bash_demo.sources",
+            "--stage",
+            "analysis",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let graph = String::from_utf8(output.stdout).unwrap();
+    assert!(graph.contains("\"external_inputs\":[{\"product\":\"merged\""));
+    assert!(graph.contains("\"stage\":[\"analysis\"]"));
+    assert!(!graph.contains("\"operation\":\"merge\""));
+    assert!(graph.contains("\"depends_on\":[]"));
+}
+
+#[test]
+fn dag_json_names_every_output_port() {
+    let output = Command::new(env!("CARGO_BIN_EXE_spit"))
+        .args([
+            "dag",
+            "examples/pipelines/selectors.spit",
+            "--sources",
+            "examples/pipelines/selectors.sources",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let graph = String::from_utf8(output.stdout).unwrap();
+    assert!(graph.contains("\"outputs\":{\"low\":{\"product\":\"low_band\""));
+    assert!(graph.contains("\"high\":{\"product\":\"high_band\""));
+}
+
+#[test]
+fn dag_json_stage_is_an_array_of_names() {
+    let output = Command::new(env!("CARGO_BIN_EXE_spit"))
+        .args([
+            "dag",
+            "examples/stages/nested.spit",
+            "--sources",
+            "examples/stages/nested.sources",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let graph = String::from_utf8(output.stdout).unwrap();
+    assert!(graph.contains("\"stage\":[\"preprocess\",\"clean\"]"));
+    assert!(!graph.contains("\"stage\":\"preprocess/clean\""));
 }
 
 #[test]
