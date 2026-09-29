@@ -151,7 +151,7 @@ pub fn render_source_inventory(
 /// `binding` as `dim=value,...`, in the order of `declared`, then any
 /// dimension it does not name.
 fn in_order(binding: &EntityBinding, declared: &[&str]) -> String {
-    let mut values: Vec<_> = binding.0.iter().collect();
+    let mut values: Vec<_> = binding.iter().collect();
     values.sort_by_key(|(dimension, _)| {
         declared
             .iter()
@@ -322,5 +322,5 @@ fn parse_bindings(bindings: &str, number: usize) -> Result<EntityBinding, ParseE
             .at_token(item));
         }
     }
-    Ok(EntityBinding(values))
+    Ok(EntityBinding::from(values))
 }

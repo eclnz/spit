@@ -339,7 +339,7 @@ fn resolves_untyped_pipeline_by_shape_and_cardinality() {
     assert_eq!(dag.jobs.len(), 3);
     assert_eq!(dag.jobs[2].input_artifacts().count(), 2);
     assert_eq!(dag.jobs[2].output().artifact_type, TypeExpr::Unknown);
-    assert!(!dag.jobs[2].output().entities.0.contains_key("repeat"));
+    assert!(!dag.jobs[2].output().entities.binds("repeat"));
     assert!(!render_dag(&dag).contains(": Unknown"));
 }
 

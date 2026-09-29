@@ -148,7 +148,7 @@ fn directory_bindings_expand_sources_at_their_declared_dimensions() {
         .artifacts
         .iter()
         .filter(|record| record.product == "reference")
-        .map(|record| record.entities.0["sub"].as_str())
+        .map(|record| record.entities.get("sub").unwrap())
         .collect();
     assert_eq!(inventory.artifacts.len(), 5);
     assert_eq!(references, ["A", "B"]);
@@ -193,14 +193,14 @@ fn coverage_can_target_the_named_discovery_rule() {
     assert!(matches!(
         settle(&pipeline, &spec, &inventory).require_complete(),
         Err(ResolveError::CoverageViolation { product, context, found: 1, discovery: true, .. })
-            if product == "sessions" && context.0.get("sub").map(String::as_str) == Some("5")
+            if product == "sessions" && context.get("sub") == Some("5")
     ));
     let values = text.replace("count>=2", "ses=1,2");
     let (pipeline, spec) = parse(&values);
     assert!(matches!(
         settle(&pipeline, &spec, &inventory).require_complete(),
         Err(ResolveError::MissingRequiredValue { product, context, dimension, value, discovery: true, .. })
-            if product == "sessions" && context.0.get("sub").map(String::as_str) == Some("5") && dimension == "ses" && value == "2"
+            if product == "sessions" && context.get("sub") == Some("5") && dimension == "ses" && value == "2"
     ));
 }
 
@@ -235,7 +235,7 @@ fn skip_discovery_group_removes_subject_before_source_checks_and_jobs() {
     assert!(!inventory
         .contexts
         .iter()
-        .any(|binding| binding.0["sub"] == "5"));
+        .any(|binding| binding.get("sub") == Some("5")));
     let dag = resolve(&pipeline, &inventory).unwrap();
     assert_eq!(dag.jobs.len(), 8);
     assert!(!outputs(&dag).iter().any(|output| output.contains("sub=5")));
@@ -290,7 +290,7 @@ fn skip_source_group_can_omit_missing_files_in_a_discovered_context() {
     assert!(inventory
         .contexts
         .iter()
-        .all(|binding| binding.0["sub"] == "1"));
+        .all(|binding| binding.get("sub") == Some("1")));
     assert_eq!(resolve(&pipeline, &inventory).unwrap().jobs.len(), 2);
 }
 

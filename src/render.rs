@@ -239,9 +239,8 @@ fn render_artifact(dag: &ResolvedDag, artifact: &ArtifactInstance) -> String {
     let Some(dimensions) = dag.product_dimensions.get(&artifact.product) else {
         return artifact.to_string();
     };
-    let entities = dimensions.iter().filter_map(|dimension| {
-        let value = artifact.entities.0.get(dimension)?;
-        Some((dimension.as_str(), value.as_str()))
-    });
+    let entities = dimensions
+        .iter()
+        .filter_map(|dimension| Some((dimension.as_str(), artifact.entities.get(dimension)?)));
     identity(&artifact.product, entities)
 }

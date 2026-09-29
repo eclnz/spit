@@ -229,13 +229,11 @@ fn validate_path_template(pipeline: &Pipeline, product: &ProductDef) -> Result<S
     }
     // Each dimension gets a distinct sample value so that templates naming
     // different dimensions are not mistaken for colliding ones.
-    let entities = EntityBinding(
-        product
-            .dimensions
-            .iter()
-            .map(|dimension| (dimension.clone(), dimension.clone()))
-            .collect(),
-    );
+    let entities: EntityBinding = product
+        .dimensions
+        .iter()
+        .map(|dimension| (dimension.clone(), dimension.clone()))
+        .collect();
     let artifact = ArtifactInstance::new(&product.name, product.artifact_type.clone(), entities);
     bind_path(pipeline, &product.dimensions, &artifact, || {
         format!("path rule for `{}`", product.name)

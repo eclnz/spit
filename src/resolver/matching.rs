@@ -36,10 +36,9 @@ pub(super) fn expand_step(
             family(artifacts, binding.product_name())
                 .iter()
                 .filter(|artifact| {
-                    binding
-                        .pinned
-                        .iter()
-                        .all(|(dimension, value)| artifact.entities.0.get(dimension) == Some(value))
+                    binding.pinned.iter().all(|(dimension, value)| {
+                        artifact.entities.get(dimension) == Some(value.as_str())
+                    })
                 })
                 .collect()
         })
@@ -50,7 +49,7 @@ pub(super) fn expand_step(
         .flat_map(|(group, driven)| {
             contexts.iter().map(move |values| {
                 let mut context = group.clone();
-                context.0.extend(values.0.clone());
+                context.extend(values);
                 (context, driven.clone())
             })
         });
@@ -154,7 +153,7 @@ fn match_input(
         .filter(|candidate| {
             joins
                 .iter()
-                .all(|dimension| candidate.entities.0.get(dimension) == context.0.get(dimension))
+                .all(|dimension| candidate.entities.get(dimension) == context.get(dimension))
         })
         .collect();
     let [artifact] = matches.as_slice() else {
@@ -206,7 +205,7 @@ fn broadcast_contexts(
             .flat_map(|context| {
                 values.iter().map(move |value| {
                     let mut combined = context.clone();
-                    combined.0.extend(value.0.clone());
+                    combined.extend(value);
                     combined
                 })
             })

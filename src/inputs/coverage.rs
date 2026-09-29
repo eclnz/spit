@@ -88,7 +88,7 @@ pub(crate) fn apply_skips(
                 values.iter().all(|value| {
                     members
                         .iter()
-                        .any(|binding| binding.0.get(dimension) == Some(value))
+                        .any(|binding| binding.get(dimension) == Some(value.as_str()))
                 })
             });
             if !valid_count || !valid_values {
@@ -254,7 +254,7 @@ pub(crate) fn coverage_gaps(
             let missing = values.iter().filter(|value| {
                 !bindings
                     .iter()
-                    .any(|binding| binding.0.get(dimension) == Some(*value))
+                    .any(|binding| binding.get(dimension) == Some(value.as_str()))
             });
             errors.extend(missing.map(|value| ResolveError::MissingRequiredValue {
                 product: rule.product.clone(),
@@ -320,9 +320,9 @@ pub(crate) fn check_inventory(
         let Some(discovery) = rules.discovery(name) else {
             continue;
         };
-        let expected: BTreeSet<_> = discovery.dimensions.iter().collect();
+        let expected: BTreeSet<_> = discovery.dimensions.iter().map(String::as_str).collect();
         for binding in bindings {
-            let found: BTreeSet<_> = binding.0.keys().collect();
+            let found: BTreeSet<_> = binding.dimensions().collect();
             if found != expected {
                 return Err(ResolveError::InvalidDefinition {
                     subject: DefinitionSubject::None,

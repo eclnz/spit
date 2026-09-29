@@ -206,7 +206,7 @@ pub(crate) fn bind_path(
                 let bindings = dimensions
                     .iter()
                     .map(|dimension| {
-                        let value = artifact.entities.0.get(dimension).ok_or_else(|| {
+                        let value = artifact.entities.get(dimension).ok_or_else(|| {
                             error(format!(
                                 "artifact `{artifact}` lacks dimension `{dimension}`"
                             ))
@@ -225,7 +225,7 @@ pub(crate) fn bind_path(
                 }
             }
             PathPart::Placeholder(placeholder @ PathPlaceholder::Dimension(dimension)) => {
-                let value = artifact.entities.0.get(dimension).ok_or_else(|| {
+                let value = artifact.entities.get(dimension).ok_or_else(|| {
                     error(format!(
                         "path template for `{}` uses absent dimension `{dimension}`",
                         artifact.product

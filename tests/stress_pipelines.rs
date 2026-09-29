@@ -84,16 +84,16 @@ fn nested_types_propagate_across_polymorphic_branches_and_rollups() {
     let batch = jobs(&dag, "selected_batch")
         .into_iter()
         .find(|job| {
-            job.output().entities.0.get("lab").map(String::as_str) == Some("Alpha")
-                && job.output().entities.0.get("rig").map(String::as_str) == Some("R1")
-                && job.output().entities.0.get("capture").map(String::as_str) == Some("C1")
+            job.output().entities.get("lab") == Some("Alpha")
+                && job.output().entities.get("rig") == Some("R1")
+                && job.output().entities.get("capture") == Some("C1")
         })
         .unwrap();
     assert_eq!(batch.inputs[0].len(), 2);
     assert_eq!(batch.dependencies.len(), 2);
     assert!(batch
         .input_artifacts()
-        .all(|input| input.entities.0.get("capture") == Some(&"C1".to_owned())));
+        .all(|input| input.entities.get("capture") == Some("C1")));
     assert_eq!(jobs(&dag, "global_summary")[0].dependencies.len(), 2);
 }
 

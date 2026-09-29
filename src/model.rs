@@ -9,10 +9,64 @@ use crate::types::TypeExpr;
 
 pub type ArtifactType = TypeExpr;
 
+/// The value an artifact has for each of its product's dimensions.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Ord, PartialOrd)]
-pub struct EntityBinding(pub BTreeMap<String, String>);
+pub struct EntityBinding(BTreeMap<String, String>);
+
+impl From<BTreeMap<String, String>> for EntityBinding {
+    fn from(values: BTreeMap<String, String>) -> Self {
+        Self(values)
+    }
+}
+
+impl FromIterator<(String, String)> for EntityBinding {
+    fn from_iter<I: IntoIterator<Item = (String, String)>>(values: I) -> Self {
+        Self(values.into_iter().collect())
+    }
+}
 
 impl EntityBinding {
+    /// The value bound to `dimension`, if any.
+    pub fn get(&self, dimension: &str) -> Option<&str> {
+        self.0.get(dimension).map(String::as_str)
+    }
+
+    /// Whether `dimension` has a value.
+    pub fn binds(&self, dimension: &str) -> bool {
+        self.0.contains_key(dimension)
+    }
+
+    /// Each dimension and its value, in dimension name order.
+    pub fn iter(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.0
+            .iter()
+            .map(|(dimension, value)| (dimension.as_str(), value.as_str()))
+    }
+
+    /// The dimensions with a value, in name order.
+    pub fn dimensions(&self) -> impl Iterator<Item = &str> {
+        self.0.keys().map(String::as_str)
+    }
+
+    /// How many dimensions have a value.
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    /// Add `other`'s values, replacing any this has for the same dimensions.
+    pub(crate) fn extend(&mut self, other: &Self) {
+        self.0.extend(
+            other
+                .0
+                .iter()
+                .map(|(key, value)| (key.clone(), value.clone())),
+        );
+    }
+
     pub fn from_pairs<const N: usize>(pairs: [(&str, &str); N]) -> Self {
         Self(
             pairs
@@ -238,9 +292,7 @@ pub(crate) const DEFAULT_OUTPUT: &str = "output";
 
 /// A placeholder a command has without its operation naming the port.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum DefaultPort {
-    /// `{output}`: an operation's only, unnamed output.
-    Output,
+pub(crate) enum DefaultPort {
     /// `{input}`: an operation's only input, when unnamed.
     Input,
     /// `{input1}`, `{input2}`, ...: the unnamed inputs of an operation with
@@ -264,7 +316,6 @@ impl DefaultPort {
     /// The name between the braces.
     pub fn name(self) -> String {
         match self {
-            Self::Output => DEFAULT_OUTPUT.to_owned(),
             Self::Input => "input".to_owned(),
             Self::InputAt(number) => format!("input{number}"),
             Self::Inputs => "inputs".to_owned(),

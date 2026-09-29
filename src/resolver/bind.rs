@@ -33,8 +33,8 @@ pub fn bind_dag(pipeline: &Pipeline, dag: &ResolvedDag) -> Result<BoundDag, Bind
             entities: dimensions
                 .iter()
                 .filter_map(|dimension| {
-                    let value = artifact.entities.0.get(dimension)?;
-                    Some((dimension.clone(), value.clone()))
+                    let value = artifact.entities.get(dimension)?;
+                    Some((dimension.clone(), value.to_owned()))
                 })
                 .collect(),
             artifact_type: artifact.artifact_type.clone(),
