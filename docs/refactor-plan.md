@@ -119,6 +119,7 @@ Dead public API (item 5, 15) is not visible to the compiler because `lib.rs` re-
 
 ### 8. Collapse the three recipe parsers
 - **Where:** `src/inputs/mod.rs`: `parse_input_spec`, `parse_input_spec_at`, `parse_recipe_lines` share `pipeline_line` -> `check_input_lines` -> `finish_spec`. Extract the shared step.
+- **Status: done.** `parse_recipe` does `pipeline_line`, `check_input_lines` and the parse, given how to parse; `finish_spec` takes the pipeline file. `parse_input_spec` is `parse_recipe_lines` without the lines, and `parse_input_spec_at` only adds the located parse and the folder. Behaviour unchanged.
 
 ### 9. Centralise BOM stripping and duplicated validation helpers
 - BOM stripped in `main.rs` (~762) and `imports.rs` (~323) but not in library entry points, so library and CLI differ. Decide where it belongs (likely the library) and do it once.

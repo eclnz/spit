@@ -9,7 +9,7 @@
 mod coverage;
 mod discover;
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::path::{Path, PathBuf};
 
@@ -39,39 +39,39 @@ pub struct InputSpec {
 
 /// Parse a `.spitin` file without resolving imports.
 pub fn parse_input_spec(text: &str) -> Result<InputSpec, ParseError> {
-    let (pipeline, text) = pipeline_line(text)?;
-    check_input_lines(&text)?;
-    let spec = finish_spec(parse_document_with_imports(
-        &text,
-        &Default::default(),
-        Kind::Recipe,
-    )?)?;
-    Ok(InputSpec { pipeline, ..spec })
+    parse_recipe_lines(text).map(|(spec, _)| spec)
 }
 
 /// Parse a `.spitin` file at `path`. Paths inside the recipe, and the
 /// pipeline it names, are relative to its folder unless the CLI supplies
 /// `--root`.
 pub fn parse_input_spec_at(text: &str, path: &Path) -> Result<InputSpec, ParseError> {
-    let (pipeline, text) = pipeline_line(text)?;
-    check_input_lines(&text)?;
-    let spec = finish_spec(parse_located_document(&text, path, Kind::Recipe)?)?;
+    let (pipeline, document) = parse_recipe(text, |text| {
+        parse_located_document(text, path, Kind::Recipe)
+    })?;
     let folder = path.parent().unwrap_or_else(|| Path::new(""));
-    Ok(InputSpec {
-        pipeline: pipeline.map(|pipeline| folder.join(pipeline)),
-        ..spec
-    })
+    finish_spec(document, pipeline.map(|pipeline| folder.join(pipeline)))
 }
 
 /// Parse a `.spitin` without resolving imports, with where each of its
 /// rules is written, for diagnostics.
 pub(crate) fn parse_recipe_lines(text: &str) -> Result<(InputSpec, SourceMap), ParseError> {
+    let (pipeline, mut document) = parse_recipe(text, |text| {
+        parse_document_with_imports(text, &BTreeMap::new(), Kind::Recipe)
+    })?;
+    let lines = std::mem::take(&mut document.lines);
+    Ok((finish_spec(document, pipeline)?, lines))
+}
+
+/// A recipe's `pipeline` line, and the document its other lines parse to
+/// with `parse` once each is checked to belong in a recipe.
+fn parse_recipe(
+    text: &str,
+    parse: impl FnOnce(&str) -> Result<ParsedDocument, ParseError>,
+) -> Result<(Option<PathBuf>, ParsedDocument), ParseError> {
     let (pipeline, text) = pipeline_line(text)?;
     check_input_lines(&text)?;
-    let mut document = parse_document_with_imports(&text, &Default::default(), Kind::Recipe)?;
-    let lines = std::mem::take(&mut document.lines);
-    let spec = finish_spec(document)?;
-    Ok((InputSpec { pipeline, ..spec }, lines))
+    Ok((pipeline, parse(&text)?))
 }
 
 /// The pipeline a recipe names with `pipeline analysis.spit`, and the text
@@ -131,8 +131,12 @@ fn check_input_lines(text: &str) -> Result<(), ParseError> {
     Ok(())
 }
 
-/// A recipe holds rules and records, and paths only for sources.
-fn finish_spec(document: ParsedDocument) -> Result<InputSpec, ParseError> {
+/// A recipe holds rules and records, and paths only for sources; it names
+/// `pipeline`.
+fn finish_spec(
+    document: ParsedDocument,
+    pipeline_file: Option<PathBuf>,
+) -> Result<InputSpec, ParseError> {
     let ParsedDocument {
         pipeline,
         mut inputs,
@@ -150,7 +154,7 @@ fn finish_spec(document: ParsedDocument) -> Result<InputSpec, ParseError> {
     }
     inputs.source_paths = pipeline.product_paths;
     Ok(InputSpec {
-        pipeline: None,
+        pipeline: pipeline_file,
         rules: inputs,
         inventory,
     })
