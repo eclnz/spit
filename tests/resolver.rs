@@ -1,7 +1,7 @@
 use spit::{
-    render_dag, resolve, CountRequirement, CoverageRule, EntityBinding, InputBinding, InputPort,
-    Invocation, OperationDef, Pipeline, ProductDef, ResolveError, ShapeRule, SourceInventory,
-    SourceRecord, TypeExpr,
+    parse_document, parse_pipeline, render_dag, resolve, validate_pipeline, CountRequirement,
+    CoverageRule, EntityBinding, InputBinding, InputPort, Invocation, OperationDef, Pipeline,
+    ProductDef, ResolveError, ShapeRule, SourceInventory, SourceRecord, TypeExpr,
 };
 
 fn artifact(product: &str, pairs: &[(&str, &str)]) -> SourceRecord {
@@ -449,4 +449,50 @@ fn full_inventory() -> SourceInventory {
         ],
         ..SourceInventory::default()
     }
+}
+
+#[test]
+fn named_ports_and_declared_aggregate_shape_are_checked() {
+    let text = "source raw [site, run]\noperation combine(runs: many) @ drop(run)\nresult = combine(raw @ vary(run))\nsources:\n  raw[site=01,run=2]\n  raw[site=01,run=1]\n";
+    let (pipeline, inventory) = parse_document(text).unwrap();
+    assert_eq!(pipeline.operations[0].inputs[0].name, "runs");
+    assert_eq!(
+        pipeline.operations[0].aggregated_dimension.as_deref(),
+        Some("run")
+    );
+    let dag = resolve(&pipeline, &inventory.unwrap()).unwrap();
+    assert_eq!(dag.jobs[0].output().entities.0.len(), 1);
+
+    let wrong_vary = text.replace("vary(run)", "vary(site)");
+    let (pipeline, inventory) = parse_document(&wrong_vary).unwrap();
+    assert!(resolve(&pipeline, &inventory.unwrap())
+        .unwrap_err()
+        .to_string()
+        .contains("declares drop(run) but invocation uses vary(site)"));
+
+    let wrong_shape = text.replace("result =", "result : Data [site, run] =");
+    let (pipeline, inventory) = parse_document(&wrong_shape).unwrap();
+    assert!(resolve(&pipeline, &inventory.unwrap()).is_err());
+}
+
+#[test]
+fn pipeline_checks_need_no_inventory() {
+    let text = "source raw : Table [id]\noperation clean(Table) -> Table\n\ncleaned = clean(rwa)\n";
+    assert_eq!(
+        validate_pipeline(&parse_pipeline(text).unwrap()).unwrap_err(),
+        ResolveError::UnknownProduct {
+            name: "rwa".to_owned()
+        }
+    );
+
+    let text = "source raw : Table [id]\nsource other : Other [id]\noperation clean(Table) -> Table\ncleaned = clean(other)\n";
+    assert!(matches!(
+        validate_pipeline(&parse_pipeline(text).unwrap()),
+        Err(ResolveError::TypeMismatch { .. })
+    ));
+
+    let (pipeline, inventory) =
+        parse_document(include_str!("../examples/commands/bash_demo.spit")).unwrap();
+    assert!(inventory.is_none());
+    validate_pipeline(&pipeline).unwrap();
 }
