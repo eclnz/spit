@@ -5,9 +5,9 @@ These are compile-only fixtures. They model artifact identities and types; the
 the jobs. Use `check`, `dag`, or `check --paths` to inspect them.
 
 ```sh
-cargo run -- check examples/stress/type_lab.spit --sources examples/stress/type_lab.sources
-cargo run -- dag examples/stress/type_lab.spit --sources examples/stress/type_lab.sources
-cargo run -- check examples/stress/observatory.spit --sources examples/stress/observatory.sources
+cargo run -- check examples/stress/type_lab.spit --sources examples/stress/type_lab.spitout
+cargo run -- dag examples/stress/type_lab.spit --sources examples/stress/type_lab.spitout
+cargo run -- check examples/stress/observatory.spit --sources examples/stress/observatory.spitout
 cargo test --test stress_pipelines
 ```
 

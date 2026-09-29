@@ -8,7 +8,7 @@ use spit::{
 };
 
 const PIPELINE: &str = "examples/stages/stages.spit";
-const SOURCES: &str = "examples/stages/stages.sources";
+const SOURCES: &str = "examples/stages/stages.spitout";
 
 fn staged() -> String {
     fs::read_to_string(PIPELINE).unwrap() + &fs::read_to_string(SOURCES).unwrap()
@@ -351,7 +351,7 @@ fn root_checks_the_files_a_stage_reads_from_earlier_stages() {
 }
 
 const NESTED: &str = "examples/stages/nested.spit";
-const NESTED_SOURCES: &str = "examples/stages/nested.sources";
+const NESTED_SOURCES: &str = "examples/stages/nested.spitout";
 
 fn nested() -> String {
     fs::read_to_string(NESTED).unwrap() + &fs::read_to_string(NESTED_SOURCES).unwrap()

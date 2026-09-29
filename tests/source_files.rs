@@ -64,7 +64,7 @@ impl Fixture {
                 "check",
                 "examples/commands/field_survey.spit",
                 "--sources",
-                "examples/commands/field_survey.sources",
+                "examples/commands/field_survey.spitout",
                 "--root",
                 self.0.to_str().unwrap(),
             ])
@@ -111,9 +111,9 @@ fn survey_reports_a_missing_required_file() {
 #[test]
 fn survey_rejects_a_photo_without_an_inventory_sidecar() {
     let fixture = Fixture::new(None);
-    let inventory = include_str!("../examples/commands/field_survey.sources")
+    let inventory = include_str!("../examples/commands/field_survey.spitout")
         .replace("    photo_imu[site=01,visit=02,shot=02]\n", "");
-    let inventory_path = fixture.0.join("incomplete.sources");
+    let inventory_path = fixture.0.join("incomplete.spitout");
     fs::write(&inventory_path, inventory).unwrap();
     let result = Command::new(env!("CARGO_BIN_EXE_spit"))
         .args([

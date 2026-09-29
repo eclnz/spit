@@ -140,7 +140,7 @@ The lines directly in a stage share one indentation. A nested stage without its 
 SPIT orders stages by the products they read, so a stage needs no `after` clause. Stages must not depend on each other in a cycle, even through steps outside every stage. A nested stage is compared with its siblings, and counts toward its outer stage's place among the outer stage's siblings; a step written in an outer stage itself, like one outside every stage, passes on what it reads. `check` counts the jobs in each outermost stage, `dag` names each job's stage, and `bash` marks where each stage starts. To run one stage, such as the analysis after preprocessing has already run, pass `--stage`; a stage includes the stages nested in it, and `--stage preprocess/combine` names a nested one:
 
 ```sh
-cargo run -- bash examples/stages/stages.spit --sources examples/stages/stages.sources --stage analysis
+cargo run -- bash examples/stages/stages.spit --sources examples/stages/stages.spitout --stage analysis
 ```
 
 Stages are written in the flow form; a sectioned document cannot declare them. A step outside every stage stays valid.

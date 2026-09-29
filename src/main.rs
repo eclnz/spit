@@ -131,7 +131,7 @@ impl Flag {
     fn value(self) -> Option<&'static str> {
         match self {
             Self::Inputs => Some("<recipe.spitin>"),
-            Self::Sources => Some("<inventory.spit|->"),
+            Self::Sources => Some("<inventory.spitout|->"),
             Self::Root => Some("<directory>"),
             Self::Stage => Some("<name>"),
             Self::Paths | Self::StrictPaths | Self::Json | Self::Stdin => None,
@@ -477,7 +477,7 @@ fn run(mut args: CliArgs) -> Result<(), Box<dyn Error>> {
             println!("Pipeline valid.\n\nNo source inventory; jobs not resolved.");
             return Ok(());
         }
-        return Err("no inline source inventory; supply --sources <inventory.spit|->".into());
+        return Err("no inline source inventory; supply --sources <inventory.spitout|->".into());
     };
     if args.command == Command::Artifacts {
         let report = resolve_artifacts(&pipeline, &inventory)?;
