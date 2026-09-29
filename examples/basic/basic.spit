@@ -1,4 +1,4 @@
-# Sectioned pipeline example with an embedded source inventory.
+# Sectioned pipeline example; its inputs are in basic.spitout.
 products:
     bold       : BOLD           [sub, ses, run]
     t1w        : T1w            [sub, ses]
