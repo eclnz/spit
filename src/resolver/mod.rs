@@ -47,13 +47,7 @@ pub fn resolve_artifacts_excluding(
     inventory: &SourceInventory,
     unavailable: &[ArtifactInstance],
 ) -> Result<ArtifactReport, ResolveError> {
-    let CompiledPipeline {
-        products,
-        operations,
-        order,
-        inferred_types,
-        shapes,
-    } = compile(pipeline)?;
+    let CompiledPipeline { steps } = compile(pipeline)?;
     let artifacts = pipeline.source_artifacts(inventory)?;
     let sources = pipeline
         .products
@@ -88,28 +82,12 @@ pub fn resolve_artifacts_excluding(
         },
         incomplete_jobs: Vec::new(),
     };
-    for index in order {
-        let invocation = &pipeline.invocations[index];
-        let operation = operations[invocation.operation.as_str()];
-        // Every artifact in a family has the same type, so the type inferred
-        // statically for each output is the type of each job's artifact.
-        let outputs: Vec<_> = invocation
-            .outputs
-            .iter()
-            .map(|name| (products[name.as_str()], &inferred_types[name]))
-            .collect();
-        let expansions = expand_step(
-            invocation,
-            operation,
-            &shapes[&index],
-            &outputs,
-            &resolution.artifacts,
-            &resolution.incomplete,
-        );
+    for step in &steps {
+        let expansions = expand_step(step, &resolution.artifacts, &resolution.incomplete);
         for expansion in expansions {
-            resolution.add(invocation, operation, expansion)?;
+            resolution.add(step.invocation, step.operation, expansion)?;
         }
-        for (product, _) in &outputs {
+        for (product, _) in &step.outputs {
             if let Some(family) = resolution.artifacts.get_mut(&product.name) {
                 product.sort_family(family);
             }
