@@ -6,6 +6,7 @@ use std::ops::Range;
 use std::path::Path;
 
 use crate::command::collect_commands;
+use crate::compile::collect_pipeline;
 use crate::imports::parse_located_document;
 use crate::inputs::{check_inventory, collect_rule_errors, InputSpec};
 use crate::lower::{parse_document_with_imports, ParsedDocument};
@@ -13,7 +14,6 @@ use crate::model::DEFAULT_OUTPUT;
 use crate::model::{stage_within, CommandRole, Job, ResolvedDag, SourceInventory};
 use crate::parser::{glued_comment, InlineInventory, Rule, SourceMap, Step};
 use crate::paths::{case_collisions, collect_paths};
-use crate::resolver::collect_pipeline;
 use crate::span::{columns_of, content_columns, utf16_columns, Located, Place};
 use crate::{
     parse_source_inventory, resolve, resolve_artifacts_excluding, DefinitionSubject, EntityBinding,

@@ -1,139 +1,19 @@
-//! Resolve a pipeline against a source inventory: check everything the
-//! pipeline text determines, then expand each step, in dependency order, into
-//! concrete jobs over the inventory's artifacts.
+//! Resolve jobs: expand each step of a compiled pipeline, in dependency
+//! order, into concrete jobs over an inventory's artifacts.
 
-mod definitions;
 mod matching;
-mod types;
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::error::{DefinitionSubject, ResolveError};
+use crate::error::ResolveError;
 use crate::model::{
     ArtifactInstance, ArtifactKey, ArtifactReport, Gap, IncompleteJob, Invocation, OperationDef,
-    Pipeline, ProductDef, ResolvedDag, SourceInventory,
+    Pipeline, ResolvedDag, SourceInventory,
 };
-use crate::types::TypeExpr;
 
-use self::definitions::{
-    check_stages, index_operations, index_producers, index_products, invocation_order,
-};
-use self::matching::{expand_step, make_job, step_shape, Expansion, StepShape};
-use self::types::infer_types;
+use crate::compile::{compile, CompiledPipeline};
 
-/// A pipeline whose declarations, steps, and rules hold without any inventory.
-struct CheckedPipeline<'a> {
-    products: BTreeMap<&'a str, &'a ProductDef>,
-    operations: BTreeMap<&'a str, &'a OperationDef>,
-    /// Invocation indices with every producer before its consumers.
-    order: Vec<usize>,
-    /// The statically inferred type of each checked step's outputs.
-    inferred_types: BTreeMap<String, TypeExpr>,
-    /// How each checked step, by invocation index, shapes its jobs.
-    shapes: BTreeMap<usize, StepShape>,
-}
-
-/// Every pipeline error, plus the names that failed or depend on a failure.
-pub(crate) struct PipelineCheck<'a> {
-    pipeline: CheckedPipeline<'a>,
-    pub errors: Vec<(DefinitionSubject, ResolveError)>,
-    /// Products and operations that are invalid or produced by a step that
-    /// could not be checked. Anything using them is skipped rather than
-    /// reported again.
-    pub poisoned: BTreeSet<String>,
-}
-
-/// Check everything that depends only on the pipeline text: declarations,
-/// each step's operation, inputs, dimensions and inferred types, and cycles.
-/// Returns the first error.
-pub fn validate_pipeline(pipeline: &Pipeline) -> Result<(), ResolveError> {
-    check_pipeline(pipeline).map(|_| ())
-}
-
-fn check_pipeline(pipeline: &Pipeline) -> Result<CheckedPipeline<'_>, ResolveError> {
-    let checked = collect_pipeline(pipeline);
-    match checked.errors.into_iter().next() {
-        Some((_, error)) => Err(error),
-        None => Ok(checked.pipeline),
-    }
-}
-
-/// Check the whole pipeline without an inventory, collecting every error.
-pub(crate) fn collect_pipeline(pipeline: &Pipeline) -> PipelineCheck<'_> {
-    let mut errors = Vec::new();
-    let mut poisoned = BTreeSet::new();
-    let products = index_products(
-        &pipeline.products,
-        &pipeline.invocations,
-        &mut errors,
-        &mut poisoned,
-    );
-    let operations = index_operations(&pipeline.operations, &mut errors, &mut poisoned);
-    let producers = index_producers(
-        &pipeline.invocations,
-        &products,
-        &operations,
-        &mut errors,
-        &mut poisoned,
-    );
-    check_stages(pipeline, &producers, &mut errors);
-    let order = match invocation_order(&pipeline.invocations, &producers) {
-        Ok(order) => order,
-        Err(error) => {
-            let ResolveError::Cycle { products } = &error else {
-                unreachable!("ordering only reports cycles")
-            };
-            errors.push((DefinitionSubject::Invocation(products[0].clone()), error));
-            (0..pipeline.invocations.len()).collect()
-        }
-    };
-    // Inferred intermediate types are also part of the reusable pipeline
-    // contract. Check them in dependency order so a type error does not depend
-    // on whether an inventory happens to contain concrete source artifacts.
-    // A step that fails, or uses something that failed, quiets its consumers.
-    let mut inferred_types = BTreeMap::new();
-    let mut shapes = BTreeMap::new();
-    for &index in &order {
-        let invocation = &pipeline.invocations[index];
-        let depends_on_failure = poisoned.contains(&invocation.operation)
-            || invocation
-                .outputs
-                .iter()
-                .any(|output| poisoned.contains(output))
-            || invocation
-                .inputs
-                .iter()
-                .any(|input| poisoned.contains(input.product_name()));
-        if depends_on_failure {
-            poisoned.extend(invocation.outputs.iter().cloned());
-            continue;
-        }
-        match validate_invocation(invocation, &products, &operations, &inferred_types) {
-            Ok((inferred, shape)) => {
-                inferred_types.extend(invocation.outputs.iter().cloned().zip(inferred));
-                shapes.insert(index, shape);
-            }
-            Err(error) => {
-                errors.push((
-                    DefinitionSubject::Invocation(invocation.output_product().to_owned()),
-                    error,
-                ));
-                poisoned.extend(invocation.outputs.iter().cloned());
-            }
-        }
-    }
-    PipelineCheck {
-        pipeline: CheckedPipeline {
-            products,
-            operations,
-            order,
-            inferred_types,
-            shapes,
-        },
-        errors,
-        poisoned,
-    }
-}
+use self::matching::{expand_step, make_job, Expansion};
 
 /// Resolve every job of `pipeline` over the sources in `inventory`, failing
 /// on the first job that cannot be made.
@@ -173,13 +53,13 @@ pub fn resolve_artifacts_excluding(
     inventory: &SourceInventory,
     unavailable: &[ArtifactInstance],
 ) -> Result<ArtifactReport, ResolveError> {
-    let CheckedPipeline {
+    let CompiledPipeline {
         products,
         operations,
         order,
         inferred_types,
         shapes,
-    } = check_pipeline(pipeline)?;
+    } = compile(pipeline)?;
     let artifacts = pipeline.source_artifacts(inventory)?;
     let sources = pipeline
         .products
@@ -302,83 +182,9 @@ impl Resolution {
     }
 }
 
-pub(super) fn find_product<'a>(
-    products: &'a BTreeMap<&str, &ProductDef>,
-    name: &str,
-) -> Result<&'a ProductDef, ResolveError> {
-    products
-        .get(name)
-        .copied()
-        .ok_or_else(|| ResolveError::UnknownProduct {
-            name: name.to_owned(),
-        })
-}
-
-pub(super) fn find_operation<'a>(
-    operations: &'a BTreeMap<&str, &OperationDef>,
-    name: &str,
-) -> Result<&'a OperationDef, ResolveError> {
-    operations
-        .get(name)
-        .copied()
-        .ok_or_else(|| ResolveError::UnknownOperation {
-            name: name.to_owned(),
-        })
-}
-
-fn validate_invocation(
-    invocation: &Invocation,
-    products: &BTreeMap<&str, &ProductDef>,
-    operations: &BTreeMap<&str, &OperationDef>,
-    inferred_types: &BTreeMap<String, TypeExpr>,
-) -> Result<(Vec<TypeExpr>, StepShape), ResolveError> {
-    let operation = find_operation(operations, &invocation.operation)?;
-    let outputs = invocation
-        .outputs
-        .iter()
-        .map(|name| find_product(products, name))
-        .collect::<Result<Vec<_>, _>>()?;
-    if invocation.inputs.len() != operation.inputs.len() {
-        return Err(unsupported(
-            operation,
-            format!(
-                "expected {} input bindings, found {}",
-                operation.inputs.len(),
-                invocation.inputs.len()
-            ),
-        ));
-    }
-    if invocation.outputs.len() != operation.outputs.len() {
-        let names: Vec<_> = operation
-            .outputs
-            .iter()
-            .map(|port| port.name.as_str())
-            .collect();
-        return Err(unsupported(
-            operation,
-            format!(
-                "expected {} output products ({}), found {}",
-                operation.outputs.len(),
-                names.join(", "),
-                invocation.outputs.len()
-            ),
-        ));
-    }
-    let inferred = infer_types(invocation, operation, products, &outputs, inferred_types)?;
-    let shape = step_shape(invocation, operation, products, &outputs)?;
-    Ok((inferred, shape))
-}
-
 pub(super) fn family<'a>(
     artifacts: &'a BTreeMap<String, Vec<ArtifactInstance>>,
     product: &str,
 ) -> &'a [ArtifactInstance] {
     artifacts.get(product).map_or(&[], Vec::as_slice)
-}
-
-pub(super) fn unsupported(operation: &OperationDef, detail: impl Into<String>) -> ResolveError {
-    ResolveError::UnsupportedShapeRelationship {
-        operation: operation.name.clone(),
-        detail: detail.into(),
-    }
 }
