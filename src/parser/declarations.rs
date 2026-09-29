@@ -5,8 +5,8 @@ use std::collections::BTreeMap;
 
 use crate::command::CommandTemplate;
 use crate::model::{
-    CommandDef, CommandRole, CountRequirement, CoverageRule, DirectoryDiscovery, InputBinding,
-    Invocation, ProductDef,
+    CommandDef, CommandRole, CountRequirement, CoverageAction, CoverageRule, DirectoryDiscovery,
+    InputBinding, Invocation, ProductDef,
 };
 use crate::paths::{validate_discovery_rule, PathTemplate};
 use crate::types::{parse_type_expr, TypeExpr, TypeParseError};
@@ -210,10 +210,14 @@ fn parse_use_path(text: &str, number: usize) -> Result<(String, Option<String>),
 }
 
 pub(super) fn parse_coverage_rule(line: &str, number: usize) -> Result<CoverageRule, ParseError> {
-    let syntax = "expected constraint: require product count=1 per [dimensions], count>=1, or dimension=value,...";
-    let rest = line
-        .strip_prefix("require ")
-        .ok_or_else(|| ParseError::new(number, syntax))?;
+    let syntax = "expected constraint: require or skip product count=1 per [dimensions], count>=1, or dimension=value,...";
+    let (action, rest) = if let Some(rest) = line.strip_prefix("require ") {
+        (CoverageAction::Require, rest)
+    } else if let Some(rest) = line.strip_prefix("skip ") {
+        (CoverageAction::Skip, rest)
+    } else {
+        return Err(ParseError::new(number, syntax));
+    };
     let (subject, dimensions) = rest
         .split_once(" per ")
         .ok_or_else(|| ParseError::new(number, syntax))?;
@@ -277,6 +281,7 @@ pub(super) fn parse_coverage_rule(line: &str, number: usize) -> Result<CoverageR
         &dimensions,
         count.unwrap_or(CountRequirement::AtLeast(1)),
     );
+    rule.action = action;
     for (dimension, listed) in values {
         rule = rule.requiring(dimension, listed);
     }

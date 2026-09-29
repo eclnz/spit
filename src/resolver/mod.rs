@@ -16,6 +16,7 @@ use crate::model::{
 };
 use crate::types::TypeExpr;
 
+pub(crate) use self::coverage::apply_skips;
 use self::coverage::{check_coverage_rule, coverage_gaps};
 use self::definitions::{
     check_stages, index_operations, index_producers, index_products, invocation_order,
@@ -129,7 +130,9 @@ pub(crate) fn collect_pipeline(pipeline: &Pipeline) -> PipelineCheck<'_> {
         if poisoned.contains(&rule.product) {
             continue;
         }
-        if let Err(error) = check_coverage_rule(index, rule, &products, &producers) {
+        if let Err(error) =
+            check_coverage_rule(index, rule, &products, &producers, &pipeline.discoveries)
+        {
             // Keep the more specific subject a definition error names.
             let subject = match &error {
                 ResolveError::InvalidDefinition { subject, .. } => subject.clone(),
@@ -190,12 +193,61 @@ pub fn resolve_artifacts(
         inferred_types,
         shapes,
     } = check_pipeline(pipeline)?;
+    for (name, bindings) in &inventory.discovered {
+        let Some(discovery) = pipeline.discoveries.iter().find(|rule| rule.name == *name) else {
+            return Err(ResolveError::InvalidDefinition {
+                subject: DefinitionSubject::None,
+                detail: format!("inventory names unknown discovery rule `{name}`"),
+            });
+        };
+        let expected: BTreeSet<_> = discovery.dimensions.iter().collect();
+        for binding in bindings {
+            let found: BTreeSet<_> = binding.0.keys().collect();
+            if found != expected {
+                return Err(ResolveError::InvalidDefinition {
+                    subject: DefinitionSubject::None,
+                    detail: format!(
+                        "inventory context [{binding}] for discovery `{name}` must bind [{}]",
+                        discovery.dimensions.join(", ")
+                    ),
+                });
+            }
+        }
+    }
+    // Validate every supplied record, including records a skip rule may omit.
+    source_artifacts(inventory, &products, &producers)?;
+    let mut inventory = inventory.clone();
+    apply_skips(pipeline, &mut inventory, false);
+    let inventory = &inventory;
     let artifacts = source_artifacts(inventory, &products, &producers)?;
+    for (rule_index, rule) in pipeline.constraints.iter().enumerate() {
+        if pipeline
+            .discoveries
+            .iter()
+            .any(|discovery| discovery.name == rule.product)
+            && inventory.discovered.get(&rule.product).is_none()
+        {
+            return Err(ResolveError::InvalidDefinition {
+                subject: DefinitionSubject::Constraint(rule_index),
+                detail: format!(
+                    "coverage rule for discovery `{}` needs named contexts in the inventory",
+                    rule.product
+                ),
+            });
+        }
+    }
     let coverage: Vec<_> = pipeline
         .constraints
         .iter()
         .enumerate()
-        .flat_map(|(rule_index, rule)| coverage_gaps(rule_index, rule, inventory, &artifacts))
+        .filter(|(_, rule)| rule.action == crate::model::CoverageAction::Require)
+        .flat_map(|(rule_index, rule)| {
+            let discovery = pipeline
+                .discoveries
+                .iter()
+                .any(|candidate| candidate.name == rule.product);
+            coverage_gaps(rule_index, rule, inventory, &artifacts, discovery)
+        })
         .collect();
     let sources = pipeline
         .products

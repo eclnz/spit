@@ -103,9 +103,23 @@ merged = merge(sorted @ vary(part))
 
 `source` declares a family of input artifacts. A `shard` is identified by its `group` and `part` values. `sorted` keeps those dimensions. `merge` collects all parts of each group and produces one `merged[group=...]` artifact per group. The `@ drop(part)` contract and `@ vary(part)` call must agree. For datasets whose subject and session values are unknown in advance, `discover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}` reads the observed pairs from folders and expands source artifacts over them.
 
+`require sessions count>=2 per [sub]` checks the discovered folders themselves. If subject `5` has only one session, SPIT reports that group with a count of one; `sessions` remains a discovery rule name, not a product.
+
+`skip sessions count>=2 per [sub]` instead removes subjects with fewer than two sessions before checking source files or expanding jobs. During filesystem discovery, SPIT reports each skipped subject on stderr while keeping DAG JSON on stdout.
+
 `path` lines say where artifacts live. `command` lines give the exact executable and argument order. SPIT decides which artifacts belong to each job before filling their paths into a command.
 
 ## Supply the inputs
+
+For a dataset on disk, keep file discovery in a sibling `.spitin` recipe. For example, `analysis.spit` can declare `source image: Image [sub, ses]` and the operation that reads it, while `analysis.spitin` contains:
+
+```text
+discover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}
+skip sessions count>=2 per [sub]
+path image: data/sub-{sub}/ses-{ses}/image.nii.gz
+```
+
+`spit check analysis.spit` and `spit dag analysis.spit --json` load that sibling recipe automatically, discover source files, and resolve the pipeline. Use `--inputs other/cohort.spitin` for another dataset; relative paths then start at that recipe's folder unless `--root` is given. A pipeline with a `.spitin` recipe can omit output path rules: outputs default to `out/{product}/{entities}`. The `.spitin` file may also contain `require` rules or explicit `sources:` and `contexts:` records. Logical source types and operations stay in `.spit`.
 
 The pipeline describes what to do; an inventory describes what is present. The example uses [bash_demo.sources](examples/commands/bash_demo.sources):
 

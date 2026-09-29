@@ -802,12 +802,25 @@ pub fn discover_source_files(pipeline: &Pipeline, root: &Path) -> Result<Discove
         }
     }
     discovery.inventory.contexts = contexts.into_iter().collect();
+    discovery.inventory.discovered = directory_patterns
+        .iter()
+        .zip(&rule_contexts)
+        .map(|((rule, _), bindings)| (rule.name.clone(), bindings.iter().cloned().collect()))
+        .collect();
+    let skipped_groups = crate::resolver::apply_skips(pipeline, &mut discovery.inventory, true);
+    for group in &skipped_groups {
+        discovery.skipped.push(format!(
+            "[{}] because `skip {}` rejected the group",
+            group.context, group.target
+        ));
+    }
     let mut expected: BTreeMap<String, BTreeSet<EntityBinding>> = BTreeMap::new();
     for product in &pipeline.products {
         if outputs.contains(&product.name) {
             continue;
         }
-        for ((rule, _), bindings) in directory_patterns.iter().zip(&rule_contexts) {
+        for (rule, _) in &directory_patterns {
+            let bindings = &discovery.inventory.discovered[&rule.name];
             if product
                 .dimensions
                 .iter()
@@ -821,32 +834,6 @@ pub fn discover_source_files(pipeline: &Pipeline, root: &Path) -> Result<Discove
                     );
                 }
             }
-        }
-    }
-    for product in &pipeline.products {
-        let Some(bindings) = expected.get(&product.name) else {
-            continue;
-        };
-        for binding in bindings {
-            let artifact = ArtifactInstance::new(
-                &product.name,
-                product.artifact_type.clone(),
-                binding.clone(),
-            );
-            let relative = bind_path(pipeline, &product.dimensions, &artifact, || {
-                format!("source `{artifact}`")
-            })?;
-            let full = root.join(&relative);
-            if !full.is_file() {
-                return Err(error(format!(
-                    "missing source file for `{artifact}` at discovered context: `{}`",
-                    full.display()
-                )));
-            }
-            discovery
-                .inventory
-                .artifacts
-                .push(SourceRecord::new(&product.name, binding.clone()));
         }
     }
     'files: for file in &files {
@@ -878,6 +865,9 @@ pub fn discover_source_files(pipeline: &Pipeline, root: &Path) -> Result<Discove
                 }
             }
             let binding = EntityBinding(entities);
+            if skipped_groups.iter().any(|group| group.matches(&binding)) {
+                continue 'files;
+            }
             if let Some(bindings) = expected.get(&product.name) {
                 if !bindings.contains(&binding) {
                     return Err(error(format!(
@@ -897,6 +887,38 @@ pub fn discover_source_files(pipeline: &Pipeline, root: &Path) -> Result<Discove
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect();
+    let additional_skips = crate::resolver::apply_skips(pipeline, &mut discovery.inventory, false);
+    for group in &additional_skips {
+        discovery.skipped.push(format!(
+            "[{}] because `skip {}` rejected the group",
+            group.context, group.target
+        ));
+    }
+    for product in &pipeline.products {
+        let Some(bindings) = expected.get(&product.name) else {
+            continue;
+        };
+        for binding in bindings {
+            if additional_skips.iter().any(|group| group.matches(binding)) {
+                continue;
+            }
+            let artifact = ArtifactInstance::new(
+                &product.name,
+                product.artifact_type.clone(),
+                binding.clone(),
+            );
+            let relative = bind_path(pipeline, &product.dimensions, &artifact, || {
+                format!("source `{artifact}`")
+            })?;
+            let full = root.join(&relative);
+            if !full.is_file() {
+                return Err(error(format!(
+                    "missing source file for `{artifact}` at discovered context: `{}`",
+                    full.display()
+                )));
+            }
+        }
+    }
     let rank: BTreeMap<_, _> = pipeline
         .products
         .iter()
