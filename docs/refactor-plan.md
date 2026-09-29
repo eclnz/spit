@@ -193,6 +193,7 @@ Dead public API (item 5, 15) is not visible to the compiler because `lib.rs` re-
 
 ### 21. Optional: iterative `invocation_order`, O(1) `is_source`
 - `compile/definitions.rs` `invocation_order` is recursive (survived a 200k chain, so theoretical). `Pipeline::is_source` scans all invocations and `source_artifacts` calls it per record (quadratic in principle; 0.5 s at 40k records). Precompute a producer set.
+- **Status: done.** Not only theoretical: a new unit test ordering a 100k-step chain on a test thread (2 MB stack) overflowed the recursive `invocation_order`. It is now a depth-first search with an explicit stack of (step, next input) frames, visiting in the same order and reporting a cycle from the same step. Compared with the old code on 8,000 random step graphs (3,454 with cycles, 4,000 acyclic with shuffled declaration order): diagnostics and job order identical in all. `source_artifacts` builds its name-to-product map and set of produced products once instead of scanning per record (the first declaration of a name still wins).
 
 ### 22. `spit-vscode`: lexer/parser duplication (separate repo, `eclnz/spit-vscode`)
 - `extension.js` re-implements the Rust lexer (`stripComment`, `splitTopLevel`) and a partial declaration parser for semantic highlighting; the two can drift. Options: have `spit check --json` emit token data, or add cross-language conformance tests.

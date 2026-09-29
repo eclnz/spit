@@ -635,17 +635,27 @@ impl Pipeline {
         &self,
         inventory: &SourceInventory,
     ) -> Result<BTreeMap<String, Vec<ArtifactInstance>>, ResolveError> {
+        // Looked up once, not once per record; the first declaration of a
+        // name wins, as when searching.
+        let mut products = BTreeMap::new();
+        for product in &self.products {
+            products.entry(product.name.as_str()).or_insert(product);
+        }
+        let produced: BTreeSet<_> = self
+            .invocations
+            .iter()
+            .flat_map(|invocation| &invocation.outputs)
+            .map(String::as_str)
+            .collect();
         let mut artifacts: BTreeMap<String, Vec<ArtifactInstance>> = BTreeMap::new();
         let mut seen = BTreeSet::new();
         for record in &inventory.artifacts {
-            let product = self
-                .products
-                .iter()
-                .find(|product| product.name == record.product)
-                .ok_or_else(|| ResolveError::UnknownProduct {
+            let product = products.get(record.product.as_str()).ok_or_else(|| {
+                ResolveError::UnknownProduct {
                     name: record.product.clone(),
-                })?;
-            if !self.is_source(&record.product) {
+                }
+            })?;
+            if produced.contains(record.product.as_str()) {
                 return Err(ResolveError::InvalidDefinition {
                     subject: DefinitionSubject::Product(record.product.clone()),
                     detail: format!(
@@ -680,8 +690,7 @@ impl Pipeline {
                 .push(source);
         }
         for (name, family) in &mut artifacts {
-            let product = self.products.iter().find(|product| &product.name == name);
-            if let Some(product) = product {
+            if let Some(product) = products.get(name.as_str()) {
                 product.sort_family(family);
             }
         }
