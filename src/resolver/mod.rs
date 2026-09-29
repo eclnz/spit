@@ -11,12 +11,13 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::error::{DefinitionSubject, ResolveError};
 use crate::model::{
-    ArtifactInstance, ArtifactKey, ArtifactReport, Gap, IncompleteJob, Invocation, OperationDef,
-    Pipeline, ProductDef, ResolvedDag, SourceInventory,
+    ArtifactInstance, ArtifactKey, ArtifactReport, CoverageGap, Gap, IncompleteJob, Invocation,
+    OperationDef, Pipeline, ProductDef, ResolvedDag, SourceInventory,
 };
 use crate::types::TypeExpr;
 
 pub(crate) use self::coverage::apply_skips;
+
 use self::coverage::{check_coverage_rule, coverage_gaps};
 use self::definitions::{
     check_stages, index_operations, index_producers, index_products, invocation_order,
@@ -181,18 +182,22 @@ pub fn resolve(
     }
 }
 
-pub fn resolve_artifacts(
+/// An inventory after its skip rules, with the source artifacts it holds and
+/// the coverage its `require` rules find missing.
+pub(crate) struct InputCheck {
+    pub(crate) inventory: SourceInventory,
+    artifacts: BTreeMap<String, Vec<ArtifactInstance>>,
+    pub(crate) coverage: Vec<CoverageGap>,
+}
+
+/// Check an inventory against a pipeline's discovery, skip and coverage rules,
+/// without expanding any job.
+fn check_inputs(
     pipeline: &Pipeline,
+    products: &BTreeMap<&str, &ProductDef>,
+    producers: &BTreeMap<String, usize>,
     inventory: &SourceInventory,
-) -> Result<ArtifactReport, ResolveError> {
-    let CheckedPipeline {
-        products,
-        operations,
-        producers,
-        order,
-        inferred_types,
-        shapes,
-    } = check_pipeline(pipeline)?;
+) -> Result<InputCheck, ResolveError> {
     for (name, bindings) in &inventory.discovered {
         let Some(discovery) = pipeline.discoveries.iter().find(|rule| rule.name == *name) else {
             return Err(ResolveError::InvalidDefinition {
@@ -215,11 +220,11 @@ pub fn resolve_artifacts(
         }
     }
     // Validate every supplied record, including records a skip rule may omit.
-    source_artifacts(inventory, &products, &producers)?;
+    source_artifacts(inventory, products, producers)?;
     let mut inventory = inventory.clone();
     apply_skips(pipeline, &mut inventory, false);
     let inventory = &inventory;
-    let artifacts = source_artifacts(inventory, &products, &producers)?;
+    let artifacts = source_artifacts(inventory, products, producers)?;
     for (rule_index, rule) in pipeline.constraints.iter().enumerate() {
         if pipeline
             .discoveries
@@ -249,6 +254,39 @@ pub fn resolve_artifacts(
             coverage_gaps(rule_index, rule, inventory, &artifacts, discovery)
         })
         .collect();
+    Ok(InputCheck {
+        inventory: inventory.clone(),
+        artifacts,
+        coverage,
+    })
+}
+
+/// Skip and coverage checks of `inventory` alone, for the `.spitin` input stage.
+pub(crate) fn check_inventory(
+    pipeline: &Pipeline,
+    inventory: &SourceInventory,
+) -> Result<InputCheck, ResolveError> {
+    let checked = check_pipeline(pipeline)?;
+    check_inputs(pipeline, &checked.products, &checked.producers, inventory)
+}
+
+pub fn resolve_artifacts(
+    pipeline: &Pipeline,
+    inventory: &SourceInventory,
+) -> Result<ArtifactReport, ResolveError> {
+    let CheckedPipeline {
+        products,
+        operations,
+        producers,
+        order,
+        inferred_types,
+        shapes,
+    } = check_pipeline(pipeline)?;
+    let InputCheck {
+        artifacts,
+        coverage,
+        ..
+    } = check_inputs(pipeline, &products, &producers, inventory)?;
     let sources = pipeline
         .products
         .iter()

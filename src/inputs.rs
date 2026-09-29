@@ -1,11 +1,14 @@
 //! Dataset input recipes kept separate from the logical pipeline.
 
 use std::collections::BTreeSet;
-use std::path::Path;
+use std::error::Error;
+use std::path::{Path, PathBuf};
 
+use crate::error::ResolveError;
 use crate::model::{Pipeline, SourceInventory};
 use crate::parser::ParseError;
-use crate::paths::PathTemplate;
+use crate::paths::{discover_source_files, PathTemplate};
+use crate::resolver::{check_inventory, validate_pipeline};
 use crate::{parse_document, parse_document_at};
 
 /// A `.spitin` recipe and any inventory records written in it.
@@ -76,9 +79,38 @@ fn finish_spec(
 }
 
 impl InputSpec {
-    /// Attach the recipe's declarations to a pipeline without replacing its
-    /// logical source contracts. Existing path rules must be unambiguous.
-    pub fn apply_to(&self, pipeline: &mut Pipeline) -> Result<(), String> {
+    /// Run the input stage: find the contexts and source files a dataset
+    /// holds, apply the recipe's `skip` rules, and check its `require` rules.
+    ///
+    /// The stage reads the logical `pipeline` only for its source products and
+    /// leaves it untouched. What it returns is a plain inventory, so resolving
+    /// jobs never sees a discovery, coverage or skip rule.
+    pub fn resolve(
+        &self,
+        pipeline: &Pipeline,
+        source: InputSource<'_>,
+    ) -> Result<ResolvedInputs, Box<dyn Error>> {
+        let mut recipe = pipeline.clone();
+        self.apply_to(&mut recipe)?;
+        validate_pipeline(&recipe)?;
+        let (inventory, skipped, root) = match source {
+            InputSource::Discover(root) => {
+                let found = discover_source_files(&recipe, root)?;
+                (found.inventory, found.skipped, Some(root.to_owned()))
+            }
+            InputSource::Inventory(inventory) => (inventory, Vec::new(), None),
+        };
+        let checked = check_inventory(&recipe, &inventory)?;
+        Ok(ResolvedInputs {
+            inventory: checked.inventory,
+            skipped,
+            missing: checked.coverage.into_iter().map(|gap| gap.error).collect(),
+            root,
+        })
+    }
+
+    /// Check the recipe against the pipeline's source products.
+    fn check_against(&self, pipeline: &Pipeline) -> Result<(), String> {
         let sources: BTreeSet<_> = pipeline
             .products
             .iter()
@@ -125,8 +157,14 @@ impl InputSpec {
                 }
             }
         }
-        pipeline.discoveries.extend(self.rules.discoveries.clone());
-        pipeline.constraints.extend(self.rules.constraints.clone());
+        Ok(())
+    }
+
+    /// Give a pipeline the recipe's source paths, and the built-in output
+    /// path when it declares none, so paths can be bound to its jobs. This
+    /// adds no discovery, coverage or skip rule.
+    pub fn apply_paths(&self, pipeline: &mut Pipeline) -> Result<(), String> {
+        self.check_against(pipeline)?;
         pipeline
             .product_paths
             .extend(self.rules.product_paths.clone());
@@ -137,5 +175,52 @@ impl InputSpec {
             );
         }
         Ok(())
+    }
+
+    /// Attach every declaration of the recipe to a pipeline, for the input
+    /// stage and for diagnostics that check both files together.
+    pub fn apply_to(&self, pipeline: &mut Pipeline) -> Result<(), String> {
+        self.apply_paths(pipeline)?;
+        pipeline.discoveries.extend(self.rules.discoveries.clone());
+        pipeline.constraints.extend(self.rules.constraints.clone());
+        Ok(())
+    }
+}
+
+/// Where the input stage gets its inventory.
+pub enum InputSource<'a> {
+    /// Scan the directory the recipe's rules describe.
+    Discover(&'a Path),
+    /// Use records already written, from `--sources` or the recipe itself.
+    Inventory(SourceInventory),
+}
+
+/// What the input stage settled about a dataset.
+#[derive(Debug)]
+pub struct ResolvedInputs {
+    /// The contexts and sources that remain after `skip` rules, with the named
+    /// discovery contexts kept for `spit discover`.
+    pub inventory: SourceInventory,
+    /// Each file or group left out, and why.
+    pub skipped: Vec<String>,
+    /// What the recipe's `require` rules find missing.
+    pub missing: Vec<ResolveError>,
+    /// The directory that was scanned, when the stage scanned one.
+    pub root: Option<PathBuf>,
+}
+
+impl ResolvedInputs {
+    /// The first missing requirement, as an error.
+    pub fn require_complete(&self) -> Result<(), ResolveError> {
+        self.missing.first().cloned().map_or(Ok(()), Err)
+    }
+
+    /// The inventory for resolving jobs: the same contexts and sources without
+    /// the bookkeeping that ties them to discovery rules.
+    pub fn dag_inventory(&self) -> SourceInventory {
+        SourceInventory {
+            discovered: Default::default(),
+            ..self.inventory.clone()
+        }
     }
 }
