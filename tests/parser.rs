@@ -255,7 +255,7 @@ fn a_source_record_may_give_its_file() {
     );
     assert_eq!(inventory.artifacts[1].path, None);
     let pipeline = parse_pipeline("source raw [site]\n").unwrap();
-    let rendered = spit::render_source_inventory(&inventory, &pipeline);
+    let rendered = spit::render_source_inventory(&inventory, &pipeline, &Default::default());
     assert_eq!(parse_source_inventory(&rendered).unwrap(), inventory);
     for bad in [
         "raw[site=A] data.txt",

@@ -194,7 +194,7 @@ fn coverage_can_target_the_named_discovery_rule() {
     let (pipeline, spec) = parse(text);
     let inventory = discover_sources(&pipeline, &spec.rules, &tree.0).unwrap();
     assert_eq!(inventory.discovered["sessions"].len(), 9);
-    let rendered = spit::render_source_inventory(&inventory, &pipeline);
+    let rendered = spit::render_source_inventory(&inventory, &pipeline, &spec.rules);
     assert!(rendered.starts_with("contexts sessions:\n"), "{rendered}");
     assert_eq!(parse_source_inventory(&rendered).unwrap(), inventory);
     let inline = format!("{text}{rendered}");

@@ -3,7 +3,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::model::{EntityBinding, Pipeline, SourceInventory, SourceRecord};
+use crate::model::{EntityBinding, InputRules, Pipeline, SourceInventory, SourceRecord};
 use crate::paths::unusable_path;
 
 use super::keyword::{Header, Keyword};
@@ -72,19 +72,42 @@ fn is_step(line: &str) -> bool {
 
 /// Write an inventory in the text form [`parse_source_inventory`] reads,
 /// with each record's values in its product's declared dimension order.
-pub fn render_source_inventory(inventory: &SourceInventory, pipeline: &Pipeline) -> String {
-    // A context's values follow the order the pipeline first declares its
-    // dimensions in, as each record's follow its product's.
-    let mut dimensions: Vec<&str> = Vec::new();
+///
+/// A discovery rule's contexts follow the dimensions the rule declares, and
+/// other contexts the order the pipeline first declares its dimensions in.
+/// Contexts are listed in the order their values are written, reading
+/// numbers as numbers.
+pub fn render_source_inventory(
+    inventory: &SourceInventory,
+    pipeline: &Pipeline,
+    rules: &InputRules,
+) -> String {
+    let mut pipeline_order: Vec<String> = Vec::new();
     for dimension in pipeline
         .products
         .iter()
         .flat_map(|product| &product.dimensions)
     {
-        if !dimensions.contains(&dimension.as_str()) {
-            dimensions.push(dimension);
+        if !pipeline_order.contains(dimension) {
+            pipeline_order.push(dimension.clone());
         }
     }
+    let context_lines = |contexts: Vec<&EntityBinding>, first: &[String]| {
+        let mut order = first.to_vec();
+        order.extend(
+            pipeline_order
+                .iter()
+                .filter(|d| !first.contains(d))
+                .cloned(),
+        );
+        let mut contexts = contexts;
+        contexts.sort_by(|left, right| left.cmp_in(right, &order));
+        let order: Vec<&str> = order.iter().map(String::as_str).collect();
+        contexts
+            .into_iter()
+            .map(|context| format!("    [{}]\n", in_order(context, &order)))
+            .collect::<String>()
+    };
     let mut text = String::new();
     let named: BTreeSet<_> = inventory.discovered.values().flatten().collect();
     let unnamed: Vec<_> = inventory
@@ -94,15 +117,14 @@ pub fn render_source_inventory(inventory: &SourceInventory, pipeline: &Pipeline)
         .collect();
     if !unnamed.is_empty() {
         text.push_str("contexts:\n");
-        for context in unnamed {
-            text.push_str(&format!("    [{}]\n", in_order(context, &dimensions)));
-        }
+        text.push_str(&context_lines(unnamed, &[]));
     }
     for (name, bindings) in &inventory.discovered {
         text.push_str(&format!("contexts {name}:\n"));
-        for context in bindings {
-            text.push_str(&format!("    [{}]\n", in_order(context, &dimensions)));
-        }
+        let declared = rules
+            .discovery(name)
+            .map_or(&[][..], |rule| rule.dimensions.as_slice());
+        text.push_str(&context_lines(bindings.iter().collect(), declared));
     }
     text.push_str("sources:\n");
     for record in &inventory.artifacts {

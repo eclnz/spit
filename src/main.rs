@@ -468,7 +468,11 @@ fn check(args: &CliArgs) -> Result<(), Box<dyn Error>> {
 fn inputs(args: &CliArgs) -> Result<(), Box<dyn Error>> {
     let settled = run_inputs(&args.files[0], None, args.value(Flag::Root).as_deref())?;
     settled.inputs.require_complete()?;
-    let text = render_source_inventory(&settled.inputs.inventory, &settled.pipeline);
+    let text = render_source_inventory(
+        &settled.inputs.inventory,
+        &settled.pipeline,
+        &settled.recipe.rules,
+    );
     write_output(args, &text, "the .spitout")
 }
 
@@ -577,7 +581,11 @@ fn prepare(args: &CliArgs, pipeline_file: &str, inputs: &str) -> Result<Prepared
         let settled = run_inputs(inputs, Some(path), given_root)?;
         eprintln!("note: ran `spit inputs {inputs}` in memory");
         root = root.or_else(|| settled.inputs.root.clone());
-        let text = render_source_inventory(&settled.inputs.inventory, &settled.pipeline);
+        let text = render_source_inventory(
+            &settled.inputs.inventory,
+            &settled.pipeline,
+            &settled.recipe.rules,
+        );
         (text, Some(settled.recipe))
     } else {
         (read_file(inputs)?, None)
