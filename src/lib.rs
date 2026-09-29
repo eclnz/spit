@@ -25,7 +25,10 @@ pub use diagnostics::{
 };
 pub use error::{DefinitionSubject, ResolveError, TypeConflict};
 pub use imports::{parse_document_at, parse_pipeline_at};
-pub use inputs::{parse_input_spec, parse_input_spec_at, InputSource, InputSpec, ResolvedInputs};
+pub use inputs::{
+    discover_source_files, discover_sources, parse_input_spec, parse_input_spec_at, Discovery,
+    InputSource, InputSpec, ResolvedInputs,
+};
 pub use lower::{parse_document, parse_pipeline};
 pub use model::{
     natural_cmp, stage_and_parents, stage_within, ArtifactInstance, ArtifactKey, ArtifactReport,
@@ -36,9 +39,8 @@ pub use model::{
 };
 pub use parser::{parse_source_inventory, render_source_inventory, ParseError, ParseErrorKind};
 pub use paths::{
-    discover_source_files, discover_sources, inspect_paths, validate_concrete_paths,
-    validate_source_files, PathCoverage, PathCoverageEntry, PathError, PathRule, PathTemplate,
-    VerifiedFiles,
+    inspect_paths, validate_concrete_paths, validate_source_files, PathCoverage, PathCoverageEntry,
+    PathError, PathRule, PathTemplate, VerifiedFiles,
 };
 pub use render::{render_artifacts, render_bound_dag, render_dag, render_dag_json};
 pub use resolver::{resolve, resolve_artifacts, validate_pipeline};
