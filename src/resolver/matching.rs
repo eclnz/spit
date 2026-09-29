@@ -25,7 +25,7 @@ pub(super) fn expand_step(
     artifacts: &BTreeMap<String, Vec<ArtifactInstance>>,
     incomplete: &BTreeSet<ArtifactKey>,
 ) -> Vec<Expansion> {
-    let (invocation, operation, shape) = (step.invocation, step.operation, &step.shape);
+    let (invocation, shape) = (step.invocation, &step.shape);
     let candidates: Vec<Vec<&ArtifactInstance>> = invocation
         .inputs
         .iter()
@@ -50,68 +50,79 @@ pub(super) fn expand_step(
                 (context, driven.clone())
             })
         });
-    let mut expansions = Vec::new();
-    for (context, driven) in jobs {
-        let mut gaps = Vec::new();
-        if let Some(minimum) = operation.minimum_collection {
-            if driven.len() < minimum {
-                gaps.push(Gap::Unmatched(ResolveError::CollectionTooSmall {
-                    site: port_site(invocation, operation, shape.driver),
-                    context: Box::new(context.clone()),
-                    minimum,
-                    found: driven.len(),
-                }));
-            }
+    jobs.map(|(context, driven)| expand_job(step, &candidates, incomplete, context, driven))
+        .collect()
+}
+
+/// One job of `step`: the driver's `driven` artifacts, every other input
+/// matched to `context`, and the gaps that leave it incomplete.
+fn expand_job(
+    step: &CompiledStep<'_>,
+    candidates: &[Vec<&ArtifactInstance>],
+    incomplete: &BTreeSet<ArtifactKey>,
+    context: EntityBinding,
+    driven: Vec<ArtifactInstance>,
+) -> Expansion {
+    let (invocation, operation, shape) = (step.invocation, step.operation, &step.shape);
+    let mut gaps = Vec::new();
+    if let Some(minimum) = operation.minimum_collection {
+        if driven.len() < minimum {
+            gaps.push(Gap::Unmatched(ResolveError::CollectionTooSmall {
+                site: port_site(invocation, operation, shape.driver),
+                context: Box::new(context.clone()),
+                minimum,
+                found: driven.len(),
+            }));
         }
-        let mut inputs = Vec::new();
-        for (index, port) in operation.inputs.iter().enumerate() {
-            let bound = if index == shape.driver {
-                driven.clone()
-            } else {
-                match match_input(
-                    invocation,
-                    operation,
-                    index,
-                    &shape.joins[index],
-                    &candidates[index],
-                    &context,
-                ) {
-                    Ok(artifact) => vec![artifact],
-                    Err(gap) => {
-                        gaps.push(gap);
-                        continue;
-                    }
-                }
-            };
-            gaps.extend(
-                bound
-                    .iter()
-                    .filter(|artifact| incomplete.contains(&artifact.key()))
-                    .map(|artifact| Gap::Blocked {
-                        port: port.name.clone(),
-                        artifact: artifact.clone(),
-                    }),
-            );
-            inputs.push(bound);
-        }
-        // Every artifact in a family has the same type, so the type inferred
-        // statically for each output is the type of each job's artifact.
-        let outputs = step
-            .outputs
-            .iter()
-            .map(|(product, artifact_type)| ArtifactInstance {
-                product: product.name.clone(),
-                artifact_type: artifact_type.clone(),
-                entities: context.clone(),
-            })
-            .collect();
-        expansions.push(Expansion {
-            inputs,
-            outputs,
-            gaps,
-        });
     }
-    expansions
+    let mut inputs = Vec::new();
+    for (index, port) in operation.inputs.iter().enumerate() {
+        let bound = if index == shape.driver {
+            driven.clone()
+        } else {
+            let joins = &shape.joins[index];
+            match match_input(
+                invocation,
+                operation,
+                index,
+                joins,
+                &candidates[index],
+                &context,
+            ) {
+                Ok(artifact) => vec![artifact],
+                Err(gap) => {
+                    gaps.push(gap);
+                    continue;
+                }
+            }
+        };
+        gaps.extend(
+            bound
+                .iter()
+                .filter(|artifact| incomplete.contains(&artifact.key()))
+                .map(|artifact| Gap::Blocked {
+                    port: port.name.clone(),
+                    artifact: artifact.clone(),
+                }),
+        );
+        inputs.push(bound);
+    }
+    // Every artifact in a family has the same type, so the type inferred
+    // statically for each output is the type of each job's artifact.
+    let outputs = step
+        .outputs
+        .iter()
+        .map(|(product, artifact_type)| ArtifactInstance {
+            product: product.name.clone(),
+            artifact_type: artifact_type.clone(),
+            entities: context.clone(),
+        })
+        .collect();
+    Expansion {
+        inputs,
+        outputs,
+        gaps,
+    }
 }
 
 /// The driver's artifacts grouped by the step's groups: one artifact per
