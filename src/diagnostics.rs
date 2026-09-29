@@ -326,9 +326,13 @@ pub fn diagnose_recipe_against(text: &str, pipeline: &Pipeline) -> Vec<Diagnosti
             None => spec.check(pipeline),
         };
         if let Err(problem) = checked {
+            // Records written in the recipe keep its line numbers.
+            let place = problem
+                .downcast_ref::<ResolveError>()
+                .and_then(|error| error_location(pipeline, &lines, error, text, false).1);
             diagnostics.push(Diagnostic::error(
                 DiagnosticSource::Pipeline,
-                None,
+                place,
                 problem.to_string(),
             ));
         }
