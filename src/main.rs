@@ -67,14 +67,14 @@ impl Command {
             },
             Self::Dag => CommandSpec {
                 name: "dag",
-                files: "<recipe.spitin> | <pipeline.spit> <inputs.spitout | recipe.spitin | ->",
+                files: "[<pipeline.spit>] <recipe.spitin | inputs.spitout | ->",
                 summary: "step 3: resolve a pipeline's jobs over a dataset's inputs; -o writes the .spitdag",
                 example: "spit dag dataset.spitin -o analysis.spitdag\n  spit dag analysis.spit dataset.spitout -o analysis.spitdag\n  spit dag analysis.spit dataset.spitout --paths",
                 flags: &[Root, StrictPaths, Paths, Json, Output],
             },
             Self::Artifacts => CommandSpec {
                 name: "artifacts",
-                files: "<recipe.spitin> | <pipeline.spit> <inputs.spitout | recipe.spitin | ->",
+                files: "[<pipeline.spit>] <recipe.spitin | inputs.spitout | ->",
                 summary: "step 3: report what can and cannot be made from a dataset's inputs, and why",
                 example: "spit artifacts dataset.spitin\n  spit artifacts analysis.spit dataset.spitout",
                 flags: &[Root],
@@ -116,7 +116,7 @@ impl Command {
     fn shortcut(self) -> Option<&'static str> {
         match self {
             Self::Dag | Self::Artifacts => Some(
-                "Given a .spitin in place of the .spitout, it runs `spit inputs` in memory first.\nA .spitin names its pipeline, so it can be given alone; a .spitout or `-` needs the pipeline too.",
+                "Given a .spitin in place of the .spitout, it runs `spit inputs` in memory first.\nThe pipeline can be left out when a .spitin is given, since it names its own; a .spitout or `-` needs it first.",
             ),
             Self::Check | Self::Inputs => None,
         }
@@ -610,7 +610,11 @@ fn prepare(args: &CliArgs) -> Result<Prepared, Box<dyn Error>> {
         (settled.pipeline_file, text, Some(settled.recipe))
     } else {
         let Some(pipeline) = given else {
-            return Err(format!("{} needs {}", args.command.name(), args.command.files()).into());
+            return Err(format!(
+                "{} needs a pipeline before `{inputs}`; only a .spitin recipe names its own",
+                args.command.name()
+            )
+            .into());
         };
         let text = if inputs == "-" {
             read_stdin()?
