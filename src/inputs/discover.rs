@@ -1,14 +1,15 @@
 //! Scanning a root for the contexts and source files an input recipe describes.
 
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::ops::Range;
 use std::path::Path;
 
-use super::coverage::apply_skips;
+use super::coverage::{apply_skips, SkippedGroup};
 use crate::model::{
-    ArtifactInstance, EntityBinding, InputRules, Pipeline, ProductDef, SourceInventory,
-    SourceRecord,
+    ArtifactInstance, DirectoryDiscovery, EntityBinding, InputRules, Pipeline, ProductDef,
+    SourceInventory, SourceRecord,
 };
 use crate::paths::{
     bind_path, decode_component, encode_component, error, inspect_paths, validate_discovery_rule,
@@ -44,9 +45,30 @@ pub fn discover_source_files(
     rules: &InputRules,
     root: &Path,
 ) -> Result<Discovery, PathError> {
-    let mut pipeline = pipeline.clone();
-    pipeline.product_paths.extend(rules.source_paths.clone());
-    let pipeline = &pipeline;
+    discover(&with_source_paths(pipeline, rules), rules, root)
+}
+
+/// `pipeline` with the path rules `rules` sets for its sources, which take
+/// precedence; borrowed when there are none.
+pub(super) fn with_source_paths<'a>(
+    pipeline: &'a Pipeline,
+    rules: &InputRules,
+) -> Cow<'a, Pipeline> {
+    if rules.source_paths.is_empty() {
+        return Cow::Borrowed(pipeline);
+    }
+    let mut merged = pipeline.clone();
+    merged.product_paths.extend(rules.source_paths.clone());
+    Cow::Owned(merged)
+}
+
+/// Discover under `root` with `pipeline`, whose path rules already include
+/// the recipe's source paths.
+pub(super) fn discover(
+    pipeline: &Pipeline,
+    rules: &InputRules,
+    root: &Path,
+) -> Result<Discovery, PathError> {
     if !root.is_dir() {
         return Err(error(format!(
             "source root is not a directory: `{}`",
@@ -54,188 +76,278 @@ pub fn discover_source_files(
         )));
     }
     inspect_paths(pipeline)?;
-    for rule in &rules.discoveries {
+    let directory_patterns = rules
+        .discoveries
+        .iter()
+        .map(DiscoveryPattern::new)
+        .collect::<Result<Vec<_>, _>>()?;
+    let sources = source_patterns(pipeline)?;
+    let tree = Tree::scan(root)?;
+    let mut discovery = Discovery::default();
+    find_contexts(&directory_patterns, &tree.directories, root, &mut discovery)?;
+    let skipped = skip(rules, &mut discovery, true);
+    let expected = expected_bindings(
+        &sources,
+        &directory_patterns,
+        &discovery.inventory.discovered,
+    );
+    find_source_files(&sources, &tree.files, &skipped, &expected, &mut discovery)?;
+    let skipped = skip(rules, &mut discovery, false);
+    require_source_files(pipeline, root, &sources, &expected, &skipped)?;
+    sort_records(&sources, &mut discovery.inventory.artifacts);
+    Ok(discovery)
+}
+
+/// A directory discovery rule, checked, as pieces to match.
+struct DiscoveryPattern<'a> {
+    rule: &'a DirectoryDiscovery,
+    pieces: Vec<Piece>,
+}
+
+impl<'a> DiscoveryPattern<'a> {
+    fn new(rule: &'a DirectoryDiscovery) -> Result<Self, PathError> {
         validate_discovery_rule(rule)?;
+        let pieces = rule
+            .template
+            .parts()
+            .iter()
+            .map(|part| match part {
+                PathPart::Literal(value) => Ok(Piece::Literal(value.clone())),
+                PathPart::Placeholder(PathPlaceholder::Dimension(name)) => {
+                    Ok(Piece::Value(name.clone()))
+                }
+                PathPart::Placeholder(placeholder) => Err(error(format!(
+                    "discovery `{}` uses undeclared or reserved placeholder `{placeholder}`",
+                    rule.name
+                ))),
+            })
+            .collect::<Result<_, _>>()?;
+        Ok(Self { rule, pieces })
     }
+
+    /// Whether this rule binds every dimension of `product`, so its contexts
+    /// say which of the product's files must exist.
+    fn covers(&self, product: &ProductDef) -> bool {
+        product
+            .dimensions
+            .iter()
+            .all(|dimension| self.rule.dimensions.contains(dimension))
+    }
+}
+
+/// A source product and the pieces its path rule matches, in the order
+/// the pipeline declares its products.
+struct SourcePattern<'a> {
+    product: &'a ProductDef,
+    pieces: Vec<Piece>,
+}
+
+/// Every source of `pipeline` with its path pattern; each must have a rule.
+fn source_patterns(pipeline: &Pipeline) -> Result<Vec<SourcePattern<'_>>, PathError> {
     let outputs: BTreeSet<_> = pipeline
         .invocations
         .iter()
         .flat_map(|invocation| &invocation.outputs)
         .collect();
-    let mut patterns = Vec::new();
-    for product in &pipeline.products {
-        if outputs.contains(&product.name) {
-            continue;
-        }
-        let template = pipeline.path_template_for(&product.name).ok_or_else(|| {
-            error(format!(
-                "no path rule for source `{}`, so its files cannot be discovered",
-                product.name
-            ))
-        })?;
-        patterns.push((product, path_pattern(template, product)?));
-    }
-    let mut files = Vec::new();
-    let mut directories = Vec::new();
-    let mut visited = BTreeSet::new();
-    walk(root, "", &mut visited, &mut files, &mut directories)?;
-    files.sort();
-    directories.sort();
-    let mut discovery = Discovery::default();
-    let directory_patterns: Vec<_> = rules
-        .discoveries
+    pipeline
+        .products
         .iter()
-        .map(|rule| {
-            let pieces = rule
-                .template
-                .parts()
-                .iter()
-                .map(|part| match part {
-                    PathPart::Literal(value) => Piece::Literal(value.clone()),
-                    PathPart::Placeholder(PathPlaceholder::Dimension(name)) => {
-                        Piece::Value(name.clone())
-                    }
-                    _ => unreachable!("validated discovery rule"),
-                })
-                .collect::<Vec<_>>();
-            (rule, pieces)
+        .filter(|product| !outputs.contains(&product.name))
+        .map(|product| {
+            let template = pipeline.path_template_for(&product.name).ok_or_else(|| {
+                error(format!(
+                    "no path rule for source `{}`, so its files cannot be discovered",
+                    product.name
+                ))
+            })?;
+            let pieces = path_pattern(template, product)?;
+            Ok(SourcePattern { product, pieces })
         })
-        .collect();
+        .collect()
+}
+
+/// The directories and files under a root, each sorted, as `/`-separated
+/// paths relative to it.
+struct Tree {
+    directories: Vec<String>,
+    files: Vec<String>,
+}
+
+impl Tree {
+    fn scan(root: &Path) -> Result<Self, PathError> {
+        let mut tree = Self {
+            directories: Vec::new(),
+            files: Vec::new(),
+        };
+        walk(
+            root,
+            "",
+            &mut BTreeSet::new(),
+            &mut tree.files,
+            &mut tree.directories,
+        )?;
+        tree.files.sort();
+        tree.directories.sort();
+        Ok(tree)
+    }
+}
+
+/// Bind each directory that a discovery rule matches, recording the
+/// contexts each rule finds and skipping values that cannot be read. Every
+/// rule must match some directory.
+fn find_contexts(
+    patterns: &[DiscoveryPattern<'_>],
+    directories: &[String],
+    root: &Path,
+    discovery: &mut Discovery,
+) -> Result<(), PathError> {
     let mut contexts = BTreeSet::new();
-    let mut rule_contexts = vec![BTreeSet::new(); directory_patterns.len()];
-    for directory in &directories {
-        for (index, (_, pattern)) in directory_patterns.iter().enumerate() {
-            let Some(bound) = match_pattern(pattern, directory) else {
+    let mut found = vec![BTreeSet::new(); patterns.len()];
+    for directory in directories {
+        for (pattern, found) in patterns.iter().zip(&mut found) {
+            let Some(bound) = match_pattern(&pattern.pieces, directory) else {
                 continue;
             };
-            let mut entities = BTreeMap::new();
-            let mut valid = true;
-            for (dimension, encoded) in bound {
-                match readable_value(encoded) {
-                    Ok(value) => {
-                        entities.insert(dimension, value);
-                    }
-                    Err(reason) => {
-                        discovery.skipped.push(format!(
-                            "`{directory}`: `{dimension}` value `{encoded}` {reason}"
-                        ));
-                        valid = false;
-                        break;
-                    }
+            match read_binding(directory, bound) {
+                Ok(binding) => {
+                    contexts.insert(binding.clone());
+                    found.insert(binding);
                 }
-            }
-            if valid {
-                let binding = EntityBinding(entities);
-                contexts.insert(binding.clone());
-                rule_contexts[index].insert(binding);
+                Err(note) => discovery.skipped.push(note),
             }
         }
     }
-    for ((rule, _), bindings) in directory_patterns.iter().zip(&rule_contexts) {
+    for (pattern, bindings) in patterns.iter().zip(&found) {
         if bindings.is_empty() {
             return Err(error(format!(
                 "discovery `{}` matched no directories under `{}` with pattern `{}`",
-                rule.name,
+                pattern.rule.name,
                 root.display(),
-                rule.template
+                pattern.rule.template
             )));
         }
     }
     discovery.inventory.contexts = contexts.into_iter().collect();
-    discovery.inventory.discovered = directory_patterns
+    discovery.inventory.discovered = patterns
         .iter()
-        .zip(&rule_contexts)
-        .map(|((rule, _), bindings)| (rule.name.clone(), bindings.iter().cloned().collect()))
+        .zip(found)
+        .map(|(pattern, bindings)| (pattern.rule.name.clone(), bindings.into_iter().collect()))
         .collect();
-    let skipped_groups = apply_skips(rules, &mut discovery.inventory, true);
-    for group in &skipped_groups {
-        discovery.skipped.push(group.note());
-    }
-    let mut expected: BTreeMap<String, BTreeSet<EntityBinding>> = BTreeMap::new();
-    for product in &pipeline.products {
-        if outputs.contains(&product.name) {
-            continue;
+    Ok(())
+}
+
+/// Apply the `skip` rules, of discovery rules only or of every rule, noting
+/// each group they reject.
+fn skip(rules: &InputRules, discovery: &mut Discovery, discovery_only: bool) -> Vec<SkippedGroup> {
+    let skipped = apply_skips(rules, &mut discovery.inventory, discovery_only);
+    discovery
+        .skipped
+        .extend(skipped.iter().map(SkippedGroup::note));
+    skipped
+}
+
+/// For each source a discovery rule covers, the bindings its files must
+/// have: the rule's contexts, cut to the source's dimensions. A source
+/// whose covering rules found nothing is left out, so it is not checked.
+fn expected_bindings<'a>(
+    sources: &[SourcePattern<'a>],
+    patterns: &[DiscoveryPattern<'_>],
+    discovered: &BTreeMap<String, Vec<EntityBinding>>,
+) -> BTreeMap<&'a str, BTreeSet<EntityBinding>> {
+    let mut expected: BTreeMap<_, BTreeSet<_>> = BTreeMap::new();
+    for source in sources {
+        let dimensions = &source.product.dimensions;
+        for pattern in patterns
+            .iter()
+            .filter(|pattern| pattern.covers(source.product))
+        {
+            let bindings = discovered.get(&pattern.rule.name).into_iter().flatten();
+            expected
+                .entry(source.product.name.as_str())
+                .or_default()
+                .extend(bindings.filter_map(|binding| binding.project(dimensions)));
         }
-        for (rule, _) in &directory_patterns {
-            let bindings = &discovery.inventory.discovered[&rule.name];
-            if product
-                .dimensions
-                .iter()
-                .all(|dimension| rule.dimensions.contains(dimension))
-            {
-                for binding in bindings {
-                    expected.entry(product.name.clone()).or_default().insert(
-                        binding
-                            .project(&product.dimensions)
-                            .expect("rule binds its dimensions"),
-                    );
-                }
-            }
+    }
+    expected.retain(|_, bindings| !bindings.is_empty());
+    expected
+}
+
+/// Record each file that a source's path rule matches, unless a skip rule
+/// rejects its group or a value cannot be read.
+fn find_source_files(
+    sources: &[SourcePattern<'_>],
+    files: &[String],
+    skipped: &[SkippedGroup],
+    expected: &BTreeMap<&str, BTreeSet<EntityBinding>>,
+    discovery: &mut Discovery,
+) -> Result<(), PathError> {
+    for file in files {
+        let found = source_record(sources, file, skipped, expected, &mut discovery.skipped)?;
+        discovery.inventory.artifacts.extend(found);
+    }
+    let artifacts = &mut discovery.inventory.artifacts;
+    artifacts.sort();
+    artifacts.dedup();
+    Ok(())
+}
+
+/// The record for `file`, if a source's rule matches it. A file must match
+/// one source only, and lie within the contexts found for that source.
+fn source_record(
+    sources: &[SourcePattern<'_>],
+    file: &str,
+    skipped: &[SkippedGroup],
+    expected: &BTreeMap<&str, BTreeSet<EntityBinding>>,
+    notes: &mut Vec<String>,
+) -> Result<Option<SourceRecord>, PathError> {
+    let mut matches = sources.iter().filter_map(|source| {
+        match_pattern(&source.pieces, file).map(|bound| (source.product, bound))
+    });
+    let Some((product, bound)) = matches.next() else {
+        return Ok(None);
+    };
+    let binding = match read_binding(file, bound) {
+        Ok(binding) => binding,
+        Err(note) => {
+            notes.push(note);
+            return Ok(None);
         }
+    };
+    if skipped.iter().any(|group| group.matches(&binding)) {
+        return Ok(None);
     }
-    'files: for file in &files {
-        let mut owner: Option<&ProductDef> = None;
-        let mut record = None;
-        for (product, pattern) in &patterns {
-            let Some(bound) = match_pattern(pattern, file) else {
-                continue;
-            };
-            if let Some(other) = owner {
-                return Err(error(format!(
-                    "file `{file}` matches the path rules of both `{}` and `{}`",
-                    other.name, product.name
-                )));
-            }
-            owner = Some(product);
-            let mut entities = BTreeMap::new();
-            for (dimension, encoded) in bound {
-                match readable_value(encoded) {
-                    Ok(value) => {
-                        entities.insert(dimension, value);
-                    }
-                    Err(reason) => {
-                        discovery.skipped.push(format!(
-                            "`{file}`: `{dimension}` value `{encoded}` {reason}"
-                        ));
-                        continue 'files;
-                    }
-                }
-            }
-            let binding = EntityBinding(entities);
-            if skipped_groups.iter().any(|group| group.matches(&binding)) {
-                continue 'files;
-            }
-            if let Some(bindings) = expected.get(&product.name) {
-                if !bindings.contains(&binding) {
-                    return Err(error(format!(
-                        "source file `{file}` for `{}` lies outside the discovered contexts",
-                        product.name
-                    )));
-                }
-            }
-            record = Some(SourceRecord::new(&product.name, binding).at(file.clone()));
-        }
-        discovery.inventory.artifacts.extend(record);
+    let name = product.name.as_str();
+    if expected
+        .get(name)
+        .is_some_and(|bindings| !bindings.contains(&binding))
+    {
+        return Err(error(format!(
+            "source file `{file}` for `{name}` lies outside the discovered contexts"
+        )));
     }
-    discovery.inventory.artifacts = discovery
-        .inventory
-        .artifacts
-        .into_iter()
-        .collect::<BTreeSet<_>>()
-        .into_iter()
-        .collect();
-    let additional_skips = apply_skips(rules, &mut discovery.inventory, false);
-    for group in &additional_skips {
-        discovery.skipped.push(group.note());
+    if let Some((other, _)) = matches.next() {
+        return Err(error(format!(
+            "file `{file}` matches the path rules of both `{name}` and `{}`",
+            other.name
+        )));
     }
-    for product in &pipeline.products {
-        let Some(bindings) = expected.get(&product.name) else {
-            continue;
-        };
-        for binding in bindings {
-            if additional_skips.iter().any(|group| group.matches(binding)) {
-                continue;
-            }
+    Ok(Some(SourceRecord::new(name, binding).at(file)))
+}
+
+/// Require the file of every source binding a discovery rule expects,
+/// except in groups a skip rule rejected.
+fn require_source_files(
+    pipeline: &Pipeline,
+    root: &Path,
+    sources: &[SourcePattern<'_>],
+    expected: &BTreeMap<&str, BTreeSet<EntityBinding>>,
+    skipped: &[SkippedGroup],
+) -> Result<(), PathError> {
+    for product in sources.iter().map(|source| source.product) {
+        let bindings = expected.get(product.name.as_str()).into_iter().flatten();
+        for binding in
+            bindings.filter(|binding| !skipped.iter().any(|group| group.matches(binding)))
+        {
             let artifact = ArtifactInstance::new(
                 &product.name,
                 product.artifact_type.clone(),
@@ -253,19 +365,49 @@ pub fn discover_source_files(
             }
         }
     }
-    let rank: BTreeMap<_, _> = pipeline
-        .products
+    Ok(())
+}
+
+/// Order records by their product's place in the pipeline, then by its
+/// dimensions, reading numbers as numbers.
+fn sort_records(sources: &[SourcePattern<'_>], records: &mut [SourceRecord]) {
+    let rank: BTreeMap<_, _> = sources
         .iter()
         .enumerate()
-        .map(|(index, product)| (product.name.as_str(), (index, &product.dimensions)))
+        .map(|(index, source)| {
+            let product = source.product;
+            (
+                product.name.as_str(),
+                (index, product.dimensions.as_slice()),
+            )
+        })
         .collect();
-    discovery.inventory.artifacts.sort_by(|left, right| {
-        let (left_rank, dimensions) = rank[left.product.as_str()];
+    let rank = |record: &SourceRecord| {
+        rank.get(record.product.as_str())
+            .copied()
+            .unwrap_or((usize::MAX, &[]))
+    };
+    records.sort_by(|left, right| {
+        let (left_rank, dimensions) = rank(left);
         left_rank
-            .cmp(&rank[right.product.as_str()].0)
+            .cmp(&rank(right).0)
             .then_with(|| left.entities.cmp_in(&right.entities, dimensions))
     });
-    Ok(discovery)
+}
+
+/// The entities `bound` in `path`, decoded, or a note of why a value cannot
+/// be read and the path is skipped.
+fn read_binding(path: &str, bound: BTreeMap<String, &str>) -> Result<EntityBinding, String> {
+    bound
+        .into_iter()
+        .map(|(dimension, encoded)| match readable_value(encoded) {
+            Ok(value) => Ok((dimension, value)),
+            Err(reason) => Err(format!(
+                "`{path}`: `{dimension}` value `{encoded}` {reason}"
+            )),
+        })
+        .collect::<Result<_, _>>()
+        .map(EntityBinding)
 }
 
 /// Decode a path component. It must be written exactly as SPIT would write
@@ -363,8 +505,9 @@ fn match_from(
     let later: Vec<_> = bound
         .iter()
         .filter(|(dimension, _)| {
-            pieces[index..]
+            pieces
                 .iter()
+                .skip(index)
                 .any(|piece| matches!(piece, Piece::Value(name) if name == *dimension))
         })
         .map(|(_, value)| (value.start, value.end))
@@ -447,15 +590,13 @@ fn walk(
 }
 
 /// Give each record without a path the one its source's rule gives it, so
-/// that resolving jobs needs no rule for a source. `rules.source_paths` take
-/// precedence over the pipeline's. A source with no rule keeps no path.
+/// that resolving jobs needs no rule for a source. `pipeline` has the
+/// recipe's source paths, from [`with_source_paths`]. A source with no rule
+/// keeps no path.
 pub(crate) fn locate_sources(
     pipeline: &Pipeline,
-    rules: &InputRules,
     inventory: &mut SourceInventory,
 ) -> Result<(), PathError> {
-    let mut pipeline = pipeline.clone();
-    pipeline.product_paths.extend(rules.source_paths.clone());
     for record in &mut inventory.artifacts {
         if record.path.is_some() || pipeline.path_template_for(&record.product).is_none() {
             continue;
@@ -472,7 +613,7 @@ pub(crate) fn locate_sources(
             product.artifact_type.clone(),
             record.entities.clone(),
         );
-        let path = bind_path(&pipeline, &product.dimensions, &artifact, || {
+        let path = bind_path(pipeline, &product.dimensions, &artifact, || {
             format!("source `{artifact}`")
         })?;
         record.path = Some(path);
