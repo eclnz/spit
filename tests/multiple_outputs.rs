@@ -62,6 +62,7 @@ fn one_job_owns_every_output_of_an_operation() {
 }
 
 #[test]
+#[ignore = "the Bash backend is paused"]
 fn a_multi_output_job_runs_one_command_after_its_verification() {
     let pipeline = parse_pipeline(TISSUES).unwrap();
     let inventory =

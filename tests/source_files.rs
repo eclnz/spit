@@ -61,9 +61,8 @@ impl Fixture {
     fn check(&self) -> Output {
         Command::new(env!("CARGO_BIN_EXE_spit"))
             .args([
-                "check",
+                "dag",
                 "examples/commands/field_survey.spit",
-                "--sources",
                 "examples/commands/field_survey.spitout",
                 "--root",
                 self.0.to_str().unwrap(),
@@ -88,9 +87,12 @@ fn survey_compiles_when_all_required_source_files_exist() {
         "{}",
         String::from_utf8_lossy(&result.stderr)
     );
-    let report = String::from_utf8(result.stdout).unwrap();
-    assert!(report.contains("93 jobs resolved."));
-    assert!(report.contains("39 source files verified."));
+    let report = String::from_utf8(result.stderr).unwrap();
+    assert!(report.contains("note: 93 jobs resolved."), "{report}");
+    assert!(
+        report.contains("note: 39 source files verified."),
+        "{report}"
+    );
     assert!(!fixture.0.join("derivatives").exists());
 }
 
@@ -117,9 +119,8 @@ fn survey_rejects_a_photo_without_an_inventory_sidecar() {
     fs::write(&inventory_path, inventory).unwrap();
     let result = Command::new(env!("CARGO_BIN_EXE_spit"))
         .args([
-            "check",
+            "dag",
             "examples/commands/field_survey.spit",
-            "--sources",
             inventory_path.to_str().unwrap(),
             "--root",
             fixture.0.to_str().unwrap(),

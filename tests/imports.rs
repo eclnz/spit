@@ -40,6 +40,7 @@ impl Drop for TestDir {
 }
 
 #[test]
+#[ignore = "the Bash backend is paused"]
 fn aliased_source_and_operation_work_through_cli_and_bash() {
     let path = Path::new("examples/imports/imported.spit");
     let text = fs::read_to_string(path).unwrap();
@@ -218,6 +219,7 @@ fn imported_definitions_are_not_reported_as_unused() {
 }
 
 #[test]
+#[ignore = "the Bash backend is paused"]
 fn qualified_product_names_use_dots_in_default_paths() {
     let dir = TestDir::new();
     dir.write("lib.spit", "source shard [part]\n");
@@ -236,6 +238,7 @@ copied = copy(lib::shard)\nsources:\n  lib::shard[part=a]\n",
 }
 
 #[test]
+#[ignore = "the Bash backend is paused"]
 fn an_operation_imports_with_its_command_and_verifications() {
     let dir = TestDir::new();
     dir.write(

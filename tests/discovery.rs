@@ -181,10 +181,13 @@ output = process(image)
         String::from_utf8_lossy(&implicit.stderr)
     );
     assert_eq!(implicit.stdout, rendered.as_bytes());
+    let spitout = tree.0.join("dataset.spitout");
+    fs::write(&spitout, &rendered).unwrap();
     let dag = Command::new(env!("CARGO_BIN_EXE_spit"))
         .args([
             "dag",
             pipeline_file.to_str().unwrap(),
+            spitout.to_str().unwrap(),
             "--root",
             tree.0.to_str().unwrap(),
             "--json",
@@ -199,18 +202,7 @@ output = process(image)
     let json = String::from_utf8(dag.stdout).unwrap();
     assert!(json.contains("\"operation\":\"process\""), "{json}");
     assert!(json.contains("\"sub\":\"A\""), "{json}");
-    let checked = Command::new(env!("CARGO_BIN_EXE_spit"))
-        .args(["check", pipeline_file.to_str().unwrap()])
-        .output()
-        .unwrap();
-    assert!(
-        checked.status.success(),
-        "{}",
-        String::from_utf8_lossy(&checked.stderr)
-    );
-    assert!(String::from_utf8(checked.stdout)
-        .unwrap()
-        .contains("3 jobs resolved"));
+    assert!(String::from_utf8_lossy(&dag.stderr).contains("note: 3 jobs resolved."));
 }
 
 #[test]
@@ -305,18 +297,24 @@ fn coverage_can_target_the_named_discovery_rule() {
     ));
     let pipeline_file = tree.0.join("pipeline.spit");
     fs::write(&pipeline_file, text).unwrap();
+    // The input stage writes no .spitout that misses a requirement.
     let discovered = Command::new(env!("CARGO_BIN_EXE_spit"))
-        .args(["discover", pipeline_file.to_str().unwrap()])
+        .args(["inputs", pipeline_file.to_str().unwrap()])
         .output()
         .unwrap();
-    assert!(
-        discovered.status.success(),
-        "{}",
-        String::from_utf8_lossy(&discovered.stderr)
-    );
-    assert_eq!(String::from_utf8(discovered.stdout).unwrap(), rendered);
+    assert!(!discovered.status.success());
+    assert_eq!(discovered.stdout, b"");
+    assert!(String::from_utf8_lossy(&discovered.stderr)
+        .contains("discovery coverage for `sessions` at [sub=5]"));
+    // Resolving jobs from those records reports the rule's line.
+    let spitout = tree.0.join("dataset.spitout");
+    fs::write(&spitout, &rendered).unwrap();
     let checked = Command::new(env!("CARGO_BIN_EXE_spit"))
-        .args(["check", pipeline_file.to_str().unwrap()])
+        .args([
+            "dag",
+            pipeline_file.to_str().unwrap(),
+            spitout.to_str().unwrap(),
+        ])
         .output()
         .unwrap();
     assert!(!checked.status.success());
@@ -401,18 +399,29 @@ fn skip_discovery_group_removes_subject_before_source_checks_and_jobs() {
 
     let pipeline_file = tree.0.join("pipeline.spit");
     fs::write(&pipeline_file, text).unwrap();
-    let checked = Command::new(env!("CARGO_BIN_EXE_spit"))
-        .args(["check", pipeline_file.to_str().unwrap()])
+    let spitout = tree.0.join("dataset.spitout");
+    let found = Command::new(env!("CARGO_BIN_EXE_spit"))
+        .args([
+            "inputs",
+            pipeline_file.to_str().unwrap(),
+            "-o",
+            spitout.to_str().unwrap(),
+        ])
         .output()
         .unwrap();
     assert!(
-        checked.status.success(),
+        found.status.success(),
         "{}",
-        String::from_utf8_lossy(&checked.stderr)
+        String::from_utf8_lossy(&found.stderr)
     );
-    assert!(String::from_utf8_lossy(&checked.stderr).contains("skip sessions"));
+    assert!(String::from_utf8_lossy(&found.stderr).contains("skip sessions"));
     let dag = Command::new(env!("CARGO_BIN_EXE_spit"))
-        .args(["dag", pipeline_file.to_str().unwrap(), "--json"])
+        .args([
+            "dag",
+            pipeline_file.to_str().unwrap(),
+            spitout.to_str().unwrap(),
+            "--json",
+        ])
         .output()
         .unwrap();
     assert!(
@@ -531,22 +540,18 @@ fn directory_discovery_errors_when_no_directories_match() {
         "discover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}\n",
     )
     .unwrap();
-    let checked = Command::new(env!("CARGO_BIN_EXE_spit"))
+    let found = Command::new(env!("CARGO_BIN_EXE_spit"))
         .args([
-            "check",
+            "inputs",
             pipeline_file.to_str().unwrap(),
             "--root",
             tree.0.to_str().unwrap(),
-            "--json",
         ])
         .output()
         .unwrap();
-    assert!(checked.status.success());
-    let diagnostics = String::from_utf8(checked.stdout).unwrap();
-    assert!(
-        diagnostics.contains("matched no directories"),
-        "{diagnostics}"
-    );
+    assert!(!found.status.success());
+    let errors = String::from_utf8(found.stderr).unwrap();
+    assert!(errors.contains("matched no directories"), "{errors}");
 }
 
 #[test]
@@ -586,16 +591,23 @@ fn cli_discovers_sources_under_the_root() {
     let discovered = run(&["discover", pipeline.to_str().unwrap(), "--root", root]);
     assert!(discovered.status.success());
     assert_eq!(
-        String::from_utf8(discovered.stdout).unwrap(),
+        String::from_utf8_lossy(&discovered.stdout),
         "sources:\n    frame[subject=a,run=1]: raw/sub-a/run-1.dat\n    frame[subject=a,run=2]: raw/sub-a/run-2.dat\n    lut[]: config/lut.txt\n"
     );
-    let checked = run(&["check", pipeline.to_str().unwrap(), "--root", root]);
-    assert!(checked.status.success());
-    let report = String::from_utf8(checked.stdout).unwrap();
-    assert!(report.contains("1 jobs resolved."), "{report}");
-    assert!(String::from_utf8(checked.stderr)
-        .unwrap()
-        .contains("note: discovered 3 source artifacts"));
+    assert!(String::from_utf8_lossy(&discovered.stderr).contains("note: found 3 source artifacts"));
+    let spitout = tree.0.join("found.spitout");
+    fs::write(&spitout, &discovered.stdout).unwrap();
+    let dag = run(&[
+        "dag",
+        pipeline.to_str().unwrap(),
+        spitout.to_str().unwrap(),
+        "--root",
+        root,
+    ]);
+    let notes = String::from_utf8(dag.stderr).unwrap();
+    assert!(dag.status.success(), "{notes}");
+    assert!(notes.contains("note: 1 jobs resolved."), "{notes}");
+    assert!(notes.contains("note: 3 source files verified."), "{notes}");
 }
 
 #[test]
