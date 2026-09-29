@@ -1,13 +1,8 @@
-use spit::{diagnose, Diagnostic, DiagnosticSource};
+mod support;
 
-/// The errors among `diagnostics`. These tests pin where errors land;
-/// warnings have their own tests.
-fn errors(diagnostics: Vec<Diagnostic>) -> Vec<Diagnostic> {
-    diagnostics
-        .into_iter()
-        .filter(Diagnostic::is_error)
-        .collect()
-}
+use support::{errors, rendered};
+
+use spit::{diagnose, DiagnosticSource};
 
 #[test]
 fn validates_external_inventory_and_semantics() {
@@ -128,10 +123,6 @@ fn a_coverage_error_names_the_failing_rule_when_rules_share_a_product() {
     ));
     assert_eq!(issues.len(), 1);
     assert!(issues[0].message.contains("expected at least 2"));
-}
-
-fn rendered(diagnostics: &[Diagnostic]) -> Vec<String> {
-    diagnostics.iter().map(ToString::to_string).collect()
 }
 
 #[test]

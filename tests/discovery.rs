@@ -3,7 +3,7 @@
 
 mod support;
 
-use support::Tree;
+use support::{outputs, spit, text, Tree};
 
 use std::fs;
 use std::process::Command;
@@ -11,27 +11,8 @@ use std::time::{Duration, Instant};
 
 use spit::{
     discover_source_files, discover_sources, parse_pipeline, parse_source_inventory, resolve,
-    InputSource, InputSpec, Pipeline, ResolveError, ResolvedDag, ResolvedInputs, SourceInventory,
+    InputSource, InputSpec, Pipeline, ResolveError, ResolvedInputs, SourceInventory,
 };
-
-fn outputs(dag: &ResolvedDag) -> Vec<String> {
-    dag.jobs
-        .iter()
-        .flat_map(|job| &job.outputs)
-        .map(ToString::to_string)
-        .collect()
-}
-
-fn text(bytes: &[u8]) -> String {
-    String::from_utf8_lossy(bytes).into_owned()
-}
-
-fn spit(args: &[&str]) -> std::process::Output {
-    Command::new(env!("CARGO_BIN_EXE_spit"))
-        .args(args)
-        .output()
-        .unwrap()
-}
 
 /// A document's pipeline, and the input rules written beside it.
 fn parse(text: &str) -> (Pipeline, InputSpec) {

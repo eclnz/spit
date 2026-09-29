@@ -4,16 +4,9 @@
 mod support;
 
 use std::fs;
-use std::process::{Command, Output};
+use std::process::Output;
 
-use support::Tree;
-
-fn spit(args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_spit"))
-        .args(args)
-        .output()
-        .unwrap()
-}
+use support::{spit, Tree};
 
 fn stdout(output: &Output) -> String {
     String::from_utf8_lossy(&output.stdout).into_owned()

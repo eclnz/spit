@@ -3,19 +3,13 @@
 
 mod support;
 
+use support::outputs;
+
 use spit::{parse_pipeline, parse_source_inventory, resolve, ResolveError, ResolvedDag};
 
 fn resolve_text(text: &str, inventory: &str) -> Result<ResolvedDag, ResolveError> {
     let pipeline = parse_pipeline(text).unwrap();
     resolve(&pipeline, &parse_source_inventory(inventory).unwrap())
-}
-
-fn outputs(dag: &ResolvedDag) -> Vec<String> {
-    dag.jobs
-        .iter()
-        .flat_map(|job| &job.outputs)
-        .map(ToString::to_string)
-        .collect()
 }
 
 const COMBINE: &str = "\

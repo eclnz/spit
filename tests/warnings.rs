@@ -1,18 +1,11 @@
 //! Warnings: unused definitions, missing commands, steps that resolve no
 //! jobs, and an inline inventory a separate one replaces.
 
+mod support;
+
+use support::{errors, rendered};
+
 use spit::{diagnose, Diagnostic, Severity};
-
-fn rendered(diagnostics: &[Diagnostic]) -> Vec<String> {
-    diagnostics.iter().map(ToString::to_string).collect()
-}
-
-fn errors(diagnostics: Vec<Diagnostic>) -> Vec<Diagnostic> {
-    diagnostics
-        .into_iter()
-        .filter(Diagnostic::is_error)
-        .collect()
-}
 
 fn warnings(diagnostics: Vec<Diagnostic>) -> Vec<String> {
     diagnostics

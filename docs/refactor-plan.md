@@ -138,6 +138,7 @@ Dead public API (item 5, 15) is not visible to the compiler because `lib.rs` re-
 
 ### 11. Deduplicate test helpers
 - `spit` is defined 4x across `tests/`; `rendered`, `outputs`, `errors`, `bound` 3x each; `text`, `settle`, `resolve_text` 2x. Move to `tests/support/mod.rs`.
+- **Status: done.** Only helpers with identical bodies moved to `tests/support/mod.rs`: `bound`, `errors`, `outputs` (3 copies each), `rendered`, `text` and `spit` (2 each; the `spit` in `cli.rs` and `discovery.rs` differed only in how it spelled `Output`). Same-named helpers that do different things stay local: `spit` in `robustness.rs` (takes stdin) and `stages.rs` (returns a tuple), `rendered` in `robustness.rs` (with columns), `settle` and `resolve_text`. 247 tests before and after.
 
 ## Rust idiom
 
