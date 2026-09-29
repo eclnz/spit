@@ -37,7 +37,7 @@ pub use paths::{
     validate_source_files, PathCoverage, PathCoverageEntry, PathError, PathRule, PathTemplate,
     VerifiedFiles,
 };
-pub use render::{render_artifacts, render_bound_dag, render_dag};
+pub use render::{render_artifacts, render_bound_dag, render_dag, render_dag_json};
 pub use resolver::{resolve, resolve_artifacts, validate_pipeline};
 pub use types::{
     parse_type_expr, Compatibility, Substitutions, TypeExpr, TypeParseError, TypeUnifyError,
