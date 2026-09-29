@@ -7,6 +7,8 @@ use std::ops::Range;
 use crate::model::{CoverageRule, Invocation, Pipeline};
 use crate::span::{columns_of, content_columns, find_word, Place};
 
+use super::keyword::Keyword;
+
 /// Where declarations sit in the source, kept beside the parsed [`Pipeline`]
 /// so that diagnostics can point at them without the model carrying them.
 #[derive(Clone, Debug, Default)]
@@ -212,12 +214,9 @@ pub(super) fn tail_place(original: &str, number: usize, tail: &str) -> Place {
 /// Where a parsed coverage rule's product and grouped dimensions sit.
 pub(super) fn rule_place(original: &str, number: usize, rule: &CoverageRule) -> Rule {
     let whole = content_columns(original);
-    let after_keyword = whole.start
-        + if original[whole.clone()].trim_start().starts_with("skip ") {
-            "skip".len()
-        } else {
-            "require".len()
-        };
+    let content = &original[whole.clone()];
+    let after_keyword =
+        whole.end - Keyword::split(content).map_or(content.len(), |(_, rest)| rest.len());
     let product = find_word(original, after_keyword, &rule.product).unwrap_or(whole.clone());
     let dimensions = original[product.end..whole.end]
         .find('[')

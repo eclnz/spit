@@ -18,7 +18,7 @@ use crate::error::ResolveError;
 use crate::imports::parse_located_document;
 use crate::lower::{parse_document_with_imports, ParsedDocument};
 use crate::model::{ArtifactInstance, CoverageGap, InputRules, Pipeline, SourceInventory};
-use crate::parser::{strip_comment, Kind, ParseError, SourceMap};
+use crate::parser::{strip_comment, Header, Keyword, Kind, ParseError, SourceMap};
 use crate::paths::PathTemplate;
 
 pub(crate) use self::coverage::check_inventory;
@@ -99,18 +99,22 @@ fn pipeline_line(text: &str) -> Result<(Option<PathBuf>, String), ParseError> {
 
 fn check_input_lines(text: &str) -> Result<(), ParseError> {
     for (index, original) in text.lines().enumerate() {
-        let line = original.trim_start();
-        if line.starts_with("source ")
-            || line.starts_with("operation ")
-            || line.starts_with("command ")
-            || line.starts_with("verify ")
-            || line.starts_with("stage ")
-            || line.starts_with("use ")
-            || matches!(
-                line,
-                "products:" | "operations:" | "pipeline:" | "commands:"
+        let line = strip_comment(original).trim();
+        let pipeline_only = matches!(
+            Keyword::of(line),
+            Some(
+                Keyword::Source
+                    | Keyword::Operation
+                    | Keyword::Command
+                    | Keyword::Verify
+                    | Keyword::Stage
+                    | Keyword::Use
             )
-        {
+        ) || matches!(
+            Header::of(line),
+            Some(Header::Products | Header::Operations | Header::Pipeline | Header::Commands)
+        );
+        if pipeline_only {
             return Err(ParseError::new(
                 index + 1,
                 "logical sources, operations, commands, stages, and imports belong in the .spit pipeline",

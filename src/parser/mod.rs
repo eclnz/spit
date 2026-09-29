@@ -3,6 +3,7 @@
 mod declarations;
 mod flow;
 mod inventory;
+mod keyword;
 mod lexical;
 mod operation;
 mod sectioned;
@@ -23,6 +24,7 @@ use self::sectioned::{is_sectioned_document, parse_sectioned};
 pub(crate) use self::declarations::{parse_use, UseSpec};
 pub(crate) use self::inventory::split_document;
 pub use self::inventory::{parse_source_inventory, render_source_inventory};
+pub(crate) use self::keyword::{Header, Keyword};
 pub(crate) use self::lexical::{glued_comment, strip_comment};
 pub(crate) use self::source_map::{Rule, SourceMap, Step};
 
