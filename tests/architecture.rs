@@ -5,9 +5,7 @@
 //! - shared code (the model, parser, templates) uses no step;
 //! - step 1, compile, uses shared code;
 //! - step 2, inputs, uses shared code and step 1;
-//! - step 3, resolve, uses shared code and step 1, never step 2;
-//! - step 4, a backend such as Bash, uses shared code only: it reads the
-//!   bound DAG (`spitdag`, shared), never the pipeline's steps.
+//! - step 3, resolve, uses shared code and step 1, never step 2.
 //!
 //! `diagnostics.rs`, `main.rs` and `lib.rs` run the steps in order, so they
 //! may use all of them.
@@ -23,7 +21,6 @@ enum Layer {
     Compile,
     Inputs,
     Resolve,
-    Backend,
     /// Runs every step; not checked.
     Driver,
 }
@@ -35,7 +32,6 @@ impl fmt::Display for Layer {
             Self::Compile => "step 1 (compile)",
             Self::Inputs => "step 2 (inputs)",
             Self::Resolve => "step 3 (resolve)",
-            Self::Backend => "step 4 (backend)",
             Self::Driver => "a driver",
         })
     }
@@ -46,7 +42,7 @@ impl Layer {
     fn may_use(self, other: Self) -> bool {
         match self {
             Self::Driver => true,
-            Self::Shared | Self::Backend => other == Self::Shared,
+            Self::Shared => other == Self::Shared,
             Self::Compile => matches!(other, Self::Shared | Self::Compile),
             Self::Inputs => matches!(other, Self::Shared | Self::Compile | Self::Inputs),
             Self::Resolve => matches!(other, Self::Shared | Self::Compile | Self::Resolve),
@@ -64,7 +60,6 @@ fn layer_of(module: &str) -> Layer {
         ("compile", _) => Layer::Compile,
         ("inputs", _) => Layer::Inputs,
         ("resolver" | "render", _) => Layer::Resolve,
-        ("bash", _) => Layer::Backend,
         ("diagnostics" | "main" | "lib", _) => Layer::Driver,
         _ => Layer::Shared,
     }
@@ -264,7 +259,6 @@ fn each_step_uses_only_what_it_builds_on() {
         (Layer::Resolve, Layer::Compile),
         (Layer::Driver, Layer::Inputs),
         (Layer::Driver, Layer::Resolve),
-        (Layer::Backend, Layer::Shared),
     ] {
         assert!(
             edges.contains(&edge),
@@ -294,9 +288,6 @@ fn a_crossing_is_reported() {
     assert!(!layer_of("inputs").may_use(layer_of("paths/bind")));
     assert!(!layer_of("parser/declarations").may_use(layer_of("paths/rules")));
     assert!(layer_of("inputs/discover").may_use(layer_of("compile")));
-    assert!(!layer_of("bash").may_use(layer_of("paths/bind")));
-    assert!(!layer_of("bash").may_use(layer_of("compile")));
-    assert!(layer_of("bash").may_use(layer_of("spitdag")));
     let exported = reexports(
         "paths",
         "pub use self::bind::{validate_source_files};\npub(crate) use self::rules::validate_discovery_rule;",

@@ -2,7 +2,6 @@ mod support;
 
 use std::fs;
 use std::process::Command;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use spit::{diagnose, inspect_paths, parse_pipeline, render_dag, resolve, Diagnostic, PathRule};
 
@@ -10,12 +9,6 @@ use spit::{diagnose, inspect_paths, parse_pipeline, render_dag, resolve, Diagnos
 fn bound(pipeline: &spit::Pipeline, dag: &spit::ResolvedDag) -> Result<String, String> {
     let bound = spit::bind_dag(pipeline, dag).map_err(|error| error.to_string())?;
     Ok(spit::render_bound_dag(&bound, true))
-}
-
-/// Step 3's binding, then the Bash backend, with either's error as text.
-fn bash_script(pipeline: &spit::Pipeline, dag: &spit::ResolvedDag) -> Result<String, String> {
-    let bound = spit::bind_dag(pipeline, dag).map_err(|error| error.to_string())?;
-    spit::render_bash(&bound).map_err(|error| error.to_string())
 }
 
 const PIPELINE: &str = "examples/stages/stages.spit";
@@ -155,34 +148,6 @@ fn path_placeholder_names_are_reserved() {
 }
 
 #[test]
-#[ignore = "the Bash backend is paused"]
-fn bash_marks_where_each_stage_starts() {
-    let (pipeline, inventory) = support::parse_fixture(&staged()).unwrap();
-    let dag = resolve(&pipeline, &inventory.unwrap()).unwrap();
-    let script = bash_script(&pipeline, &dag).unwrap();
-    let preprocess = script.find("# ===== Stage: preprocess =====").unwrap();
-    let analysis = script.find("# ===== Stage: analysis =====").unwrap();
-    assert!(preprocess < script.find("# Job 1:").unwrap());
-    assert!(script.find("# Job 5:").unwrap() < analysis);
-    assert!(analysis < script.find("# Job 6:").unwrap());
-}
-
-#[test]
-#[ignore = "the Bash backend is paused"]
-fn one_stage_runs_on_what_earlier_stages_wrote() {
-    let (pipeline, inventory) = support::parse_fixture(&staged()).unwrap();
-    let dag = resolve(&pipeline, &inventory.unwrap())
-        .unwrap()
-        .only_stage("analysis");
-    let ids: Vec<_> = dag.jobs.iter().map(|job| job.id).collect();
-    assert_eq!(ids, [6, 7]);
-    assert!(dag.jobs.iter().all(|job| job.dependencies.is_empty()));
-    let script = bash_script(&pipeline, &dag).unwrap();
-    assert!(script.contains("spit_require \"$SPIT_ROOT\"/'preprocess/merged/group=alpha.txt'"));
-    assert!(!script.contains("sort_lines"));
-}
-
-#[test]
 fn stages_must_not_depend_on_each_other_in_a_cycle() {
     // `glue` sits outside every stage, so `late` reads from `second` through it.
     let text = "source raw [id]\noperation copy(A) -> A\noperation pair(A, A) -> A\nstage first:\n    a = copy(raw)\n    d = pair(a, late)\nstage second:\n    b = copy(a)\nglue = copy(b)\nstage third:\n    late = copy(glue)\n";
@@ -296,63 +261,6 @@ fn check_counts_jobs_per_stage() {
     let (ok, _, stderr) = spit(&["dag", PIPELINE, SOURCES]);
     assert!(ok, "{stderr}");
     assert!(stderr.contains("7 jobs resolved: 5 in preprocess, 2 in analysis."));
-}
-
-#[test]
-#[ignore = "the Bash backend is paused"]
-fn stage_option_rejects_unknown_stages() {
-    let (ok, _, stderr) = spit(&["bash", PIPELINE, "--sources", SOURCES, "--stage", "report"]);
-    assert!(!ok);
-    assert!(stderr.contains("unknown stage `report`; stages: `preprocess`, `analysis`"));
-    let (ok, _, stderr) = spit(&[
-        "artifacts",
-        PIPELINE,
-        "--sources",
-        SOURCES,
-        "--stage",
-        "analysis",
-    ]);
-    assert!(!ok);
-    assert!(stderr.contains("--stage applies to check, dag, and bash"));
-}
-
-#[test]
-#[ignore = "the Bash backend is paused"]
-fn root_checks_the_files_a_stage_reads_from_earlier_stages() {
-    let unique = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    let root = std::env::temp_dir().join(format!("spit-stages-{}-{unique}", std::process::id()));
-    for file in [
-        "input/alpha/01.txt",
-        "input/alpha/02.txt",
-        "input/beta/01.txt",
-    ] {
-        let path = root.join(file);
-        fs::create_dir_all(path.parent().unwrap()).unwrap();
-        fs::write(path, "line\n").unwrap();
-    }
-    let root_arg = root.to_str().unwrap();
-    let (ok, _, stderr) = spit(&["check", PIPELINE, "--root", root_arg, "--stage", "analysis"]);
-    assert!(!ok);
-    assert!(
-        stderr.contains("missing file for `merged[group=alpha]`, which stage `preprocess` makes"),
-        "{stderr}"
-    );
-    for group in ["alpha", "beta"] {
-        let path = root.join(format!("preprocess/merged/group={group}.txt"));
-        fs::create_dir_all(path.parent().unwrap()).unwrap();
-        fs::write(path, "line\n").unwrap();
-    }
-    let (ok, stdout, stderr) =
-        spit(&["check", PIPELINE, "--root", root_arg, "--stage", "analysis"]);
-    fs::remove_dir_all(&root).unwrap();
-    assert!(ok, "{stderr}");
-    assert!(
-        stdout.contains("2 files made outside the stage verified."),
-        "{stdout}"
-    );
 }
 
 const NESTED: &str = "examples/stages/nested.spit";

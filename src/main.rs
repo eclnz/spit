@@ -3,8 +3,7 @@
 //!
 //! 1. `check` compiles a pipeline, or checks a recipe against its pipeline;
 //! 2. `inputs` settles a dataset from a recipe, writing a `.spitout`;
-//! 3. `dag` and `artifacts` resolve a pipeline's jobs over a `.spitout`;
-//! 4. `bash` writes a script from a `.spitdag`.
+//! 3. `dag` and `artifacts` resolve a pipeline's jobs over a `.spitout`.
 //!
 //! A command given files from an earlier step runs the steps between in
 //! memory. Nothing is loaded that the command line does not name.
@@ -20,9 +19,10 @@ use std::process::ExitCode;
 use spit::{
     bind_dag, diagnose_artifacts_at, diagnose_at, diagnose_at_with_inputs, diagnose_recipe,
     inspect_paths, parse_input_spec_at, parse_pipeline_at, parse_source_inventory,
-    render_artifacts, render_bash, render_bound_dag, render_dag, render_source_inventory, resolve,
-    resolve_artifacts_excluding, stage_within, validate_pipeline, validate_source_files, BoundDag,
-    Diagnostic, InputSource, InputSpec, PathTemplate, Pipeline, ResolvedDag, ResolvedInputs,
+    render_artifacts, render_bound_dag, render_dag, render_diagnostics_json,
+    render_source_inventory, resolve, resolve_artifacts_excluding, stage_within, validate_pipeline,
+    validate_source_files, Diagnostic, DiagnosticSource, InputSource, InputSpec, PathTemplate,
+    Pipeline, ResolvedDag, ResolvedInputs, Severity,
 };
 
 #[derive(Clone, Copy, PartialEq)]
@@ -31,15 +31,13 @@ enum Command {
     Inputs,
     Dag,
     Artifacts,
-    Bash,
 }
 
-const COMMANDS: [Command; 5] = [
+const COMMANDS: [Command; 4] = [
     Command::Check,
     Command::Inputs,
     Command::Dag,
     Command::Artifacts,
-    Command::Bash,
 ];
 
 impl Command {
@@ -49,7 +47,6 @@ impl Command {
             Self::Inputs => "inputs",
             Self::Dag => "dag",
             Self::Artifacts => "artifacts",
-            Self::Bash => "bash",
         }
     }
 
@@ -63,7 +60,6 @@ impl Command {
             Self::Check => "<pipeline.spit | recipe.spitin>",
             Self::Inputs => "<recipe.spitin>",
             Self::Dag | Self::Artifacts => "<pipeline.spit> <inputs.spitout | recipe.spitin | ->",
-            Self::Bash => "<plan.spitdag | pipeline.spit inputs.spitout>",
         }
     }
 
@@ -72,7 +68,6 @@ impl Command {
         match self {
             Self::Check | Self::Inputs => (1, 1),
             Self::Dag | Self::Artifacts => (2, 2),
-            Self::Bash => (1, 2),
         }
     }
 
@@ -82,7 +77,6 @@ impl Command {
             Self::Inputs => "step 2: find a dataset's sources with a recipe, apply `skip` and `require`, and write a .spitout",
             Self::Dag => "step 3: resolve a pipeline's jobs over a dataset's inputs; -o writes the .spitdag",
             Self::Artifacts => "step 3: report what can and cannot be made from a dataset's inputs, and why",
-            Self::Bash => "step 4: write a Bash script that runs a .spitdag",
         }
     }
 
@@ -92,7 +86,6 @@ impl Command {
             Self::Inputs => "spit inputs dataset.spitin -o dataset.spitout",
             Self::Dag => "spit dag analysis.spit dataset.spitout -o analysis.spitdag\n  spit dag analysis.spit dataset.spitout --paths",
             Self::Artifacts => "spit artifacts analysis.spit dataset.spitout",
-            Self::Bash => "spit bash analysis.spitdag -o run.sh\n  spit bash analysis.spitdag --stage preprocess",
         }
     }
 
@@ -102,9 +95,6 @@ impl Command {
         match self {
             Self::Dag | Self::Artifacts => Some(
                 "Given a .spitin in place of the .spitout, it runs `spit inputs` in memory first.",
-            ),
-            Self::Bash => Some(
-                "Given a pipeline and its inputs in place of the .spitdag, it runs `spit dag` in memory first.",
             ),
             Self::Check | Self::Inputs => None,
         }
@@ -118,7 +108,6 @@ impl Command {
             Self::Inputs => &[Root, Output],
             Self::Dag => &[Root, StrictPaths, Paths, Json, Output],
             Self::Artifacts => &[Root],
-            Self::Bash => &[Stage, Root, Output],
         }
     }
 }
@@ -127,7 +116,6 @@ impl Command {
 enum Flag {
     Root,
     Output,
-    Stage,
     Paths,
     PathRules,
     StrictPaths,
@@ -135,10 +123,9 @@ enum Flag {
     Stdin,
 }
 
-const FLAGS: [Flag; 8] = [
+const FLAGS: [Flag; 7] = [
     Flag::Root,
     Flag::Output,
-    Flag::Stage,
     Flag::Paths,
     Flag::PathRules,
     Flag::StrictPaths,
@@ -160,7 +147,6 @@ impl Flag {
         match self {
             Self::Root => "--root",
             Self::Output => "-o",
-            Self::Stage => "--stage",
             Self::Paths => "--paths",
             Self::PathRules => "--path-rules",
             Self::StrictPaths => "--strict-paths",
@@ -174,7 +160,6 @@ impl Flag {
         match self {
             Self::Root => Some("<directory>"),
             Self::Output => Some("<file>"),
-            Self::Stage => Some("<name>"),
             _ => None,
         }
     }
@@ -184,9 +169,7 @@ impl Flag {
             (Self::Root, Command::Inputs) => "the folder to scan; the recipe's folder by default",
             (Self::Root, _) => "the dataset folder, to check that each source file exists",
             (Self::Output, Command::Inputs) => "write the .spitout to <file>, not standard output",
-            (Self::Output, Command::Dag) => "write the .spitdag to <file>",
-            (Self::Output, _) => "write the script to <file>, not standard output",
-            (Self::Stage, _) => "only the jobs of this stage and the stages within it",
+            (Self::Output, _) => "write the .spitdag to <file>",
             (Self::Paths, _) => "show each artifact's file",
             (Self::PathRules, _) => "list the path rule each product uses",
             (Self::StrictPaths, _) => "require an explicit path rule for every product",
@@ -325,30 +308,16 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> Result<Request, String>
             files.push(argument);
             continue;
         }
-        let flag = Flag::parse(&argument).ok_or_else(|| {
-            let hint = match argument.as_str() {
-                "--sources" => "; give the .spitout as a file after the pipeline",
-                "--inputs" => "; give the .spitin as a file",
-                _ => "",
-            };
-            misuse(
-                format_args!("unknown option `{argument}`{hint}"),
-                Some(command),
-            )
-        })?;
+        let flag = Flag::parse(&argument)
+            .ok_or_else(|| misuse(format_args!("unknown option `{argument}`"), Some(command)))?;
         if !command.flags().contains(&flag) {
             let accepting: Vec<_> = COMMANDS
                 .iter()
                 .filter(|other| other.flags().contains(&flag))
                 .map(|other| other.name())
                 .collect();
-            let hint = if flag == Flag::Paths && command == Command::Check {
-                "; use --path-rules"
-            } else {
-                ""
-            };
             return Err(misuse(
-                format_args!("{} applies to {}{hint}", flag.name(), accepting.join(", ")),
+                format_args!("{} applies to {}", flag.name(), accepting.join(", ")),
                 Some(command),
             ));
         }
@@ -431,16 +400,19 @@ fn main() -> ExitCode {
         Command::Inputs => inputs(&args),
         Command::Dag => dag(&args),
         Command::Artifacts => artifacts(&args),
-        Command::Bash => bash(&args),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
         // Editors expect JSON even when the check cannot run.
         Err(error) if diagnostics_json => {
-            println!(
-                "{{\"diagnostics\":[{{\"severity\":\"error\",\"source\":\"pipeline\",\"line\":null,\"column\":null,\"end_column\":null,\"message\":\"{}\"}}]}}",
-                escape_json(&error.to_string())
-            );
+            let diagnostic = Diagnostic {
+                severity: Severity::Error,
+                source: DiagnosticSource::Pipeline,
+                line: None,
+                columns: None,
+                message: error.to_string(),
+            };
+            print!("{}", render_diagnostics_json(&[diagnostic], "", None));
             ExitCode::SUCCESS
         }
         Err(error) => {
@@ -468,7 +440,7 @@ fn check(args: &CliArgs) -> Result<(), Box<dyn Error>> {
         }
         let diagnostics = diagnose_recipe(&text, path);
         if args.has(Flag::Json) {
-            print_json(&diagnostics, &text, None);
+            print!("{}", render_diagnostics_json(&diagnostics, &text, None));
             return Ok(());
         }
         report(&diagnostics, &text, None)?;
@@ -477,7 +449,7 @@ fn check(args: &CliArgs) -> Result<(), Box<dyn Error>> {
     }
     let diagnostics = diagnose_at(&text, None, path);
     if args.has(Flag::Json) {
-        print_json(&diagnostics, &text, None);
+        print!("{}", render_diagnostics_json(&diagnostics, &text, None));
         return Ok(());
     }
     report(&diagnostics, &text, None)?;
@@ -522,6 +494,7 @@ fn run_inputs(
         .filter(|parent| !parent.as_os_str().is_empty())
         .unwrap_or_else(|| Path::new("."))
         .to_owned();
+    let scan = root.is_some();
     let root = root.map_or(folder, PathBuf::from);
     let recipe = parse_input_spec_at(&read_file(file)?, Path::new(file))
         .map_err(|error| format!("{file}: {error}"))?;
@@ -551,9 +524,11 @@ fn run_inputs(
     )?;
     let pipeline = parse_pipeline_at(&pipeline_text, &pipeline_file)?;
     validate_pipeline(&pipeline)?;
+    // Records written in the recipe stand in for a scan, unless a root to
+    // scan is given.
     let source = match &recipe.inventory {
-        Some(records) => InputSource::Inventory(records.clone()),
-        None => InputSource::Discover(&root),
+        Some(records) if !scan => InputSource::Inventory(records.clone()),
+        _ => InputSource::Discover(&root),
     };
     let resolved = recipe.resolve(&pipeline, source)?;
     for skipped in &resolved.skipped {
@@ -682,37 +657,6 @@ fn artifacts(args: &CliArgs) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-/// Step 4: a Bash script for a `.spitdag`, or for a pipeline and its inputs.
-fn bash(args: &CliArgs) -> Result<(), Box<dyn Error>> {
-    let first = &args.files[0];
-    let bound = if first.ends_with(".spitdag") {
-        if args.files.len() > 1 {
-            return Err("a .spitdag is complete; give no other file with it".into());
-        }
-        BoundDag::from_json(&read_file(first)?).map_err(|error| format!("{first}: {error}"))?
-    } else {
-        let inputs = args.files.get(1).ok_or_else(|| {
-            format!("spit bash needs a .spitdag, or a pipeline and its inputs, not `{first}` alone")
-        })?;
-        let prepared = prepare(args, first, inputs)?;
-        prepared.inputs.require_complete()?;
-        let dag = resolve(&prepared.pipeline, &prepared.inputs.dag_inventory())?;
-        if let Some(root) = &prepared.root {
-            validate_source_files(&prepared.bound, &dag, root)?;
-        }
-        eprintln!("note: ran `spit dag` in memory");
-        bind_dag(&prepared.bound, &dag)?
-    };
-    let bound = match args.value(Flag::Stage) {
-        Some(stage) => bound.only_stage(&stage)?,
-        None => bound,
-    };
-    if bound.jobs.is_empty() {
-        return Err("there are no jobs, so there is nothing to run".into());
-    }
-    write_output(args, &render_bash(&bound)?, "the script")
-}
-
 /// Print `text`, or write it to the `-o` file.
 fn write_output(args: &CliArgs, text: &str, what: &str) -> Result<(), Box<dyn Error>> {
     match args.value(Flag::Output) {
@@ -814,43 +758,4 @@ fn report(
         return Err(Reported);
     }
     Ok(())
-}
-
-fn print_json(diagnostics: &[Diagnostic], text: &str, source_text: Option<&str>) {
-    let number = |value: Option<usize>| value.map_or_else(|| "null".to_owned(), |n| n.to_string());
-    print!("{{\"diagnostics\":[");
-    for (index, diagnostic) in diagnostics.iter().enumerate() {
-        if index != 0 {
-            print!(",");
-        }
-        // Columns are 1-based, in UTF-16 code units as editors count them;
-        // `end_column` is one past the last character.
-        let columns = diagnostic.utf16_columns(text, source_text);
-        print!(
-            "{{\"severity\":\"{}\",\"source\":\"{}\",\"line\":{},\"column\":{},\"end_column\":{},\"message\":\"{}\"}}",
-            diagnostic.severity.as_str(),
-            diagnostic.source.as_str(),
-            number(diagnostic.line),
-            number(columns.as_ref().map(|columns| columns.start + 1)),
-            number(columns.as_ref().map(|columns| columns.end + 1)),
-            escape_json(&diagnostic.message)
-        );
-    }
-    println!("]}}");
-}
-
-fn escape_json(text: &str) -> String {
-    let mut escaped = String::new();
-    for character in text.chars() {
-        match character {
-            '"' => escaped.push_str("\\\""),
-            '\\' => escaped.push_str("\\\\"),
-            '\n' => escaped.push_str("\\n"),
-            '\r' => escaped.push_str("\\r"),
-            '\t' => escaped.push_str("\\t"),
-            c if c < ' ' => write!(escaped, "\\u{:04x}", u32::from(c)).unwrap(),
-            c => escaped.push(c),
-        }
-    }
-    escaped
 }

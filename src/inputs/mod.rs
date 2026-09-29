@@ -18,11 +18,12 @@ use crate::error::ResolveError;
 use crate::imports::parse_located_document;
 use crate::lower::{parse_document_with_imports, ParsedDocument};
 use crate::model::{ArtifactInstance, CoverageGap, InputRules, Pipeline, SourceInventory};
-use crate::parser::{strip_comment, Kind, ParseError, SourceMap};
+use crate::parser::{strip_comment, Header, Keyword, Kind, ParseError, SourceMap};
 use crate::paths::PathTemplate;
 
 pub(crate) use self::coverage::check_inventory;
 pub(crate) use self::coverage::collect_rule_errors;
+use self::coverage::SkippedGroup;
 use self::discover::locate_sources;
 pub use self::discover::{discover_source_files, discover_sources, Discovery};
 
@@ -99,18 +100,22 @@ fn pipeline_line(text: &str) -> Result<(Option<PathBuf>, String), ParseError> {
 
 fn check_input_lines(text: &str) -> Result<(), ParseError> {
     for (index, original) in text.lines().enumerate() {
-        let line = original.trim_start();
-        if line.starts_with("source ")
-            || line.starts_with("operation ")
-            || line.starts_with("command ")
-            || line.starts_with("verify ")
-            || line.starts_with("stage ")
-            || line.starts_with("use ")
-            || matches!(
-                line,
-                "products:" | "operations:" | "pipeline:" | "commands:"
+        let line = strip_comment(original).trim();
+        let pipeline_only = matches!(
+            Keyword::of(line),
+            Some(
+                Keyword::Source
+                    | Keyword::Operation
+                    | Keyword::Command
+                    | Keyword::Verify
+                    | Keyword::Stage
+                    | Keyword::Use
             )
-        {
+        ) || matches!(
+            Header::of(line),
+            Some(Header::Products | Header::Operations | Header::Pipeline | Header::Commands)
+        );
+        if pipeline_only {
             return Err(ParseError::new(
                 index + 1,
                 "logical sources, operations, commands, stages, and imports belong in the .spit pipeline",
@@ -205,7 +210,7 @@ impl InputSpec {
     ) -> Result<ResolvedInputs, Box<dyn Error>> {
         validate_pipeline(pipeline)?;
         self.check(pipeline)?;
-        let (inventory, skipped, root) = match source {
+        let (inventory, mut skipped, root) = match source {
             InputSource::Discover(root) => {
                 let found = discover_source_files(pipeline, &self.rules, root)?;
                 (found.inventory, found.skipped, Some(root.to_owned()))
@@ -213,6 +218,7 @@ impl InputSpec {
             InputSource::Inventory(inventory) => (inventory, Vec::new(), None),
         };
         let mut checked = check_inventory(pipeline, &self.rules, &inventory)?;
+        skipped.extend(checked.skipped.iter().map(SkippedGroup::note));
         locate_sources(pipeline, &self.rules, &mut checked.inventory)?;
         Ok(ResolvedInputs {
             inventory: checked.inventory,
