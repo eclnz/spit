@@ -29,6 +29,7 @@ Requires a [Rust toolchain](https://www.rust-lang.org/tools/install) (stable, vi
 ```sh
 cargo run -- check examples/commands/bash_demo.spit --sources examples/commands/bash_demo.sources
 cargo run -- dag examples/commands/bash_demo.spit --sources examples/commands/bash_demo.sources
+cargo run -- dag examples/commands/bash_demo.spit --sources examples/commands/bash_demo.sources --json
 ```
 
 Use `cargo build` to get the `target/debug/spit` executable. With `cargo run`, the `--` separates Cargo's arguments from SPIT's arguments.
@@ -46,19 +47,19 @@ Choose one command per call. The pipeline file comes next; options follow it.
 | Command | Result |
 | --- | --- |
 | `check` | Validate the pipeline and report how many jobs resolve. Without an inventory, it checks the pipeline text alone and resolves no jobs. |
-| `dag` | Print the jobs, their artifact identities, and dependencies. |
+| `dag` | Print the jobs, their artifact identities, and dependencies. Use `--json` for a versioned logical graph. |
 | `bash` | Write a Bash script for the resolved jobs to standard output. It does not run the script. |
 | `artifacts` | List every concrete artifact the inventory yields: the complete ones, then the incomplete ones with why each cannot be produced. Unlike the other commands, it does not stop at a missing, ambiguous, or too-small input or a coverage gap; see [Find incomplete artifacts](#find-incomplete-artifacts). |
-| `discover` | Print an inventory of the source files under `--root`, found by matching each file against the sources' path rules. |
+| `discover` | Print an inventory of source files and discovered directory contexts under `--root`. |
 
 | Option | Effect |
 | --- | --- |
 | `--sources <inventory.spit>` | Read source artifact identities from a separate file. Jobs need an inventory: this file, an inline one, or sources discovered with `--root`; `check` without any checks the pipeline alone. A separate inventory replaces an inline one, which is then skipped with a warning. Use `--sources -` to read standard input. |
-| `--root <directory>` | Check that every required source path points to a regular file under this directory; derived outputs need not exist yet. Without `--sources` or an inline inventory, the sources are discovered under this directory from their path rules. |
+| `--root <directory>` | Check source paths under this directory and use it as the discovery root. A `discover` rule uses the pipeline file's folder when `--root` is omitted. Without an inventory, sources are found or expected from their path rules and discovered bindings. |
 | `--paths` | With `check`, show which path rule covers each product and validate the resulting paths. With `dag`, print a path under every artifact. |
 | `--stage <name>` | With `check`, `dag`, or `bash`, keep only the jobs of one [stage](docs/language-reference.md#stages) and the stages nested in it; name a nested stage by its path, such as `preprocess/combine`. Outputs of other stages that it reads are treated as files that already exist: `bash` checks for them before the first job, and `--root` checks that they are there. |
 | `--strict-paths` | Require an explicit `path product:` rule for every product, even if a default `path:` rule exists. |
-| `--json` | With `check`, print the diagnostics as JSON for editor use and stop, succeeding whatever they report. Each has a `severity` of `error` or `warning`; those tied to a declaration, call, rule, command, or path include its `line`, and a `column` and `end_column` for the text it is about, such as one input of a call or one `{placeholder}`. Columns are 1-based and count UTF-16 code units, as editors do; `end_column` is one past the last character. |
+| `--json` | With `dag`, print the resolved logical graph as JSON; it works with `--stage`, `--root`, and `--strict-paths`, but not `--paths`. With `check`, print diagnostics as JSON for editor use and stop, succeeding whatever they report. Each diagnostic has a `severity` of `error` or `warning`; those tied to a declaration, call, rule, command, or path include its `line`, and a `column` and `end_column` for the text it is about, such as one input of a call or one `{placeholder}`. Columns are 1-based and count UTF-16 code units, as editors do; `end_column` is one past the last character. |
 | `--stdin` | Read the pipeline text from standard input instead of the pipeline file, such as an editor's unsaved buffer. The pipeline path is still used to resolve `use` imports. |
 
 For example, `check` resolves the pipeline, while `check --root` also verifies its input files:
@@ -100,7 +101,7 @@ command merge: sort -m -u -o {output} {items}
 merged = merge(sorted @ vary(part))
 ```
 
-`source` declares a family of input artifacts. A `shard` is identified by its `group` and `part` values. `sorted` keeps those dimensions. `merge` collects all parts of each group and produces one `merged[group=...]` artifact per group. The `@ drop(part)` contract and `@ vary(part)` call must agree.
+`source` declares a family of input artifacts. A `shard` is identified by its `group` and `part` values. `sorted` keeps those dimensions. `merge` collects all parts of each group and produces one `merged[group=...]` artifact per group. The `@ drop(part)` contract and `@ vary(part)` call must agree. For datasets whose subject and session values are unknown in advance, `discover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}` reads the observed pairs from folders and expands source artifacts over them.
 
 `path` lines say where artifacts live. `command` lines give the exact executable and argument order. SPIT decides which artifacts belong to each job before filling their paths into a command.
 

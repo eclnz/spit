@@ -92,6 +92,207 @@ fn sources_are_discovered_from_their_path_rules() {
 }
 
 #[test]
+fn directory_discovery_finds_observed_subject_session_pairs() {
+    let tree = Tree::new(
+        "directory-contexts",
+        &[
+            "data/sub-A/ses-baseline/image.nii.gz",
+            "data/sub-pilot-X/ses-followup/image.nii.gz",
+            "data/sub-ignored/other/file.txt",
+            "data/sub-Z/ses-visit-10/image.nii.gz",
+        ],
+    );
+    let text = "\
+discover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}
+path: results/{product}/{entities}.txt
+source image [sub, ses]
+path image: data/sub-{sub}/ses-{ses}/image.nii.gz
+operation process(image) -> Output
+output = process(image)
+";
+    let pipeline = parse_pipeline(text).unwrap();
+    let inventory = discover_sources(&pipeline, &tree.0).unwrap();
+    let contexts: Vec<_> = inventory.contexts.iter().map(ToString::to_string).collect();
+    assert_eq!(
+        contexts,
+        [
+            "ses=baseline,sub=A",
+            "ses=followup,sub=pilot-X",
+            "ses=visit-10,sub=Z",
+        ]
+    );
+    assert_eq!(inventory.artifacts.len(), 3);
+    assert_eq!(resolve(&pipeline, &inventory).unwrap().jobs.len(), 3);
+
+    let pipeline_file = tree.0.join("pipeline.spit");
+    fs::write(&pipeline_file, text).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_spit"))
+        .args([
+            "discover",
+            pipeline_file.to_str().unwrap(),
+            "--root",
+            tree.0.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let rendered = String::from_utf8(output.stdout).unwrap();
+    assert!(
+        rendered.contains("contexts:\n    [ses=baseline,sub=A]"),
+        "{rendered}"
+    );
+    assert!(rendered.contains("image[sub=A,ses=baseline]"), "{rendered}");
+    let implicit = Command::new(env!("CARGO_BIN_EXE_spit"))
+        .args(["discover", pipeline_file.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(
+        implicit.status.success(),
+        "{}",
+        String::from_utf8_lossy(&implicit.stderr)
+    );
+    assert_eq!(implicit.stdout, rendered.as_bytes());
+    let dag = Command::new(env!("CARGO_BIN_EXE_spit"))
+        .args([
+            "dag",
+            pipeline_file.to_str().unwrap(),
+            "--root",
+            tree.0.to_str().unwrap(),
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        dag.status.success(),
+        "{}",
+        String::from_utf8_lossy(&dag.stderr)
+    );
+    let json = String::from_utf8(dag.stdout).unwrap();
+    assert!(json.contains("\"operation\":\"process\""), "{json}");
+    assert!(json.contains("\"sub\":\"A\""), "{json}");
+    let checked = Command::new(env!("CARGO_BIN_EXE_spit"))
+        .args(["check", pipeline_file.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(
+        checked.status.success(),
+        "{}",
+        String::from_utf8_lossy(&checked.stderr)
+    );
+    assert!(String::from_utf8(checked.stdout)
+        .unwrap()
+        .contains("3 jobs resolved"));
+}
+
+#[test]
+fn discovered_directories_require_source_files_even_without_coverage_rules() {
+    let tree = Tree::new("directory-coverage", &["data/sub-A/ses-1/image.nii.gz"]);
+    fs::create_dir_all(tree.0.join("data/sub-B/ses-followup")).unwrap();
+    let text = "\
+discover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}
+source image [sub, ses]
+path image: data/sub-{sub}/ses-{ses}/image.nii.gz
+";
+    let pipeline = parse_pipeline(text).unwrap();
+    let error = discover_sources(&pipeline, &tree.0).unwrap_err();
+    assert!(
+        error
+            .message()
+            .contains("missing source file for `image[ses=followup,sub=B]`"),
+        "{error}"
+    );
+}
+
+#[test]
+fn directory_bindings_expand_sources_at_their_declared_dimensions() {
+    let tree = Tree::new(
+        "directory-projection",
+        &[
+            "data/sub-A/ses-1/image.nii.gz",
+            "data/sub-A/ses-2/image.nii.gz",
+            "data/sub-B/ses-baseline/image.nii.gz",
+            "data/sub-A/reference.nii.gz",
+            "data/sub-B/reference.nii.gz",
+        ],
+    );
+    let pipeline = parse_pipeline(
+        "discover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}\n\
+         source image [sub, ses]\n\
+         path image: data/sub-{sub}/ses-{ses}/image.nii.gz\n\
+         source reference [sub]\n\
+         path reference: data/sub-{sub}/reference.nii.gz\n",
+    )
+    .unwrap();
+    let inventory = discover_sources(&pipeline, &tree.0).unwrap();
+    let references: Vec<_> = inventory
+        .artifacts
+        .iter()
+        .filter(|record| record.product == "reference")
+        .map(|record| record.entities.0["sub"].as_str())
+        .collect();
+    assert_eq!(inventory.artifacts.len(), 5);
+    assert_eq!(references, ["A", "B"]);
+}
+
+#[test]
+fn directory_discovery_rejects_unsafe_or_incomplete_patterns() {
+    for declaration in [
+        "discover sessions: [sub, ses] from dirs data/sub-{sub}",
+        "discover sessions: [sub] from dirs ../data/sub-{sub}",
+        "discover sessions: [sub] from dirs data/sub-{other}",
+        "discover sessions: [sub, sub] from dirs data/sub-{sub}",
+        "discover sessions [sub] from dirs data/sub-{sub}",
+    ] {
+        assert!(parse_pipeline(declaration).is_err(), "{declaration}");
+    }
+}
+
+#[test]
+fn directory_discovery_errors_when_no_directories_match() {
+    let tree = Tree::new("directory-empty", &["data/unrelated/file.txt"]);
+    let pipeline =
+        parse_pipeline("discover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}\n")
+            .unwrap();
+    let error = discover_sources(&pipeline, &tree.0).unwrap_err();
+    assert!(
+        error
+            .message()
+            .contains("discovery `sessions` matched no directories"),
+        "{error}"
+    );
+    assert!(
+        error.message().contains("data/sub-{sub}/ses-{ses}"),
+        "{error}"
+    );
+    let pipeline_file = tree.0.join("pipeline.spit");
+    fs::write(
+        &pipeline_file,
+        "discover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}\n",
+    )
+    .unwrap();
+    let checked = Command::new(env!("CARGO_BIN_EXE_spit"))
+        .args([
+            "check",
+            pipeline_file.to_str().unwrap(),
+            "--root",
+            tree.0.to_str().unwrap(),
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(checked.status.success());
+    let diagnostics = String::from_utf8(checked.stdout).unwrap();
+    assert!(
+        diagnostics.contains("matched no directories"),
+        "{diagnostics}"
+    );
+}
+
+#[test]
 fn a_file_matching_two_source_rules_is_rejected() {
     // Distinct rules that both fit `in/q-x.txt`: `a` with id=q-x, `b` with id=q.
     let text = "source a [id]\npath a: in/{id}.txt\nsource b [id]\npath b: in/{id}-x.txt\n";

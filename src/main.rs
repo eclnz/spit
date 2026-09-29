@@ -9,7 +9,7 @@ use std::process::ExitCode;
 use spit::{
     diagnose_artifacts_at, diagnose_at, discover_source_files, inspect_paths, parse_document_at,
     parse_pipeline_at, parse_source_inventory, render_artifacts, render_bash, render_bound_dag,
-    render_dag, render_source_inventory, resolve, resolve_artifacts, stage_within,
+    render_dag, render_dag_json, render_source_inventory, resolve, resolve_artifacts, stage_within,
     validate_concrete_paths, validate_source_files, Diagnostic, PathCoverage, Pipeline,
     ResolvedDag, SourceInventory,
 };
@@ -51,7 +51,7 @@ impl Command {
         use Flag::*;
         match self {
             Self::Check => &[Sources, Root, Stage, Paths, StrictPaths, Json, Stdin],
-            Self::Dag => &[Sources, Root, Stage, Paths, StrictPaths, Stdin],
+            Self::Dag => &[Sources, Root, Stage, Paths, StrictPaths, Json, Stdin],
             Self::Bash => &[Sources, Root, Stage, StrictPaths, Stdin],
             Self::Artifacts => &[Sources, Root, Stdin],
             Self::Discover => &[Root, Stdin],
@@ -60,10 +60,7 @@ impl Command {
 
     /// The flags this command cannot run without.
     fn required(self) -> &'static [Flag] {
-        match self {
-            Self::Discover => &[Flag::Root],
-            _ => &[],
-        }
+        &[]
     }
 }
 
@@ -89,10 +86,9 @@ const FLAGS: [Flag; 7] = [
 ];
 
 /// Pairs of flags that cannot be used together, whatever the command.
-const CONFLICTS: [(Flag, Flag); 4] = [
+const CONFLICTS: [(Flag, Flag); 3] = [
     (Flag::Json, Flag::Paths),
     (Flag::Json, Flag::StrictPaths),
-    (Flag::Json, Flag::Root),
     (Flag::Json, Flag::Stage),
 ];
 
@@ -266,7 +262,10 @@ fn check_flags(command: Command, flags: &Flags) -> Result<(), String> {
         }
     }
     for (first, second) in CONFLICTS {
-        if flags.has(first) && flags.has(second) {
+        if flags.has(first)
+            && flags.has(second)
+            && (command == Command::Check || (command == Command::Dag && second == Flag::Paths))
+        {
             return Err(format!(
                 "{} cannot be used with {}",
                 first.name(),
@@ -300,11 +299,11 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let json = args.json;
+    let diagnostics_json = args.json && args.command == Command::Check;
     match run(args) {
         Ok(()) => ExitCode::SUCCESS,
         // Editors expect JSON even when the check cannot run.
-        Err(error) if json => {
+        Err(error) if diagnostics_json => {
             println!(
                 "{{\"diagnostics\":[{{\"severity\":\"error\",\"source\":\"pipeline\",\"line\":null,\"column\":null,\"end_column\":null,\"message\":\"{}\"}}]}}",
                 escape_json(&error.to_string())
@@ -320,13 +319,27 @@ fn main() -> ExitCode {
     }
 }
 
-fn run(args: CliArgs) -> Result<(), Box<dyn Error>> {
+fn run(mut args: CliArgs) -> Result<(), Box<dyn Error>> {
     let pipeline_text = if args.stdin {
         read_stdin()?
     } else {
         read_file(&args.pipeline)?
     };
     let path = Path::new(&args.pipeline);
+    if args.root.is_none()
+        && args.sources.is_none()
+        && !has_inline_inventory(&pipeline_text, path)
+        && parse_pipeline_at(&pipeline_text, path)
+            .is_ok_and(|pipeline| !pipeline.discoveries.is_empty())
+    {
+        args.root = Some(
+            path.parent()
+                .filter(|parent| !parent.as_os_str().is_empty())
+                .unwrap_or_else(|| Path::new("."))
+                .to_string_lossy()
+                .into_owned(),
+        );
+    }
     let inventory_text = read_inventory(&args, &pipeline_text, path)?;
     // Report every error and warning before doing any work.
     let diagnose = if args.command == Command::Artifacts {
@@ -335,11 +348,16 @@ fn run(args: CliArgs) -> Result<(), Box<dyn Error>> {
         diagnose_at
     };
     let diagnostics = diagnose(&pipeline_text, inventory_text.as_deref(), path);
-    if args.json {
+    if args.json && args.command == Command::Check {
         print_json(&diagnostics, &pipeline_text, inventory_text.as_deref());
         return Ok(());
     }
     report(&diagnostics, &pipeline_text, inventory_text.as_deref())?;
+    if args.command == Command::Discover && args.root.is_none() {
+        return Err(
+            "discover requires --root unless the pipeline declares directory discovery".into(),
+        );
+    }
     if args.command == Command::Discover {
         print!("{}", inventory_text.unwrap_or_default());
         return Ok(());
@@ -413,6 +431,7 @@ fn run_jobs(
                 println!("{verified}");
             }
         }
+        Command::Dag if args.json => print!("{}", render_dag_json(pipeline, &dag)?),
         Command::Dag if args.paths => print!("{}", render_bound_dag(pipeline, &dag)?),
         Command::Dag => print!("{}", render_dag(&dag)),
         Command::Bash if inventory.artifacts.is_empty() => {
@@ -552,11 +571,20 @@ fn discover(text: &str, path: &Path, root: &Path) -> Result<Option<String>, Box<
     for skipped in &discovery.skipped {
         eprintln!("warning: skipped {skipped}");
     }
-    eprintln!(
-        "note: discovered {} source artifacts under `{}`",
-        discovery.inventory.artifacts.len(),
-        root.display()
-    );
+    if pipeline.discoveries.is_empty() {
+        eprintln!(
+            "note: discovered {} source artifacts under `{}`",
+            discovery.inventory.artifacts.len(),
+            root.display()
+        );
+    } else {
+        eprintln!(
+            "note: discovered {} source artifacts and {} contexts under `{}`",
+            discovery.inventory.artifacts.len(),
+            discovery.inventory.contexts.len(),
+            root.display()
+        );
+    }
     Ok(Some(render_source_inventory(
         &discovery.inventory,
         &pipeline,

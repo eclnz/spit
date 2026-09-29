@@ -5,9 +5,10 @@ use std::collections::BTreeMap;
 
 use crate::command::CommandTemplate;
 use crate::model::{
-    CommandDef, CommandRole, CountRequirement, CoverageRule, InputBinding, Invocation, ProductDef,
+    CommandDef, CommandRole, CountRequirement, CoverageRule, DirectoryDiscovery, InputBinding,
+    Invocation, ProductDef,
 };
-use crate::paths::PathTemplate;
+use crate::paths::{validate_discovery_rule, PathTemplate};
 use crate::types::{parse_type_expr, TypeExpr, TypeParseError};
 
 use super::lexical::{call_parts, comma_items, identifier, qualified_identifier};
@@ -106,6 +107,45 @@ pub(super) fn parse_path(
         template: parsed,
         place: tail_place(original, number, template),
     })
+}
+
+pub(super) fn parse_discover(line: &str, number: usize) -> Result<DirectoryDiscovery, ParseError> {
+    let (declaration, pattern) = line.split_once(" from dirs ").ok_or_else(|| {
+        ParseError::new(
+            number,
+            "expected `discover name: [dimensions] from dirs path-pattern`",
+        )
+    })?;
+    let (name, dimensions) = declaration
+        .split_once(':')
+        .ok_or_else(|| ParseError::new(number, "expected `:` after discovery name"))?;
+    let name = identifier(name.trim(), number, "discovery name")?;
+    let dimensions = dimensions.trim();
+    let dimensions = dimensions
+        .strip_prefix('[')
+        .and_then(|items| items.strip_suffix(']'))
+        .ok_or_else(|| ParseError::new(number, "expected `[dimensions]` after discovery name"))?;
+    let dimensions = comma_items(dimensions, number)?;
+    for dimension in &dimensions {
+        identifier(dimension, number, "dimension")?;
+    }
+    let pattern = pattern.trim();
+    if pattern.is_empty() {
+        return Err(ParseError::new(
+            number,
+            "discovery directory pattern must not be empty",
+        ));
+    }
+    let template = PathTemplate::parse(pattern)
+        .map_err(|error| ParseError::new(number, error.message()).at_token(pattern))?;
+    let discovery = DirectoryDiscovery {
+        name: name.to_owned(),
+        dimensions: dimensions.into_iter().map(str::to_owned).collect(),
+        template,
+    };
+    validate_discovery_rule(&discovery)
+        .map_err(|error| ParseError::new(number, error.message()).at_token(pattern))?;
+    Ok(discovery)
 }
 
 #[derive(Debug)]
