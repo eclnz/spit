@@ -315,3 +315,25 @@ fn a_recipe_names_its_own_pipeline_for_dag_and_artifacts() {
         stderr(&spitout)
     );
 }
+
+#[test]
+fn a_recipe_run_in_memory_prints_each_pipeline_warning_once() {
+    let tree = Tree::new("warn-once", &["in/a.txt"]);
+    tree.write(
+        "analysis.spit",
+        "source raw : Raw [id]\nsource spare : Raw [id]\npath raw: in/{id}.txt\n\
+         path spare: sp/{id}.txt\npath: out/{product}/{id}.txt\n\
+         operation clean(Raw) -> Clean\ncommand clean: tool {input} {output}\ncleaned = clean(raw)\n",
+    );
+    let recipe = tree.write("data.spitin", "pipeline analysis.spit\n");
+    for command in ["inputs", "dag", "artifacts"] {
+        let output = spit(&[command, recipe.to_str().unwrap()]);
+        let errors = stderr(&output);
+        assert!(output.status.success(), "{command}: {errors}");
+        assert_eq!(
+            errors.matches("`spare` is never used").count(),
+            1,
+            "{command}: {errors}"
+        );
+    }
+}
