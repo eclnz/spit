@@ -83,6 +83,14 @@ pub fn resolve_artifacts_excluding(
                 .iter()
                 .map(|product| (product.name.clone(), product.dimensions.clone()))
                 .collect(),
+            source_paths: inventory
+                .artifacts
+                .iter()
+                .filter_map(|record| {
+                    let key = (record.product.clone(), record.entities.clone());
+                    Some((key, record.path.clone()?))
+                })
+                .collect(),
         },
         incomplete_jobs: Vec::new(),
     };

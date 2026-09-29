@@ -670,11 +670,13 @@ pub fn stage_within(stage: &str, outer: &str) -> bool {
         .is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
 }
 
-/// A source record identifies a logical artifact without binding it to a path.
+/// A source record identifies a logical artifact, and may say where its file
+/// is, relative to the dataset root, as the input stage found it.
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub struct SourceRecord {
     pub product: String,
     pub entities: EntityBinding,
+    pub path: Option<String>,
 }
 
 impl SourceRecord {
@@ -682,6 +684,16 @@ impl SourceRecord {
         Self {
             product: product.into(),
             entities,
+            path: None,
+        }
+    }
+
+    /// This record with its file at `path`, relative to the dataset root.
+    #[must_use]
+    pub fn at(self, path: impl Into<String>) -> Self {
+        Self {
+            path: Some(path.into()),
+            ..self
         }
     }
 }
@@ -788,6 +800,9 @@ pub struct ResolvedDag {
     pub jobs: Vec<Job>,
     /// Declaration order is retained for readable dry-run output.
     pub product_dimensions: BTreeMap<String, Vec<String>>,
+    /// The file of each source whose inventory record gave one. Other
+    /// artifacts take the path their product's rule gives them.
+    pub source_paths: BTreeMap<ArtifactKey, String>,
 }
 
 impl ResolvedDag {
@@ -816,6 +831,7 @@ impl ResolvedDag {
                 })
                 .collect(),
             product_dimensions: self.product_dimensions.clone(),
+            source_paths: self.source_paths.clone(),
         }
     }
 }

@@ -27,7 +27,7 @@ pub fn validate_source_files(
             root.display()
         )));
     }
-    inspect_paths(pipeline)?.validate(false)?;
+    check_rules(pipeline, dag)?;
     let paths = bound_paths(pipeline, dag)?;
     let outputs = output_keys(dag);
     let mut verified = VerifiedFiles::default();
@@ -97,6 +97,14 @@ impl fmt::Display for VerifiedFiles {
     }
 }
 
+/// Check that every product of `pipeline` has a valid path rule, except
+/// sources whose files the inventory gave the DAG.
+pub(crate) fn check_rules(pipeline: &Pipeline, dag: &ResolvedDag) -> Result<(), PathError> {
+    inspect_paths(pipeline)?
+        .with_inventory_paths(dag.source_paths.keys().map(|(product, _)| product.as_str()))
+        .validate(false)
+}
+
 /// Every artifact the resolved jobs produce.
 pub(crate) fn output_keys(dag: &ResolvedDag) -> BTreeSet<ArtifactKey> {
     dag.jobs
@@ -125,9 +133,12 @@ pub(crate) fn bound_paths(
             .product_dimensions
             .get(&artifact.product)
             .ok_or_else(|| error(format!("unknown product `{}`", artifact.product)))?;
-        let relative = bind_path(pipeline, dimensions, artifact, || {
-            format!("path for `{artifact}`")
-        })?;
+        let relative = match dag.source_paths.get(&identity) {
+            Some(path) => path.clone(),
+            None => bind_path(pipeline, dimensions, artifact, || {
+                format!("path for `{artifact}`")
+            })?,
+        };
         if let Some(previous) = owners.insert(relative.clone(), identity.clone()) {
             return Err(error(format!(
                 "artifacts `{}[{}]` and `{}[{}]` bind to the same path `{relative}`",

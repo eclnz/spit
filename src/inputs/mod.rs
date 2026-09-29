@@ -24,6 +24,7 @@ use crate::{parse_spit, parse_spit_at};
 
 pub(crate) use self::coverage::check_inventory;
 pub(crate) use self::coverage::collect_rule_errors;
+use self::discover::locate_sources;
 pub use self::discover::{discover_source_files, discover_sources, Discovery};
 
 /// A recipe's rules and any inventory records written with them.
@@ -173,7 +174,8 @@ impl InputSpec {
     }
 
     /// Run the input stage: find the contexts and source files a dataset
-    /// holds, apply the `skip` rules, and check the `require` rules.
+    /// holds, apply the `skip` rules, check the `require` rules, and give
+    /// each source record its file's path.
     ///
     /// The stage reads `pipeline` only for its source products and leaves it
     /// untouched. What it returns is a plain inventory, so resolving jobs
@@ -192,7 +194,8 @@ impl InputSpec {
             }
             InputSource::Inventory(inventory) => (inventory, Vec::new(), None),
         };
-        let checked = check_inventory(pipeline, &self.rules, &inventory)?;
+        let mut checked = check_inventory(pipeline, &self.rules, &inventory)?;
+        locate_sources(pipeline, &self.rules, &mut checked.inventory)?;
         Ok(ResolvedInputs {
             inventory: checked.inventory,
             skipped,

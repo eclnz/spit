@@ -4,7 +4,7 @@ use std::fmt::Write;
 use crate::model::{
     ArtifactInstance, ArtifactReport, Gap, Job, OperationDef, Pipeline, ResolvedDag,
 };
-use crate::paths::{bound_paths, error, inspect_paths, PathError};
+use crate::paths::{bound_paths, check_rules, error, PathError};
 use crate::types::TypeExpr;
 
 pub fn render_dag(dag: &ResolvedDag) -> String {
@@ -277,7 +277,7 @@ pub fn render_artifacts(report: &ArtifactReport) -> String {
 
 /// Inspect the resolved jobs and bound paths before expanding any commands.
 pub fn render_bound_dag(pipeline: &Pipeline, dag: &ResolvedDag) -> Result<String, PathError> {
-    inspect_paths(pipeline)?.validate(false)?;
+    check_rules(pipeline, dag)?;
     let paths = bound_paths(pipeline, dag)?;
     let operations: BTreeMap<_, _> = pipeline
         .operations

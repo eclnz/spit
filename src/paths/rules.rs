@@ -19,6 +19,8 @@ pub enum PathRule {
         template: String,
     },
     Default(String),
+    /// A source with no rule whose inventory records each give its file.
+    Inventory,
     Missing,
 }
 
@@ -35,6 +37,22 @@ pub struct PathCoverage {
 }
 
 impl PathCoverage {
+    /// Mark each source in `products` that has no rule as having its files
+    /// given by the inventory, which needs no rule.
+    #[must_use]
+    pub fn with_inventory_paths<'a>(mut self, products: impl IntoIterator<Item = &'a str>) -> Self {
+        let products: BTreeSet<_> = products.into_iter().collect();
+        for entry in &mut self.entries {
+            if entry.source
+                && entry.rule == PathRule::Missing
+                && products.contains(entry.product.as_str())
+            {
+                entry.rule = PathRule::Inventory;
+            }
+        }
+        self
+    }
+
     /// Missing rules always fail. Strict mode also rejects default fallbacks.
     pub fn validate(&self, strict: bool) -> Result<(), PathError> {
         let missing: Vec<_> = self
@@ -85,6 +103,9 @@ impl fmt::Display for PathCoverage {
                 }
                 PathRule::Default(template) => {
                     writeln!(f, "  {} ({role}): default {template}", entry.product)?;
+                }
+                PathRule::Inventory => {
+                    writeln!(f, "  {} ({role}): from the inventory", entry.product)?;
                 }
                 PathRule::Missing => {
                     writeln!(f, "  {} ({role}): MISSING", entry.product)?;
