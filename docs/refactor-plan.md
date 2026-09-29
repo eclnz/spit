@@ -187,6 +187,7 @@ Dead public API (item 5, 15) is not visible to the compiler because `lib.rs` re-
 - `paths/template.rs` ~232 and `docs/language-reference.md` ~167 mention `SPIT_ROOT`, which nothing reads (the dataset root is `--root` / the recipe folder).
 - `paths/bind.rs` ~32 comment mentions a `--stage` flag the CLI does not have (only `ResolvedDag::only_stage`, used by `tests/stages.rs`).
 - Correct the messages and docs; the message change touches tests that match on it.
+- **Status: done.** The absolute-path error now says "must be relative to the dataset root, not start with `/`", and the language reference says paths are relative to "the dataset root: the recipe's folder, or `--root` when given", matching how the rest of the docs name it. The `--stage` comment now names `ResolvedDag::only_stage`. **Output change:** that one error message; its test updated. Nothing in `spit-vscode` mentioned `SPIT_ROOT`.
 
 ### 21. Optional: iterative `invocation_order`, O(1) `is_source`
 - `compile/definitions.rs` `invocation_order` is recursive (survived a 200k chain, so theoretical). `Pipeline::is_source` scans all invocations and `source_artifacts` calls it per record (quadratic in principle; 0.5 s at 40k records). Precompute a producer set.
