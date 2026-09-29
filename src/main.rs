@@ -210,6 +210,59 @@ impl Flag {
 struct Flags(Vec<(Flag, Option<String>)>);
 
 impl Flags {
+    /// Add the flag `argument` for `command`, taking its value from `rest`
+    /// when it has one.
+    fn add(
+        &mut self,
+        command: Command,
+        argument: &str,
+        rest: &mut impl Iterator<Item = String>,
+    ) -> Result<(), String> {
+        let flag = Flag::parse(argument)
+            .ok_or_else(|| misuse(format_args!("unknown option `{argument}`"), Some(command)))?;
+        if !command.flags().contains(&flag) {
+            let accepting: Vec<_> = COMMANDS
+                .iter()
+                .filter(|other| other.flags().contains(&flag))
+                .map(|other| other.name())
+                .collect();
+            return Err(misuse(
+                format_args!("{} applies to {}", flag.name(), accepting.join(", ")),
+                Some(command),
+            ));
+        }
+        if self.has(flag) {
+            return Err(misuse(
+                format_args!("{} is given more than once", flag.name()),
+                Some(command),
+            ));
+        }
+        let value = match flag.value() {
+            Some(value) => Some(rest.next().ok_or_else(|| {
+                misuse(
+                    format_args!("{} needs a value: {value}", flag.name()),
+                    Some(command),
+                )
+            })?),
+            None => None,
+        };
+        self.0.push((flag, value));
+        Ok(())
+    }
+
+    /// Fail if two flags that cannot be used together were both given.
+    fn check_conflicts(&self, command: Command) -> Result<(), String> {
+        for (first, second) in CONFLICTS {
+            if self.has(first) && self.has(second) {
+                return Err(misuse(
+                    format_args!("{} cannot be used with {}", first.name(), second.name()),
+                    Some(command),
+                ));
+            }
+        }
+        Ok(())
+    }
+
     fn has(&self, flag: Flag) -> bool {
         self.0.iter().any(|(given, _)| *given == flag)
     }
@@ -333,44 +386,20 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> Result<Request, String>
             files.push(argument);
             continue;
         }
-        let flag = Flag::parse(&argument)
-            .ok_or_else(|| misuse(format_args!("unknown option `{argument}`"), Some(command)))?;
-        if !command.flags().contains(&flag) {
-            let accepting: Vec<_> = COMMANDS
-                .iter()
-                .filter(|other| other.flags().contains(&flag))
-                .map(|other| other.name())
-                .collect();
-            return Err(misuse(
-                format_args!("{} applies to {}", flag.name(), accepting.join(", ")),
-                Some(command),
-            ));
-        }
-        if flags.has(flag) {
-            return Err(misuse(
-                format_args!("{} is given more than once", flag.name()),
-                Some(command),
-            ));
-        }
-        let value = match flag.value() {
-            Some(value) => Some(args.next().ok_or_else(|| {
-                misuse(
-                    format_args!("{} needs a value: {value}", flag.name()),
-                    Some(command),
-                )
-            })?),
-            None => None,
-        };
-        flags.0.push((flag, value));
+        flags.add(command, &argument, &mut args)?;
     }
-    for (first, second) in CONFLICTS {
-        if flags.has(first) && flags.has(second) {
-            return Err(misuse(
-                format_args!("{} cannot be used with {}", first.name(), second.name()),
-                Some(command),
-            ));
-        }
-    }
+    flags.check_conflicts(command)?;
+    let (file, second) = take_files(command, files)?;
+    Ok(Request::Run(CliArgs {
+        command,
+        file,
+        second,
+        flags,
+    }))
+}
+
+/// The file `command` takes, and a second when it takes two.
+fn take_files(command: Command, files: Vec<String>) -> Result<(String, Option<String>), String> {
     let mut files = files.into_iter();
     let Some(file) = files.next() else {
         return Err(misuse(
@@ -390,12 +419,7 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> Result<Request, String>
             Some(command),
         ));
     }
-    Ok(Request::Run(CliArgs {
-        command,
-        file,
-        second,
-        flags,
-    }))
+    Ok((file, second))
 }
 
 /// Diagnostics that have already been printed.
@@ -504,7 +528,8 @@ fn check(args: &CliArgs) -> Result<(), Box<dyn Error>> {
 fn inputs(args: &CliArgs) -> Result<(), Box<dyn Error>> {
     let loaded = load_recipe(&args.file)?;
     report(&loaded.checked.warnings, &loaded.pipeline_text, None)?;
-    let settled = settle(&loaded, &args.file, args.value(Flag::Root).as_deref())?;
+    let root = args.value(Flag::Root).map(PathBuf::from);
+    let settled = settle(&loaded, &args.file, root.as_deref())?;
     settled.require_complete()?;
     let text = render_source_inventory(
         &settled.inventory,
@@ -556,7 +581,7 @@ fn load_recipe(file: &str) -> Result<Loaded, Box<dyn Error>> {
 fn settle(
     loaded: &Loaded,
     file: &str,
-    root: Option<&str>,
+    root: Option<&Path>,
 ) -> Result<ResolvedInputs, Box<dyn Error>> {
     let folder = Path::new(file)
         .parent()
@@ -564,7 +589,7 @@ fn settle(
         .unwrap_or_else(|| Path::new("."))
         .to_owned();
     let scan = root.is_some();
-    let root = root.map_or(folder, PathBuf::from);
+    let root = root.map_or(folder, Path::to_path_buf);
     let recipe = &loaded.recipe;
     // Records written in the recipe stand in for a scan, unless a root to
     // scan is given.
@@ -618,35 +643,9 @@ fn prepare(args: &CliArgs) -> Result<Prepared, Box<dyn Error>> {
         .into());
     }
     let lenient = args.command == Command::Artifacts;
-    let given_root = args.value(Flag::Root);
+    let root = args.value(Flag::Root).map(PathBuf::from);
     if is_recipe(inputs) {
-        // Step 2 in memory: the pipeline is read and settled once, and its
-        // warnings are printed once, with the records' below.
-        let loaded = load_recipe(inputs)?;
-        let settled = settle(&loaded, inputs, given_root.as_deref())?;
-        eprintln!("note: ran `spit inputs {inputs}` in memory");
-        let records_text = render_source_inventory(
-            &settled.inventory,
-            &loaded.checked.pipeline,
-            &loaded.recipe.rules,
-        );
-        let context = Context {
-            path: Some(&loaded.pipeline_file),
-            recipe: Some(&loaded.recipe),
-            lenient,
-        };
-        let diagnosis =
-            diagnose_checked_with_records(&loaded.pipeline_text, &records_text, context);
-        passed(
-            diagnosis,
-            |(checked, _)| &checked.warnings,
-            &loaded.pipeline_text,
-            Some(&records_text),
-        )?;
-        let root = given_root
-            .map(PathBuf::from)
-            .or_else(|| settled.root.clone());
-        return Ok(prepared(loaded.checked.pipeline, settled, root));
+        return prepare_recipe(inputs, root, lenient);
     }
     let Some(pipeline) = given else {
         return Err(format!(
@@ -659,10 +658,9 @@ fn prepare(args: &CliArgs) -> Result<Prepared, Box<dyn Error>> {
     } else {
         read_file(inputs)?
     };
-    let path = Path::new(pipeline);
     let pipeline_text = read_file(pipeline)?;
     let context = Context {
-        path: Some(path),
+        path: Some(Path::new(pipeline)),
         recipe: None,
         lenient,
     };
@@ -675,8 +673,39 @@ fn prepare(args: &CliArgs) -> Result<Prepared, Box<dyn Error>> {
     )?;
     let settled =
         InputSpec::default().resolve(&checked.pipeline, InputSource::Inventory(records))?;
-    let root = given_root.map(PathBuf::from);
     Ok(prepared(checked.pipeline, settled, root))
+}
+
+/// Step 2 in memory for the recipe `file`, then step 3's diagnosis of the
+/// records it settles. The pipeline is read and settled once, and its
+/// warnings are printed once, with the records'.
+fn prepare_recipe(
+    file: &str,
+    root: Option<PathBuf>,
+    lenient: bool,
+) -> Result<Prepared, Box<dyn Error>> {
+    let loaded = load_recipe(file)?;
+    let settled = settle(&loaded, file, root.as_deref())?;
+    eprintln!("note: ran `spit inputs {file}` in memory");
+    let records_text = render_source_inventory(
+        &settled.inventory,
+        &loaded.checked.pipeline,
+        &loaded.recipe.rules,
+    );
+    let context = Context {
+        path: Some(&loaded.pipeline_file),
+        recipe: Some(&loaded.recipe),
+        lenient,
+    };
+    let diagnosis = diagnose_checked_with_records(&loaded.pipeline_text, &records_text, context);
+    passed(
+        diagnosis,
+        |(checked, _)| &checked.warnings,
+        &loaded.pipeline_text,
+        Some(&records_text),
+    )?;
+    let root = root.or_else(|| settled.root.clone());
+    Ok(prepared(loaded.checked.pipeline, settled, root))
 }
 
 /// `pipeline` ready for step 3 with its `inputs`.
