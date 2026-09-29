@@ -1,4 +1,4 @@
-use spit::{parse_document, parse_pipeline, parse_source_inventory, resolve};
+use spit::{parse_document, parse_pipeline, parse_source_inventory, parse_spit, resolve};
 
 /// A sectioned pipeline with the same shape as the basic example.
 const PIPELINE: &str = "\
@@ -41,12 +41,14 @@ fn document() -> String {
 
 #[test]
 fn parses_a_document_with_its_inventory() {
-    let (pipeline, embedded_inventory) = parse_document(&document()).unwrap();
+    let document = parse_spit(&document()).unwrap();
+    let pipeline = &document.pipeline;
     assert_eq!(pipeline.products.len(), 5);
     assert_eq!(pipeline.operations.len(), 3);
     assert_eq!(pipeline.invocations.len(), 3);
-    assert_eq!(pipeline.constraints.len(), 2);
-    let inventory = embedded_inventory.unwrap();
+    // `require` rules are for the input stage, not the pipeline.
+    assert_eq!(document.inputs.constraints.len(), 2);
+    let inventory = document.inventory.clone().unwrap();
     assert_eq!(inventory, parse_source_inventory(INVENTORY).unwrap());
     assert_eq!(inventory.artifacts.len(), 3);
 }
@@ -90,16 +92,16 @@ require raw count>=1 per [site]\n\
 sources:\n\
     raw[site=A,run=1]\n\
     raw[site=A,run=2]\n";
-    let (pipeline, inventory) = parse_document(text).unwrap();
-    let inventory = inventory.unwrap();
+    let document = parse_spit(text).unwrap();
+    let (pipeline, inventory) = (&document.pipeline, document.inventory.clone().unwrap());
     assert_eq!(pipeline.products.len(), 3);
     assert_eq!(pipeline.operations.len(), 2);
     assert_eq!(pipeline.invocations.len(), 2);
-    assert_eq!(pipeline.constraints.len(), 1);
+    assert_eq!(document.inputs.constraints.len(), 1);
     assert_eq!(pipeline.products[1].name, "cleaned");
     assert_eq!(pipeline.products[1].dimensions, vec!["site", "run"]);
     assert_eq!(pipeline.products[2].dimensions, vec!["site"]);
-    assert_eq!(resolve(&pipeline, &inventory).unwrap().jobs.len(), 3);
+    assert_eq!(resolve(pipeline, &inventory).unwrap().jobs.len(), 3);
 }
 
 #[test]
@@ -223,4 +225,26 @@ fn commands_header_alone_selects_sectioned_form() {
     assert_eq!(pipeline.commands.len(), 1);
     let pipeline = parse_pipeline("commands:\n  copy: tool {input} {output}\n").unwrap();
     assert_eq!(pipeline.commands[0].operation, "copy");
+}
+
+#[test]
+fn a_source_record_may_give_its_file() {
+    let text = "sources:\n    raw[site=A]: data/A/raw.txt\n    raw[site=B]\n";
+    let inventory = parse_source_inventory(text).unwrap();
+    assert_eq!(
+        inventory.artifacts[0].path.as_deref(),
+        Some("data/A/raw.txt")
+    );
+    assert_eq!(inventory.artifacts[1].path, None);
+    let pipeline = parse_pipeline("source raw [site]\n").unwrap();
+    let rendered = spit::render_source_inventory(&inventory, &pipeline);
+    assert_eq!(parse_source_inventory(&rendered).unwrap(), inventory);
+    for bad in [
+        "raw[site=A] data.txt",
+        "raw[site=A]:",
+        "raw[site=A]: /abs.txt",
+    ] {
+        let error = parse_source_inventory(&format!("sources:\n{bad}\n")).unwrap_err();
+        assert_eq!(error.line(), 2, "{bad}");
+    }
 }

@@ -27,9 +27,9 @@ Add or remove inputs and the same pipeline definition produces the right jobs, w
 Requires a [Rust toolchain](https://www.rust-lang.org/tools/install) (stable, via `cargo`). From this repository:
 
 ```sh
-cargo run -- check examples/commands/bash_demo.spit --sources examples/commands/bash_demo.sources
-cargo run -- dag examples/commands/bash_demo.spit --sources examples/commands/bash_demo.sources
-cargo run -- dag examples/commands/bash_demo.spit --sources examples/commands/bash_demo.sources --json
+cargo run -- check examples/commands/bash_demo.spit --sources examples/commands/bash_demo.spitout
+cargo run -- dag examples/commands/bash_demo.spit --sources examples/commands/bash_demo.spitout
+cargo run -- dag examples/commands/bash_demo.spit --sources examples/commands/bash_demo.spitout --json
 ```
 
 Use `cargo build` to get the `target/debug/spit` executable. With `cargo run`, the `--` separates Cargo's arguments from SPIT's arguments.
@@ -39,7 +39,7 @@ Live validation in VS Code is maintained in the separate `spit-vscode` repositor
 ## CLI commands and options
 
 ```text
-spit <check|dag|bash|artifacts|discover> <pipeline.spit> [--sources <inventory.spit|->] [--root <directory>] [--stage <name>] [--paths] [--strict-paths] [--json] [--stdin]
+spit <check|dag|bash|artifacts|discover> <pipeline.spit> [--sources <inventory.spitout|->] [--root <directory>] [--stage <name>] [--paths] [--strict-paths] [--json] [--stdin]
 ```
 
 Choose one command per call. The pipeline file comes next; options follow it.
@@ -54,7 +54,7 @@ Choose one command per call. The pipeline file comes next; options follow it.
 
 | Option | Effect |
 | --- | --- |
-| `--sources <inventory.spit>` | Read source artifact identities from a separate file. Jobs need an inventory: this file, an inline one, or sources discovered with `--root`; `check` without any checks the pipeline alone. A separate inventory replaces an inline one, which is then skipped with a warning. Use `--sources -` to read standard input. |
+| `--sources <inventory.spitout>` | Read source artifact identities from a separate file. Jobs need an inventory: this file, an inline one, or sources discovered with `--root`; `check` without any checks the pipeline alone. A separate inventory replaces an inline one, which is then skipped with a warning. Use `--sources -` to read standard input. |
 | `--root <directory>` | Check source paths under this directory and use it as the discovery root. A `discover` rule uses the pipeline file's folder when `--root` is omitted. Without an inventory, sources are found or expected from their path rules and discovered bindings. |
 | `--paths` | With `check`, show which path rule covers each product and validate the resulting paths. With `dag`, print a path under every artifact. |
 | `--stage <name>` | With `check`, `dag`, or `bash`, keep only the jobs of one [stage](docs/language-reference.md#stages) and the stages nested in it; name a nested stage by its path, such as `preprocess/combine`. Outputs of other stages that it reads are treated as files that already exist: `bash` checks for them before the first job, and `--root` checks that they are there. |
@@ -65,8 +65,8 @@ Choose one command per call. The pipeline file comes next; options follow it.
 For example, `check` resolves the pipeline, while `check --root` also verifies its input files:
 
 ```sh
-cargo run -- check examples/commands/bash_demo.spit --sources examples/commands/bash_demo.sources
-cargo run -- check examples/commands/bash_demo.spit --sources examples/commands/bash_demo.sources --root /path/to/data
+cargo run -- check examples/commands/bash_demo.spit --sources examples/commands/bash_demo.spitout
+cargo run -- check examples/commands/bash_demo.spit --sources examples/commands/bash_demo.spitout --root /path/to/data
 ```
 
 ### Errors and warnings
@@ -119,9 +119,9 @@ skip sessions count>=2 per [sub]
 path image: data/sub-{sub}/ses-{ses}/image.nii.gz
 ```
 
-`spit check analysis.spit` and `spit dag analysis.spit --json` load that sibling recipe automatically, discover source files, and resolve the pipeline. Use `--inputs other/cohort.spitin` for another dataset; relative paths then start at that recipe's folder unless `--root` is given. A pipeline with a `.spitin` recipe can omit output path rules: outputs default to `out/{product}/{entities}`. The `.spitin` file may also contain `require` rules or explicit `sources:` and `contexts:` records. Logical source types and operations stay in `.spit`.
+`spit check analysis.spit` and `spit dag analysis.spit --json` load that sibling recipe automatically, discover source files, and resolve the pipeline. Use `--inputs other/cohort.spitin` for another dataset; relative paths then start at that recipe's folder unless `--root` is given. A pipeline with a `.spitin` recipe can omit output path rules: outputs default to `out/{product}/{entities}`. The `.spitin` file may also contain `require` rules or explicit `sources:` and `contexts:` records. Logical source types and operations stay in `.spit`. To keep what a recipe found, save `spit discover analysis.spit > dataset.spitout`: each record carries its file's path, so `spit dag analysis.spit --sources dataset.spitout` needs neither the recipe nor a rescan.
 
-The pipeline describes what to do; an inventory describes what is present. The example uses [bash_demo.sources](examples/commands/bash_demo.sources):
+The pipeline describes what to do; an inventory describes what is present. The example uses [bash_demo.spitout](examples/commands/bash_demo.spitout):
 
 ```text
 sources:
@@ -132,14 +132,14 @@ sources:
 
 This creates two sort jobs for `alpha`, one for `beta`, and one merge job for each group. Add another shard to the inventory and SPIT creates the corresponding job without changing the pipeline.
 
-An inventory can also be placed in the same `.spit` file for a small example, as in [basic.spit](examples/basic/basic.spit). For reusable pipelines, keep it separate and pass `--sources inventory.spit`. Use `--sources -` to read an inventory from standard input.
+An inventory can also be placed in the same `.spit` file for a small example, as in [basic.spit](examples/basic/basic.spit). For reusable pipelines, keep it separate and pass `--sources inventory.spitout`. Use `--sources -` to read an inventory from standard input.
 
 ## Inspect and generate a script
 
 ```sh
-cargo run -- check examples/commands/bash_demo.spit --sources examples/commands/bash_demo.sources --paths
-cargo run -- dag examples/commands/bash_demo.spit --sources examples/commands/bash_demo.sources --paths
-cargo run -- bash examples/commands/bash_demo.spit --sources examples/commands/bash_demo.sources > run.sh
+cargo run -- check examples/commands/bash_demo.spit --sources examples/commands/bash_demo.spitout --paths
+cargo run -- dag examples/commands/bash_demo.spit --sources examples/commands/bash_demo.spitout --paths
+cargo run -- bash examples/commands/bash_demo.spit --sources examples/commands/bash_demo.spitout > run.sh
 SPIT_ROOT=/path/to/data bash run.sh
 ```
 
@@ -150,7 +150,7 @@ SPIT_ROOT=/path/to/data bash run.sh
 Every other command stops at the first job the inventory cannot complete. `artifacts` resolves every job it can and reports the rest:
 
 ```sh
-cargo run -- artifacts pipeline.spit --sources inventory.spit
+cargo run -- artifacts pipeline.spit --sources inventory.spitout
 ```
 
 ```text

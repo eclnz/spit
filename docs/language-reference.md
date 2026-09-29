@@ -140,7 +140,7 @@ The lines directly in a stage share one indentation. A nested stage without its 
 SPIT orders stages by the products they read, so a stage needs no `after` clause. Stages must not depend on each other in a cycle, even through steps outside every stage. A nested stage is compared with its siblings, and counts toward its outer stage's place among the outer stage's siblings; a step written in an outer stage itself, like one outside every stage, passes on what it reads. `check` counts the jobs in each outermost stage, `dag` names each job's stage, and `bash` marks where each stage starts. To run one stage, such as the analysis after preprocessing has already run, pass `--stage`; a stage includes the stages nested in it, and `--stage preprocess/combine` names a nested one:
 
 ```sh
-cargo run -- bash examples/stages/stages.spit --sources examples/stages/stages.sources --stage analysis
+cargo run -- bash examples/stages/stages.spit --sources examples/stages/stages.spitout --stage analysis
 ```
 
 Stages are written in the flow form; a sectioned document cannot declare them. A step outside every stage stays valid.
@@ -228,13 +228,13 @@ Constraints check each observed group. They do not set a total subject or visit 
 ```text
 require image run=1,2 per [subject, visit]
 ```
- An inventory may include `contexts:` to name a group even when one of its required inputs is absent:
+ An inventory may include `contexts:` to name a group even when one of its required inputs is absent. A record may end with `: path`, its file relative to the dataset root; `spit discover` writes one for each file it finds, and a record without one takes its product's path rule:
 
 ```text
 contexts:
     [subject=A,visit=1]
 sources:
-    image[subject=A,visit=1,run=1]
+    image[subject=A,visit=1,run=1]: raw/A/1/run-1.nii.gz
 ```
 
 Types are additive. You can leave them out, add them to selected products and operations, or type the whole pipeline. Known mismatches fail; missing type information does not.
