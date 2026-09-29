@@ -84,7 +84,7 @@ fn sectioned_line(
         "sources:" | "contexts:" => {
             return Err(ParseError::new(
                 number,
-                "source inventory is separate from Pipeline; use parse_document for a combined text file",
+                "`sources:` and `contexts:` records belong in a .spitout, not a pipeline",
             ))
         }
         _ => match section {

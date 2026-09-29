@@ -26,10 +26,6 @@ path source_classes: config/source_classes.txt
 source target_classes : ClassTable []
 path target_classes: config/target_classes.txt
 
-require raw_photo count>=2 per [site, visit]
-require flat_field count=1 per [site, visit]
-require ground_map count=1 per [site, visit]
-
 # Import each photo with its pose sidecars and capture metadata.
 operation import_photo(image: Image<Photo,$Space>, gps: GpsTrack, imu: ImuTrace, metadata: CaptureMetadata) -> Image<Photo,$Space>
 command import_photo: imgconvert {image} {output} --pose {gps} {imu} --meta {metadata}

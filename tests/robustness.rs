@@ -2,12 +2,14 @@
 //! cannot coexist, commands written as if for a shell, and the command line
 //! used wrongly.
 
+mod support;
+
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
-use spit::{diagnose, parse_document, parse_pipeline, resolve, Cardinality, Diagnostic};
+use spit::{diagnose, parse_pipeline, resolve, Cardinality, Diagnostic};
 
 /// Step 3's binding, then the Bash backend, with either's error as text.
 fn bash_script(pipeline: &spit::Pipeline, dag: &spit::ResolvedDag) -> Result<String, String> {
@@ -78,7 +80,7 @@ fn a_path_inside_another_artifacts_file_is_rejected() {
     );
     // Different dimension names hide the overlap until paths are bound.
     let text = "source x [s]\npath x: in/{s}.txt\nsource z [t]\npath z: in/{t}.txt/out.txt\noperation f(a, b) -> Text\ncommand f: cp {a} {b} {output}\npath: o/{product}/{entities}\ny = f(x, z @ where(t=1))\nsources:\n    x[s=1]\n    z[t=1]\n";
-    let (pipeline, inventory) = parse_document(text).unwrap();
+    let (pipeline, inventory) = support::parse_fixture(text).unwrap();
     let error =
         bash_script(&pipeline, &resolve(&pipeline, &inventory.unwrap()).unwrap()).unwrap_err();
     assert!(
@@ -158,7 +160,7 @@ fn a_root_starting_with_a_dash_is_not_read_as_an_option() {
 #[ignore = "the Bash backend is paused"]
 fn single_quotes_and_backslashes_keep_braces_literal() {
     let text = "source x [s]\npath: {product}/{entities}\noperation f(a) -> Text\ncommand f: awk '{print $1}' \\{a\\} \"{a}\" {output}\ny = f(x)\nsources:\n    x[s=1]\n";
-    let (pipeline, inventory) = parse_document(text).unwrap();
+    let (pipeline, inventory) = support::parse_fixture(text).unwrap();
     let script = bash_script(&pipeline, &resolve(&pipeline, &inventory.unwrap()).unwrap()).unwrap();
     assert!(
         script.contains("'awk' '{print $1}' '{a}' \"$SPIT_ROOT\"/'x/s=1' \"$SPIT_ROOT\"/'y/s=1'"),
@@ -178,7 +180,7 @@ fn shell_operators_in_a_command_are_flagged() {
 #[test]
 fn a_step_after_an_inline_inventory_is_read_as_a_step() {
     let text = "source x [s]\noperation f(a) -> Text\nsources:\n    x[s=1]\ny = f(x)\naverage : Text [s] = f(x)\n";
-    let (pipeline, inventory) = parse_document(text).unwrap();
+    let (pipeline, inventory) = support::parse_fixture(text).unwrap();
     assert_eq!(pipeline.invocations.len(), 2);
     assert_eq!(inventory.unwrap().artifacts.len(), 1);
 }

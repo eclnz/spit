@@ -1,11 +1,10 @@
+mod support;
+
 use std::fs;
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use spit::{
-    diagnose, inspect_paths, parse_document, parse_pipeline, render_dag, resolve, Diagnostic,
-    PathRule,
-};
+use spit::{diagnose, inspect_paths, parse_pipeline, render_dag, resolve, Diagnostic, PathRule};
 
 /// The jobs with their bound paths, or the binding error as text.
 fn bound(pipeline: &spit::Pipeline, dag: &spit::ResolvedDag) -> Result<String, String> {
@@ -47,7 +46,7 @@ fn spit(args: &[&str]) -> (bool, String, String) {
 
 #[test]
 fn steps_belong_to_the_stage_whose_block_holds_them() {
-    let (pipeline, _) = parse_document(&staged()).unwrap();
+    let (pipeline, _) = support::parse_fixture(&staged()).unwrap();
     let names: Vec<_> = pipeline.stages.iter().map(|stage| &stage.name).collect();
     assert_eq!(names, ["preprocess", "analysis"]);
     assert_eq!(pipeline.stage_of("sorted"), Some("preprocess"));
@@ -77,7 +76,7 @@ fn a_product_named_stage_is_still_a_step() {
 
 #[test]
 fn jobs_carry_their_stage() {
-    let (pipeline, inventory) = parse_document(&staged()).unwrap();
+    let (pipeline, inventory) = support::parse_fixture(&staged()).unwrap();
     let dag = resolve(&pipeline, &inventory.unwrap()).unwrap();
     let stages: Vec<_> = dag.jobs.iter().map(|job| job.stage.as_deref()).collect();
     assert_eq!(
@@ -97,7 +96,7 @@ fn jobs_carry_their_stage() {
 
 #[test]
 fn a_stage_path_rule_covers_only_that_stage() {
-    let (pipeline, inventory) = parse_document(&staged()).unwrap();
+    let (pipeline, inventory) = support::parse_fixture(&staged()).unwrap();
     let coverage = inspect_paths(&pipeline).unwrap();
     let rule = |product: &str| {
         coverage
@@ -158,7 +157,7 @@ fn path_placeholder_names_are_reserved() {
 #[test]
 #[ignore = "the Bash backend is paused"]
 fn bash_marks_where_each_stage_starts() {
-    let (pipeline, inventory) = parse_document(&staged()).unwrap();
+    let (pipeline, inventory) = support::parse_fixture(&staged()).unwrap();
     let dag = resolve(&pipeline, &inventory.unwrap()).unwrap();
     let script = bash_script(&pipeline, &dag).unwrap();
     let preprocess = script.find("# ===== Stage: preprocess =====").unwrap();
@@ -171,7 +170,7 @@ fn bash_marks_where_each_stage_starts() {
 #[test]
 #[ignore = "the Bash backend is paused"]
 fn one_stage_runs_on_what_earlier_stages_wrote() {
-    let (pipeline, inventory) = parse_document(&staged()).unwrap();
+    let (pipeline, inventory) = support::parse_fixture(&staged()).unwrap();
     let dag = resolve(&pipeline, &inventory.unwrap())
         .unwrap()
         .only_stage("analysis");
@@ -195,7 +194,7 @@ fn stages_must_not_depend_on_each_other_in_a_cycle() {
             "stages must not depend on each other in a cycle: `d` in `first` reads `late` from `third`, `late` in `third` reads `b` from `second`, and `b` in `second` reads `a` from `first`"
         )]
     );
-    let (pipeline, _) = parse_document(text).unwrap();
+    let (pipeline, _) = support::parse_fixture(text).unwrap();
     assert!(resolve(&pipeline, &Default::default()).is_err());
 }
 
@@ -365,7 +364,7 @@ fn nested() -> String {
 
 #[test]
 fn nested_stages_are_named_by_their_path() {
-    let (pipeline, _) = parse_document(&nested()).unwrap();
+    let (pipeline, _) = support::parse_fixture(&nested()).unwrap();
     let names: Vec<_> = pipeline.stages.iter().map(|stage| &stage.name).collect();
     assert_eq!(
         names,
@@ -394,7 +393,7 @@ fn the_same_name_can_be_nested_in_different_stages() {
 #[test]
 fn nested_stages_nest_their_paths_and_inherit_defaults() {
     let text = "path: {stage}/{product}/{entities}\nsource raw [id]\npath raw: in/{id}\noperation copy(A) -> A\nstage outer:\n    path: out/{stage}/{product}/{entities}\n    stage inner:\n        a = copy(raw)\n    stage own:\n        path: own/{product}/{entities}\n        b = copy(a)\n";
-    let (pipeline, _) = parse_document(text).unwrap();
+    let (pipeline, _) = support::parse_fixture(text).unwrap();
     let coverage = inspect_paths(&pipeline).unwrap();
     let rule = |product: &str| {
         coverage
@@ -427,7 +426,7 @@ fn nested_stages_nest_their_paths_and_inherit_defaults() {
 
 #[test]
 fn one_stage_includes_the_stages_nested_in_it() {
-    let (pipeline, inventory) = parse_document(&nested()).unwrap();
+    let (pipeline, inventory) = support::parse_fixture(&nested()).unwrap();
     let dag = resolve(&pipeline, &inventory.unwrap()).unwrap();
     let ids = |stage: &str| -> Vec<_> {
         dag.only_stage(stage)

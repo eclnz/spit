@@ -1,9 +1,11 @@
+mod support;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use spit::{diagnose_at, parse_document_at, resolve};
+use spit::{diagnose_at, resolve};
 
 /// Step 3's binding, then the Bash backend, with either's error as text.
 fn bash_script(pipeline: &spit::Pipeline, dag: &spit::ResolvedDag) -> Result<String, String> {
@@ -44,13 +46,14 @@ impl Drop for TestDir {
 fn aliased_source_and_operation_work_through_cli_and_bash() {
     let path = Path::new("examples/imports/imported.spit");
     let text = fs::read_to_string(path).unwrap();
-    let document = spit::parse_spit_at(&text, path).unwrap();
-    let (pipeline, inventory) = (document.pipeline, document.inventory.unwrap());
+    let pipeline = spit::parse_pipeline_at(&text, path).unwrap();
+    let inventory = spit::parse_source_inventory(
+        &fs::read_to_string("examples/imports/imported.spitout").unwrap(),
+    )
+    .unwrap();
     assert_eq!(pipeline.products[0].name, "text::shard");
     assert_eq!(pipeline.operations[0].name, "text::sort_lines");
     assert_eq!(pipeline.commands[0].operation, "text::sort_lines");
-    // The imported source's rules come with it, for the input stage.
-    assert_eq!(document.inputs.constraints[0].product, "text::shard");
     assert_eq!(
         pipeline.product_paths["text::shard"],
         "input/{group}/{part}.txt"
@@ -92,7 +95,7 @@ fn unqualified_and_nested_imports_work_in_sectioned_files() {
          sources:\n  raw[id=x]\n",
     );
     let text = fs::read_to_string(&main).unwrap();
-    let (pipeline, inventory) = parse_document_at(&text, &main).unwrap();
+    let (pipeline, inventory) = support::parse_fixture_at(&text, &main).unwrap();
     assert_eq!(pipeline.operations.len(), 2);
     assert_eq!(pipeline.commands.len(), 2);
     assert_eq!(
@@ -106,7 +109,7 @@ fn import_errors_point_to_the_use_line() {
     let dir = TestDir::new();
     dir.write("base.spit", "operation clean(one)\n");
     let main = dir.write("main.spit", "use absent from base.spit\n");
-    let error = parse_document_at(&fs::read_to_string(&main).unwrap(), &main).unwrap_err();
+    let error = support::parse_fixture_at(&fs::read_to_string(&main).unwrap(), &main).unwrap_err();
     assert_eq!(error.line(), 1);
     assert!(error.message.contains("not a source or operation"));
 
@@ -114,7 +117,7 @@ fn import_errors_point_to_the_use_line() {
         "main.spit",
         "use clean from base.spit\nuse clean from base.spit\n",
     );
-    let error = parse_document_at(&fs::read_to_string(&main).unwrap(), &main).unwrap_err();
+    let error = support::parse_fixture_at(&fs::read_to_string(&main).unwrap(), &main).unwrap_err();
     assert_eq!(error.line(), 2);
     assert!(error.message.contains("conflicts with operation"));
 
@@ -122,7 +125,7 @@ fn import_errors_point_to_the_use_line() {
         "base.spit",
         "use clean from main.spit\noperation clean(one)\n",
     );
-    let error = parse_document_at(&fs::read_to_string(&main).unwrap(), &main).unwrap_err();
+    let error = support::parse_fixture_at(&fs::read_to_string(&main).unwrap(), &main).unwrap_err();
     assert_eq!(error.line(), 1);
     assert!(error.message.contains("import cycle"));
 }
@@ -155,7 +158,7 @@ fn import_after_inventory_keeps_inventory_separate() {
         "sources:\n  lib::raw[id=x]\nuse raw, clean from base.spit as lib\nresult = lib::clean(lib::raw)\n",
     );
     let (pipeline, inventory) =
-        parse_document_at(&fs::read_to_string(&main).unwrap(), &main).unwrap();
+        support::parse_fixture_at(&fs::read_to_string(&main).unwrap(), &main).unwrap();
     assert_eq!(pipeline.product_paths["lib::raw"], "input/raw/{id}.txt");
     assert_eq!(inventory.as_ref().unwrap().artifacts[0].product, "lib::raw");
     assert_eq!(
@@ -172,7 +175,8 @@ fn quoted_import_path_can_contain_as() {
         "main.spit",
         "use clean from \"base as draft.spit\" as prep\nsource raw [id]\nresult = prep::clean(raw)\n",
     );
-    let (pipeline, _) = parse_document_at(&fs::read_to_string(&main).unwrap(), &main).unwrap();
+    let (pipeline, _) =
+        support::parse_fixture_at(&fs::read_to_string(&main).unwrap(), &main).unwrap();
     assert_eq!(pipeline.operations[0].name, "prep::clean");
 }
 
@@ -188,7 +192,7 @@ fn import_all_skips_pipeline_steps_and_inventory() {
         "use base.spit as lib\nresult = lib::clean(lib::raw)\nsources:\n  lib::raw[id=new]\n",
     );
     let (pipeline, inventory) =
-        parse_document_at(&fs::read_to_string(&main).unwrap(), &main).unwrap();
+        support::parse_fixture_at(&fs::read_to_string(&main).unwrap(), &main).unwrap();
     assert_eq!(pipeline.products.len(), 2);
     assert_eq!(pipeline.products[0].name, "lib::raw");
     assert_eq!(pipeline.operations[0].name, "lib::clean");
@@ -203,7 +207,8 @@ fn import_all_skips_pipeline_steps_and_inventory() {
         "use base.spit\nresult = clean(raw)\nsources:\n  raw[id=new]\n",
     );
     let (pipeline, inventory) =
-        parse_document_at(&fs::read_to_string(&unqualified).unwrap(), &unqualified).unwrap();
+        support::parse_fixture_at(&fs::read_to_string(&unqualified).unwrap(), &unqualified)
+            .unwrap();
     assert_eq!(pipeline.operations[0].name, "clean");
     assert_eq!(
         resolve(&pipeline, &inventory.unwrap()).unwrap().jobs.len(),
@@ -230,7 +235,7 @@ operation copy(input) -> Unknown\ncommand copy: cp {input} {output}\n\
 copied = copy(lib::shard)\nsources:\n  lib::shard[part=a]\n",
     );
     let (pipeline, inventory) =
-        parse_document_at(&fs::read_to_string(&main).unwrap(), &main).unwrap();
+        support::parse_fixture_at(&fs::read_to_string(&main).unwrap(), &main).unwrap();
     let dag = resolve(&pipeline, &inventory.unwrap()).unwrap();
     let bash = bash_script(&pipeline, &dag).unwrap();
     assert!(bash.contains("'lib.shard/a.txt'"), "{bash}");
@@ -250,7 +255,7 @@ fn an_operation_imports_with_its_command_and_verifications() {
         "use library.spit as lib\npath: {product}/{entities}.txt\nsource raw : Table [id]\ncleaned = lib::clean(raw)\nsources:\n  raw[id=a]\n",
     );
     let text = fs::read_to_string(&pipeline).unwrap();
-    let (pipeline, inventory) = parse_document_at(&text, &pipeline).unwrap();
+    let (pipeline, inventory) = support::parse_fixture_at(&text, &pipeline).unwrap();
     assert_eq!(pipeline.commands.len(), 2);
     let bash = bash_script(&pipeline, &resolve(&pipeline, &inventory.unwrap()).unwrap()).unwrap();
     assert!(bash.contains("spit_verify 1 'check_table'"), "{bash}");
@@ -264,7 +269,8 @@ fn an_imported_path_keeps_escaped_braces() {
         "path: input/{{product}}/{product}/{id}.txt\nsource raw [id]\n",
     );
     let main = dir.write("main.spit", "use raw from base.spit as lib\n");
-    let (pipeline, _) = parse_document_at(&fs::read_to_string(&main).unwrap(), &main).unwrap();
+    let (pipeline, _) =
+        support::parse_fixture_at(&fs::read_to_string(&main).unwrap(), &main).unwrap();
     // Only the placeholder takes the product's name; the escaped braces stay literal.
     assert_eq!(
         pipeline.product_paths["lib::raw"],

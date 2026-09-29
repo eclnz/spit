@@ -1,9 +1,10 @@
 //! Path rules: which rule covers each product, and rules that cannot tell
 //! artifacts apart.
 
+mod support;
+
 use spit::{
-    inspect_paths, parse_document, parse_pipeline, parse_source_inventory, resolve, PathRule,
-    PathTemplate,
+    inspect_paths, parse_pipeline, parse_source_inventory, resolve, PathRule, PathTemplate,
 };
 
 /// The jobs with their bound paths, or the binding error as text.
@@ -15,7 +16,7 @@ fn bound(pipeline: &spit::Pipeline, dag: &spit::ResolvedDag) -> Result<String, S
 #[test]
 fn path_coverage_exposes_default_fallbacks_and_strict_rejects_them() {
     let (pipeline, _) =
-        parse_document(include_str!("../examples/commands/field_survey.spit")).unwrap();
+        support::parse_fixture(include_str!("../examples/commands/field_survey.spit")).unwrap();
     let coverage = inspect_paths(&pipeline).unwrap();
     assert!(coverage.entries.iter().any(|entry| {
         entry.product == "vegetation" && matches!(entry.rule, PathRule::Default(_))
@@ -57,7 +58,7 @@ fn path_coverage_catches_missing_and_invalid_rules_without_jobs() {
 #[test]
 fn bound_dag_shows_port_names_and_paths_without_commands() {
     let (mut pipeline, _) =
-        parse_document(include_str!("../examples/commands/field_survey.spit")).unwrap();
+        support::parse_fixture(include_str!("../examples/commands/field_survey.spit")).unwrap();
     let inventory =
         parse_source_inventory(include_str!("../examples/commands/field_survey.spitout")).unwrap();
     let dag = resolve(&pipeline, &inventory).unwrap();

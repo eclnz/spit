@@ -1,0 +1,4 @@
+pipeline selectors.spit
+
+require reading day=1,2 per [station]
+require policy count=1 per [station]

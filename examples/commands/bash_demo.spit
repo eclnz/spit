@@ -1,6 +1,5 @@
 # Each observed group and part produces jobs; no group names appear in this pipeline.
 source shard : Lines [group, part]
-require shard count>=1 per [group]
 
 # A general layout for generated products, with a different source layout.
 path: {product}/{entities}.txt

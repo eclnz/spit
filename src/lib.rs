@@ -24,17 +24,15 @@ pub use command::{validate_commands, CommandError, CommandTemplate};
 pub use compile::validate_pipeline;
 pub use diagnostics::{
     diagnose, diagnose_artifacts_at, diagnose_at, diagnose_at_with_inputs, diagnose_recipe,
-    Diagnostic, DiagnosticSource, Severity,
+    diagnose_recipe_against, Diagnostic, DiagnosticSource, Severity,
 };
 pub use error::{DefinitionSubject, ResolveError, TypeConflict};
-pub use imports::{
-    parse_document_at, parse_pipeline_at, parse_spit_at, parse_spit_without_records_at,
-};
+pub use imports::parse_pipeline_at;
 pub use inputs::{
     discover_source_files, discover_sources, parse_input_spec, parse_input_spec_at, Discovery,
     InputSource, InputSpec, ResolvedInputs,
 };
-pub use lower::{parse_document, parse_pipeline, parse_spit, Document};
+pub use lower::parse_pipeline;
 pub use model::{
     natural_cmp, stage_and_parents, stage_within, ArtifactInstance, ArtifactKey, ArtifactReport,
     ArtifactType, Cardinality, CommandDef, CommandRole, CountRequirement, CoverageAction,
