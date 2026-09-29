@@ -172,6 +172,20 @@ fn lower_statement(
         StatementKind::Product(product, place) => {
             builder.add_product(product.clone(), place.clone())
         }
+        StatementKind::Discover(discovery) => {
+            if builder
+                .pipeline
+                .discoveries
+                .iter()
+                .any(|existing| existing.name == discovery.name)
+            {
+                return Err(ParseError::new(
+                    statement.place.line,
+                    format!("duplicate discovery `{}`", discovery.name),
+                ));
+            }
+            builder.pipeline.discoveries.push(discovery.clone());
+        }
         StatementKind::Operation(operation, place) => {
             builder.add_operation(operation.clone(), place.clone())
         }

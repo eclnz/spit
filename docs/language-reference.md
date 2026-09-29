@@ -185,6 +185,18 @@ Place a source path beside its `source` line and a derived path beside its assig
 
 Path rules also find sources. `spit discover pipeline.spit --root data` lists each file under `data` whose path matches a source's rule, reading entity values from its placeholders, as inventory text. Links to files and directories are followed. A value is read only as SPIT writes it, so a file such as `in/%41.txt`, whose value SPIT would write `A`, is skipped with a warning rather than listed under a path no script would use. Other commands given `--root` and no inventory do the same, so `spit bash pipeline.spit --root data` needs no inventory file.
 
+### Discover contexts from directories
+
+```text
+discover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}
+```
+
+At the top level of a pipeline, `discover` extracts global entity bindings from directories. `sessions` names the rule; it is not an artifact or an input to a step. Each matching directory contributes one `[sub=...,ses=...]` binding, including an empty directory. Values can be strings and need not be sequential. Only pairs found on disk are included; SPIT does not form a Cartesian product of subjects and sessions. The pattern is relative to the pipeline file's folder by default, or to `--root` when given. `spit discover` prints the bindings under `contexts:`.
+
+If a `discover` declaration matches no directories, discovery fails and names that declaration and its pattern.
+
+Sources whose dimensions fit within the rule's dimensions expand over the observed bindings. For example, `source image [sub, ses]` expects one image per discovered pair, while `source reference [sub]` expects one per observed subject. Their `path` rules must name regular files; a missing file is an error. A source with another dimension, such as `run`, is still found by scanning its file path rule and can use `require` to check run coverage. The directory pattern must use every declared dimension, contain no other placeholders, and name a relative directory without `.` or `..` components. Values that cannot be represented faithfully in an inventory are skipped with a warning. An explicit `--sources` inventory or inline inventory takes precedence over filesystem discovery.
+
 ## Constraints and optional types
 
 ```text

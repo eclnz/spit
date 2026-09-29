@@ -10,7 +10,9 @@ mod source_map;
 
 use std::fmt;
 
-use crate::model::{CommandDef, CoverageRule, Invocation, OperationDef, ProductDef};
+use crate::model::{
+    CommandDef, CoverageRule, DirectoryDiscovery, Invocation, OperationDef, ProductDef,
+};
 use crate::paths::PathTemplate;
 use crate::span::{content_columns, Focus, Located, Place};
 use crate::types::TypeExpr;
@@ -136,6 +138,7 @@ pub(crate) enum StatementKind {
     },
     /// A `source` declaration or an entry of a `products:` section.
     Product(ProductDef, Place),
+    Discover(DirectoryDiscovery),
     Operation(OperationDef, Place),
     Constraint(CoverageRule, Rule),
     Command(CommandDef, Place),

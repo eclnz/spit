@@ -4,7 +4,8 @@
 use crate::model::{CommandRole, Invocation};
 
 use super::declarations::{
-    parse_command, parse_coverage_rule, parse_invocation_parts, parse_path, parse_product,
+    parse_command, parse_coverage_rule, parse_discover, parse_invocation_parts, parse_path,
+    parse_product,
 };
 use super::flow::is_stage_header;
 use super::lexical::{comma_items, identifier, strip_comment};
@@ -59,6 +60,12 @@ fn sectioned_line(
         "commands:" => *section = Some(Section::Commands),
         source if source.starts_with("use ") => {
             push(StatementKind::Import);
+            *section = None;
+        }
+        declaration if declaration.starts_with("discover ") => {
+            let declaration = declaration.trim_start_matches("discover ");
+            let discovery = parse_discover(declaration, number)?;
+            push(StatementKind::Discover(discovery));
             *section = None;
         }
         source if source.starts_with("shell-source:") => {
