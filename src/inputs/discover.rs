@@ -386,8 +386,7 @@ fn read_binding(path: &str, bound: BTreeMap<String, &str>) -> Result<EntityBindi
                 "`{path}`: `{dimension}` value `{encoded}` {reason}"
             )),
         })
-        .collect::<Result<_, _>>()
-        .map(EntityBinding)
+        .collect()
 }
 
 /// Decode a path component. It must be written exactly as SPIT would write

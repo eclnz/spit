@@ -27,12 +27,10 @@ fn resolve_text(text: &str, inventory: &str) -> Result<ResolvedDag, ResolveError
 fn record(product: &str, pairs: &[(&str, &str)]) -> SourceRecord {
     SourceRecord::new(
         product,
-        EntityBinding(
-            pairs
-                .iter()
-                .map(|(dimension, value)| ((*dimension).to_owned(), (*value).to_owned()))
-                .collect(),
-        ),
+        pairs
+            .iter()
+            .map(|(dimension, value)| ((*dimension).to_owned(), (*value).to_owned()))
+            .collect::<EntityBinding>(),
     )
 }
 

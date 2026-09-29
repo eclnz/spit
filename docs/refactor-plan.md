@@ -160,6 +160,10 @@ Dead public API (item 5, 15) is not visible to the compiler because `lib.rs` re-
 ### 15. Narrow the public API and encapsulate fields
 - `lib.rs` re-exports about 80 items; `EntityBinding(pub BTreeMap)`, `Pipeline`, `Job` expose all fields (`entities.0.get(..)` throughout).
 - Decide the intended public surface first (what does `spit-vscode` or an external backend actually use?). Then `pub(crate)` the rest and add accessors. Clippy `redundant_pub_crate` (~100 hits under pedantic) is style only and not part of this item.
+- **Status: done, with a narrower scope, by decision.** Nothing outside this repo links the library: `spit-vscode` runs the CLI, and a backend reads the `.spitdag` JSON. Of the 95 re-exports, 29 are unused outside the library, but nearly all appear in public signatures or fields (`BoundDag.jobs` holds `BoundJob`, `ResolveError` holds `DefinitionSubject`, and so on), so dropping their re-exports would leave public types callers cannot name. What changed:
+  - `EntityBinding`'s map is private, behind `get` (returning `&str`), `binds`, `iter`, `dimensions`, `len`, `is_empty`, crate-private `extend`, and `From<BTreeMap>`/`FromIterator` to build one. It was the type reached into most (12 places in `src`, 9 in tests).
+  - `DefaultPort` is crate-private (in no public signature). Doing so exposed a dead variant, `DefaultPort::Output`, now removed.
+  - **Left as is:** `Pipeline`, `Job`, `OperationDef` and the other model types keep public fields. They are a plain data model the tests build as struct literals; hiding them would need builders for every type and change nothing for a caller. Revisit if the crate is ever published for other Rust code.
 
 ### 16. Make `TypeExpr` `Display` unambiguous
 - `src/types.rs`: `Variable("T")` and `Named("T")` both print `T` (`Variable` prints bare when the name has one character). Diagnostics cannot distinguish them; the JSON encoder does. **Output change:** update expected messages in tests and docs.

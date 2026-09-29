@@ -321,7 +321,7 @@ stacked = stack(frame @ vary(run))
     );
     let runs: Vec<_> = dag.jobs[1].inputs[0]
         .iter()
-        .map(|frame| frame.entities.0["run"].clone())
+        .map(|frame| frame.entities.get("run").unwrap().to_owned())
         .collect();
     assert_eq!(runs, ["1", "2", "10"]);
 }
