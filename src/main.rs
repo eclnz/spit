@@ -10,7 +10,7 @@
 
 use std::env;
 use std::error::Error;
-use std::fmt::Write;
+use std::fmt;
 use std::fs;
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
@@ -248,42 +248,48 @@ enum Request {
     Version,
 }
 
-fn overview() -> String {
-    let mut text = String::from(
-        "spit: compile a pipeline, settle a dataset's inputs, resolve jobs, and write a script\n\nusage: spit <command> <files> [options]\n\ncommands:\n",
-    );
-    for command in COMMANDS {
-        writeln!(text, "  {:<10} {}", command.name(), command.summary()).unwrap();
+/// `spit help`, or `spit help <command>`.
+struct Help(Option<Command>);
+
+impl fmt::Display for Help {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.0 {
+            None => overview(f),
+            Some(command) => command_help(f, command),
+        }
     }
-    text.push_str(
-        "\nfiles:\n  .spit      a pipeline: sources, operations, steps, commands, path rules\n  .spitin    a recipe for a dataset's inputs, naming its pipeline\n  .spitout   a dataset's settled inputs, each source with its file\n  .spitdag   the resolved jobs, each with its files and command\n\nRun `spit help <command>` for its options.\n",
-    );
-    text
 }
 
-fn command_help(command: Command) -> String {
-    let mut text = format!(
-        "spit {}: {}\n\nusage: spit {} {} [options]\n",
-        command.name(),
-        command.summary(),
-        command.name(),
-        command.files()
-    );
+fn overview(f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    f.write_str(
+        "spit: compile a pipeline, settle a dataset's inputs, resolve jobs, and write a script\n\nusage: spit <command> <files> [options]\n\ncommands:\n",
+    )?;
+    for command in COMMANDS {
+        writeln!(f, "  {:<10} {}", command.name(), command.summary())?;
+    }
+    f.write_str(
+        "\nfiles:\n  .spit      a pipeline: sources, operations, steps, commands, path rules\n  .spitin    a recipe for a dataset's inputs, naming its pipeline\n  .spitout   a dataset's settled inputs, each source with its file\n  .spitdag   the resolved jobs, each with its files and command\n\nRun `spit help <command>` for its options.\n",
+    )
+}
+
+fn command_help(f: &mut fmt::Formatter<'_>, command: Command) -> fmt::Result {
+    let name = command.name();
+    writeln!(f, "spit {name}: {}\n", command.summary())?;
+    writeln!(f, "usage: spit {name} {} [options]", command.files())?;
     if let Some(shortcut) = command.shortcut() {
-        writeln!(text, "\n{shortcut}").unwrap();
+        writeln!(f, "\n{shortcut}")?;
     }
     if !command.flags().is_empty() {
-        text.push_str("\noptions:\n");
+        writeln!(f, "\noptions:")?;
         for flag in command.flags() {
             let name = match flag.value() {
                 Some(value) => format!("{} {value}", flag.name()),
                 None => flag.name().to_owned(),
             };
-            writeln!(text, "  {name:<20} {}", flag.help(command)).unwrap();
+            writeln!(f, "  {name:<20} {}", flag.help(command))?;
         }
     }
-    writeln!(text, "\nexample:\n  {}", command.example()).unwrap();
-    text
+    writeln!(f, "\nexample:\n  {}", command.example())
 }
 
 /// A usage error: what is wrong, and where to read more.
@@ -408,7 +414,7 @@ fn main() -> ExitCode {
     let args = match parse_args(env::args().skip(1)) {
         Ok(Request::Run(args)) => args,
         Ok(Request::Help(command)) => {
-            print!("{}", command.map_or_else(overview, command_help));
+            print!("{}", Help(command));
             return ExitCode::SUCCESS;
         }
         Ok(Request::Version) => {

@@ -106,6 +106,7 @@ Dead public API (item 5, 15) is not visible to the compiler because `lib.rs` re-
 - **Where:** `render::write_jobs` (`render.rs` ~98-125) and `spitdag::render_bound_dag` (`spitdag.rs` ~188-231) produce the same Job layout; `render_artifact` and `BoundArtifact::identity` duplicate each other.
 - **Also:** about 40 `writeln!(..).unwrap()` on `String` (`render.rs`, `spitdag.rs` ~193-229, `main.rs` ~253-282, `paths/template.rs` ~253); use a helper.
 - **Done when:** one job renderer; output text identical (golden-check `spit dag` and `spit dag --paths` on `examples/basic`).
+- **Status: done.** `render_dag` and `render_bound_dag` (moved to `render.rs`) both map their DAG onto one `JobText` view with one `Display`; the only difference is whether lines carry a port and a path. The artifact identity format is one function, `model::identity`, used by both and by `BoundArtifact::identity` (in `model`, since `spitdag` is a shared module and may not depend on `render`; `tests/architecture.rs` enforces this). The artifacts report and the CLI help are `Display` types too, and `encode_component` builds its string without `write!`, so no `writeln!(..).unwrap()` remains in `src/`. CLI output unchanged, including every `help` page and the artifacts report with incomplete jobs and coverage gaps.
 
 ### 7. Remove double work in CLI `prepare()`
 - **Where:** `src/main.rs` `prepare` (~614) and `run_inputs`.

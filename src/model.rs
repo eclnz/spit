@@ -109,6 +109,19 @@ impl fmt::Display for EntityBinding {
     }
 }
 
+/// An artifact as `product[dimension=value,...]`, its entities in the order
+/// given.
+pub(crate) fn identity<'a>(
+    product: &str,
+    entities: impl IntoIterator<Item = (&'a str, &'a str)>,
+) -> String {
+    let bindings: Vec<_> = entities
+        .into_iter()
+        .map(|(dimension, value)| format!("{dimension}={value}"))
+        .collect();
+    format!("{product}[{}]", bindings.join(","))
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProductDef {
     pub name: String,
