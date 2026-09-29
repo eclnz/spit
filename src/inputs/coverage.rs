@@ -231,34 +231,34 @@ pub(crate) fn coverage_gaps(
             .filter_map(|binding| binding.project(&rule.group_by))
             .collect()
     };
+    // Each group's members, found in one pass rather than once per group.
+    let mut members: BTreeMap<EntityBinding, Vec<ArtifactInstance>> = BTreeMap::new();
+    let mut bindings: BTreeMap<EntityBinding, Vec<&EntityBinding>> = BTreeMap::new();
+    if discovery {
+        for binding in discovered.into_iter().flatten() {
+            if let Some(group) = binding.project(&rule.group_by) {
+                bindings.entry(group).or_default().push(binding);
+            }
+        }
+    } else {
+        for artifact in artifacts.get(&rule.product).into_iter().flatten() {
+            if let Some(group) = artifact.entities.project(&rule.group_by) {
+                members.entry(group).or_default().push(artifact.clone());
+            }
+        }
+        for (group, artifacts) in &members {
+            let entities = artifacts.iter().map(|artifact| &artifact.entities);
+            bindings.insert(group.clone(), entities.collect());
+        }
+    }
     let mut gaps = Vec::new();
     for context in groups {
-        let members: Vec<_> = if discovery {
-            Vec::new()
-        } else {
-            artifacts
-                .get(&rule.product)
-                .map_or(&[][..], Vec::as_slice)
-                .iter()
-                .filter(|artifact| {
-                    artifact.entities.project(&rule.group_by).as_ref() == Some(&context)
-                })
-                .cloned()
-                .collect()
-        };
-        let bindings: Vec<_> = if discovery {
-            discovered
-                .into_iter()
-                .flatten()
-                .filter(|binding| binding.project(&rule.group_by).as_ref() == Some(&context))
-                .collect()
-        } else {
-            members.iter().map(|artifact| &artifact.entities).collect()
-        };
-        let errors = group_errors(rule_index, rule, &context, &bindings, discovery);
+        let members = members.get(&context).map_or(&[][..], Vec::as_slice);
+        let bindings = bindings.get(&context).map_or(&[][..], Vec::as_slice);
+        let errors = group_errors(rule_index, rule, &context, bindings, discovery);
         gaps.extend(errors.into_iter().map(|error| CoverageGap {
             error,
-            sources: members.clone(),
+            sources: members.to_vec(),
         }));
     }
     gaps

@@ -195,13 +195,13 @@ impl InventoryText<'_> {
             Some((name, contexts)) if inventory.discovered.len() == 1 => self
                 .rules
                 .discovery(name)
-                .map(|rule| (contexts, &rule.dimensions)),
+                .map(|rule| (contexts.iter().collect::<BTreeSet<_>>(), &rule.dimensions)),
             _ => None,
         };
         let mut nested: Nested<'a> = BTreeMap::new();
         let mut flat = Vec::new();
         for record in &inventory.artifacts {
-            let under = discovery.and_then(|(contexts, dimensions)| {
+            let under = discovery.as_ref().and_then(|(contexts, dimensions)| {
                 if unexpected_path(record, located).is_some() {
                     return None;
                 }

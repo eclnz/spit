@@ -19,9 +19,9 @@ use std::process::ExitCode;
 use spit::{
     bind_dag, diagnose_checked, diagnose_checked_with_records, diagnose_recipe, inspect_paths,
     parse_input_spec_at, render_artifacts, render_bound_dag, render_dag, render_diagnostics_json,
-    render_source_inventory, resolve, resolve_artifacts_excluding, stage_within,
-    validate_source_files, Checked, Context, Diagnosis, Diagnostic, DiagnosticSource, InputSource,
-    InputSpec, PathTemplate, Pipeline, ResolvedDag, ResolvedInputs, Severity,
+    render_source_inventory, stage_within, validate_source_files, ArtifactReport, Checked, Context,
+    Diagnosis, Diagnostic, DiagnosticSource, InputSource, InputSpec, PathTemplate, Pipeline,
+    ResolvedDag, ResolvedInputs, Severity,
 };
 
 #[derive(Clone, Copy, PartialEq)]
@@ -622,6 +622,9 @@ struct Prepared {
     pipeline: Pipeline,
     bound: Pipeline,
     inputs: ResolvedInputs,
+    /// What the inputs resolve to, from their diagnosis; its sources get
+    /// their files from `inputs` in [`prepared`].
+    report: ArtifactReport,
     /// Where source files are, when known.
     root: Option<PathBuf>,
 }
@@ -671,9 +674,9 @@ fn prepare(args: &CliArgs) -> Result<Prepared, Box<dyn Error>> {
         &pipeline_text,
         Some(&records_text),
     )?;
-    let settled =
-        InputSpec::default().resolve(&checked.pipeline, InputSource::Inventory(records))?;
-    Ok(prepared(checked.pipeline, settled, root))
+    let settled = InputSpec::default()
+        .resolve(&checked.pipeline, InputSource::Inventory(records.inventory))?;
+    Ok(prepared(checked.pipeline, settled, records.report, root))
 }
 
 /// Step 2 in memory for the recipe `file`, then step 3's diagnosis of the
@@ -698,18 +701,29 @@ fn prepare_recipe(
         lenient,
     };
     let diagnosis = diagnose_checked_with_records(&loaded.pipeline_text, &records_text, context);
-    passed(
+    let (_, records) = passed(
         diagnosis,
         |(checked, _)| &checked.warnings,
         &loaded.pipeline_text,
         Some(&records_text),
     )?;
     let root = root.or_else(|| settled.root.clone());
-    Ok(prepared(loaded.checked.pipeline, settled, root))
+    Ok(prepared(
+        loaded.checked.pipeline,
+        settled,
+        records.report,
+        root,
+    ))
 }
 
 /// `pipeline` ready for step 3 with its `inputs`.
-fn prepared(pipeline: Pipeline, inputs: ResolvedInputs, root: Option<PathBuf>) -> Prepared {
+fn prepared(
+    pipeline: Pipeline,
+    inputs: ResolvedInputs,
+    mut report: ArtifactReport,
+    root: Option<PathBuf>,
+) -> Prepared {
+    report.dag.locate_sources(&inputs.inventory);
     // Records give every source its file; outputs with no rule take the
     // built-in layout.
     let mut bound = pipeline.clone();
@@ -720,6 +734,7 @@ fn prepared(pipeline: Pipeline, inputs: ResolvedInputs, root: Option<PathBuf>) -
         pipeline,
         bound,
         inputs,
+        report,
         root,
     }
 }
@@ -728,19 +743,19 @@ fn prepared(pipeline: Pipeline, inputs: ResolvedInputs, root: Option<PathBuf>) -
 fn dag(args: &CliArgs) -> Result<(), Box<dyn Error>> {
     let prepared = prepare(args)?;
     prepared.inputs.require_complete()?;
-    let dag = resolve(&prepared.pipeline, &prepared.inputs.dag_inventory())?;
+    let dag = &prepared.report.dag;
     if args.has(Flag::StrictPaths) {
         inspect_paths(&prepared.bound)?
             .with_inventory_paths(located(&prepared.inputs))
             .validate(true)?;
     }
     if let Some(root) = &prepared.root {
-        let verified = validate_source_files(&prepared.bound, &dag, root)?;
+        let verified = validate_source_files(&prepared.bound, dag, root)?;
         eprintln!("note: {verified}");
     }
-    eprintln!("note: {}", job_count(&prepared.pipeline, &dag));
+    eprintln!("note: {}", job_count(&prepared.pipeline, dag));
     if args.has(Flag::Output) || args.has(Flag::Json) {
-        let mut bound = bind_dag(&prepared.bound, &dag)?;
+        let mut bound = bind_dag(&prepared.bound, dag)?;
         bound.root = prepared.root.as_deref().map(|root| {
             std::path::absolute(root)
                 .unwrap_or_else(|_| root.to_path_buf())
@@ -752,10 +767,10 @@ fn dag(args: &CliArgs) -> Result<(), Box<dyn Error>> {
     if args.has(Flag::Paths) {
         print!(
             "{}",
-            render_bound_dag(&bind_dag(&prepared.bound, &dag)?, true)
+            render_bound_dag(&bind_dag(&prepared.bound, dag)?, true)
         );
     } else {
-        print!("{}", render_dag(&dag));
+        print!("{}", render_dag(dag));
     }
     Ok(())
 }
@@ -763,11 +778,7 @@ fn dag(args: &CliArgs) -> Result<(), Box<dyn Error>> {
 /// Step 3: what can be made, what cannot, and why.
 fn artifacts(args: &CliArgs) -> Result<(), Box<dyn Error>> {
     let prepared = prepare(args)?;
-    let mut report = resolve_artifacts_excluding(
-        &prepared.pipeline,
-        &prepared.inputs.dag_inventory(),
-        &prepared.inputs.unavailable(),
-    )?;
+    let mut report = prepared.report;
     report.coverage = prepared.inputs.gaps;
     if let Some(root) = &prepared.root {
         validate_source_files(&prepared.bound, &report.dag, root)?;
