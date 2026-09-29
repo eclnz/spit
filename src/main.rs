@@ -67,16 +67,16 @@ impl Command {
             },
             Self::Dag => CommandSpec {
                 name: "dag",
-                files: "<pipeline.spit> <inputs.spitout | recipe.spitin | ->",
+                files: "<recipe.spitin> | <pipeline.spit> <inputs.spitout | recipe.spitin | ->",
                 summary: "step 3: resolve a pipeline's jobs over a dataset's inputs; -o writes the .spitdag",
-                example: "spit dag analysis.spit dataset.spitout -o analysis.spitdag\n  spit dag analysis.spit dataset.spitout --paths",
+                example: "spit dag dataset.spitin -o analysis.spitdag\n  spit dag analysis.spit dataset.spitout -o analysis.spitdag\n  spit dag analysis.spit dataset.spitout --paths",
                 flags: &[Root, StrictPaths, Paths, Json, Output],
             },
             Self::Artifacts => CommandSpec {
                 name: "artifacts",
-                files: "<pipeline.spit> <inputs.spitout | recipe.spitin | ->",
+                files: "<recipe.spitin> | <pipeline.spit> <inputs.spitout | recipe.spitin | ->",
                 summary: "step 3: report what can and cannot be made from a dataset's inputs, and why",
-                example: "spit artifacts analysis.spit dataset.spitout",
+                example: "spit artifacts dataset.spitin\n  spit artifacts analysis.spit dataset.spitout",
                 flags: &[Root],
             },
         }
@@ -99,7 +99,7 @@ impl Command {
     fn arity(self) -> (usize, usize) {
         match self {
             Self::Check | Self::Inputs => (1, 1),
-            Self::Dag | Self::Artifacts => (2, 2),
+            Self::Dag | Self::Artifacts => (1, 2),
         }
     }
 
@@ -116,7 +116,7 @@ impl Command {
     fn shortcut(self) -> Option<&'static str> {
         match self {
             Self::Dag | Self::Artifacts => Some(
-                "Given a .spitin in place of the .spitout, it runs `spit inputs` in memory first.",
+                "Given a .spitin in place of the .spitout, it runs `spit inputs` in memory first.\nA .spitin names its pipeline, so it can be given alone; a .spitout or `-` needs the pipeline too.",
             ),
             Self::Check | Self::Inputs => None,
         }
@@ -497,6 +497,8 @@ fn inputs(args: &CliArgs) -> Result<(), Box<dyn Error>> {
 
 /// A settled dataset, with the pipeline it was settled for.
 struct Settled {
+    /// The file the recipe's `pipeline` line, or the caller, named.
+    pipeline_file: PathBuf,
     pipeline: Pipeline,
     recipe: InputSpec,
     inputs: ResolvedInputs,
@@ -566,6 +568,7 @@ fn run_inputs(
         );
     }
     Ok(Settled {
+        pipeline_file,
         pipeline,
         recipe,
         inputs: resolved,
@@ -584,16 +587,19 @@ struct Prepared {
 
 /// Read the pipeline and its inputs for step 3, running step 2 in memory
 /// for a recipe, and report every diagnostic first.
-fn prepare(args: &CliArgs, pipeline_file: &str, inputs: &str) -> Result<Prepared, Box<dyn Error>> {
-    let path = Path::new(pipeline_file);
-    let pipeline_text = read_file(pipeline_file)?;
+fn prepare(args: &CliArgs) -> Result<Prepared, Box<dyn Error>> {
+    // A recipe names its pipeline, so it can stand alone; any other inputs
+    // need the pipeline they are for.
+    let (given, inputs) = match args.files.as_slice() {
+        [inputs] => (None, inputs),
+        [pipeline, inputs] => (Some(pipeline.as_str()), inputs),
+        _ => unreachable!("the command takes one or two files"),
+    };
     let lenient = args.command == Command::Artifacts;
     let mut root = args.value(Flag::Root).map(PathBuf::from);
-    let (records_text, recipe) = if inputs == "-" {
-        (read_stdin()?, None)
-    } else if is_recipe(inputs) {
+    let (path, records_text, recipe) = if is_recipe(inputs) {
         let given_root = root.as_ref().and_then(|root| root.to_str());
-        let settled = run_inputs(inputs, Some(path), given_root)?;
+        let settled = run_inputs(inputs, given.map(Path::new), given_root)?;
         eprintln!("note: ran `spit inputs {inputs}` in memory");
         root = root.or_else(|| settled.inputs.root.clone());
         let text = render_source_inventory(
@@ -601,10 +607,20 @@ fn prepare(args: &CliArgs, pipeline_file: &str, inputs: &str) -> Result<Prepared
             &settled.pipeline,
             &settled.recipe.rules,
         );
-        (text, Some(settled.recipe))
+        (settled.pipeline_file, text, Some(settled.recipe))
     } else {
-        (read_file(inputs)?, None)
+        let Some(pipeline) = given else {
+            return Err(format!("{} needs {}", args.command.name(), args.command.files()).into());
+        };
+        let text = if inputs == "-" {
+            read_stdin()?
+        } else {
+            read_file(inputs)?
+        };
+        (PathBuf::from(pipeline), text, None)
     };
+    let path = path.as_path();
+    let pipeline_text = read_file(&path.display().to_string())?;
     let checked = diagnose_at_checked(
         &pipeline_text,
         Some(&records_text),
@@ -634,7 +650,7 @@ fn prepare(args: &CliArgs, pipeline_file: &str, inputs: &str) -> Result<Prepared
 
 /// Step 3: resolve the jobs and print them, or write the `.spitdag`.
 fn dag(args: &CliArgs) -> Result<(), Box<dyn Error>> {
-    let prepared = prepare(args, &args.files[0], &args.files[1])?;
+    let prepared = prepare(args)?;
     prepared.inputs.require_complete()?;
     let dag = resolve(&prepared.pipeline, &prepared.inputs.dag_inventory())?;
     if args.has(Flag::StrictPaths) {
@@ -666,7 +682,7 @@ fn dag(args: &CliArgs) -> Result<(), Box<dyn Error>> {
 
 /// Step 3: what can be made, what cannot, and why.
 fn artifacts(args: &CliArgs) -> Result<(), Box<dyn Error>> {
-    let prepared = prepare(args, &args.files[0], &args.files[1])?;
+    let prepared = prepare(args)?;
     let mut report = resolve_artifacts_excluding(
         &prepared.pipeline,
         &prepared.inputs.dag_inventory(),
