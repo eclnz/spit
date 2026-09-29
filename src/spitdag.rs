@@ -3,9 +3,11 @@
 //! nothing else; it never sees the pipeline, a path rule or a command
 //! template. Written as a `.spitdag`, a JSON document.
 
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt;
 
-use crate::json::{Json, ObjectRef};
+use crate::json::{write_array, Json, ObjectRef, ObjectWriter};
 use crate::types::TypeExpr;
 
 /// The schema version a `.spitdag` is written with.
@@ -144,58 +146,66 @@ impl BoundDag {
 
     /// The `.spitdag` document.
     pub fn to_json(&self) -> String {
-        let dependents = self.dependents();
-        let document =
-            Json::object([
-                ("version", Json::Number(SPITDAG_VERSION)),
-                (
-                    "generator",
-                    Json::object([
-                        ("name", Json::string("spit")),
-                        ("version", Json::string(env!("CARGO_PKG_VERSION"))),
-                    ]),
-                ),
-                (
-                    "root",
-                    self.root.as_deref().map_or(Json::Null, Json::string),
-                ),
-                (
-                    "external_inputs",
-                    Json::array(self.external_inputs().into_iter().map(artifact_json)),
-                ),
-                (
-                    "targets",
-                    Json::array(self.targets().into_iter().map(artifact_json)),
-                ),
-                (
-                    "executables",
-                    Json::array(self.executables().into_iter().map(Json::String)),
-                ),
-                (
-                    "jobs",
-                    Json::array(self.jobs.iter().map(|job| {
-                        job_json(job, dependents.get(&job.id).map_or(&[], Vec::as_slice))
-                    })),
-                ),
-            ]);
-        format!("{document}\n")
+        format!("{}\n", Document(self))
     }
 }
 
-fn job_json(job: &BoundJob, dependents: &[usize]) -> Json {
+/// A bound DAG as a `.spitdag`, written a job at a time.
+struct Document<'a>(&'a BoundDag);
+
+impl fmt::Display for Document<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let dag = self.0;
+        let dependents = dag.dependents();
+        let mut document = ObjectWriter::start(f)?;
+        document.field("version", &Json::Number(SPITDAG_VERSION))?;
+        document.field(
+            "generator",
+            &Json::object([
+                ("name", Json::string("spit")),
+                ("version", Json::string(env!("CARGO_PKG_VERSION"))),
+            ]),
+        )?;
+        document.field(
+            "root",
+            &dag.root.as_deref().map_or(Json::Null, Json::string),
+        )?;
+        document.field(
+            "external_inputs",
+            &Json::array(dag.external_inputs().into_iter().map(artifact_json)),
+        )?;
+        document.field(
+            "targets",
+            &Json::array(dag.targets().into_iter().map(artifact_json)),
+        )?;
+        document.field(
+            "executables",
+            &Json::array(dag.executables().into_iter().map(Json::string)),
+        )?;
+        document.field_with("jobs", |out| {
+            write_array(out, &dag.jobs, |out, job| {
+                let dependents = dependents.get(&job.id).map_or(&[][..], Vec::as_slice);
+                job_json(job, dependents)?.write_to(out)
+            })
+        })?;
+        document.finish()
+    }
+}
+
+fn job_json<'a>(job: &'a BoundJob, dependents: &[usize]) -> Result<Json<'a>, fmt::Error> {
     let stage = job.stage.as_deref().map_or(Vec::new(), |stage| {
         stage.split('/').map(Json::string).collect()
     });
     let inputs = job.inputs.iter().map(|(port, artifacts)| {
         (
-            port.clone(),
+            Cow::Borrowed(port.as_str()),
             Json::array(artifacts.iter().map(artifact_json)),
         )
     });
     let outputs = job
         .outputs
         .iter()
-        .map(|(port, artifact)| (port.clone(), artifact_json(artifact)));
+        .map(|(port, artifact)| (Cow::Borrowed(port.as_str()), artifact_json(artifact)));
     let operation = Json::string(&job.operation);
     let inputs = Json::Object(inputs.collect());
     let outputs = Json::Object(outputs.collect());
@@ -210,12 +220,12 @@ fn job_json(job: &BoundJob, dependents: &[usize]) -> Json {
         ("command", &command),
         ("verify", &verify),
     ]);
-    let fingerprint = fingerprint(&work.to_string());
-    Json::object([
+    let fingerprint = fingerprint(&work)?;
+    Ok(Json::object([
         ("id", Json::Number(job.id)),
         ("operation", operation),
         ("stage", Json::Array(stage)),
-        ("fingerprint", Json::String(fingerprint)),
+        ("fingerprint", Json::string(fingerprint)),
         ("inputs", inputs),
         ("outputs", outputs),
         (
@@ -228,23 +238,45 @@ fn job_json(job: &BoundJob, dependents: &[usize]) -> Json {
         ),
         ("command", command),
         ("verify", verify),
-    ])
+    ]))
 }
 
-/// A 64-bit FNV-1a hash of `text`, as 16 hexadecimal digits: the same on
-/// every platform and in every release, unlike the standard library's. A
-/// job's fingerprint hashes its work as compact JSON, so the JSON writer's
-/// format is part of the `.spitdag` contract; a test pins a job's value.
-fn fingerprint(text: &str) -> String {
-    let hash = text.bytes().fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
-        (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3)
-    });
-    format!("{hash:016x}")
+/// A 64-bit FNV-1a hash of `work` written as compact JSON, as 16
+/// hexadecimal digits: the same on every platform and in every release,
+/// unlike the standard library's. The JSON writer's format is part of the
+/// `.spitdag` contract; a test pins a job's value.
+fn fingerprint(work: &ObjectRef<'_, '_>) -> Result<String, fmt::Error> {
+    let mut hash = Fnv::new();
+    work.write_to(&mut hash)?;
+    Ok(hash.hex())
+}
+
+/// FNV-1a over the text written to it, so nothing is kept but the hash.
+struct Fnv(u64);
+
+impl Fnv {
+    fn new() -> Self {
+        Self(0xcbf2_9ce4_8422_2325)
+    }
+
+    /// The hash as 16 hexadecimal digits.
+    fn hex(&self) -> String {
+        format!("{:016x}", self.0)
+    }
+}
+
+impl fmt::Write for Fnv {
+    fn write_str(&mut self, text: &str) -> fmt::Result {
+        for byte in text.bytes() {
+            self.0 = (self.0 ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3);
+        }
+        Ok(())
+    }
 }
 
 /// An argument is an array of parts: a string for text, `{"path": ...}` for
 /// a file.
-fn command_json(command: &[Argument]) -> Json {
+fn command_json(command: &[Argument]) -> Json<'_> {
     Json::array(command.iter().map(|argument| {
         Json::array(argument.iter().map(|part| match part {
             ArgPart::Text(text) => Json::string(text),
@@ -253,11 +285,11 @@ fn command_json(command: &[Argument]) -> Json {
     }))
 }
 
-fn artifact_json(artifact: &BoundArtifact) -> Json {
+fn artifact_json(artifact: &BoundArtifact) -> Json<'_> {
     let entities = artifact
         .entities
         .iter()
-        .map(|(dimension, value)| (dimension.clone(), Json::string(value)));
+        .map(|(dimension, value)| (Cow::Borrowed(dimension.as_str()), Json::string(value)));
     Json::object([
         ("product", Json::string(&artifact.product)),
         ("entities", Json::Object(entities.collect())),
@@ -266,7 +298,7 @@ fn artifact_json(artifact: &BoundArtifact) -> Json {
     ])
 }
 
-fn type_json(artifact_type: &TypeExpr) -> Json {
+fn type_json(artifact_type: &TypeExpr) -> Json<'_> {
     match artifact_type {
         TypeExpr::Unknown => Json::Null,
         TypeExpr::Variable(name) => Json::object([("variable", Json::string(name))]),
@@ -402,7 +434,12 @@ mod tests {
         // The hash of the work as compact JSON: a change to the JSON writer
         // changes every fingerprint, so it must be deliberate.
         assert_eq!(print(&job), "72f6d8ecbacfd9ad");
-        assert_eq!(fingerprint(""), "cbf29ce484222325");
-        assert_eq!(fingerprint("a"), "af63dc4c8601ec8c");
+        let fnv = |text: &str| {
+            let mut hash = Fnv::new();
+            fmt::Write::write_str(&mut hash, text).unwrap();
+            hash.hex()
+        };
+        assert_eq!(fnv(""), "cbf29ce484222325");
+        assert_eq!(fnv("a"), "af63dc4c8601ec8c");
     }
 }

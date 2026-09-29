@@ -456,6 +456,18 @@ fn path_pattern(template: &PathTemplate, product: &ProductDef) -> Result<Vec<Pie
 /// Match `text` against `pieces`, binding each dimension to its encoded
 /// value; a dimension used twice must have the same value both times.
 fn match_pattern<'a>(pieces: &[Piece], text: &'a str) -> Option<BTreeMap<String, &'a str>> {
+    // A match begins with a literal first piece and ends with a literal last
+    // one, which rules out most patterns without searching.
+    if let Some(Piece::Literal(first)) = pieces.first() {
+        if !text.starts_with(first.as_str()) {
+            return None;
+        }
+    }
+    if let Some(Piece::Literal(last)) = pieces.last() {
+        if !text.ends_with(last.as_str()) {
+            return None;
+        }
+    }
     let mut bound = BTreeMap::new();
     let mut failed = BTreeSet::new();
     match_from(pieces, 0, text, 0, &mut bound, &mut failed).then(|| {

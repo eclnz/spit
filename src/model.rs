@@ -172,6 +172,14 @@ impl EntityBinding {
 
     /// Keep only `dimensions`, or `None` if one of them is unbound.
     pub fn project(&self, dimensions: &[String]) -> Option<Self> {
+        // Keeping every dimension, as when grouping by all of them, is a copy.
+        if self.len() == dimensions.len()
+            && self
+                .dimensions()
+                .all(|name| dimensions.iter().any(|dimension| dimension == name))
+        {
+            return Some(self.clone());
+        }
         dimensions
             .iter()
             .map(|dimension| {
