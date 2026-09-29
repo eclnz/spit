@@ -40,6 +40,7 @@ pub(crate) fn split_document(text: &str) -> DocumentText {
                 || line.starts_with("shell-source:")
                 || line.starts_with("use ")
                 || line.starts_with("source ")
+                || line.starts_with("discover ")
                 || line.starts_with("operation ")
                 || line.starts_with("command ")
                 || line.starts_with("verify ")

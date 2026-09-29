@@ -5,7 +5,8 @@
 use crate::model::{CommandRole, Invocation};
 
 use super::declarations::{
-    parse_command, parse_coverage_rule, parse_invocation_parts, parse_path, parse_product,
+    parse_command, parse_coverage_rule, parse_discover, parse_invocation_parts, parse_path,
+    parse_product,
 };
 use super::lexical::{comma_items, identifier, strip_comment};
 use super::operation::parse_operation;
@@ -154,6 +155,10 @@ fn flow_line(
         let product = parse_product(declaration, number)?;
         let place = name_place(original, number, declaration, &product.name);
         StatementKind::Product(product, place)
+    } else if let Some(declaration) = line.strip_prefix("discover ") {
+        top_level_only("`discover`")?;
+        let discovery = parse_discover(declaration.trim(), number)?;
+        StatementKind::Discover(discovery)
     } else if let Some(declaration) = line.strip_prefix("operation ") {
         let declaration = declaration.trim();
         let operation = parse_operation(declaration, number)?;
@@ -193,7 +198,7 @@ fn flow_line(
     } else {
         return Err(ParseError::new(
             number,
-            "expected source, operation, command, verify, require, path, stage, or output = operation(inputs)",
+            "expected source, discover, operation, command, verify, require, path, stage, or output = operation(inputs)",
         ));
     };
     syntax.push(original, number, kind);

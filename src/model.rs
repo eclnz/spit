@@ -487,6 +487,14 @@ pub struct StageDef {
     pub path_template: Option<PathTemplate>,
 }
 
+/// A directory pattern that discovers concrete entity bindings under a root.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DirectoryDiscovery {
+    pub name: String,
+    pub dimensions: Vec<String>,
+    pub template: PathTemplate,
+}
+
 impl StageDef {
     pub fn new(name: impl Into<String>) -> Self {
         Self {
@@ -498,6 +506,7 @@ impl StageDef {
 
 #[derive(Clone, Debug, Default)]
 pub struct Pipeline {
+    pub discoveries: Vec<DirectoryDiscovery>,
     pub products: Vec<ProductDef>,
     pub operations: Vec<OperationDef>,
     pub invocations: Vec<Invocation>,
