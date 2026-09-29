@@ -15,7 +15,7 @@ use crate::model::{
     CommandDef, CoverageRule, DirectoryDiscovery, Invocation, OperationDef, ProductDef,
 };
 use crate::paths::PathTemplate;
-use crate::span::{content_columns, Focus, Located, Place};
+use crate::span::{address_of, columns_at, content_columns, Focus, Located, Place};
 use crate::types::TypeExpr;
 
 use self::flow::parse_flow;
@@ -79,10 +79,9 @@ impl ParseError {
 
     /// Mark `token`, a slice of the line being parsed, as what the error is about.
     pub(crate) fn at_token(mut self, token: &str) -> Self {
-        let start = token.as_ptr() as usize;
         self.location
             .focus
-            .get_or_insert(Focus::Slice(start..start + token.len()));
+            .get_or_insert(Focus::Address(address_of(token)));
         self
     }
 
@@ -99,16 +98,10 @@ impl ParseError {
     /// from; without one, point at the line's content.
     pub(crate) fn locate(mut self, line: &str) -> Self {
         if self.location.columns.is_none() {
-            let base = line.as_ptr() as usize;
             let token = match self.location.focus.take() {
-                Some(Focus::Slice(token)) => Some(token),
+                Some(Focus::Address(address)) => columns_at(line, &address),
                 _ => None,
             };
-            let token = token.and_then(|token| {
-                let start = token.start.checked_sub(base)?;
-                let end = token.end.checked_sub(base)?;
-                (end <= line.len()).then_some(start..end)
-            });
             self.location.columns = Some(token.unwrap_or_else(|| content_columns(line)));
         }
         self

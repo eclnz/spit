@@ -1,5 +1,7 @@
 //! Lexical helpers: comments, names, and comma-separated lists.
 
+use std::ops::Range;
+
 use super::ParseError;
 
 /// As in Bash, an unquoted `#` starts a comment only at the start of a word,
@@ -12,9 +14,10 @@ fn comment_start(line: &str) -> Option<usize> {
     scan_hashes(line).find_map(|hash| hash.starts_word.then_some(hash.index))
 }
 
-/// The word before an unquoted `#` that ends it, as in `word# note`: the `#`
-/// stays part of the word, though it reads like the start of a comment.
-pub(crate) fn glued_comment(line: &str) -> Option<&str> {
+/// Where the word before an unquoted `#` that ends it sits, as in
+/// `word# note`: the `#` stays part of the word, though it reads like the
+/// start of a comment.
+pub(crate) fn glued_comment(line: &str) -> Option<Range<usize>> {
     let end = comment_start(line).unwrap_or(line.len());
     scan_hashes(&line[..end]).find_map(|hash| {
         let ends_word = line[hash.index + 1..]
@@ -25,7 +28,7 @@ pub(crate) fn glued_comment(line: &str) -> Option<&str> {
             let word_start = line[..hash.index]
                 .rfind(char::is_whitespace)
                 .map_or(0, |index| index + 1);
-            &line[word_start..hash.index]
+            word_start..hash.index
         })
     })
 }

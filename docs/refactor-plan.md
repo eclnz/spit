@@ -62,6 +62,12 @@ Dead public API (item 5, 15) is not visible to the compiler because `lib.rs` re-
 - **Problem:** offsets are recovered by subtracting `as_ptr() as usize` values. `discover.rs` subtracts unchecked (debug-build panic if the slice is not from that text). Nothing checks `char` boundaries. `Focus::Slice` only works if it is resolved "before the line is dropped".
 - **Fix:** parser returns byte spans (or `str::substr_range` where the toolchain allows); delete `Focus::Slice`'s lifetime contract.
 - **Done when:** no `as_ptr() as usize` remains in `src/`; diagnostics tests (`tests/diagnostics.rs`, `tests/syntax_errors.rs`, `tests/robustness.rs`) unchanged and passing; fuzz clean.
+- **Status: done, with a narrower scope.** A span-carrying parser would touch about 50 `at_token` sites in ten files: the parser works on `&str` slices from `split_once`, `trim` and `strip_prefix`, so offsets must be recovered from slices somewhere, which is what `str::substr_range` does, and that is still unstable (checked on Rust 1.94). What changed instead:
+  - `discover.rs` binds values as byte ranges; no address arithmetic, so the unchecked subtraction is gone.
+  - `content_columns` computes from lengths; `glued_comment` returns its word's range.
+  - The remaining recovery is two helpers in `span.rs`, `address_of` and `columns_at`, the only code that reads an address. `columns_at` rejects an address from other text or one off a char boundary. `Focus::Slice` is now `Focus::Address`, resolved through them.
+  - Unit tests in `span.rs`; CLI output compared byte-for-byte with the previous build on the examples and on damaged input.
+  - **Follow-up:** when `substr_range` is stable, replace the two helpers with it.
 
 ### 2. Break up `discover_source_files` (222 lines)
 - **Where:** `src/inputs/discover.rs:41`.
