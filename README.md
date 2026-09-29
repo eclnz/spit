@@ -143,8 +143,8 @@ path image: data/sub-{sub}/ses-{ses}/image.nii.gz
 
 ```text
 contexts sessions:
-    [ses=01,sub=01]
-    [ses=02,sub=01]
+    [sub=01,ses=01]
+    [sub=01,ses=02]
 sources:
     image[sub=01,ses=01]: data/sub-01/ses-01/image.nii.gz
     image[sub=01,ses=02]: data/sub-01/ses-02/image.nii.gz

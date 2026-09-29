@@ -344,6 +344,20 @@ fn the_stage_writes_each_sources_path_into_its_record() {
 }
 
 #[test]
+fn a_spitout_writes_values_in_the_declared_dimension_order() {
+    let tree = Tree::new("order", &FILES);
+    let resolved = inventory_of(RECIPE, &tree);
+    let text =
+        spit::render_source_inventory(&resolved.inventory, &parse_pipeline(PIPELINE).unwrap());
+    // `image` declares [sub, ses]: its records and the contexts follow suit.
+    assert!(
+        text.starts_with("contexts sessions:\n    [sub=1,ses=1]\n"),
+        "{text}"
+    );
+    assert!(text.contains("    image[sub=1,ses=1]: "), "{text}");
+}
+
+#[test]
 fn a_spitout_alone_drives_jobs_without_its_recipe() {
     let tree = Tree::new("spitout", &FILES);
     // Sources have no path rule in the pipeline: only the recipe knows them.
