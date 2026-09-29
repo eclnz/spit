@@ -187,6 +187,8 @@ Path rules also find sources. `spit discover pipeline.spit --root data` lists ea
 
 ### Discover contexts from directories
 
+Directory discovery, `require`/`skip` rules, and source path rules may live in a `.spitin` input recipe. A same-name sibling is loaded automatically (`analysis.spit` → `analysis.spitin`), or select one with `--inputs cohort.spitin`. Its directory patterns and source paths are relative to the recipe's folder unless `--root` is supplied. The `.spit` pipeline still declares each logical `source` with its dimensions and optional type. A `.spitin` file may contain `discover`, `require`, `skip`, named `path product:` rules for source products, and optional `sources:`/`contexts:` inventory sections. It cannot declare operations, jobs, commands, stages, or a default `path:` rule. If the pipeline has no default path, outputs use `out/{product}/{entities}`. Existing inline declarations and `--sources` inventories remain supported; `--inputs` and `--sources` cannot be supplied together.
+
 ```text
 discover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}
 ```

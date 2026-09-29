@@ -7,6 +7,7 @@ use std::path::Path;
 
 use crate::command::collect_commands;
 use crate::imports::parse_located_document;
+use crate::inputs::InputSpec;
 use crate::lower::{parse_document_with_imports, ParsedDocument};
 use crate::model::DEFAULT_OUTPUT;
 use crate::model::{stage_within, CommandRole, Job, ResolvedDag, SourceInventory};
@@ -196,6 +197,24 @@ pub fn diagnose_at(text: &str, source_text: Option<&str>, path: &Path) -> Vec<Di
     let inline = inline_inventory(source_text);
     diagnose_with_parser(text, source_text, false, |text| {
         parse_located_document(text, path, inline)
+    })
+}
+
+/// Diagnose a pipeline after attaching a separately parsed `.spitin` recipe.
+pub fn diagnose_at_with_inputs(
+    text: &str,
+    source_text: Option<&str>,
+    path: &Path,
+    inputs: &InputSpec,
+    lenient: bool,
+) -> Vec<Diagnostic> {
+    let inline = inline_inventory(source_text);
+    diagnose_with_parser(text, source_text, lenient, |text| {
+        let mut document = parse_located_document(text, path, inline)?;
+        inputs
+            .apply_to(&mut document.pipeline)
+            .map_err(|message| ParseError::new(1, message))?;
+        Ok(document)
     })
 }
 

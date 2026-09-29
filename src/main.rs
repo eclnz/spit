@@ -3,14 +3,15 @@ use std::error::Error;
 use std::fmt::Write;
 use std::fs;
 use std::io::{self, Read};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use spit::{
-    diagnose_artifacts_at, diagnose_at, discover_source_files, inspect_paths, parse_document_at,
-    parse_pipeline_at, parse_source_inventory, render_artifacts, render_bash, render_bound_dag,
-    render_dag, render_dag_json, render_source_inventory, resolve, resolve_artifacts, stage_within,
-    validate_concrete_paths, validate_source_files, Diagnostic, PathCoverage, Pipeline,
+    diagnose_artifacts_at, diagnose_at, diagnose_at_with_inputs, discover_source_files,
+    inspect_paths, parse_document_at, parse_input_spec_at, parse_pipeline_at,
+    parse_source_inventory, render_artifacts, render_bash, render_bound_dag, render_dag,
+    render_dag_json, render_source_inventory, resolve, resolve_artifacts, stage_within,
+    validate_concrete_paths, validate_source_files, Diagnostic, InputSpec, PathCoverage, Pipeline,
     ResolvedDag, SourceInventory,
 };
 
@@ -50,11 +51,29 @@ impl Command {
     fn flags(self) -> &'static [Flag] {
         use Flag::*;
         match self {
-            Self::Check => &[Sources, Root, Stage, Paths, StrictPaths, Json, Stdin],
-            Self::Dag => &[Sources, Root, Stage, Paths, StrictPaths, Json, Stdin],
-            Self::Bash => &[Sources, Root, Stage, StrictPaths, Stdin],
-            Self::Artifacts => &[Sources, Root, Stdin],
-            Self::Discover => &[Root, Stdin],
+            Self::Check => &[
+                Inputs,
+                Sources,
+                Root,
+                Stage,
+                Paths,
+                StrictPaths,
+                Json,
+                Stdin,
+            ],
+            Self::Dag => &[
+                Inputs,
+                Sources,
+                Root,
+                Stage,
+                Paths,
+                StrictPaths,
+                Json,
+                Stdin,
+            ],
+            Self::Bash => &[Inputs, Sources, Root, Stage, StrictPaths, Stdin],
+            Self::Artifacts => &[Inputs, Sources, Root, Stdin],
+            Self::Discover => &[Inputs, Root, Stdin],
         }
     }
 
@@ -66,6 +85,7 @@ impl Command {
 
 #[derive(Clone, Copy, PartialEq)]
 enum Flag {
+    Inputs,
     Sources,
     Root,
     Stage,
@@ -75,7 +95,8 @@ enum Flag {
     Stdin,
 }
 
-const FLAGS: [Flag; 7] = [
+const FLAGS: [Flag; 8] = [
+    Flag::Inputs,
     Flag::Sources,
     Flag::Root,
     Flag::Stage,
@@ -95,6 +116,7 @@ const CONFLICTS: [(Flag, Flag); 3] = [
 impl Flag {
     fn name(self) -> &'static str {
         match self {
+            Self::Inputs => "--inputs",
             Self::Sources => "--sources",
             Self::Root => "--root",
             Self::Stage => "--stage",
@@ -108,6 +130,7 @@ impl Flag {
     /// What the flag's value is, for a flag that takes one.
     fn value(self) -> Option<&'static str> {
         match self {
+            Self::Inputs => Some("<recipe.spitin>"),
             Self::Sources => Some("<inventory.spit|->"),
             Self::Root => Some("<directory>"),
             Self::Stage => Some("<name>"),
@@ -140,6 +163,7 @@ impl Flags {
 struct CliArgs {
     command: Command,
     pipeline: String,
+    inputs: Option<String>,
     sources: Option<String>,
     paths: bool,
     strict_paths: bool,
@@ -227,6 +251,7 @@ fn parse_args() -> Result<CliArgs, Box<dyn Error>> {
     Ok(CliArgs {
         command,
         pipeline,
+        inputs: flags.value(Flag::Inputs),
         sources: flags.value(Flag::Sources),
         paths: flags.has(Flag::Paths),
         strict_paths: flags.has(Flag::StrictPaths),
@@ -275,6 +300,9 @@ fn check_flags(command: Command, flags: &Flags) -> Result<(), String> {
     }
     if flags.has(Flag::Stdin) && flags.value(Flag::Sources).as_deref() == Some("-") {
         return Err("--stdin reads the pipeline, so --sources needs a file".into());
+    }
+    if flags.has(Flag::Inputs) && flags.has(Flag::Sources) {
+        return Err("--inputs and --sources select different input descriptions; use one".into());
     }
     Ok(())
 }
@@ -326,21 +354,55 @@ fn run(mut args: CliArgs) -> Result<(), Box<dyn Error>> {
         read_file(&args.pipeline)?
     };
     let path = Path::new(&args.pipeline);
+    let input_file = input_spec_path(&args, path, &pipeline_text);
+    let input_spec = input_file
+        .as_ref()
+        .map(|file| {
+            let text = read_file(&file.to_string_lossy())?;
+            parse_input_spec_at(&text, file).map_err(|error| format!("{}: {error}", file.display()))
+        })
+        .transpose()?;
+    if args.inputs.is_some() && has_inline_inventory(&pipeline_text, path) {
+        return Err(
+            "an explicit .spitin recipe cannot be combined with an inline inventory".into(),
+        );
+    }
+    let prepared = parse_pipeline_at(&pipeline_text, path)
+        .ok()
+        .and_then(|mut pipeline| {
+            if let Some(spec) = &input_spec {
+                spec.apply_to(&mut pipeline).ok()?;
+            }
+            Some(pipeline)
+        });
     if args.root.is_none()
         && args.sources.is_none()
         && !has_inline_inventory(&pipeline_text, path)
-        && parse_pipeline_at(&pipeline_text, path)
-            .is_ok_and(|pipeline| !pipeline.discoveries.is_empty())
+        && input_spec
+            .as_ref()
+            .is_none_or(|spec| spec.inventory.is_none())
+        && prepared
+            .as_ref()
+            .is_some_and(|pipeline| input_spec.is_some() || !pipeline.discoveries.is_empty())
     {
         args.root = Some(
-            path.parent()
+            input_file
+                .as_deref()
+                .unwrap_or(path)
+                .parent()
                 .filter(|parent| !parent.as_os_str().is_empty())
                 .unwrap_or_else(|| Path::new("."))
                 .to_string_lossy()
                 .into_owned(),
         );
     }
-    let inventory_text = read_inventory(&args, &pipeline_text, path)?;
+    let inventory_text = read_inventory(
+        &args,
+        &pipeline_text,
+        path,
+        prepared.as_ref(),
+        input_spec.as_ref(),
+    )?;
     // Report every error and warning before doing any work.
     let diagnose = if args.command == Command::Artifacts {
         diagnose_artifacts_at
@@ -349,6 +411,14 @@ fn run(mut args: CliArgs) -> Result<(), Box<dyn Error>> {
     };
     let diagnostics = if args.command == Command::Discover && inventory_text.is_some() {
         Vec::new()
+    } else if let Some(spec) = &input_spec {
+        diagnose_at_with_inputs(
+            &pipeline_text,
+            inventory_text.as_deref(),
+            path,
+            spec,
+            args.command == Command::Artifacts,
+        )
     } else {
         diagnose(&pipeline_text, inventory_text.as_deref(), path)
     };
@@ -367,13 +437,16 @@ fn run(mut args: CliArgs) -> Result<(), Box<dyn Error>> {
         return Ok(());
     }
     // A separate inventory replaces an inline one, which is then not read.
-    let (pipeline, inventory) = match &inventory_text {
+    let (mut pipeline, inventory) = match &inventory_text {
         Some(text) => (
             parse_pipeline_at(&pipeline_text, path)?,
             Some(parse_source_inventory(text)?),
         ),
         None => parse_document_at(&pipeline_text, path)?,
     };
+    if let Some(spec) = &input_spec {
+        spec.apply_to(&mut pipeline)?;
+    }
     if let Some(stage) = &args.stage {
         check_stage(&pipeline, stage)?;
     }
@@ -511,18 +584,40 @@ fn read_inventory(
     args: &CliArgs,
     pipeline_text: &str,
     path: &Path,
+    pipeline: Option<&Pipeline>,
+    inputs: Option<&InputSpec>,
 ) -> Result<Option<String>, Box<dyn Error>> {
     Ok(match (args.sources.as_deref(), &args.root) {
         (Some("-"), _) => Some(read_stdin()?),
         (Some(sources), _) => Some(read_file(sources)?),
+        (None, _) if inputs.and_then(|spec| spec.inventory.as_ref()).is_some() => {
+            let Some(pipeline) = pipeline else {
+                return Ok(None);
+            };
+            let inventory = inputs.and_then(|spec| spec.inventory.as_ref()).unwrap();
+            Some(render_source_inventory(inventory, pipeline))
+        }
         // With a root and no inventory, find the sources by their path rules.
         (None, Some(root))
             if args.command == Command::Discover || !has_inline_inventory(pipeline_text, path) =>
         {
-            discover(pipeline_text, path, Path::new(root))?
+            pipeline
+                .map(|pipeline| discover(pipeline, Path::new(root)))
+                .transpose()?
         }
         (None, _) => None,
     })
+}
+
+fn input_spec_path(args: &CliArgs, path: &Path, text: &str) -> Option<PathBuf> {
+    if let Some(file) = &args.inputs {
+        return Some(PathBuf::from(file));
+    }
+    if args.sources.is_some() || has_inline_inventory(text, path) {
+        return None;
+    }
+    let sibling = path.with_extension("spitin");
+    sibling.is_file().then_some(sibling)
 }
 
 /// Print every diagnostic, failing if any is an error.
@@ -567,12 +662,9 @@ fn has_inline_inventory(text: &str, path: &Path) -> bool {
 
 /// The inventory text for the source files under `root`, or `None` when the
 /// pipeline does not parse; diagnostics then report why.
-fn discover(text: &str, path: &Path, root: &Path) -> Result<Option<String>, Box<dyn Error>> {
-    let Ok(pipeline) = parse_pipeline_at(text, path) else {
-        return Ok(None);
-    };
-    spit::validate_pipeline(&pipeline)?;
-    let discovery = discover_source_files(&pipeline, root)?;
+fn discover(pipeline: &Pipeline, root: &Path) -> Result<String, Box<dyn Error>> {
+    spit::validate_pipeline(pipeline)?;
+    let discovery = discover_source_files(pipeline, root)?;
     for skipped in &discovery.skipped {
         eprintln!("warning: skipped {skipped}");
     }
@@ -590,10 +682,7 @@ fn discover(text: &str, path: &Path, root: &Path) -> Result<Option<String>, Box<
             root.display()
         );
     }
-    Ok(Some(render_source_inventory(
-        &discovery.inventory,
-        &pipeline,
-    )))
+    Ok(render_source_inventory(&discovery.inventory, pipeline))
 }
 
 fn print_json(diagnostics: &[Diagnostic], text: &str, source_text: Option<&str>) {
