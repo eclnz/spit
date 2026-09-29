@@ -211,6 +211,9 @@ pub fn parse_source_inventory(text: &str) -> Result<SourceInventory, ParseError>
             Some(Header::Contexts(Some(name))) => {
                 let name = identifier(name, number, "discovery name")
                     .map_err(|error| error.locate(original))?;
+                // A named section says the discovery ran, even when every
+                // context it found was skipped and the section is empty.
+                inventory.discovered.entry(name.to_owned()).or_default();
                 section = Some(InventorySection::Contexts(Some(name.to_owned())));
             }
             _ => match section {

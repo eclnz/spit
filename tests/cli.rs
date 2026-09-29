@@ -343,3 +343,27 @@ fn a_recipe_checks_a_pipeline_saved_with_a_byte_order_mark() {
     assert!(output.status.success(), "{}", stderr(&output));
     assert_eq!(stdout(&output), "Recipe valid.\n");
 }
+
+#[test]
+fn a_recipe_whose_skip_leaves_a_discovery_empty_runs_in_memory_as_it_settles() {
+    let tree = Tree::new(
+        "skip-all",
+        &["data/sub-1/ses-1/image.nii", "data/sub-2/ses-1/image.nii"],
+    );
+    tree.write(
+        "analysis.spit",
+        "source image : Img [sub, ses]\npath image: data/sub-{sub}/ses-{ses}/image.nii\n\
+         operation clean(Img) -> Clean\ncommand clean: tool {input} {output}\n\
+         path: out/{product}/{sub}_{ses}.txt\ncleaned = clean(image)\n",
+    );
+    // Every subject has one session, so the skip rejects every group.
+    let recipe = tree.write(
+        "data.spitin",
+        "pipeline analysis.spit\ndiscover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}\n\
+         skip sessions count>=2 per [sub]\nrequire sessions count>=1 per [sub]\n",
+    );
+    for command in ["inputs", "dag", "artifacts"] {
+        let output = spit(&[command, recipe.to_str().unwrap()]);
+        assert!(output.status.success(), "{command}: {}", stderr(&output));
+    }
+}
