@@ -3,36 +3,12 @@
 //! sees only the logical pipeline and a plain inventory.
 
 use std::fs;
-use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use spit::{parse_input_spec, parse_pipeline, resolve, InputSource, ResolveError, SourceInventory};
 
-struct Tree(PathBuf);
-
-impl Tree {
-    fn new(name: &str, files: &[&str]) -> Self {
-        let root = std::env::temp_dir().join(format!("spit-inputs-{name}-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&root);
-        fs::create_dir_all(&root).unwrap();
-        for file in files {
-            let path = root.join(file);
-            fs::create_dir_all(path.parent().unwrap()).unwrap();
-            fs::write(path, "").unwrap();
-        }
-        Self(root)
-    }
-
-    fn path(&self) -> &Path {
-        &self.0
-    }
-}
-
-impl Drop for Tree {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
-    }
-}
+mod support;
+use support::Tree;
 
 const PIPELINE: &str = "\
 source image: Image [sub, ses]
@@ -177,10 +153,19 @@ fn discover_scans_the_root_when_a_recipe_has_written_records() {
     )
     .unwrap();
     let output = Command::new(env!("CARGO_BIN_EXE_spit"))
-        .args(["discover", pipeline.to_str().unwrap(), "--root", tree.path().to_str().unwrap()])
+        .args([
+            "discover",
+            pipeline.to_str().unwrap(),
+            "--root",
+            tree.path().to_str().unwrap(),
+        ])
         .output()
         .unwrap();
-    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let inventory = String::from_utf8(output.stdout).unwrap();
     assert!(inventory.contains("image[sub=1,ses=1]"), "{inventory}");
     assert!(!inventory.contains("sub=old"), "{inventory}");
