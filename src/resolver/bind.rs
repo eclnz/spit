@@ -7,7 +7,7 @@ use std::fmt;
 
 use crate::command::{slot, validate_commands, CommandError, Slot};
 use crate::model::{
-    ArtifactInstance, ArtifactKey, Cardinality, CommandRole, Job, OperationDef, Pipeline,
+    ArtifactInstance, ArtifactMap, Cardinality, CommandRole, Job, OperationDef, Pipeline,
     ResolvedDag,
 };
 use crate::paths::{bound_paths, check_rules, PathError};
@@ -43,7 +43,7 @@ pub fn bind_dag(pipeline: &Pipeline, dag: &ResolvedDag) -> Result<BoundDag, Bind
 struct Binder<'a> {
     pipeline: &'a Pipeline,
     dag: &'a ResolvedDag,
-    paths: BTreeMap<ArtifactKey, String>,
+    paths: ArtifactMap<String>,
     operations: BTreeMap<&'a str, &'a OperationDef>,
 }
 
@@ -104,7 +104,7 @@ impl Binder<'_> {
             .product_dimensions
             .get(&artifact.product)
             .ok_or_else(unbound)?;
-        let path = self.paths.get(&artifact.key()).ok_or_else(unbound)?;
+        let path = self.paths.get(artifact).ok_or_else(unbound)?;
         Ok(BoundArtifact {
             product: artifact.product.clone(),
             entities: dimensions
@@ -126,11 +126,11 @@ fn expand(
     template: &[Vec<Part>],
     operation: &OperationDef,
     job: &Job,
-    paths: &BTreeMap<ArtifactKey, String>,
+    paths: &ArtifactMap<String>,
 ) -> Result<Vec<Argument>, BindError> {
     let path = |artifact: &ArtifactInstance| {
         let path = paths
-            .get(&artifact.key())
+            .get(artifact)
             .ok_or_else(|| BindError::Dag(format!("no path is bound for `{artifact}`")))?;
         Ok::<_, BindError>(ArgPart::Path(path.clone()))
     };

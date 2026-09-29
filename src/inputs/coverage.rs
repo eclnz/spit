@@ -18,16 +18,38 @@ pub(crate) struct SkippedGroup {
 }
 
 impl SkippedGroup {
-    pub(crate) fn matches(&self, binding: &EntityBinding) -> bool {
-        binding.project(&self.group_by).as_ref() == Some(&self.context)
-    }
-
     /// What was skipped and why, as a warning says it.
     pub(crate) fn note(&self) -> String {
         format!(
             "[{}] because `skip {}` rejected the group",
             self.context, self.target
         )
+    }
+}
+
+/// Skipped groups by the dimensions they group by, so a binding is tested
+/// against all of them with one lookup per grouping.
+pub(crate) struct SkipIndex<'a>(BTreeMap<&'a [String], BTreeSet<&'a EntityBinding>>);
+
+impl<'a> SkipIndex<'a> {
+    pub(crate) fn new(groups: &'a [SkippedGroup]) -> Self {
+        let mut index: BTreeMap<_, BTreeSet<_>> = BTreeMap::new();
+        for group in groups {
+            index
+                .entry(group.group_by.as_slice())
+                .or_default()
+                .insert(&group.context);
+        }
+        Self(index)
+    }
+
+    /// Whether `binding` lies in one of the skipped groups.
+    pub(crate) fn matches(&self, binding: &EntityBinding) -> bool {
+        self.0.iter().any(|(group_by, contexts)| {
+            binding
+                .project(group_by)
+                .is_some_and(|context| contexts.contains(&context))
+        })
     }
 }
 
@@ -89,15 +111,18 @@ fn rejected_groups(
             .filter_map(|binding| binding.project(&rule.group_by))
             .collect()
     };
+    // Each group's members, found in one pass rather than once per group.
+    let mut members: BTreeMap<EntityBinding, Vec<&EntityBinding>> = BTreeMap::new();
+    for binding in bindings {
+        if let Some(group) = binding.project(&rule.group_by) {
+            members.entry(group).or_default().push(binding);
+        }
+    }
     groups
         .into_iter()
         .filter(|context| {
-            let members: Vec<_> = bindings
-                .iter()
-                .copied()
-                .filter(|binding| binding.project(&rule.group_by).as_ref() == Some(context))
-                .collect();
-            !rule.count.allows(members.len()) || missing_values(rule, &members).next().is_some()
+            let members = members.get(context).map_or(&[][..], Vec::as_slice);
+            !rule.count.allows(members.len()) || missing_values(rule, members).next().is_some()
         })
         .map(|context| SkippedGroup {
             target: rule.product.clone(),
@@ -112,7 +137,8 @@ fn remove_groups(inventory: &mut SourceInventory, groups: &[SkippedGroup]) {
     if groups.is_empty() {
         return;
     }
-    let skipped = |binding: &EntityBinding| groups.iter().any(|group| group.matches(binding));
+    let index = SkipIndex::new(groups);
+    let skipped = |binding: &EntityBinding| index.matches(binding);
     inventory.contexts.retain(|binding| !skipped(binding));
     for bindings in inventory.discovered.values_mut() {
         bindings.retain(|binding| !skipped(binding));
@@ -360,10 +386,15 @@ pub(crate) fn check_inventory(
         }
     }
     // Validate every supplied record, including records a skip rule may omit.
-    pipeline.source_artifacts(inventory)?;
+    let supplied = pipeline.source_artifacts(inventory)?;
     let mut inventory = inventory.clone();
     let skipped = apply_skips(rules, &mut inventory, false);
-    let artifacts = pipeline.source_artifacts(&inventory)?;
+    // Skipping only removes records, so when none go the artifacts stand.
+    let artifacts = if inventory.artifacts.len() == supplied.values().map(Vec::len).sum() {
+        supplied
+    } else {
+        pipeline.source_artifacts(&inventory)?
+    };
     for (rule_index, rule) in rules.constraints.iter().enumerate() {
         if rules.discovery(&rule.product).is_some()
             && !inventory.discovered.contains_key(&rule.product)
