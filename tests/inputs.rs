@@ -72,9 +72,7 @@ fn the_stage_finds_contexts_and_sources_without_touching_the_pipeline() {
     assert_eq!(resolved.inventory.contexts.len(), 3);
     assert_eq!(resolved.inventory.artifacts.len(), 3);
     assert_eq!(resolved.inventory.discovered["sessions"].len(), 3);
-    assert!(resolved.missing.is_empty());
-    assert!(pipeline.discoveries.is_empty());
-    assert!(pipeline.constraints.is_empty());
+    assert!(resolved.gaps.is_empty());
     assert!(pipeline.product_paths.is_empty());
 }
 
@@ -111,7 +109,7 @@ fn require_gaps_are_the_stages_to_report_and_do_not_reach_the_resolver() {
     let tree = Tree::new("missing", &FILES);
     let recipe = format!("{RECIPE}require sessions count>=2 per [sub]\n");
     let resolved = inventory_of(&recipe, &tree);
-    assert_eq!(resolved.missing.len(), 1);
+    assert_eq!(resolved.gaps.len(), 1);
     assert!(matches!(
         resolved.require_complete(),
         Err(ResolveError::CoverageViolation {
@@ -145,7 +143,7 @@ fn a_recipe_can_settle_records_that_were_already_written() {
         )
         .unwrap();
     assert!(resolved.root.is_none());
-    assert_eq!(resolved.missing.len(), 1);
+    assert_eq!(resolved.gaps.len(), 1);
 }
 
 #[test]

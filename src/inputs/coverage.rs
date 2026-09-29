@@ -1,16 +1,14 @@
-//! Coverage rules: the sources each rule requires, checked first against
-//! the pipeline and then against an inventory.
+//! `require` and `skip` rules: checked first against the pipeline's source
+//! declarations, then applied to an inventory.
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::error::{DefinitionSubject, ResolveError};
 use crate::model::{
-    ArtifactInstance, CountRequirement, CoverageAction, CoverageGap, CoverageRule,
-    DirectoryDiscovery, EntityBinding, ProductDef, SourceInventory,
+    ArtifactInstance, CountRequirement, CoverageAction, CoverageGap, CoverageRule, EntityBinding,
+    InputRules, Pipeline, SourceInventory,
 };
 use crate::shape::dimension_set;
-
-use super::{family, find_product};
 
 #[derive(Clone, Debug)]
 pub(crate) struct SkippedGroup {
@@ -28,19 +26,16 @@ impl SkippedGroup {
 /// Apply skip rules in declaration order. A failed group is removed from all
 /// contexts and source records, so it cannot drive a downstream job.
 pub(crate) fn apply_skips(
-    pipeline: &crate::model::Pipeline,
+    rules: &InputRules,
     inventory: &mut SourceInventory,
     discovery_only: bool,
 ) -> Vec<SkippedGroup> {
     let mut skipped = Vec::new();
-    for rule in &pipeline.constraints {
+    for rule in &rules.constraints {
         if rule.action != CoverageAction::Skip {
             continue;
         }
-        let is_discovery = pipeline
-            .discoveries
-            .iter()
-            .any(|item| item.name == rule.product);
+        let is_discovery = rules.discovery(&rule.product).is_some();
         if discovery_only && !is_discovery {
             continue;
         }
@@ -115,17 +110,20 @@ pub(crate) fn apply_skips(
     skipped
 }
 
-pub(super) fn check_coverage_rule(
+/// Check that a rule names a source or discovery rule and groups by its
+/// dimensions. Needs no inventory.
+pub(crate) fn check_coverage_rule(
     rule_index: usize,
     rule: &CoverageRule,
-    products: &BTreeMap<&str, &ProductDef>,
-    producers: &BTreeMap<String, usize>,
-    discoveries: &[DirectoryDiscovery],
+    pipeline: &Pipeline,
+    rules: &InputRules,
 ) -> Result<(), ResolveError> {
-    let discovery = discoveries
+    let discovery = rules.discovery(&rule.product);
+    let product = pipeline
+        .products
         .iter()
-        .find(|candidate| candidate.name == rule.product);
-    if discovery.is_some() && products.contains_key(rule.product.as_str()) {
+        .find(|product| product.name == rule.product);
+    if discovery.is_some() && product.is_some() {
         return Err(ResolveError::InvalidDefinition {
             subject: DefinitionSubject::Constraint(rule_index),
             detail: format!(
@@ -134,12 +132,16 @@ pub(super) fn check_coverage_rule(
             ),
         });
     }
-    let dimensions = if let Some(discovery) = discovery {
-        &discovery.dimensions
-    } else {
-        &find_product(products, &rule.product)?.dimensions
+    let dimensions = match (discovery, product) {
+        (Some(discovery), _) => &discovery.dimensions,
+        (None, Some(product)) => &product.dimensions,
+        (None, None) => {
+            return Err(ResolveError::UnknownProduct {
+                name: rule.product.clone(),
+            })
+        }
     };
-    if discovery.is_none() && producers.contains_key(&rule.product) {
+    if discovery.is_none() && !pipeline.is_source(&rule.product) {
         return Err(ResolveError::InvalidDefinition {
             subject: DefinitionSubject::Constraint(rule_index),
             detail: format!(
@@ -177,7 +179,7 @@ pub(super) fn check_coverage_rule(
     Ok(())
 }
 
-pub(super) fn coverage_gaps(
+pub(crate) fn coverage_gaps(
     rule_index: usize,
     rule: &CoverageRule,
     inventory: &SourceInventory,
@@ -205,7 +207,9 @@ pub(super) fn coverage_gaps(
         let members: Vec<_> = if discovery {
             Vec::new()
         } else {
-            family(artifacts, &rule.product)
+            artifacts
+                .get(&rule.product)
+                .map_or(&[][..], Vec::as_slice)
                 .iter()
                 .filter(|artifact| {
                     artifact.entities.project(&rule.group_by).as_ref() == Some(&context)
@@ -259,4 +263,95 @@ pub(super) fn coverage_gaps(
         }));
     }
     gaps
+}
+
+/// Check every rule against the pipeline, needing no inventory, with the
+/// subject each error concerns.
+pub(crate) fn collect_rule_errors(
+    pipeline: &Pipeline,
+    rules: &InputRules,
+    poisoned: &BTreeSet<String>,
+) -> Vec<(DefinitionSubject, ResolveError)> {
+    let mut errors = Vec::new();
+    for (index, rule) in rules.constraints.iter().enumerate() {
+        if poisoned.contains(&rule.product) {
+            continue;
+        }
+        if let Err(error) = check_coverage_rule(index, rule, pipeline, rules) {
+            // Keep the more specific subject a definition error names.
+            let subject = match &error {
+                ResolveError::InvalidDefinition { subject, .. } => subject.clone(),
+                _ => DefinitionSubject::Constraint(index),
+            };
+            errors.push((subject, error));
+        }
+    }
+    errors
+}
+
+/// An inventory after the skip rules, with what the `require` rules find
+/// missing and the sources each gap holds back.
+pub(crate) struct InputCheck {
+    pub(crate) inventory: SourceInventory,
+    pub(crate) gaps: Vec<CoverageGap>,
+}
+
+/// Check an inventory's records against the pipeline's sources and its
+/// named contexts against the discovery rules, apply the skip rules, and
+/// find what the `require` rules miss.
+pub(crate) fn check_inventory(
+    pipeline: &Pipeline,
+    rules: &InputRules,
+    inventory: &SourceInventory,
+) -> Result<InputCheck, ResolveError> {
+    for (name, bindings) in &inventory.discovered {
+        let Some(discovery) = rules.discovery(name) else {
+            return Err(ResolveError::InvalidDefinition {
+                subject: DefinitionSubject::None,
+                detail: format!("inventory names unknown discovery rule `{name}`"),
+            });
+        };
+        let expected: BTreeSet<_> = discovery.dimensions.iter().collect();
+        for binding in bindings {
+            let found: BTreeSet<_> = binding.0.keys().collect();
+            if found != expected {
+                return Err(ResolveError::InvalidDefinition {
+                    subject: DefinitionSubject::None,
+                    detail: format!(
+                        "inventory context [{binding}] for discovery `{name}` must bind [{}]",
+                        discovery.dimensions.join(", ")
+                    ),
+                });
+            }
+        }
+    }
+    // Validate every supplied record, including records a skip rule may omit.
+    pipeline.source_artifacts(inventory)?;
+    let mut inventory = inventory.clone();
+    apply_skips(rules, &mut inventory, false);
+    let artifacts = pipeline.source_artifacts(&inventory)?;
+    for (rule_index, rule) in rules.constraints.iter().enumerate() {
+        if rules.discovery(&rule.product).is_some()
+            && !inventory.discovered.contains_key(&rule.product)
+        {
+            return Err(ResolveError::InvalidDefinition {
+                subject: DefinitionSubject::Constraint(rule_index),
+                detail: format!(
+                    "coverage rule for discovery `{}` needs named contexts in the inventory",
+                    rule.product
+                ),
+            });
+        }
+    }
+    let gaps = rules
+        .constraints
+        .iter()
+        .enumerate()
+        .filter(|(_, rule)| rule.action == CoverageAction::Require)
+        .flat_map(|(rule_index, rule)| {
+            let discovery = rules.discovery(&rule.product).is_some();
+            coverage_gaps(rule_index, rule, &inventory, &artifacts, discovery)
+        })
+        .collect();
+    Ok(InputCheck { inventory, gaps })
 }

@@ -2,7 +2,6 @@
 //! pipeline text determines, then expand each step, in dependency order, into
 //! concrete jobs over the inventory's artifacts.
 
-mod coverage;
 mod definitions;
 mod matching;
 mod types;
@@ -11,14 +10,11 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::error::{DefinitionSubject, ResolveError};
 use crate::model::{
-    ArtifactInstance, ArtifactKey, ArtifactReport, CoverageGap, Gap, IncompleteJob, Invocation,
-    OperationDef, Pipeline, ProductDef, ResolvedDag, SourceInventory,
+    ArtifactInstance, ArtifactKey, ArtifactReport, Gap, IncompleteJob, Invocation, OperationDef,
+    Pipeline, ProductDef, ResolvedDag, SourceInventory,
 };
 use crate::types::TypeExpr;
 
-pub(crate) use self::coverage::apply_skips;
-
-use self::coverage::{check_coverage_rule, coverage_gaps};
 use self::definitions::{
     check_stages, index_operations, index_producers, index_products, invocation_order,
 };
@@ -29,7 +25,6 @@ use self::types::infer_types;
 struct CheckedPipeline<'a> {
     products: BTreeMap<&'a str, &'a ProductDef>,
     operations: BTreeMap<&'a str, &'a OperationDef>,
-    producers: BTreeMap<String, usize>,
     /// Invocation indices with every producer before its consumers.
     order: Vec<usize>,
     /// The statically inferred type of each checked step's outputs.
@@ -49,8 +44,8 @@ pub(crate) struct PipelineCheck<'a> {
 }
 
 /// Check everything that depends only on the pipeline text: declarations,
-/// each step's operation, inputs, dimensions and inferred types, cycles, and
-/// the shape of coverage rules. Returns the first error.
+/// each step's operation, inputs, dimensions and inferred types, and cycles.
+/// Returns the first error.
 pub fn validate_pipeline(pipeline: &Pipeline) -> Result<(), ResolveError> {
     check_pipeline(pipeline).map(|_| ())
 }
@@ -127,26 +122,10 @@ pub(crate) fn collect_pipeline(pipeline: &Pipeline) -> PipelineCheck<'_> {
             }
         }
     }
-    for (index, rule) in pipeline.constraints.iter().enumerate() {
-        if poisoned.contains(&rule.product) {
-            continue;
-        }
-        if let Err(error) =
-            check_coverage_rule(index, rule, &products, &producers, &pipeline.discoveries)
-        {
-            // Keep the more specific subject a definition error names.
-            let subject = match &error {
-                ResolveError::InvalidDefinition { subject, .. } => subject.clone(),
-                _ => DefinitionSubject::Constraint(index),
-            };
-            errors.push((subject, error));
-        }
-    }
     PipelineCheck {
         pipeline: CheckedPipeline {
             products,
             operations,
-            producers,
             order,
             inferred_types,
             shapes,
@@ -156,137 +135,52 @@ pub(crate) fn collect_pipeline(pipeline: &Pipeline) -> PipelineCheck<'_> {
     }
 }
 
+/// Resolve every job of `pipeline` over the sources in `inventory`, failing
+/// on the first job that cannot be made.
 pub fn resolve(
     pipeline: &Pipeline,
     inventory: &SourceInventory,
 ) -> Result<ResolvedDag, ResolveError> {
     let report = resolve_artifacts(pipeline, inventory)?;
     // A blocked gap always follows the gap that blocks it.
-    let unmatched = report
+    let failure = report
         .incomplete
         .into_iter()
         .flat_map(|job| job.gaps)
-        .filter_map(|gap| match gap {
+        .find_map(|gap| match gap {
             Gap::Unmatched(error) => Some(error),
             Gap::Blocked { .. } => None,
         });
-    let failure = report
-        .coverage
-        .into_iter()
-        .map(|gap| gap.error)
-        .chain(unmatched)
-        .next();
     match failure {
         Some(error) => Err(error),
         None => Ok(report.dag),
     }
 }
 
-/// An inventory after its skip rules, with the source artifacts it holds and
-/// the coverage its `require` rules find missing.
-pub(crate) struct InputCheck {
-    pub(crate) inventory: SourceInventory,
-    artifacts: BTreeMap<String, Vec<ArtifactInstance>>,
-    pub(crate) coverage: Vec<CoverageGap>,
-}
-
-/// Check an inventory against a pipeline's discovery, skip and coverage rules,
-/// without expanding any job.
-fn check_inputs(
-    pipeline: &Pipeline,
-    products: &BTreeMap<&str, &ProductDef>,
-    producers: &BTreeMap<String, usize>,
-    inventory: &SourceInventory,
-) -> Result<InputCheck, ResolveError> {
-    for (name, bindings) in &inventory.discovered {
-        let Some(discovery) = pipeline.discoveries.iter().find(|rule| rule.name == *name) else {
-            return Err(ResolveError::InvalidDefinition {
-                subject: DefinitionSubject::None,
-                detail: format!("inventory names unknown discovery rule `{name}`"),
-            });
-        };
-        let expected: BTreeSet<_> = discovery.dimensions.iter().collect();
-        for binding in bindings {
-            let found: BTreeSet<_> = binding.0.keys().collect();
-            if found != expected {
-                return Err(ResolveError::InvalidDefinition {
-                    subject: DefinitionSubject::None,
-                    detail: format!(
-                        "inventory context [{binding}] for discovery `{name}` must bind [{}]",
-                        discovery.dimensions.join(", ")
-                    ),
-                });
-            }
-        }
-    }
-    // Validate every supplied record, including records a skip rule may omit.
-    source_artifacts(inventory, products, producers)?;
-    let mut inventory = inventory.clone();
-    apply_skips(pipeline, &mut inventory, false);
-    let inventory = &inventory;
-    let artifacts = source_artifacts(inventory, products, producers)?;
-    for (rule_index, rule) in pipeline.constraints.iter().enumerate() {
-        if pipeline
-            .discoveries
-            .iter()
-            .any(|discovery| discovery.name == rule.product)
-            && inventory.discovered.get(&rule.product).is_none()
-        {
-            return Err(ResolveError::InvalidDefinition {
-                subject: DefinitionSubject::Constraint(rule_index),
-                detail: format!(
-                    "coverage rule for discovery `{}` needs named contexts in the inventory",
-                    rule.product
-                ),
-            });
-        }
-    }
-    let coverage: Vec<_> = pipeline
-        .constraints
-        .iter()
-        .enumerate()
-        .filter(|(_, rule)| rule.action == crate::model::CoverageAction::Require)
-        .flat_map(|(rule_index, rule)| {
-            let discovery = pipeline
-                .discoveries
-                .iter()
-                .any(|candidate| candidate.name == rule.product);
-            coverage_gaps(rule_index, rule, inventory, &artifacts, discovery)
-        })
-        .collect();
-    Ok(InputCheck {
-        inventory: inventory.clone(),
-        artifacts,
-        coverage,
-    })
-}
-
-/// Skip and coverage checks of `inventory` alone, for the `.spitin` input stage.
-pub(crate) fn check_inventory(
-    pipeline: &Pipeline,
-    inventory: &SourceInventory,
-) -> Result<InputCheck, ResolveError> {
-    let checked = check_pipeline(pipeline)?;
-    check_inputs(pipeline, &checked.products, &checked.producers, inventory)
-}
-
+/// Resolve what can be made, reporting each job that cannot and why.
 pub fn resolve_artifacts(
     pipeline: &Pipeline,
     inventory: &SourceInventory,
 ) -> Result<ArtifactReport, ResolveError> {
+    resolve_artifacts_excluding(pipeline, inventory, &[])
+}
+
+/// As [`resolve_artifacts`], with some listed sources known to be unusable,
+/// such as those an input rule holds back. Jobs that need them are reported
+/// as blocked.
+pub fn resolve_artifacts_excluding(
+    pipeline: &Pipeline,
+    inventory: &SourceInventory,
+    unavailable: &[ArtifactInstance],
+) -> Result<ArtifactReport, ResolveError> {
     let CheckedPipeline {
         products,
         operations,
-        producers,
         order,
         inferred_types,
         shapes,
     } = check_pipeline(pipeline)?;
-    let InputCheck {
-        artifacts,
-        coverage,
-        ..
-    } = check_inputs(pipeline, &products, &producers, inventory)?;
+    let artifacts = pipeline.source_artifacts(inventory)?;
     let sources = pipeline
         .products
         .iter()
@@ -299,11 +193,7 @@ pub fn resolve_artifacts(
             .flatten()
             .map(ArtifactInstance::key)
             .collect(),
-        incomplete: coverage
-            .iter()
-            .flat_map(|gap| &gap.sources)
-            .map(ArtifactInstance::key)
-            .collect(),
+        incomplete: unavailable.iter().map(ArtifactInstance::key).collect(),
         artifacts,
         producers: BTreeMap::new(),
         dag: ResolvedDag {
@@ -339,7 +229,7 @@ pub fn resolve_artifacts(
         }
         for (product, _) in &outputs {
             if let Some(family) = resolution.artifacts.get_mut(&product.name) {
-                sort_family(family, product);
+                product.sort_family(family);
             }
         }
     }
@@ -347,59 +237,8 @@ pub fn resolve_artifacts(
         sources,
         dag: resolution.dag,
         incomplete: resolution.incomplete_jobs,
-        coverage,
+        coverage: Vec::new(),
     })
-}
-
-/// Each source artifact in the inventory, by product, after checking that
-/// it binds its product's dimensions and appears once.
-fn source_artifacts(
-    inventory: &SourceInventory,
-    products: &BTreeMap<&str, &ProductDef>,
-    producers: &BTreeMap<String, usize>,
-) -> Result<BTreeMap<String, Vec<ArtifactInstance>>, ResolveError> {
-    let mut artifacts: BTreeMap<String, Vec<ArtifactInstance>> = BTreeMap::new();
-    let mut seen = BTreeSet::new();
-    for record in &inventory.artifacts {
-        let product = find_product(products, &record.product)?;
-        if producers.contains_key(&record.product) {
-            return Err(ResolveError::InvalidDefinition {
-                subject: DefinitionSubject::Product(record.product.clone()),
-                detail: format!(
-                    "product `{}` cannot be both a source family and an invocation output",
-                    record.product
-                ),
-            });
-        }
-        let source = ArtifactInstance {
-            product: record.product.clone(),
-            artifact_type: product.artifact_type.clone(),
-            entities: record.entities.clone(),
-        };
-        let actual: BTreeSet<_> = record.entities.0.keys().cloned().collect();
-        let expected: BTreeSet<_> = product.dimensions.iter().cloned().collect();
-        if actual != expected {
-            return Err(ResolveError::InvalidDefinition {
-                subject: DefinitionSubject::Source(record.clone()),
-                detail: format!(
-                    "source `{source}` must bind exactly the dimensions of product `{}`: [{}]",
-                    product.name,
-                    product.dimensions.join(", ")
-                ),
-            });
-        }
-        if !seen.insert(source.key()) {
-            return Err(ResolveError::DuplicateSourceArtifact { artifact: source });
-        }
-        artifacts
-            .entry(source.product.clone())
-            .or_default()
-            .push(source);
-    }
-    for (name, family) in &mut artifacts {
-        sort_family(family, products[name.as_str()]);
-    }
-    Ok(artifacts)
 }
 
 /// The artifacts and jobs found so far, as steps are expanded in order.
@@ -407,7 +246,7 @@ struct Resolution {
     artifacts: BTreeMap<String, Vec<ArtifactInstance>>,
     /// Every artifact, so that none is made twice.
     seen: BTreeSet<ArtifactKey>,
-    /// Artifacts that will not exist: sources a coverage rule rejects, and
+    /// Artifacts that will not exist: sources the caller rules out, and
     /// the outputs of incomplete jobs.
     incomplete: BTreeSet<ArtifactKey>,
     /// The job that makes each output artifact.
@@ -461,11 +300,6 @@ impl Resolution {
         }
         Ok(())
     }
-}
-
-/// Order a family by its declared dimensions, reading numbers as numbers.
-fn sort_family(family: &mut [ArtifactInstance], product: &ProductDef) {
-    family.sort_by(|left, right| left.entities.cmp_in(&right.entities, &product.dimensions));
 }
 
 pub(super) fn find_product<'a>(

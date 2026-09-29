@@ -8,11 +8,11 @@ use std::process::ExitCode;
 
 use spit::{
     diagnose_artifacts_at, diagnose_at, diagnose_at_with_inputs, discover_source_files,
-    inspect_paths, parse_document_at, parse_input_spec_at, parse_pipeline_at,
-    parse_source_inventory, render_artifacts, render_bash, render_bound_dag, render_dag,
-    render_dag_json, render_source_inventory, resolve, resolve_artifacts, stage_within,
-    validate_concrete_paths, validate_source_files, Diagnostic, InputSource, InputSpec,
-    PathCoverage, Pipeline, ResolvedDag, ResolvedInputs, SourceInventory,
+    inspect_paths, parse_document_at, parse_input_spec_at, parse_source_inventory, parse_spit_at,
+    parse_spit_without_records_at, render_artifacts, render_bash, render_bound_dag, render_dag,
+    render_dag_json, render_source_inventory, resolve, resolve_artifacts_excluding, stage_within,
+    validate_concrete_paths, validate_source_files, Diagnostic, Document, InputSource, InputSpec,
+    PathCoverage, Pipeline, ResolvedDag, SourceInventory,
 };
 
 #[derive(Clone, Copy, PartialEq)]
@@ -355,7 +355,7 @@ fn run(mut args: CliArgs) -> Result<(), Box<dyn Error>> {
     };
     let path = Path::new(&args.pipeline);
     let input_file = input_spec_path(&args, path, &pipeline_text);
-    let input_spec = input_file
+    let recipe = input_file
         .as_ref()
         .map(|file| {
             let text = read_file(&file.to_string_lossy())?;
@@ -367,16 +367,26 @@ fn run(mut args: CliArgs) -> Result<(), Box<dyn Error>> {
             "an explicit .spitin recipe cannot be combined with an inline inventory".into(),
         );
     }
-    let logical = parse_pipeline_at(&pipeline_text, path).ok();
+    // Step 1 reads the pipeline; the rules and records beside it, and any
+    // recipe, are for the input stage. A separate inventory replaces an
+    // inline one, which is then not read.
+    let parse = |text: &str| {
+        if args.sources.is_some() {
+            parse_spit_without_records_at(text, path)
+        } else {
+            parse_spit_at(text, path)
+        }
+    };
+    let document = parse(&pipeline_text).ok();
+    let spec = document
+        .as_ref()
+        .map(|document| input_spec(document, recipe.as_ref()))
+        .transpose()?;
     if args.root.is_none()
         && args.sources.is_none()
-        && !has_inline_inventory(&pipeline_text, path)
-        && input_spec
-            .as_ref()
-            .is_none_or(|spec| spec.inventory.is_none())
-        && logical
-            .as_ref()
-            .is_some_and(|pipeline| input_spec.is_some() || !pipeline.discoveries.is_empty())
+        && spec.as_ref().is_some_and(|spec| {
+            spec.inventory.is_none() && (recipe.is_some() || !spec.rules.discoveries.is_empty())
+        })
     {
         args.root = Some(
             input_file
@@ -389,18 +399,7 @@ fn run(mut args: CliArgs) -> Result<(), Box<dyn Error>> {
                 .into_owned(),
         );
     }
-    // With a recipe, the input stage settles the dataset before any job is
-    // resolved; it needs a pipeline that parses and something to read.
-    let resolved_inputs = match (&input_spec, &logical) {
-        (Some(spec), Some(pipeline)) => run_input_stage(&args, spec, pipeline)?,
-        _ => None,
-    };
-    let inventory_text = match &resolved_inputs {
-        Some(resolved) => logical
-            .as_ref()
-            .map(|pipeline| render_source_inventory(&resolved.inventory, pipeline)),
-        None => read_inventory(&args, &pipeline_text, path, logical.as_ref())?,
-    };
+    let inventory_text = read_inventory(&args, document.as_ref(), spec.as_ref(), recipe.as_ref())?;
     // Report every error and warning before doing any work.
     let diagnose = if args.command == Command::Artifacts {
         diagnose_artifacts_at
@@ -409,12 +408,12 @@ fn run(mut args: CliArgs) -> Result<(), Box<dyn Error>> {
     };
     let diagnostics = if args.command == Command::Discover && inventory_text.is_some() {
         Vec::new()
-    } else if let Some(spec) = &input_spec {
+    } else if let Some(recipe) = &recipe {
         diagnose_at_with_inputs(
             &pipeline_text,
             inventory_text.as_deref(),
             path,
-            spec,
+            recipe,
             args.command == Command::Artifacts,
         )
     } else {
@@ -434,34 +433,23 @@ fn run(mut args: CliArgs) -> Result<(), Box<dyn Error>> {
         print!("{}", inventory_text.unwrap_or_default());
         return Ok(());
     }
-    // A separate inventory replaces an inline one, which is then not read.
-    let (pipeline, parsed_inventory) = match &inventory_text {
-        Some(text) => (
-            parse_pipeline_at(&pipeline_text, path)?,
-            Some(parse_source_inventory(text)?),
-        ),
-        None => parse_document_at(&pipeline_text, path)?,
+    let document = parse(&pipeline_text)?;
+    let spec = input_spec(&document, recipe.as_ref())?;
+    let pipeline = document.pipeline;
+    // Step 2 settles the records: skip rules, then require rules.
+    let records = match &inventory_text {
+        Some(text) => Some(parse_source_inventory(text)?),
+        None => document.inventory,
     };
-    // Only paths reach past the input stage: the jobs come from the logical
-    // pipeline, and the recipe's paths are bound to them afterwards.
+    let settled = records
+        .map(|records| spec.resolve(&pipeline, InputSource::Inventory(records)))
+        .transpose()?;
+    // Step 3 sees the logical pipeline and the settled inventory. A recipe's
+    // source paths are attached only to bind paths to the jobs.
     let mut bound = pipeline.clone();
-    if let Some(spec) = &input_spec {
-        spec.apply_paths(&mut bound)?;
+    if let Some(recipe) = &recipe {
+        recipe.apply_paths(&mut bound);
     }
-    let inventory = match &resolved_inputs {
-        Some(resolved) => {
-            // Requirements are errors, except that `artifacts` shows what is there.
-            if args.command == Command::Artifacts {
-                for missing in &resolved.missing {
-                    eprintln!("warning: {missing}");
-                }
-            } else {
-                resolved.require_complete()?;
-            }
-            Some(resolved.dag_inventory())
-        }
-        None => parsed_inventory,
-    };
     if let Some(stage) = &args.stage {
         check_stage(&pipeline, stage)?;
     }
@@ -469,7 +457,7 @@ fn run(mut args: CliArgs) -> Result<(), Box<dyn Error>> {
     if args.command == Command::Check && args.paths {
         println!("{coverage}");
     }
-    let Some(inventory) = inventory else {
+    let Some(settled) = settled else {
         if args.command == Command::Check && args.root.is_none() {
             if args.strict_paths || args.paths {
                 coverage.validate(args.strict_paths)?;
@@ -479,15 +467,29 @@ fn run(mut args: CliArgs) -> Result<(), Box<dyn Error>> {
         }
         return Err("no inline source inventory; supply --sources <inventory.spitout|->".into());
     };
+    let inventory = settled.dag_inventory();
     if args.command == Command::Artifacts {
-        let report = resolve_artifacts(&pipeline, &inventory)?;
+        // `artifacts` shows what the missing requirements hold back.
+        let mut report =
+            resolve_artifacts_excluding(&pipeline, &inventory, &settled.unavailable())?;
+        report.coverage = settled.gaps;
         if let Some(root) = &args.root {
             validate_source_files(&bound, &report.dag, Path::new(root))?;
         }
         print!("{}", render_artifacts(&report));
         return Ok(());
     }
+    settled.require_complete()?;
     run_jobs(&args, &pipeline, &bound, &inventory, &coverage)
+}
+
+/// The rules and records written beside the pipeline, with a recipe's.
+fn input_spec(document: &Document, recipe: Option<&InputSpec>) -> Result<InputSpec, String> {
+    let mut spec = InputSpec::embedded_in(document);
+    if let Some(recipe) = recipe {
+        spec.merge(recipe.clone())?;
+    }
+    Ok(spec)
 }
 
 /// Resolve the jobs of `check`, `dag` or `bash`, check their paths and
@@ -594,71 +596,35 @@ fn read_file(path: &str) -> Result<String, String> {
         .map_err(|reason| format!("cannot read `{path}`: {reason}"))
 }
 
-/// The inventory text: from `--sources`, or else discovered under `--root`
-/// when the pipeline has no inline inventory. A `.spitin` recipe has its own
-/// stage and never comes here.
+/// The inventory text: from `--sources`, a recipe's records, or else found
+/// under `--root` when the pipeline has no inline inventory. `None` leaves
+/// any inline inventory to be read with the pipeline.
 fn read_inventory(
     args: &CliArgs,
-    pipeline_text: &str,
-    path: &Path,
-    pipeline: Option<&Pipeline>,
+    document: Option<&Document>,
+    spec: Option<&InputSpec>,
+    recipe: Option<&InputSpec>,
 ) -> Result<Option<String>, Box<dyn Error>> {
+    let inline = document.is_some_and(|document| document.inventory.is_some());
+    let recipe_records = recipe.and_then(|recipe| recipe.inventory.as_ref());
     Ok(match (args.sources.as_deref(), &args.root) {
         (Some("-"), _) => Some(read_stdin()?),
         (Some(sources), _) => Some(read_file(sources)?),
+        (None, _) if recipe_records.is_some() => document
+            .zip(recipe_records)
+            .map(|(document, records)| render_source_inventory(records, &document.pipeline)),
         // With a root and no inventory, find the sources by their path rules.
-        (None, Some(root))
-            if args.command == Command::Discover || !has_inline_inventory(pipeline_text, path) =>
-        {
-            pipeline
-                .map(|pipeline| discover(pipeline, Path::new(root)))
-                .transpose()?
+        (None, Some(root)) if args.command == Command::Discover || !inline => {
+            match document.zip(spec) {
+                Some((document, spec)) => {
+                    Some(discover(&document.pipeline, spec, Path::new(root))?)
+                }
+                // The pipeline does not parse; diagnostics report why.
+                None => None,
+            }
         }
         (None, _) => None,
     })
-}
-
-/// Run the `.spitin` input stage, reporting what it found. `None` when there
-/// is neither an inventory nor a root to scan.
-fn run_input_stage(
-    args: &CliArgs,
-    spec: &InputSpec,
-    pipeline: &Pipeline,
-) -> Result<Option<ResolvedInputs>, Box<dyn Error>> {
-    let source = match (args.sources.as_deref(), &args.root) {
-        (Some("-"), _) => InputSource::Inventory(parse_source_inventory(&read_stdin()?)?),
-        (Some(sources), _) => InputSource::Inventory(parse_source_inventory(&read_file(sources)?)?),
-        (None, _) if spec.inventory.is_some() => {
-            InputSource::Inventory(spec.inventory.clone().unwrap_or_default())
-        }
-        (None, Some(root)) => InputSource::Discover(Path::new(root)),
-        (None, None) => {
-            // Nothing to scan, but the recipe must still fit the pipeline.
-            spec.apply_to(&mut pipeline.clone())?;
-            return Ok(None);
-        }
-    };
-    let resolved = spec.resolve(pipeline, source)?;
-    for skipped in &resolved.skipped {
-        eprintln!("warning: skipped {skipped}");
-    }
-    if let Some(root) = &resolved.root {
-        if resolved.inventory.discovered.is_empty() {
-            eprintln!(
-                "note: discovered {} source artifacts under `{}`",
-                resolved.inventory.artifacts.len(),
-                root.display()
-            );
-        } else {
-            eprintln!(
-                "note: discovered {} source artifacts and {} contexts under `{}`",
-                resolved.inventory.artifacts.len(),
-                resolved.inventory.contexts.len(),
-                root.display()
-            );
-        }
-    }
-    Ok(Some(resolved))
 }
 
 fn input_spec_path(args: &CliArgs, path: &Path, text: &str) -> Option<PathBuf> {
@@ -712,15 +678,16 @@ fn has_inline_inventory(text: &str, path: &Path) -> bool {
     parse_document_at(text, path).is_ok_and(|(_, inventory)| inventory.is_some())
 }
 
-/// The inventory text for the source files under `root`, or `None` when the
-/// pipeline does not parse; diagnostics then report why.
-fn discover(pipeline: &Pipeline, root: &Path) -> Result<String, Box<dyn Error>> {
+/// Scan `root` for the contexts and source files the rules describe, and
+/// write them as inventory text.
+fn discover(pipeline: &Pipeline, spec: &InputSpec, root: &Path) -> Result<String, Box<dyn Error>> {
     spit::validate_pipeline(pipeline)?;
-    let discovery = discover_source_files(pipeline, root)?;
+    spec.check(pipeline)?;
+    let discovery = discover_source_files(pipeline, &spec.rules, root)?;
     for skipped in &discovery.skipped {
         eprintln!("warning: skipped {skipped}");
     }
-    if pipeline.discoveries.is_empty() {
+    if spec.rules.discoveries.is_empty() {
         eprintln!(
             "note: discovered {} source artifacts under `{}`",
             discovery.inventory.artifacts.len(),

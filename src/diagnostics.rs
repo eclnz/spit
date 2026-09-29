@@ -7,7 +7,7 @@ use std::path::Path;
 
 use crate::command::collect_commands;
 use crate::imports::parse_located_document;
-use crate::inputs::InputSpec;
+use crate::inputs::{check_inventory, collect_rule_errors, InputSpec};
 use crate::lower::{parse_document_with_imports, ParsedDocument};
 use crate::model::DEFAULT_OUTPUT;
 use crate::model::{stage_within, CommandRole, Job, ResolvedDag, SourceInventory};
@@ -16,7 +16,7 @@ use crate::paths::{case_collisions, collect_paths};
 use crate::resolver::collect_pipeline;
 use crate::span::{columns_of, content_columns, utf16_columns, Located, Place};
 use crate::{
-    parse_source_inventory, resolve, resolve_artifacts, DefinitionSubject, EntityBinding,
+    parse_source_inventory, resolve, resolve_artifacts_excluding, DefinitionSubject, EntityBinding,
     InputBinding, ParseError, ParseErrorKind, Pipeline, ResolveError,
 };
 
@@ -211,9 +211,20 @@ pub fn diagnose_at_with_inputs(
     let inline = inline_inventory(source_text);
     diagnose_with_parser(text, source_text, lenient, |text| {
         let mut document = parse_located_document(text, path, inline)?;
-        inputs
-            .apply_to(&mut document.pipeline)
+        let mut spec = InputSpec {
+            rules: document.inputs.clone(),
+            inventory: None,
+        };
+        let recipe = InputSpec {
+            rules: inputs.rules.clone(),
+            inventory: None,
+        };
+        spec.merge(recipe)
             .map_err(|message| ParseError::new(1, message))?;
+        spec.check(&document.pipeline)
+            .map_err(|error| ParseError::new(1, error.to_string()))?;
+        inputs.apply_paths(&mut document.pipeline);
+        document.inputs = spec.rules;
         Ok(document)
     })
 }
@@ -285,20 +296,34 @@ fn diagnose_with_parser(
     let supplied = external_inventory.or(document.inventory);
     let inventory = supplied.clone().unwrap_or_default();
     let outputs = |jobs: Vec<Job>| jobs.into_iter().flat_map(|job| job.outputs);
-    let produced: Result<BTreeSet<String>, _> = if lenient {
-        resolve_artifacts(&document.pipeline, &inventory).map(|report| {
-            let incomplete = report.incomplete.into_iter().flat_map(|job| job.outputs);
-            outputs(report.dag.jobs)
-                .chain(incomplete)
-                .map(|artifact| artifact.product)
-                .collect()
-        })
-    } else {
-        resolve(&document.pipeline, &inventory).map(|dag| {
-            diagnostics.extend(case_warnings(&document.pipeline, &document.lines, &dag));
-            outputs(dag.jobs).map(|artifact| artifact.product).collect()
-        })
-    };
+    // The input stage settles the inventory; only then are jobs resolved.
+    let produced: Result<BTreeSet<String>, _> =
+        check_inventory(&document.pipeline, &document.inputs, &inventory).and_then(|checked| {
+            let unavailable: Vec<_> = checked
+                .gaps
+                .iter()
+                .flat_map(|gap| gap.sources.iter().cloned())
+                .collect();
+            if lenient {
+                let report = resolve_artifacts_excluding(
+                    &document.pipeline,
+                    &checked.inventory,
+                    &unavailable,
+                )?;
+                let incomplete = report.incomplete.into_iter().flat_map(|job| job.outputs);
+                Ok(outputs(report.dag.jobs)
+                    .chain(incomplete)
+                    .map(|artifact| artifact.product)
+                    .collect())
+            } else {
+                if let Some(gap) = checked.gaps.into_iter().next() {
+                    return Err(gap.error);
+                }
+                let dag = resolve(&document.pipeline, &checked.inventory)?;
+                diagnostics.extend(case_warnings(&document.pipeline, &document.lines, &dag));
+                Ok(outputs(dag.jobs).map(|artifact| artifact.product).collect())
+            }
+        });
     match produced {
         Err(error) => {
             let (source, place) = error_location(
@@ -411,9 +436,11 @@ fn pipeline_diagnostics(
 ) -> Vec<Diagnostic> {
     let (pipeline, lines) = (&document.pipeline, &document.lines);
     let checked = collect_pipeline(pipeline);
+    let rule_errors = collect_rule_errors(pipeline, &document.inputs, &checked.poisoned);
     let mut diagnostics: Vec<_> = checked
         .errors
         .iter()
+        .chain(&rule_errors)
         .map(|(subject, error)| {
             let place = subject_place(pipeline, lines, subject, error)
                 .or_else(|| error_location(pipeline, lines, error, inventory_text, false).1);
