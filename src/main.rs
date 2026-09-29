@@ -19,9 +19,10 @@ use std::process::ExitCode;
 use spit::{
     bind_dag, diagnose_artifacts_at, diagnose_at, diagnose_at_with_inputs, diagnose_recipe,
     inspect_paths, parse_input_spec_at, parse_pipeline_at, parse_source_inventory,
-    render_artifacts, render_bound_dag, render_dag, render_source_inventory, resolve,
-    resolve_artifacts_excluding, stage_within, validate_pipeline, validate_source_files,
-    Diagnostic, InputSource, InputSpec, PathTemplate, Pipeline, ResolvedDag, ResolvedInputs,
+    render_artifacts, render_bound_dag, render_dag, render_diagnostics_json,
+    render_source_inventory, resolve, resolve_artifacts_excluding, stage_within, validate_pipeline,
+    validate_source_files, Diagnostic, DiagnosticSource, InputSource, InputSpec, PathTemplate,
+    Pipeline, ResolvedDag, ResolvedInputs, Severity,
 };
 
 #[derive(Clone, Copy, PartialEq)]
@@ -404,10 +405,14 @@ fn main() -> ExitCode {
         Ok(()) => ExitCode::SUCCESS,
         // Editors expect JSON even when the check cannot run.
         Err(error) if diagnostics_json => {
-            println!(
-                "{{\"diagnostics\":[{{\"severity\":\"error\",\"source\":\"pipeline\",\"line\":null,\"column\":null,\"end_column\":null,\"message\":\"{}\"}}]}}",
-                escape_json(&error.to_string())
-            );
+            let diagnostic = Diagnostic {
+                severity: Severity::Error,
+                source: DiagnosticSource::Pipeline,
+                line: None,
+                columns: None,
+                message: error.to_string(),
+            };
+            print!("{}", render_diagnostics_json(&[diagnostic], "", None));
             ExitCode::SUCCESS
         }
         Err(error) => {
@@ -435,7 +440,7 @@ fn check(args: &CliArgs) -> Result<(), Box<dyn Error>> {
         }
         let diagnostics = diagnose_recipe(&text, path);
         if args.has(Flag::Json) {
-            print_json(&diagnostics, &text, None);
+            print!("{}", render_diagnostics_json(&diagnostics, &text, None));
             return Ok(());
         }
         report(&diagnostics, &text, None)?;
@@ -444,7 +449,7 @@ fn check(args: &CliArgs) -> Result<(), Box<dyn Error>> {
     }
     let diagnostics = diagnose_at(&text, None, path);
     if args.has(Flag::Json) {
-        print_json(&diagnostics, &text, None);
+        print!("{}", render_diagnostics_json(&diagnostics, &text, None));
         return Ok(());
     }
     report(&diagnostics, &text, None)?;
@@ -750,43 +755,4 @@ fn report(
         return Err(Reported);
     }
     Ok(())
-}
-
-fn print_json(diagnostics: &[Diagnostic], text: &str, source_text: Option<&str>) {
-    let number = |value: Option<usize>| value.map_or_else(|| "null".to_owned(), |n| n.to_string());
-    print!("{{\"diagnostics\":[");
-    for (index, diagnostic) in diagnostics.iter().enumerate() {
-        if index != 0 {
-            print!(",");
-        }
-        // Columns are 1-based, in UTF-16 code units as editors count them;
-        // `end_column` is one past the last character.
-        let columns = diagnostic.utf16_columns(text, source_text);
-        print!(
-            "{{\"severity\":\"{}\",\"source\":\"{}\",\"line\":{},\"column\":{},\"end_column\":{},\"message\":\"{}\"}}",
-            diagnostic.severity.as_str(),
-            diagnostic.source.as_str(),
-            number(diagnostic.line),
-            number(columns.as_ref().map(|columns| columns.start + 1)),
-            number(columns.as_ref().map(|columns| columns.end + 1)),
-            escape_json(&diagnostic.message)
-        );
-    }
-    println!("]}}");
-}
-
-fn escape_json(text: &str) -> String {
-    let mut escaped = String::new();
-    for character in text.chars() {
-        match character {
-            '"' => escaped.push_str("\\\""),
-            '\\' => escaped.push_str("\\\\"),
-            '\n' => escaped.push_str("\\n"),
-            '\r' => escaped.push_str("\\r"),
-            '\t' => escaped.push_str("\\t"),
-            c if c < ' ' => write!(escaped, "\\u{:04x}", u32::from(c)).unwrap(),
-            c => escaped.push(c),
-        }
-    }
-    escaped
 }
