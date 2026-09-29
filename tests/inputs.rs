@@ -222,7 +222,8 @@ fn a_named_recipe_runs_in_memory_and_defaults_output_paths() {
     .unwrap();
     fs::write(
         tree.0.join("analysis.spitin"),
-        "discover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}\n\
+        "pipeline analysis.spit\n\
+         discover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}\n\
          skip sessions count>=2 per [sub]\n\
          require sessions count>=2 per [sub]\n\
          path image: data/sub-{sub}/ses-{ses}/image.nii.gz\n",
@@ -239,16 +240,11 @@ fn a_named_recipe_runs_in_memory_and_defaults_output_paths() {
         String::from_utf8_lossy(&check.stderr)
     );
     assert_eq!(String::from_utf8_lossy(&check.stdout), "Pipeline valid.\n");
-    // Named in place of a .spitout, it runs the input stage in memory, and
-    // outputs with no rule take the built-in layout.
+    // Given in place of a .spitout, it runs the input stage in memory over
+    // the pipeline it names, and outputs with no rule take the built-in layout.
     let recipe = tree.0.join("analysis.spitin");
     let paths = Command::new(env!("CARGO_BIN_EXE_spit"))
-        .args([
-            "dag",
-            pipeline_file.to_str().unwrap(),
-            recipe.to_str().unwrap(),
-            "--paths",
-        ])
+        .args(["dag", recipe.to_str().unwrap(), "--paths"])
         .output()
         .unwrap();
     let notes = String::from_utf8_lossy(&paths.stderr).into_owned();
@@ -302,10 +298,7 @@ fn explicit_spitin_uses_its_own_directory_and_require_reports_gaps() {
         "{}",
         String::from_utf8_lossy(&checked.stderr)
     );
-    for args in [
-        &["inputs", recipe][..],
-        &["dag", pipeline_file.to_str().unwrap(), recipe],
-    ] {
+    for args in [&["inputs", recipe][..], &["dag", recipe]] {
         let output = run(args);
         assert!(!output.status.success(), "{args:?}");
         assert!(
