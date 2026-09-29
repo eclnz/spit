@@ -2,6 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
+use std::ops::Range;
 use std::path::Path;
 
 use super::coverage::apply_skips;
@@ -332,21 +333,27 @@ fn path_pattern(template: &PathTemplate, product: &ProductDef) -> Result<Vec<Pie
 fn match_pattern<'a>(pieces: &[Piece], text: &'a str) -> Option<BTreeMap<String, &'a str>> {
     let mut bound = BTreeMap::new();
     let mut failed = BTreeSet::new();
-    match_from(pieces, 0, text, 0, &mut bound, &mut failed).then_some(bound)
+    match_from(pieces, 0, text, 0, &mut bound, &mut failed).then(|| {
+        bound
+            .into_iter()
+            .map(|(dimension, value)| (dimension, &text[value]))
+            .collect()
+    })
 }
 
 /// A position that failed to match: the piece, the offset in the text, and
 /// the values bound for dimensions that later pieces repeat.
 type Attempt = (usize, usize, Vec<(usize, usize)>);
 
-/// Match `pieces[index..]` against `text[offset..]`. Failed positions are
+/// Match `pieces[index..]` against `text[offset..]`, binding each dimension
+/// to the byte range of its value in `text`. Failed positions are
 /// remembered, which keeps ambiguous splits from taking exponential time.
-fn match_from<'a>(
+fn match_from(
     pieces: &[Piece],
     index: usize,
-    text: &'a str,
+    text: &str,
     offset: usize,
-    bound: &mut BTreeMap<String, &'a str>,
+    bound: &mut BTreeMap<String, Range<usize>>,
     failed: &mut BTreeSet<Attempt>,
 ) -> bool {
     let rest = &text[offset..];
@@ -360,10 +367,7 @@ fn match_from<'a>(
                 .iter()
                 .any(|piece| matches!(piece, Piece::Value(name) if name == *dimension))
         })
-        .map(|(_, value)| {
-            let start = value.as_ptr() as usize - text.as_ptr() as usize;
-            (start, start + value.len())
-        })
+        .map(|(_, value)| (value.start, value.end))
         .collect();
     let attempt = (index, offset, later);
     if failed.contains(&attempt) {
@@ -381,7 +385,7 @@ fn match_from<'a>(
                     failed,
                 )
         }
-        Piece::Value(dimension) => match bound.get(dimension).copied() {
+        Piece::Value(dimension) => match bound.get(dimension).map(|value| &text[value.clone()]) {
             Some(value) => {
                 rest.starts_with(value)
                     && match_from(pieces, index + 1, text, offset + value.len(), bound, failed)
@@ -393,7 +397,7 @@ fn match_from<'a>(
                     })
                     .unwrap_or(rest.len());
                 let found = (1..=longest).any(|end| {
-                    bound.insert(dimension.clone(), &rest[..end]);
+                    bound.insert(dimension.clone(), offset..offset + end);
                     match_from(pieces, index + 1, text, offset + end, bound, failed)
                 });
                 if !found {

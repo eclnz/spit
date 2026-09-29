@@ -16,7 +16,7 @@ use crate::model::DEFAULT_OUTPUT;
 use crate::model::{stage_within, CommandRole, Job, ResolvedDag, SourceInventory};
 use crate::parser::{glued_comment, source_record_lines, Kind, Rule, SourceMap, Step};
 use crate::paths::{case_collisions, collect_paths};
-use crate::span::{columns_of, content_columns, utf16_columns, Located, Place};
+use crate::span::{content_columns, utf16_columns, Located, Place};
 use crate::{
     parse_source_inventory, resolve, resolve_artifacts_excluding, DefinitionSubject, EntityBinding,
     InputBinding, ParseError, ParseErrorKind, Pipeline, ResolveError,
@@ -509,9 +509,10 @@ fn finish(
     for (source, text) in texts {
         let Some(text) = text else { continue };
         for (index, line) in text.lines().enumerate() {
-            let Some(word) = glued_comment(line) else {
+            let Some(columns) = glued_comment(line) else {
                 continue;
             };
+            let word = &line[columns.clone()];
             let number = Some(index + 1);
             let explanation = format!(
                 "`#` after `{word}` is part of that word, not a comment; put a space before `#` to start a comment, or quote the text to keep it"
@@ -526,11 +527,10 @@ fn finish(
                 .collect();
             if errors.is_empty() {
                 // Point at the word and the `#` joined to it.
-                let columns = columns_of(line, word).map(|word| word.start..word.end + 1);
                 diagnostics.push(Diagnostic::new(
                     Severity::Warning,
                     source,
-                    columns.map(|columns| Place::new(index + 1, columns)),
+                    Some(Place::new(index + 1, columns.start..columns.end + 1)),
                     explanation,
                 ));
             } else {

@@ -33,9 +33,9 @@ pub(crate) enum Focus {
     /// Text within the error's columns, or elsewhere on its line, such as
     /// one `{placeholder}`, found when the error is reported.
     Text(Box<str>),
-    /// Where a slice of the line being parsed sits in memory, resolved to
-    /// columns before the line is dropped.
-    Slice(Range<usize>),
+    /// A slice of the line being parsed, by its [`address_of`], resolved to
+    /// columns with [`columns_at`] once the parser is back at the line.
+    Address(Range<usize>),
 }
 
 impl Location {
@@ -141,16 +141,36 @@ impl<E: fmt::Debug + fmt::Display> std::error::Error for Located<E> {}
 /// Parsing works on slices of the original line, so this recovers where a
 /// token came from without the parser tracking offsets itself.
 pub(crate) fn columns_of(line: &str, part: &str) -> Option<Range<usize>> {
-    let start = (part.as_ptr() as usize).checked_sub(line.as_ptr() as usize)?;
-    let end = start + part.len();
-    (end <= line.len()).then_some(start..end)
+    columns_at(line, &address_of(part))
+}
+
+/// Where `part` sits in memory, to find it later in the line it was sliced
+/// from with [`columns_at`], when the parser has only the slice.
+///
+/// This and [`columns_at`] are the only places SPIT reads an address; they
+/// do what the unstable `str::substr_range` does, and can use it once it is
+/// stable.
+pub(crate) fn address_of(part: &str) -> Range<usize> {
+    let start = part.as_ptr() as usize;
+    start..start + part.len()
+}
+
+/// The byte range of `line` at `address`, from [`address_of`], when the
+/// address lies within `line` on character boundaries. An address from any
+/// other text gives `None`, never columns that could split a character.
+pub(crate) fn columns_at(line: &str, address: &Range<usize>) -> Option<Range<usize>> {
+    let base = line.as_ptr() as usize;
+    let start = address.start.checked_sub(base)?;
+    let end = address.end.checked_sub(base)?;
+    (start <= end && line.get(start..end).is_some()).then_some(start..end)
 }
 
 /// The range of `line` without leading indentation, trailing space, or a
 /// trailing comment.
 pub(crate) fn content_columns(line: &str) -> Range<usize> {
-    let content = crate::parser::strip_comment(line).trim();
-    columns_of(line, content).unwrap_or(0..line.len())
+    let code = crate::parser::strip_comment(line);
+    let start = code.len() - code.trim_start().len();
+    start..code.trim_end().len().max(start)
 }
 
 /// The first occurrence of `word` in `line` at or after `from` that is not
@@ -181,4 +201,42 @@ pub(crate) fn utf16_columns(line: &str, columns: &Range<usize>) -> Range<usize> 
             .map_or(0, |prefix| prefix.encode_utf16().count())
     };
     units(columns.start)..units(columns.end)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{address_of, columns_at, columns_of, content_columns};
+
+    #[test]
+    fn a_slice_is_found_in_the_line_it_came_from() {
+        let line = "  source é: Image  # note";
+        let token = &line[9..11];
+        assert_eq!(columns_of(line, token), Some(9..11));
+        assert_eq!(columns_of(line, &line[..0]), Some(0..0));
+        assert_eq!(
+            columns_of(line, &line[line.len()..]),
+            Some(line.len()..line.len())
+        );
+    }
+
+    #[test]
+    fn an_address_outside_the_line_or_inside_a_character_is_rejected() {
+        let line = "source é";
+        let other = String::from("source é");
+        assert_eq!(columns_of(line, &other), None);
+        let address = address_of(line);
+        let inside = address.start + 8..address.end;
+        assert_eq!(columns_at(line, &inside), None);
+        let past = address.start..address.end + 1;
+        assert_eq!(columns_at(line, &past), None);
+    }
+
+    #[test]
+    fn content_leaves_out_indentation_trailing_space_and_comments() {
+        assert_eq!(content_columns("  a b  # c"), 2..5);
+        assert_eq!(content_columns("a"), 0..1);
+        assert_eq!(content_columns("   "), 3..3);
+        assert_eq!(content_columns("  # only"), 2..2);
+        assert_eq!(content_columns(""), 0..0);
+    }
 }
