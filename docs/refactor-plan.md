@@ -2,6 +2,26 @@
 
 Findings from a read-through of `src/` (about 11k lines) plus targeted checks. Line numbers were taken at commit `2bad9af` and will drift; search by function name if they do.
 
+## Outcome
+
+All 22 items are done; each item below has a **Status** saying what changed, and where the scope was narrowed or something left, why. Every change was checked with clippy (clean), the full test suite (253 tests, up from 239) and a byte-for-byte comparison of CLI output over 76 command groups against the previous commit; larger changes were also compared with the old code on randomized inputs.
+
+**Behaviour changes, all deliberate:**
+- `dag`/`artifacts` on a recipe print each pipeline warning once, not twice (item 7).
+- A type variable prints as `$T`, so it cannot be mistaken for a named type `T` (item 16).
+- The absolute-path error names the dataset root, not `SPIT_ROOT` (item 20).
+- Library entry points accept text with a byte order mark, as the CLI did (item 9).
+- Public API: `diagnose_*` entry points reorganized around `Context` (item 5), `Diagnosis` is a `Result` (item 3), `bind_dag` returns `BindError` (item 13), `InputSpec::check`/`resolve` return `InputError` (item 14), `PortSite` groups `ResolveError` fields (item 14), `ParseError::kind()`/`message()` replace field access through `Deref` (item 12), `EntityBinding`'s map is private (item 15).
+
+**Bugs found and fixed, each with a test:**
+- `spit check recipe.spitin` rejected a pipeline file saved with a byte order mark (item 9).
+- `invocation_order` overflowed a test thread's stack on a 100k-step chain (item 21).
+- The empty-step warning took exponential time on steps reading a product twice: 14 s at 24 steps, hours at 40 (item 19).
+- Type arguments nested about 10,000 deep crashed `spit check` with a stack overflow (item 19).
+- `spit-vscode` treated a `#` after a byte order mark as a comment where SPIT does not (item 22).
+
+**Found and not fixed:** `spit dag recipe.spitin` fails where `spit inputs recipe.spitin` succeeds when a `skip` rule removes every context of a discovery that a `require` rule names (see item 7).
+
 ## Baseline
 
 What held at audit time, so a refactor can be checked against it:
