@@ -119,33 +119,39 @@ fn check_vary(
     driver: usize,
     context: &[String],
 ) -> Result<(), ResolveError> {
-    if let Some(dimension) = &inputs[driver].binding.vary {
-        if let Some(declared) = &operation.aggregated_dimension {
-            if declared != dimension {
-                return Err(unsupported(
-                    operation,
-                    format!("declares drop({declared}) but invocation uses vary({dimension})"),
-                ));
-            }
-        }
-        // Every other input is matched once per group.
-        let grouped = dimension_set(context);
-        for (index, input) in inputs.iter().enumerate() {
-            let extra = missing_from(&input.joins(), &grouped);
-            if index != driver && !extra.is_empty() {
-                return Err(unsupported(
-                    operation,
-                    format!(
-                        "input `{}` has dimensions absent from the groups of `{}` @ vary({dimension}): {}; aggregate them first, pin them with `@ where(...)`, match on fewer with `@ same(...)`, or broadcast them with `@ each(...)`",
-                        input.binding.product,
-                        inputs[driver].binding.product,
-                        extra.join(", ")
-                    ),
-                ));
-            }
-        }
+    let driving = inputs[driver].binding;
+    let Some(dimension) = &driving.vary else {
+        return Ok(());
+    };
+    if let Some(declared) = operation
+        .aggregated_dimension
+        .as_ref()
+        .filter(|declared| *declared != dimension)
+    {
+        return Err(unsupported(
+            operation,
+            format!("declares drop({declared}) but invocation uses vary({dimension})"),
+        ));
     }
-    Ok(())
+    let grouped = dimension_set(context);
+    let unmatched = inputs
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| *index != driver)
+        .map(|(_, input)| (input, missing_from(&input.joins(), &grouped)))
+        .find(|(_, extra)| !extra.is_empty());
+    match unmatched {
+        Some((input, extra)) => Err(unsupported(
+            operation,
+            format!(
+                "input `{}` has dimensions absent from the groups of `{}` @ vary({dimension}): {}; aggregate them first, pin them with `@ where(...)`, match on fewer with `@ same(...)`, or broadcast them with `@ each(...)`",
+                input.binding.product,
+                driving.product,
+                extra.join(", ")
+            ),
+        )),
+        None => Ok(()),
+    }
 }
 
 /// Each output has the dimensions of the step's context: the driver's
@@ -159,35 +165,31 @@ fn check_output_dimensions(
     outputs: &[&ProductDef],
 ) -> Result<(), ResolveError> {
     let expected = dimension_set(context);
-    for output in outputs {
-        if dimension_set(&output.dimensions) != expected {
-            let detail = match &inputs[driver].binding.vary {
-                Some(dimension) if context.len() > groups.len() => format!(
-                    "output `{}` must have input dimensions minus `{dimension}`, plus those broadcast with `@ each(...)`: [{}]",
-                    output.name,
-                    context.join(", ")
-                ),
-                Some(dimension) => format!(
-                    "output `{}` must have input dimensions minus `{dimension}`",
-                    output.name
-                ),
-                None if context.len() > groups.len() => format!(
-                    "output `{}` must have the dimensions of driving product `{}` and those broadcast with `@ each(...)`: [{}]",
-                    output.name,
-                    inputs[driver].binding.product,
-                    context.join(", ")
-                ),
-                None => format!(
-                    "output `{}` must have the dimensions of driving product `{}`: [{}]",
-                    output.name,
-                    inputs[driver].binding.product,
-                    context.join(", ")
-                ),
-            };
-            return Err(unsupported(operation, detail));
-        }
-    }
-    Ok(())
+    let Some(output) = outputs
+        .iter()
+        .find(|output| dimension_set(&output.dimensions) != expected)
+    else {
+        return Ok(());
+    };
+    let driving = inputs[driver].binding;
+    let less = driving
+        .vary
+        .as_ref()
+        .map_or(String::new(), |dimension| format!(" less `{dimension}`"));
+    let broadcast = if context.len() > groups.len() {
+        ", plus those broadcast with `@ each(...)`"
+    } else {
+        ""
+    };
+    Err(unsupported(
+        operation,
+        format!(
+            "output `{}` must have the dimensions of driving product `{}`{less}{broadcast}: [{}]",
+            output.name,
+            driving.product,
+            context.join(", ")
+        ),
+    ))
 }
 
 /// Check that each dimension an input broadcasts is new to the step: the
@@ -198,119 +200,104 @@ fn check_broadcasts(
     driver: usize,
     groups: &[String],
 ) -> Result<(), ResolveError> {
+    let driving = inputs[driver].binding;
     let mut broadcast: BTreeMap<&str, &str> = BTreeMap::new();
     for input in inputs {
         let product = input.binding.product.as_str();
         for dimension in &input.binding.each {
-            if let Some(varied) = inputs[driver]
-                .binding
-                .vary
-                .as_ref()
-                .filter(|varied| *varied == dimension)
-            {
-                return Err(unsupported(
-                    operation,
-                    format!(
-                        "`@ each({dimension})` on `{product}` would restore the dimension `{}` @ vary({varied}) collects",
-                        inputs[driver].binding.product
-                    ),
-                ));
-            }
-            if groups.contains(dimension) {
-                return Err(unsupported(
-                    operation,
-                    format!(
-                        "`@ each({dimension})` on `{product}`: driving product `{}` already has `{dimension}`, so it is matched without `@ each`",
-                        inputs[driver].binding.product
-                    ),
-                ));
-            }
-            if let Some(first) = broadcast.insert(dimension, product) {
-                return Err(unsupported(
-                    operation,
-                    format!(
-                        "`{first}` and `{product}` both broadcast `{dimension}`; keep `@ each({dimension})` on one and the other is matched on it"
-                    ),
-                ));
-            }
+            let problem = if driving.vary.as_ref() == Some(dimension) {
+                format!(
+                    "`@ each({dimension})` on `{product}` would restore the dimension `{}` @ vary({dimension}) collects",
+                    driving.product
+                )
+            } else if groups.contains(dimension) {
+                format!(
+                    "`@ each({dimension})` on `{product}`: driving product `{}` already has `{dimension}`, so it is matched without `@ each`",
+                    driving.product
+                )
+            } else if let Some(first) = broadcast.insert(dimension, product) {
+                format!(
+                    "`{first}` and `{product}` both broadcast `{dimension}`; keep `@ each({dimension})` on one and the other is matched on it"
+                )
+            } else {
+                continue;
+            };
+            return Err(unsupported(operation, problem));
         }
     }
     Ok(())
 }
 
+/// Check each selector of a binding against its port's cardinality and its
+/// product's dimensions.
 fn check_selectors(
     operation: &OperationDef,
     port: &InputPort,
     binding: &InputBinding,
     product: &ProductDef,
 ) -> Result<(), ResolveError> {
-    let selector_error = |detail: String| unsupported(operation, detail);
-    for dimension in binding.pinned.keys() {
-        if !product.dimensions.contains(dimension) {
-            return Err(selector_error(format!(
-                "`@ where({dimension}=...)`: product `{}` has no dimension `{dimension}`",
-                product.name
-            )));
-        }
+    let fail = |detail: String| Err(unsupported(operation, detail));
+    let name = &product.name;
+    if let Some(dimension) = binding
+        .pinned
+        .keys()
+        .find(|dimension| !product.dimensions.contains(*dimension))
+    {
+        return fail(format!(
+            "`@ where({dimension}=...)`: product `{name}` has no dimension `{dimension}`"
+        ));
     }
     let free = binding.free_dimensions(&product.dimensions);
+    // The first of `dimensions` a selector names that is pinned or absent.
+    let not_free = |selector: &str, dimensions: &[String]| {
+        dimensions
+            .iter()
+            .find(|dimension| !free.contains(*dimension))
+            .map(|dimension| {
+                format!("`@ {selector}({dimension})`: product `{name}` has no unpinned dimension `{dimension}`")
+            })
+    };
+    let port_name = &port.name;
     match port.cardinality {
         Cardinality::Many => {
             let Some(dimension) = &binding.vary else {
-                return Err(selector_error(format!(
-                    "many input `{}` requires an explicit vary(dimension) binding",
-                    port.name
-                )));
+                return fail(format!(
+                    "many input `{port_name}` requires an explicit vary(dimension) binding"
+                ));
             };
             if !free.contains(dimension) {
                 return Err(ResolveError::InvalidAggregationDimension {
-                    product: product.name.clone(),
+                    product: name.clone(),
                     dimension: dimension.clone(),
                 });
             }
-            if binding.same.is_some() {
-                return Err(selector_error(format!(
-                    "`@ same(...)` applies to single-artifact inputs, not many input `{}`",
-                    port.name
-                )));
-            }
-            if !binding.each.is_empty() {
-                return Err(selector_error(format!(
-                    "`@ each(...)` applies to single-artifact inputs, not many input `{}`",
-                    port.name
-                )));
+            let single_only = if binding.same.is_some() {
+                Some("same")
+            } else if !binding.each.is_empty() {
+                Some("each")
+            } else {
+                None
+            };
+            if let Some(selector) = single_only {
+                return fail(format!(
+                    "`@ {selector}(...)` applies to single-artifact inputs, not many input `{port_name}`"
+                ));
             }
         }
         Cardinality::One => {
             if binding.vary.is_some() {
-                return Err(selector_error(format!(
-                    "`@ vary(...)` applies to many inputs; input `{}` takes one artifact",
-                    port.name
-                )));
+                return fail(format!(
+                    "`@ vary(...)` applies to many inputs; input `{port_name}` takes one artifact"
+                ));
             }
-            if let Some(same) = &binding.same {
-                if dimension_set(same).len() != same.len() {
-                    return Err(selector_error(format!(
-                        "`@ same(...)` repeats a dimension of `{}`",
-                        product.name
-                    )));
-                }
-                if let Some(dimension) = same.iter().find(|dimension| !free.contains(*dimension)) {
-                    return Err(selector_error(format!(
-                        "`@ same({dimension})`: product `{}` has no unpinned dimension `{dimension}`",
-                        product.name
-                    )));
-                }
+            let same = binding.same.as_deref().unwrap_or_default();
+            if dimension_set(same).len() != same.len() {
+                return fail(format!("`@ same(...)` repeats a dimension of `{name}`"));
             }
-            if let Some(dimension) = binding
-                .each
-                .iter()
-                .find(|dimension| !free.contains(*dimension))
+            if let Some(problem) =
+                not_free("same", same).or_else(|| not_free("each", &binding.each))
             {
-                return Err(selector_error(format!(
-                    "`@ each({dimension})`: product `{}` has no unpinned dimension `{dimension}`",
-                    product.name
-                )));
+                return fail(problem);
             }
         }
     }
