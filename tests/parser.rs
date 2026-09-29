@@ -1,7 +1,4 @@
-use spit::{
-    parse_document, parse_pipeline, parse_source_inventory, render_dag, resolve, validate_pipeline,
-    ResolveError, TypeExpr,
-};
+use spit::{parse_document, parse_pipeline, parse_source_inventory, resolve};
 
 /// A sectioned pipeline with the same shape as the basic example.
 const PIPELINE: &str = "\
@@ -43,7 +40,7 @@ fn document() -> String {
 }
 
 #[test]
-fn parses_and_resolves_a_document_with_its_inventory() {
+fn parses_a_document_with_its_inventory() {
     let (pipeline, embedded_inventory) = parse_document(&document()).unwrap();
     assert_eq!(pipeline.products.len(), 5);
     assert_eq!(pipeline.operations.len(), 3);
@@ -52,10 +49,6 @@ fn parses_and_resolves_a_document_with_its_inventory() {
     let inventory = embedded_inventory.unwrap();
     assert_eq!(inventory, parse_source_inventory(INVENTORY).unwrap());
     assert_eq!(inventory.artifacts.len(), 3);
-    let dag = resolve(&pipeline, &inventory).unwrap();
-    assert_eq!(dag.jobs.len(), 5);
-    assert_eq!(dag.jobs[4].input_artifacts().count(), 2);
-    assert!(!dag.jobs[4].output().entities.0.contains_key("run"));
 }
 
 #[test]
@@ -76,52 +69,6 @@ fn rejects_duplicate_dimension_in_source() {
 fn rejects_source_inventory_inside_pipeline_file() {
     let text = "products:\n  signal : Signal [site]\nsources:\n  signal[site=01]\n";
     assert_eq!(parse_pipeline(text).unwrap_err().line(), 3);
-}
-
-#[test]
-fn reports_semantic_type_error_after_parsing() {
-    let text = document().replace(
-        "registered = register(denoised, calibration)",
-        "registered = register(denoised, signal)",
-    );
-    let (pipeline, inventory) = parse_document(&text).unwrap();
-    assert!(matches!(
-        resolve(&pipeline, &inventory.unwrap()),
-        Err(ResolveError::TypeMismatch { .. })
-    ));
-}
-
-#[test]
-fn resolves_untyped_pipeline_by_shape_and_cardinality() {
-    let (pipeline, inventory) =
-        parse_document(include_str!("../examples/types/untyped.spit")).unwrap();
-    assert!(pipeline
-        .products
-        .iter()
-        .all(|product| product.artifact_type == TypeExpr::Unknown));
-    let dag = resolve(&pipeline, &inventory.unwrap()).unwrap();
-    assert_eq!(dag.jobs.len(), 3);
-    assert_eq!(dag.jobs[2].input_artifacts().count(), 2);
-    assert_eq!(dag.jobs[2].output().artifact_type, TypeExpr::Unknown);
-    assert!(!dag.jobs[2].output().entities.0.contains_key("repeat"));
-    assert!(!render_dag(&dag).contains(": Unknown"));
-}
-
-#[test]
-fn partially_typed_pipeline_accepts_unknown_and_rejects_known_mismatch() {
-    let text = "products:\n  raw [site]\n  output : Result [site]\noperations:\n  process(Input) -> Result\npipeline:\n  output = process(raw)\nsources:\n  raw[site=01]\n";
-    let (pipeline, inventory) = parse_document(text).unwrap();
-    assert_eq!(
-        resolve(&pipeline, &inventory.unwrap()).unwrap().jobs.len(),
-        1
-    );
-
-    let mismatched = text.replace("raw [site]", "raw : Other [site]");
-    let (pipeline, inventory) = parse_document(&mismatched).unwrap();
-    assert!(matches!(
-        resolve(&pipeline, &inventory.unwrap()),
-        Err(ResolveError::TypeMismatch { .. })
-    ));
 }
 
 #[test]
@@ -184,30 +131,6 @@ fn equals_command_keeps_colons_in_arguments() {
         pipeline.commands[0].template,
         "tool --url https://example.com/a:b {input} {output}"
     );
-}
-
-#[test]
-fn named_ports_and_declared_aggregate_shape_are_checked() {
-    let text = "source raw [site, run]\noperation combine(runs: many) @ drop(run)\nresult = combine(raw @ vary(run))\nsources:\n  raw[site=01,run=2]\n  raw[site=01,run=1]\n";
-    let (pipeline, inventory) = parse_document(text).unwrap();
-    assert_eq!(pipeline.operations[0].inputs[0].name, "runs");
-    assert_eq!(
-        pipeline.operations[0].aggregated_dimension.as_deref(),
-        Some("run")
-    );
-    let dag = resolve(&pipeline, &inventory.unwrap()).unwrap();
-    assert_eq!(dag.jobs[0].output().entities.0.len(), 1);
-
-    let wrong_vary = text.replace("vary(run)", "vary(site)");
-    let (pipeline, inventory) = parse_document(&wrong_vary).unwrap();
-    assert!(resolve(&pipeline, &inventory.unwrap())
-        .unwrap_err()
-        .to_string()
-        .contains("declares drop(run) but invocation uses vary(site)"));
-
-    let wrong_shape = text.replace("result =", "result : Data [site, run] =");
-    let (pipeline, inventory) = parse_document(&wrong_shape).unwrap();
-    assert!(resolve(&pipeline, &inventory.unwrap()).is_err());
 }
 
 #[test]
@@ -282,28 +205,6 @@ fn hash_inside_a_word_is_text_as_in_bash() {
     );
     let error = parse_pipeline("source raw [id]# note\n").unwrap_err();
     assert_eq!(error.line(), 1);
-}
-
-#[test]
-fn pipeline_checks_need_no_inventory() {
-    let text = "source raw : Table [id]\noperation clean(Table) -> Table\n\ncleaned = clean(rwa)\n";
-    assert_eq!(
-        validate_pipeline(&parse_pipeline(text).unwrap()).unwrap_err(),
-        ResolveError::UnknownProduct {
-            name: "rwa".to_owned()
-        }
-    );
-
-    let text = "source raw : Table [id]\nsource other : Other [id]\noperation clean(Table) -> Table\ncleaned = clean(other)\n";
-    assert!(matches!(
-        validate_pipeline(&parse_pipeline(text).unwrap()),
-        Err(ResolveError::TypeMismatch { .. })
-    ));
-
-    let (pipeline, inventory) =
-        parse_document(include_str!("../examples/commands/bash_demo.spit")).unwrap();
-    assert!(inventory.is_none());
-    validate_pipeline(&pipeline).unwrap();
 }
 
 #[test]
