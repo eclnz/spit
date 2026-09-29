@@ -122,13 +122,12 @@ impl PipelineBuilder {
             .find(|operation| &operation.name == name)
             .ok_or_else(|| {
                 let place = step.operation();
-                let mut error = ParseError::new(
+                ParseError::new(
                     place.line,
                     format!("operation `{name}` must be declared before its first flow step"),
                 )
-                .within(&place);
-                error.kind = ParseErrorKind::UndeclaredOperation { name: name.clone() };
-                error
+                .within(&place)
+                .with_kind(ParseErrorKind::UndeclaredOperation { name: name.clone() })
             })?;
         let dimensions = inferred_dimensions(invocation, operation, &self.pipeline);
         for (index, output) in outputs.iter().enumerate() {
@@ -285,20 +284,18 @@ pub(crate) fn parse_document_with_imports(
                 .err()
                 .is_some_and(|error| error.line() < line);
             if !earlier {
-                let mut error = ParseError::new(
+                let records = document
+                    .inventory
+                    .lines()
+                    .enumerate()
+                    .filter(|(_, text)| !text.trim().is_empty())
+                    .map(|(index, _)| index + 1)
+                    .collect();
+                return Err(ParseError::new(
                     line,
                     "`sources:` and `contexts:` records belong in a .spitout, not a pipeline",
-                );
-                error.kind = ParseErrorKind::MisplacedRecords {
-                    lines: document
-                        .inventory
-                        .lines()
-                        .enumerate()
-                        .filter(|(_, text)| !text.trim().is_empty())
-                        .map(|(index, _)| index + 1)
-                        .collect(),
-                };
-                return Err(error);
+                )
+                .with_kind(ParseErrorKind::MisplacedRecords { lines: records }));
             }
             None
         }

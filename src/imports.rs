@@ -319,7 +319,7 @@ fn parse_document_at_inner(
                         "in `{}` at line {}: {}",
                         canonical.display(),
                         error.line(),
-                        error.message
+                        error.message()
                     ),
                 )
             });

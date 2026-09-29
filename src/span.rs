@@ -2,7 +2,7 @@
 //! and the location every error in the pipeline text carries.
 
 use std::fmt;
-use std::ops::{Deref, DerefMut, Range};
+use std::ops::Range;
 
 /// A line and a byte range within it.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -107,20 +107,6 @@ impl Located<String> {
     /// path template, whose location is not known yet.
     pub(crate) fn new(message: impl Into<String>) -> Self {
         Self::unplaced(message.into())
-    }
-}
-
-impl<E> Deref for Located<E> {
-    type Target = E;
-
-    fn deref(&self) -> &E {
-        &self.error
-    }
-}
-
-impl<E> DerefMut for Located<E> {
-    fn deref_mut(&mut self) -> &mut E {
-        &mut self.error
     }
 }
 
