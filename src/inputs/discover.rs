@@ -442,9 +442,8 @@ fn walk(
     Ok(())
 }
 
-/// Give each record without a path the one its source's rule gives it, so
-/// that resolving jobs needs no rule for a source. `rules.source_paths` take
-/// precedence over the pipeline's. A source with no rule keeps no path.
+/// Bind each source to its one declared path. Older inventories may include
+/// record paths; accept those only when they agree with the rule.
 pub(crate) fn locate_sources(
     pipeline: &Pipeline,
     rules: &InputRules,
@@ -453,7 +452,13 @@ pub(crate) fn locate_sources(
     let mut pipeline = pipeline.clone();
     pipeline.product_paths.extend(rules.source_paths.clone());
     for record in &mut inventory.artifacts {
-        if record.path.is_some() || pipeline.path_template_for(&record.product).is_none() {
+        if pipeline.path_template_for(&record.product).is_none() {
+            if record.path.is_some() {
+                return Err(error(format!(
+                    "source `{}` has a record path but no path rule",
+                    record.product
+                )));
+            }
             continue;
         }
         let Some(product) = pipeline
@@ -471,6 +476,13 @@ pub(crate) fn locate_sources(
         let path = bind_path(&pipeline, &product.dimensions, &artifact, || {
             format!("source `{artifact}`")
         })?;
+        if let Some(given) = &record.path {
+            if *given != path {
+                return Err(error(format!(
+                    "source `{artifact}` record path `{given}` differs from its path rule `{path}`"
+                )));
+            }
+        }
         record.path = Some(path);
     }
     Ok(())

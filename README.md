@@ -82,7 +82,7 @@ Files come first; options follow them. `spit help` lists the commands, and `spit
 | `--root <directory>` | With `inputs`, the folder to scan; the recipe's folder by default. With `dag` and `artifacts`, the dataset folder, to check that each source file exists there. |
 | `--path-rules` | With `check`, list the path rule each product uses. |
 | `--paths` | With `dag`, print the file under every artifact. |
-| `--strict-paths` | With `check` and `dag`, require an explicit `path product:` rule for every product, even if a default `path:` rule exists. With `dag`, a source whose record gives its file needs none. |
+| `--strict-paths` | With `check` and `dag`, require an explicit `path product:` rule for every product, even if a default `path:` rule exists. Source rules settled from a recipe count when building a DAG. |
 | `--json` | With `dag`, print the `.spitdag`. With `check`, print diagnostics as JSON for editor use and stop, succeeding whatever they report. Each diagnostic has a `severity` of `error` or `warning`; those tied to a declaration, call, rule, command, or path include its `line`, and a `column` and `end_column` for the text it is about, such as one input of a call or one `{placeholder}`. Columns are 1-based and count UTF-16 code units, as editors do; `end_column` is one past the last character. |
 | `--stdin` | With `check`, read the file's text from standard input, such as an editor's unsaved buffer. The file's path is still used to resolve `use` imports and a recipe's `pipeline` line. |
 
@@ -142,15 +142,18 @@ path image: data/sub-{sub}/ses-{ses}/image.nii.gz
 `spit check cohort.spitin` checks the rules against the pipeline without reading the dataset. `spit inputs cohort.spitin -o cohort.spitout` scans the recipe's folder, or `--root`, and writes what it found:
 
 ```text
+source_paths:
+    image: data/sub-{sub}/ses-{ses}/image.nii.gz
+
 contexts sessions:
-    [sub=01,ses=01]
-    [sub=01,ses=02]
-sources:
-    image[sub=01,ses=01]: data/sub-01/ses-01/image.nii.gz
-    image[sub=01,ses=02]: data/sub-01/ses-02/image.nii.gz
+    [sub=01,ses=01]:
+        image
+
+    [sub=01,ses=02]:
+        image
 ```
 
-Each record carries its file's path, so later steps need neither the recipe nor a rescan. A `.spitout` can also come from a dataset indexer or be written by hand; a record without a path takes its product's path rule. The text processing example uses [command_demo.spitout](examples/commands/command_demo.spitout):
+The `.spitout` lists the source identities found in the dataset. Paths come from the pipeline's source rules; when a recipe defines a source rule instead, the `.spitout` carries that rule once in `source_paths:`. Later steps need neither the recipe nor a rescan. A dataset indexer or person can write the same inventory. Older records with `: path` are accepted only when the path agrees with the declared rule. The text processing example uses [command_demo.spitout](examples/commands/command_demo.spitout):
 
 ```text
 sources:

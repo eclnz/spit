@@ -19,7 +19,7 @@ use crate::imports::parse_located_document;
 use crate::lower::{parse_document_with_imports, ParsedDocument};
 use crate::model::{ArtifactInstance, CoverageGap, InputRules, Pipeline, SourceInventory};
 use crate::parser::{strip_comment, Header, Keyword, Kind, ParseError, SourceMap};
-use crate::paths::PathTemplate;
+use crate::paths::{inspect_paths, PathTemplate};
 
 pub(crate) use self::coverage::check_inventory;
 pub(crate) use self::coverage::collect_rule_errors;
@@ -127,6 +127,12 @@ fn check_input_lines(text: &str) -> Result<(), ParseError> {
                 "a .spitin path must name a source product, for example `path image: ...`",
             ));
         }
+        if matches!(Header::of(line), Some(Header::SourcePaths)) {
+            return Err(ParseError::new(
+                index + 1,
+                "`source_paths:` belongs in a .spitout; use `path image:` in a .spitin",
+            ));
+        }
     }
     Ok(())
 }
@@ -210,16 +216,46 @@ impl InputSpec {
     ) -> Result<ResolvedInputs, Box<dyn Error>> {
         validate_pipeline(pipeline)?;
         self.check(pipeline)?;
-        let (inventory, mut skipped, root) = match source {
+        let (mut inventory, mut skipped, root) = match source {
             InputSource::Discover(root) => {
                 let found = discover_source_files(pipeline, &self.rules, root)?;
                 (found.inventory, found.skipped, Some(root.to_owned()))
             }
             InputSource::Inventory(inventory) => (inventory, Vec::new(), None),
         };
+        for (name, template) in &self.rules.source_paths {
+            if let Some(existing) = inventory.source_paths.get(name) {
+                if existing != template {
+                    return Err(format!(
+                        "source `{name}` has conflicting path rules in .spitin and .spitout"
+                    )
+                    .into());
+                }
+            }
+            inventory
+                .source_paths
+                .insert(name.clone(), template.clone());
+        }
+        for name in inventory.source_paths.keys() {
+            if !pipeline.is_source(name) {
+                return Err(format!("source path rule names unknown source `{name}`").into());
+            }
+            if pipeline.product_paths.contains_key(name) {
+                return Err(
+                    format!("source `{name}` has path rules in both .spit and .spitout").into(),
+                );
+            }
+        }
+        let mut path_pipeline = pipeline.clone();
+        path_pipeline
+            .product_paths
+            .extend(inventory.source_paths.clone());
+        inspect_paths(&path_pipeline)?;
         let mut checked = check_inventory(pipeline, &self.rules, &inventory)?;
         skipped.extend(checked.skipped.iter().map(SkippedGroup::note));
-        locate_sources(pipeline, &self.rules, &mut checked.inventory)?;
+        let mut path_rules = self.rules.clone();
+        path_rules.source_paths = checked.inventory.source_paths.clone();
+        locate_sources(pipeline, &path_rules, &mut checked.inventory)?;
         Ok(ResolvedInputs {
             inventory: checked.inventory,
             skipped,

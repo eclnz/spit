@@ -266,3 +266,27 @@ fn a_source_record_may_give_its_file() {
         assert_eq!(error.line(), 2, "{bad}");
     }
 }
+
+#[test]
+fn nested_sources_expand_each_product_and_run() {
+    let text = "sources:\n    lut\n\ncontexts sessions:\n    [sub=01,ses=01]:\n        t1w\n        [run=01,02]:\n            dwi, bvec\n";
+    let inventory = parse_source_inventory(text).unwrap();
+    assert_eq!(inventory.contexts.len(), 1);
+    assert_eq!(inventory.artifacts.len(), 6);
+    assert!(inventory
+        .artifacts
+        .iter()
+        .any(|record| record.product == "bvec"
+            && record
+                .entities
+                .0
+                .get("run")
+                .is_some_and(|value| value == "02")));
+    for bad in [
+        "contexts sessions:\n    [sub=01]:\n        [sub=02]:\n            image\n",
+        "contexts sessions:\n    [sub=01]:\n        [run=01,]:\n            image\n",
+        "contexts sessions:\n    image\n",
+    ] {
+        assert!(parse_source_inventory(bad).is_err(), "{bad}");
+    }
+}
