@@ -289,3 +289,39 @@ fn check_prints_every_diagnostic_and_fails_only_on_errors() {
         .unwrap()
         .ends_with("error: no inline source inventory; supply --sources <inventory.spit|->\n"));
 }
+
+#[test]
+fn cli_skips_an_inline_inventory_that_sources_replaces() {
+    let directory = std::env::temp_dir().join(format!(
+        "spit-cli-override-{}",
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::create_dir_all(&directory).unwrap();
+    let pipeline = directory.join("pipeline.spit");
+    fs::write(
+        &pipeline,
+        "source image [subject]\noperation f(Image) -> Image\nout = f(image)\nsources:\n  image[subject=a\n",
+    )
+    .unwrap();
+    let inventory = directory.join("inventory.sources");
+    fs::write(&inventory, "sources:\n  image[subject=b]\n").unwrap();
+    let result = Command::new(env!("CARGO_BIN_EXE_spit"))
+        .args([
+            "check",
+            pipeline.to_str().unwrap(),
+            "--sources",
+            inventory.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(result.status.success(), "{result:?}");
+    assert!(String::from_utf8(result.stdout)
+        .unwrap()
+        .contains("1 jobs resolved."));
+    assert!(String::from_utf8(result.stderr)
+        .unwrap()
+        .contains("this inline inventory is ignored"));
+}
