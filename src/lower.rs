@@ -283,10 +283,20 @@ pub(crate) fn parse_document_with_imports(
                 .err()
                 .is_some_and(|error| error.line() < line);
             if !earlier {
-                return Err(ParseError::new(
+                let mut error = ParseError::new(
                     line,
                     "`sources:` and `contexts:` records belong in a .spitout, not a pipeline",
-                ));
+                );
+                error.kind = ParseErrorKind::MisplacedRecords {
+                    lines: document
+                        .inventory
+                        .lines()
+                        .enumerate()
+                        .filter(|(_, text)| !text.trim().is_empty())
+                        .map(|(index, _)| index + 1)
+                        .collect(),
+                };
+                return Err(error);
             }
             None
         }

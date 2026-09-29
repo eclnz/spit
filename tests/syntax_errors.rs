@@ -295,3 +295,18 @@ fn next_random(seed: &mut u64) -> u64 {
     *seed ^= *seed << 17;
     *seed
 }
+
+#[test]
+fn records_in_a_pipeline_are_one_error_however_many_lines() {
+    let text =
+        "source x [s]\nsources:\n    x[s=1]\n    x[s=2\ncontexts:\n    [s=3]\noperation f(one\n";
+    let issues = errors(diagnose(text, None));
+    let found: Vec<_> = issues
+        .iter()
+        .map(|issue| (issue.line, issue.message.as_str()))
+        .collect();
+    assert_eq!(found.len(), 2, "{found:?}");
+    assert_eq!(found[0].0, Some(2));
+    assert!(found[0].1.contains("belong in a .spitout"), "{found:?}");
+    assert_eq!(found[1].0, Some(7));
+}
