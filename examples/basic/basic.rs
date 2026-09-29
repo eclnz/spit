@@ -79,6 +79,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             ),
         ],
         contexts: Vec::new(),
+        ..SourceInventory::default()
     };
     let dag = resolve(&pipeline, &inventory)?;
     print!("{}", render_dag(&dag));

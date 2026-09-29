@@ -99,6 +99,7 @@ pub enum ResolveError {
         context: EntityBinding,
         expected: CountRequirement,
         found: usize,
+        discovery: bool,
     },
     /// A group lacks an entity value its coverage rule requires.
     MissingRequiredValue {
@@ -107,6 +108,7 @@ pub enum ResolveError {
         context: EntityBinding,
         dimension: String,
         value: String,
+        discovery: bool,
     },
     InvalidDefinition {
         subject: DefinitionSubject,
@@ -195,21 +197,25 @@ impl fmt::Display for ResolveError {
                 context,
                 expected,
                 found,
+                discovery,
                 ..
-            } => write!(
-                f,
-                "source coverage for `{product}` at [{context}]: expected {expected} artifact(s), found {found}"
-            ),
+            } => if *discovery {
+                write!(f, "discovery coverage for `{product}` at [{context}]: expected {expected} binding(s), found {found}")
+            } else {
+                write!(f, "source coverage for `{product}` at [{context}]: expected {expected} artifact(s), found {found}")
+            },
             Self::MissingRequiredValue {
                 product,
                 context,
                 dimension,
                 value,
+                discovery,
                 ..
-            } => write!(
-                f,
-                "source coverage for `{product}` at [{context}]: no artifact with {dimension}={value}"
-            ),
+            } => if *discovery {
+                write!(f, "discovery coverage for `{product}` at [{context}]: no binding with {dimension}={value}")
+            } else {
+                write!(f, "source coverage for `{product}` at [{context}]: no artifact with {dimension}={value}")
+            },
             Self::InvalidDefinition { detail, .. } => f.write_str(detail),
         }
     }

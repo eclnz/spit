@@ -164,8 +164,12 @@ fn flow_line(
         let operation = parse_operation(declaration, number)?;
         let place = name_place(original, number, declaration, &operation.name);
         StatementKind::Operation(operation, place)
-    } else if line.starts_with("require ") {
-        top_level_only("`require`, which checks sources,")?;
+    } else if line.starts_with("require ") || line.starts_with("skip ") {
+        top_level_only(if line.starts_with("require ") {
+            "`require`, which checks sources,"
+        } else {
+            "`skip`, which filters sources,"
+        })?;
         let rule = parse_coverage_rule(line, number)?;
         let place = rule_place(original, number, &rule);
         StatementKind::Constraint(rule, place)

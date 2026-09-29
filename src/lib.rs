@@ -5,6 +5,7 @@ mod command;
 pub mod diagnostics;
 pub mod error;
 mod imports;
+pub mod inputs;
 mod lower;
 pub mod model;
 pub mod parser;
@@ -19,17 +20,19 @@ pub mod types;
 pub use bash::{render_bash, BashError};
 pub use command::{validate_commands, CommandError, CommandTemplate};
 pub use diagnostics::{
-    diagnose, diagnose_artifacts_at, diagnose_at, Diagnostic, DiagnosticSource, Severity,
+    diagnose, diagnose_artifacts_at, diagnose_at, diagnose_at_with_inputs, Diagnostic,
+    DiagnosticSource, Severity,
 };
 pub use error::{DefinitionSubject, ResolveError, TypeConflict};
 pub use imports::{parse_document_at, parse_pipeline_at};
+pub use inputs::{parse_input_spec, parse_input_spec_at, InputSpec};
 pub use lower::{parse_document, parse_pipeline};
 pub use model::{
     natural_cmp, stage_and_parents, stage_within, ArtifactInstance, ArtifactKey, ArtifactReport,
-    ArtifactType, Cardinality, CommandDef, CommandRole, CountRequirement, CoverageGap,
-    CoverageRule, DefaultPort, DirectoryDiscovery, EntityBinding, Gap, IncompleteJob, InputBinding,
-    InputPort, Invocation, Job, OperationDef, OutputPort, Pipeline, ProductDef, ResolvedDag,
-    ShapeRule, SourceInventory, SourceRecord, StageDef, DEFAULT_OUTPUT,
+    ArtifactType, Cardinality, CommandDef, CommandRole, CountRequirement, CoverageAction,
+    CoverageGap, CoverageRule, DefaultPort, DirectoryDiscovery, EntityBinding, Gap, IncompleteJob,
+    InputBinding, InputPort, Invocation, Job, OperationDef, OutputPort, Pipeline, ProductDef,
+    ResolvedDag, ShapeRule, SourceInventory, SourceRecord, StageDef, DEFAULT_OUTPUT,
 };
 pub use parser::{parse_source_inventory, render_source_inventory, ParseError, ParseErrorKind};
 pub use paths::{
