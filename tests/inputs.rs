@@ -347,8 +347,11 @@ fn the_stage_writes_each_sources_path_into_its_record() {
 fn a_spitout_writes_values_in_the_declared_dimension_order() {
     let tree = Tree::new("order", &FILES);
     let resolved = inventory_of(RECIPE, &tree);
-    let text =
-        spit::render_source_inventory(&resolved.inventory, &parse_pipeline(PIPELINE).unwrap());
+    let text = spit::render_source_inventory(
+        &resolved.inventory,
+        &parse_pipeline(PIPELINE).unwrap(),
+        &Default::default(),
+    );
     // `image` declares [sub, ses]: its records and the contexts follow suit.
     assert!(
         text.starts_with("contexts sessions:\n    [sub=1,ses=1]\n"),
@@ -410,4 +413,40 @@ fn a_spitout_alone_drives_jobs_without_its_recipe() {
     );
     let notes = String::from_utf8(checked.stderr).unwrap();
     assert!(notes.contains("3 source files verified."), "{notes}");
+}
+
+#[test]
+fn contexts_follow_the_discover_rule_and_list_in_the_order_written() {
+    // The pipeline declares [ses, sub] and, with the alphabetical fallback,
+    // used to put `ses` first in the contexts and sort by it.
+    let files = [
+        "data/sub-1/ses-1/image.nii.gz",
+        "data/sub-1/ses-2/image.nii.gz",
+        "data/sub-2/ses-1/image.nii.gz",
+        "data/sub-10/ses-1/image.nii.gz",
+    ];
+    let tree = Tree::new("context-order", &files);
+    let pipeline = parse_pipeline("source image: Image [ses, sub]\n").unwrap();
+    let spec = parse_input_spec(RECIPE).unwrap();
+    let resolved = spec
+        .resolve(&pipeline, InputSource::Discover(tree.path()))
+        .unwrap();
+    let text = spit::render_source_inventory(&resolved.inventory, &pipeline, &spec.rules);
+    let contexts: Vec<_> = text
+        .lines()
+        .skip(1)
+        .take_while(|line| line.starts_with("    ["))
+        .collect();
+    assert_eq!(
+        contexts,
+        [
+            "    [sub=1,ses=1]",
+            "    [sub=1,ses=2]",
+            "    [sub=2,ses=1]",
+            "    [sub=10,ses=1]",
+        ],
+        "{text}"
+    );
+    // Records keep their own product's declared order.
+    assert!(text.contains("    image[ses=1,sub=1]: "), "{text}");
 }
