@@ -84,7 +84,8 @@ impl fmt::Display for TypeExpr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Named(name) => f.write_str(name),
-            Self::Variable(name) if name.len() == 1 => f.write_str(name),
+            // Always marked, since a bare `T` is also a named type outside
+            // signatures; `$T` reads back as the same variable.
             Self::Variable(name) => write!(f, "${name}"),
             Self::Applied { constructor, args } => {
                 let args = args.iter().map(ToString::to_string).collect::<Vec<_>>();

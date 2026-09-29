@@ -359,3 +359,28 @@ fn partially_typed_pipeline_accepts_unknown_and_rejects_known_mismatch() {
         Err(ResolveError::TypeMismatch { .. })
     ));
 }
+
+#[test]
+fn a_type_variable_prints_marked_so_it_differs_from_a_named_type() {
+    let variable = spit::parse_type_expr("List<T>", true).unwrap();
+    let named = spit::parse_type_expr("List<T>", false).unwrap();
+    assert_eq!(variable.to_string(), "List<$T>");
+    assert_eq!(named.to_string(), "List<T>");
+    // Each reads back as itself where it can be written.
+    assert_eq!(
+        spit::parse_type_expr(&variable.to_string(), true).unwrap(),
+        variable
+    );
+    assert_eq!(
+        spit::parse_type_expr(&named.to_string(), false).unwrap(),
+        named
+    );
+    let text = "source raw : T [id]\noperation f(List<T>) -> T\nout = f(raw)\n";
+    let found = spit::diagnose(text, None);
+    assert!(
+        found[0]
+            .message
+            .contains("product `raw` is T, expected List<$T>"),
+        "{found:?}"
+    );
+}
