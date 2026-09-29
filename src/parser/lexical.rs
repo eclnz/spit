@@ -185,3 +185,24 @@ pub(super) fn qualified_identifier<'a>(
     }
     Ok(value)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::strip_comment;
+
+    /// `tests/fixtures/comments.txt`, which the editor extension also
+    /// checks its own comment stripping against.
+    #[test]
+    fn comments_are_stripped_as_the_shared_fixture_says() {
+        let fixture = include_str!("../../tests/fixtures/comments.txt");
+        let mut lines = fixture.lines().filter(|line| !line.starts_with('#'));
+        let mut cases = 0;
+        while let Some(input) = lines.next() {
+            let input = input.strip_prefix("in:").expect("an `in:` line");
+            let output = lines.next().and_then(|line| line.strip_prefix("out:"));
+            assert_eq!(Some(strip_comment(input)), output, "in: {input:?}");
+            cases += 1;
+        }
+        assert!(cases > 10);
+    }
+}
