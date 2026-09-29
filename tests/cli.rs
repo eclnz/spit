@@ -37,7 +37,9 @@ fn help_lists_each_step_and_each_command_explains_itself() {
     for args in [&["help", "dag"][..], &["dag", "--help"]] {
         let text = stdout(&spit(args));
         assert!(
-            text.contains("usage: spit dag <pipeline.spit> <inputs.spitout | recipe.spitin | ->"),
+            text.contains(
+                "usage: spit dag <recipe.spitin> or <pipeline.spit> <inputs.spitout | ->"
+            ),
             "{text}"
         );
         assert!(text.contains("-o <file>"), "{text}");
@@ -275,8 +277,41 @@ fn check_prints_every_diagnostic_and_fails_only_on_errors() {
     assert_eq!(stdout(&warned_check), "Pipeline valid.\n");
     assert!(!warned_dag.status.success());
     assert!(
-        stderr(&warned_dag).starts_with("error: dag needs <pipeline.spit> <inputs.spitout"),
+        stderr(&warned_dag).starts_with("error: dag needs a pipeline before"),
         "{}",
         stderr(&warned_dag)
+    );
+}
+
+#[test]
+fn a_recipe_names_its_own_pipeline_for_dag_and_artifacts() {
+    let recipe = "examples/commands/command_demo.spitin";
+    let pipeline = "examples/commands/command_demo.spit";
+    let inventory = "examples/commands/command_demo.spitout";
+    for command in ["dag", "artifacts"] {
+        let alone = spit(&[command, recipe]);
+        assert!(alone.status.success(), "{}", stderr(&alone));
+        // The pipeline is the recipe's to name, not the command line's, even
+        // when it names the same one.
+        let named = spit(&[command, pipeline, recipe]);
+        assert!(!named.status.success(), "{command}");
+        assert_eq!(
+            stderr(&named),
+            format!(
+                "error: `{recipe}` names its own pipeline; run `spit {command} {recipe}` without `{pipeline}`\n"
+            )
+        );
+        // A .spitout names none, so it takes the pipeline.
+        let settled = spit(&[command, pipeline, inventory]);
+        assert!(settled.status.success(), "{}", stderr(&settled));
+    }
+    let spitout = spit(&["dag", inventory]);
+    assert!(!spitout.status.success());
+    assert!(
+        stderr(&spitout).starts_with(
+            "error: dag needs a pipeline before `examples/commands/command_demo.spitout`"
+        ),
+        "{}",
+        stderr(&spitout)
     );
 }
