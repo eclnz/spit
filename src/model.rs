@@ -63,7 +63,7 @@ impl EntityBinding {
 }
 
 /// Order text as people read it: runs of digits compare by numeric value.
-pub fn natural_cmp(left: &str, right: &str) -> Ordering {
+pub(crate) fn natural_cmp(left: &str, right: &str) -> Ordering {
     let (mut left_rest, mut right_rest) = (left, right);
     loop {
         match (left_rest.chars().next(), right_rest.chars().next()) {
@@ -221,7 +221,7 @@ impl OutputPort {
 }
 
 /// The port name of an operation's only, unnamed output.
-pub const DEFAULT_OUTPUT: &str = "output";
+pub(crate) const DEFAULT_OUTPUT: &str = "output";
 
 /// A placeholder a command has without its operation naming the port.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -657,7 +657,7 @@ impl InputRules {
 }
 
 /// A stage's full name, then each stage around it: `a/b/c`, `a/b`, `a`.
-pub fn stage_and_parents(stage: &str) -> impl Iterator<Item = &str> {
+pub(crate) fn stage_and_parents(stage: &str) -> impl Iterator<Item = &str> {
     std::iter::successors(Some(stage), |name| {
         name.rsplit_once('/').map(|(parent, _)| parent)
     })

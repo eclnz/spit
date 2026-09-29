@@ -1,0 +1,3 @@
+pipeline bash_demo.spit
+
+require shard count>=1 per [group]

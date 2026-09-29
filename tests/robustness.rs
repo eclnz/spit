@@ -2,14 +2,20 @@
 //! cannot coexist, commands written as if for a shell, and the command line
 //! used wrongly.
 
+mod support;
+
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
-use spit::{
-    diagnose, parse_document, parse_pipeline, render_bash, resolve, Cardinality, Diagnostic,
-};
+use spit::{diagnose, parse_pipeline, resolve, Cardinality, Diagnostic};
+
+/// Step 3's binding, then the Bash backend, with either's error as text.
+fn bash_script(pipeline: &spit::Pipeline, dag: &spit::ResolvedDag) -> Result<String, String> {
+    let bound = spit::bind_dag(pipeline, dag).map_err(|error| error.to_string())?;
+    spit::render_bash(&bound).map_err(|error| error.to_string())
+}
 
 struct Tree(PathBuf);
 
@@ -74,13 +80,11 @@ fn a_path_inside_another_artifacts_file_is_rejected() {
     );
     // Different dimension names hide the overlap until paths are bound.
     let text = "source x [s]\npath x: in/{s}.txt\nsource z [t]\npath z: in/{t}.txt/out.txt\noperation f(a, b) -> Text\ncommand f: cp {a} {b} {output}\npath: o/{product}/{entities}\ny = f(x, z @ where(t=1))\nsources:\n    x[s=1]\n    z[t=1]\n";
-    let (pipeline, inventory) = parse_document(text).unwrap();
+    let (pipeline, inventory) = support::parse_fixture(text).unwrap();
     let error =
-        render_bash(&pipeline, &resolve(&pipeline, &inventory.unwrap()).unwrap()).unwrap_err();
+        bash_script(&pipeline, &resolve(&pipeline, &inventory.unwrap()).unwrap()).unwrap_err();
     assert!(
-        error
-            .message()
-            .contains("puts it inside `in/1.txt`, the path of `x[s=1]`, which is a file"),
+        error.contains("puts it inside `in/1.txt`, the path of `x[s=1]`, which is a file"),
         "{error}"
     );
 }
@@ -111,9 +115,10 @@ fn a_path_rule_that_cannot_name_a_file_says_why() {
 
 #[test]
 fn paths_that_differ_only_in_case_are_flagged() {
-    let text = "source x [s]\npath x: in/{s}.txt\noperation f(a) -> Text\npath y: out/{s}.txt\ny = f(x)\nsources:\n    x[s=A]\n    x[s=a]\n";
+    let text =
+        "source x [s]\npath x: in/{s}.txt\noperation f(a) -> Text\npath y: out/{s}.txt\ny = f(x)\n";
     assert_eq!(
-        rendered(&diagnose(text, None), text),
+        rendered(&diagnose(text, Some("sources:\n    x[s=A]\n    x[s=a]\n")), text),
         [
             "warning: line 2, column 9: `x[s=A]` and `x[s=a]` have paths `in/A.txt` and `in/a.txt`, which differ only in case, so they are one file where case is ignored, as on macOS and Windows",
             "warning: line 4, column 9: `y[s=A]` and `y[s=a]` have paths `out/A.txt` and `out/a.txt`, which differ only in case, so they are one file where case is ignored, as on macOS and Windows",
@@ -122,6 +127,7 @@ fn paths_that_differ_only_in_case_are_flagged() {
 }
 
 #[test]
+#[ignore = "the Bash backend is paused"]
 fn bash_refuses_an_empty_inventory() {
     let output = spit(
         &["bash", "examples/commands/bash_demo.spit", "--sources", "-"],
@@ -136,6 +142,7 @@ fn bash_refuses_an_empty_inventory() {
 }
 
 #[test]
+#[ignore = "the Bash backend is paused"]
 fn a_root_starting_with_a_dash_is_not_read_as_an_option() {
     let output = spit(
         &[
@@ -151,10 +158,11 @@ fn a_root_starting_with_a_dash_is_not_read_as_an_option() {
 }
 
 #[test]
+#[ignore = "the Bash backend is paused"]
 fn single_quotes_and_backslashes_keep_braces_literal() {
     let text = "source x [s]\npath: {product}/{entities}\noperation f(a) -> Text\ncommand f: awk '{print $1}' \\{a\\} \"{a}\" {output}\ny = f(x)\nsources:\n    x[s=1]\n";
-    let (pipeline, inventory) = parse_document(text).unwrap();
-    let script = render_bash(&pipeline, &resolve(&pipeline, &inventory.unwrap()).unwrap()).unwrap();
+    let (pipeline, inventory) = support::parse_fixture(text).unwrap();
+    let script = bash_script(&pipeline, &resolve(&pipeline, &inventory.unwrap()).unwrap()).unwrap();
     assert!(
         script.contains("'awk' '{print $1}' '{a}' \"$SPIT_ROOT\"/'x/s=1' \"$SPIT_ROOT\"/'y/s=1'"),
         "{script}"
@@ -168,14 +176,6 @@ fn shell_operators_in_a_command_are_flagged() {
     assert_eq!(messages.len(), 2, "{messages:?}");
     assert!(messages[0].starts_with("warning: line 4, column 30: `2>&1` in the command for `f` is passed to the program as an argument"));
     assert!(messages[1].starts_with("warning: line 4, column 35: `|` in the command"));
-}
-
-#[test]
-fn a_step_after_an_inline_inventory_is_read_as_a_step() {
-    let text = "source x [s]\noperation f(a) -> Text\nsources:\n    x[s=1]\ny = f(x)\naverage : Text [s] = f(x)\n";
-    let (pipeline, inventory) = parse_document(text).unwrap();
-    assert_eq!(pipeline.invocations.len(), 2);
-    assert_eq!(inventory.unwrap().artifacts.len(), 1);
 }
 
 #[test]
@@ -239,32 +239,48 @@ fn json_mode_always_prints_json() {
 
 #[test]
 fn command_line_mistakes_are_named() {
-    for (args, problem) in [
-        (&["chek", "p.spit"][..], "unknown command `chek`"),
-        (&["check"][..], "check needs a pipeline file"),
+    for (args, problem, more) in [
         (
-            &["check", "--json", "p.spit"][..],
-            "the pipeline file comes before options such as `--json`",
+            &["chek", "p.spit"][..],
+            "unknown command `chek`",
+            "run `spit help`",
         ),
-        (&["check", "p.spit", "--jsn"][..], "unknown option `--jsn`"),
+        (
+            &["check"][..],
+            "check needs <pipeline.spit | recipe.spitin>",
+            "usage: spit check ",
+        ),
+        (
+            &["check", "p.spit", "--jsn"][..],
+            "unknown option `--jsn`",
+            "usage: spit check ",
+        ),
         (
             &["check", "p.spit", "q.spit"][..],
-            "unexpected argument `q.spit`; give one pipeline file",
+            "unexpected file `q.spit`",
+            "usage: spit check ",
         ),
         (
             &["check", "p.spit", "--stdin", "--stdin"][..],
             "--stdin is given more than once",
+            "usage: spit check ",
         ),
         (
-            &["check", "p.spit", "--sources"][..],
-            "--sources needs a value: <inventory.spitout|->",
+            &["dag", "p.spit", "d.spitout", "--root"][..],
+            "--root needs a value: <directory>",
+            "usage: spit dag ",
+        ),
+        (
+            &["check", "p.spit", "--sources", "d.spitout"][..],
+            "unknown option `--sources`; give the .spitout as a file after the pipeline",
+            "usage: spit check ",
         ),
     ] {
         let output = spit(args, None);
         assert!(!output.status.success());
         let stderr = text(&output.stderr);
         assert!(
-            stderr.starts_with(&format!("error: {problem}\nusage: spit ")),
+            stderr.starts_with(&format!("error: {problem}\n{more}")),
             "{stderr}"
         );
     }

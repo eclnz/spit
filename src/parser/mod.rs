@@ -53,6 +53,11 @@ pub enum ParseErrorKind {
     UndeclaredOperation {
         name: String,
     },
+    /// Records written in a pipeline; they belong in a `.spitout`. Each
+    /// line they take, so that one error covers them all.
+    MisplacedRecords {
+        lines: Vec<usize>,
+    },
 }
 
 impl ParseError {
@@ -177,12 +182,12 @@ pub(crate) struct FlowOutput {
     pub(crate) dimensions: Option<Vec<String>>,
 }
 
-/// Whether to read a document's inline inventory. A separate inventory
-/// replaces it, so it is then skipped rather than required to parse.
+/// What a document may hold. A pipeline holds neither input rules nor
+/// records; a `.spitin` recipe holds both, beside source paths.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum InlineInventory {
-    Read,
-    Skip,
+pub(crate) enum Kind {
+    Pipeline,
+    Recipe,
 }
 
 /// Parse a pipeline's statements, in the sectioned or the flow form.

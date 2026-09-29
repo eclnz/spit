@@ -1,0 +1,21 @@
+contexts:
+    [site=A,device=D1,window=W1]
+    [site=A,device=D1,window=W2]
+    [site=A,device=D2,window=W1]
+    [site=B,device=D3,window=W2]
+
+sources:
+    reading[site=A,device=D1,window=W1,sample=1]
+    reading[site=A,device=D1,window=W1,sample=2]
+    reading[site=A,device=D1,window=W2,sample=1]
+    reading[site=A,device=D2,window=W1,sample=1]
+    reading[site=B,device=D3,window=W2,sample=1]
+    reading[site=B,device=D3,window=W2,sample=2]
+    gain[site=A,device=D1]
+    gain[site=A,device=D2]
+    gain[site=B,device=D3]
+    baseline[site=A,window=W1]
+    baseline[site=A,window=W2]
+    baseline[site=B,window=W2]
+    target[site=A]
+    target[site=B]

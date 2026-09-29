@@ -32,10 +32,6 @@ path source_lut: config/source_lut.txt
 source target_lut : LookupTable []
 path target_lut: config/target_lut.txt
 
-require raw_dwi count>=2 per [sub, ses]
-require reverse_b0 count=1 per [sub, ses]
-require t1w count=1 per [sub, ses]
-
 # Import each run with its sidecars, clean it, combine the runs into one
 # session, and correct motion, distortion, and bias.
 stage preprocess:

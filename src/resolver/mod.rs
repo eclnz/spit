@@ -1,6 +1,7 @@
 //! Resolve jobs: expand each step of a compiled pipeline, in dependency
 //! order, into concrete jobs over an inventory's artifacts.
 
+mod bind;
 mod matching;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -13,6 +14,7 @@ use crate::model::{
 
 use crate::compile::{compile, CompiledPipeline};
 
+pub use self::bind::bind_dag;
 use self::matching::{expand_step, make_job, Expansion};
 
 /// Resolve every job of `pipeline` over the sources in `inventory`, failing
@@ -21,7 +23,7 @@ pub fn resolve(
     pipeline: &Pipeline,
     inventory: &SourceInventory,
 ) -> Result<ResolvedDag, ResolveError> {
-    let report = resolve_artifacts(pipeline, inventory)?;
+    let report = resolve_artifacts_excluding(pipeline, inventory, &[])?;
     // A blocked gap always follows the gap that blocks it.
     let failure = report
         .incomplete
@@ -37,17 +39,9 @@ pub fn resolve(
     }
 }
 
-/// Resolve what can be made, reporting each job that cannot and why.
-pub fn resolve_artifacts(
-    pipeline: &Pipeline,
-    inventory: &SourceInventory,
-) -> Result<ArtifactReport, ResolveError> {
-    resolve_artifacts_excluding(pipeline, inventory, &[])
-}
-
-/// As [`resolve_artifacts`], with some listed sources known to be unusable,
-/// such as those an input rule holds back. Jobs that need them are reported
-/// as blocked.
+/// Resolve what can be made, reporting each job that cannot and why. Some
+/// sources may be known to be unusable, such as those a missing requirement
+/// holds back; jobs that need them are reported as blocked.
 pub fn resolve_artifacts_excluding(
     pipeline: &Pipeline,
     inventory: &SourceInventory,

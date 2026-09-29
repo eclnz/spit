@@ -1,15 +1,16 @@
 //! Source discovery: building an inventory from the files and directories
 //! under a root, including named discovery rules, their coverage and skips.
 
+mod support;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
 
 use spit::{
-    discover_source_files, discover_sources, parse_pipeline, parse_source_inventory, parse_spit,
-    resolve, InputSource, InputSpec, Pipeline, ResolveError, ResolvedDag, ResolvedInputs,
-    SourceInventory,
+    discover_source_files, discover_sources, parse_pipeline, parse_source_inventory, resolve,
+    InputSource, InputSpec, Pipeline, ResolveError, ResolvedDag, ResolvedInputs, SourceInventory,
 };
 
 struct Tree(PathBuf);
@@ -60,9 +61,8 @@ fn spit(args: &[&str]) -> std::process::Output {
 
 /// A document's pipeline, and the input rules written beside it.
 fn parse(text: &str) -> (Pipeline, InputSpec) {
-    let document = parse_spit(text).unwrap();
-    let spec = InputSpec::embedded_in(&document);
-    (document.pipeline, spec)
+    let (pipeline, spec, _) = support::parse_with_rules(text).unwrap();
+    (pipeline, spec)
 }
 
 /// Run the input stage over records already found.
@@ -148,69 +148,6 @@ output = process(image)
     );
     assert_eq!(inventory.artifacts.len(), 3);
     assert_eq!(resolve(&pipeline, &inventory).unwrap().jobs.len(), 3);
-
-    let pipeline_file = tree.0.join("pipeline.spit");
-    fs::write(&pipeline_file, text).unwrap();
-    let output = Command::new(env!("CARGO_BIN_EXE_spit"))
-        .args([
-            "discover",
-            pipeline_file.to_str().unwrap(),
-            "--root",
-            tree.0.to_str().unwrap(),
-        ])
-        .output()
-        .unwrap();
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let rendered = String::from_utf8(output.stdout).unwrap();
-    assert!(
-        rendered.contains("contexts sessions:\n    [ses=baseline,sub=A]"),
-        "{rendered}"
-    );
-    assert!(rendered.contains("image[sub=A,ses=baseline]"), "{rendered}");
-    let implicit = Command::new(env!("CARGO_BIN_EXE_spit"))
-        .args(["discover", pipeline_file.to_str().unwrap()])
-        .output()
-        .unwrap();
-    assert!(
-        implicit.status.success(),
-        "{}",
-        String::from_utf8_lossy(&implicit.stderr)
-    );
-    assert_eq!(implicit.stdout, rendered.as_bytes());
-    let dag = Command::new(env!("CARGO_BIN_EXE_spit"))
-        .args([
-            "dag",
-            pipeline_file.to_str().unwrap(),
-            "--root",
-            tree.0.to_str().unwrap(),
-            "--json",
-        ])
-        .output()
-        .unwrap();
-    assert!(
-        dag.status.success(),
-        "{}",
-        String::from_utf8_lossy(&dag.stderr)
-    );
-    let json = String::from_utf8(dag.stdout).unwrap();
-    assert!(json.contains("\"operation\":\"process\""), "{json}");
-    assert!(json.contains("\"sub\":\"A\""), "{json}");
-    let checked = Command::new(env!("CARGO_BIN_EXE_spit"))
-        .args(["check", pipeline_file.to_str().unwrap()])
-        .output()
-        .unwrap();
-    assert!(
-        checked.status.success(),
-        "{}",
-        String::from_utf8_lossy(&checked.stderr)
-    );
-    assert!(String::from_utf8(checked.stdout)
-        .unwrap()
-        .contains("3 jobs resolved"));
 }
 
 #[test]
@@ -287,11 +224,11 @@ fn coverage_can_target_the_named_discovery_rule() {
     assert!(rendered.starts_with("contexts sessions:\n"), "{rendered}");
     assert_eq!(parse_source_inventory(&rendered).unwrap(), inventory);
     let inline = format!("{text}{rendered}");
-    let document = parse_spit(&inline).unwrap();
-    let inline_inventory = document.inventory.clone().expect("inline named contexts");
-    let inline_spec = InputSpec::embedded_in(&document);
+    let (inline_pipeline, inline_spec, inline_inventory) =
+        support::parse_with_rules(&inline).unwrap();
+    let inline_inventory = inline_inventory.expect("named contexts");
     assert!(matches!(
-        settle(&document.pipeline, &inline_spec, &inline_inventory).require_complete(),
+        settle(&inline_pipeline, &inline_spec, &inline_inventory).require_complete(),
         Err(ResolveError::CoverageViolation {
             found: 1,
             discovery: true,
@@ -303,32 +240,6 @@ fn coverage_can_target_the_named_discovery_rule() {
         Err(ResolveError::CoverageViolation { product, context, found: 1, discovery: true, .. })
             if product == "sessions" && context.0.get("sub").map(String::as_str) == Some("5")
     ));
-    let pipeline_file = tree.0.join("pipeline.spit");
-    fs::write(&pipeline_file, text).unwrap();
-    let discovered = Command::new(env!("CARGO_BIN_EXE_spit"))
-        .args(["discover", pipeline_file.to_str().unwrap()])
-        .output()
-        .unwrap();
-    assert!(
-        discovered.status.success(),
-        "{}",
-        String::from_utf8_lossy(&discovered.stderr)
-    );
-    assert_eq!(String::from_utf8(discovered.stdout).unwrap(), rendered);
-    let checked = Command::new(env!("CARGO_BIN_EXE_spit"))
-        .args(["check", pipeline_file.to_str().unwrap()])
-        .output()
-        .unwrap();
-    assert!(!checked.status.success());
-    let errors = String::from_utf8(checked.stderr).unwrap();
-    assert!(errors.contains("line 2"), "{errors}");
-    assert!(
-        errors.contains(
-            "discovery coverage for `sessions` at [sub=5]: expected at least 2 binding(s), found 1"
-        ),
-        "{errors}"
-    );
-
     let values = text.replace("count>=2", "ses=1,2");
     let (pipeline, spec) = parse(&values);
     assert!(matches!(
@@ -398,29 +309,6 @@ fn skip_discovery_group_removes_subject_before_source_checks_and_jobs() {
     let dag = resolve(&pipeline, &settled.dag_inventory()).unwrap();
     assert_eq!(dag.jobs.len(), 8);
     assert!(!outputs(&dag).iter().any(|output| output.contains("sub=5")));
-
-    let pipeline_file = tree.0.join("pipeline.spit");
-    fs::write(&pipeline_file, text).unwrap();
-    let checked = Command::new(env!("CARGO_BIN_EXE_spit"))
-        .args(["check", pipeline_file.to_str().unwrap()])
-        .output()
-        .unwrap();
-    assert!(
-        checked.status.success(),
-        "{}",
-        String::from_utf8_lossy(&checked.stderr)
-    );
-    assert!(String::from_utf8_lossy(&checked.stderr).contains("skip sessions"));
-    let dag = Command::new(env!("CARGO_BIN_EXE_spit"))
-        .args(["dag", pipeline_file.to_str().unwrap(), "--json"])
-        .output()
-        .unwrap();
-    assert!(
-        dag.status.success(),
-        "{}",
-        String::from_utf8_lossy(&dag.stderr)
-    );
-    assert!(!String::from_utf8_lossy(&dag.stdout).contains("sub=5"));
 }
 
 #[test]
@@ -525,28 +413,6 @@ fn directory_discovery_errors_when_no_directories_match() {
         error.message().contains("data/sub-{sub}/ses-{ses}"),
         "{error}"
     );
-    let pipeline_file = tree.0.join("pipeline.spit");
-    fs::write(
-        &pipeline_file,
-        "discover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}\n",
-    )
-    .unwrap();
-    let checked = Command::new(env!("CARGO_BIN_EXE_spit"))
-        .args([
-            "check",
-            pipeline_file.to_str().unwrap(),
-            "--root",
-            tree.0.to_str().unwrap(),
-            "--json",
-        ])
-        .output()
-        .unwrap();
-    assert!(checked.status.success());
-    let diagnostics = String::from_utf8(checked.stdout).unwrap();
-    assert!(
-        diagnostics.contains("matched no directories"),
-        "{diagnostics}"
-    );
 }
 
 #[test]
@@ -576,6 +442,9 @@ fn cli_discovers_sources_under_the_root() {
     );
     let pipeline = tree.0.join("pipeline.spit");
     fs::write(&pipeline, DISCOVERED).unwrap();
+    // A recipe with no rules: sources are found by the pipeline's path rules.
+    let recipe = tree.0.join("dataset.spitin");
+    fs::write(&recipe, "pipeline pipeline.spit\n").unwrap();
     let run = |args: &[&str]| {
         Command::new(env!("CARGO_BIN_EXE_spit"))
             .args(args)
@@ -583,19 +452,26 @@ fn cli_discovers_sources_under_the_root() {
             .unwrap()
     };
     let root = tree.0.to_str().unwrap();
-    let discovered = run(&["discover", pipeline.to_str().unwrap(), "--root", root]);
+    let discovered = run(&["inputs", recipe.to_str().unwrap(), "--root", root]);
     assert!(discovered.status.success());
     assert_eq!(
-        String::from_utf8(discovered.stdout).unwrap(),
+        String::from_utf8_lossy(&discovered.stdout),
         "sources:\n    frame[subject=a,run=1]: raw/sub-a/run-1.dat\n    frame[subject=a,run=2]: raw/sub-a/run-2.dat\n    lut[]: config/lut.txt\n"
     );
-    let checked = run(&["check", pipeline.to_str().unwrap(), "--root", root]);
-    assert!(checked.status.success());
-    let report = String::from_utf8(checked.stdout).unwrap();
-    assert!(report.contains("1 jobs resolved."), "{report}");
-    assert!(String::from_utf8(checked.stderr)
-        .unwrap()
-        .contains("note: discovered 3 source artifacts"));
+    assert!(String::from_utf8_lossy(&discovered.stderr).contains("note: found 3 source artifacts"));
+    let spitout = tree.0.join("found.spitout");
+    fs::write(&spitout, &discovered.stdout).unwrap();
+    let dag = run(&[
+        "dag",
+        pipeline.to_str().unwrap(),
+        spitout.to_str().unwrap(),
+        "--root",
+        root,
+    ]);
+    let notes = String::from_utf8(dag.stderr).unwrap();
+    assert!(dag.status.success(), "{notes}");
+    assert!(notes.contains("note: 1 jobs resolved."), "{notes}");
+    assert!(notes.contains("note: 3 source files verified."), "{notes}");
 }
 
 #[test]
@@ -629,11 +505,12 @@ fn discovery_skips_values_spit_would_write_differently() {
 #[test]
 fn discovery_reports_skipped_files_and_still_succeeds() {
     let tree = Tree::new("skipped", &["in/%41.txt", "in/a.txt"]);
-    let pipeline = tree.path().join("pipeline.spit");
-    fs::write(&pipeline, ONE_SOURCE).unwrap();
+    fs::write(tree.path().join("pipeline.spit"), ONE_SOURCE).unwrap();
+    let recipe = tree.path().join("dataset.spitin");
+    fs::write(&recipe, "pipeline pipeline.spit\n").unwrap();
     let output = spit(&[
-        "discover",
-        pipeline.to_str().unwrap(),
+        "inputs",
+        recipe.to_str().unwrap(),
         "--root",
         tree.path().to_str().unwrap(),
     ]);

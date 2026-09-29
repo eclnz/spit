@@ -10,7 +10,7 @@ use crate::model::{
     Pipeline, ProductDef, SourceInventory, StageDef,
 };
 use crate::parser::{
-    parse_source_inventory, parse_syntax, split_document, FlowStep, InlineInventory, ParseError,
+    parse_source_inventory, parse_syntax, split_document, FlowStep, Kind, ParseError,
     ParseErrorKind, PathRule, Rule, SourceMap, Statement, StatementKind, Step, Syntax,
 };
 use crate::shape::{step_context, BoundInput};
@@ -24,14 +24,6 @@ pub(crate) struct PipelineBuilder {
     pub(crate) pipeline: Pipeline,
     pub(crate) inputs: InputRules,
     pub(crate) lines: SourceMap,
-}
-
-/// What a `use` line brings in: definitions, and the input rules of the
-/// sources among them.
-#[derive(Default)]
-pub(crate) struct Module {
-    pub(crate) pipeline: Pipeline,
-    pub(crate) inputs: InputRules,
 }
 
 impl PipelineBuilder {
@@ -160,10 +152,22 @@ impl PipelineBuilder {
 /// a statement, or else the syntax error parsing stopped at.
 pub(crate) fn lower(
     syntax: &Syntax,
-    imports: &BTreeMap<usize, Module>,
+    imports: &BTreeMap<usize, Pipeline>,
+    kind: Kind,
 ) -> Result<PipelineBuilder, ParseError> {
     let mut builder = PipelineBuilder::default();
     for statement in &syntax.statements {
+        let rule = matches!(
+            statement.kind,
+            StatementKind::Discover(_) | StatementKind::Constraint(..)
+        );
+        if rule && kind == Kind::Pipeline {
+            return Err(ParseError::new(
+                statement.place.line,
+                "`discover`, `require` and `skip` rules belong in a .spitin recipe, not a pipeline",
+            )
+            .within(&statement.place));
+        }
         lower_statement(&mut builder, imports, statement)
             .map_err(|error| error.within(&statement.place))?;
     }
@@ -175,7 +179,7 @@ pub(crate) fn lower(
 
 fn lower_statement(
     builder: &mut PipelineBuilder,
-    imports: &BTreeMap<usize, Module>,
+    imports: &BTreeMap<usize, Pipeline>,
     statement: &Statement,
 ) -> Result<(), ParseError> {
     match &statement.kind {
@@ -246,74 +250,62 @@ fn inferred_dimensions(
         .unwrap_or_default()
 }
 
-/// A parsed document: its pipeline, the input rules and inline inventory
-/// beside it, and declaration lines.
+/// A parsed document: its pipeline, or a recipe's input rules and records,
+/// and declaration lines.
 pub(crate) struct ParsedDocument {
     pub(crate) pipeline: Pipeline,
     pub(crate) inputs: InputRules,
     pub(crate) inventory: Option<SourceInventory>,
     pub(crate) lines: SourceMap,
-    /// The line of the first inline `sources:` or `contexts:` header.
-    pub(crate) inventory_line: Option<usize>,
 }
 
-/// A `.spit` document separated by step: the logical pipeline for compiling
-/// and resolving jobs, and what the input stage reads.
-#[derive(Clone, Debug, Default)]
-pub struct Document {
-    pub pipeline: Pipeline,
-    /// The `discover`, `require` and `skip` rules written in the document.
-    pub inputs: InputRules,
-    /// Inline `sources:` and `contexts:` records.
-    pub inventory: Option<SourceInventory>,
-}
-
-impl From<ParsedDocument> for Document {
-    fn from(document: ParsedDocument) -> Self {
-        Self {
-            pipeline: document.pipeline,
-            inputs: document.inputs,
-            inventory: document.inventory,
-        }
-    }
-}
-
-/// Parse the logical pipeline of a document. Input rules and records written
-/// in it are left out; [`parse_spit`] keeps them.
+/// Parse a pipeline. Input rules and records are not part of one: they
+/// belong in a `.spitin` recipe and a `.spitout`.
 pub fn parse_pipeline(text: &str) -> Result<Pipeline, ParseError> {
-    lower(&parse_syntax(text), &BTreeMap::new()).map(|builder| builder.pipeline)
-}
-
-/// Parse a text document that may package an inventory alongside its pipeline.
-/// The two remain separate values for resolution. Input rules are left out;
-/// [`parse_spit`] keeps them.
-pub fn parse_document(text: &str) -> Result<(Pipeline, Option<SourceInventory>), ParseError> {
-    parse_spit(text).map(|document| (document.pipeline, document.inventory))
-}
-
-/// Parse a whole document: its pipeline, input rules, and inline records.
-pub fn parse_spit(text: &str) -> Result<Document, ParseError> {
-    parse_document_with_imports(text, &BTreeMap::new(), InlineInventory::Read).map(Document::from)
+    parse_document_with_imports(text, &BTreeMap::new(), Kind::Pipeline)
+        .map(|document| document.pipeline)
 }
 
 pub(crate) fn parse_document_with_imports(
     text: &str,
-    imports: &BTreeMap<usize, Module>,
-    inline: InlineInventory,
+    imports: &BTreeMap<usize, Pipeline>,
+    kind: Kind,
 ) -> Result<ParsedDocument, ParseError> {
     let document = split_document(text);
-    let builder = lower(&parse_syntax(&document.pipeline), imports)?;
-    let inventory = match inline {
-        InlineInventory::Read if document.inventory_line.is_some() => {
-            Some(parse_source_inventory(&document.inventory)?)
+    let lowered = lower(&parse_syntax(&document.pipeline), imports, kind);
+    let inventory = match (kind, document.inventory_line) {
+        (_, None) => None,
+        (Kind::Recipe, Some(_)) => Some(parse_source_inventory(&document.inventory)?),
+        // An error on an earlier line is the first.
+        (Kind::Pipeline, Some(line)) => {
+            let earlier = lowered
+                .as_ref()
+                .err()
+                .is_some_and(|error| error.line() < line);
+            if !earlier {
+                let mut error = ParseError::new(
+                    line,
+                    "`sources:` and `contexts:` records belong in a .spitout, not a pipeline",
+                );
+                error.kind = ParseErrorKind::MisplacedRecords {
+                    lines: document
+                        .inventory
+                        .lines()
+                        .enumerate()
+                        .filter(|(_, text)| !text.trim().is_empty())
+                        .map(|(index, _)| index + 1)
+                        .collect(),
+                };
+                return Err(error);
+            }
+            None
         }
-        _ => None,
     };
+    let builder = lowered?;
     Ok(ParsedDocument {
         pipeline: builder.pipeline,
         inputs: builder.inputs,
         inventory,
         lines: builder.lines,
-        inventory_line: document.inventory_line,
     })
 }

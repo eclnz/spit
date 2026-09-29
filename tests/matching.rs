@@ -1,9 +1,9 @@
 //! How a step's inputs are matched: many-inputs, selectors (`where`, `same`),
 //! broadcasts (`each`), the driving input, declared order, and `min`.
 
-use spit::{
-    parse_document, parse_pipeline, parse_source_inventory, resolve, ResolveError, ResolvedDag,
-};
+mod support;
+
+use spit::{parse_pipeline, parse_source_inventory, resolve, ResolveError, ResolvedDag};
 
 fn resolve_text(text: &str, inventory: &str) -> Result<ResolvedDag, ResolveError> {
     let pipeline = parse_pipeline(text).unwrap();
@@ -89,7 +89,7 @@ fn where_pins_a_dimension_the_driver_lacks() {
 #[test]
 fn where_filters_the_driver_and_removes_its_dimension_from_the_output() {
     let text = "source image [site, echo]\noperation keep(Image) -> Image\nfirst = keep(image @ where(echo=1))\n";
-    let (pipeline, _) = parse_document(text).unwrap();
+    let (pipeline, _) = support::parse_fixture(text).unwrap();
     assert_eq!(pipeline.products[1].dimensions, ["site"]);
     let dag = resolve(
         &pipeline,
@@ -174,7 +174,7 @@ const SCENARIOS: &str = "sources:\n  reading[station=01]\n  reading[station=02]\
 fn each_runs_a_step_for_every_value_an_input_broadcasts() {
     let text =
         format!("{PREDICT}forecast = predict(reading, model @ each(scenario), parameters)\n");
-    let (pipeline, _) = parse_document(&text).unwrap();
+    let (pipeline, _) = support::parse_fixture(&text).unwrap();
     assert_eq!(pipeline.products[3].dimensions, ["station", "scenario"]);
     let dag = resolve(&pipeline, &parse_source_inventory(SCENARIOS).unwrap()).unwrap();
     assert_eq!(
@@ -292,7 +292,7 @@ source calibration [site]
 operation apply(calibration: Calibration, data: Signal) -> Signal
 calibrated = apply(calibration, signal)
 ";
-    let (pipeline, _) = parse_document(text).unwrap();
+    let (pipeline, _) = support::parse_fixture(text).unwrap();
     assert_eq!(pipeline.products[2].dimensions, ["site", "run"]);
     let dag = resolve(
         &pipeline,

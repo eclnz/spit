@@ -23,15 +23,3 @@ pipeline:
     audit = audit_group(validated @ vary(item))
     digest = digest_group(enriched @ vary(item))
     report = assemble(audit, digest, policy)
-
-constraints:
-    require raw count>=1 per [team, period]
-    require policy count=1 per [team]
-
-sources:
-    raw[team=Alpha,period=Q1,item=1]
-    raw[team=Alpha,period=Q1,item=2]
-    raw[team=Alpha,period=Q2,item=1]
-    raw[team=Beta,period=Q1,item=1]
-    policy[team=Alpha]
-    policy[team=Beta]

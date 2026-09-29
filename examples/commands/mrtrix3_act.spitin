@@ -1,0 +1,5 @@
+pipeline mrtrix3_act.spit
+
+require raw_dwi count>=2 per [sub, ses]
+require reverse_b0 count=1 per [sub, ses]
+require t1w count=1 per [sub, ses]

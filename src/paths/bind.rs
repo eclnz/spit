@@ -8,12 +8,6 @@ use super::rules::inspect_paths;
 use super::template::{bind_path, enclosing_path, error, PathError};
 use crate::model::{ArtifactInstance, ArtifactKey, Pipeline, ResolvedDag};
 
-/// Validate concrete artifact path bindings without requiring commands.
-pub fn validate_concrete_paths(pipeline: &Pipeline, dag: &ResolvedDag) -> Result<(), PathError> {
-    bound_paths(pipeline, dag)?;
-    Ok(())
-}
-
 /// Check the files needed to start the resolved DAG under a dataset root.
 /// Derived outputs are deliberately excluded because the pipeline creates them.
 pub fn validate_source_files(
