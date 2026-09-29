@@ -23,7 +23,7 @@ pub fn resolve(
     pipeline: &Pipeline,
     inventory: &SourceInventory,
 ) -> Result<ResolvedDag, ResolveError> {
-    let report = resolve_artifacts(pipeline, inventory)?;
+    let report = resolve_artifacts_excluding(pipeline, inventory, &[])?;
     // A blocked gap always follows the gap that blocks it.
     let failure = report
         .incomplete
@@ -39,17 +39,9 @@ pub fn resolve(
     }
 }
 
-/// Resolve what can be made, reporting each job that cannot and why.
-pub fn resolve_artifacts(
-    pipeline: &Pipeline,
-    inventory: &SourceInventory,
-) -> Result<ArtifactReport, ResolveError> {
-    resolve_artifacts_excluding(pipeline, inventory, &[])
-}
-
-/// As [`resolve_artifacts`], with some listed sources known to be unusable,
-/// such as those an input rule holds back. Jobs that need them are reported
-/// as blocked.
+/// Resolve what can be made, reporting each job that cannot and why. Some
+/// sources may be known to be unusable, such as those a missing requirement
+/// holds back; jobs that need them are reported as blocked.
 pub fn resolve_artifacts_excluding(
     pipeline: &Pipeline,
     inventory: &SourceInventory,

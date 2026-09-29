@@ -1,23 +1,23 @@
 //! SPIT: resolve artifact pipelines, bind paths, and generate Bash scripts.
 
-pub mod bash;
+mod bash;
 mod command;
 mod compile;
-pub mod diagnostics;
-pub mod error;
+mod diagnostics;
+mod error;
 mod imports;
-pub mod inputs;
+mod inputs;
 mod lower;
-pub mod model;
-pub mod parser;
-pub mod paths;
-pub mod render;
-pub mod resolver;
+mod model;
+mod parser;
+mod paths;
+mod render;
+mod resolver;
 mod shape;
 mod span;
-pub mod spitdag;
+mod spitdag;
 mod template;
-pub mod types;
+mod types;
 
 pub use bash::{render_bash, BashError};
 pub use command::{validate_commands, CommandError, CommandTemplate};
@@ -34,11 +34,11 @@ pub use inputs::{
 };
 pub use lower::parse_pipeline;
 pub use model::{
-    natural_cmp, stage_and_parents, stage_within, ArtifactInstance, ArtifactKey, ArtifactReport,
-    ArtifactType, Cardinality, CommandDef, CommandRole, CountRequirement, CoverageAction,
-    CoverageGap, CoverageRule, DefaultPort, DirectoryDiscovery, EntityBinding, Gap, IncompleteJob,
-    InputBinding, InputPort, InputRules, Invocation, Job, OperationDef, OutputPort, Pipeline,
-    ProductDef, ResolvedDag, ShapeRule, SourceInventory, SourceRecord, StageDef, DEFAULT_OUTPUT,
+    stage_within, ArtifactInstance, ArtifactKey, ArtifactReport, ArtifactType, Cardinality,
+    CommandDef, CommandRole, CountRequirement, CoverageAction, CoverageGap, CoverageRule,
+    DefaultPort, DirectoryDiscovery, EntityBinding, Gap, IncompleteJob, InputBinding, InputPort,
+    InputRules, Invocation, Job, OperationDef, OutputPort, Pipeline, ProductDef, ResolvedDag,
+    ShapeRule, SourceInventory, SourceRecord, StageDef,
 };
 pub use parser::{parse_source_inventory, render_source_inventory, ParseError, ParseErrorKind};
 pub use paths::{
@@ -46,7 +46,7 @@ pub use paths::{
     PathTemplate, VerifiedFiles,
 };
 pub use render::{render_artifacts, render_dag};
-pub use resolver::{bind_dag, resolve, resolve_artifacts, resolve_artifacts_excluding};
+pub use resolver::{bind_dag, resolve, resolve_artifacts_excluding};
 pub use spitdag::{render_bound_dag, ArgPart, Argument, BoundArtifact, BoundDag, BoundJob};
 pub use types::{
     parse_type_expr, Compatibility, Substitutions, TypeExpr, TypeParseError, TypeUnifyError,
