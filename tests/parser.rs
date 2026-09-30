@@ -1,7 +1,6 @@
-use spit::{
-    parse_document, parse_pipeline, parse_source_inventory, render_dag, resolve, validate_pipeline,
-    ResolveError, TypeExpr,
-};
+mod support;
+
+use spit::{parse_input_spec, parse_pipeline, parse_source_inventory, resolve};
 
 /// A sectioned pipeline with the same shape as the basic example.
 const PIPELINE: &str = "\
@@ -22,10 +21,10 @@ pipeline:
     registered = register(denoised, calibration)
     mean_signal = mean(registered @ vary(run))
 
-constraints:
-    require signal count>=1 per [site, day]
-    require calibration count=1 per [site, day]
-
+";
+const RECIPE: &str = "\
+require signal count>=1 per [site, day]
+require calibration count=1 per [site, day]
 ";
 const INVENTORY: &str = "\
 contexts:
@@ -37,25 +36,41 @@ sources:
     calibration[site=01,day=01]
 ";
 
-/// The pipeline with its inventory in the same document.
-fn document() -> String {
-    format!("{PIPELINE}{INVENTORY}")
-}
-
 #[test]
-fn parses_and_resolves_a_document_with_its_inventory() {
-    let (pipeline, embedded_inventory) = parse_document(&document()).unwrap();
+fn parses_a_sectioned_pipeline_its_recipe_and_its_records() {
+    let pipeline = parse_pipeline(PIPELINE).unwrap();
     assert_eq!(pipeline.products.len(), 5);
     assert_eq!(pipeline.operations.len(), 3);
     assert_eq!(pipeline.invocations.len(), 3);
-    assert_eq!(pipeline.constraints.len(), 2);
-    let inventory = embedded_inventory.unwrap();
-    assert_eq!(inventory, parse_source_inventory(INVENTORY).unwrap());
-    assert_eq!(inventory.artifacts.len(), 3);
-    let dag = resolve(&pipeline, &inventory).unwrap();
-    assert_eq!(dag.jobs.len(), 5);
-    assert_eq!(dag.jobs[4].input_artifacts().count(), 2);
-    assert!(!dag.jobs[4].output().entities.0.contains_key("run"));
+    assert_eq!(parse_input_spec(RECIPE).unwrap().rules.constraints.len(), 2);
+    assert_eq!(
+        parse_source_inventory(INVENTORY).unwrap().artifacts.len(),
+        3
+    );
+}
+
+#[test]
+fn rules_and_records_belong_outside_the_pipeline() {
+    for (text, line, file) in [
+        ("source x [a]\nrequire x count>=1 per [a]\n", 2, ".spitin"),
+        ("source x [a]\nskip x count>=1 per [a]\n", 2, ".spitin"),
+        (
+            "discover s: [a] from dirs d/{a}\nsource x [a]\n",
+            1,
+            ".spitin",
+        ),
+        ("source x [a]\nsources:\n    x[a=1]\n", 2, ".spitout"),
+        ("source x [a]\ncontexts:\n    [a=1]\n", 2, ".spitout"),
+        (
+            "products:\n    x : X [a]\nconstraints:\n    require x count>=1 per [a]\n",
+            4,
+            ".spitin",
+        ),
+    ] {
+        let error = parse_pipeline(text).unwrap_err();
+        assert_eq!(error.line(), line, "{text}");
+        assert!(error.to_string().contains(file), "{text}: {error}");
+    }
 }
 
 #[test]
@@ -79,55 +94,9 @@ fn rejects_source_inventory_inside_pipeline_file() {
 }
 
 #[test]
-fn reports_semantic_type_error_after_parsing() {
-    let text = document().replace(
-        "registered = register(denoised, calibration)",
-        "registered = register(denoised, signal)",
-    );
-    let (pipeline, inventory) = parse_document(&text).unwrap();
-    assert!(matches!(
-        resolve(&pipeline, &inventory.unwrap()),
-        Err(ResolveError::TypeMismatch { .. })
-    ));
-}
-
-#[test]
-fn resolves_untyped_pipeline_by_shape_and_cardinality() {
-    let (pipeline, inventory) =
-        parse_document(include_str!("../examples/types/untyped.spit")).unwrap();
-    assert!(pipeline
-        .products
-        .iter()
-        .all(|product| product.artifact_type == TypeExpr::Unknown));
-    let dag = resolve(&pipeline, &inventory.unwrap()).unwrap();
-    assert_eq!(dag.jobs.len(), 3);
-    assert_eq!(dag.jobs[2].input_artifacts().count(), 2);
-    assert_eq!(dag.jobs[2].output().artifact_type, TypeExpr::Unknown);
-    assert!(!dag.jobs[2].output().entities.0.contains_key("repeat"));
-    assert!(!render_dag(&dag).contains(": Unknown"));
-}
-
-#[test]
-fn partially_typed_pipeline_accepts_unknown_and_rejects_known_mismatch() {
-    let text = "products:\n  raw [site]\n  output : Result [site]\noperations:\n  process(Input) -> Result\npipeline:\n  output = process(raw)\nsources:\n  raw[site=01]\n";
-    let (pipeline, inventory) = parse_document(text).unwrap();
-    assert_eq!(
-        resolve(&pipeline, &inventory.unwrap()).unwrap().jobs.len(),
-        1
-    );
-
-    let mismatched = text.replace("raw [site]", "raw : Other [site]");
-    let (pipeline, inventory) = parse_document(&mismatched).unwrap();
-    assert!(matches!(
-        resolve(&pipeline, &inventory.unwrap()),
-        Err(ResolveError::TypeMismatch { .. })
-    ));
-}
-
-#[test]
 fn separate_pipeline_still_parses_without_inventory() {
     let (pipeline, inventory) =
-        parse_document(include_str!("../examples/types/typed.spit")).unwrap();
+        support::parse_fixture(include_str!("../examples/types/typed.spit")).unwrap();
     assert!(inventory.is_none());
     assert!(!pipeline.products.is_empty());
 }
@@ -139,20 +108,18 @@ operation clean(Image<S>) -> Clean<S>\n\
 cleaned = clean(raw)\n\
 operation mean(many Clean<S>) -> Mean<S>\n\
 average : Mean<Native> [site] = mean(cleaned @ vary(run))\n\
-require raw count>=1 per [site]\n\
 sources:\n\
     raw[site=A,run=1]\n\
     raw[site=A,run=2]\n";
-    let (pipeline, inventory) = parse_document(text).unwrap();
-    let inventory = inventory.unwrap();
+    let (pipeline, inventory) = support::parse_fixture(text).unwrap();
+    let (pipeline, inventory) = (&pipeline, inventory.unwrap());
     assert_eq!(pipeline.products.len(), 3);
     assert_eq!(pipeline.operations.len(), 2);
     assert_eq!(pipeline.invocations.len(), 2);
-    assert_eq!(pipeline.constraints.len(), 1);
     assert_eq!(pipeline.products[1].name, "cleaned");
     assert_eq!(pipeline.products[1].dimensions, vec!["site", "run"]);
     assert_eq!(pipeline.products[2].dimensions, vec!["site"]);
-    assert_eq!(resolve(&pipeline, &inventory).unwrap().jobs.len(), 3);
+    assert_eq!(resolve(pipeline, &inventory).unwrap().jobs.len(), 3);
 }
 
 #[test]
@@ -187,40 +154,16 @@ fn equals_command_keeps_colons_in_arguments() {
 }
 
 #[test]
-fn named_ports_and_declared_aggregate_shape_are_checked() {
-    let text = "source raw [site, run]\noperation combine(runs: many) @ drop(run)\nresult = combine(raw @ vary(run))\nsources:\n  raw[site=01,run=2]\n  raw[site=01,run=1]\n";
-    let (pipeline, inventory) = parse_document(text).unwrap();
-    assert_eq!(pipeline.operations[0].inputs[0].name, "runs");
-    assert_eq!(
-        pipeline.operations[0].aggregated_dimension.as_deref(),
-        Some("run")
-    );
-    let dag = resolve(&pipeline, &inventory.unwrap()).unwrap();
-    assert_eq!(dag.jobs[0].output().entities.0.len(), 1);
-
-    let wrong_vary = text.replace("vary(run)", "vary(site)");
-    let (pipeline, inventory) = parse_document(&wrong_vary).unwrap();
-    assert!(resolve(&pipeline, &inventory.unwrap())
-        .unwrap_err()
-        .to_string()
-        .contains("declares drop(run) but invocation uses vary(site)"));
-
-    let wrong_shape = text.replace("result =", "result : Data [site, run] =");
-    let (pipeline, inventory) = parse_document(&wrong_shape).unwrap();
-    assert!(resolve(&pipeline, &inventory.unwrap()).is_err());
-}
-
-#[test]
 fn shell_source_is_rejected_with_migration_guidance() {
-    let text = "source raw [id]\noperation copy(one)\nresult = copy(raw)\nsources:\n  raw[id=x]\nshell-source: scripts/functions.sh\n";
-    let error = parse_document(text).unwrap_err();
-    assert_eq!(error.line(), 6);
-    assert!(error.message.contains("executable available on PATH"));
+    let text = "source raw [id]\noperation copy(one)\nresult = copy(raw)\nshell-source: scripts/functions.sh\n";
+    let error = parse_pipeline(text).unwrap_err();
+    assert_eq!(error.line(), 4);
+    assert!(error.message().contains("executable available on PATH"));
 
     let error =
         parse_pipeline("products:\n  raw [id]\nshell-source: scripts/functions.sh\n").unwrap_err();
     assert_eq!(error.line(), 3);
-    assert!(error.message.contains("executable available on PATH"));
+    assert!(error.message().contains("executable available on PATH"));
 }
 
 #[test]
@@ -251,8 +194,8 @@ fn rejects_unbalanced_command_brackets_with_line_number() {
         let text = format!("source raw : Table [id]\n{line}\n");
         let error = parse_pipeline(&text).unwrap_err();
         assert_eq!(error.line(), 2, "{line}");
-        assert!(error.message.contains("normalize"), "{error}");
-        assert!(error.message.contains(expected), "{line}: {error}");
+        assert!(error.message().contains("normalize"), "{error}");
+        assert!(error.message().contains(expected), "{line}: {error}");
     }
 }
 
@@ -266,7 +209,7 @@ fn path_template_errors_are_reported_while_parsing() {
         let text = format!("source raw : Table [id]\n{line}\n");
         let error = parse_pipeline(&text).unwrap_err();
         assert_eq!(error.line(), 2, "{line}");
-        assert!(error.message.contains(expected), "{line}: {error}");
+        assert!(error.message().contains(expected), "{line}: {error}");
     }
 }
 
@@ -285,33 +228,11 @@ fn hash_inside_a_word_is_text_as_in_bash() {
 }
 
 #[test]
-fn pipeline_checks_need_no_inventory() {
-    let text = "source raw : Table [id]\noperation clean(Table) -> Table\n\ncleaned = clean(rwa)\n";
-    assert_eq!(
-        validate_pipeline(&parse_pipeline(text).unwrap()).unwrap_err(),
-        ResolveError::UnknownProduct {
-            name: "rwa".to_owned()
-        }
-    );
-
-    let text = "source raw : Table [id]\nsource other : Other [id]\noperation clean(Table) -> Table\ncleaned = clean(other)\n";
-    assert!(matches!(
-        validate_pipeline(&parse_pipeline(text).unwrap()),
-        Err(ResolveError::TypeMismatch { .. })
-    ));
-
-    let (pipeline, inventory) =
-        parse_document(include_str!("../examples/commands/bash_demo.spit")).unwrap();
-    assert!(inventory.is_none());
-    validate_pipeline(&pipeline).unwrap();
-}
-
-#[test]
 fn input_port_cannot_shadow_output_placeholder() {
     let error =
         parse_pipeline("source raw [id]\noperation copy(output: Image) -> Image\n").unwrap_err();
     assert_eq!(error.line(), 2);
-    assert!(error.message.contains("`output` is reserved"));
+    assert!(error.message().contains("`output` is reserved"));
 }
 
 #[test]
@@ -322,4 +243,52 @@ fn commands_header_alone_selects_sectioned_form() {
     assert_eq!(pipeline.commands.len(), 1);
     let pipeline = parse_pipeline("commands:\n  copy: tool {input} {output}\n").unwrap();
     assert_eq!(pipeline.commands[0].operation, "copy");
+}
+
+#[test]
+fn a_source_record_may_give_its_file() {
+    let text = "sources:\n    raw[site=A]: data/A/raw.txt\n    raw[site=B]\n";
+    let inventory = parse_source_inventory(text).unwrap();
+    assert_eq!(
+        inventory.artifacts[0].path.as_deref(),
+        Some("data/A/raw.txt")
+    );
+    assert_eq!(inventory.artifacts[1].path, None);
+    let pipeline = parse_pipeline("source raw [site]\n").unwrap();
+    let rendered = spit::render_source_inventory(&inventory, &pipeline, &Default::default());
+    assert_eq!(parse_source_inventory(&rendered).unwrap(), inventory);
+    for bad in [
+        "raw[site=A] data.txt",
+        "raw[site=A]:",
+        "raw[site=A]: /abs.txt",
+    ] {
+        let error = parse_source_inventory(&format!("sources:\n{bad}\n")).unwrap_err();
+        assert_eq!(error.line(), 2, "{bad}");
+    }
+}
+
+#[test]
+fn an_empty_named_contexts_section_records_its_discovery() {
+    let inventory = spit::parse_source_inventory("contexts sessions:\nsources:\n").unwrap();
+    assert_eq!(inventory.discovered.get("sessions"), Some(&Vec::new()));
+    assert!(inventory.contexts.is_empty());
+}
+
+#[test]
+fn nested_sources_expand_each_product_and_run() {
+    let text = "sources:\n    lut\n\ncontexts sessions:\n    [sub=01,ses=01]:\n        t1w\n        [run=01,02]:\n            dwi, bvec\n";
+    let inventory = parse_source_inventory(text).unwrap();
+    assert_eq!(inventory.contexts.len(), 1);
+    assert_eq!(inventory.artifacts.len(), 6);
+    assert!(inventory
+        .artifacts
+        .iter()
+        .any(|record| record.product == "bvec" && record.entities.get("run") == Some("02")));
+    for bad in [
+        "contexts sessions:\n    [sub=01]:\n        [sub=02]:\n            image\n",
+        "contexts sessions:\n    [sub=01]:\n        [run=01,]:\n            image\n",
+        "contexts sessions:\n    image\n",
+    ] {
+        assert!(parse_source_inventory(bad).is_err(), "{bad}");
+    }
 }

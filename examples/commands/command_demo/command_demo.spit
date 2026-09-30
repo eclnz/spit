@@ -1,0 +1,14 @@
+# Each observed group and part produces jobs; no group names appear in this pipeline.
+source shard : Lines [group, part]
+
+# A general layout for generated products, with a different source layout.
+path: {product}/{entities}.txt
+path shard: input/{group}/{part}.txt
+
+operation sort_lines(input: Lines) -> Lines
+command sort_lines: sort -u -o {output} {input}
+sorted = sort_lines(shard)
+
+operation merge(items: many Lines) -> Lines @ drop(part)
+command merge: sort -m -u -o {output} {items}
+merged = merge(sorted @ vary(part))

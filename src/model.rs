@@ -1,49 +1,195 @@
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
+use std::hash::{Hash, Hasher};
+use std::sync::Arc;
+
+use rustc_hash::{FxHashMap, FxHashSet, FxHasher};
 
 use crate::command::CommandTemplate;
-use crate::error::ResolveError;
+use crate::error::{DefinitionSubject, ResolveError};
 use crate::paths::PathTemplate;
 use crate::types::TypeExpr;
 
 pub type ArtifactType = TypeExpr;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Ord, PartialOrd)]
-pub struct EntityBinding(pub BTreeMap<String, String>);
+/// The value an artifact has for each of its product's dimensions. Every
+/// job an artifact reaches holds a copy of it, so copies share one map, and
+/// the map's hash is kept with it, so artifacts are cheap to look up.
+/// Bindings order by their values alone.
+#[derive(Clone)]
+pub struct EntityBinding(Arc<Entities>);
+
+struct Entities {
+    values: BTreeMap<String, String>,
+    hash: u64,
+}
+
+impl Entities {
+    fn new(values: BTreeMap<String, String>) -> Self {
+        let mut hasher = FxHasher::default();
+        values.hash(&mut hasher);
+        Self {
+            hash: hasher.finish(),
+            values,
+        }
+    }
+}
+
+impl Clone for Entities {
+    fn clone(&self) -> Self {
+        Self {
+            values: self.values.clone(),
+            hash: self.hash,
+        }
+    }
+}
+
+impl Default for EntityBinding {
+    fn default() -> Self {
+        BTreeMap::new().into()
+    }
+}
+
+impl PartialEq for EntityBinding {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+            || (self.0.hash == other.0.hash && self.0.values == other.0.values)
+    }
+}
+
+impl Eq for EntityBinding {}
+
+impl PartialOrd for EntityBinding {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for EntityBinding {
+    fn cmp(&self, other: &Self) -> Ordering {
+        if Arc::ptr_eq(&self.0, &other.0) {
+            return Ordering::Equal;
+        }
+        self.0.values.cmp(&other.0.values)
+    }
+}
+
+impl Hash for EntityBinding {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        state.write_u64(self.0.hash);
+    }
+}
+
+impl fmt::Debug for EntityBinding {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("EntityBinding")
+            .field(&self.0.values)
+            .finish()
+    }
+}
+
+impl From<BTreeMap<String, String>> for EntityBinding {
+    fn from(values: BTreeMap<String, String>) -> Self {
+        Self(Arc::new(Entities::new(values)))
+    }
+}
+
+impl FromIterator<(String, String)> for EntityBinding {
+    fn from_iter<I: IntoIterator<Item = (String, String)>>(values: I) -> Self {
+        values.into_iter().collect::<BTreeMap<_, _>>().into()
+    }
+}
 
 impl EntityBinding {
+    /// The value bound to `dimension`, if any.
+    pub fn get(&self, dimension: &str) -> Option<&str> {
+        self.0.values.get(dimension).map(String::as_str)
+    }
+
+    /// Whether `dimension` has a value.
+    pub fn binds(&self, dimension: &str) -> bool {
+        self.0.values.contains_key(dimension)
+    }
+
+    /// Each dimension and its value, in dimension name order.
+    pub fn iter(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.0
+            .values
+            .iter()
+            .map(|(dimension, value)| (dimension.as_str(), value.as_str()))
+    }
+
+    /// The dimensions with a value, in name order.
+    pub fn dimensions(&self) -> impl Iterator<Item = &str> {
+        self.0.values.keys().map(String::as_str)
+    }
+
+    /// How many dimensions have a value.
+    pub fn len(&self) -> usize {
+        self.0.values.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.values.is_empty()
+    }
+
+    /// Add `other`'s values, replacing any this has for the same dimensions.
+    pub(crate) fn extend(&mut self, other: &Self) {
+        if other.is_empty() {
+            return;
+        }
+        let entities = Arc::make_mut(&mut self.0);
+        let mut values = std::mem::take(&mut entities.values);
+        values.extend(
+            other
+                .iter()
+                .map(|(key, value)| (key.to_owned(), value.to_owned())),
+        );
+        *entities = Entities::new(values);
+    }
+
     pub fn from_pairs<const N: usize>(pairs: [(&str, &str); N]) -> Self {
-        Self(
-            pairs
-                .into_iter()
-                .map(|(dimension, value)| (dimension.to_owned(), value.to_owned()))
-                .collect(),
-        )
+        pairs
+            .into_iter()
+            .map(|(dimension, value)| (dimension.to_owned(), value.to_owned()))
+            .collect()
     }
 
     pub fn without(&self, dimension: &str) -> Self {
-        let mut values = self.0.clone();
+        let mut values = self.0.values.clone();
         values.remove(dimension);
-        Self(values)
+        values.into()
     }
 
     pub fn matches_shared(&self, other: &Self) -> bool {
-        self.0
-            .iter()
-            .all(|(dimension, value)| other.0.get(dimension).is_none_or(|other| other == value))
+        self.0.values.iter().all(|(dimension, value)| {
+            other
+                .0
+                .values
+                .get(dimension)
+                .is_none_or(|other| other == value)
+        })
     }
 
     /// Keep only `dimensions`, or `None` if one of them is unbound.
     pub fn project(&self, dimensions: &[String]) -> Option<Self> {
+        // Keeping every dimension, as when grouping by all of them, is a copy.
+        if self.len() == dimensions.len()
+            && self
+                .dimensions()
+                .all(|name| dimensions.iter().any(|dimension| dimension == name))
+        {
+            return Some(self.clone());
+        }
         dimensions
             .iter()
             .map(|dimension| {
-                let value = self.0.get(dimension)?;
+                let value = self.0.values.get(dimension)?;
                 Some((dimension.clone(), value.clone()))
             })
-            .collect::<Option<_>>()
-            .map(Self)
+            .collect::<Option<BTreeMap<_, _>>>()
+            .map(Self::from)
     }
 
     /// Compare values dimension by dimension in `dimensions` order, reading
@@ -52,7 +198,7 @@ impl EntityBinding {
         dimensions
             .iter()
             .map(
-                |dimension| match (self.0.get(dimension), other.0.get(dimension)) {
+                |dimension| match (self.0.values.get(dimension), other.0.values.get(dimension)) {
                     (Some(left), Some(right)) => natural_cmp(left, right),
                     (left, right) => left.cmp(&right),
                 },
@@ -63,7 +209,7 @@ impl EntityBinding {
 }
 
 /// Order text as people read it: runs of digits compare by numeric value.
-pub fn natural_cmp(left: &str, right: &str) -> Ordering {
+pub(crate) fn natural_cmp(left: &str, right: &str) -> Ordering {
     let (mut left_rest, mut right_rest) = (left, right);
     loop {
         match (left_rest.chars().next(), right_rest.chars().next()) {
@@ -104,9 +250,35 @@ fn split_digits(text: &str) -> (&str, &str) {
 
 impl fmt::Display for EntityBinding {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let parts: Vec<_> = self.0.iter().map(|(k, v)| format!("{k}={v}")).collect();
-        f.write_str(&parts.join(","))
+        for (index, (dimension, value)) in self.iter().enumerate() {
+            if index > 0 {
+                f.write_str(",")?;
+            }
+            write!(f, "{dimension}={value}")?;
+        }
+        Ok(())
     }
+}
+
+/// An artifact as `product[dimension=value,...]`, its entities in the order
+/// given.
+pub(crate) fn identity<'a>(
+    product: &str,
+    entities: impl IntoIterator<Item = (&'a str, &'a str)>,
+) -> String {
+    let mut text = String::with_capacity(product.len() + 32);
+    text.push_str(product);
+    text.push('[');
+    for (index, (dimension, value)) in entities.into_iter().enumerate() {
+        if index > 0 {
+            text.push(',');
+        }
+        text.push_str(dimension);
+        text.push('=');
+        text.push_str(value);
+    }
+    text.push(']');
+    text
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -139,6 +311,70 @@ pub struct ArtifactInstance {
 
 /// An artifact's identity: its product and entity bindings, ignoring its type.
 pub type ArtifactKey = (String, EntityBinding);
+
+/// A value for each of a set of artifacts, found by product and then by
+/// entities, so that looking an artifact up copies nothing.
+#[derive(Clone, Debug)]
+pub(crate) struct ArtifactMap<V>(FxHashMap<String, FxHashMap<EntityBinding, V>>);
+
+impl<V> Default for ArtifactMap<V> {
+    fn default() -> Self {
+        Self(FxHashMap::default())
+    }
+}
+
+impl<V> ArtifactMap<V> {
+    pub(crate) fn get(&self, artifact: &ArtifactInstance) -> Option<&V> {
+        self.get_by(&artifact.product, &artifact.entities)
+    }
+
+    /// The value of the artifact of `product` with `entities`.
+    pub(crate) fn get_by(&self, product: &str, entities: &EntityBinding) -> Option<&V> {
+        self.0.get(product)?.get(entities)
+    }
+
+    pub(crate) fn contains(&self, artifact: &ArtifactInstance) -> bool {
+        self.get(artifact).is_some()
+    }
+
+    /// Each artifact's product and entities with its value, in no order.
+    pub(crate) fn iter(&self) -> impl Iterator<Item = (&str, &EntityBinding, &V)> {
+        self.0.iter().flat_map(|(product, family)| {
+            family
+                .iter()
+                .map(move |(entities, value)| (product.as_str(), entities, value))
+        })
+    }
+
+    /// Give `artifact` `value`, returning the value it had.
+    pub(crate) fn insert(&mut self, artifact: &ArtifactInstance, value: V) -> Option<V> {
+        let family = match self.0.get_mut(&artifact.product) {
+            Some(family) => family,
+            None => self.0.entry(artifact.product.clone()).or_default(),
+        };
+        family.insert(artifact.entities.clone(), value)
+    }
+}
+
+/// A set of artifacts.
+pub(crate) type ArtifactSet = ArtifactMap<()>;
+
+impl ArtifactSet {
+    /// Add `artifact`, returning whether it was new.
+    pub(crate) fn add(&mut self, artifact: &ArtifactInstance) -> bool {
+        self.insert(artifact, ()).is_none()
+    }
+}
+
+impl<'a> FromIterator<&'a ArtifactInstance> for ArtifactSet {
+    fn from_iter<I: IntoIterator<Item = &'a ArtifactInstance>>(artifacts: I) -> Self {
+        let mut set = Self::default();
+        for artifact in artifacts {
+            set.add(artifact);
+        }
+        set
+    }
+}
 
 impl ArtifactInstance {
     pub fn key(&self) -> ArtifactKey {
@@ -221,13 +457,11 @@ impl OutputPort {
 }
 
 /// The port name of an operation's only, unnamed output.
-pub const DEFAULT_OUTPUT: &str = "output";
+pub(crate) const DEFAULT_OUTPUT: &str = "output";
 
 /// A placeholder a command has without its operation naming the port.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum DefaultPort {
-    /// `{output}`: an operation's only, unnamed output.
-    Output,
+pub(crate) enum DefaultPort {
     /// `{input}`: an operation's only input, when unnamed.
     Input,
     /// `{input1}`, `{input2}`, ...: the unnamed inputs of an operation with
@@ -251,7 +485,6 @@ impl DefaultPort {
     /// The name between the braces.
     pub fn name(self) -> String {
         match self {
-            Self::Output => DEFAULT_OUTPUT.to_owned(),
             Self::Input => "input".to_owned(),
             Self::InputAt(number) => format!("input{number}"),
             Self::Inputs => "inputs".to_owned(),
@@ -487,6 +720,14 @@ pub struct StageDef {
     pub path_template: Option<PathTemplate>,
 }
 
+/// A directory pattern that discovers concrete entity bindings under a root.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DirectoryDiscovery {
+    pub name: String,
+    pub dimensions: Vec<String>,
+    pub template: PathTemplate,
+}
+
 impl StageDef {
     pub fn new(name: impl Into<String>) -> Self {
         Self {
@@ -496,12 +737,13 @@ impl StageDef {
     }
 }
 
+/// The logical pipeline: what to make from which sources. It says nothing
+/// about how a dataset's sources are found or filtered; see [`InputRules`].
 #[derive(Clone, Debug, Default)]
 pub struct Pipeline {
     pub products: Vec<ProductDef>,
     pub operations: Vec<OperationDef>,
     pub invocations: Vec<Invocation>,
-    pub constraints: Vec<CoverageRule>,
     pub commands: Vec<CommandDef>,
     pub path_template: Option<PathTemplate>,
     pub product_paths: BTreeMap<String, PathTemplate>,
@@ -543,10 +785,129 @@ impl Pipeline {
     pub fn stage_path_template(&self, product: &str) -> Option<&PathTemplate> {
         self.stage_path_rule(product).map(|(_, template)| template)
     }
+
+    /// Whether `product` is a source family, which no step produces.
+    pub fn is_source(&self, product: &str) -> bool {
+        self.products
+            .iter()
+            .any(|declared| declared.name == product)
+            && !self
+                .invocations
+                .iter()
+                .any(|invocation| invocation.outputs.iter().any(|output| output == product))
+    }
+
+    /// Each record of `inventory` as an artifact, by product and in order,
+    /// after checking that it names a source, binds exactly its dimensions,
+    /// and appears once.
+    pub fn source_artifacts(
+        &self,
+        inventory: &SourceInventory,
+    ) -> Result<BTreeMap<String, Vec<ArtifactInstance>>, ResolveError> {
+        // Each product with the set of its dimensions, looked up once, not
+        // once per record; the first declaration of a name wins, as when
+        // searching.
+        let mut products = FxHashMap::default();
+        for product in &self.products {
+            products.entry(product.name.as_str()).or_insert_with(|| {
+                let dimensions: BTreeSet<_> =
+                    product.dimensions.iter().map(String::as_str).collect();
+                (product, dimensions)
+            });
+        }
+        let produced: FxHashSet<_> = self
+            .invocations
+            .iter()
+            .flat_map(|invocation| &invocation.outputs)
+            .map(String::as_str)
+            .collect();
+        let mut artifacts: BTreeMap<String, Vec<ArtifactInstance>> = BTreeMap::new();
+        let mut seen: FxHashSet<(&str, &EntityBinding)> = FxHashSet::default();
+        for record in &inventory.artifacts {
+            let (product, dimensions) = products.get(record.product.as_str()).ok_or_else(|| {
+                ResolveError::UnknownProduct {
+                    name: record.product.clone(),
+                }
+            })?;
+            if produced.contains(record.product.as_str()) {
+                return Err(ResolveError::InvalidDefinition {
+                    subject: DefinitionSubject::Product(record.product.clone()),
+                    detail: format!(
+                        "product `{}` cannot be both a source family and an invocation output",
+                        record.product
+                    ),
+                });
+            }
+            let source = ArtifactInstance {
+                product: record.product.clone(),
+                artifact_type: product.artifact_type.clone(),
+                entities: record.entities.clone(),
+            };
+            let binds_exactly = record.entities.len() == dimensions.len()
+                && record
+                    .entities
+                    .dimensions()
+                    .all(|name| dimensions.contains(name));
+            if !binds_exactly {
+                return Err(ResolveError::InvalidDefinition {
+                    subject: DefinitionSubject::Source(record.clone()),
+                    detail: format!(
+                        "source `{source}` must bind exactly the dimensions of product `{}`: [{}]",
+                        product.name,
+                        product.dimensions.join(", ")
+                    ),
+                });
+            }
+            if !seen.insert((&record.product, &record.entities)) {
+                return Err(ResolveError::DuplicateSourceArtifact { artifact: source });
+            }
+            artifacts
+                .entry(source.product.clone())
+                .or_default()
+                .push(source);
+        }
+        for (name, family) in &mut artifacts {
+            if let Some((product, _)) = products.get(name.as_str()) {
+                product.sort_family(family);
+            }
+        }
+        Ok(artifacts)
+    }
+}
+
+impl ProductDef {
+    /// Order this product's artifacts by its declared dimensions, reading
+    /// numbers as numbers.
+    pub fn sort_family(&self, family: &mut [ArtifactInstance]) {
+        family.sort_by(|left, right| left.entities.cmp_in(&right.entities, &self.dimensions));
+    }
+}
+
+/// How a dataset's sources are found and filtered: directory discovery,
+/// `require` and `skip` rules, and where source files live. The input stage
+/// reads these; job resolution never does.
+#[derive(Clone, Debug, Default)]
+pub struct InputRules {
+    pub discoveries: Vec<DirectoryDiscovery>,
+    /// `require` and `skip` rules, in declaration order.
+    pub constraints: Vec<CoverageRule>,
+    /// Path rules for source products that the recipe, not the pipeline, sets.
+    pub source_paths: BTreeMap<String, PathTemplate>,
+}
+
+impl InputRules {
+    pub fn is_empty(&self) -> bool {
+        self.discoveries.is_empty() && self.constraints.is_empty() && self.source_paths.is_empty()
+    }
+
+    /// The discovery rule named `name`, if any.
+    pub fn discovery(&self, name: &str) -> Option<&DirectoryDiscovery> {
+        self.discoveries.iter().find(|rule| rule.name == name)
+    }
 }
 
 /// A stage's full name, then each stage around it: `a/b/c`, `a/b`, `a`.
-pub fn stage_and_parents(stage: &str) -> impl Iterator<Item = &str> {
+pub(crate) fn stage_and_parents(stage: &str) -> impl Iterator<Item = &str> {
     std::iter::successors(Some(stage), |name| {
         name.rsplit_once('/').map(|(parent, _)| parent)
     })
@@ -559,11 +920,13 @@ pub fn stage_within(stage: &str, outer: &str) -> bool {
         .is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
 }
 
-/// A source record identifies a logical artifact without binding it to a path.
+/// A source record identifies a logical artifact, and may say where its file
+/// is, relative to the dataset root, as the input stage found it.
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub struct SourceRecord {
     pub product: String,
     pub entities: EntityBinding,
+    pub path: Option<String>,
 }
 
 impl SourceRecord {
@@ -571,6 +934,16 @@ impl SourceRecord {
         Self {
             product: product.into(),
             entities,
+            path: None,
+        }
+    }
+
+    /// This record with its file at `path`, relative to the dataset root.
+    #[must_use]
+    pub fn at(self, path: impl Into<String>) -> Self {
+        Self {
+            path: Some(path.into()),
+            ..self
         }
     }
 }
@@ -582,12 +955,28 @@ pub struct SourceInventory {
     /// Observed contexts can expose missing artifacts even when no other source
     /// family has an artifact for that context.
     pub contexts: Vec<EntityBinding>,
+    /// Bindings from each named directory discovery rule. These are also
+    /// present in `contexts`, but retain their origin for coverage rules.
+    pub discovered: BTreeMap<String, Vec<EntityBinding>>,
+    /// Source path rules settled from a recipe, when the pipeline does not
+    /// declare them. A .spitout carries each rule once for standalone DAGs.
+    pub source_paths: BTreeMap<String, PathTemplate>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum CountRequirement {
     Exactly(usize),
     AtLeast(usize),
+}
+
+impl CountRequirement {
+    /// Whether `found` artifacts or bindings meet the requirement.
+    pub fn allows(&self, found: usize) -> bool {
+        match *self {
+            Self::Exactly(count) => found == count,
+            Self::AtLeast(count) => found >= count,
+        }
+    }
 }
 
 impl fmt::Display for CountRequirement {
@@ -601,12 +990,20 @@ impl fmt::Display for CountRequirement {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CoverageRule {
+    pub action: CoverageAction,
     pub product: String,
     pub group_by: Vec<String>,
     pub count: CountRequirement,
     /// Entity values that must each be present in every group, such as
     /// `run=1,2`. Each listed dimension is checked on its own.
     pub values: BTreeMap<String, Vec<String>>,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum CoverageAction {
+    #[default]
+    Require,
+    Skip,
 }
 
 impl CoverageRule {
@@ -616,6 +1013,7 @@ impl CoverageRule {
         count: CountRequirement,
     ) -> Self {
         Self {
+            action: CoverageAction::Require,
             product: product.into(),
             group_by: owned_strings(group_by),
             count,
@@ -650,6 +1048,11 @@ pub struct Job {
 
 impl Job {
     /// The first output artifact.
+    ///
+    /// # Panics
+    ///
+    /// If the job has no outputs. A resolved job always has one, since
+    /// every operation declares at least one output.
     pub fn output(&self) -> &ArtifactInstance {
         &self.outputs[0]
     }
@@ -665,9 +1068,26 @@ pub struct ResolvedDag {
     pub jobs: Vec<Job>,
     /// Declaration order is retained for readable dry-run output.
     pub product_dimensions: BTreeMap<String, Vec<String>>,
+    /// The file of each source whose inventory record gave one. Other
+    /// artifacts take the path their product's rule gives them.
+    pub source_paths: BTreeMap<ArtifactKey, String>,
 }
 
 impl ResolvedDag {
+    /// Take each source's file from its record in `inventory`, replacing the
+    /// files known before: a DAG resolved before its inventory's sources
+    /// were located gets their files this way, without resolving it again.
+    pub fn locate_sources(&mut self, inventory: &SourceInventory) {
+        self.source_paths = inventory
+            .artifacts
+            .iter()
+            .filter_map(|record| {
+                let key = (record.product.clone(), record.entities.clone());
+                Some((key, record.path.clone()?))
+            })
+            .collect();
+    }
+
     /// Only the jobs of `stage` and the stages nested in it. Their inputs from
     /// other stages are taken as files that already exist, so dependencies on those jobs are dropped;
     /// every job keeps its number.
@@ -693,6 +1113,7 @@ impl ResolvedDag {
                 })
                 .collect(),
             product_dimensions: self.product_dimensions.clone(),
+            source_paths: self.source_paths.clone(),
         }
     }
 }

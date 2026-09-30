@@ -175,19 +175,54 @@ fn invalid_type_variables_point_at_the_variable_not_the_whole_type() {
 }
 
 #[test]
-fn rule_errors_point_at_the_product_or_the_grouped_dimensions() {
-    let text = "\
-source raw : Table [id]
-operation clean(Table) -> Table
-cleaned = clean(raw)
+fn recipe_rule_errors_point_at_the_product_or_the_grouped_dimensions() {
+    let pipeline = spit::parse_pipeline(
+        "source raw : Table [id]\noperation clean(Table) -> Table\ncleaned = clean(raw)\n",
+    )
+    .unwrap();
+    let recipe = "\
+pipeline analysis.spit
 require rwa count>=1 per [id]
 require raw count>=1 per [shard]
 require cleaned count=1 per [id]
 ";
+    let pointed: Vec<_> = spit::diagnose_recipe_against(recipe, &pipeline)
+        .iter()
+        .map(|diagnostic| {
+            let line = diagnostic.line.unwrap();
+            let columns = diagnostic.columns.clone().unwrap();
+            let text = &recipe.lines().nth(line - 1).unwrap()[columns];
+            format!("{} {line}: {text}", diagnostic.severity.as_str())
+        })
+        .collect();
     assert_eq!(
-        pointed(text, None),
-        ["error 4: rwa", "error 5: [shard]", "error 6: cleaned"]
+        pointed,
+        ["error 2: rwa", "error 3: [shard]", "error 4: cleaned"]
     );
+}
+
+#[test]
+fn errors_in_records_written_in_a_recipe_point_at_the_record() {
+    let pipeline = spit::parse_pipeline(
+        "source raw : Table [id, run]\noperation clean(Table) -> Table\ncleaned = clean(raw)\n",
+    )
+    .unwrap();
+    for (record, message) in [
+        ("rwa[id=1,run=1]", "unknown product `rwa`"),
+        ("raw[id=2]", "must bind exactly the dimensions"),
+        ("raw[id=1,run=1]", "duplicate source artifact"),
+    ] {
+        let recipe =
+            format!("pipeline analysis.spit\nsources:\n    raw[id=1,run=1]\n    {record}\n");
+        let diagnostics = spit::diagnose_recipe_against(&recipe, &pipeline);
+        let [diagnostic] = diagnostics.as_slice() else {
+            panic!("{diagnostics:?}");
+        };
+        assert!(diagnostic.message.contains(message), "{diagnostic:?}");
+        let columns = diagnostic.columns.clone().unwrap();
+        assert_eq!(diagnostic.line, Some(4));
+        assert_eq!(&recipe.lines().nth(3).unwrap()[columns], record);
+    }
 }
 
 #[test]

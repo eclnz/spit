@@ -1,84 +1,78 @@
+//! The command line: one command per step, with the files it works on given
+//! as arguments.
+
+mod support;
+
 use std::fs;
-use std::process::Command;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::process::Output;
 
-#[test]
-fn example_runs_with_embedded_inventory() {
-    let output = Command::new(env!("CARGO_BIN_EXE_spit"))
-        .args(["dag", "examples/analytics/analytics.spit"])
-        .output()
-        .unwrap();
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let dag = String::from_utf8(output.stdout).unwrap();
-    assert_eq!(dag.matches("Job ").count(), 34);
-    assert!(dag.contains("tenant_metrics[tenant=acme]"));
+use support::{spit, Tree};
+
+fn stdout(output: &Output) -> String {
+    String::from_utf8_lossy(&output.stdout).into_owned()
+}
+
+fn stderr(output: &Output) -> String {
+    String::from_utf8_lossy(&output.stderr).into_owned()
 }
 
 #[test]
-fn separate_inventory_remains_supported() {
-    let output = Command::new(env!("CARGO_BIN_EXE_spit"))
-        .args([
-            "check",
-            "examples/types/typed.spit",
-            "--sources",
-            "examples/types/typed.sources",
-        ])
-        .output()
-        .unwrap();
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
+fn help_lists_each_step_and_each_command_explains_itself() {
+    for args in [&[][..], &["help"], &["--help"], &["-h"]] {
+        let help = spit(args);
+        assert!(help.status.success());
+        let text = stdout(&help);
+        for command in ["check", "inputs", "dag", "artifacts"] {
+            assert!(text.contains(&format!("  {command} ")), "{text}");
+        }
+        assert!(text.contains(".spitdag"), "{text}");
+    }
+    for args in [&["help", "dag"][..], &["dag", "--help"]] {
+        let text = stdout(&spit(args));
+        assert!(
+            text.contains(
+                "usage: spit dag <recipe.spitin> or <pipeline.spit> <inputs.spitout | ->"
+            ),
+            "{text}"
+        );
+        assert!(text.contains("-o <file>"), "{text}");
+        assert!(text.contains("example:"), "{text}");
+    }
+    let version = spit(&["--version"]);
+    assert_eq!(
+        stdout(&version),
+        format!("spit {}\n", env!("CARGO_PKG_VERSION"))
     );
-    assert!(String::from_utf8(output.stdout)
-        .unwrap()
-        .contains("Pipeline valid."));
 }
 
 #[test]
-fn bash_command_expands_observed_groups() {
-    let output = Command::new(env!("CARGO_BIN_EXE_spit"))
-        .args([
-            "bash",
-            "examples/commands/bash_demo.spit",
-            "--sources",
-            "examples/commands/bash_demo.sources",
-        ])
-        .output()
-        .unwrap();
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let script = String::from_utf8(output.stdout).unwrap();
-    assert_eq!(script.matches("# Job ").count(), 5);
-    assert!(script.contains("input/alpha/01.txt"));
-    assert!(script.contains("input/beta/01.txt"));
+fn check_compiles_the_pipeline_without_its_inputs() {
+    let output = spit(&["check", "examples/types/typed.spit"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(stdout(&output), "Pipeline valid.\n");
+}
+
+#[test]
+fn dag_resolves_a_pipeline_over_a_spitout() {
+    let output = spit(&[
+        "dag",
+        "examples/types/typed.spit",
+        "examples/types/typed.spitout",
+    ]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(stdout(&output).starts_with("Job 1\n"));
 }
 
 #[test]
 fn dag_with_paths_displays_resolved_paths_before_command_expansion() {
-    let output = Command::new(env!("CARGO_BIN_EXE_spit"))
-        .args([
-            "dag",
-            "examples/commands/field_survey.spit",
-            "--sources",
-            "examples/commands/field_survey.sources",
-            "--paths",
-        ])
-        .output()
-        .unwrap();
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let report = String::from_utf8(output.stdout).unwrap();
+    let output = spit(&[
+        "dag",
+        "examples/commands/field_survey/field_survey.spit",
+        "examples/commands/field_survey/field_survey.spitout",
+        "--paths",
+    ]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let report = stdout(&output);
     assert_eq!(report.matches("Job ").count(), 93);
     assert!(report.contains("moving: ground_map[site=01,visit=01]"));
     assert!(report.contains("path: site-01/visit-01/map/site-01_visit-01_map.tif"));
@@ -86,166 +80,169 @@ fn dag_with_paths_displays_resolved_paths_before_command_expansion() {
 
 #[test]
 fn expanded_examples_resolve() {
-    for (pipeline, sources, expected_jobs) in [
-        ("examples/pipelines/branching.spit", None, 21),
-        ("examples/pipelines/complex.spit", None, 25),
-        (
-            "examples/pipelines/rich_shapes.spit",
-            Some("examples/pipelines/rich_shapes.sources"),
-            17,
-        ),
-        (
-            "examples/commands/field_survey.spit",
-            Some("examples/commands/field_survey.sources"),
-            93,
-        ),
-        ("examples/analytics/analytics.spit", None, 34),
+    for (example, expected_jobs) in [
+        ("examples/pipelines/branching", 21),
+        ("examples/pipelines/complex", 25),
+        ("examples/pipelines/rich_shapes", 17),
+        ("examples/commands/field_survey/field_survey", 93),
+        ("examples/analytics/analytics", 34),
     ] {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_spit"));
-        command.args(["check", pipeline]);
-        if let Some(sources) = sources {
-            command.args(["--sources", sources]);
-        }
-        let output = command.output().unwrap();
+        let (pipeline, sources) = (format!("{example}.spit"), format!("{example}.spitout"));
+        let output = spit(&["dag", &pipeline, &sources]);
+        assert!(output.status.success(), "{pipeline}: {}", stderr(&output));
         assert!(
-            output.status.success(),
-            "{pipeline}: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        assert!(
-            String::from_utf8(output.stdout)
-                .unwrap()
-                .contains(&format!("{expected_jobs} jobs resolved.")),
+            stderr(&output).contains(&format!("note: {expected_jobs} jobs resolved.")),
             "{pipeline} resolved an unexpected number of jobs"
         );
     }
 }
 
 #[test]
-fn check_paths_reports_fallbacks_and_strict_check_rejects_them() {
-    let paths = Command::new(env!("CARGO_BIN_EXE_spit"))
-        .args([
-            "check",
-            "examples/commands/field_survey.spit",
-            "--sources",
-            "examples/commands/field_survey.sources",
-            "--paths",
-        ])
-        .output()
-        .unwrap();
-    assert!(paths.status.success());
-    let report = String::from_utf8(paths.stdout).unwrap();
+fn path_rules_report_fallbacks_and_strict_paths_reject_them() {
+    let rules = spit(&[
+        "check",
+        "examples/commands/field_survey/field_survey.spit",
+        "--path-rules",
+    ]);
+    assert!(rules.status.success(), "{}", stderr(&rules));
+    let report = stdout(&rules);
     assert!(report.contains("photo_response (output): explicit"));
     assert!(report.contains("vegetation (output): default"));
 
-    let strict = Command::new(env!("CARGO_BIN_EXE_spit"))
-        .args([
-            "check",
-            "examples/commands/field_survey.spit",
-            "--strict-paths",
-            "--sources",
-            "examples/commands/field_survey.sources",
-        ])
-        .output()
-        .unwrap();
-    assert!(!strict.status.success());
-    assert!(String::from_utf8(strict.stderr)
-        .unwrap()
-        .contains("strict paths requires explicit rules"));
+    for command in ["check", "dag"] {
+        let mut args = vec![command, "examples/commands/field_survey/field_survey.spit"];
+        if command == "dag" {
+            args.push("examples/commands/field_survey/field_survey.spitout");
+        }
+        args.push("--strict-paths");
+        let strict = spit(&args);
+        assert!(!strict.status.success(), "{command}");
+        assert!(
+            stderr(&strict).contains("strict paths requires explicit rules"),
+            "{command}"
+        );
+    }
 }
 
 #[test]
-fn paths_flag_applies_to_check_and_dag_only() {
-    let output = Command::new(env!("CARGO_BIN_EXE_spit"))
-        .args([
-            "bash",
-            "examples/commands/bash_demo.spit",
-            "--sources",
-            "examples/commands/bash_demo.sources",
-            "--paths",
-        ])
-        .output()
-        .unwrap();
+fn each_option_applies_to_its_commands() {
+    let output = spit(&[
+        "artifacts",
+        "examples/commands/command_demo/command_demo.spit",
+        "examples/commands/command_demo/command_demo.spitout",
+        "--paths",
+    ]);
     assert!(!output.status.success());
-    assert_eq!(
-        String::from_utf8(output.stderr).unwrap(),
-        "error: --paths applies to check and dag\n"
-    );
+    assert!(stderr(&output).starts_with("error: --paths applies to dag\n"));
+    let conflict = spit(&["dag", "a.spit", "b.spitout", "--json", "-o", "x"]);
+    assert!(stderr(&conflict).starts_with("error: --json cannot be used with -o\n"));
+    let extra = spit(&["check", "a.spit", "b.spitout"]);
+    assert!(stderr(&extra).starts_with("error: unexpected file `b.spitout`\n"));
 }
 
 #[test]
-fn json_reads_the_pipeline_file_and_applies_to_check_only() {
-    let run = |command: &str| {
-        Command::new(env!("CARGO_BIN_EXE_spit"))
-            .args([
-                command,
-                "examples/commands/bash_demo.spit",
-                "--sources",
-                "examples/commands/bash_demo.sources",
-                "--json",
-            ])
-            .output()
-            .unwrap()
-    };
-    let check = run("check");
+fn check_json_reads_the_pipeline_file_and_dag_json_emits_the_spitdag() {
+    let check = spit(&[
+        "check",
+        "examples/commands/command_demo/command_demo.spit",
+        "--json",
+    ]);
     assert!(check.status.success());
-    assert_eq!(
-        String::from_utf8(check.stdout).unwrap(),
-        "{\"diagnostics\":[]}\n"
+    assert_eq!(stdout(&check), "{\"diagnostics\":[]}\n");
+    let run = || {
+        spit(&[
+            "dag",
+            "examples/commands/command_demo/command_demo.spit",
+            "examples/commands/command_demo/command_demo.spitout",
+            "--json",
+        ])
+    };
+    let dag = run();
+    assert!(dag.status.success(), "{}", stderr(&dag));
+    let graph = stdout(&dag);
+    assert!(graph.starts_with("{\"version\":3,\"generator\":{\"name\":\"spit\",\"version\":\""));
+    // A `.spitout` alone says nothing of where its files are.
+    assert!(
+        graph.contains("\"root\":null,\"external_inputs\":["),
+        "{graph}"
     );
-    let dag = run("dag");
-    assert!(!dag.status.success());
-    assert!(String::from_utf8(dag.stderr)
-        .unwrap()
-        .contains("--json applies to check"));
+    // What a full run leaves behind, and the one program it needs.
+    assert!(
+        graph.contains("\"targets\":[{\"product\":\"merged\""),
+        "{graph}"
+    );
+    assert_eq!(graph.matches("{\"product\":\"merged\"").count(), 4);
+    assert!(
+        graph.contains("\"executables\":[\"sort\"],\"jobs\":["),
+        "{graph}"
+    );
+    assert!(
+        graph.contains("\"depends_on\":[],\"dependents\":[4]"),
+        "{graph}"
+    );
+    assert!(
+        graph.contains("\"depends_on\":[1,2],\"dependents\":[]"),
+        "{graph}"
+    );
+    assert_eq!(graph.matches("\"fingerprint\":\"").count(), 5);
+    // A bound DAG: every artifact has its path and every job its command.
+    assert!(graph.contains("\"path\":\"input/alpha/01.txt\""), "{graph}");
+    assert!(graph.contains("\"command\":[[\"sort\"]"), "{graph}");
+    assert!(graph.contains("\"product\":\"shard\",\"entities\":{\"group\":\"alpha\",\"part\":\"01\"},\"type\":{\"name\":\"Lines\",\"args\":[]}"));
+    assert!(graph.contains("\"inputs\":{\"items\":["));
+    assert!(graph.contains("\"depends_on\":[1,2]"));
+    assert_eq!(graph.matches("\"operation\":").count(), 5);
+    assert_eq!(graph, stdout(&run()));
 }
 
 #[test]
-fn check_paths_fails_on_missing_rule_and_strict_check_accepts_complete_rules() {
-    let suffix = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    let file =
-        std::env::temp_dir().join(format!("spit paths {} {suffix}.spit", std::process::id()));
-    let pipeline = "source raw [id]\npath raw: input/{id}.txt\noperation copy(one)\nresult = copy(raw)\nsources:\n    raw[id=x]\n";
-    fs::write(&file, pipeline).unwrap();
-    let missing = Command::new(env!("CARGO_BIN_EXE_spit"))
-        .args(["check", file.to_str().unwrap(), "--paths"])
-        .output()
-        .unwrap();
-    assert!(!missing.status.success());
-    assert!(String::from_utf8(missing.stdout)
-        .unwrap()
-        .contains("result (output): MISSING"));
+fn dag_json_names_every_output_port() {
+    let output = spit(&[
+        "dag",
+        "examples/pipelines/selectors.spit",
+        "examples/pipelines/selectors.spitout",
+        "--json",
+    ]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let graph = stdout(&output);
+    assert!(graph.contains("\"outputs\":{\"low\":{\"product\":\"low_band\""));
+    assert!(graph.contains("\"high\":{\"product\":\"high_band\""));
+}
 
-    fs::write(
-        &file,
-        pipeline.replace("sources:", "path result: output/{id}.txt\nsources:"),
-    )
-    .unwrap();
-    let complete = Command::new(env!("CARGO_BIN_EXE_spit"))
-        .args(["check", file.to_str().unwrap(), "--strict-paths"])
-        .output()
-        .unwrap();
-    fs::remove_file(&file).unwrap();
-    assert!(
-        complete.status.success(),
-        "{}",
-        String::from_utf8_lossy(&complete.stderr)
-    );
+#[test]
+fn dag_json_stage_is_an_array_of_names() {
+    let output = spit(&[
+        "dag",
+        "examples/stages/nested.spit",
+        "examples/stages/nested.spitout",
+        "--json",
+    ]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let graph = stdout(&output);
+    assert!(graph.contains("\"stage\":[\"preprocess\",\"clean\"]"));
+    assert!(!graph.contains("\"stage\":\"preprocess/clean\""));
+}
+
+#[test]
+fn path_rules_show_a_missing_rule_and_strict_paths_accept_complete_rules() {
+    let tree = Tree::new("cli-paths", &[]);
+    let directory = tree.path();
+    let file = directory.join("spit paths.spit");
+    let pipeline =
+        "source raw [id]\npath raw: input/{id}.txt\noperation copy(one)\nresult = copy(raw)\n";
+    fs::write(&file, pipeline).unwrap();
+    let missing = spit(&["check", file.to_str().unwrap(), "--path-rules"]);
+    assert!(stdout(&missing).contains("result (output): MISSING"));
+
+    fs::write(&file, format!("{pipeline}path result: output/{{id}}.txt\n")).unwrap();
+    let complete = spit(&["check", file.to_str().unwrap(), "--strict-paths"]);
+    assert!(complete.status.success(), "{}", stderr(&complete));
 }
 
 #[test]
 fn check_prints_every_diagnostic_and_fails_only_on_errors() {
-    let directory = std::env::temp_dir().join(format!(
-        "spit-cli-diagnostics-{}",
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
-    ));
-    fs::create_dir_all(&directory).unwrap();
+    let tree = Tree::new("cli-diagnostics", &[]);
+    let directory = tree.path();
     let broken = directory.join("broken.spit");
     fs::write(
         &broken,
@@ -258,34 +255,119 @@ fn check_prints_every_diagnostic_and_fails_only_on_errors() {
         "source raw [id]\nsource spare [id]\noperation clean(one)\ncleaned = clean(raw)\n",
     )
     .unwrap();
-    let run = |path: &std::path::Path, command: &str| {
-        Command::new(env!("CARGO_BIN_EXE_spit"))
-            .args([command, path.to_str().unwrap()])
-            .output()
-            .unwrap()
-    };
-    let broken_check = run(&broken, "check");
-    let warned_check = run(&warned, "check");
-    let warned_dag = run(&warned, "dag");
-    fs::remove_dir_all(&directory).unwrap();
+    let broken_check = spit(&["check", broken.to_str().unwrap()]);
+    let warned_check = spit(&["check", warned.to_str().unwrap()]);
+    let warned_dag = spit(&["dag", warned.to_str().unwrap()]);
 
     assert!(!broken_check.status.success());
     assert_eq!(
-        String::from_utf8(broken_check.stderr).unwrap(),
+        stderr(&broken_check),
         "warning: line 1, column 8: source product `raw` is never used as an input\nerror: line 3, column 11: path template for `raw` omits dimension `batch`; artifacts differing only in `batch` would share a path\nerror: line 5, column 17: unknown product `rwa`\n"
     );
 
-    // Without an inventory, check stops after the pipeline checks; dag needs jobs.
+    // Check compiles the pipeline alone; dag needs the dataset's inputs.
     assert!(warned_check.status.success());
     assert_eq!(
-        String::from_utf8(warned_check.stderr).unwrap(),
+        stderr(&warned_check),
         "warning: line 2, column 8: source product `spare` is never used as an input\n"
     );
-    assert!(String::from_utf8(warned_check.stdout)
-        .unwrap()
-        .contains("No source inventory; jobs not resolved."));
+    assert_eq!(stdout(&warned_check), "Pipeline valid.\n");
     assert!(!warned_dag.status.success());
-    assert!(String::from_utf8(warned_dag.stderr)
-        .unwrap()
-        .ends_with("error: no inline source inventory; supply --sources <inventory.spit|->\n"));
+    assert!(
+        stderr(&warned_dag).starts_with("error: dag needs a pipeline before"),
+        "{}",
+        stderr(&warned_dag)
+    );
+}
+
+#[test]
+fn a_recipe_names_its_own_pipeline_for_dag_and_artifacts() {
+    let recipe = "examples/commands/command_demo/command_demo.spitin";
+    let pipeline = "examples/commands/command_demo/command_demo.spit";
+    let inventory = "examples/commands/command_demo/command_demo.spitout";
+    for command in ["dag", "artifacts"] {
+        let alone = spit(&[command, recipe]);
+        assert!(alone.status.success(), "{}", stderr(&alone));
+        // The pipeline is the recipe's to name, not the command line's, even
+        // when it names the same one.
+        let named = spit(&[command, pipeline, recipe]);
+        assert!(!named.status.success(), "{command}");
+        assert_eq!(
+            stderr(&named),
+            format!(
+                "error: `{recipe}` names its own pipeline; run `spit {command} {recipe}` without `{pipeline}`\n"
+            )
+        );
+        // A .spitout names none, so it takes the pipeline.
+        let settled = spit(&[command, pipeline, inventory]);
+        assert!(settled.status.success(), "{}", stderr(&settled));
+    }
+    let spitout = spit(&["dag", inventory]);
+    assert!(!spitout.status.success());
+    assert!(
+        stderr(&spitout).starts_with(
+            "error: dag needs a pipeline before `examples/commands/command_demo/command_demo.spitout`"
+        ),
+        "{}",
+        stderr(&spitout)
+    );
+}
+
+#[test]
+fn a_recipe_run_in_memory_prints_each_pipeline_warning_once() {
+    let tree = Tree::new("warn-once", &["in/a.txt"]);
+    tree.write(
+        "analysis.spit",
+        "source raw : Raw [id]\nsource spare : Raw [id]\npath raw: in/{id}.txt\n\
+         path spare: sp/{id}.txt\npath: out/{product}/{id}.txt\n\
+         operation clean(Raw) -> Clean\ncommand clean: tool {input} {output}\ncleaned = clean(raw)\n",
+    );
+    let recipe = tree.write("data.spitin", "pipeline analysis.spit\n");
+    for command in ["inputs", "dag", "artifacts"] {
+        let output = spit(&[command, recipe.to_str().unwrap()]);
+        let errors = stderr(&output);
+        assert!(output.status.success(), "{command}: {errors}");
+        assert_eq!(
+            errors.matches("`spare` is never used").count(),
+            1,
+            "{command}: {errors}"
+        );
+    }
+}
+
+#[test]
+fn a_recipe_checks_a_pipeline_saved_with_a_byte_order_mark() {
+    let tree = Tree::new("bom-recipe", &[]);
+    tree.write(
+        "analysis.spit",
+        "\u{feff}source raw [id]\npath raw: in/{id}.txt\n",
+    );
+    let recipe = tree.write("data.spitin", "\u{feff}pipeline analysis.spit\n");
+    let output = spit(&["check", recipe.to_str().unwrap()]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(stdout(&output), "Recipe valid.\n");
+}
+
+#[test]
+fn a_recipe_whose_skip_leaves_a_discovery_empty_runs_in_memory_as_it_settles() {
+    let tree = Tree::new(
+        "skip-all",
+        &["data/sub-1/ses-1/image.nii", "data/sub-2/ses-1/image.nii"],
+    );
+    tree.write(
+        "analysis.spit",
+        "source image : Img [sub, ses]\npath image: data/sub-{sub}/ses-{ses}/image.nii\n\
+         operation clean(Img) -> Clean\ncommand clean: tool {input} {output}\n\
+         path: out/{product}/{sub}_{ses}.txt\ncleaned = clean(image)\n",
+    );
+    // Every subject has one session, so the skip rejects every group.
+    let recipe = tree.write(
+        "data.spitin",
+        "pipeline analysis.spit\ndiscover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}\n\
+         skip sessions count>=2 per [sub]\nrequire sessions count>=1 per [sub]\n",
+    );
+    for command in ["inputs", "dag", "artifacts"] {
+        let output = spit(&[command, recipe.to_str().unwrap()]);
+        assert!(output.status.success(), "{command}: {}", stderr(&output));
+    }
 }

@@ -149,9 +149,10 @@ fn parse_input_port<'a>(
     } else {
         port_type(value, number)?
     };
-    let port_name = declared_name
-        .map(str::to_owned)
-        .unwrap_or_else(|| DefaultPort::for_input(index, count).name());
+    let port_name = declared_name.map_or_else(
+        || DefaultPort::for_input(index, count).name(),
+        str::to_owned,
+    );
     Ok(match cardinality {
         Cardinality::One => InputPort::one(&port_name, artifact_type),
         Cardinality::Many => InputPort::many(&port_name, artifact_type),

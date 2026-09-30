@@ -1,0 +1,3 @@
+sources:
+    raw[subject=A,repeat=1]
+    raw[subject=A,repeat=2]

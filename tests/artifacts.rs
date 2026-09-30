@@ -1,20 +1,46 @@
-use std::fs;
+mod support;
+
 use std::process::Command;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use spit::{
-    diagnose, parse_pipeline, parse_source_inventory, render_artifacts, resolve, resolve_artifacts,
-    ArtifactReport, Gap, ResolveError, Severity,
+    diagnose, parse_source_inventory, render_artifacts, resolve, resolve_artifacts_excluding,
+    ArtifactReport, Gap, InputSource, ResolveError, ResolvedInputs, Severity,
 };
+use support::Tree;
 
-fn report(text: &str, inventory: &str) -> Result<ArtifactReport, ResolveError> {
-    let pipeline = parse_pipeline(text).unwrap();
-    resolve_artifacts(&pipeline, &parse_source_inventory(inventory).unwrap())
+/// The document's pipeline, and `inventory` after the input stage.
+fn settle(text: &str, inventory: &str) -> Result<(spit::Pipeline, ResolvedInputs), ResolveError> {
+    let (pipeline, spec, _) = support::parse_with_rules(text).unwrap();
+    let records = parse_source_inventory(inventory).unwrap();
+    let settled = spec
+        .resolve(&pipeline, InputSource::Inventory(records))
+        .map_err(|error| match error {
+            spit::InputError::Resolve(error) => error,
+            error => panic!("{error}"),
+        })?;
+    Ok((pipeline, settled))
 }
 
+/// What `spit artifacts` reports: jobs over the settled inventory, with the
+/// sources a coverage gap holds back.
+fn report(text: &str, inventory: &str) -> Result<ArtifactReport, ResolveError> {
+    let (pipeline, settled) = settle(text, inventory)?;
+    let mut report =
+        resolve_artifacts_excluding(&pipeline, &settled.dag_inventory(), &settled.unavailable())?;
+    report.coverage = settled.gaps;
+    Ok(report)
+}
+
+/// The error `spit dag` stops at: a missing requirement, else a job.
 fn first_error(text: &str, inventory: &str) -> ResolveError {
-    let pipeline = parse_pipeline(text).unwrap();
-    resolve(&pipeline, &parse_source_inventory(inventory).unwrap()).unwrap_err()
+    let (pipeline, settled) = match settle(text, inventory) {
+        Ok(settled) => settled,
+        Err(error) => return error,
+    };
+    if let Err(error) = settled.require_complete() {
+        return error;
+    }
+    resolve(&pipeline, &settled.dag_inventory()).unwrap_err()
 }
 
 fn complete(report: &ArtifactReport) -> Vec<String> {
@@ -80,7 +106,7 @@ fn keeps_complete_jobs_and_blocks_consumers_of_incomplete_ones() {
     );
     assert!(matches!(
         report.incomplete[0].gaps.as_slice(),
-        [Gap::Unmatched(ResolveError::MissingInput { port, product, .. })]
+        [Gap::Unmatched(ResolveError::MissingInput { site: spit::PortSite { port, product, .. }, .. })]
             if port == "reference" && product == "calibration"
     ));
     assert!(matches!(
@@ -121,8 +147,8 @@ sources:
     assert!(matches!(
         report.incomplete[0].gaps.as_slice(),
         [
-            Gap::Unmatched(ResolveError::AmbiguousInput { port: ambiguous, .. }),
-            Gap::Unmatched(ResolveError::MissingInput { port: missing, .. }),
+            Gap::Unmatched(ResolveError::AmbiguousInput { site: spit::PortSite { port: ambiguous, .. }, .. }),
+            Gap::Unmatched(ResolveError::MissingInput { site: spit::PortSite { port: missing, .. }, .. }),
         ] if ambiguous == "reference" && missing == "mask"
     ));
 }
@@ -255,32 +281,21 @@ fn diagnose_still_reports_the_gap_as_an_error() {
 
 #[test]
 fn cli_lists_incomplete_artifacts_where_check_fails() {
-    let directory = std::env::temp_dir().join(format!(
-        "spit-cli-artifacts-{}",
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
-    ));
-    fs::create_dir_all(&directory).unwrap();
-    let pipeline = directory.join("align.spit");
-    let sources = directory.join("align.sources");
-    fs::write(&pipeline, ALIGN).unwrap();
-    fs::write(&sources, ALIGN_SOURCES).unwrap();
+    let tree = Tree::new("cli-artifacts", &[]);
+    let pipeline = tree.write("align.spit", ALIGN);
+    let sources = tree.write("align.spitout", ALIGN_SOURCES);
     let run = |command: &str| {
         Command::new(env!("CARGO_BIN_EXE_spit"))
             .args([
                 command,
                 pipeline.to_str().unwrap(),
-                "--sources",
                 sources.to_str().unwrap(),
             ])
             .output()
             .unwrap()
     };
     let artifacts = run("artifacts");
-    let check = run("check");
-    fs::remove_dir_all(&directory).unwrap();
+    let check = run("dag");
 
     assert!(
         artifacts.status.success(),

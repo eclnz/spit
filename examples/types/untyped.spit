@@ -11,7 +11,3 @@ operations:
 pipeline:
     processed = process(raw)
     combined = combine(processed @ vary(repeat))
-
-sources:
-    raw[subject=A,repeat=1]
-    raw[subject=A,repeat=2]

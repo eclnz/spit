@@ -5,9 +5,10 @@ use std::collections::BTreeMap;
 
 use crate::command::CommandTemplate;
 use crate::model::{
-    CommandDef, CommandRole, CountRequirement, CoverageRule, InputBinding, Invocation, ProductDef,
+    CommandDef, CommandRole, CountRequirement, CoverageAction, CoverageRule, DirectoryDiscovery,
+    InputBinding, Invocation, ProductDef,
 };
-use crate::paths::PathTemplate;
+use crate::paths::{validate_discovery_rule, PathTemplate};
 use crate::types::{parse_type_expr, TypeExpr, TypeParseError};
 
 use super::lexical::{call_parts, comma_items, identifier, qualified_identifier};
@@ -108,6 +109,45 @@ pub(super) fn parse_path(
     })
 }
 
+pub(super) fn parse_discover(line: &str, number: usize) -> Result<DirectoryDiscovery, ParseError> {
+    let (declaration, pattern) = line.split_once(" from dirs ").ok_or_else(|| {
+        ParseError::new(
+            number,
+            "expected `discover name: [dimensions] from dirs path-pattern`",
+        )
+    })?;
+    let (name, dimensions) = declaration
+        .split_once(':')
+        .ok_or_else(|| ParseError::new(number, "expected `:` after discovery name"))?;
+    let name = identifier(name.trim(), number, "discovery name")?;
+    let dimensions = dimensions.trim();
+    let dimensions = dimensions
+        .strip_prefix('[')
+        .and_then(|items| items.strip_suffix(']'))
+        .ok_or_else(|| ParseError::new(number, "expected `[dimensions]` after discovery name"))?;
+    let dimensions = comma_items(dimensions, number)?;
+    for dimension in &dimensions {
+        identifier(dimension, number, "dimension")?;
+    }
+    let pattern = pattern.trim();
+    if pattern.is_empty() {
+        return Err(ParseError::new(
+            number,
+            "discovery directory pattern must not be empty",
+        ));
+    }
+    let template = PathTemplate::parse(pattern)
+        .map_err(|error| ParseError::new(number, error.message()).at_token(pattern))?;
+    let discovery = DirectoryDiscovery {
+        name: name.to_owned(),
+        dimensions: dimensions.into_iter().map(str::to_owned).collect(),
+        template,
+    };
+    validate_discovery_rule(&discovery)
+        .map_err(|error| ParseError::new(number, error.message()).at_token(pattern))?;
+    Ok(discovery)
+}
+
 #[derive(Debug)]
 pub(crate) struct UseSpec {
     pub(crate) names: Option<Vec<String>>,
@@ -170,18 +210,48 @@ fn parse_use_path(text: &str, number: usize) -> Result<(String, Option<String>),
 }
 
 pub(super) fn parse_coverage_rule(line: &str, number: usize) -> Result<CoverageRule, ParseError> {
-    let syntax = "expected constraint: require product count=1 per [dimensions], count>=1, or dimension=value,...";
-    let rest = line
-        .strip_prefix("require ")
-        .ok_or_else(|| ParseError::new(number, syntax))?;
+    let syntax = "expected constraint: require or skip product count=1 per [dimensions], count>=1, or dimension=value,...";
+    let (action, rest) = if let Some(rest) = line.strip_prefix("require ") {
+        (CoverageAction::Require, rest)
+    } else if let Some(rest) = line.strip_prefix("skip ") {
+        (CoverageAction::Skip, rest)
+    } else {
+        return Err(ParseError::new(number, syntax));
+    };
     let (subject, dimensions) = rest
         .split_once(" per ")
         .ok_or_else(|| ParseError::new(number, syntax))?;
     let mut parts = subject.split_whitespace();
     let product = qualified_identifier(parts.next().unwrap_or(""), number, "constraint product")?;
+    let RuleTerms { count, values } = parse_rule_terms(parts, number, syntax)?;
+    let dimensions = parse_group_dimensions(dimensions, number)?;
+    let mut rule = CoverageRule::new(
+        product,
+        &dimensions,
+        count.unwrap_or(CountRequirement::AtLeast(1)),
+    );
+    rule.action = action;
+    for (dimension, listed) in values {
+        rule = rule.requiring(dimension, listed);
+    }
+    Ok(rule)
+}
+
+/// A rule's `count=`/`count>=` term and its `dimension=value,...` terms.
+struct RuleTerms<'a> {
+    count: Option<CountRequirement>,
+    values: BTreeMap<String, Vec<&'a str>>,
+}
+
+/// A rule's terms after its product; it needs at least one.
+fn parse_rule_terms<'a>(
+    terms: impl Iterator<Item = &'a str>,
+    number: usize,
+    syntax: &str,
+) -> Result<RuleTerms<'a>, ParseError> {
     let mut count = None;
     let mut values = BTreeMap::new();
-    for token in parts {
+    for token in terms {
         let parsed = if let Some(value) = token.strip_prefix("count=") {
             Some(CountRequirement::Exactly(parse_count(value, number)?))
         } else if let Some(value) = token.strip_prefix("count>=") {
@@ -215,6 +285,11 @@ pub(super) fn parse_coverage_rule(line: &str, number: usize) -> Result<CoverageR
     if count.is_none() && values.is_empty() {
         return Err(ParseError::new(number, syntax));
     }
+    Ok(RuleTerms { count, values })
+}
+
+/// The `[dimension, ...]` a rule groups by.
+fn parse_group_dimensions(dimensions: &str, number: usize) -> Result<Vec<&str>, ParseError> {
     let bracketed = dimensions.trim();
     let dimensions = bracketed.strip_prefix('[').ok_or_else(|| {
         ParseError::new(number, "expected `[` before constraint dimensions").at_token(bracketed)
@@ -232,15 +307,7 @@ pub(super) fn parse_coverage_rule(line: &str, number: usize) -> Result<CoverageR
     for dimension in &dimensions {
         identifier(dimension, number, "constraint dimension")?;
     }
-    let mut rule = CoverageRule::new(
-        product,
-        &dimensions,
-        count.unwrap_or(CountRequirement::AtLeast(1)),
-    );
-    for (dimension, listed) in values {
-        rule = rule.requiring(dimension, listed);
-    }
-    Ok(rule)
+    Ok(dimensions)
 }
 
 fn parse_count(value: &str, number: usize) -> Result<usize, ParseError> {
@@ -328,32 +395,7 @@ fn parse_binding(arg: &str, number: usize) -> Result<InputBinding, ParseError> {
                 if !binding.pinned.is_empty() {
                     return Err(duplicate());
                 }
-                for item in items {
-                    let (dimension, value) = item.split_once('=').ok_or_else(|| {
-                        ParseError::new(number, "expected `dimension=value` in `@ where(...)`")
-                            .at_token(item)
-                    })?;
-                    let dimension = identifier(dimension.trim(), number, "where dimension")?;
-                    let value = value.trim();
-                    if value.is_empty() || value.chars().any(char::is_whitespace) {
-                        return Err(ParseError::new(
-                            number,
-                            "a `@ where` value must be one nonempty token",
-                        )
-                        .at_token(item));
-                    }
-                    if binding
-                        .pinned
-                        .insert(dimension.to_owned(), value.to_owned())
-                        .is_some()
-                    {
-                        return Err(ParseError::new(
-                            number,
-                            format!("`@ where(...)` pins `{dimension}` twice"),
-                        )
-                        .at_token(item));
-                    }
-                }
+                binding.pinned = parse_pins(&items, number)?;
             }
             "same" => {
                 let dimensions = items
@@ -368,22 +410,58 @@ fn parse_binding(arg: &str, number: usize) -> Result<InputBinding, ParseError> {
                 if !binding.each.is_empty() {
                     return Err(duplicate());
                 }
-                for item in items {
-                    let dimension = identifier(item, number, "each dimension")?;
-                    if binding.each.iter().any(|each| each == dimension) {
-                        return Err(ParseError::new(
-                            number,
-                            format!("`@ each(...)` names `{dimension}` twice"),
-                        )
-                        .at_token(item));
-                    }
-                    binding.each.push(dimension.to_owned());
-                }
+                binding.each = parse_each(&items, number)?;
             }
             _ => return Err(ParseError::new(number, SELECTORS).at_token(keyword)),
         }
     }
     Ok(binding)
+}
+
+/// The `dimension=value` pins of `@ where(...)`, each dimension once.
+fn parse_pins(items: &[&str], number: usize) -> Result<BTreeMap<String, String>, ParseError> {
+    let mut pinned = BTreeMap::new();
+    for &item in items {
+        let (dimension, value) = item.split_once('=').ok_or_else(|| {
+            ParseError::new(number, "expected `dimension=value` in `@ where(...)`").at_token(item)
+        })?;
+        let dimension = identifier(dimension.trim(), number, "where dimension")?;
+        let value = value.trim();
+        if value.is_empty() || value.chars().any(char::is_whitespace) {
+            return Err(
+                ParseError::new(number, "a `@ where` value must be one nonempty token")
+                    .at_token(item),
+            );
+        }
+        if pinned
+            .insert(dimension.to_owned(), value.to_owned())
+            .is_some()
+        {
+            return Err(ParseError::new(
+                number,
+                format!("`@ where(...)` pins `{dimension}` twice"),
+            )
+            .at_token(item));
+        }
+    }
+    Ok(pinned)
+}
+
+/// The dimensions of `@ each(...)`, each once.
+fn parse_each(items: &[&str], number: usize) -> Result<Vec<String>, ParseError> {
+    let mut each: Vec<String> = Vec::new();
+    for &item in items {
+        let dimension = identifier(item, number, "each dimension")?;
+        if each.iter().any(|named| named == dimension) {
+            return Err(ParseError::new(
+                number,
+                format!("`@ each(...)` names `{dimension}` twice"),
+            )
+            .at_token(item));
+        }
+        each.push(dimension.to_owned());
+    }
+    Ok(each)
 }
 
 fn owned(values: &[&str]) -> Vec<String> {

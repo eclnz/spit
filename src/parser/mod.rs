@@ -3,6 +3,7 @@
 mod declarations;
 mod flow;
 mod inventory;
+mod keyword;
 mod lexical;
 mod operation;
 mod sectioned;
@@ -10,18 +11,21 @@ mod source_map;
 
 use std::fmt;
 
-use crate::model::{CommandDef, CoverageRule, Invocation, OperationDef, ProductDef};
+use crate::model::{
+    CommandDef, CommandRole, CoverageRule, DirectoryDiscovery, Invocation, OperationDef, ProductDef,
+};
 use crate::paths::PathTemplate;
-use crate::span::{content_columns, Focus, Located, Place};
+use crate::span::{address_of, columns_at, content_columns, Focus, Located, Place};
 use crate::types::TypeExpr;
 
 use self::flow::parse_flow;
 use self::sectioned::{is_sectioned_document, parse_sectioned};
 
 pub(crate) use self::declarations::{parse_use, UseSpec};
-pub(crate) use self::inventory::split_document;
 pub use self::inventory::{parse_source_inventory, render_source_inventory};
-pub(crate) use self::lexical::{glued_comment, strip_comment};
+pub(crate) use self::inventory::{source_record_lines, split_document};
+pub(crate) use self::keyword::{Header, Keyword};
+pub(crate) use self::lexical::{glued_comment, strip_comment, without_bom};
 pub(crate) use self::source_map::{Rule, SourceMap, Step};
 
 const SHELL_SOURCE_REMOVED: &str =
@@ -51,6 +55,11 @@ pub enum ParseErrorKind {
     UndeclaredOperation {
         name: String,
     },
+    /// Records written in a pipeline; they belong in a `.spitout`. Each
+    /// line they take, so that one error covers them all.
+    MisplacedRecords {
+        lines: Vec<usize>,
+    },
 }
 
 impl ParseError {
@@ -68,12 +77,22 @@ impl ParseError {
         self.location.line.unwrap_or_default()
     }
 
+    /// Which kind of error it is, for callers that treat some specially.
+    pub fn kind(&self) -> &ParseErrorKind {
+        &self.error.kind
+    }
+
+    /// This error, as `kind`.
+    pub(crate) fn with_kind(mut self, kind: ParseErrorKind) -> Self {
+        self.error.kind = kind;
+        self
+    }
+
     /// Mark `token`, a slice of the line being parsed, as what the error is about.
     pub(crate) fn at_token(mut self, token: &str) -> Self {
-        let start = token.as_ptr() as usize;
         self.location
             .focus
-            .get_or_insert(Focus::Slice(start..start + token.len()));
+            .get_or_insert_with(|| Focus::Address(address_of(token)));
         self
     }
 
@@ -90,16 +109,10 @@ impl ParseError {
     /// from; without one, point at the line's content.
     pub(crate) fn locate(mut self, line: &str) -> Self {
         if self.location.columns.is_none() {
-            let base = line.as_ptr() as usize;
             let token = match self.location.focus.take() {
-                Some(Focus::Slice(token)) => Some(token),
+                Some(Focus::Address(address)) => columns_at(line, &address),
                 _ => None,
             };
-            let token = token.and_then(|token| {
-                let start = token.start.checked_sub(base)?;
-                let end = token.end.checked_sub(base)?;
-                (end <= line.len()).then_some(start..end)
-            });
             self.location.columns = Some(token.unwrap_or_else(|| content_columns(line)));
         }
         self
@@ -136,6 +149,7 @@ pub(crate) enum StatementKind {
     },
     /// A `source` declaration or an entry of a `products:` section.
     Product(ProductDef, Place),
+    Discover(DirectoryDiscovery),
     Operation(OperationDef, Place),
     Constraint(CoverageRule, Rule),
     Command(CommandDef, Place),
@@ -174,12 +188,12 @@ pub(crate) struct FlowOutput {
     pub(crate) dimensions: Option<Vec<String>>,
 }
 
-/// Whether to read a document's inline inventory. A separate inventory
-/// replaces it, so it is then skipped rather than required to parse.
+/// What a document may hold. A pipeline holds neither input rules nor
+/// records; a `.spitin` recipe holds both, beside source paths.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum InlineInventory {
-    Read,
-    Skip,
+pub(crate) enum Kind {
+    Pipeline,
+    Recipe,
 }
 
 /// Parse a pipeline's statements, in the sectioned or the flow form.
@@ -188,6 +202,41 @@ pub(crate) fn parse_syntax(text: &str) -> Syntax {
         parse_sectioned(text)
     } else {
         parse_flow(text)
+    }
+}
+
+impl StatementKind {
+    /// A product declared by `declaration`, a slice of the line `original`.
+    fn product(original: &str, declaration: &str, number: usize) -> Result<Self, ParseError> {
+        let product = declarations::parse_product(declaration, number)?;
+        let place = source_map::name_place(original, number, declaration, &product.name);
+        Ok(Self::Product(product, place))
+    }
+
+    /// An operation declared by `declaration`, a slice of `original`.
+    fn operation(original: &str, declaration: &str, number: usize) -> Result<Self, ParseError> {
+        let operation = operation::parse_operation(declaration, number)?;
+        let place = source_map::name_place(original, number, declaration, &operation.name);
+        Ok(Self::Operation(operation, place))
+    }
+
+    /// A `require` or `skip` rule, the whole content `line` of `original`.
+    fn constraint(original: &str, line: &str, number: usize) -> Result<Self, ParseError> {
+        let rule = declarations::parse_coverage_rule(line, number)?;
+        let place = source_map::rule_place(original, number, &rule);
+        Ok(Self::Constraint(rule, place))
+    }
+
+    /// A command, or a `verify` command, for an operation.
+    fn command(
+        original: &str,
+        declaration: &str,
+        number: usize,
+        role: CommandRole,
+    ) -> Result<Self, ParseError> {
+        let command = declarations::parse_command(declaration, number, role)?;
+        let place = source_map::tail_place(original, number, command.template.as_str());
+        Ok(Self::Command(command, place))
     }
 }
 

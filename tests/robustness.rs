@@ -2,41 +2,19 @@
 //! cannot coexist, commands written as if for a shell, and the command line
 //! used wrongly.
 
+mod support;
+
+use support::{text, Tree};
+
 use std::fs;
 use std::io::Write;
-use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
-use std::time::{Duration, Instant};
 
-use spit::{
-    diagnose, discover_source_files, parse_document, parse_pipeline, render_bash, resolve,
-    Cardinality, Diagnostic,
-};
+use spit::{diagnose, parse_pipeline, resolve, Cardinality, Diagnostic};
 
-struct Tree(PathBuf);
-
-impl Tree {
-    fn new(name: &str, files: &[&str]) -> Self {
-        let root = std::env::temp_dir().join(format!("spit-robust-{name}-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&root);
-        fs::create_dir_all(&root).unwrap();
-        for file in files {
-            let path = root.join(file);
-            fs::create_dir_all(path.parent().unwrap()).unwrap();
-            fs::write(path, "").unwrap();
-        }
-        Self(root)
-    }
-
-    fn path(&self) -> &Path {
-        &self.0
-    }
-}
-
-impl Drop for Tree {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
-    }
+/// Step 3's binding, with its error as text.
+fn bind(pipeline: &spit::Pipeline, dag: &spit::ResolvedDag) -> Result<spit::BoundDag, String> {
+    spit::bind_dag(pipeline, dag).map_err(|error| error.to_string())
 }
 
 fn spit(args: &[&str], stdin: Option<&[u8]>) -> Output {
@@ -56,115 +34,11 @@ fn spit(args: &[&str], stdin: Option<&[u8]>) -> Output {
     child.wait_with_output().unwrap()
 }
 
-fn text(bytes: &[u8]) -> String {
-    String::from_utf8_lossy(bytes).into_owned()
-}
-
 fn rendered(diagnostics: &[Diagnostic], text: &str) -> Vec<String> {
     diagnostics
         .iter()
         .map(|diagnostic| diagnostic.display_in(text, None).to_string())
         .collect()
-}
-
-const ONE_SOURCE: &str = "source x [s]\npath x: in/{s}.txt\n";
-
-#[test]
-fn discovery_skips_values_spit_would_write_differently() {
-    // `%41` decodes to `A`, whose path SPIT writes as `in/A.txt`.
-    let tree = Tree::new(
-        "canonical",
-        &[
-            "in/%41.txt",
-            "in/%2e.txt",
-            "in/x%zz.txt",
-            "in/%2E%2E.txt",
-            "in/b.txt",
-        ],
-    );
-    let pipeline = parse_pipeline(ONE_SOURCE).unwrap();
-    let discovery = discover_source_files(&pipeline, tree.path()).unwrap();
-    let records: Vec<_> = discovery
-        .inventory
-        .artifacts
-        .iter()
-        .map(|record| record.entities.to_string())
-        .collect();
-    assert_eq!(records, ["s=..", "s=b"]);
-    assert_eq!(discovery.skipped.len(), 3, "{:?}", discovery.skipped);
-    assert!(discovery.skipped[0].starts_with("`in/%2e.txt`"));
-    assert!(discovery.skipped[1].contains("is not how SPIT writes a value"));
-    assert!(discovery.skipped[2].contains("is not valid `%XX` text"));
-}
-
-#[test]
-fn discovery_reports_skipped_files_and_still_succeeds() {
-    let tree = Tree::new("skipped", &["in/%41.txt", "in/a.txt"]);
-    let pipeline = tree.path().join("pipeline.spit");
-    fs::write(&pipeline, ONE_SOURCE).unwrap();
-    let output = spit(
-        &[
-            "discover",
-            pipeline.to_str().unwrap(),
-            "--root",
-            tree.path().to_str().unwrap(),
-        ],
-        None,
-    );
-    assert!(output.status.success(), "{}", text(&output.stderr));
-    assert_eq!(text(&output.stdout), "sources:\n    x[s=a]\n");
-    assert!(text(&output.stderr).contains("warning: skipped `in/%41.txt`"));
-}
-
-#[test]
-fn discovery_is_fast_however_values_could_be_split() {
-    // Adjacent placeholders, or separators values may hold, give a long
-    // file name exponentially many ways to split.
-    let long = format!("in/{}.txt", "a".repeat(200));
-    let dashed = format!("in/{}z.txt", "a-".repeat(100));
-    let tree = Tree::new("backtrack", &[&long, &dashed]);
-    for rule in [
-        "source x [a, b, c, d, e, f, g]\npath x: in/{a}{b}{c}{d}{e}{f}{g}.dat\n",
-        "source x [a, b, c, d, e]\npath x: in/{a}-{b}-{c}-{d}-{e}.dat\n",
-    ] {
-        let started = Instant::now();
-        let discovery = discover_source_files(&parse_pipeline(rule).unwrap(), tree.path()).unwrap();
-        assert!(discovery.inventory.artifacts.is_empty());
-        assert!(
-            started.elapsed() < Duration::from_secs(5),
-            "took {:?}",
-            started.elapsed()
-        );
-    }
-    // A match still finds its values, including a repeated dimension.
-    let tree = Tree::new("repeat", &["in/ab-x/ab.txt", "in/ab-x/cd.txt"]);
-    let rule = "source x [s, t]\npath x: in/{s}-{t}/{s}.txt\n";
-    let discovery = discover_source_files(&parse_pipeline(rule).unwrap(), tree.path()).unwrap();
-    let records: Vec<_> = discovery
-        .inventory
-        .artifacts
-        .iter()
-        .map(|record| record.entities.to_string())
-        .collect();
-    assert_eq!(records, ["s=ab,t=x"]);
-}
-
-#[cfg(unix)]
-#[test]
-fn discovery_follows_links_without_looping() {
-    let tree = Tree::new("links", &["elsewhere/c.txt", "data/in/a.txt"]);
-    let data = tree.path().join("data");
-    std::os::unix::fs::symlink(tree.path().join("elsewhere/c.txt"), data.join("in/b.txt")).unwrap();
-    std::os::unix::fs::symlink(&data, data.join("in/loop")).unwrap();
-    let pipeline = parse_pipeline(ONE_SOURCE).unwrap();
-    let discovery = discover_source_files(&pipeline, &data).unwrap();
-    let records: Vec<_> = discovery
-        .inventory
-        .artifacts
-        .iter()
-        .map(|record| record.entities.to_string())
-        .collect();
-    assert_eq!(records, ["s=a", "s=b"]);
 }
 
 #[test]
@@ -176,13 +50,10 @@ fn a_path_inside_another_artifacts_file_is_rejected() {
     );
     // Different dimension names hide the overlap until paths are bound.
     let text = "source x [s]\npath x: in/{s}.txt\nsource z [t]\npath z: in/{t}.txt/out.txt\noperation f(a, b) -> Text\ncommand f: cp {a} {b} {output}\npath: o/{product}/{entities}\ny = f(x, z @ where(t=1))\nsources:\n    x[s=1]\n    z[t=1]\n";
-    let (pipeline, inventory) = parse_document(text).unwrap();
-    let error =
-        render_bash(&pipeline, &resolve(&pipeline, &inventory.unwrap()).unwrap()).unwrap_err();
+    let (pipeline, inventory) = support::parse_fixture(text).unwrap();
+    let error = bind(&pipeline, &resolve(&pipeline, &inventory.unwrap()).unwrap()).unwrap_err();
     assert!(
-        error
-            .message()
-            .contains("puts it inside `in/1.txt`, the path of `x[s=1]`, which is a file"),
+        error.contains("puts it inside `in/1.txt`, the path of `x[s=1]`, which is a file"),
         "{error}"
     );
 }
@@ -192,7 +63,7 @@ fn a_path_rule_that_cannot_name_a_file_says_why() {
     for (rule, reason) in [
         (
             "/tmp/{s}.txt",
-            "must be relative to `SPIT_ROOT`, not start with `/`",
+            "must be relative to the dataset root, not start with `/`",
         ),
         ("out/{s}/", "must name a file, not end with `/`"),
         (
@@ -213,53 +84,14 @@ fn a_path_rule_that_cannot_name_a_file_says_why() {
 
 #[test]
 fn paths_that_differ_only_in_case_are_flagged() {
-    let text = "source x [s]\npath x: in/{s}.txt\noperation f(a) -> Text\npath y: out/{s}.txt\ny = f(x)\nsources:\n    x[s=A]\n    x[s=a]\n";
+    let text =
+        "source x [s]\npath x: in/{s}.txt\noperation f(a) -> Text\npath y: out/{s}.txt\ny = f(x)\n";
     assert_eq!(
-        rendered(&diagnose(text, None), text),
+        rendered(&diagnose(text, Some("sources:\n    x[s=A]\n    x[s=a]\n")), text),
         [
             "warning: line 2, column 9: `x[s=A]` and `x[s=a]` have paths `in/A.txt` and `in/a.txt`, which differ only in case, so they are one file where case is ignored, as on macOS and Windows",
             "warning: line 4, column 9: `y[s=A]` and `y[s=a]` have paths `out/A.txt` and `out/a.txt`, which differ only in case, so they are one file where case is ignored, as on macOS and Windows",
         ]
-    );
-}
-
-#[test]
-fn bash_refuses_an_empty_inventory() {
-    let output = spit(
-        &["bash", "examples/commands/bash_demo.spit", "--sources", "-"],
-        Some(b"sources:\n"),
-    );
-    assert!(!output.status.success());
-    assert!(
-        text(&output.stderr).contains("the inventory lists no source artifacts"),
-        "{}",
-        text(&output.stderr)
-    );
-}
-
-#[test]
-fn a_root_starting_with_a_dash_is_not_read_as_an_option() {
-    let output = spit(
-        &[
-            "bash",
-            "examples/commands/bash_demo.spit",
-            "--sources",
-            "examples/commands/bash_demo.sources",
-        ],
-        None,
-    );
-    assert!(text(&output.stdout)
-        .contains("case $SPIT_ROOT in -*) SPIT_ROOT=\"./$SPIT_ROOT\" ;; esac\n"));
-}
-
-#[test]
-fn single_quotes_and_backslashes_keep_braces_literal() {
-    let text = "source x [s]\npath: {product}/{entities}\noperation f(a) -> Text\ncommand f: awk '{print $1}' \\{a\\} \"{a}\" {output}\ny = f(x)\nsources:\n    x[s=1]\n";
-    let (pipeline, inventory) = parse_document(text).unwrap();
-    let script = render_bash(&pipeline, &resolve(&pipeline, &inventory.unwrap()).unwrap()).unwrap();
-    assert!(
-        script.contains("'awk' '{print $1}' '{a}' \"$SPIT_ROOT\"/'x/s=1' \"$SPIT_ROOT\"/'y/s=1'"),
-        "{script}"
     );
 }
 
@@ -270,14 +102,6 @@ fn shell_operators_in_a_command_are_flagged() {
     assert_eq!(messages.len(), 2, "{messages:?}");
     assert!(messages[0].starts_with("warning: line 4, column 30: `2>&1` in the command for `f` is passed to the program as an argument"));
     assert!(messages[1].starts_with("warning: line 4, column 35: `|` in the command"));
-}
-
-#[test]
-fn a_step_after_an_inline_inventory_is_read_as_a_step() {
-    let text = "source x [s]\noperation f(a) -> Text\nsources:\n    x[s=1]\ny = f(x)\naverage : Text [s] = f(x)\n";
-    let (pipeline, inventory) = parse_document(text).unwrap();
-    assert_eq!(pipeline.invocations.len(), 2);
-    assert_eq!(inventory.unwrap().artifacts.len(), 1);
 }
 
 #[test]
@@ -341,35 +165,98 @@ fn json_mode_always_prints_json() {
 
 #[test]
 fn command_line_mistakes_are_named() {
-    for (args, problem) in [
-        (&["chek", "p.spit"][..], "unknown command `chek`"),
-        (&["check"][..], "check needs a pipeline file"),
+    for (args, problem, more) in [
         (
-            &["check", "--json", "p.spit"][..],
-            "the pipeline file comes before options such as `--json`",
+            &["chek", "p.spit"][..],
+            "unknown command `chek`",
+            "run `spit help`",
         ),
-        (&["check", "p.spit", "--jsn"][..], "unknown option `--jsn`"),
+        (
+            &["check"][..],
+            "check needs <pipeline.spit | recipe.spitin>",
+            "usage: spit check ",
+        ),
+        (
+            &["check", "p.spit", "--jsn"][..],
+            "unknown option `--jsn`",
+            "usage: spit check ",
+        ),
         (
             &["check", "p.spit", "q.spit"][..],
-            "unexpected argument `q.spit`; give one pipeline file",
+            "unexpected file `q.spit`",
+            "usage: spit check ",
         ),
         (
             &["check", "p.spit", "--stdin", "--stdin"][..],
             "--stdin is given more than once",
+            "usage: spit check ",
         ),
         (
-            &["check", "p.spit", "--sources"][..],
-            "--sources needs a value: <inventory.spit|->",
+            &["dag", "p.spit", "d.spitout", "--root"][..],
+            "--root needs a value: <directory>",
+            "usage: spit dag ",
+        ),
+        (
+            &["check", "p.spit", "--frobnicate"][..],
+            "unknown option `--frobnicate`",
+            "usage: spit check ",
         ),
     ] {
         let output = spit(args, None);
         assert!(!output.status.success());
         let stderr = text(&output.stderr);
         assert!(
-            stderr.starts_with(&format!("error: {problem}\nusage: spit ")),
+            stderr.starts_with(&format!("error: {problem}\n{more}")),
             "{stderr}"
         );
     }
     let output = spit(&["check", "/no/such/pipeline.spit"], None);
     assert!(text(&output.stderr).starts_with("error: cannot read `/no/such/pipeline.spit`: "));
+}
+
+#[test]
+fn a_byte_order_mark_is_ignored_by_every_entry_point() {
+    let bom = |text: &str| format!("\u{feff}{text}");
+    let valid = "source raw : Raw [id]\noperation clean(Raw) -> Clean\ncleaned = clean(raw)\n";
+    let records = "sources:\n  raw[id=a]\n";
+    parse_pipeline(&bom(valid)).unwrap();
+    spit::parse_source_inventory(&bom(records)).unwrap();
+    spit::parse_input_spec(&bom("pipeline analysis.spit\npath raw: in/{id}.txt\n")).unwrap();
+    assert_eq!(
+        diagnose(&bom(valid), Some(&bom(records))),
+        diagnose(valid, Some(records))
+    );
+    // An error on the first line has the same columns, counted without it.
+    let broken = "source bad [id id]\n";
+    let found = diagnose(&bom(broken), None);
+    assert_eq!(found, diagnose(broken, None));
+    assert!(found[0].is_error());
+    assert_eq!(
+        spit::render_diagnostics_json(&found, &bom(broken), None),
+        spit::render_diagnostics_json(&found, broken, None)
+    );
+    assert_eq!(
+        found[0].display_in(&bom(broken), None).to_string(),
+        found[0].display_in(broken, None).to_string()
+    );
+}
+
+#[test]
+fn deeply_nested_type_arguments_are_an_error_not_a_crash() {
+    let nested = |depth: usize| {
+        format!(
+            "source raw : {}B{} [id]\n",
+            "A<".repeat(depth),
+            ">".repeat(depth)
+        )
+    };
+    assert!(diagnose(&nested(64), None).is_empty());
+    for depth in [65, 100_000] {
+        let found = diagnose(&nested(depth), None);
+        assert_eq!(found.len(), 1);
+        assert_eq!(
+            found[0].message,
+            "type arguments nest more than 64 levels deep"
+        );
+    }
 }
