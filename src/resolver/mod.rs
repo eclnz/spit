@@ -210,6 +210,7 @@ impl Resolution {
             self.incomplete_jobs.push(IncompleteJob {
                 operation: operation.name.clone(),
                 stage: invocation.stage.clone(),
+                inputs: expansion.inputs.into_iter().flatten().collect(),
                 outputs: outputs
                     .iter()
                     .map(|&id| self.dag.artifacts.get(id).to_instance())

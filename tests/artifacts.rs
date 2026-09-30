@@ -228,6 +228,57 @@ sources:
     ));
     assert!(rendered.contains("Coverage gaps: 2\n"));
     assert!(rendered.contains("    holds back: scan[subject=02,run=1]\n"));
+    // A source a gap holds back is reported with the gap, not as unused.
+    assert!(report.unused_sources().is_empty());
+    assert!(!rendered.contains("Unused sources"));
+}
+
+#[test]
+fn a_source_no_job_reads_is_listed_as_unused() {
+    // Revision 1 is filtered out by `where`, and `price[store=S07]` names a
+    // store no sales need. Store s09's sales have no price list, so their
+    // job cannot be completed, but that job still reads them.
+    let text = "\
+source cal [station, revision]
+source reading [station]
+source sales [store]
+source price [store]
+operation calibrate(cal, reading) -> Reading
+calibrated = calibrate(cal @ where(revision=2), reading)
+operation total(sales, price) -> Total
+totals = total(sales, price)
+";
+    let sources = "\
+sources:
+    cal[station=north,revision=1]
+    cal[station=north,revision=2]
+    reading[station=north]
+    sales[store=s07]
+    sales[store=s09]
+    price[store=S07]
+    price[store=s07]
+";
+    let report = report(text, sources).unwrap();
+    let unused: Vec<_> = report
+        .unused_sources()
+        .into_iter()
+        .map(|id| report.dag.artifact(id).to_string())
+        .collect();
+    assert_eq!(
+        unused,
+        ["cal[revision=1,station=north]", "price[store=S07]"]
+    );
+    assert_eq!(incomplete(&report), ["totals[store=s09]"]);
+    assert_eq!(
+        spit::unused_sources_summary(&report).unwrap(),
+        "2 source artifacts are used by no job (cal: 1, price: 1)"
+    );
+    let rendered = render_artifacts(&report);
+    assert!(
+        rendered
+            .contains("\nUnused sources: 2\n  cal[station=north,revision=1]\n  price[store=S07]\n"),
+        "{rendered}"
+    );
 }
 
 #[test]

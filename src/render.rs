@@ -171,6 +171,38 @@ pub fn render_artifacts(report: &ArtifactReport) -> String {
     Report(report).to_string()
 }
 
+/// How many sources no job reads, by product in source order, as
+/// `3 source artifacts are used by no job (calibration: 3)`; `None` when
+/// every source is read.
+pub fn unused_sources_summary(report: &ArtifactReport) -> Option<String> {
+    let unused = report.unused_sources();
+    if unused.is_empty() {
+        return None;
+    }
+    let mut counts: Vec<(&str, usize)> = Vec::new();
+    for &source in &unused {
+        let product = report.dag.artifact(source).product;
+        match counts.last_mut() {
+            Some((last, count)) if *last == product => *count += 1,
+            _ => counts.push((product, 1)),
+        }
+    }
+    let by_product: Vec<_> = counts
+        .iter()
+        .map(|(product, count)| format!("{product}: {count}"))
+        .collect();
+    let noun = if unused.len() == 1 {
+        "artifact is"
+    } else {
+        "artifacts are"
+    };
+    Some(format!(
+        "{} source {noun} used by no job ({})",
+        unused.len(),
+        by_product.join(", ")
+    ))
+}
+
 /// Writes jobs as the text reports show them, from a resolved or a bound
 /// DAG, one piece at a time. Jobs are separated by a blank line.
 #[derive(Default)]
@@ -268,6 +300,7 @@ impl fmt::Display for Report<'_> {
             writeln!(f, "  {line}")?;
         }
         self.write_incomplete(f, &held_back)?;
+        self.write_unused(f)?;
         self.write_coverage(f)
     }
 }
@@ -304,6 +337,20 @@ impl Report<'_> {
                     }
                 }
             }
+        }
+        Ok(())
+    }
+
+    /// The sources no job reads, when there are any.
+    fn write_unused(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let unused = self.0.unused_sources();
+        if unused.is_empty() {
+            return Ok(());
+        }
+        let dag = &self.0.dag;
+        writeln!(f, "\nUnused sources: {}", unused.len())?;
+        for source in unused {
+            writeln!(f, "  {}", typed_artifact(dag, dag.artifact(source)))?;
         }
         Ok(())
     }
