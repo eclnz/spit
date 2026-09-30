@@ -1,5 +1,6 @@
 //! Editor-friendly validation of an in-memory SPIT document.
 
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::ops::Range;
@@ -520,7 +521,8 @@ fn record_diagnostics(
 ) -> Result<(ArtifactReport, Vec<Diagnostic>), Vec<Diagnostic>> {
     let (pipeline, lines) = (&document.pipeline, &document.lines);
     let mut diagnostics = Vec::new();
-    let resolved = check_inventory(pipeline, &document.inputs, supplied).and_then(|checked| {
+    let checked = check_inventory(pipeline, &document.inputs, Cow::Borrowed(supplied));
+    let resolved = checked.and_then(|checked| {
         if lenient {
             let unavailable: Vec<_> = checked
                 .gaps
