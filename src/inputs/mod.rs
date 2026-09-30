@@ -1,6 +1,6 @@
 //! The input stage: settle which contexts and sources a dataset holds.
 //!
-//! It reads a `.spitin` recipe of `discover`, `require`, `skip` and source
+//! It reads a `.spitin` recipe of `discover`, `require`, `skip`, `exclude` and source
 //! path rules, and the pipeline's source declarations. It scans a root or
 //! takes records already written, and returns a plain inventory with what it
 //! skipped and what the `require` rules find missing. Resolving jobs needs
@@ -8,6 +8,7 @@
 
 mod coverage;
 mod discover;
+mod exclusions;
 
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
@@ -28,6 +29,9 @@ use self::coverage::SkippedGroup;
 pub(crate) use self::coverage::{check_inventory, InputCheck};
 use self::discover::{discover, locate_sources, with_source_paths};
 pub use self::discover::{discover_source_files, discover_sources, Discovery};
+pub(crate) use self::exclusions::collect_exclusion_errors;
+pub use self::exclusions::UnmatchedExclusion;
+use self::exclusions::{read_exclusion_files, Excluder};
 
 /// A recipe's rules and any inventory records written with them.
 #[derive(Clone, Debug, Default)]
@@ -41,7 +45,11 @@ pub struct InputSpec {
 
 /// Parse a `.spitin` file without resolving imports.
 pub fn parse_input_spec(text: &str) -> Result<InputSpec, ParseError> {
-    parse_recipe_lines(text).map(|(spec, _)| spec)
+    let (pipeline, document) = parse_recipe(text, |text| {
+        parse_document_with_imports(text, &BTreeMap::new(), Kind::Recipe)
+    })?;
+    // Files an `exclude from` line names are read from the working folder.
+    finish_spec(document, pipeline, Some(Path::new("")))
 }
 
 /// Parse a `.spitin` file at `path`. Paths inside the recipe, and the
@@ -52,7 +60,11 @@ pub fn parse_input_spec_at(text: &str, path: &Path) -> Result<InputSpec, ParseEr
         parse_located_document(text, path, Kind::Recipe)
     })?;
     let folder = path.parent().unwrap_or_else(|| Path::new(""));
-    finish_spec(document, pipeline.map(|pipeline| folder.join(pipeline)))
+    finish_spec(
+        document,
+        pipeline.map(|pipeline| folder.join(pipeline)),
+        Some(folder),
+    )
 }
 
 /// Parse a `.spitin` without resolving imports, with where each of its
@@ -62,7 +74,9 @@ pub(crate) fn parse_recipe_lines(text: &str) -> Result<(InputSpec, SourceMap), P
         parse_document_with_imports(text, &BTreeMap::new(), Kind::Recipe)
     })?;
     let lines = std::mem::take(&mut document.lines);
-    Ok((finish_spec(document, pipeline)?, lines))
+    // Its `exclude from` files are left unread: its rules' places are the
+    // lines of the recipe, and a file's rows have none there.
+    Ok((finish_spec(document, pipeline, None)?, lines))
 }
 
 /// A recipe's `pipeline` line, and the document its other lines parse to
@@ -144,6 +158,7 @@ fn check_input_lines(text: &str) -> Result<(), ParseError> {
 fn finish_spec(
     document: ParsedDocument,
     pipeline_file: Option<PathBuf>,
+    folder: Option<&Path>,
 ) -> Result<InputSpec, ParseError> {
     let ParsedDocument {
         pipeline,
@@ -161,6 +176,9 @@ fn finish_spec(
         return Err(ParseError::new(1, "a .spitin file may contain discovery, coverage, source paths, and inventory records only"));
     }
     inputs.source_paths = pipeline.product_paths;
+    if let Some(folder) = folder {
+        read_exclusion_files(&mut inputs, folder)?;
+    }
     Ok(InputSpec {
         pipeline: pipeline_file,
         rules: inputs,
@@ -215,20 +233,36 @@ impl InputSpec {
     ) -> Result<ResolvedInputs, InputError> {
         validate_pipeline(pipeline)?;
         self.check(pipeline)?;
-        let (mut inventory, mut skipped, root) = match source {
+        let (mut inventory, mut skipped, root, mut removed) = match source {
             InputSource::Discover(root) => {
                 let located = with_source_paths(pipeline, &self.rules.source_paths);
                 let found = discover(&located, &self.rules, root)?;
-                (found.inventory, found.skipped, Some(root.to_owned()))
+                if let Some(unmatched) = found.unmatched {
+                    return Err(InputError::UnmatchedExclusion(unmatched));
+                }
+                (
+                    found.inventory,
+                    found.skipped,
+                    Some(root.to_owned()),
+                    found.removed,
+                )
             }
-            InputSource::Inventory(inventory) => (inventory, Vec::new(), None),
+            InputSource::Inventory(mut inventory) => {
+                let mut excluder = Excluder::new(&self.rules.exclusions);
+                excluder.apply(&mut inventory);
+                let excluded = excluder.finish().map_err(InputError::UnmatchedExclusion)?;
+                (inventory, Vec::new(), None, excluded)
+            }
         };
         self.merge_source_paths(pipeline, &mut inventory)?;
         let located = with_source_paths(pipeline, &inventory.source_paths);
         inspect_paths(&located)?;
         let checked = check_inventory(pipeline, &self.rules, Cow::Owned(inventory))?;
         skipped.extend(checked.skipped.iter().map(SkippedGroup::note));
+        removed.extend(checked.skipped.iter().map(SkippedGroup::removal));
         let mut inventory = checked.inventory.into_owned();
+        // After any record the inventory already held, as a .spitout does.
+        inventory.removed.extend(removed);
         locate_sources(&located, &mut inventory)?;
         Ok(ResolvedInputs {
             inventory,
@@ -309,6 +343,8 @@ pub enum InputError {
     UnknownSourcePath { product: String },
     /// A source has a path rule in both the pipeline and the `.spitout`.
     InventoryPathInBoth { product: String },
+    /// An `exclude` rule matches nothing in the dataset.
+    UnmatchedExclusion(UnmatchedExclusion),
 }
 
 impl From<ResolveError> for InputError {
@@ -351,6 +387,17 @@ impl fmt::Display for InputError {
                 f,
                 "source `{product}` has path rules in both .spit and .spitout"
             ),
+            Self::UnmatchedExclusion(unmatched) => {
+                write!(
+                    f,
+                    "`{}` ({}) matches nothing in this dataset",
+                    unmatched.rule, unmatched.origin
+                )?;
+                if !unmatched.near.is_empty() {
+                    write!(f, "; it has {}", unmatched.near.join(", "))?;
+                }
+                Ok(())
+            }
         }
     }
 }

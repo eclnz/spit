@@ -248,6 +248,41 @@ Constraints, written in a recipe, check each observed group. They do not set a t
 require image run=1,2 per [subject, visit]
 ```
 
+### Exclude named artifacts
+
+`exclude` removes artifacts by name, such as a corrupted run or a subject who withdrew, while their files stay where they are:
+
+```text
+exclude bold[sub=02,ses=02,run=3]    # corrupted: motion spike at volume 140
+exclude [sub=07]                     # withdrew consent
+exclude bold[run=3]                  # run 3 dropped from the protocol
+exclude calibration                  # replaced by the pipeline's own
+```
+
+A rule names a source, some values, or both, and removes every artifact whose identity includes each value it names:
+
+- **A source with all its dimensions** names one artifact.
+- **Values alone**, in brackets, name a group: every source's artifacts with those values, and every discovered context that has them. `exclude [sub=02,ses=02]` removes a whole session.
+- **A source with some of its dimensions** names part of that source only: `exclude bold[sub=02]` removes that subject's BOLD runs and nothing else, so steps other sources drive still run for them.
+
+A comment on the line is kept as the rule's reason. Values are compared as written, so `sub=2` does not match `sub=02`. An exclude that matches nothing is an error, naming any value it comes close to, so a typo or a rule the data has outgrown does not pass unnoticed. `spit check` tests each rule against the pipeline: its source must be one, and each dimension it names must be that source's, or, for values alone, some source's.
+
+Exclusions apply before anything else in the recipe. An excluded discovered context expects no files, an excluded file needs to exist nowhere, and a file excluded by name may lie outside every discovered context, such as a misnamed copy. `skip` and `require` rules then see what the exclusions leave.
+
+Rules can also come from a CSV file, relative to the recipe's folder, such as a lab's list of scans that failed quality control:
+
+```text
+exclude from qc/excluded.csv
+```
+
+```csv
+product,sub,ses,run,reason
+bold,02,02,3,"motion spike, volume 140"
+,07,,,withdrew consent
+```
+
+The header names the columns: `product` and `reason` are optional, and every other column is a dimension. Each row is one rule; an empty cell leaves its column out, so a row with no `product` names a group. Fields may be quoted, as spreadsheets write them. Each row must match something, and a message about a row names the file and its line.
+
 ## Inputs
 
 A `.spitout` lists a dataset's settled source identities. `spit inputs` writes one, and a dataset indexer or a person can write one too. Paths come from rules in the pipeline or, if a recipe supplies a source rule, a `source_paths:` section written once in the `.spitout`. A record ending in `: path` is accepted for older inventories only if that path agrees with its rule. `contexts:` names a group even when one of its required inputs is absent:
@@ -279,6 +314,20 @@ source_paths:
 ```
 
 The DAG can then use the rule without loading the recipe. Per-record paths cannot redirect an artifact away from it.
+
+`spit inputs` also writes what the recipe's `exclude` and `skip` rules removed, each with its rule, where the rule is, and its reason:
+
+```text
+removed:
+    bold[sub=02,ses=02,run=3]
+        rule: exclude bold[sub=02,ses=02,run=3]
+        at: line 4
+        reason: corrupted: motion spike at volume 140
+    [sub=07]
+        rule: skip sessions count>=2 per [sub]
+```
+
+The section is a record, not a rule: the records above it already leave these out, and resolving jobs removes nothing more. Scanning again rewrites it from the recipe, so a removal survives a rescan. `dag` copies it into the `.spitdag`.
 
 ## Optional types
 

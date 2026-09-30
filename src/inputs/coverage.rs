@@ -9,7 +9,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use crate::error::{DefinitionSubject, ResolveError};
 use crate::model::{
     ArtifactInstance, CoverageAction, CoverageGap, CoverageRule, EntityBinding, GroupKey,
-    InputRules, Pipeline, SourceInventory,
+    InputRules, Pipeline, Removal, SourceInventory,
 };
 use crate::shape::dimension_set;
 
@@ -18,9 +18,22 @@ pub(crate) struct SkippedGroup {
     pub target: String,
     pub context: EntityBinding,
     pub group_by: Vec<String>,
+    /// The rule that rejected the group, as written.
+    pub rule: String,
 }
 
 impl SkippedGroup {
+    /// The group, as the `.spitout` records what the input stage removed.
+    pub(crate) fn removal(&self) -> Removal {
+        Removal {
+            product: None,
+            entities: self.context.clone(),
+            rule: self.rule.clone(),
+            origin: None,
+            reason: None,
+        }
+    }
+
     /// What was skipped and why, as a warning says it.
     pub(crate) fn note(&self) -> String {
         format!(
@@ -124,6 +137,7 @@ fn rejected_groups(
             target: rule.product.clone(),
             context,
             group_by: rule.group_by.clone(),
+            rule: rule.to_string(),
         })
         .collect()
 }
@@ -344,7 +358,7 @@ pub(crate) fn collect_rule_errors(
     rules: &InputRules,
     poisoned: &BTreeSet<String>,
 ) -> Vec<(DefinitionSubject, ResolveError)> {
-    let mut errors = Vec::new();
+    let mut errors = super::exclusions::collect_exclusion_errors(pipeline, rules);
     for (index, rule) in rules.constraints.iter().enumerate() {
         if poisoned.contains(&rule.product) {
             continue;

@@ -6,7 +6,9 @@ use std::fmt;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::model::{Artifact, EntityBinding, InputRules, Pipeline, SourceInventory, SourceRecord};
+use crate::model::{
+    Artifact, EntityBinding, InputRules, Pipeline, Removal, SourceInventory, SourceRecord,
+};
 use crate::paths::{unusable_path, PathBinder, PathTemplate};
 
 use super::keyword::{Header, Keyword};
@@ -222,11 +224,59 @@ impl fmt::Display for InventoryText<'_> {
                 }
             }
         }
-        Ok(())
+        self.write_removed(f)
     }
 }
 
 impl InventoryText<'_> {
+    /// What the input stage removed, each with the rule that removed it:
+    ///
+    /// ```text
+    /// removed:
+    ///     bold[sub=02,ses=02,run=3]
+    ///         rule: exclude bold[run=3,ses=02,sub=02]
+    ///         at: line 4
+    ///         reason: corrupted
+    /// ```
+    fn write_removed(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let removed = &self.inventory.removed;
+        if removed.is_empty() {
+            return Ok(());
+        }
+        let order = self.pipeline_order();
+        let order: Vec<_> = order.iter().map(String::as_str).collect();
+        writeln!(f, "\nremoved:")?;
+        for removal in removed {
+            let declared: Vec<&str> = removal
+                .product
+                .as_deref()
+                .and_then(|name| {
+                    self.pipeline
+                        .products
+                        .iter()
+                        .find(|product| product.name == name)
+                })
+                .map_or_else(
+                    || order.clone(),
+                    |product| product.dimensions.iter().map(String::as_str).collect(),
+                );
+            let product = removal.product.as_deref().unwrap_or_default();
+            writeln!(
+                f,
+                "    {product}[{}]",
+                in_order(&removal.entities, &declared)
+            )?;
+            writeln!(f, "        rule: {}", removal.rule)?;
+            if let Some(origin) = &removal.origin {
+                writeln!(f, "        at: {origin}")?;
+            }
+            if let Some(reason) = &removal.reason {
+                writeln!(f, "        reason: {reason}")?;
+            }
+        }
+        Ok(())
+    }
+
     /// The pipeline's dimensions, each once, in the order its products
     /// declare them.
     fn pipeline_order(&self) -> Vec<String> {
@@ -447,6 +497,7 @@ fn parse_inventory_with_lines(
         Sources,
         SourcePaths,
         Contexts(Option<String>),
+        Removed,
     }
 
     let text = super::without_bom(text);
@@ -478,6 +529,11 @@ fn parse_inventory_with_lines(
                 parent = None;
                 group = None;
             }
+            Some(Header::Removed) => {
+                section = Some(InventorySection::Removed);
+                parent = None;
+                group = None;
+            }
             Some(Header::Contexts(Some(name))) => {
                 let name = identifier(name, number, "discovery name")
                     .map_err(|error| error.locate(original))?;
@@ -500,6 +556,10 @@ fn parse_inventory_with_lines(
                         record_lines.extend(records.iter().cloned().map(|record| (number, record)));
                         inventory.artifacts.extend(records);
                     }
+                }
+                Some(InventorySection::Removed) => {
+                    parse_removed_line(original, number, &mut inventory.removed)
+                        .map_err(|e| e.locate(original))?;
                 }
                 Some(InventorySection::SourcePaths) => {
                     let (name, template) = line.split_once(':').ok_or_else(|| {
@@ -587,6 +647,51 @@ fn parse_inventory_with_lines(
         bindings.dedup();
     }
     Ok((inventory, record_lines))
+}
+
+/// Read one line of a `removed:` section into `removed`: what was removed,
+/// `product[dimension=value,...]` or `[dimension=value,...]`, or one of its
+/// `rule:`, `at:` and `reason:` lines. Values are read from the whole line,
+/// so a `#` in a reason is kept.
+fn parse_removed_line(
+    original: &str,
+    number: usize,
+    removed: &mut Vec<Removal>,
+) -> Result<(), ParseError> {
+    let line = original.trim();
+    if let Some((key, value)) = line
+        .split_once(':')
+        .filter(|(key, _)| matches!(*key, "rule" | "at" | "reason"))
+    {
+        let removal = removed.last_mut().ok_or_else(|| {
+            ParseError::new(
+                number,
+                format!("`{key}:` needs the removed artifact or group above it"),
+            )
+        })?;
+        let value = value.trim().to_owned();
+        match key {
+            "rule" => removal.rule = value,
+            "at" => removal.origin = Some(value),
+            _ => removal.reason = Some(value),
+        }
+        return Ok(());
+    }
+    let line = strip_comment(original).trim();
+    let (product, entities) = if line.starts_with('[') {
+        (None, parse_context(line, number)?)
+    } else {
+        let record = parse_source(line, number)?;
+        (Some(record.product), record.entities)
+    };
+    removed.push(Removal {
+        product,
+        entities,
+        rule: String::new(),
+        origin: None,
+        reason: None,
+    });
+    Ok(())
 }
 
 fn parse_source(line: &str, number: usize) -> Result<SourceRecord, ParseError> {
@@ -697,7 +802,7 @@ fn parse_context(line: &str, number: usize) -> Result<EntityBinding, ParseError>
 }
 
 /// Parse `dimension=value, ...]`, the text after a record's opening `[`.
-fn parse_bindings(bindings: &str, number: usize) -> Result<EntityBinding, ParseError> {
+pub(super) fn parse_bindings(bindings: &str, number: usize) -> Result<EntityBinding, ParseError> {
     let open = bindings.trim_end();
     let bindings = open.strip_suffix(']').ok_or_else(|| {
         let error = ParseError::new(number, "expected closing `]` in source artifact");

@@ -22,7 +22,10 @@ fn cli_accepts_stdin_and_returns_json() {
     let json = String::from_utf8(output.stdout).unwrap();
     assert!(json.contains("\"source\":\"pipeline\""));
     assert!(json.contains("\"line\":2"));
-    assert!(json.contains("\"message\":\"expected source"));
+    assert!(
+        json.contains("\"message\":\"`this` does not start a statement"),
+        "{json}"
+    );
 }
 
 #[test]

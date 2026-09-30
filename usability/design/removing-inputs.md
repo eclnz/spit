@@ -62,7 +62,7 @@ bold,02,02,3,motion spike at volume 140
 
 - The header names the columns. `product` and `reason` are optional; every other column is a dimension, and must belong to some source.
 - Each row is one exclude. An empty cell leaves that dimension unconstrained, so an empty `product` makes the row a group form.
-- Every row must match something. An error names the file and row: `qc/excluded.csv: row 3: …`.
+- Every row must match something. An error names the file and the row's line: `qc/excluded.csv line 3`, the line an editor shows.
 - Fields follow RFC 4180 (quotes, doubled quotes, commas inside quotes). SPIT has no CSV dependency today, and this subset is small enough to parse by hand.
 
 ### `drop`: remove groups that fail a criterion
@@ -131,13 +131,16 @@ error: pipeline.spit: line 12, column 9: no `t1w` artifact for input `ref` of `c
 
 ## Recording what was removed
 
-**In the `.spitout`.** A `removed:` section lists each removal with the rule that made it:
+**In the `.spitout`.** A `removed:` section lists each removal with the rule that made it, where the rule is, and its reason, one field to a line so a reason may hold any text:
 
 ```text
 removed:
-    bold[sub=02,ses=02,run=3]: exclude, recipe.spitin line 4  # corrupted: motion spike at volume 140
-    bold[sub=05,ses=01,run=2]: exclude, qc/excluded.csv row 2  # motion spike
-    [sub=03]: drop [sub] where sessions count<2, recipe.spitin line 6 (found 1)
+    bold[sub=02,ses=02,run=3]
+        rule: exclude bold[sub=02,ses=02,run=3]
+        at: line 4
+        reason: corrupted: motion spike at volume 140
+    [sub=03]
+        rule: skip sessions count>=2 per [sub]
 ```
 
 - The section is a record, not a rule: resolving a `.spitout` removes nothing more, and a person writing an inventory may leave it out.
@@ -186,7 +189,7 @@ error: pipeline.spit: line 18, column 26: no `pricing` artifact for input `price
 **Model.**
 
 - Replace `CoverageRule` and `CoverageAction` (`src/model.rs`) with separate `Exclude`, `Drop` and `Require` rules in `InputRules`.
-- An `Exclude` holds a pattern (an optional product and dimension values), a reason and an origin (a recipe line, or a CSV file and row).
+- An `Exclude` holds a pattern (an optional product and dimension values), a reason and an origin (a recipe line, or a CSV file and line).
 - A `Drop` holds a grouping, a target and a condition.
 - Both `Drop` and `Require` gain `Count` comparators.
 

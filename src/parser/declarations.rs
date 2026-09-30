@@ -467,3 +467,67 @@ fn parse_each(items: &[&str], number: usize) -> Result<Vec<String>, ParseError> 
 fn owned(values: &[&str]) -> Vec<String> {
     values.iter().map(|value| (*value).to_owned()).collect()
 }
+
+/// What an `exclude` line names: a file of rules, or one rule.
+#[derive(Clone, Debug)]
+pub(crate) enum ExcludeLine {
+    /// `exclude from qc/excluded.csv`, relative to the recipe's folder.
+    File(String),
+    /// A source, the values an artifact's identity must include, or both,
+    /// the values in the order written.
+    Rule {
+        product: Option<String>,
+        values: Vec<(String, String)>,
+    },
+}
+
+/// Parse the text after `exclude`: `from <file>`, or a source with or
+/// without `[dimension=value,...]`, or `[dimension=value,...]` alone.
+pub(crate) fn parse_exclude(text: &str, number: usize) -> Result<ExcludeLine, ParseError> {
+    let text = text.trim();
+    if text == "from" {
+        return Err(ParseError::new(
+            number,
+            "expected one file after `exclude from`, such as `exclude from qc/excluded.csv`",
+        ));
+    }
+    if let Some(file) = text.strip_prefix("from ") {
+        let file = file.trim();
+        if file.is_empty() || file.chars().any(char::is_whitespace) {
+            return Err(ParseError::new(
+                number,
+                "expected one file after `exclude from`, such as `exclude from qc/excluded.csv`",
+            ));
+        }
+        return Ok(ExcludeLine::File(file.to_owned()));
+    }
+    let (product, bindings) = match text.split_once('[') {
+        Some((product, bindings)) => (product.trim(), Some(bindings)),
+        None => (text, None),
+    };
+    let product = if product.is_empty() {
+        None
+    } else {
+        Some(qualified_identifier(product, number, "source product")?.to_owned())
+    };
+    let values = match bindings {
+        Some(bindings) => {
+            // Checked as a record's values are, then kept in written order.
+            super::inventory::parse_bindings(bindings, number)?;
+            let inner = bindings.trim_end().trim_end_matches(']');
+            comma_items(inner, number)?
+                .into_iter()
+                .filter_map(|item| item.split_once('='))
+                .map(|(dimension, value)| (dimension.trim().to_owned(), value.trim().to_owned()))
+                .collect()
+        }
+        None => Vec::new(),
+    };
+    if product.is_none() && values.is_empty() {
+        return Err(ParseError::new(
+            number,
+            "`exclude` names a source, values such as `[sub=02]`, or both",
+        ));
+    }
+    Ok(ExcludeLine::Rule { product, values })
+}

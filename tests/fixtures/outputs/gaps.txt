@@ -108,6 +108,10 @@ contexts sessions:
         reference
         [run=1,2]:
             image
+
+removed:
+    [sub=02,ses=2]
+        rule: skip image count>=2 per [sub, ses]
 --- stderr
 warning: skipped [ses=2,sub=02] because `skip image` rejected the group
 note: found 18 source artifacts and 5 contexts under `.`

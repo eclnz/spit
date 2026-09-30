@@ -14,6 +14,7 @@ A `.spitdag` is one JSON object, followed by a newline:
   "external_inputs": [ARTIFACT, ...],
   "targets": [ARTIFACT, ...],
   "executables": ["sort", ...],
+  "removed": [REMOVAL, ...],
   "jobs": [JOB, ...]
 }
 ```
@@ -26,6 +27,7 @@ A `.spitdag` is one JSON object, followed by a newline:
 | `external_inputs` | Every artifact a job reads but no job writes, once each: the sources, and the outputs of stages left out. Ordered by path in natural order, the order `many` inputs take, so `wave2` comes before `wave10`. |
 | `targets` | Every artifact a job writes but no job reads: what a full run leaves behind. Ordered by the job that writes it. |
 | `executables` | The program each command and `verify` command starts with, once each, in text order. A command whose first word is a path names no program and is left out. A backend can check these are installed before running anything. |
+| `removed` | What the input stage left out of the dataset, and why: see [Removal](#removal). `[]` when nothing was. |
 | `jobs` | Every job, each after the jobs it depends on. |
 
 ## Artifact
@@ -42,6 +44,24 @@ Every artifact is written the same way, wherever it appears:
 | `entities` | Each dimension and its value, as strings, in the product's declared order. A product with no dimensions has `{}`. |
 | `type` | `null` for an untyped product; `{"name": N, "args": [TYPE, ...]}` for a named type, with its arguments; `{"variable": V}` for a type variable left unbound. |
 | `path` | The artifact's file, relative to `root`. |
+
+## Removal
+
+Each artifact or group an `exclude` or `skip` rule removed, as the `.spitout` records it:
+
+```json
+{"product": "bold", "entities": {"run": "3", "ses": "02", "sub": "02"}, "rule": "exclude bold[sub=02,ses=02,run=3]", "origin": "line 4", "reason": "corrupted"}
+```
+
+| Field | Holds |
+| --- | --- |
+| `product` | The removed artifact's product, or `null` for a group, which removed every artifact whose identity includes `entities`. |
+| `entities` | Each dimension and value, as strings, in name order. |
+| `rule` | The rule that removed it, as written. |
+| `origin` | Where the rule is: `line 4` of the recipe, or a line of a file an `exclude from` line names. `null` when not recorded. |
+| `reason` | Why, from the rule's comment or a file's `reason` column; `null` when not given. |
+
+Nothing in `removed` is among the jobs' inputs: the record says what was left out, so a report can say so.
 
 ## Job
 

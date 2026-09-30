@@ -1144,13 +1144,23 @@ pub struct InputRules {
     pub discoveries: Vec<DirectoryDiscovery>,
     /// `require` and `skip` rules, in declaration order.
     pub constraints: Vec<CoverageRule>,
+    /// `exclude` rules, in declaration order, with each row of a file an
+    /// `exclude from` line names in its place once the file is read.
+    pub exclusions: Vec<Exclusion>,
+    /// The files `exclude from` lines name, relative to the recipe's
+    /// folder, with the line of each, until they are read.
+    pub exclusion_files: Vec<(String, usize)>,
     /// Path rules for source products that the recipe, not the pipeline, sets.
     pub source_paths: BTreeMap<String, PathTemplate>,
 }
 
 impl InputRules {
     pub fn is_empty(&self) -> bool {
-        self.discoveries.is_empty() && self.constraints.is_empty() && self.source_paths.is_empty()
+        self.discoveries.is_empty()
+            && self.constraints.is_empty()
+            && self.exclusions.is_empty()
+            && self.exclusion_files.is_empty()
+            && self.source_paths.is_empty()
     }
 
     /// The discovery rule named `name`, if any.
@@ -1171,6 +1181,124 @@ pub fn stage_within(stage: &str, outer: &str) -> bool {
     stage
         .strip_prefix(outer)
         .is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
+}
+
+/// An `exclude` rule: it removes every source artifact whose identity
+/// includes each value it names, of its product or, when it names none, of
+/// every product, with every discovered context that does too.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Exclusion {
+    pub product: Option<String>,
+    /// Each dimension and value it names, in the order written.
+    pub values: Vec<(String, String)>,
+    /// Why, from the comment on its line or a file's `reason` column.
+    pub reason: Option<String>,
+    /// Where it is written: `line 4` of the recipe, or `qc/excluded.csv row
+    /// 3` for a row of a file an `exclude from` line names.
+    pub origin: String,
+}
+
+impl Exclusion {
+    /// Whether it removes the artifact of `product` with `entities`.
+    pub fn matches(&self, product: &str, entities: &EntityBinding) -> bool {
+        self.product.as_deref().is_none_or(|name| name == product) && self.within(entities)
+    }
+
+    /// Whether it removes the discovered context `binding`: only a rule that
+    /// names no product removes contexts.
+    pub fn matches_context(&self, binding: &EntityBinding) -> bool {
+        self.product.is_none() && self.within(binding)
+    }
+
+    /// Whether `entities` has every value this rule names.
+    fn within(&self, entities: &EntityBinding) -> bool {
+        self.values
+            .iter()
+            .all(|(dimension, value)| entities.get(dimension) == Some(value.as_str()))
+    }
+
+    /// The values it names, as a binding.
+    pub fn binding(&self) -> EntityBinding {
+        self.values.iter().cloned().collect()
+    }
+
+    /// What it names, as written: `bold[sub=02,run=3]`, `[store=s07]`, or
+    /// `testset`.
+    pub fn pattern(&self) -> String {
+        let mut text = self.product.clone().unwrap_or_default();
+        if !self.values.is_empty() || self.product.is_none() {
+            let pairs = self
+                .values
+                .iter()
+                .map(|(dimension, value)| (dimension.as_str(), value.as_str()));
+            push_bindings(&mut text, pairs);
+        }
+        text
+    }
+}
+
+impl fmt::Display for Exclusion {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "exclude {}", self.pattern())
+    }
+}
+
+/// What the input stage left out of a dataset, and the rule that did: an
+/// artifact of `product`, or, with no product, a group, every artifact
+/// whose identity includes `entities`.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Removal {
+    pub product: Option<String>,
+    pub entities: EntityBinding,
+    /// The rule, as `exclude bold[run=3]` or `skip sessions count>=2 per
+    /// [sub]`.
+    pub rule: String,
+    /// Where the rule is written, when known: `line 4` of the recipe, or a
+    /// row of a file.
+    pub origin: Option<String>,
+    pub reason: Option<String>,
+}
+
+impl Removal {
+    /// What was removed, as `bold[run=3,sub=02]` or `[sub=03]`, its
+    /// dimensions in name order.
+    pub fn identity(&self) -> String {
+        self.identity_in(&[])
+    }
+
+    /// As [`Removal::identity`], with the dimensions `declared` names first,
+    /// in that order.
+    pub fn identity_in(&self, declared: &[String]) -> String {
+        let mut pairs: Vec<_> = self.entities.iter().collect();
+        pairs.sort_by_key(|(dimension, _)| {
+            declared
+                .iter()
+                .position(|name| name == dimension)
+                .unwrap_or(usize::MAX)
+        });
+        let mut text = self.product.clone().unwrap_or_default();
+        push_bindings(&mut text, pairs.into_iter());
+        text
+    }
+
+    /// Whether an `exclude` rule made it, rather than a `skip` rule.
+    pub fn is_exclusion(&self) -> bool {
+        self.rule.starts_with("exclude")
+    }
+}
+
+/// Add `[dimension=value,...]` to `text`.
+fn push_bindings<'a>(text: &mut String, pairs: impl Iterator<Item = (&'a str, &'a str)>) {
+    text.push('[');
+    for (index, (dimension, value)) in pairs.enumerate() {
+        if index > 0 {
+            text.push(',');
+        }
+        text.push_str(dimension);
+        text.push('=');
+        text.push_str(value);
+    }
+    text.push(']');
 }
 
 /// A source record identifies a logical artifact, and may say where its file
@@ -1214,6 +1342,9 @@ pub struct SourceInventory {
     /// Source path rules settled from a recipe, when the pipeline does not
     /// declare them. A .spitout carries each rule once for standalone DAGs.
     pub source_paths: BTreeMap<String, PathTemplate>,
+    /// What the input stage left out, and why: a record, not a rule, so
+    /// resolving jobs removes nothing more for it.
+    pub removed: Vec<Removal>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1250,6 +1381,28 @@ pub struct CoverageRule {
     /// Entity values that must each be present in every group, such as
     /// `run=1,2`. Each listed dimension is checked on its own.
     pub values: BTreeMap<String, Vec<String>>,
+}
+
+/// Reads as written: `skip sessions count>=2 per [sub]`, or `require
+/// image run=1,2 per [sub]`, leaving out the count a value clause implies.
+impl fmt::Display for CoverageRule {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let action = match self.action {
+            CoverageAction::Require => "require",
+            CoverageAction::Skip => "skip",
+        };
+        write!(f, "{action} {}", self.product)?;
+        if self.values.is_empty() || self.count != CountRequirement::AtLeast(1) {
+            match self.count {
+                CountRequirement::Exactly(count) => write!(f, " count={count}")?,
+                CountRequirement::AtLeast(count) => write!(f, " count>={count}")?,
+            }
+        }
+        for (dimension, values) in &self.values {
+            write!(f, " {dimension}={}", values.join(","))?;
+        }
+        write!(f, " per [{}]", self.group_by.join(", "))
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]

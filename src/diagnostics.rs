@@ -10,7 +10,8 @@ use crate::command::collect_commands;
 use crate::compile::collect_pipeline;
 use crate::imports::parse_located_document;
 use crate::inputs::{
-    check_inventory, collect_rule_errors, InputCheck, InputError, InputSpec, ResolvedInputs,
+    check_inventory, collect_exclusion_errors, collect_rule_errors, InputCheck, InputError,
+    InputSpec, ResolvedInputs,
 };
 use crate::json::Json;
 use crate::lower::{parse_document_with_imports, ParsedDocument};
@@ -536,7 +537,27 @@ pub fn diagnose_recipe(text: &str, path: &Path) -> Vec<Diagnostic> {
         }
     };
     match diagnose_checked(&pipeline_text, Context::at(&pipeline_path)) {
-        Ok(checked) => diagnose_recipe_against(text, &checked.pipeline),
+        Ok(checked) => {
+            let mut diagnostics = diagnose_recipe_against(text, &checked.pipeline);
+            // The rows of files `exclude from` lines name are read with the
+            // recipe at its path, not with its text; each error says where.
+            let rows = InputRules {
+                exclusions: spec
+                    .rules
+                    .exclusions
+                    .iter()
+                    .filter(|rule| !rule.origin.starts_with("line "))
+                    .cloned()
+                    .collect(),
+                ..InputRules::default()
+            };
+            diagnostics.extend(
+                collect_exclusion_errors(&checked.pipeline, &rows)
+                    .into_iter()
+                    .map(|(_, problem)| error(problem.to_string())),
+            );
+            diagnostics
+        }
         Err(diagnostics) => {
             let pipeline_errors = diagnostics
                 .into_iter()
@@ -568,6 +589,7 @@ pub fn diagnose_recipe_against(text: &str, pipeline: &Pipeline) -> Vec<Diagnosti
                 DefinitionSubject::ConstraintGroup(index) => {
                     lines.rules.get(*index).map(Rule::dimensions)
                 }
+                DefinitionSubject::Exclusion(index) => lines.exclusions.get(*index).cloned(),
                 _ => None,
             };
             Diagnostic::error(DiagnosticSource::Pipeline, place, error.to_string())
@@ -867,6 +889,7 @@ fn subject_place(
         // A rule's own errors concern its product: unknown, or not a source.
         DefinitionSubject::Constraint(index) => lines.rules.get(*index).map(Rule::product),
         DefinitionSubject::ConstraintGroup(index) => lines.rules.get(*index).map(Rule::dimensions),
+        DefinitionSubject::Exclusion(index) => lines.exclusions.get(*index).cloned(),
         DefinitionSubject::Stage(name) => lines.stages.get(name).cloned(),
         DefinitionSubject::Source(_) | DefinitionSubject::None => None,
     }

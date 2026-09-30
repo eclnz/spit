@@ -14,6 +14,8 @@ pub enum DefinitionSubject {
     Constraint(usize),
     /// The dimensions a coverage rule groups by, by the rule's index.
     ConstraintGroup(usize),
+    /// An `exclude` rule, by its index in `InputRules::exclusions`.
+    Exclusion(usize),
     Source(SourceRecord),
     /// A stage, by name.
     Stage(String),

@@ -8,7 +8,7 @@ use std::io;
 use std::ops::Range;
 
 use crate::json::{write_array, write_number, write_string, ObjectWriter, Out};
-use crate::model::{identity, natural_cmp, ArtifactId, Artifacts, EntityBinding};
+use crate::model::{identity, natural_cmp, ArtifactId, Artifacts, EntityBinding, Removal};
 use crate::types::TypeExpr;
 
 /// The schema version a `.spitdag` is written with.
@@ -21,6 +21,8 @@ pub const SPITDAG_VERSION: usize = 3;
 pub struct BoundDag {
     /// The absolute dataset folder every path is relative to, when known.
     pub root: Option<String>,
+    /// What the input stage left out of the dataset, and why.
+    pub removed: Vec<Removal>,
     /// Each job after the jobs it depends on.
     pub jobs: Vec<BoundJob>,
     artifacts: Artifacts,
@@ -105,6 +107,7 @@ impl BoundDag {
     ) -> Self {
         Self {
             root: None,
+            removed: Vec::new(),
             jobs,
             artifacts,
             paths,
@@ -261,6 +264,11 @@ fn write_document(
     });
     document.field("executables", |out| {
         write_array(out, dag.executables(), |out, name| write_string(out, &name));
+    });
+    document.field("removed", |out| {
+        write_array(out, &dag.removed, |out, removal| {
+            write_removal(out, removal)
+        });
     });
     let mut work = String::new();
     document.field("jobs", |out| {
@@ -460,6 +468,34 @@ fn write_artifact(out: &mut String, artifact: &BoundArtifact<'_>) {
     out.push('}');
 }
 
+/// A removal as `{"product": ..., "entities": {...}, "rule": ..., "origin":
+/// ..., "reason": ...}`, with `null` for a group's product and for an
+/// origin or reason that is not known.
+fn write_removal(out: &mut String, removal: &Removal) {
+    let optional = |out: &mut String, value: Option<&str>| match value {
+        Some(value) => write_string(out, value),
+        None => out.push_str("null"),
+    };
+    out.push_str("{\"product\":");
+    optional(out, removal.product.as_deref());
+    out.push_str(",\"entities\":{");
+    for (index, (dimension, value)) in removal.entities.iter().enumerate() {
+        if index > 0 {
+            out.push(',');
+        }
+        write_string(out, dimension);
+        out.push(':');
+        write_string(out, value);
+    }
+    out.push_str("},\"rule\":");
+    write_string(out, &removal.rule);
+    out.push_str(",\"origin\":");
+    optional(out, removal.origin.as_deref());
+    out.push_str(",\"reason\":");
+    optional(out, removal.reason.as_deref());
+    out.push('}');
+}
+
 fn write_type(out: &mut String, artifact_type: &TypeExpr) {
     match artifact_type {
         TypeExpr::Unknown => out.push_str("null"),
@@ -552,7 +588,7 @@ mod tests {
         assert!(text.contains("\"command\":null"), "{text}");
         // A verify command that starts with a path names no program.
         assert!(
-            text.contains("\"executables\":[\"tool\"],\"jobs\""),
+            text.contains("\"executables\":[\"tool\"],\"removed\":[],\"jobs\""),
             "{text}"
         );
         assert!(
@@ -566,6 +602,37 @@ mod tests {
         );
         assert!(
             text.contains("\"depends_on\":[1],\"dependents\":[]"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn a_removal_is_written_with_its_rule_and_why() {
+        let mut dag = bound(|_| Vec::new());
+        dag.removed = vec![
+            Removal {
+                product: Some("bold".into()),
+                entities: EntityBinding::from_pairs([("sub", "02"), ("run", "3")]),
+                rule: "exclude bold[run=3,sub=02]".into(),
+                origin: Some("line 4".into()),
+                reason: Some("motion \"spike\"".into()),
+            },
+            Removal {
+                product: None,
+                entities: EntityBinding::from_pairs([("sub", "03")]),
+                rule: "skip sessions count>=2 per [sub]".into(),
+                origin: None,
+                reason: None,
+            },
+        ];
+        let text = dag.to_json();
+        assert!(
+            text.contains(
+                "\"removed\":[{\"product\":\"bold\",\"entities\":{\"run\":\"3\",\"sub\":\"02\"},\
+\"rule\":\"exclude bold[run=3,sub=02]\",\"origin\":\"line 4\",\"reason\":\"motion \\\"spike\\\"\"},\
+{\"product\":null,\"entities\":{\"sub\":\"03\"},\"rule\":\"skip sessions count>=2 per [sub]\",\
+\"origin\":null,\"reason\":null}]"
+            ),
             "{text}"
         );
     }

@@ -6,12 +6,12 @@ use std::collections::BTreeMap;
 
 use crate::imports::apply_import;
 use crate::model::{
-    Cardinality, CommandDef, CoverageRule, InputBinding, InputRules, Invocation, OperationDef,
-    Pipeline, ProductDef, SourceInventory, StageDef,
+    Cardinality, CommandDef, CoverageRule, Exclusion, InputBinding, InputRules, Invocation,
+    OperationDef, Pipeline, ProductDef, SourceInventory, StageDef,
 };
 use crate::parser::{
-    parse_source_inventory, parse_syntax, split_document, without_bom, FlowStep, Kind, ParseError,
-    ParseErrorKind, PathRule, Rule, SourceMap, Statement, StatementKind, Step, Syntax,
+    parse_source_inventory, parse_syntax, split_document, without_bom, ExcludeLine, FlowStep, Kind,
+    ParseError, ParseErrorKind, PathRule, Rule, SourceMap, Statement, StatementKind, Step, Syntax,
 };
 use crate::shape::{step_context, step_driver, BoundInput};
 use crate::span::Place;
@@ -158,12 +158,12 @@ pub(crate) fn lower(
     for statement in &syntax.statements {
         let rule = matches!(
             statement.kind,
-            StatementKind::Discover(_) | StatementKind::Constraint(..)
+            StatementKind::Discover(_) | StatementKind::Constraint(..) | StatementKind::Exclude(..)
         );
         if rule && kind == Kind::Pipeline {
             return Err(ParseError::new(
                 statement.place.line,
-                "`discover`, `require` and `skip` rules belong in a .spitin recipe, not a pipeline",
+                "`discover`, `require`, `skip` and `exclude` rules belong in a .spitin recipe, not a pipeline",
             )
             .within(&statement.place));
         }
@@ -201,6 +201,21 @@ fn lower_statement(
         }
         StatementKind::Constraint(constraint, rule) => {
             builder.add_constraint(constraint.clone(), rule.clone());
+        }
+        StatementKind::Exclude(ExcludeLine::File(file), ..) => {
+            builder
+                .inputs
+                .exclusion_files
+                .push((file.clone(), statement.place.line));
+        }
+        StatementKind::Exclude(ExcludeLine::Rule { product, values }, reason, place) => {
+            builder.inputs.exclusions.push(Exclusion {
+                product: product.clone(),
+                values: values.clone(),
+                reason: reason.clone(),
+                origin: format!("line {}", statement.place.line),
+            });
+            builder.lines.exclusions.push(place.clone());
         }
         StatementKind::Command(command, place) => {
             builder.add_command(command.clone(), place.clone());
