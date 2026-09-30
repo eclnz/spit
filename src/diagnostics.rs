@@ -551,8 +551,14 @@ fn record_diagnostics(
                 .jobs
                 .iter()
                 .flat_map(|job| &job.outputs)
-                .chain(report.incomplete.iter().flat_map(|job| &job.outputs))
-                .map(|artifact| artifact.product.as_str())
+                .map(|&artifact| report.dag.artifact(artifact).product)
+                .chain(
+                    report
+                        .incomplete
+                        .iter()
+                        .flat_map(|job| &job.outputs)
+                        .map(|artifact| artifact.product.as_str()),
+                )
                 .collect();
             diagnostics.extend(empty_step_warnings(pipeline, lines, &produced, supplied));
             Ok((report, diagnostics))

@@ -312,70 +312,6 @@ pub struct ArtifactInstance {
 /// An artifact's identity: its product and entity bindings, ignoring its type.
 pub type ArtifactKey = (String, EntityBinding);
 
-/// A value for each of a set of artifacts, found by product and then by
-/// entities, so that looking an artifact up copies nothing.
-#[derive(Clone, Debug)]
-pub(crate) struct ArtifactMap<V>(FxHashMap<String, FxHashMap<EntityBinding, V>>);
-
-impl<V> Default for ArtifactMap<V> {
-    fn default() -> Self {
-        Self(FxHashMap::default())
-    }
-}
-
-impl<V> ArtifactMap<V> {
-    pub(crate) fn get(&self, artifact: &ArtifactInstance) -> Option<&V> {
-        self.get_by(&artifact.product, &artifact.entities)
-    }
-
-    /// The value of the artifact of `product` with `entities`.
-    pub(crate) fn get_by(&self, product: &str, entities: &EntityBinding) -> Option<&V> {
-        self.0.get(product)?.get(entities)
-    }
-
-    pub(crate) fn contains(&self, artifact: &ArtifactInstance) -> bool {
-        self.get(artifact).is_some()
-    }
-
-    /// Each artifact's product and entities with its value, in no order.
-    pub(crate) fn iter(&self) -> impl Iterator<Item = (&str, &EntityBinding, &V)> {
-        self.0.iter().flat_map(|(product, family)| {
-            family
-                .iter()
-                .map(move |(entities, value)| (product.as_str(), entities, value))
-        })
-    }
-
-    /// Give `artifact` `value`, returning the value it had.
-    pub(crate) fn insert(&mut self, artifact: &ArtifactInstance, value: V) -> Option<V> {
-        let family = match self.0.get_mut(&artifact.product) {
-            Some(family) => family,
-            None => self.0.entry(artifact.product.clone()).or_default(),
-        };
-        family.insert(artifact.entities.clone(), value)
-    }
-}
-
-/// A set of artifacts.
-pub(crate) type ArtifactSet = ArtifactMap<()>;
-
-impl ArtifactSet {
-    /// Add `artifact`, returning whether it was new.
-    pub(crate) fn add(&mut self, artifact: &ArtifactInstance) -> bool {
-        self.insert(artifact, ()).is_none()
-    }
-}
-
-impl<'a> FromIterator<&'a ArtifactInstance> for ArtifactSet {
-    fn from_iter<I: IntoIterator<Item = &'a ArtifactInstance>>(artifacts: I) -> Self {
-        let mut set = Self::default();
-        for artifact in artifacts {
-            set.add(artifact);
-        }
-        set
-    }
-}
-
 impl ArtifactInstance {
     pub fn key(&self) -> ArtifactKey {
         (self.product.clone(), self.entities.clone())
@@ -397,6 +333,140 @@ impl ArtifactInstance {
 impl fmt::Display for ArtifactInstance {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}[{}]", self.product, self.entities)
+    }
+}
+
+impl ArtifactInstance {
+    /// This artifact, borrowed.
+    pub fn view(&self) -> Artifact<'_> {
+        Artifact {
+            product: &self.product,
+            artifact_type: &self.artifact_type,
+            entities: &self.entities,
+        }
+    }
+}
+
+/// An artifact borrowed from where it is kept, such as a DAG's
+/// [`Artifacts`].
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Artifact<'a> {
+    pub product: &'a str,
+    pub artifact_type: &'a ArtifactType,
+    pub entities: &'a EntityBinding,
+}
+
+impl Artifact<'_> {
+    /// An owned copy.
+    pub fn to_instance(self) -> ArtifactInstance {
+        ArtifactInstance {
+            product: self.product.to_owned(),
+            artifact_type: self.artifact_type.clone(),
+            entities: self.entities.clone(),
+        }
+    }
+}
+
+impl fmt::Display for Artifact<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}[{}]", self.product, self.entities)
+    }
+}
+
+/// An artifact's place in its DAG's [`Artifacts`].
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct ArtifactId(u32);
+
+impl ArtifactId {
+    pub fn index(self) -> usize {
+        self.0 as usize
+    }
+}
+
+/// Each artifact of a DAG, once, which its jobs refer to by [`ArtifactId`].
+/// Every artifact of a product has the product's type, so the name and type
+/// are kept once per product and each artifact holds its product's number
+/// and its entities, a column each.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct Artifacts {
+    products: Vec<(String, ArtifactType)>,
+    product_numbers: FxHashMap<String, u32>,
+    product: Vec<u32>,
+    entities: Vec<EntityBinding>,
+    ids: FxHashMap<(u32, EntityBinding), ArtifactId>,
+}
+
+impl Artifacts {
+    /// How many artifacts there are.
+    pub fn len(&self) -> usize {
+        self.entities.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.entities.is_empty()
+    }
+
+    pub fn get(&self, id: ArtifactId) -> Artifact<'_> {
+        let (product, artifact_type) = &self.products[self.product[id.index()] as usize];
+        Artifact {
+            product,
+            artifact_type,
+            entities: &self.entities[id.index()],
+        }
+    }
+
+    pub fn entities(&self, id: ArtifactId) -> &EntityBinding {
+        &self.entities[id.index()]
+    }
+
+    /// The number of `product`, if it has any artifacts.
+    pub(crate) fn product_number(&self, product: &str) -> Option<u32> {
+        self.product_numbers.get(product).copied()
+    }
+
+    /// The artifact of `product` with `entities`, if there is one.
+    pub fn find(&self, product: &str, entities: &EntityBinding) -> Option<ArtifactId> {
+        let number = *self.product_numbers.get(product)?;
+        self.ids.get(&(number, entities.clone())).copied()
+    }
+
+    /// Every artifact, in the order they were added.
+    pub fn ids(&self) -> impl Iterator<Item = ArtifactId> {
+        (0..self.len() as u32).map(ArtifactId)
+    }
+
+    /// The number of `product`, whose artifacts have `artifact_type`, adding
+    /// it when it is new.
+    pub(crate) fn product(&mut self, product: &str, artifact_type: &ArtifactType) -> u32 {
+        if let Some(&number) = self.product_numbers.get(product) {
+            return number;
+        }
+        let number = self.products.len() as u32;
+        self.products
+            .push((product.to_owned(), artifact_type.clone()));
+        self.product_numbers.insert(product.to_owned(), number);
+        number
+    }
+
+    /// Add the artifact of product number `product` with `entities`, or
+    /// give the id of the one already there.
+    pub(crate) fn add(
+        &mut self,
+        product: u32,
+        entities: EntityBinding,
+    ) -> Result<ArtifactId, ArtifactId> {
+        let id = ArtifactId(
+            u32::try_from(self.entities.len()).expect("fewer than 2^32 artifacts in a DAG"),
+        );
+        match self.ids.entry((product, entities)) {
+            std::collections::hash_map::Entry::Occupied(entry) => Err(*entry.get()),
+            std::collections::hash_map::Entry::Vacant(entry) => {
+                self.product.push(product);
+                self.entities.push(entry.key().1.clone());
+                entry.insert(id);
+                Ok(id)
+            }
+        }
     }
 }
 
@@ -1038,9 +1108,9 @@ pub struct Job {
     pub operation: String,
     /// The artifacts bound to each input port, in port order. A many port
     /// holds its collection in order; every other port holds one artifact.
-    pub inputs: Vec<Vec<ArtifactInstance>>,
+    pub inputs: Vec<Vec<ArtifactId>>,
     /// One artifact per output port, in port order.
-    pub outputs: Vec<ArtifactInstance>,
+    pub outputs: Vec<ArtifactId>,
     pub dependencies: Vec<usize>,
     /// The stage of the step that made this job, if any.
     pub stage: Option<String>,
@@ -1053,19 +1123,21 @@ impl Job {
     ///
     /// If the job has no outputs. A resolved job always has one, since
     /// every operation declares at least one output.
-    pub fn output(&self) -> &ArtifactInstance {
-        &self.outputs[0]
+    pub fn output(&self) -> ArtifactId {
+        self.outputs[0]
     }
 
     /// Every input artifact, in port order.
-    pub fn input_artifacts(&self) -> impl Iterator<Item = &ArtifactInstance> {
-        self.inputs.iter().flatten()
+    pub fn input_artifacts(&self) -> impl Iterator<Item = ArtifactId> + '_ {
+        self.inputs.iter().flatten().copied()
     }
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ResolvedDag {
     pub jobs: Vec<Job>,
+    /// Every artifact the jobs refer to.
+    pub artifacts: Artifacts,
     /// Declaration order is retained for readable dry-run output.
     pub product_dimensions: BTreeMap<String, Vec<String>>,
     /// The file of each source whose inventory record gave one. Other
@@ -1074,6 +1146,10 @@ pub struct ResolvedDag {
 }
 
 impl ResolvedDag {
+    pub fn artifact(&self, id: ArtifactId) -> Artifact<'_> {
+        self.artifacts.get(id)
+    }
+
     /// Take each source's file from its record in `inventory`, replacing the
     /// files known before: a DAG resolved before its inventory's sources
     /// were located gets their files this way, without resolving it again.
@@ -1112,6 +1188,7 @@ impl ResolvedDag {
                     job
                 })
                 .collect(),
+            artifacts: self.artifacts.clone(),
             product_dimensions: self.product_dimensions.clone(),
             source_paths: self.source_paths.clone(),
         }

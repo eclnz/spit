@@ -340,7 +340,7 @@ fn unexpected_path<'a>(record: &'a SourceRecord, pipeline: &Pipeline) -> Option<
                 product.artifact_type.clone(),
                 record.entities.clone(),
             );
-            bind_path(pipeline, &product.dimensions, &artifact, || {
+            bind_path(pipeline, &product.dimensions, artifact.view(), || {
                 format!("source `{artifact}`")
             })
             .ok()

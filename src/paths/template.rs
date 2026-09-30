@@ -6,7 +6,7 @@ use std::fmt;
 
 use rustc_hash::FxHashMap;
 
-use crate::model::{ArtifactInstance, DirectoryDiscovery, Pipeline};
+use crate::model::{Artifact, DirectoryDiscovery, Pipeline};
 use crate::span::Located;
 use crate::template::{parse_template, Part};
 
@@ -171,10 +171,10 @@ pub(crate) fn require_directory(root: &std::path::Path) -> Result<(), PathError>
 pub(crate) fn bind_path(
     pipeline: &Pipeline,
     dimensions: &[String],
-    artifact: &ArtifactInstance,
+    artifact: Artifact<'_>,
     label: impl Fn() -> String,
 ) -> Result<String, PathError> {
-    ProductPath::new(pipeline, &artifact.product)?.bind(dimensions, artifact, label)
+    ProductPath::new(pipeline, artifact.product)?.bind(dimensions, artifact, label)
 }
 
 /// Binds many artifacts' paths, as [`bind_path`] does, finding each
@@ -195,15 +195,15 @@ impl<'p> PathBinder<'p> {
     pub(crate) fn bind(
         &mut self,
         dimensions: &[String],
-        artifact: &ArtifactInstance,
+        artifact: Artifact<'_>,
         label: impl Fn() -> String,
     ) -> Result<String, PathError> {
-        let product = match self.products.get(artifact.product.as_str()) {
+        let product = match self.products.get(artifact.product) {
             Some(product) => product,
             None => {
-                let product = ProductPath::new(self.pipeline, &artifact.product)?;
+                let product = ProductPath::new(self.pipeline, artifact.product)?;
                 self.products
-                    .entry(artifact.product.clone())
+                    .entry(artifact.product.to_owned())
                     .or_insert(product)
             }
         };
@@ -246,7 +246,7 @@ impl<'p> ProductPath<'p> {
     fn bind(
         &self,
         dimensions: &[String],
-        artifact: &ArtifactInstance,
+        artifact: Artifact<'_>,
         label: impl Fn() -> String,
     ) -> Result<String, PathError> {
         let mut relative = String::with_capacity(self.template.text.len() + 32);
@@ -292,7 +292,7 @@ impl<'p> ProductPath<'p> {
 /// declared order and joined by `__`, or `global` for none.
 fn push_entities(
     relative: &mut String,
-    artifact: &ArtifactInstance,
+    artifact: Artifact<'_>,
     dimensions: &[String],
 ) -> Result<(), PathError> {
     if dimensions.is_empty() {
