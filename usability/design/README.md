@@ -54,6 +54,9 @@ One design built in three steps, each leaving the tool working. See [removing in
    - a `require` with no groups left becomes an error.
 
    Rewrite the Recipes section of the guide (closes D8).
+
+   Done: `drop [dims] where source` with a count, `missing` or `has` condition; `skip` is an error that shows the `drop` rule to write. Every `drop` is judged against the same inventory and their union removed at once, groups form from every artifact and context (a group with none of the target counts 0), and removing every group of a grouping is an error. `require` takes all six count comparisons, runs after the drops, and fails when its grouping finds no group. Dropped groups are notes on stderr and records in the `.spitout` and `.spitdag`, with how many the rule found. Records given directly are checked before any rule removes some. The answer keys of scenarios 2 and 6 now use `drop` and resolve to the same jobs. The Recipes section of the reference is rewritten around `exclude`, `drop` and `require` (closes D8).
+
 9. **`dag --partial`,** the error that points to it and to `artifacts` (F5), and the hint that names an exclusion when an excluded input breaks a join.
 
 ### Phase 3: messages and language

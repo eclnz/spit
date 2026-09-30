@@ -10,7 +10,7 @@ This plan resolves the [guide gaps](../FINDINGS.md#guide-gaps), D1–D11.
 
 | Gap | Closed by |
 | --- | --- |
-| D8: how `skip` and `require` form groups | [Removing inputs](removing-inputs.md): the rewritten Recipes section defines groups for `drop` and `require` |
+| D8: how `skip` and `require` form groups | [Removing inputs](removing-inputs.md): the rewritten Recipes section defines groups for `drop` and `require`. *Done.* |
 | D5 (the rest): unmatched files are skipped silently | [Diagnostics](diagnostics.md#unmatched-files-d5): the unmatched-file note and `--unmatched` |
 | D6 (partly): the `[]` form | [Language, F6](language.md#f6-sources-with-no-dimensions): brackets become optional |
 
