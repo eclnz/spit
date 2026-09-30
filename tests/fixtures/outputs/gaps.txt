@@ -1,0 +1,460 @@
+$ spit dag strict.spitin --root .
+exit: 1
+--- stdout
+--- stderr
+note: found 20 source artifacts and 6 contexts under `.`
+note: ran `spit inputs strict.spitin` in memory
+error: source coverage for `image` at [ses=2,sub=02]: expected at least 2 artifact(s), found 1
+$ spit artifacts strict.spitin --root .
+exit: 0
+--- stdout
+Complete artifacts: 49
+  image[sub=01,ses=1,run=1] : Image<T1w>  (source)
+  image[sub=01,ses=1,run=2] : Image<T1w>  (source)
+  image[sub=01,ses=2,run=1] : Image<T1w>  (source)
+  image[sub=01,ses=2,run=2] : Image<T1w>  (source)
+  image[sub=02,ses=1,run=1] : Image<T1w>  (source)
+  image[sub=02,ses=1,run=2] : Image<T1w>  (source)
+  image[sub=03,ses=1,run=1] : Image<T1w>  (source)
+  image[sub=03,ses=1,run=2] : Image<T1w>  (source)
+  image[sub=03,ses=2,run=1] : Image<T1w>  (source)
+  image[sub=03,ses=2,run=2] : Image<T1w>  (source)
+  mask[sub=01] : Mask  (source)
+  mask[sub=02] : Mask  (source)
+  mask[sub=03] : Mask  (source)
+  reference[sub=01,ses=1] : Reference  (source)
+  reference[sub=01,ses=2] : Reference  (source)
+  reference[sub=02,ses=1] : Reference  (source)
+  reference[sub=02,ses=2] : Reference  (source)
+  reference[sub=03,ses=1] : Reference  (source)
+  reference[sub=03,ses=2] : Reference  (source)
+  cleaned[sub=01,ses=1,run=1] : Image<T1w>  (job 1: clean, stage prep)
+  cleaned[sub=01,ses=1,run=2] : Image<T1w>  (job 2: clean, stage prep)
+  cleaned[sub=01,ses=2,run=1] : Image<T1w>  (job 3: clean, stage prep)
+  cleaned[sub=01,ses=2,run=2] : Image<T1w>  (job 4: clean, stage prep)
+  cleaned[sub=02,ses=1,run=1] : Image<T1w>  (job 5: clean, stage prep)
+  cleaned[sub=02,ses=1,run=2] : Image<T1w>  (job 6: clean, stage prep)
+  cleaned[sub=03,ses=1,run=1] : Image<T1w>  (job 7: clean, stage prep)
+  cleaned[sub=03,ses=1,run=2] : Image<T1w>  (job 8: clean, stage prep)
+  cleaned[sub=03,ses=2,run=1] : Image<T1w>  (job 9: clean, stage prep)
+  cleaned[sub=03,ses=2,run=2] : Image<T1w>  (job 10: clean, stage prep)
+  aligned[sub=01,ses=1,run=1] : Image<T1w>  (job 11: align, stage prep)
+  aligned[sub=01,ses=1,run=2] : Image<T1w>  (job 12: align, stage prep)
+  aligned[sub=01,ses=2,run=1] : Image<T1w>  (job 13: align, stage prep)
+  aligned[sub=01,ses=2,run=2] : Image<T1w>  (job 14: align, stage prep)
+  aligned[sub=02,ses=1,run=1] : Image<T1w>  (job 15: align, stage prep)
+  aligned[sub=02,ses=1,run=2] : Image<T1w>  (job 16: align, stage prep)
+  aligned[sub=03,ses=1,run=1] : Image<T1w>  (job 17: align, stage prep)
+  aligned[sub=03,ses=1,run=2] : Image<T1w>  (job 18: align, stage prep)
+  aligned[sub=03,ses=2,run=1] : Image<T1w>  (job 19: align, stage prep)
+  aligned[sub=03,ses=2,run=2] : Image<T1w>  (job 20: align, stage prep)
+  averaged[sub=01,ses=1] : Image<T1w>  (job 21: average)
+  averaged[sub=01,ses=2] : Image<T1w>  (job 22: average)
+  averaged[sub=02,ses=1] : Image<T1w>  (job 23: average)
+  averaged[sub=03,ses=1] : Image<T1w>  (job 24: average)
+  averaged[sub=03,ses=2] : Image<T1w>  (job 25: average)
+  score[sub=01,ses=1] : Score  (job 26: compare)
+  score[sub=01,ses=2] : Score  (job 27: compare)
+  score[sub=02,ses=1] : Score  (job 28: compare)
+  score[sub=03,ses=1] : Score  (job 29: compare)
+  score[sub=03,ses=2] : Score  (job 30: compare)
+
+Incomplete artifacts: 4
+  cleaned[sub=02,ses=2,run=1] : Image<T1w>  (clean, stage prep)
+    - input `image` needs image[sub=02,ses=2,run=1], which a coverage gap holds back
+  aligned[sub=02,ses=2,run=1] : Image<T1w>  (align, stage prep)
+    - input `image` needs cleaned[sub=02,ses=2,run=1], which cannot be produced
+  averaged[sub=02,ses=2] : Image<T1w>  (average)
+    - input `images` needs aligned[sub=02,ses=2,run=1], which cannot be produced
+  score[sub=02,ses=2] : Score  (compare)
+    - input `image` needs averaged[sub=02,ses=2], which cannot be produced
+
+Coverage gaps: 1
+  source coverage for `image` at [ses=2,sub=02]: expected at least 2 artifact(s), found 1
+    holds back: image[sub=02,ses=2,run=1]
+--- stderr
+note: found 20 source artifacts and 6 contexts under `.`
+note: ran `spit inputs strict.spitin` in memory
+$ spit inputs skip.spitin --root . -o /dev/stdout
+exit: 0
+--- stdout
+sources:
+    mask[sub=01]
+    mask[sub=02]
+    mask[sub=03]
+
+contexts sessions:
+    [sub=01,ses=1]:
+        reference
+        [run=1,2]:
+            image
+
+    [sub=01,ses=2]:
+        reference
+        [run=1,2]:
+            image
+
+    [sub=02,ses=1]:
+        reference
+        [run=1,2]:
+            image
+
+    [sub=03,ses=1]:
+        reference
+        [run=1,2]:
+            image
+
+    [sub=03,ses=2]:
+        reference
+        [run=1,2]:
+            image
+--- stderr
+warning: skipped [ses=2,sub=02] because `skip image` rejected the group
+note: found 18 source artifacts and 5 contexts under `.`
+note: wrote the .spitout to `/dev/stdout`
+$ spit dag skip.spitin --root .
+exit: 0
+--- stdout
+Job 1
+  stage: prep
+  operation: clean
+  inputs:
+    image[sub=01,ses=1,run=1] : Image<T1w>
+    mask[sub=01] : Mask
+  output:
+    cleaned[sub=01,ses=1,run=1] : Image<T1w>
+
+Job 2
+  stage: prep
+  operation: clean
+  inputs:
+    image[sub=01,ses=1,run=2] : Image<T1w>
+    mask[sub=01] : Mask
+  output:
+    cleaned[sub=01,ses=1,run=2] : Image<T1w>
+
+Job 3
+  stage: prep
+  operation: clean
+  inputs:
+    image[sub=01,ses=2,run=1] : Image<T1w>
+    mask[sub=01] : Mask
+  output:
+    cleaned[sub=01,ses=2,run=1] : Image<T1w>
+
+Job 4
+  stage: prep
+  operation: clean
+  inputs:
+    image[sub=01,ses=2,run=2] : Image<T1w>
+    mask[sub=01] : Mask
+  output:
+    cleaned[sub=01,ses=2,run=2] : Image<T1w>
+
+Job 5
+  stage: prep
+  operation: clean
+  inputs:
+    image[sub=02,ses=1,run=1] : Image<T1w>
+    mask[sub=02] : Mask
+  output:
+    cleaned[sub=02,ses=1,run=1] : Image<T1w>
+
+Job 6
+  stage: prep
+  operation: clean
+  inputs:
+    image[sub=02,ses=1,run=2] : Image<T1w>
+    mask[sub=02] : Mask
+  output:
+    cleaned[sub=02,ses=1,run=2] : Image<T1w>
+
+Job 7
+  stage: prep
+  operation: clean
+  inputs:
+    image[sub=03,ses=1,run=1] : Image<T1w>
+    mask[sub=03] : Mask
+  output:
+    cleaned[sub=03,ses=1,run=1] : Image<T1w>
+
+Job 8
+  stage: prep
+  operation: clean
+  inputs:
+    image[sub=03,ses=1,run=2] : Image<T1w>
+    mask[sub=03] : Mask
+  output:
+    cleaned[sub=03,ses=1,run=2] : Image<T1w>
+
+Job 9
+  stage: prep
+  operation: clean
+  inputs:
+    image[sub=03,ses=2,run=1] : Image<T1w>
+    mask[sub=03] : Mask
+  output:
+    cleaned[sub=03,ses=2,run=1] : Image<T1w>
+
+Job 10
+  stage: prep
+  operation: clean
+  inputs:
+    image[sub=03,ses=2,run=2] : Image<T1w>
+    mask[sub=03] : Mask
+  output:
+    cleaned[sub=03,ses=2,run=2] : Image<T1w>
+
+Job 11
+  stage: prep
+  operation: align
+  inputs:
+    cleaned[sub=01,ses=1,run=1] : Image<T1w>
+    reference[sub=01,ses=1] : Reference
+  output:
+    aligned[sub=01,ses=1,run=1] : Image<T1w>
+  depends_on: 1
+
+Job 12
+  stage: prep
+  operation: align
+  inputs:
+    cleaned[sub=01,ses=1,run=2] : Image<T1w>
+    reference[sub=01,ses=1] : Reference
+  output:
+    aligned[sub=01,ses=1,run=2] : Image<T1w>
+  depends_on: 2
+
+Job 13
+  stage: prep
+  operation: align
+  inputs:
+    cleaned[sub=01,ses=2,run=1] : Image<T1w>
+    reference[sub=01,ses=2] : Reference
+  output:
+    aligned[sub=01,ses=2,run=1] : Image<T1w>
+  depends_on: 3
+
+Job 14
+  stage: prep
+  operation: align
+  inputs:
+    cleaned[sub=01,ses=2,run=2] : Image<T1w>
+    reference[sub=01,ses=2] : Reference
+  output:
+    aligned[sub=01,ses=2,run=2] : Image<T1w>
+  depends_on: 4
+
+Job 15
+  stage: prep
+  operation: align
+  inputs:
+    cleaned[sub=02,ses=1,run=1] : Image<T1w>
+    reference[sub=02,ses=1] : Reference
+  output:
+    aligned[sub=02,ses=1,run=1] : Image<T1w>
+  depends_on: 5
+
+Job 16
+  stage: prep
+  operation: align
+  inputs:
+    cleaned[sub=02,ses=1,run=2] : Image<T1w>
+    reference[sub=02,ses=1] : Reference
+  output:
+    aligned[sub=02,ses=1,run=2] : Image<T1w>
+  depends_on: 6
+
+Job 17
+  stage: prep
+  operation: align
+  inputs:
+    cleaned[sub=03,ses=1,run=1] : Image<T1w>
+    reference[sub=03,ses=1] : Reference
+  output:
+    aligned[sub=03,ses=1,run=1] : Image<T1w>
+  depends_on: 7
+
+Job 18
+  stage: prep
+  operation: align
+  inputs:
+    cleaned[sub=03,ses=1,run=2] : Image<T1w>
+    reference[sub=03,ses=1] : Reference
+  output:
+    aligned[sub=03,ses=1,run=2] : Image<T1w>
+  depends_on: 8
+
+Job 19
+  stage: prep
+  operation: align
+  inputs:
+    cleaned[sub=03,ses=2,run=1] : Image<T1w>
+    reference[sub=03,ses=2] : Reference
+  output:
+    aligned[sub=03,ses=2,run=1] : Image<T1w>
+  depends_on: 9
+
+Job 20
+  stage: prep
+  operation: align
+  inputs:
+    cleaned[sub=03,ses=2,run=2] : Image<T1w>
+    reference[sub=03,ses=2] : Reference
+  output:
+    aligned[sub=03,ses=2,run=2] : Image<T1w>
+  depends_on: 10
+
+Job 21
+  operation: average
+  inputs:
+    aligned[sub=01,ses=1,run=1] : Image<T1w>
+    aligned[sub=01,ses=1,run=2] : Image<T1w>
+  output:
+    averaged[sub=01,ses=1] : Image<T1w>
+  depends_on: 11, 12
+
+Job 22
+  operation: average
+  inputs:
+    aligned[sub=01,ses=2,run=1] : Image<T1w>
+    aligned[sub=01,ses=2,run=2] : Image<T1w>
+  output:
+    averaged[sub=01,ses=2] : Image<T1w>
+  depends_on: 13, 14
+
+Job 23
+  operation: average
+  inputs:
+    aligned[sub=02,ses=1,run=1] : Image<T1w>
+    aligned[sub=02,ses=1,run=2] : Image<T1w>
+  output:
+    averaged[sub=02,ses=1] : Image<T1w>
+  depends_on: 15, 16
+
+Job 24
+  operation: average
+  inputs:
+    aligned[sub=03,ses=1,run=1] : Image<T1w>
+    aligned[sub=03,ses=1,run=2] : Image<T1w>
+  output:
+    averaged[sub=03,ses=1] : Image<T1w>
+  depends_on: 17, 18
+
+Job 25
+  operation: average
+  inputs:
+    aligned[sub=03,ses=2,run=1] : Image<T1w>
+    aligned[sub=03,ses=2,run=2] : Image<T1w>
+  output:
+    averaged[sub=03,ses=2] : Image<T1w>
+  depends_on: 19, 20
+
+Job 26
+  operation: compare
+  inputs:
+    averaged[sub=01,ses=1] : Image<T1w>
+    reference[sub=01,ses=1] : Reference
+  output:
+    score[sub=01,ses=1] : Score
+  depends_on: 21
+
+Job 27
+  operation: compare
+  inputs:
+    averaged[sub=01,ses=2] : Image<T1w>
+    reference[sub=01,ses=2] : Reference
+  output:
+    score[sub=01,ses=2] : Score
+  depends_on: 22
+
+Job 28
+  operation: compare
+  inputs:
+    averaged[sub=02,ses=1] : Image<T1w>
+    reference[sub=02,ses=1] : Reference
+  output:
+    score[sub=02,ses=1] : Score
+  depends_on: 23
+
+Job 29
+  operation: compare
+  inputs:
+    averaged[sub=03,ses=1] : Image<T1w>
+    reference[sub=03,ses=1] : Reference
+  output:
+    score[sub=03,ses=1] : Score
+  depends_on: 24
+
+Job 30
+  operation: compare
+  inputs:
+    averaged[sub=03,ses=2] : Image<T1w>
+    reference[sub=03,ses=2] : Reference
+  output:
+    score[sub=03,ses=2] : Score
+  depends_on: 25
+--- stderr
+warning: skipped [ses=2,sub=02] because `skip image` rejected the group
+note: found 18 source artifacts and 5 contexts under `.`
+note: ran `spit inputs skip.spitin` in memory
+note: 18 source files verified.
+note: 30 jobs resolved: 20 in prep, 10 outside stages.
+$ spit artifacts skip.spitin --root .
+exit: 0
+--- stdout
+Complete artifacts: 48
+  image[sub=01,ses=1,run=1] : Image<T1w>  (source)
+  image[sub=01,ses=1,run=2] : Image<T1w>  (source)
+  image[sub=01,ses=2,run=1] : Image<T1w>  (source)
+  image[sub=01,ses=2,run=2] : Image<T1w>  (source)
+  image[sub=02,ses=1,run=1] : Image<T1w>  (source)
+  image[sub=02,ses=1,run=2] : Image<T1w>  (source)
+  image[sub=03,ses=1,run=1] : Image<T1w>  (source)
+  image[sub=03,ses=1,run=2] : Image<T1w>  (source)
+  image[sub=03,ses=2,run=1] : Image<T1w>  (source)
+  image[sub=03,ses=2,run=2] : Image<T1w>  (source)
+  mask[sub=01] : Mask  (source)
+  mask[sub=02] : Mask  (source)
+  mask[sub=03] : Mask  (source)
+  reference[sub=01,ses=1] : Reference  (source)
+  reference[sub=01,ses=2] : Reference  (source)
+  reference[sub=02,ses=1] : Reference  (source)
+  reference[sub=03,ses=1] : Reference  (source)
+  reference[sub=03,ses=2] : Reference  (source)
+  cleaned[sub=01,ses=1,run=1] : Image<T1w>  (job 1: clean, stage prep)
+  cleaned[sub=01,ses=1,run=2] : Image<T1w>  (job 2: clean, stage prep)
+  cleaned[sub=01,ses=2,run=1] : Image<T1w>  (job 3: clean, stage prep)
+  cleaned[sub=01,ses=2,run=2] : Image<T1w>  (job 4: clean, stage prep)
+  cleaned[sub=02,ses=1,run=1] : Image<T1w>  (job 5: clean, stage prep)
+  cleaned[sub=02,ses=1,run=2] : Image<T1w>  (job 6: clean, stage prep)
+  cleaned[sub=03,ses=1,run=1] : Image<T1w>  (job 7: clean, stage prep)
+  cleaned[sub=03,ses=1,run=2] : Image<T1w>  (job 8: clean, stage prep)
+  cleaned[sub=03,ses=2,run=1] : Image<T1w>  (job 9: clean, stage prep)
+  cleaned[sub=03,ses=2,run=2] : Image<T1w>  (job 10: clean, stage prep)
+  aligned[sub=01,ses=1,run=1] : Image<T1w>  (job 11: align, stage prep)
+  aligned[sub=01,ses=1,run=2] : Image<T1w>  (job 12: align, stage prep)
+  aligned[sub=01,ses=2,run=1] : Image<T1w>  (job 13: align, stage prep)
+  aligned[sub=01,ses=2,run=2] : Image<T1w>  (job 14: align, stage prep)
+  aligned[sub=02,ses=1,run=1] : Image<T1w>  (job 15: align, stage prep)
+  aligned[sub=02,ses=1,run=2] : Image<T1w>  (job 16: align, stage prep)
+  aligned[sub=03,ses=1,run=1] : Image<T1w>  (job 17: align, stage prep)
+  aligned[sub=03,ses=1,run=2] : Image<T1w>  (job 18: align, stage prep)
+  aligned[sub=03,ses=2,run=1] : Image<T1w>  (job 19: align, stage prep)
+  aligned[sub=03,ses=2,run=2] : Image<T1w>  (job 20: align, stage prep)
+  averaged[sub=01,ses=1] : Image<T1w>  (job 21: average)
+  averaged[sub=01,ses=2] : Image<T1w>  (job 22: average)
+  averaged[sub=02,ses=1] : Image<T1w>  (job 23: average)
+  averaged[sub=03,ses=1] : Image<T1w>  (job 24: average)
+  averaged[sub=03,ses=2] : Image<T1w>  (job 25: average)
+  score[sub=01,ses=1] : Score  (job 26: compare)
+  score[sub=01,ses=2] : Score  (job 27: compare)
+  score[sub=02,ses=1] : Score  (job 28: compare)
+  score[sub=03,ses=1] : Score  (job 29: compare)
+  score[sub=03,ses=2] : Score  (job 30: compare)
+
+Incomplete artifacts: 0
+--- stderr
+warning: skipped [ses=2,sub=02] because `skip image` rejected the group
+note: found 18 source artifacts and 5 contexts under `.`
+note: ran `spit inputs skip.spitin` in memory
