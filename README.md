@@ -15,6 +15,7 @@ Add or remove inputs and the same pipeline definition produces the right jobs, w
 - [CLI commands and options](#cli-commands-and-options)
 - [Write a pipeline](#write-a-pipeline)
 - [Supply the inputs](#supply-the-inputs)
+- [Where files live](#where-files-live)
 - [Resolve jobs](#resolve-jobs)
 - [Language reference](#language-reference)
 - [More examples](#more-examples)
@@ -81,7 +82,7 @@ Files come first; options follow them. `spit help` lists the commands, and `spit
 | Option | Effect |
 | --- | --- |
 | `-o <file>`, `--output <file>` | With `inputs`, write the `.spitout` to the file instead of standard output. With `dag`, write the `.spitdag`. |
-| `--root <directory>` | With `inputs`, the folder to scan; the recipe's folder by default. With `dag` and `artifacts`, the dataset folder, to check that each source file exists there. |
+| `--root <directory>` | The dataset root: the folder a recipe scans, the base of every path, and where each source file must exist. The recipe's folder by default; see [Where files live](#where-files-live). |
 | `--path-rules` | With `check`, list the path rule each product uses. |
 | `--paths` | With `dag`, print the file under every artifact. |
 | `--commands` | With `dag`, print each job's `verify` and command lines with their paths filled in, quoted as a shell reads them, so a line can be pasted into a shell run from the dataset folder. With `--paths`, print them under each job's artifacts. |
@@ -130,7 +131,15 @@ A pipeline names no dataset. Rules about what a dataset must hold, and records o
 
 ## Supply the inputs
 
-A `.spitin` recipe describes how to find a dataset's inputs. Its first line names the pipeline it serves, relative to the recipe's folder. For example, beside an `analysis.spit` that declares `source image: Image [sub, ses]`, `cohort.spitin` might read:
+A `.spitin` recipe describes how to find a dataset's inputs. Its first line names the pipeline it serves, relative to the recipe's folder. The smallest recipe is that line alone:
+
+```text
+pipeline analysis.spit
+```
+
+`spit inputs` then finds every source by its path rule: each file under the recipe's folder whose path matches a source's rule becomes one of that source's artifacts, with its dimensions read from the path. Nothing else is needed when the files say everything.
+
+Add rules when they say more than the files do. For example, beside an `analysis.spit` that declares `source image: Image [sub, ses]`, `cohort.spitin` might read:
 
 ```text
 pipeline analysis.spit
@@ -140,7 +149,7 @@ skip sessions count>=2 per [sub]
 path image: data/sub-{sub}/ses-{ses}/image.nii.gz
 ```
 
-`discover` reads the observed subject and session pairs from folders, and the image source expands over them. `skip` removes subjects with fewer than two sessions, reporting each on stderr. `require` instead fails such a group: `require sessions count>=2 per [sub]` names the subject with one session and its count. `sessions` remains a discovery rule name, not a product. Logical source types and operations stay in the `.spit`.
+`discover` reads the observed subject and session pairs from folders, and the image source expands over them, so a session folder without its image is an error rather than a session that silently has none. `skip` removes subjects with fewer than two sessions, reporting each on stderr. `require` instead fails such a group: `require sessions count>=2 per [sub]` names the subject with one session and its count. `sessions` remains a discovery rule name, not a product. Logical source types and operations stay in the `.spit`.
 
 `spit check cohort.spitin` checks the rules against the pipeline without reading the dataset. `spit inputs cohort.spitin -o cohort.spitout` scans the recipe's folder, or `--root`, and writes what it found:
 
@@ -167,6 +176,22 @@ sources:
 
 This creates two sort jobs for `alpha`, one for `beta`, and one merge job for each group. Add another shard and SPIT creates the corresponding job without changing the pipeline.
 
+## Where files live
+
+Every path SPIT reads or writes, for a source or an output, is relative to one folder: the dataset root. The root is:
+
+- **with a recipe:** the recipe's folder, unless `--root` names another;
+- **with a `.spitout`:** the folder `--root` names. Without `--root`, `dag` does not check that source files exist, and the `.spitdag` records no root.
+
+`--root` sets the root for `inputs`, `dag` and `artifacts` alike: the folder a recipe scans, the base of every path, and where each source file must exist. A recipe's `pipeline` line is relative to the recipe's own folder and may use `..`.
+
+Two layouts work well:
+
+- **Everything together:** the pipeline and recipe sit in the dataset folder, and `spit dag data/cohort.spitin` needs no `--root`.
+- **The pipeline apart:** the pipeline lives with your code, and the recipe sits in the dataset folder with `pipeline ../code/analysis.spit`, or elsewhere with `--root` naming the dataset.
+
+Write each path rule relative to the root: `path image: sub-{sub}/image.nii.gz` for files at `<root>/sub-01/image.nii.gz`.
+
 ## Resolve jobs
 
 ```sh
@@ -176,7 +201,7 @@ cargo run -- dag examples/commands/command_demo/command_demo.spit examples/comma
 cargo run -- dag examples/commands/command_demo/command_demo.spit examples/commands/command_demo/command_demo.spitout -o command_demo.spitdag
 ```
 
-`dag --paths` shows each artifact's file, `dag --commands` shows the exact command lines each job will run, and `-o` writes the `.spitdag`. It holds everything a backend needs to run the jobs, so a backend reads nothing else: no pipeline, path rule or command template. Paths in it are relative to the dataset folder.
+`dag --paths` shows each artifact's file, `dag --commands` shows the exact command lines each job will run, and `-o` writes the `.spitdag`. It holds everything a backend needs to run the jobs, so a backend reads nothing else: no pipeline, path rule or command template. Paths in it are relative to the dataset folder. The [`.spitdag` reference](docs/spitdag.md) describes each field.
 
 ### Find incomplete artifacts
 
@@ -243,6 +268,7 @@ The pipeline supplies operations and rules; the `.spitout` supplies artifact ide
 ## Documentation
 
 - [Language reference](docs/language-reference.md) — full `.spit`, `.spitin` and `.spitout` syntax
+- [The `.spitdag` format](docs/spitdag.md) — every field a backend reads
 - [Architecture](docs/architecture.md) — the internal model: resolution, typing, and the bound DAG
 - [Examples](docs/examples.md) — how to run each example pipeline, and what the larger ones show
 

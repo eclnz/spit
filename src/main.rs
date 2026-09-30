@@ -195,7 +195,7 @@ impl Flag {
     fn help(self, command: Command) -> &'static str {
         match (self, command) {
             (Self::Root, Command::Inputs) => "the folder to scan; the recipe's folder by default",
-            (Self::Root, _) => "the dataset folder, to check that each source file exists",
+            (Self::Root, _) => "the dataset folder every path is relative to; the recipe's folder by default",
             (Self::Output, Command::Inputs) => "write the .spitout to <file>, not standard output",
             (Self::Output, _) => "write the .spitdag to <file>",
             (Self::Paths, _) => "show each artifact's file",

@@ -11,7 +11,7 @@ This plan resolves the [guide gaps](../FINDINGS.md#guide-gaps), D1–D11.
 | Gap | Closed by |
 | --- | --- |
 | D8: how `skip` and `require` form groups | [Removing inputs](removing-inputs.md): the rewritten Recipes section defines groups for `drop` and `require` |
-| D5 (partly): unmatched files are skipped silently | [Diagnostics](diagnostics.md): the unmatched-file note and `--unmatched` |
+| D5 (the rest): unmatched files are skipped silently | [Diagnostics](diagnostics.md#unmatched-files-d5): the unmatched-file note and `--unmatched` |
 | D6 (partly): the `[]` form | [Language, F6](language.md#f6-sources-with-no-dimensions): brackets become optional |
 
 ## Gaps to write down now
@@ -119,7 +119,7 @@ The study's answer keys (`usability/harness/scenarios/*/key`) are working versio
 
 ## Order
 
-1. **D1–D4, D7, D9, D10 now,** in one commit. They describe behaviour that is not changing.
+1. **D1–D4, D7, D9, D10 now,** in one commit, with the whole-path rule of D5. They describe behaviour that is not changing. *Done.*
 2. **D5, D6 and D8** with the changes that close them.
 3. **D11** last, so the cohort example uses `drop` and `exclude`.
 
