@@ -3,10 +3,11 @@
 use std::collections::BTreeSet;
 use std::fmt::{self, Write as _};
 
+use crate::command::shell_word;
 use crate::model::{
     identity, push_identity, Artifact, ArtifactReport, EntityBinding, Gap, ResolvedDag,
 };
-use crate::spitdag::BoundDag;
+use crate::spitdag::{ArgPart, Argument, BoundDag, BoundJob};
 use crate::types::TypeExpr;
 
 /// The jobs as text, without ports or paths. Each job is written straight
@@ -60,15 +61,31 @@ struct ProductText<'a> {
     typed: String,
 }
 
-/// The jobs of a bound DAG as text, each artifact with its port, and with
-/// its path when `paths` is set.
-pub fn render_bound_dag(dag: &BoundDag, paths: bool) -> String {
+/// What a text report of a bound DAG shows of each job besides its
+/// operation and stage.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct View {
+    /// Each artifact's file.
+    pub paths: bool,
+    /// The job's `verify` and command lines, quoted as a shell reads them.
+    pub commands: bool,
+}
+
+/// The jobs of a bound DAG as text. With `view.paths`, each job shows its
+/// artifacts with their ports and files, then its command lines when
+/// `view.commands` is also set. With `view.commands` alone, each job shows
+/// only its heading and command lines. Otherwise each job shows its
+/// artifacts with their ports.
+pub fn render_bound_dag(dag: &BoundDag, view: View) -> String {
+    if view.commands && !view.paths {
+        return render_commands(dag);
+    }
     let mut writer = JobWriter::default();
     let artifact = |writer: &mut JobWriter, port: Option<&str>, id| {
         let artifact = dag.artifact(id);
         writer.line(port);
         writer.artifact(&artifact.identity(), artifact.artifact_type);
-        if paths {
+        if view.paths {
             writer.path(artifact.path);
         }
     };
@@ -85,8 +102,68 @@ pub fn render_bound_dag(dag: &BoundDag, paths: bool) -> String {
             artifact(&mut writer, (!single).then_some(port.as_str()), *output);
         }
         writer.tail(&job.depends_on);
+        if view.commands {
+            push_command_lines(&mut writer.text, dag, job);
+        }
     }
     writer.text
+}
+
+/// Each job as its heading, then its `verify` lines and its command line:
+///
+/// ```text
+/// Job 12  fit_panel  [model]
+///   verify: validate_panel build/clean/ne/wave1.csv
+///   run:    fit_panel --coef build/coef/ne.json build/clean/ne/wave1.csv
+/// ```
+fn render_commands(dag: &BoundDag) -> String {
+    let mut text = String::new();
+    for job in &dag.jobs {
+        if !text.is_empty() {
+            text.push('\n');
+        }
+        write!(text, "Job {}  {}", job.id, job.operation).expect("writing to a String");
+        if let Some(stage) = &job.stage {
+            write!(text, "  [{stage}]").expect("writing to a String");
+        }
+        text.push('\n');
+        push_command_lines(&mut text, dag, job);
+    }
+    text
+}
+
+/// A job's `verify` lines, then its `run` line.
+fn push_command_lines(text: &mut String, dag: &BoundDag, job: &BoundJob) {
+    for verify in &job.verify {
+        text.push_str("  verify: ");
+        push_command(text, dag, verify);
+        text.push('\n');
+    }
+    text.push_str("  run:    ");
+    match &job.command {
+        Some(command) => push_command(text, dag, command),
+        None => text.push_str("(no command)"),
+    }
+    text.push('\n');
+}
+
+/// A command's arguments, each with its paths filled in and quoted as a
+/// shell reads it, separated by spaces.
+fn push_command(text: &mut String, dag: &BoundDag, command: &[Argument]) {
+    let mut word = String::new();
+    for (index, argument) in command.iter().enumerate() {
+        word.clear();
+        for part in argument {
+            match part {
+                ArgPart::Text(literal) => word.push_str(literal),
+                ArgPart::Path(id) => word.push_str(dag.path(*id)),
+            }
+        }
+        if index > 0 {
+            text.push(' ');
+        }
+        text.push_str(&shell_word(&word));
+    }
 }
 
 /// What can be made from a DAG's sources, what cannot, and why.

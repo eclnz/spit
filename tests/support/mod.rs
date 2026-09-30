@@ -134,7 +134,13 @@ impl Drop for Tree {
 /// The jobs with their bound paths, or the binding error as text.
 pub fn bound(pipeline: &spit::Pipeline, dag: &spit::ResolvedDag) -> Result<String, String> {
     let bound = spit::bind_dag(pipeline, dag).map_err(|error| error.to_string())?;
-    Ok(spit::render_bound_dag(&bound, true))
+    Ok(spit::render_bound_dag(
+        &bound,
+        spit::View {
+            paths: true,
+            ..spit::View::default()
+        },
+    ))
 }
 
 /// Only the diagnostics that are errors.
