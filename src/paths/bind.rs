@@ -3,7 +3,7 @@
 use std::fmt;
 use std::path::Path;
 
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::rules::inspect_paths;
 use super::template::{error, require_directory, PathBinder, PathError};
@@ -116,6 +116,8 @@ pub(crate) fn bound_paths(
     dag: &ResolvedDag,
 ) -> Result<Vec<Option<String>>, PathError> {
     let mut binder = PathBinder::new(pipeline);
+    // Each product's dimensions, found once, by product number.
+    let mut dimensions: Vec<Option<&[String]>> = vec![None; dag.artifacts.products().count()];
     let mut paths = vec![None; dag.artifacts.len()];
     let mut owners: FxHashMap<String, ArtifactId> = FxHashMap::default();
     for id in dag
@@ -127,13 +129,22 @@ pub(crate) fn bound_paths(
             continue;
         }
         let artifact = dag.artifact(id);
-        let dimensions = dag
-            .product_dimensions
-            .get(artifact.product)
-            .ok_or_else(|| error(format!("unknown product `{}`", artifact.product)))?;
+        let number = dag.artifacts.product_of(id);
+        let dimensions = match dimensions[number as usize] {
+            Some(dimensions) => dimensions,
+            None => {
+                let found = dag
+                    .product_dimensions
+                    .get(artifact.product)
+                    .ok_or_else(|| error(format!("unknown product `{}`", artifact.product)))?;
+                *dimensions[number as usize].insert(found)
+            }
+        };
         let relative = match dag.source_path(id) {
             Some(path) => path.to_owned(),
-            None => binder.bind(dimensions, artifact, || format!("path for `{artifact}`"))?,
+            None => binder.bind_numbered(number, dimensions, artifact, || {
+                format!("path for `{artifact}`")
+            })?,
         };
         if let Some(previous) = owners.insert(relative.clone(), id) {
             let previous = dag.artifact(previous);
@@ -144,13 +155,24 @@ pub(crate) fn bound_paths(
         }
         paths[id.index()] = Some(relative);
     }
-    // The first such path in path order is the one reported.
+    // The first such path in path order is the one reported. Paths share
+    // their directories, so a directory found to hold no file, nor any above
+    // it, is kept, and a path in it needs no more looking up.
+    let mut clear: FxHashSet<&str> = FxHashSet::default();
     let enclosed = owners
         .iter()
         .filter_map(|(relative, &artifact)| {
-            let (directory, &other) = relative
+            let parent = &relative[..relative.rfind('/')?];
+            if clear.contains(parent) {
+                return None;
+            }
+            let found = relative
                 .match_indices('/')
-                .find_map(|(end, _)| owners.get_key_value(&relative[..end]))?;
+                .find_map(|(end, _)| owners.get_key_value(&relative[..end]));
+            let Some((directory, &other)) = found else {
+                clear.insert(parent);
+                return None;
+            };
             Some((relative, artifact, directory, other))
         })
         .min_by(|left, right| left.0.cmp(right.0));
