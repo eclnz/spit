@@ -12,6 +12,8 @@ use super::template::{bind_path, enclosing_path, error, PathError, PathPart, Pat
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum PathRule {
     Explicit(String),
+    /// An explicit source rule supplied by the recipe.
+    Recipe(String),
     /// The default `path:` rule written inside a stage.
     Stage {
         stage: String,
@@ -55,6 +57,21 @@ pub struct PathCoverage {
 }
 
 impl PathCoverage {
+    /// Label source rules supplied by a recipe after inspecting the merged
+    /// pipeline, so the listing makes each rule's origin clear.
+    #[must_use]
+    pub fn with_recipe_paths<'a>(mut self, products: impl IntoIterator<Item = &'a str>) -> Self {
+        let products: BTreeSet<_> = products.into_iter().collect();
+        for entry in &mut self.entries {
+            if entry.source && products.contains(entry.product.as_str()) {
+                if let PathRule::Explicit(template) = &entry.rule {
+                    entry.rule = PathRule::Recipe(template.clone());
+                }
+            }
+        }
+        self
+    }
+
     /// Mark each source in `products` as having its files given by the
     /// inventory. Binding takes those files over any rule, so the source
     /// needs none.
@@ -110,6 +127,13 @@ impl fmt::Display for PathCoverage {
                 PathRule::Explicit(template) => {
                     writeln!(f, "  {} ({role}): explicit {template}", entry.product)?;
                 }
+                PathRule::Recipe(template) => {
+                    writeln!(
+                        f,
+                        "  {} ({role}): explicit {template} (recipe)",
+                        entry.product
+                    )?;
+                }
                 PathRule::Stage { stage, template } => {
                     writeln!(
                         f,
@@ -124,7 +148,15 @@ impl fmt::Display for PathCoverage {
                     writeln!(f, "  {} ({role}): from the inventory", entry.product)?;
                 }
                 PathRule::Missing => {
-                    writeln!(f, "  {} ({role}): MISSING", entry.product)?;
+                    if entry.source {
+                        writeln!(
+                            f,
+                            "  {} ({role}): no rule (a recipe may supply one)",
+                            entry.product
+                        )?;
+                    } else {
+                        writeln!(f, "  {} ({role}): MISSING", entry.product)?;
+                    }
                 }
             }
         }
