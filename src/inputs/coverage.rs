@@ -3,10 +3,12 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use rustc_hash::{FxHashMap, FxHashSet};
+
 use crate::error::{DefinitionSubject, ResolveError};
 use crate::model::{
-    ArtifactInstance, CoverageAction, CoverageGap, CoverageRule, EntityBinding, InputRules,
-    Pipeline, SourceInventory,
+    ArtifactInstance, CoverageAction, CoverageGap, CoverageRule, EntityBinding, GroupKey,
+    InputRules, Pipeline, SourceInventory,
 };
 use crate::shape::dimension_set;
 
@@ -98,38 +100,56 @@ fn rejected_groups(
             .map(|record| &record.entities)
             .collect()
     };
-    let groups: BTreeSet<_> = if is_discovery {
-        bindings
-            .iter()
-            .filter_map(|binding| binding.project(&rule.group_by))
-            .collect()
+    let groups = if is_discovery {
+        distinct_groups(bindings.iter().copied(), &rule.group_by)
     } else {
-        inventory
-            .contexts
-            .iter()
-            .chain(inventory.artifacts.iter().map(|record| &record.entities))
-            .filter_map(|binding| binding.project(&rule.group_by))
-            .collect()
+        let records = inventory.artifacts.iter().map(|record| &record.entities);
+        distinct_groups(inventory.contexts.iter().chain(records), &rule.group_by)
     };
     // Each group's members, found in one pass rather than once per group.
-    let mut members: BTreeMap<EntityBinding, Vec<&EntityBinding>> = BTreeMap::new();
+    let mut members: FxHashMap<GroupKey, Vec<&EntityBinding>> = FxHashMap::default();
     for binding in bindings {
-        if let Some(group) = binding.project(&rule.group_by) {
-            members.entry(group).or_default().push(binding);
+        if let Some(key) = binding.group_key(&rule.group_by) {
+            members.entry(key).or_default().push(binding);
         }
     }
     groups
         .into_iter()
-        .filter(|context| {
-            let members = members.get(context).map_or(&[][..], Vec::as_slice);
+        .filter(|(key, _)| {
+            let members = members.get(key).map_or(&[][..], Vec::as_slice);
             !rule.count.allows(members.len()) || missing_values(rule, members).next().is_some()
         })
-        .map(|context| SkippedGroup {
+        .map(|(_, context)| SkippedGroup {
             target: rule.product.clone(),
             context,
             group_by: rule.group_by.clone(),
         })
         .collect()
+}
+
+/// Each distinct projection of `bindings` onto `dimensions`, with its key,
+/// in binding order. Bindings are grouped by key, so a projection is built
+/// once for each group rather than once for each binding.
+fn distinct_groups<'a>(
+    bindings: impl IntoIterator<Item = &'a EntityBinding>,
+    dimensions: &[String],
+) -> Vec<(GroupKey, EntityBinding)> {
+    let mut seen = FxHashSet::default();
+    let mut groups = Vec::new();
+    for binding in bindings {
+        let Some(key) = binding.group_key(dimensions) else {
+            continue;
+        };
+        if !seen.contains(&key) {
+            let group = binding
+                .project(dimensions)
+                .expect("a binding with a key binds its dimensions");
+            seen.insert(key.clone());
+            groups.push((key, group));
+        }
+    }
+    groups.sort_unstable_by(|(_, left), (_, right)| left.cmp(right));
+    groups
 }
 
 /// Remove every context, discovered binding and source record in `groups`.
@@ -242,49 +262,41 @@ pub(crate) fn coverage_gaps(
     discovery: bool,
 ) -> Vec<CoverageGap> {
     let discovered = inventory.discovered.get(&rule.product);
-    let groups: BTreeSet<_> = if discovery {
-        discovered
-            .into_iter()
-            .flatten()
-            .filter_map(|binding| binding.project(&rule.group_by))
-            .collect()
+    let groups = if discovery {
+        distinct_groups(discovered.into_iter().flatten(), &rule.group_by)
     } else {
-        inventory
+        let bindings = inventory
             .contexts
             .iter()
             .chain(inventory.discovered.values().flatten())
-            .chain(inventory.artifacts.iter().map(|record| &record.entities))
-            .filter_map(|binding| binding.project(&rule.group_by))
-            .collect()
+            .chain(inventory.artifacts.iter().map(|record| &record.entities));
+        distinct_groups(bindings, &rule.group_by)
     };
     // Each group's members, found in one pass rather than once per group.
-    let mut members: BTreeMap<EntityBinding, Vec<ArtifactInstance>> = BTreeMap::new();
-    let mut bindings: BTreeMap<EntityBinding, Vec<&EntityBinding>> = BTreeMap::new();
+    let mut members: FxHashMap<GroupKey, Vec<&ArtifactInstance>> = FxHashMap::default();
+    let mut bindings: FxHashMap<GroupKey, Vec<&EntityBinding>> = FxHashMap::default();
     if discovery {
         for binding in discovered.into_iter().flatten() {
-            if let Some(group) = binding.project(&rule.group_by) {
-                bindings.entry(group).or_default().push(binding);
+            if let Some(key) = binding.group_key(&rule.group_by) {
+                bindings.entry(key).or_default().push(binding);
             }
         }
     } else {
         for artifact in artifacts.get(&rule.product).into_iter().flatten() {
-            if let Some(group) = artifact.entities.project(&rule.group_by) {
-                members.entry(group).or_default().push(artifact.clone());
+            if let Some(key) = artifact.entities.group_key(&rule.group_by) {
+                members.entry(key.clone()).or_default().push(artifact);
+                bindings.entry(key).or_default().push(&artifact.entities);
             }
-        }
-        for (group, artifacts) in &members {
-            let entities = artifacts.iter().map(|artifact| &artifact.entities);
-            bindings.insert(group.clone(), entities.collect());
         }
     }
     let mut gaps = Vec::new();
-    for context in groups {
-        let members = members.get(&context).map_or(&[][..], Vec::as_slice);
-        let bindings = bindings.get(&context).map_or(&[][..], Vec::as_slice);
+    for (key, context) in groups {
+        let members = members.get(&key).map_or(&[][..], Vec::as_slice);
+        let bindings = bindings.get(&key).map_or(&[][..], Vec::as_slice);
         let errors = group_errors(rule_index, rule, &context, bindings, discovery);
         gaps.extend(errors.into_iter().map(|error| CoverageGap {
             error,
-            sources: members.to_vec(),
+            sources: members.iter().map(|&member| member.clone()).collect(),
         }));
     }
     gaps
