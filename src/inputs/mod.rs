@@ -380,7 +380,6 @@ pub struct ResolvedInputs {
 }
 
 impl ResolvedInputs {
-    /// The first missing requirement, as an error.
     pub fn require_complete(&self) -> Result<(), ResolveError> {
         self.gaps
             .first()

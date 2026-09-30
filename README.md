@@ -8,21 +8,6 @@ SPIT separates the pipeline from the data. You describe the pipeline once — it
 
 Add or remove inputs and the same pipeline definition produces the right jobs, with no edits.
 
-## Contents
-
-- [Try it](#try-it)
-- [The three steps and their files](#the-three-steps-and-their-files)
-- [CLI commands and options](#cli-commands-and-options)
-- [Write a pipeline](#write-a-pipeline)
-- [Supply the inputs](#supply-the-inputs)
-- [Resolve jobs](#resolve-jobs)
-- [Language reference](#language-reference)
-- [More examples](#more-examples)
-- [How SPIT works](#how-spit-works)
-- [Documentation](#documentation)
-- [Development](#development)
-- [Contributing](#contributing)
-
 ## Try it
 
 Requires a [Rust toolchain](https://www.rust-lang.org/tools/install) (stable, via `cargo`). From this repository:
@@ -33,7 +18,7 @@ cargo run -- dag examples/commands/command_demo/command_demo.spit examples/comma
 cargo run -- dag examples/commands/command_demo/command_demo.spit examples/commands/command_demo/command_demo.spitout -o command_demo.spitdag
 ```
 
-Use `cargo build` to get the `target/debug/spit` executable. With `cargo run`, the `--` separates Cargo's arguments from SPIT's arguments.
+`cargo build` produces `target/debug/spit`. With `cargo run`, `--` separates Cargo's arguments from SPIT's.
 
 Live validation in VS Code is maintained in the separate `spit-vscode` repository.
 
@@ -56,7 +41,7 @@ SPIT runs in three steps. Each is one command, and each reads the files the prev
 
 A later step may also take an earlier step's input and run that step in memory: `dag` and `artifacts` take a `.spitin` in place of the `.spitout`. A `.spitin` names its own pipeline, so it is given alone: `spit dag dataset.spitin`. Giving a `.spit` beside it is an error, so the two cannot disagree. A `.spitout` names no pipeline, so it takes one: `spit dag analysis.spit dataset.spitout`.
 
-SPIT has no backend yet: nothing in this repository runs a `.spitdag`.
+SPIT has no backend yet: nothing here runs a `.spitdag`.
 
 ## CLI commands and options
 
@@ -155,7 +140,7 @@ contexts sessions:
         image
 ```
 
-The `.spitout` lists the source identities found in the dataset. Paths come from the pipeline's source rules; when a recipe defines a source rule instead, the `.spitout` carries that rule once in `source_paths:`. Later steps need neither the recipe nor a rescan. A dataset indexer or person can write the same inventory. Older records with `: path` are accepted only when the path agrees with the declared rule. The text processing example uses [command_demo.spitout](examples/commands/command_demo/command_demo.spitout):
+The `.spitout` lists the source identities found in the dataset. Paths come from the pipeline's source rules; when a recipe defines a source rule instead, the `.spitout` carries that rule once in `source_paths:`. Later steps need neither the recipe nor a rescan. A dataset indexer or person can write the same inventory. The text processing example uses [command_demo.spitout](examples/commands/command_demo/command_demo.spitout):
 
 ```text
 sources:
@@ -168,13 +153,7 @@ This creates two sort jobs for `alpha`, one for `beta`, and one merge job for ea
 
 ## Resolve jobs
 
-```sh
-cargo run -- check examples/commands/command_demo/command_demo.spit --path-rules
-cargo run -- dag examples/commands/command_demo/command_demo.spit examples/commands/command_demo/command_demo.spitout --paths
-cargo run -- dag examples/commands/command_demo/command_demo.spit examples/commands/command_demo/command_demo.spitout -o command_demo.spitdag
-```
-
-`dag --paths` shows each artifact's file, and `-o` writes the `.spitdag`. It holds everything a backend needs to run the jobs, so a backend reads nothing else: no pipeline, path rule or command template. Paths in it are relative to the dataset folder.
+`dag --paths` shows each artifact's file, and `-o` writes the `.spitdag`. It holds everything a backend needs (no pipeline, path rule or command template), with paths relative to the dataset folder.
 
 ### Find incomplete artifacts
 
@@ -201,58 +180,21 @@ An incomplete artifact has a missing or ambiguous input, a collection below its 
 
 ## Language reference
 
-Beyond the basics above, `.spit` files support typed products, multi-output operations, `many`/aggregation inputs with selectors (`where`, `same`, `vary`, `each`), symbolic type variables, stages, path placeholders, and `use` imports for sharing definitions across files; `.spitin` recipes add directory discovery and coverage rules (`require`, `skip`). See the [full language reference](docs/language-reference.md) for syntax and rules for each of these.
+Typed products, multi-output operations, `many` inputs with selectors, type variables, stages, path placeholders and `use` imports are covered in the [language reference](docs/language-reference.md).
 
 ## More examples
 
-| Example | Shows |
-| --- | --- |
-| [Basic](examples/basic/basic.spit) | Sectioned syntax, with its recipe and inputs in separate files |
-| [Untyped](examples/types/untyped.spit) | Resolution without types |
-| [Typed](examples/types/typed.spit) | Parameterized symbolic types |
-| [Branching](examples/pipelines/branching.spit) | Shared inputs and branches |
-| [Complex](examples/pipelines/complex.spit) | Nested aggregation |
-| [Selectors](examples/pipelines/selectors.spit) | `where`, `same`, a two-output step, a verification, and a many input beside a single input |
-| [Analytics](examples/analytics/analytics.spit) | Joins and rollups |
-| [Field survey](examples/commands/field_survey/field_survey.spit) | A larger pipeline with sidecar files, calibration, alignment between spaces, and commands |
-| [MRtrix3 ACT](examples/commands/mrtrix3_act/mrtrix3_act.spit) | A larger pipeline with commands in nested preprocessing, anatomy, and tractography stages, with a folder per stage and per-stage file formats |
-| [Stages](examples/stages/stages.spit) | Preprocessing and analysis stages, a stage's own path default, and `{stage}` paths |
-| [Nested stages](examples/stages/nested.spit) | Stages within a stage, beside a step in the outer stage itself |
-| [Imports](examples/imports/imported.spit) | Reuse source and operation definitions with `text::` names |
-| [Compiler stress pipelines](examples/stress/README.md) | Deep type inference, deliberate type errors, uneven joins, and large multilevel DAGs |
-
-Run `cargo test --test source_files` to see the field survey example checked against a temporary tree of empty source files: it resolves when every file is present, and reports a missing file, a photo without its sidecar, and a source path that is a directory. The MRtrix example imports each DWI's `.bvec`, `.bval`, and JSON metadata into a `.mif` before processing.
-
-## How SPIT works
-
-```text
-.spit ──► 1. check ──► compiled pipeline
-                            │
-.spitin + data ──► 2. inputs ──► .spitout
-                            │        │
-                            ▼        ▼
-                        3. dag ──► .spitdag
-```
-
-The pipeline supplies operations and rules; the `.spitout` supplies artifact identities and their files. Resolution checks dimensions, matching, cardinality, and any known types, then binds each artifact to its file and expands each command into its arguments. Step 2 and step 3 each build on step 1 and never on each other, and a backend would read only the `.spitdag`. SPIT does not inspect file contents or command-specific metadata itself; `verify` commands run those checks with your own tools.
+[docs/examples.md](docs/examples.md) lists each pipeline under [`examples/`](examples) with the command that resolves it.
 
 ## Documentation
 
 - [Language reference](docs/language-reference.md) — full `.spit`, `.spitin` and `.spitout` syntax
 - [Architecture](docs/architecture.md) — the internal model: resolution, typing, and the bound DAG
-- [Examples](docs/examples.md) — how to run each example pipeline, and what the larger ones show
+- [Examples](docs/examples.md) — each example pipeline and how to run it
 
 ## Development
 
-```sh
-cargo test
-```
-
-Runs the full test suite, including the integration tests under `tests/` that check the example pipelines end to end.
-
-## Contributing
-
-Issues and pull requests are welcome. For a change to the language or resolver, add or update a test under `tests/` and, if it changes behavior described here, update this README or the [language reference](docs/language-reference.md) alongside it.
+`cargo test` runs the full suite, including end-to-end tests of the examples. A change to the language or resolver should add a test under `tests/` and update the docs.
 
 ## Disclaimer
 

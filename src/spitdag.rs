@@ -11,7 +11,6 @@ use crate::json::{write_array, write_number, write_string, ObjectWriter, Out};
 use crate::model::{identity, ArtifactId, Artifacts, EntityBinding};
 use crate::types::TypeExpr;
 
-/// The schema version a `.spitdag` is written with.
 pub const SPITDAG_VERSION: usize = 3;
 
 /// A resolved DAG with its paths bound and its commands expanded. Its
@@ -21,7 +20,6 @@ pub const SPITDAG_VERSION: usize = 3;
 pub struct BoundDag {
     /// The absolute dataset folder every path is relative to, when known.
     pub root: Option<String>,
-    /// Each job after the jobs it depends on.
     pub jobs: Vec<BoundJob>,
     artifacts: Artifacts,
     /// Each artifact's file, relative to the dataset root, by id; empty for
@@ -37,9 +35,7 @@ pub struct BoundJob {
     pub operation: String,
     /// The stage of the step that made this job, as `outer/inner`.
     pub stage: Option<String>,
-    /// Each input port and its artifacts, in port order.
     pub inputs: Vec<(String, Vec<ArtifactId>)>,
-    /// Each output port and its artifact, in port order.
     pub outputs: Vec<(String, ArtifactId)>,
     pub depends_on: Vec<usize>,
     /// The command that makes the outputs; `None` when the operation has none.
@@ -48,7 +44,6 @@ pub struct BoundJob {
     pub verify: Vec<Vec<Argument>>,
 }
 
-/// An artifact of a bound DAG, with its path.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct BoundArtifact<'a> {
     pub product: &'a str,
@@ -59,7 +54,6 @@ pub struct BoundArtifact<'a> {
     dimensions: &'a [String],
 }
 
-/// One command-line argument: literal text and artifact paths, joined.
 pub type Argument = Vec<ArgPart>;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -85,7 +79,6 @@ impl<'a> BoundArtifact<'a> {
 }
 
 impl BoundJob {
-    /// Every input artifact, in port order.
     pub fn input_artifacts(&self) -> impl Iterator<Item = ArtifactId> + '_ {
         self.inputs
             .iter()
@@ -188,7 +181,6 @@ impl BoundDag {
             .collect()
     }
 
-    /// The jobs that depend on each job, by ID.
     pub fn dependents(&self) -> BTreeMap<usize, Vec<usize>> {
         let mut dependents: BTreeMap<_, Vec<_>> = BTreeMap::new();
         for job in &self.jobs {
@@ -199,7 +191,6 @@ impl BoundDag {
         dependents
     }
 
-    /// The `.spitdag` document.
     pub fn to_json(&self) -> String {
         let mut out = String::new();
         // The text is kept whole, so there is nothing to hand on.
@@ -397,7 +388,6 @@ fn fingerprint(work: &str) -> u64 {
     hash.0
 }
 
-/// `value` as 16 hexadecimal digits.
 fn write_hex(out: &mut String, value: u64) {
     const HEX: &[u8; 16] = b"0123456789abcdef";
     for shift in (0..16).rev() {

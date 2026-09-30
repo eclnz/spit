@@ -97,7 +97,6 @@ impl Command {
         COMMANDS.into_iter().find(|command| command.name() == name)
     }
 
-    /// The files it takes, as the usage line shows them.
     fn files(self) -> &'static str {
         self.spec().files
     }
@@ -129,7 +128,6 @@ impl Command {
         }
     }
 
-    /// The flags this command accepts.
     fn flags(self) -> &'static [Flag] {
         self.spec().flags
     }
@@ -178,7 +176,6 @@ impl Flag {
         }
     }
 
-    /// What the flag's value is, for a flag that takes one.
     fn value(self) -> Option<&'static str> {
         match self {
             Self::Root => Some("<directory>"),
@@ -284,9 +281,7 @@ impl Flags {
 
 struct CliArgs {
     command: Command,
-    /// The file every command takes.
     file: String,
-    /// The inputs after a pipeline, for a command that takes two files.
     second: Option<String>,
     flags: Flags,
 }
@@ -301,7 +296,6 @@ impl CliArgs {
     }
 }
 
-/// What the command line asks for.
 enum Request {
     Run(CliArgs),
     Help(Option<Command>),
@@ -405,7 +399,6 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> Result<Request, String>
     }))
 }
 
-/// The file `command` takes, and a second when it takes two.
 fn take_files(command: Command, files: Vec<String>) -> Result<(String, Option<String>), String> {
     let mut files = files.into_iter();
     let Some(file) = files.next() else {
@@ -549,7 +542,6 @@ fn inputs(args: &CliArgs) -> Result<(), Box<dyn Error>> {
 /// A recipe, and the pipeline its `pipeline` line names, checked.
 struct Loaded {
     recipe: InputSpec,
-    /// The file the recipe's `pipeline` line names.
     pipeline_file: PathBuf,
     pipeline_text: String,
     checked: Checked,
@@ -885,7 +877,6 @@ fn read_stdin() -> Result<String, String> {
     Ok(text)
 }
 
-/// Read a file, naming it if it cannot be read.
 fn read_file(path: &str) -> Result<String, String> {
     fs::read_to_string(path).map_err(|reason| format!("cannot read `{path}`: {reason}"))
 }

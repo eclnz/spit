@@ -1,6 +1,6 @@
 # Language reference
 
-This is the full syntax reference for `.spit` pipelines, `.spitin` recipes, and `.spitout` inputs. See the [README](../README.md) for a quick start and the [architecture](architecture.md) doc for the internal model.
+Syntax reference for `.spit` pipelines, `.spitin` recipes, and `.spitout` inputs. See the [README](../README.md) for a quick start and [architecture](architecture.md) for the internal model.
 
 A `#` that starts a word begins a comment, as in Bash. A `#` inside a word or in quotes is kept, so `--color=#fff` and `'#run'` are ordinary arguments.
 
@@ -85,13 +85,9 @@ A `verify` command checks a job's inputs before its command runs, using the tool
 verify register: check_same_grid {moving} {reference}
 ```
 
-Input port names are optional. A port written as a lowercase word alone, as in `operation copy(image)`, is named `image` and untyped; type names start with a capital letter. An unnamed single input is `{input}`; multiple unnamed inputs are `{input1}`, `{input2}`, and so on. An operation whose only input is a `many` input can also reach it as `{inputs}`, whatever its name. Named ports give clearer errors, although errors also name the product bound to a port. `{output}` is the path of a single unnamed output, so `output` cannot name an input port. A command must use every output placeholder; a `verify` command may use inputs only. Command templates give ordered words and arguments, not shell pipelines or redirection; an unquoted `|`, `>`, `&&`, or the like is passed to the program as an argument, and SPIT warns about it. Words are split and quoted as in Bash, and every argument is passed literally: `$` and backticks are not expanded. As in Bash, text in single quotes is literal, so `awk '{print $1}'` needs no escaping; a placeholder is filled in unquoted text or double quotes. Write `{{` or `}}`, or `\{` and `\}`, for a literal brace elsewhere. Every command is checked when the pipeline is loaded: braces and quotes must balance, placeholders must name the operation's ports, and `{output}` must appear.
+Input port names are optional. A port written as a lowercase word alone, as in `operation copy(image)`, is named `image` and untyped; type names start with a capital letter. An unnamed single input is `{input}`; multiple unnamed inputs are `{input1}`, `{input2}`, and so on. An operation whose only input is a `many` input can also reach it as `{inputs}`, whatever its name. `{output}` is the path of a single unnamed output, so `output` cannot name an input port. A command must use every output placeholder; a `verify` command may use inputs only. Command templates give ordered words and arguments, not shell pipelines or redirection; an unquoted `|`, `>`, `&&`, or the like is passed to the program as an argument, and SPIT warns about it. Words are split and quoted as in Bash, but every argument is passed literally: `$` and backticks are not expanded. Single-quoted text is literal, so `awk '{print $1}'` needs no escaping; a placeholder is filled in unquoted text or double quotes. Write `{{` or `}}`, or `\{` and `\}`, for a literal brace elsewhere. Every command is checked when the pipeline is loaded: braces and quotes must balance, placeholders must name the operation's ports, and `{output}` must appear.
 
-The first word of a command must be an executable available on `PATH` (or an executable path). SPIT emits that command without managing its installation or loading shell functions:
-
-```text
-command process: process_tool {image} {output}
-```
+The first word of a command must be an executable on `PATH` (or an executable path); SPIT does not manage its installation or load shell functions.
 
 ## Stages
 
@@ -139,11 +135,7 @@ The lines directly in a stage share one indentation. A nested stage without its 
 
 SPIT orders stages by the products they read, so a stage needs no `after` clause. Stages must not depend on each other in a cycle, even through steps outside every stage. A nested stage is compared with its siblings, and counts toward its outer stage's place among the outer stage's siblings; a step written in an outer stage itself, like one outside every stage, passes on what it reads. `dag` counts the jobs in each outermost stage and names each job's stage, and the `.spitdag` gives each job its stage as a list of names from outermost to innermost:
 
-```sh
-cargo run -- dag examples/stages/stages.spit examples/stages/stages.spitout
-```
-
-Stages are written in the flow form; a sectioned document cannot declare them. A step outside every stage stays valid.
+Stages are written in the flow form; a sectioned document cannot declare them.
 
 ## Reuse definitions
 
@@ -178,10 +170,6 @@ A template fills these placeholders from the artifact it names, here `aligned[su
 `product`, `entities`, and `stage` are reserved: no product may declare a dimension with one of those names. Values keep letters, digits, and `-`; any other byte is written as `%` and two hex digits, so a value never adds a directory.
 
 Path rules are checked when the pipeline is loaded, even for products with no resolved jobs. SPIT rejects unbalanced braces, a dimension the product does not declare, a rule that omits one of the product's dimensions (use `{entities}` or name each one), two products whose rules give the same path for the same entities, such as a default rule without `{product}`, and a rule that puts files inside another product's file path, such as `in/{id}.txt/out.txt` beside `in/{id}.txt`. A path must be relative, name a file rather than end in `/`, and contain no empty, `.`, or `..` directory. Missing rules are reported by `--paths` and `--root`, and collisions between resolved artifact paths once jobs are bound. SPIT warns when two artifacts' paths differ only in letter case, such as `id=A` and `id=a`: where case is ignored, as by default on macOS and Windows, they are one file.
-
-As in Bash, an unquoted `#` starts a comment only at the start of a word, so `--color=#fff` is one argument. A `#` that ends a word, as in `{output}# note`, stays part of the word; SPIT warns about it, since it reads like a comment. Put a space before `#` to start a comment, or quote the text to keep it.
-
-Place a source path beside its `source` line and a derived path beside its assignment. The default can stay near the top of the file.
 
 Path rules also find sources. `spit inputs recipe.spitin --root data` lists each file under `data` whose path matches a source's rule, in the pipeline or the recipe, reading entity values from its placeholders. Links to files and directories are followed. A value is read only as SPIT writes it, so a file such as `in/%41.txt`, whose value SPIT would write `A`, is skipped with a warning rather than listed under a path no job would use.
 
@@ -246,7 +234,7 @@ require image run=1,2 per [subject, visit]
 
 ## Inputs
 
-A `.spitout` lists a dataset's settled source identities. `spit inputs` writes one, and a dataset indexer or a person can write one too. Paths come from rules in the pipeline or, if a recipe supplies a source rule, a `source_paths:` section written once in the `.spitout`. A record ending in `: path` is accepted for older inventories only if that path agrees with its rule. `contexts:` names a group even when one of its required inputs is absent:
+A `.spitout` lists a dataset's settled source identities. `spit inputs` writes one, and a dataset indexer or a person can write one too. Paths come from rules in the pipeline or, if a recipe supplies a source rule, a `source_paths:` section written once in the `.spitout`. `contexts:` names a group even when one of its required inputs is absent:
 
 ```text
 contexts:
@@ -274,7 +262,7 @@ source_paths:
     image: data/sub-{sub}/image.nii.gz
 ```
 
-The DAG can then use the rule without loading the recipe. Per-record paths cannot redirect an artifact away from it.
+The DAG can then use the rule without loading the recipe.
 
 ## Optional types
 
@@ -288,4 +276,4 @@ operation project(sample: Frame<$Kind,$SourceSpace>, calibration: Calibration<$K
 
 ## Grouped sections
 
-SPIT also accepts grouped `products:`, `operations:`, and `pipeline:` sections in a pipeline, and a `constraints:` section of `require` and `skip` rules in a recipe, as an alternative to the flow style used elsewhere in this reference. The flow style is intended for writing a pipeline in the order you read it.
+A pipeline may instead use grouped `products:`, `operations:` and `pipeline:` sections, and a recipe a `constraints:` section of `require` and `skip` rules, in place of the flow style used above.

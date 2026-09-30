@@ -1,8 +1,6 @@
 # Compiler stress pipelines
 
-These are compile-only fixtures. They model artifact identities and types; the
-`.dat` and `.bin` paths are illustrative, and no commands are supplied to run
-the jobs. Use `check`, `check --path-rules`, or `dag` to inspect them.
+Compile-only fixtures: artifact identities and types, with illustrative paths and no commands.
 
 ```sh
 cargo run -- check examples/stress/type_lab.spit
@@ -25,9 +23,4 @@ an unknown frame kind, which the camera calibration resolves. The opaque
 branch retains an unknown processing state in
 `Classified<Camera,World,Unknown>`.
 
-The tests also mutate the valid type lab to confirm that compilation rejects
-a camera calibration on a lidar stream, a second lidar stream in the camera
-port, and a declared Mars output after a World calibration. A missing camera
-slice confirms that keyed matching does not silently borrow another capture.
-They also check that a type mismatch inferred across two stages fails with an
-empty inventory, before any concrete jobs are created.
+The tests also mutate the valid type lab to confirm that compilation rejects a camera calibration on a lidar stream, a second lidar stream in the camera port, and a declared Mars output after a World calibration, and that keyed matching does not borrow another capture's slice. A type mismatch inferred across two stages fails with an empty inventory, before any jobs exist.

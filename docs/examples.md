@@ -1,6 +1,6 @@
 # Examples
 
-Each pipeline below, under [`examples/`](../examples), checks cleanly and sits beside a `.spitin` recipe with its `require` rules and a `.spitout` of its inputs. Run the command from the repository root to see its jobs; add `--paths` to see each artifact's file or `-o plan.spitdag` to write them, or run `spit check` on the `.spit` or `.spitin` alone.
+Each pipeline sits beside a `.spitin` recipe and a `.spitout` of its inputs. Run the command from the repository root; add `--paths` to see each artifact's file or `-o plan.spitdag` to write the `.spitdag`.
 
 | Pipeline | Shows | Command | Jobs |
 | --- | --- | --- | --- |
@@ -13,6 +13,8 @@ Each pipeline below, under [`examples/`](../examples), checks cleanly and sits b
 | [Nested stages](../examples/stages/nested.spit) | Stages within a stage | `cargo run -- dag examples/stages/nested.spit examples/stages/nested.spitout` | 9 |
 | [Field survey](../examples/commands/field_survey/field_survey.spit) | Sidecar files, calibration, alignment between spaces, and commands | `cargo run -- dag examples/commands/field_survey/field_survey.spit examples/commands/field_survey/field_survey.spitout` | 93 |
 | [MRtrix3 ACT](../examples/commands/mrtrix3_act/mrtrix3_act.spit) | A diffusion MRI pipeline in nested stages, from BIDS import to connectome | `cargo run -- dag examples/commands/mrtrix3_act/mrtrix3_act.spit examples/commands/mrtrix3_act/mrtrix3_act.spitout` | 93 |
+
+Smaller examples, without a recipe of their own: [Basic](../examples/basic/basic.spit) (sectioned syntax), [Untyped](../examples/types/untyped.spit) and [Typed](../examples/types/typed.spit) (resolution with and without types), [Imports](../examples/imports/imported.spit) (`text::` names), and [compiler stress pipelines](../examples/stress/README.md).
 
 ## Analytics
 
@@ -32,7 +34,7 @@ Image products share one type, `MRI<Kind,Space>`, and product names carry the pr
 
 SPIT emits these command lines; it does not read acquisition metadata, check transforms, or judge image quality.
 
-To try source discovery with empty placeholder files, run:
+To try source discovery on empty placeholder files:
 
 ```sh
 sh examples/commands/mrtrix3_act/mock_mrtrix3_inputs.sh
@@ -41,4 +43,4 @@ cargo run -- dag examples/commands/mrtrix3_act/mrtrix3_act.spit examples/command
 cargo run -- dag examples/commands/mrtrix3_act/mrtrix3_act.spit examples/commands/mrtrix3_act/mrtrix3_mock_data/inputs.spitout --root examples/commands/mrtrix3_act/mrtrix3_mock_data -o examples/commands/mrtrix3_act/mrtrix3_mock_data/jobs.spitdag
 ```
 
-The script creates the three sessions and seven DWI runs listed in the example inventory. The recipe has no hand-written context or source records: it discovers session directories and scans the files. `inputs.spitout` nests 39 source identities under three session contexts, with no repeated paths because the pipeline declares them. The DAG contains 93 planned jobs. The files are empty, so the generated MRtrix3, FSL, and SynthSeg commands are for inspection only and cannot process this mock dataset.
+The script creates three sessions and seven DWI runs. The recipe writes no records: it discovers the session directories and scans the files. The files are empty, so the commands are for inspection only.

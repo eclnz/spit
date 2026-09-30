@@ -192,7 +192,6 @@ impl Diagnostic {
     }
 }
 
-/// A diagnostic rendered with its column; see [`Diagnostic::display_in`].
 struct DisplayIn<'a> {
     diagnostic: &'a Diagnostic,
     column: Option<usize>,
@@ -256,7 +255,6 @@ pub struct Context<'a> {
 }
 
 impl<'a> Context<'a> {
-    /// The pipeline in the file at `path`.
     pub fn at(path: &'a Path) -> Self {
         Self {
             path: Some(path),
@@ -298,7 +296,6 @@ struct Parsed {
 }
 
 impl Parsed {
-    /// The document checked with `warnings`, its pipeline as written.
     fn checked(self, warnings: Vec<Diagnostic>) -> Checked {
         Checked {
             pipeline: self.as_written.unwrap_or(self.document.pipeline),
@@ -537,7 +534,6 @@ pub fn diagnose_recipe_against(text: &str, pipeline: &Pipeline) -> Vec<Diagnosti
     finish(diagnostics, text, None)
 }
 
-/// Each parse error in `text` as a diagnostic.
 fn located_all<'a>(
     source: DiagnosticSource,
     errors: impl IntoIterator<Item = ParseError> + 'a,
@@ -1150,9 +1146,7 @@ fn empty_step_warnings(
     warnings
 }
 
-/// Blank only the line that failed, preserving all later line numbers. This
-/// lets the existing parser continue to report errors on other lines without
-/// changing the fail-fast parsing API used by the CLI and library callers.
+/// Blank only the line that failed, keeping later line numbers, and parse again.
 fn recover_parse_errors<T>(
     text: &str,
     parse: impl Fn(&str) -> Result<T, ParseError>,

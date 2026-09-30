@@ -506,8 +506,7 @@ fn a_spitout_source_path_rule_cannot_override_the_pipeline() {
 
 #[test]
 fn contexts_follow_the_discover_rule_and_list_in_the_order_written() {
-    // The pipeline declares [ses, sub] and, with the alphabetical fallback,
-    // used to put `ses` first in the contexts and sort by it.
+    // The pipeline declares [ses, sub]: contexts still follow the rule's order.
     let files = [
         "data/sub-1/ses-1/image.nii.gz",
         "data/sub-1/ses-2/image.nii.gz",

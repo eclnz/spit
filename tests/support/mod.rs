@@ -137,7 +137,6 @@ pub fn bound(pipeline: &spit::Pipeline, dag: &spit::ResolvedDag) -> Result<Strin
     Ok(spit::render_bound_dag(&bound, true))
 }
 
-/// Only the diagnostics that are errors.
 pub fn errors(diagnostics: Vec<Diagnostic>) -> Vec<Diagnostic> {
     diagnostics
         .into_iter()
@@ -159,7 +158,6 @@ pub fn rendered(diagnostics: &[Diagnostic]) -> Vec<String> {
     diagnostics.iter().map(ToString::to_string).collect()
 }
 
-/// Command output as text.
 pub fn text(bytes: &[u8]) -> String {
     String::from_utf8_lossy(bytes).into_owned()
 }

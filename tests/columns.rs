@@ -150,9 +150,7 @@ require raw count>=1 per [id
 
 #[test]
 fn unclosed_generic_brackets_point_at_the_specific_opener() {
-    // The missing `>` belongs to `Stream<`, several layers out from where
-    // parsing actually gives up; earlier this fell back to a span covering
-    // almost the whole line.
+    // The missing `>` belongs to `Stream<`, several layers out from where parsing gives up.
     let text = "operations:\n  f(Stream<Frame<X>,Y) -> Signal\n";
     assert_eq!(pointed(text, None), ["error 2: <"]);
 

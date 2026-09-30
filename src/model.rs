@@ -47,7 +47,6 @@ impl Symbol {
         Self { id, text }
     }
 
-    /// Compare as text; equal symbols are equal text.
     fn cmp_text(self, other: Self) -> Ordering {
         if self == other {
             Ordering::Equal
@@ -156,7 +155,6 @@ impl fmt::Debug for EntityBinding {
     }
 }
 
-/// A binding's pairs, shown as a map.
 struct DebugPairs<'a>(&'a EntityBinding);
 
 impl fmt::Debug for DebugPairs<'_> {
@@ -183,29 +181,24 @@ impl FromIterator<(String, String)> for EntityBinding {
 }
 
 impl EntityBinding {
-    /// The value bound to `dimension`, if any.
     pub fn get(&self, dimension: &str) -> Option<&str> {
         self.pair(dimension).map(|value| value.text)
     }
 
-    /// Whether `dimension` has a value.
     pub fn binds(&self, dimension: &str) -> bool {
         self.pair(dimension).is_some()
     }
 
-    /// Each dimension and its value, in dimension name order.
     pub fn iter(&self) -> impl Iterator<Item = (&str, &str)> {
         self.pairs()
             .iter()
             .map(|(dimension, value)| (dimension.text, value.text))
     }
 
-    /// The dimensions with a value, in name order.
     pub fn dimensions(&self) -> impl Iterator<Item = &str> {
         self.pairs().iter().map(|(dimension, _)| dimension.text)
     }
 
-    /// How many dimensions have a value.
     pub fn len(&self) -> usize {
         self.pairs().len()
     }
@@ -480,7 +473,6 @@ impl fmt::Display for ArtifactInstance {
 }
 
 impl ArtifactInstance {
-    /// This artifact, borrowed.
     pub fn view(&self) -> Artifact<'_> {
         Artifact {
             product: &self.product,
@@ -500,7 +492,6 @@ pub struct Artifact<'a> {
 }
 
 impl Artifact<'_> {
-    /// An owned copy.
     pub fn to_instance(self) -> ArtifactInstance {
         ArtifactInstance {
             product: self.product.to_owned(),
@@ -516,7 +507,6 @@ impl fmt::Display for Artifact<'_> {
     }
 }
 
-/// An artifact's place in its DAG's [`Artifacts`].
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct ArtifactId(u32);
 
@@ -544,7 +534,6 @@ pub struct Artifacts {
 }
 
 impl Artifacts {
-    /// How many artifacts there are.
     pub fn len(&self) -> usize {
         self.entities.len()
     }
@@ -589,7 +578,6 @@ impl Artifacts {
         self.ids.get(&(number, entities.clone())).copied()
     }
 
-    /// Every artifact, in the order they were added.
     pub fn ids(&self) -> impl Iterator<Item = ArtifactId> {
         (0..self.len() as u32).map(ArtifactId)
     }
@@ -732,7 +720,6 @@ impl fmt::Display for DefaultPort {
 pub struct OperationDef {
     pub name: String,
     pub inputs: Vec<InputPort>,
-    /// Every artifact one job writes, in declaration order.
     pub outputs: Vec<OutputPort>,
     pub shape_rule: ShapeRule,
     /// An optional declared dimension consumed by an aggregate operation.
@@ -841,7 +828,6 @@ impl InputBinding {
         &self.product
     }
 
-    /// Whether any `@` selector is present.
     pub fn has_selectors(&self) -> bool {
         self.vary.is_some()
             || !self.pinned.is_empty()
@@ -898,7 +884,6 @@ impl Invocation {
         self
     }
 
-    /// The first output, which names the step in diagnostics.
     pub fn output_product(&self) -> &str {
         self.outputs.first().map_or("", String::as_str)
     }
@@ -976,7 +961,6 @@ pub struct Pipeline {
     pub commands: Vec<CommandDef>,
     pub path_template: Option<PathTemplate>,
     pub product_paths: BTreeMap<String, PathTemplate>,
-    /// Stages in declaration order.
     pub stages: Vec<StageDef>,
 }
 
@@ -1153,7 +1137,6 @@ impl InputRules {
         self.discoveries.is_empty() && self.constraints.is_empty() && self.source_paths.is_empty()
     }
 
-    /// The discovery rule named `name`, if any.
     pub fn discovery(&self, name: &str) -> Option<&DirectoryDiscovery> {
         self.discoveries.iter().find(|rule| rule.name == name)
     }
@@ -1354,12 +1337,10 @@ impl ResolvedDag {
         }
     }
 
-    /// The file `id`'s inventory record gave it, if it is a source with one.
     pub fn source_path(&self, id: ArtifactId) -> Option<&str> {
         self.source_paths.get(id.index())?.as_deref()
     }
 
-    /// The products with a source whose inventory record gave its file.
     pub fn located_products(&self) -> impl Iterator<Item = &str> {
         self.located.iter().map(String::as_str)
     }
@@ -1423,7 +1404,6 @@ pub struct CoverageGap {
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ArtifactReport {
-    /// Every source, by product in declaration order.
     pub sources: Vec<ArtifactId>,
     pub dag: ResolvedDag,
     pub incomplete: Vec<IncompleteJob>,
