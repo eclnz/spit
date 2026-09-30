@@ -267,6 +267,16 @@ pub(crate) fn identity<'a>(
     entities: impl IntoIterator<Item = (&'a str, &'a str)>,
 ) -> String {
     let mut text = String::with_capacity(product.len() + 32);
+    push_identity(&mut text, product, entities);
+    text
+}
+
+/// Add `product[dimension=value,...]` to `text`.
+pub(crate) fn push_identity<'a>(
+    text: &mut String,
+    product: &str,
+    entities: impl IntoIterator<Item = (&'a str, &'a str)>,
+) {
     text.push_str(product);
     text.push('[');
     for (index, (dimension, value)) in entities.into_iter().enumerate() {
@@ -278,7 +288,6 @@ pub(crate) fn identity<'a>(
         text.push_str(value);
     }
     text.push(']');
-    text
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -413,6 +422,18 @@ impl Artifacts {
             artifact_type,
             entities: &self.entities[id.index()],
         }
+    }
+
+    /// The number of `id`'s product, which [`Artifacts::products`] lists.
+    pub(crate) fn product_of(&self, id: ArtifactId) -> u32 {
+        self.product[id.index()]
+    }
+
+    /// Each product's name and type, by number.
+    pub(crate) fn products(&self) -> impl Iterator<Item = (&str, &ArtifactType)> {
+        self.products
+            .iter()
+            .map(|(product, artifact_type)| (product.as_str(), artifact_type))
     }
 
     pub fn entities(&self, id: ArtifactId) -> &EntityBinding {
