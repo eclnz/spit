@@ -13,12 +13,12 @@ The plans that answer the [usability findings](../FINDINGS.md), and the order to
 
 ## Status
 
-- **Done:** steps 1–10. Phase 1 and Phase 2 are complete, as is the first step of Phase 3.
-- **Next:** step 11, sources with no brackets.
-- **Resolved so far:** B1, B2, B3, B5, B6, B7, F1–F5, F7, F8, D1–D5, D7–D10.
+- **Done:** steps 1–11. Phase 1 and Phase 2 are complete, along with the first two steps of Phase 3.
+- **Next:** step 12, varying over several dimensions in one aggregation.
+- **Resolved so far:** B1, B2, B3, B5, B6, B7, F1–F5, F6, F7, F8, D1–D10.
 - **Still open:**
-  - B4, F6, F9, F10;
-  - D6 and D11;
+  - B4, F9, F10;
+  - D11;
   - the VS Code extension.
 
 ## Order
@@ -106,6 +106,7 @@ One design built in three steps, each leaving the tool working. See [removing in
     - **Unmatched files.** `Listing` in `src/inputs/discover.rs` walks every file. Count the files no source rule matches: add a note to `inputs`, and a `--unmatched` option that lists them on stdout and writes no `.spitout` (a new `Flag` in `src/main.rs`).
     - **Test.** Scenario 6's layout: `S07.json` gets the hint and the warning, and the store with no price list gets neither.
 11. **F6:** sources without brackets, and bare names for products with no dimensions (closes D6). See [language](language.md#f6-sources-with-no-dimensions).
+    Done: source declarations accept omitted brackets with or without a type; dimensionless artifact names display without `[]`, and a dimensionless source joins every driven job.
     - **Parser.** The source declaration parser is in `src/parser/declarations.rs`; the error today is "expected product name followed by [dimensions]".
     - **Display.** `push_identity` in `src/model.rs` writes `name[]` for no dimensions. Change it to write the bare name, and check that the `.spitout` reader accepts the bare record (it does for `source_lut`).
     - **Stored outputs.** Re-save and review them. The answer keys ignore display, so they must still pass.

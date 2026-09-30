@@ -441,9 +441,10 @@ pub(super) fn type_error(number: usize, ty: &str, error: TypeParseError) -> Pars
 }
 
 pub(super) fn parse_product(line: &str, number: usize) -> Result<ProductDef, ParseError> {
-    let (declaration, dimensions) = line
-        .split_once('[')
-        .ok_or_else(|| ParseError::new(number, "expected product name followed by [dimensions]"))?;
+    let (declaration, dimensions) = match line.split_once('[') {
+        Some((declaration, dimensions)) => (declaration, Some(dimensions)),
+        None => (line, None),
+    };
     let (name, artifact_type) = if let Some((name, ty)) = declaration.split_once(':') {
         let ty = ty.trim();
         let ty = parse_type_expr(ty, false).map_err(|error| type_error(number, ty, error))?;
@@ -451,13 +452,28 @@ pub(super) fn parse_product(line: &str, number: usize) -> Result<ProductDef, Par
     } else {
         (declaration.trim(), TypeExpr::Unknown)
     };
-    let name = identifier(name, number, "product name")?;
-    // From the `[` that is never closed to the end of the declaration.
-    let bracketed = &line[declaration.len()..];
-    let dimensions = dimensions.strip_suffix(']').ok_or_else(|| {
-        ParseError::new(number, "expected closing `]` in product declaration").at_token(bracketed)
+    let name = identifier(name, number, "product name").map_err(|error| {
+        if dimensions.is_none() && name.split_whitespace().count() > 1 {
+            ParseError::new(
+                number,
+                "expected source name, optional `: Type`, and optional [dimensions]",
+            )
+            .at_token(name)
+        } else {
+            error
+        }
     })?;
-    let dimensions = comma_items(dimensions, number)?;
+    let dimensions = if let Some(dimensions) = dimensions {
+        // From the `[` that is never closed to the end of the declaration.
+        let bracketed = &line[declaration.len()..];
+        let dimensions = dimensions.strip_suffix(']').ok_or_else(|| {
+            ParseError::new(number, "expected closing `]` in product declaration")
+                .at_token(bracketed)
+        })?;
+        comma_items(dimensions, number)?
+    } else {
+        Vec::new()
+    };
     for dimension in &dimensions {
         identifier(dimension, number, "dimension")?;
     }

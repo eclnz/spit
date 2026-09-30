@@ -430,8 +430,12 @@ pub(crate) fn push_identity<'a>(
     entities: impl IntoIterator<Item = (&'a str, &'a str)>,
 ) {
     text.push_str(product);
+    let mut entities = entities.into_iter().peekable();
+    if entities.peek().is_none() {
+        return;
+    }
     text.push('[');
-    for (index, (dimension, value)) in entities.into_iter().enumerate() {
+    for (index, (dimension, value)) in entities.enumerate() {
         if index > 0 {
             text.push(',');
         }
@@ -493,7 +497,11 @@ impl ArtifactInstance {
 
 impl fmt::Display for ArtifactInstance {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}[{}]", self.product, self.entities)
+        if self.entities.is_empty() {
+            f.write_str(&self.product)
+        } else {
+            write!(f, "{}[{}]", self.product, self.entities)
+        }
     }
 }
 
@@ -530,7 +538,11 @@ impl Artifact<'_> {
 
 impl fmt::Display for Artifact<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}[{}]", self.product, self.entities)
+        if self.entities.is_empty() {
+            f.write_str(self.product)
+        } else {
+            write!(f, "{}[{}]", self.product, self.entities)
+        }
     }
 }
 
@@ -1297,7 +1309,9 @@ impl Removal {
                 .unwrap_or(usize::MAX)
         });
         let mut text = self.product.clone().unwrap_or_default();
-        push_bindings(&mut text, pairs.into_iter());
+        if !pairs.is_empty() || self.product.is_none() {
+            push_bindings(&mut text, pairs.into_iter());
+        }
         text
     }
 
