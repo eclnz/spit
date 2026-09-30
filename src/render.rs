@@ -4,7 +4,7 @@ use std::collections::BTreeSet;
 use std::fmt::{self, Write as _};
 
 use crate::model::{
-    identity, push_identity, Artifact, ArtifactInstance, ArtifactReport, Gap, ResolvedDag,
+    identity, push_identity, Artifact, ArtifactReport, EntityBinding, Gap, ResolvedDag,
 };
 use crate::spitdag::BoundDag;
 use crate::types::TypeExpr;
@@ -171,12 +171,14 @@ impl fmt::Display for Report<'_> {
             .coverage
             .iter()
             .flat_map(|gap| &gap.sources)
+            .map(|source| (source.product.as_str(), &source.entities))
             .collect();
         let sources = report
             .sources
             .iter()
-            .filter(|source| !held_back.contains(source))
-            .map(|source| format!("{}  (source)", typed_artifact(dag, source.view())));
+            .map(|&source| dag.artifact(source))
+            .filter(|source| !held_back.contains(&(source.product, source.entities)))
+            .map(|source| format!("{}  (source)", typed_artifact(dag, source)));
         let made = dag.jobs.iter().flat_map(|job| {
             job.outputs.iter().map(move |&artifact| {
                 let stage = in_stage(job.stage.as_deref());
@@ -200,7 +202,7 @@ impl Report<'_> {
     fn write_incomplete(
         &self,
         f: &mut fmt::Formatter<'_>,
-        held_back: &BTreeSet<&ArtifactInstance>,
+        held_back: &BTreeSet<(&str, &EntityBinding)>,
     ) -> fmt::Result {
         let dag = &self.0.dag;
         let incomplete = &self.0.incomplete;
@@ -216,7 +218,8 @@ impl Report<'_> {
                 match gap {
                     Gap::Unmatched(error) => writeln!(f, "    - {error}")?,
                     Gap::Blocked { port, artifact } => {
-                        let reason = if held_back.contains(artifact) {
+                        let key = (artifact.product.as_str(), &artifact.entities);
+                        let reason = if held_back.contains(&key) {
                             "a coverage gap holds back"
                         } else {
                             "cannot be produced"
