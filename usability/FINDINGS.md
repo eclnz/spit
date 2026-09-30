@@ -8,6 +8,8 @@ Priority reflects how much time the item cost and how many runs hit it:
 - **P2**: forced several runs to guess or to read the `.spitdag` JSON by hand.
 - **P3**: a single run, or cosmetic.
 
+> F1, B1 and F2 are one problem, and are resolved together by the [removing inputs design](design/removing-inputs.md), which replaces `skip` with `exclude`, `drop` and `dag --partial`.
+
 ## Summary
 
 | ID | Kind | Priority | Item |
