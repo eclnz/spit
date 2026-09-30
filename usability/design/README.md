@@ -117,7 +117,8 @@ One design built in three steps, each leaving the tool working. See [removing in
     - **Grouping.** In `step_driver` (`src/shape.rs`), a group becomes a set difference.
     - **Checks.** The contract check in `src/compile/steps.rs` compares sets. `inferred_dimensions` in `src/lower.rs` may also need the set.
     - **Test.** The original scenario 3 shape, one leaderboard over every model and config, with collections ordered by the product's dimensions.
-13. **F10:** a call's `@ vary` inferred from the operation's `@ drop`. Fill a missing `vary` from the operation in the contract check (`src/compile/steps.rs`) before checking. The lowering in `src/lower.rs` infers outputs before that, so check that it sees the filled binding.
+13. **F10:** a call's `@ vary` inferred from the operation's `@ drop`.
+    Done: omitted `@ vary` inherits the operation's dropped dimensions for one or several dimensions, including flow output inference; explicit mismatches still fail, and an operation without `@ drop` still requires `@ vary`. Fill a missing `vary` from the operation in the contract check (`src/compile/steps.rs`) before checking. The lowering in `src/lower.rs` infers outputs before that, so check that it sees the filled binding.
 14. **B4:** `check recipe.spitin --path-rules`, and the source wording on a pipeline. See [small fixes](small-fixes.md#b4-show-every-path-rule-whichever-file-holds-it).
     - **The refusal.** It is in `check()` in `src/main.rs`.
     - **Merging rules.** Merge the recipe's source rules with `with_source_paths` (`src/inputs/discover.rs`) before `inspect_paths`.

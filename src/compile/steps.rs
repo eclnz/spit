@@ -9,7 +9,9 @@ use crate::error::ResolveError;
 use crate::model::{
     Cardinality, InputBinding, InputPort, Invocation, OperationDef, ProductDef, ShapeRule,
 };
-use crate::shape::{broadcast_dimensions, dimension_set, step_context, step_driver, BoundInput};
+use crate::shape::{
+    broadcast_dimensions, dimension_set, effective_binding, step_context, step_driver, BoundInput,
+};
 
 use super::{find_product, unsupported};
 
@@ -35,8 +37,14 @@ pub(super) fn step_shape(
     products: &BTreeMap<&str, &ProductDef>,
     outputs: &[&ProductDef],
 ) -> Result<StepShape, ResolveError> {
+    let bindings: Vec<_> = operation
+        .inputs
+        .iter()
+        .zip(&invocation.inputs)
+        .map(|(port, binding)| effective_binding(binding, port, operation))
+        .collect();
     let mut inputs = Vec::new();
-    for (port, binding) in operation.inputs.iter().zip(&invocation.inputs) {
+    for (port, binding) in operation.inputs.iter().zip(&bindings) {
         let product = find_product(products, binding.product_name())?;
         check_selectors(operation, port, binding, product)?;
         inputs.push(BoundInput {
@@ -271,7 +279,7 @@ fn check_selectors(
         Cardinality::Many => {
             if binding.vary.is_empty() {
                 return fail(format!(
-                    "many input `{port_name}` requires an explicit vary(dimension) binding"
+                    "many input `{port_name}` requires vary(dimension) or an operation @ drop(dimension)"
                 ));
             }
             if dimension_set(&binding.vary).len() != binding.vary.len() {

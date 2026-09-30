@@ -5,7 +5,22 @@
 use std::cmp::Reverse;
 use std::collections::BTreeSet;
 
-use crate::model::InputBinding;
+use crate::model::{Cardinality, InputBinding, InputPort, OperationDef};
+
+/// Supply a many input's omitted `@ vary` from the operation contract.
+/// Explicit selectors remain unchanged so the contract check can reject a
+/// mismatch.
+pub(crate) fn effective_binding(
+    binding: &InputBinding,
+    port: &InputPort,
+    operation: &OperationDef,
+) -> InputBinding {
+    let mut effective = binding.clone();
+    if port.cardinality == Cardinality::Many && effective.vary.is_empty() {
+        effective.vary.clone_from(&operation.aggregated_dimensions);
+    }
+    effective
+}
 
 /// A binding's product dimensions, less any `where` pins, and whether it
 /// takes many artifacts.
