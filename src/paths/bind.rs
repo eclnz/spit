@@ -16,6 +16,16 @@ pub fn validate_source_files(
     dag: &ResolvedDag,
     root: &Path,
 ) -> Result<VerifiedFiles, PathError> {
+    validate_bound_source_files(pipeline, dag, root).map(|(verified, _)| verified)
+}
+
+/// As [`validate_source_files`], with the paths it bound, so that
+/// [`bind_dag_with`](crate::bind_dag_with) need not bind them again.
+pub fn validate_bound_source_files(
+    pipeline: &Pipeline,
+    dag: &ResolvedDag,
+    root: &Path,
+) -> Result<(VerifiedFiles, BoundPaths), PathError> {
     require_directory(root)?;
     check_rules(pipeline, dag)?;
     let paths = bound_paths(pipeline, dag)?;
@@ -62,8 +72,13 @@ pub fn validate_source_files(
             verified.sources += 1;
         }
     }
-    Ok(verified)
+    Ok((verified, BoundPaths(paths)))
 }
+
+/// Each artifact's path in a resolved DAG, as [`validate_bound_source_files`]
+/// bound them.
+#[derive(Clone, Debug)]
+pub struct BoundPaths(pub(crate) Vec<Option<String>>);
 
 /// The files [`validate_source_files`] found under the root.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
