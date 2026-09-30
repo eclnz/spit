@@ -36,7 +36,7 @@ operation mean(images: many Image) -> Image @ drop(run)
 command mean: mean_tool {images} --out {output}
 ```
 
-Declare an operation before its first use. Inputs in a call follow the port order in the declaration. A `one` input must resolve to exactly one artifact for each job, so every other input may only use dimensions the driving input has, unless it broadcasts them with `@ each(...)`; SPIT rejects a pipeline that breaks this before reading any inputs, and reports a missing match for a job. A `many` input needs `@ vary(dimension)`, and its command placeholder expands to one separately quoted argument per artifact, ordered by the product's dimensions with numbers compared as numbers, so `run=2` comes before `run=10`. A many placeholder must occupy a whole argument. An operation takes at most one `many` input, which may sit beside `one` inputs; each of those is matched once per group:
+Declare an operation before its first use. Inputs in a call follow the port order in the declaration. A `one` input must resolve to exactly one artifact for each job, so every other input may only use dimensions the driving input has, unless it broadcasts them with `@ each(...)`; SPIT rejects a pipeline that breaks this before reading any inputs, and reports a missing match for a job. A `many` input needs `@ vary(dimension)`, and its command placeholder expands to one separately quoted argument per artifact, in natural order. Artifacts are compared dimension by dimension in the product's declared order. Within a value, runs of digits compare as numbers and other characters compare one by one, so `run=2` comes before `run=10`, ISO dates such as `2026-09-01` sort by date, and names sort by character (`lr-high`, `lr-low`, `warmup`). Values equal as numbers but written differently, such as `1` and `01`, are then ordered by their text. A many placeholder must occupy a whole argument. An operation takes at most one `many` input, which may sit beside `one` inputs; each of those is matched once per group:
 
 ```text
 operation summarise(days: many Series, policy: Policy) -> Summary @ drop(day) @ min(2)
@@ -64,7 +64,7 @@ source parameters : Parameters [scenario]
 forecast = predict(reading, model @ each(scenario), parameters)
 ```
 
-With two stations and two scenarios, this makes four `forecast[station=...,scenario=...]` jobs. The values come from the artifacts of the broadcast input, so adding a scenario to the inputs adds its jobs. Other inputs are matched on the new dimension as usual; here `parameters` supplies the settings for each scenario. Only one input may broadcast a given dimension, and the driving input must not already have it. `each` pairs with `vary`, so a sweep can be collected again:
+With two stations and two scenarios, this makes four `forecast[station=...,scenario=...]` jobs. The values come from the artifacts of the broadcast input, so adding a scenario to the inputs adds its jobs. Other inputs are matched on the new dimension as usual; here `parameters` supplies the settings for each scenario. Only one input may broadcast a given dimension, and the driving input must not already have it. A broadcast dimension comes after the driving input's dimensions, so here `forecast` has dimensions `[station, scenario]`, the order `{entities}` writes them in. `each` pairs with `vary`, so a sweep can be collected again:
 
 ```text
 trial = simulate(reading, seed @ each(rep))
@@ -79,7 +79,7 @@ command estimate: dwi2response dhollander {dwi} {wm} {gm} {csf}
 wm_response, gm_response, csf_response = estimate(dwi)
 ```
 
-A `verify` command checks a job's inputs before its command runs, using the tools that understand the files; if it fails, the job does not run:
+A `verify` command checks a job's inputs before its command runs, using the tools that understand the files. SPIT does not run it; it writes each job's `verify` commands into the `.spitdag` beside its command, and a backend runs them first, in order. If one fails, the job does not run, and neither does any job that depends on it:
 
 ```text
 verify register: check_same_grid {moving} {reference}
@@ -88,6 +88,8 @@ verify register: check_same_grid {moving} {reference}
 `spit dag --commands` shows each job's `verify` lines above the command they guard, with their paths filled in.
 
 Input port names are optional. A port written as a lowercase word alone, as in `operation copy(image)`, is named `image` and untyped; type names start with a capital letter. An unnamed single input is `{input}`; multiple unnamed inputs are `{input1}`, `{input2}`, and so on. An operation whose only input is a `many` input can also reach it as `{inputs}`, whatever its name. Named ports give clearer errors, although errors also name the product bound to a port. `{output}` is the path of a single unnamed output, so `output` cannot name an input port. A command must use every output placeholder; a `verify` command may use inputs only. Command templates give ordered words and arguments, not shell pipelines or redirection; an unquoted `|`, `>`, `&&`, or the like is passed to the program as an argument, and SPIT warns about it. Words are split and quoted as in Bash, and every argument is passed literally: `$` and backticks are not expanded. As in Bash, text in single quotes is literal, so `awk '{print $1}'` needs no escaping; a placeholder is filled in unquoted text or double quotes. Write `{{` or `}}`, or `\{` and `\}`, for a literal brace elsewhere. Every command is checked when the pipeline is loaded: braces and quotes must balance, placeholders must name the operation's ports, and `{output}` must appear.
+
+Products, operations and dimensions have separate names, so a product may share its operation's name (`coreg = coreg(mc, brain)`) and a dimension may share a product's (`model @ each(model)`). An untyped `many` port is written `many items` or `items: many`; a lone `many` is reached as `{inputs}`.
 
 The first word of a command must be an executable available on `PATH` (or an executable path). SPIT emits that command without managing its installation or loading shell functions:
 
@@ -185,7 +187,7 @@ As in Bash, an unquoted `#` starts a comment only at the start of a word, so `--
 
 Place a source path beside its `source` line and a derived path beside its assignment. The default can stay near the top of the file.
 
-Path rules also find sources. `spit inputs recipe.spitin --root data` lists each file under `data` whose path matches a source's rule, in the pipeline or the recipe, reading entity values from its placeholders. Links to files and directories are followed. A value is read only as SPIT writes it, so a file such as `in/%41.txt`, whose value SPIT would write `A`, is skipped with a warning rather than listed under a path no job would use.
+Path rules also find sources. `spit inputs recipe.spitin --root data` lists each file under `data` whose path matches a source's rule, in the pipeline or the recipe, reading entity values from its placeholders. A rule matches a file's whole path, so `responses/{region}/wave{wave}.csv` does not match `wave3.csv.bak` or `wave3.csv.1`, and files that match no rule are left out. Links to files and directories are followed. A value is read only as SPIT writes it, so a file such as `in/%41.txt`, whose value SPIT would write `A`, is skipped with a warning rather than listed under a path no job would use.
 
 ## Recipes
 
@@ -200,7 +202,7 @@ require image count=1 per [sub, ses]
 path image: data/sub-{sub}/ses-{ses}/image.nii.gz
 ```
 
-A recipe may contain `discover`, `require` and `skip` rules, `path product:` rules for source products, and `sources:`/`contexts:` records. It cannot declare sources, operations, steps, commands, stages, imports, or a default `path:` rule; the pipeline still declares each logical `source` with its dimensions and optional type. Rules in a pipeline are an error, and so are records.
+A recipe may contain `discover`, `require` and `skip` rules, `path product:` rules for source products, and `sources:`/`contexts:` records. It cannot declare sources, operations, steps, commands, stages, imports, or a default `path:` rule; the pipeline still declares each logical `source` with its dimensions and optional type. Rules in a pipeline are an error, and so are records. A source's path rule is written in the pipeline or in the recipe, not both: put it in the pipeline when every dataset for that pipeline shares the layout, and in the recipe when the layout belongs to one dataset.
 
 `spit check recipe.spitin` checks the rules against the pipeline without reading any data: each rule must name a source or discovery with the dimensions it counts. `spit inputs recipe.spitin` scans the recipe's folder, or `--root`, applies `skip`, checks `require`, and prints the `.spitout`. A recipe that writes its own `sources:` records is not scanned unless `--root` is given; the scan then replaces them. `spit dag recipe.spitin` runs the same step in memory before resolving jobs, over the pipeline the recipe's `pipeline` line names. A recipe is given alone; the pipeline is not named a second time on the command line.
 
