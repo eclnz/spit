@@ -8,30 +8,30 @@ Priority reflects how much time the item cost and how many runs hit it:
 - **P2**: forced several runs to guess or to read the `.spitdag` JSON by hand.
 - **P3**: a single run, or cosmetic.
 
-> F1, B1 and F2 are one problem, and are resolved together by the [removing inputs design](design/removing-inputs.md), which replaces `skip` with `exclude`, `drop` and `dag --partial`.
+> F1, B1 and F2 are one problem, and are resolved together by the [removing inputs design](design/removing-inputs.md), which replaces `skip` with `exclude`, `drop` and `dag --partial`. Every item links to its plan; the [roadmap](design/README.md) gives the order they are built in.
 
 ## Summary
 
-| ID | Kind | Priority | Item |
-| --- | --- | --- | --- |
-| [F1](#f1-exclude-individual-artifacts-in-a-recipe) | Feature | P1 | Exclude individual artifacts in a recipe |
-| [B1](#b1-a-skip-value-clause-reads-as-exclude-but-keeps-only-matching-groups) | Bug | P1 | A `skip` value clause reads as "exclude" but keeps only the matching groups |
-| [F2](#f2-record-skipped-and-excluded-groups-with-their-reason) | Feature | P1 | Record skipped and excluded groups, with their reason |
-| [F3](#f3-flag-unused-source-artifacts-and-near-miss-values) | Feature | P1 | Flag unused source artifacts and near-miss values |
-| [F4](#f4-show-each-jobs-command-line) | Feature | P2 | Show each job's command line |
-| [F5](#f5-point-a-failed-dag-at-spit-artifacts) | Feature | P2 | Point a failed `dag` at `spit artifacts` |
-| [B2](#b2-an-unknown-recipe-statement-is-reported-as-a-bracket-error) | Bug | P2 | An unknown recipe statement is reported as a bracket error |
-| [B3](#b3-errors-from-a-recipe-run-do-not-name-the-pipeline-file) | Bug | P2 | Errors from a recipe run do not name the pipeline file |
-| [B4](#b4-no-command-shows-the-full-set-of-path-rules) | Bug | P2 | No command shows the full set of path rules |
-| [F6](#f6-accept-a-source-with-no-dimensions) | Feature | P2 | Accept a source with no dimensions, or suggest `[]` |
-| [F7](#f7-a-stray-file-outside-discovered-contexts-should-not-stop-inputs) | Feature | P2 | A stray file outside discovered contexts should not stop `inputs` |
-| [F8](#f8-say-why-a-value-clause-on-a-grouping-dimension-is-rejected) | Feature | P2 | Say why a value clause on a grouping dimension is rejected |
-| [F9](#f9-aggregate-over-several-dimensions-in-one-step) | Feature | P2 | Aggregate over several dimensions in one step |
-| [B5](#b5-found-and-verified-counts-disagree-without-explanation) | Bug | P3 | "Found" and "verified" counts disagree without explanation |
-| [B6](#b6-external_inputs-is-in-text-order) | Bug | P3 | `external_inputs` is in text order |
-| [B7](#b7-spit-help-promises-a-script) | Bug | P3 | `spit help` promises a script |
-| [F10](#f10-smaller-language-requests) | Feature | P3 | Smaller language requests |
-| [D1–D11](#guide-gaps) | Docs | P2 | Gaps in the guide |
+| ID | Kind | Priority | Item | Plan |
+| --- | --- | --- | --- | --- |
+| [F1](#f1-exclude-individual-artifacts-in-a-recipe) | Feature | P1 | Exclude individual artifacts in a recipe | [plan](design/removing-inputs.md) |
+| [B1](#b1-a-skip-value-clause-reads-as-exclude-but-keeps-only-matching-groups) | Bug | P1 | A `skip` value clause reads as "exclude" but keeps only the matching groups | [plan](design/removing-inputs.md) |
+| [F2](#f2-record-skipped-and-excluded-groups-with-their-reason) | Feature | P1 | Record skipped and excluded groups, with their reason | [plan](design/removing-inputs.md) |
+| [F3](#f3-flag-unused-source-artifacts-and-near-miss-values) | Feature | P1 | Flag unused source artifacts and near-miss values | [plan](design/diagnostics.md#b5-and-f3-say-what-the-inventory-holds-that-no-job-uses) |
+| [F4](#f4-show-each-jobs-command-line) | Feature | P2 | Show each job's command line | [plan](design/commands-view.md) |
+| [F5](#f5-point-a-failed-dag-at-spit-artifacts) | Feature | P2 | Point a failed `dag` at `spit artifacts` | [plan](design/removing-inputs.md#dag---partial) |
+| [B2](#b2-an-unknown-recipe-statement-is-reported-as-a-bracket-error) | Bug | P2 | An unknown recipe statement is reported as a bracket error | [plan](design/removing-inputs.md) |
+| [B3](#b3-errors-from-a-recipe-run-do-not-name-the-pipeline-file) | Bug | P2 | Errors from a recipe run do not name the pipeline file | [plan](design/diagnostics.md#b3-name-the-file-a-message-is-about) |
+| [B4](#b4-no-command-shows-the-full-set-of-path-rules) | Bug | P2 | No command shows the full set of path rules | [plan](design/small-fixes.md#b4-show-every-path-rule-whichever-file-holds-it) |
+| [F6](#f6-accept-a-source-with-no-dimensions) | Feature | P2 | Accept a source with no dimensions, or suggest `[]` | [plan](design/language.md#f6-sources-with-no-dimensions) |
+| [F7](#f7-a-stray-file-outside-discovered-contexts-should-not-stop-inputs) | Feature | P2 | A stray file outside discovered contexts should not stop `inputs` | [plan](design/removing-inputs.md#order-of-the-input-stage) |
+| [F8](#f8-say-why-a-value-clause-on-a-grouping-dimension-is-rejected) | Feature | P2 | Say why a value clause on a grouping dimension is rejected | [plan](design/removing-inputs.md) |
+| [F9](#f9-aggregate-over-several-dimensions-in-one-step) | Feature | P2 | Aggregate over several dimensions in one step | [plan](design/language.md#f9-aggregating-over-several-dimensions-in-one-step) |
+| [B5](#b5-found-and-verified-counts-disagree-without-explanation) | Bug | P3 | "Found" and "verified" counts disagree without explanation | [plan](design/diagnostics.md#b5-and-f3-say-what-the-inventory-holds-that-no-job-uses) |
+| [B6](#b6-external_inputs-is-in-text-order) | Bug | P3 | `external_inputs` is in text order | [plan](design/small-fixes.md#b6-order-a-spitdags-lists-as-many-inputs-are-ordered) |
+| [B7](#b7-spit-help-promises-a-script) | Bug | P3 | `spit help` promises a script | [plan](design/small-fixes.md#b7-the-help-line) |
+| [F10](#f10-smaller-language-requests) | Feature | P3 | Smaller language requests | [plan](design/language.md#f10-smaller-changes) |
+| [D1–D11](#guide-gaps) | Docs | P2 | Gaps in the guide | [plan](design/guide.md) |
 
 ## Bugs
 
@@ -241,7 +241,7 @@ Suggested feature: allow `@ vary(x, y)` with `@ drop(x, y)`, ordering the collec
 These are things agents looked for in the guide and did not find. The count is how many of the 12 first builds raised each one.
 
 | ID | Runs | Gap | Where it belongs |
-| --- | --- | --- | --- |
+| --- | --- | --- | --- | --- |
 | D1 | ~8 | A recipe may be just its `pipeline` line, with path rules finding the sources. Every recipe example has `discover` or `require`, so most agents wondered whether a rule was required. | Recipes; Supply the inputs |
 | D2 | 5 | What paths are relative to, and where to put the recipe relative to the data. The CLI table describes `--root` on `dag` as only a check that files exist, but with a recipe it also sets the folder scanned and the base of every path. One agent put its recipe inside `data/` with `pipeline ../rest.spit`, unsure `..` was allowed. | CLI options; Paths; Recipes |
 | D3 | 6 | The `.spitdag` format: how a command's words and paths are encoded, `root` (written as an absolute path), `external_inputs`, `targets`, `executables`, `fingerprint`, `stage` and `verify`. | Resolve jobs; a new reference section |
