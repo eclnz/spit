@@ -270,6 +270,9 @@ impl InventoryText<'_> {
             if let Some(origin) = &removal.origin {
                 writeln!(f, "        at: {origin}")?;
             }
+            if let Some(found) = removal.found {
+                writeln!(f, "        found: {found}")?;
+            }
             if let Some(reason) = &removal.reason {
                 writeln!(f, "        reason: {reason}")?;
             }
@@ -661,7 +664,7 @@ fn parse_removed_line(
     let line = original.trim();
     if let Some((key, value)) = line
         .split_once(':')
-        .filter(|(key, _)| matches!(*key, "rule" | "at" | "reason"))
+        .filter(|(key, _)| matches!(*key, "rule" | "at" | "reason" | "found"))
     {
         let removal = removed.last_mut().ok_or_else(|| {
             ParseError::new(
@@ -673,6 +676,12 @@ fn parse_removed_line(
         match key {
             "rule" => removal.rule = value,
             "at" => removal.origin = Some(value),
+            "found" => {
+                let found = value.parse().map_err(|_| {
+                    ParseError::new(number, "`found:` must be a nonnegative integer")
+                })?;
+                removal.found = Some(found);
+            }
             _ => removal.reason = Some(value),
         }
         return Ok(());
@@ -690,6 +699,7 @@ fn parse_removed_line(
         rule: String::new(),
         origin: None,
         reason: None,
+        found: None,
     });
     Ok(())
 }

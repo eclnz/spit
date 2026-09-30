@@ -31,15 +31,15 @@ pub use error::{DefinitionSubject, PortSite, ResolveError, TypeConflict};
 pub use imports::parse_pipeline_at;
 pub use inputs::{
     discover_source_files, discover_sources, parse_input_spec, parse_input_spec_at, Discovery,
-    InputError, InputSource, InputSpec, ResolvedInputs,
+    EveryGroupDropped, InputError, InputSource, InputSpec, ResolvedInputs, UnmatchedExclusion,
 };
 pub use lower::parse_pipeline;
 pub use model::{
     stage_within, Artifact, ArtifactId, ArtifactInstance, ArtifactKey, ArtifactReport,
     ArtifactType, Artifacts, Cardinality, CommandDef, CommandRole, CountRequirement,
-    CoverageAction, CoverageGap, CoverageRule, DirectoryDiscovery, EntityBinding, Gap,
+    CoverageAction, CoverageGap, CoverageRule, DirectoryDiscovery, EntityBinding, Exclusion, Gap,
     IncompleteJob, InputBinding, InputPort, InputRules, Invocation, Job, OperationDef, OutputPort,
-    Pipeline, ProductDef, ResolvedDag, ShapeRule, SourceInventory, SourceRecord, StageDef,
+    Pipeline, ProductDef, Removal, ResolvedDag, ShapeRule, SourceInventory, SourceRecord, StageDef,
 };
 pub use parser::{parse_source_inventory, render_source_inventory, ParseError, ParseErrorKind};
 pub use paths::{

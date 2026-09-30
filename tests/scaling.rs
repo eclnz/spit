@@ -47,7 +47,7 @@ const RECIPE: &str = "\
 discover sessions: [sub, ses] from dirs sub-{sub}/ses-{ses}
 require image count>=2 per [sub, ses]
 require reference count=1 per [sub, ses]
-skip image count>=1 per [sub, ses]
+drop [sub, ses] where image count<1
 ";
 
 /// A dataset of `subjects` subjects, each with a mask and two sessions of a

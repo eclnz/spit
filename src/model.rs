@@ -285,7 +285,7 @@ impl EntityBinding {
     ///
     /// Keep in step with `group_key`: two bindings must have equal keys for
     /// `dimensions` exactly when they project to equal bindings, as coverage
-    /// and skip rules group by key and report the projection.
+    /// and drop rules group by key and report the projection.
     pub fn project(&self, dimensions: &[String]) -> Option<Self> {
         // Keeping every dimension, as when grouping by all of them, is a copy.
         if self.len() == dimensions.len()
@@ -1137,12 +1137,12 @@ impl ProductDef {
 }
 
 /// How a dataset's sources are found and filtered: directory discovery,
-/// `require` and `skip` rules, and where source files live. The input stage
+/// `exclude`, `drop` and `require` rules, and where source files live. The input stage
 /// reads these; job resolution never does.
 #[derive(Clone, Debug, Default)]
 pub struct InputRules {
     pub discoveries: Vec<DirectoryDiscovery>,
-    /// `require` and `skip` rules, in declaration order.
+    /// `require` and `drop` rules, in declaration order.
     pub constraints: Vec<CoverageRule>,
     /// `exclude` rules, in declaration order, with each row of a file an
     /// `exclude from` line names in its place once the file is read.
@@ -1250,13 +1250,15 @@ impl fmt::Display for Exclusion {
 pub struct Removal {
     pub product: Option<String>,
     pub entities: EntityBinding,
-    /// The rule, as `exclude bold[run=3]` or `skip sessions count>=2 per
-    /// [sub]`.
+    /// The rule, as `exclude bold[run=3]` or `drop [sub] where sessions
+    /// count<2`.
     pub rule: String,
     /// Where the rule is written, when known: `line 4` of the recipe, or a
-    /// row of a file.
+    /// line of a file.
     pub origin: Option<String>,
     pub reason: Option<String>,
+    /// For a group a `drop` rule counted: how many it found.
+    pub found: Option<usize>,
 }
 
 impl Removal {
@@ -1281,7 +1283,7 @@ impl Removal {
         text
     }
 
-    /// Whether an `exclude` rule made it, rather than a `skip` rule.
+    /// Whether an `exclude` rule made it, rather than a `drop` rule.
     pub fn is_exclusion(&self) -> bool {
         self.rule.starts_with("exclude")
     }
@@ -1347,10 +1349,16 @@ pub struct SourceInventory {
     pub removed: Vec<Removal>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+/// A comparison of how many artifacts or contexts a group holds, as a
+/// rule writes it after `count`: `=2`, `!=2`, `>=2`, `<=2`, `>2` or `<2`.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum CountRequirement {
     Exactly(usize),
+    NotExactly(usize),
     AtLeast(usize),
+    AtMost(usize),
+    MoreThan(usize),
+    FewerThan(usize),
 }
 
 impl CountRequirement {
@@ -1358,7 +1366,36 @@ impl CountRequirement {
     pub fn allows(&self, found: usize) -> bool {
         match *self {
             Self::Exactly(count) => found == count,
+            Self::NotExactly(count) => found != count,
             Self::AtLeast(count) => found >= count,
+            Self::AtMost(count) => found <= count,
+            Self::MoreThan(count) => found > count,
+            Self::FewerThan(count) => found < count,
+        }
+    }
+
+    /// The comparison as a rule writes it: `count>=2`.
+    pub fn as_written(&self) -> String {
+        let (op, count) = match *self {
+            Self::Exactly(count) => ("=", count),
+            Self::NotExactly(count) => ("!=", count),
+            Self::AtLeast(count) => (">=", count),
+            Self::AtMost(count) => ("<=", count),
+            Self::MoreThan(count) => (">", count),
+            Self::FewerThan(count) => ("<", count),
+        };
+        format!("count{op}{count}")
+    }
+
+    /// The comparison that holds exactly when this one does not.
+    pub fn negated(&self) -> Self {
+        match *self {
+            Self::Exactly(count) => Self::NotExactly(count),
+            Self::NotExactly(count) => Self::Exactly(count),
+            Self::AtLeast(count) => Self::FewerThan(count),
+            Self::AtMost(count) => Self::MoreThan(count),
+            Self::MoreThan(count) => Self::AtMost(count),
+            Self::FewerThan(count) => Self::AtLeast(count),
         }
     }
 }
@@ -1367,41 +1404,80 @@ impl fmt::Display for CountRequirement {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Exactly(count) => write!(f, "exactly {count}"),
+            Self::NotExactly(count) => write!(f, "other than {count}"),
             Self::AtLeast(count) => write!(f, "at least {count}"),
+            Self::AtMost(count) => write!(f, "at most {count}"),
+            Self::MoreThan(count) => write!(f, "more than {count}"),
+            Self::FewerThan(count) => write!(f, "fewer than {count}"),
         }
     }
 }
 
+/// A `require` or `drop` rule over the groups of a dataset that `group_by`
+/// forms, counting the artifacts of a source, or the contexts of a
+/// discovery rule, in each: `product`.
+///
+/// A `require` rule fails a group unless its count holds and it has every
+/// value in `values`. A `drop` rule removes a group when its count holds,
+/// when it lacks a value in `values`, or when it has a value in `has`; it
+/// names one of the three.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CoverageRule {
     pub action: CoverageAction,
     pub product: String,
     pub group_by: Vec<String>,
-    pub count: CountRequirement,
+    /// The count; a `require` rule without one needs at least one.
+    pub count: Option<CountRequirement>,
     /// Entity values that must each be present in every group, such as
     /// `run=1,2`. Each listed dimension is checked on its own.
     pub values: BTreeMap<String, Vec<String>>,
+    /// For `drop … has`: values any one of which removes a group.
+    pub has: BTreeMap<String, Vec<String>>,
+    /// The recipe line the rule is written on, when known.
+    pub line: Option<usize>,
 }
 
-/// Reads as written: `skip sessions count>=2 per [sub]`, or `require
-/// image run=1,2 per [sub]`, leaving out the count a value clause implies.
+/// Reads as written: `drop [sub] where sessions count<2`, or `require
+/// image run=1,2 per [sub]`.
 impl fmt::Display for CoverageRule {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let action = match self.action {
-            CoverageAction::Require => "require",
-            CoverageAction::Skip => "skip",
+        let clause = |values: &BTreeMap<String, Vec<String>>| {
+            values
+                .iter()
+                .map(|(dimension, values)| format!("{dimension}={}", values.join(",")))
+                .collect::<Vec<_>>()
+                .join(" ")
         };
-        write!(f, "{action} {}", self.product)?;
-        if self.values.is_empty() || self.count != CountRequirement::AtLeast(1) {
-            match self.count {
-                CountRequirement::Exactly(count) => write!(f, " count={count}")?,
-                CountRequirement::AtLeast(count) => write!(f, " count>={count}")?,
+        match self.action {
+            CoverageAction::Require => {
+                write!(f, "require {}", self.product)?;
+                if let Some(count) = self.count {
+                    write!(f, " {}", count.as_written())?;
+                }
+                if !self.values.is_empty() {
+                    write!(f, " {}", clause(&self.values))?;
+                }
+                write!(f, " per [{}]", self.group_by.join(", "))
+            }
+            CoverageAction::Drop => {
+                write!(
+                    f,
+                    "drop [{}] where {}",
+                    self.group_by.join(", "),
+                    self.product
+                )?;
+                if let Some(count) = self.count {
+                    write!(f, " {}", count.as_written())?;
+                }
+                if !self.values.is_empty() {
+                    write!(f, " missing {}", clause(&self.values))?;
+                }
+                if !self.has.is_empty() {
+                    write!(f, " has {}", clause(&self.has))?;
+                }
+                Ok(())
             }
         }
-        for (dimension, values) in &self.values {
-            write!(f, " {dimension}={}", values.join(","))?;
-        }
-        write!(f, " per [{}]", self.group_by.join(", "))
     }
 }
 
@@ -1409,7 +1485,7 @@ impl fmt::Display for CoverageRule {
 pub enum CoverageAction {
     #[default]
     Require,
-    Skip,
+    Drop,
 }
 
 impl CoverageRule {
@@ -1422,8 +1498,44 @@ impl CoverageRule {
             action: CoverageAction::Require,
             product: product.into(),
             group_by: owned_strings(group_by),
-            count,
+            count: Some(count),
             values: BTreeMap::new(),
+            has: BTreeMap::new(),
+            line: None,
+        }
+    }
+
+    /// Whether a group whose members have `bindings` passes a `require`
+    /// rule, or is removed by a `drop` rule.
+    pub fn holds_for(&self, bindings: &[&EntityBinding]) -> bool {
+        let lacks = |values: &BTreeMap<String, Vec<String>>| {
+            values.iter().any(|(dimension, listed)| {
+                listed.iter().any(|value| {
+                    !bindings
+                        .iter()
+                        .any(|binding| binding.get(dimension) == Some(value.as_str()))
+                })
+            })
+        };
+        match self.action {
+            CoverageAction::Require => {
+                self.count
+                    .unwrap_or(CountRequirement::AtLeast(1))
+                    .allows(bindings.len())
+                    && !lacks(&self.values)
+            }
+            CoverageAction::Drop => {
+                let has = self.has.iter().any(|(dimension, listed)| {
+                    bindings.iter().any(|binding| {
+                        binding
+                            .get(dimension)
+                            .is_some_and(|found| listed.iter().any(|value| value == found))
+                    })
+                });
+                self.count.is_some_and(|count| count.allows(bindings.len()))
+                    || lacks(&self.values)
+                    || has
+            }
         }
     }
 

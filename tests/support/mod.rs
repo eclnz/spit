@@ -43,7 +43,7 @@ pub fn parse_fixture(text: &str) -> Result<(Pipeline, Option<SourceInventory>), 
 fn is_rule(line: &str) -> bool {
     let line = line.trim_start();
     line.trim_end() == "constraints:"
-        || ["discover ", "require ", "skip "]
+        || ["discover ", "require ", "drop ", "exclude "]
             .iter()
             .any(|keyword| line.starts_with(keyword))
 }

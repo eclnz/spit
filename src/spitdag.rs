@@ -493,6 +493,11 @@ fn write_removal(out: &mut String, removal: &Removal) {
     optional(out, removal.origin.as_deref());
     out.push_str(",\"reason\":");
     optional(out, removal.reason.as_deref());
+    out.push_str(",\"found\":");
+    match removal.found {
+        Some(found) => write_number(out, found),
+        None => out.push_str("null"),
+    }
     out.push('}');
 }
 
@@ -616,22 +621,24 @@ mod tests {
                 rule: "exclude bold[run=3,sub=02]".into(),
                 origin: Some("line 4".into()),
                 reason: Some("motion \"spike\"".into()),
+                found: None,
             },
             Removal {
                 product: None,
                 entities: EntityBinding::from_pairs([("sub", "03")]),
-                rule: "skip sessions count>=2 per [sub]".into(),
+                rule: "drop [sub] where sessions count<2".into(),
                 origin: None,
                 reason: None,
+                found: Some(1),
             },
         ];
         let text = dag.to_json();
         assert!(
             text.contains(
                 "\"removed\":[{\"product\":\"bold\",\"entities\":{\"run\":\"3\",\"sub\":\"02\"},\
-\"rule\":\"exclude bold[run=3,sub=02]\",\"origin\":\"line 4\",\"reason\":\"motion \\\"spike\\\"\"},\
-{\"product\":null,\"entities\":{\"sub\":\"03\"},\"rule\":\"skip sessions count>=2 per [sub]\",\
-\"origin\":null,\"reason\":null}]"
+\"rule\":\"exclude bold[run=3,sub=02]\",\"origin\":\"line 4\",\"reason\":\"motion \\\"spike\\\"\",\
+\"found\":null},{\"product\":null,\"entities\":{\"sub\":\"03\"},\"rule\":\"drop [sub] where sessions count<2\",\
+\"origin\":null,\"reason\":null,\"found\":1}]"
             ),
             "{text}"
         );

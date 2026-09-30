@@ -205,9 +205,9 @@ fn coverage_can_target_the_named_discovery_rule() {
 }
 
 #[test]
-fn skip_discovery_group_removes_subject_before_source_checks_and_jobs() {
+fn drop_discovery_group_removes_subject_before_source_checks_and_jobs() {
     let tree = Tree::new(
-        "directory-skip",
+        "directory-drop",
         &[
             "data/sub-1/ses-1/image.nii.gz",
             "data/sub-1/ses-2/image.nii.gz",
@@ -221,7 +221,7 @@ fn skip_discovery_group_removes_subject_before_source_checks_and_jobs() {
         ],
     );
     let text = "discover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}\n\
-                skip sessions count>=2 per [sub]\n\
+                drop [sub] where sessions count<2\n\
                 require sessions count>=2 per [sub]\n\
                 source image [sub, ses]\n\
                 path image: data/sub-{sub}/ses-{ses}/image.nii.gz\n\
@@ -267,9 +267,9 @@ fn skip_discovery_group_removes_subject_before_source_checks_and_jobs() {
 }
 
 #[test]
-fn skip_source_group_can_omit_missing_files_in_a_discovered_context() {
+fn drop_source_group_can_omit_missing_files_in_a_discovered_context() {
     let tree = Tree::new(
-        "source-skip",
+        "source-drop",
         &[
             "data/sub-1/ses-1/image.nii.gz",
             "data/sub-1/ses-2/image.nii.gz",
@@ -281,7 +281,7 @@ fn skip_source_group_can_omit_missing_files_in_a_discovered_context() {
         "discover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}\n\
          source image [sub, ses]\n\
          path image: data/sub-{sub}/ses-{ses}/image.nii.gz\n\
-         skip image count>=2 per [sub]\n\
+         drop [sub] where image count<2\n\
          operation process(Image) -> Image\n\
          result = process(image)\n",
     );
@@ -295,10 +295,10 @@ fn skip_source_group_can_omit_missing_files_in_a_discovered_context() {
 }
 
 #[test]
-fn skip_does_not_hide_invalid_inventory_bindings() {
+fn drop_does_not_hide_invalid_inventory_bindings() {
     let (pipeline, spec) = parse(
         "discover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}\n\
-         skip sessions count>=2 per [sub]\n",
+         drop [sub] where sessions count<2\n",
     );
     let inventory = parse_source_inventory("contexts sessions:\n[sub=5]\n").unwrap();
     let error = spec

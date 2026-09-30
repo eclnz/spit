@@ -17,8 +17,8 @@ use crate::json::Json;
 use crate::lower::{parse_document_with_imports, ParsedDocument};
 use crate::model::DEFAULT_OUTPUT;
 use crate::model::{
-    stage_within, ArtifactReport, CommandRole, CoverageAction, CoverageGap, InputRules,
-    ResolvedDag, SourceInventory,
+    stage_within, ArtifactReport, CommandRole, CoverageGap, InputRules, ResolvedDag,
+    SourceInventory,
 };
 use crate::parser::{
     as_read_back, glued_comment, source_record_lines, without_bom, Kind, Rule, SourceMap, Step,
@@ -486,11 +486,9 @@ pub fn diagnose_checked_with_inventory(
     let no_rules = InputRules::default();
     let rules = context.recipe.map_or(&no_rules, |recipe| &recipe.rules);
     let inventory = as_read_back(&settled.inventory, written, rules)?;
-    let skips = rules
-        .constraints
-        .iter()
-        .any(|rule| rule.action == CoverageAction::Skip);
-    let gaps = (!skips).then_some(settled.gaps.as_slice());
+    // Checking the settled records again finds what settling found, since
+    // only the `drop` rules change records and they ran while settling.
+    let gaps = Some(settled.gaps.as_slice());
     // Only errors are placed in the records' text.
     let mut diagnostics = check_document(document, text, None).ok()?;
     let lenient = context.lenient;
@@ -650,10 +648,10 @@ fn check_document(
 /// they resolve to with any warnings, about paths that differ only in case
 /// and steps that make nothing, or those diagnostics with the error that
 /// stops either.
-/// `settled` holds what settling `supplied` with the same rules found, when
-/// they have no `skip` rule: checking it again would find the same, and
-/// change nothing. Keep in step with `check_inventory`: this holds only
-/// while a `skip` rule is the one thing that makes a second check differ.
+/// `settled` holds what settling `supplied` with the same rules found:
+/// checking it again would find the same, and change nothing. Keep in step
+/// with `check_inventory`: this holds only while checking changes no
+/// records, which `drop` rules do only while the inventory is settled.
 fn record_diagnostics(
     document: &ParsedDocument,
     supplied: &SourceInventory,
@@ -667,7 +665,6 @@ fn record_diagnostics(
         Some(gaps) => Ok(InputCheck {
             inventory: Cow::Borrowed(supplied),
             gaps: gaps.to_vec(),
-            skipped: Vec::new(),
         }),
         None => check_inventory(pipeline, &document.inputs, Cow::Borrowed(supplied)),
     };
@@ -1371,7 +1368,8 @@ fn pipeline_place(pipeline: &Pipeline, lines: &SourceMap, error: &ResolveError) 
         ResolveError::UnsupportedShapeRelationship { operation, .. } => unique_step(operation),
         // Too few or too many artifacts is about the rule as a whole.
         ResolveError::CoverageViolation { rule_index, .. }
-        | ResolveError::MissingRequiredValue { rule_index, .. } => {
+        | ResolveError::MissingRequiredValue { rule_index, .. }
+        | ResolveError::NoGroupsToCheck { rule_index, .. } => {
             lines.rules.get(*rule_index).map(Rule::whole)
         }
         ResolveError::DuplicateOutputArtifact { artifact } => step(&artifact.product),

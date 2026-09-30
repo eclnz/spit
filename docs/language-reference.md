@@ -197,14 +197,27 @@ A `.spitin` recipe says how to find one dataset's inputs, keeping everything abo
 pipeline analysis.spit
 
 discover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}
-skip sessions count>=2 per [sub]
+exclude image[sub=04,ses=2]    # scanner fault
+drop [sub] where sessions count<2
 require image count=1 per [sub, ses]
 path image: data/sub-{sub}/ses-{ses}/image.nii.gz
 ```
 
-A recipe may contain `discover`, `require` and `skip` rules, `path product:` rules for source products, and `sources:`/`contexts:` records. It cannot declare sources, operations, steps, commands, stages, imports, or a default `path:` rule; the pipeline still declares each logical `source` with its dimensions and optional type. Rules in a pipeline are an error, and so are records. A source's path rule is written in the pipeline or in the recipe, not both: put it in the pipeline when every dataset for that pipeline shares the layout, and in the recipe when the layout belongs to one dataset.
+A recipe may contain `discover`, `exclude`, `drop` and `require` rules, `path product:` rules for source products, and `sources:`/`contexts:` records. It cannot declare sources, operations, steps, commands, stages, imports, or a default `path:` rule; the pipeline still declares each logical `source` with its dimensions and optional type. Rules in a pipeline are an error, and so are records. A source's path rule is written in the pipeline or in the recipe, not both: put it in the pipeline when every dataset for that pipeline shares the layout, and in the recipe when the layout belongs to one dataset.
 
-`spit check recipe.spitin` checks the rules against the pipeline without reading any data: each rule must name a source or discovery with the dimensions it counts. `spit inputs recipe.spitin` scans the recipe's folder, or `--root`, applies `skip`, checks `require`, and prints the `.spitout`. A recipe that writes its own `sources:` records is not scanned unless `--root` is given; the scan then replaces them. `spit dag recipe.spitin` runs the same step in memory before resolving jobs, over the pipeline the recipe's `pipeline` line names. A recipe is given alone; the pipeline is not named a second time on the command line.
+`spit check recipe.spitin` checks the rules against the pipeline without reading any data: each rule must name a source or discovery with the dimensions it counts. `spit inputs recipe.spitin` scans the recipe's folder, or `--root`, applies the rules, and prints the `.spitout`. A recipe that writes its own `sources:` records is not scanned unless `--root` is given; the scan then replaces them. `spit dag recipe.spitin` runs the same step in memory before resolving jobs, over the pipeline the recipe's `pipeline` line names. A recipe is given alone; the pipeline is not named a second time on the command line.
+
+Three rules leave data out, each for a different reason:
+
+| To | Write | For example |
+| --- | --- | --- |
+| Remove named artifacts or groups, such as a corrupted run | `exclude` | `exclude bold[sub=02,ses=02,run=3]  # corrupted` |
+| Remove every group that fails a criterion, as the data changes | `drop` | `drop [sub] where sessions count<2` |
+| Stop, when the data is incomplete | `require` | `require t1w count=1 per [sub, ses]` |
+
+They apply in that order, however they are written: first every `exclude`, then every `drop`, each judged against what the exclusions leave, then every `require`, checked against what the drops leave. What `exclude` and `drop` remove is reported on stderr as notes and recorded in the `.spitout`.
+
+Rules that count form their groups from every artifact and discovered context in the dataset, whichever source or discovery found it. `drop [store] where pricing count=0` groups by every store any source or discovery has, so a store with sales but no price list is a group with none: its count is 0.
 
 ### Discover contexts from directories
 
@@ -227,14 +240,6 @@ require sessions ses=1,2 per [sub]
 
 The first rule needs at least two observed session bindings per subject. The second specifically needs sessions `1` and `2`. These rules count the directories matched by `sessions`, not artifacts from a product called `sessions`. Records keep the rule name as `contexts sessions:` followed by its `[sub=...,ses=...]` records, which `spit inputs` writes.
 
-Use `skip` with the same count or value clauses to omit a group instead of failing it:
-
-```text
-skip sessions count>=2 per [sub]
-```
-
-If subject `5` has one session, SPIT removes that subject's contexts and source artifacts before checking expected source files. A later `require` rule sees the remaining groups. Skipped groups are reported on stderr, so standard output stays the `.spitout`.
-
 ### Constraints
 
 ```text
@@ -242,11 +247,36 @@ require image count>=2 per [subject, visit]
 require reference count=1 per [subject, visit]
 ```
 
-Constraints, written in a recipe, check each observed group. They do not set a total subject or visit count. A rule can also require particular values in each group, alone or with a count:
+Constraints, written in a recipe, check each observed group, and fail the run if any group fails. They do not set a total subject or visit count. The count takes any comparison: `count=1`, `count!=1`, `count>=2`, `count<=2`, `count>2` or `count<2`. A rule can also require particular values in each group, alone or with a count:
 
 ```text
 require image run=1,2 per [subject, visit]
 ```
+
+A `require` rule is checked after every `drop` rule, against the groups they leave. A rule whose grouping finds no group at all, because nothing in the dataset has those dimensions or a `drop` removed every one, is an error: a check of nothing is not a pass.
+
+### Drop groups that fail a criterion
+
+`drop` removes every group that meets its condition, and reads the way it acts: the groups, then `where`, then what removes one.
+
+```text
+drop [sub] where sessions count<2
+drop [sub, ses] where t1w count=0
+drop [sub, ses] where bold missing run=1,2
+drop [sub, ses] where bold has run=3
+```
+
+After `where` comes the source or discovery rule to count, then one condition:
+
+- **A count,** with any comparison: `count<2` removes each group with fewer than two.
+- **`missing` values:** `missing run=1,2` removes each group without a run 1 or without a run 2.
+- **`has` values:** `has run=3` removes each group with a run 3.
+
+Removing a group removes every artifact and discovered context within it, of every source. An artifact without all the group's dimensions, such as a subject's reference when only its sessions are dropped, stays; if no job then uses it, `spit artifacts` lists it as unused. Each `drop` rule is one condition, and a group is removed when any rule's condition holds. Every rule is judged against the same inventory, so writing them in another order changes nothing. A `drop` rule that would remove every group of its grouping is an error, since nothing would be left to plan.
+
+A file a discovered context expects but lacks counts as absent, so `drop [sub, ses] where t1w count=0` removes a session whose T1w is missing, rather than failing on the missing file. Each removed group is reported on stderr, `note: dropped [sub=5] by \`drop [sub] where sessions count<2\` (line 3); found 1`, and recorded in the `.spitout`.
+
+A `drop` rule's values name a dimension within each group, not one of its groups: `drop [store] where sales missing store=s07` is an error, since each group has one store. To remove named groups, write `exclude [store=s07]`.
 
 ### Exclude named artifacts
 
@@ -267,7 +297,7 @@ A rule names a source, some values, or both, and removes every artifact whose id
 
 A comment on the line is kept as the rule's reason. Values are compared as written, so `sub=2` does not match `sub=02`. An exclude that matches nothing is an error, naming any value it comes close to, so a typo or a rule the data has outgrown does not pass unnoticed. `spit check` tests each rule against the pipeline: its source must be one, and each dimension it names must be that source's, or, for values alone, some source's.
 
-Exclusions apply before anything else in the recipe. An excluded discovered context expects no files, an excluded file needs to exist nowhere, and a file excluded by name may lie outside every discovered context, such as a misnamed copy. `skip` and `require` rules then see what the exclusions leave.
+Exclusions apply before anything else in the recipe. An excluded discovered context expects no files, an excluded file needs to exist nowhere, and a file excluded by name may lie outside every discovered context, such as a misnamed copy. `drop` and `require` rules then see what the exclusions leave.
 
 Rules can also come from a CSV file, relative to the recipe's folder, such as a lab's list of scans that failed quality control:
 
@@ -315,7 +345,7 @@ source_paths:
 
 The DAG can then use the rule without loading the recipe. Per-record paths cannot redirect an artifact away from it.
 
-`spit inputs` also writes what the recipe's `exclude` and `skip` rules removed, each with its rule, where the rule is, and its reason:
+`spit inputs` also writes what the recipe's `exclude` and `drop` rules removed, each with its rule, where the rule is, how many a counting rule found, and the reason:
 
 ```text
 removed:
@@ -324,7 +354,9 @@ removed:
         at: line 4
         reason: corrupted: motion spike at volume 140
     [sub=07]
-        rule: skip sessions count>=2 per [sub]
+        rule: drop [sub] where sessions count<2
+        at: line 6
+        found: 1
 ```
 
 The section is a record, not a rule: the records above it already leave these out, and resolving jobs removes nothing more. Scanning again rewrites it from the recipe, so a removal survives a rescan. `dag` copies it into the `.spitdag`.
@@ -341,4 +373,4 @@ operation project(sample: Frame<$Kind,$SourceSpace>, calibration: Calibration<$K
 
 ## Grouped sections
 
-SPIT also accepts grouped `products:`, `operations:`, and `pipeline:` sections in a pipeline, and a `constraints:` section of `require` and `skip` rules in a recipe, as an alternative to the flow style used elsewhere in this reference. The flow style is intended for writing a pipeline in the order you read it.
+SPIT also accepts grouped `products:`, `operations:`, and `pipeline:` sections in a pipeline, and a `constraints:` section of `require` and `drop` rules in a recipe, as an alternative to the flow style used elsewhere in this reference. The flow style is intended for writing a pipeline in the order you read it.

@@ -47,10 +47,10 @@ Every artifact is written the same way, wherever it appears:
 
 ## Removal
 
-Each artifact or group an `exclude` or `skip` rule removed, as the `.spitout` records it:
+Each artifact or group an `exclude` or `drop` rule removed, as the `.spitout` records it:
 
 ```json
-{"product": "bold", "entities": {"run": "3", "ses": "02", "sub": "02"}, "rule": "exclude bold[sub=02,ses=02,run=3]", "origin": "line 4", "reason": "corrupted"}
+{"product": "bold", "entities": {"run": "3", "ses": "02", "sub": "02"}, "rule": "exclude bold[sub=02,ses=02,run=3]", "origin": "line 4", "reason": "corrupted", "found": null}
 ```
 
 | Field | Holds |
@@ -60,6 +60,7 @@ Each artifact or group an `exclude` or `skip` rule removed, as the `.spitout` re
 | `rule` | The rule that removed it, as written. |
 | `origin` | Where the rule is: `line 4` of the recipe, or a line of a file an `exclude from` line names. `null` when not recorded. |
 | `reason` | Why, from the rule's comment or a file's `reason` column; `null` when not given. |
+| `found` | For a group a counting `drop` rule removed, how many it found; `null` otherwise. |
 
 Nothing in `removed` is among the jobs' inputs: the record says what was left out, so a report can say so.
 

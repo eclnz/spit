@@ -337,6 +337,7 @@ impl<'a> Excluder<'a> {
                 rule: rule.to_string(),
                 origin: Some(rule.origin.clone()),
                 reason: rule.reason.clone(),
+                found: None,
             },
         ));
     }
