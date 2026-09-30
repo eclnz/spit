@@ -13,11 +13,10 @@ The plans that answer the [usability findings](../FINDINGS.md), and the order to
 
 ## Status
 
-- **Done:** steps 1–12. Phase 1 and Phase 2 are complete, along with the first three steps of Phase 3.
-- **Next:** step 13, inferring a call's `@ vary` from its operation.
-- **Resolved so far:** B1, B2, B3, B5, B6, B7, F1–F9, D1–D10.
+- **Done:** steps 1–14. Phase 1, Phase 2, and Phase 3 are complete.
+- **Next:** step 15, the worked examples.
+- **Resolved so far:** B1–B7, F1–F10, D1–D10.
 - **Still open:**
-  - B4, F10;
   - D11;
   - the VS Code extension.
 
@@ -120,6 +119,7 @@ One design built in three steps, each leaving the tool working. See [removing in
 13. **F10:** a call's `@ vary` inferred from the operation's `@ drop`.
     Done: omitted `@ vary` inherits the operation's dropped dimensions for one or several dimensions, including flow output inference; explicit mismatches still fail, and an operation without `@ drop` still requires `@ vary`. Fill a missing `vary` from the operation in the contract check (`src/compile/steps.rs`) before checking. The lowering in `src/lower.rs` infers outputs before that, so check that it sees the filled binding.
 14. **B4:** `check recipe.spitin --path-rules`, and the source wording on a pipeline. See [small fixes](small-fixes.md#b4-show-every-path-rule-whichever-file-holds-it).
+    Done: recipe checks list combined pipeline and recipe path rules with origins, and strict validation uses the combined rules. A pipeline check explains that a recipe may provide a missing source rule.
     - **The refusal.** It is in `check()` in `src/main.rs`.
     - **Merging rules.** Merge the recipe's source rules with `with_source_paths` (`src/inputs/discover.rs`) before `inspect_paths`.
     - **Wording.** The `MISSING` text is in `src/paths/rules.rs`.

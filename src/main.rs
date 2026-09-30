@@ -520,15 +520,34 @@ fn check(args: &CliArgs) -> Result<(), Box<dyn Error>> {
         read_file(file)?
     };
     if is_recipe(file) {
-        if args.has(Flag::PathRules) || args.has(Flag::StrictPaths) {
-            return Err("--path-rules and --strict-paths check a pipeline, not a recipe".into());
-        }
         let diagnostics = diagnose_recipe(&text, path);
         if args.has(Flag::Json) {
             print!("{}", render_diagnostics_json(&diagnostics, &text, None));
             return Ok(());
         }
         report(&diagnostics, &text, None, FileNames::default())?;
+        if args.has(Flag::PathRules) || args.has(Flag::StrictPaths) {
+            let recipe = parse_input_spec_at(&text, path)?;
+            let pipeline_file = recipe
+                .pipeline
+                .as_ref()
+                .expect("a checked recipe names its pipeline");
+            let pipeline_text = read_file(&pipeline_file.display().to_string())?;
+            let checked = diagnose_checked(&pipeline_text, Context::at(pipeline_file))
+                .expect("a checked recipe has a valid pipeline");
+            let mut merged = checked.pipeline;
+            merged
+                .product_paths
+                .extend(recipe.rules.source_paths.clone());
+            let coverage = inspect_paths(&merged)?
+                .with_recipe_paths(recipe.rules.source_paths.keys().map(String::as_str));
+            if args.has(Flag::PathRules) {
+                println!("{coverage}");
+            }
+            if args.has(Flag::StrictPaths) {
+                coverage.validate(true)?;
+            }
+        }
         println!("Recipe valid.");
         return Ok(());
     }

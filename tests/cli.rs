@@ -278,6 +278,54 @@ fn path_rules_show_a_missing_rule_and_strict_paths_accept_complete_rules() {
 }
 
 #[test]
+fn recipe_path_rules_show_combined_coverage_and_origin() {
+    let tree = Tree::new("cli-recipe-paths", &[]);
+    let pipeline = tree.write(
+        "analysis.spit",
+        "source raw [id]\noperation copy(one)\nresult = copy(raw)\npath result: output/{id}.txt\n",
+    );
+    let recipe = tree.write(
+        "data.spitin",
+        "pipeline analysis.spit\npath raw: input/{id}.txt\n",
+    );
+    let output = spit(&[
+        "check",
+        recipe.to_str().unwrap(),
+        "--path-rules",
+        "--strict-paths",
+    ]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let report = stdout(&output);
+    assert!(
+        report.contains("raw (source): explicit input/{id}.txt (recipe)"),
+        "{report}"
+    );
+    assert!(
+        report.contains("result (output): explicit output/{id}.txt"),
+        "{report}"
+    );
+    assert!(report.contains("Recipe valid."), "{report}");
+
+    let pipeline_only = spit(&["check", pipeline.to_str().unwrap(), "--path-rules"]);
+    assert!(pipeline_only.status.success(), "{}", stderr(&pipeline_only));
+    assert!(stdout(&pipeline_only).contains("raw (source): no rule (a recipe may supply one)"));
+
+    tree.write(
+        "analysis.spit",
+        "source raw [id]\noperation copy(one)\nresult = copy(raw)\n",
+    );
+    let missing = spit(&[
+        "check",
+        recipe.to_str().unwrap(),
+        "--path-rules",
+        "--strict-paths",
+    ]);
+    assert!(!missing.status.success());
+    assert!(stdout(&missing).contains("result (output): MISSING"));
+    assert!(stderr(&missing).contains("no path rule for products: result"));
+}
+
+#[test]
 fn a_message_names_the_file_it_is_about_when_that_file_was_not_given() {
     let tree = Tree::new("cli-file-names", &["in/1.txt", "in/2.txt", "ref/2.txt"]);
     let directory = tree.path();

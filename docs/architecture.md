@@ -67,7 +67,7 @@ concrete DAG + path templates -> bound artifact paths
 bound paths + operation commands -> argument expansion -> .spitdag
 ```
 
-`spit check --path-rules` reports whether each declared product uses an explicit rule, the default rule, or no rule. Path templates are validated at compile time even for product families with no resolved jobs, and `dag` checks collisions among concrete paths. `--strict-paths` requires explicit rules for all products; without it, a default rule can cover multiple families. An output with no rule takes the built-in `out/{product}/{entities}`. A recipe's source rule is carried once in the `.spitout` for standalone resolution.
+`spit check pipeline.spit --path-rules` reports whether each declared product uses an explicit rule, the default rule, or no rule. A source with no rule may receive one from a recipe; `spit check recipe.spitin --path-rules` lists the combined rules and marks those supplied by the recipe. Path templates are validated at compile time even for product families with no resolved jobs, and `dag` checks collisions among concrete paths. `--strict-paths` requires explicit rules for all products; without it, a default rule can cover multiple families. An output with no rule takes the built-in `out/{product}/{entities}`. A recipe's source rule is carried once in the `.spitout` for standalone resolution.
 
 `spit dag --paths` reports each concrete job, its named input artifacts and output artifact, and their relative paths: the `.spitdag` without its commands.
 
