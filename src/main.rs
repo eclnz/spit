@@ -322,7 +322,7 @@ impl fmt::Display for Help {
 
 fn overview(f: &mut fmt::Formatter<'_>) -> fmt::Result {
     f.write_str(
-        "spit: compile a pipeline, settle a dataset's inputs, resolve jobs, and write a script\n\nusage: spit <command> <files> [options]\n\ncommands:\n",
+        "spit: compile a pipeline, settle a dataset's inputs, and resolve its jobs into a .spitdag\n\nusage: spit <command> <files> [options]\n\ncommands:\n",
     )?;
     for command in COMMANDS {
         writeln!(f, "  {:<10} {}", command.name(), command.summary())?;
