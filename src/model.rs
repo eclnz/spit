@@ -291,6 +291,18 @@ impl EntityBinding {
         Some(Self::from_sorted(pairs))
     }
 
+    /// Its values for `dimensions`, in their order, or `None` if one of them
+    /// is unbound: two bindings project onto `dimensions` alike exactly when
+    /// their keys are equal, so bindings can be grouped without building a
+    /// binding for each.
+    pub(crate) fn group_key(&self, dimensions: &[String]) -> Option<GroupKey> {
+        dimensions
+            .iter()
+            .map(|dimension| self.pair(dimension).map(|value| value.id))
+            .collect::<Option<_>>()
+            .map(GroupKey)
+    }
+
     /// Compare values dimension by dimension in `dimensions` order, reading
     /// runs of digits as numbers, so `run=2` sorts before `run=10`.
     pub fn cmp_in(&self, other: &Self, dimensions: &[String]) -> Ordering {
@@ -307,6 +319,10 @@ impl EntityBinding {
             .unwrap_or_else(|| self.cmp(other))
     }
 }
+
+/// A binding's values for some dimensions; see [`EntityBinding::group_key`].
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub(crate) struct GroupKey(Vec<u32>);
 
 /// Order text as people read it: runs of digits compare by numeric value.
 pub(crate) fn natural_cmp(left: &str, right: &str) -> Ordering {
