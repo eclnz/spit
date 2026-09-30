@@ -90,6 +90,71 @@ fn one_aggregate_can_vary_two_dimensions_in_product_order() {
 }
 
 #[test]
+fn a_call_inherits_vary_from_drop_for_one_or_several_dimensions() {
+    for (source_dimensions, drop, inventory) in [
+        (
+            "site, run",
+            "run",
+            "sources:\n  result[site=A,run=1]\n  result[site=A,run=2]\n",
+        ),
+        (
+            "site, model, config",
+            "model, config",
+            "sources:\n  result[site=A,model=b,config=1]\n  result[site=A,model=a,config=2]\n",
+        ),
+    ] {
+        let text = format!(
+            "source result [{source_dimensions}]\noperation combine(items: many Result) -> Summary @ drop({drop})\nsummary = combine(result)\n"
+        );
+        let pipeline = parse_pipeline(&text).unwrap();
+        assert_eq!(
+            pipeline.invocations[0].inputs[0].vary,
+            drop.split(", ").collect::<Vec<_>>()
+        );
+        assert_eq!(pipeline.products[1].dimensions, ["site"]);
+        let dag = resolve(&pipeline, &parse_source_inventory(inventory).unwrap()).unwrap();
+        assert_eq!(dag.jobs.len(), 1);
+        assert_eq!(dag.jobs[0].inputs[0].len(), 2);
+        assert_eq!(
+            dag.artifact(dag.jobs[0].output()).to_string(),
+            "summary[site=A]"
+        );
+    }
+}
+
+#[test]
+fn omitted_vary_needs_drop_and_explicit_vary_still_matches_drop() {
+    let base = "source result [site, run]\noperation combine(items: many Result) -> Summary @ drop(run)\nsummary = combine(result)\n";
+    let inventory = "sources:\n  result[site=A,run=1]\n  result[site=A,run=2]\n";
+    let mut constructed = parse_pipeline(base).unwrap();
+    constructed.invocations[0].inputs[0].vary.clear();
+    spit::validate_pipeline(&constructed).unwrap();
+    assert_eq!(
+        resolve(&constructed, &parse_source_inventory(inventory).unwrap())
+            .unwrap()
+            .jobs
+            .len(),
+        1
+    );
+
+    let no_drop = base.replace(" @ drop(run)", "");
+    let error = spit::validate_pipeline(&parse_pipeline(&no_drop).unwrap()).unwrap_err();
+    assert!(
+        error.to_string().contains("requires vary(dimension)"),
+        "{error}"
+    );
+
+    let mismatch = base.replace("combine(result)", "combine(result @ vary(site))");
+    let error = spit::validate_pipeline(&parse_pipeline(&mismatch).unwrap()).unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("declares drop(run) but invocation uses vary(site)"),
+        "{error}"
+    );
+}
+
+#[test]
 fn a_single_input_of_an_aggregate_must_match_each_group() {
     let missing = resolve_text(COMBINE, "sources:\n  result[site=A,run=1]\n");
     assert!(matches!(

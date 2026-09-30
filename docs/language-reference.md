@@ -40,11 +40,11 @@ operation mean(images: many Image) -> Image @ drop(run)
 command mean: mean_tool {images} --out {output}
 ```
 
-Declare an operation before its first use. Inputs in a call follow the port order in the declaration. A `one` input must resolve to exactly one artifact for each job, so every other input may only use dimensions the driving input has, unless it broadcasts them with `@ each(...)`; SPIT rejects a pipeline that breaks this before reading any inputs, and reports a missing match for a job. A `many` input needs `@ vary(dimension, ...)`, and its command placeholder expands to one separately quoted argument per artifact, in natural order. Artifacts are compared dimension by dimension in the product's declared order. Within a value, runs of digits compare as numbers and other characters compare one by one, so `run=2` comes before `run=10`, ISO dates such as `2026-09-01` sort by date, and names sort by character (`lr-high`, `lr-low`, `warmup`). Values equal as numbers but written differently, such as `1` and `01`, are then ordered by their text. A many placeholder must occupy a whole argument. An operation takes at most one `many` input, which may sit beside `one` inputs; each of those is matched once per group:
+Declare an operation before its first use. Inputs in a call follow the port order in the declaration. A `one` input must resolve to exactly one artifact for each job, so every other input may only use dimensions the driving input has, unless it broadcasts them with `@ each(...)`; SPIT rejects a pipeline that breaks this before reading any inputs, and reports a missing match for a job. A `many` input takes `@ vary(dimension, ...)` from the call or, when omitted, from the operation's `@ drop(dimension, ...)`. An explicit `@ vary` must agree with `@ drop`; without `@ drop`, the call must specify `@ vary`. Its command placeholder expands to one separately quoted argument per artifact, in natural order. Artifacts are compared dimension by dimension in the product's declared order. Within a value, runs of digits compare as numbers and other characters compare one by one, so `run=2` comes before `run=10`, ISO dates such as `2026-09-01` sort by date, and names sort by character (`lr-high`, `lr-low`, `warmup`). Values equal as numbers but written differently, such as `1` and `01`, are then ordered by their text. A many placeholder must occupy a whole argument. An operation takes at most one `many` input, which may sit beside `one` inputs; each of those is matched once per group:
 
 ```text
 operation summarise(days: many Series, policy: Policy) -> Summary @ drop(day) @ min(2)
-summary = summarise(reading @ vary(day), policy)
+summary = summarise(reading, policy)
 ```
 
 `@ min(2)` rejects a group with fewer than two artifacts.
@@ -53,7 +53,7 @@ One aggregate can remove several dimensions at once. The operation's `@ drop(...
 
 ```text
 operation leaderboard(summaries: many Summary) -> Table @ drop(model, config)
-board = leaderboard(summary @ vary(model, config))
+board = leaderboard(summary)
 ```
 
 `@ min(n)` counts the whole collection, across both dimensions. A call that writes two `@ vary` clauses is an error; put both dimensions in one clause.
