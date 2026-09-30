@@ -1,58 +1,94 @@
 //! Text reports of a resolved DAG: its jobs, and what can and cannot be made.
 
 use std::collections::BTreeSet;
-use std::fmt;
+use std::fmt::{self, Write as _};
 
-use crate::model::{identity, Artifact, ArtifactInstance, ArtifactReport, Gap, ResolvedDag};
-use crate::spitdag::{BoundArtifact, BoundDag};
+use crate::model::{
+    identity, push_identity, Artifact, ArtifactInstance, ArtifactReport, Gap, ResolvedDag,
+};
+use crate::spitdag::BoundDag;
 use crate::types::TypeExpr;
 
-/// The jobs as text, without ports or paths.
+/// The jobs as text, without ports or paths. Each job is written straight
+/// into the text, with each product's dimensions and type found and
+/// formatted once rather than once per artifact.
 pub fn render_dag(dag: &ResolvedDag) -> String {
-    let artifact = |id| {
+    let products: Vec<ProductText<'_>> = dag
+        .artifacts
+        .products()
+        .map(|(product, artifact_type)| ProductText {
+            dimensions: dag.product_dimensions.get(product).map(Vec::as_slice),
+            typed: typed(String::new(), artifact_type),
+        })
+        .collect();
+    let mut writer = JobWriter::default();
+    let artifact = |writer: &mut JobWriter, id| {
+        let product = &products[dag.artifacts.product_of(id) as usize];
         let artifact = dag.artifact(id);
-        Line {
-            port: None,
-            artifact: typed(render_artifact(dag, artifact), artifact.artifact_type),
-            path: None,
+        writer.line(None);
+        match product.dimensions {
+            Some(dimensions) => push_identity(
+                &mut writer.text,
+                artifact.product,
+                dimensions.iter().filter_map(|dimension| {
+                    Some((dimension.as_str(), artifact.entities.get(dimension)?))
+                }),
+            ),
+            None => write!(writer.text, "{artifact}").expect("writing to a String"),
         }
+        writer.text.push_str(&product.typed);
+        writer.text.push('\n');
     };
-    let jobs = dag.jobs.iter().map(|job| JobText {
-        id: job.id,
-        stage: job.stage.as_deref(),
-        operation: &job.operation,
-        inputs: job.input_artifacts().map(artifact).collect(),
-        outputs: job.outputs.iter().copied().map(artifact).collect(),
-        depends_on: &job.dependencies,
-    });
-    Jobs(jobs.collect()).to_string()
+    for job in &dag.jobs {
+        writer.head(job.id, job.stage.as_deref(), &job.operation);
+        for input in job.input_artifacts() {
+            artifact(&mut writer, input);
+        }
+        writer.outputs(job.outputs.len() == 1);
+        for &output in &job.outputs {
+            artifact(&mut writer, output);
+        }
+        writer.tail(&job.dependencies);
+    }
+    writer.text
+}
+
+/// What every artifact of one product shows: its dimensions in declared
+/// order, when known, and its type as ` : Type`, or nothing when unknown.
+struct ProductText<'a> {
+    dimensions: Option<&'a [String]>,
+    typed: String,
 }
 
 /// The jobs of a bound DAG as text, each artifact with its port, and with
 /// its path when `paths` is set.
 pub fn render_bound_dag(dag: &BoundDag, paths: bool) -> String {
-    let artifact = |port: &'_ str, artifact: &'_ BoundArtifact| Line {
-        port: Some(port.to_owned()),
-        artifact: typed(artifact.identity(), &artifact.artifact_type),
-        path: paths.then(|| artifact.path.clone()),
-    };
-    let jobs = dag.jobs.iter().map(|job| JobText {
-        id: job.id,
-        stage: job.stage.as_deref(),
-        operation: &job.operation,
-        inputs: job
+    let mut writer = JobWriter::default();
+    for job in &dag.jobs {
+        writer.head(job.id, job.stage.as_deref(), &job.operation);
+        let inputs = job
             .inputs
             .iter()
-            .flat_map(|(port, artifacts)| artifacts.iter().map(|each| artifact(port, each)))
-            .collect(),
-        outputs: job
-            .outputs
-            .iter()
-            .map(|(port, each)| artifact(port, each))
-            .collect(),
-        depends_on: &job.depends_on,
-    });
-    Jobs(jobs.collect()).to_string()
+            .flat_map(|(port, artifacts)| artifacts.iter().map(move |each| (port, each)));
+        for (port, artifact) in inputs {
+            writer.line(Some(port));
+            writer.artifact(&artifact.identity(), &artifact.artifact_type);
+            if paths {
+                writer.path(&artifact.path);
+            }
+        }
+        let single = job.outputs.len() == 1;
+        writer.outputs(single);
+        for (port, artifact) in &job.outputs {
+            writer.line((!single).then_some(port.as_str()));
+            writer.artifact(&artifact.identity(), &artifact.artifact_type);
+            if paths {
+                writer.path(&artifact.path);
+            }
+        }
+        writer.tail(&job.depends_on);
+    }
+    writer.text
 }
 
 /// What can be made from a DAG's sources, what cannot, and why.
@@ -60,72 +96,70 @@ pub fn render_artifacts(report: &ArtifactReport) -> String {
     Report(report).to_string()
 }
 
-/// A job as the text reports show it, from a resolved or a bound DAG.
-struct JobText<'a> {
-    id: usize,
-    stage: Option<&'a str>,
-    operation: &'a str,
-    inputs: Vec<Line>,
-    outputs: Vec<Line>,
-    depends_on: &'a [usize],
+/// Writes jobs as the text reports show them, from a resolved or a bound
+/// DAG, one piece at a time. Jobs are separated by a blank line.
+#[derive(Default)]
+struct JobWriter {
+    text: String,
 }
 
-/// One artifact of a job: its port and path when shown.
-struct Line {
-    port: Option<String>,
-    artifact: String,
-    path: Option<String>,
-}
-
-struct Jobs<'a>(Vec<JobText<'a>>);
-
-impl fmt::Display for Jobs<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for (index, job) in self.0.iter().enumerate() {
-            if index > 0 {
-                writeln!(f)?;
-            }
-            write!(f, "{job}")?;
+impl JobWriter {
+    /// A job's number, stage and operation, up to its inputs.
+    fn head(&mut self, id: usize, stage: Option<&str>, operation: &str) {
+        if !self.text.is_empty() {
+            self.text.push('\n');
         }
-        Ok(())
+        let text = &mut self.text;
+        writeln!(text, "Job {id}").expect("writing to a String");
+        if let Some(stage) = stage {
+            writeln!(text, "  stage: {stage}").expect("writing to a String");
+        }
+        writeln!(text, "  operation: {operation}\n  inputs:").expect("writing to a String");
     }
-}
 
-impl fmt::Display for JobText<'_> {
-    /// A lone output is shown without its port.
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "Job {}", self.id)?;
-        if let Some(stage) = self.stage {
-            writeln!(f, "  stage: {stage}")?;
-        }
-        writeln!(f, "  operation: {}", self.operation)?;
-        writeln!(f, "  inputs:")?;
-        for line in &self.inputs {
-            line.write(f, true)?;
-        }
-        let single = self.outputs.len() == 1;
-        writeln!(f, "  {}:", if single { "output" } else { "outputs" })?;
-        for line in &self.outputs {
-            line.write(f, !single)?;
-        }
-        if !self.depends_on.is_empty() {
-            let dependencies: Vec<_> = self.depends_on.iter().map(ToString::to_string).collect();
-            writeln!(f, "  depends_on: {}", dependencies.join(", "))?;
-        }
-        Ok(())
+    /// The heading of a job's outputs. A lone output is shown without its
+    /// port.
+    fn outputs(&mut self, single: bool) {
+        self.text.push_str(if single {
+            "  output:\n"
+        } else {
+            "  outputs:\n"
+        });
     }
-}
 
-impl Line {
-    fn write(&self, f: &mut fmt::Formatter<'_>, with_port: bool) -> fmt::Result {
-        match self.port.as_deref().filter(|_| with_port) {
-            Some(port) => writeln!(f, "    {port}: {}", self.artifact)?,
-            None => writeln!(f, "    {}", self.artifact)?,
+    /// The start of an artifact's line, with its port when shown.
+    fn line(&mut self, port: Option<&str>) {
+        self.text.push_str("    ");
+        if let Some(port) = port {
+            self.text.push_str(port);
+            self.text.push_str(": ");
         }
-        if let Some(path) = &self.path {
-            writeln!(f, "      path: {path}")?;
+    }
+
+    /// The rest of an artifact's line: its identity and, unless unknown, its
+    /// type.
+    fn artifact(&mut self, identity: &str, artifact_type: &TypeExpr) {
+        self.text.push_str(identity);
+        if *artifact_type != TypeExpr::Unknown {
+            write!(self.text, " : {artifact_type}").expect("writing to a String");
         }
-        Ok(())
+        self.text.push('\n');
+    }
+
+    fn path(&mut self, path: &str) {
+        writeln!(self.text, "      path: {path}").expect("writing to a String");
+    }
+
+    /// The jobs this one depends on, if any.
+    fn tail(&mut self, depends_on: &[usize]) {
+        let Some((first, rest)) = depends_on.split_first() else {
+            return;
+        };
+        write!(self.text, "  depends_on: {first}").expect("writing to a String");
+        for dependency in rest {
+            write!(self.text, ", {dependency}").expect("writing to a String");
+        }
+        self.text.push('\n');
     }
 }
 
