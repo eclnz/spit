@@ -9,12 +9,19 @@ use std::path::Path;
 use crate::command::collect_commands;
 use crate::compile::collect_pipeline;
 use crate::imports::parse_located_document;
-use crate::inputs::{check_inventory, collect_rule_errors, InputError, InputSpec};
+use crate::inputs::{
+    check_inventory, collect_rule_errors, InputCheck, InputError, InputSpec, ResolvedInputs,
+};
 use crate::json::Json;
 use crate::lower::{parse_document_with_imports, ParsedDocument};
 use crate::model::DEFAULT_OUTPUT;
-use crate::model::{stage_within, ArtifactReport, CommandRole, ResolvedDag, SourceInventory};
-use crate::parser::{glued_comment, source_record_lines, without_bom, Kind, Rule, SourceMap, Step};
+use crate::model::{
+    stage_within, ArtifactReport, CommandRole, CoverageAction, CoverageGap, InputRules,
+    ResolvedDag, SourceInventory,
+};
+use crate::parser::{
+    as_read_back, glued_comment, source_record_lines, without_bom, Kind, Rule, SourceMap, Step,
+};
 use crate::paths::{case_collisions, collect_paths};
 use crate::resolver::first_failure;
 use crate::span::{content_columns, utf16_columns, Located, Place};
@@ -365,7 +372,7 @@ pub fn diagnose_checked_with_records(
     };
     let document = &parsed.document;
     let mut diagnostics = check_document(document, text, Some(records))?;
-    let report = record_diagnostics(document, &inventory, records, context.lenient);
+    let report = record_diagnostics(document, &inventory, None, records, context.lenient);
     let report = match report {
         Ok((report, found)) => {
             diagnostics.extend(found);
@@ -383,6 +390,44 @@ pub fn diagnose_checked_with_records(
         }
         _ => Err(diagnostics),
     }
+}
+
+/// As [`diagnose_checked_with_records`], for the records `settled` in memory
+/// by [`InputSpec::resolve`] with the context's recipe, without writing them
+/// as text and reading them back. It gives `None`, so that the caller
+/// diagnoses their text instead, when a diagnostic would point into that
+/// text: when anything is an error or concerns the records, or when a path
+/// rule the text would carry holds a `#`.
+pub fn diagnose_checked_with_inventory(
+    text: &str,
+    settled: &ResolvedInputs,
+    context: Context<'_>,
+) -> Option<(Checked, Records)> {
+    let text = without_bom(text);
+    let parsed = recover_parse_errors(text, |text| context.parse(text)).ok()?;
+    let document = &parsed.document;
+    let written = parsed.as_written.as_ref().unwrap_or(&document.pipeline);
+    let no_rules = InputRules::default();
+    let rules = context.recipe.map_or(&no_rules, |recipe| &recipe.rules);
+    let inventory = as_read_back(&settled.inventory, written, rules)?;
+    let skips = rules
+        .constraints
+        .iter()
+        .any(|rule| rule.action == CoverageAction::Skip);
+    let gaps = (!skips).then_some(settled.gaps.as_slice());
+    // Only errors are placed in the records' text.
+    let mut diagnostics = check_document(document, text, None).ok()?;
+    let lenient = context.lenient;
+    let (report, found) = record_diagnostics(document, &inventory, gaps, "", lenient).ok()?;
+    diagnostics.extend(found);
+    let diagnostics = finish(diagnostics, text, None);
+    if diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.is_error() || diagnostic.source == DiagnosticSource::Inventory)
+    {
+        return None;
+    }
+    Some((parsed.checked(diagnostics), Records { inventory, report }))
 }
 
 /// Diagnose a `.spitin` recipe at `path` without reading any data: its own
@@ -513,15 +558,26 @@ fn check_document(
 /// they resolve to with any warnings, about paths that differ only in case
 /// and steps that make nothing, or those diagnostics with the error that
 /// stops either.
+/// `settled` holds what settling `supplied` with the same rules found, when
+/// they have no `skip` rule: checking it again would find the same, and
+/// change nothing.
 fn record_diagnostics(
     document: &ParsedDocument,
     supplied: &SourceInventory,
+    settled: Option<&[CoverageGap]>,
     records: &str,
     lenient: bool,
 ) -> Result<(ArtifactReport, Vec<Diagnostic>), Vec<Diagnostic>> {
     let (pipeline, lines) = (&document.pipeline, &document.lines);
     let mut diagnostics = Vec::new();
-    let checked = check_inventory(pipeline, &document.inputs, Cow::Borrowed(supplied));
+    let checked = match settled {
+        Some(gaps) => Ok(InputCheck {
+            inventory: Cow::Borrowed(supplied),
+            gaps: gaps.to_vec(),
+            skipped: Vec::new(),
+        }),
+        None => check_inventory(pipeline, &document.inputs, Cow::Borrowed(supplied)),
+    };
     let resolved = checked.and_then(|checked| {
         if lenient {
             let unavailable: Vec<_> = checked

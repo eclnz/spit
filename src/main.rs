@@ -22,12 +22,13 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use spit::{
-    bind_dag, bind_dag_with, diagnose_checked, diagnose_checked_with_records, diagnose_recipe,
-    inspect_paths, parse_input_spec_at, render_artifacts, render_bound_dag, render_dag,
-    render_diagnostics_json, render_source_inventory, stage_within, validate_bound_source_files,
-    validate_source_files, ArtifactReport, BoundDag, BoundPaths, Checked, Context, Diagnosis,
-    Diagnostic, DiagnosticSource, InputSource, InputSpec, PathTemplate, Pipeline, ResolvedDag,
-    ResolvedInputs, Severity,
+    bind_dag, bind_dag_with, diagnose_checked, diagnose_checked_with_inventory,
+    diagnose_checked_with_records, diagnose_recipe, inspect_paths, parse_input_spec_at,
+    render_artifacts, render_bound_dag, render_dag, render_diagnostics_json,
+    render_source_inventory, stage_within, validate_bound_source_files, validate_source_files,
+    ArtifactReport, BoundDag, BoundPaths, Checked, Context, Diagnosis, Diagnostic,
+    DiagnosticSource, InputSource, InputSpec, PathTemplate, Pipeline, ResolvedDag, ResolvedInputs,
+    Severity,
 };
 
 #[derive(Clone, Copy, PartialEq)]
@@ -696,16 +697,25 @@ fn prepare_recipe(
     let loaded = load_recipe(file)?;
     let settled = settle(&loaded, file, root.as_deref())?;
     eprintln!("note: ran `spit inputs {file}` in memory");
-    let records_text = render_source_inventory(
-        &settled.inventory,
-        &loaded.checked.pipeline,
-        &loaded.recipe.rules,
-    );
     let context = Context {
         path: Some(&loaded.pipeline_file),
         recipe: Some(&loaded.recipe),
         lenient,
     };
+    let root = root.or_else(|| settled.root.clone());
+    // The records are written as a .spitout only when a diagnostic needs
+    // lines of it to point at.
+    let text = &loaded.pipeline_text;
+    if let Some((checked, records)) = diagnose_checked_with_inventory(text, &settled, context) {
+        report(&checked.warnings, text, None)?;
+        let pipeline = loaded.checked.pipeline;
+        return Ok(prepared(pipeline, settled, records.report, root));
+    }
+    let records_text = render_source_inventory(
+        &settled.inventory,
+        &loaded.checked.pipeline,
+        &loaded.recipe.rules,
+    );
     let diagnosis = diagnose_checked_with_records(&loaded.pipeline_text, &records_text, context);
     let (_, records) = passed(
         diagnosis,
@@ -713,7 +723,6 @@ fn prepare_recipe(
         &loaded.pipeline_text,
         Some(&records_text),
     )?;
-    let root = root.or_else(|| settled.root.clone());
     Ok(prepared(
         loaded.checked.pipeline,
         settled,
