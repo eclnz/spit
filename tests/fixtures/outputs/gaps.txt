@@ -2,6 +2,7 @@ $ spit dag strict.spitin --root .
 exit: 1
 --- stdout
 --- stderr
+note: 3 files under `.` match no source rule; `spit inputs strict.spitin --unmatched` lists them
 note: found 20 source artifacts and 6 contexts under `.`
 note: ran `spit inputs strict.spitin` in memory
 error: source coverage for `image` at [ses=2,sub=02]: expected at least 2 artifact(s), found 1
@@ -73,6 +74,7 @@ Coverage gaps: 1
   source coverage for `image` at [ses=2,sub=02]: expected at least 2 artifact(s), found 1
     holds back: image[sub=02,ses=2,run=1]
 --- stderr
+note: 3 files under `.` match no source rule; `spit inputs strict.spitin --unmatched` lists them
 note: found 20 source artifacts and 6 contexts under `.`
 note: ran `spit inputs strict.spitin` in memory
 $ spit inputs drop.spitin --root . -o /dev/stdout
@@ -115,6 +117,7 @@ removed:
         at: line 3
         found: 1
 --- stderr
+note: 3 files under `.` match no source rule; `spit inputs drop.spitin --unmatched` lists them
 note: dropped [sub=02,ses=2] by `drop [sub, ses] where image count<2` (line 3); found 1
 note: found 18 source artifacts and 5 contexts under `.`
 note: wrote the .spitout to `/dev/stdout`
@@ -401,6 +404,7 @@ Job 30
     score[sub=03,ses=2] : Score
   depends_on: 25
 --- stderr
+note: 3 files under `.` match no source rule; `spit inputs drop.spitin --unmatched` lists them
 note: dropped [sub=02,ses=2] by `drop [sub, ses] where image count<2` (line 3); found 1
 note: found 18 source artifacts and 5 contexts under `.`
 note: ran `spit inputs drop.spitin` in memory
@@ -461,6 +465,7 @@ Complete artifacts: 48
 
 Incomplete artifacts: 0
 --- stderr
+note: 3 files under `.` match no source rule; `spit inputs drop.spitin --unmatched` lists them
 note: dropped [sub=02,ses=2] by `drop [sub, ses] where image count<2` (line 3); found 1
 note: found 18 source artifacts and 5 contexts under `.`
 note: ran `spit inputs drop.spitin` in memory

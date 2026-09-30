@@ -6,7 +6,9 @@ use std::collections::BTreeSet;
 use std::path::Path;
 
 use crate::error::{DefinitionSubject, ResolveError};
-use crate::model::{EntityBinding, Exclusion, InputRules, Pipeline, Removal, SourceInventory};
+use crate::model::{
+    near_reason, EntityBinding, Exclusion, InputRules, Pipeline, Removal, SourceInventory,
+};
 use crate::parser::ParseError;
 
 /// Read each file the `exclude from` lines of `rules` name, relative to
@@ -399,22 +401,11 @@ fn note_near(
     }
     for (dimension, value) in &rule.values {
         if let Some(found) = entities.get(dimension) {
-            if found != value && is_near(found, value) {
+            if near_reason(found, value).is_some() {
                 near.insert((dimension.to_owned(), found.to_owned()));
             }
         }
     }
-}
-
-/// Whether two values differ only in letter case, or are the same number
-/// written with different leading zeros.
-fn is_near(found: &str, wanted: &str) -> bool {
-    let number = |text: &str| {
-        (!text.is_empty() && text.bytes().all(|byte| byte.is_ascii_digit()))
-            .then(|| text.trim_start_matches('0').to_owned())
-    };
-    found.eq_ignore_ascii_case(wanted)
-        || number(found).is_some_and(|found| Some(found) == number(wanted))
 }
 
 #[cfg(test)]
@@ -454,9 +445,9 @@ mod tests {
 
     #[test]
     fn near_values_differ_in_case_or_leading_zeros() {
-        assert!(is_near("S07", "s07"));
-        assert!(is_near("02", "2"));
-        assert!(!is_near("03", "2"));
-        assert!(!is_near("run-2", "run-02"));
+        assert!(near_reason("S07", "s07").is_some());
+        assert!(near_reason("02", "2").is_some());
+        assert!(near_reason("03", "2").is_none());
+        assert!(near_reason("run-2", "run-02").is_none());
     }
 }

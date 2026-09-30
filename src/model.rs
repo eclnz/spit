@@ -375,6 +375,24 @@ pub(crate) fn natural_cmp(left: &str, right: &str) -> Ordering {
     }
 }
 
+/// Why two unequal values are likely the same intended value.
+pub(crate) fn near_reason(found: &str, wanted: &str) -> Option<&'static str> {
+    if found == wanted {
+        return None;
+    }
+    if found.eq_ignore_ascii_case(wanted) {
+        return Some("letter case");
+    }
+    let digits = |text: &str| !text.is_empty() && text.bytes().all(|byte| byte.is_ascii_digit());
+    if digits(found)
+        && digits(wanted)
+        && found.trim_start_matches('0') == wanted.trim_start_matches('0')
+    {
+        return Some("leading zeros");
+    }
+    None
+}
+
 fn split_digits(text: &str) -> (&str, &str) {
     let end = text
         .find(|character: char| !character.is_ascii_digit())

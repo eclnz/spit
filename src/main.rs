@@ -57,7 +57,9 @@ struct CommandSpec {
 
 impl Command {
     fn spec(self) -> CommandSpec {
-        use Flag::{Commands, Json, Output, Partial, PathRules, Paths, Root, Stdin, StrictPaths};
+        use Flag::{
+            Commands, Json, Output, Partial, PathRules, Paths, Root, Stdin, StrictPaths, Unmatched,
+        };
         match self {
             Self::Check => CommandSpec {
                 name: "check",
@@ -71,7 +73,7 @@ impl Command {
                 files: "<recipe.spitin>",
                 summary: "step 2: find a dataset's sources with a recipe, apply `exclude`, `drop` and `require`, and write a .spitout",
                 example: "spit inputs dataset.spitin -o dataset.spitout",
-                flags: &[Root, Output],
+                flags: &[Root, Output, Unmatched],
             },
             Self::Dag => CommandSpec {
                 name: "dag",
@@ -143,18 +145,20 @@ enum Flag {
     Paths,
     Commands,
     Partial,
+    Unmatched,
     PathRules,
     StrictPaths,
     Json,
     Stdin,
 }
 
-const FLAGS: [Flag; 9] = [
+const FLAGS: [Flag; 10] = [
     Flag::Root,
     Flag::Output,
     Flag::Paths,
     Flag::Commands,
     Flag::Partial,
+    Flag::Unmatched,
     Flag::PathRules,
     Flag::StrictPaths,
     Flag::Json,
@@ -162,7 +166,7 @@ const FLAGS: [Flag; 9] = [
 ];
 
 /// Pairs of flags that cannot be used together.
-const CONFLICTS: [(Flag, Flag); 7] = [
+const CONFLICTS: [(Flag, Flag); 8] = [
     (Flag::Json, Flag::Paths),
     (Flag::Json, Flag::Output),
     (Flag::Paths, Flag::Output),
@@ -170,6 +174,7 @@ const CONFLICTS: [(Flag, Flag); 7] = [
     (Flag::Commands, Flag::Output),
     (Flag::Json, Flag::PathRules),
     (Flag::Json, Flag::StrictPaths),
+    (Flag::Unmatched, Flag::Output),
 ];
 
 impl Flag {
@@ -180,6 +185,7 @@ impl Flag {
             Self::Paths => "--paths",
             Self::Commands => "--commands",
             Self::Partial => "--partial",
+            Self::Unmatched => "--unmatched",
             Self::PathRules => "--path-rules",
             Self::StrictPaths => "--strict-paths",
             Self::Json => "--json",
@@ -207,6 +213,9 @@ impl Flag {
             (Self::Paths, _) => "show each artifact's file",
             (Self::Commands, _) => "show each job's command lines, as a shell would run them",
             (Self::Partial, _) => "plan complete jobs and record artifacts that cannot be produced",
+            (Self::Unmatched, _) => {
+                "list files matching no source rule instead of writing a .spitout"
+            }
             (Self::PathRules, _) => "list the path rule each product uses",
             (Self::StrictPaths, _) => "require an explicit path rule for every product",
             (Self::Json, Command::Check) => "print diagnostics as JSON, for editors",
@@ -562,6 +571,12 @@ fn inputs(args: &CliArgs) -> Result<(), Box<dyn Error>> {
     let root = args.value(Flag::Root).map(PathBuf::from);
     let settled = settle(&loaded, &args.file, root.as_deref())?;
     settled.require_complete()?;
+    if args.has(Flag::Unmatched) {
+        for file in &settled.unmatched_files {
+            println!("{file}");
+        }
+        return Ok(());
+    }
     let text = render_source_inventory(
         &settled.inventory,
         &loaded.checked.pipeline,
@@ -650,6 +665,12 @@ fn settle(
     let resolved = recipe.resolve(&loaded.checked.pipeline, source)?;
     for skipped in &resolved.skipped {
         eprintln!("warning: skipped {skipped}");
+    }
+    if let Some(root) = &resolved.root {
+        let count = resolved.unmatched_files.len();
+        if count > 0 {
+            eprintln!("note: {count} files under `{}` match no source rule; `spit inputs {} --unmatched` lists them", root.display(), file);
+        }
     }
     let pipeline = &loaded.checked.pipeline;
     for removal in &resolved.inventory.removed {

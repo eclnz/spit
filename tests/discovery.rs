@@ -28,6 +28,29 @@ fn settle(pipeline: &Pipeline, spec: &InputSpec, inventory: &SourceInventory) ->
 
 const ONE_SOURCE: &str = "source x [s]\npath x: in/{s}.txt\n";
 
+#[test]
+fn unmatched_files_are_counted_and_can_be_listed_without_an_inventory() {
+    let tree = Tree::new(
+        "unmatched",
+        &["data/in/a.txt", "data/in/a.txt.bak", "data/notes.md"],
+    );
+    tree.write("pipeline.spit", ONE_SOURCE);
+    let recipe = tree.write("recipe.spitin", "pipeline pipeline.spit\n");
+    let root = tree.path().join("data");
+    let recipe = recipe.to_str().unwrap();
+    let root = root.to_str().unwrap();
+
+    let regular = spit(&["inputs", recipe, "--root", root]);
+    assert!(regular.status.success(), "{}", text(&regular.stderr));
+    assert!(text(&regular.stdout).contains("x[s=a]"));
+    assert!(text(&regular.stderr).contains("2 files under"));
+
+    let listing = spit(&["inputs", recipe, "--root", root, "--unmatched"]);
+    assert!(listing.status.success(), "{}", text(&listing.stderr));
+    assert_eq!(text(&listing.stdout), "in/a.txt.bak\nnotes.md\n");
+    assert!(!text(&listing.stdout).contains("sources:"));
+}
+
 const DISCOVERED: &str = "\
 path: derived/{product}/{entities}.txt
 source frame [subject, run]

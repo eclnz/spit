@@ -675,17 +675,20 @@ fn record_diagnostics(
                 .iter()
                 .flat_map(|gap| gap.sources.iter().cloned())
                 .collect();
-            return resolve_artifacts_excluding(pipeline, &checked.inventory, &unavailable);
+            let report = resolve_artifacts_excluding(pipeline, &checked.inventory, &unavailable)?;
+            diagnostics.extend(near_miss_warnings(&report));
+            return Ok(report);
         }
         if let Some(gap) = checked.gaps.into_iter().next() {
             return Err(gap.error);
         }
         let report = resolve_artifacts_excluding(pipeline, &checked.inventory, &[])?;
+        diagnostics.extend(near_miss_warnings(&report));
         if let Some(error) = first_failure(&report.incomplete) {
             let remaining: usize = report.incomplete.iter().map(|job| job.outputs.len()).sum();
             let (source, place) = error_location(pipeline, lines, &error, records, true);
             let mut message = error.to_string();
-            if let ResolveError::MissingInput { site, context } = &error {
+            if let ResolveError::MissingInput { site, context, .. } = &error {
                 if let Some(removal) = supplied.removed.iter().find(|removal| {
                     removal.product.as_deref() == Some(&site.product)
                         && removal.entities.iter().all(|(dimension, value)| {
@@ -741,6 +744,37 @@ fn record_diagnostics(
             Ok((report, diagnostics))
         }
     }
+}
+
+/// Unused sources that spell a value nearly as an incomplete job needs it.
+fn near_miss_warnings(report: &ArtifactReport) -> Vec<Diagnostic> {
+    let unused: BTreeSet<_> = report
+        .unused_sources()
+        .into_iter()
+        .map(|id| report.dag.artifact(id).to_instance().key())
+        .collect();
+    let mut seen = BTreeSet::new();
+    let mut warnings = Vec::new();
+    for job in &report.incomplete {
+        for gap in &job.gaps {
+            let crate::model::Gap::Unmatched(ResolveError::MissingInput {
+                site,
+                near: Some(near),
+                ..
+            }) = gap
+            else {
+                continue;
+            };
+            let key = near.artifact.key();
+            if unused.contains(&key) && seen.insert(key) {
+                warnings.push(warning(None, format!(
+                    "source {} is used by no job; `{}` differs only in {} from {}, which `{}` needs",
+                    near.artifact, near.dimension, near.reason, near.wanted, site.operation
+                )));
+            }
+        }
+    }
+    warnings
 }
 
 /// Flag paths that differ only in case, which are one file on macOS and Windows.

@@ -73,6 +73,9 @@ fn partial_dag_plans_the_complete_stores_and_records_the_rest() {
     assert!(!failed.status.success());
     assert!(stderr(&failed).contains("9 more artifacts cannot be produced"));
     assert!(stderr(&failed).contains("spit dag --partial"));
+    assert!(stderr(&failed)
+        .contains("pricing[store=S07] exists; its `store` differs only in letter case"));
+    assert!(stderr(&failed).contains("warning: source pricing[store=S07] is used by no job"));
 
     let partial = spit(&["dag", &recipe, "--partial", "--json"]);
     assert!(partial.status.success(), "{}", stderr(&partial));

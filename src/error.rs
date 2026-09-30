@@ -41,6 +41,15 @@ pub struct PortSite {
     pub product: String,
 }
 
+/// A source artifact that differs from a missing input in one value's spelling.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NearMiss {
+    pub artifact: ArtifactInstance,
+    pub dimension: String,
+    pub wanted: String,
+    pub reason: &'static str,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ResolveError {
     UnknownProduct {
@@ -61,6 +70,7 @@ pub enum ResolveError {
     MissingInput {
         site: PortSite,
         context: Box<EntityBinding>,
+        near: Option<Box<NearMiss>>,
     },
     /// A `one` input left more than one artifact for a job.
     AmbiguousInput {
@@ -163,10 +173,14 @@ impl fmt::Display for ResolveError {
                         ..
                     },
                 context,
-            } => write!(
-                f,
-                "no `{product}` artifact for input `{port}` of `{operation}` at [{context}]"
-            ),
+                near,
+            } => {
+                write!(f, "no `{product}` artifact for input `{port}` of `{operation}` at [{context}]")?;
+                if let Some(near) = near {
+                    write!(f, "\n    {} exists; its `{}` differs only in {}", near.artifact, near.dimension, near.reason)?;
+                }
+                Ok(())
+            }
             Self::AmbiguousInput {
                 site:
                     PortSite {
