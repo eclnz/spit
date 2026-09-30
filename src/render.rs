@@ -64,27 +64,25 @@ struct ProductText<'a> {
 /// its path when `paths` is set.
 pub fn render_bound_dag(dag: &BoundDag, paths: bool) -> String {
     let mut writer = JobWriter::default();
+    let artifact = |writer: &mut JobWriter, port: Option<&str>, id| {
+        let artifact = dag.artifact(id);
+        writer.line(port);
+        writer.artifact(&artifact.identity(), artifact.artifact_type);
+        if paths {
+            writer.path(artifact.path);
+        }
+    };
     for job in &dag.jobs {
         writer.head(job.id, job.stage.as_deref(), &job.operation);
-        let inputs = job
-            .inputs
-            .iter()
-            .flat_map(|(port, artifacts)| artifacts.iter().map(move |each| (port, each)));
-        for (port, artifact) in inputs {
-            writer.line(Some(port));
-            writer.artifact(&artifact.identity(), &artifact.artifact_type);
-            if paths {
-                writer.path(&artifact.path);
+        for (port, artifacts) in &job.inputs {
+            for &input in artifacts {
+                artifact(&mut writer, Some(port), input);
             }
         }
         let single = job.outputs.len() == 1;
         writer.outputs(single);
-        for (port, artifact) in &job.outputs {
-            writer.line((!single).then_some(port.as_str()));
-            writer.artifact(&artifact.identity(), &artifact.artifact_type);
-            if paths {
-                writer.path(&artifact.path);
-            }
+        for (port, output) in &job.outputs {
+            artifact(&mut writer, (!single).then_some(port.as_str()), *output);
         }
         writer.tail(&job.depends_on);
     }
