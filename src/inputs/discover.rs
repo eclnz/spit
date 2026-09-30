@@ -484,8 +484,9 @@ fn match_pattern<'a>(pieces: &[Piece], text: &'a str) -> Option<BTreeMap<String,
 type Attempt = (usize, usize, Vec<(usize, usize)>);
 
 /// Match `pieces[index..]` against `text[offset..]`, binding each dimension
-/// to the byte range of its value in `text`. Failed positions are
-/// remembered, which keeps ambiguous splits from taking exponential time.
+/// to the byte range of its value in `text`. Where a value's end is not
+/// forced, failed positions are remembered, which keeps ambiguous splits
+/// from taking exponential time.
 fn match_from(
     pieces: &[Piece],
     index: usize,
@@ -498,21 +499,7 @@ fn match_from(
     let Some(piece) = pieces.get(index) else {
         return rest.is_empty();
     };
-    let later: Vec<_> = bound
-        .iter()
-        .filter(|(dimension, _)| {
-            pieces
-                .iter()
-                .skip(index)
-                .any(|piece| matches!(piece, Piece::Value(name) if name == *dimension))
-        })
-        .map(|(_, value)| (value.start, value.end))
-        .collect();
-    let attempt = (index, offset, later);
-    if failed.contains(&attempt) {
-        return false;
-    }
-    let matched = match piece {
+    match piece {
         Piece::Literal(literal) => {
             rest.starts_with(literal.as_str())
                 && match_from(
@@ -526,29 +513,75 @@ fn match_from(
         }
         Piece::Value(dimension) => {
             if let Some(value) = bound.get(dimension).map(|value| &text[value.clone()]) {
-                rest.starts_with(value)
-                    && match_from(pieces, index + 1, text, offset + value.len(), bound, failed)
-            } else {
-                let longest = rest
-                    .find(|character: char| {
-                        !(character.is_ascii_alphanumeric() || character == '-' || character == '%')
-                    })
-                    .unwrap_or(rest.len());
-                let found = (1..=longest).any(|end| {
-                    bound.insert(dimension.clone(), offset..offset + end);
-                    match_from(pieces, index + 1, text, offset + end, bound, failed)
-                });
+                return rest.starts_with(value)
+                    && match_from(pieces, index + 1, text, offset + value.len(), bound, failed);
+            }
+            let longest = rest
+                .find(|character: char| !is_value_character(character))
+                .unwrap_or(rest.len());
+            if let Some(end) = forced_end(pieces.get(index + 1), rest, longest) {
+                if end == 0 {
+                    return false;
+                }
+                bound.insert(dimension.clone(), offset..offset + end);
+                let found = match_from(pieces, index + 1, text, offset + end, bound, failed);
                 if !found {
                     bound.remove(dimension);
                 }
-                found
+                return found;
             }
+            let later: Vec<_> = bound
+                .iter()
+                .filter(|(dimension, _)| {
+                    pieces
+                        .iter()
+                        .skip(index)
+                        .any(|piece| matches!(piece, Piece::Value(name) if name == *dimension))
+                })
+                .map(|(_, value)| (value.start, value.end))
+                .collect();
+            let attempt = (index, offset, later);
+            if failed.contains(&attempt) {
+                return false;
+            }
+            let found = (1..=longest).any(|end| {
+                bound.insert(dimension.clone(), offset..offset + end);
+                match_from(pieces, index + 1, text, offset + end, bound, failed)
+            });
+            if !found {
+                bound.remove(dimension);
+                failed.insert(attempt);
+            }
+            found
         }
-    };
-    if !matched {
-        failed.insert(attempt);
     }
-    matched
+}
+
+/// Whether a value can hold `character`: what `encode_component` keeps, and
+/// the `%` of what it escapes.
+fn is_value_character(character: char) -> bool {
+    character.is_ascii_alphanumeric() || character == '-' || character == '%'
+}
+
+/// The one length a value at the start of `rest` can have, when what
+/// follows it decides: the rest of the text at the end of the pattern, or
+/// its first `longest` characters before a literal that starts with a
+/// character no value holds, since every shorter value leaves a value
+/// character where the literal must start. `Some(0)` means none fits; `None`
+/// means several lengths must be tried.
+fn forced_end(next: Option<&Piece>, rest: &str, longest: usize) -> Option<usize> {
+    match next {
+        None => Some(if longest == rest.len() { longest } else { 0 }),
+        Some(Piece::Literal(literal))
+            if literal
+                .chars()
+                .next()
+                .is_some_and(|first| !is_value_character(first)) =>
+        {
+            Some(longest)
+        }
+        _ => None,
+    }
 }
 
 /// The directories and files under a root, each sorted, as `/`-separated
