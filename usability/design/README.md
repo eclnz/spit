@@ -65,7 +65,7 @@ One design built in three steps, each leaving the tool working. See [removing in
 
 15. **D11:** the five worked examples.
 16. **F10:** named arguments in a call (optional).
-17. **The VS Code extension** ([spit-vscode](https://github.com/eclnz/spit-vscode)): highlight `drop`, `exclude`, `where`, `has`, `missing` and `from`; drop `skip`; read the diagnostics' new `file` field.
+17. **The VS Code extension** ([spit-vscode](https://github.com/eclnz/spit-vscode)): highlight `drop`, `exclude`, `where`, `has`, `missing` and `from`; drop `skip`. Add a `file` field to `check --json` diagnostics, so the editor can place a pipeline's error found while checking a recipe ([diagnostics](diagnostics.md#b3-name-the-file-a-message-is-about)).
 
 ## After the work: the second round
 

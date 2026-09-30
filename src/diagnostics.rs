@@ -156,13 +156,50 @@ impl Diagnostic {
         text: &'a str,
         source_text: Option<&'a str>,
     ) -> impl fmt::Display + 'a {
-        let column = self.columns.as_ref().and_then(|columns| {
-            let line = self.line_text(text, source_text)?;
-            Some(line.get(..columns.start)?.chars().count() + 1)
-        });
+        self.display_named(text, source_text, FileNames::default())
+    }
+
+    /// As [`Diagnostic::display_in`], naming the file the diagnostic is in
+    /// when `names` gives one: `error: pipeline.spit: line 5, column 12:
+    /// message`. A caller names a file that is not the one its user gave,
+    /// such as the pipeline a recipe names.
+    pub fn display_named<'a>(
+        &'a self,
+        text: &'a str,
+        source_text: Option<&'a str>,
+        names: FileNames<'a>,
+    ) -> impl fmt::Display + 'a {
         DisplayIn {
             diagnostic: self,
-            column,
+            column: self.column_in(text, source_text),
+            name: self.name_in(names),
+        }
+    }
+
+    /// Its file, line and column, then its message, without its severity:
+    /// `pipeline.spit: line 5, column 12: message`.
+    pub(crate) fn located_message(&self, text: &str, name: &str) -> String {
+        struct Located<'a>(&'a Diagnostic, Option<usize>, &'a str);
+        impl fmt::Display for Located<'_> {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                self.0.write_located(f, self.1, Some(self.2))
+            }
+        }
+        Located(self, self.column_in(text, None), name).to_string()
+    }
+
+    /// The 1-based column in characters, given the texts that were diagnosed.
+    fn column_in(&self, text: &str, source_text: Option<&str>) -> Option<usize> {
+        let columns = self.columns.as_ref()?;
+        let line = self.line_text(text, source_text)?;
+        Some(line.get(..columns.start)?.chars().count() + 1)
+    }
+
+    /// The name `names` gives the text this diagnostic is in.
+    fn name_in<'a>(&self, names: FileNames<'a>) -> Option<&'a str> {
+        match self.source {
+            DiagnosticSource::Pipeline => names.pipeline,
+            DiagnosticSource::Inventory => names.inventory,
         }
     }
 
@@ -175,13 +212,33 @@ impl Diagnostic {
         without_bom(text).lines().nth(self.line?.checked_sub(1)?)
     }
 
-    fn write(&self, f: &mut fmt::Formatter<'_>, column: Option<usize>) -> fmt::Result {
+    fn write(
+        &self,
+        f: &mut fmt::Formatter<'_>,
+        column: Option<usize>,
+        name: Option<&str>,
+    ) -> fmt::Result {
         write!(f, "{}: ", self.severity.as_str())?;
+        self.write_located(f, column, name)
+    }
+
+    /// The diagnostic's place, then its message. A named file leads the
+    /// place; an unnamed inventory is called `inventory`. A diagnostic about
+    /// the pipeline with no line, such as a recipe rule's coverage gap, is
+    /// about no line of the pipeline, so the pipeline is not named.
+    fn write_located(
+        &self,
+        f: &mut fmt::Formatter<'_>,
+        column: Option<usize>,
+        name: Option<&str>,
+    ) -> fmt::Result {
         let inventory = self.source == DiagnosticSource::Inventory;
-        match (self.line, column) {
-            (Some(_), _) if inventory => f.write_str("inventory ")?,
-            (None, _) if inventory => f.write_str("inventory: ")?,
-            _ => {}
+        let name = name.filter(|_| inventory || self.line.is_some());
+        match (name, self.line) {
+            (Some(name), _) => write!(f, "{name}: ")?,
+            (None, Some(_)) if inventory => f.write_str("inventory ")?,
+            (None, None) if inventory => f.write_str("inventory: ")?,
+            (None, _) => {}
         }
         match (self.line, column) {
             (Some(line), Some(column)) => write!(f, "line {line}, column {column}: ")?,
@@ -192,15 +249,24 @@ impl Diagnostic {
     }
 }
 
+/// The files a diagnostic's texts came from, for those a message should
+/// name: the pipeline, or the main text diagnosed, and the inventory.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct FileNames<'a> {
+    pub pipeline: Option<&'a str>,
+    pub inventory: Option<&'a str>,
+}
+
 /// A diagnostic rendered with its column; see [`Diagnostic::display_in`].
 struct DisplayIn<'a> {
     diagnostic: &'a Diagnostic,
     column: Option<usize>,
+    name: Option<&'a str>,
 }
 
 impl fmt::Display for DisplayIn<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.diagnostic.write(f, self.column)
+        self.diagnostic.write(f, self.column, self.name)
     }
 }
 
@@ -209,7 +275,7 @@ impl fmt::Display for DisplayIn<'_> {
 /// [`Diagnostic::display_in`] to include it.
 impl fmt::Display for Diagnostic {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.write(f, None)
+        self.write(f, None, None)
     }
 }
 
@@ -458,7 +524,7 @@ pub fn diagnose_recipe(text: &str, path: &Path) -> Vec<Diagnostic> {
             "name the pipeline this recipe is for, with a line such as `pipeline analysis.spit`";
         return finish(vec![error(message.to_owned())], text, None);
     };
-    let shown = pipeline_path.display();
+    let shown = pipeline_path.display().to_string();
     let pipeline_text = match std::fs::read_to_string(&pipeline_path) {
         Ok(pipeline_text) => pipeline_text,
         Err(reason) => {
@@ -475,12 +541,7 @@ pub fn diagnose_recipe(text: &str, path: &Path) -> Vec<Diagnostic> {
             let pipeline_errors = diagnostics
                 .into_iter()
                 .filter(Diagnostic::is_error)
-                .map(|diagnostic| {
-                    let line = diagnostic
-                        .line
-                        .map_or_else(String::new, |line| format!(" line {line}"));
-                    error(format!("in `{shown}`{line}: {}", diagnostic.message))
-                })
+                .map(|diagnostic| error(diagnostic.located_message(&pipeline_text, &shown)))
                 .collect();
             finish(pipeline_errors, text, None)
         }
