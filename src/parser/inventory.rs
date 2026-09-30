@@ -1,13 +1,13 @@
 //! Source inventories: `sources:` records and `contexts:`, whether in a
 //! `.spitout` or written in a `.spitin` recipe.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::fmt;
 
-use crate::model::{
-    ArtifactInstance, EntityBinding, InputRules, Pipeline, SourceInventory, SourceRecord,
-};
-use crate::paths::{bind_path, unusable_path, PathTemplate};
+use rustc_hash::{FxHashMap, FxHashSet};
+
+use crate::model::{Artifact, EntityBinding, InputRules, Pipeline, SourceInventory, SourceRecord};
+use crate::paths::{unusable_path, PathBinder, PathTemplate};
 
 use super::keyword::{Header, Keyword};
 use super::lexical::{comma_items, identifier, qualified_identifier, strip_comment};
@@ -93,8 +93,68 @@ pub fn render_source_inventory(
     .to_string()
 }
 
+/// Settled `inventory` as writing it as a `.spitout` for `pipeline` and
+/// `rules` and reading that back gives it, but in its own order, or `None`
+/// when a path rule it would write holds a `#`. Settling gives each record
+/// the path its rule gives, which the text leaves out.
+///
+/// Keep in step with `InventoryText`, which writes the text, and
+/// `parse_inventory_with_lines`, which reads it: this must do to the
+/// inventory whatever the two do to it together, or a recipe diagnosed in
+/// memory will differ from its text. `tests/outputs.rs` compares them.
+pub(crate) fn as_read_back(
+    inventory: &SourceInventory,
+    pipeline: &Pipeline,
+    rules: &InputRules,
+) -> Option<SourceInventory> {
+    let source_paths = written_source_paths(inventory, rules);
+    if source_paths
+        .values()
+        .any(|template| template.to_string().contains('#'))
+    {
+        return None;
+    }
+    debug_assert!({
+        let mut located = pipeline.clone();
+        located.product_paths.extend(source_paths.clone());
+        unexpected_paths(&inventory.artifacts, &located)
+            .iter()
+            .all(Option::is_none)
+    });
+    let mut read = inventory.clone();
+    read.source_paths = source_paths;
+    for record in &mut read.artifacts {
+        record.path = None;
+    }
+    // Every named context is written as a context, and contexts are read
+    // back sorted, each once.
+    read.contexts
+        .extend(read.discovered.values().flatten().cloned());
+    read.contexts.sort();
+    read.contexts.dedup();
+    for bindings in read.discovered.values_mut() {
+        bindings.sort();
+        bindings.dedup();
+    }
+    Some(read)
+}
+
+/// The source path rules a `.spitout` writes: the inventory's and the
+/// recipe's.
+fn written_source_paths(
+    inventory: &SourceInventory,
+    rules: &InputRules,
+) -> BTreeMap<String, PathTemplate> {
+    let mut source_paths = inventory.source_paths.clone();
+    source_paths.extend(rules.source_paths.clone());
+    source_paths
+}
+
 /// A `.spitout`: its contexts, unnamed then by discovery rule, and its
 /// source records.
+///
+/// Keep in step with `as_read_back`: whatever this leaves out or rewrites,
+/// such as a record's path or the order of contexts, it must too.
 struct InventoryText<'a> {
     inventory: &'a SourceInventory,
     pipeline: &'a Pipeline,
@@ -104,13 +164,12 @@ struct InventoryText<'a> {
 /// The records a `.spitout` writes under a discovered context instead of
 /// under `sources:`: for each context, each remaining dimension's value (or
 /// none) and the products with a record there.
-type Nested<'a> = BTreeMap<EntityBinding, BTreeMap<EntityBinding, Vec<&'a str>>>;
+type Nested<'a> = FxHashMap<EntityBinding, FxHashMap<EntityBinding, Vec<&'a str>>>;
 
 impl fmt::Display for InventoryText<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let inventory = self.inventory;
-        let mut source_paths = inventory.source_paths.clone();
-        source_paths.extend(self.rules.source_paths.clone());
+        let source_paths = written_source_paths(inventory, self.rules);
         if !source_paths.is_empty() {
             writeln!(f, "source_paths:")?;
             for (name, template) in &source_paths {
@@ -120,17 +179,18 @@ impl fmt::Display for InventoryText<'_> {
         }
         let mut located = self.pipeline.clone();
         located.product_paths.extend(source_paths);
-        let (nested, flat) = self.nest_records(&located);
+        let unexpected = unexpected_paths(&inventory.artifacts, &located);
+        let (nested, flat) = self.nest_records(&unexpected);
         if !flat.is_empty() {
             writeln!(f, "sources:")?;
-            for record in flat {
-                self.write_record(f, record, &located)?;
+            for (record, path) in flat {
+                self.write_record(f, record, path)?;
             }
             if !inventory.contexts.is_empty() {
                 writeln!(f)?;
             }
         }
-        let named: BTreeSet<_> = inventory.discovered.values().flatten().collect();
+        let named: FxHashSet<_> = inventory.discovered.values().flatten().collect();
         let unnamed: Vec<_> = inventory
             .contexts
             .iter()
@@ -189,29 +249,28 @@ impl InventoryText<'_> {
     /// each record with its dimensions one unambiguous context, and at most
     /// one remaining dimension can be grouped under it. A record whose path
     /// is not the one its rule gives stays flat, so the path is kept.
-    fn nest_records<'a>(&'a self, located: &Pipeline) -> (Nested<'a>, Vec<&'a SourceRecord>) {
+    /// `unexpected` holds each record's path when its rule does not give it.
+    fn nest_records<'a>(
+        &'a self,
+        unexpected: &[Option<&'a str>],
+    ) -> (Nested<'a>, Vec<(&'a SourceRecord, Option<&'a str>)>) {
         let inventory = self.inventory;
         let discovery = match inventory.discovered.iter().next() {
             Some((name, contexts)) if inventory.discovered.len() == 1 => self
                 .rules
                 .discovery(name)
-                .map(|rule| (contexts.iter().collect::<BTreeSet<_>>(), &rule.dimensions)),
+                .map(|rule| (contexts.iter().collect::<FxHashSet<_>>(), &rule.dimensions)),
             _ => None,
         };
-        let mut nested: Nested<'a> = BTreeMap::new();
+        let mut nested: Nested<'a> = FxHashMap::default();
         let mut flat = Vec::new();
-        for record in &inventory.artifacts {
+        for (record, &path) in inventory.artifacts.iter().zip(unexpected) {
             let under = discovery.as_ref().and_then(|(contexts, dimensions)| {
-                if unexpected_path(record, located).is_some() {
+                if path.is_some() {
                     return None;
                 }
                 let parent = record.entities.project(dimensions)?;
-                let remainder: EntityBinding = record
-                    .entities
-                    .iter()
-                    .filter(|(dimension, _)| !dimensions.iter().any(|named| named == dimension))
-                    .map(|(dimension, value)| (dimension.to_owned(), value.to_owned()))
-                    .collect();
+                let remainder = record.entities.except(dimensions);
                 (contexts.contains(&parent) && remainder.len() <= 1).then_some((parent, remainder))
             });
             match under {
@@ -221,7 +280,7 @@ impl InventoryText<'_> {
                     .entry(remainder)
                     .or_default()
                     .push(&record.product),
-                None => flat.push(record),
+                None => flat.push((record, path)),
             }
         }
         (nested, flat)
@@ -233,7 +292,7 @@ impl InventoryText<'_> {
         &self,
         f: &mut fmt::Formatter<'_>,
         record: &SourceRecord,
-        located: &Pipeline,
+        unexpected: Option<&str>,
     ) -> fmt::Result {
         if record.entities.is_empty() {
             write!(f, "    {}", record.product)?;
@@ -249,7 +308,7 @@ impl InventoryText<'_> {
             let entities = in_order(&record.entities, &declared);
             write!(f, "    {}[{entities}]", record.product)?;
         }
-        if let Some(path) = unexpected_path(record, located) {
+        if let Some(path) = unexpected {
             write!(f, ": {path}")?;
         }
         writeln!(f)
@@ -283,7 +342,7 @@ impl InventoryText<'_> {
     fn write_groups(
         &self,
         f: &mut fmt::Formatter<'_>,
-        groups: &BTreeMap<EntityBinding, Vec<&str>>,
+        groups: &FxHashMap<EntityBinding, Vec<&str>>,
     ) -> fmt::Result {
         let products = &self.pipeline.products;
         let sorted_names = |names: &[&str]| {
@@ -327,25 +386,34 @@ impl InventoryText<'_> {
 }
 
 /// Preserve a legacy record path without a matching rule so rendering an
-/// invalid inventory does not silently discard its file. Resolution rejects it.
-fn unexpected_path<'a>(record: &'a SourceRecord, pipeline: &Pipeline) -> Option<&'a str> {
-    let given = record.path.as_deref()?;
-    let expected = pipeline
-        .products
+/// invalid inventory does not silently discard its file. Resolution rejects
+/// it. Each record's path, when its rule does not give it; each product's
+/// rule is found once.
+fn unexpected_paths<'a>(records: &'a [SourceRecord], pipeline: &Pipeline) -> Vec<Option<&'a str>> {
+    let mut products = FxHashMap::default();
+    for product in &pipeline.products {
+        products.entry(product.name.as_str()).or_insert(product);
+    }
+    let mut binder = PathBinder::new(pipeline);
+    records
         .iter()
-        .find(|product| product.name == record.product)
-        .and_then(|product| {
-            let artifact = ArtifactInstance::new(
-                &record.product,
-                product.artifact_type.clone(),
-                record.entities.clone(),
-            );
-            bind_path(pipeline, &product.dimensions, artifact.view(), || {
-                format!("source `{artifact}`")
-            })
-            .ok()
-        });
-    (expected.as_deref() != Some(given)).then_some(given)
+        .map(|record| {
+            let given = record.path.as_deref()?;
+            let expected = products.get(record.product.as_str()).and_then(|product| {
+                let artifact = Artifact {
+                    product: &record.product,
+                    artifact_type: &product.artifact_type,
+                    entities: &record.entities,
+                };
+                binder
+                    .bind(&product.dimensions, artifact, || {
+                        format!("source `{artifact}`")
+                    })
+                    .ok()
+            });
+            (expected.as_deref() != Some(given)).then_some(given)
+        })
+        .collect()
 }
 
 /// `binding` as `dim=value,...`, in the order of `declared`, then any
@@ -510,6 +578,8 @@ fn parse_inventory_with_lines(
             },
         }
     }
+    // Keep in step with `as_read_back`, which must normalize a settled
+    // inventory as reading its text does here.
     inventory.contexts.sort();
     inventory.contexts.dedup();
     for bindings in inventory.discovered.values_mut() {

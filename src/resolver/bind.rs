@@ -9,7 +9,7 @@ use crate::command::{slot, validate_commands, CommandError, Slot};
 use crate::model::{
     ArtifactId, Cardinality, CommandRole, Job, OperationDef, Pipeline, ResolvedDag,
 };
-use crate::paths::{bound_paths, check_rules, PathError};
+use crate::paths::{bound_paths, check_rules, BoundPaths, PathError};
 use crate::spitdag::{ArgPart, Argument, BoundDag, BoundJob};
 use crate::template::Part;
 
@@ -17,9 +17,39 @@ use crate::template::Part;
 /// and `verify` commands. A job whose operation has no command keeps none;
 /// a backend that runs jobs reports it.
 pub fn bind_dag(pipeline: &Pipeline, dag: &ResolvedDag) -> Result<BoundDag, BindError> {
+    // Keep in step with `bind_dag_with`, which skips the steps up to the
+    // paths' binding because `validate_bound_source_files` took them.
     check_rules(pipeline, dag)?;
     validate_commands(pipeline)?;
     let paths = bound_paths(pipeline, dag)?;
+    bind_jobs(pipeline, dag, paths)
+}
+
+/// As [`bind_dag`], with the paths [`validate_bound_source_files`] bound for
+/// the same pipeline and DAG, which checked their rules.
+///
+/// Keep in step with [`bind_dag`] and `validate_bound_source_files`: this
+/// leaves out `bind_dag`'s rule check and path binding because that
+/// function did both, so a check `bind_dag` gains before its paths are
+/// bound belongs there or here as well.
+///
+/// [`validate_bound_source_files`]: crate::validate_bound_source_files
+pub fn bind_dag_with(
+    pipeline: &Pipeline,
+    dag: &ResolvedDag,
+    paths: BoundPaths,
+) -> Result<BoundDag, BindError> {
+    validate_commands(pipeline)?;
+    bind_jobs(pipeline, dag, paths.0)
+}
+
+/// Every job of `dag` with its ports named and its commands expanded, over
+/// the path `paths` holds for each artifact.
+fn bind_jobs(
+    pipeline: &Pipeline,
+    dag: &ResolvedDag,
+    paths: Vec<Option<String>>,
+) -> Result<BoundDag, BindError> {
     let operations: BTreeMap<&str, &OperationDef> = pipeline
         .operations
         .iter()

@@ -182,6 +182,8 @@ pub(crate) fn bind_path(
 pub(crate) struct PathBinder<'p> {
     pipeline: &'p Pipeline,
     products: FxHashMap<String, ProductPath<'p>>,
+    /// The same, by the product's number in a DAG's artifact table.
+    numbered: Vec<Option<ProductPath<'p>>>,
 }
 
 impl<'p> PathBinder<'p> {
@@ -189,7 +191,28 @@ impl<'p> PathBinder<'p> {
         Self {
             pipeline,
             products: FxHashMap::default(),
+            numbered: Vec::new(),
         }
+    }
+
+    /// As [`PathBinder::bind`], for an artifact whose product has `number`
+    /// in its DAG's artifact table.
+    pub(crate) fn bind_numbered(
+        &mut self,
+        number: u32,
+        dimensions: &[String],
+        artifact: Artifact<'_>,
+        label: impl Fn() -> String,
+    ) -> Result<String, PathError> {
+        let number = number as usize;
+        if self.numbered.len() <= number {
+            self.numbered.resize_with(number + 1, || None);
+        }
+        let product = match &mut self.numbered[number] {
+            Some(product) => product,
+            slot => slot.insert(ProductPath::new(self.pipeline, artifact.product)?),
+        };
+        product.bind(dimensions, artifact, label)
     }
 
     pub(crate) fn bind(
@@ -323,9 +346,9 @@ pub(crate) fn unusable_path(relative: &str) -> Option<&'static str> {
         return Some("must name a file, not end with `/`");
     }
     let (mut empty, mut dots) = (false, false);
-    for component in relative.split('/') {
+    for component in relative.as_bytes().split(|&byte| byte == b'/') {
         empty |= component.is_empty();
-        dots |= component == "." || component == "..";
+        dots |= component == b"." || component == b"..";
     }
     if empty {
         Some("must not contain an empty directory name, as in `//`")
@@ -338,6 +361,11 @@ pub(crate) fn unusable_path(relative: &str) -> Option<&'static str> {
 
 /// `value` as one path component: ASCII letters, digits and `-` as they
 /// are, every other byte as `%XX`.
+///
+/// Keep in step with `is_value_character` in `inputs/discover.rs`, which
+/// holds that an encoded value has only these characters and `%`:
+/// discovery binds a value without searching when the character after it
+/// cannot be one of them, so a character added here must be added there.
 pub(crate) fn encode_component(value: &str) -> String {
     let mut encoded = String::with_capacity(value.len());
     push_encoded(&mut encoded, value);
