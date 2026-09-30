@@ -1,0 +1,405 @@
+$ spit dag pipeline.spit complete.spitout --root .
+exit: 0
+--- stdout
+Job 1
+  stage: prep
+  operation: clean
+  inputs:
+    image[sub=01,ses=1,run=1] : Image<T1w>
+    mask[sub=01] : Mask
+  output:
+    cleaned[sub=01,ses=1,run=1] : Image<T1w>
+
+Job 2
+  stage: prep
+  operation: clean
+  inputs:
+    image[sub=01,ses=1,run=2] : Image<T1w>
+    mask[sub=01] : Mask
+  output:
+    cleaned[sub=01,ses=1,run=2] : Image<T1w>
+
+Job 3
+  stage: prep
+  operation: clean
+  inputs:
+    image[sub=01,ses=2,run=1] : Image<T1w>
+    mask[sub=01] : Mask
+  output:
+    cleaned[sub=01,ses=2,run=1] : Image<T1w>
+
+Job 4
+  stage: prep
+  operation: clean
+  inputs:
+    image[sub=01,ses=2,run=2] : Image<T1w>
+    mask[sub=01] : Mask
+  output:
+    cleaned[sub=01,ses=2,run=2] : Image<T1w>
+
+Job 5
+  stage: prep
+  operation: clean
+  inputs:
+    image[sub=02,ses=1,run=1] : Image<T1w>
+    mask[sub=02] : Mask
+  output:
+    cleaned[sub=02,ses=1,run=1] : Image<T1w>
+
+Job 6
+  stage: prep
+  operation: clean
+  inputs:
+    image[sub=02,ses=1,run=2] : Image<T1w>
+    mask[sub=02] : Mask
+  output:
+    cleaned[sub=02,ses=1,run=2] : Image<T1w>
+
+Job 7
+  stage: prep
+  operation: clean
+  inputs:
+    image[sub=02,ses=2,run=1] : Image<T1w>
+    mask[sub=02] : Mask
+  output:
+    cleaned[sub=02,ses=2,run=1] : Image<T1w>
+
+Job 8
+  stage: prep
+  operation: clean
+  inputs:
+    image[sub=02,ses=2,run=2] : Image<T1w>
+    mask[sub=02] : Mask
+  output:
+    cleaned[sub=02,ses=2,run=2] : Image<T1w>
+
+Job 9
+  stage: prep
+  operation: clean
+  inputs:
+    image[sub=03,ses=1,run=1] : Image<T1w>
+    mask[sub=03] : Mask
+  output:
+    cleaned[sub=03,ses=1,run=1] : Image<T1w>
+
+Job 10
+  stage: prep
+  operation: clean
+  inputs:
+    image[sub=03,ses=1,run=2] : Image<T1w>
+    mask[sub=03] : Mask
+  output:
+    cleaned[sub=03,ses=1,run=2] : Image<T1w>
+
+Job 11
+  stage: prep
+  operation: clean
+  inputs:
+    image[sub=03,ses=2,run=1] : Image<T1w>
+    mask[sub=03] : Mask
+  output:
+    cleaned[sub=03,ses=2,run=1] : Image<T1w>
+
+Job 12
+  stage: prep
+  operation: clean
+  inputs:
+    image[sub=03,ses=2,run=2] : Image<T1w>
+    mask[sub=03] : Mask
+  output:
+    cleaned[sub=03,ses=2,run=2] : Image<T1w>
+
+Job 13
+  stage: prep
+  operation: align
+  inputs:
+    cleaned[sub=01,ses=1,run=1] : Image<T1w>
+    reference[sub=01,ses=1] : Reference
+  output:
+    aligned[sub=01,ses=1,run=1] : Image<T1w>
+  depends_on: 1
+
+Job 14
+  stage: prep
+  operation: align
+  inputs:
+    cleaned[sub=01,ses=1,run=2] : Image<T1w>
+    reference[sub=01,ses=1] : Reference
+  output:
+    aligned[sub=01,ses=1,run=2] : Image<T1w>
+  depends_on: 2
+
+Job 15
+  stage: prep
+  operation: align
+  inputs:
+    cleaned[sub=01,ses=2,run=1] : Image<T1w>
+    reference[sub=01,ses=2] : Reference
+  output:
+    aligned[sub=01,ses=2,run=1] : Image<T1w>
+  depends_on: 3
+
+Job 16
+  stage: prep
+  operation: align
+  inputs:
+    cleaned[sub=01,ses=2,run=2] : Image<T1w>
+    reference[sub=01,ses=2] : Reference
+  output:
+    aligned[sub=01,ses=2,run=2] : Image<T1w>
+  depends_on: 4
+
+Job 17
+  stage: prep
+  operation: align
+  inputs:
+    cleaned[sub=02,ses=1,run=1] : Image<T1w>
+    reference[sub=02,ses=1] : Reference
+  output:
+    aligned[sub=02,ses=1,run=1] : Image<T1w>
+  depends_on: 5
+
+Job 18
+  stage: prep
+  operation: align
+  inputs:
+    cleaned[sub=02,ses=1,run=2] : Image<T1w>
+    reference[sub=02,ses=1] : Reference
+  output:
+    aligned[sub=02,ses=1,run=2] : Image<T1w>
+  depends_on: 6
+
+Job 19
+  stage: prep
+  operation: align
+  inputs:
+    cleaned[sub=02,ses=2,run=1] : Image<T1w>
+    reference[sub=02,ses=2] : Reference
+  output:
+    aligned[sub=02,ses=2,run=1] : Image<T1w>
+  depends_on: 7
+
+Job 20
+  stage: prep
+  operation: align
+  inputs:
+    cleaned[sub=02,ses=2,run=2] : Image<T1w>
+    reference[sub=02,ses=2] : Reference
+  output:
+    aligned[sub=02,ses=2,run=2] : Image<T1w>
+  depends_on: 8
+
+Job 21
+  stage: prep
+  operation: align
+  inputs:
+    cleaned[sub=03,ses=1,run=1] : Image<T1w>
+    reference[sub=03,ses=1] : Reference
+  output:
+    aligned[sub=03,ses=1,run=1] : Image<T1w>
+  depends_on: 9
+
+Job 22
+  stage: prep
+  operation: align
+  inputs:
+    cleaned[sub=03,ses=1,run=2] : Image<T1w>
+    reference[sub=03,ses=1] : Reference
+  output:
+    aligned[sub=03,ses=1,run=2] : Image<T1w>
+  depends_on: 10
+
+Job 23
+  stage: prep
+  operation: align
+  inputs:
+    cleaned[sub=03,ses=2,run=1] : Image<T1w>
+    reference[sub=03,ses=2] : Reference
+  output:
+    aligned[sub=03,ses=2,run=1] : Image<T1w>
+  depends_on: 11
+
+Job 24
+  stage: prep
+  operation: align
+  inputs:
+    cleaned[sub=03,ses=2,run=2] : Image<T1w>
+    reference[sub=03,ses=2] : Reference
+  output:
+    aligned[sub=03,ses=2,run=2] : Image<T1w>
+  depends_on: 12
+
+Job 25
+  operation: average
+  inputs:
+    aligned[sub=01,ses=1,run=1] : Image<T1w>
+    aligned[sub=01,ses=1,run=2] : Image<T1w>
+  output:
+    averaged[sub=01,ses=1] : Image<T1w>
+  depends_on: 13, 14
+
+Job 26
+  operation: average
+  inputs:
+    aligned[sub=01,ses=2,run=1] : Image<T1w>
+    aligned[sub=01,ses=2,run=2] : Image<T1w>
+  output:
+    averaged[sub=01,ses=2] : Image<T1w>
+  depends_on: 15, 16
+
+Job 27
+  operation: average
+  inputs:
+    aligned[sub=02,ses=1,run=1] : Image<T1w>
+    aligned[sub=02,ses=1,run=2] : Image<T1w>
+  output:
+    averaged[sub=02,ses=1] : Image<T1w>
+  depends_on: 17, 18
+
+Job 28
+  operation: average
+  inputs:
+    aligned[sub=02,ses=2,run=1] : Image<T1w>
+    aligned[sub=02,ses=2,run=2] : Image<T1w>
+  output:
+    averaged[sub=02,ses=2] : Image<T1w>
+  depends_on: 19, 20
+
+Job 29
+  operation: average
+  inputs:
+    aligned[sub=03,ses=1,run=1] : Image<T1w>
+    aligned[sub=03,ses=1,run=2] : Image<T1w>
+  output:
+    averaged[sub=03,ses=1] : Image<T1w>
+  depends_on: 21, 22
+
+Job 30
+  operation: average
+  inputs:
+    aligned[sub=03,ses=2,run=1] : Image<T1w>
+    aligned[sub=03,ses=2,run=2] : Image<T1w>
+  output:
+    averaged[sub=03,ses=2] : Image<T1w>
+  depends_on: 23, 24
+
+Job 31
+  operation: compare
+  inputs:
+    averaged[sub=01,ses=1] : Image<T1w>
+    reference[sub=01,ses=1] : Reference
+  output:
+    score[sub=01,ses=1] : Score
+  depends_on: 25
+
+Job 32
+  operation: compare
+  inputs:
+    averaged[sub=01,ses=2] : Image<T1w>
+    reference[sub=01,ses=2] : Reference
+  output:
+    score[sub=01,ses=2] : Score
+  depends_on: 26
+
+Job 33
+  operation: compare
+  inputs:
+    averaged[sub=02,ses=1] : Image<T1w>
+    reference[sub=02,ses=1] : Reference
+  output:
+    score[sub=02,ses=1] : Score
+  depends_on: 27
+
+Job 34
+  operation: compare
+  inputs:
+    averaged[sub=02,ses=2] : Image<T1w>
+    reference[sub=02,ses=2] : Reference
+  output:
+    score[sub=02,ses=2] : Score
+  depends_on: 28
+
+Job 35
+  operation: compare
+  inputs:
+    averaged[sub=03,ses=1] : Image<T1w>
+    reference[sub=03,ses=1] : Reference
+  output:
+    score[sub=03,ses=1] : Score
+  depends_on: 29
+
+Job 36
+  operation: compare
+  inputs:
+    averaged[sub=03,ses=2] : Image<T1w>
+    reference[sub=03,ses=2] : Reference
+  output:
+    score[sub=03,ses=2] : Score
+  depends_on: 30
+--- stderr
+note: 21 source files verified.
+note: 36 jobs resolved: 24 in prep, 12 outside stages.
+$ spit artifacts pipeline.spit complete.spitout
+exit: 0
+--- stdout
+Complete artifacts: 57
+  image[sub=01,ses=1,run=1] : Image<T1w>  (source)
+  image[sub=01,ses=1,run=2] : Image<T1w>  (source)
+  image[sub=01,ses=2,run=1] : Image<T1w>  (source)
+  image[sub=01,ses=2,run=2] : Image<T1w>  (source)
+  image[sub=02,ses=1,run=1] : Image<T1w>  (source)
+  image[sub=02,ses=1,run=2] : Image<T1w>  (source)
+  image[sub=02,ses=2,run=1] : Image<T1w>  (source)
+  image[sub=02,ses=2,run=2] : Image<T1w>  (source)
+  image[sub=03,ses=1,run=1] : Image<T1w>  (source)
+  image[sub=03,ses=1,run=2] : Image<T1w>  (source)
+  image[sub=03,ses=2,run=1] : Image<T1w>  (source)
+  image[sub=03,ses=2,run=2] : Image<T1w>  (source)
+  mask[sub=01] : Mask  (source)
+  mask[sub=02] : Mask  (source)
+  mask[sub=03] : Mask  (source)
+  reference[sub=01,ses=1] : Reference  (source)
+  reference[sub=01,ses=2] : Reference  (source)
+  reference[sub=02,ses=1] : Reference  (source)
+  reference[sub=02,ses=2] : Reference  (source)
+  reference[sub=03,ses=1] : Reference  (source)
+  reference[sub=03,ses=2] : Reference  (source)
+  cleaned[sub=01,ses=1,run=1] : Image<T1w>  (job 1: clean, stage prep)
+  cleaned[sub=01,ses=1,run=2] : Image<T1w>  (job 2: clean, stage prep)
+  cleaned[sub=01,ses=2,run=1] : Image<T1w>  (job 3: clean, stage prep)
+  cleaned[sub=01,ses=2,run=2] : Image<T1w>  (job 4: clean, stage prep)
+  cleaned[sub=02,ses=1,run=1] : Image<T1w>  (job 5: clean, stage prep)
+  cleaned[sub=02,ses=1,run=2] : Image<T1w>  (job 6: clean, stage prep)
+  cleaned[sub=02,ses=2,run=1] : Image<T1w>  (job 7: clean, stage prep)
+  cleaned[sub=02,ses=2,run=2] : Image<T1w>  (job 8: clean, stage prep)
+  cleaned[sub=03,ses=1,run=1] : Image<T1w>  (job 9: clean, stage prep)
+  cleaned[sub=03,ses=1,run=2] : Image<T1w>  (job 10: clean, stage prep)
+  cleaned[sub=03,ses=2,run=1] : Image<T1w>  (job 11: clean, stage prep)
+  cleaned[sub=03,ses=2,run=2] : Image<T1w>  (job 12: clean, stage prep)
+  aligned[sub=01,ses=1,run=1] : Image<T1w>  (job 13: align, stage prep)
+  aligned[sub=01,ses=1,run=2] : Image<T1w>  (job 14: align, stage prep)
+  aligned[sub=01,ses=2,run=1] : Image<T1w>  (job 15: align, stage prep)
+  aligned[sub=01,ses=2,run=2] : Image<T1w>  (job 16: align, stage prep)
+  aligned[sub=02,ses=1,run=1] : Image<T1w>  (job 17: align, stage prep)
+  aligned[sub=02,ses=1,run=2] : Image<T1w>  (job 18: align, stage prep)
+  aligned[sub=02,ses=2,run=1] : Image<T1w>  (job 19: align, stage prep)
+  aligned[sub=02,ses=2,run=2] : Image<T1w>  (job 20: align, stage prep)
+  aligned[sub=03,ses=1,run=1] : Image<T1w>  (job 21: align, stage prep)
+  aligned[sub=03,ses=1,run=2] : Image<T1w>  (job 22: align, stage prep)
+  aligned[sub=03,ses=2,run=1] : Image<T1w>  (job 23: align, stage prep)
+  aligned[sub=03,ses=2,run=2] : Image<T1w>  (job 24: align, stage prep)
+  averaged[sub=01,ses=1] : Image<T1w>  (job 25: average)
+  averaged[sub=01,ses=2] : Image<T1w>  (job 26: average)
+  averaged[sub=02,ses=1] : Image<T1w>  (job 27: average)
+  averaged[sub=02,ses=2] : Image<T1w>  (job 28: average)
+  averaged[sub=03,ses=1] : Image<T1w>  (job 29: average)
+  averaged[sub=03,ses=2] : Image<T1w>  (job 30: average)
+  score[sub=01,ses=1] : Score  (job 31: compare)
+  score[sub=01,ses=2] : Score  (job 32: compare)
+  score[sub=02,ses=1] : Score  (job 33: compare)
+  score[sub=02,ses=2] : Score  (job 34: compare)
+  score[sub=03,ses=1] : Score  (job 35: compare)
+  score[sub=03,ses=2] : Score  (job 36: compare)
+
+Incomplete artifacts: 0
+--- stderr

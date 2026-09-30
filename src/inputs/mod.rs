@@ -9,6 +9,7 @@
 mod coverage;
 mod discover;
 
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::fmt;
@@ -22,9 +23,9 @@ use crate::model::{ArtifactInstance, CoverageGap, InputRules, Pipeline, SourceIn
 use crate::parser::{strip_comment, without_bom, Header, Keyword, Kind, ParseError, SourceMap};
 use crate::paths::{inspect_paths, PathError, PathTemplate};
 
-pub(crate) use self::coverage::check_inventory;
 pub(crate) use self::coverage::collect_rule_errors;
 use self::coverage::SkippedGroup;
+pub(crate) use self::coverage::{check_inventory, InputCheck};
 use self::discover::{discover, locate_sources, with_source_paths};
 pub use self::discover::{discover_source_files, discover_sources, Discovery};
 
@@ -225,11 +226,12 @@ impl InputSpec {
         self.merge_source_paths(pipeline, &mut inventory)?;
         let located = with_source_paths(pipeline, &inventory.source_paths);
         inspect_paths(&located)?;
-        let mut checked = check_inventory(pipeline, &self.rules, &inventory)?;
+        let checked = check_inventory(pipeline, &self.rules, Cow::Owned(inventory))?;
         skipped.extend(checked.skipped.iter().map(SkippedGroup::note));
-        locate_sources(&located, &mut checked.inventory)?;
+        let mut inventory = checked.inventory.into_owned();
+        locate_sources(&located, &mut inventory)?;
         Ok(ResolvedInputs {
-            inventory: checked.inventory,
+            inventory,
             skipped,
             gaps: checked.gaps,
             root,

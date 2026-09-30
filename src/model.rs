@@ -2,7 +2,7 @@ use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::hash::{Hash, Hasher};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
 use rustc_hash::{FxHashMap, FxHashSet, FxHasher};
 
@@ -13,48 +13,104 @@ use crate::types::TypeExpr;
 
 pub type ArtifactType = TypeExpr;
 
-/// The value an artifact has for each of its product's dimensions. Every
-/// job an artifact reaches holds a copy of it, so copies share one map, and
-/// the map's hash is kept with it, so artifacts are cheap to look up.
-/// Bindings order by their values alone.
-#[derive(Clone)]
-pub struct EntityBinding(Arc<Entities>);
-
-struct Entities {
-    values: BTreeMap<String, String>,
-    hash: u64,
+/// A dimension's name or value, interned: each distinct text is kept once
+/// for the life of the process and numbered, so symbols compare equal by
+/// number. A dataset has few distinct names and values, however many
+/// artifacts bind them.
+#[derive(Clone, Copy)]
+struct Symbol {
+    id: u32,
+    text: &'static str,
 }
 
-impl Entities {
-    fn new(values: BTreeMap<String, String>) -> Self {
-        let mut hasher = FxHasher::default();
-        values.hash(&mut hasher);
-        Self {
-            hash: hasher.finish(),
-            values,
+impl PartialEq for Symbol {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+    }
+}
+
+impl Eq for Symbol {}
+
+impl Symbol {
+    fn new(text: &str) -> Self {
+        static SYMBOLS: OnceLock<Mutex<FxHashMap<&'static str, u32>>> = OnceLock::new();
+        let mut symbols = SYMBOLS
+            .get_or_init(Mutex::default)
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        if let Some((&text, &id)) = symbols.get_key_value(text) {
+            return Self { id, text };
+        }
+        let id = u32::try_from(symbols.len()).expect("fewer than 2^32 distinct names and values");
+        let text: &'static str = Box::leak(text.into());
+        symbols.insert(text, id);
+        Self { id, text }
+    }
+
+    /// Compare as text; equal symbols are equal text.
+    fn cmp_text(self, other: Self) -> Ordering {
+        if self == other {
+            Ordering::Equal
+        } else {
+            self.text.cmp(other.text)
         }
     }
 }
 
-impl Clone for Entities {
-    fn clone(&self) -> Self {
-        Self {
-            values: self.values.clone(),
-            hash: self.hash,
+/// The value an artifact has for each of its product's dimensions. Every
+/// job an artifact reaches holds a copy of it, so copies share one list of
+/// pairs, sorted by dimension name, and its hash is kept with it, so
+/// artifacts are cheap to look up. Bindings order by their values alone.
+#[derive(Clone)]
+pub struct EntityBinding(Arc<Entities>);
+
+/// Behind one pointer, so a binding held by every artifact and job it
+/// reaches costs a pointer each.
+struct Entities {
+    pairs: Box<[(Symbol, Symbol)]>,
+    hash: u64,
+}
+
+impl EntityBinding {
+    /// A binding of `pairs`, which are sorted by dimension name, each once.
+    fn from_sorted(pairs: Vec<(Symbol, Symbol)>) -> Self {
+        // The hash a `BTreeMap<String, String>` of the same pairs has. Keep
+        // in step with `Ord` below: maps keyed by bindings iterate as they
+        // did when bindings were maps, which output order depends on.
+        let mut hasher = FxHasher::default();
+        hasher.write_usize(pairs.len());
+        for (dimension, value) in &pairs {
+            dimension.text.hash(&mut hasher);
+            value.text.hash(&mut hasher);
         }
+        Self(Arc::new(Entities {
+            pairs: pairs.into(),
+            hash: hasher.finish(),
+        }))
+    }
+
+    fn pairs(&self) -> &[(Symbol, Symbol)] {
+        &self.0.pairs
+    }
+
+    fn pair(&self, dimension: &str) -> Option<Symbol> {
+        self.pairs()
+            .iter()
+            .find(|(name, _)| name.text == dimension)
+            .map(|&(_, value)| value)
     }
 }
 
 impl Default for EntityBinding {
     fn default() -> Self {
-        BTreeMap::new().into()
+        Self::from_sorted(Vec::new())
     }
 }
 
 impl PartialEq for EntityBinding {
     fn eq(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.0, &other.0)
-            || (self.0.hash == other.0.hash && self.0.values == other.0.values)
+            || (self.0.hash == other.0.hash && self.pairs() == other.pairs())
     }
 }
 
@@ -67,11 +123,22 @@ impl PartialOrd for EntityBinding {
 }
 
 impl Ord for EntityBinding {
+    /// As a `BTreeMap` of the same pairs orders. Keep in step with the hash
+    /// in `from_sorted`; output that sorts by binding depends on this order.
     fn cmp(&self, other: &Self) -> Ordering {
         if Arc::ptr_eq(&self.0, &other.0) {
             return Ordering::Equal;
         }
-        self.0.values.cmp(&other.0.values)
+        self.pairs()
+            .iter()
+            .zip(other.pairs().iter())
+            .map(|(&(left_name, left), &(right_name, right))| {
+                left_name
+                    .cmp_text(right_name)
+                    .then_with(|| left.cmp_text(right))
+            })
+            .find(|ordering| ordering.is_ne())
+            .unwrap_or_else(|| self.pairs().len().cmp(&other.pairs().len()))
     }
 }
 
@@ -84,14 +151,28 @@ impl Hash for EntityBinding {
 impl fmt::Debug for EntityBinding {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_tuple("EntityBinding")
-            .field(&self.0.values)
+            .field(&DebugPairs(self))
             .finish()
+    }
+}
+
+/// A binding's pairs, shown as a map.
+struct DebugPairs<'a>(&'a EntityBinding);
+
+impl fmt::Debug for DebugPairs<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_map().entries(self.0.iter()).finish()
     }
 }
 
 impl From<BTreeMap<String, String>> for EntityBinding {
     fn from(values: BTreeMap<String, String>) -> Self {
-        Self(Arc::new(Entities::new(values)))
+        Self::from_sorted(
+            values
+                .iter()
+                .map(|(dimension, value)| (Symbol::new(dimension), Symbol::new(value)))
+                .collect(),
+        )
     }
 }
 
@@ -104,34 +185,33 @@ impl FromIterator<(String, String)> for EntityBinding {
 impl EntityBinding {
     /// The value bound to `dimension`, if any.
     pub fn get(&self, dimension: &str) -> Option<&str> {
-        self.0.values.get(dimension).map(String::as_str)
+        self.pair(dimension).map(|value| value.text)
     }
 
     /// Whether `dimension` has a value.
     pub fn binds(&self, dimension: &str) -> bool {
-        self.0.values.contains_key(dimension)
+        self.pair(dimension).is_some()
     }
 
     /// Each dimension and its value, in dimension name order.
     pub fn iter(&self) -> impl Iterator<Item = (&str, &str)> {
-        self.0
-            .values
+        self.pairs()
             .iter()
-            .map(|(dimension, value)| (dimension.as_str(), value.as_str()))
+            .map(|(dimension, value)| (dimension.text, value.text))
     }
 
     /// The dimensions with a value, in name order.
     pub fn dimensions(&self) -> impl Iterator<Item = &str> {
-        self.0.values.keys().map(String::as_str)
+        self.pairs().iter().map(|(dimension, _)| dimension.text)
     }
 
     /// How many dimensions have a value.
     pub fn len(&self) -> usize {
-        self.0.values.len()
+        self.pairs().len()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.0.values.is_empty()
+        self.pairs().is_empty()
     }
 
     /// Add `other`'s values, replacing any this has for the same dimensions.
@@ -139,14 +219,28 @@ impl EntityBinding {
         if other.is_empty() {
             return;
         }
-        let entities = Arc::make_mut(&mut self.0);
-        let mut values = std::mem::take(&mut entities.values);
-        values.extend(
-            other
-                .iter()
-                .map(|(key, value)| (key.to_owned(), value.to_owned())),
+        let (mut mine, mut theirs) = (
+            self.pairs().iter().peekable(),
+            other.pairs().iter().peekable(),
         );
-        *entities = Entities::new(values);
+        let mut pairs = Vec::with_capacity(self.len() + other.len());
+        loop {
+            let next = match (mine.peek(), theirs.peek()) {
+                (None, None) => break,
+                (Some(_), None) => mine.next(),
+                (None, Some(_)) => theirs.next(),
+                (Some(&&(left, _)), Some(&&(right, _))) => match left.cmp_text(right) {
+                    Ordering::Less => mine.next(),
+                    Ordering::Greater => theirs.next(),
+                    Ordering::Equal => {
+                        mine.next();
+                        theirs.next()
+                    }
+                },
+            };
+            pairs.extend(next.copied());
+        }
+        *self = Self::from_sorted(pairs);
     }
 
     pub fn from_pairs<const N: usize>(pairs: [(&str, &str); N]) -> Self {
@@ -157,22 +251,41 @@ impl EntityBinding {
     }
 
     pub fn without(&self, dimension: &str) -> Self {
-        let mut values = self.0.values.clone();
-        values.remove(dimension);
-        values.into()
+        Self::from_sorted(
+            self.pairs()
+                .iter()
+                .filter(|(name, _)| name.text != dimension)
+                .copied()
+                .collect(),
+        )
+    }
+
+    /// Without `dimensions`' values.
+    pub(crate) fn except(&self, dimensions: &[String]) -> Self {
+        Self::from_sorted(
+            self.pairs()
+                .iter()
+                .filter(|(name, _)| !dimensions.iter().any(|dimension| dimension == name.text))
+                .copied()
+                .collect(),
+        )
     }
 
     pub fn matches_shared(&self, other: &Self) -> bool {
-        self.0.values.iter().all(|(dimension, value)| {
+        self.pairs().iter().all(|&(dimension, value)| {
             other
-                .0
-                .values
-                .get(dimension)
-                .is_none_or(|other| other == value)
+                .pairs()
+                .iter()
+                .find(|&&(name, _)| name == dimension)
+                .is_none_or(|&(_, other)| other == value)
         })
     }
 
     /// Keep only `dimensions`, or `None` if one of them is unbound.
+    ///
+    /// Keep in step with `group_key`: two bindings must have equal keys for
+    /// `dimensions` exactly when they project to equal bindings, as coverage
+    /// and skip rules group by key and report the projection.
     pub fn project(&self, dimensions: &[String]) -> Option<Self> {
         // Keeping every dimension, as when grouping by all of them, is a copy.
         if self.len() == dimensions.len()
@@ -182,14 +295,30 @@ impl EntityBinding {
         {
             return Some(self.clone());
         }
-        dimensions
+        let mut pairs = dimensions
             .iter()
             .map(|dimension| {
-                let value = self.0.values.get(dimension)?;
-                Some((dimension.clone(), value.clone()))
+                self.pairs()
+                    .iter()
+                    .find(|(name, _)| name.text == dimension)
+                    .copied()
             })
-            .collect::<Option<BTreeMap<_, _>>>()
-            .map(Self::from)
+            .collect::<Option<Vec<_>>>()?;
+        pairs.sort_unstable_by(|(left, _), (right, _)| left.cmp_text(*right));
+        pairs.dedup_by(|(left, _), (right, _)| left == right);
+        Some(Self::from_sorted(pairs))
+    }
+
+    /// Its values for `dimensions`, in their order, or `None` if one of them
+    /// is unbound: two bindings project onto `dimensions` alike exactly when
+    /// their keys are equal, so bindings can be grouped without building a
+    /// binding for each. Keep in step with `project`.
+    pub(crate) fn group_key(&self, dimensions: &[String]) -> Option<GroupKey> {
+        dimensions
+            .iter()
+            .map(|dimension| self.pair(dimension).map(|value| value.id))
+            .collect::<Option<_>>()
+            .map(GroupKey)
     }
 
     /// Compare values dimension by dimension in `dimensions` order, reading
@@ -198,15 +327,20 @@ impl EntityBinding {
         dimensions
             .iter()
             .map(
-                |dimension| match (self.0.values.get(dimension), other.0.values.get(dimension)) {
-                    (Some(left), Some(right)) => natural_cmp(left, right),
-                    (left, right) => left.cmp(&right),
+                |dimension| match (self.pair(dimension), other.pair(dimension)) {
+                    (Some(left), Some(right)) if left == right => Ordering::Equal,
+                    (Some(left), Some(right)) => natural_cmp(left.text, right.text),
+                    (left, right) => left.is_some().cmp(&right.is_some()),
                 },
             )
             .find(|ordering| ordering.is_ne())
             .unwrap_or_else(|| self.cmp(other))
     }
 }
+
+/// A binding's values for some dimensions; see [`EntityBinding::group_key`].
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub(crate) struct GroupKey(Vec<u32>);
 
 /// Order text as people read it: runs of digits compare by numeric value.
 pub(crate) fn natural_cmp(left: &str, right: &str) -> Ordering {
@@ -396,6 +530,10 @@ impl ArtifactId {
 /// Every artifact of a product has the product's type, so the name and type
 /// are kept once per product and each artifact holds its product's number
 /// and its entities, a column each.
+///
+/// Keep in step with `index_producers` in `compile/definitions.rs`, which
+/// rejects a product made by more than one step: that is why one type per
+/// product holds. A product made by two steps could have two types.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Artifacts {
     products: Vec<(String, ArtifactType)>,

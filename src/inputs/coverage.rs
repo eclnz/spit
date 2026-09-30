@@ -1,12 +1,15 @@
 //! `require` and `skip` rules: checked first against the pipeline's source
 //! declarations, then applied to an inventory.
 
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
+
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::error::{DefinitionSubject, ResolveError};
 use crate::model::{
-    ArtifactInstance, CoverageAction, CoverageGap, CoverageRule, EntityBinding, InputRules,
-    Pipeline, SourceInventory,
+    ArtifactInstance, CoverageAction, CoverageGap, CoverageRule, EntityBinding, GroupKey,
+    InputRules, Pipeline, SourceInventory,
 };
 use crate::shape::dimension_set;
 
@@ -98,38 +101,56 @@ fn rejected_groups(
             .map(|record| &record.entities)
             .collect()
     };
-    let groups: BTreeSet<_> = if is_discovery {
-        bindings
-            .iter()
-            .filter_map(|binding| binding.project(&rule.group_by))
-            .collect()
+    let groups = if is_discovery {
+        distinct_groups(bindings.iter().copied(), &rule.group_by)
     } else {
-        inventory
-            .contexts
-            .iter()
-            .chain(inventory.artifacts.iter().map(|record| &record.entities))
-            .filter_map(|binding| binding.project(&rule.group_by))
-            .collect()
+        let records = inventory.artifacts.iter().map(|record| &record.entities);
+        distinct_groups(inventory.contexts.iter().chain(records), &rule.group_by)
     };
     // Each group's members, found in one pass rather than once per group.
-    let mut members: BTreeMap<EntityBinding, Vec<&EntityBinding>> = BTreeMap::new();
+    let mut members: FxHashMap<GroupKey, Vec<&EntityBinding>> = FxHashMap::default();
     for binding in bindings {
-        if let Some(group) = binding.project(&rule.group_by) {
-            members.entry(group).or_default().push(binding);
+        if let Some(key) = binding.group_key(&rule.group_by) {
+            members.entry(key).or_default().push(binding);
         }
     }
     groups
         .into_iter()
-        .filter(|context| {
-            let members = members.get(context).map_or(&[][..], Vec::as_slice);
+        .filter(|(key, _)| {
+            let members = members.get(key).map_or(&[][..], Vec::as_slice);
             !rule.count.allows(members.len()) || missing_values(rule, members).next().is_some()
         })
-        .map(|context| SkippedGroup {
+        .map(|(_, context)| SkippedGroup {
             target: rule.product.clone(),
             context,
             group_by: rule.group_by.clone(),
         })
         .collect()
+}
+
+/// Each distinct projection of `bindings` onto `dimensions`, with its key,
+/// in binding order. Bindings are grouped by key, so a projection is built
+/// once for each group rather than once for each binding.
+fn distinct_groups<'a>(
+    bindings: impl IntoIterator<Item = &'a EntityBinding>,
+    dimensions: &[String],
+) -> Vec<(GroupKey, EntityBinding)> {
+    let mut seen = FxHashSet::default();
+    let mut groups = Vec::new();
+    for binding in bindings {
+        let Some(key) = binding.group_key(dimensions) else {
+            continue;
+        };
+        if !seen.contains(&key) {
+            let group = binding
+                .project(dimensions)
+                .expect("a binding with a key binds its dimensions");
+            seen.insert(key.clone());
+            groups.push((key, group));
+        }
+    }
+    groups.sort_unstable_by(|(_, left), (_, right)| left.cmp(right));
+    groups
 }
 
 /// Remove every context, discovered binding and source record in `groups`.
@@ -242,49 +263,41 @@ pub(crate) fn coverage_gaps(
     discovery: bool,
 ) -> Vec<CoverageGap> {
     let discovered = inventory.discovered.get(&rule.product);
-    let groups: BTreeSet<_> = if discovery {
-        discovered
-            .into_iter()
-            .flatten()
-            .filter_map(|binding| binding.project(&rule.group_by))
-            .collect()
+    let groups = if discovery {
+        distinct_groups(discovered.into_iter().flatten(), &rule.group_by)
     } else {
-        inventory
+        let bindings = inventory
             .contexts
             .iter()
             .chain(inventory.discovered.values().flatten())
-            .chain(inventory.artifacts.iter().map(|record| &record.entities))
-            .filter_map(|binding| binding.project(&rule.group_by))
-            .collect()
+            .chain(inventory.artifacts.iter().map(|record| &record.entities));
+        distinct_groups(bindings, &rule.group_by)
     };
     // Each group's members, found in one pass rather than once per group.
-    let mut members: BTreeMap<EntityBinding, Vec<ArtifactInstance>> = BTreeMap::new();
-    let mut bindings: BTreeMap<EntityBinding, Vec<&EntityBinding>> = BTreeMap::new();
+    let mut members: FxHashMap<GroupKey, Vec<&ArtifactInstance>> = FxHashMap::default();
+    let mut bindings: FxHashMap<GroupKey, Vec<&EntityBinding>> = FxHashMap::default();
     if discovery {
         for binding in discovered.into_iter().flatten() {
-            if let Some(group) = binding.project(&rule.group_by) {
-                bindings.entry(group).or_default().push(binding);
+            if let Some(key) = binding.group_key(&rule.group_by) {
+                bindings.entry(key).or_default().push(binding);
             }
         }
     } else {
         for artifact in artifacts.get(&rule.product).into_iter().flatten() {
-            if let Some(group) = artifact.entities.project(&rule.group_by) {
-                members.entry(group).or_default().push(artifact.clone());
+            if let Some(key) = artifact.entities.group_key(&rule.group_by) {
+                members.entry(key.clone()).or_default().push(artifact);
+                bindings.entry(key).or_default().push(&artifact.entities);
             }
-        }
-        for (group, artifacts) in &members {
-            let entities = artifacts.iter().map(|artifact| &artifact.entities);
-            bindings.insert(group.clone(), entities.collect());
         }
     }
     let mut gaps = Vec::new();
-    for context in groups {
-        let members = members.get(&context).map_or(&[][..], Vec::as_slice);
-        let bindings = bindings.get(&context).map_or(&[][..], Vec::as_slice);
+    for (key, context) in groups {
+        let members = members.get(&key).map_or(&[][..], Vec::as_slice);
+        let bindings = bindings.get(&key).map_or(&[][..], Vec::as_slice);
         let errors = group_errors(rule_index, rule, &context, bindings, discovery);
         gaps.extend(errors.into_iter().map(|error| CoverageGap {
             error,
-            sources: members.to_vec(),
+            sources: members.iter().map(|&member| member.clone()).collect(),
         }));
     }
     gaps
@@ -350,8 +363,9 @@ pub(crate) fn collect_rule_errors(
 
 /// An inventory after the skip rules, with what the `require` rules find
 /// missing and the sources each gap holds back.
-pub(crate) struct InputCheck {
-    pub(crate) inventory: SourceInventory,
+pub(crate) struct InputCheck<'a> {
+    /// The inventory as given, unless a skip rule removed records from it.
+    pub(crate) inventory: Cow<'a, SourceInventory>,
     pub(crate) gaps: Vec<CoverageGap>,
     /// The groups a `skip` rule removed from the records.
     pub(crate) skipped: Vec<SkippedGroup>,
@@ -360,11 +374,11 @@ pub(crate) struct InputCheck {
 /// Check an inventory's records against the pipeline's sources and its
 /// named contexts against the discovery rules, apply the skip rules, and
 /// find what the `require` rules miss.
-pub(crate) fn check_inventory(
+pub(crate) fn check_inventory<'a>(
     pipeline: &Pipeline,
     rules: &InputRules,
-    inventory: &SourceInventory,
-) -> Result<InputCheck, ResolveError> {
+    inventory: Cow<'a, SourceInventory>,
+) -> Result<InputCheck<'a>, ResolveError> {
     // A settled `.spitout` keeps the names of the rules that found its
     // contexts; without those rules the names are only a record of that.
     for (name, bindings) in &inventory.discovered {
@@ -385,15 +399,35 @@ pub(crate) fn check_inventory(
             }
         }
     }
-    // Validate every supplied record, including records a skip rule may omit.
-    let supplied = pipeline.source_artifacts(inventory)?;
-    let mut inventory = inventory.clone();
-    let skipped = apply_skips(rules, &mut inventory, false);
-    // Skipping only removes records, so when none go the artifacts stand.
-    let artifacts = if inventory.artifacts.len() == supplied.values().map(Vec::len).sum() {
-        supplied
+    let has = |action| rules.constraints.iter().any(|rule| rule.action == action);
+    // Validate every supplied record, including records a skip rule may
+    // omit. Only `require` rules need the records as artifacts.
+    let supplied = if has(CoverageAction::Require) {
+        Some(pipeline.source_artifacts(&inventory)?)
     } else {
-        pipeline.source_artifacts(&inventory)?
+        let mut seen = FxHashSet::default();
+        pipeline.check_sources(&inventory, |_, record| {
+            seen.insert((record.product.as_str(), &record.entities))
+        })?;
+        None
+    };
+    // Only a skip rule changes the inventory. Keep in step with
+    // `record_diagnostics`, which reuses what settling found when there is
+    // no skip rule, as checking again would find the same: anything else
+    // that makes a second check differ must stop that reuse too.
+    let mut inventory = inventory;
+    let skipped = if has(CoverageAction::Skip) {
+        apply_skips(rules, inventory.to_mut(), false)
+    } else {
+        Vec::new()
+    };
+    // Skipping only removes records, so when none go the artifacts stand.
+    let artifacts = match supplied {
+        Some(supplied) if inventory.artifacts.len() == supplied.values().map(Vec::len).sum() => {
+            supplied
+        }
+        Some(_) => pipeline.source_artifacts(&inventory)?,
+        None => BTreeMap::new(),
     };
     for (rule_index, rule) in rules.constraints.iter().enumerate() {
         if rules.discovery(&rule.product).is_some()
