@@ -13,11 +13,11 @@ The plans that answer the [usability findings](../FINDINGS.md), and the order to
 
 ## Status
 
-- **Done:** steps 1–8. Phase 1 is complete, and so are the first two steps of Phase 2 (`exclude` in `c14295a`, `drop` in `2d090aa`).
-- **Next:** step 9, `dag --partial`.
-- **Resolved so far:** B1, B2, B3, B5, B6, B7, F1, F2, F4, F7, F8, D1–D4, D7–D10, the first half of F3 (unused sources), and the whole-path rule of D5.
+- **Done:** steps 1–9. Phase 1 and Phase 2 are complete.
+- **Next:** step 10, near-miss hints and unmatched-file reporting.
+- **Resolved so far:** B1, B2, B3, B5, B6, B7, F1, F2, F4, F5, F7, F8, D1–D4, D7–D10, the first half of F3 (unused sources), and the whole-path rule of D5.
 - **Still open:**
-  - B4, F3's near-miss hints, F5, F6, F9, F10;
+  - B4, F3's near-miss hints, F6, F9, F10;
   - the rest of D5 (the unmatched-file note), D6 and D11;
   - the VS Code extension.
 
@@ -68,6 +68,7 @@ One design built in three steps, each leaving the tool working. See [removing in
    Done: `drop [dims] where source` with a count, `missing` or `has` condition; `skip` is an error that shows the `drop` rule to write. Every `drop` is judged against the same inventory and their union removed at once, groups form from every artifact and context (a group with none of the target counts 0), and removing every group of a grouping is an error. `require` takes all six count comparisons, runs after the drops, and fails when its grouping finds no group. Dropped groups are notes on stderr and records in the `.spitout` and `.spitdag`, with how many the rule found. Records given directly are checked before any rule removes some. The answer keys of scenarios 2 and 6 now use `drop` and resolve to the same jobs. The Recipes section of the reference is rewritten around `exclude`, `drop` and `require` (closes D8).
 
 9. **`dag --partial`,** the error that points to it and to `artifacts` (F5), and the hint that names an exclusion when an excluded input breaks a join. See [removing inputs, `dag --partial`](removing-inputs.md#dag---partial).
+   Done: partial plans complete members of a `many` input, applies `@ min` after filtering, writes each left-out output and its gaps to the `.spitdag`, and reports the count. Plain `dag` points to `artifacts` and `--partial`, and names a matching exclusion when that caused a missing join. Scenario 6 yields 30 jobs with the summary over three stores and nine left-out artifacts.
    - **Where `dag` fails today.**
      - `prepare` in `src/main.rs` builds an `ArtifactReport` through `diagnose_checked_with_inventory` or `diagnose_checked_with_records` (`src/diagnostics.rs`).
      - In those, `record_diagnostics` returns `first_failure(&report.incomplete)` as an error unless `lenient`. `artifacts` passes `lenient = true`.
@@ -210,4 +211,3 @@ usability/harness/rebuild_keys.sh             # expect `ok` for all seven keys
 - **`ResolvedInputs.skipped`** now holds only files whose path values cannot be read. What the rules removed is in `inventory.removed`.
 - **A `Removal`** has `product`, `entities`, `rule`, `origin`, `reason` and `found`. Its `.spitout` lines are read raw, so a `#` inside a reason survives.
 - **The trial sandboxes are gone.** They were in `/srv/spit-trials`, which the container that ran round 1 no longer has. `usability/harness/make_run.sh` rebuilds them; see [the study README](../README.md#run-it-again).
-

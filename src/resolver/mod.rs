@@ -49,6 +49,25 @@ pub fn resolve_artifacts_excluding(
     inventory: &SourceInventory,
     unavailable: &[ArtifactInstance],
 ) -> Result<ArtifactReport, ResolveError> {
+    resolve_artifacts_with_partial(pipeline, inventory, unavailable, false)
+}
+
+/// Resolve all complete jobs, allowing an aggregate's many input to use
+/// complete members when other members cannot be produced.
+pub fn resolve_artifacts_partial(
+    pipeline: &Pipeline,
+    inventory: &SourceInventory,
+    unavailable: &[ArtifactInstance],
+) -> Result<ArtifactReport, ResolveError> {
+    resolve_artifacts_with_partial(pipeline, inventory, unavailable, true)
+}
+
+fn resolve_artifacts_with_partial(
+    pipeline: &Pipeline,
+    inventory: &SourceInventory,
+    unavailable: &[ArtifactInstance],
+    partial: bool,
+) -> Result<ArtifactReport, ResolveError> {
     let CompiledPipeline { steps } = compile(pipeline)?;
     let mut resolution = Resolution {
         families: Vec::new(),
@@ -113,6 +132,7 @@ pub fn resolve_artifacts_excluding(
             &resolution.dag.artifacts,
             &resolution.families,
             &resolution.incomplete,
+            partial,
         );
         for expansion in expansions {
             resolution.add(step.invocation, step.operation, &outputs, expansion)?;

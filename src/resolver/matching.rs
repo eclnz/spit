@@ -7,7 +7,9 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::compile::{CompiledStep, StepShape};
 use crate::error::{PortSite, ResolveError};
-use crate::model::{ArtifactId, Artifacts, EntityBinding, Gap, Invocation, Job, OperationDef};
+use crate::model::{
+    ArtifactId, Artifacts, Cardinality, EntityBinding, Gap, Invocation, Job, OperationDef,
+};
 
 /// One job of a step: its inputs, and the context each of its outputs
 /// binds. `inputs` is complete only when `gaps` is empty.
@@ -24,6 +26,7 @@ pub(super) fn expand_step(
     artifacts: &Artifacts,
     families: &[Vec<ArtifactId>],
     incomplete: &[bool],
+    partial: bool,
 ) -> Vec<Expansion> {
     let (invocation, shape) = (step.invocation, &step.shape);
     let candidates: Vec<Vec<ArtifactId>> = invocation
@@ -75,8 +78,12 @@ pub(super) fn expand_step(
                 (context, driven.clone())
             })
         });
-    jobs.map(|(context, driven)| expand_job(step, artifacts, &indexes, incomplete, context, driven))
-        .collect()
+    jobs.map(|(context, driven)| {
+        expand_job(
+            step, artifacts, &indexes, incomplete, partial, context, driven,
+        )
+    })
+    .collect()
 }
 
 /// One input's candidates, by their values for the dimensions it joins on,
@@ -98,11 +105,18 @@ fn expand_job(
     artifacts: &Artifacts,
     indexes: &[JoinIndex<'_>],
     incomplete: &[bool],
+    partial: bool,
     context: EntityBinding,
     mut driven: Vec<ArtifactId>,
 ) -> Expansion {
     let (invocation, operation, shape) = (step.invocation, step.operation, &step.shape);
     let mut gaps = Vec::new();
+    if partial
+        && operation.inputs[shape.driver].cardinality == Cardinality::Many
+        && driven.iter().any(|artifact| !incomplete[artifact.index()])
+    {
+        driven.retain(|artifact| !incomplete[artifact.index()]);
+    }
     if let Some(minimum) = operation.minimum_collection {
         if driven.len() < minimum {
             gaps.push(Gap::Unmatched(ResolveError::CollectionTooSmall {

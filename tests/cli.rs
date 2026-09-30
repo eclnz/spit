@@ -64,6 +64,36 @@ fn dag_resolves_a_pipeline_over_a_spitout() {
 }
 
 #[test]
+fn partial_dag_plans_the_complete_stores_and_records_the_rest() {
+    let recipe = format!(
+        "{}/usability/harness/scenarios/s6-diagnose/data/weekly.spitin",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let failed = spit(&["dag", &recipe]);
+    assert!(!failed.status.success());
+    assert!(stderr(&failed).contains("9 more artifacts cannot be produced"));
+    assert!(stderr(&failed).contains("spit dag --partial"));
+
+    let partial = spit(&["dag", &recipe, "--partial", "--json"]);
+    assert!(partial.status.success(), "{}", stderr(&partial));
+    let json = stdout(&partial);
+    assert_eq!(json.matches("\"operation\":").count(), 30);
+    assert_eq!(json.matches("\"identity\":").count(), 9);
+    assert!(json.contains("\"operation\":\"chain_summary\""));
+    assert!(json.contains("\"identity\":\"report[store=s03]\""));
+    assert!(json.contains("\"input `prices` needs") || json.contains("no `pricing` artifact"));
+}
+
+#[test]
+fn partial_on_complete_inputs_has_the_same_jobs() {
+    let files = ["examples/types/typed.spit", "examples/types/typed.spitout"];
+    let full = spit(&["dag", files[0], files[1], "--json"]);
+    let partial = spit(&["dag", files[0], files[1], "--partial", "--json"]);
+    assert!(full.status.success() && partial.status.success());
+    assert_eq!(stdout(&full), stdout(&partial));
+}
+
+#[test]
 fn dag_with_paths_displays_resolved_paths_before_command_expansion() {
     let output = spit(&[
         "dag",
@@ -178,7 +208,7 @@ fn check_json_reads_the_pipeline_file_and_dag_json_emits_the_spitdag() {
     );
     assert_eq!(graph.matches("{\"product\":\"merged\"").count(), 4);
     assert!(
-        graph.contains("\"executables\":[\"sort\"],\"removed\":[],\"jobs\":["),
+        graph.contains("\"executables\":[\"sort\"],\"removed\":[],\"left_out\":[],\"jobs\":["),
         "{graph}"
     );
     assert!(

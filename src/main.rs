@@ -25,10 +25,11 @@ use spit::{
     bind_dag, bind_dag_with, diagnose_checked, diagnose_checked_with_inventory,
     diagnose_checked_with_records, diagnose_recipe, inspect_paths, parse_input_spec_at,
     render_artifacts, render_bound_dag, render_dag, render_diagnostics_json,
-    render_source_inventory, stage_within, unused_sources_summary, validate_bound_source_files,
-    validate_source_files, ArtifactReport, BoundDag, BoundPaths, Checked, Context, Diagnosis,
-    Diagnostic, DiagnosticSource, FileNames, InputSource, InputSpec, PathTemplate, Pipeline,
-    Removal, ResolvedDag, ResolvedInputs, Severity, View,
+    render_source_inventory, resolve_artifacts_partial, stage_within, unused_sources_summary,
+    validate_bound_source_files, validate_source_files, ArtifactReport, BoundDag, BoundPaths,
+    Checked, Context, Diagnosis, Diagnostic, DiagnosticSource, FileNames, Gap, InputSource,
+    InputSpec, LeftOut, PathTemplate, Pipeline, Removal, ResolvedDag, ResolvedInputs, Severity,
+    View,
 };
 
 #[derive(Clone, Copy, PartialEq)]
@@ -56,7 +57,7 @@ struct CommandSpec {
 
 impl Command {
     fn spec(self) -> CommandSpec {
-        use Flag::{Commands, Json, Output, PathRules, Paths, Root, Stdin, StrictPaths};
+        use Flag::{Commands, Json, Output, Partial, PathRules, Paths, Root, Stdin, StrictPaths};
         match self {
             Self::Check => CommandSpec {
                 name: "check",
@@ -77,7 +78,7 @@ impl Command {
                 files: "<recipe.spitin> or <pipeline.spit> <inputs.spitout | ->",
                 summary: "step 3: resolve a pipeline's jobs over a dataset's inputs; -o writes the .spitdag",
                 example: "spit dag dataset.spitin -o analysis.spitdag\n  spit dag analysis.spit dataset.spitout -o analysis.spitdag\n  spit dag dataset.spitin --commands",
-                flags: &[Root, StrictPaths, Paths, Commands, Json, Output],
+                flags: &[Root, StrictPaths, Paths, Commands, Partial, Json, Output],
             },
             Self::Artifacts => CommandSpec {
                 name: "artifacts",
@@ -141,17 +142,19 @@ enum Flag {
     Output,
     Paths,
     Commands,
+    Partial,
     PathRules,
     StrictPaths,
     Json,
     Stdin,
 }
 
-const FLAGS: [Flag; 8] = [
+const FLAGS: [Flag; 9] = [
     Flag::Root,
     Flag::Output,
     Flag::Paths,
     Flag::Commands,
+    Flag::Partial,
     Flag::PathRules,
     Flag::StrictPaths,
     Flag::Json,
@@ -176,6 +179,7 @@ impl Flag {
             Self::Output => "-o",
             Self::Paths => "--paths",
             Self::Commands => "--commands",
+            Self::Partial => "--partial",
             Self::PathRules => "--path-rules",
             Self::StrictPaths => "--strict-paths",
             Self::Json => "--json",
@@ -202,6 +206,7 @@ impl Flag {
             (Self::Output, _) => "write the .spitdag to <file>",
             (Self::Paths, _) => "show each artifact's file",
             (Self::Commands, _) => "show each job's command lines, as a shell would run them",
+            (Self::Partial, _) => "plan complete jobs and record artifacts that cannot be produced",
             (Self::PathRules, _) => "list the path rule each product uses",
             (Self::StrictPaths, _) => "require an explicit path rule for every product",
             (Self::Json, Command::Check) => "print diagnostics as JSON, for editors",
@@ -737,7 +742,7 @@ fn prepare(args: &CliArgs) -> Result<Prepared, Box<dyn Error>> {
         )
         .into());
     }
-    let lenient = args.command == Command::Artifacts;
+    let lenient = args.command == Command::Artifacts || args.has(Flag::Partial);
     let root = args.value(Flag::Root).map(PathBuf::from);
     if is_recipe(inputs) {
         return prepare_recipe(inputs, root, lenient);
@@ -854,8 +859,20 @@ fn prepared(
 
 /// Step 3: resolve the jobs and print them, or write the `.spitdag`.
 fn dag(args: &CliArgs) -> Result<(), Box<dyn Error>> {
-    let prepared = prepare(args)?;
-    prepared.inputs.require_complete()?;
+    let mut prepared = prepare(args)?;
+    if args.has(Flag::Partial) {
+        prepared.report = resolve_artifacts_partial(
+            &prepared.pipeline,
+            &prepared.inputs.dag_inventory(),
+            &prepared.inputs.unavailable(),
+        )?;
+        prepared
+            .report
+            .dag
+            .locate_sources(&prepared.inputs.inventory);
+    } else {
+        prepared.inputs.require_complete()?;
+    }
     let dag = &prepared.report.dag;
     if args.has(Flag::StrictPaths) {
         inspect_paths(&prepared.bound)?
@@ -870,6 +887,15 @@ fn dag(args: &CliArgs) -> Result<(), Box<dyn Error>> {
         paths = Some(bound);
     }
     eprintln!("note: {}", job_count(&prepared.pipeline, dag));
+    if args.has(Flag::Partial) {
+        let left_out: usize = prepared
+            .report
+            .incomplete
+            .iter()
+            .map(|job| job.outputs.len())
+            .sum();
+        eprintln!("note: planned {} jobs; left out {left_out} artifacts that cannot be produced (see left_out)", dag.jobs.len());
+    }
     if let Some(unused) = unused_sources_summary(&prepared.report) {
         eprintln!("note: {unused}; `spit artifacts` lists them");
     }
@@ -880,6 +906,26 @@ fn dag(args: &CliArgs) -> Result<(), Box<dyn Error>> {
     if args.has(Flag::Output) || args.has(Flag::Json) {
         let mut bound = bind(paths)?;
         bound.removed = prepared.inputs.inventory.removed.clone();
+        bound.left_out = prepared
+            .report
+            .incomplete
+            .iter()
+            .flat_map(|job| {
+                job.outputs.iter().map(|artifact| LeftOut {
+                    artifact: artifact.clone(),
+                    reasons: job
+                        .gaps
+                        .iter()
+                        .map(|gap| match gap {
+                            Gap::Unmatched(error) => error.to_string(),
+                            Gap::Blocked { port, artifact } => {
+                                format!("input `{port}` needs {artifact}, which cannot be produced")
+                            }
+                        })
+                        .collect(),
+                })
+            })
+            .collect();
         bound.root = prepared.root.as_deref().map(|root| {
             std::path::absolute(root)
                 .unwrap_or_else(|_| root.to_path_buf())
