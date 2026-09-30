@@ -21,6 +21,10 @@ pub fn validate_source_files(
 
 /// As [`validate_source_files`], with the paths it bound, so that
 /// [`bind_dag_with`](crate::bind_dag_with) need not bind them again.
+///
+/// Keep in step with `bind_dag_with`, which trusts that the rules were
+/// checked and the paths bound here as `bind_dag` would: if this stops
+/// checking them, that function must start.
 pub fn validate_bound_source_files(
     pipeline: &Pipeline,
     dag: &ResolvedDag,

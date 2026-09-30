@@ -97,6 +97,11 @@ pub fn render_source_inventory(
 /// `rules` and reading that back gives it, but in its own order, or `None`
 /// when a path rule it would write holds a `#`. Settling gives each record
 /// the path its rule gives, which the text leaves out.
+///
+/// Keep in step with `InventoryText`, which writes the text, and
+/// `parse_inventory_with_lines`, which reads it: this must do to the
+/// inventory whatever the two do to it together, or a recipe diagnosed in
+/// memory will differ from its text. `tests/outputs.rs` compares them.
 pub(crate) fn as_read_back(
     inventory: &SourceInventory,
     pipeline: &Pipeline,
@@ -147,6 +152,9 @@ fn written_source_paths(
 
 /// A `.spitout`: its contexts, unnamed then by discovery rule, and its
 /// source records.
+///
+/// Keep in step with `as_read_back`: whatever this leaves out or rewrites,
+/// such as a record's path or the order of contexts, it must too.
 struct InventoryText<'a> {
     inventory: &'a SourceInventory,
     pipeline: &'a Pipeline,
@@ -570,6 +578,8 @@ fn parse_inventory_with_lines(
             },
         }
     }
+    // Keep in step with `as_read_back`, which must normalize a settled
+    // inventory as reading its text does here.
     inventory.contexts.sort();
     inventory.contexts.dedup();
     for bindings in inventory.discovered.values_mut() {

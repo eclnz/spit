@@ -17,6 +17,8 @@ use crate::template::Part;
 /// and `verify` commands. A job whose operation has no command keeps none;
 /// a backend that runs jobs reports it.
 pub fn bind_dag(pipeline: &Pipeline, dag: &ResolvedDag) -> Result<BoundDag, BindError> {
+    // Keep in step with `bind_dag_with`, which skips the steps up to the
+    // paths' binding because `validate_bound_source_files` took them.
     check_rules(pipeline, dag)?;
     validate_commands(pipeline)?;
     let paths = bound_paths(pipeline, dag)?;
@@ -25,6 +27,11 @@ pub fn bind_dag(pipeline: &Pipeline, dag: &ResolvedDag) -> Result<BoundDag, Bind
 
 /// As [`bind_dag`], with the paths [`validate_bound_source_files`] bound for
 /// the same pipeline and DAG, which checked their rules.
+///
+/// Keep in step with [`bind_dag`] and `validate_bound_source_files`: this
+/// leaves out `bind_dag`'s rule check and path binding because that
+/// function did both, so a check `bind_dag` gains before its paths are
+/// bound belongs there or here as well.
 ///
 /// [`validate_bound_source_files`]: crate::validate_bound_source_files
 pub fn bind_dag_with(

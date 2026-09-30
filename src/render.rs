@@ -138,9 +138,7 @@ impl JobWriter {
     /// type.
     fn artifact(&mut self, identity: &str, artifact_type: &TypeExpr) {
         self.text.push_str(identity);
-        if *artifact_type != TypeExpr::Unknown {
-            write!(self.text, " : {artifact_type}").expect("writing to a String");
-        }
+        push_type(&mut self.text, artifact_type);
         self.text.push('\n');
     }
 
@@ -260,11 +258,16 @@ fn in_stage(stage: Option<&str>) -> String {
 }
 
 /// `identity` with its type, unless the type is unknown.
-fn typed(identity: String, artifact_type: &TypeExpr) -> String {
-    if *artifact_type == TypeExpr::Unknown {
-        identity
-    } else {
-        format!("{identity} : {artifact_type}")
+fn typed(mut identity: String, artifact_type: &TypeExpr) -> String {
+    push_type(&mut identity, artifact_type);
+    identity
+}
+
+/// An artifact's type as every report shows it after the artifact: ` : Type`,
+/// or nothing when the type is unknown.
+fn push_type(text: &mut String, artifact_type: &TypeExpr) {
+    if *artifact_type != TypeExpr::Unknown {
+        write!(text, " : {artifact_type}").expect("writing to a String");
     }
 }
 

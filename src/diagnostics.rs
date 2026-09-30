@@ -345,6 +345,11 @@ pub fn diagnose_checked(text: &str, context: Context<'_>) -> Diagnosis {
 /// As [`diagnose_checked`], with the records in `records` settled and
 /// resolved over the pipeline once it passes on its own; the inventory they
 /// parse to, and what it resolves to, are returned with it.
+///
+/// Keep in step with [`diagnose_checked_with_inventory`], which takes the
+/// same steps over records in memory: a step added or changed here must be
+/// added or changed there, or recipes will be diagnosed differently when
+/// they pass than when they fail.
 pub fn diagnose_checked_with_records(
     text: &str,
     records: &str,
@@ -398,6 +403,10 @@ pub fn diagnose_checked_with_records(
 /// diagnoses their text instead, when a diagnostic would point into that
 /// text: when anything is an error or concerns the records, or when a path
 /// rule the text would carry holds a `#`.
+///
+/// Keep in step with [`diagnose_checked_with_records`]: this takes its steps
+/// but parsing the records, and must give what it gives whenever this gives
+/// anything. `tests/outputs.rs` compares the two.
 pub fn diagnose_checked_with_inventory(
     text: &str,
     settled: &ResolvedInputs,
@@ -560,7 +569,8 @@ fn check_document(
 /// stops either.
 /// `settled` holds what settling `supplied` with the same rules found, when
 /// they have no `skip` rule: checking it again would find the same, and
-/// change nothing.
+/// change nothing. Keep in step with `check_inventory`: this holds only
+/// while a `skip` rule is the one thing that makes a second check differ.
 fn record_diagnostics(
     document: &ParsedDocument,
     supplied: &SourceInventory,
