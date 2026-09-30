@@ -1422,9 +1422,10 @@ fn pipeline_place(pipeline: &Pipeline, lines: &SourceMap, error: &ResolveError) 
             .invocations
             .iter()
             .find(|invocation| {
-                invocation.inputs.iter().any(|binding| {
-                    &binding.product == product && binding.vary.as_ref() == Some(dimension)
-                })
+                invocation
+                    .inputs
+                    .iter()
+                    .any(|binding| &binding.product == product && binding.vary.contains(dimension))
             })
             .and_then(|invocation| step(invocation.output_product())),
         ResolveError::Cycle { products } => products.first().and_then(|name| step(name)),

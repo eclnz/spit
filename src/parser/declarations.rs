@@ -516,13 +516,23 @@ fn parse_binding(arg: &str, number: usize) -> Result<InputBinding, ParseError> {
             || ParseError::new(number, format!("duplicate `@ {keyword}(...)`")).at_token(keyword);
         match keyword {
             "vary" => {
-                let [dimension] = items.as_slice() else {
-                    return Err(ParseError::new(number, "`@ vary(...)` takes one dimension")
+                if !binding.vary.is_empty() {
+                    return Err(ParseError::new(
+                        number,
+                        "write the dimensions in one clause: `@ vary(model, config)`",
+                    )
+                    .at_token(selector));
+                }
+                for dimension in items {
+                    let dimension = identifier(dimension, number, "vary dimension")?;
+                    if binding.vary.iter().any(|name| name == dimension) {
+                        return Err(ParseError::new(
+                            number,
+                            format!("`@ vary(...)` repeats `{dimension}`"),
+                        )
                         .at_token(selector));
-                };
-                let dimension = identifier(dimension, number, "vary dimension")?;
-                if binding.vary.replace(dimension.to_owned()).is_some() {
-                    return Err(duplicate());
+                    }
+                    binding.vary.push(dimension.to_owned());
                 }
             }
             "where" => {

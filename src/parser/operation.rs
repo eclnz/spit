@@ -53,8 +53,8 @@ pub(super) fn parse_operation(line: &str, number: usize) -> Result<OperationDef,
         .collect::<Result<Vec<_>, _>>()?;
     let shape_rule = shape_rule(&ports, &clauses, number)?;
     let mut operation = OperationDef::with_outputs(name, ports, outputs, shape_rule);
-    if let Some(dimension) = clauses.drop {
-        operation = operation.aggregating(dimension);
+    if let Some(dimensions) = clauses.drop {
+        operation = operation.aggregating_dimensions(dimensions);
     }
     if let Some(minimum) = clauses.min {
         operation = operation.at_least(minimum);
@@ -64,26 +64,44 @@ pub(super) fn parse_operation(line: &str, number: usize) -> Result<OperationDef,
 
 /// The `@ drop(dimension)` and `@ min(count)` clauses after a signature.
 #[derive(Default)]
-struct Clauses<'a> {
-    drop: Option<&'a str>,
+struct Clauses {
+    drop: Option<Vec<String>>,
     min: Option<usize>,
 }
 
-fn parse_clauses<'a>(
-    clauses: impl Iterator<Item = &'a str>,
+fn parse_clauses(
+    clauses: impl Iterator<Item = impl AsRef<str>>,
     number: usize,
-) -> Result<Clauses<'a>, ParseError> {
+) -> Result<Clauses, ParseError> {
     let expected = "expected `@ drop(dimension)` or `@ min(count)` after operation signature";
     let mut parsed = Clauses::default();
     for clause in clauses {
-        let clause = clause.trim();
+        let clause = clause.as_ref().trim();
         let (keyword, argument) = clause
             .split_once('(')
             .and_then(|(keyword, rest)| Some((keyword.trim(), rest.strip_suffix(')')?.trim())))
             .ok_or_else(|| ParseError::new(number, expected).at_token(clause))?;
         match keyword {
             "drop" if parsed.drop.is_none() => {
-                parsed.drop = Some(identifier(argument, number, "aggregated dimension")?);
+                let dimensions = comma_items(argument, number)?;
+                if dimensions.is_empty() {
+                    return Err(
+                        ParseError::new(number, "`@ drop(...)` needs a dimension").at_token(clause)
+                    );
+                }
+                let mut names = Vec::new();
+                for dimension in dimensions {
+                    let dimension = identifier(dimension, number, "aggregated dimension")?;
+                    if names.contains(&dimension.to_owned()) {
+                        return Err(ParseError::new(
+                            number,
+                            format!("`@ drop(...)` repeats `{dimension}`"),
+                        )
+                        .at_token(clause));
+                    }
+                    names.push(dimension.to_owned());
+                }
+                parsed.drop = Some(names);
             }
             "min" if parsed.min.is_none() => {
                 let count: usize = argument
@@ -163,7 +181,7 @@ fn parse_input_port<'a>(
 /// then may it drop a dimension or require a minimum count.
 fn shape_rule(
     ports: &[InputPort],
-    clauses: &Clauses<'_>,
+    clauses: &Clauses,
     number: usize,
 ) -> Result<ShapeRule, ParseError> {
     let many = ports

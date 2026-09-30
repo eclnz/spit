@@ -765,8 +765,8 @@ pub struct OperationDef {
     /// Every artifact one job writes, in declaration order.
     pub outputs: Vec<OutputPort>,
     pub shape_rule: ShapeRule,
-    /// An optional declared dimension consumed by an aggregate operation.
-    pub aggregated_dimension: Option<String>,
+    /// Dimensions consumed by an aggregate operation.
+    pub aggregated_dimensions: Vec<String>,
     /// The fewest artifacts the many input accepts in one job.
     pub minimum_collection: Option<usize>,
 }
@@ -798,14 +798,23 @@ impl OperationDef {
             inputs,
             outputs,
             shape_rule,
-            aggregated_dimension: None,
+            aggregated_dimensions: Vec::new(),
             minimum_collection: None,
         }
     }
 
     #[must_use]
     pub fn aggregating(mut self, dimension: impl Into<String>) -> Self {
-        self.aggregated_dimension = Some(dimension.into());
+        self.aggregated_dimensions = vec![dimension.into()];
+        self
+    }
+
+    #[must_use]
+    pub fn aggregating_dimensions(
+        mut self,
+        dimensions: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Self {
+        self.aggregated_dimensions = dimensions.into_iter().map(Into::into).collect();
         self
     }
 
@@ -820,8 +829,8 @@ impl OperationDef {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct InputBinding {
     pub product: String,
-    /// `@ vary(dimension)`: collect the artifacts that differ in this dimension.
-    pub vary: Option<String>,
+    /// `@ vary(dimensions)`: collect artifacts that differ in these dimensions.
+    pub vary: Vec<String>,
     /// `@ where(dimension=value, ...)`: keep only artifacts with these values.
     /// A pinned dimension no longer takes part in matching.
     pub pinned: BTreeMap<String, String>,
@@ -844,7 +853,17 @@ impl InputBinding {
 
     pub fn vary(product: impl Into<String>, dimension: impl Into<String>) -> Self {
         Self {
-            vary: Some(dimension.into()),
+            vary: vec![dimension.into()],
+            ..Self::product(product)
+        }
+    }
+
+    pub fn varying(
+        product: impl Into<String>,
+        dimensions: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Self {
+        Self {
+            vary: dimensions.into_iter().map(Into::into).collect(),
             ..Self::product(product)
         }
     }
@@ -873,7 +892,7 @@ impl InputBinding {
 
     /// Whether any `@` selector is present.
     pub fn has_selectors(&self) -> bool {
-        self.vary.is_some()
+        !self.vary.is_empty()
             || !self.pinned.is_empty()
             || self.same.is_some()
             || !self.each.is_empty()

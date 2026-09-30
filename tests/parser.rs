@@ -107,7 +107,7 @@ fn rules_and_records_belong_outside_the_pipeline() {
 
 #[test]
 fn reports_line_for_bad_text() {
-    let text = "products:\n  signal : Signal [site, run]\npipeline:\n  denoised = denoise(signal @ vary(run, day))\n";
+    let text = "products:\n  signal : Signal [site, run]\npipeline:\n  denoised = denoise(signal @ vary(run) @ vary(day))\n";
     let error = parse_pipeline(text).unwrap_err();
     assert_eq!(error.line(), 4);
     assert!(error.to_string().contains("line 4"));

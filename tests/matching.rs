@@ -37,6 +37,59 @@ fn a_many_input_can_share_an_operation_with_single_inputs() {
 }
 
 #[test]
+fn one_aggregate_can_vary_two_dimensions_in_product_order() {
+    let pipeline = "source summary [model, config]\noperation leaderboard(summaries: many Summary) -> Table @ drop(model, config) @ min(3)\noverall = leaderboard(summary @ vary(model, config))\n";
+    let inventory = "sources:\n  summary[model=b,config=1]\n  summary[model=a,config=10]\n  summary[model=a,config=2]\n";
+    let dag = resolve_text(pipeline, inventory).unwrap();
+    assert_eq!(dag.jobs.len(), 1);
+    let job = &dag.jobs[0];
+    let members: Vec<_> = job.inputs[0]
+        .iter()
+        .map(|id| dag.artifact(*id).to_string())
+        .collect();
+    assert_eq!(
+        members,
+        [
+            "summary[config=2,model=a]",
+            "summary[config=10,model=a]",
+            "summary[config=1,model=b]"
+        ]
+    );
+    assert_eq!(dag.artifact(job.output()).to_string(), "overall");
+    assert!(resolve_text(
+        &pipeline.replace("vary(model, config)", "vary(config, model)"),
+        inventory
+    )
+    .is_ok());
+
+    for changed in [
+        pipeline.replace("vary(model, config)", "vary(model)"),
+        pipeline.replace("drop(model, config)", "drop(model)"),
+    ] {
+        assert!(resolve_text(&changed, inventory)
+            .unwrap_err()
+            .to_string()
+            .contains("declares drop("));
+    }
+    let too_small = pipeline.replace("min(3)", "min(4)");
+    assert!(matches!(
+        resolve_text(&too_small, inventory),
+        Err(ResolveError::CollectionTooSmall {
+            found: 3,
+            minimum: 4,
+            ..
+        })
+    ));
+    for invalid in [
+        pipeline.replace("vary(model, config)", "vary(model) @ vary(config)"),
+        pipeline.replace("vary(model, config)", "vary(model, model)"),
+        pipeline.replace("drop(model, config)", "drop(model, model)"),
+    ] {
+        assert!(parse_pipeline(&invalid).is_err(), "{invalid}");
+    }
+}
+
+#[test]
 fn a_single_input_of_an_aggregate_must_match_each_group() {
     let missing = resolve_text(COMBINE, "sources:\n  result[site=A,run=1]\n");
     assert!(matches!(
