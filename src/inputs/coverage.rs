@@ -390,7 +390,7 @@ pub(crate) fn check_inventory(
     let mut inventory = inventory.clone();
     let skipped = apply_skips(rules, &mut inventory, false);
     // Skipping only removes records, so when none go the artifacts stand.
-    let artifacts = if inventory.artifacts.len() == supplied.values().map(Vec::len).sum() {
+    let artifacts = if inventory.artifacts.len() == supplied.values().map(Vec::len).sum::<usize>() {
         supplied
     } else {
         pipeline.source_artifacts(&inventory)?

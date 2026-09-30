@@ -6,6 +6,11 @@ license = "MIT"
 description = "A small static compiler for logical artifact pipelines"
 
 [dependencies]
+fnv = "1.0.7"
+mimalloc = "0.1.52"
+rustc-hash = "2.1.3"
+serde = { version = "1.0.229", features = ["derive", "rc"] }
+serde_json = { version = "1.0.151", features = ["raw_value"] }
 
 [[example]]
 name = "basic"

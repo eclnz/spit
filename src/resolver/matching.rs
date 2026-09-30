@@ -3,9 +3,10 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use rustc_hash::FxHashMap;
+
 use crate::compile::{CompiledStep, StepShape};
 use crate::error::{PortSite, ResolveError};
-use crate::hash::QuickMap;
 use crate::model::{
     ArtifactInstance, ArtifactMap, ArtifactSet, EntityBinding, Gap, Invocation, Job, OperationDef,
 };
@@ -74,7 +75,7 @@ pub(super) fn expand_step(
 
 /// One input's candidates, by their values for the dimensions it joins on,
 /// so each job finds its match without scanning them all.
-type JoinIndex<'a> = QuickMap<Vec<Option<&'a str>>, Vec<&'a ArtifactInstance>>;
+type JoinIndex<'a> = FxHashMap<Vec<Option<&'a str>>, Vec<&'a ArtifactInstance>>;
 
 /// `entities`' values for `joins`, in order; `None` where one is unbound.
 fn join_values<'a>(joins: &[String], entities: &'a EntityBinding) -> Vec<Option<&'a str>> {
