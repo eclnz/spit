@@ -3,7 +3,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::compile::{CompiledStep, StepShape};
 use crate::error::{PortSite, ResolveError};
@@ -160,7 +160,7 @@ fn driver_groups(
     shape: &StepShape,
 ) -> Vec<(EntityBinding, Vec<ArtifactInstance>)> {
     let mut groups: Vec<(EntityBinding, Vec<ArtifactInstance>)> = Vec::new();
-    let mut group_index: BTreeMap<EntityBinding, usize> = BTreeMap::new();
+    let mut group_index: FxHashMap<EntityBinding, usize> = FxHashMap::default();
     for artifact in candidates {
         let context = artifact
             .entities
@@ -220,7 +220,7 @@ fn broadcast_contexts(
             continue;
         }
         let mut values: Vec<EntityBinding> = Vec::new();
-        let mut seen = BTreeSet::new();
+        let mut seen = FxHashSet::default();
         for candidate in candidates {
             let value = candidate
                 .entities
