@@ -245,6 +245,66 @@ fn path_rules_show_a_missing_rule_and_strict_paths_accept_complete_rules() {
 }
 
 #[test]
+fn a_message_names_the_file_it_is_about_when_that_file_was_not_given() {
+    let tree = Tree::new("cli-file-names", &["in/1.txt", "in/2.txt", "ref/2.txt"]);
+    let directory = tree.path();
+    let pipeline = directory.join("pipeline.spit");
+    // Line 6 joins `raw` to `ref`, which has no artifact at [id=1].
+    fs::write(
+        &pipeline,
+        "source raw [id]\npath raw: in/{id}.txt\nsource ref [id]\npath ref: ref/{id}.txt\n\
+         operation link(raw, ref)\nlinked = link(raw, ref)\n",
+    )
+    .unwrap();
+    let recipe = directory.join("data.spitin");
+    fs::write(&recipe, "pipeline pipeline.spit\n").unwrap();
+    let shown = pipeline.display().to_string();
+
+    // Given the recipe, a failed match in the pipeline names the pipeline.
+    let dag = spit(&["dag", recipe.to_str().unwrap()]);
+    assert!(!dag.status.success());
+    assert!(
+        stderr(&dag).contains(&format!(
+            "error: {shown}: line 6, column 20: no `ref` artifact"
+        )),
+        "{}",
+        stderr(&dag)
+    );
+
+    // Checking the recipe names the pipeline too, and keeps the column.
+    fs::write(
+        &pipeline,
+        "source raw [id]\noperation link(raw)\nlinked = link(rwa)\n",
+    )
+    .unwrap();
+    let check = spit(&["check", recipe.to_str().unwrap()]);
+    assert_eq!(
+        stderr(&check),
+        format!("error: {shown}: line 3, column 15: unknown product `rwa`\n")
+    );
+
+    // Given the pipeline and records, the pipeline is the file given first;
+    // the records are named, as their lines are in another file.
+    fs::write(
+        &pipeline,
+        "source raw [id]\noperation link(raw)\nlinked = link(raw)\n",
+    )
+    .unwrap();
+    let records = directory.join("inputs.spitout");
+    fs::write(&records, "sources:\n    rwa[id=1]\n").unwrap();
+    let dag = spit(&["dag", pipeline.to_str().unwrap(), records.to_str().unwrap()]);
+    assert!(
+        stderr(&dag).starts_with(&format!(
+            "error: {}: line 2, column 5: unknown product `rwa`",
+            records.display()
+        )),
+        "{}",
+        stderr(&dag)
+    );
+    assert!(!stderr(&dag).contains(&shown), "{}", stderr(&dag));
+}
+
+#[test]
 fn check_prints_every_diagnostic_and_fails_only_on_errors() {
     let tree = Tree::new("cli-diagnostics", &[]);
     let directory = tree.path();

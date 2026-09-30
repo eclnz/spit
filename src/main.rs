@@ -27,8 +27,8 @@ use spit::{
     render_artifacts, render_bound_dag, render_dag, render_diagnostics_json,
     render_source_inventory, stage_within, validate_bound_source_files, validate_source_files,
     ArtifactReport, BoundDag, BoundPaths, Checked, Context, Diagnosis, Diagnostic,
-    DiagnosticSource, InputSource, InputSpec, PathTemplate, Pipeline, ResolvedDag, ResolvedInputs,
-    Severity, View,
+    DiagnosticSource, FileNames, InputSource, InputSpec, PathTemplate, Pipeline, ResolvedDag,
+    ResolvedInputs, Severity, View,
 };
 
 #[derive(Clone, Copy, PartialEq)]
@@ -512,7 +512,7 @@ fn check(args: &CliArgs) -> Result<(), Box<dyn Error>> {
             print!("{}", render_diagnostics_json(&diagnostics, &text, None));
             return Ok(());
         }
-        report(&diagnostics, &text, None)?;
+        report(&diagnostics, &text, None, FileNames::default())?;
         println!("Recipe valid.");
         return Ok(());
     }
@@ -525,7 +525,13 @@ fn check(args: &CliArgs) -> Result<(), Box<dyn Error>> {
         print!("{}", render_diagnostics_json(diagnostics, &text, None));
         return Ok(());
     }
-    let checked = passed(diagnosis, |checked| &checked.warnings, &text, None)?;
+    let checked = passed(
+        diagnosis,
+        |checked| &checked.warnings,
+        &text,
+        None,
+        FileNames::default(),
+    )?;
     let coverage = inspect_paths(&checked.pipeline)?;
     if args.has(Flag::PathRules) {
         println!("{coverage}");
@@ -540,7 +546,12 @@ fn check(args: &CliArgs) -> Result<(), Box<dyn Error>> {
 /// Step 2: settle a dataset from a recipe and write its `.spitout`.
 fn inputs(args: &CliArgs) -> Result<(), Box<dyn Error>> {
     let loaded = load_recipe(&args.file)?;
-    report(&loaded.checked.warnings, &loaded.pipeline_text, None)?;
+    report(
+        &loaded.checked.warnings,
+        &loaded.pipeline_text,
+        None,
+        loaded.names(),
+    )?;
     let root = args.value(Flag::Root).map(PathBuf::from);
     let settled = settle(&loaded, &args.file, root.as_deref())?;
     settled.require_complete()?;
@@ -557,8 +568,21 @@ struct Loaded {
     recipe: InputSpec,
     /// The file the recipe's `pipeline` line names.
     pipeline_file: PathBuf,
+    /// That file as messages name it.
+    pipeline_name: String,
     pipeline_text: String,
     checked: Checked,
+}
+
+impl Loaded {
+    /// Names for messages about the pipeline, which the user did not give
+    /// on the command line.
+    fn names(&self) -> FileNames<'_> {
+        FileNames {
+            pipeline: Some(&self.pipeline_name),
+            inventory: None,
+        }
+    }
 }
 
 /// Read the recipe `file` and check the pipeline it names, printing the
@@ -577,12 +601,18 @@ fn load_recipe(file: &str) -> Result<Loaded, Box<dyn Error>> {
     let checked = match diagnose_checked(&pipeline_text, Context::at(&pipeline_file)) {
         Ok(checked) => checked,
         Err(all) => {
-            report(&all, &pipeline_text, None)?;
+            let shown = pipeline_file.display().to_string();
+            let names = FileNames {
+                pipeline: Some(&shown),
+                inventory: None,
+            };
+            report(&all, &pipeline_text, None, names)?;
             return Err(Reported.into());
         }
     };
     Ok(Loaded {
         recipe,
+        pipeline_name: pipeline_file.display().to_string(),
         pipeline_file,
         pipeline_text,
         checked,
@@ -681,11 +711,22 @@ fn prepare(args: &CliArgs) -> Result<Prepared, Box<dyn Error>> {
         lenient,
     };
     let diagnosis = diagnose_checked_with_records(&pipeline_text, &records_text, context);
+    // The pipeline is the file given first; the records are named, as they
+    // may be in another file or read from standard input.
+    let names = FileNames {
+        pipeline: None,
+        inventory: Some(if inputs == "-" {
+            "standard input"
+        } else {
+            inputs
+        }),
+    };
     let (checked, records) = passed(
         diagnosis,
         |(checked, _)| &checked.warnings,
         &pipeline_text,
         Some(&records_text),
+        names,
     )?;
     let settled = InputSpec::default()
         .resolve(&checked.pipeline, InputSource::Inventory(records.inventory))?;
@@ -713,7 +754,7 @@ fn prepare_recipe(
     // lines of it to point at.
     let text = &loaded.pipeline_text;
     if let Some((checked, records)) = diagnose_checked_with_inventory(text, &settled, context) {
-        report(&checked.warnings, text, None)?;
+        report(&checked.warnings, text, None, loaded.names())?;
         let pipeline = loaded.checked.pipeline;
         return Ok(prepared(pipeline, settled, records.report, root));
     }
@@ -723,11 +764,13 @@ fn prepare_recipe(
         &loaded.recipe.rules,
     );
     let diagnosis = diagnose_checked_with_records(&loaded.pipeline_text, &records_text, context);
+    // The records were settled in memory, so they have no file to name.
     let (_, records) = passed(
         diagnosis,
         |(checked, _)| &checked.warnings,
         &loaded.pipeline_text,
         Some(&records_text),
+        loaded.names(),
     )?;
     Ok(prepared(
         loaded.checked.pipeline,
@@ -910,9 +953,10 @@ fn report(
     diagnostics: &[Diagnostic],
     text: &str,
     inventory_text: Option<&str>,
+    names: FileNames<'_>,
 ) -> Result<(), Reported> {
     for diagnostic in diagnostics {
-        eprintln!("{}", diagnostic.display_in(text, inventory_text));
+        eprintln!("{}", diagnostic.display_named(text, inventory_text, names));
     }
     if diagnostics.iter().any(Diagnostic::is_error) {
         return Err(Reported);
@@ -927,14 +971,15 @@ fn passed<T>(
     warnings: fn(&T) -> &[Diagnostic],
     text: &str,
     inventory_text: Option<&str>,
+    names: FileNames<'_>,
 ) -> Result<T, Reported> {
     match diagnosis {
         Ok(checked) => {
-            report(warnings(&checked), text, inventory_text)?;
+            report(warnings(&checked), text, inventory_text, names)?;
             Ok(checked)
         }
         Err(all) => {
-            report(&all, text, inventory_text)?;
+            report(&all, text, inventory_text, names)?;
             Err(Reported)
         }
     }

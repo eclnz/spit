@@ -22,9 +22,10 @@ error: sweep.spit: line 7, column 1: expected product name followed by [dimensio
 - `display_in` takes the display names of the pipeline and inventory files, with `None` for the file named on the command line.
 - The inventory's current prefix (`inventory line 4`) becomes its file name (`data.spitout: line 4`).
 - `report` and `passed` in `src/main.rs` pass the names on, and the recipe-check path in `src/diagnostics.rs` (`in `{shown}`{line}`) switches to the same form, keeping the column.
-- A name is shown relative to the working directory when it lies under it, and absolute otherwise.
+- A name is shown as SPIT holds the path: as given on the command line, or joined to the recipe's folder for the pipeline a recipe names.
+- A diagnostic about the pipeline that has no line, such as a `require` rule's coverage gap, names no file, because it is not about any line of the pipeline. An inventory is always named when its file is known.
 
-**JSON diagnostics.** Each diagnostic from `check --json` gains a `file` field, the path it is about. Editors can then place a pipeline's diagnostic in the right buffer when a recipe was checked. Existing fields are unchanged; the [VS Code extension](https://github.com/eclnz/spit-vscode) can adopt the field when ready.
+**JSON diagnostics (moved to the VS Code step).** A `file` field on each `check --json` diagnostic needs a diagnostic to carry a place in a second file. Today, the pipeline's errors inside a recipe check have no line of their own. That is a larger change than the text form, and only the editor uses it, so it moves to the [VS Code step](README.md#phase-4-examples-and-follow-ups) of the roadmap.
 
 **Tests.**
 
