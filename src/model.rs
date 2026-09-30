@@ -257,6 +257,17 @@ impl EntityBinding {
         )
     }
 
+    /// Without `dimensions`' values.
+    pub(crate) fn except(&self, dimensions: &[String]) -> Self {
+        Self::from_sorted(
+            self.pairs()
+                .iter()
+                .filter(|(name, _)| !dimensions.iter().any(|dimension| dimension == name.text))
+                .copied()
+                .collect(),
+        )
+    }
+
     pub fn matches_shared(&self, other: &Self) -> bool {
         self.pairs().iter().all(|&(dimension, value)| {
             other
