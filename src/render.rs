@@ -3,23 +3,26 @@
 use std::collections::BTreeSet;
 use std::fmt;
 
-use crate::model::{identity, ArtifactInstance, ArtifactReport, Gap, ResolvedDag};
+use crate::model::{identity, Artifact, ArtifactInstance, ArtifactReport, Gap, ResolvedDag};
 use crate::spitdag::{BoundArtifact, BoundDag};
 use crate::types::TypeExpr;
 
 /// The jobs as text, without ports or paths.
 pub fn render_dag(dag: &ResolvedDag) -> String {
-    let artifact = |artifact| Line {
-        port: None,
-        artifact: typed(render_artifact(dag, artifact), &artifact.artifact_type),
-        path: None,
+    let artifact = |id| {
+        let artifact = dag.artifact(id);
+        Line {
+            port: None,
+            artifact: typed(render_artifact(dag, artifact), artifact.artifact_type),
+            path: None,
+        }
     };
     let jobs = dag.jobs.iter().map(|job| JobText {
         id: job.id,
         stage: job.stage.as_deref(),
         operation: &job.operation,
         inputs: job.input_artifacts().map(artifact).collect(),
-        outputs: job.outputs.iter().map(artifact).collect(),
+        outputs: job.outputs.iter().copied().map(artifact).collect(),
         depends_on: &job.dependencies,
     });
     Jobs(jobs.collect()).to_string()
@@ -141,12 +144,12 @@ impl fmt::Display for Report<'_> {
             .sources
             .iter()
             .filter(|source| !held_back.contains(source))
-            .map(|source| format!("{}  (source)", typed_artifact(dag, source)));
+            .map(|source| format!("{}  (source)", typed_artifact(dag, source.view())));
         let made = dag.jobs.iter().flat_map(|job| {
-            job.outputs.iter().map(move |artifact| {
+            job.outputs.iter().map(move |&artifact| {
                 let stage = in_stage(job.stage.as_deref());
                 let operation = &job.operation;
-                let artifact = typed_artifact(dag, artifact);
+                let artifact = typed_artifact(dag, dag.artifact(artifact));
                 format!("{artifact}  (job {}: {operation}{stage})", job.id)
             })
         });
@@ -174,7 +177,7 @@ impl Report<'_> {
         for job in incomplete {
             let stage = in_stage(job.stage.as_deref());
             for artifact in &job.outputs {
-                let artifact = typed_artifact(dag, artifact);
+                let artifact = typed_artifact(dag, artifact.view());
                 writeln!(f, "  {artifact}  ({}{stage})", job.operation)?;
             }
             for gap in &job.gaps {
@@ -186,7 +189,7 @@ impl Report<'_> {
                         } else {
                             "cannot be produced"
                         };
-                        let artifact = render_artifact(dag, artifact);
+                        let artifact = render_artifact(dag, artifact.view());
                         writeln!(f, "    - input `{port}` needs {artifact}, which {reason}")?;
                     }
                 }
@@ -208,7 +211,7 @@ impl Report<'_> {
                 let sources: Vec<_> = gap
                     .sources
                     .iter()
-                    .map(|source| render_artifact(&self.0.dag, source))
+                    .map(|source| render_artifact(&self.0.dag, source.view()))
                     .collect();
                 writeln!(f, "    holds back: {}", sources.join(", "))?;
             }
@@ -230,17 +233,17 @@ fn typed(identity: String, artifact_type: &TypeExpr) -> String {
     }
 }
 
-fn typed_artifact(dag: &ResolvedDag, artifact: &ArtifactInstance) -> String {
-    typed(render_artifact(dag, artifact), &artifact.artifact_type)
+fn typed_artifact(dag: &ResolvedDag, artifact: Artifact<'_>) -> String {
+    typed(render_artifact(dag, artifact), artifact.artifact_type)
 }
 
 /// An artifact with its entities in its product's declared order.
-fn render_artifact(dag: &ResolvedDag, artifact: &ArtifactInstance) -> String {
-    let Some(dimensions) = dag.product_dimensions.get(&artifact.product) else {
+fn render_artifact(dag: &ResolvedDag, artifact: Artifact<'_>) -> String {
+    let Some(dimensions) = dag.product_dimensions.get(artifact.product) else {
         return artifact.to_string();
     };
     let entities = dimensions
         .iter()
         .filter_map(|dimension| Some((dimension.as_str(), artifact.entities.get(dimension)?)));
-    identity(&artifact.product, entities)
+    identity(artifact.product, entities)
 }

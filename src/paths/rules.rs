@@ -243,7 +243,7 @@ fn validate_path_template(pipeline: &Pipeline, product: &ProductDef) -> Result<S
         .map(|dimension| (dimension.clone(), dimension.clone()))
         .collect();
     let artifact = ArtifactInstance::new(&product.name, product.artifact_type.clone(), entities);
-    bind_path(pipeline, &product.dimensions, &artifact, || {
+    bind_path(pipeline, &product.dimensions, artifact.view(), || {
         format!("path rule for `{}`", product.name)
     })
 }

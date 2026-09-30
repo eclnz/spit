@@ -338,7 +338,7 @@ fn require_source_files(
                 product.artifact_type.clone(),
                 binding.clone(),
             );
-            let relative = binder.bind(&product.dimensions, &artifact, || {
+            let relative = binder.bind(&product.dimensions, artifact.view(), || {
                 format!("source `{artifact}`")
             })?;
             let full = root.join(&relative);
@@ -632,7 +632,7 @@ pub(crate) fn locate_sources(
             product.artifact_type.clone(),
             record.entities.clone(),
         );
-        let path = binder.bind(&product.dimensions, &artifact, || {
+        let path = binder.bind(&product.dimensions, artifact.view(), || {
             format!("source `{artifact}`")
         })?;
         if let Some(given) = &record.path {

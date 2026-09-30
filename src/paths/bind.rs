@@ -8,9 +8,7 @@ use rustc_hash::FxHashMap;
 
 use super::rules::inspect_paths;
 use super::template::{error, require_directory, PathBinder, PathError};
-use crate::model::{
-    ArtifactInstance, ArtifactKey, ArtifactMap, ArtifactSet, EntityBinding, Pipeline, ResolvedDag,
-};
+use crate::model::{Artifact, ArtifactId, ArtifactKey, EntityBinding, Pipeline, ResolvedDag};
 
 /// Check the files needed to start the resolved DAG under a dataset root.
 /// Derived outputs are deliberately excluded because the pipeline creates them.
@@ -22,13 +20,12 @@ pub fn validate_source_files(
     require_directory(root)?;
     check_rules(pipeline, dag)?;
     let paths = bound_paths(pipeline, dag)?;
-    let outputs = output_keys(dag);
+    let made = outputs_made(dag);
     // What the jobs read and none makes, checked in artifact order so the
     // first missing file is reported.
-    let mut needed: Vec<_> = paths
-        .iter()
-        .filter(|(product, entities, _)| outputs.get_by(product, entities).is_none())
-        .map(|(product, entities, relative)| ((product, entities), relative))
+    let mut needed: Vec<_> = with_paths(dag, &paths)
+        .filter(|(id, _, _)| !made[id.index()])
+        .map(|(_, artifact, relative)| (key(artifact), relative))
         .collect();
     needed.sort_unstable_by(|(left, _), (right, _)| left.cmp(right));
     let mut verified = VerifiedFiles::default();
@@ -104,15 +101,21 @@ pub(crate) fn check_rules(pipeline: &Pipeline, dag: &ResolvedDag) -> Result<(), 
         .validate(false)
 }
 
-/// Every artifact the resolved jobs produce.
-pub(crate) fn output_keys(dag: &ResolvedDag) -> ArtifactSet {
-    dag.jobs.iter().flat_map(|job| &job.outputs).collect()
+/// Whether each artifact, by id, is made by one of the resolved jobs.
+pub(crate) fn outputs_made(dag: &ResolvedDag) -> Vec<bool> {
+    let mut made = vec![false; dag.artifacts.len()];
+    for &output in dag.jobs.iter().flat_map(|job| &job.outputs) {
+        made[output.index()] = true;
+    }
+    made
 }
 
+/// The path of each artifact the jobs use, by artifact id; `None` for an
+/// artifact no job uses.
 pub(crate) fn bound_paths(
     pipeline: &Pipeline,
     dag: &ResolvedDag,
-) -> Result<ArtifactMap<String>, PathError> {
+) -> Result<Vec<Option<String>>, PathError> {
     // Only these products' artifacts can have files the inventory gave.
     let located: BTreeSet<&str> = dag
         .source_paths
@@ -120,47 +123,53 @@ pub(crate) fn bound_paths(
         .map(|(product, _)| product.as_str())
         .collect();
     let mut binder = PathBinder::new(pipeline);
-    let mut paths = ArtifactMap::default();
-    let mut owners: FxHashMap<String, &ArtifactInstance> = FxHashMap::default();
-    for artifact in dag
+    let mut paths = vec![None; dag.artifacts.len()];
+    let mut owners: FxHashMap<String, ArtifactId> = FxHashMap::default();
+    for id in dag
         .jobs
         .iter()
-        .flat_map(|job| job.input_artifacts().chain(&job.outputs))
+        .flat_map(|job| job.input_artifacts().chain(job.outputs.iter().copied()))
     {
-        if paths.contains(artifact) {
+        if paths[id.index()].is_some() {
             continue;
         }
+        let artifact = dag.artifact(id);
         let dimensions = dag
             .product_dimensions
-            .get(&artifact.product)
+            .get(artifact.product)
             .ok_or_else(|| error(format!("unknown product `{}`", artifact.product)))?;
         let given = located
-            .contains(artifact.product.as_str())
-            .then(|| dag.source_paths.get(&artifact.key()))
+            .contains(artifact.product)
+            .then(|| {
+                let key = (artifact.product.to_owned(), artifact.entities.clone());
+                dag.source_paths.get(&key)
+            })
             .flatten();
         let relative = match given {
             Some(path) => path.clone(),
             None => binder.bind(dimensions, artifact, || format!("path for `{artifact}`"))?,
         };
-        if let Some(previous) = owners.insert(relative.clone(), artifact) {
+        if let Some(previous) = owners.insert(relative.clone(), id) {
+            let previous = dag.artifact(previous);
             return Err(error(format!(
                 "artifacts `{}[{}]` and `{}[{}]` bind to the same path `{relative}`",
                 previous.product, previous.entities, artifact.product, artifact.entities
             )));
         }
-        paths.insert(artifact, relative);
+        paths[id.index()] = Some(relative);
     }
     // The first such path in path order is the one reported.
     let enclosed = owners
         .iter()
-        .filter_map(|(relative, artifact)| {
-            let (directory, other) = relative
+        .filter_map(|(relative, &artifact)| {
+            let (directory, &other) = relative
                 .match_indices('/')
                 .find_map(|(end, _)| owners.get_key_value(&relative[..end]))?;
             Some((relative, artifact, directory, other))
         })
         .min_by(|left, right| left.0.cmp(right.0));
     if let Some((_, artifact, directory, other)) = enclosed {
+        let (artifact, other) = (dag.artifact(artifact), dag.artifact(other));
         return Err(error(format!(
             "path of `{}[{}]` puts it inside `{directory}`, the path of `{}[{}]`, which is a file",
             artifact.product, artifact.entities, other.product, other.entities
@@ -169,8 +178,23 @@ pub(crate) fn bound_paths(
     Ok(paths)
 }
 
+/// Each artifact the jobs use, with its path, in no order.
+fn with_paths<'a>(
+    dag: &'a ResolvedDag,
+    paths: &'a [Option<String>],
+) -> impl Iterator<Item = (ArtifactId, Artifact<'a>, &'a String)> {
+    dag.artifacts
+        .ids()
+        .zip(paths)
+        .filter_map(|(id, path)| Some((id, dag.artifact(id), path.as_ref()?)))
+}
+
 /// An artifact by its product and entities, as [`ArtifactKey`] without copies.
-type Artifact<'a> = (&'a str, &'a EntityBinding);
+type Key<'a> = (&'a str, &'a EntityBinding);
+
+fn key(artifact: Artifact<'_>) -> Key<'_> {
+    (artifact.product, artifact.entities)
+}
 
 /// Pairs of artifacts, with their paths, whose paths differ only in case:
 /// in artifact order, the first artifact with each such path paired with
@@ -182,14 +206,14 @@ pub(crate) fn case_collisions(
     let Ok(paths) = bound_paths(pipeline, dag) else {
         return Vec::new();
     };
-    let mut folded: FxHashMap<String, Vec<(Artifact<'_>, &String)>> = FxHashMap::default();
-    for (product, entities, path) in paths.iter() {
+    let mut folded: FxHashMap<String, Vec<(Key<'_>, &String)>> = FxHashMap::default();
+    for (_, artifact, path) in with_paths(dag, &paths) {
         folded
             .entry(path.to_lowercase())
             .or_default()
-            .push(((product, entities), path));
+            .push((key(artifact), path));
     }
-    let owned = |((product, entities), path): (Artifact<'_>, &String)| {
+    let owned = |((product, entities), path): (Key<'_>, &String)| {
         ((product.to_owned(), entities.clone()), path.clone())
     };
     let mut collisions = Vec::new();

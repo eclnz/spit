@@ -74,7 +74,7 @@ sources:\n\
     let (pipeline, inventory) = support::parse_fixture(text).unwrap();
     let dag = resolve(&pipeline, &inventory.unwrap()).unwrap();
     assert_eq!(
-        dag.jobs[0].output().artifact_type,
+        *dag.artifact(dag.jobs[0].output()).artifact_type,
         product("Image<Photo,Native>")
     );
 }
@@ -200,7 +200,10 @@ fn unresolved_output_variables_become_unknown_at_job_boundary() {
     .unwrap();
     let inventory = parse_source_inventory("sources:\n  raw[site=A]\n").unwrap();
     let dag = resolve(&pipeline, &inventory).unwrap();
-    assert_eq!(dag.jobs[0].output().artifact_type, product("B<Unknown>"));
+    assert_eq!(
+        *dag.artifact(dag.jobs[0].output()).artifact_type,
+        product("B<Unknown>")
+    );
 }
 
 #[test]
@@ -212,7 +215,7 @@ fn generic_pipeline_infers_output_type_without_pipeline_annotations() {
     let inventory = parse_source_inventory("sources:\n  signal[site=A]\n").unwrap();
     let dag = resolve(&pipeline, &inventory).unwrap();
     assert_eq!(
-        dag.jobs[0].output().artifact_type,
+        *dag.artifact(dag.jobs[0].output()).artifact_type,
         product("FilteredSignal<Native>")
     );
 }
@@ -225,8 +228,14 @@ fn chained_generic_operations_propagate_concrete_type() {
     .unwrap();
     let inventory = parse_source_inventory("sources:\n  raw[site=A]\n").unwrap();
     let dag = resolve(&pipeline, &inventory).unwrap();
-    assert_eq!(dag.jobs[0].output().artifact_type, product("B<Native>"));
-    assert_eq!(dag.jobs[1].output().artifact_type, product("C<Native>"));
+    assert_eq!(
+        *dag.artifact(dag.jobs[0].output()).artifact_type,
+        product("B<Native>")
+    );
+    assert_eq!(
+        *dag.artifact(dag.jobs[1].output()).artifact_type,
+        product("C<Native>")
+    );
 }
 
 #[test]
@@ -237,8 +246,14 @@ fn operation_type_variables_do_not_leak_between_invocations() {
     .unwrap();
     let inventory = parse_source_inventory("sources:\n  a[site=01]\n  b[site=01]\n").unwrap();
     let dag = resolve(&pipeline, &inventory).unwrap();
-    assert_eq!(dag.jobs[0].output().artifact_type, product("B<Native>"));
-    assert_eq!(dag.jobs[1].output().artifact_type, product("B<Standard>"));
+    assert_eq!(
+        *dag.artifact(dag.jobs[0].output()).artifact_type,
+        product("B<Native>")
+    );
+    assert_eq!(
+        *dag.artifact(dag.jobs[1].output()).artifact_type,
+        product("B<Standard>")
+    );
 }
 
 #[test]
@@ -255,9 +270,9 @@ fn field_survey_reuses_image_operations_across_kinds_and_spaces() {
     let output_type = |name: &str| {
         dag.jobs
             .iter()
-            .find(|job| job.output().product == name)
+            .map(|job| dag.artifact(job.output()))
+            .find(|output| output.product == name)
             .unwrap()
-            .output()
             .artifact_type
             .clone()
     };
@@ -343,8 +358,11 @@ fn resolves_untyped_pipeline_by_shape_and_cardinality() {
     let dag = resolve(&pipeline, &inventory).unwrap();
     assert_eq!(dag.jobs.len(), 3);
     assert_eq!(dag.jobs[2].input_artifacts().count(), 2);
-    assert_eq!(dag.jobs[2].output().artifact_type, TypeExpr::Unknown);
-    assert!(!dag.jobs[2].output().entities.binds("repeat"));
+    assert_eq!(
+        *dag.artifact(dag.jobs[2].output()).artifact_type,
+        TypeExpr::Unknown
+    );
+    assert!(!dag.artifact(dag.jobs[2].output()).entities.binds("repeat"));
     assert!(!render_dag(&dag).contains(": Unknown"));
 }
 
