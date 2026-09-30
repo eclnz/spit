@@ -25,10 +25,10 @@ use spit::{
     bind_dag, bind_dag_with, diagnose_checked, diagnose_checked_with_inventory,
     diagnose_checked_with_records, diagnose_recipe, inspect_paths, parse_input_spec_at,
     render_artifacts, render_bound_dag, render_dag, render_diagnostics_json,
-    render_source_inventory, stage_within, validate_bound_source_files, validate_source_files,
-    ArtifactReport, BoundDag, BoundPaths, Checked, Context, Diagnosis, Diagnostic,
-    DiagnosticSource, FileNames, InputSource, InputSpec, PathTemplate, Pipeline, ResolvedDag,
-    ResolvedInputs, Severity, View,
+    render_source_inventory, stage_within, unused_sources_summary, validate_bound_source_files,
+    validate_source_files, ArtifactReport, BoundDag, BoundPaths, Checked, Context, Diagnosis,
+    Diagnostic, DiagnosticSource, FileNames, InputSource, InputSpec, PathTemplate, Pipeline,
+    ResolvedDag, ResolvedInputs, Severity, View,
 };
 
 #[derive(Clone, Copy, PartialEq)]
@@ -821,6 +821,9 @@ fn dag(args: &CliArgs) -> Result<(), Box<dyn Error>> {
         paths = Some(bound);
     }
     eprintln!("note: {}", job_count(&prepared.pipeline, dag));
+    if let Some(unused) = unused_sources_summary(&prepared.report) {
+        eprintln!("note: {unused}; `spit artifacts` lists them");
+    }
     let bind = |paths: Option<BoundPaths>| match paths {
         Some(paths) => bind_dag_with(&prepared.bound, dag, paths),
         None => bind_dag(&prepared.bound, dag),

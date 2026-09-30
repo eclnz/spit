@@ -1411,6 +1411,8 @@ pub enum Gap {
 pub struct IncompleteJob {
     pub operation: String,
     pub stage: Option<String>,
+    /// The inputs it did match, by id in the DAG's table, in port order.
+    pub inputs: Vec<ArtifactId>,
     pub outputs: Vec<ArtifactInstance>,
     pub gaps: Vec<Gap>,
 }
@@ -1428,6 +1430,35 @@ pub struct ArtifactReport {
     pub dag: ResolvedDag,
     pub incomplete: Vec<IncompleteJob>,
     pub coverage: Vec<CoverageGap>,
+}
+
+impl ArtifactReport {
+    /// The sources no job reads, complete or not, in source order: files
+    /// the inventory holds that the plan has no use for, such as those a
+    /// `where` selector leaves out, or a file whose name matches no value a
+    /// job needs. Sources a coverage gap holds back are reported with the
+    /// gap, not here.
+    pub fn unused_sources(&self) -> Vec<ArtifactId> {
+        let mut read = vec![false; self.dag.artifacts.len()];
+        let complete = self.dag.jobs.iter().flat_map(Job::input_artifacts);
+        let incomplete = self
+            .incomplete
+            .iter()
+            .flat_map(|job| job.inputs.iter().copied());
+        for id in complete.chain(incomplete) {
+            read[id.index()] = true;
+        }
+        for source in self.coverage.iter().flat_map(|gap| &gap.sources) {
+            if let Some(id) = self.dag.artifacts.find(&source.product, &source.entities) {
+                read[id.index()] = true;
+            }
+        }
+        self.sources
+            .iter()
+            .copied()
+            .filter(|id| !read[id.index()])
+            .collect()
+    }
 }
 
 fn owned_strings(values: impl IntoIterator<Item = impl AsRef<str>>) -> Vec<String> {
