@@ -74,7 +74,9 @@ struct Entities {
 impl EntityBinding {
     /// A binding of `pairs`, which are sorted by dimension name, each once.
     fn from_sorted(pairs: Vec<(Symbol, Symbol)>) -> Self {
-        // The hash a `BTreeMap<String, String>` of the same pairs has.
+        // The hash a `BTreeMap<String, String>` of the same pairs has. Keep
+        // in step with `Ord` below: maps keyed by bindings iterate as they
+        // did when bindings were maps, which output order depends on.
         let mut hasher = FxHasher::default();
         hasher.write_usize(pairs.len());
         for (dimension, value) in &pairs {
@@ -121,7 +123,8 @@ impl PartialOrd for EntityBinding {
 }
 
 impl Ord for EntityBinding {
-    /// As a `BTreeMap` of the same pairs orders.
+    /// As a `BTreeMap` of the same pairs orders. Keep in step with the hash
+    /// in `from_sorted`; output that sorts by binding depends on this order.
     fn cmp(&self, other: &Self) -> Ordering {
         if Arc::ptr_eq(&self.0, &other.0) {
             return Ordering::Equal;
@@ -279,6 +282,10 @@ impl EntityBinding {
     }
 
     /// Keep only `dimensions`, or `None` if one of them is unbound.
+    ///
+    /// Keep in step with `group_key`: two bindings must have equal keys for
+    /// `dimensions` exactly when they project to equal bindings, as coverage
+    /// and skip rules group by key and report the projection.
     pub fn project(&self, dimensions: &[String]) -> Option<Self> {
         // Keeping every dimension, as when grouping by all of them, is a copy.
         if self.len() == dimensions.len()
@@ -305,7 +312,7 @@ impl EntityBinding {
     /// Its values for `dimensions`, in their order, or `None` if one of them
     /// is unbound: two bindings project onto `dimensions` alike exactly when
     /// their keys are equal, so bindings can be grouped without building a
-    /// binding for each.
+    /// binding for each. Keep in step with `project`.
     pub(crate) fn group_key(&self, dimensions: &[String]) -> Option<GroupKey> {
         dimensions
             .iter()
@@ -523,6 +530,10 @@ impl ArtifactId {
 /// Every artifact of a product has the product's type, so the name and type
 /// are kept once per product and each artifact holds its product's number
 /// and its entities, a column each.
+///
+/// Keep in step with `index_producers` in `compile/definitions.rs`, which
+/// rejects a product made by more than one step: that is why one type per
+/// product holds. A product made by two steps could have two types.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Artifacts {
     products: Vec<(String, ArtifactType)>,

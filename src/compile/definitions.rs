@@ -398,6 +398,8 @@ pub(super) fn index_producers(
             continue;
         }
         for output in &invocation.outputs {
+            // Keep in step with `Artifacts` in `model.rs`, which keeps one
+            // type per product because only one step makes each.
             if producers.contains_key(output) {
                 errors.push((
                     site.clone(),

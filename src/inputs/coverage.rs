@@ -411,7 +411,10 @@ pub(crate) fn check_inventory<'a>(
         })?;
         None
     };
-    // Only a skip rule changes the inventory.
+    // Only a skip rule changes the inventory. Keep in step with
+    // `record_diagnostics`, which reuses what settling found when there is
+    // no skip rule, as checking again would find the same: anything else
+    // that makes a second check differ must stop that reuse too.
     let mut inventory = inventory;
     let skipped = if has(CoverageAction::Skip) {
         apply_skips(rules, inventory.to_mut(), false)

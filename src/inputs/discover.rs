@@ -559,6 +559,10 @@ fn match_from(
 
 /// Whether a value can hold `character`: what `encode_component` keeps, and
 /// the `%` of what it escapes.
+///
+/// Keep in step with `encode_component` in `paths/template.rs`: if a value
+/// could hold a character this denies, `forced_end` would bind it too short
+/// and discovery would miss files.
 fn is_value_character(character: char) -> bool {
     character.is_ascii_alphanumeric() || character == '-' || character == '%'
 }
@@ -653,6 +657,11 @@ impl Listing {
 /// no rule for a source. `pipeline` has every source path rule: its own, the
 /// recipe's and the inventory's. Older inventories may include record paths;
 /// accept those only when they agree with the rule.
+///
+/// Keep in step with `as_read_back` in `parser/inventory.rs`, which relies
+/// on every settled record's path being the one its rule gives: a `.spitout`
+/// leaves such paths out, so a record allowed to keep another path would be
+/// diagnosed in memory differently from its text.
 pub(crate) fn locate_sources(
     pipeline: &Pipeline,
     inventory: &mut SourceInventory,
