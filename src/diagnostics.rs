@@ -682,6 +682,33 @@ fn record_diagnostics(
         }
         let report = resolve_artifacts_excluding(pipeline, &checked.inventory, &[])?;
         if let Some(error) = first_failure(&report.incomplete) {
+            let remaining: usize = report.incomplete.iter().map(|job| job.outputs.len()).sum();
+            let (source, place) = error_location(pipeline, lines, &error, records, true);
+            let mut message = error.to_string();
+            if let ResolveError::MissingInput { site, context } = &error {
+                if let Some(removal) = supplied.removed.iter().find(|removal| {
+                    removal.product.as_deref() == Some(&site.product)
+                        && removal.entities.iter().all(|(dimension, value)| {
+                            context.get(dimension) == Some(value)
+                        })
+                }) {
+                    let origin = removal.origin.as_deref().unwrap_or("the recipe");
+                    let origin = if origin.starts_with("line ") {
+                        format!("recipe {origin}")
+                    } else {
+                        origin.to_owned()
+                    };
+                    message.push_str(&format!(
+                        "\n  {} was excluded by {origin}; exclude the whole group or plan the rest with `--partial`",
+                        removal.identity()
+                    ));
+                }
+            }
+            message.push_str(&format!(
+                "\n  {} more artifacts cannot be produced; run `spit artifacts` to list them, or `spit dag --partial` to plan the rest",
+                remaining.saturating_sub(1)
+            ));
+            diagnostics.push(Diagnostic::error(source, place, message));
             return Err(error);
         }
         diagnostics.extend(case_warnings(pipeline, lines, &report.dag));
@@ -689,8 +716,10 @@ fn record_diagnostics(
     });
     match resolved {
         Err(error) => {
-            let (source, place) = error_location(pipeline, lines, &error, records, true);
-            diagnostics.push(Diagnostic::error(source, place, error.to_string()));
+            if !diagnostics.iter().any(Diagnostic::is_error) {
+                let (source, place) = error_location(pipeline, lines, &error, records, true);
+                diagnostics.push(Diagnostic::error(source, place, error.to_string()));
+            }
             Err(diagnostics)
         }
         Ok(report) => {

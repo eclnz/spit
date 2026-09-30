@@ -4,7 +4,8 @@ use std::process::Command;
 
 use spit::{
     diagnose, parse_source_inventory, render_artifacts, resolve, resolve_artifacts_excluding,
-    ArtifactReport, Gap, InputSource, ResolveError, ResolvedInputs, Severity,
+    resolve_artifacts_partial, ArtifactReport, Gap, InputSource, ResolveError, ResolvedInputs,
+    Severity,
 };
 use support::Tree;
 
@@ -116,6 +117,15 @@ fn keeps_complete_jobs_and_blocks_consumers_of_incomplete_ones() {
     ));
     assert_eq!(report.sources.len(), 4);
     assert!(report.coverage.is_empty());
+}
+
+#[test]
+fn partial_keeps_an_aggregate_incomplete_when_no_member_is_complete() {
+    let (pipeline, settled) = settle(ALIGN, ALIGN_SOURCES).unwrap();
+    let partial = resolve_artifacts_partial(&pipeline, &settled.dag_inventory(), &[]).unwrap();
+    assert!(incomplete(&partial)
+        .iter()
+        .any(|artifact| artifact == "merged[subject=02]"));
 }
 
 #[test]

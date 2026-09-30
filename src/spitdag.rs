@@ -8,7 +8,9 @@ use std::io;
 use std::ops::Range;
 
 use crate::json::{write_array, write_number, write_string, ObjectWriter, Out};
-use crate::model::{identity, natural_cmp, ArtifactId, Artifacts, EntityBinding, Removal};
+use crate::model::{
+    identity, natural_cmp, ArtifactId, ArtifactInstance, Artifacts, EntityBinding, Removal,
+};
 use crate::types::TypeExpr;
 
 /// The schema version a `.spitdag` is written with.
@@ -23,6 +25,8 @@ pub struct BoundDag {
     pub root: Option<String>,
     /// What the input stage left out of the dataset, and why.
     pub removed: Vec<Removal>,
+    /// Outputs whose jobs could not be planned, with the reasons from `artifacts`.
+    pub left_out: Vec<LeftOut>,
     /// Each job after the jobs it depends on.
     pub jobs: Vec<BoundJob>,
     artifacts: Artifacts,
@@ -31,6 +35,12 @@ pub struct BoundDag {
     paths: Vec<String>,
     /// Each product's dimensions in declared order, by product number.
     dimensions: Vec<Vec<String>>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LeftOut {
+    pub artifact: ArtifactInstance,
+    pub reasons: Vec<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -108,6 +118,7 @@ impl BoundDag {
         Self {
             root: None,
             removed: Vec::new(),
+            left_out: Vec::new(),
             jobs,
             artifacts,
             paths,
@@ -268,6 +279,18 @@ fn write_document(
     document.field("removed", |out| {
         write_array(out, &dag.removed, |out, removal| {
             write_removal(out, removal)
+        });
+    });
+    document.field("left_out", |out| {
+        write_array(out, &dag.left_out, |out, left_out| {
+            let mut item = ObjectWriter::start(out);
+            item.string("identity", &left_out.artifact.to_string());
+            item.field("reasons", |out| {
+                write_array(out, &left_out.reasons, |out, reason| {
+                    write_string(out, reason)
+                });
+            });
+            item.finish();
         });
     });
     let mut work = String::new();
@@ -593,7 +616,7 @@ mod tests {
         assert!(text.contains("\"command\":null"), "{text}");
         // A verify command that starts with a path names no program.
         assert!(
-            text.contains("\"executables\":[\"tool\"],\"removed\":[],\"jobs\""),
+            text.contains("\"executables\":[\"tool\"],\"removed\":[],\"left_out\":[],\"jobs\""),
             "{text}"
         );
         assert!(

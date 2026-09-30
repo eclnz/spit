@@ -15,6 +15,7 @@ A `.spitdag` is one JSON object, followed by a newline:
   "targets": [ARTIFACT, ...],
   "executables": ["sort", ...],
   "removed": [REMOVAL, ...],
+  "left_out": [LEFT_OUT, ...],
   "jobs": [JOB, ...]
 }
 ```
@@ -28,6 +29,7 @@ A `.spitdag` is one JSON object, followed by a newline:
 | `targets` | Every artifact a job writes but no job reads: what a full run leaves behind. Ordered by the job that writes it. |
 | `executables` | The program each command and `verify` command starts with, once each, in text order. A command whose first word is a path names no program and is left out. A backend can check these are installed before running anything. |
 | `removed` | What the input stage left out of the dataset, and why: see [Removal](#removal). `[]` when nothing was. |
+| `left_out` | Outputs whose jobs could not be planned, each with its reasons: see [Left out](#left-out). `[]` for a complete plan. |
 | `jobs` | Every job, each after the jobs it depends on. |
 
 ## Artifact
@@ -63,6 +65,16 @@ Each artifact or group an `exclude` or `drop` rule removed, as the `.spitout` re
 | `found` | For a group a counting `drop` rule removed, how many it found; `null` otherwise. |
 
 Nothing in `removed` is among the jobs' inputs: the record says what was left out, so a report can say so.
+
+## Left out
+
+Each output that could not be produced has its identity and the input gaps that prevented its job:
+
+```json
+{"identity": "report[store=s07]", "reasons": ["input `weeks` needs revenue[store=s07,week=2026-W36], which cannot be produced"]}
+```
+
+`dag --partial` fills this array while keeping every complete job. Plain `dag` fails if any output would be left out. The reasons are the same kinds shown by `spit artifacts`: a missing or ambiguous input, a collection below `@ min`, or an input artifact whose job cannot be completed. A `many` input in a partial plan uses only its complete members, so a downstream aggregate may still run.
 
 ## Job
 

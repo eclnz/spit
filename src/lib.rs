@@ -47,8 +47,11 @@ pub use paths::{
     PathCoverageEntry, PathError, PathProblem, PathRule, PathTemplate, VerifiedFiles,
 };
 pub use render::{render_artifacts, render_bound_dag, render_dag, unused_sources_summary, View};
-pub use resolver::{bind_dag, bind_dag_with, resolve, resolve_artifacts_excluding, BindError};
-pub use spitdag::{ArgPart, Argument, BoundArtifact, BoundDag, BoundJob};
+pub use resolver::{
+    bind_dag, bind_dag_with, resolve, resolve_artifacts_excluding, resolve_artifacts_partial,
+    BindError,
+};
+pub use spitdag::{ArgPart, Argument, BoundArtifact, BoundDag, BoundJob, LeftOut};
 pub use types::{
     parse_type_expr, Compatibility, Substitutions, TypeExpr, TypeParseError, TypeUnifyError,
 };

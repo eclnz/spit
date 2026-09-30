@@ -330,6 +330,21 @@ fn an_excluded_file_may_lie_outside_the_discovered_contexts() {
 }
 
 #[test]
+fn a_failed_join_names_the_exclusion_that_caused_it() {
+    let tree = dataset(
+        "excluded-join",
+        "exclude ref[sub=01,ses=01]  # rejected image\n",
+    );
+    let (ok, _, stderr) = run(&tree, "dag");
+    assert!(!ok);
+    assert!(
+        stderr.contains("ref[ses=01,sub=01] was excluded by recipe line 2"),
+        "{stderr}"
+    );
+    assert!(stderr.contains("--partial"), "{stderr}");
+}
+
+#[test]
 fn rules_are_read_from_a_csv_file_beside_the_recipe() {
     let tree = dataset("exclude-csv", "exclude from qc/excluded.csv\n");
     tree.write(
