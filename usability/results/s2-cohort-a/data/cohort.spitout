@@ -1,0 +1,44 @@
+source_paths:
+    bold: sub-{sub}/ses-{ses}/func/sub-{sub}_ses-{ses}_task-rest_run-{run}_bold.nii.gz
+    t1w: sub-{sub}/ses-{ses}/anat/sub-{sub}_ses-{ses}_T1w.nii.gz
+
+contexts sessions:
+    [sub=01,ses=01]:
+        t1w
+        [run=1,2]:
+            bold
+
+    [sub=01,ses=02]:
+        t1w
+        [run=1,2]:
+            bold
+
+    [sub=02,ses=01]:
+        t1w
+        [run=1,2]:
+            bold
+
+    [sub=02,ses=02]:
+        t1w
+        [run=1,2]:
+            bold
+
+    [sub=04,ses=01]:
+        t1w
+        [run=1,2]:
+            bold
+
+    [sub=04,ses=02]:
+        t1w
+        [run=1,2]:
+            bold
+
+    [sub=06,ses=01]:
+        t1w
+        [run=1,2]:
+            bold
+
+    [sub=06,ses=02]:
+        t1w
+        [run=1,2]:
+            bold

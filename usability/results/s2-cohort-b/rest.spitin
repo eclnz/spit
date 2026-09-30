@@ -1,0 +1,4 @@
+pipeline rest.spit
+
+discover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}
+skip sessions count>=2 per [sub]

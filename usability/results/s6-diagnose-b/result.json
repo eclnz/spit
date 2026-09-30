@@ -1,0 +1,81 @@
+{
+  "run": "s6-diagnose-b",
+  "model": "smaller",
+  "grade": {
+    "pass": true,
+    "expected_jobs": 22,
+    "actual_jobs": 22,
+    "matched_jobs": 22,
+    "expected_by_tool": {
+      "clean_sales": 9,
+      "apply_prices": 9,
+      "store_report": 3,
+      "chain_summary": 1
+    },
+    "actual_by_tool": {
+      "clean_sales": 9,
+      "apply_prices": 9,
+      "store_report": 3,
+      "chain_summary": 1
+    },
+    "missing": [],
+    "extra": []
+  },
+  "telemetry": {
+    "spit_calls": 20,
+    "by_command": {
+      "help": 4,
+      "check": 2,
+      "inputs": 10,
+      "artifacts": 1,
+      "dag": 3
+    },
+    "failed_calls": 5,
+    "first_success_call": 2,
+    "diagnostics": [
+      "#5: error: line 18, column 26: no `pricing` artifact for input `prices` of `price` at [store=s07,week=2026-W36]",
+      "#9: warning: skipped [store=S07] because `skip sales` rejected the group",
+      "#9: warning: skipped [store=s03] because `skip sales` rejected the group",
+      "#10: warning: skipped [store=S07] because `skip sales` rejected the group",
+      "#10: warning: skipped [store=s03] because `skip sales` rejected the group",
+      "#11: error: coverage rule for `sales` requires values of `store`, which must be a dimension of that product outside its groups",
+      "#12: error: coverage rule for `sales` requires values of `store`, which must be a dimension of that product outside its groups",
+      "#13: error: coverage rule for `pricing` requires values of `store`, which must be a dimension of that product outside its groups",
+      "#14: error: coverage rule for `pricing` requires values of `store`, which must be a dimension of that product outside its groups",
+      "#15: warning: skipped [store=S07] because `skip sales` rejected the group",
+      "#15: warning: skipped [store=s03] because `skip sales` rejected the group",
+      "#16: warning: skipped [store=S07] because `skip sales` rejected the group",
+      "#16: warning: skipped [store=s03] because `skip sales` rejected the group",
+      "#18: warning: skipped [store=S07] because `skip sales` rejected the group",
+      "#18: warning: skipped [store=s03] because `skip sales` rejected the group",
+      "#18: warning: skipped [store=s07] because `skip pricing` rejected the group",
+      "#18: warning: skipped [store=s09] because `skip pricing` rejected the group",
+      "#19: warning: skipped [store=S07] because `skip sales` rejected the group",
+      "#19: warning: skipped [store=s03] because `skip sales` rejected the group",
+      "#19: warning: skipped [store=s07] because `skip pricing` rejected the group",
+      "#19: warning: skipped [store=s09] because `skip pricing` rejected the group",
+      "#20: warning: skipped [store=S07] because `skip sales` rejected the group",
+      "#20: warning: skipped [store=s03] because `skip sales` rejected the group",
+      "#20: warning: skipped [store=s07] because `skip pricing` rejected the group",
+      "#20: warning: skipped [store=s09] because `skip pricing` rejected the group"
+    ],
+    "diagnostic_kinds": {
+      "warning: skipped [store=S07] because `\u2026` rejected the group": 7,
+      "warning: skipped [store=s03] because `\u2026` rejected the group": 7,
+      "error: coverage rule for `\u2026` requires values of `\u2026`, which must be a dimension of that product outside its groups": 4,
+      "warning: skipped [store=s07] because `\u2026` rejected the group": 3,
+      "warning: skipped [store=s09] because `\u2026` rejected the group": 3,
+      "error: no `\u2026` artifact for input `\u2026` of `\u2026` at [store=s07,week=2026-W36]": 1
+    }
+  },
+  "audit": {
+    "tool_calls": {
+      "Read": 2,
+      "Bash": 8,
+      "SubagentHandback": 1
+    },
+    "total_tool_calls": 11,
+    "output_tokens": 280,
+    "violations": []
+  }
+}

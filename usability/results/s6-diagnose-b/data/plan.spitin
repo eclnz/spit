@@ -1,0 +1,8 @@
+pipeline pipeline.spit
+
+# Leave out stores with problems until they are fixed:
+#   s03 has one week of sales (report needs at least 2)
+#   s07 has no pricing[store=s07] (file is named pricing/S07.json)
+#   s09 has no pricing file at all
+skip sales count>=2 per [store]
+skip pricing count=1 per [store]

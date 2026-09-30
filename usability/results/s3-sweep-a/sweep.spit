@@ -1,0 +1,43 @@
+# Training sweep: every base model x every config x every seed file of that config.
+
+source model : Checkpoint [model]
+path model: models/{model}.pt
+
+source config : Config [config]
+path config: configs/{config}.yaml
+
+source seed : SeedFile [config, seed]
+path seed: sweep/{config}/seed-{seed}.json
+
+source testset : TestSet []
+path testset: eval/testset.parquet
+
+# 1. train: driven by the seed files; broadcast over every base model
+operation train(model: Checkpoint, config: Config, seed_file: SeedFile) -> Weights
+command train: train --model {model} --config {config} --seed-file {seed_file} --out {output}
+weights = train(model @ each(model), config, seed)
+path weights: runs/{model}/{config}/seed-{seed}/weights.pt
+
+# 2. evaluate every trained run on the single test set
+operation evaluate(weights: Weights, testset: TestSet) -> Metrics
+command evaluate: evaluate --weights {weights} --testset {testset} --out {output}
+metrics = evaluate(weights, testset)
+path metrics: runs/{model}/{config}/seed-{seed}/metrics.json
+
+# 3. per model and config, summarise over its seeds
+operation summarise(metrics: many Metrics) -> Summary @ drop(seed)
+command summarise: summarise --out {output} {metrics}
+summary = summarise(metrics @ vary(seed))
+path summary: summaries/{model}/{config}.json
+
+# 4. per model, a leaderboard across its configs
+operation leaderboard(summaries: many Summary) -> Board @ drop(config)
+command leaderboard: leaderboard --out {output} {summaries}
+board = leaderboard(summary @ vary(config))
+path board: leaderboards/{model}.csv
+
+# 5. one overall comparison of the models
+operation compare_models(boards: many Board) -> Comparison @ drop(model)
+command compare_models: compare_models {boards} --out {output}
+comparison = compare_models(board @ vary(model))
+path comparison: leaderboard.csv

@@ -1,0 +1,94 @@
+{
+  "run": "s7-change-b",
+  "model": "smaller",
+  "grade": {
+    "pass": true,
+    "expected_jobs": 60,
+    "actual_jobs": 60,
+    "matched_jobs": 60,
+    "expected_by_tool": {
+      "motioncorr": 16,
+      "bet": 8,
+      "coreg": 16,
+      "sessionavg": 8,
+      "longitudinal": 4,
+      "qcreport": 8
+    },
+    "actual_by_tool": {
+      "motioncorr": 16,
+      "bet": 8,
+      "coreg": 16,
+      "sessionavg": 8,
+      "longitudinal": 4,
+      "qcreport": 8
+    },
+    "missing": [],
+    "extra": []
+  },
+  "telemetry": {
+    "spit_calls": 24,
+    "by_command": {
+      "help": 4,
+      "check": 8,
+      "inputs": 7,
+      "dag": 5
+    },
+    "failed_calls": 4,
+    "first_success_call": 2,
+    "diagnostics": [
+      "#4: warning: skipped [sub=03] because `skip sessions` rejected the group",
+      "#5: warning: skipped [sub=03] because `skip sessions` rejected the group",
+      "#6: warning: skipped [sub=03] because `skip sessions` rejected the group",
+      "#11: warning: skipped [sub=03] because `skip sessions` rejected the group",
+      "#13: warning: skipped [sub=03] because `skip sessions` rejected the group",
+      "#13: warning: skipped [ses=01,sub=01] because `skip bold` rejected the group",
+      "#13: warning: skipped [ses=01,sub=02] because `skip bold` rejected the group",
+      "#13: warning: skipped [ses=01,sub=04] because `skip bold` rejected the group",
+      "#13: warning: skipped [ses=01,sub=06] because `skip bold` rejected the group",
+      "#13: warning: skipped [ses=02,sub=01] because `skip bold` rejected the group",
+      "#13: warning: skipped [ses=02,sub=04] because `skip bold` rejected the group",
+      "#13: warning: skipped [ses=02,sub=06] because `skip bold` rejected the group",
+      "#13: warning: skipped [sub=02] because `skip sessions` rejected the group",
+      "#14: error: line 5, column 11: invalid required dimension `run!`; use letters, digits, and underscores",
+      "#15: error: t.spitin: line 5: invalid required dimension `run!`; use letters, digits, and underscores",
+      "#16: error: line 5, column 1: expected constraint: require or skip product count=1 per [dimensions], count>=1, or dimension=value,...",
+      "#17: error: t.spitin: line 5: expected constraint: require or skip product count=1 per [dimensions], count>=1, or dimension=value,...",
+      "#19: warning: skipped [sub=03] because `skip sessions` rejected the group",
+      "#19: warning: skipped [ses=01,sub=01] because `skip bold` rejected the group",
+      "#19: warning: skipped [ses=01,sub=02] because `skip bold` rejected the group",
+      "#19: warning: skipped [ses=01,sub=04] because `skip bold` rejected the group",
+      "#19: warning: skipped [ses=01,sub=06] because `skip bold` rejected the group",
+      "#19: warning: skipped [ses=02,sub=01] because `skip bold` rejected the group",
+      "#19: warning: skipped [ses=02,sub=04] because `skip bold` rejected the group",
+      "#19: warning: skipped [ses=02,sub=06] because `skip bold` rejected the group",
+      "#19: warning: skipped [sub=02] because `skip sessions` rejected the group",
+      "#20: warning: skipped [sub=03] because `skip sessions` rejected the group"
+    ],
+    "diagnostic_kinds": {
+      "warning: skipped [sub=03] because `\u2026` rejected the group": 7,
+      "warning: skipped [ses=01,sub=01] because `\u2026` rejected the group": 2,
+      "warning: skipped [ses=01,sub=02] because `\u2026` rejected the group": 2,
+      "warning: skipped [ses=01,sub=04] because `\u2026` rejected the group": 2,
+      "warning: skipped [ses=01,sub=06] because `\u2026` rejected the group": 2,
+      "warning: skipped [ses=02,sub=01] because `\u2026` rejected the group": 2,
+      "warning: skipped [ses=02,sub=04] because `\u2026` rejected the group": 2,
+      "warning: skipped [ses=02,sub=06] because `\u2026` rejected the group": 2,
+      "warning: skipped [sub=02] because `\u2026` rejected the group": 2,
+      "error: invalid required dimension `\u2026`; use letters, digits, and underscores": 1,
+      "error: t.spitin: line 5: invalid required dimension `\u2026`; use letters, digits, and underscores": 1,
+      "error: expected constraint: require or skip product count=1 per [dimensions], count>=1, or dimension=value,...": 1,
+      "error: t.spitin: line 5: expected constraint: require or skip product count=1 per [dimensions], count>=1, or dimension=value,...": 1
+    }
+  },
+  "audit": {
+    "tool_calls": {
+      "Read": 3,
+      "Bash": 10,
+      "Write": 1,
+      "SubagentHandback": 2
+    },
+    "total_tool_calls": 16,
+    "output_tokens": 213,
+    "violations": []
+  }
+}
