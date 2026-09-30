@@ -59,11 +59,11 @@ pub(crate) fn broadcast_dimensions(inputs: &[BoundInput<'_>]) -> Vec<String> {
 /// order of an operation's ports never changes which jobs exist.
 pub(crate) fn step_driver(inputs: &[BoundInput<'_>]) -> Option<(usize, Vec<String>)> {
     if let Some(index) = inputs.iter().position(|input| input.many) {
-        let vary = inputs[index].binding.vary.as_deref();
+        let vary = &inputs[index].binding.vary;
         let groups = inputs[index]
             .dimensions
             .iter()
-            .filter(|dimension| Some(dimension.as_str()) != vary)
+            .filter(|dimension| !vary.contains(dimension))
             .cloned()
             .collect();
         return Some((index, groups));

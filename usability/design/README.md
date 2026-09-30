@@ -13,11 +13,11 @@ The plans that answer the [usability findings](../FINDINGS.md), and the order to
 
 ## Status
 
-- **Done:** steps 1–11. Phase 1 and Phase 2 are complete, along with the first two steps of Phase 3.
-- **Next:** step 12, varying over several dimensions in one aggregation.
-- **Resolved so far:** B1, B2, B3, B5, B6, B7, F1–F5, F6, F7, F8, D1–D10.
+- **Done:** steps 1–12. Phase 1 and Phase 2 are complete, along with the first three steps of Phase 3.
+- **Next:** step 13, inferring a call's `@ vary` from its operation.
+- **Resolved so far:** B1, B2, B3, B5, B6, B7, F1–F9, D1–D10.
 - **Still open:**
-  - B4, F9, F10;
+  - B4, F10;
   - D11;
   - the VS Code extension.
 
@@ -111,6 +111,7 @@ One design built in three steps, each leaving the tool working. See [removing in
     - **Display.** `push_identity` in `src/model.rs` writes `name[]` for no dimensions. Change it to write the bare name, and check that the `.spitout` reader accepts the bare record (it does for `source_lut`).
     - **Stored outputs.** Re-save and review them. The answer keys ignore display, so they must still pass.
 12. **F9:** `@ vary(x, y)` with `@ drop(x, y)`. See [language](language.md#f9-aggregating-over-several-dimensions-in-one-step).
+    Done: the parser accepts dimension lists, the resolver groups by the driver's remaining dimensions, the contract compares sets, and a collection keeps the source product's declared ordering. `@ min` counts the whole collection.
     - **Model.** `InputBinding::vary` and `OperationDef::aggregated_dimension` become lists (`src/model.rs`).
     - **Parsing.** Both clauses are parsed in `src/parser/declarations.rs` and `src/parser/operation.rs`.
     - **Grouping.** In `step_driver` (`src/shape.rs`), a group becomes a set difference.

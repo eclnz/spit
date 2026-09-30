@@ -11,7 +11,8 @@ use spit::{diagnose, DiagnosticSource};
 
 #[test]
 fn reports_syntax_line_from_unsaved_text() {
-    let text = "source raw [id]\noperation copy(one)\nresult = copy(raw @ vary(id, extra))\n";
+    let text =
+        "source raw [id]\noperation copy(one)\nresult = copy(raw @ vary(id) @ vary(extra))\n";
     let issues = errors(diagnose(text, None));
     assert_eq!(issues.len(), 1);
     assert_eq!(issues[0].source, DiagnosticSource::Pipeline);

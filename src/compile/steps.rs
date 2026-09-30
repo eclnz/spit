@@ -80,7 +80,7 @@ fn check_shape_rule(
     let many_ports = inputs.iter().filter(|input| input.many).count();
     match &operation.shape_rule {
         ShapeRule::Preserve => {
-            if operation.aggregated_dimension.is_some() {
+            if !operation.aggregated_dimensions.is_empty() {
                 return Err(unsupported(
                     operation,
                     "preserve operation cannot declare a dropped dimension",
@@ -120,17 +120,17 @@ fn check_vary(
     context: &[String],
 ) -> Result<(), ResolveError> {
     let driving = inputs[driver].binding;
-    let Some(dimension) = &driving.vary else {
+    if driving.vary.is_empty() {
         return Ok(());
-    };
-    if let Some(declared) = operation
-        .aggregated_dimension
-        .as_ref()
-        .filter(|declared| *declared != dimension)
+    }
+    let varied = driving.vary.join(", ");
+    if !operation.aggregated_dimensions.is_empty()
+        && dimension_set(&operation.aggregated_dimensions) != dimension_set(&driving.vary)
     {
+        let declared = operation.aggregated_dimensions.join(", ");
         return Err(unsupported(
             operation,
-            format!("declares drop({declared}) but invocation uses vary({dimension})"),
+            format!("declares drop({declared}) but invocation uses vary({varied})"),
         ));
     }
     let grouped = dimension_set(context);
@@ -144,7 +144,7 @@ fn check_vary(
         Some((input, extra)) => Err(unsupported(
             operation,
             format!(
-                "input `{}` has dimensions absent from the groups of `{}` @ vary({dimension}): {}; aggregate them first, pin them with `@ where(...)`, match on fewer with `@ same(...)`, or broadcast them with `@ each(...)`",
+                "input `{}` has dimensions absent from the groups of `{}` @ vary({varied}): {}; aggregate them first, pin them with `@ where(...)`, match on fewer with `@ same(...)`, or broadcast them with `@ each(...)`",
                 input.binding.product,
                 driving.product,
                 extra.join(", ")
@@ -172,10 +172,19 @@ fn check_output_dimensions(
         return Ok(());
     };
     let driving = inputs[driver].binding;
-    let less = driving
-        .vary
-        .as_ref()
-        .map_or(String::new(), |dimension| format!(" less `{dimension}`"));
+    let less = if driving.vary.is_empty() {
+        String::new()
+    } else {
+        format!(
+            " less {}",
+            driving
+                .vary
+                .iter()
+                .map(|dimension| format!("`{dimension}`"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    };
     let broadcast = if context.len() > groups.len() {
         ", plus those broadcast with `@ each(...)`"
     } else {
@@ -205,7 +214,7 @@ fn check_broadcasts(
     for input in inputs {
         let product = input.binding.product.as_str();
         for dimension in &input.binding.each {
-            let problem = if driving.vary.as_ref() == Some(dimension) {
+            let problem = if driving.vary.contains(dimension) {
                 format!(
                     "`@ each({dimension})` on `{product}` would restore the dimension `{}` @ vary({dimension}) collects",
                     driving.product
@@ -260,16 +269,21 @@ fn check_selectors(
     let port_name = &port.name;
     match port.cardinality {
         Cardinality::Many => {
-            let Some(dimension) = &binding.vary else {
+            if binding.vary.is_empty() {
                 return fail(format!(
                     "many input `{port_name}` requires an explicit vary(dimension) binding"
                 ));
-            };
-            if !free.contains(dimension) {
-                return Err(ResolveError::InvalidAggregationDimension {
-                    product: name.clone(),
-                    dimension: dimension.clone(),
-                });
+            }
+            if dimension_set(&binding.vary).len() != binding.vary.len() {
+                return fail(format!("`@ vary(...)` repeats a dimension of `{name}`"));
+            }
+            for dimension in &binding.vary {
+                if !free.contains(dimension) {
+                    return Err(ResolveError::InvalidAggregationDimension {
+                        product: name.clone(),
+                        dimension: dimension.clone(),
+                    });
+                }
             }
             let single_only = if binding.same.is_some() {
                 Some("same")
@@ -285,7 +299,7 @@ fn check_selectors(
             }
         }
         Cardinality::One => {
-            if binding.vary.is_some() {
+            if !binding.vary.is_empty() {
                 return fail(format!(
                     "`@ vary(...)` applies to many inputs; input `{port_name}` takes one artifact"
                 ));
