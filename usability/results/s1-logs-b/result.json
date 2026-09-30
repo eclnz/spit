@@ -1,0 +1,50 @@
+{
+  "run": "s1-logs-b",
+  "model": "smaller",
+  "grade": {
+    "pass": true,
+    "expected_jobs": 24,
+    "actual_jobs": 24,
+    "matched_jobs": 24,
+    "expected_by_tool": {
+      "logdigest": 20,
+      "rollup": 3,
+      "fleetsum": 1
+    },
+    "actual_by_tool": {
+      "logdigest": 20,
+      "rollup": 3,
+      "fleetsum": 1
+    },
+    "missing": [],
+    "extra": []
+  },
+  "telemetry": {
+    "spit_calls": 8,
+    "by_command": {
+      "help": 1,
+      "check": 3,
+      "inputs": 2,
+      "dag": 2
+    },
+    "failed_calls": 2,
+    "first_success_call": 2,
+    "diagnostics": [
+      "#3: error: source `log` has path rules in both .spit and .spitin",
+      "#4: error: source `log` has path rules in both .spit and .spitin"
+    ],
+    "diagnostic_kinds": {
+      "error: source `\u2026` has path rules in both .spit and .spitin": 2
+    }
+  },
+  "audit": {
+    "tool_calls": {
+      "Read": 3,
+      "Bash": 6,
+      "SubagentHandback": 1
+    },
+    "total_tool_calls": 10,
+    "output_tokens": 259,
+    "violations": []
+  }
+}

@@ -1,0 +1,15 @@
+sources:
+    model[model=large]
+    model[model=small]
+    config[config=lr-high]
+    config[config=lr-low]
+    config[config=warmup]
+    seedfile[config=lr-high,seed=11]
+    seedfile[config=lr-high,seed=22]
+    seedfile[config=lr-high,seed=33]
+    seedfile[config=lr-low,seed=11]
+    seedfile[config=lr-low,seed=22]
+    seedfile[config=lr-low,seed=33]
+    seedfile[config=warmup,seed=11]
+    seedfile[config=warmup,seed=22]
+    testset

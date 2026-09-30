@@ -1,0 +1,3 @@
+pipeline pipeline.spit
+
+skip t1w count>=2 per [sub]

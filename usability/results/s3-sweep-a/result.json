@@ -1,0 +1,56 @@
+{
+  "run": "s3-sweep-a",
+  "model": "larger",
+  "grade": {
+    "pass": true,
+    "expected_jobs": 41,
+    "actual_jobs": 41,
+    "matched_jobs": 41,
+    "expected_by_tool": {
+      "train": 16,
+      "evaluate": 16,
+      "summarise": 6,
+      "leaderboard": 2,
+      "compare_models": 1
+    },
+    "actual_by_tool": {
+      "train": 16,
+      "evaluate": 16,
+      "summarise": 6,
+      "leaderboard": 2,
+      "compare_models": 1
+    },
+    "missing": [],
+    "extra": []
+  },
+  "telemetry": {
+    "spit_calls": 10,
+    "by_command": {
+      "help": 3,
+      "check": 4,
+      "inputs": 1,
+      "dag": 2
+    },
+    "failed_calls": 2,
+    "first_success_call": 6,
+    "diagnostics": [
+      "#4: error: line 12, column 1: expected product name followed by [dimensions]",
+      "#5: error: in `sweep.spit` line 12: expected product name followed by [dimensions]"
+    ],
+    "diagnostic_kinds": {
+      "error: expected product name followed by [dimensions]": 1,
+      "error: in `\u2026` line 12: expected product name followed by [dimensions]": 1
+    }
+  },
+  "audit": {
+    "tool_calls": {
+      "Read": 2,
+      "Bash": 9,
+      "Write": 1,
+      "SubagentHandback": 1
+    },
+    "total_tool_calls": 13,
+    "output_tokens": 235,
+    "violations": []
+  }
+}

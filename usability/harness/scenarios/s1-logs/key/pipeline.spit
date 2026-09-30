@@ -1,0 +1,17 @@
+source log : Log [server, date]
+path log: logs/{server}/{date}.log
+
+operation digest(log: Log) -> Digest
+command digest: logdigest --in {log} --out {output}
+path daily: digests/{server}/{date}.json
+daily = digest(log)
+
+operation rollup(days: many Digest) -> Report @ drop(date)
+command rollup: rollup --out {output} {days}
+path weekly: reports/{server}/week.json
+weekly = rollup(daily @ vary(date))
+
+operation fleet(reports: many Report) -> Report @ drop(server)
+command fleet: fleetsum {reports} -o {output}
+path fleetwide: reports/fleet.json
+fleetwide = fleet(weekly @ vary(server))

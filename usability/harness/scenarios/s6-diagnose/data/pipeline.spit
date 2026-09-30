@@ -1,0 +1,29 @@
+# Weekly store reports: clean each week's sales export, price it with the
+# store's price list, then roll the weeks up into one report per store and one
+# chain-wide summary.
+
+source sales : Sales [store, week]
+path sales: sales/{store}/{week}.csv
+source pricing : Prices [store]
+path pricing: pricing/{store}.json
+
+operation clean(sales: Sales) -> Sales
+command clean: clean_sales {sales} {output}
+path cleaned: out/cleaned/{store}/{week}.csv
+cleaned = clean(sales)
+
+operation price(sales: Sales, prices: Prices) -> Revenue
+command price: apply_prices --prices {prices} {sales} {output}
+path revenue: out/revenue/{store}/{week}.csv
+revenue = price(cleaned, pricing)
+
+# A trend needs at least two weeks.
+operation store_report(weeks: many Revenue) -> Report @ drop(week) @ min(2)
+command store_report: store_report --out {output} {weeks}
+path report: reports/{store}.pdf
+report = store_report(revenue @ vary(week))
+
+operation chain_summary(reports: many Report) -> Report @ drop(store)
+command chain_summary: chain_summary {reports} --out {output}
+path summary: reports/chain.pdf
+summary = chain_summary(report @ vary(store))

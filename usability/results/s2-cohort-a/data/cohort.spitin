@@ -1,0 +1,8 @@
+pipeline ../rest.spit
+
+discover sessions: [sub, ses] from dirs sub-{sub}/ses-{ses}
+skip sessions count>=2 per [sub]
+require t1w count=1 per [sub, ses]
+require bold count>=1 per [sub, ses]
+path t1w: sub-{sub}/ses-{ses}/anat/sub-{sub}_ses-{ses}_T1w.nii.gz
+path bold: sub-{sub}/ses-{ses}/func/sub-{sub}_ses-{ses}_task-rest_run-{run}_bold.nii.gz

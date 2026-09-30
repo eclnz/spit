@@ -1,0 +1,34 @@
+source model : Model [model]
+source config : Config [config]
+source seedfile : SeedFile [config, seed]
+source testset : TestSet []
+
+path model: data/models/{model}.pt
+path config: data/configs/{config}.yaml
+path seedfile: data/sweep/{config}/seed-{seed}.json
+path testset: data/eval/testset.parquet
+
+operation train(model: Model, config: Config, seedfile: SeedFile) -> Weights
+command train: train --model {model} --config {config} --seed-file {seedfile} --out {output}
+weights = train(model @ each(model), config, seedfile)
+path weights: runs/{model}/{config}/seed-{seed}/weights.pt
+
+operation evaluate(weights: Weights, testset: TestSet) -> Metrics
+command evaluate: evaluate --weights {weights} --testset {testset} --out {output}
+metrics = evaluate(weights, testset)
+path metrics: runs/{model}/{config}/seed-{seed}/metrics.json
+
+operation summarise(metrics: many Metrics) -> Summary @ drop(seed)
+command summarise: summarise --out {output} {metrics}
+summary = summarise(metrics @ vary(seed))
+path summary: summaries/{model}/{config}.json
+
+operation leaderboard(summaries: many Summary) -> Board @ drop(config)
+command leaderboard: leaderboard --out {output} {summaries}
+board = leaderboard(summary @ vary(config))
+path board: leaderboards/{model}.csv
+
+operation compare_models(boards: many Board) -> Comparison @ drop(model)
+command compare_models: compare_models {boards} --out {output}
+comparison = compare_models(board @ vary(model))
+path comparison: leaderboard.csv

@@ -1,0 +1,35 @@
+source bold : Bold [sub, ses, run]
+path bold: data/sub-{sub}/ses-{ses}/func/sub-{sub}_ses-{ses}_task-rest_run-{run}_bold.nii.gz
+
+source t1w : T1w [sub, ses]
+path t1w: data/sub-{sub}/ses-{ses}/anat/sub-{sub}_ses-{ses}_T1w.nii.gz
+
+operation motioncorr(bold: Bold) -> MC
+command motioncorr: motioncorr {bold} {output}
+mc = motioncorr(bold)
+path mc: derivatives/sub-{sub}/ses-{ses}/func/sub-{sub}_ses-{ses}_run-{run}_mc.nii.gz
+
+operation bet(t1w: T1w) -> Brain
+command bet: bet {t1w} {output}
+brain = bet(t1w)
+path brain: derivatives/sub-{sub}/ses-{ses}/anat/sub-{sub}_ses-{ses}_brain.nii.gz
+
+operation coreg(mc: MC, brain: Brain) -> Coreg
+command coreg: coreg --ref {brain} --in {mc} --out {output}
+coreg = coreg(mc, brain)
+path coreg: derivatives/sub-{sub}/ses-{ses}/func/sub-{sub}_ses-{ses}_run-{run}_coreg.nii.gz
+
+operation sessionavg(runs: many Coreg) -> Avg @ drop(run)
+command sessionavg: sessionavg --out {output} {runs}
+avg = sessionavg(coreg @ vary(run))
+path avg: derivatives/sub-{sub}/ses-{ses}/func/sub-{sub}_ses-{ses}_avg.nii.gz
+
+operation longitudinal(sessions: many Avg) -> Long @ drop(ses)
+command longitudinal: longitudinal --out {output} {sessions}
+long = longitudinal(avg @ vary(ses))
+path long: derivatives/sub-{sub}/sub-{sub}_long.nii.gz
+
+operation qcreport(brain: Brain, runs: many Coreg) -> QC @ drop(run)
+command qcreport: qcreport --t1 {brain} --out {output} {runs}
+qc = qcreport(brain, coreg @ vary(run))
+path qc: derivatives/sub-{sub}/ses-{ses}/sub-{sub}_ses-{ses}_qc.html
