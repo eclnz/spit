@@ -895,6 +895,39 @@ impl Pipeline {
         &self,
         inventory: &SourceInventory,
     ) -> Result<BTreeMap<String, Vec<ArtifactInstance>>, ResolveError> {
+        let mut artifacts: BTreeMap<String, Vec<ArtifactInstance>> = BTreeMap::new();
+        let mut seen: FxHashSet<(&str, &EntityBinding)> = FxHashSet::default();
+        self.check_sources(inventory, |product, record| {
+            if !seen.insert((&record.product, &record.entities)) {
+                return false;
+            }
+            artifacts
+                .entry(record.product.clone())
+                .or_default()
+                .push(ArtifactInstance {
+                    product: record.product.clone(),
+                    artifact_type: product.artifact_type.clone(),
+                    entities: record.entities.clone(),
+                });
+            true
+        })?;
+        for (name, family) in &mut artifacts {
+            if let Some(product) = self.products.iter().find(|product| product.name == *name) {
+                product.sort_family(family);
+            }
+        }
+        Ok(artifacts)
+    }
+
+    /// Check each record of `inventory` in order: that it names a source
+    /// and binds exactly its dimensions. `add` is given each record that
+    /// passes, with its product, and says whether the record is new; one
+    /// that is not is an error.
+    pub(crate) fn check_sources<'a>(
+        &'a self,
+        inventory: &'a SourceInventory,
+        mut add: impl FnMut(&'a ProductDef, &'a SourceRecord) -> bool,
+    ) -> Result<(), ResolveError> {
         // Each product with the set of its dimensions, looked up once, not
         // once per record; the first declaration of a name wins, as when
         // searching.
@@ -912,14 +945,13 @@ impl Pipeline {
             .flat_map(|invocation| &invocation.outputs)
             .map(String::as_str)
             .collect();
-        let mut artifacts: BTreeMap<String, Vec<ArtifactInstance>> = BTreeMap::new();
-        let mut seen: FxHashSet<(&str, &EntityBinding)> = FxHashSet::default();
         for record in &inventory.artifacts {
-            let (product, dimensions) = products.get(record.product.as_str()).ok_or_else(|| {
-                ResolveError::UnknownProduct {
-                    name: record.product.clone(),
-                }
-            })?;
+            let &(product, ref dimensions) =
+                products.get(record.product.as_str()).ok_or_else(|| {
+                    ResolveError::UnknownProduct {
+                        name: record.product.clone(),
+                    }
+                })?;
             if produced.contains(record.product.as_str()) {
                 return Err(ResolveError::InvalidDefinition {
                     subject: DefinitionSubject::Product(record.product.clone()),
@@ -929,7 +961,7 @@ impl Pipeline {
                     ),
                 });
             }
-            let source = ArtifactInstance {
+            let source = || ArtifactInstance {
                 product: record.product.clone(),
                 artifact_type: product.artifact_type.clone(),
                 entities: record.entities.clone(),
@@ -943,26 +975,18 @@ impl Pipeline {
                 return Err(ResolveError::InvalidDefinition {
                     subject: DefinitionSubject::Source(record.clone()),
                     detail: format!(
-                        "source `{source}` must bind exactly the dimensions of product `{}`: [{}]",
+                        "source `{}` must bind exactly the dimensions of product `{}`: [{}]",
+                        source(),
                         product.name,
                         product.dimensions.join(", ")
                     ),
                 });
             }
-            if !seen.insert((&record.product, &record.entities)) {
-                return Err(ResolveError::DuplicateSourceArtifact { artifact: source });
-            }
-            artifacts
-                .entry(source.product.clone())
-                .or_default()
-                .push(source);
-        }
-        for (name, family) in &mut artifacts {
-            if let Some((product, _)) = products.get(name.as_str()) {
-                product.sort_family(family);
+            if !add(product, record) {
+                return Err(ResolveError::DuplicateSourceArtifact { artifact: source() });
             }
         }
-        Ok(artifacts)
+        Ok(())
     }
 }
 
@@ -1161,9 +1185,11 @@ pub struct ResolvedDag {
     pub artifacts: Artifacts,
     /// Declaration order is retained for readable dry-run output.
     pub product_dimensions: BTreeMap<String, Vec<String>>,
-    /// The file of each source whose inventory record gave one. Other
-    /// artifacts take the path their product's rule gives them.
-    pub source_paths: BTreeMap<ArtifactKey, String>,
+    /// The file of each source whose inventory record gave one, by artifact
+    /// id. Other artifacts take the path their product's rule gives them.
+    pub(crate) source_paths: Vec<Option<String>>,
+    /// The products of the inventory records that gave a file.
+    pub(crate) located: BTreeSet<String>,
 }
 
 impl ResolvedDag {
@@ -1175,14 +1201,29 @@ impl ResolvedDag {
     /// files known before: a DAG resolved before its inventory's sources
     /// were located gets their files this way, without resolving it again.
     pub fn locate_sources(&mut self, inventory: &SourceInventory) {
-        self.source_paths = inventory
-            .artifacts
-            .iter()
-            .filter_map(|record| {
-                let key = (record.product.clone(), record.entities.clone());
-                Some((key, record.path.clone()?))
-            })
-            .collect();
+        self.source_paths = vec![None; self.artifacts.len()];
+        self.located.clear();
+        for record in &inventory.artifacts {
+            let Some(path) = &record.path else {
+                continue;
+            };
+            if !self.located.contains(&record.product) {
+                self.located.insert(record.product.clone());
+            }
+            if let Some(id) = self.artifacts.find(&record.product, &record.entities) {
+                self.source_paths[id.index()] = Some(path.clone());
+            }
+        }
+    }
+
+    /// The file `id`'s inventory record gave it, if it is a source with one.
+    pub fn source_path(&self, id: ArtifactId) -> Option<&str> {
+        self.source_paths.get(id.index())?.as_deref()
+    }
+
+    /// The products with a source whose inventory record gave its file.
+    pub fn located_products(&self) -> impl Iterator<Item = &str> {
+        self.located.iter().map(String::as_str)
     }
 
     /// Only the jobs of `stage` and the stages nested in it. Their inputs from
@@ -1212,6 +1253,7 @@ impl ResolvedDag {
             artifacts: self.artifacts.clone(),
             product_dimensions: self.product_dimensions.clone(),
             source_paths: self.source_paths.clone(),
+            located: self.located.clone(),
         }
     }
 }
@@ -1243,7 +1285,8 @@ pub struct CoverageGap {
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ArtifactReport {
-    pub sources: Vec<ArtifactInstance>,
+    /// Every source, by product in declaration order.
+    pub sources: Vec<ArtifactId>,
     pub dag: ResolvedDag,
     pub incomplete: Vec<IncompleteJob>,
     pub coverage: Vec<CoverageGap>,

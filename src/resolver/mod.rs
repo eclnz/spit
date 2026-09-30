@@ -50,7 +50,6 @@ pub fn resolve_artifacts_excluding(
     unavailable: &[ArtifactInstance],
 ) -> Result<ArtifactReport, ResolveError> {
     let CompiledPipeline { steps } = compile(pipeline)?;
-    let mut families = pipeline.source_artifacts(inventory)?;
     let mut resolution = Resolution {
         families: Vec::new(),
         incomplete: Vec::new(),
@@ -65,26 +64,34 @@ pub fn resolve_artifacts_excluding(
         },
         incomplete_jobs: Vec::new(),
     };
-    for (product, family) in &families {
-        let Some(first) = family.first() else {
-            continue;
-        };
-        let number = resolution.product(product, &first.artifact_type);
-        for source in family {
-            let id = resolution
-                .dag
-                .artifacts
-                .add(number, source.entities.clone())
-                .expect("source_artifacts rejects duplicate sources");
-            resolution.families[number as usize].push(id);
+    pipeline.check_sources(inventory, |product, record| {
+        let number = resolution.product(&product.name, &product.artifact_type);
+        match resolution
+            .dag
+            .artifacts
+            .add(number, record.entities.clone())
+        {
+            Ok(id) => {
+                resolution.families[number as usize].push(id);
+                true
+            }
+            Err(_) => false,
+        }
+    })?;
+    // Sources in natural order, by product in declaration order.
+    let mut sources = Vec::new();
+    for product in &pipeline.products {
+        if let Some(number) = resolution.dag.artifacts.product_number(&product.name) {
+            let artifacts = &resolution.dag.artifacts;
+            let family = &mut resolution.families[number as usize];
+            family.sort_by(|&left, &right| {
+                artifacts
+                    .entities(left)
+                    .cmp_in(artifacts.entities(right), &product.dimensions)
+            });
+            sources.extend_from_slice(family);
         }
     }
-    let sources = pipeline
-        .products
-        .iter()
-        .filter_map(|product| families.remove(&product.name))
-        .flatten()
-        .collect();
     resolution.grow();
     for artifact in unavailable {
         if let Some(id) = resolution

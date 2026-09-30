@@ -1,6 +1,5 @@
 //! Paths bound to the artifacts of resolved jobs, and the files they name.
 
-use std::collections::BTreeSet;
 use std::fmt;
 use std::path::Path;
 
@@ -97,7 +96,7 @@ impl fmt::Display for VerifiedFiles {
 /// sources whose files the inventory gave the DAG.
 pub(crate) fn check_rules(pipeline: &Pipeline, dag: &ResolvedDag) -> Result<(), PathError> {
     inspect_paths(pipeline)?
-        .with_inventory_paths(dag.source_paths.keys().map(|(product, _)| product.as_str()))
+        .with_inventory_paths(dag.located_products())
         .validate(false)
 }
 
@@ -116,12 +115,6 @@ pub(crate) fn bound_paths(
     pipeline: &Pipeline,
     dag: &ResolvedDag,
 ) -> Result<Vec<Option<String>>, PathError> {
-    // Only these products' artifacts can have files the inventory gave.
-    let located: BTreeSet<&str> = dag
-        .source_paths
-        .keys()
-        .map(|(product, _)| product.as_str())
-        .collect();
     let mut binder = PathBinder::new(pipeline);
     let mut paths = vec![None; dag.artifacts.len()];
     let mut owners: FxHashMap<String, ArtifactId> = FxHashMap::default();
@@ -138,15 +131,8 @@ pub(crate) fn bound_paths(
             .product_dimensions
             .get(artifact.product)
             .ok_or_else(|| error(format!("unknown product `{}`", artifact.product)))?;
-        let given = located
-            .contains(artifact.product)
-            .then(|| {
-                let key = (artifact.product.to_owned(), artifact.entities.clone());
-                dag.source_paths.get(&key)
-            })
-            .flatten();
-        let relative = match given {
-            Some(path) => path.clone(),
+        let relative = match dag.source_path(id) {
+            Some(path) => path.to_owned(),
             None => binder.bind(dimensions, artifact, || format!("path for `{artifact}`"))?,
         };
         if let Some(previous) = owners.insert(relative.clone(), id) {
