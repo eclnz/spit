@@ -23,9 +23,9 @@ use crate::model::{ArtifactInstance, CoverageGap, InputRules, Pipeline, SourceIn
 use crate::parser::{strip_comment, without_bom, Header, Keyword, Kind, ParseError, SourceMap};
 use crate::paths::{inspect_paths, PathError, PathTemplate};
 
-pub(crate) use self::coverage::check_inventory;
 pub(crate) use self::coverage::collect_rule_errors;
 use self::coverage::SkippedGroup;
+pub(crate) use self::coverage::{check_inventory, InputCheck};
 use self::discover::{discover, locate_sources, with_source_paths};
 pub use self::discover::{discover_source_files, discover_sources, Discovery};
 

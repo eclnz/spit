@@ -93,6 +93,58 @@ pub fn render_source_inventory(
     .to_string()
 }
 
+/// Settled `inventory` as writing it as a `.spitout` for `pipeline` and
+/// `rules` and reading that back gives it, but in its own order, or `None`
+/// when a path rule it would write holds a `#`. Settling gives each record
+/// the path its rule gives, which the text leaves out.
+pub(crate) fn as_read_back(
+    inventory: &SourceInventory,
+    pipeline: &Pipeline,
+    rules: &InputRules,
+) -> Option<SourceInventory> {
+    let source_paths = written_source_paths(inventory, rules);
+    if source_paths
+        .values()
+        .any(|template| template.to_string().contains('#'))
+    {
+        return None;
+    }
+    debug_assert!({
+        let mut located = pipeline.clone();
+        located.product_paths.extend(source_paths.clone());
+        unexpected_paths(&inventory.artifacts, &located)
+            .iter()
+            .all(Option::is_none)
+    });
+    let mut read = inventory.clone();
+    read.source_paths = source_paths;
+    for record in &mut read.artifacts {
+        record.path = None;
+    }
+    // Every named context is written as a context, and contexts are read
+    // back sorted, each once.
+    read.contexts
+        .extend(read.discovered.values().flatten().cloned());
+    read.contexts.sort();
+    read.contexts.dedup();
+    for bindings in read.discovered.values_mut() {
+        bindings.sort();
+        bindings.dedup();
+    }
+    Some(read)
+}
+
+/// The source path rules a `.spitout` writes: the inventory's and the
+/// recipe's.
+fn written_source_paths(
+    inventory: &SourceInventory,
+    rules: &InputRules,
+) -> BTreeMap<String, PathTemplate> {
+    let mut source_paths = inventory.source_paths.clone();
+    source_paths.extend(rules.source_paths.clone());
+    source_paths
+}
+
 /// A `.spitout`: its contexts, unnamed then by discovery rule, and its
 /// source records.
 struct InventoryText<'a> {
@@ -109,8 +161,7 @@ type Nested<'a> = FxHashMap<EntityBinding, FxHashMap<EntityBinding, Vec<&'a str>
 impl fmt::Display for InventoryText<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let inventory = self.inventory;
-        let mut source_paths = inventory.source_paths.clone();
-        source_paths.extend(self.rules.source_paths.clone());
+        let source_paths = written_source_paths(inventory, self.rules);
         if !source_paths.is_empty() {
             writeln!(f, "source_paths:")?;
             for (name, template) in &source_paths {
