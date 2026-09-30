@@ -21,7 +21,7 @@ use crate::types::TypeExpr;
 use self::flow::parse_flow;
 use self::sectioned::{is_sectioned_document, parse_sectioned};
 
-pub(crate) use self::declarations::{parse_use, UseSpec};
+pub(crate) use self::declarations::{parse_use, ExcludeLine, UseSpec};
 pub(crate) use self::inventory::{as_read_back, source_record_lines, split_document};
 pub use self::inventory::{parse_source_inventory, render_source_inventory};
 pub(crate) use self::keyword::{Header, Keyword};
@@ -152,6 +152,9 @@ pub(crate) enum StatementKind {
     Discover(DirectoryDiscovery),
     Operation(OperationDef, Place),
     Constraint(CoverageRule, Rule),
+    /// An `exclude` rule, its reason from the line's comment, and where
+    /// what it names sits.
+    Exclude(declarations::ExcludeLine, Option<String>, Place),
     Command(CommandDef, Place),
     Path(PathRule),
     /// A step whose outputs are declared elsewhere, from a `pipeline:` section.
@@ -225,6 +228,15 @@ impl StatementKind {
         let rule = declarations::parse_coverage_rule(line, number)?;
         let place = source_map::rule_place(original, number, &rule);
         Ok(Self::Constraint(rule, place))
+    }
+
+    /// An `exclude` rule, `declaration` being the text after its keyword
+    /// in `original`.
+    fn exclude(original: &str, declaration: &str, number: usize) -> Result<Self, ParseError> {
+        let rule = declarations::parse_exclude(declaration, number)?;
+        let place = source_map::tail_place(original, number, declaration.trim());
+        let reason = lexical::comment_text(original).map(str::to_owned);
+        Ok(Self::Exclude(rule, reason, place))
     }
 
     /// A command, or a `verify` command, for an operation.

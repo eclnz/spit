@@ -13,6 +13,7 @@ pub(crate) enum Keyword {
     Verify,
     Require,
     Skip,
+    Exclude,
     /// `path:` for a default, `path product:` for one product.
     Path,
     Stage,
@@ -20,7 +21,7 @@ pub(crate) enum Keyword {
     ShellSource,
 }
 
-const WORDS: [(Keyword, &str); 9] = [
+const WORDS: [(Keyword, &str); 10] = [
     (Keyword::Use, "use"),
     (Keyword::Source, "source"),
     (Keyword::Discover, "discover"),
@@ -29,6 +30,7 @@ const WORDS: [(Keyword, &str); 9] = [
     (Keyword::Verify, "verify"),
     (Keyword::Require, "require"),
     (Keyword::Skip, "skip"),
+    (Keyword::Exclude, "exclude"),
     (Keyword::Stage, "stage"),
 ];
 
@@ -70,6 +72,8 @@ pub(crate) enum Header<'a> {
     SourcePaths,
     /// `contexts:`, or `contexts name:` for a named discovery's contexts.
     Contexts(Option<&'a str>),
+    /// `removed:`, the record of what the input stage left out.
+    Removed,
 }
 
 impl<'a> Header<'a> {
@@ -83,6 +87,7 @@ impl<'a> Header<'a> {
             "commands:" => Self::Commands,
             "sources:" => Self::Sources,
             "source_paths:" => Self::SourcePaths,
+            "removed:" => Self::Removed,
             "contexts:" => Self::Contexts(None),
             _ => Self::Contexts(Some(
                 line.strip_prefix("contexts ")?.strip_suffix(':')?.trim(),
@@ -93,7 +98,10 @@ impl<'a> Header<'a> {
     /// Whether it opens records, which belong in a `.spitout`, rather than a
     /// section of a sectioned pipeline.
     pub(crate) fn is_records(self) -> bool {
-        matches!(self, Self::Sources | Self::SourcePaths | Self::Contexts(_))
+        matches!(
+            self,
+            Self::Sources | Self::SourcePaths | Self::Contexts(_) | Self::Removed
+        )
     }
 }
 

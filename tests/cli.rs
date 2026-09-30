@@ -178,7 +178,7 @@ fn check_json_reads_the_pipeline_file_and_dag_json_emits_the_spitdag() {
     );
     assert_eq!(graph.matches("{\"product\":\"merged\"").count(), 4);
     assert!(
-        graph.contains("\"executables\":[\"sort\"],\"jobs\":["),
+        graph.contains("\"executables\":[\"sort\"],\"removed\":[],\"jobs\":["),
         "{graph}"
     );
     assert!(

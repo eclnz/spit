@@ -44,6 +44,9 @@ One design built in three steps, each leaving the tool working. See [removing in
    - the unknown-statement error (B2).
 
    `skip` still works during this step.
+
+   Done: `exclude` in all three forms and from CSV, the `removed:` record in the `.spitout` and `.spitdag` (with `skip` rejections), notes on stderr, the unknown-statement error, and `exclude` as the way past a stray file outside the discovered contexts (F7). The fixed order is exclusions first; `skip` keeps its two passes until `drop` replaces it.
+
 8. **`drop` replaces `skip`.** Also in this step:
    - `require` gains `count` comparisons;
    - rule order stops mattering;

@@ -55,10 +55,10 @@ fn sectioned_line(
             Header::Pipeline => Section::Pipeline,
             Header::Constraints => Section::Constraints,
             Header::Commands => Section::Commands,
-            Header::Sources | Header::SourcePaths | Header::Contexts(_) => {
+            Header::Sources | Header::SourcePaths | Header::Contexts(_) | Header::Removed => {
                 return Err(ParseError::new(
                     number,
-                    "`sources:`, `source_paths:`, and `contexts:` records belong in a .spitout, not a pipeline",
+                    "`sources:`, `source_paths:`, `contexts:` and `removed:` records belong in a .spitout, not a pipeline",
                 ))
             }
         });

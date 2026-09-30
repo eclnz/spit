@@ -17,6 +17,13 @@ pub(crate) fn strip_comment(line: &str) -> &str {
     &line[..comment_start(line).unwrap_or(line.len())]
 }
 
+/// The text of `line`'s comment, after its `#`, trimmed; `None` when it
+/// has no comment or an empty one.
+pub(crate) fn comment_text(line: &str) -> Option<&str> {
+    let text = line[comment_start(line)? + 1..].trim();
+    (!text.is_empty()).then_some(text)
+}
+
 fn comment_start(line: &str) -> Option<usize> {
     scan_hashes(line).find_map(|hash| hash.starts_word.then_some(hash.index))
 }

@@ -23,6 +23,9 @@ pub(crate) struct SourceMap {
     pub(crate) constraints: BTreeMap<String, Rule>,
     /// One entry per `Pipeline::constraints` element, in the same order.
     pub(crate) rules: Vec<Rule>,
+    /// Where each `exclude` rule written in the recipe names what it
+    /// removes, in the order of `InputRules::exclusions`.
+    pub(crate) exclusions: Vec<Place>,
     /// One template per `Pipeline::commands` element, in the same order.
     pub(crate) commands: Vec<Place>,
     /// Templates of `path product:` rules, keyed by product.

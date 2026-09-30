@@ -44,8 +44,8 @@ path raw: in/{id.csv
 
 #[test]
 fn syntax_errors_without_a_token_point_at_the_line_content() {
-    let text = "source raw [id]\n    this is invalid   # trailing note\n";
-    assert_eq!(pointed(text, None), ["error 2: this is invalid"]);
+    let text = "source raw [id]\n    This is invalid   # trailing note\n";
+    assert_eq!(pointed(text, None), ["error 2: This is invalid"]);
 }
 
 #[test]

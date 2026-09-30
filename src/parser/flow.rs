@@ -159,6 +159,10 @@ fn flow_line(
             })?;
             StatementKind::constraint(original, line, number)?
         }
+        Some((Keyword::Exclude, declaration)) => {
+            top_level_only("`exclude`, which removes sources,")?;
+            StatementKind::exclude(original, declaration, number)?
+        }
         Some((keyword @ (Keyword::Command | Keyword::Verify), declaration)) => {
             let role = if keyword == Keyword::Command {
                 CommandRole::Run
@@ -184,6 +188,22 @@ fn flow_statement(
     number: usize,
     stage: Option<&str>,
 ) -> Result<StatementKind, ParseError> {
+    if let Some(word) = unknown_keyword(line) {
+        let hint = STATEMENT_WORDS
+            .iter()
+            .find(|keyword| edit_distance(word, keyword) <= 2)
+            .map_or_else(String::new, |keyword| format!("did you mean `{keyword}`? "));
+        return Err(ParseError::new(
+            number,
+            format!(
+                "`{word}` does not start a statement; {hint}a pipeline line starts with \
+                 source, operation, command, verify, path, stage or use, or is a step \
+                 `output = operation(inputs)`, and a recipe line starts with pipeline, \
+                 discover, require, skip, exclude or path"
+            ),
+        )
+        .at_token(word));
+    }
     if line.contains('=') {
         let (mut invocation, outputs) = parse_flow_step(line, number)?;
         invocation.stage = stage.map(str::to_owned);
@@ -241,5 +261,81 @@ fn parse_flow_output(left: &str, number: usize) -> Result<FlowOutput, ParseError
             artifact_type: None,
             dimensions: None,
         })
+    }
+}
+
+/// The words a statement can start with, for suggesting one.
+const STATEMENT_WORDS: [&str; 12] = [
+    "source",
+    "operation",
+    "command",
+    "verify",
+    "path",
+    "stage",
+    "use",
+    "pipeline",
+    "discover",
+    "require",
+    "skip",
+    "exclude",
+];
+
+/// The first word of `line`, when it reads as an unknown keyword: a
+/// lowercase word followed by more than a step's `=`, `,` or `: Type` can
+/// follow it with, as in `omit bold[sub=02]`.
+fn unknown_keyword(line: &str) -> Option<&str> {
+    // A line shaped as a step, or as a call missing its `=`, is reported as
+    // one, whatever is wrong in it.
+    let step = line
+        .find('(')
+        .is_some_and(|paren| line[..paren].contains('='));
+    if step || (line.contains('(') && line.ends_with(')')) {
+        return None;
+    }
+    let (word, rest) = line.split_once(char::is_whitespace)?;
+    let is_word = word.starts_with(|first: char| first.is_ascii_lowercase())
+        && word
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || character == '_');
+    (is_word && !rest.trim_start().starts_with(['=', ',', ':'])).then_some(word)
+}
+
+/// How many single-character insertions, deletions and substitutions turn
+/// `left` into `right`.
+fn edit_distance(left: &str, right: &str) -> usize {
+    let right: Vec<char> = right.chars().collect();
+    let mut row: Vec<usize> = (0..=right.len()).collect();
+    for (index, left_char) in left.chars().enumerate() {
+        let mut previous = row[0];
+        row[0] = index + 1;
+        for (column, &right_char) in right.iter().enumerate() {
+            let substitution = previous + usize::from(left_char != right_char);
+            previous = row[column + 1];
+            row[column + 1] = substitution.min(row[column] + 1).min(previous + 1);
+        }
+    }
+    row[right.len()]
+}
+
+#[cfg(test)]
+mod unknown_tests {
+    use super::{edit_distance, unknown_keyword};
+
+    #[test]
+    fn a_line_that_cannot_start_a_step_names_its_first_word() {
+        assert_eq!(unknown_keyword("omit bold[sub=02]"), Some("omit"));
+        assert_eq!(unknown_keyword("drop [sub] where x count<2"), Some("drop"));
+        assert_eq!(unknown_keyword("cleaned = clean(raw)"), None);
+        assert_eq!(unknown_keyword("low, high = split(x)"), None);
+        assert_eq!(
+            unknown_keyword("mean : Image [s] = average(x @ vary(r))"),
+            None
+        );
+        assert_eq!(unknown_keyword("Cleaned stuff"), None);
+        assert_eq!(unknown_keyword("bad name = copy(raw)"), None);
+        assert_eq!(unknown_keyword("result copy(raw)"), None);
+        assert_eq!(unknown_keyword("operaton clean(x) -> Y"), Some("operaton"));
+        assert_eq!(edit_distance("excldue", "exclude"), 2);
+        assert_eq!(edit_distance("", "use"), 3);
     }
 }

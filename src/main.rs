@@ -195,7 +195,9 @@ impl Flag {
     fn help(self, command: Command) -> &'static str {
         match (self, command) {
             (Self::Root, Command::Inputs) => "the folder to scan; the recipe's folder by default",
-            (Self::Root, _) => "the dataset folder every path is relative to; the recipe's folder by default",
+            (Self::Root, _) => {
+                "the dataset folder every path is relative to; the recipe's folder by default"
+            }
             (Self::Output, Command::Inputs) => "write the .spitout to <file>, not standard output",
             (Self::Output, _) => "write the .spitdag to <file>",
             (Self::Paths, _) => "show each artifact's file",
@@ -644,6 +646,30 @@ fn settle(
     for skipped in &resolved.skipped {
         eprintln!("warning: skipped {skipped}");
     }
+    for removal in resolved
+        .inventory
+        .removed
+        .iter()
+        .filter(|removal| removal.is_exclusion())
+    {
+        let pipeline = &loaded.checked.pipeline;
+        let declared = removal
+            .product
+            .as_deref()
+            .and_then(|name| {
+                pipeline
+                    .products
+                    .iter()
+                    .find(|product| product.name == name)
+            })
+            .map_or(&[][..], |product| product.dimensions.as_slice());
+        let identity = removal.identity_in(declared);
+        let origin = removal.origin.as_deref().unwrap_or("the recipe");
+        match &removal.reason {
+            Some(reason) => eprintln!("note: excluded {identity} ({origin}): {reason}"),
+            None => eprintln!("note: excluded {identity} ({origin})"),
+        }
+    }
     if let Some(root) = &resolved.root {
         let contexts = if recipe.rules.discoveries.is_empty() {
             String::new()
@@ -830,6 +856,7 @@ fn dag(args: &CliArgs) -> Result<(), Box<dyn Error>> {
     };
     if args.has(Flag::Output) || args.has(Flag::Json) {
         let mut bound = bind(paths)?;
+        bound.removed = prepared.inputs.inventory.removed.clone();
         bound.root = prepared.root.as_deref().map(|root| {
             std::path::absolute(root)
                 .unwrap_or_else(|_| root.to_path_buf())
