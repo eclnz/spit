@@ -22,6 +22,8 @@ use crate::paths::{
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Discovery {
     pub inventory: SourceInventory,
+    /// Files under the root that match no source path rule.
+    pub unmatched_files: Vec<String>,
     /// Each skipped file and why.
     pub skipped: Vec<String>,
     /// What each `exclude` rule removed, then each group a `drop` rule
@@ -93,7 +95,19 @@ pub(super) fn discover(
         .collect::<Result<Vec<_>, _>>()?;
     let sources = source_patterns(pipeline)?;
     let listing = Listing::of(root)?;
-    let mut discovery = Discovery::default();
+    let mut discovery = Discovery {
+        unmatched_files: listing
+            .files
+            .iter()
+            .filter(|file| {
+                !sources
+                    .iter()
+                    .any(|source| match_pattern(&source.pieces, file).is_some())
+            })
+            .cloned()
+            .collect(),
+        ..Discovery::default()
+    };
     find_contexts(
         &directory_patterns,
         &listing.directories,

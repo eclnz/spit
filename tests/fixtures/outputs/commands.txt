@@ -109,6 +109,7 @@ Job 35  compare
 Job 36  compare
   run:    score derivatives/averaged/sub=03__ses=2.txt sub-03/ses-2/reference.nii -o derivatives/score/sub=03__ses=2.txt
 --- stderr
+note: 3 files under `.` match no source rule; `spit inputs strict.spitin --unmatched` lists them
 note: found 21 source artifacts and 6 contexts under `.`
 note: ran `spit inputs strict.spitin` in memory
 note: 21 source files verified.
@@ -597,6 +598,7 @@ Job 36
   depends_on: 30
   run:    score derivatives/averaged/sub=03__ses=2.txt sub-03/ses-2/reference.nii -o derivatives/score/sub=03__ses=2.txt
 --- stderr
+note: 3 files under `.` match no source rule; `spit inputs strict.spitin --unmatched` lists them
 note: found 21 source artifacts and 6 contexts under `.`
 note: ran `spit inputs strict.spitin` in memory
 note: 21 source files verified.

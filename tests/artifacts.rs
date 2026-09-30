@@ -129,6 +129,19 @@ fn partial_keeps_an_aggregate_incomplete_when_no_member_is_complete() {
 }
 
 #[test]
+fn a_numeric_near_miss_points_to_the_existing_artifact() {
+    let sources = ALIGN_SOURCES.replace("calibration[subject=01]", "calibration[subject=001]");
+    let report = report(ALIGN, &sources).unwrap();
+    let rendered = render_artifacts(&report);
+    assert!(
+        rendered.contains(
+            "calibration[subject=001] exists; its `subject` differs only in leading zeros"
+        ),
+        "{rendered}"
+    );
+}
+
+#[test]
 fn resolve_fails_with_the_first_gap_the_report_finds() {
     let report = report(ALIGN, ALIGN_SOURCES).unwrap();
     let Gap::Unmatched(expected) = &report.incomplete[0].gaps[0] else {

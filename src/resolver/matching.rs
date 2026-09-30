@@ -6,9 +6,10 @@ use std::collections::BTreeSet;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::compile::{CompiledStep, StepShape};
-use crate::error::{PortSite, ResolveError};
+use crate::error::{NearMiss, PortSite, ResolveError};
 use crate::model::{
-    ArtifactId, Artifacts, Cardinality, EntityBinding, Gap, Invocation, Job, OperationDef,
+    near_reason, ArtifactId, Artifacts, Cardinality, EntityBinding, Gap, Invocation, Job,
+    OperationDef,
 };
 
 /// One job of a step: its inputs, and the context each of its outputs
@@ -78,9 +79,19 @@ pub(super) fn expand_step(
                 (context, driven.clone())
             })
         });
+    let availability = Availability {
+        incomplete,
+        partial,
+    };
     jobs.map(|(context, driven)| {
         expand_job(
-            step, artifacts, &indexes, incomplete, partial, context, driven,
+            step,
+            artifacts,
+            &candidates,
+            &indexes,
+            availability,
+            context,
+            driven,
         )
     })
     .collect()
@@ -89,6 +100,12 @@ pub(super) fn expand_step(
 /// One input's candidates, by their values for the dimensions it joins on,
 /// so each job finds its match without scanning them all.
 type JoinIndex<'a> = FxHashMap<Vec<Option<&'a str>>, Vec<ArtifactId>>;
+
+#[derive(Clone, Copy)]
+struct Availability<'a> {
+    incomplete: &'a [bool],
+    partial: bool,
+}
 
 /// `entities`' values for `joins`, in order; `None` where one is unbound.
 fn join_values<'a>(joins: &[String], entities: &'a EntityBinding) -> Vec<Option<&'a str>> {
@@ -103,13 +120,17 @@ fn join_values<'a>(joins: &[String], entities: &'a EntityBinding) -> Vec<Option<
 fn expand_job(
     step: &CompiledStep<'_>,
     artifacts: &Artifacts,
+    candidates: &[Vec<ArtifactId>],
     indexes: &[JoinIndex<'_>],
-    incomplete: &[bool],
-    partial: bool,
+    availability: Availability<'_>,
     context: EntityBinding,
     mut driven: Vec<ArtifactId>,
 ) -> Expansion {
     let (invocation, operation, shape) = (step.invocation, step.operation, &step.shape);
+    let Availability {
+        incomplete,
+        partial,
+    } = availability;
     let mut gaps = Vec::new();
     if partial
         && operation.inputs[shape.driver].cardinality == Cardinality::Many
@@ -135,7 +156,14 @@ fn expand_job(
             let matches = indexes[index]
                 .get(&join_values(&shape.joins[index], &context))
                 .map_or(&[][..], Vec::as_slice);
-            match match_input(invocation, operation, index, matches, &context) {
+            match match_input(
+                port_site(invocation, operation, index),
+                matches,
+                &candidates[index],
+                &shape.joins[index],
+                artifacts,
+                &context,
+            ) {
                 Ok(artifact) => vec![artifact],
                 Err(gap) => {
                     gaps.push(gap);
@@ -190,17 +218,47 @@ fn driver_groups(
 /// with a job's context on every dimension it joins on, or the gap left
 /// when none or several do.
 fn match_input(
-    invocation: &Invocation,
-    operation: &OperationDef,
-    index: usize,
+    site: PortSite,
     matches: &[ArtifactId],
+    candidates: &[ArtifactId],
+    joins: &[String],
+    artifacts: &Artifacts,
     context: &EntityBinding,
 ) -> Result<ArtifactId, Gap> {
     let [artifact] = matches else {
-        let site = port_site(invocation, operation, index);
         let context = Box::new(context.clone());
         return Err(Gap::Unmatched(if matches.is_empty() {
-            ResolveError::MissingInput { site, context }
+            let near = candidates.iter().find_map(|candidate| {
+                let binding = artifacts.entities(*candidate);
+                let mut difference = None;
+                for dimension in joins {
+                    let (Some(found), Some(wanted)) =
+                        (binding.get(dimension), context.get(dimension))
+                    else {
+                        return None;
+                    };
+                    if found == wanted {
+                        continue;
+                    }
+                    let reason = near_reason(found, wanted)?;
+                    if difference.is_some() {
+                        return None;
+                    }
+                    difference = Some((dimension.clone(), wanted.to_owned(), reason));
+                }
+                let (dimension, wanted, reason) = difference?;
+                Some(Box::new(NearMiss {
+                    artifact: artifacts.get(*candidate).to_instance(),
+                    dimension,
+                    wanted,
+                    reason,
+                }))
+            });
+            ResolveError::MissingInput {
+                site,
+                context,
+                near,
+            }
         } else {
             ResolveError::AmbiguousInput { site, context }
         }));

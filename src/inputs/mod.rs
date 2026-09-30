@@ -236,7 +236,7 @@ impl InputSpec {
     ) -> Result<ResolvedInputs, InputError> {
         validate_pipeline(pipeline)?;
         self.check(pipeline)?;
-        let (mut inventory, skipped, root, removed) = match source {
+        let (mut inventory, skipped, unmatched_files, root, removed) = match source {
             InputSource::Discover(root) => {
                 let located = with_source_paths(pipeline, &self.rules.source_paths);
                 let found = discover(&located, &self.rules, root)?;
@@ -249,6 +249,7 @@ impl InputSpec {
                 (
                     found.inventory,
                     found.skipped,
+                    found.unmatched_files,
                     Some(root.to_owned()),
                     found.removed,
                 )
@@ -269,7 +270,7 @@ impl InputSpec {
                 let dropped = apply_drops(&self.rules, &mut inventory)
                     .map_err(InputError::EveryGroupDropped)?;
                 removed.extend(dropped.iter().map(|group| group.removal()));
-                (inventory, Vec::new(), None, removed)
+                (inventory, Vec::new(), Vec::new(), None, removed)
             }
         };
         self.merge_source_paths(pipeline, &mut inventory)?;
@@ -283,6 +284,7 @@ impl InputSpec {
         Ok(ResolvedInputs {
             inventory,
             skipped,
+            unmatched_files,
             gaps: checked.gaps,
             root,
         })
@@ -440,6 +442,8 @@ pub struct ResolvedInputs {
     /// Each file left out because a value in its path cannot be read, and
     /// why. What the recipe's rules removed is in `inventory.removed`.
     pub skipped: Vec<String>,
+    /// Files under a scanned root that matched no source path rule.
+    pub unmatched_files: Vec<String>,
     /// What the `require` rules find missing, with the sources each holds back.
     pub gaps: Vec<CoverageGap>,
     /// The directory that was scanned, when the stage scanned one.

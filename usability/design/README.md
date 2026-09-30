@@ -13,12 +13,12 @@ The plans that answer the [usability findings](../FINDINGS.md), and the order to
 
 ## Status
 
-- **Done:** steps 1–9. Phase 1 and Phase 2 are complete.
-- **Next:** step 10, near-miss hints and unmatched-file reporting.
-- **Resolved so far:** B1, B2, B3, B5, B6, B7, F1, F2, F4, F5, F7, F8, D1–D4, D7–D10, the first half of F3 (unused sources), and the whole-path rule of D5.
+- **Done:** steps 1–10. Phase 1 and Phase 2 are complete, as is the first step of Phase 3.
+- **Next:** step 11, sources with no brackets.
+- **Resolved so far:** B1, B2, B3, B5, B6, B7, F1–F5, F7, F8, D1–D5, D7–D10.
 - **Still open:**
-  - B4, F3's near-miss hints, F6, F9, F10;
-  - the rest of D5 (the unmatched-file note), D6 and D11;
+  - B4, F6, F9, F10;
+  - D6 and D11;
   - the VS Code extension.
 
 ## Order
@@ -99,6 +99,7 @@ One design built in three steps, each leaving the tool working. See [removing in
 ### Phase 3: messages and language
 
 10. **F3 part 2:** near-miss hints on a failed match and on unused sources. Also the unmatched-file note and `inputs --unmatched` (closes D5). See [diagnostics](diagnostics.md#b5-and-f3-say-what-the-inventory-holds-that-no-job-uses).
+    Done: missing joins show a source whose value differs only in ASCII case or leading zeros, unused near sources are warned about, and discovery counts and lists unmatched files with `inputs --unmatched`. Scenario 6's `S07.json` gets the hint while s09's absent price list does not.
     - **What exists.** `is_near` in `src/inputs/exclusions.rs` (equal ignoring ASCII case, or the same digits with different leading zeros) already powers the unmatched-`exclude` hint. Reuse it: move it somewhere shared, such as `src/model.rs` beside `natural_cmp`.
     - **Failed-match hint.** On `MissingInput` (`src/resolver/matching.rs`), look through the missing product's artifacts for one whose joined values are near. Put the hint in the error text, and in `render_artifacts` under the incomplete artifact.
     - **Unused-source warning.** An unused source (`ArtifactReport::unused_sources`, `src/model.rs`) that is near a value some incomplete job needed becomes a warning in `dag` and `artifacts`, not just part of the count.

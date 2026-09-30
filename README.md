@@ -63,7 +63,7 @@ SPIT has no backend yet: nothing in this repository runs a `.spitdag`.
 
 ```text
 spit check <pipeline.spit | recipe.spitin> [--path-rules] [--strict-paths] [--json] [--stdin]
-spit inputs <recipe.spitin> [--root <directory>] [-o <file>]
+spit inputs <recipe.spitin> [--root <directory>] [--unmatched | -o <file>]
 spit dag <recipe.spitin> [--root <directory>] [--strict-paths] [--paths] [--commands] [--partial] [--json | -o <file>]
 spit dag <pipeline.spit> <inputs.spitout | -> [--root <directory>] [--strict-paths] [--paths] [--commands] [--partial] [--json | -o <file>]
 spit artifacts <recipe.spitin> [--root <directory>]
@@ -84,6 +84,7 @@ Files come first; options follow them. `spit help` lists the commands, and `spit
 | `-o <file>`, `--output <file>` | With `inputs`, write the `.spitout` to the file instead of standard output. With `dag`, write the `.spitdag`. |
 | `--root <directory>` | The dataset root: the folder a recipe scans, the base of every path, and where each source file must exist. The recipe's folder by default; see [Where files live](#where-files-live). |
 | `--path-rules` | With `check`, list the path rule each product uses. |
+| `--unmatched` | With `inputs`, list files under the dataset root that match no source path rule, one per line, instead of writing a `.spitout`. |
 | `--paths` | With `dag`, print the file under every artifact. |
 | `--commands` | With `dag`, print each job's `verify` and command lines with their paths filled in, quoted as a shell reads them, so a line can be pasted into a shell run from the dataset folder. With `--paths`, print them under each job's artifacts. |
 | `--partial` | With `dag`, plan jobs whose inputs can be completed and record the artifacts left out of the `.spitdag`. A `many` input uses its complete members. Without it, `dag` stops at an incomplete job. |
@@ -228,6 +229,8 @@ Incomplete artifacts: 2
 An incomplete artifact has a missing or ambiguous input, a collection below its `@ min(count)`, or an input that is itself incomplete, so a gap early in the pipeline is traced through every step that depends on it. Given a recipe, a group that fails a `require` rule is listed under `Coverage gaps`, and its sources are held back from every job. A step creates jobs only for the artifacts that drive it, so a context with no driving artifact at all appears only through the coverage gaps and steps that notice it missing. The command succeeds whatever it finds; the complete artifacts are the ones the pipeline could produce from these inputs today.
 
 `artifacts` also lists, under `Unused sources`, each source that no job reads, whether or not that job can be completed. Some are left out on purpose, such as calibration revisions a `where(revision=3)` selector passes over; others point to a mistake, such as `pricing/S07.json` read as store `S07` where the pipeline needs `s07`. `dag` counts them in a note: `3 source artifacts are used by no job (calibration: 3)`.
+
+When a missing input differs from an unused source only in letter case or leading zeros, the failed `dag` and `artifacts` reports name that source and the differing dimension. They also warn that the source is unused. A genuinely missing source has no such hint. During discovery, `inputs` notes how many files match no source rule; run `spit inputs dataset.spitin --unmatched` to list them.
 
 To make a plan for the work that can run now, use `spit dag dataset.spitin --partial -o plan.spitdag`. The command succeeds and records each unproducible output and its reasons in `left_out`. A `many` input takes only its complete members, then applies any `@ min(count)` requirement to that smaller collection. For example, a chain summary can use the reports from good stores even when other stores' reports cannot be made. Use `spit artifacts dataset.spitin` to inspect the full set of gaps before running the plan.
 
