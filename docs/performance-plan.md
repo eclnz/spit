@@ -56,7 +56,7 @@ there; every stage now takes under 5.
 | `spit inputs` | 5.1 s | 0.63 s | 0.38 s |
 | `spit dag` over a `.spitout` | 14.5 s | 0.96 s | 0.45 s |
 | `spit dag` over a recipe | 25.0 s | 2.0 s | 1.0 s |
-| `spit dag --json` | 21.9 s | 2.3 s | 0.99 s |
+| `spit dag --json` | 21.9 s | 2.3 s | 0.86 s |
 | `spit artifacts` | 13.7 s | 0.56 s | 0.28 s |
 
 At 5,000 subjects (110,002 files, 300,000 jobs), `dag` takes 3.3 s in 800 MB
@@ -88,12 +88,12 @@ reach each error whose choice depends on order.
   - The `.spitdag` is written a job at a time.
 - **Discovery tests fewer patterns.** It rejects a path pattern whose literal start or end a file lacks before searching.
 
-In the second round, where a well-used library does the job it replaces
-code of our own:
+In the second round (two small, widely used crates where they clearly pay
+for themselves):
 
 - **mimalloc is the CLI's allocator.** SPIT makes and frees many small strings; allocation was a quarter of a run with the system allocator.
 - **rustc-hash's `FxHashMap` and `FxHashSet`** replace the standard hasher in maps whose order does not matter: artifact maps, the join index, path owners, bindings' own hashes, and the duplicate check in `source_artifacts`, which compared whole entity maps in a `BTreeSet` about fifteen times per record.
-- **serde_json writes all JSON**, the `.spitdag` and `check --json`, streamed to the output. One formatter keeps the text as it was, so fingerprints are unchanged; the `fnv` crate computes them.
+- **The `.spitdag` is written straight into a buffer,** not through a `Formatter` and a JSON tree per job. Each job's work is written once, fingerprinted, and copied into the document; artifacts are written with their fixed keys as whole pieces; `BoundDag::write_json` streams the document to a writer. serde_json was tried in its place: less code, but 15% slower, since the fingerprint must serialize each job's work twice, and five more crates.
 - **Jobs share their bound artifacts.** `bind_dag` binds each artifact once and every job that uses it holds the same `Arc<BoundArtifact>`: a quarter fewer allocations, and less memory to walk when writing.
 - **Paths bind with each product's template and stage found once** (`PathBinder`), rather than once per artifact, in `bound_paths` and in discovery.
 
@@ -169,8 +169,7 @@ to a map found by borrowed product and entities changes the public type.
 
 ### 10. A faster fingerprint
 
-A fingerprint is FNV-1a over the job's work, serialized a second time just
-to be hashed, one dependent multiply per byte: about a third of writing the
-`.spitdag`. A hash that takes eight bytes at a time would be several times
+A fingerprint is FNV-1a over the job's work, one dependent multiply per
+byte: about a quarter of writing the `.spitdag`. A hash that takes eight bytes at a time would be several times
 faster, but changes every fingerprint, so a backend would see every job as
 changed once. It belongs with a `.spitdag` version change.

@@ -5,13 +5,11 @@ use std::fmt;
 use std::ops::Range;
 use std::path::Path;
 
-use serde::Serialize;
-
 use crate::command::collect_commands;
 use crate::compile::collect_pipeline;
 use crate::imports::parse_located_document;
 use crate::inputs::{check_inventory, collect_rule_errors, InputError, InputSpec};
-use crate::json;
+use crate::json::Json;
 use crate::lower::{parse_document_with_imports, ParsedDocument};
 use crate::model::DEFAULT_OUTPUT;
 use crate::model::{stage_within, ArtifactReport, CommandRole, ResolvedDag, SourceInventory};
@@ -215,34 +213,24 @@ pub fn render_diagnostics_json(
     text: &str,
     source_text: Option<&str>,
 ) -> String {
-    #[derive(Serialize)]
-    struct Item<'a> {
-        severity: &'a str,
-        source: &'a str,
-        line: Option<usize>,
-        column: Option<usize>,
-        end_column: Option<usize>,
-        message: &'a str,
-    }
-    #[derive(Serialize)]
-    struct Document<'a> {
-        diagnostics: Vec<Item<'a>>,
-    }
-    let diagnostics = diagnostics
-        .iter()
-        .map(|diagnostic| {
-            let columns = diagnostic.utf16_columns(text, source_text);
-            Item {
-                severity: diagnostic.severity.as_str(),
-                source: diagnostic.source.as_str(),
-                line: diagnostic.line,
-                column: columns.as_ref().map(|columns| columns.start + 1),
-                end_column: columns.as_ref().map(|columns| columns.end + 1),
-                message: &diagnostic.message,
-            }
-        })
-        .collect();
-    format!("{}\n", json::to_string(&Document { diagnostics }))
+    let items = diagnostics.iter().map(|diagnostic| {
+        let columns = diagnostic.utf16_columns(text, source_text);
+        Json::object([
+            ("severity", Json::string(diagnostic.severity.as_str())),
+            ("source", Json::string(diagnostic.source.as_str())),
+            ("line", Json::number_or_null(diagnostic.line)),
+            (
+                "column",
+                Json::number_or_null(columns.as_ref().map(|columns| columns.start + 1)),
+            ),
+            (
+                "end_column",
+                Json::number_or_null(columns.as_ref().map(|columns| columns.end + 1)),
+            ),
+            ("message", Json::string(&diagnostic.message)),
+        ])
+    });
+    format!("{}\n", Json::object([("diagnostics", Json::array(items))]))
 }
 
 /// Where a pipeline is, and what applies to it, when diagnosing it.
