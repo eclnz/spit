@@ -2,7 +2,7 @@
 
 Can someone who has only the `spit` binary and its guide turn a pipeline problem into a correct plan, and how much does it cost them? To find out, we gave AI agents realistic tasks with nothing else: no source, no examples, no tests. We graded their plans against answer keys and logged every `spit` call they made.
 
-The findings are in [FINDINGS.md](FINDINGS.md), written as a backlog of bugs, features and gaps in the guide. This page describes how the study was run, what came out, and how to run it again.
+The findings are in [FINDINGS.md](FINDINGS.md), written as a backlog of bugs, features and gaps in the guide. Designs that answer them are in [`design/`](design): so far, [removing inputs](design/removing-inputs.md), which replaces `skip`. This page describes how the study was run, what came out, and how to run it again.
 
 ## Scenarios
 
