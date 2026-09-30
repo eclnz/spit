@@ -4,7 +4,7 @@ use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::ops::Range;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use super::coverage::{apply_skips, SkipIndex, SkippedGroup};
 use crate::model::{
@@ -595,7 +595,7 @@ struct Listing {
 impl Listing {
     fn of(root: &Path) -> Result<Self, PathError> {
         let mut listing = Self::default();
-        listing.walk(root, "", &mut BTreeSet::new())?;
+        listing.walk(root, None, "", &mut BTreeSet::new())?;
         listing.directories.sort();
         listing.files.sort();
         Ok(listing)
@@ -604,16 +604,26 @@ impl Listing {
     /// Add every directory and regular file under `directory`, following
     /// links. `visited` stops link cycles. Names that are not UTF-8 cannot
     /// match a rule.
+    ///
+    /// `canonical` is `directory` with every link resolved, when known. A
+    /// listing gives each entry's type, and only a link changes where an
+    /// entry is, so only a link is looked up and resolved; a directory
+    /// inside is its directory's canonical path and its name.
     fn walk(
         &mut self,
         directory: &Path,
+        canonical: Option<PathBuf>,
         prefix: &str,
-        visited: &mut BTreeSet<std::path::PathBuf>,
+        visited: &mut BTreeSet<PathBuf>,
     ) -> Result<(), PathError> {
         let unreadable = |reason: std::io::Error| {
             error(format!("cannot read `{}`: {reason}", directory.display()))
         };
-        if !visited.insert(fs::canonicalize(directory).map_err(unreadable)?) {
+        let canonical = match canonical {
+            Some(canonical) => canonical,
+            None => fs::canonicalize(directory).map_err(unreadable)?,
+        };
+        if !visited.insert(canonical.clone()) {
             return Ok(());
         }
         for entry in fs::read_dir(directory).map_err(unreadable)? {
@@ -623,10 +633,15 @@ impl Listing {
             };
             let relative = format!("{prefix}{name}");
             let path = entry.path();
-            if path.is_dir() {
-                self.walk(&path, &format!("{relative}/"), visited)?;
+            let (is_dir, is_file, linked) = match entry.file_type() {
+                Ok(kind) if !kind.is_symlink() => (kind.is_dir(), kind.is_file(), false),
+                _ => (path.is_dir(), path.is_file(), true),
+            };
+            if is_dir {
+                let inner = (!linked).then(|| canonical.join(&name));
+                self.walk(&path, inner, &format!("{relative}/"), visited)?;
                 self.directories.push(relative);
-            } else if path.is_file() {
+            } else if is_file {
                 self.files.push(relative);
             }
         }
