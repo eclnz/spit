@@ -6,16 +6,19 @@ use std::ops::Range;
 use std::path::Path;
 
 use crate::command::collect_commands;
+use crate::compile::collect_pipeline;
 use crate::imports::parse_located_document;
+use crate::inputs::{check_inventory, collect_rule_errors, InputError, InputSpec};
+use crate::json::Json;
 use crate::lower::{parse_document_with_imports, ParsedDocument};
 use crate::model::DEFAULT_OUTPUT;
-use crate::model::{stage_within, CommandRole, Job, ResolvedDag, SourceInventory};
-use crate::parser::{glued_comment, InlineInventory, Rule, SourceMap, Step};
+use crate::model::{stage_within, ArtifactReport, CommandRole, ResolvedDag, SourceInventory};
+use crate::parser::{glued_comment, source_record_lines, without_bom, Kind, Rule, SourceMap, Step};
 use crate::paths::{case_collisions, collect_paths};
-use crate::resolver::collect_pipeline;
-use crate::span::{columns_of, content_columns, utf16_columns, Located, Place};
+use crate::resolver::first_failure;
+use crate::span::{content_columns, utf16_columns, Located, Place};
 use crate::{
-    parse_source_inventory, resolve, resolve_artifacts, DefinitionSubject, EntityBinding,
+    parse_source_inventory, resolve_artifacts_excluding, DefinitionSubject, EntityBinding,
     InputBinding, ParseError, ParseErrorKind, Pipeline, ResolveError,
 };
 
@@ -66,6 +69,30 @@ pub struct Diagnostic {
     pub columns: Option<Range<usize>>,
     pub message: String,
 }
+
+/// A document that passed every check: its pipeline, and its warnings.
+#[derive(Debug)]
+pub struct Checked {
+    pub pipeline: Pipeline,
+    /// Every diagnostic found, none of them an error, in line order.
+    pub warnings: Vec<Diagnostic>,
+}
+
+/// Records that passed diagnosis with their pipeline: the inventory they
+/// parse to, and what it resolves to, so a caller need not resolve it again.
+#[derive(Debug)]
+pub struct Records {
+    pub inventory: SourceInventory,
+    /// The jobs over the records' sources, with those that cannot be made in
+    /// a lenient diagnosis. Sources take their files from the records, so a
+    /// caller that locates them later gives them their files with
+    /// [`ResolvedDag::locate_sources`].
+    pub report: ArtifactReport,
+}
+
+/// What diagnosing a document found: what it checked to, or, when any
+/// diagnostic is an error, every diagnostic in line order.
+pub type Diagnosis<T = Checked> = Result<T, Vec<Diagnostic>>;
 
 impl Diagnostic {
     fn new(
@@ -137,7 +164,7 @@ impl Diagnostic {
             DiagnosticSource::Inventory => source_text?,
             DiagnosticSource::Pipeline => text,
         };
-        text.lines().nth(self.line?.checked_sub(1)?)
+        without_bom(text).lines().nth(self.line?.checked_sub(1)?)
     }
 
     fn write(&self, f: &mut fmt::Formatter<'_>, column: Option<usize>) -> fmt::Result {
@@ -178,6 +205,100 @@ impl fmt::Display for Diagnostic {
     }
 }
 
+/// The diagnostics as the JSON `check --json` prints, for editors. Columns
+/// are 1-based, in UTF-16 code units as editors count them; `end_column` is
+/// one past the last character.
+pub fn render_diagnostics_json(
+    diagnostics: &[Diagnostic],
+    text: &str,
+    source_text: Option<&str>,
+) -> String {
+    let items = diagnostics.iter().map(|diagnostic| {
+        let columns = diagnostic.utf16_columns(text, source_text);
+        Json::object([
+            ("severity", Json::string(diagnostic.severity.as_str())),
+            ("source", Json::string(diagnostic.source.as_str())),
+            ("line", Json::number_or_null(diagnostic.line)),
+            (
+                "column",
+                Json::number_or_null(columns.as_ref().map(|columns| columns.start + 1)),
+            ),
+            (
+                "end_column",
+                Json::number_or_null(columns.as_ref().map(|columns| columns.end + 1)),
+            ),
+            ("message", Json::string(&diagnostic.message)),
+        ])
+    });
+    format!("{}\n", Json::object([("diagnostics", Json::array(items))]))
+}
+
+/// Where a pipeline is, and what applies to it, when diagnosing it.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Context<'a> {
+    /// The pipeline's file, so that its `use` lines can be resolved. Without
+    /// one, a `use` line is an error.
+    pub path: Option<&'a Path>,
+    /// A `.spitin` recipe whose rules and source paths are checked with the
+    /// pipeline.
+    pub recipe: Option<&'a InputSpec>,
+    /// Report records that leave jobs unmade without failing, as
+    /// `spit artifacts` does.
+    pub lenient: bool,
+}
+
+impl<'a> Context<'a> {
+    /// The pipeline in the file at `path`.
+    pub fn at(path: &'a Path) -> Self {
+        Self {
+            path: Some(path),
+            ..Self::default()
+        }
+    }
+
+    /// Parse a pipeline in this context: with its imports resolved from its
+    /// path, and its recipe checked and applied.
+    fn parse(&self, text: &str) -> Result<Parsed, ParseError> {
+        let mut document = match self.path {
+            Some(path) => parse_located_document(text, path, Kind::Pipeline)?,
+            None => parse_document_with_imports(text, &BTreeMap::new(), Kind::Pipeline)?,
+        };
+        let Some(recipe) = self.recipe else {
+            return Ok(Parsed {
+                document,
+                as_written: None,
+            });
+        };
+        recipe
+            .check(&document.pipeline)
+            .map_err(|error| ParseError::new(1, error.to_string()))?;
+        let as_written = document.pipeline.clone();
+        recipe.apply_paths(&mut document.pipeline);
+        document.inputs = recipe.rules.clone();
+        Ok(Parsed {
+            document,
+            as_written: Some(as_written),
+        })
+    }
+}
+
+/// A parsed pipeline, and the pipeline as written when a recipe added its
+/// source paths.
+struct Parsed {
+    document: ParsedDocument,
+    as_written: Option<Pipeline>,
+}
+
+impl Parsed {
+    /// The document checked with `warnings`, its pipeline as written.
+    fn checked(self, warnings: Vec<Diagnostic>) -> Checked {
+        Checked {
+            pipeline: self.as_written.unwrap_or(self.document.pipeline),
+            warnings,
+        }
+    }
+}
+
 /// Collect independent syntax errors throughout the document, then check its
 /// semantics once the document parses: every declaration, step, rule,
 /// command, and path error, and warnings for likely mistakes. Jobs are
@@ -185,125 +306,258 @@ impl fmt::Display for Diagnostic {
 /// inventory still allows every other check. Diagnostics are ordered by
 /// line, with at most one error per line.
 pub fn diagnose(text: &str, source_text: Option<&str>) -> Vec<Diagnostic> {
-    let inline = inline_inventory(source_text);
-    diagnose_with_parser(text, source_text, false, |text| {
-        parse_document_with_imports(text, &BTreeMap::new(), inline)
-    })
+    diagnose_in(text, source_text, Context::default())
 }
 
-/// Diagnose a document with its location available for resolving imports.
-pub fn diagnose_at(text: &str, source_text: Option<&str>, path: &Path) -> Vec<Diagnostic> {
-    let inline = inline_inventory(source_text);
-    diagnose_with_parser(text, source_text, false, |text| {
-        parse_located_document(text, path, inline)
-    })
-}
-
-pub fn diagnose_artifacts_at(
-    text: &str,
-    source_text: Option<&str>,
-    path: &Path,
-) -> Vec<Diagnostic> {
-    let inline = inline_inventory(source_text);
-    diagnose_with_parser(text, source_text, true, |text| {
-        parse_located_document(text, path, inline)
-    })
-}
-
-/// A separate inventory replaces an inline one, which is then not read.
-fn inline_inventory(source_text: Option<&str>) -> InlineInventory {
-    if source_text.is_some() {
-        InlineInventory::Skip
-    } else {
-        InlineInventory::Read
-    }
-}
-
-fn diagnose_with_parser(
-    text: &str,
-    source_text: Option<&str>,
-    lenient: bool,
-    parser: impl Fn(&str) -> Result<ParsedDocument, ParseError>,
-) -> Vec<Diagnostic> {
-    let (document, pipeline_errors) = recover_parse_errors(text, parser);
-    let (external_inventory, inventory_errors) = source_text.map_or_else(
-        || (None, Vec::new()),
-        |source_text| recover_parse_errors(source_text, parse_source_inventory),
-    );
-    let mut diagnostics: Vec<_> = pipeline_errors
-        .iter()
-        .map(|error| Diagnostic::located(DiagnosticSource::Pipeline, error, text))
-        .chain(inventory_errors.iter().map(|error| {
-            Diagnostic::located(
-                DiagnosticSource::Inventory,
-                error,
-                source_text.unwrap_or(text),
-            )
-        }))
-        .collect();
-    if !diagnostics.is_empty() {
-        return finish(diagnostics, text, source_text);
-    }
-
-    let document = document.expect("document parsed without errors");
-    let inventory_text = source_text.unwrap_or(text);
-    diagnostics.extend(pipeline_diagnostics(&document, text, inventory_text));
-    if let (Some(line), Some(_)) = (document.inventory_line, source_text) {
-        let place = text
-            .lines()
-            .nth(line - 1)
-            .map(|header| Place::new(line, content_columns(header)));
-        diagnostics.push(Diagnostic::new(
-            Severity::Warning,
-            DiagnosticSource::Pipeline,
-            place,
-            "this inline inventory is ignored because a separate inventory was supplied".to_owned(),
-        ));
-    }
-    if diagnostics.iter().any(Diagnostic::is_error) {
-        return finish(diagnostics, text, source_text);
-    }
-    let supplied = external_inventory.or(document.inventory);
-    let inventory = supplied.clone().unwrap_or_default();
-    let outputs = |jobs: Vec<Job>| jobs.into_iter().flat_map(|job| job.outputs);
-    let produced: Result<BTreeSet<String>, _> = if lenient {
-        resolve_artifacts(&document.pipeline, &inventory).map(|report| {
-            let incomplete = report.incomplete.into_iter().flat_map(|job| job.outputs);
-            outputs(report.dag.jobs)
-                .chain(incomplete)
-                .map(|artifact| artifact.product)
-                .collect()
-        })
-    } else {
-        resolve(&document.pipeline, &inventory).map(|dag| {
-            diagnostics.extend(case_warnings(&document.pipeline, &document.lines, &dag));
-            outputs(dag.jobs).map(|artifact| artifact.product).collect()
-        })
+/// As [`diagnose`], in `context`.
+pub fn diagnose_in(text: &str, source_text: Option<&str>, context: Context<'_>) -> Vec<Diagnostic> {
+    let diagnosis = match source_text {
+        None => diagnose_checked(text, context),
+        Some(records) => {
+            diagnose_checked_with_records(text, records, context).map(|(checked, _)| checked)
+        }
     };
-    match produced {
-        Err(error) => {
-            let (source, place) = error_location(
-                &document.pipeline,
-                &document.lines,
-                &error,
-                inventory_text,
-                source_text.is_some(),
-            );
-            diagnostics.push(Diagnostic::error(source, place, error.to_string()));
+    diagnosis.map_or_else(|all| all, |checked| checked.warnings)
+}
+
+/// Diagnose a pipeline without records, and return it once it passes: every
+/// parse error, or once it parses, every declaration, step, rule, command
+/// and path. The pipeline is returned as written, without the source paths
+/// a recipe adds.
+pub fn diagnose_checked(text: &str, context: Context<'_>) -> Diagnosis {
+    let text = without_bom(text);
+    let parsed = recover_parse_errors(text, |text| context.parse(text)).map_err(|errors| {
+        let diagnostics = located_all(DiagnosticSource::Pipeline, errors, text);
+        finish(diagnostics.collect(), text, None)
+    })?;
+    let warnings = check_document(&parsed.document, text, None)?;
+    Ok(parsed.checked(finish(warnings, text, None)))
+}
+
+/// As [`diagnose_checked`], with the records in `records` settled and
+/// resolved over the pipeline once it passes on its own; the inventory they
+/// parse to, and what it resolves to, are returned with it.
+pub fn diagnose_checked_with_records(
+    text: &str,
+    records: &str,
+    context: Context<'_>,
+) -> Diagnosis<(Checked, Records)> {
+    let (text, records) = (without_bom(text), without_bom(records));
+    let parsed = (
+        recover_parse_errors(text, |text| context.parse(text)),
+        recover_parse_errors(records, parse_source_inventory),
+    );
+    let (parsed, inventory) = match parsed {
+        (Ok(parsed), Ok(inventory)) => (parsed, inventory),
+        (parsed, inventory) => {
+            let pipeline_errors = parsed.err().into_iter().flatten();
+            let record_errors = inventory.err().into_iter().flatten();
+            let diagnostics = located_all(DiagnosticSource::Pipeline, pipeline_errors, text)
+                .chain(located_all(
+                    DiagnosticSource::Inventory,
+                    record_errors,
+                    records,
+                ))
+                .collect();
+            return Err(finish(diagnostics, text, Some(records)));
         }
-        // Without an inventory no step is expected to resolve jobs.
-        Ok(produced) => {
-            if let Some(inventory) = &supplied {
-                diagnostics.extend(empty_step_warnings(
-                    &document.pipeline,
-                    &document.lines,
-                    &produced,
-                    inventory,
-                ));
-            }
+    };
+    let document = &parsed.document;
+    let mut diagnostics = check_document(document, text, Some(records))?;
+    let report = record_diagnostics(document, &inventory, records, context.lenient);
+    let report = match report {
+        Ok((report, found)) => {
+            diagnostics.extend(found);
+            Some(report)
+        }
+        Err(found) => {
+            diagnostics.extend(found);
+            None
+        }
+    };
+    let diagnostics = finish(diagnostics, text, Some(records));
+    match report {
+        Some(report) if !diagnostics.iter().any(Diagnostic::is_error) => {
+            Ok((parsed.checked(diagnostics), Records { inventory, report }))
+        }
+        _ => Err(diagnostics),
+    }
+}
+
+/// Diagnose a `.spitin` recipe at `path` without reading any data: its own
+/// lines, then the pipeline its `pipeline` line names, then its rules and
+/// any records against that pipeline. The pipeline's own errors are named
+/// by file and line, since they are not in `text`.
+pub fn diagnose_recipe(text: &str, path: &Path) -> Vec<Diagnostic> {
+    let text = without_bom(text);
+    let error = |message: String| Diagnostic::error(DiagnosticSource::Pipeline, None, message);
+    let spec = match crate::inputs::parse_input_spec_at(text, path) {
+        Ok(spec) => spec,
+        Err(parse) => {
+            let diagnostic = Diagnostic::located(DiagnosticSource::Pipeline, &parse, text);
+            return finish(vec![diagnostic], text, None);
+        }
+    };
+    let Some(pipeline_path) = spec.pipeline else {
+        let message =
+            "name the pipeline this recipe is for, with a line such as `pipeline analysis.spit`";
+        return finish(vec![error(message.to_owned())], text, None);
+    };
+    let shown = pipeline_path.display();
+    let pipeline_text = match std::fs::read_to_string(&pipeline_path) {
+        Ok(pipeline_text) => pipeline_text,
+        Err(reason) => {
+            return finish(
+                vec![error(format!("cannot read pipeline `{shown}`: {reason}"))],
+                text,
+                None,
+            )
+        }
+    };
+    match diagnose_checked(&pipeline_text, Context::at(&pipeline_path)) {
+        Ok(checked) => diagnose_recipe_against(text, &checked.pipeline),
+        Err(diagnostics) => {
+            let pipeline_errors = diagnostics
+                .into_iter()
+                .filter(Diagnostic::is_error)
+                .map(|diagnostic| {
+                    let line = diagnostic
+                        .line
+                        .map_or_else(String::new, |line| format!(" line {line}"));
+                    error(format!("in `{shown}`{line}: {}", diagnostic.message))
+                })
+                .collect();
+            finish(pipeline_errors, text, None)
         }
     }
-    finish(diagnostics, text, source_text)
+}
+
+/// Diagnose the text of a `.spitin` recipe against `pipeline`, reading no
+/// data: every rule's error at the rule, then its source paths and records.
+pub fn diagnose_recipe_against(text: &str, pipeline: &Pipeline) -> Vec<Diagnostic> {
+    let text = without_bom(text);
+    let (spec, lines) = match crate::inputs::parse_recipe_lines(text) {
+        Ok(parsed) => parsed,
+        Err(parse) => {
+            let diagnostic = Diagnostic::located(DiagnosticSource::Pipeline, &parse, text);
+            return finish(vec![diagnostic], text, None);
+        }
+    };
+    let mut diagnostics: Vec<_> = collect_rule_errors(pipeline, &spec.rules, &BTreeSet::new())
+        .into_iter()
+        .map(|(subject, error)| {
+            // A rule's own errors concern its product, or its groups.
+            let place = match &subject {
+                DefinitionSubject::Constraint(index) => lines.rules.get(*index).map(Rule::product),
+                DefinitionSubject::ConstraintGroup(index) => {
+                    lines.rules.get(*index).map(Rule::dimensions)
+                }
+                _ => None,
+            };
+            Diagnostic::error(DiagnosticSource::Pipeline, place, error.to_string())
+        })
+        .collect();
+    if diagnostics.is_empty() {
+        let checked = match &spec.inventory {
+            Some(records) => spec
+                .resolve(pipeline, crate::InputSource::Inventory(records.clone()))
+                .map(|_| ()),
+            None => spec.check(pipeline),
+        };
+        if let Err(problem) = checked {
+            // Records written in the recipe keep its line numbers.
+            let place = match &problem {
+                InputError::Resolve(error) => {
+                    error_location(pipeline, &lines, error, text, false).1
+                }
+                _ => None,
+            };
+            diagnostics.push(Diagnostic::error(
+                DiagnosticSource::Pipeline,
+                place,
+                problem.to_string(),
+            ));
+        }
+    }
+    finish(diagnostics, text, None)
+}
+
+/// Each parse error in `text` as a diagnostic.
+fn located_all<'a>(
+    source: DiagnosticSource,
+    errors: impl IntoIterator<Item = ParseError> + 'a,
+    text: &'a str,
+) -> impl Iterator<Item = Diagnostic> + 'a {
+    errors
+        .into_iter()
+        .map(move |error| Diagnostic::located(source, &error, text))
+}
+
+/// Check a parsed pipeline on its own: its warnings, or every diagnostic,
+/// finished, when one is an error. Errors about records point into
+/// `source_text` when given.
+fn check_document(
+    document: &ParsedDocument,
+    text: &str,
+    source_text: Option<&str>,
+) -> Result<Vec<Diagnostic>, Vec<Diagnostic>> {
+    let diagnostics = pipeline_diagnostics(document, text, source_text.unwrap_or(text));
+    if diagnostics.iter().any(Diagnostic::is_error) {
+        return Err(finish(diagnostics, text, source_text));
+    }
+    Ok(diagnostics)
+}
+
+/// Settle `supplied` with the input stage, then resolve jobs over it: what
+/// they resolve to with any warnings, about paths that differ only in case
+/// and steps that make nothing, or those diagnostics with the error that
+/// stops either.
+fn record_diagnostics(
+    document: &ParsedDocument,
+    supplied: &SourceInventory,
+    records: &str,
+    lenient: bool,
+) -> Result<(ArtifactReport, Vec<Diagnostic>), Vec<Diagnostic>> {
+    let (pipeline, lines) = (&document.pipeline, &document.lines);
+    let mut diagnostics = Vec::new();
+    let resolved = check_inventory(pipeline, &document.inputs, supplied).and_then(|checked| {
+        if lenient {
+            let unavailable: Vec<_> = checked
+                .gaps
+                .iter()
+                .flat_map(|gap| gap.sources.iter().cloned())
+                .collect();
+            return resolve_artifacts_excluding(pipeline, &checked.inventory, &unavailable);
+        }
+        if let Some(gap) = checked.gaps.into_iter().next() {
+            return Err(gap.error);
+        }
+        let report = resolve_artifacts_excluding(pipeline, &checked.inventory, &[])?;
+        if let Some(error) = first_failure(&report.incomplete) {
+            return Err(error);
+        }
+        diagnostics.extend(case_warnings(pipeline, lines, &report.dag));
+        Ok(report)
+    });
+    match resolved {
+        Err(error) => {
+            let (source, place) = error_location(pipeline, lines, &error, records, true);
+            diagnostics.push(Diagnostic::error(source, place, error.to_string()));
+            Err(diagnostics)
+        }
+        Ok(report) => {
+            let produced: BTreeSet<&str> = report
+                .dag
+                .jobs
+                .iter()
+                .flat_map(|job| &job.outputs)
+                .chain(report.incomplete.iter().flat_map(|job| &job.outputs))
+                .map(|artifact| artifact.product.as_str())
+                .collect();
+            diagnostics.extend(empty_step_warnings(pipeline, lines, &produced, supplied));
+            Ok((report, diagnostics))
+        }
+    }
 }
 
 /// Flag paths that differ only in case, which are one file on macOS and Windows.
@@ -336,9 +590,10 @@ fn finish(
     for (source, text) in texts {
         let Some(text) = text else { continue };
         for (index, line) in text.lines().enumerate() {
-            let Some(word) = glued_comment(line) else {
+            let Some(columns) = glued_comment(line) else {
                 continue;
             };
+            let word = &line[columns.clone()];
             let number = Some(index + 1);
             let explanation = format!(
                 "`#` after `{word}` is part of that word, not a comment; put a space before `#` to start a comment, or quote the text to keep it"
@@ -353,11 +608,10 @@ fn finish(
                 .collect();
             if errors.is_empty() {
                 // Point at the word and the `#` joined to it.
-                let columns = columns_of(line, word).map(|word| word.start..word.end + 1);
                 diagnostics.push(Diagnostic::new(
                     Severity::Warning,
                     source,
-                    columns.map(|columns| Place::new(index + 1, columns)),
+                    Some(Place::new(index + 1, columns.start..columns.end + 1)),
                     explanation,
                 ));
             } else {
@@ -392,20 +646,29 @@ fn pipeline_diagnostics(
 ) -> Vec<Diagnostic> {
     let (pipeline, lines) = (&document.pipeline, &document.lines);
     let checked = collect_pipeline(pipeline);
+    let rule_errors = collect_rule_errors(pipeline, &document.inputs, &checked.poisoned);
     let mut diagnostics: Vec<_> = checked
         .errors
         .iter()
+        .chain(&rule_errors)
         .map(|(subject, error)| {
             let place = subject_place(pipeline, lines, subject, error)
                 .or_else(|| error_location(pipeline, lines, error, inventory_text, false).1);
             Diagnostic::error(DiagnosticSource::Pipeline, place, error.to_string())
         })
         .collect();
-    let template_errors = collect_commands(pipeline, lines, &checked.poisoned)
-        .into_iter()
-        .chain(collect_paths(pipeline, lines, &checked.poisoned).1);
+    let source = DiagnosticSource::Pipeline;
+    let command_errors = collect_commands(pipeline, lines, &checked.poisoned);
+    let path_errors = collect_paths(pipeline, lines, &checked.poisoned).1;
     diagnostics.extend(
-        template_errors.map(|error| Diagnostic::located(DiagnosticSource::Pipeline, &error, text)),
+        command_errors
+            .iter()
+            .map(|error| Diagnostic::located(source, error, text)),
+    );
+    diagnostics.extend(
+        path_errors
+            .iter()
+            .map(|error| Diagnostic::located(source, error, text)),
     );
     diagnostics.extend(warnings(pipeline, lines, &checked.poisoned));
     diagnostics.extend(operator_warnings(pipeline, lines, text));
@@ -440,7 +703,7 @@ fn operator_warnings(pipeline: &Pipeline, lines: &SourceMap, text: &str) -> Vec<
             });
             warnings.push(warning(
                 place.as_ref().map(|place| {
-                    Place::new(place.line, columns.unwrap_or(place.columns.clone()))
+                    Place::new(place.line, columns.unwrap_or_else(|| place.columns.clone()))
                 }),
                 format!(
                     "`{operator}` in the command for `{}` is passed to the program as an argument, not read as a pipe or redirection, since commands do not run through a shell; quote it to pass it on purpose",
@@ -512,14 +775,14 @@ fn step_part(pipeline: &Pipeline, step: &Step, output: &str, error: &ResolveErro
         step.input(index)
     };
     let part = match error {
+        ResolveError::TypeMismatch { site, .. }
+        | ResolveError::TypeVariableConflict { site, .. }
+        | ResolveError::MissingInput { site, .. }
+        | ResolveError::AmbiguousInput { site, .. }
+        | ResolveError::CollectionTooSmall { site, .. } => port(&site.port),
         ResolveError::UnknownProduct { name } if name == output => Some(step.output()),
         ResolveError::UnknownProduct { name } => input_named(name),
         ResolveError::UnknownOperation { .. } => Some(step.operation()),
-        ResolveError::TypeMismatch { port: name, .. }
-        | ResolveError::TypeVariableConflict { port: name, .. }
-        | ResolveError::MissingInput { port: name, .. }
-        | ResolveError::AmbiguousInput { port: name, .. }
-        | ResolveError::CollectionTooSmall { port: name, .. } => port(name),
         ResolveError::InvalidAggregationDimension { product, .. } => input_named(product),
         ResolveError::UnsupportedShapeRelationship { .. } => Some(step.call()),
         _ => Some(step.output()),
@@ -671,7 +934,7 @@ fn operation_warnings(
             // Only once commands are in use: a pipeline may be written for its DAG alone.
             warnings.push(warning(
                 place.clone(),
-                format!("operation `{name}` has no command, so `bash` cannot run its jobs"),
+                format!("operation `{name}` has no command, so its jobs cannot run"),
             ));
         }
         if imported {
@@ -702,10 +965,51 @@ fn operation_warnings(
 /// Steps that resolve no jobs from a supplied inventory. A source with no
 /// artifacts is reported once, naming the steps it leaves empty; any other
 /// step that is empty although its inputs are not is reported on its own.
+/// For each product, the sources it depends on that have no artifacts.
+/// Each product's set is found once, from its inputs' sets, so a step that
+/// reads the same product twice costs no more than one that reads it once.
+fn unobserved_sources<'a>(
+    producers: &BTreeMap<&'a str, &'a crate::Invocation>,
+    observed: &BTreeSet<&str>,
+) -> BTreeMap<&'a str, BTreeSet<&'a str>> {
+    let mut found: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
+    let products = producers
+        .values()
+        .flat_map(|invocation| &invocation.inputs)
+        .map(|input| input.product.as_str());
+    for product in products {
+        // Depth first with an explicit stack: a product is finished once
+        // every product it reads is.
+        let mut stack = vec![(product, false)];
+        while let Some((name, inputs_done)) = stack.pop() {
+            if found.contains_key(name) {
+                continue;
+            }
+            let Some(invocation) = producers.get(name) else {
+                let sources = (!observed.contains(name)).then_some(name);
+                found.insert(name, sources.into_iter().collect());
+                continue;
+            };
+            let inputs = invocation.inputs.iter().map(|input| input.product.as_str());
+            if inputs_done {
+                let sources = inputs
+                    .flat_map(|input| found.get(input).into_iter().flatten())
+                    .copied()
+                    .collect();
+                found.insert(name, sources);
+            } else {
+                stack.push((name, true));
+                stack.extend(inputs.map(|input| (input, false)));
+            }
+        }
+    }
+    found
+}
+
 fn empty_step_warnings(
     pipeline: &Pipeline,
     lines: &SourceMap,
-    produced: &BTreeSet<String>,
+    produced: &BTreeSet<&str>,
     inventory: &SourceInventory,
 ) -> Vec<Diagnostic> {
     let observed: BTreeSet<_> = inventory
@@ -727,25 +1031,7 @@ fn empty_step_warnings(
         Some(producer) => !produced.contains(producer.output_product()),
         None => !observed.contains(name),
     };
-    // The unobserved sources each product depends on.
-    fn unobserved<'a>(
-        name: &'a str,
-        producers: &BTreeMap<&'a str, &'a crate::Invocation>,
-        observed: &BTreeSet<&str>,
-        found: &mut BTreeSet<&'a str>,
-    ) {
-        match producers.get(name) {
-            Some(invocation) => {
-                for input in &invocation.inputs {
-                    unobserved(&input.product, producers, observed, found);
-                }
-            }
-            None if !observed.contains(name) => {
-                found.insert(name);
-            }
-            None => {}
-        }
-    }
+    let unobserved = unobserved_sources(&producers, &observed);
     let mut left_empty: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
     let mut warnings = Vec::new();
     for invocation in &pipeline.invocations {
@@ -753,10 +1039,12 @@ fn empty_step_warnings(
         if produced.contains(step) {
             continue;
         }
-        let mut sources = BTreeSet::new();
-        for input in &invocation.inputs {
-            unobserved(&input.product, &producers, &observed, &mut sources);
-        }
+        let sources: BTreeSet<_> = invocation
+            .inputs
+            .iter()
+            .flat_map(|input| unobserved.get(input.product.as_str()).into_iter().flatten())
+            .copied()
+            .collect();
         for source in &sources {
             left_empty.entry(source).or_default().push(step);
         }
@@ -794,24 +1082,42 @@ fn empty_step_warnings(
 fn recover_parse_errors<T>(
     text: &str,
     parse: impl Fn(&str) -> Result<T, ParseError>,
-) -> (Option<T>, Vec<ParseError>) {
-    let mut lines: Vec<String> = text.lines().map(str::to_owned).collect();
-    let original_lines = lines.clone();
+) -> Result<T, Vec<ParseError>> {
+    let original_lines: Vec<String> = text.lines().map(str::to_owned).collect();
+    let mut recovered = original_lines.join("\n");
+    let mut offset = 0;
+    let ranges: Vec<_> = original_lines
+        .iter()
+        .map(|line| {
+            let range = offset..offset + line.len();
+            offset = range.end + 1;
+            range
+        })
+        .collect();
     let mut errors = Vec::new();
     loop {
-        match parse(&lines.join("\n")) {
-            Ok(parsed) => return (Some(parsed), errors),
+        match parse(&recovered) {
+            Ok(parsed) if errors.is_empty() => return Ok(parsed),
+            Ok(_) => return Err(errors),
             Err(error) => {
-                let Some(line) = error
+                let Some(range) = error
                     .line()
                     .checked_sub(1)
-                    .and_then(|index| lines.get_mut(index))
-                    .filter(|line| !line.trim().is_empty())
+                    .and_then(|index| ranges.get(index))
+                    .filter(|range| !recovered[(*range).clone()].trim().is_empty())
                 else {
                     errors.push(error);
-                    return (None, errors);
+                    return Err(errors);
                 };
-                line.clear();
+                recovered.replace_range(range.clone(), &" ".repeat(range.len()));
+                // Misplaced records are one error, however many lines.
+                if let ParseErrorKind::MisplacedRecords { lines: records } = error.kind() {
+                    for record in records {
+                        if let Some(range) = ranges.get(record - 1) {
+                            recovered.replace_range(range.clone(), &" ".repeat(range.len()));
+                        }
+                    }
+                }
                 if !depends_on_invalid_operation(&error, &errors, &original_lines) {
                     errors.push(error);
                 }
@@ -827,7 +1133,7 @@ fn depends_on_invalid_operation(
     previous_errors: &[ParseError],
     original_lines: &[String],
 ) -> bool {
-    let ParseErrorKind::UndeclaredOperation { name: operation } = &error.kind else {
+    let ParseErrorKind::UndeclaredOperation { name: operation } = error.kind() else {
         return false;
     };
     previous_errors.iter().any(|previous| {
@@ -849,6 +1155,19 @@ fn error_location(
     inventory_text: &str,
     external_inventory: bool,
 ) -> (DiagnosticSource, Option<Place>) {
+    if let Some(place) = pipeline_place(pipeline, lines, error) {
+        return (DiagnosticSource::Pipeline, Some(place));
+    }
+    let inventory_place = inventory_place(error, inventory_text);
+    match inventory_place {
+        Some(_) if external_inventory => (DiagnosticSource::Inventory, inventory_place),
+        _ => (DiagnosticSource::Pipeline, inventory_place),
+    }
+}
+
+/// Where in the pipeline `error` is, when it is about a step, rule or
+/// declaration there.
+fn pipeline_place(pipeline: &Pipeline, lines: &SourceMap, error: &ResolveError) -> Option<Place> {
     // The part of the step producing `output` that `error` is about.
     let step = |output: &str| {
         let step = lines.invocations.get(output)?;
@@ -863,12 +1182,12 @@ fn error_location(
         let first = matching.next()?;
         matching.next().is_none().then_some(first)
     };
-    let pipeline_place = match error {
-        ResolveError::TypeMismatch { output_product, .. }
-        | ResolveError::TypeVariableConflict { output_product, .. }
-        | ResolveError::MissingInput { output_product, .. }
-        | ResolveError::AmbiguousInput { output_product, .. }
-        | ResolveError::CollectionTooSmall { output_product, .. } => step(output_product),
+    match error {
+        ResolveError::TypeMismatch { site, .. }
+        | ResolveError::TypeVariableConflict { site, .. }
+        | ResolveError::MissingInput { site, .. }
+        | ResolveError::AmbiguousInput { site, .. }
+        | ResolveError::CollectionTooSmall { site, .. } => step(&site.output_product),
         ResolveError::UnknownOperation { name } => unique_step(name),
         ResolveError::UnknownProduct { name } => pipeline
             .invocations
@@ -902,11 +1221,12 @@ fn error_location(
             subject_place(pipeline, lines, subject, error)
         }
         ResolveError::DuplicateSourceArtifact { .. } => None,
-    };
-    if pipeline_place.is_some() {
-        return (DiagnosticSource::Pipeline, pipeline_place);
     }
+}
 
+/// The inventory record `error` is about, when it is about one: the whole
+/// line.
+fn inventory_place(error: &ResolveError, inventory_text: &str) -> Option<Place> {
     let inventory_line = match error {
         ResolveError::UnknownProduct { name } => inventory_record_lines(inventory_text, name, None)
             .into_iter()
@@ -925,14 +1245,10 @@ fn error_location(
         _ => None,
     };
     // A source record is one line; point at all of it.
-    let inventory_place = inventory_line.and_then(|line| {
+    inventory_line.and_then(|line| {
         let text = inventory_text.lines().nth(line.checked_sub(1)?)?;
         Some(Place::new(line, content_columns(text)))
-    });
-    match inventory_place {
-        Some(_) if external_inventory => (DiagnosticSource::Inventory, inventory_place),
-        _ => (DiagnosticSource::Pipeline, inventory_place),
-    }
+    })
 }
 
 fn inventory_record_lines(
@@ -940,14 +1256,11 @@ fn inventory_record_lines(
     product: &str,
     entities: Option<&EntityBinding>,
 ) -> Vec<usize> {
-    text.lines()
-        .enumerate()
-        .filter_map(|(index, line)| {
-            let candidate = format!("sources:\n{line}\n");
-            let parsed = parse_source_inventory(&candidate).ok()?;
-            let record = parsed.artifacts.first()?;
+    source_record_lines(text)
+        .into_iter()
+        .filter_map(|(line, record)| {
             (record.product == product && entities.is_none_or(|value| value == &record.entities))
-                .then_some(index + 1)
+                .then_some(line)
         })
         .collect()
 }

@@ -3,13 +3,10 @@
 
 use crate::model::{CommandRole, Invocation};
 
-use super::declarations::{
-    parse_command, parse_coverage_rule, parse_invocation_parts, parse_path, parse_product,
-};
-use super::flow::is_stage_header;
+use super::declarations::{parse_discover, parse_invocation_parts, parse_path};
+use super::keyword::{Header, Keyword};
 use super::lexical::{comma_items, identifier, strip_comment};
-use super::operation::parse_operation;
-use super::source_map::{name_place, rule_place, step_place, tail_place};
+use super::source_map::step_place;
 use super::{ParseError, StatementKind, Syntax, SHELL_SOURCE_REMOVED};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -22,12 +19,10 @@ enum Section {
 }
 
 pub(super) fn is_sectioned_document(text: &str) -> bool {
-    text.lines().map(strip_comment).map(str::trim).any(|line| {
-        matches!(
-            line,
-            "products:" | "operations:" | "pipeline:" | "constraints:" | "commands:"
-        )
-    })
+    text.lines()
+        .map(strip_comment)
+        .map(str::trim)
+        .any(|line| Header::of(line).is_some_and(|header| !header.is_records()))
 }
 
 pub(super) fn parse_sectioned(text: &str) -> Syntax {
@@ -50,76 +45,86 @@ fn sectioned_line(
 ) -> Result<(), ParseError> {
     let line = strip_comment(original).trim();
     let mut push = |kind| syntax.push(original, number, kind);
-    match line {
-        "" => {}
-        "products:" => *section = Some(Section::Products),
-        "operations:" => *section = Some(Section::Operations),
-        "pipeline:" => *section = Some(Section::Pipeline),
-        "constraints:" => *section = Some(Section::Constraints),
-        "commands:" => *section = Some(Section::Commands),
-        source if source.starts_with("use ") => {
+    if line.is_empty() {
+        return Ok(());
+    }
+    if let Some(header) = Header::of(line) {
+        *section = Some(match header {
+            Header::Products => Section::Products,
+            Header::Operations => Section::Operations,
+            Header::Pipeline => Section::Pipeline,
+            Header::Constraints => Section::Constraints,
+            Header::Commands => Section::Commands,
+            Header::Sources | Header::SourcePaths | Header::Contexts(_) => {
+                return Err(ParseError::new(
+                    number,
+                    "`sources:`, `source_paths:`, and `contexts:` records belong in a .spitout, not a pipeline",
+                ))
+            }
+        });
+        return Ok(());
+    }
+    match Keyword::split(line) {
+        Some((Keyword::Use, _)) => {
             push(StatementKind::Import);
             *section = None;
         }
-        source if source.starts_with("shell-source:") => {
+        Some((Keyword::Discover, declaration)) => {
+            let discovery = parse_discover(declaration.trim(), number)?;
+            push(StatementKind::Discover(discovery));
+            *section = None;
+        }
+        Some((Keyword::ShellSource, _)) => {
             return Err(ParseError::new(number, SHELL_SOURCE_REMOVED));
         }
-        stage if is_stage_header(stage) => {
+        Some((Keyword::Stage, _)) => {
             return Err(ParseError::new(
                 number,
                 "stages are written in the flow form, not in a sectioned document",
             ));
         }
-        path if path.starts_with("path:") || path.starts_with("path ") => {
-            push(StatementKind::Path(parse_path(None, original, path, number)?));
+        Some((Keyword::Path, _)) => {
+            push(StatementKind::Path(parse_path(
+                None, original, line, number,
+            )?));
             *section = None;
         }
-        "sources:" | "contexts:" => {
-            return Err(ParseError::new(
-                number,
-                "source inventory is separate from Pipeline; use parse_document for a combined text file",
-            ))
-        }
-        _ => match section {
-            Some(Section::Products) => {
-                let product = parse_product(line, number)?;
-                let place = name_place(original, number, line, &product.name);
-                push(StatementKind::Product(product, place));
-            }
-            Some(Section::Operations) => {
-                let operation = parse_operation(line, number)?;
-                let place = name_place(original, number, line, &operation.name);
-                push(StatementKind::Operation(operation, place));
-            }
-            Some(Section::Pipeline) => {
-                let invocation = parse_invocation(line, number)?;
-                let step = step_place(original, number, &invocation);
-                push(StatementKind::Step(invocation, step));
-            }
-            Some(Section::Constraints) => {
-                let rule = parse_coverage_rule(line, number)?;
-                let place = rule_place(original, number, &rule);
-                push(StatementKind::Constraint(rule, place));
-            }
-            Some(Section::Commands) => {
-                let command = match line.strip_prefix("verify ") {
-                    Some(declaration) => {
-                        parse_command(declaration.trim(), number, CommandRole::Verify)?
-                    }
-                    None => parse_command(line, number, CommandRole::Run)?,
-                };
-                let place = tail_place(original, number, command.template.as_str());
-                push(StatementKind::Command(command, place));
-            }
-            None => {
+        _ => {
+            let Some(section) = *section else {
                 return Err(ParseError::new(
                     number,
                     "expected a section header: products:, operations:, pipeline:, constraints:, or commands:",
-                ))
-            }
-        },
+                ));
+            };
+            push(section_statement(section, original, line, number)?);
+        }
     }
     Ok(())
+}
+
+/// A line inside `section`, as the statement that section holds.
+fn section_statement(
+    section: Section,
+    original: &str,
+    line: &str,
+    number: usize,
+) -> Result<StatementKind, ParseError> {
+    match section {
+        Section::Products => StatementKind::product(original, line, number),
+        Section::Operations => StatementKind::operation(original, line, number),
+        Section::Pipeline => {
+            let invocation = parse_invocation(line, number)?;
+            let step = step_place(original, number, &invocation);
+            Ok(StatementKind::Step(invocation, step))
+        }
+        Section::Constraints => StatementKind::constraint(original, line, number),
+        Section::Commands => match line.strip_prefix("verify ") {
+            Some(declaration) => {
+                StatementKind::command(original, declaration.trim(), number, CommandRole::Verify)
+            }
+            None => StatementKind::command(original, line, number, CommandRole::Run),
+        },
+    }
 }
 
 fn parse_invocation(line: &str, number: usize) -> Result<Invocation, ParseError> {

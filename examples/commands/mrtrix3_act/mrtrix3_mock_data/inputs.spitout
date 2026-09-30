@@ -1,0 +1,19 @@
+sources:
+    source_lut
+    target_lut
+
+contexts sessions:
+    [sub=01,ses=01]:
+        reverse_b0, reverse_b0_json, t1w
+        [run=01,02]:
+            raw_dwi, dwi_bvec, dwi_bval, dwi_json
+
+    [sub=01,ses=02]:
+        reverse_b0, reverse_b0_json, t1w
+        [run=01,02]:
+            raw_dwi, dwi_bvec, dwi_bval, dwi_json
+
+    [sub=02,ses=01]:
+        reverse_b0, reverse_b0_json, t1w
+        [run=01,02,03]:
+            raw_dwi, dwi_bvec, dwi_bval, dwi_json

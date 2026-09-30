@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --locked
+
+  messie:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        id: setup-python
+        with:
+          python-version: '3.11'
+      - name: Cache Messie environment
+        id: messie-cache
+        uses: actions/cache@v4
+        with:
+          path: .venv
+          key: ${{ runner.os }}-messie-py${{ steps.setup-python.outputs.python-version }}-${{ hashFiles('.github/messie-requirements.txt') }}
+      - name: Install Messie
+        if: steps.messie-cache.outputs.cache-hit != 'true'
+        run: |
+          python -m venv .venv
+          .venv/bin/python -m pip install -r .github/messie-requirements.txt
+      - name: Check repository folders
+        run: .venv/bin/messie .

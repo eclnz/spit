@@ -1,5 +1,7 @@
+mod support;
+
 use spit::{
-    render_dag, resolve, CountRequirement, CoverageRule, EntityBinding, InputBinding, InputPort,
+    parse_pipeline, render_dag, resolve, validate_pipeline, EntityBinding, InputBinding, InputPort,
     Invocation, OperationDef, Pipeline, ProductDef, ResolveError, ShapeRule, SourceInventory,
     SourceRecord, TypeExpr,
 };
@@ -7,12 +9,10 @@ use spit::{
 fn artifact(product: &str, pairs: &[(&str, &str)]) -> SourceRecord {
     SourceRecord::new(
         product,
-        EntityBinding(
-            pairs
-                .iter()
-                .map(|(k, v)| ((*k).into(), (*v).into()))
-                .collect(),
-        ),
+        pairs
+            .iter()
+            .map(|(k, v)| ((*k).into(), (*v).into()))
+            .collect::<EntityBinding>(),
     )
 }
 
@@ -99,8 +99,8 @@ fn expands_one_to_one_over_two_runs() {
     let dag = resolve(&pipeline, &inventory).unwrap();
     assert_eq!(dag.jobs.len(), 2);
     assert_eq!(dag.jobs[0].output().product, "denoised");
-    assert_eq!(dag.jobs[0].output().entities.0["run"], "1");
-    assert_eq!(dag.jobs[1].output().entities.0["run"], "2");
+    assert_eq!(dag.jobs[0].output().entities.get("run"), Some("1"));
+    assert_eq!(dag.jobs[1].output().entities.get("run"), Some("2"));
 }
 
 #[test]
@@ -118,8 +118,8 @@ fn reuses_less_specific_t1_across_runs() {
     let dag = resolve(&pipeline, &inventory).unwrap();
     assert_eq!(dag.jobs.len(), 2);
     assert_eq!(dag.jobs[0].inputs[1], dag.jobs[1].inputs[1]);
-    assert_eq!(dag.jobs[0].output().entities.0["run"], "1");
-    assert_eq!(dag.jobs[1].output().entities.0["run"], "2");
+    assert_eq!(dag.jobs[0].output().entities.get("run"), Some("1"));
+    assert_eq!(dag.jobs[1].output().entities.get("run"), Some("2"));
 }
 
 #[test]
@@ -136,7 +136,7 @@ fn reports_missing_input() {
 
     assert!(matches!(
         resolve(&pipeline, &inventory),
-        Err(ResolveError::MissingInput { port, .. }) if port == "reference"
+        Err(ResolveError::MissingInput { site: spit::PortSite { port, .. }, .. }) if port == "reference"
     ));
 }
 
@@ -184,7 +184,7 @@ fn checks_types_before_concrete_expansion() {
 
     assert!(matches!(
         resolve(&pipeline, &SourceInventory::default()),
-        Err(ResolveError::TypeMismatch { port, .. }) if port == "reference"
+        Err(ResolveError::TypeMismatch { site: spit::PortSite { port, .. }, .. }) if port == "reference"
     ));
 }
 
@@ -235,7 +235,7 @@ fn aggregates_each_fixed_dimension_group() {
     assert!(dag
         .jobs
         .iter()
-        .all(|job| !job.output().entities.0.contains_key("run")));
+        .all(|job| !job.output().entities.binds("run")));
     assert_ne!(dag.jobs[0].output().entities, dag.jobs[1].output().entities);
 }
 
@@ -332,43 +332,6 @@ fn catches_product_cycle() {
 }
 
 #[test]
-fn coverage_checks_each_observed_context_without_a_global_count() {
-    let pipeline = Pipeline {
-        products: vec![ProductDef::new(
-            "image",
-            TypeExpr::named("Image"),
-            ["site", "visit"],
-        )],
-        constraints: vec![CoverageRule::new(
-            "image",
-            ["site", "visit"],
-            CountRequirement::Exactly(1),
-        )],
-        ..Pipeline::default()
-    };
-    let inventory = SourceInventory {
-        artifacts: vec![artifact("image", &[("site", "A"), ("visit", "1")])],
-        contexts: vec![
-            EntityBinding::from_pairs([("site", "A"), ("visit", "1")]),
-            EntityBinding::from_pairs([("site", "B"), ("visit", "1")]),
-        ],
-    };
-    assert!(matches!(
-        resolve(&pipeline, &inventory),
-        Err(ResolveError::CoverageViolation { product, found: 0, .. }) if product == "image"
-    ));
-
-    let complete = SourceInventory {
-        artifacts: vec![
-            artifact("image", &[("site", "A"), ("visit", "1")]),
-            artifact("image", &[("site", "B"), ("visit", "1")]),
-        ],
-        contexts: inventory.contexts,
-    };
-    assert!(resolve(&pipeline, &complete).is_ok());
-}
-
-#[test]
 fn source_inventory_changes_job_count_without_changing_pipeline() {
     let pipeline = full_pipeline();
     let one_run = SourceInventory {
@@ -433,7 +396,6 @@ fn full_pipeline() -> Pipeline {
                 "mean_signal",
             ),
         ],
-        constraints: Vec::new(),
         ..Pipeline::default()
     }
 }
@@ -447,4 +409,52 @@ fn full_inventory() -> SourceInventory {
         ],
         ..SourceInventory::default()
     }
+}
+
+#[test]
+fn named_ports_and_declared_aggregate_shape_are_checked() {
+    let text = "source raw [site, run]\noperation combine(runs: many) @ drop(run)\nresult = combine(raw @ vary(run))\nsources:\n  raw[site=01,run=2]\n  raw[site=01,run=1]\n";
+    let (pipeline, inventory) = support::parse_fixture(text).unwrap();
+    assert_eq!(pipeline.operations[0].inputs[0].name, "runs");
+    assert_eq!(
+        pipeline.operations[0].aggregated_dimension.as_deref(),
+        Some("run")
+    );
+    let dag = resolve(&pipeline, &inventory.unwrap()).unwrap();
+    assert_eq!(dag.jobs[0].output().entities.len(), 1);
+
+    let wrong_vary = text.replace("vary(run)", "vary(site)");
+    let (pipeline, inventory) = support::parse_fixture(&wrong_vary).unwrap();
+    assert!(resolve(&pipeline, &inventory.unwrap())
+        .unwrap_err()
+        .to_string()
+        .contains("declares drop(run) but invocation uses vary(site)"));
+
+    let wrong_shape = text.replace("result =", "result : Data [site, run] =");
+    let (pipeline, inventory) = support::parse_fixture(&wrong_shape).unwrap();
+    assert!(resolve(&pipeline, &inventory.unwrap()).is_err());
+}
+
+#[test]
+fn pipeline_checks_need_no_inventory() {
+    let text = "source raw : Table [id]\noperation clean(Table) -> Table\n\ncleaned = clean(rwa)\n";
+    assert_eq!(
+        validate_pipeline(&parse_pipeline(text).unwrap()).unwrap_err(),
+        ResolveError::UnknownProduct {
+            name: "rwa".to_owned()
+        }
+    );
+
+    let text = "source raw : Table [id]\nsource other : Other [id]\noperation clean(Table) -> Table\ncleaned = clean(other)\n";
+    assert!(matches!(
+        validate_pipeline(&parse_pipeline(text).unwrap()),
+        Err(ResolveError::TypeMismatch { .. })
+    ));
+
+    let (pipeline, inventory) = support::parse_fixture(include_str!(
+        "../examples/commands/command_demo/command_demo.spit"
+    ))
+    .unwrap();
+    assert!(inventory.is_none());
+    validate_pipeline(&pipeline).unwrap();
 }

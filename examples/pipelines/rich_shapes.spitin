@@ -1,0 +1,4 @@
+pipeline rich_shapes.spit
+
+require scan count>=1 per [sub, ses]
+require ref count=1 per [sub, ses]

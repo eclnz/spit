@@ -1,0 +1,7 @@
+sources:
+    raw[team=Alpha,period=Q1,item=1]
+    raw[team=Alpha,period=Q1,item=2]
+    raw[team=Alpha,period=Q2,item=1]
+    raw[team=Beta,period=Q1,item=1]
+    policy[team=Alpha]
+    policy[team=Beta]

@@ -1,0 +1,3 @@
+pipeline nested.spit
+
+require shard count>=1 per [group]

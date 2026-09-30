@@ -6,21 +6,23 @@ use std::collections::BTreeMap;
 
 use crate::imports::apply_import;
 use crate::model::{
-    Cardinality, CommandDef, CoverageRule, InputBinding, Invocation, OperationDef, Pipeline,
-    ProductDef, SourceInventory, StageDef,
+    Cardinality, CommandDef, CoverageRule, InputBinding, InputRules, Invocation, OperationDef,
+    Pipeline, ProductDef, SourceInventory, StageDef,
 };
 use crate::parser::{
-    parse_source_inventory, parse_syntax, split_document, FlowStep, InlineInventory, ParseError,
+    parse_source_inventory, parse_syntax, split_document, without_bom, FlowStep, Kind, ParseError,
     ParseErrorKind, PathRule, Rule, SourceMap, Statement, StatementKind, Step, Syntax,
 };
-use crate::shape::{step_context, BoundInput};
+use crate::shape::{step_context, step_driver, BoundInput};
 use crate::span::Place;
 use crate::types::TypeExpr;
 
-/// A pipeline under construction together with where its declarations sit.
+/// A pipeline under construction, the input rules its document declares
+/// beside it, and where its declarations sit.
 #[derive(Default)]
 pub(crate) struct PipelineBuilder {
     pub(crate) pipeline: Pipeline,
+    pub(crate) inputs: InputRules,
     pub(crate) lines: SourceMap,
 }
 
@@ -40,7 +42,7 @@ impl PipelineBuilder {
             .constraints
             .insert(constraint.product.clone(), rule.clone());
         self.lines.rules.push(rule);
-        self.pipeline.constraints.push(constraint);
+        self.inputs.constraints.push(constraint);
     }
 
     pub(crate) fn add_command(&mut self, command: CommandDef, place: Place) {
@@ -48,7 +50,7 @@ impl PipelineBuilder {
         self.pipeline.commands.push(command);
     }
 
-    fn add_invocation(&mut self, invocation: Invocation, step: Step) {
+    fn add_invocation(&mut self, invocation: Invocation, step: &Step) {
         for output in &invocation.outputs {
             self.lines.invocations.insert(output.clone(), step.clone());
         }
@@ -67,7 +69,9 @@ impl PipelineBuilder {
     }
 
     fn add_path(&mut self, rule: &PathRule, line: usize) -> Result<(), ParseError> {
-        let Self { pipeline, lines } = self;
+        let Self {
+            pipeline, lines, ..
+        } = self;
         let template = rule.template.clone();
         if let Some(product) = &rule.product {
             lines.paths.insert(product.clone(), rule.place.clone());
@@ -118,13 +122,12 @@ impl PipelineBuilder {
             .find(|operation| &operation.name == name)
             .ok_or_else(|| {
                 let place = step.operation();
-                let mut error = ParseError::new(
+                ParseError::new(
                     place.line,
                     format!("operation `{name}` must be declared before its first flow step"),
                 )
-                .within(&place);
-                error.kind = ParseErrorKind::UndeclaredOperation { name: name.clone() };
-                error
+                .within(&place)
+                .with_kind(ParseErrorKind::UndeclaredOperation { name: name.clone() })
             })?;
         let dimensions = inferred_dimensions(invocation, operation, &self.pipeline);
         for (index, output) in outputs.iter().enumerate() {
@@ -138,7 +141,7 @@ impl PipelineBuilder {
             );
             self.add_product(product, step.output_at(index));
         }
-        self.add_invocation(invocation.clone(), step.clone());
+        self.add_invocation(invocation.clone(), step);
         Ok(())
     }
 }
@@ -149,9 +152,21 @@ impl PipelineBuilder {
 pub(crate) fn lower(
     syntax: &Syntax,
     imports: &BTreeMap<usize, Pipeline>,
+    kind: Kind,
 ) -> Result<PipelineBuilder, ParseError> {
     let mut builder = PipelineBuilder::default();
     for statement in &syntax.statements {
+        let rule = matches!(
+            statement.kind,
+            StatementKind::Discover(_) | StatementKind::Constraint(..)
+        );
+        if rule && kind == Kind::Pipeline {
+            return Err(ParseError::new(
+                statement.place.line,
+                "`discover`, `require` and `skip` rules belong in a .spitin recipe, not a pipeline",
+            )
+            .within(&statement.place));
+        }
         lower_statement(&mut builder, imports, statement)
             .map_err(|error| error.within(&statement.place))?;
     }
@@ -167,23 +182,32 @@ fn lower_statement(
     statement: &Statement,
 ) -> Result<(), ParseError> {
     match &statement.kind {
-        StatementKind::Import => apply_import(builder, imports, statement.place.clone())?,
+        StatementKind::Import => apply_import(builder, imports, &statement.place)?,
         StatementKind::Stage { name, place } => builder.add_stage(name, place.clone())?,
         StatementKind::Product(product, place) => {
-            builder.add_product(product.clone(), place.clone())
+            builder.add_product(product.clone(), place.clone());
+        }
+        StatementKind::Discover(discovery) => {
+            if builder.inputs.discovery(&discovery.name).is_some() {
+                return Err(ParseError::new(
+                    statement.place.line,
+                    format!("duplicate discovery `{}`", discovery.name),
+                ));
+            }
+            builder.inputs.discoveries.push(discovery.clone());
         }
         StatementKind::Operation(operation, place) => {
-            builder.add_operation(operation.clone(), place.clone())
+            builder.add_operation(operation.clone(), place.clone());
         }
         StatementKind::Constraint(constraint, rule) => {
-            builder.add_constraint(constraint.clone(), rule.clone())
+            builder.add_constraint(constraint.clone(), rule.clone());
         }
         StatementKind::Command(command, place) => {
-            builder.add_command(command.clone(), place.clone())
+            builder.add_command(command.clone(), place.clone());
         }
         StatementKind::Path(rule) => builder.add_path(rule, statement.place.line)?,
         StatementKind::Step(invocation, step) => {
-            builder.add_invocation(invocation.clone(), step.clone())
+            builder.add_invocation(invocation.clone(), step);
         }
         StatementKind::FlowStep(flow) => builder.add_flow_step(flow)?,
     }
@@ -219,49 +243,68 @@ fn inferred_dimensions(
     // Otherwise the step is invalid; the resolver reports why.
     inputs
         .filter(|inputs| inputs.len() == invocation.inputs.len())
-        .and_then(|inputs| step_context(&inputs))
-        .map(|(_, context)| context)
+        .and_then(|inputs| {
+            let (_, groups) = step_driver(&inputs)?;
+            Some(step_context(&inputs, &groups))
+        })
         .or_else(|| invocation.inputs.first().and_then(dimensions))
         .unwrap_or_default()
 }
 
-/// A parsed document: its pipeline, any inline inventory, and declaration lines.
+/// A parsed document: its pipeline, or a recipe's input rules and records,
+/// and declaration lines.
 pub(crate) struct ParsedDocument {
     pub(crate) pipeline: Pipeline,
+    pub(crate) inputs: InputRules,
     pub(crate) inventory: Option<SourceInventory>,
     pub(crate) lines: SourceMap,
-    /// The line of the first inline `sources:` or `contexts:` header.
-    pub(crate) inventory_line: Option<usize>,
 }
 
+/// Parse a pipeline. Input rules and records are not part of one: they
+/// belong in a `.spitin` recipe and a `.spitout`.
 pub fn parse_pipeline(text: &str) -> Result<Pipeline, ParseError> {
-    lower(&parse_syntax(text), &BTreeMap::new()).map(|builder| builder.pipeline)
-}
-
-/// Parse a text document that may package an inventory alongside its pipeline.
-/// The two remain separate values for resolution.
-pub fn parse_document(text: &str) -> Result<(Pipeline, Option<SourceInventory>), ParseError> {
-    parse_document_with_imports(text, &BTreeMap::new(), InlineInventory::Read)
-        .map(|document| (document.pipeline, document.inventory))
+    parse_document_with_imports(without_bom(text), &BTreeMap::new(), Kind::Pipeline)
+        .map(|document| document.pipeline)
 }
 
 pub(crate) fn parse_document_with_imports(
     text: &str,
     imports: &BTreeMap<usize, Pipeline>,
-    inline: InlineInventory,
+    kind: Kind,
 ) -> Result<ParsedDocument, ParseError> {
     let document = split_document(text);
-    let builder = lower(&parse_syntax(&document.pipeline), imports)?;
-    let inventory = match inline {
-        InlineInventory::Read if document.inventory_line.is_some() => {
-            Some(parse_source_inventory(&document.inventory)?)
+    let lowered = lower(&parse_syntax(&document.pipeline), imports, kind);
+    let inventory = match (kind, document.inventory_line) {
+        (_, None) => None,
+        (Kind::Recipe, Some(_)) => Some(parse_source_inventory(&document.inventory)?),
+        // An error on an earlier line is the first.
+        (Kind::Pipeline, Some(line)) => {
+            let earlier = lowered
+                .as_ref()
+                .err()
+                .is_some_and(|error| error.line() < line);
+            if !earlier {
+                let records = document
+                    .inventory
+                    .lines()
+                    .enumerate()
+                    .filter(|(_, text)| !text.trim().is_empty())
+                    .map(|(index, _)| index + 1)
+                    .collect();
+                return Err(ParseError::new(
+                    line,
+                    "`sources:` and `contexts:` records belong in a .spitout, not a pipeline",
+                )
+                .with_kind(ParseErrorKind::MisplacedRecords { lines: records }));
+            }
+            None
         }
-        _ => None,
     };
+    let builder = lowered?;
     Ok(ParsedDocument {
         pipeline: builder.pipeline,
+        inputs: builder.inputs,
         inventory,
         lines: builder.lines,
-        inventory_line: document.inventory_line,
     })
 }

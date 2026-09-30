@@ -1,11 +1,13 @@
 [package]
 name = "spit"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 license = "MIT"
 description = "A small static compiler for logical artifact pipelines"
 
 [dependencies]
+mimalloc = "0.1.52"
+rustc-hash = "2.1.3"
 
 [[example]]
 name = "basic"

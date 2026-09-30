@@ -2,12 +2,12 @@
 
 These are compile-only fixtures. They model artifact identities and types; the
 `.dat` and `.bin` paths are illustrative, and no commands are supplied to run
-the jobs. Use `check`, `dag`, or `check --paths` to inspect them.
+the jobs. Use `check`, `check --path-rules`, or `dag` to inspect them.
 
 ```sh
-cargo run -- check examples/stress/type_lab.spit --sources examples/stress/type_lab.sources
-cargo run -- dag examples/stress/type_lab.spit --sources examples/stress/type_lab.sources
-cargo run -- check examples/stress/observatory.spit --sources examples/stress/observatory.sources
+cargo run -- check examples/stress/type_lab.spit
+cargo run -- dag examples/stress/type_lab.spit examples/stress/type_lab.spitout
+cargo run -- dag examples/stress/observatory.spit examples/stress/observatory.spitout
 cargo test --test stress_pipelines
 ```
 
