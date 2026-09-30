@@ -9,6 +9,7 @@
 mod coverage;
 mod discover;
 
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::fmt;
@@ -225,11 +226,12 @@ impl InputSpec {
         self.merge_source_paths(pipeline, &mut inventory)?;
         let located = with_source_paths(pipeline, &inventory.source_paths);
         inspect_paths(&located)?;
-        let mut checked = check_inventory(pipeline, &self.rules, &inventory)?;
+        let checked = check_inventory(pipeline, &self.rules, Cow::Owned(inventory))?;
         skipped.extend(checked.skipped.iter().map(SkippedGroup::note));
-        locate_sources(&located, &mut checked.inventory)?;
+        let mut inventory = checked.inventory.into_owned();
+        locate_sources(&located, &mut inventory)?;
         Ok(ResolvedInputs {
-            inventory: checked.inventory,
+            inventory,
             skipped,
             gaps: checked.gaps,
             root,

@@ -1,6 +1,7 @@
 //! `require` and `skip` rules: checked first against the pipeline's source
 //! declarations, then applied to an inventory.
 
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -362,8 +363,9 @@ pub(crate) fn collect_rule_errors(
 
 /// An inventory after the skip rules, with what the `require` rules find
 /// missing and the sources each gap holds back.
-pub(crate) struct InputCheck {
-    pub(crate) inventory: SourceInventory,
+pub(crate) struct InputCheck<'a> {
+    /// The inventory as given, unless a skip rule removed records from it.
+    pub(crate) inventory: Cow<'a, SourceInventory>,
     pub(crate) gaps: Vec<CoverageGap>,
     /// The groups a `skip` rule removed from the records.
     pub(crate) skipped: Vec<SkippedGroup>,
@@ -372,11 +374,11 @@ pub(crate) struct InputCheck {
 /// Check an inventory's records against the pipeline's sources and its
 /// named contexts against the discovery rules, apply the skip rules, and
 /// find what the `require` rules miss.
-pub(crate) fn check_inventory(
+pub(crate) fn check_inventory<'a>(
     pipeline: &Pipeline,
     rules: &InputRules,
-    inventory: &SourceInventory,
-) -> Result<InputCheck, ResolveError> {
+    inventory: Cow<'a, SourceInventory>,
+) -> Result<InputCheck<'a>, ResolveError> {
     // A settled `.spitout` keeps the names of the rules that found its
     // contexts; without those rules the names are only a record of that.
     for (name, bindings) in &inventory.discovered {
@@ -397,15 +399,32 @@ pub(crate) fn check_inventory(
             }
         }
     }
-    // Validate every supplied record, including records a skip rule may omit.
-    let supplied = pipeline.source_artifacts(inventory)?;
-    let mut inventory = inventory.clone();
-    let skipped = apply_skips(rules, &mut inventory, false);
-    // Skipping only removes records, so when none go the artifacts stand.
-    let artifacts = if inventory.artifacts.len() == supplied.values().map(Vec::len).sum() {
-        supplied
+    let has = |action| rules.constraints.iter().any(|rule| rule.action == action);
+    // Validate every supplied record, including records a skip rule may
+    // omit. Only `require` rules need the records as artifacts.
+    let supplied = if has(CoverageAction::Require) {
+        Some(pipeline.source_artifacts(&inventory)?)
     } else {
-        pipeline.source_artifacts(&inventory)?
+        let mut seen = FxHashSet::default();
+        pipeline.check_sources(&inventory, |_, record| {
+            seen.insert((record.product.as_str(), &record.entities))
+        })?;
+        None
+    };
+    // Only a skip rule changes the inventory.
+    let mut inventory = inventory;
+    let skipped = if has(CoverageAction::Skip) {
+        apply_skips(rules, inventory.to_mut(), false)
+    } else {
+        Vec::new()
+    };
+    // Skipping only removes records, so when none go the artifacts stand.
+    let artifacts = match supplied {
+        Some(supplied) if inventory.artifacts.len() == supplied.values().map(Vec::len).sum() => {
+            supplied
+        }
+        Some(_) => pipeline.source_artifacts(&inventory)?,
+        None => BTreeMap::new(),
     };
     for (rule_index, rule) in rules.constraints.iter().enumerate() {
         if rules.discovery(&rule.product).is_some()
