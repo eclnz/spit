@@ -22,11 +22,12 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use spit::{
-    bind_dag, diagnose_checked, diagnose_checked_with_records, diagnose_recipe, inspect_paths,
-    parse_input_spec_at, render_artifacts, render_bound_dag, render_dag, render_diagnostics_json,
-    render_source_inventory, stage_within, validate_source_files, ArtifactReport, BoundDag,
-    Checked, Context, Diagnosis, Diagnostic, DiagnosticSource, InputSource, InputSpec,
-    PathTemplate, Pipeline, ResolvedDag, ResolvedInputs, Severity,
+    bind_dag, bind_dag_with, diagnose_checked, diagnose_checked_with_records, diagnose_recipe,
+    inspect_paths, parse_input_spec_at, render_artifacts, render_bound_dag, render_dag,
+    render_diagnostics_json, render_source_inventory, stage_within, validate_bound_source_files,
+    validate_source_files, ArtifactReport, BoundDag, BoundPaths, Checked, Context, Diagnosis,
+    Diagnostic, DiagnosticSource, InputSource, InputSpec, PathTemplate, Pipeline, ResolvedDag,
+    ResolvedInputs, Severity,
 };
 
 #[derive(Clone, Copy, PartialEq)]
@@ -754,13 +755,20 @@ fn dag(args: &CliArgs) -> Result<(), Box<dyn Error>> {
             .with_inventory_paths(located(&prepared.inputs))
             .validate(true)?;
     }
+    // Paths bound to check the source files are bound for the DAG too.
+    let mut paths = None;
     if let Some(root) = &prepared.root {
-        let verified = validate_source_files(&prepared.bound, dag, root)?;
+        let (verified, bound) = validate_bound_source_files(&prepared.bound, dag, root)?;
         eprintln!("note: {verified}");
+        paths = Some(bound);
     }
     eprintln!("note: {}", job_count(&prepared.pipeline, dag));
+    let bind = |paths: Option<BoundPaths>| match paths {
+        Some(paths) => bind_dag_with(&prepared.bound, dag, paths),
+        None => bind_dag(&prepared.bound, dag),
+    };
     if args.has(Flag::Output) || args.has(Flag::Json) {
-        let mut bound = bind_dag(&prepared.bound, dag)?;
+        let mut bound = bind(paths)?;
         bound.root = prepared.root.as_deref().map(|root| {
             std::path::absolute(root)
                 .unwrap_or_else(|_| root.to_path_buf())
@@ -770,10 +778,7 @@ fn dag(args: &CliArgs) -> Result<(), Box<dyn Error>> {
         return write_spitdag(args, &bound);
     }
     if args.has(Flag::Paths) {
-        print!(
-            "{}",
-            render_bound_dag(&bind_dag(&prepared.bound, dag)?, true)
-        );
+        print!("{}", render_bound_dag(&bind(paths)?, true));
     } else {
         print!("{}", render_dag(dag));
     }
