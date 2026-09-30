@@ -28,7 +28,7 @@ use spit::{
     render_source_inventory, stage_within, validate_bound_source_files, validate_source_files,
     ArtifactReport, BoundDag, BoundPaths, Checked, Context, Diagnosis, Diagnostic,
     DiagnosticSource, InputSource, InputSpec, PathTemplate, Pipeline, ResolvedDag, ResolvedInputs,
-    Severity,
+    Severity, View,
 };
 
 #[derive(Clone, Copy, PartialEq)]
@@ -56,7 +56,7 @@ struct CommandSpec {
 
 impl Command {
     fn spec(self) -> CommandSpec {
-        use Flag::{Json, Output, PathRules, Paths, Root, Stdin, StrictPaths};
+        use Flag::{Commands, Json, Output, PathRules, Paths, Root, Stdin, StrictPaths};
         match self {
             Self::Check => CommandSpec {
                 name: "check",
@@ -76,8 +76,8 @@ impl Command {
                 name: "dag",
                 files: "<recipe.spitin> or <pipeline.spit> <inputs.spitout | ->",
                 summary: "step 3: resolve a pipeline's jobs over a dataset's inputs; -o writes the .spitdag",
-                example: "spit dag dataset.spitin -o analysis.spitdag\n  spit dag analysis.spit dataset.spitout -o analysis.spitdag\n  spit dag analysis.spit dataset.spitout --paths",
-                flags: &[Root, StrictPaths, Paths, Json, Output],
+                example: "spit dag dataset.spitin -o analysis.spitdag\n  spit dag analysis.spit dataset.spitout -o analysis.spitdag\n  spit dag dataset.spitin --commands",
+                flags: &[Root, StrictPaths, Paths, Commands, Json, Output],
             },
             Self::Artifacts => CommandSpec {
                 name: "artifacts",
@@ -140,16 +140,18 @@ enum Flag {
     Root,
     Output,
     Paths,
+    Commands,
     PathRules,
     StrictPaths,
     Json,
     Stdin,
 }
 
-const FLAGS: [Flag; 7] = [
+const FLAGS: [Flag; 8] = [
     Flag::Root,
     Flag::Output,
     Flag::Paths,
+    Flag::Commands,
     Flag::PathRules,
     Flag::StrictPaths,
     Flag::Json,
@@ -157,10 +159,12 @@ const FLAGS: [Flag; 7] = [
 ];
 
 /// Pairs of flags that cannot be used together.
-const CONFLICTS: [(Flag, Flag); 5] = [
+const CONFLICTS: [(Flag, Flag); 7] = [
     (Flag::Json, Flag::Paths),
     (Flag::Json, Flag::Output),
     (Flag::Paths, Flag::Output),
+    (Flag::Json, Flag::Commands),
+    (Flag::Commands, Flag::Output),
     (Flag::Json, Flag::PathRules),
     (Flag::Json, Flag::StrictPaths),
 ];
@@ -171,6 +175,7 @@ impl Flag {
             Self::Root => "--root",
             Self::Output => "-o",
             Self::Paths => "--paths",
+            Self::Commands => "--commands",
             Self::PathRules => "--path-rules",
             Self::StrictPaths => "--strict-paths",
             Self::Json => "--json",
@@ -194,6 +199,7 @@ impl Flag {
             (Self::Output, Command::Inputs) => "write the .spitout to <file>, not standard output",
             (Self::Output, _) => "write the .spitdag to <file>",
             (Self::Paths, _) => "show each artifact's file",
+            (Self::Commands, _) => "show each job's command lines, as a shell would run them",
             (Self::PathRules, _) => "list the path rule each product uses",
             (Self::StrictPaths, _) => "require an explicit path rule for every product",
             (Self::Json, Command::Check) => "print diagnostics as JSON, for editors",
@@ -786,8 +792,17 @@ fn dag(args: &CliArgs) -> Result<(), Box<dyn Error>> {
         });
         return write_spitdag(args, &bound);
     }
-    if args.has(Flag::Paths) {
-        print!("{}", render_bound_dag(&bind(paths)?, true));
+    let view = View {
+        paths: args.has(Flag::Paths),
+        commands: args.has(Flag::Commands),
+    };
+    if view.paths || view.commands {
+        if view.commands {
+            if let Some(root) = &prepared.root {
+                eprintln!("note: commands run from `{}`", root.display());
+            }
+        }
+        print!("{}", render_bound_dag(&bind(paths)?, view));
     } else {
         print!("{}", render_dag(dag));
     }

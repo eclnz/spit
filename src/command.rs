@@ -1,9 +1,10 @@
 //! Command templates, and static checks of commands against their operations.
 //!
 //! A command is stored as a list of arguments, each made of literal text and
-//! `{placeholders}`. How the arguments are quoted for a shell, and where the
-//! artifact paths are rooted, is left to a backend.
+//! `{placeholders}`. A backend runs the arguments as they are; [`shell_word`]
+//! quotes one for a person to read or paste into a shell.
 
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
@@ -247,6 +248,20 @@ fn check_command_placeholders(
     Ok(())
 }
 
+/// `word` as a POSIX shell must be given it to read it back unchanged: as it
+/// is when every character is one a shell leaves alone, and otherwise in
+/// single quotes, with each `'` in it written `'\''`. The reverse of how a
+/// template's words are read, so a line of quoted words splits back into
+/// the words that were quoted.
+pub(crate) fn shell_word(word: &str) -> Cow<'_, str> {
+    let plain =
+        |character: char| character.is_ascii_alphanumeric() || "_@%+=:,./-".contains(character);
+    if !word.is_empty() && word.chars().all(plain) {
+        return Cow::Borrowed(word);
+    }
+    Cow::Owned(format!("'{}'", word.replace('\'', "'\\''")))
+}
+
 /// A word of a command, before its placeholders are parsed.
 struct Word {
     /// The text, with quoted or escaped braces written `{{` and `}}`.
@@ -327,4 +342,59 @@ fn split_arguments(template: &str) -> Result<Vec<Word>, CommandError> {
         });
     }
     Ok(arguments)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_plain_word_is_left_as_it_is() {
+        for word in [
+            "tool",
+            "--out=build/x.csv",
+            "a_b@c%d+e:f,g.h/i-j",
+            "2026-09-01",
+        ] {
+            assert_eq!(shell_word(word), word);
+        }
+    }
+
+    #[test]
+    fn any_other_word_is_quoted() {
+        assert_eq!(shell_word(""), "''");
+        assert_eq!(shell_word("two words"), "'two words'");
+        assert_eq!(shell_word("it's"), "'it'\\''s'");
+        assert_eq!(shell_word("$HOME"), "'$HOME'");
+        assert_eq!(shell_word("#note"), "'#note'");
+        assert_eq!(shell_word("é"), "'é'");
+    }
+
+    #[test]
+    fn quoted_words_split_back_into_the_same_words() {
+        let words = [
+            "tool",
+            "",
+            "two words",
+            "it's",
+            "'",
+            "\\",
+            "$x `y`",
+            "*.csv",
+            "~",
+            "#c",
+            "{a}",
+            "a\"b",
+            "tab\there",
+            "é",
+        ];
+        let line: Vec<_> = words.iter().map(|word| shell_word(word)).collect();
+        let split = split_arguments(&line.join(" ")).unwrap();
+        // Quoted braces read back doubled, as a template's literal braces do.
+        let read: Vec<_> = split
+            .iter()
+            .map(|word| word.text.replace("{{", "{").replace("}}", "}"))
+            .collect();
+        assert_eq!(read, words);
+    }
 }

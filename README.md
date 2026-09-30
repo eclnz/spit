@@ -63,8 +63,8 @@ SPIT has no backend yet: nothing in this repository runs a `.spitdag`.
 ```text
 spit check <pipeline.spit | recipe.spitin> [--path-rules] [--strict-paths] [--json] [--stdin]
 spit inputs <recipe.spitin> [--root <directory>] [-o <file>]
-spit dag <recipe.spitin> [--root <directory>] [--strict-paths] [--paths | --json | -o <file>]
-spit dag <pipeline.spit> <inputs.spitout | -> [--strict-paths] [--paths | --json | -o <file>]
+spit dag <recipe.spitin> [--root <directory>] [--strict-paths] [--paths] [--commands] [--json | -o <file>]
+spit dag <pipeline.spit> <inputs.spitout | -> [--strict-paths] [--paths] [--commands] [--json | -o <file>]
 spit artifacts <recipe.spitin> [--root <directory>]
 spit artifacts <pipeline.spit> <inputs.spitout | -> [--root <directory>]
 ```
@@ -84,6 +84,7 @@ Files come first; options follow them. `spit help` lists the commands, and `spit
 | `--root <directory>` | With `inputs`, the folder to scan; the recipe's folder by default. With `dag` and `artifacts`, the dataset folder, to check that each source file exists there. |
 | `--path-rules` | With `check`, list the path rule each product uses. |
 | `--paths` | With `dag`, print the file under every artifact. |
+| `--commands` | With `dag`, print each job's `verify` and command lines with their paths filled in, quoted as a shell reads them, so a line can be pasted into a shell run from the dataset folder. With `--paths`, print them under each job's artifacts. |
 | `--strict-paths` | With `check` and `dag`, require an explicit `path product:` rule for every product, even if a default `path:` rule exists. Source rules settled from a recipe count when building a DAG. |
 | `--json` | With `dag`, print the `.spitdag`. With `check`, print diagnostics as JSON for editor use and stop, succeeding whatever they report. Each diagnostic has a `severity` of `error` or `warning`; those tied to a declaration, call, rule, command, or path include its `line`, and a `column` and `end_column` for the text it is about, such as one input of a call or one `{placeholder}`. Columns are 1-based and count UTF-16 code units, as editors do; `end_column` is one past the last character. |
 | `--stdin` | With `check`, read the file's text from standard input, such as an editor's unsaved buffer. The file's path is still used to resolve `use` imports and a recipe's `pipeline` line. |
@@ -171,10 +172,11 @@ This creates two sort jobs for `alpha`, one for `beta`, and one merge job for ea
 ```sh
 cargo run -- check examples/commands/command_demo/command_demo.spit --path-rules
 cargo run -- dag examples/commands/command_demo/command_demo.spit examples/commands/command_demo/command_demo.spitout --paths
+cargo run -- dag examples/commands/command_demo/command_demo.spit examples/commands/command_demo/command_demo.spitout --commands
 cargo run -- dag examples/commands/command_demo/command_demo.spit examples/commands/command_demo/command_demo.spitout -o command_demo.spitdag
 ```
 
-`dag --paths` shows each artifact's file, and `-o` writes the `.spitdag`. It holds everything a backend needs to run the jobs, so a backend reads nothing else: no pipeline, path rule or command template. Paths in it are relative to the dataset folder.
+`dag --paths` shows each artifact's file, `dag --commands` shows the exact command lines each job will run, and `-o` writes the `.spitdag`. It holds everything a backend needs to run the jobs, so a backend reads nothing else: no pipeline, path rule or command template. Paths in it are relative to the dataset folder.
 
 ### Find incomplete artifacts
 

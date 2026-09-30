@@ -136,6 +136,11 @@ fn each_option_applies_to_its_commands() {
     assert!(stderr(&output).starts_with("error: --paths applies to dag\n"));
     let conflict = spit(&["dag", "a.spit", "b.spitout", "--json", "-o", "x"]);
     assert!(stderr(&conflict).starts_with("error: --json cannot be used with -o\n"));
+    // The command lines are a text view; the .spitdag already holds them.
+    let commands = spit(&["dag", "a.spit", "b.spitout", "--commands", "-o", "x"]);
+    assert!(stderr(&commands).starts_with("error: --commands cannot be used with -o\n"));
+    let commands = spit(&["artifacts", "a.spit", "b.spitout", "--commands"]);
+    assert!(stderr(&commands).starts_with("error: --commands applies to dag\n"));
     let extra = spit(&["check", "a.spit", "b.spitout"]);
     assert!(stderr(&extra).starts_with("error: unexpected file `b.spitout`\n"));
 }

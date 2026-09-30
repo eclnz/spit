@@ -46,7 +46,7 @@ pub use paths::{
     inspect_paths, validate_bound_source_files, validate_source_files, BoundPaths, PathCoverage,
     PathCoverageEntry, PathError, PathProblem, PathRule, PathTemplate, VerifiedFiles,
 };
-pub use render::{render_artifacts, render_bound_dag, render_dag};
+pub use render::{render_artifacts, render_bound_dag, render_dag, View};
 pub use resolver::{bind_dag, bind_dag_with, resolve, resolve_artifacts_excluding, BindError};
 pub use spitdag::{ArgPart, Argument, BoundArtifact, BoundDag, BoundJob};
 pub use types::{

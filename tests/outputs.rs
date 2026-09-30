@@ -163,6 +163,24 @@ fn a_complete_dataset_prints_as_before() {
 }
 
 #[test]
+fn command_lines_print_as_before() {
+    let tree = dataset(false);
+    let runs: [&[&str]; 2] = [
+        &["dag", "strict.spitin", "--root", ".", "--commands"],
+        &[
+            "dag",
+            "strict.spitin",
+            "--root",
+            ".",
+            "--commands",
+            "--paths",
+        ],
+    ];
+    let text: String = runs.iter().map(|args| run(&tree, args)).collect();
+    check("commands", &text);
+}
+
+#[test]
 fn a_dataset_with_gaps_prints_as_before() {
     let tree = dataset(true);
     let runs: [&[&str]; 5] = [

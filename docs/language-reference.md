@@ -85,6 +85,8 @@ A `verify` command checks a job's inputs before its command runs, using the tool
 verify register: check_same_grid {moving} {reference}
 ```
 
+`spit dag --commands` shows each job's `verify` lines above the command they guard, with their paths filled in.
+
 Input port names are optional. A port written as a lowercase word alone, as in `operation copy(image)`, is named `image` and untyped; type names start with a capital letter. An unnamed single input is `{input}`; multiple unnamed inputs are `{input1}`, `{input2}`, and so on. An operation whose only input is a `many` input can also reach it as `{inputs}`, whatever its name. Named ports give clearer errors, although errors also name the product bound to a port. `{output}` is the path of a single unnamed output, so `output` cannot name an input port. A command must use every output placeholder; a `verify` command may use inputs only. Command templates give ordered words and arguments, not shell pipelines or redirection; an unquoted `|`, `>`, `&&`, or the like is passed to the program as an argument, and SPIT warns about it. Words are split and quoted as in Bash, and every argument is passed literally: `$` and backticks are not expanded. As in Bash, text in single quotes is literal, so `awk '{print $1}'` needs no escaping; a placeholder is filled in unquoted text or double quotes. Write `{{` or `}}`, or `\{` and `\}`, for a literal brace elsewhere. Every command is checked when the pipeline is loaded: braces and quotes must balance, placeholders must name the operation's ports, and `{output}` must appear.
 
 The first word of a command must be an executable available on `PATH` (or an executable path). SPIT emits that command without managing its installation or loading shell functions:
