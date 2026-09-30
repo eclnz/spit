@@ -22,16 +22,16 @@ The work is in four phases: small independent fixes first, then the one large ch
 - Before each commit, run `cargo test` and `usability/harness/rebuild_keys.sh`.
 - A key that stops resolving to the same jobs is either a regression, or an intended change that the commit explains and re-blesses.
 
-### Phase 1: small, independent fixes
+### Phase 1: small, independent fixes (done)
 
 These touch separate code and change no language, so they can land in any order.
 
-1. **B7:** the help line ([small fixes](small-fixes.md#b7-the-help-line)).
-2. **B6:** natural order for `external_inputs` ([small fixes](small-fixes.md#b6-order-a-spitdags-lists-as-many-inputs-are-ordered)).
-3. **F4:** `dag --commands` ([commands view](commands-view.md)).
-4. **B3:** file names in every message ([diagnostics](diagnostics.md#b3-name-the-file-a-message-is-about)).
-5. **B5, F3 part 1:** count and list unused sources ([diagnostics](diagnostics.md#b5-and-f3-say-what-the-inventory-holds-that-no-job-uses)).
-6. **D1–D4, D7, D9, D10:** guide sections for behaviour that is staying ([guide](guide.md#gaps-to-write-down-now)).
+1. **B7:** the help line ([small fixes](small-fixes.md#b7-the-help-line)). Done in `b782b87`.
+2. **B6:** natural order for `external_inputs` ([small fixes](small-fixes.md#b6-order-a-spitdags-lists-as-many-inputs-are-ordered)). Done in `87780cf`.
+3. **F4:** `dag --commands` ([commands view](commands-view.md)). Done in `3f27d75`.
+4. **B3:** file names in every message ([diagnostics](diagnostics.md#b3-name-the-file-a-message-is-about)). Done in `8e17408`.
+5. **B5, F3 part 1:** count and list unused sources ([diagnostics](diagnostics.md#b5-and-f3-say-what-the-inventory-holds-that-no-job-uses)). Done in `912df53`.
+6. **D1–D4, D7, D9, D10:** guide sections for behaviour that is staying ([guide](guide.md#gaps-to-write-down-now)). Done in `13801f2`.
 
 ### Phase 2: removing inputs
 
