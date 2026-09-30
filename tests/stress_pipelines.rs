@@ -10,17 +10,17 @@ fn type_lab() -> (spit::Pipeline, spit::SourceInventory) {
 fn jobs<'a>(dag: &'a spit::ResolvedDag, product: &str) -> Vec<&'a Job> {
     dag.jobs
         .iter()
-        .filter(|job| job.output().product == product)
+        .filter(|job| dag.artifact(job.output()).product == product)
         .collect()
 }
 
 fn type_of(dag: &spit::ResolvedDag, product: &str) -> spit::TypeExpr {
     let family = jobs(dag, product);
     assert!(!family.is_empty(), "no jobs for {product}");
-    let expected = family[0].output().artifact_type.clone();
+    let expected = dag.artifact(family[0].output()).artifact_type.clone();
     assert!(family
         .iter()
-        .all(|job| job.output().artifact_type == expected));
+        .all(|job| *dag.artifact(job.output()).artifact_type == expected));
     expected
 }
 
@@ -84,16 +84,17 @@ fn nested_types_propagate_across_polymorphic_branches_and_rollups() {
     let batch = jobs(&dag, "selected_batch")
         .into_iter()
         .find(|job| {
-            job.output().entities.get("lab") == Some("Alpha")
-                && job.output().entities.get("rig") == Some("R1")
-                && job.output().entities.get("capture") == Some("C1")
+            let entities = dag.artifact(job.output()).entities;
+            entities.get("lab") == Some("Alpha")
+                && entities.get("rig") == Some("R1")
+                && entities.get("capture") == Some("C1")
         })
         .unwrap();
     assert_eq!(batch.inputs[0].len(), 2);
     assert_eq!(batch.dependencies.len(), 2);
     assert!(batch
         .input_artifacts()
-        .all(|input| input.entities.get("capture") == Some("C1")));
+        .all(|input| dag.artifact(input).entities.get("capture") == Some("C1")));
     assert_eq!(jobs(&dag, "global_summary")[0].dependencies.len(), 2);
 }
 

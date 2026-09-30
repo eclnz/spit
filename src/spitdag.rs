@@ -5,23 +5,30 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::io;
-use std::sync::Arc;
-
-use rustc_hash::{FxHashMap, FxHashSet};
+use std::ops::Range;
 
 use crate::json::{write_array, write_number, write_string, ObjectWriter, Out};
+use crate::model::{identity, ArtifactId, Artifacts, EntityBinding};
 use crate::types::TypeExpr;
 
 /// The schema version a `.spitdag` is written with.
 pub const SPITDAG_VERSION: usize = 3;
 
-/// A resolved DAG with its paths bound and its commands expanded.
+/// A resolved DAG with its paths bound and its commands expanded. Its
+/// artifacts are the resolved DAG's, each kept once with its path; jobs,
+/// and the paths in their commands, refer to them by id.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct BoundDag {
     /// The absolute dataset folder every path is relative to, when known.
     pub root: Option<String>,
     /// Each job after the jobs it depends on.
     pub jobs: Vec<BoundJob>,
+    artifacts: Artifacts,
+    /// Each artifact's file, relative to the dataset root, by id; empty for
+    /// an artifact no job uses.
+    paths: Vec<String>,
+    /// Each product's dimensions in declared order, by product number.
+    dimensions: Vec<Vec<String>>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -30,11 +37,10 @@ pub struct BoundJob {
     pub operation: String,
     /// The stage of the step that made this job, as `outer/inner`.
     pub stage: Option<String>,
-    /// Each input port and its artifacts, in port order. Jobs that use the
-    /// same artifact share it.
-    pub inputs: Vec<(String, Vec<Arc<BoundArtifact>>)>,
+    /// Each input port and its artifacts, in port order.
+    pub inputs: Vec<(String, Vec<ArtifactId>)>,
     /// Each output port and its artifact, in port order.
-    pub outputs: Vec<(String, Arc<BoundArtifact>)>,
+    pub outputs: Vec<(String, ArtifactId)>,
     pub depends_on: Vec<usize>,
     /// The command that makes the outputs; `None` when the operation has none.
     pub command: Option<Vec<Argument>>,
@@ -42,14 +48,15 @@ pub struct BoundJob {
     pub verify: Vec<Vec<Argument>>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct BoundArtifact {
-    pub product: String,
-    /// Each dimension and value, in the product's declared order.
-    pub entities: Vec<(String, String)>,
-    pub artifact_type: TypeExpr,
+/// An artifact of a bound DAG, with its path.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct BoundArtifact<'a> {
+    pub product: &'a str,
+    pub artifact_type: &'a TypeExpr,
     /// The file, relative to the dataset root.
-    pub path: String,
+    pub path: &'a str,
+    entities: &'a EntityBinding,
+    dimensions: &'a [String],
 }
 
 /// One command-line argument: literal text and artifact paths, joined.
@@ -58,66 +65,106 @@ pub type Argument = Vec<ArgPart>;
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ArgPart {
     Text(String),
-    /// A file relative to the dataset root.
-    Path(String),
+    /// An artifact's file, relative to the dataset root.
+    Path(ArtifactId),
 }
 
-impl BoundArtifact {
+impl<'a> BoundArtifact<'a> {
+    /// Each dimension and value, in the product's declared order.
+    pub fn entities(&self) -> impl Iterator<Item = (&'a str, &'a str)> {
+        let entities = self.entities;
+        self.dimensions
+            .iter()
+            .filter_map(|dimension| Some((dimension.as_str(), entities.get(dimension)?)))
+    }
+
     /// Its product and bindings, as `image[sub=1,ses=2]`.
     pub fn identity(&self) -> String {
-        let entities = self
-            .entities
-            .iter()
-            .map(|(dimension, value)| (dimension.as_str(), value.as_str()));
-        crate::model::identity(&self.product, entities)
+        identity(self.product, self.entities())
     }
 }
 
 impl BoundJob {
     /// Every input artifact, in port order.
-    pub fn input_artifacts(&self) -> impl Iterator<Item = &BoundArtifact> {
+    pub fn input_artifacts(&self) -> impl Iterator<Item = ArtifactId> + '_ {
         self.inputs
             .iter()
             .flat_map(|(_, artifacts)| artifacts)
-            .map(Arc::as_ref)
+            .copied()
     }
 }
 
 impl BoundDag {
+    /// `jobs` over `artifacts`, where the artifact with each id has the path
+    /// `paths` holds for it and each product, by number, has `dimensions`.
+    pub(crate) fn new(
+        artifacts: Artifacts,
+        paths: Vec<String>,
+        dimensions: Vec<Vec<String>>,
+        jobs: Vec<BoundJob>,
+    ) -> Self {
+        Self {
+            root: None,
+            jobs,
+            artifacts,
+            paths,
+            dimensions,
+        }
+    }
+
+    pub fn artifact(&self, id: ArtifactId) -> BoundArtifact<'_> {
+        let artifact = self.artifacts.get(id);
+        BoundArtifact {
+            product: artifact.product,
+            artifact_type: artifact.artifact_type,
+            path: &self.paths[id.index()],
+            entities: artifact.entities,
+            dimensions: &self.dimensions[self.artifacts.product_of(id) as usize],
+        }
+    }
+
+    /// The path of `id`, relative to the dataset root.
+    pub fn path(&self, id: ArtifactId) -> &str {
+        &self.paths[id.index()]
+    }
+
+    /// Whether each artifact, by id, is an output of a job here.
+    fn produced(&self) -> Vec<bool> {
+        let mut produced = vec![false; self.paths.len()];
+        for &(_, output) in self.jobs.iter().flat_map(|job| &job.outputs) {
+            produced[output.index()] = true;
+        }
+        produced
+    }
+
     /// The inputs no job here makes, each once, by path: sources, and the
     /// outputs of stages left out.
-    pub fn external_inputs(&self) -> Vec<&BoundArtifact> {
-        let produced: FxHashSet<_> = self
-            .jobs
-            .iter()
-            .flat_map(|job| &job.outputs)
-            .map(|(_, artifact)| artifact.path.as_str())
-            .collect();
-        let mut external = FxHashMap::default();
-        for artifact in self.jobs.iter().flat_map(BoundJob::input_artifacts) {
-            if !produced.contains(artifact.path.as_str()) {
-                external.entry(artifact.path.as_str()).or_insert(artifact);
+    pub fn external_inputs(&self) -> Vec<BoundArtifact<'_>> {
+        let mut seen = self.produced();
+        let mut external = Vec::new();
+        for input in self.jobs.iter().flat_map(BoundJob::input_artifacts) {
+            if !seen[input.index()] {
+                seen[input.index()] = true;
+                external.push(input);
             }
         }
-        let mut external: Vec<_> = external.into_iter().collect();
-        external.sort_unstable_by_key(|&(path, _)| path);
-        external.into_iter().map(|(_, artifact)| artifact).collect()
+        // Every artifact has its own path, so the order is total.
+        external.sort_unstable_by_key(|&id| self.path(id));
+        external.into_iter().map(|id| self.artifact(id)).collect()
     }
 
     /// The outputs no job here reads: what a full run leaves behind, in job
     /// order.
-    pub fn targets(&self) -> Vec<&BoundArtifact> {
-        let read: FxHashSet<_> = self
-            .jobs
-            .iter()
-            .flat_map(BoundJob::input_artifacts)
-            .map(|artifact| artifact.path.as_str())
-            .collect();
+    pub fn targets(&self) -> Vec<BoundArtifact<'_>> {
+        let mut read = vec![false; self.paths.len()];
+        for input in self.jobs.iter().flat_map(BoundJob::input_artifacts) {
+            read[input.index()] = true;
+        }
         self.jobs
             .iter()
             .flat_map(|job| &job.outputs)
-            .map(|(_, artifact)| artifact.as_ref())
-            .filter(|artifact| !read.contains(artifact.path.as_str()))
+            .filter(|(_, output)| !read[output.index()])
+            .map(|&(_, output)| self.artifact(output))
             .collect()
     }
 
@@ -188,6 +235,7 @@ fn write_document(
 ) -> io::Result<()> {
     let mut handed = Ok(());
     let dependents = dag.dependents();
+    let artifacts = ArtifactJson::new(dag);
     let mut document = ObjectWriter::start(out);
     document.field("version", |out| write_number(out, SPITDAG_VERSION));
     document.field("generator", |out| {
@@ -201,10 +249,14 @@ fn write_document(
         None => out.push_str("null"),
     });
     document.field("external_inputs", |out| {
-        write_array(out, dag.external_inputs(), write_artifact);
+        write_array(out, dag.external_inputs(), |out, artifact| {
+            write_artifact(out, &artifact);
+        });
     });
     document.field("targets", |out| {
-        write_array(out, dag.targets(), write_artifact);
+        write_array(out, dag.targets(), |out, artifact| {
+            write_artifact(out, &artifact);
+        });
     });
     document.field("executables", |out| {
         write_array(out, dag.executables(), |out, name| write_string(out, &name));
@@ -216,7 +268,7 @@ fn write_document(
                 return;
             }
             let dependents = dependents.get(&job.id).map_or(&[][..], Vec::as_slice);
-            write_job(out, job, dependents, &mut work);
+            write_job(out, dag, &artifacts, job, dependents, &mut work);
             if out.len() >= PIECE {
                 handed = hand_on(out);
             }
@@ -227,20 +279,64 @@ fn write_document(
     handed
 }
 
+/// Each artifact a job uses, as JSON, written once however many jobs use it.
+struct ArtifactJson {
+    text: String,
+    /// Where each artifact's JSON is in `text`, by id; empty for one no job
+    /// uses.
+    spans: Vec<Range<usize>>,
+}
+
+impl ArtifactJson {
+    fn new(dag: &BoundDag) -> Self {
+        let mut used = vec![false; dag.paths.len()];
+        for job in &dag.jobs {
+            for id in job
+                .input_artifacts()
+                .chain(job.outputs.iter().map(|&(_, id)| id))
+            {
+                used[id.index()] = true;
+            }
+        }
+        let mut text = String::new();
+        let spans = dag
+            .artifacts
+            .ids()
+            .map(|id| {
+                let start = text.len();
+                if used[id.index()] {
+                    write_artifact(&mut text, &dag.artifact(id));
+                }
+                start..text.len()
+            })
+            .collect();
+        Self { text, spans }
+    }
+
+    fn get(&self, id: ArtifactId) -> &str {
+        &self.text[self.spans[id.index()].clone()]
+    }
+}
+
 /// One job. What it reads, writes and runs is written first into `work`, a
 /// buffer reused between jobs, as the object its fingerprint hashes; the
 /// job's own fields then copy from it.
-fn write_job(out: &mut String, job: &BoundJob, dependents: &[usize], work: &mut String) {
+fn write_job(
+    out: &mut String,
+    dag: &BoundDag,
+    artifacts: &ArtifactJson,
+    job: &BoundJob,
+    dependents: &[usize],
+    work: &mut String,
+) {
     work.clear();
     let mut object = ObjectWriter::start(work);
     let operation = object.field_at("operation", |out| write_string(out, &job.operation));
     let inputs = object.field_at("inputs", |out| {
         let mut inputs = ObjectWriter::start(out);
-        for (port, artifacts) in &job.inputs {
+        for (port, ids) in &job.inputs {
             inputs.field(port, |out| {
-                write_array(out, artifacts, |out, artifact| {
-                    write_artifact(out, artifact)
-                });
+                write_array(out, ids, |out, &id| out.push_str(artifacts.get(id)));
             });
         }
         inputs.finish();
@@ -248,16 +344,18 @@ fn write_job(out: &mut String, job: &BoundJob, dependents: &[usize], work: &mut 
     let outputs = object.field_at("outputs", |out| {
         let mut outputs = ObjectWriter::start(out);
         for (port, artifact) in &job.outputs {
-            outputs.field(port, |out| write_artifact(out, artifact));
+            outputs.field(port, |out| out.push_str(artifacts.get(*artifact)));
         }
         outputs.finish();
     });
     let command = object.field_at("command", |out| match &job.command {
-        Some(command) => write_command(out, command),
+        Some(command) => write_command(out, dag, command),
         None => out.push_str("null"),
     });
     let verify = object.field_at("verify", |out| {
-        write_array(out, &job.verify, |out, command| write_command(out, command));
+        write_array(out, &job.verify, |out, command| {
+            write_command(out, dag, command);
+        });
     });
     object.finish();
 
@@ -326,13 +424,13 @@ impl Out for Fnv {
 
 /// An argument is an array of parts: a string for text, `{"path": ...}` for
 /// a file.
-fn write_command(out: &mut String, command: &[Argument]) {
+fn write_command(out: &mut String, dag: &BoundDag, command: &[Argument]) {
     write_array(out, command, |out, argument| {
         write_array(out, argument, |out, part| match part {
             ArgPart::Text(text) => write_string(out, text),
-            ArgPart::Path(path) => {
+            ArgPart::Path(artifact) => {
                 out.push_str("{\"path\":");
-                write_string(out, path);
+                write_string(out, dag.path(*artifact));
                 out.push('}');
             }
         });
@@ -342,11 +440,11 @@ fn write_command(out: &mut String, command: &[Argument]) {
 // Artifacts are most of a `.spitdag`, so their fixed keys are written as
 // whole pieces rather than a field at a time.
 
-fn write_artifact(out: &mut String, artifact: &BoundArtifact) {
+fn write_artifact(out: &mut String, artifact: &BoundArtifact<'_>) {
     out.push_str("{\"product\":");
-    write_string(out, &artifact.product);
+    write_string(out, artifact.product);
     out.push_str(",\"entities\":{");
-    for (index, (dimension, value)) in artifact.entities.iter().enumerate() {
+    for (index, (dimension, value)) in artifact.entities().enumerate() {
         if index > 0 {
             out.push(',');
         }
@@ -355,9 +453,9 @@ fn write_artifact(out: &mut String, artifact: &BoundArtifact) {
         write_string(out, value);
     }
     out.push_str("},\"type\":");
-    write_type(out, &artifact.artifact_type);
+    write_type(out, artifact.artifact_type);
     out.push_str(",\"path\":");
-    write_string(out, &artifact.path);
+    write_string(out, artifact.path);
     out.push('}');
 }
 
@@ -388,57 +486,58 @@ fn write_type(out: &mut String, artifact_type: &TypeExpr) {
 mod tests {
     use super::*;
 
-    fn artifact(product: &str, path: &str) -> Arc<BoundArtifact> {
-        Arc::new(BoundArtifact {
-            product: product.into(),
-            entities: vec![
-                ("sub".into(), "1".into()),
-                ("run".into(), "a\"\\\n\u{1}é".into()),
+    /// A DAG of the jobs `jobs` makes from the ids of `raw`, `clean` and
+    /// `mean`: one artifact each, at `in/1.txt`, `out/1.txt` and
+    /// `out/mean.txt`, with entities that need escaping.
+    fn bound(jobs: impl FnOnce([ArtifactId; 3]) -> Vec<BoundJob>) -> BoundDag {
+        let artifact_type = TypeExpr::applied(
+            "MRI",
+            vec![
+                TypeExpr::applied("Pair", vec![TypeExpr::named("T1w"), TypeExpr::Unknown]),
+                TypeExpr::named("Diffusion"),
             ],
-            artifact_type: TypeExpr::applied(
-                "MRI",
-                vec![
-                    TypeExpr::applied("Pair", vec![TypeExpr::named("T1w"), TypeExpr::Unknown]),
-                    TypeExpr::named("Diffusion"),
-                ],
-            ),
-            path: path.into(),
-        })
+        );
+        let entities = EntityBinding::from_pairs([("sub", "1"), ("run", "a\"\\\n\u{1}é")]);
+        let mut artifacts = Artifacts::default();
+        let ids = ["raw", "clean", "mean"].map(|product| {
+            let number = artifacts.product(product, &artifact_type);
+            artifacts.add(number, entities.clone()).unwrap()
+        });
+        let paths = ["in/1.txt", "out/1.txt", "out/mean.txt"].map(String::from);
+        let dimensions = vec![vec!["sub".to_owned(), "run".to_owned()]; 3];
+        BoundDag::new(artifacts, paths.to_vec(), dimensions, jobs(ids))
     }
 
     #[test]
     fn a_spitdag_is_written_with_its_version_and_escapes() {
-        let dag = BoundDag {
-            root: Some("/data/study".into()),
-            jobs: vec![
+        let mut dag = bound(|[raw, clean, mean]| {
+            vec![
                 BoundJob {
                     id: 1,
                     operation: "clean".into(),
                     stage: Some("prep/denoise".into()),
-                    inputs: vec![("raw".into(), vec![artifact("raw", "in/1.txt")])],
-                    outputs: vec![("output".into(), artifact("clean", "out/1.txt"))],
+                    inputs: vec![("raw".into(), vec![raw])],
+                    outputs: vec![("output".into(), clean)],
                     depends_on: vec![],
                     command: Some(vec![
                         vec![ArgPart::Text("tool".into())],
-                        vec![
-                            ArgPart::Text("--in=".into()),
-                            ArgPart::Path("in/1.txt".into()),
-                        ],
+                        vec![ArgPart::Text("--in=".into()), ArgPart::Path(raw)],
                     ]),
-                    verify: vec![vec![vec![ArgPart::Path("in/1.txt".into())]]],
+                    verify: vec![vec![vec![ArgPart::Path(raw)]]],
                 },
                 BoundJob {
                     id: 2,
                     operation: "mean".into(),
                     stage: None,
-                    inputs: vec![("frames".into(), vec![artifact("clean", "out/1.txt")])],
-                    outputs: vec![("output".into(), artifact("mean", "out/mean.txt"))],
+                    inputs: vec![("frames".into(), vec![clean])],
+                    outputs: vec![("output".into(), mean)],
                     depends_on: vec![1],
                     command: None,
                     verify: vec![],
                 },
-            ],
-        };
+            ]
+        });
+        dag.root = Some("/data/study".into());
         let text = dag.to_json();
         assert!(text.starts_with(&format!(
             "{{\"version\":3,\"generator\":{{\"name\":\"spit\",\"version\":\"{}\"}},\
@@ -472,34 +571,30 @@ mod tests {
 
     #[test]
     fn a_fingerprint_follows_the_work_not_the_job_number() {
-        let job = BoundJob {
+        let job = |[raw, clean, _]: [ArtifactId; 3]| BoundJob {
             id: 1,
             operation: "clean".into(),
             stage: None,
-            inputs: vec![("raw".into(), vec![artifact("raw", "in/1.txt")])],
-            outputs: vec![("output".into(), artifact("clean", "out/1.txt"))],
+            inputs: vec![("raw".into(), vec![raw])],
+            outputs: vec![("output".into(), clean)],
             depends_on: vec![],
             command: Some(vec![vec![ArgPart::Text("tool".into())]]),
             verify: vec![],
         };
-        let print = |job: &BoundJob| {
-            let text = BoundDag {
-                root: None,
-                jobs: vec![job.clone()],
-            }
-            .to_json();
+        let print = |make: &dyn Fn([ArtifactId; 3]) -> BoundJob| {
+            let text = bound(|ids| vec![make(ids)]).to_json();
             let start = text.find("\"fingerprint\":\"").unwrap() + 15;
             text[start..start + 16].to_owned()
         };
-        let renumbered = BoundJob {
+        let renumbered = |ids| BoundJob {
             id: 7,
             stage: Some("prep".into()),
-            ..job.clone()
+            ..job(ids)
         };
         assert_eq!(print(&job), print(&renumbered));
-        let changed = BoundJob {
+        let changed = |ids| BoundJob {
             command: Some(vec![vec![ArgPart::Text("other".into())]]),
-            ..job.clone()
+            ..job(ids)
         };
         assert_ne!(print(&job), print(&changed));
         assert!(print(&job).bytes().all(|byte| byte.is_ascii_hexdigit()));

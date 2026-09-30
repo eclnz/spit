@@ -150,7 +150,7 @@ pub fn outputs(dag: &ResolvedDag) -> Vec<String> {
     dag.jobs
         .iter()
         .flat_map(|job| &job.outputs)
-        .map(ToString::to_string)
+        .map(|&output| dag.artifact(output).to_string())
         .collect()
 }
 

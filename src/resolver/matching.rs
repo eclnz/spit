@@ -1,22 +1,19 @@
 //! Expanding a checked step into jobs: one per driving artifact or group,
 //! with every other input matched to that job.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::compile::{CompiledStep, StepShape};
 use crate::error::{PortSite, ResolveError};
-use crate::model::{
-    ArtifactInstance, ArtifactMap, ArtifactSet, EntityBinding, Gap, Invocation, Job, OperationDef,
-};
+use crate::model::{ArtifactId, Artifacts, EntityBinding, Gap, Invocation, Job, OperationDef};
 
-use super::family;
-
-/// `inputs` is complete only when `gaps` is empty.
+/// One job of a step: its inputs, and the context each of its outputs
+/// binds. `inputs` is complete only when `gaps` is empty.
 pub(super) struct Expansion {
-    pub(super) inputs: Vec<Vec<ArtifactInstance>>,
-    pub(super) outputs: Vec<ArtifactInstance>,
+    pub(super) inputs: Vec<Vec<ArtifactId>>,
+    pub(super) context: EntityBinding,
     pub(super) gaps: Vec<Gap>,
 }
 
@@ -24,25 +21,31 @@ pub(super) struct Expansion {
 /// many input, with every other input matched to that job's context.
 pub(super) fn expand_step(
     step: &CompiledStep<'_>,
-    artifacts: &BTreeMap<String, Vec<ArtifactInstance>>,
-    incomplete: &ArtifactSet,
+    artifacts: &Artifacts,
+    families: &[Vec<ArtifactId>],
+    incomplete: &[bool],
 ) -> Vec<Expansion> {
     let (invocation, shape) = (step.invocation, &step.shape);
-    let candidates: Vec<Vec<&ArtifactInstance>> = invocation
+    let candidates: Vec<Vec<ArtifactId>> = invocation
         .inputs
         .iter()
         .map(|binding| {
-            family(artifacts, binding.product_name())
+            artifacts
+                .product_number(binding.product_name())
+                .map_or(&[][..], |number| &families[number as usize])
                 .iter()
-                .filter(|artifact| {
-                    binding.pinned.iter().all(|(dimension, value)| {
-                        artifact.entities.get(dimension) == Some(value.as_str())
-                    })
+                .copied()
+                .filter(|&artifact| {
+                    let entities = artifacts.entities(artifact);
+                    binding
+                        .pinned
+                        .iter()
+                        .all(|(dimension, value)| entities.get(dimension) == Some(value.as_str()))
                 })
                 .collect()
         })
         .collect();
-    let contexts = broadcast_contexts(invocation, &candidates);
+    let contexts = broadcast_contexts(invocation, artifacts, &candidates);
     let indexes: Vec<JoinIndex<'_>> = candidates
         .iter()
         .enumerate()
@@ -53,14 +56,17 @@ pub(super) fn expand_step(
             let mut by_values = JoinIndex::default();
             for &candidate in candidates {
                 by_values
-                    .entry(join_values(&shape.joins[index], &candidate.entities))
+                    .entry(join_values(
+                        &shape.joins[index],
+                        artifacts.entities(candidate),
+                    ))
                     .or_default()
                     .push(candidate);
             }
             by_values
         })
         .collect();
-    let jobs = driver_groups(&candidates[shape.driver], shape)
+    let jobs = driver_groups(artifacts, &candidates[shape.driver], shape)
         .into_iter()
         .flat_map(|(group, driven)| {
             contexts.iter().map(move |values| {
@@ -69,13 +75,13 @@ pub(super) fn expand_step(
                 (context, driven.clone())
             })
         });
-    jobs.map(|(context, driven)| expand_job(step, &indexes, incomplete, &context, &driven))
+    jobs.map(|(context, driven)| expand_job(step, artifacts, &indexes, incomplete, context, driven))
         .collect()
 }
 
 /// One input's candidates, by their values for the dimensions it joins on,
 /// so each job finds its match without scanning them all.
-type JoinIndex<'a> = FxHashMap<Vec<Option<&'a str>>, Vec<&'a ArtifactInstance>>;
+type JoinIndex<'a> = FxHashMap<Vec<Option<&'a str>>, Vec<ArtifactId>>;
 
 /// `entities`' values for `joins`, in order; `None` where one is unbound.
 fn join_values<'a>(joins: &[String], entities: &'a EntityBinding) -> Vec<Option<&'a str>> {
@@ -89,10 +95,11 @@ fn join_values<'a>(joins: &[String], entities: &'a EntityBinding) -> Vec<Option<
 /// matched to `context`, and the gaps that leave it incomplete.
 fn expand_job(
     step: &CompiledStep<'_>,
+    artifacts: &Artifacts,
     indexes: &[JoinIndex<'_>],
-    incomplete: &ArtifactSet,
-    context: &EntityBinding,
-    driven: &[ArtifactInstance],
+    incomplete: &[bool],
+    context: EntityBinding,
+    mut driven: Vec<ArtifactId>,
 ) -> Expansion {
     let (invocation, operation, shape) = (step.invocation, step.operation, &step.shape);
     let mut gaps = Vec::new();
@@ -109,12 +116,12 @@ fn expand_job(
     let mut inputs = Vec::new();
     for (index, port) in operation.inputs.iter().enumerate() {
         let bound = if index == shape.driver {
-            driven.to_vec()
+            std::mem::take(&mut driven)
         } else {
             let matches = indexes[index]
-                .get(&join_values(&shape.joins[index], context))
+                .get(&join_values(&shape.joins[index], &context))
                 .map_or(&[][..], Vec::as_slice);
-            match match_input(invocation, operation, index, matches, context) {
+            match match_input(invocation, operation, index, matches, &context) {
                 Ok(artifact) => vec![artifact],
                 Err(gap) => {
                     gaps.push(gap);
@@ -125,28 +132,17 @@ fn expand_job(
         gaps.extend(
             bound
                 .iter()
-                .filter(|artifact| incomplete.contains(artifact))
-                .map(|artifact| Gap::Blocked {
+                .filter(|artifact| incomplete[artifact.index()])
+                .map(|&artifact| Gap::Blocked {
                     port: port.name.clone(),
-                    artifact: artifact.clone(),
+                    artifact: artifacts.get(artifact).to_instance(),
                 }),
         );
         inputs.push(bound);
     }
-    // Every artifact in a family has the same type, so the type inferred
-    // statically for each output is the type of each job's artifact.
-    let outputs = step
-        .outputs
-        .iter()
-        .map(|(product, artifact_type)| ArtifactInstance {
-            product: product.name.clone(),
-            artifact_type: artifact_type.clone(),
-            entities: context.clone(),
-        })
-        .collect();
     Expansion {
         inputs,
-        outputs,
+        context,
         gaps,
     }
 }
@@ -156,21 +152,22 @@ fn expand_job(
 /// one. Families are sorted, so groups keep the order of their first
 /// artifact and each collection is in natural entity order.
 fn driver_groups(
-    candidates: &[&ArtifactInstance],
+    artifacts: &Artifacts,
+    candidates: &[ArtifactId],
     shape: &StepShape,
-) -> Vec<(EntityBinding, Vec<ArtifactInstance>)> {
-    let mut groups: Vec<(EntityBinding, Vec<ArtifactInstance>)> = Vec::new();
-    let mut group_index: BTreeMap<EntityBinding, usize> = BTreeMap::new();
-    for artifact in candidates {
-        let context = artifact
-            .entities
+) -> Vec<(EntityBinding, Vec<ArtifactId>)> {
+    let mut groups: Vec<(EntityBinding, Vec<ArtifactId>)> = Vec::new();
+    let mut group_index: FxHashMap<EntityBinding, usize> = FxHashMap::default();
+    for &artifact in candidates {
+        let context = artifacts
+            .entities(artifact)
             .project(&shape.groups)
             .expect("an artifact binds every dimension of its product");
         let index = *group_index.entry(context.clone()).or_insert_with(|| {
             groups.push((context, Vec::new()));
             groups.len() - 1
         });
-        groups[index].1.push((*artifact).clone());
+        groups[index].1.push(artifact);
     }
     groups
 }
@@ -182,9 +179,9 @@ fn match_input(
     invocation: &Invocation,
     operation: &OperationDef,
     index: usize,
-    matches: &[&ArtifactInstance],
+    matches: &[ArtifactId],
     context: &EntityBinding,
-) -> Result<ArtifactInstance, Gap> {
+) -> Result<ArtifactId, Gap> {
     let [artifact] = matches else {
         let site = port_site(invocation, operation, index);
         let context = Box::new(context.clone());
@@ -194,7 +191,7 @@ fn match_input(
             ResolveError::AmbiguousInput { site, context }
         }));
     };
-    Ok((**artifact).clone())
+    Ok(*artifact)
 }
 
 /// Where input `index` of a step is bound.
@@ -212,7 +209,8 @@ fn port_site(invocation: &Invocation, operation: &OperationDef, index: usize) ->
 /// A step without broadcasts has one empty combination.
 fn broadcast_contexts(
     invocation: &Invocation,
-    candidates: &[Vec<&ArtifactInstance>],
+    artifacts: &Artifacts,
+    candidates: &[Vec<ArtifactId>],
 ) -> Vec<EntityBinding> {
     let mut contexts = vec![EntityBinding::default()];
     for (binding, candidates) in invocation.inputs.iter().zip(candidates) {
@@ -220,10 +218,10 @@ fn broadcast_contexts(
             continue;
         }
         let mut values: Vec<EntityBinding> = Vec::new();
-        let mut seen = BTreeSet::new();
-        for candidate in candidates {
-            let value = candidate
-                .entities
+        let mut seen = FxHashSet::default();
+        for &candidate in candidates {
+            let value = artifacts
+                .entities(candidate)
                 .project(&binding.each)
                 .expect("an artifact binds every dimension of its product");
             if seen.insert(value.clone()) {
@@ -248,14 +246,14 @@ pub(super) fn make_job(
     id: usize,
     operation: &OperationDef,
     stage: Option<String>,
-    inputs: Vec<Vec<ArtifactInstance>>,
-    outputs: Vec<ArtifactInstance>,
-    artifact_producers: &ArtifactMap<usize>,
+    inputs: Vec<Vec<ArtifactId>>,
+    outputs: Vec<ArtifactId>,
+    producers: &[Option<usize>],
 ) -> Job {
     let dependencies: BTreeSet<_> = inputs
         .iter()
         .flatten()
-        .filter_map(|input| artifact_producers.get(input).copied())
+        .filter_map(|input| producers[input.index()])
         .collect();
     Job {
         id,

@@ -49,7 +49,7 @@ fn complete(report: &ArtifactReport) -> Vec<String> {
         .jobs
         .iter()
         .flat_map(|job| &job.outputs)
-        .map(ToString::to_string)
+        .map(|&output| report.dag.artifact(output).to_string())
         .collect()
 }
 
