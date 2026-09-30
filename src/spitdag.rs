@@ -8,7 +8,7 @@ use std::io;
 use std::ops::Range;
 
 use crate::json::{write_array, write_number, write_string, ObjectWriter, Out};
-use crate::model::{identity, ArtifactId, Artifacts, EntityBinding};
+use crate::model::{identity, natural_cmp, ArtifactId, Artifacts, EntityBinding};
 use crate::types::TypeExpr;
 
 /// The schema version a `.spitdag` is written with.
@@ -148,8 +148,9 @@ impl BoundDag {
                 external.push(input);
             }
         }
-        // Every artifact has its own path, so the order is total.
-        external.sort_unstable_by_key(|&id| self.path(id));
+        // In the order `many` inputs take, so `wave10` follows `wave2`. Every
+        // artifact has its own path, so the order is total.
+        external.sort_unstable_by(|&left, &right| natural_cmp(self.path(left), self.path(right)));
         external.into_iter().map(|id| self.artifact(id)).collect()
     }
 
@@ -567,6 +568,39 @@ mod tests {
             text.contains("\"depends_on\":[1],\"dependents\":[]"),
             "{text}"
         );
+    }
+
+    #[test]
+    fn external_inputs_are_in_the_order_many_inputs_take() {
+        let artifact_type = TypeExpr::named("Table");
+        let mut artifacts = Artifacts::default();
+        let wave = artifacts.product("wave", &artifact_type);
+        let fit = artifacts.product("fit", &artifact_type);
+        let waves = ["1", "10", "2"].map(|value| {
+            artifacts
+                .add(wave, EntityBinding::from_pairs([("wave", value)]))
+                .unwrap()
+        });
+        let output = artifacts.add(fit, EntityBinding::from_pairs([])).unwrap();
+        let paths = ["w/wave1.csv", "w/wave10.csv", "w/wave2.csv", "fit.json"].map(String::from);
+        let job = BoundJob {
+            id: 1,
+            operation: "fit".into(),
+            stage: None,
+            inputs: vec![("waves".into(), waves.to_vec())],
+            outputs: vec![("output".into(), output)],
+            depends_on: vec![],
+            command: None,
+            verify: vec![],
+        };
+        let dimensions = vec![vec!["wave".to_owned()], vec![]];
+        let dag = BoundDag::new(artifacts, paths.to_vec(), dimensions, vec![job]);
+        let order: Vec<_> = dag
+            .external_inputs()
+            .iter()
+            .map(|input| input.path)
+            .collect();
+        assert_eq!(order, ["w/wave1.csv", "w/wave2.csv", "w/wave10.csv"]);
     }
 
     #[test]
