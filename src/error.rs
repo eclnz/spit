@@ -108,6 +108,11 @@ pub enum ResolveError {
         value: String,
         discovery: bool,
     },
+    /// A `require` rule whose grouping forms no group, so it checks nothing.
+    NoGroupsToCheck {
+        rule: String,
+        rule_index: usize,
+    },
     InvalidDefinition {
         subject: DefinitionSubject,
         detail: String,
@@ -226,6 +231,10 @@ impl fmt::Display for ResolveError {
             } else {
                 write!(f, "source coverage for `{product}` at [{context}]: no artifact with {dimension}={value}")
             },
+            Self::NoGroupsToCheck { rule, .. } => write!(
+                f,
+                "`{rule}` has no groups to check: nothing in the dataset has those dimensions"
+            ),
             Self::InvalidDefinition { detail, .. } => f.write_str(detail),
         }
     }

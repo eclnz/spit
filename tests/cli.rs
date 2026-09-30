@@ -350,8 +350,19 @@ fn a_recipe_names_its_own_pipeline_for_dag_and_artifacts() {
     let recipe = "examples/commands/command_demo/command_demo.spitin";
     let pipeline = "examples/commands/command_demo/command_demo.spit";
     let inventory = "examples/commands/command_demo/command_demo.spitout";
+    // The example keeps no data beside its recipe; scan a folder that has
+    // the shards its inventory lists.
+    let data = Tree::new(
+        "recipe-alone",
+        &[
+            "input/alpha/01.txt",
+            "input/alpha/02.txt",
+            "input/beta/01.txt",
+        ],
+    );
+    let root = data.path().to_str().unwrap();
     for command in ["dag", "artifacts"] {
-        let alone = spit(&[command, recipe]);
+        let alone = spit(&[command, recipe, "--root", root]);
         assert!(alone.status.success(), "{}", stderr(&alone));
         // The pipeline is the recipe's to name, not the command line's, even
         // when it names the same one.
@@ -414,9 +425,9 @@ fn a_recipe_checks_a_pipeline_saved_with_a_byte_order_mark() {
 }
 
 #[test]
-fn a_recipe_whose_skip_leaves_a_discovery_empty_runs_in_memory_as_it_settles() {
+fn drop_rules_that_remove_every_group_stop_each_command() {
     let tree = Tree::new(
-        "skip-all",
+        "drop-all",
         &["data/sub-1/ses-1/image.nii", "data/sub-2/ses-1/image.nii"],
     );
     tree.write(
@@ -425,14 +436,23 @@ fn a_recipe_whose_skip_leaves_a_discovery_empty_runs_in_memory_as_it_settles() {
          operation clean(Img) -> Clean\ncommand clean: tool {input} {output}\n\
          path: out/{product}/{sub}_{ses}.txt\ncleaned = clean(image)\n",
     );
-    // Every subject has one session, so the skip rejects every group.
+    // Every subject has one session, so the drop removes every subject;
+    // before, a `require` after it checked nothing and passed.
     let recipe = tree.write(
         "data.spitin",
         "pipeline analysis.spit\ndiscover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}\n\
-         skip sessions count>=2 per [sub]\nrequire sessions count>=1 per [sub]\n",
+         drop [sub] where sessions count<2\nrequire sessions count>=1 per [sub]\n",
     );
     for command in ["inputs", "dag", "artifacts"] {
         let output = spit(&[command, recipe.to_str().unwrap()]);
-        assert!(output.status.success(), "{command}: {}", stderr(&output));
+        assert!(!output.status.success(), "{command}");
+        assert!(
+            stderr(&output).contains(
+                "error: drop rules removed all 2 [sub] groups, leaving nothing to plan: \
+                 `drop [sub] where sessions count<2` (line 3)"
+            ),
+            "{command}: {}",
+            stderr(&output)
+        );
     }
 }

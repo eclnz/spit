@@ -37,7 +37,8 @@ impl PipelineBuilder {
         self.pipeline.operations.push(operation);
     }
 
-    pub(crate) fn add_constraint(&mut self, constraint: CoverageRule, rule: Rule) {
+    pub(crate) fn add_constraint(&mut self, mut constraint: CoverageRule, rule: Rule) {
+        constraint.line = Some(rule.line);
         self.lines
             .constraints
             .insert(constraint.product.clone(), rule.clone());
@@ -163,7 +164,7 @@ pub(crate) fn lower(
         if rule && kind == Kind::Pipeline {
             return Err(ParseError::new(
                 statement.place.line,
-                "`discover`, `require`, `skip` and `exclude` rules belong in a .spitin recipe, not a pipeline",
+                "`discover`, `require`, `drop` and `exclude` rules belong in a .spitin recipe, not a pipeline",
             )
             .within(&statement.place));
         }

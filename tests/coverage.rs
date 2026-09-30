@@ -67,7 +67,12 @@ fn a_rule_is_checked_against_the_pipeline_without_an_inventory() {
     let text = "source image [subject, run]\nrequire image subject=a per [subject]\n";
     let (pipeline, spec, _) = support::parse_with_rules(text).unwrap();
     let error = spec.check(&pipeline).unwrap_err();
-    assert!(error.to_string().contains("outside its groups"), "{error}");
+    assert!(
+        error
+            .to_string()
+            .contains("`subject` is one of the rule's groups ([subject])"),
+        "{error}"
+    );
 }
 
 #[test]

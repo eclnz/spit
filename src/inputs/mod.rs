@@ -1,9 +1,9 @@
 //! The input stage: settle which contexts and sources a dataset holds.
 //!
-//! It reads a `.spitin` recipe of `discover`, `require`, `skip`, `exclude` and source
+//! It reads a `.spitin` recipe of `discover`, `exclude`, `drop`, `require` and source
 //! path rules, and the pipeline's source declarations. It scans a root or
 //! takes records already written, and returns a plain inventory with what it
-//! skipped and what the `require` rules find missing. Resolving jobs needs
+//! removed and what the `require` rules find missing. Resolving jobs needs
 //! nothing else from it.
 
 mod coverage;
@@ -20,12 +20,15 @@ use crate::compile::validate_pipeline;
 use crate::error::ResolveError;
 use crate::imports::parse_located_document;
 use crate::lower::{parse_document_with_imports, ParsedDocument};
-use crate::model::{ArtifactInstance, CoverageGap, InputRules, Pipeline, SourceInventory};
+use crate::model::{
+    ArtifactInstance, CoverageAction, CoverageGap, InputRules, Pipeline, SourceInventory,
+};
 use crate::parser::{strip_comment, without_bom, Header, Keyword, Kind, ParseError, SourceMap};
 use crate::paths::{inspect_paths, PathError, PathTemplate};
 
 pub(crate) use self::coverage::collect_rule_errors;
-use self::coverage::SkippedGroup;
+pub use self::coverage::EveryGroupDropped;
+use self::coverage::{apply_drops, check_before_removal};
 pub(crate) use self::coverage::{check_inventory, InputCheck};
 use self::discover::{discover, locate_sources, with_source_paths};
 pub use self::discover::{discover_source_files, discover_sources, Discovery};
@@ -220,12 +223,12 @@ impl InputSpec {
     }
 
     /// Run the input stage: find the contexts and source files a dataset
-    /// holds, apply the `skip` rules, check the `require` rules, and give
+    /// holds, apply the `exclude` and `drop` rules, check the `require` rules, and give
     /// each source record its file's path.
     ///
     /// The stage reads `pipeline` only for its source products and leaves it
     /// untouched. What it returns is a plain inventory, so resolving jobs
-    /// never sees a discovery, coverage or skip rule.
+    /// never sees a discovery, exclude, drop or require rule.
     pub fn resolve(
         &self,
         pipeline: &Pipeline,
@@ -233,12 +236,15 @@ impl InputSpec {
     ) -> Result<ResolvedInputs, InputError> {
         validate_pipeline(pipeline)?;
         self.check(pipeline)?;
-        let (mut inventory, mut skipped, root, mut removed) = match source {
+        let (mut inventory, skipped, root, removed) = match source {
             InputSource::Discover(root) => {
                 let located = with_source_paths(pipeline, &self.rules.source_paths);
                 let found = discover(&located, &self.rules, root)?;
                 if let Some(unmatched) = found.unmatched {
                     return Err(InputError::UnmatchedExclusion(unmatched));
+                }
+                if let Some(emptied) = found.emptied {
+                    return Err(InputError::EveryGroupDropped(emptied));
                 }
                 (
                     found.inventory,
@@ -248,18 +254,28 @@ impl InputSpec {
                 )
             }
             InputSource::Inventory(mut inventory) => {
+                let removes = !self.rules.exclusions.is_empty()
+                    || self
+                        .rules
+                        .constraints
+                        .iter()
+                        .any(|rule| rule.action == CoverageAction::Drop);
+                if removes {
+                    check_before_removal(pipeline, &self.rules, &inventory)?;
+                }
                 let mut excluder = Excluder::new(&self.rules.exclusions);
                 excluder.apply(&mut inventory);
-                let excluded = excluder.finish().map_err(InputError::UnmatchedExclusion)?;
-                (inventory, Vec::new(), None, excluded)
+                let mut removed = excluder.finish().map_err(InputError::UnmatchedExclusion)?;
+                let dropped = apply_drops(&self.rules, &mut inventory)
+                    .map_err(InputError::EveryGroupDropped)?;
+                removed.extend(dropped.iter().map(|group| group.removal()));
+                (inventory, Vec::new(), None, removed)
             }
         };
         self.merge_source_paths(pipeline, &mut inventory)?;
         let located = with_source_paths(pipeline, &inventory.source_paths);
         inspect_paths(&located)?;
         let checked = check_inventory(pipeline, &self.rules, Cow::Owned(inventory))?;
-        skipped.extend(checked.skipped.iter().map(SkippedGroup::note));
-        removed.extend(checked.skipped.iter().map(SkippedGroup::removal));
         let mut inventory = checked.inventory.into_owned();
         // After any record the inventory already held, as a .spitout does.
         inventory.removed.extend(removed);
@@ -345,6 +361,8 @@ pub enum InputError {
     InventoryPathInBoth { product: String },
     /// An `exclude` rule matches nothing in the dataset.
     UnmatchedExclusion(UnmatchedExclusion),
+    /// `drop` rules remove every group of a grouping.
+    EveryGroupDropped(EveryGroupDropped),
 }
 
 impl From<ResolveError> for InputError {
@@ -387,6 +405,7 @@ impl fmt::Display for InputError {
                 f,
                 "source `{product}` has path rules in both .spit and .spitout"
             ),
+            Self::EveryGroupDropped(emptied) => emptied.fmt(f),
             Self::UnmatchedExclusion(unmatched) => {
                 write!(
                     f,
@@ -415,10 +434,11 @@ pub enum InputSource<'a> {
 /// What the input stage settled about a dataset.
 #[derive(Debug)]
 pub struct ResolvedInputs {
-    /// The contexts and sources that remain after `skip` rules, with the named
+    /// The contexts and sources that remain after `exclude` and `drop` rules, with the named
     /// discovery contexts kept for the `.spitout`.
     pub inventory: SourceInventory,
-    /// Each file or group left out, and why.
+    /// Each file left out because a value in its path cannot be read, and
+    /// why. What the recipe's rules removed is in `inventory.removed`.
     pub skipped: Vec<String>,
     /// What the `require` rules find missing, with the sources each holds back.
     pub gaps: Vec<CoverageGap>,

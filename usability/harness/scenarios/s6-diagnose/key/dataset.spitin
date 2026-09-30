@@ -1,4 +1,4 @@
 pipeline pipeline.spit
 
-skip sales count>=2 per [store]
-skip pricing count=1 per [store]
+drop [store] where sales count<2
+drop [store] where pricing count!=1

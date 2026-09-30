@@ -210,34 +210,159 @@ fn parse_use_path(text: &str, number: usize) -> Result<(String, Option<String>),
 }
 
 pub(super) fn parse_coverage_rule(line: &str, number: usize) -> Result<CoverageRule, ParseError> {
-    let syntax = "expected constraint: require or skip product count=1 per [dimensions], count>=1, or dimension=value,...";
-    let (action, rest) = if let Some(rest) = line.strip_prefix("require ") {
-        (CoverageAction::Require, rest)
-    } else if let Some(rest) = line.strip_prefix("skip ") {
-        (CoverageAction::Skip, rest)
-    } else {
-        return Err(ParseError::new(number, syntax));
-    };
+    if let Some(rest) = line.strip_prefix("drop ") {
+        return parse_drop(rest, number);
+    }
+    if let Some(rest) = line.strip_prefix("skip ") {
+        return Err(skip_replaced(rest, number));
+    }
+    let syntax =
+        "expected constraint: require product count=1 per [dimensions], or dimension=value,...";
+    let rest = line
+        .strip_prefix("require ")
+        .ok_or_else(|| ParseError::new(number, syntax))?;
+    let (target, terms, dimensions) = parse_require_parts(rest, number, syntax)?;
+    let mut rule = CoverageRule::new(target, &dimensions, CountRequirement::AtLeast(1));
+    rule.count = terms.count;
+    rule.values = owned_values(terms.values);
+    Ok(rule)
+}
+
+/// A `require` rule's source, its terms, and the dimensions after `per`.
+fn parse_require_parts<'a>(
+    rest: &'a str,
+    number: usize,
+    syntax: &str,
+) -> Result<(&'a str, RuleTerms<'a>, Vec<&'a str>), ParseError> {
     let (subject, dimensions) = rest
         .split_once(" per ")
         .ok_or_else(|| ParseError::new(number, syntax))?;
     let mut parts = subject.split_whitespace();
     let product = qualified_identifier(parts.next().unwrap_or(""), number, "constraint product")?;
-    let RuleTerms { count, values } = parse_rule_terms(parts, number, syntax)?;
+    let terms = parse_rule_terms(parts, number, syntax)?;
     let dimensions = parse_group_dimensions(dimensions, number)?;
-    let mut rule = CoverageRule::new(
-        product,
-        &dimensions,
-        count.unwrap_or(CountRequirement::AtLeast(1)),
-    );
-    rule.action = action;
-    for (dimension, listed) in values {
-        rule = rule.requiring(dimension, listed);
+    Ok((product, terms, dimensions))
+}
+
+/// Parse the text after `drop`: `[dimensions] where source condition`, the
+/// condition one of `count<2` (any comparison), `missing dimension=value,...`
+/// or `has dimension=value,...`.
+fn parse_drop(rest: &str, number: usize) -> Result<CoverageRule, ParseError> {
+    let syntax = "expected `drop [dimensions] where source` and one condition: `count<2`, `missing run=1,2` or `has run=3`";
+    let rest = rest.trim_start();
+    let close = rest
+        .find(']')
+        .filter(|_| rest.starts_with('['))
+        .ok_or_else(|| ParseError::new(number, syntax))?;
+    let dimensions = parse_group_dimensions(&rest[..=close], number)?;
+    let after = rest[close + 1..].trim_start();
+    let after = after.strip_prefix("where ").ok_or_else(|| {
+        ParseError::new(
+            number,
+            "expected `where` after the groups, as in `drop [sub] where sessions count<2`",
+        )
+    })?;
+    let mut tokens = after.split_whitespace();
+    let product = qualified_identifier(tokens.next().unwrap_or(""), number, "constraint product")?;
+    let mut rule = CoverageRule::new(product, &dimensions, CountRequirement::AtLeast(1));
+    rule.action = CoverageAction::Drop;
+    rule.count = None;
+    let condition = tokens
+        .next()
+        .ok_or_else(|| ParseError::new(number, syntax))?;
+    let listed: Vec<&str> = tokens.collect();
+    match condition {
+        "missing" | "has" => {
+            if listed.is_empty() {
+                return Err(ParseError::new(
+                    number,
+                    format!("expected values after `{condition}`, such as `{condition} run=1,2`"),
+                ));
+            }
+            let values = owned_values(parse_rule_terms(listed.into_iter(), number, syntax)?.values);
+            if condition == "missing" {
+                rule.values = values;
+            } else {
+                rule.has = values;
+            }
+        }
+        token => {
+            let count = parse_count_term(token, number)
+                .transpose()?
+                .ok_or_else(|| ParseError::new(number, syntax).at_token(token))?;
+            if let Some(extra) = listed.first() {
+                return Err(
+                    ParseError::new(number, "a `drop` rule takes one condition").at_token(extra)
+                );
+            }
+            rule.count = Some(count);
+        }
     }
     Ok(rule)
 }
 
-/// A rule's `count=`/`count>=` term and its `dimension=value,...` terms.
+/// The error for a `skip` rule, which `drop` replaces, with the `drop` rule
+/// that removes the same groups when the old rule reads cleanly.
+fn skip_replaced(rest: &str, number: usize) -> ParseError {
+    let old = "expected `skip product count>=2 per [dimensions]`";
+    let suggestion =
+        parse_require_parts(rest, number, old)
+            .ok()
+            .map(|(product, terms, dimensions)| {
+                let groups = dimensions.join(", ");
+                let mut lines = Vec::new();
+                if let Some(count) = terms.count {
+                    lines.push(format!(
+                        "drop [{groups}] where {product} {}",
+                        count.negated().as_written()
+                    ));
+                }
+                for (dimension, values) in &terms.values {
+                    lines.push(format!(
+                        "drop [{groups}] where {product} missing {dimension}={}",
+                        values.join(",")
+                    ));
+                }
+                lines.join("` and `")
+            });
+    let message = match suggestion {
+        Some(rule) => format!(
+            "`skip` is replaced by `drop`, which names the groups to remove: write `{rule}`"
+        ),
+        None => "`skip` is replaced by `drop`, which names the groups to remove, as in `drop [sub] where sessions count<2`".to_owned(),
+    };
+    ParseError::new(number, message)
+}
+
+/// A term `count` followed by a comparison and a number, such as `count<2`;
+/// `None` when `token` is not one.
+fn parse_count_term(token: &str, number: usize) -> Option<Result<CountRequirement, ParseError>> {
+    let rest = token.strip_prefix("count")?;
+    /// Makes the comparison a written operator names, given its count.
+    type Comparison = fn(usize) -> CountRequirement;
+    // Longer operators first, so `>=` is not read as `>`.
+    const COMPARISONS: [(&str, Comparison); 6] = [
+        ("!=", CountRequirement::NotExactly),
+        (">=", CountRequirement::AtLeast),
+        ("<=", CountRequirement::AtMost),
+        ("=", CountRequirement::Exactly),
+        (">", CountRequirement::MoreThan),
+        ("<", CountRequirement::FewerThan),
+    ];
+    let (op, value) = COMPARISONS
+        .iter()
+        .find_map(|(op, make)| Some((make, rest.strip_prefix(op)?)))?;
+    Some(parse_count(value, number).map(op))
+}
+
+fn owned_values(values: BTreeMap<String, Vec<&str>>) -> BTreeMap<String, Vec<String>> {
+    values
+        .into_iter()
+        .map(|(dimension, listed)| (dimension, listed.into_iter().map(str::to_owned).collect()))
+        .collect()
+}
+
+/// A rule's count term and its `dimension=value,...` terms.
 struct RuleTerms<'a> {
     count: Option<CountRequirement>,
     values: BTreeMap<String, Vec<&'a str>>,
@@ -252,15 +377,8 @@ fn parse_rule_terms<'a>(
     let mut count = None;
     let mut values = BTreeMap::new();
     for token in terms {
-        let parsed = if let Some(value) = token.strip_prefix("count=") {
-            Some(CountRequirement::Exactly(parse_count(value, number)?))
-        } else if let Some(value) = token.strip_prefix("count>=") {
-            Some(CountRequirement::AtLeast(parse_count(value, number)?))
-        } else {
-            None
-        };
-        if let Some(parsed) = parsed {
-            if count.replace(parsed).is_some() {
+        if let Some(parsed) = parse_count_term(token, number) {
+            if count.replace(parsed?).is_some() {
                 return Err(ParseError::new(number, "a rule takes one count").at_token(token));
             }
         } else if let Some((dimension, listed)) = token.split_once('=') {

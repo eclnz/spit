@@ -47,9 +47,9 @@ const STRICT: &str = "\
 require image count>=2 per [sub, ses]
 require reference count=1 per [sub, ses]
 ";
-/// A `skip` rule that drops what the gaps dataset lacks.
-const SKIP: &str = "\
-skip image count>=2 per [sub, ses]
+/// A `drop` rule that removes what the gaps dataset lacks.
+const DROP: &str = "\
+drop [sub, ses] where image count<2
 require reference count=1 per [sub, ses]
 ";
 
@@ -79,8 +79,8 @@ fn dataset(gaps: bool) -> Tree {
         &format!("pipeline pipeline.spit\n{DISCOVER}{STRICT}"),
     );
     tree.write(
-        "skip.spitin",
-        &format!("pipeline pipeline.spit\n{DISCOVER}{SKIP}"),
+        "drop.spitin",
+        &format!("pipeline pipeline.spit\n{DISCOVER}{DROP}"),
     );
     tree
 }
@@ -186,9 +186,9 @@ fn a_dataset_with_gaps_prints_as_before() {
     let runs: [&[&str]; 5] = [
         &["dag", "strict.spitin", "--root", "."],
         &["artifacts", "strict.spitin", "--root", "."],
-        &["inputs", "skip.spitin", "--root", ".", "-o", "/dev/stdout"],
-        &["dag", "skip.spitin", "--root", "."],
-        &["artifacts", "skip.spitin", "--root", "."],
+        &["inputs", "drop.spitin", "--root", ".", "-o", "/dev/stdout"],
+        &["dag", "drop.spitin", "--root", "."],
+        &["artifacts", "drop.spitin", "--root", "."],
     ];
     let text: String = runs.iter().map(|args| run(&tree, args)).collect();
     check("gaps", &text);
@@ -204,8 +204,8 @@ fn recipes_diagnosed_in_memory_match_their_text() {
         (false, STRICT, false, true),
         (false, STRICT, true, true),
         (true, STRICT, true, true),
-        (true, SKIP, false, true),
-        (true, SKIP, true, true),
+        (true, DROP, false, true),
+        (true, DROP, true, true),
         // An unmet `require` is an error, which points at the text.
         (true, STRICT, false, false),
     ];

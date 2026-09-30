@@ -51,7 +51,7 @@ SPIT runs in three steps. Each is one command, and each reads the files the prev
 | File | Holds |
 | --- | --- |
 | `.spit` | A pipeline: sources, operations, steps, commands, and path rules. No dataset appears in it. |
-| `.spitin` | A recipe for a dataset's inputs: the pipeline it serves, and its `discover`, `require`, `skip` and `exclude` rules and source paths. |
+| `.spitin` | A recipe for a dataset's inputs: the pipeline it serves, and its `discover`, `exclude`, `drop` and `require` rules and source paths. |
 | `.spitout` | A dataset's settled inputs: each source artifact, with its file. |
 | `.spitdag` | The resolved jobs, each with its artifacts' files and its command, as JSON, in an order they can run in: all a backend needs to run them, with the dataset folder, the programs the commands need, and a fingerprint of each job's work to tell when it must run again. |
 
@@ -75,7 +75,7 @@ Files come first; options follow them. `spit help` lists the commands, and `spit
 | Command | Result |
 | --- | --- |
 | `check` | Compile a pipeline and report every problem the text shows, reading no data. Given a recipe, check its rules against the pipeline its `pipeline` line names. |
-| `inputs` | Scan the dataset folder with a recipe, apply its `exclude` and `skip` rules, check its `require` rules, and print the `.spitout` with a record of what was removed. It writes nothing if a `require` rule fails. |
+| `inputs` | Scan the dataset folder with a recipe, apply its `exclude` and `drop` rules, check its `require` rules, and print the `.spitout` with a record of what was removed. It writes nothing if a `require` rule fails. |
 | `dag` | Resolve the jobs, and print each with its artifacts and dependencies. With `-o`, write them as a `.spitdag`. |
 | `artifacts` | List every concrete artifact the inputs yield: the complete ones, then the incomplete ones with why each cannot be produced. Unlike `dag`, it does not stop at a missing, ambiguous, or too-small input or a coverage gap; see [Find incomplete artifacts](#find-incomplete-artifacts). |
 
@@ -145,11 +145,11 @@ Add rules when they say more than the files do. For example, beside an `analysis
 pipeline analysis.spit
 
 discover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}
-skip sessions count>=2 per [sub]
+drop [sub] where sessions count<2
 path image: data/sub-{sub}/ses-{ses}/image.nii.gz
 ```
 
-`discover` reads the observed subject and session pairs from folders, and the image source expands over them, so a session folder without its image is an error rather than a session that silently has none. `skip` removes subjects with fewer than two sessions, reporting each on stderr. `require` instead fails such a group: `require sessions count>=2 per [sub]` names the subject with one session and its count. `sessions` remains a discovery rule name, not a product. `exclude bold[sub=02,ses=01,run=3]  # corrupted` removes one named artifact, and `exclude from qc/excluded.csv` reads such rules from a spreadsheet; the `.spitout` records what each rule removed and why. Logical source types and operations stay in the `.spit`.
+`discover` reads the observed subject and session pairs from folders, and the image source expands over them, so a session folder without its image is an error rather than a session that silently has none. `drop [sub] where sessions count<2` removes each subject with fewer than two sessions, reporting each on stderr. `require` instead fails such a group: `require sessions count>=2 per [sub]` names the subject with one session and its count. `sessions` remains a discovery rule name, not a product. `exclude bold[sub=02,ses=01,run=3]  # corrupted` removes one named artifact, and `exclude from qc/excluded.csv` reads such rules from a spreadsheet; the `.spitout` records what each rule removed and why. Logical source types and operations stay in the `.spit`.
 
 `spit check cohort.spitin` checks the rules against the pipeline without reading the dataset. `spit inputs cohort.spitin -o cohort.spitout` scans the recipe's folder, or `--root`, and writes what it found:
 
@@ -230,7 +230,7 @@ An incomplete artifact has a missing or ambiguous input, a collection below its 
 
 ## Language reference
 
-Beyond the basics above, `.spit` files support typed products, multi-output operations, `many`/aggregation inputs with selectors (`where`, `same`, `vary`, `each`), symbolic type variables, stages, path placeholders, and `use` imports for sharing definitions across files; `.spitin` recipes add directory discovery, coverage rules (`require`, `skip`) and exclusions (`exclude`). See the [full language reference](docs/language-reference.md) for syntax and rules for each of these.
+Beyond the basics above, `.spit` files support typed products, multi-output operations, `many`/aggregation inputs with selectors (`where`, `same`, `vary`, `each`), symbolic type variables, stages, path placeholders, and `use` imports for sharing definitions across files; `.spitin` recipes add directory discovery, rules that leave data out (`exclude`, `drop`) or require it (`require`). See the [full language reference](docs/language-reference.md) for syntax and rules for each of these.
 
 ## More examples
 

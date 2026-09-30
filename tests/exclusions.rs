@@ -412,8 +412,8 @@ fn the_record_of_what_was_removed_reads_back_and_reaches_the_spitdag() {
     assert!(
         json.contains(
             "\"removed\":[{\"product\":\"bold\",\"entities\":{\"run\":\"3\",\"ses\":\"01\",\"sub\":\"02\"},\
-\"rule\":\"exclude bold[sub=02,ses=01,run=3]\",\"origin\":\"line 2\",\"reason\":\"corrupted: see #140\"},\
-{\"product\":null,\"entities\":{\"sub\":\"03\"},\"rule\":\"exclude [sub=03]\",\"origin\":\"line 3\",\"reason\":null}]"
+\"rule\":\"exclude bold[sub=02,ses=01,run=3]\",\"origin\":\"line 2\",\"reason\":\"corrupted: see #140\",\"found\":null},\
+{\"product\":null,\"entities\":{\"sub\":\"03\"},\"rule\":\"exclude [sub=03]\",\"origin\":\"line 3\",\"reason\":null,\"found\":null}]"
         ),
         "{json}"
     );

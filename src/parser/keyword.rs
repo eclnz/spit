@@ -12,7 +12,9 @@ pub(crate) enum Keyword {
     Command,
     Verify,
     Require,
+    /// `skip`, which `drop` replaced; kept to say so.
     Skip,
+    Drop,
     Exclude,
     /// `path:` for a default, `path product:` for one product.
     Path,
@@ -21,7 +23,7 @@ pub(crate) enum Keyword {
     ShellSource,
 }
 
-const WORDS: [(Keyword, &str); 10] = [
+const WORDS: [(Keyword, &str); 11] = [
     (Keyword::Use, "use"),
     (Keyword::Source, "source"),
     (Keyword::Discover, "discover"),
@@ -30,6 +32,7 @@ const WORDS: [(Keyword, &str); 10] = [
     (Keyword::Verify, "verify"),
     (Keyword::Require, "require"),
     (Keyword::Skip, "skip"),
+    (Keyword::Drop, "drop"),
     (Keyword::Exclude, "exclude"),
     (Keyword::Stage, "stage"),
 ];

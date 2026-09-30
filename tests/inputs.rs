@@ -64,15 +64,16 @@ fn jobs_resolve_from_the_logical_pipeline_and_the_stages_inventory() {
 }
 
 #[test]
-fn skip_rules_are_applied_by_the_stage_before_jobs_exist() {
-    let tree = Tree::new("skip", &FILES);
-    let recipe = format!("{RECIPE}skip sessions count>=2 per [sub]\n");
+fn drop_rules_are_applied_by_the_stage_before_jobs_exist() {
+    let tree = Tree::new("drop", &FILES);
+    let recipe = format!("{RECIPE}drop [sub] where sessions count<2\n");
     let resolved = inventory_of(&recipe, &tree);
     assert_eq!(resolved.inventory.artifacts.len(), 2);
-    assert!(resolved
-        .skipped
-        .iter()
-        .any(|note| note.contains("skip sessions")));
+    let removed = &resolved.inventory.removed;
+    assert_eq!(removed.len(), 1);
+    assert_eq!(removed[0].identity(), "[sub=5]");
+    assert_eq!(removed[0].rule, "drop [sub] where sessions count<2");
+    assert_eq!(removed[0].found, Some(1));
     let dag = resolve(
         &parse_pipeline(PIPELINE).unwrap(),
         &resolved.dag_inventory(),
@@ -124,8 +125,8 @@ fn a_recipe_can_settle_records_that_were_already_written() {
 }
 
 #[test]
-fn skipping_written_records_reports_the_removed_group() {
-    let recipe = parse_input_spec("skip image count>=2 per [sub]\n").unwrap();
+fn dropping_written_records_records_the_removed_group() {
+    let recipe = parse_input_spec("drop [sub] where image count<2\n").unwrap();
     let inventory = spit::parse_source_inventory(
         "sources:\n  image[sub=1,ses=1]\n  image[sub=2,ses=1]\n  image[sub=2,ses=2]\n",
     )
@@ -137,10 +138,10 @@ fn skipping_written_records_reports_the_removed_group() {
         )
         .unwrap();
     assert_eq!(resolved.inventory.artifacts.len(), 2);
-    assert_eq!(
-        resolved.skipped,
-        ["[sub=1] because `skip image` rejected the group"]
-    );
+    let removed = &resolved.inventory.removed;
+    assert_eq!(removed.len(), 1);
+    assert_eq!(removed[0].identity(), "[sub=1]");
+    assert_eq!(removed[0].origin.as_deref(), Some("line 1"));
 }
 
 #[test]
@@ -225,7 +226,7 @@ fn a_named_recipe_runs_in_memory_and_defaults_output_paths() {
         tree.0.join("analysis.spitin"),
         "pipeline analysis.spit\n\
          discover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}\n\
-         skip sessions count>=2 per [sub]\n\
+         drop [sub] where sessions count<2\n\
          require sessions count>=2 per [sub]\n\
          path image: data/sub-{sub}/ses-{ses}/image.nii.gz\n",
     )
@@ -250,7 +251,12 @@ fn a_named_recipe_runs_in_memory_and_defaults_output_paths() {
         .unwrap();
     let notes = String::from_utf8_lossy(&paths.stderr).into_owned();
     assert!(paths.status.success(), "{notes}");
-    assert!(notes.contains("skip sessions"), "{notes}");
+    assert!(
+        notes.contains(
+            "note: dropped [sub=5] by `drop [sub] where sessions count<2` (line 3); found 1"
+        ),
+        "{notes}"
+    );
     assert!(notes.contains("note: 2 jobs resolved."), "{notes}");
     let paths = String::from_utf8(paths.stdout).unwrap();
     assert!(paths.contains("out/result/sub=1__ses=1"), "{paths}");

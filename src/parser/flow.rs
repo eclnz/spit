@@ -151,11 +151,11 @@ fn flow_line(
         Some((Keyword::Operation, declaration)) => {
             StatementKind::operation(original, declaration.trim(), number)?
         }
-        Some((keyword @ (Keyword::Require | Keyword::Skip), _)) => {
+        Some((keyword @ (Keyword::Require | Keyword::Skip | Keyword::Drop), _)) => {
             top_level_only(if keyword == Keyword::Require {
                 "`require`, which checks sources,"
             } else {
-                "`skip`, which filters sources,"
+                "`drop`, which removes groups,"
             })?;
             StatementKind::constraint(original, line, number)?
         }
@@ -199,7 +199,7 @@ fn flow_statement(
                 "`{word}` does not start a statement; {hint}a pipeline line starts with \
                  source, operation, command, verify, path, stage or use, or is a step \
                  `output = operation(inputs)`, and a recipe line starts with pipeline, \
-                 discover, require, skip, exclude or path"
+                 discover, require, drop, exclude or path"
             ),
         )
         .at_token(word));
@@ -276,7 +276,7 @@ const STATEMENT_WORDS: [&str; 12] = [
     "pipeline",
     "discover",
     "require",
-    "skip",
+    "drop",
     "exclude",
 ];
 

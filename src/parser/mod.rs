@@ -223,7 +223,7 @@ impl StatementKind {
         Ok(Self::Operation(operation, place))
     }
 
-    /// A `require` or `skip` rule, the whole content `line` of `original`.
+    /// A `require` or `drop` rule, the whole content `line` of `original`.
     fn constraint(original: &str, line: &str, number: usize) -> Result<Self, ParseError> {
         let rule = declarations::parse_coverage_rule(line, number)?;
         let place = source_map::rule_place(original, number, &rule);

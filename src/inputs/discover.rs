@@ -6,7 +6,7 @@ use std::fs;
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 
-use super::coverage::{apply_skips, SkipIndex, SkippedGroup};
+use super::coverage::{apply_drops, DropIndex, EveryGroupDropped};
 use super::exclusions::{Excluder, UnmatchedExclusion};
 use crate::model::{
     ArtifactInstance, DirectoryDiscovery, EntityBinding, InputRules, Pipeline, ProductDef, Removal,
@@ -17,18 +17,22 @@ use crate::paths::{
     validate_discovery_rule, PathBinder, PathError, PathPart, PathPlaceholder, PathTemplate,
 };
 
-/// The source files found under a root, and those skipped.
+/// The source files found under a root, what the recipe's rules removed,
+/// and files whose values cannot be read.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Discovery {
     pub inventory: SourceInventory,
     /// Each skipped file and why.
     pub skipped: Vec<String>,
-    /// What each `exclude` rule removed, then each group a `skip` rule
-    /// rejected.
+    /// What each `exclude` rule removed, then each group a `drop` rule
+    /// removed.
     pub removed: Vec<Removal>,
     /// The first `exclude` rule that matched nothing, which the input stage
     /// reports as an error.
     pub unmatched: Option<UnmatchedExclusion>,
+    /// `drop` rules that removed every group of a grouping, which the input
+    /// stage reports as an error.
+    pub emptied: Option<EveryGroupDropped>,
 }
 
 /// Find source artifacts and contexts under `root`. Directory rules provide
@@ -106,7 +110,6 @@ pub(super) fn discover(
     for bindings in inventory.discovered.values_mut() {
         bindings.retain(|binding| !excluder.context(binding));
     }
-    let skipped = skip(rules, &mut discovery, true);
     let expected = expected_bindings(
         &sources,
         &directory_patterns,
@@ -115,13 +118,31 @@ pub(super) fn discover(
     find_source_files(
         &sources,
         &listing.files,
-        &skipped,
         &expected,
         &mut excluder,
         &mut discovery,
     )?;
-    let skipped = skip(rules, &mut discovery, false);
-    require_source_files(pipeline, root, &sources, &expected, &skipped, &mut excluder)?;
+    // Every `drop` rule is judged once, against what was found: a file a
+    // context expects but lacks counts as absent, so a rule can remove the
+    // context rather than fail on the missing file below.
+    let dropped = match apply_drops(rules, &mut discovery.inventory) {
+        Ok(dropped) => dropped,
+        Err(emptied) => {
+            discovery.emptied = Some(emptied);
+            return Ok(discovery);
+        }
+    };
+    discovery
+        .removed
+        .extend(dropped.iter().map(|group| group.removal()));
+    require_source_files(
+        pipeline,
+        root,
+        &sources,
+        &expected,
+        &DropIndex::new(&dropped),
+        &mut excluder,
+    )?;
     sort_records(&sources, &mut discovery.inventory.artifacts);
     match excluder.finish() {
         Ok(excluded) => {
@@ -244,19 +265,6 @@ fn find_contexts(
     Ok(())
 }
 
-/// Apply the `skip` rules, of discovery rules only or of every rule, noting
-/// each group they reject.
-fn skip(rules: &InputRules, discovery: &mut Discovery, discovery_only: bool) -> Vec<SkippedGroup> {
-    let skipped = apply_skips(rules, &mut discovery.inventory, discovery_only);
-    discovery
-        .skipped
-        .extend(skipped.iter().map(SkippedGroup::note));
-    discovery
-        .removed
-        .extend(skipped.iter().map(SkippedGroup::removal));
-    skipped
-}
-
 /// For each source a discovery rule covers, the bindings its files must
 /// have: the rule's contexts, cut to the source's dimensions. A source
 /// whose covering rules found nothing is left out, so it is not checked.
@@ -283,26 +291,17 @@ fn expected_bindings<'a>(
     expected
 }
 
-/// Record each file that a source's path rule matches, unless a skip rule
-/// rejects its group or a value cannot be read.
+/// Record each file that a source's path rule matches, unless an `exclude`
+/// rule removes it or a value cannot be read.
 fn find_source_files(
     sources: &[SourcePattern<'_>],
     files: &[String],
-    skipped: &[SkippedGroup],
     expected: &BTreeMap<&str, BTreeSet<EntityBinding>>,
     excluder: &mut Excluder<'_>,
     discovery: &mut Discovery,
 ) -> Result<(), PathError> {
-    let skipped = SkipIndex::new(skipped);
     for file in files {
-        let found = source_record(
-            sources,
-            file,
-            &skipped,
-            expected,
-            excluder,
-            &mut discovery.skipped,
-        )?;
+        let found = source_record(sources, file, expected, excluder, &mut discovery.skipped)?;
         discovery.inventory.artifacts.extend(found);
     }
     let artifacts = &mut discovery.inventory.artifacts;
@@ -317,7 +316,6 @@ fn find_source_files(
 fn source_record(
     sources: &[SourcePattern<'_>],
     file: &str,
-    skipped: &SkipIndex<'_>,
     expected: &BTreeMap<&str, BTreeSet<EntityBinding>>,
     excluder: &mut Excluder<'_>,
     notes: &mut Vec<String>,
@@ -335,9 +333,6 @@ fn source_record(
             return Ok(None);
         }
     };
-    if skipped.matches(&binding) {
-        return Ok(None);
-    }
     let name = product.name.as_str();
     // An excluded file may lie outside every discovered context, such as a
     // misnamed copy of one that does.
@@ -362,7 +357,7 @@ fn source_record(
 }
 
 /// Require the file of every source binding a discovery rule expects,
-/// except in groups a skip rule rejected. An excluded binding needs no file;
+/// except in groups a `drop` rule removed. An excluded binding needs no file;
 /// when it has none, its exclusion is recorded here, since no file was found
 /// to record it by.
 fn require_source_files(
@@ -370,14 +365,13 @@ fn require_source_files(
     root: &Path,
     sources: &[SourcePattern<'_>],
     expected: &BTreeMap<&str, BTreeSet<EntityBinding>>,
-    skipped: &[SkippedGroup],
+    dropped: &DropIndex<'_>,
     excluder: &mut Excluder<'_>,
 ) -> Result<(), PathError> {
-    let skipped = SkipIndex::new(skipped);
     let mut binder = PathBinder::new(pipeline);
     for product in sources.iter().map(|source| source.product) {
         let bindings = expected.get(product.name.as_str()).into_iter().flatten();
-        for binding in bindings.filter(|binding| !skipped.matches(binding)) {
+        for binding in bindings.filter(|binding| !dropped.matches(binding)) {
             let excluded = excluder.excludes(&product.name, binding);
             let artifact = ArtifactInstance::new(
                 &product.name,

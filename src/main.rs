@@ -28,7 +28,7 @@ use spit::{
     render_source_inventory, stage_within, unused_sources_summary, validate_bound_source_files,
     validate_source_files, ArtifactReport, BoundDag, BoundPaths, Checked, Context, Diagnosis,
     Diagnostic, DiagnosticSource, FileNames, InputSource, InputSpec, PathTemplate, Pipeline,
-    ResolvedDag, ResolvedInputs, Severity, View,
+    Removal, ResolvedDag, ResolvedInputs, Severity, View,
 };
 
 #[derive(Clone, Copy, PartialEq)]
@@ -68,7 +68,7 @@ impl Command {
             Self::Inputs => CommandSpec {
                 name: "inputs",
                 files: "<recipe.spitin>",
-                summary: "step 2: find a dataset's sources with a recipe, apply `skip` and `require`, and write a .spitout",
+                summary: "step 2: find a dataset's sources with a recipe, apply `exclude`, `drop` and `require`, and write a .spitout",
                 example: "spit inputs dataset.spitin -o dataset.spitout",
                 flags: &[Root, Output],
             },
@@ -646,29 +646,9 @@ fn settle(
     for skipped in &resolved.skipped {
         eprintln!("warning: skipped {skipped}");
     }
-    for removal in resolved
-        .inventory
-        .removed
-        .iter()
-        .filter(|removal| removal.is_exclusion())
-    {
-        let pipeline = &loaded.checked.pipeline;
-        let declared = removal
-            .product
-            .as_deref()
-            .and_then(|name| {
-                pipeline
-                    .products
-                    .iter()
-                    .find(|product| product.name == name)
-            })
-            .map_or(&[][..], |product| product.dimensions.as_slice());
-        let identity = removal.identity_in(declared);
-        let origin = removal.origin.as_deref().unwrap_or("the recipe");
-        match &removal.reason {
-            Some(reason) => eprintln!("note: excluded {identity} ({origin}): {reason}"),
-            None => eprintln!("note: excluded {identity} ({origin})"),
-        }
+    let pipeline = &loaded.checked.pipeline;
+    for removal in &resolved.inventory.removed {
+        eprintln!("note: {}", removal_note(removal, pipeline));
     }
     if let Some(root) = &resolved.root {
         let contexts = if recipe.rules.discoveries.is_empty() {
@@ -683,6 +663,49 @@ fn settle(
         );
     }
     Ok(resolved)
+}
+
+/// What an `exclude` or `drop` rule removed, as a note says it:
+/// `excluded bold[sub=02,run=3] (line 4): corrupted`, or `dropped [sub=03]
+/// by \`drop [sub] where sessions count<2\` (line 6); found 1`.
+fn removal_note(removal: &Removal, pipeline: &Pipeline) -> String {
+    // An artifact's dimensions in its product's order; a group's in the
+    // order the pipeline first declares them, as the .spitout writes it.
+    let declared: Vec<String> = match &removal.product {
+        Some(name) => pipeline
+            .products
+            .iter()
+            .find(|product| &product.name == name)
+            .map(|product| product.dimensions.clone())
+            .unwrap_or_default(),
+        None => {
+            let mut order: Vec<String> = Vec::new();
+            for dimension in pipeline
+                .products
+                .iter()
+                .flat_map(|product| &product.dimensions)
+            {
+                if !order.contains(dimension) {
+                    order.push(dimension.clone());
+                }
+            }
+            order
+        }
+    };
+    let identity = removal.identity_in(&declared);
+    let origin = removal.origin.as_deref().unwrap_or("the recipe");
+    let mut note = if removal.is_exclusion() {
+        format!("excluded {identity} ({origin})")
+    } else {
+        format!("dropped {identity} by `{}` ({origin})", removal.rule)
+    };
+    if let Some(found) = removal.found {
+        note.push_str(&format!("; found {found}"));
+    }
+    if let Some(reason) = &removal.reason {
+        note.push_str(&format!(": {reason}"));
+    }
+    note
 }
 
 /// A pipeline ready for step 3: its settled inputs, and the pipeline used
