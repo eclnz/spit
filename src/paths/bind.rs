@@ -4,9 +4,10 @@ use std::collections::BTreeSet;
 use std::fmt;
 use std::path::Path;
 
+use rustc_hash::FxHashMap;
+
 use super::rules::inspect_paths;
 use super::template::{error, require_directory, PathBinder, PathError};
-use crate::hash::QuickMap;
 use crate::model::{
     ArtifactInstance, ArtifactKey, ArtifactMap, ArtifactSet, EntityBinding, Pipeline, ResolvedDag,
 };
@@ -120,7 +121,7 @@ pub(crate) fn bound_paths(
         .collect();
     let mut binder = PathBinder::new(pipeline);
     let mut paths = ArtifactMap::default();
-    let mut owners: QuickMap<String, &ArtifactInstance> = QuickMap::default();
+    let mut owners: FxHashMap<String, &ArtifactInstance> = FxHashMap::default();
     for artifact in dag
         .jobs
         .iter()
@@ -181,7 +182,7 @@ pub(crate) fn case_collisions(
     let Ok(paths) = bound_paths(pipeline, dag) else {
         return Vec::new();
     };
-    let mut folded: QuickMap<String, Vec<(Artifact<'_>, &String)>> = QuickMap::default();
+    let mut folded: FxHashMap<String, Vec<(Artifact<'_>, &String)>> = FxHashMap::default();
     for (product, entities, path) in paths.iter() {
         folded
             .entry(path.to_lowercase())

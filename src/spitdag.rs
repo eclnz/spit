@@ -4,12 +4,16 @@
 //! template. Written as a `.spitdag`, a JSON document.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::io;
+use std::hash::Hasher;
+use std::io::{self, Write};
 use std::sync::Arc;
 
-use crate::hash::{QuickMap, QuickSet};
+use fnv::FnvHasher;
+use rustc_hash::{FxHashMap, FxHashSet};
+use serde::ser::{Error, SerializeMap, SerializeStruct, Serializer};
+use serde::Serialize;
 
-use crate::json::{write_array, write_number, write_string, ObjectWriter, Out};
+use crate::json;
 use crate::types::TypeExpr;
 
 /// The schema version a `.spitdag` is written with.
@@ -87,13 +91,13 @@ impl BoundDag {
     /// The inputs no job here makes, each once, by path: sources, and the
     /// outputs of stages left out.
     pub fn external_inputs(&self) -> Vec<&BoundArtifact> {
-        let produced: QuickSet<_> = self
+        let produced: FxHashSet<_> = self
             .jobs
             .iter()
             .flat_map(|job| &job.outputs)
             .map(|(_, artifact)| artifact.path.as_str())
             .collect();
-        let mut external = QuickMap::default();
+        let mut external = FxHashMap::default();
         for artifact in self.jobs.iter().flat_map(BoundJob::input_artifacts) {
             if !produced.contains(artifact.path.as_str()) {
                 external.entry(artifact.path.as_str()).or_insert(artifact);
@@ -107,7 +111,7 @@ impl BoundDag {
     /// The outputs no job here reads: what a full run leaves behind, in job
     /// order.
     pub fn targets(&self) -> Vec<&BoundArtifact> {
-        let read: QuickSet<_> = self
+        let read: FxHashSet<_> = self
             .jobs
             .iter()
             .flat_map(BoundJob::input_artifacts)
@@ -154,232 +158,184 @@ impl BoundDag {
 
     /// The `.spitdag` document.
     pub fn to_json(&self) -> String {
-        let mut out = String::new();
-        // The text is kept whole, so there is nothing to hand on.
-        let kept: io::Result<()> = write_document(self, &mut out, |_| Ok(()));
-        debug_assert!(kept.is_ok());
-        out
+        format!("{}\n", json::to_string(&Document(self)))
     }
 
-    /// Write the `.spitdag` document to `writer` a piece at a time, without
+    /// Write the `.spitdag` document to `writer` as it is made, without
     /// holding it all.
     pub fn write_json(&self, writer: &mut impl io::Write) -> io::Result<()> {
-        let mut out = String::with_capacity(2 * PIECE);
-        write_document(self, &mut out, |out| {
-            writer.write_all(out.as_bytes())?;
-            out.clear();
-            Ok(())
-        })?;
-        writer.write_all(out.as_bytes())?;
+        let mut writer = io::BufWriter::new(writer);
+        json::write(&mut writer, &Document(self))?;
+        writer.write_all(b"\n")?;
         writer.flush()
     }
 }
 
-/// How much of a document [`BoundDag::write_json`] holds before writing it.
-const PIECE: usize = 1 << 16;
+/// A bound DAG as a `.spitdag`.
+struct Document<'a>(&'a BoundDag);
 
-/// A bound DAG as a `.spitdag`, ending in a newline, written a job at a
-/// time into `out`. Whenever `out` holds a piece, `hand_on` may take what it
-/// holds; the first error it returns stops the writing.
-fn write_document(
-    dag: &BoundDag,
-    out: &mut String,
-    mut hand_on: impl FnMut(&mut String) -> io::Result<()>,
-) -> io::Result<()> {
-    let mut handed = Ok(());
-    let dependents = dag.dependents();
-    let mut document = ObjectWriter::start(out);
-    document.field("version", |out| write_number(out, SPITDAG_VERSION));
-    document.field("generator", |out| {
-        let mut generator = ObjectWriter::start(out);
-        generator.string("name", "spit");
-        generator.string("version", env!("CARGO_PKG_VERSION"));
-        generator.finish();
-    });
-    document.field("root", |out| match &dag.root {
-        Some(root) => write_string(out, root),
-        None => out.push_str("null"),
-    });
-    document.field("external_inputs", |out| {
-        write_array(out, dag.external_inputs(), write_artifact);
-    });
-    document.field("targets", |out| {
-        write_array(out, dag.targets(), write_artifact);
-    });
-    document.field("executables", |out| {
-        write_array(out, dag.executables(), |out, name| write_string(out, &name));
-    });
-    let mut work = String::new();
-    document.field("jobs", |out| {
-        write_array(out, &dag.jobs, |out, job| {
-            if handed.is_err() {
-                return;
+impl Serialize for Document<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        #[derive(Serialize)]
+        struct Generator {
+            name: &'static str,
+            version: &'static str,
+        }
+        let dag = self.0;
+        let dependents = dag.dependents();
+        let jobs: Vec<_> = (dag.jobs.iter())
+            .map(|job| Job {
+                job,
+                dependents: dependents.get(&job.id).map_or(&[], Vec::as_slice),
+            })
+            .collect();
+        let mut document = serializer.serialize_struct("Document", 7)?;
+        document.serialize_field("version", &SPITDAG_VERSION)?;
+        let generator = Generator {
+            name: "spit",
+            version: env!("CARGO_PKG_VERSION"),
+        };
+        document.serialize_field("generator", &generator)?;
+        document.serialize_field("root", &dag.root)?;
+        document.serialize_field("external_inputs", &dag.external_inputs())?;
+        document.serialize_field("targets", &dag.targets())?;
+        document.serialize_field("executables", &dag.executables())?;
+        document.serialize_field("jobs", &jobs)?;
+        document.end()
+    }
+}
+
+/// A job with the jobs that depend on it.
+struct Job<'a> {
+    job: &'a BoundJob,
+    dependents: &'a [usize],
+}
+
+impl Serialize for Job<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let job = self.job;
+        let work = Work::from(job);
+        let stage: Vec<_> = job
+            .stage
+            .iter()
+            .flat_map(|stage| stage.split('/'))
+            .collect();
+        let mut object = serializer.serialize_struct("Job", 10)?;
+        object.serialize_field("id", &job.id)?;
+        object.serialize_field("operation", &work.operation)?;
+        object.serialize_field("stage", &stage)?;
+        let fingerprint = work.fingerprint().map_err(S::Error::custom)?;
+        object.serialize_field("fingerprint", &format_args!("{fingerprint:016x}"))?;
+        object.serialize_field("inputs", &work.inputs)?;
+        object.serialize_field("outputs", &work.outputs)?;
+        object.serialize_field("depends_on", &job.depends_on)?;
+        object.serialize_field("dependents", self.dependents)?;
+        object.serialize_field("command", &work.command)?;
+        object.serialize_field("verify", &work.verify)?;
+        object.end()
+    }
+}
+
+/// What a job reads, writes and runs, but not its ID, stage or neighbours,
+/// which can change while the work stays the same.
+#[derive(Serialize)]
+struct Work<'a> {
+    operation: &'a str,
+    inputs: Ports<'a, Vec<Arc<BoundArtifact>>>,
+    outputs: Ports<'a, Arc<BoundArtifact>>,
+    command: &'a Option<Vec<Argument>>,
+    verify: &'a [Vec<Argument>],
+}
+
+impl<'a> From<&'a BoundJob> for Work<'a> {
+    fn from(job: &'a BoundJob) -> Self {
+        Self {
+            operation: &job.operation,
+            inputs: Ports(&job.inputs),
+            outputs: Ports(&job.outputs),
+            command: &job.command,
+            verify: &job.verify,
+        }
+    }
+}
+
+impl Work<'_> {
+    /// A 64-bit FNV-1a hash of the work written as compact JSON: the same
+    /// on every platform and in every release, unlike the standard
+    /// library's. The JSON's format is part of the `.spitdag` contract; a
+    /// test pins a job's value.
+    fn fingerprint(&self) -> serde_json::Result<u64> {
+        struct Hashing(FnvHasher);
+        impl io::Write for Hashing {
+            fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+                self.0.write(bytes);
+                Ok(bytes.len())
             }
-            let dependents = dependents.get(&job.id).map_or(&[][..], Vec::as_slice);
-            write_job(out, job, dependents, &mut work);
-            if out.len() >= PIECE {
-                handed = hand_on(out);
+            fn flush(&mut self) -> io::Result<()> {
+                Ok(())
             }
-        });
-    });
-    document.finish();
-    out.push('\n');
-    handed
-}
-
-/// One job. What it reads, writes and runs is written first into `work`, a
-/// buffer reused between jobs, as the object its fingerprint hashes; the
-/// job's own fields then copy from it.
-fn write_job(out: &mut String, job: &BoundJob, dependents: &[usize], work: &mut String) {
-    work.clear();
-    let mut object = ObjectWriter::start(work);
-    let operation = object.field_at("operation", |out| write_string(out, &job.operation));
-    let inputs = object.field_at("inputs", |out| {
-        let mut inputs = ObjectWriter::start(out);
-        for (port, artifacts) in &job.inputs {
-            inputs.field(port, |out| {
-                write_array(out, artifacts, |out, artifact| {
-                    write_artifact(out, artifact)
-                });
-            });
         }
-        inputs.finish();
-    });
-    let outputs = object.field_at("outputs", |out| {
-        let mut outputs = ObjectWriter::start(out);
-        for (port, artifact) in &job.outputs {
-            outputs.field(port, |out| write_artifact(out, artifact));
-        }
-        outputs.finish();
-    });
-    let command = object.field_at("command", |out| match &job.command {
-        Some(command) => write_command(out, command),
-        None => out.push_str("null"),
-    });
-    let verify = object.field_at("verify", |out| {
-        write_array(out, &job.verify, |out, command| write_command(out, command));
-    });
-    object.finish();
-
-    let mut object = ObjectWriter::start(out);
-    object.field("id", |out| write_number(out, job.id));
-    object.raw("operation", &work[operation]);
-    object.field("stage", |out| {
-        write_array(
-            out,
-            job.stage.iter().flat_map(|stage| stage.split('/')),
-            write_string,
-        );
-    });
-    object.field("fingerprint", |out| {
-        out.push('"');
-        write_hex(out, fingerprint(work));
-        out.push('"');
-    });
-    object.raw("inputs", &work[inputs]);
-    object.raw("outputs", &work[outputs]);
-    object.field("depends_on", |out| {
-        write_array(out, job.depends_on.iter().copied(), write_number);
-    });
-    object.field("dependents", |out| {
-        write_array(out, dependents.iter().copied(), write_number);
-    });
-    object.raw("command", &work[command]);
-    object.raw("verify", &work[verify]);
-    object.finish();
-}
-
-/// A 64-bit FNV-1a hash of a job's work written as compact JSON, as 16
-/// hexadecimal digits: the same on every platform and in every release,
-/// unlike the standard library's. The JSON writer's format is part of the
-/// `.spitdag` contract; a test pins a job's value.
-fn fingerprint(work: &str) -> u64 {
-    let mut hash = Fnv::new();
-    hash.push_str(work);
-    hash.0
-}
-
-/// `value` as 16 hexadecimal digits.
-fn write_hex(out: &mut String, value: u64) {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    for shift in (0..16).rev() {
-        out.push(char::from(HEX[(value >> (4 * shift)) as usize & 0xf]));
+        let mut hash = Hashing(FnvHasher::default());
+        json::write(&mut hash, self)?;
+        Ok(hash.0.finish())
     }
 }
 
-/// FNV-1a over the text written to it, so nothing is kept but the hash.
-struct Fnv(u64);
+/// Named values in order, as an object.
+struct Ports<'a, T>(&'a [(String, T)]);
 
-impl Fnv {
-    fn new() -> Self {
-        Self(0xcbf2_9ce4_8422_2325)
+impl<T: Serialize> Serialize for Ports<'_, T> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_map(self.0.iter().map(|(name, value)| (name, value)))
     }
 }
 
-impl Out for Fnv {
-    fn push_str(&mut self, text: &str) {
-        for byte in text.bytes() {
-            self.0 = (self.0 ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3);
-        }
+/// An artifact: its product, its entities in declared order, its type and
+/// its path.
+impl Serialize for BoundArtifact {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut object = serializer.serialize_struct("BoundArtifact", 4)?;
+        object.serialize_field("product", &self.product)?;
+        object.serialize_field("entities", &Ports(&self.entities))?;
+        object.serialize_field("type", &Type(&self.artifact_type))?;
+        object.serialize_field("path", &self.path)?;
+        object.end()
     }
 }
 
-/// An argument is an array of parts: a string for text, `{"path": ...}` for
-/// a file.
-fn write_command(out: &mut String, command: &[Argument]) {
-    write_array(out, command, |out, argument| {
-        write_array(out, argument, |out, part| match part {
-            ArgPart::Text(text) => write_string(out, text),
-            ArgPart::Path(path) => {
-                out.push_str("{\"path\":");
-                write_string(out, path);
-                out.push('}');
+/// A type: `null` when unknown, `{"variable": ...}`, or its name and
+/// arguments.
+struct Type<'a>(&'a TypeExpr);
+
+impl Serialize for Type<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let (name, args) = match self.0 {
+            TypeExpr::Unknown => return serializer.serialize_none(),
+            TypeExpr::Variable(name) => {
+                let mut object = serializer.serialize_map(Some(1))?;
+                object.serialize_entry("variable", name)?;
+                return object.end();
             }
-        });
-    });
-}
-
-// Artifacts are most of a `.spitdag`, so their fixed keys are written as
-// whole pieces rather than a field at a time.
-
-fn write_artifact(out: &mut String, artifact: &BoundArtifact) {
-    out.push_str("{\"product\":");
-    write_string(out, &artifact.product);
-    out.push_str(",\"entities\":{");
-    for (index, (dimension, value)) in artifact.entities.iter().enumerate() {
-        if index > 0 {
-            out.push(',');
-        }
-        write_string(out, dimension);
-        out.push(':');
-        write_string(out, value);
+            TypeExpr::Named(name) => (name, &[][..]),
+            TypeExpr::Applied { constructor, args } => (constructor, args.as_slice()),
+        };
+        let mut object = serializer.serialize_map(Some(2))?;
+        object.serialize_entry("name", name)?;
+        object.serialize_entry("args", &args.iter().map(Type).collect::<Vec<_>>())?;
+        object.end()
     }
-    out.push_str("},\"type\":");
-    write_type(out, &artifact.artifact_type);
-    out.push_str(",\"path\":");
-    write_string(out, &artifact.path);
-    out.push('}');
 }
 
-fn write_type(out: &mut String, artifact_type: &TypeExpr) {
-    match artifact_type {
-        TypeExpr::Unknown => out.push_str("null"),
-        TypeExpr::Variable(name) => {
-            out.push_str("{\"variable\":");
-            write_string(out, name);
-            out.push('}');
-        }
-        TypeExpr::Named(name) => {
-            out.push_str("{\"name\":");
-            write_string(out, name);
-            out.push_str(",\"args\":[]}");
-        }
-        TypeExpr::Applied { constructor, args } => {
-            out.push_str("{\"name\":");
-            write_string(out, constructor);
-            out.push_str(",\"args\":");
-            write_array(out, args, write_type);
-            out.push('}');
+/// A part of an argument: a string for text, `{"path": ...}` for a file.
+impl Serialize for ArgPart {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Self::Text(text) => serializer.serialize_str(text),
+            Self::Path(path) => {
+                let mut object = serializer.serialize_map(Some(1))?;
+                object.serialize_entry("path", path)?;
+                object.end()
+            }
         }
     }
 }
@@ -507,9 +463,9 @@ mod tests {
         // changes every fingerprint, so it must be deliberate.
         assert_eq!(print(&job), "72f6d8ecbacfd9ad");
         let fnv = |text: &str| {
-            let mut hex = String::new();
-            write_hex(&mut hex, fingerprint(text));
-            hex
+            let mut hash = FnvHasher::default();
+            hash.write(text.as_bytes());
+            format!("{:016x}", hash.finish())
         };
         assert_eq!(fnv(""), "cbf29ce484222325");
         assert_eq!(fnv("a"), "af63dc4c8601ec8c");

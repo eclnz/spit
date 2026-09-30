@@ -1,12 +1,13 @@
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
-use std::hash::{DefaultHasher, Hash, Hasher};
+use std::hash::{Hash, Hasher};
 use std::sync::Arc;
+
+use rustc_hash::{FxHashMap, FxHashSet, FxHasher};
 
 use crate::command::CommandTemplate;
 use crate::error::{DefinitionSubject, ResolveError};
-use crate::hash::{QuickMap, QuickSet};
 use crate::paths::PathTemplate;
 use crate::types::TypeExpr;
 
@@ -26,7 +27,7 @@ struct Entities {
 
 impl Entities {
     fn new(values: BTreeMap<String, String>) -> Self {
-        let mut hasher = DefaultHasher::new();
+        let mut hasher = FxHasher::default();
         values.hash(&mut hasher);
         Self {
             hash: hasher.finish(),
@@ -314,11 +315,11 @@ pub type ArtifactKey = (String, EntityBinding);
 /// A value for each of a set of artifacts, found by product and then by
 /// entities, so that looking an artifact up copies nothing.
 #[derive(Clone, Debug)]
-pub(crate) struct ArtifactMap<V>(QuickMap<String, QuickMap<EntityBinding, V>>);
+pub(crate) struct ArtifactMap<V>(FxHashMap<String, FxHashMap<EntityBinding, V>>);
 
 impl<V> Default for ArtifactMap<V> {
     fn default() -> Self {
-        Self(QuickMap::default())
+        Self(FxHashMap::default())
     }
 }
 
@@ -806,7 +807,7 @@ impl Pipeline {
         // Each product with the set of its dimensions, looked up once, not
         // once per record; the first declaration of a name wins, as when
         // searching.
-        let mut products = QuickMap::default();
+        let mut products = FxHashMap::default();
         for product in &self.products {
             products.entry(product.name.as_str()).or_insert_with(|| {
                 let dimensions: BTreeSet<_> =
@@ -814,14 +815,14 @@ impl Pipeline {
                 (product, dimensions)
             });
         }
-        let produced: QuickSet<_> = self
+        let produced: FxHashSet<_> = self
             .invocations
             .iter()
             .flat_map(|invocation| &invocation.outputs)
             .map(String::as_str)
             .collect();
         let mut artifacts: BTreeMap<String, Vec<ArtifactInstance>> = BTreeMap::new();
-        let mut seen: QuickSet<(&str, &EntityBinding)> = QuickSet::default();
+        let mut seen: FxHashSet<(&str, &EntityBinding)> = FxHashSet::default();
         for record in &inventory.artifacts {
             let (product, dimensions) = products.get(record.product.as_str()).ok_or_else(|| {
                 ResolveError::UnknownProduct {

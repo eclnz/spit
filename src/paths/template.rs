@@ -4,7 +4,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
-use crate::hash::QuickMap;
+use rustc_hash::FxHashMap;
+
 use crate::model::{ArtifactInstance, DirectoryDiscovery, Pipeline};
 use crate::span::Located;
 use crate::template::{parse_template, Part};
@@ -180,14 +181,14 @@ pub(crate) fn bind_path(
 /// product's template and stage once.
 pub(crate) struct PathBinder<'p> {
     pipeline: &'p Pipeline,
-    products: QuickMap<String, ProductPath<'p>>,
+    products: FxHashMap<String, ProductPath<'p>>,
 }
 
 impl<'p> PathBinder<'p> {
     pub(crate) fn new(pipeline: &'p Pipeline) -> Self {
         Self {
             pipeline,
-            products: QuickMap::default(),
+            products: FxHashMap::default(),
         }
     }
 

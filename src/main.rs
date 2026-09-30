@@ -8,6 +8,11 @@
 //! A command given files from an earlier step runs the steps between in
 //! memory. Nothing is loaded that the command line does not name.
 
+/// SPIT makes and frees many small strings; mimalloc does this faster than
+/// the system allocator.
+#[global_allocator]
+static ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 use std::env;
 use std::error::Error;
 use std::fmt;
@@ -762,26 +767,17 @@ fn dag(args: &CliArgs) -> Result<(), Box<dyn Error>> {
                 .to_string_lossy()
                 .into_owned()
         });
-        write_spitdag(args, &bound)?;
-        exit_without_freeing((prepared, bound));
-        return Ok(());
+        return write_spitdag(args, &bound);
     }
     if args.has(Flag::Paths) {
-        let bound = bind_dag(&prepared.bound, dag)?;
-        print!("{}", render_bound_dag(&bound, true));
-        exit_without_freeing(bound);
+        print!(
+            "{}",
+            render_bound_dag(&bind_dag(&prepared.bound, dag)?, true)
+        );
     } else {
         print!("{}", render_dag(dag));
     }
-    exit_without_freeing(prepared);
     Ok(())
-}
-
-/// Leave `value` for the operating system to reclaim when the process
-/// exits, which it is about to: freeing a large DAG piece by piece takes a
-/// sixth of a run.
-fn exit_without_freeing<T>(value: T) {
-    std::mem::forget(value);
 }
 
 /// Step 3: what can be made, what cannot, and why.
@@ -793,7 +789,6 @@ fn artifacts(args: &CliArgs) -> Result<(), Box<dyn Error>> {
         validate_source_files(&prepared.bound, &report.dag, root)?;
     }
     print!("{}", render_artifacts(&report));
-    exit_without_freeing(report);
     Ok(())
 }
 
