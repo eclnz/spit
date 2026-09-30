@@ -12,12 +12,13 @@ use crate::inputs::{check_inventory, collect_rule_errors, InputError, InputSpec}
 use crate::json::Json;
 use crate::lower::{parse_document_with_imports, ParsedDocument};
 use crate::model::DEFAULT_OUTPUT;
-use crate::model::{stage_within, CommandRole, Job, ResolvedDag, SourceInventory};
+use crate::model::{stage_within, ArtifactReport, CommandRole, ResolvedDag, SourceInventory};
 use crate::parser::{glued_comment, source_record_lines, without_bom, Kind, Rule, SourceMap, Step};
 use crate::paths::{case_collisions, collect_paths};
+use crate::resolver::first_failure;
 use crate::span::{content_columns, utf16_columns, Located, Place};
 use crate::{
-    parse_source_inventory, resolve, resolve_artifacts_excluding, DefinitionSubject, EntityBinding,
+    parse_source_inventory, resolve_artifacts_excluding, DefinitionSubject, EntityBinding,
     InputBinding, ParseError, ParseErrorKind, Pipeline, ResolveError,
 };
 
@@ -75,6 +76,18 @@ pub struct Checked {
     pub pipeline: Pipeline,
     /// Every diagnostic found, none of them an error, in line order.
     pub warnings: Vec<Diagnostic>,
+}
+
+/// Records that passed diagnosis with their pipeline: the inventory they
+/// parse to, and what it resolves to, so a caller need not resolve it again.
+#[derive(Debug)]
+pub struct Records {
+    pub inventory: SourceInventory,
+    /// The jobs over the records' sources, with those that cannot be made in
+    /// a lenient diagnosis. Sources take their files from the records, so a
+    /// caller that locates them later gives them their files with
+    /// [`ResolvedDag::locate_sources`].
+    pub report: ArtifactReport,
 }
 
 /// What diagnosing a document found: what it checked to, or, when any
@@ -323,12 +336,12 @@ pub fn diagnose_checked(text: &str, context: Context<'_>) -> Diagnosis {
 
 /// As [`diagnose_checked`], with the records in `records` settled and
 /// resolved over the pipeline once it passes on its own; the inventory they
-/// parse to is returned with it.
+/// parse to, and what it resolves to, are returned with it.
 pub fn diagnose_checked_with_records(
     text: &str,
     records: &str,
     context: Context<'_>,
-) -> Diagnosis<(Checked, SourceInventory)> {
+) -> Diagnosis<(Checked, Records)> {
     let (text, records) = (without_bom(text), without_bom(records));
     let parsed = (
         recover_parse_errors(text, |text| context.parse(text)),
@@ -351,17 +364,24 @@ pub fn diagnose_checked_with_records(
     };
     let document = &parsed.document;
     let mut diagnostics = check_document(document, text, Some(records))?;
-    diagnostics.extend(record_diagnostics(
-        document,
-        &inventory,
-        records,
-        context.lenient,
-    ));
+    let report = record_diagnostics(document, &inventory, records, context.lenient);
+    let report = match report {
+        Ok((report, found)) => {
+            diagnostics.extend(found);
+            Some(report)
+        }
+        Err(found) => {
+            diagnostics.extend(found);
+            None
+        }
+    };
     let diagnostics = finish(diagnostics, text, Some(records));
-    if diagnostics.iter().any(Diagnostic::is_error) {
-        return Err(diagnostics);
+    match report {
+        Some(report) if !diagnostics.iter().any(Diagnostic::is_error) => {
+            Ok((parsed.checked(diagnostics), Records { inventory, report }))
+        }
+        _ => Err(diagnostics),
     }
-    Ok((parsed.checked(diagnostics), inventory))
 }
 
 /// Diagnose a `.spitin` recipe at `path` without reading any data: its own
@@ -488,52 +508,56 @@ fn check_document(
     Ok(diagnostics)
 }
 
-/// Settle `supplied` with the input stage, then resolve jobs over it: the
-/// error that stops either, or warnings about paths that differ only in
-/// case and steps that make nothing.
+/// Settle `supplied` with the input stage, then resolve jobs over it: what
+/// they resolve to with any warnings, about paths that differ only in case
+/// and steps that make nothing, or those diagnostics with the error that
+/// stops either.
 fn record_diagnostics(
     document: &ParsedDocument,
     supplied: &SourceInventory,
     records: &str,
     lenient: bool,
-) -> Vec<Diagnostic> {
+) -> Result<(ArtifactReport, Vec<Diagnostic>), Vec<Diagnostic>> {
     let (pipeline, lines) = (&document.pipeline, &document.lines);
     let mut diagnostics = Vec::new();
-    let outputs = |jobs: Vec<Job>| jobs.into_iter().flat_map(|job| job.outputs);
-    let produced: Result<BTreeSet<String>, _> =
-        check_inventory(pipeline, &document.inputs, supplied).and_then(|checked| {
+    let resolved = check_inventory(pipeline, &document.inputs, supplied).and_then(|checked| {
+        if lenient {
             let unavailable: Vec<_> = checked
                 .gaps
                 .iter()
                 .flat_map(|gap| gap.sources.iter().cloned())
                 .collect();
-            if lenient {
-                let report =
-                    resolve_artifacts_excluding(pipeline, &checked.inventory, &unavailable)?;
-                let incomplete = report.incomplete.into_iter().flat_map(|job| job.outputs);
-                Ok(outputs(report.dag.jobs)
-                    .chain(incomplete)
-                    .map(|artifact| artifact.product)
-                    .collect())
-            } else {
-                if let Some(gap) = checked.gaps.into_iter().next() {
-                    return Err(gap.error);
-                }
-                let dag = resolve(pipeline, &checked.inventory)?;
-                diagnostics.extend(case_warnings(pipeline, lines, &dag));
-                Ok(outputs(dag.jobs).map(|artifact| artifact.product).collect())
-            }
-        });
-    match produced {
+            return resolve_artifacts_excluding(pipeline, &checked.inventory, &unavailable);
+        }
+        if let Some(gap) = checked.gaps.into_iter().next() {
+            return Err(gap.error);
+        }
+        let report = resolve_artifacts_excluding(pipeline, &checked.inventory, &[])?;
+        if let Some(error) = first_failure(&report.incomplete) {
+            return Err(error);
+        }
+        diagnostics.extend(case_warnings(pipeline, lines, &report.dag));
+        Ok(report)
+    });
+    match resolved {
         Err(error) => {
             let (source, place) = error_location(pipeline, lines, &error, records, true);
             diagnostics.push(Diagnostic::error(source, place, error.to_string()));
+            Err(diagnostics)
         }
-        Ok(produced) => {
+        Ok(report) => {
+            let produced: BTreeSet<&str> = report
+                .dag
+                .jobs
+                .iter()
+                .flat_map(|job| &job.outputs)
+                .chain(report.incomplete.iter().flat_map(|job| &job.outputs))
+                .map(|artifact| artifact.product.as_str())
+                .collect();
             diagnostics.extend(empty_step_warnings(pipeline, lines, &produced, supplied));
+            Ok((report, diagnostics))
         }
     }
-    diagnostics
 }
 
 /// Flag paths that differ only in case, which are one file on macOS and Windows.
@@ -985,7 +1009,7 @@ fn unobserved_sources<'a>(
 fn empty_step_warnings(
     pipeline: &Pipeline,
     lines: &SourceMap,
-    produced: &BTreeSet<String>,
+    produced: &BTreeSet<&str>,
     inventory: &SourceInventory,
 ) -> Vec<Diagnostic> {
     let observed: BTreeSet<_> = inventory

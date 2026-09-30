@@ -6,14 +6,14 @@ use std::fs;
 use std::ops::Range;
 use std::path::Path;
 
-use super::coverage::{apply_skips, SkippedGroup};
+use super::coverage::{apply_skips, SkipIndex, SkippedGroup};
 use crate::model::{
     ArtifactInstance, DirectoryDiscovery, EntityBinding, InputRules, Pipeline, ProductDef,
     SourceInventory, SourceRecord,
 };
 use crate::paths::{
-    bind_path, decode_component, encode_component, error, inspect_paths, require_directory,
-    validate_discovery_rule, PathError, PathPart, PathPlaceholder, PathTemplate,
+    decode_component, encode_component, error, inspect_paths, require_directory,
+    validate_discovery_rule, PathBinder, PathError, PathPart, PathPlaceholder, PathTemplate,
 };
 
 /// The source files found under a root, and those skipped.
@@ -265,8 +265,9 @@ fn find_source_files(
     expected: &BTreeMap<&str, BTreeSet<EntityBinding>>,
     discovery: &mut Discovery,
 ) -> Result<(), PathError> {
+    let skipped = SkipIndex::new(skipped);
     for file in files {
-        let found = source_record(sources, file, skipped, expected, &mut discovery.skipped)?;
+        let found = source_record(sources, file, &skipped, expected, &mut discovery.skipped)?;
         discovery.inventory.artifacts.extend(found);
     }
     let artifacts = &mut discovery.inventory.artifacts;
@@ -280,7 +281,7 @@ fn find_source_files(
 fn source_record(
     sources: &[SourcePattern<'_>],
     file: &str,
-    skipped: &[SkippedGroup],
+    skipped: &SkipIndex<'_>,
     expected: &BTreeMap<&str, BTreeSet<EntityBinding>>,
     notes: &mut Vec<String>,
 ) -> Result<Option<SourceRecord>, PathError> {
@@ -297,7 +298,7 @@ fn source_record(
             return Ok(None);
         }
     };
-    if skipped.iter().any(|group| group.matches(&binding)) {
+    if skipped.matches(&binding) {
         return Ok(None);
     }
     let name = product.name.as_str();
@@ -327,17 +328,17 @@ fn require_source_files(
     expected: &BTreeMap<&str, BTreeSet<EntityBinding>>,
     skipped: &[SkippedGroup],
 ) -> Result<(), PathError> {
+    let skipped = SkipIndex::new(skipped);
+    let mut binder = PathBinder::new(pipeline);
     for product in sources.iter().map(|source| source.product) {
         let bindings = expected.get(product.name.as_str()).into_iter().flatten();
-        for binding in
-            bindings.filter(|binding| !skipped.iter().any(|group| group.matches(binding)))
-        {
+        for binding in bindings.filter(|binding| !skipped.matches(binding)) {
             let artifact = ArtifactInstance::new(
                 &product.name,
                 product.artifact_type.clone(),
                 binding.clone(),
             );
-            let relative = bind_path(pipeline, &product.dimensions, &artifact, || {
+            let relative = binder.bind(&product.dimensions, &artifact, || {
                 format!("source `{artifact}`")
             })?;
             let full = root.join(&relative);
@@ -456,6 +457,18 @@ fn path_pattern(template: &PathTemplate, product: &ProductDef) -> Result<Vec<Pie
 /// Match `text` against `pieces`, binding each dimension to its encoded
 /// value; a dimension used twice must have the same value both times.
 fn match_pattern<'a>(pieces: &[Piece], text: &'a str) -> Option<BTreeMap<String, &'a str>> {
+    // A match begins with a literal first piece and ends with a literal last
+    // one, which rules out most patterns without searching.
+    if let Some(Piece::Literal(first)) = pieces.first() {
+        if !text.starts_with(first.as_str()) {
+            return None;
+        }
+    }
+    if let Some(Piece::Literal(last)) = pieces.last() {
+        if !text.ends_with(last.as_str()) {
+            return None;
+        }
+    }
     let mut bound = BTreeMap::new();
     let mut failed = BTreeSet::new();
     match_from(pieces, 0, text, 0, &mut bound, &mut failed).then(|| {
@@ -596,6 +609,7 @@ pub(crate) fn locate_sources(
     pipeline: &Pipeline,
     inventory: &mut SourceInventory,
 ) -> Result<(), PathError> {
+    let mut binder = PathBinder::new(pipeline);
     for record in &mut inventory.artifacts {
         if pipeline.path_template_for(&record.product).is_none() {
             if record.path.is_some() {
@@ -618,7 +632,7 @@ pub(crate) fn locate_sources(
             product.artifact_type.clone(),
             record.entities.clone(),
         );
-        let path = bind_path(pipeline, &product.dimensions, &artifact, || {
+        let path = binder.bind(&product.dimensions, &artifact, || {
             format!("source `{artifact}`")
         })?;
         if let Some(given) = &record.path {

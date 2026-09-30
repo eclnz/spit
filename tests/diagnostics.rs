@@ -31,11 +31,11 @@ fn checked_diagnosis_retains_the_original_pipeline_and_inventory() {
         recipe: Some(&recipe),
         ..spit::Context::at(std::path::Path::new("pipeline.spit"))
     };
-    let (checked, inventory) =
+    let (checked, records) =
         spit::diagnose_checked_with_records(pipeline, inventory, context).unwrap();
     assert!(errors(checked.warnings).is_empty());
     assert!(checked.pipeline.product_paths.is_empty());
-    assert_eq!(inventory.artifacts.len(), 1);
+    assert_eq!(records.inventory.artifacts.len(), 1);
 }
 
 #[test]

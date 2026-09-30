@@ -4,12 +4,12 @@
 mod bind;
 mod matching;
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use crate::error::ResolveError;
 use crate::model::{
-    ArtifactInstance, ArtifactKey, ArtifactReport, Gap, IncompleteJob, Invocation, OperationDef,
-    Pipeline, ResolvedDag, SourceInventory,
+    ArtifactInstance, ArtifactMap, ArtifactReport, ArtifactSet, Gap, IncompleteJob, Invocation,
+    OperationDef, Pipeline, ResolvedDag, SourceInventory,
 };
 
 use crate::compile::{compile, CompiledPipeline};
@@ -24,19 +24,23 @@ pub fn resolve(
     inventory: &SourceInventory,
 ) -> Result<ResolvedDag, ResolveError> {
     let report = resolve_artifacts_excluding(pipeline, inventory, &[])?;
-    // A blocked gap always follows the gap that blocks it.
-    let failure = report
-        .incomplete
-        .into_iter()
-        .flat_map(|job| job.gaps)
-        .find_map(|gap| match gap {
-            Gap::Unmatched(error) => Some(error),
-            Gap::Blocked { .. } => None,
-        });
-    match failure {
+    match first_failure(&report.incomplete) {
         Some(error) => Err(error),
         None => Ok(report.dag),
     }
+}
+
+/// Why the first of `incomplete` cannot be made; a blocked gap always
+/// follows the gap that blocks it, so there is one whenever any job is
+/// incomplete.
+pub(crate) fn first_failure(incomplete: &[IncompleteJob]) -> Option<ResolveError> {
+    incomplete
+        .iter()
+        .flat_map(|job| &job.gaps)
+        .find_map(|gap| match gap {
+            Gap::Unmatched(error) => Some(error.clone()),
+            Gap::Blocked { .. } => None,
+        })
 }
 
 /// Resolve what can be made, reporting each job that cannot and why. Some
@@ -56,14 +60,10 @@ pub fn resolve_artifacts_excluding(
         .cloned()
         .collect();
     let mut resolution = Resolution {
-        seen: artifacts
-            .values()
-            .flatten()
-            .map(ArtifactInstance::key)
-            .collect(),
-        incomplete: unavailable.iter().map(ArtifactInstance::key).collect(),
+        seen: artifacts.values().flatten().collect(),
+        incomplete: unavailable.iter().collect(),
         artifacts,
-        producers: BTreeMap::new(),
+        producers: ArtifactMap::default(),
         dag: ResolvedDag {
             jobs: Vec::new(),
             product_dimensions: pipeline
@@ -71,14 +71,7 @@ pub fn resolve_artifacts_excluding(
                 .iter()
                 .map(|product| (product.name.clone(), product.dimensions.clone()))
                 .collect(),
-            source_paths: inventory
-                .artifacts
-                .iter()
-                .filter_map(|record| {
-                    let key = (record.product.clone(), record.entities.clone());
-                    Some((key, record.path.clone()?))
-                })
-                .collect(),
+            source_paths: BTreeMap::new(),
         },
         incomplete_jobs: Vec::new(),
     };
@@ -93,9 +86,11 @@ pub fn resolve_artifacts_excluding(
             }
         }
     }
+    let mut dag = resolution.dag;
+    dag.locate_sources(inventory);
     Ok(ArtifactReport {
         sources,
-        dag: resolution.dag,
+        dag,
         incomplete: resolution.incomplete_jobs,
         coverage: Vec::new(),
     })
@@ -105,12 +100,12 @@ pub fn resolve_artifacts_excluding(
 struct Resolution {
     artifacts: BTreeMap<String, Vec<ArtifactInstance>>,
     /// Every artifact, so that none is made twice.
-    seen: BTreeSet<ArtifactKey>,
+    seen: ArtifactSet,
     /// Artifacts that will not exist: sources the caller rules out, and
     /// the outputs of incomplete jobs.
-    incomplete: BTreeSet<ArtifactKey>,
+    incomplete: ArtifactSet,
     /// The job that makes each output artifact.
-    producers: BTreeMap<ArtifactKey, usize>,
+    producers: ArtifactMap<usize>,
     dag: ResolvedDag,
     incomplete_jobs: Vec<IncompleteJob>,
 }
@@ -125,7 +120,7 @@ impl Resolution {
         expansion: Expansion,
     ) -> Result<(), ResolveError> {
         for output in &expansion.outputs {
-            if !self.seen.insert(output.key()) {
+            if !self.seen.add(output) {
                 return Err(ResolveError::DuplicateOutputArtifact {
                     artifact: output.clone(),
                 });
@@ -145,12 +140,13 @@ impl Resolution {
                 &self.producers,
             );
             for output in &job.outputs {
-                self.producers.insert(output.key(), job.id);
+                self.producers.insert(output, job.id);
             }
             self.dag.jobs.push(job);
         } else {
-            self.incomplete
-                .extend(expansion.outputs.iter().map(ArtifactInstance::key));
+            for output in &expansion.outputs {
+                self.incomplete.add(output);
+            }
             self.incomplete_jobs.push(IncompleteJob {
                 operation: operation.name.clone(),
                 stage: invocation.stage.clone(),

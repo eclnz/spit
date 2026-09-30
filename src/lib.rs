@@ -25,7 +25,7 @@ pub use compile::validate_pipeline;
 pub use diagnostics::{
     diagnose, diagnose_checked, diagnose_checked_with_records, diagnose_in, diagnose_recipe,
     diagnose_recipe_against, render_diagnostics_json, Checked, Context, Diagnosis, Diagnostic,
-    DiagnosticSource, Severity,
+    DiagnosticSource, Records, Severity,
 };
 pub use error::{DefinitionSubject, PortSite, ResolveError, TypeConflict};
 pub use imports::parse_pipeline_at;

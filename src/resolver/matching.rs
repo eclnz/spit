@@ -3,10 +3,12 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use rustc_hash::FxHashMap;
+
 use crate::compile::{CompiledStep, StepShape};
 use crate::error::{PortSite, ResolveError};
 use crate::model::{
-    ArtifactInstance, ArtifactKey, EntityBinding, Gap, Invocation, Job, OperationDef,
+    ArtifactInstance, ArtifactMap, ArtifactSet, EntityBinding, Gap, Invocation, Job, OperationDef,
 };
 
 use super::family;
@@ -23,7 +25,7 @@ pub(super) struct Expansion {
 pub(super) fn expand_step(
     step: &CompiledStep<'_>,
     artifacts: &BTreeMap<String, Vec<ArtifactInstance>>,
-    incomplete: &BTreeSet<ArtifactKey>,
+    incomplete: &ArtifactSet,
 ) -> Vec<Expansion> {
     let (invocation, shape) = (step.invocation, &step.shape);
     let candidates: Vec<Vec<&ArtifactInstance>> = invocation
@@ -41,6 +43,23 @@ pub(super) fn expand_step(
         })
         .collect();
     let contexts = broadcast_contexts(invocation, &candidates);
+    let indexes: Vec<JoinIndex<'_>> = candidates
+        .iter()
+        .enumerate()
+        .map(|(index, candidates)| {
+            if index == shape.driver {
+                return JoinIndex::default();
+            }
+            let mut by_values = JoinIndex::default();
+            for &candidate in candidates {
+                by_values
+                    .entry(join_values(&shape.joins[index], &candidate.entities))
+                    .or_default()
+                    .push(candidate);
+            }
+            by_values
+        })
+        .collect();
     let jobs = driver_groups(&candidates[shape.driver], shape)
         .into_iter()
         .flat_map(|(group, driven)| {
@@ -50,7 +69,19 @@ pub(super) fn expand_step(
                 (context, driven.clone())
             })
         });
-    jobs.map(|(context, driven)| expand_job(step, &candidates, incomplete, &context, &driven))
+    jobs.map(|(context, driven)| expand_job(step, &indexes, incomplete, &context, &driven))
+        .collect()
+}
+
+/// One input's candidates, by their values for the dimensions it joins on,
+/// so each job finds its match without scanning them all.
+type JoinIndex<'a> = FxHashMap<Vec<Option<&'a str>>, Vec<&'a ArtifactInstance>>;
+
+/// `entities`' values for `joins`, in order; `None` where one is unbound.
+fn join_values<'a>(joins: &[String], entities: &'a EntityBinding) -> Vec<Option<&'a str>> {
+    joins
+        .iter()
+        .map(|dimension| entities.get(dimension))
         .collect()
 }
 
@@ -58,8 +89,8 @@ pub(super) fn expand_step(
 /// matched to `context`, and the gaps that leave it incomplete.
 fn expand_job(
     step: &CompiledStep<'_>,
-    candidates: &[Vec<&ArtifactInstance>],
-    incomplete: &BTreeSet<ArtifactKey>,
+    indexes: &[JoinIndex<'_>],
+    incomplete: &ArtifactSet,
     context: &EntityBinding,
     driven: &[ArtifactInstance],
 ) -> Expansion {
@@ -80,15 +111,10 @@ fn expand_job(
         let bound = if index == shape.driver {
             driven.to_vec()
         } else {
-            let joins = &shape.joins[index];
-            match match_input(
-                invocation,
-                operation,
-                index,
-                joins,
-                &candidates[index],
-                context,
-            ) {
+            let matches = indexes[index]
+                .get(&join_values(&shape.joins[index], context))
+                .map_or(&[][..], Vec::as_slice);
+            match match_input(invocation, operation, index, matches, context) {
                 Ok(artifact) => vec![artifact],
                 Err(gap) => {
                     gaps.push(gap);
@@ -99,7 +125,7 @@ fn expand_job(
         gaps.extend(
             bound
                 .iter()
-                .filter(|artifact| incomplete.contains(&artifact.key()))
+                .filter(|artifact| incomplete.contains(artifact))
                 .map(|artifact| Gap::Blocked {
                     port: port.name.clone(),
                     artifact: artifact.clone(),
@@ -149,25 +175,17 @@ fn driver_groups(
     groups
 }
 
-/// The one candidate for input `index` that agrees with a job's context on
-/// every dimension it joins on, or the gap left when none or several do.
+/// The one candidate for input `index` among `matches`, those that agree
+/// with a job's context on every dimension it joins on, or the gap left
+/// when none or several do.
 fn match_input(
     invocation: &Invocation,
     operation: &OperationDef,
     index: usize,
-    joins: &[String],
-    candidates: &[&ArtifactInstance],
+    matches: &[&ArtifactInstance],
     context: &EntityBinding,
 ) -> Result<ArtifactInstance, Gap> {
-    let matches: Vec<_> = candidates
-        .iter()
-        .filter(|candidate| {
-            joins
-                .iter()
-                .all(|dimension| candidate.entities.get(dimension) == context.get(dimension))
-        })
-        .collect();
-    let [artifact] = matches.as_slice() else {
+    let [artifact] = matches else {
         let site = port_site(invocation, operation, index);
         let context = Box::new(context.clone());
         return Err(Gap::Unmatched(if matches.is_empty() {
@@ -202,12 +220,13 @@ fn broadcast_contexts(
             continue;
         }
         let mut values: Vec<EntityBinding> = Vec::new();
+        let mut seen = BTreeSet::new();
         for candidate in candidates {
             let value = candidate
                 .entities
                 .project(&binding.each)
                 .expect("an artifact binds every dimension of its product");
-            if !values.contains(&value) {
+            if seen.insert(value.clone()) {
                 values.push(value);
             }
         }
@@ -231,12 +250,12 @@ pub(super) fn make_job(
     stage: Option<String>,
     inputs: Vec<Vec<ArtifactInstance>>,
     outputs: Vec<ArtifactInstance>,
-    artifact_producers: &BTreeMap<ArtifactKey, usize>,
+    artifact_producers: &ArtifactMap<usize>,
 ) -> Job {
     let dependencies: BTreeSet<_> = inputs
         .iter()
         .flatten()
-        .filter_map(|input| artifact_producers.get(&input.key()).copied())
+        .filter_map(|input| artifact_producers.get(input).copied())
         .collect();
     Job {
         id,

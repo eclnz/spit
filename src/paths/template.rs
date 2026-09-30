@@ -4,6 +4,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
+use rustc_hash::FxHashMap;
+
 use crate::model::{ArtifactInstance, DirectoryDiscovery, Pipeline};
 use crate::span::Located;
 use crate::template::{parse_template, Part};
@@ -172,96 +174,162 @@ pub(crate) fn bind_path(
     artifact: &ArtifactInstance,
     label: impl Fn() -> String,
 ) -> Result<String, PathError> {
-    let template = pipeline
-        .path_template_for(&artifact.product)
-        .ok_or_else(|| {
-            error(format!(
-                "no path template for product `{}`",
-                artifact.product
-            ))
-        })?;
-    let mut relative = String::new();
-    for part in template.parts() {
-        match part {
-            PathPart::Literal(value) => relative.push_str(value),
-            PathPart::Placeholder(PathPlaceholder::Product) => {
-                // `alias::name` would put colons in file names.
-                relative.push_str(&artifact.product.replace("::", "."));
-            }
-            PathPart::Placeholder(PathPlaceholder::Stage) => {
-                let stage = pipeline.stage_of(&artifact.product).ok_or_else(|| {
-                    error(format!(
-                        "path template for `{}` uses `{}`, but `{}` is not made in a stage",
-                        artifact.product,
-                        PathPlaceholder::Stage,
-                        artifact.product
-                    ))
-                    .focus(PathPlaceholder::Stage.to_string())
-                })?;
-                // Each nested stage is a directory.
-                let components: Vec<_> = stage.split('/').map(encode_component).collect();
-                relative.push_str(&components.join("/"));
-            }
-            PathPart::Placeholder(PathPlaceholder::Entities) => {
-                relative.push_str(&entities_component(artifact, dimensions)?);
-            }
-            PathPart::Placeholder(placeholder @ PathPlaceholder::Dimension(dimension)) => {
-                let value = artifact.entities.get(dimension).ok_or_else(|| {
-                    error(format!(
-                        "path template for `{}` uses absent dimension `{dimension}`",
-                        artifact.product
-                    ))
-                    .focus(placeholder.to_string())
-                })?;
-                relative.push_str(&encode_component(value));
-            }
-        }
-    }
-    if let Some(reason) = unusable_path(&relative) {
-        return Err(error(format!("{} {reason}: `{relative}`", label())));
-    }
-    Ok(relative)
+    ProductPath::new(pipeline, &artifact.product)?.bind(dimensions, artifact, label)
 }
 
-/// What `{entities}` binds to: each dimension as `dimension=value`, in
+/// Binds many artifacts' paths, as [`bind_path`] does, finding each
+/// product's template and stage once.
+pub(crate) struct PathBinder<'p> {
+    pipeline: &'p Pipeline,
+    products: FxHashMap<String, ProductPath<'p>>,
+}
+
+impl<'p> PathBinder<'p> {
+    pub(crate) fn new(pipeline: &'p Pipeline) -> Self {
+        Self {
+            pipeline,
+            products: FxHashMap::default(),
+        }
+    }
+
+    pub(crate) fn bind(
+        &mut self,
+        dimensions: &[String],
+        artifact: &ArtifactInstance,
+        label: impl Fn() -> String,
+    ) -> Result<String, PathError> {
+        let product = match self.products.get(artifact.product.as_str()) {
+            Some(product) => product,
+            None => {
+                let product = ProductPath::new(self.pipeline, &artifact.product)?;
+                self.products
+                    .entry(artifact.product.clone())
+                    .or_insert(product)
+            }
+        };
+        product.bind(dimensions, artifact, label)
+    }
+}
+
+/// What every path of one product shares: its template, its name as a
+/// path gives it, and its stage's directories.
+struct ProductPath<'p> {
+    template: &'p PathTemplate,
+    /// `alias::name` would put colons in file names.
+    name: String,
+    /// Each nested stage is a directory.
+    stage: Option<String>,
+}
+
+impl<'p> ProductPath<'p> {
+    fn new(pipeline: &'p Pipeline, product: &str) -> Result<Self, PathError> {
+        let template = pipeline
+            .path_template_for(product)
+            .ok_or_else(|| error(format!("no path template for product `{product}`")))?;
+        let stage = pipeline.stage_of(product).map(|stage| {
+            let mut directories = String::new();
+            for (index, component) in stage.split('/').enumerate() {
+                if index > 0 {
+                    directories.push('/');
+                }
+                push_encoded(&mut directories, component);
+            }
+            directories
+        });
+        Ok(Self {
+            template,
+            name: product.replace("::", "."),
+            stage,
+        })
+    }
+
+    fn bind(
+        &self,
+        dimensions: &[String],
+        artifact: &ArtifactInstance,
+        label: impl Fn() -> String,
+    ) -> Result<String, PathError> {
+        let mut relative = String::with_capacity(self.template.text.len() + 32);
+        for part in self.template.parts() {
+            match part {
+                PathPart::Literal(value) => relative.push_str(value),
+                PathPart::Placeholder(PathPlaceholder::Product) => relative.push_str(&self.name),
+                PathPart::Placeholder(PathPlaceholder::Stage) => {
+                    let stage = self.stage.as_deref().ok_or_else(|| {
+                        error(format!(
+                            "path template for `{}` uses `{}`, but `{}` is not made in a stage",
+                            artifact.product,
+                            PathPlaceholder::Stage,
+                            artifact.product
+                        ))
+                        .focus(PathPlaceholder::Stage.to_string())
+                    })?;
+                    relative.push_str(stage);
+                }
+                PathPart::Placeholder(PathPlaceholder::Entities) => {
+                    push_entities(&mut relative, artifact, dimensions)?;
+                }
+                PathPart::Placeholder(placeholder @ PathPlaceholder::Dimension(dimension)) => {
+                    let value = artifact.entities.get(dimension).ok_or_else(|| {
+                        error(format!(
+                            "path template for `{}` uses absent dimension `{dimension}`",
+                            artifact.product
+                        ))
+                        .focus(placeholder.to_string())
+                    })?;
+                    push_encoded(&mut relative, value);
+                }
+            }
+        }
+        if let Some(reason) = unusable_path(&relative) {
+            return Err(error(format!("{} {reason}: `{relative}`", label())));
+        }
+        Ok(relative)
+    }
+}
+
+/// Add what `{entities}` binds to: each dimension as `dimension=value`, in
 /// declared order and joined by `__`, or `global` for none.
-fn entities_component(
+fn push_entities(
+    relative: &mut String,
     artifact: &ArtifactInstance,
     dimensions: &[String],
-) -> Result<String, PathError> {
-    let bindings = dimensions
-        .iter()
-        .map(|dimension| {
-            let value = artifact.entities.get(dimension).ok_or_else(|| {
-                error(format!(
-                    "artifact `{artifact}` lacks dimension `{dimension}`"
-                ))
-            })?;
-            Ok(format!(
-                "{}={}",
-                encode_component(dimension),
-                encode_component(value)
-            ))
-        })
-        .collect::<Result<Vec<_>, PathError>>()?;
-    if bindings.is_empty() {
-        return Ok("global".to_owned());
+) -> Result<(), PathError> {
+    if dimensions.is_empty() {
+        relative.push_str("global");
     }
-    Ok(bindings.join("__"))
+    for (index, dimension) in dimensions.iter().enumerate() {
+        let value = artifact.entities.get(dimension).ok_or_else(|| {
+            error(format!(
+                "artifact `{artifact}` lacks dimension `{dimension}`"
+            ))
+        })?;
+        if index > 0 {
+            relative.push_str("__");
+        }
+        push_encoded(relative, dimension);
+        relative.push('=');
+        push_encoded(relative, value);
+    }
+    Ok(())
 }
 
 /// Why `relative` cannot name a file under the root, if it cannot.
 pub(crate) fn unusable_path(relative: &str) -> Option<&'static str> {
     if relative.starts_with('/') {
-        Some("must be relative to the dataset root, not start with `/`")
-    } else if relative.ends_with('/') {
-        Some("must name a file, not end with `/`")
-    } else if relative.split('/').any(str::is_empty) {
+        return Some("must be relative to the dataset root, not start with `/`");
+    }
+    if relative.ends_with('/') {
+        return Some("must name a file, not end with `/`");
+    }
+    let (mut empty, mut dots) = (false, false);
+    for component in relative.split('/') {
+        empty |= component.is_empty();
+        dots |= component == "." || component == "..";
+    }
+    if empty {
         Some("must not contain an empty directory name, as in `//`")
-    } else if relative
-        .split('/')
-        .any(|component| component == "." || component == "..")
-    {
+    } else if dots {
         Some("must not contain `.` or `..` directories")
     } else {
         None
@@ -271,16 +339,31 @@ pub(crate) fn unusable_path(relative: &str) -> Option<&'static str> {
 /// `value` as one path component: ASCII letters, digits and `-` as they
 /// are, every other byte as `%XX`.
 pub(crate) fn encode_component(value: &str) -> String {
-    value
-        .bytes()
-        .map(|byte| {
-            if byte.is_ascii_alphanumeric() || byte == b'-' {
-                char::from(byte).to_string()
-            } else {
-                format!("%{byte:02X}")
-            }
-        })
-        .collect()
+    let mut encoded = String::with_capacity(value.len());
+    push_encoded(&mut encoded, value);
+    encoded
+}
+
+/// Add `value` to `text` as [`encode_component`] encodes it. Runs of
+/// bytes kept as they are are added whole.
+fn push_encoded(text: &mut String, value: &str) {
+    const HEX: &[u8; 16] = b"0123456789ABCDEF";
+    let mut plain = 0;
+    for (index, byte) in value.bytes().enumerate() {
+        if byte.is_ascii_alphanumeric() || byte == b'-' {
+            continue;
+        }
+        // A run kept as it is is ASCII, so it starts and ends between
+        // characters; an empty one may not.
+        if plain < index {
+            text.push_str(&value[plain..index]);
+        }
+        text.push('%');
+        text.push(char::from(HEX[usize::from(byte >> 4)]));
+        text.push(char::from(HEX[usize::from(byte & 0xF)]));
+        plain = index + 1;
+    }
+    text.push_str(&value[plain..]);
 }
 
 pub(crate) fn decode_component(encoded: &str) -> Option<String> {
@@ -360,4 +443,29 @@ pub(crate) fn validate_discovery_rule(rule: &DirectoryDiscovery) -> Result<(), P
         return Err(error(format!("discovery `{}` pattern {reason}", rule.name)));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{decode_component, encode_component, unusable_path};
+
+    #[test]
+    fn components_keep_letters_digits_and_dashes_and_encode_the_rest() {
+        assert_eq!(encode_component("sub-01"), "sub-01");
+        assert_eq!(encode_component("a b/é"), "a%20b%2F%C3%A9");
+        assert_eq!(encode_component("éa"), "%C3%A9a");
+        assert_eq!(encode_component("__"), "%5F%5F");
+        assert_eq!(encode_component(""), "");
+        assert_eq!(decode_component("a%20b%2F%C3%A9").as_deref(), Some("a b/é"));
+    }
+
+    #[test]
+    fn unusable_paths_are_named_by_their_first_problem() {
+        assert_eq!(unusable_path("a/b.txt"), None);
+        assert!(unusable_path("/a").unwrap().contains("relative"));
+        assert!(unusable_path("a/").unwrap().contains("end with"));
+        assert!(unusable_path("a//../b").unwrap().contains("empty"));
+        assert!(unusable_path("a/../b").unwrap().contains("`..`"));
+        assert!(unusable_path("./b").unwrap().contains("`..`"));
+    }
 }
