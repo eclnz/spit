@@ -9,9 +9,13 @@ A `#` that starts a word begins a comment, as in Bash. A `#` inside a word or in
 ```text
 source image : Image [subject, visit, run]
 source reference [subject, visit]
+source testset : Data
+source calibration
 ```
 
 Each `source` declares a product family, not an individual file. `image[subject=A,visit=1,run=2]` identifies one artifact. Types such as `Image` are optional; product names and entity bindings identify artifacts.
+
+Brackets are optional for a source with no dimensions; `source testset : Data` and `source calibration` each declare one artifact, displayed by its bare name. The explicit `[]` form is also accepted. A source with no dimensions matches every job that takes it as an input, without a selector.
 
 An assignment introduces a derived product automatically:
 
@@ -169,6 +173,8 @@ path image: input/{subject}/{visit}/{run}.txt
 ```
 
 `path:` sets a default; without one, outputs go to `out/{product}/{entities}`. `path image:` overrides it for `image`. Each output of a multi-output step has its own product, so its own rule. A `path:` line inside a [stage](#stages) sets the default for that stage's products. Paths are relative to the dataset root: the recipe's folder, or `--root` when given.
+
+A source with no dimensions can use a fixed path, such as `path testset: eval/testset.parquet`.
 
 A template fills these placeholders from the artifact it names, here `aligned[subject=A,run=2]` made in stage `preprocess/align`:
 

@@ -1,6 +1,37 @@
 mod support;
 
-use spit::{parse_input_spec, parse_pipeline, parse_source_inventory, resolve};
+use spit::{parse_input_spec, parse_pipeline, parse_source_inventory, render_dag, resolve};
+
+#[test]
+fn dimensionless_sources_accept_bare_names_and_match_each_job() {
+    for declaration in [
+        "source testset : Data",
+        "source testset",
+        "source testset : Data []",
+        "source testset []",
+    ] {
+        assert_eq!(
+            parse_pipeline(&format!("{declaration}\n"))
+                .unwrap()
+                .products[0]
+                .dimensions
+                .len(),
+            0
+        );
+    }
+    let pipeline = parse_pipeline("source raw : Raw [id]\nsource testset : Data\noperation process(raw: Raw, testset: Data) -> Result\nresult = process(raw, testset)\n").unwrap();
+    let inventory =
+        parse_source_inventory("sources:\n    raw[id=1]\n    raw[id=2]\n    testset\n").unwrap();
+    let dag = resolve(&pipeline, &inventory).unwrap();
+    assert_eq!(dag.jobs.len(), 2);
+    let view = render_dag(&dag);
+    assert!(view.contains("testset : Data"), "{view}");
+    assert!(!view.contains("testset[]"), "{view}");
+    assert!(parse_pipeline("source bad extra\n")
+        .unwrap_err()
+        .to_string()
+        .contains("optional [dimensions]"));
+}
 
 /// A sectioned pipeline with the same shape as the basic example.
 const PIPELINE: &str = "\
