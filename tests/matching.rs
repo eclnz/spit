@@ -29,7 +29,10 @@ fn a_many_input_can_share_an_operation_with_single_inputs() {
     .unwrap();
     assert_eq!(dag.jobs.len(), 2);
     assert_eq!(dag.jobs[0].inputs[0].len(), 2);
-    assert_eq!(dag.jobs[0].inputs[1][0].to_string(), "policy[site=A]");
+    assert_eq!(
+        dag.artifact(dag.jobs[0].inputs[1][0]).to_string(),
+        "policy[site=A]"
+    );
     assert_eq!(outputs(&dag), ["summary[site=A]", "summary[site=B]"]);
 }
 
@@ -74,7 +77,7 @@ fn where_pins_a_dimension_the_driver_lacks() {
     .unwrap();
     assert_eq!(dag.jobs.len(), 1);
     assert_eq!(
-        dag.jobs[0].inputs[1][0].to_string(),
+        dag.artifact(dag.jobs[0].inputs[1][0]).to_string(),
         "calibration[revision=2,site=A]"
     );
     assert_eq!(outputs(&dag), ["calibrated[run=1,site=A]"]);
@@ -182,7 +185,7 @@ fn each_runs_a_step_for_every_value_an_input_broadcasts() {
     );
     // Another input is matched on the broadcast dimension.
     assert_eq!(
-        dag.jobs[1].inputs[2][0].to_string(),
+        dag.artifact(dag.jobs[1].inputs[2][0]).to_string(),
         "parameters[scenario=high]"
     );
     let missing = resolve_text(
@@ -321,7 +324,7 @@ stacked = stack(frame @ vary(run))
     );
     let runs: Vec<_> = dag.jobs[1].inputs[0]
         .iter()
-        .map(|frame| frame.entities.get("run").unwrap().to_owned())
+        .map(|&frame| dag.artifact(frame).entities.get("run").unwrap().to_owned())
         .collect();
     assert_eq!(runs, ["1", "2", "10"]);
 }

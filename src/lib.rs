@@ -35,11 +35,11 @@ pub use inputs::{
 };
 pub use lower::parse_pipeline;
 pub use model::{
-    stage_within, ArtifactInstance, ArtifactKey, ArtifactReport, ArtifactType, Cardinality,
-    CommandDef, CommandRole, CountRequirement, CoverageAction, CoverageGap, CoverageRule,
-    DirectoryDiscovery, EntityBinding, Gap, IncompleteJob, InputBinding, InputPort, InputRules,
-    Invocation, Job, OperationDef, OutputPort, Pipeline, ProductDef, ResolvedDag, ShapeRule,
-    SourceInventory, SourceRecord, StageDef,
+    stage_within, Artifact, ArtifactId, ArtifactInstance, ArtifactKey, ArtifactReport,
+    ArtifactType, Artifacts, Cardinality, CommandDef, CommandRole, CountRequirement,
+    CoverageAction, CoverageGap, CoverageRule, DirectoryDiscovery, EntityBinding, Gap,
+    IncompleteJob, InputBinding, InputPort, InputRules, Invocation, Job, OperationDef, OutputPort,
+    Pipeline, ProductDef, ResolvedDag, ShapeRule, SourceInventory, SourceRecord, StageDef,
 };
 pub use parser::{parse_source_inventory, render_source_inventory, ParseError, ParseErrorKind};
 pub use paths::{

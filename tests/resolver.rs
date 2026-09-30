@@ -98,9 +98,15 @@ fn expands_one_to_one_over_two_runs() {
 
     let dag = resolve(&pipeline, &inventory).unwrap();
     assert_eq!(dag.jobs.len(), 2);
-    assert_eq!(dag.jobs[0].output().product, "denoised");
-    assert_eq!(dag.jobs[0].output().entities.get("run"), Some("1"));
-    assert_eq!(dag.jobs[1].output().entities.get("run"), Some("2"));
+    assert_eq!(dag.artifact(dag.jobs[0].output()).product, "denoised");
+    assert_eq!(
+        dag.artifact(dag.jobs[0].output()).entities.get("run"),
+        Some("1")
+    );
+    assert_eq!(
+        dag.artifact(dag.jobs[1].output()).entities.get("run"),
+        Some("2")
+    );
 }
 
 #[test]
@@ -118,8 +124,14 @@ fn reuses_less_specific_t1_across_runs() {
     let dag = resolve(&pipeline, &inventory).unwrap();
     assert_eq!(dag.jobs.len(), 2);
     assert_eq!(dag.jobs[0].inputs[1], dag.jobs[1].inputs[1]);
-    assert_eq!(dag.jobs[0].output().entities.get("run"), Some("1"));
-    assert_eq!(dag.jobs[1].output().entities.get("run"), Some("2"));
+    assert_eq!(
+        dag.artifact(dag.jobs[0].output()).entities.get("run"),
+        Some("1")
+    );
+    assert_eq!(
+        dag.artifact(dag.jobs[1].output()).entities.get("run"),
+        Some("2")
+    );
 }
 
 #[test]
@@ -235,8 +247,11 @@ fn aggregates_each_fixed_dimension_group() {
     assert!(dag
         .jobs
         .iter()
-        .all(|job| !job.output().entities.binds("run")));
-    assert_ne!(dag.jobs[0].output().entities, dag.jobs[1].output().entities);
+        .all(|job| !dag.artifact(job.output()).entities.binds("run")));
+    assert_ne!(
+        dag.artifact(dag.jobs[0].output()).entities,
+        dag.artifact(dag.jobs[1].output()).entities
+    );
 }
 
 #[test]
@@ -421,7 +436,7 @@ fn named_ports_and_declared_aggregate_shape_are_checked() {
         Some("run")
     );
     let dag = resolve(&pipeline, &inventory.unwrap()).unwrap();
-    assert_eq!(dag.jobs[0].output().entities.len(), 1);
+    assert_eq!(dag.artifact(dag.jobs[0].output()).entities.len(), 1);
 
     let wrong_vary = text.replace("vary(run)", "vary(site)");
     let (pipeline, inventory) = support::parse_fixture(&wrong_vary).unwrap();
