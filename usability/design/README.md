@@ -17,7 +17,7 @@ The plans that answer the [usability findings](../FINDINGS.md), and the order to
 
 - **Done:** steps 1–15 and 17. Phase 1, Phase 2, and Phase 3 are complete; the worked examples and extension update are in place. Step 16 was declined.
 - **Second-study actions:** items 1–4 are done. Item 6, the rerun, becomes round 3, after Phase 5; item 5 is judged from round 3's results.
-- **Next:** Phase 5, [one way to write each thing](one-way.md): step 18 is done; step 19 is next.
+- **Next:** Phase 5, [one way to write each thing](one-way.md): steps 18 and 19 are done; step 20 is next.
 - **Resolved so far:** B1–B7, F1–F10, D1–D11.
 
 ## Order
@@ -147,6 +147,7 @@ Settle the forms round 2 left open. See [one way to write each thing](one-way.md
 18. **Remove the sectioned form** (`products:`, `operations:`, `pipeline:`, `commands:`, and a recipe's `constraints:`). It goes first because it halves the parser the next steps change. Convert the 8 sectioned examples and the parser tests to the flow form. See [syntax doubles](one-way.md#5-one-form-for-each-syntax-double).
     Done: the sectioned parser is gone, and each removed header is an error that says what to write instead. The eight examples are in the flow form with named ports, and the tests that exercised sections now use the flow form or were dropped where a flow test already covered them.
 19. **The call says which dimensions are collected.** `@ vary` is required on every `many` input; `@ drop` on an operation is an error; `@ min` stays. See [decision 1](one-way.md#1-the-call-says-which-dimensions-are-collected).
+    Done: the operation parser rejects `@ drop(...)` with the call to write, a `many` input without `@ vary` names its port, and the inference and the contract check are gone. Every pipeline, test, harness key and walkthrough now writes `@ vary` at the call; the keys resolve to the same jobs.
 20. **One dimension order for the pipeline,** derived from sources, with `dimensions [...]` required only for pairs no source orders. `@ each` dimensions take their place in it, and product annotations become checks. See [decision 2](one-way.md#2-one-dimension-order-for-the-pipeline).
 21. **The remaining syntax doubles:** `source x []`, the extra `many` port forms and nameless ports, positional placeholders and the `{inputs}` alias, `\{` escapes, `: path` records, and the warning for a product named like its operation. See [syntax doubles](one-way.md#5-one-form-for-each-syntax-double).
 22. **The VS Code extension:** drop `@ drop` and the sectioned headers from the grammar, and add `dimensions`.

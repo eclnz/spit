@@ -35,7 +35,7 @@ source reference : Reference [sub, ses]
 path reference: sub-{sub}/ses-{ses}/reference.nii
 operation clean(Image, Mask) -> Image
 operation align(Image, Reference) -> Image
-operation average(images: many Image) -> Image @ drop(run)
+operation average(images: many Image) -> Image
 operation compare(Image, Reference) -> Score
 cleaned = clean(image, mask)
 aligned = align(cleaned, reference)

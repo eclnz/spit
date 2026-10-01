@@ -9,7 +9,7 @@ stage preprocess:
     command sort_lines: sort -u -o {output} {input}
     sorted = sort_lines(shard)
 
-    operation merge(items: many Lines) -> Lines @ drop(part)
+    operation merge(items: many Lines) -> Lines
     command merge: sort -m -u -o {output} {items}
     merged = merge(sorted @ vary(part))
 

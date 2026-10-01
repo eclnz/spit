@@ -15,11 +15,11 @@ operation evaluate(weights: Weights, testset: Data) -> Metrics
 command evaluate: evaluate {weights} {testset} --out {output}
 path metrics: runs/{model}/{config}/{seed}/metrics.json
 metrics = evaluate(trained, testset)
-operation summarise(runs: many Metrics) -> Summary @ drop(seed)
+operation summarise(runs: many Metrics) -> Summary
 command summarise: summarise {runs} --out {output}
 path summary: summaries/{model}/{config}.json
-summary = summarise(metrics)
-operation leaderboard(summaries: many Summary) -> Table @ drop(model, config)
+summary = summarise(metrics @ vary(seed))
+operation leaderboard(summaries: many Summary) -> Table
 command leaderboard: leaderboard {summaries} --out {output}
 path board: leaderboard.csv
-board = leaderboard(summary)
+board = leaderboard(summary @ vary(model, config))

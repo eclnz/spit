@@ -57,7 +57,7 @@ source frame [subject, run]
 path frame: raw/sub-{subject}/run-{run}.dat
 source lut []
 path lut: config/lut.txt
-operation stack(frames: many Frame, lut: Lut) -> Stack @ drop(run)
+operation stack(frames: many Frame, lut: Lut) -> Stack
 command stack: stack {frames} {lut} {output}
 stacked = stack(frame @ vary(run), lut)
 ";

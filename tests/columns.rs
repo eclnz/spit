@@ -55,7 +55,7 @@ source raw : Table [id, run]
 source other : Other [id]
 operation clean(Table) -> Table
 operation join(left: Table, right: Table) -> Table
-operation merge(many Table) -> Table @ drop(run)
+operation merge(many Table) -> Table
 cleaned = clean(raw)
 joined = join(cleaned, other)
 typo = clean(rwa)

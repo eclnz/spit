@@ -120,12 +120,12 @@ operation sort_lines(input: Lines) -> Lines
 command sort_lines: sort -u -o {output} {input}
 sorted = sort_lines(shard)
 
-operation merge(items: many Lines) -> Lines @ drop(part)
+operation merge(items: many Lines) -> Lines
 command merge: sort -m -u -o {output} {items}
 merged = merge(sorted @ vary(part))
 ```
 
-`source` declares a family of input artifacts. A `shard` is identified by its `group` and `part` values. `sorted` keeps those dimensions. `merge` collects all parts of each group and produces one `merged[group=...]` artifact per group. The `@ drop(part)` contract and `@ vary(part)` call must agree.
+`source` declares a family of input artifacts. A `shard` is identified by its `group` and `part` values. `sorted` keeps those dimensions. `merge` collects all parts of each group and produces one `merged[group=...]` artifact per group. The call's `@ vary(part)` names the dimension it collects.
 
 `path` lines say where artifacts live; an output with no rule goes to `out/{product}/{entities}`. `command` lines give the exact executable and argument order. SPIT decides which artifacts belong to each job before filling their paths into a command.
 

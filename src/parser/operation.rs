@@ -1,5 +1,5 @@
-//! Operation declarations: `name(inputs) -> outputs`, with optional
-//! `@ drop(dimension)` and `@ min(count)` clauses.
+//! Operation declarations: `name(inputs) -> outputs`, with an optional
+//! `@ min(count)` clause.
 
 use crate::model::{
     Cardinality, DefaultPort, InputPort, OperationDef, OutputPort, ShapeRule, DEFAULT_OUTPUT,
@@ -39,6 +39,18 @@ pub(super) fn parse_operation(line: &str, number: usize) -> Result<OperationDef,
     }
     let (name, inputs) = call_parts(signature, number)?;
     identifier(name, number, "operation name")?;
+    if let Some((dimensions, clause)) = clauses.drop {
+        let vary = dimensions.join(", ");
+        return Err(ParseError::new(
+            number,
+            format!(
+                "an operation no longer names the dimensions it collects; remove `@ drop({vary})` \
+                 and write `@ vary({vary})` on the many input of each call, as in \
+                 `result = {name}(input @ vary({vary}))`"
+            ),
+        )
+        .at_token(clause));
+    }
     let inputs = comma_items(inputs, number)?;
     if inputs.is_empty() {
         return Err(ParseError::new(
@@ -53,30 +65,28 @@ pub(super) fn parse_operation(line: &str, number: usize) -> Result<OperationDef,
         .collect::<Result<Vec<_>, _>>()?;
     let shape_rule = shape_rule(&ports, &clauses, number)?;
     let mut operation = OperationDef::with_outputs(name, ports, outputs, shape_rule);
-    if let Some(dimensions) = clauses.drop {
-        operation = operation.aggregating_dimensions(dimensions);
-    }
     if let Some(minimum) = clauses.min {
         operation = operation.at_least(minimum);
     }
     Ok(operation)
 }
 
-/// The `@ drop(dimension)` and `@ min(count)` clauses after a signature.
+/// The `@ min(count)` clause after a signature, and a removed `@ drop(...)`
+/// clause with its text, kept to say what to write instead.
 #[derive(Default)]
-struct Clauses {
-    drop: Option<Vec<String>>,
+struct Clauses<'a> {
+    drop: Option<(Vec<String>, &'a str)>,
     min: Option<usize>,
 }
 
-fn parse_clauses(
-    clauses: impl Iterator<Item = impl AsRef<str>>,
+fn parse_clauses<'a>(
+    clauses: impl Iterator<Item = &'a str>,
     number: usize,
-) -> Result<Clauses, ParseError> {
-    let expected = "expected `@ drop(dimension)` or `@ min(count)` after operation signature";
+) -> Result<Clauses<'a>, ParseError> {
+    let expected = "expected `@ min(count)` after operation signature";
     let mut parsed = Clauses::default();
     for clause in clauses {
-        let clause = clause.as_ref().trim();
+        let clause = clause.trim();
         let (keyword, argument) = clause
             .split_once('(')
             .and_then(|(keyword, rest)| Some((keyword.trim(), rest.strip_suffix(')')?.trim())))
@@ -101,7 +111,7 @@ fn parse_clauses(
                     }
                     names.push(dimension.to_owned());
                 }
-                parsed.drop = Some(names);
+                parsed.drop = Some((names, clause));
             }
             "min" if parsed.min.is_none() => {
                 let count: usize = argument
@@ -178,7 +188,7 @@ fn parse_input_port<'a>(
 }
 
 /// Whether an operation aggregates, which it does with one many input; only
-/// then may it drop a dimension or require a minimum count.
+/// then may it require a minimum count.
 fn shape_rule(
     ports: &[InputPort],
     clauses: &Clauses,
@@ -196,12 +206,6 @@ fn shape_rule(
     }
     if many == 1 {
         return Ok(ShapeRule::Aggregate);
-    }
-    if clauses.drop.is_some() {
-        return Err(ParseError::new(
-            number,
-            "`@ drop(dimension)` requires a many input",
-        ));
     }
     if clauses.min.is_some() {
         return Err(ParseError::new(

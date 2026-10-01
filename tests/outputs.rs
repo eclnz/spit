@@ -32,7 +32,7 @@ stage prep:
     command align: register {image} {reference} {output}
     aligned = align(cleaned, reference)
 
-operation average(images: many Image<$K>) -> Image<$K> @ drop(run)
+operation average(images: many Image<$K>) -> Image<$K>
 command average: mean {images} -o {output}
 averaged = average(aligned @ vary(run))
 

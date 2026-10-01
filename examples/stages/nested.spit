@@ -12,7 +12,7 @@ stage preprocess:
         sorted = sort_lines(shard)
 
     stage combine:
-        operation merge(items: many Lines) -> Lines @ drop(part)
+        operation merge(items: many Lines) -> Lines
         command merge: sort -m -u -o {output} {items}
         merged = merge(sorted @ vary(part))
 
