@@ -1,0 +1,37 @@
+{
+  "run": "s1-logs-b",
+  "model": "same-model replicate",
+  "grade": {
+    "pass": true,
+    "expected_jobs": 24,
+    "actual_jobs": 24,
+    "matched_jobs": 24,
+    "expected_by_tool": {
+      "logdigest": 20,
+      "rollup": 3,
+      "fleetsum": 1
+    },
+    "actual_by_tool": {
+      "logdigest": 20,
+      "rollup": 3,
+      "fleetsum": 1
+    },
+    "missing": [],
+    "extra": []
+  },
+  "telemetry": {
+    "spit_calls": 4,
+    "by_command": {
+      "check": 1,
+      "dag": 2,
+      "inputs": 1
+    },
+    "failed_calls": 0,
+    "first_success_call": 1,
+    "diagnostics": [],
+    "diagnostic_kinds": {}
+  },
+  "audit": {
+    "error": "no transcript"
+  }
+}

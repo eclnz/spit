@@ -1,0 +1,42 @@
+{
+  "run": "s2-cohort-a",
+  "model": "same-model replicate",
+  "grade": {
+    "pass": true,
+    "expected_jobs": 41,
+    "actual_jobs": 41,
+    "matched_jobs": 41,
+    "expected_by_tool": {
+      "motioncorr": 13,
+      "bet": 6,
+      "coreg": 13,
+      "sessionavg": 6,
+      "longitudinal": 3
+    },
+    "actual_by_tool": {
+      "motioncorr": 13,
+      "bet": 6,
+      "coreg": 13,
+      "sessionavg": 6,
+      "longitudinal": 3
+    },
+    "missing": [],
+    "extra": []
+  },
+  "telemetry": {
+    "spit_calls": 4,
+    "by_command": {
+      "help": 1,
+      "check": 1,
+      "inputs": 1,
+      "dag": 1
+    },
+    "failed_calls": 0,
+    "first_success_call": 2,
+    "diagnostics": [],
+    "diagnostic_kinds": {}
+  },
+  "audit": {
+    "error": "no transcript"
+  }
+}

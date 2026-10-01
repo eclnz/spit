@@ -1,0 +1,6 @@
+pipeline data/pipeline.spit
+
+exclude [store=s03]  # only one sales week; report requires at least two
+exclude [store=s07]  # pricing file is named S07, not s07
+exclude pricing[store=S07]  # misnamed source for s07
+exclude [store=s09]  # pricing file is missing

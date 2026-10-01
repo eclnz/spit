@@ -1,0 +1,31 @@
+source model [model]
+path model: models/{model}.pt
+
+source config [config]
+path config: configs/{config}.yaml
+
+source seed [config, seed]
+path seed: sweep/{config}/seed-{seed}.json
+
+source testset
+path testset: eval/testset.parquet
+
+operation train_model(model, config, seed) -> Weights
+command train_model: train --model {model} --config {config} --seed-file {seed} --out {output}
+weights = train_model(model, config, seed @ each(config, seed))
+path weights: runs/{model}/{config}/seed-{seed}/weights.pt
+
+operation evaluate_run(weights: Weights, testset) -> Metrics
+command evaluate_run: evaluate --weights {weights} --testset {testset} --out {output}
+metrics = evaluate_run(weights, testset)
+path metrics: runs/{model}/{config}/seed-{seed}/metrics.json
+
+operation summarise_runs(metrics: many Metrics) -> Summary @ drop(seed)
+command summarise_runs: summarise --out {output} {metrics}
+summary = summarise_runs(metrics @ vary(seed))
+path summary: summaries/{model}/{config}.json
+
+operation make_leaderboard(summaries: many Summary) -> Board @ drop(model, config)
+command make_leaderboard: leaderboard --out {output} {summaries}
+board = make_leaderboard(summary @ vary(model, config))
+path board: leaderboard.csv

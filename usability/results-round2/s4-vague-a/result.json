@@ -1,0 +1,44 @@
+{
+  "run": "s4-vague-a",
+  "model": "same-model replicate",
+  "grade": {
+    "pass": true,
+    "expected_jobs": 19,
+    "actual_jobs": 19,
+    "matched_jobs": 19,
+    "expected_by_tool": {
+      "calibrate": 8,
+      "anomaly": 8,
+      "stationreport": 3
+    },
+    "actual_by_tool": {
+      "calibrate": 8,
+      "anomaly": 8,
+      "stationreport": 3
+    },
+    "missing": [],
+    "extra": []
+  },
+  "telemetry": {
+    "spit_calls": 7,
+    "by_command": {
+      "help": 1,
+      "check": 3,
+      "inputs": 1,
+      "dag": 2
+    },
+    "failed_calls": 1,
+    "first_success_call": 3,
+    "diagnostics": [
+      "#2: error: line 13, column 34: type `calibration` must start with a capital letter",
+      "#2: error: line 18, column 48: type `baseline` must start with a capital letter",
+      "#2: error: line 23, column 29: type `site` must start with a capital letter"
+    ],
+    "diagnostic_kinds": {
+      "error: type `\u2026` must start with a capital letter": 3
+    }
+  },
+  "audit": {
+    "error": "no transcript"
+  }
+}
