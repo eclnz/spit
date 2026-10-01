@@ -1,9 +1,0 @@
-pipeline pipeline.spit
-
-# The single-session subject remains outside the study.
-drop [sub] where t1w count<2
-# The corrupted run stays in the archive but is omitted from every job.
-exclude bold[sub=02,ses=02,run=3]    # motion spike
-
-require t1w count=1 per [sub, ses]
-require bold count>=1 per [sub, ses]

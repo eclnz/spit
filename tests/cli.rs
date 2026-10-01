@@ -66,7 +66,7 @@ fn dag_resolves_a_pipeline_over_a_spitout() {
 #[test]
 fn partial_dag_plans_the_complete_stores_and_records_the_rest() {
     let recipe = format!(
-        "{}/usability/harness/scenarios/s6-diagnose/data/weekly.spitin",
+        "{}/tests/fixtures/weekly_stores/weekly.spitin",
         env!("CARGO_MANIFEST_DIR")
     );
     let failed = spit(&["dag", &recipe]);

@@ -5,6 +5,9 @@
 # the next round of trials.
 #
 # usage: rebuild_keys.sh [--write]    --write replaces the stored keys
+#
+# The scenarios are kept in scenarios.zip; each run unpacks them to a temporary
+# folder, and --write packs them back with the new keys.
 set -e
 HARNESS=$(cd "$(dirname "$0")" && pwd)
 REPO=$(cd "$HARNESS/../.." && pwd)
@@ -13,6 +16,7 @@ WRITE=$1
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 status=0
+python3 "$HARNESS/archive.py" unpack "$HARNESS/scenarios.zip" "$TMP"
 
 check() { # name, expected, fresh
   if [ "$WRITE" = --write ]; then
@@ -24,7 +28,7 @@ check() { # name, expected, fresh
   else echo "FAIL  $1"; python3 "$HARNESS/grade.py" "$2" "$3"; status=1; fi
 }
 
-for S in "$HARNESS"/scenarios/*/; do
+for S in "$TMP"/scenarios/*/; do
   name=$(basename "$S"); W=$TMP/$name
   cp -r "$S/data" "$W"; cp "$S"/key/*.spit* "$W"/ 2>/dev/null || true
   rm -f "$W/expected.spitdag"
@@ -39,4 +43,7 @@ for S in "$HARNESS"/scenarios/*/; do
     check "$name follow-up" "$S/key-followup/expected.spitdag" "$TMP/$name-followup.spitdag"
   fi
 done
+if [ "$WRITE" = --write ]; then
+  python3 "$HARNESS/archive.py" pack "$TMP/scenarios" "$HARNESS/scenarios.zip"
+fi
 exit $status
