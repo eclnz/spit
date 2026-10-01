@@ -28,6 +28,9 @@ pub(crate) enum PathPlaceholder {
     Entities,
     /// `{@stage}`: the stage whose block holds the step.
     Stage,
+    /// `{@labels}`: every dimension as `dim-value`, joined by `_`, as BIDS
+    /// names them. A product's template has it written out.
+    Labels,
     /// Any other name: a dimension the product declares.
     Dimension(String),
 }
@@ -39,6 +42,7 @@ impl PathPlaceholder {
             "product" => Some(Self::Product),
             "entities" => Some(Self::Entities),
             "stage" => Some(Self::Stage),
+            "labels" => Some(Self::Labels),
             _ => None,
         }
     }
@@ -49,7 +53,7 @@ impl PathPlaceholder {
         match name.strip_prefix('@') {
             Some(built_in) => Self::built_in(built_in).ok_or_else(|| {
                 format!(
-                    "unknown built-in placeholder `{{{name}}}`; path templates have `{{@product}}`, `{{@entities}}` and `{{@stage}}`"
+                    "unknown built-in placeholder `{{{name}}}`; path templates have `{{@product}}`, `{{@entities}}`, `{{@labels}}` and `{{@stage}}`"
                 )
             }),
             None => Ok(Self::Dimension(name)),
@@ -63,6 +67,7 @@ impl PathPlaceholder {
             Self::Product => "the product's name",
             Self::Entities => "every dimension as `dimension=value`",
             Self::Stage => "the stage that makes it",
+            Self::Labels => "every dimension as `dimension-value`",
             Self::Dimension(_) => return None,
         };
         Some(format!("; write `{{@{name}}}` for {meaning}"))
@@ -74,6 +79,7 @@ impl PathPlaceholder {
             Self::Product => "@product",
             Self::Entities => "@entities",
             Self::Stage => "@stage",
+            Self::Labels => "@labels",
             Self::Dimension(name) => name,
         }
     }
@@ -91,6 +97,38 @@ impl fmt::Display for PathPlaceholder {
 pub(crate) enum PathPart {
     Literal(String),
     Placeholder(PathPlaceholder),
+    /// `[...]`: text and placeholders a product's path keeps only when each
+    /// placeholder in it has a value for that product. A product's template
+    /// has its groups resolved.
+    Group(Vec<PathPart>),
+}
+
+/// What a product gives the placeholders of a path template: its
+/// dimensions, in the pipeline's order, and whether a stage makes it.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Holder<'a> {
+    pub(crate) dimensions: &'a [String],
+    pub(crate) in_stage: bool,
+}
+
+impl Holder<'_> {
+    /// Whether `placeholder` has a value for the product.
+    fn has(self, placeholder: &PathPlaceholder) -> bool {
+        match placeholder {
+            PathPlaceholder::Product | PathPlaceholder::Entities => true,
+            PathPlaceholder::Stage => self.in_stage,
+            PathPlaceholder::Labels => !self.dimensions.is_empty(),
+            PathPlaceholder::Dimension(name) => self.dimensions.contains(name),
+        }
+    }
+
+    /// Whether the product keeps `group`: each placeholder in it has a value.
+    fn keeps(self, group: &[PathPart]) -> bool {
+        group.iter().all(|part| match part {
+            PathPart::Placeholder(placeholder) => self.has(placeholder),
+            _ => true,
+        })
+    }
 }
 
 /// A path rule's template, parsed once when the rule is read.
@@ -109,16 +147,47 @@ impl PathTemplate {
     /// Parse a template such as `derivatives/{@stage}/{@product}/{@entities}.mif`.
     pub fn parse(text: impl Into<String>) -> Result<Self, PathError> {
         let text = text.into();
-        let parts = parse_template(&text)
-            .map_err(error)?
-            .into_iter()
-            .map(|part| match part {
-                Part::Literal(value) => Ok(PathPart::Literal(value)),
-                Part::Placeholder(name) => PathPlaceholder::parse(name).map(PathPart::Placeholder),
-            })
-            .collect::<Result<_, _>>()
-            .map_err(error)?;
+        let parts = parse_parts(&text).map_err(error)?;
         Ok(Self { text, parts })
+    }
+
+    /// Whether the template has a `[...]` group or `{@labels}`, which each
+    /// product resolves its own way.
+    fn varies(&self) -> bool {
+        self.parts.iter().any(|part| {
+            matches!(
+                part,
+                PathPart::Group(_) | PathPart::Placeholder(PathPlaceholder::Labels)
+            )
+        })
+    }
+
+    /// This template as `holder`'s product has it: each group kept whole or
+    /// dropped, and `{@labels}` written out as `sub-{sub}_ses-{ses}`. One
+    /// with no group or `{@labels}` is the same for every product.
+    pub(crate) fn resolve(&self, holder: Holder<'_>) -> Cow<'_, Self> {
+        if !self.varies() {
+            return Cow::Borrowed(self);
+        }
+        let mut parts = Vec::new();
+        for part in &self.parts {
+            match part {
+                PathPart::Group(group) if holder.keeps(group) => {
+                    for part in group {
+                        push_resolved(&mut parts, part, holder);
+                    }
+                }
+                PathPart::Group(_) => {}
+                part => push_resolved(&mut parts, part, holder),
+            }
+        }
+        if parts.is_empty() {
+            parts.push(PathPart::Literal(String::new()));
+        }
+        Cow::Owned(Self {
+            text: render(&parts),
+            parts,
+        })
     }
 
     pub fn as_str(&self) -> &str {
@@ -177,24 +246,23 @@ impl PathTemplate {
     /// imported product keeps the path its own file gives it.
     #[must_use]
     pub(crate) fn with_product(&self, name: &str) -> Self {
-        let parts: Vec<_> = self
-            .parts
-            .iter()
-            .map(|part| match part {
-                PathPart::Placeholder(PathPlaceholder::Product) => {
-                    PathPart::Literal(name.to_owned())
-                }
-                part => part.clone(),
-            })
-            .collect();
-        let text = parts
-            .iter()
-            .map(|part| match part {
-                PathPart::Literal(value) => value.replace('{', "{{").replace('}', "}}"),
-                PathPart::Placeholder(placeholder) => placeholder.to_string(),
-            })
-            .collect();
-        Self { text, parts }
+        fn named(parts: &[PathPart], name: &str) -> Vec<PathPart> {
+            parts
+                .iter()
+                .map(|part| match part {
+                    PathPart::Placeholder(PathPlaceholder::Product) => {
+                        PathPart::Literal(name.to_owned())
+                    }
+                    PathPart::Group(group) => PathPart::Group(named(group, name)),
+                    part => part.clone(),
+                })
+                .collect()
+        }
+        let parts = named(&self.parts, name);
+        Self {
+            text: render(&parts),
+            parts,
+        }
     }
 }
 
@@ -214,6 +282,137 @@ impl PartialEq<&str> for PathTemplate {
     fn eq(&self, other: &&str) -> bool {
         self.text == *other
     }
+}
+
+/// Read a path template's parts: `[...]` groups, each holding text and
+/// placeholders, between text and placeholders. `[[` and `]]` are literal
+/// brackets, as `{{` and `}}` are literal braces.
+fn parse_parts(text: &str) -> Result<Vec<PathPart>, String> {
+    let mut parts = Vec::new();
+    // The text since the last bracket, with `[[` and `]]` read.
+    let mut segment = String::new();
+    // Where the open group's `[` is.
+    let mut open = None;
+    let mut characters = text.char_indices().peekable();
+    while let Some((index, character)) = characters.next() {
+        match character {
+            '[' | ']' if characters.peek().map(|&(_, next)| next) == Some(character) => {
+                characters.next();
+                segment.push(character);
+            }
+            '[' => {
+                if open.is_some() {
+                    return Err(format!(
+                        "`[` inside `[...]` in `{text}`; a group cannot hold another"
+                    ));
+                }
+                push_segment(&mut parts, &std::mem::take(&mut segment))?;
+                open = Some(index);
+            }
+            ']' => {
+                let start = open.take().ok_or_else(|| {
+                    format!("unmatched `]` in `{text}`; write `]]` for a literal `]`")
+                })?;
+                let mut group = Vec::new();
+                push_segment(&mut group, &std::mem::take(&mut segment))?;
+                if !group.iter().any(|part| {
+                    matches!(
+                        part,
+                        PathPart::Placeholder(
+                            PathPlaceholder::Dimension(_)
+                                | PathPlaceholder::Stage
+                                | PathPlaceholder::Labels
+                        )
+                    )
+                }) {
+                    return Err(format!(
+                        "`{}` names nothing that could be absent; remove the brackets",
+                        &text[start..=index]
+                    ));
+                }
+                parts.push(PathPart::Group(group));
+            }
+            character => segment.push(character),
+        }
+    }
+    if open.is_some() {
+        return Err(format!(
+            "unclosed `[` in `{text}`; write `[[` for a literal `[`"
+        ));
+    }
+    push_segment(&mut parts, &segment)?;
+    if parts.is_empty() {
+        parts.push(PathPart::Literal(String::new()));
+    }
+    Ok(parts)
+}
+
+/// Add the text and placeholders of `segment`, text between brackets.
+fn push_segment(parts: &mut Vec<PathPart>, segment: &str) -> Result<(), String> {
+    if segment.is_empty() {
+        return Ok(());
+    }
+    for part in parse_template(segment)? {
+        match part {
+            Part::Literal(value) => push_literal(parts, &value),
+            Part::Placeholder(name) => {
+                parts.push(PathPart::Placeholder(PathPlaceholder::parse(name)?));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Add `value` to the text `parts` ends with, so that text is one part.
+fn push_literal(parts: &mut Vec<PathPart>, value: &str) {
+    match parts.last_mut() {
+        Some(PathPart::Literal(tail)) => tail.push_str(value),
+        _ => parts.push(PathPart::Literal(value.to_owned())),
+    }
+}
+
+/// Add `part` of a group `holder`'s product keeps, or of no group, with
+/// `{@labels}` written out when the product has dimensions.
+fn push_resolved(parts: &mut Vec<PathPart>, part: &PathPart, holder: Holder<'_>) {
+    match part {
+        PathPart::Literal(value) => push_literal(parts, value),
+        PathPart::Placeholder(PathPlaceholder::Labels) if holder.has(&PathPlaceholder::Labels) => {
+            for (index, dimension) in holder.dimensions.iter().enumerate() {
+                if index > 0 {
+                    push_literal(parts, "_");
+                }
+                push_literal(parts, &format!("{}-", encode_component(dimension)));
+                parts.push(PathPart::Placeholder(PathPlaceholder::Dimension(
+                    dimension.clone(),
+                )));
+            }
+        }
+        part => parts.push(part.clone()),
+    }
+}
+
+/// The text of `parts`, as a template would write them.
+fn render(parts: &[PathPart]) -> String {
+    let mut text = String::new();
+    for part in parts {
+        match part {
+            PathPart::Literal(value) => {
+                for character in value.chars() {
+                    if matches!(character, '{' | '}' | '[' | ']') {
+                        text.push(character);
+                    }
+                    text.push(character);
+                }
+            }
+            PathPart::Placeholder(placeholder) => text.push_str(&placeholder.to_string()),
+            PathPart::Group(group) => {
+                text.push('[');
+                text.push_str(&render(group));
+                text.push(']');
+            }
+        }
+    }
+    text
 }
 
 pub(crate) fn error(message: impl Into<String>) -> PathError {
@@ -363,12 +562,26 @@ impl<'p> ProductPath<'p> {
                         error(format!(
                             "path template for `{}` uses absent dimension `{dimension}`{}",
                             artifact.product,
-                            PathPlaceholder::hint(dimension).unwrap_or_default()
+                            PathPlaceholder::hint(dimension).unwrap_or_else(|| {
+                                "; put it in `[...]` if only some products have it".to_owned()
+                            })
                         ))
                         .focus(placeholder.to_string())
                     })?;
                     push_encoded(&mut relative, value);
                 }
+                // A product with dimensions has `{@labels}` written out.
+                PathPart::Placeholder(PathPlaceholder::Labels) => {
+                    return Err(error(format!(
+                        "path template for `{}` uses `{}`, but `{}` has no dimensions; put it in `[...]`, as `[{}_]`",
+                        artifact.product,
+                        PathPlaceholder::Labels,
+                        artifact.product,
+                        PathPlaceholder::Labels
+                    ))
+                    .focus(PathPlaceholder::Labels.to_string()));
+                }
+                PathPart::Group(_) => unreachable!("a product's template has its groups resolved"),
             }
         }
         if let Some(reason) = unusable_path(&relative) {
@@ -392,6 +605,7 @@ pub(crate) fn shown_path(pipeline: &Pipeline, product: &str) -> Option<String> {
                 shown.push_str(path.stage.as_deref().unwrap_or("{@stage}"));
             }
             PathPart::Placeholder(placeholder) => shown.push_str(&placeholder.to_string()),
+            PathPart::Group(_) => unreachable!("a product's template has its groups resolved"),
         }
     }
     Some(shown)
@@ -523,6 +737,12 @@ pub(crate) fn validate_discovery_rule(rule: &DirectoryDiscovery) -> Result<(), P
     for part in rule.template.parts() {
         match part {
             PathPart::Literal(value) => sample.push_str(value),
+            PathPart::Group(_) => {
+                return Err(error(format!(
+                    "discovery `{}` pattern cannot have an optional `[...]` part; every directory it finds has each dimension",
+                    rule.name
+                )));
+            }
             PathPart::Placeholder(PathPlaceholder::Dimension(name))
                 if dimensions.contains(name) =>
             {

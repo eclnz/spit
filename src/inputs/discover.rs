@@ -193,6 +193,7 @@ impl<'a> DiscoveryPattern<'a> {
                     "discovery `{}` uses undeclared or reserved placeholder `{placeholder}`",
                     rule.name
                 ))),
+                PathPart::Group(_) => unreachable!("a discovery pattern has no group"),
             })
             .collect::<Result<_, _>>()?;
         Ok(Self { rule, pieces })
@@ -518,6 +519,16 @@ fn path_pattern(template: &PathTemplate, product: &ProductDef) -> Result<Vec<Pie
             PathPart::Placeholder(PathPlaceholder::Dimension(dimension)) => {
                 pieces.push(Piece::Value(dimension.clone()));
             }
+            // A source with dimensions has `{@labels}` written out, and
+            // its groups resolved; `inspect_paths` rejects the rest first.
+            PathPart::Placeholder(PathPlaceholder::Labels) => {
+                return Err(error(format!(
+                    "path rule for source `{}` uses `{}`, but the source has no dimensions",
+                    product.name,
+                    PathPlaceholder::Labels
+                )))
+            }
+            PathPart::Group(_) => unreachable!("a product's template has its groups resolved"),
         }
     }
     Ok(pieces)

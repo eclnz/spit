@@ -47,7 +47,7 @@ fn an_unknown_built_in_is_an_error() {
     let found = errors("path: out/{@name}/{@entities}\n");
     assert!(
         found.iter().any(|error| error.contains(
-            "unknown built-in placeholder `{@name}`; path templates have `{@product}`, `{@entities}` and `{@stage}`"
+            "unknown built-in placeholder `{@name}`; path templates have `{@product}`, `{@entities}`, `{@labels}` and `{@stage}`"
         )),
         "{found:?}"
     );

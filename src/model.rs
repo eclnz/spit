@@ -10,7 +10,7 @@ use rustc_hash::{FxHashMap, FxHashSet, FxHasher};
 
 use crate::command::CommandTemplate;
 use crate::error::{DefinitionSubject, ResolveError};
-use crate::paths::PathTemplate;
+use crate::paths::{Holder, PathTemplate};
 use crate::types::TypeExpr;
 
 pub type ArtifactType = TypeExpr;
@@ -1074,11 +1074,24 @@ impl Pipeline {
                 .unwrap_or(template);
             return Some(Cow::Owned(stem.with_extension(suffix)));
         }
-        let template = self.path_rule_for(product)?;
+        let template = self.path_rule_for(product)?.resolve(self.holder(product));
         Some(match self.added_extension(product) {
             Some((extension, _)) => Cow::Owned(template.with_extension(extension)),
-            None => Cow::Borrowed(template),
+            None => template,
         })
+    }
+
+    /// What `product` gives a path template's placeholders: its dimensions
+    /// and whether a stage makes it.
+    pub(crate) fn holder(&self, product: &str) -> Holder<'_> {
+        Holder {
+            dimensions: self
+                .products
+                .iter()
+                .find(|declared| declared.name == product)
+                .map_or(&[][..], |declared| declared.dimensions.as_slice()),
+            in_stage: self.stage_of(product).is_some(),
+        }
     }
 
     /// The path rule `product` uses, as written: its own rule, else its

@@ -100,7 +100,7 @@ fn path_rules_that_cannot_separate_artifacts_are_rejected() {
     let error = check("source raw [id]\npath: {@product}/{id}/{shard}.csv\n").unwrap_err();
     assert_eq!(
         error.to_string(),
-        "path template for `raw` uses absent dimension `shard`"
+        "path template for `raw` uses absent dimension `shard`; put it in `[...]` if only some products have it"
     );
 
     // Rules naming different dimensions are not treated as colliding.

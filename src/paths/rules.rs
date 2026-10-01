@@ -304,7 +304,7 @@ fn validate_path_template(pipeline: &Pipeline, product: &ProductDef) -> Result<S
         .iter()
         .filter_map(|part| match part {
             PathPart::Placeholder(placeholder) => Some(placeholder),
-            PathPart::Literal(_) => None,
+            PathPart::Literal(_) | PathPart::Group(_) => None,
         })
         .collect();
     if !placeholders.contains(&PathPlaceholder::Entities) {

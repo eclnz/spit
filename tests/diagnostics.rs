@@ -236,7 +236,7 @@ path other: {@product}/{id}/{shard}.csv
         [
             "error: line 2: products `raw` and `cleaned` bind to the same path `id=id.csv` for the same entities; include `{@product}` or distinguish their path rules",
             "warning: line 5: source product `other` is never used as an input",
-            "error: line 6: path template for `other` uses absent dimension `shard`",
+            "error: line 6: path template for `other` uses absent dimension `shard`; put it in `[...]` if only some products have it",
         ]
     );
 }
