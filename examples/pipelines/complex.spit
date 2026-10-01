@@ -1,25 +1,19 @@
-products:
-    reading       : Reading<Raw> [site, device, window, sample]
-    gain          [site, device]
-    baseline      : Baseline [site, window]
-    target        : Target [site]
-    normalized    [site, device, window, sample]
-    checked       : Flag [site, device, window, sample]
-    window_mean   : Reading<Normalized> [site, device, window]
-    scored        [site, device, window]
-    device_mean   : Reading<Normalized> [site, device]
-    site_mean     : Reading<Normalized> [site]
+source reading : Reading<Raw> [site, device, window, sample]
+source gain [site, device]
+source baseline : Baseline [site, window]
+source target : Target [site]
 
-operations:
-    normalize(Reading<Raw>, one, Baseline) -> Reading<Normalized>
-    inspect(Reading<Raw>) -> Flag
-    mean(many Reading<Normalized>) -> Reading<Normalized>
-    score(Reading<Normalized>, Target) -> Score
+operation normalize(reading: Reading<Raw>, gain, baseline: Baseline) -> Reading<Normalized>
+normalized = normalize(reading, gain, baseline)
 
-pipeline:
-    normalized = normalize(reading, gain, baseline)
-    checked = inspect(reading)
-    window_mean = mean(normalized @ vary(sample))
-    scored = score(window_mean, target)
-    device_mean = mean(window_mean @ vary(window))
-    site_mean = mean(device_mean @ vary(device))
+operation inspect(reading: Reading<Raw>) -> Flag
+checked = inspect(reading)
+
+operation mean(readings: many Reading<Normalized>) -> Reading<Normalized>
+window_mean = mean(normalized @ vary(sample))
+
+operation score(reading: Reading<Normalized>, target: Target) -> Score
+scored = score(window_mean, target)
+
+device_mean = mean(window_mean @ vary(window))
+site_mean = mean(device_mean @ vary(device))

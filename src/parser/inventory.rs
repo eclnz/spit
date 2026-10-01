@@ -36,11 +36,10 @@ pub(crate) fn split_document(text: &str) -> DocumentText {
         // Records run from a `sources:` or `contexts:` header to the next
         // header, statement or step.
         match Header::of(line) {
-            Some(header) if header.is_records() => {
+            Some(_) => {
                 inventory_section = true;
                 inventory_line.get_or_insert(index + 1);
             }
-            Some(_) => inventory_section = false,
             None if Keyword::of(line).is_some() || is_step(line) => inventory_section = false,
             None => {}
         }

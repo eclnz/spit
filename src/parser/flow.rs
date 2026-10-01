@@ -5,7 +5,7 @@
 use crate::model::{CommandRole, Invocation};
 
 use super::declarations::{parse_discover, parse_invocation_parts, parse_path, parse_product};
-use super::keyword::Keyword;
+use super::keyword::{removed_section, Keyword};
 use super::lexical::{comma_items, identifier, strip_comment};
 use super::source_map::{name_place, step_place};
 use super::{FlowOutput, FlowStep, ParseError, StatementKind, Syntax, SHELL_SOURCE_REMOVED};
@@ -120,6 +120,12 @@ fn flow_line(
     let line = strip_comment(original).trim();
     if line.is_empty() {
         return Ok(());
+    }
+    if let Some(instead) = removed_section(line) {
+        return Err(ParseError::new(
+            number,
+            format!("SPIT no longer reads `{line}` sections; {instead}"),
+        ));
     }
     let indent = original.len() - original.trim_start().len();
     stages.enter(indent, number)?;

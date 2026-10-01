@@ -1,5 +1,5 @@
 //! What a line starts with: a keyword such as `source` or `path`, or a
-//! section header such as `products:` or `contexts name:`. Every reader of
+//! records header such as `sources:` or `contexts name:`. Every reader of
 //! a document classifies its lines here, so they agree on what each is.
 
 /// A keyword that starts a statement.
@@ -63,14 +63,9 @@ impl Keyword {
     }
 }
 
-/// A line that opens a section.
+/// A line that opens a `.spitout`'s records.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum Header<'a> {
-    Products,
-    Operations,
-    Pipeline,
-    Constraints,
-    Commands,
     Sources,
     SourcePaths,
     /// `contexts:`, or `contexts name:` for a named discovery's contexts.
@@ -83,11 +78,6 @@ impl<'a> Header<'a> {
     /// The header a trimmed `line` is, if it is one.
     pub(crate) fn of(line: &'a str) -> Option<Self> {
         Some(match line {
-            "products:" => Self::Products,
-            "operations:" => Self::Operations,
-            "pipeline:" => Self::Pipeline,
-            "constraints:" => Self::Constraints,
-            "commands:" => Self::Commands,
             "sources:" => Self::Sources,
             "source_paths:" => Self::SourcePaths,
             "removed:" => Self::Removed,
@@ -97,15 +87,20 @@ impl<'a> Header<'a> {
             )),
         })
     }
+}
 
-    /// Whether it opens records, which belong in a `.spitout`, rather than a
-    /// section of a sectioned pipeline.
-    pub(crate) fn is_records(self) -> bool {
-        matches!(
-            self,
-            Self::Sources | Self::SourcePaths | Self::Contexts(_) | Self::Removed
-        )
-    }
+/// The headers of the removed sectioned form, which grouped declarations
+/// under `products:` and the like, and what each held. Kept to say what to
+/// write instead.
+pub(crate) fn removed_section(line: &str) -> Option<&'static str> {
+    Some(match line {
+        "products:" => "write each source as `source name : Type [dimensions]`, and let each step declare its outputs",
+        "operations:" => "write each operation as `operation name(port: Type) -> Type`",
+        "pipeline:" => "write each step as `output = operation(inputs)`",
+        "commands:" => "write each command as `command operation: program {input} {output}`",
+        "constraints:" => "write each rule on its own line, as `require ...` or `drop ...`",
+        _ => return None,
+    })
 }
 
 #[cfg(test)]
@@ -128,8 +123,8 @@ mod tests {
             Header::of("contexts visits:"),
             Some(Header::Contexts(Some("visits")))
         );
-        assert_eq!(Header::of("products:"), Some(Header::Products));
+        assert_eq!(Header::of("products:"), None);
         assert_eq!(Header::of("contexts"), None);
-        assert!(Header::of("sources:").is_some_and(Header::is_records));
+        assert_eq!(Header::of("sources:"), Some(Header::Sources));
     }
 }

@@ -130,9 +130,6 @@ fn check_input_lines(text: &str) -> Result<(), ParseError> {
                     | Keyword::Stage
                     | Keyword::Use
             )
-        ) || matches!(
-            Header::of(line),
-            Some(Header::Products | Header::Operations | Header::Pipeline | Header::Commands)
         );
         if pipeline_only {
             return Err(ParseError::new(

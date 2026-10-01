@@ -8,7 +8,7 @@ use spit::{diagnose_in, parse_pipeline, parse_source_inventory, resolve, Context
 /// Examples that demonstrate a diagnostic, with exactly what they report.
 const EXPECTED: &[(&str, &[&str])] = &[(
     "examples/analytics/analytics_bad_join.spit",
-    &["error: line 12: type conflict at `join.input2` (product `accounts`): variable `K` was inferred as CustomerKey, but now requires AccountKey"],
+    &["error: line 7: type conflict at `join.accounts` (product `accounts`): variable `K` was inferred as CustomerKey, but now requires AccountKey"],
 )];
 
 fn example_pipelines() -> Vec<PathBuf> {

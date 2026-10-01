@@ -1,4 +1,4 @@
-//! Parse sectioned or flow-style pipelines and separate source inventories.
+//! Parse flow-style pipelines and separate source inventories.
 
 mod declarations;
 mod flow;
@@ -6,7 +6,6 @@ mod inventory;
 mod keyword;
 mod lexical;
 mod operation;
-mod sectioned;
 mod source_map;
 
 use std::fmt;
@@ -19,7 +18,6 @@ use crate::span::{address_of, columns_at, content_columns, Focus, Located, Place
 use crate::types::TypeExpr;
 
 use self::flow::parse_flow;
-use self::sectioned::{is_sectioned_document, parse_sectioned};
 
 pub(crate) use self::declarations::{parse_use, ExcludeLine, UseSpec};
 pub(crate) use self::inventory::{as_read_back, source_record_lines, split_document};
@@ -147,7 +145,7 @@ pub(crate) enum StatementKind {
         name: String,
         place: Place,
     },
-    /// A `source` declaration or an entry of a `products:` section.
+    /// A `source` declaration.
     Product(ProductDef, Place),
     Discover(DirectoryDiscovery),
     Operation(OperationDef, Place),
@@ -157,8 +155,6 @@ pub(crate) enum StatementKind {
     Exclude(declarations::ExcludeLine, Option<String>, Place),
     Command(CommandDef, Place),
     Path(PathRule),
-    /// A step whose outputs are declared elsewhere, from a `pipeline:` section.
-    Step(Invocation, Step),
     /// A flow step, which declares its output products.
     FlowStep(FlowStep),
 }
@@ -199,13 +195,9 @@ pub(crate) enum Kind {
     Recipe,
 }
 
-/// Parse a pipeline's statements, in the sectioned or the flow form.
+/// Parse a pipeline's statements.
 pub(crate) fn parse_syntax(text: &str) -> Syntax {
-    if is_sectioned_document(text) {
-        parse_sectioned(text)
-    } else {
-        parse_flow(text)
-    }
+    parse_flow(text)
 }
 
 impl StatementKind {

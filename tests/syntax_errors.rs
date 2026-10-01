@@ -70,25 +70,6 @@ fn reports_pipeline_and_inventory_syntax_errors_together() {
 }
 
 #[test]
-fn reports_multiple_errors_in_a_sectioned_pipeline_and_its_inventory() {
-    let text = "products:\n  raw [id]\n  bad product\noperations:\n  copy(one)\n  bad operation\npipeline:\n  result = copy(raw)\n";
-    let inventory = "sources:\n  raw[id=x,id=y]\n  raw[id=a,id=b]\n";
-    let issues = errors(diagnose(text, Some(inventory)));
-    assert_eq!(
-        issues
-            .iter()
-            .map(|issue| (issue.source, issue.line))
-            .collect::<Vec<_>>(),
-        [
-            (DiagnosticSource::Pipeline, Some(3)),
-            (DiagnosticSource::Pipeline, Some(6)),
-            (DiagnosticSource::Inventory, Some(2)),
-            (DiagnosticSource::Inventory, Some(3)),
-        ]
-    );
-}
-
-#[test]
 fn seeded_deletions_report_every_damaged_pipeline_line() {
     let mut original = vec![
         "source raw [id]".to_owned(),
@@ -275,15 +256,6 @@ fn deletion_messages_name_the_missing_syntax_without_cascading() {
             .contains("closing `]` in constraint dimensions"),
         "{error}"
     );
-}
-
-#[test]
-fn sectioned_step_without_equals_names_the_missing_character() {
-    let text = "products:\n  raw [id]\n  result [id]\noperations:\n  copy(one)\npipeline:\n  result copy(raw)\n";
-    let issues = errors(diagnose(text, None));
-    assert_eq!(issues.len(), 1);
-    assert_eq!(issues[0].line, Some(7));
-    assert!(issues[0].message.contains("expected `=`"));
 }
 
 fn next_random(seed: &mut u64) -> u64 {

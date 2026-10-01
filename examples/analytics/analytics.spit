@@ -1,37 +1,32 @@
 # Analytics example: a keyed relation pipeline with several joins and rollups.
 # Product names describe query stages. Relation<...,CustomerKey> records the
 # join key; repeated K variables in operation signatures enforce compatibility.
-products:
-    events             : Relation<Event,CustomerKey>              [tenant, customer, day, event]
-    customers          : Relation<Customer,CustomerKey>           [tenant, customer]
-    subscriptions      : Relation<Subscription,CustomerKey>      [tenant, customer]
-    purchases          : Relation<Purchase,CustomerKey>           [tenant, customer]
-    campaigns           : Relation<Campaign,CustomerKey>           [tenant, customer]
-    clean_events       : Relation<Event,CustomerKey>              [tenant, customer, day, event]
-    customer_events    : Relation<CustomerEvent,CustomerKey>     [tenant, customer, day, event]
-    subscribed_events  : Relation<SubscribedEvent,CustomerKey>   [tenant, customer, day, event]
-    purchased_events   : Relation<PurchasedEvent,CustomerKey>    [tenant, customer, day, event]
-    attributed_events  : Relation<AttributedEvent,CustomerKey>   [tenant, customer, day, event]
-    daily_metrics      : Relation<CustomerDayMetric,CustomerKey> [tenant, customer, day]
-    customer_metrics   : Relation<CustomerMetric,CustomerKey>   [tenant, customer]
-    tenant_metrics     : Relation<TenantMetric,TenantKey>        [tenant]
+source events : Relation<Event,CustomerKey> [tenant, customer, day, event]
+source customers : Relation<Customer,CustomerKey> [tenant, customer]
+source subscriptions : Relation<Subscription,CustomerKey> [tenant, customer]
+source purchases : Relation<Purchase,CustomerKey> [tenant, customer]
+source campaigns : Relation<Campaign,CustomerKey> [tenant, customer]
 
-operations:
-    clean(Relation<Event,CustomerKey>) -> Relation<Event,CustomerKey>
-    join_customers(Relation<Event,CustomerKey>, Relation<Customer,CustomerKey>) -> Relation<CustomerEvent,CustomerKey>
-    join_subscriptions(Relation<CustomerEvent,CustomerKey>, Relation<Subscription,CustomerKey>) -> Relation<SubscribedEvent,CustomerKey>
-    join_purchases(Relation<SubscribedEvent,CustomerKey>, Relation<Purchase,CustomerKey>) -> Relation<PurchasedEvent,CustomerKey>
-    join_campaigns(Relation<PurchasedEvent,CustomerKey>, Relation<Campaign,CustomerKey>) -> Relation<AttributedEvent,CustomerKey>
-    aggregate_day(many Relation<AttributedEvent,CustomerKey>) -> Relation<CustomerDayMetric,CustomerKey>
-    aggregate_customer(many Relation<CustomerDayMetric,CustomerKey>) -> Relation<CustomerMetric,CustomerKey>
-    aggregate_tenant(many Relation<CustomerMetric,CustomerKey>) -> Relation<TenantMetric,TenantKey>
+operation clean(events: Relation<Event,K>) -> Relation<Event,K>
+clean_events = clean(events)
 
-pipeline:
-    clean_events = clean(events)
-    customer_events = join_customers(clean_events, customers)
-    subscribed_events = join_subscriptions(customer_events, subscriptions)
-    purchased_events = join_purchases(subscribed_events, purchases)
-    attributed_events = join_campaigns(purchased_events, campaigns)
-    daily_metrics = aggregate_day(attributed_events @ vary(event))
-    customer_metrics = aggregate_customer(daily_metrics @ vary(day))
-    tenant_metrics = aggregate_tenant(customer_metrics @ vary(customer))
+operation join_customers(events: Relation<Event,K>, customers: Relation<Customer,K>) -> Relation<CustomerEvent,K>
+customer_events = join_customers(clean_events, customers)
+
+operation join_subscriptions(events: Relation<CustomerEvent,K>, subscriptions: Relation<Subscription,K>) -> Relation<SubscribedEvent,K>
+subscribed_events = join_subscriptions(customer_events, subscriptions)
+
+operation join_purchases(events: Relation<SubscribedEvent,K>, purchases: Relation<Purchase,K>) -> Relation<PurchasedEvent,K>
+purchased_events = join_purchases(subscribed_events, purchases)
+
+operation join_campaigns(events: Relation<PurchasedEvent,K>, campaigns: Relation<Campaign,K>) -> Relation<AttributedEvent,K>
+attributed_events = join_campaigns(purchased_events, campaigns)
+
+operation aggregate_day(events: many Relation<AttributedEvent,K>) -> Relation<CustomerDayMetric,K>
+daily_metrics = aggregate_day(attributed_events @ vary(event))
+
+operation aggregate_customer(days: many Relation<CustomerDayMetric,K>) -> Relation<CustomerMetric,K>
+customer_metrics = aggregate_customer(daily_metrics @ vary(day))
+
+operation aggregate_tenant(customers: many Relation<CustomerMetric,CustomerKey>) -> Relation<TenantMetric,TenantKey>
+tenant_metrics = aggregate_tenant(customer_metrics @ vary(customer))

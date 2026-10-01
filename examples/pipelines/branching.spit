@@ -1,25 +1,20 @@
-products:
-    raw       : Record [team, period, item]
-    policy    : Policy [team]
-    cleaned   : CleanRecord [team, period, item]
-    validated : ValidRecord [team, period, item]
-    enriched  : EnrichedRecord [team, period, item]
-    audit     : Audit [team, period]
-    digest    : Digest [team, period]
-    report    : Report [team, period]
+source raw : Record [team, period, item]
+source policy : Policy [team]
 
-operations:
-    clean(Record) -> CleanRecord
-    validate(CleanRecord, Policy) -> ValidRecord
-    enrich(CleanRecord, Policy) -> EnrichedRecord
-    audit_group(many ValidRecord) -> Audit
-    digest_group(many EnrichedRecord) -> Digest
-    assemble(Audit, Digest, Policy) -> Report
+operation clean(record: Record) -> CleanRecord
+cleaned = clean(raw)
 
-pipeline:
-    cleaned = clean(raw)
-    validated = validate(cleaned, policy)
-    enriched = enrich(cleaned, policy)
-    audit = audit_group(validated @ vary(item))
-    digest = digest_group(enriched @ vary(item))
-    report = assemble(audit, digest, policy)
+operation validate(record: CleanRecord, policy: Policy) -> ValidRecord
+validated = validate(cleaned, policy)
+
+operation enrich(record: CleanRecord, policy: Policy) -> EnrichedRecord
+enriched = enrich(cleaned, policy)
+
+operation audit_group(records: many ValidRecord) -> Audit
+audit = audit_group(validated @ vary(item))
+
+operation digest_group(records: many EnrichedRecord) -> Digest
+digest = digest_group(enriched @ vary(item))
+
+operation assemble(audit: Audit, digest: Digest, policy: Policy) -> Report
+report = assemble(audit, digest, policy)

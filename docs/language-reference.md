@@ -160,7 +160,7 @@ SPIT orders stages by the products they read, so a stage needs no `after` clause
 cargo run -- dag examples/stages/stages.spit examples/stages/stages.spitout
 ```
 
-Stages are written in the flow form; a sectioned document cannot declare them. A step outside every stage stays valid.
+A step outside every stage stays valid.
 
 ## Reuse definitions
 
@@ -392,7 +392,3 @@ In operation signatures, a single capital letter such as `S` is a local type var
 ```text
 operation project(sample: Frame<$Kind,$SourceSpace>, calibration: Calibration<$Kind,$SourceSpace,$TargetSpace>) -> Frame<$Kind,$TargetSpace>
 ```
-
-## Grouped sections
-
-SPIT also accepts grouped `products:`, `operations:`, and `pipeline:` sections in a pipeline, and a `constraints:` section of `require` and `drop` rules in a recipe, as an alternative to the flow style used elsewhere in this reference. The flow style is intended for writing a pipeline in the order you read it.

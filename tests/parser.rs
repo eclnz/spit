@@ -33,25 +33,19 @@ fn dimensionless_sources_accept_bare_names_and_match_each_job() {
         .contains("optional [dimensions]"));
 }
 
-/// A sectioned pipeline with the same shape as the basic example.
+/// A pipeline with the same shape as the basic example.
 const PIPELINE: &str = "\
-products:
-    signal      : Signal         [site, day, run]
-    calibration : Calibration    [site, day]
-    denoised    : FilteredSignal [site, day, run]
-    registered  : AlignedSignal  [site, day, run]
-    mean_signal : MeanSignal     [site, day]
+source signal : Signal [site, day, run]
+source calibration : Calibration [site, day]
 
-operations:
-    denoise(Signal) -> FilteredSignal
-    register(FilteredSignal, Calibration) -> AlignedSignal
-    mean(many AlignedSignal) -> MeanSignal
+operation denoise(signal: Signal) -> FilteredSignal
+denoised = denoise(signal)
 
-pipeline:
-    denoised = denoise(signal)
-    registered = register(denoised, calibration)
-    mean_signal = mean(registered @ vary(run))
+operation register(signal: FilteredSignal, calibration: Calibration) -> AlignedSignal
+registered = register(denoised, calibration)
 
+operation mean(signals: many AlignedSignal) -> MeanSignal
+mean_signal = mean(registered @ vary(run))
 ";
 const RECIPE: &str = "\
 require signal count>=1 per [site, day]
@@ -68,7 +62,7 @@ sources:
 ";
 
 #[test]
-fn parses_a_sectioned_pipeline_its_recipe_and_its_records() {
+fn parses_a_pipeline_its_recipe_and_its_records() {
     let pipeline = parse_pipeline(PIPELINE).unwrap();
     assert_eq!(pipeline.products.len(), 5);
     assert_eq!(pipeline.operations.len(), 3);
@@ -93,11 +87,6 @@ fn rules_and_records_belong_outside_the_pipeline() {
         ),
         ("source x [a]\nsources:\n    x[a=1]\n", 2, ".spitout"),
         ("source x [a]\ncontexts:\n    [a=1]\n", 2, ".spitout"),
-        (
-            "products:\n    x : X [a]\nconstraints:\n    require x count>=1 per [a]\n",
-            4,
-            ".spitin",
-        ),
     ] {
         let error = parse_pipeline(text).unwrap_err();
         assert_eq!(error.line(), line, "{text}");
@@ -107,7 +96,7 @@ fn rules_and_records_belong_outside_the_pipeline() {
 
 #[test]
 fn reports_line_for_bad_text() {
-    let text = "products:\n  signal : Signal [site, run]\npipeline:\n  denoised = denoise(signal @ vary(run) @ vary(day))\n";
+    let text = "source signal : Signal [site, run]\noperation denoise(signals: many Signal)\n\n  denoised = denoise(signal @ vary(run) @ vary(day))\n";
     let error = parse_pipeline(text).unwrap_err();
     assert_eq!(error.line(), 4);
     assert!(error.to_string().contains("line 4"));
@@ -121,8 +110,8 @@ fn rejects_duplicate_dimension_in_source() {
 
 #[test]
 fn rejects_source_inventory_inside_pipeline_file() {
-    let text = "products:\n  signal : Signal [site]\nsources:\n  signal[site=01]\n";
-    assert_eq!(parse_pipeline(text).unwrap_err().line(), 3);
+    let text = "source signal : Signal [site]\nsources:\n  signal[site=01]\n";
+    assert_eq!(parse_pipeline(text).unwrap_err().line(), 2);
 }
 
 #[test]
@@ -190,11 +179,6 @@ fn shell_source_is_rejected_with_migration_guidance() {
     let text = "source raw [id]\noperation copy(one)\nresult = copy(raw)\nshell-source: scripts/functions.sh\n";
     let error = parse_pipeline(text).unwrap_err();
     assert_eq!(error.line(), 4);
-    assert!(error.message().contains("executable available on PATH"));
-
-    let error =
-        parse_pipeline("products:\n  raw [id]\nshell-source: scripts/functions.sh\n").unwrap_err();
-    assert_eq!(error.line(), 3);
     assert!(error.message().contains("executable available on PATH"));
 }
 
@@ -268,13 +252,21 @@ fn input_port_cannot_shadow_output_placeholder() {
 }
 
 #[test]
-fn commands_header_alone_selects_sectioned_form() {
-    let pipeline =
-        parse_pipeline("products:\n  raw [id]\ncommands:\n  copy: tool {input} {output}\n")
-            .unwrap();
-    assert_eq!(pipeline.commands.len(), 1);
-    let pipeline = parse_pipeline("commands:\n  copy: tool {input} {output}\n").unwrap();
-    assert_eq!(pipeline.commands[0].operation, "copy");
+fn removed_sections_say_what_to_write_instead() {
+    for (header, instead) in [
+        ("products:", "source name"),
+        ("operations:", "operation name("),
+        ("pipeline:", "output = operation(inputs)"),
+        ("commands:", "command operation:"),
+        ("constraints:", "require ..."),
+    ] {
+        let error = parse_pipeline(&format!("source raw [id]\n{header}\n")).unwrap_err();
+        assert_eq!(error.line(), 2, "{header}");
+        assert!(
+            error.message().contains("no longer reads") && error.message().contains(instead),
+            "{header}: {error}"
+        );
+    }
 }
 
 #[test]

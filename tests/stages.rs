@@ -222,13 +222,6 @@ fn stage_syntax_errors() {
             "stage prep:\n    path: a/{product}/{entities}\n    path: b/{product}/{entities}\n",
             (Some(3), "duplicate default path template for stage `prep`"),
         ),
-        (
-            "products:\n    raw [id]\nstage prep:\n",
-            (
-                Some(3),
-                "stages are written in the flow form, not in a sectioned document",
-            ),
-        ),
     ];
     for (text, expected) in cases {
         let diagnostics = diagnose(text, None);
