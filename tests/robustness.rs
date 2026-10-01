@@ -120,6 +120,9 @@ fn a_bare_lowercase_input_names_an_untyped_port() {
     assert!(error
         .to_string()
         .contains("type `image` must start with a capital letter"));
+    assert!(error
+        .to_string()
+        .contains("pass the lowercase product in the operation call"));
 }
 
 #[test]

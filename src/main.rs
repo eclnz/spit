@@ -211,7 +211,9 @@ impl Flag {
             (Self::Output, Command::Inputs) => "write the .spitout to <file>, not standard output",
             (Self::Output, _) => "write the .spitdag to <file>",
             (Self::Paths, _) => "show each artifact's file",
-            (Self::Commands, _) => "show each job's command lines, as a shell would run them",
+            (Self::Commands, _) => {
+                "show each job's command lines, as a shell would run them; cannot combine with -o"
+            }
             (Self::Partial, _) => "plan complete jobs and record artifacts that cannot be produced",
             (Self::Unmatched, _) => {
                 "list files matching no source rule instead of writing a .spitout"
@@ -283,6 +285,12 @@ impl Flags {
     fn check_conflicts(&self, command: Command) -> Result<(), String> {
         for (first, second) in CONFLICTS {
             if self.has(first) && self.has(second) {
+                if (first, second) == (Flag::Commands, Flag::Output) {
+                    return Err(misuse(
+                        format_args!("--commands cannot be used with -o; run dag with --commands to inspect command lines, or with -o <file> to save a .spitdag"),
+                        Some(command),
+                    ));
+                }
                 return Err(misuse(
                     format_args!("{} cannot be used with {}", first.name(), second.name()),
                     Some(command),

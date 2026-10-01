@@ -28,7 +28,7 @@ Work through these items in order. Each implementation step gets its own commit 
 
 **Done when:** In a freshly built trial directory, every local link in the guide resolves within that directory, the worked examples are readable offline, and no answer key is present.
 
-## 4. Tighten the two cheap CLI messages
+## 4. Tighten the two cheap CLI messages (done)
 
 **Evidence:** A vague sensor run hit the lowercase-type error; another run hit the `--commands` and `-o` conflict. Both recovered, but the repair required an extra call.
 
