@@ -598,6 +598,19 @@ pub fn diagnose_checked_with_inventory(
     Some((parsed.checked(diagnostics), Records { inventory, report }))
 }
 
+/// Diagnose a `.spitout` on its own: the syntax of its records. Whether the
+/// sources they name are a pipeline's is checked by `dag` and `artifacts`.
+pub fn diagnose_inputs(text: &str) -> Vec<Diagnostic> {
+    let text = without_bom(text);
+    match parse_source_inventory(text) {
+        Ok(_) => Vec::new(),
+        Err(parse) => {
+            let diagnostic = Diagnostic::located(DiagnosticSource::Inventory, &parse, text);
+            finish(vec![diagnostic], text, Some(text))
+        }
+    }
+}
+
 /// Diagnose a `.spitin` recipe at `path` without reading any data: its own
 /// lines, then the pipeline its `pipeline` line names, then its rules and
 /// any records against that pipeline. The pipeline's own errors are named
