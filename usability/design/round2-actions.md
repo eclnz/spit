@@ -12,7 +12,7 @@ Work through these items in order. Each implementation step gets its own commit 
 
 **Done when:** A reader can copy each walkthrough into an empty directory and obtain the documented jobs without opening another repository file. The examples check and plan successfully, and their stated counts and ordering are verified against the binary. Links to the full example fixtures still resolve in the repository.
 
-## 2. Clarify the rules exposed by the study
+## 2. Clarify the rules exposed by the study (done)
 
 **Evidence:** Two sweep participants invented a nonexistent seed combination before the missing-input error corrected them. Both vague-brief sensor participants used lowercase product names where operation types belong.
 
