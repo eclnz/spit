@@ -1,4 +1,4 @@
-# Design: output extensions and sidecars
+# Design: dataset root, output extensions and sidecars
 
 Status: proposal. Nothing here is implemented.
 
@@ -12,18 +12,61 @@ Agents in every usability round called path rules repetitive; in [round 3](../RO
 
 A third form, BIDS derivative names whose entity labels change with each product's dimensions (`…_run-{run}_mc` beside `…_avg`), is out of scope here. See [Not covered](#not-covered).
 
+**The dataset root.** Every path is relative to the dataset root: the recipe's folder, or `--root`. Agents kept the pipeline and recipe in their working folder and the data in `data/`, so every `inputs` and `dag` command needed `--root data`, and each agent had to work out that the flag moves every path at once. One agent first put the recipe inside `data/`, where the scan counted the recipe itself as a file matching no source rule. No one guessed wrong, but several called it the most careful part of the task.
+
 ## Overview
 
-The file format is chosen by the tool, so the extension belongs on the operation that runs it, not on each product's path. Four changes build on that:
+1. [A recipe names its dataset root](#1-a-recipe-names-its-dataset-root) with a `root` line. It is independent of the rest and the smallest change, so it lands first.
 
-1. [Extensions on operation outputs](#1-extensions-on-operation-outputs), with a default for operations that declare none.
-2. [Source groups](#2-source-groups) for sidecars in the input data.
-3. [Implicit outputs](#3-implicit-outputs): `beside` for files a tool writes next to another output.
-4. [Directory and stem placeholders](#4-directory-and-stem-placeholders) for tools that take a folder and a name instead of a path.
+The file format is chosen by the tool, so the extension belongs on the operation that runs it, not on each product's path. The other changes build on that:
 
-Each later change depends on SPIT knowing an output's extension, so they land in this order. Alongside 1, `spit check` reports each product's resolved path, so the editor can show it (see [Seeing the resolved path](#seeing-the-resolved-path)).
+2. [Extensions on operation outputs](#2-extensions-on-operation-outputs), with a default for operations that declare none.
+3. [Source groups](#3-source-groups) for sidecars in the input data.
+4. [Implicit outputs](#4-implicit-outputs): `beside` for files a tool writes next to another output.
+5. [Directory and stem placeholders](#5-directory-and-stem-placeholders) for tools that take a folder and a name instead of a path.
 
-## 1. Extensions on operation outputs
+Each of 3 to 5 depends on SPIT knowing an output's extension, so they land after 2. Alongside 2, `spit check` reports each product's resolved path, so the editor can show it (see [Seeing the resolved path](#seeing-the-resolved-path)).
+
+## 1. A recipe names its dataset root
+
+**Syntax.** A recipe may name its dataset root once, beside its `pipeline` line:
+
+```text
+pipeline cohort.spit
+root data
+```
+
+The folder is relative to the recipe's folder, like the `pipeline` line, and may use `..` or be absolute. A pipeline has no `root` line: it describes the computation, and the recipe describes one dataset.
+
+**Meaning.** The `root` line replaces the recipe's folder wherever that is the default today: the folder a recipe scans, the base of every source and output path, the base of `discover` patterns, and where each source file must exist. So `spit dag cohort.spitin` needs no flag.
+
+- `--root` still overrides it, for running the same recipe against a copy of the data elsewhere.
+- A recipe that writes its own `sources:` records is still not scanned unless `--root` is given. The `root` line is a default, like the recipe's folder, not a request to scan.
+
+**The recipe inside the root.** When the recipe or its pipeline lies under the folder being scanned, the scan leaves them out instead of counting them as files that match no source rule.
+
+**Checking.** `spit check` reads no data, but it can warn when the `root` folder does not exist, which the editor then shows on the line. A second `root` line is an error, as a second `pipeline` line is.
+
+**Compatibility.** New syntax only. A recipe without the line behaves as today.
+
+**Where.**
+
+- **Parsing.** `pipeline_line` in `src/inputs/mod.rs` reads and blanks the `pipeline` line. Read `root` the same way, and keep it on the recipe beside its pipeline path.
+- **Resolution.** `settle` in `src/main.rs` defaults the root to the recipe's folder with `root.map_or(folder, …)`. Default it to the recipe's `root` joined to that folder instead, keeping `scan = root.is_some()` for the flag alone. Check that `prepare_recipe`, which falls back to `settled.root`, then verifies source files under it.
+- **Scan.** Leave the recipe and pipeline files out of the unmatched files counted in `src/inputs/discover.rs`.
+
+**Tests.**
+
+- A recipe with `root data` beside a `data/` folder: `inputs` and `dag` find the same sources and jobs as with `--root data`.
+- `--root` overrides the line.
+- `root ../data`, and an absolute root.
+- A recipe with records and a `root` line is not scanned.
+- A second `root` line is an error; a missing folder is a `check` warning.
+- A recipe inside its own root is not reported as unmatched.
+
+**Guide.** The README's "Where files live" section and its `--root` row, the reference's Recipes section, and a recipe-beside-the-pipeline example, which round 3 also asked for. In spit-vscode, highlight `root` as a recipe keyword.
+
+## 2. Extensions on operation outputs
 
 **Syntax.** An output type may be followed by an extension. A multi-output operation gives one per port:
 
@@ -89,7 +132,7 @@ With extensions inherited, a product's path is no longer written in one place, a
 path map_to_photo_matrix ends in .txt, but estimate_alignment writes .mat; drop the extension or use .mat
 ```
 
-## 2. Source groups
+## 3. Source groups
 
 **Syntax.** A `sidecars` block declares sources that share dimensions and a path stem and differ only by extension. Its body is indented, like a [stage](../../docs/language-reference.md#stages):
 
@@ -111,7 +154,7 @@ Each member is an ordinary source with the group's dimensions, and its path is t
 
 **Compatibility.** New syntax only.
 
-## 3. Implicit outputs
+## 4. Implicit outputs
 
 When a tool takes a path for each output, multiple outputs already work. When it writes one file beside another without being given a path for it, two things break: the command has nowhere to put the second placeholder, and the second output's default path is not where the tool writes it.
 
@@ -130,7 +173,7 @@ A `beside` output:
 
 The `.spitdag` is unchanged: a job's `outputs` already lists every output, whether or not its command mentions it.
 
-## 4. Directory and stem placeholders
+## 5. Directory and stem placeholders
 
 Some tools take an output folder and a name rather than a path. `dcm2niix` takes `-o folder -f name` and adds `.nii.gz` and `.json` itself. Two placeholders cover this:
 
@@ -155,6 +198,8 @@ command convert: dcm2niix -z y -b y -o {image.dir} -f {image.stem} {dicom}
 
 ## Open questions
 
+- **The root in a `.spitout`.** `spit inputs` writes a `.spitout`, and `dag` on a `.spitout` has no root unless `--root` is given. Should `inputs` record the recipe's root in the `.spitout`, so the two steps agree without the flag?
+
 - **Missing outputs.** Flags can contradict a declaration: with `-b n`, `dcm2niix` writes no `.json`. The [`.spitdag` format](../../docs/spitdag.md) does not say whether a backend must fail a job whose declared outputs are missing. It should, and this should be stated.
 - **Optional members.** A BIDS `.json` may be absent. Should a group member, or a `beside` output, be allowed to be missing, perhaps using [optional types](../../docs/language-reference.md#optional-types)?
 - **Literal dots.** The agreement rule reads a template's extension from the first `.` after its final placeholder. A literal name such as `report_v1.2` would be misread. Is that rare enough to accept, or should a path whose operation declares an extension be required to omit it?
@@ -162,7 +207,8 @@ command convert: dcm2niix -z y -b y -o {image.dir} -f {image.stem} {dicom}
 
 ## Work order
 
-1. Extensions on output ports, `ext:`, resolution and the agreement error. Return resolved templates from `spit check` and show them in the editor. Convert `field_survey.spit` and `mrtrix3_act.spit`.
-2. `sidecars` groups and the incomplete-group report in discovery.
-3. `beside` outputs.
-4. `{x.dir}` and `{x.stem}`, with the `.spitdag` version bump.
+1. The recipe's `root` line, the scan leaving out the recipe and pipeline, and the guide's recipe-beside-the-pipeline example.
+2. Extensions on output ports, `ext:`, resolution and the agreement error. Return resolved templates from `spit check` and show them in the editor. Convert `field_survey.spit` and `mrtrix3_act.spit`.
+3. `sidecars` groups and the incomplete-group report in discovery.
+4. `beside` outputs.
+5. `{x.dir}` and `{x.stem}`, with the `.spitdag` version bump.
