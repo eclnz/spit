@@ -1,6 +1,6 @@
 # Design: closing the guide's gaps
 
-This plan resolves the [guide gaps](../FINDINGS.md#guide-gaps), D1–D11.
+This plan resolves the [guide gaps](../rounds/1/README.md#guide-gaps), D1–D11.
 
 **Where changes go.** The guide an agent reads is the README's user-facing sections followed by `docs/language-reference.md`, so every change here lands in one of those two files.
 

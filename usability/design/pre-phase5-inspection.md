@@ -1,6 +1,6 @@
 # Inspection ideas from the pre-Phase-5 pilot
 
-The [pre-Phase-5 pilot](../PILOT-PRE-PHASE5.md) showed repeated demand for a quick job count even when the complete walkthrough and `dag --commands` were available. These ideas require confirmation in the post-Phase-5 third study before changing the CLI.
+The [pre-Phase-5 pilot](../rounds/2-pilot/README.md) showed repeated demand for a quick job count even when the complete walkthrough and `dag --commands` were available. These ideas require confirmation in the post-Phase-5 third study before changing the CLI.
 
 ## Per-operation counts
 

@@ -1,6 +1,6 @@
 # Design: language changes
 
-This plan resolves [F6](../FINDINGS.md#f6-accept-a-source-with-no-dimensions), [F9](../FINDINGS.md#f9-aggregate-over-several-dimensions-in-one-step) and [F10](../FINDINGS.md#f10-smaller-language-requests).
+This plan resolves [F6](../rounds/1/README.md#f6-accept-a-source-with-no-dimensions), [F9](../rounds/1/README.md#f9-aggregate-over-several-dimensions-in-one-step) and [F10](../rounds/1/README.md#f10-smaller-language-requests).
 
 ## F6: sources with no dimensions
 

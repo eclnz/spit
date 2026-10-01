@@ -4,7 +4,7 @@ Status: steps 1 to 7 are done.
 
 ## Problem
 
-Agents in every usability round called path rules repetitive; in [round 3](../ROUND3.md) it was, with choosing `--root`, the biggest first-build friction in the cohort task. Most of that repetition takes one of two forms.
+Agents in every usability round called path rules repetitive; in [round 3](../rounds/3/README.md) it was, with choosing `--root`, the biggest first-build friction in the cohort task. Most of that repetition takes one of two forms.
 
 **Overrides that only change the extension.** In [`field_survey.spit`](../../examples/commands/field_survey/field_survey.spit), all 8 derived `path x:` rules copy the default `derivatives/{@product}/{@entities}` to change `.img` to `.tif`, `.mat`, `.txt`, `.rows` or `.csv`. In [`mrtrix3_act.spit`](../../examples/commands/mrtrix3_act/mrtrix3_act.spit), all 8 derived rules, stage defaults included, do the same. Each copy also stops inheriting from the default: change `derivatives/` to `out/` and the 8 overrides silently keep the old directory.
 

@@ -1,6 +1,6 @@
 # Inspection work confirmed by round 3
 
-The [post-Phase-5 study](../ROUND3.md) repeated the request for concise job counts. Implement `dag --counts` as a compact text view that resolves the same plan as plain `dag` and prints the total and counts in pipeline operation order:
+The [post-Phase-5 study](../rounds/3/README.md) repeated the request for concise job counts. Implement `dag --counts` as a compact text view that resolves the same plan as plain `dag` and prints the total and counts in pipeline operation order:
 
 ```text
 41 jobs resolved
