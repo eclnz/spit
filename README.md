@@ -62,7 +62,7 @@ SPIT has no backend yet: nothing in this repository runs a `.spitdag`.
 ## CLI commands and options
 
 ```text
-spit check <pipeline.spit | recipe.spitin> [--path-rules] [--strict-paths] [--json] [--stdin] [--hovers]
+spit check <pipeline.spit | recipe.spitin | inputs.spitout> [--path-rules] [--strict-paths] [--json] [--stdin] [--hovers]
 spit inputs <recipe.spitin> [--root <directory>] [--unmatched | -o <file>]
 spit dag <recipe.spitin> [--root <directory>] [--strict-paths] [--paths] [--commands] [--partial] [--json | -o <file>]
 spit dag <pipeline.spit> <inputs.spitout | -> [--root <directory>] [--strict-paths] [--paths] [--commands] [--partial] [--json | -o <file>]
@@ -74,7 +74,7 @@ Files come first; options follow them. `spit help` lists the commands, and `spit
 
 | Command | Result |
 | --- | --- |
-| `check` | Compile a pipeline and report every problem the text shows, reading no data. Given a recipe, check its rules against the pipeline its `pipeline` line names. |
+| `check` | Compile a pipeline and report every problem the text shows, reading no data. Given a recipe, check its rules against the pipeline its `pipeline` line names. Given a `.spitout`, check the syntax of its records; `dag` and `artifacts` check them against a pipeline. |
 | `inputs` | Scan the dataset folder with a recipe, apply its `exclude` and `drop` rules, check its `require` rules, and print the `.spitout` with a record of what was removed. It writes nothing if a `require` rule fails. |
 | `dag` | Resolve the jobs, and print each with its artifacts and dependencies. With `-o`, write them as a `.spitdag`. |
 | `artifacts` | List every concrete artifact the inputs yield: the complete ones, then the incomplete ones with why each cannot be produced. Unlike `dag`, it does not stop at a missing, ambiguous, or too-small input or a coverage gap; see [Find incomplete artifacts](#find-incomplete-artifacts). |
@@ -91,11 +91,18 @@ Files come first; options follow them. `spit help` lists the commands, and `spit
 | `--strict-paths` | With `check` and `dag`, require an explicit `path product:` rule for every product, even if a default `path:` rule exists. Source rules settled from a recipe count when building a DAG. |
 | `--json` | With `dag`, print the `.spitdag`. With `check`, print diagnostics as JSON for editor use and stop, succeeding whatever they report. Each diagnostic has a `severity` of `error` or `warning`; those tied to a declaration, call, rule, command, or path include its `line`, and a `column` and `end_column` for the text it is about, such as one input of a call or one `{placeholder}`. Columns are 1-based and count UTF-16 code units, as editors do; `end_column` is one past the last character. When checking a recipe finds an error in its pipeline, the diagnostic includes `file` and positions in that pipeline. For a pipeline that checks clean, a `paths` list gives each product whose path no rule writes in full, with its `line` and its `path`, extension included, for the editor to show. |
 | `--stdin` | With `check`, read the file's text from standard input, such as an editor's unsaved buffer. The file's path is still used to resolve `use` imports and a recipe's `pipeline` line. |
-| `--hovers` | With `check --json` on a `.spit` pipeline, include compiler-backed operation and product explanations in a `hovers` array alongside `diagnostics`. Reads no dataset. |
+| `--hovers` | With `check --json`, include what an editor shows on hover: for a pipeline, compiler-backed operation and product explanations in a `hovers` array; for any file, SPIT's own words in `words` and `word_docs`. Reads no dataset. |
 
 Pass `-` in place of the `.spitout` to read it from standard input.
 
-Editor hovers include signatures, inferred product types and dimensions, call-local generic bindings, producer/consumer relationships, commands, stages, and effective path templates with their provenance. Each hover names its `kind` and `name`, gives a plain-text `signature` and `details` array, and uses the same 1-based UTF-16 `line`, `column`, and exclusive `end_column` convention as diagnostics. Broken lines are recovered so unrelated symbols remain available; steps that fail checking do not claim specialised types. `--hovers` requires `--json` and is supported for pipelines only.
+Editor hovers include signatures, inferred product types and dimensions, call-local generic bindings, producer/consumer relationships, commands, stages, and effective path templates with their provenance. Each hover names its `kind` and `name`, gives a plain-text `signature` and `details` array, and uses the same 1-based UTF-16 `line`, `column`, and exclusive `end_column` convention as diagnostics. Broken lines are recovered so unrelated symbols remain available; steps that fail checking do not claim specialised types. A recipe or `.spitout` has no `hovers` array, since its names are its pipeline's. `--hovers` requires `--json`.
+
+SPIT's own words, such as `source`, `@ vary(...)`, `per`, `{@entities}`, `{image.stem}` or a `.spitout`'s `sources:`, are listed in `words`, each with its `line`, `column`, `end_column` and the `word` it is. `word_docs` gives each word used once, by its name: its `kind` (`keyword`, `selector`, `placeholder` or `header`), a SPIT `example`, a `summary` in plain text with code in backticks, and a `reference` link to its section of the [language reference](docs/language-reference.md). A word is told by where it is written, so a product called `each` is not the selector, and nothing in a comment is a word:
+
+```json
+"words": [{"line": 1, "column": 28, "end_column": 32, "word": "vary"}],
+"word_docs": {"vary": {"kind": "selector", "example": "average = mean(processed @ vary(run))", "summary": "Collects a `many` input over the named dimensions, ...", "reference": "https://github.com/eclnz/spit/blob/main/docs/language-reference.md#operations-and-commands"}}
+```
 
 ### Errors and warnings
 

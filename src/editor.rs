@@ -4,6 +4,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
+use crate::builtins::{builtin_words, words_json};
 use crate::compile::{collect_pipeline, CompiledStep};
 use crate::diagnostics::{
     diagnostics_json, recover_document, shown_paths_json, Diagnostic, ShownPath,
@@ -477,9 +478,9 @@ fn product_details(
     details
 }
 
-/// Hovers and resolved path hints added to `check --json --hovers`. All
-/// strings are escaped by the shared JSON writer, and ranges use the
-/// diagnostics convention.
+/// Hovers and resolved path hints added to `check --json --hovers` for a
+/// pipeline, with the built-in words it uses. All strings are escaped by
+/// the shared JSON writer, and ranges use the diagnostics convention.
 pub fn render_editor_json(
     diagnostics: &[Diagnostic],
     text: &str,
@@ -487,12 +488,39 @@ pub fn render_editor_json(
     paths: &[ShownPath],
 ) -> String {
     let hovers = pipeline_hovers(text, path);
+    let words = builtin_words(text);
+    let [words, word_docs] = words_json(&words);
     format!(
         "{}\n",
         Json::object([
             ("diagnostics", diagnostics_json(diagnostics, text, None)),
             ("paths", shown_paths_json(paths)),
             ("hovers", hovers_json(&hovers)),
+            words,
+            word_docs,
+        ])
+    )
+}
+
+/// `check --json --hovers` for a recipe or a `.spitout`: its diagnostics and
+/// the built-in words it uses. Their names come from a pipeline, which
+/// explains them. Diagnostics about records point into `records_text`.
+pub fn render_words_json(
+    diagnostics: &[Diagnostic],
+    text: &str,
+    records_text: Option<&str>,
+) -> String {
+    let words = builtin_words(text);
+    let [words, word_docs] = words_json(&words);
+    format!(
+        "{}\n",
+        Json::object([
+            (
+                "diagnostics",
+                diagnostics_json(diagnostics, text, records_text)
+            ),
+            words,
+            word_docs,
         ])
     )
 }

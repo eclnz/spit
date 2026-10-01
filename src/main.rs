@@ -23,13 +23,13 @@ use std::process::ExitCode;
 
 use spit::{
     bind_dag, bind_dag_with, diagnose_checked, diagnose_checked_with_inventory,
-    diagnose_checked_with_records, diagnose_recipe, inspect_paths, parse_input_spec_at,
-    render_artifacts, render_bound_dag, render_check_json, render_dag, render_diagnostics_json,
-    render_editor_json, render_source_inventory, resolve_artifacts_partial, stage_within,
-    unused_sources_summary, validate_bound_source_files, validate_source_files, ArtifactReport,
-    BoundDag, BoundPaths, Checked, Context, Diagnosis, Diagnostic, DiagnosticSource, FileNames,
-    Gap, InputSource, InputSpec, LeftOut, PathTemplate, Pipeline, Removal, ResolvedDag,
-    ResolvedInputs, Severity, View,
+    diagnose_checked_with_records, diagnose_inputs, diagnose_recipe, inspect_paths,
+    parse_input_spec_at, render_artifacts, render_bound_dag, render_check_json, render_dag,
+    render_diagnostics_json, render_editor_json, render_source_inventory, render_words_json,
+    resolve_artifacts_partial, stage_within, unused_sources_summary, validate_bound_source_files,
+    validate_source_files, ArtifactReport, BoundDag, BoundPaths, Checked, Context, Diagnosis,
+    Diagnostic, DiagnosticSource, FileNames, Gap, InputSource, InputSpec, LeftOut, PathTemplate,
+    Pipeline, Removal, ResolvedDag, ResolvedInputs, Severity, View,
 };
 
 #[derive(Clone, Copy, PartialEq)]
@@ -64,8 +64,8 @@ impl Command {
         match self {
             Self::Check => CommandSpec {
                 name: "check",
-                files: "<pipeline.spit | recipe.spitin>",
-                summary: "step 1: compile a pipeline, or check a recipe against its pipeline; reads no data",
+                files: "<pipeline.spit | recipe.spitin | inputs.spitout>",
+                summary: "step 1: compile a pipeline, check a recipe against its pipeline, or check a .spitout's syntax; reads no data",
                 example: "spit check analysis.spit\n  spit check dataset.spitin",
                 flags: &[PathRules, StrictPaths, Json, Stdin, Hovers],
             },
@@ -230,7 +230,7 @@ impl Flag {
                 "read the file's text from standard input; the file names its location"
             }
             (Self::Hovers, _) => {
-                "include operation and product hovers with --json (pipelines only)"
+                "include hovers with --json: SPIT's own words, and a pipeline's operations and products"
             }
         }
     }
@@ -539,13 +539,35 @@ fn check(args: &CliArgs) -> Result<(), Box<dyn Error>> {
     } else {
         read_file(file)?
     };
-    if is_recipe(file) {
-        if args.has(Flag::Hovers) {
-            return Err("--hovers describes a .spit pipeline, not a recipe".into());
+    if is_inputs(file) {
+        if args.has(Flag::PathRules) || args.has(Flag::StrictPaths) {
+            return Err(
+                "a .spitout has no path rules to show; check its recipe or pipeline".into(),
+            );
         }
+        let diagnostics = diagnose_inputs(&text);
+        if args.has(Flag::Json) {
+            let json = if args.has(Flag::Hovers) {
+                render_words_json(&diagnostics, &text, Some(&text))
+            } else {
+                render_diagnostics_json(&diagnostics, &text, Some(&text))
+            };
+            print!("{json}");
+            return Ok(());
+        }
+        report(&diagnostics, &text, Some(&text), FileNames::default())?;
+        println!("Inputs valid.");
+        return Ok(());
+    }
+    if is_recipe(file) {
         let diagnostics = diagnose_recipe(&text, path);
         if args.has(Flag::Json) {
-            print!("{}", render_diagnostics_json(&diagnostics, &text, None));
+            let json = if args.has(Flag::Hovers) {
+                render_words_json(&diagnostics, &text, None)
+            } else {
+                render_diagnostics_json(&diagnostics, &text, None)
+            };
+            print!("{json}");
             return Ok(());
         }
         report(&diagnostics, &text, None, FileNames::default())?;
@@ -1132,6 +1154,12 @@ fn located(inputs: &ResolvedInputs) -> impl Iterator<Item = &str> {
         .iter()
         .filter(|record| record.path.is_some())
         .map(|record| record.product.as_str())
+}
+
+fn is_inputs(file: &str) -> bool {
+    Path::new(file)
+        .extension()
+        .is_some_and(|extension| extension == "spitout")
 }
 
 fn is_recipe(file: &str) -> bool {
