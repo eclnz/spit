@@ -1,0 +1,30 @@
+source bold [sub, ses, run]
+source t1w [sub, ses]
+
+path bold: sub-{sub}/ses-{ses}/func/sub-{sub}_ses-{ses}_task-rest_run-{run}_bold.nii.gz
+path t1w: sub-{sub}/ses-{ses}/anat/sub-{sub}_ses-{ses}_T1w.nii.gz
+
+operation motion_correct(input) -> Image
+command motion_correct: motioncorr {input} {output}
+mc = motion_correct(bold)
+path mc: derivatives/sub-{sub}/ses-{ses}/func/sub-{sub}_ses-{ses}_run-{run}_mc.nii.gz
+
+operation brain_extract(input) -> Image
+command brain_extract: bet {input} {output}
+brain = brain_extract(t1w)
+path brain: derivatives/sub-{sub}/ses-{ses}/anat/sub-{sub}_ses-{ses}_brain.nii.gz
+
+operation coregister(ref, input) -> Image
+command coregister: coreg --ref {ref} --in {input} --out {output}
+coreg = coregister(brain, mc)
+path coreg: derivatives/sub-{sub}/ses-{ses}/func/sub-{sub}_ses-{ses}_run-{run}_coreg.nii.gz
+
+operation session_average(inputs: many) -> Image
+command session_average: sessionavg --out {output} {inputs}
+avg = session_average(coreg @ vary(run))
+path avg: derivatives/sub-{sub}/ses-{ses}/func/sub-{sub}_ses-{ses}_avg.nii.gz
+
+operation longitudinal_average(inputs: many) -> Image
+command longitudinal_average: longitudinal --out {output} {inputs}
+long = longitudinal_average(avg @ vary(ses))
+path long: derivatives/sub-{sub}/sub-{sub}_long.nii.gz

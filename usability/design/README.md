@@ -13,12 +13,13 @@ The plans that answer the [usability findings](../FINDINGS.md), and the order to
 | [Second-study actions](round2-actions.md) | Worked examples, guide packaging, rule explanations, CLI messages, and follow-up trials |
 | [One way to write each thing](one-way.md) | Aggregation, dimension order, and syntax conventions for round 3 |
 | [Pilot inspection follow-ups](pre-phase5-inspection.md) | Compact job counts, collection order, and near-case unused sources |
+| [Third-study inspection work](round3-inspection.md) | Job counts and diagnosis examples confirmed after Phase 5 |
 
 ## Status
 
 - **Done:** steps 1–15 and 17. Phase 1, Phase 2, and Phase 3 are complete; the worked examples and extension update are in place. Step 16 was declined.
-- **Second-study actions:** items 1–4 are done. A pre-Phase-5 pilot informed items 5 and 6; the post-Phase-5 study is still next.
-- **Next:** Phase 5, [one way to write each thing](one-way.md): steps 18–22 are done; step 23, round 3, is next.
+- **Second-study actions:** items 1–6 are done. The [post-Phase-5 third study](../ROUND3.md) completes the rerun.
+- **Next:** implement the [round-3 inspection work](round3-inspection.md), starting with compact per-operation counts.
 - **Resolved so far:** B1–B7, F1–F10, D1–D11.
 
 ## Order
@@ -155,7 +156,7 @@ Settle the forms round 2 left open. See [one way to write each thing](one-way.md
     Done: `[]` on a source, a nameless port, the `one` keyword and `many name` are errors that show the form to write, with a name suggested from the port's type; `{input}`, `{input1}` and `{inputs}` are no longer placeholders unless a port has that name; a `.spitout` record that names a file is an error; and `check` warns about a product named after its operation. Brace escapes keep Bash's rules, as below.
 22. **The VS Code extension:** drop `@ drop` and the sectioned headers from the grammar, and add `dimensions`.
     Done in spit-vscode's `usability` branch (`f08893b`): the grammar follows the settled forms, an output type stops at an `@` clause, and the semantic tokens, which read the sectioned form, now color a `.spitout`'s records alone.
-23. **Round 3:** rerun the scenarios with the settled language, as [second-study action 6](round2-actions.md#6-repeat-the-affected-usability-tasks) describes, keeping transcripts. Compare how alike the participants' pipelines are, not only whether the keys pass. Then decide [decision 3](one-way.md#3-the-pipeline-says-how-to-compute-the-recipe-says-which-data-after-round-3) and [decision 4](one-way.md#4-types-catch-wrong-connections-after-round-3).
+23. **Round 3:** rerun the scenarios with the settled language, as [second-study action 6](round2-actions.md#6-repeat-the-affected-usability-tasks) describes, keeping transcripts. Compare how alike the participants' pipelines are, not only whether the keys pass. Then decide [decision 3](one-way.md#3-the-pipeline-says-how-to-compute-the-recipe-says-which-data-after-round-3) and [decision 4](one-way.md#4-types-catch-wrong-connections-after-round-3). Done: [round 3](../ROUND3.md) archived two selected runs of each targeted task and two cohort follow-ups, all matching their keys. Participant tool transcripts were unavailable, so the access audit remains unverified.
 
 ## After the work: the second round
 
