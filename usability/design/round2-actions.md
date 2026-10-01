@@ -20,7 +20,7 @@ Work through these items in order. Each implementation step gets its own commit 
 
 **Done when:** The reference answers those rule questions without copying domain walkthroughs into it; every link to a walkthrough lands on the relevant section. The sweep and sensor walkthroughs demonstrate the rules with plans produced by SPIT.
 
-## 3. Deliver every local guide reference in trial packages
+## 3. Deliver every local guide reference in trial packages (done)
 
 **Evidence:** `usability/harness/build_guide.py` includes the language reference but omits `docs/examples.md` and `docs/spitdag.md`, while the generated guide links to them. Participants repeatedly looked for those files.
 

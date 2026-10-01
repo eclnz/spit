@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Build the guide a trial agent reads: the README's user-facing sections, then
-the language reference, with `cargo run -- ` written as `spit `.
+the language reference, with `cargo run -- ` written as `spit ` and local links
+adjusted for the trial root.
 
 usage: build_guide.py <output file>
 """
@@ -17,6 +18,10 @@ intro = re.sub(r"<img[^>]*>\n\n", "", readme[: readme.index("## Contents")])
 body = readme[readme.index("## The three steps") : readme.index("## Language reference")]
 how = readme[readme.index("## How SPIT works") : readme.index("## Documentation")]
 reference = reference[reference.index("\n", reference.index("This is the full syntax")) + 1 :]
+reference = reference.replace("](../README.md)", "](README.md)")
+reference = reference.replace("](../examples/", "](examples/")
+reference = reference.replace("](architecture.md)", "](docs/architecture.md)")
+reference = reference.replace("](examples.md", "](docs/examples.md")
 
 guide = intro + body + how + "\n# Language reference\n" + reference
 open(sys.argv[1], "w").write(guide.replace("cargo run -- ", "spit "))
