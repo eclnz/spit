@@ -27,9 +27,13 @@ git show <commit>^:<path>                                        # the plan as i
 - The user-facing docs: `README.md` and `docs/`.
 - How the code works now. That belongs in `docs/architecture.md`, so move it there before deleting a plan that explains it.
 - Tools that are still used, such as `usability/harness` and `profiling/`.
-- Records of what happened, such as the usability study's round reports and their results archives under `usability/rounds/`.
+- Records of what happened, such as the usability study's rounds, archived in `usability/rounds.zip`.
 
 **Links.** Permanent files (code, docs, tests and other notes) don't link to a plan, because the link breaks when the plan goes. Name the plan's path as plain text instead, which `git log -- <path>` finds, or cite the commit that deleted it.
+
+## Archives
+
+Records and data that people rarely read, and that only a tool needs as files, are kept as zip archives rather than loose files, so they don't bloat the tree. Examples are a study round's reports and runs, and the harness's scenarios. Pack them with `usability/harness/archive.py pack <folder> <archive.zip>`: it sorts the entries and fixes their timestamps, so the same files always give the same archive. A script that needs the files unpacks them to a temporary folder. The loose files stay in the git history.
 
 ## Checks before every commit
 
