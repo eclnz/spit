@@ -8,7 +8,7 @@ stage ingest:
     clean = clean_responses(responses)
 
 stage model:
-    operation fit_panel(waves: many Table) -> (coef: Coef, diag: Diag) @ drop(wave)
+    operation fit_panel(waves: many Table) -> (coef: Coef, diag: Diag)
     verify fit_panel: validate_panel {waves}
     command fit_panel: fit_panel --coef {coef} --diag {diag} {waves}
     path coef: build/model/coef/{region}.json
@@ -21,7 +21,7 @@ stage publish:
     path chart: build/publish/chart/{region}.svg
     chart = plot_region(coef)
 
-    operation national_table(coefs: many Coef) -> Table @ drop(region)
+    operation national_table(coefs: many Coef) -> Table
     command national_table: national_table --out {output} {coefs}
     path national: build/publish/national.csv
     national = national_table(coef @ vary(region))

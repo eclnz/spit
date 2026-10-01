@@ -106,7 +106,7 @@ fn shell_operators_in_a_command_are_flagged() {
 
 #[test]
 fn a_bare_lowercase_input_names_an_untyped_port() {
-    let pipeline = parse_pipeline("operation f(image, many frames) -> Text @ drop(run)\n").unwrap();
+    let pipeline = parse_pipeline("operation f(image, many frames) -> Text\n").unwrap();
     let ports: Vec<_> = pipeline.operations[0]
         .inputs
         .iter()

@@ -15,7 +15,7 @@ fn resolve_text(text: &str, inventory: &str) -> Result<ResolvedDag, ResolveError
 const COMBINE: &str = "\
 source result [site, run]
 source policy [site]
-operation combine(results: many Result, policy: Policy) -> Summary @ drop(run)
+operation combine(results: many Result, policy: Policy) -> Summary
 command combine: summarize {results} --policy {policy} {output}
 summary = combine(result @ vary(run), policy)
 ";
@@ -38,7 +38,7 @@ fn a_many_input_can_share_an_operation_with_single_inputs() {
 
 #[test]
 fn one_aggregate_can_vary_two_dimensions_in_product_order() {
-    let pipeline = "source summary [model, config]\noperation leaderboard(summaries: many Summary) -> Table @ drop(model, config) @ min(3)\noverall = leaderboard(summary @ vary(model, config))\n";
+    let pipeline = "source summary [model, config]\noperation leaderboard(summaries: many Summary) -> Table @ min(3)\noverall = leaderboard(summary @ vary(model, config))\n";
     let inventory = "sources:\n  summary[model=b,config=1]\n  summary[model=a,config=10]\n  summary[model=a,config=2]\n";
     let dag = resolve_text(pipeline, inventory).unwrap();
     assert_eq!(dag.jobs.len(), 1);
@@ -62,15 +62,6 @@ fn one_aggregate_can_vary_two_dimensions_in_product_order() {
     )
     .is_ok());
 
-    for changed in [
-        pipeline.replace("vary(model, config)", "vary(model)"),
-        pipeline.replace("drop(model, config)", "drop(model)"),
-    ] {
-        assert!(resolve_text(&changed, inventory)
-            .unwrap_err()
-            .to_string()
-            .contains("declares drop("));
-    }
     let too_small = pipeline.replace("min(3)", "min(4)");
     assert!(matches!(
         resolve_text(&too_small, inventory),
@@ -83,15 +74,14 @@ fn one_aggregate_can_vary_two_dimensions_in_product_order() {
     for invalid in [
         pipeline.replace("vary(model, config)", "vary(model) @ vary(config)"),
         pipeline.replace("vary(model, config)", "vary(model, model)"),
-        pipeline.replace("drop(model, config)", "drop(model, model)"),
     ] {
         assert!(parse_pipeline(&invalid).is_err(), "{invalid}");
     }
 }
 
 #[test]
-fn a_call_inherits_vary_from_drop_for_one_or_several_dimensions() {
-    for (source_dimensions, drop, inventory) in [
+fn a_call_varies_one_or_several_dimensions() {
+    for (source_dimensions, vary, inventory) in [
         (
             "site, run",
             "run",
@@ -104,12 +94,12 @@ fn a_call_inherits_vary_from_drop_for_one_or_several_dimensions() {
         ),
     ] {
         let text = format!(
-            "source result [{source_dimensions}]\noperation combine(items: many Result) -> Summary @ drop({drop})\nsummary = combine(result)\n"
+            "source result [{source_dimensions}]\noperation combine(items: many Result) -> Summary\nsummary = combine(result @ vary({vary}))\n"
         );
         let pipeline = parse_pipeline(&text).unwrap();
         assert_eq!(
             pipeline.invocations[0].inputs[0].vary,
-            drop.split(", ").collect::<Vec<_>>()
+            vary.split(", ").collect::<Vec<_>>()
         );
         assert_eq!(pipeline.products[1].dimensions, ["site"]);
         let dag = resolve(&pipeline, &parse_source_inventory(inventory).unwrap()).unwrap();
@@ -120,38 +110,6 @@ fn a_call_inherits_vary_from_drop_for_one_or_several_dimensions() {
             "summary[site=A]"
         );
     }
-}
-
-#[test]
-fn omitted_vary_needs_drop_and_explicit_vary_still_matches_drop() {
-    let base = "source result [site, run]\noperation combine(items: many Result) -> Summary @ drop(run)\nsummary = combine(result)\n";
-    let inventory = "sources:\n  result[site=A,run=1]\n  result[site=A,run=2]\n";
-    let mut constructed = parse_pipeline(base).unwrap();
-    constructed.invocations[0].inputs[0].vary.clear();
-    spit::validate_pipeline(&constructed).unwrap();
-    assert_eq!(
-        resolve(&constructed, &parse_source_inventory(inventory).unwrap())
-            .unwrap()
-            .jobs
-            .len(),
-        1
-    );
-
-    let no_drop = base.replace(" @ drop(run)", "");
-    let error = spit::validate_pipeline(&parse_pipeline(&no_drop).unwrap()).unwrap_err();
-    assert!(
-        error.to_string().contains("requires vary(dimension)"),
-        "{error}"
-    );
-
-    let mismatch = base.replace("combine(result)", "combine(result @ vary(site))");
-    let error = spit::validate_pipeline(&parse_pipeline(&mismatch).unwrap()).unwrap_err();
-    assert!(
-        error
-            .to_string()
-            .contains("declares drop(run) but invocation uses vary(site)"),
-        "{error}"
-    );
 }
 
 #[test]
@@ -217,7 +175,7 @@ fn where_filters_the_driver_and_removes_its_dimension_from_the_output() {
 
 #[test]
 fn selectors_combine_on_one_binding() {
-    let text = "source frame [subject, acq, run]\noperation stack(frames: many Frame) -> Stack @ drop(run)\nstacked = stack(frame @ where(acq=fast) @ vary(run))\n";
+    let text = "source frame [subject, acq, run]\noperation stack(frames: many Frame) -> Stack\nstacked = stack(frame @ where(acq=fast) @ vary(run))\n";
     let dag = resolve_text(
         text,
         "sources:\n  frame[subject=a,acq=fast,run=1]\n  frame[subject=a,acq=fast,run=2]\n  frame[subject=a,acq=slow,run=1]\n",
@@ -324,7 +282,7 @@ source reading [station]
 source seed [rep]
 operation simulate(reading: Series, seed: Seed) -> Series
 trial = simulate(reading, seed @ each(rep))
-operation average(items: many Series) -> Series @ drop(rep)
+operation average(items: many Series) -> Series
 summary = average(trial @ vary(rep))
 ";
     let dag = resolve_text(
@@ -373,7 +331,7 @@ source reading [station, scenario]
 source model [scenario]
 operation fit(reading: Series, model: Model) -> Series
 fitted = fit(reading, model @ each(scenario))
-operation stack(items: many Series, model: Model) -> Stack @ drop(scenario)
+operation stack(items: many Series, model: Model) -> Stack
 stacked = stack(fitted @ vary(scenario), model @ each(scenario))
 ";
     let error = spit::validate_pipeline(&parse_pipeline(text).unwrap()).unwrap_err();
@@ -427,7 +385,7 @@ calibrated = apply(calibration, signal)
 fn collections_and_jobs_follow_natural_declared_order() {
     let text = "\
 source frame [subject, run]
-operation stack(frames: many Frame) -> Stack @ drop(run)
+operation stack(frames: many Frame) -> Stack
 stacked = stack(frame @ vary(run))
 ";
     let pipeline = parse_pipeline(text).unwrap();
@@ -449,7 +407,7 @@ stacked = stack(frame @ vary(run))
 
 #[test]
 fn min_rejects_a_collection_that_is_too_small() {
-    let text = "source frame [subject, run]\noperation stack(frames: many Frame) -> Stack @ drop(run) @ min(2)\nstacked = stack(frame @ vary(run))\n";
+    let text = "source frame [subject, run]\noperation stack(frames: many Frame) -> Stack @ min(2)\nstacked = stack(frame @ vary(run))\n";
     let result = resolve_text(
         text,
         "sources:\n  frame[subject=a,run=1]\n  frame[subject=a,run=2]\n  frame[subject=b,run=1]\n",

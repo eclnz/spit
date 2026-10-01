@@ -1,9 +1,9 @@
 # One fit job consumes all runs per model and writes two products.
 source observation : Data [model, run]
 path observation: observations/{model}/{run}.csv
-operation fit(runs: many Data) -> (weights: Weights, quality: Metrics) @ drop(run) @ min(2)
+operation fit(runs: many Data) -> (weights: Weights, quality: Metrics) @ min(2)
 verify fit: check-inputs {runs}
 command fit: fit-model {runs} --weights {weights} --quality {quality}
 path fitted: fitted/{model}/weights.bin
 path metrics: fitted/{model}/metrics.json
-fitted, metrics = fit(observation)
+fitted, metrics = fit(observation @ vary(run))

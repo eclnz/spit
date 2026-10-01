@@ -19,12 +19,12 @@ command coreg: coreg --ref {ref} --in {bold} --out {output}
 path coregistered: derivatives/sub-{sub}/ses-{ses}/func/sub-{sub}_ses-{ses}_run-{run}_coreg.nii.gz
 coregistered = coreg(mc, brain)
 
-operation sessionavg(runs: many Bold) -> Bold @ drop(run)
+operation sessionavg(runs: many Bold) -> Bold
 command sessionavg: sessionavg --out {output} {runs}
 path avg: derivatives/sub-{sub}/ses-{ses}/func/sub-{sub}_ses-{ses}_avg.nii.gz
-avg = sessionavg(coregistered)
+avg = sessionavg(coregistered @ vary(run))
 
-operation longitudinal(sessions: many Bold) -> Bold @ drop(ses)
+operation longitudinal(sessions: many Bold) -> Bold
 command longitudinal: longitudinal --out {output} {sessions}
 path long: derivatives/sub-{sub}/sub-{sub}_long.nii.gz
-long = longitudinal(avg)
+long = longitudinal(avg @ vary(ses))

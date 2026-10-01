@@ -59,10 +59,10 @@ decision = adjudicate(case_file, atlas)
 operation select(fused: Fused<S,P>, score: Score<S,P>, decision: Decision<S,P>) -> Selected<S,P>
 selected = select(fused, scored, decision)
 
-operation collect_selected(items: many Selected<S,P>) -> SelectedBatch<S,P> @ drop(slice)
+operation collect_selected(items: many Selected<S,P>) -> SelectedBatch<S,P>
 selected_batch = collect_selected(selected @ vary(slice))
 
-operation collect_quality(items: many Quality<K,S,P>) -> QualityBatch<K,S,P> @ drop(slice)
+operation collect_quality(items: many Quality<K,S,P>) -> QualityBatch<K,S,P>
 lidar_quality_batch = collect_quality(world_lidar_quality @ vary(slice))
 camera_quality_batch = collect_quality(world_camera_quality @ vary(slice))
 
@@ -72,11 +72,11 @@ audited = audit(selected_batch, lidar_quality_batch, camera_quality_batch)
 operation approve(selected: SelectedBatch<S,P>, audit: Audit<S,P>, policy: Policy<S>) -> Approved<S,P>
 approved_capture = approve(selected_batch, audited, policy)
 
-operation summarize_captures(items: many Approved<S,P>) -> RigSummary<S,P> @ drop(capture)
+operation summarize_captures(items: many Approved<S,P>) -> RigSummary<S,P>
 rig_summary = summarize_captures(approved_capture @ vary(capture))
 
-operation summarize_rigs(items: many RigSummary<S,P>) -> LabSummary<S,P> @ drop(rig)
+operation summarize_rigs(items: many RigSummary<S,P>) -> LabSummary<S,P>
 lab_summary = summarize_rigs(rig_summary @ vary(rig))
 
-operation summarize_labs(items: many LabSummary<S,P>) -> GlobalSummary<S,P> @ drop(lab)
+operation summarize_labs(items: many LabSummary<S,P>) -> GlobalSummary<S,P>
 global_summary = summarize_labs(lab_summary @ vary(lab))

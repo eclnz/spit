@@ -17,12 +17,12 @@ command evaluate: evaluate --weights {weights} --testset {testset} --out {output
 path metrics: runs/{model}/{config}/seed-{seed}/metrics.json
 metrics = evaluate(trained, testset)
 
-operation summarise(runs: many Metrics) -> Summary @ drop(seed)
+operation summarise(runs: many Metrics) -> Summary
 command summarise: summarise --out {output} {runs}
 path summary: summaries/{model}/{config}.json
-summary : Summary [model, config] = summarise(metrics)
+summary : Summary [model, config] = summarise(metrics @ vary(seed))
 
-operation leaderboard(summaries: many Summary) -> Table @ drop(model, config)
+operation leaderboard(summaries: many Summary) -> Table
 command leaderboard: leaderboard --out {output} {summaries}
 path board: leaderboard.csv
-board = leaderboard(summary)
+board = leaderboard(summary @ vary(model, config))

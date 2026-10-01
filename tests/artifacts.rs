@@ -70,7 +70,7 @@ operation clean(Scan) -> Scan
 cleaned = clean(scan)
 operation align(moving: Scan, reference: Calibration) -> Scan
 aligned = align(cleaned, calibration)
-operation merge(runs: many Scan) -> Scan @ drop(run)
+operation merge(runs: many Scan) -> Scan
 merged = merge(aligned @ vary(run))
 ";
 
@@ -180,7 +180,7 @@ sources:
 fn a_small_collection_leaves_other_groups_complete() {
     let text = "\
 source day [site, date]
-operation summarise(days: many Day) -> Summary @ drop(date) @ min(2)
+operation summarise(days: many Day) -> Summary @ min(2)
 summary = summarise(day @ vary(date))
 ";
     let sources = "\

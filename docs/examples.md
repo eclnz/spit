@@ -26,14 +26,14 @@ operation evaluate(weights: Weights, testset: Data) -> Metrics
 command evaluate: evaluate {weights} {testset} --out {output}
 path metrics: runs/{model}/{config}/{seed}/metrics.json
 metrics = evaluate(trained, testset)
-operation summarise(runs: many Metrics) -> Summary @ drop(seed)
+operation summarise(runs: many Metrics) -> Summary
 command summarise: summarise {runs} --out {output}
 path summary: summaries/{model}/{config}.json
-summary : Summary [model, config] = summarise(metrics)
-operation leaderboard(summaries: many Summary) -> Table @ drop(model, config)
+summary : Summary [model, config] = summarise(metrics @ vary(seed))
+operation leaderboard(summaries: many Summary) -> Table
 command leaderboard: leaderboard {summaries} --out {output}
 path board: leaderboard.csv
-board = leaderboard(summary)
+board = leaderboard(summary @ vary(model, config))
 ```
 
 Save as `sweep.spitout`:
@@ -80,15 +80,15 @@ command coreg: coreg --ref {ref} --in {bold} --out {output}
 path coregistered: derivatives/sub-{sub}/ses-{ses}/func/sub-{sub}_ses-{ses}_run-{run}_coreg.nii.gz
 coregistered = coreg(mc, brain)
 
-operation sessionavg(runs: many Bold) -> Bold @ drop(run)
+operation sessionavg(runs: many Bold) -> Bold
 command sessionavg: sessionavg --out {output} {runs}
 path avg: derivatives/sub-{sub}/ses-{ses}/func/sub-{sub}_ses-{ses}_avg.nii.gz
-avg = sessionavg(coregistered)
+avg = sessionavg(coregistered @ vary(run))
 
-operation longitudinal(sessions: many Bold) -> Bold @ drop(ses)
+operation longitudinal(sessions: many Bold) -> Bold
 command longitudinal: longitudinal --out {output} {sessions}
 path long: derivatives/sub-{sub}/sub-{sub}_long.nii.gz
-long = longitudinal(avg)
+long = longitudinal(avg @ vary(ses))
 ```
 
 Save as `cohort.spitin`:
@@ -167,7 +167,7 @@ low_band, high_band = split_bands(anomaly)
 
 # A many input can sit beside single inputs, each matched once per group.
 # The days arrive in natural order, and fewer than two is an error.
-operation summarise(days: many Series, policy: Policy) -> Summary @ drop(day) @ min(2)
+operation summarise(days: many Series, policy: Policy) -> Summary @ min(2)
 command summarise: summarise --policy {policy} {days} --out {output}
 path summary: derived/summary/{station}.json
 summary = summarise(low_band @ vary(day), policy)
@@ -209,7 +209,7 @@ stage preprocess:
     command sort_lines: sort -u -o {output} {input}
     sorted = sort_lines(shard)
 
-    operation merge(items: many Lines) -> Lines @ drop(part)
+    operation merge(items: many Lines) -> Lines
     command merge: sort -m -u -o {output} {items}
     merged = merge(sorted @ vary(part))
 
@@ -244,8 +244,8 @@ Each pipeline below, under [`examples/`](../examples), checks cleanly and sits b
 | [Selectors](../examples/pipelines/selectors.spit) | `where`, `same`, a verification, a two-output step, and a many input beside a single input | `cargo run -- dag examples/pipelines/selectors.spit examples/pipelines/selectors.spitout` | 17 |
 | [Archive revision](../examples/patterns/archive_revision/archive_revision.spit) | `where` selects the approved revision before joining calibration | `cargo run -- dag examples/patterns/archive_revision/archive_revision.spit examples/patterns/archive_revision/archive_revision.spitout` | 2 |
 | [Per-group reference](../examples/patterns/per_group_reference/per_group_reference.spit) | `same(station)` finds one reference per station despite its measurement-date dimension | `cargo run -- dag examples/patterns/per_group_reference/per_group_reference.spit examples/patterns/per_group_reference/per_group_reference.spitout` | 3 |
-| [Model fit](../examples/patterns/model_fit/model_fit.spit) | One `many` input, two outputs, `@ drop`, `@ min`, and `verify` | `cargo run -- dag examples/patterns/model_fit/model_fit.spit examples/patterns/model_fit/model_fit.spitout` | 2 |
-| [Ragged sweep](../examples/patterns/ragged_sweep/ragged_sweep.spit) | `each(model)` broadcasts over per-config seeds, then `drop` collects the runs | `cargo run -- dag examples/patterns/ragged_sweep/ragged_sweep.spit examples/patterns/ragged_sweep/ragged_sweep.spitout` | 17 |
+| [Model fit](../examples/patterns/model_fit/model_fit.spit) | One `many` input, two outputs, `@ vary`, `@ min`, and `verify` | `cargo run -- dag examples/patterns/model_fit/model_fit.spit examples/patterns/model_fit/model_fit.spitout` | 2 |
+| [Ragged sweep](../examples/patterns/ragged_sweep/ragged_sweep.spit) | `each(model)` broadcasts over per-config seeds, then `vary` collects the runs | `cargo run -- dag examples/patterns/ragged_sweep/ragged_sweep.spit examples/patterns/ragged_sweep/ragged_sweep.spitout` | 17 |
 | [Cohort](../examples/patterns/cohort/cohort.spit) | BIDS sessions, a dropped subject, and an excluded run | `cargo run -- dag examples/patterns/cohort/cohort.spitin` | 24 |
 | [Analytics](../examples/analytics/analytics.spit) | Five keyed joins, then day, customer, and tenant rollups | `cargo run -- dag examples/analytics/analytics.spit examples/analytics/analytics.spitout` | 34 |
 | [Stages](../examples/stages/stages.spit) | Preprocessing and analysis stages with `{stage}` paths | `cargo run -- dag examples/stages/stages.spit examples/stages/stages.spitout` | 7 |

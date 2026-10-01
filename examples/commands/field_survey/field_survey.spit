@@ -44,7 +44,7 @@ command remove_glare: imgdeglare {input} {output}
 deglared_photo = remove_glare(denoised_photo)
 
 # Consume shot to make one image per visit for the corrections that follow.
-operation stack_shots(shots: many Image<Photo,S>) -> Image<Photo,S> @ drop(shot)
+operation stack_shots(shots: many Image<Photo,S>) -> Image<Photo,S>
 command stack_shots: imgstack {shots} {output}
 visit_photo = stack_shots(deglared_photo @ vary(shot))
 

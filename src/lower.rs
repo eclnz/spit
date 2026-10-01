@@ -13,7 +13,7 @@ use crate::parser::{
     parse_source_inventory, parse_syntax, split_document, without_bom, ExcludeLine, FlowStep, Kind,
     ParseError, ParseErrorKind, PathRule, Rule, SourceMap, Statement, StatementKind, Step, Syntax,
 };
-use crate::shape::{effective_binding, step_context, step_driver, BoundInput};
+use crate::shape::{step_context, step_driver, BoundInput};
 use crate::span::Place;
 use crate::types::TypeExpr;
 
@@ -51,17 +51,7 @@ impl PipelineBuilder {
         self.pipeline.commands.push(command);
     }
 
-    fn add_invocation(&mut self, mut invocation: Invocation, step: &Step) {
-        if let Some(operation) = self
-            .pipeline
-            .operations
-            .iter()
-            .find(|operation| operation.name == invocation.operation)
-        {
-            for (binding, port) in invocation.inputs.iter_mut().zip(&operation.inputs) {
-                *binding = effective_binding(binding, port, operation);
-            }
-        }
+    fn add_invocation(&mut self, invocation: Invocation, step: &Step) {
         for output in &invocation.outputs {
             self.lines.invocations.insert(output.clone(), step.clone());
         }
@@ -140,10 +130,7 @@ impl PipelineBuilder {
                 .within(&place)
                 .with_kind(ParseErrorKind::UndeclaredOperation { name: name.clone() })
             })?;
-        let mut invocation = invocation.clone();
-        for (binding, port) in invocation.inputs.iter_mut().zip(&operation.inputs) {
-            *binding = effective_binding(binding, port, operation);
-        }
+        let invocation = invocation.clone();
         let dimensions = inferred_dimensions(&invocation, operation, &self.pipeline);
         for (index, output) in outputs.iter().enumerate() {
             let product = ProductDef::new(

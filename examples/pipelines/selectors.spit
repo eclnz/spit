@@ -37,7 +37,7 @@ low_band, high_band = split_bands(anomaly)
 
 # A many input can sit beside single inputs, each matched once per group.
 # The days arrive in natural order, and fewer than two is an error.
-operation summarise(days: many Series, policy: Policy) -> Summary @ drop(day) @ min(2)
+operation summarise(days: many Series, policy: Policy) -> Summary @ min(2)
 command summarise: summarise --policy {policy} {days} --out {output}
 path summary: derived/summary/{station}.json
 summary = summarise(low_band @ vary(day), policy)

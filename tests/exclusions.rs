@@ -20,7 +20,7 @@ operation align(bold: Bold, ref: Ref) -> Bold
 command align: align {bold} {ref} {output}
 path aligned: out/sub-{sub}_ses-{ses}_run-{run}.nii
 aligned = align(bold, ref)
-operation average(runs: many Bold) -> Bold @ drop(run)
+operation average(runs: many Bold) -> Bold
 command average: average {runs} {output}
 path average: out/sub-{sub}_ses-{ses}_average.nii
 average = average(aligned @ vary(run))

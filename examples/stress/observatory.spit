@@ -36,31 +36,31 @@ segment_feature = feature_segment(filtered, model)
 operation judge_segment(feature: Feature<Segment>, score: Score<Segment>, policy: WindowPolicy) -> Verdict<Segment>
 segment_verdict = judge_segment(segment_feature, segment_score, window_policy)
 
-operation merge_signal(items: many Signal<Filtered>) -> Signal<Channel> @ drop(segment)
+operation merge_signal(items: many Signal<Filtered>) -> Signal<Channel>
 channel_signal = merge_signal(filtered @ vary(segment))
 
-operation merge_feature(items: many Feature<Segment>) -> Feature<Channel> @ drop(segment)
+operation merge_feature(items: many Feature<Segment>) -> Feature<Channel>
 channel_feature = merge_feature(segment_feature @ vary(segment))
 
-operation merge_score(items: many Score<Segment>) -> Score<Channel> @ drop(segment)
+operation merge_score(items: many Score<Segment>) -> Score<Channel>
 channel_score = merge_score(segment_score @ vary(segment))
 
 operation assess_channel(signal: Signal<Channel>, feature: Feature<Channel>, score: Score<Channel>) -> Assessment<Channel>
 channel_assessment = assess_channel(channel_signal, channel_feature, channel_score)
 
-operation merge_channels(items: many Signal<Channel>) -> Signal<Window> @ drop(channel)
+operation merge_channels(items: many Signal<Channel>) -> Signal<Window>
 window_signal = merge_channels(channel_signal @ vary(channel))
 
-operation merge_channel_assessments(items: many Assessment<Channel>) -> Assessment<Window> @ drop(channel)
+operation merge_channel_assessments(items: many Assessment<Channel>) -> Assessment<Window>
 window_assessment = merge_channel_assessments(channel_assessment @ vary(channel))
 
 operation compare_window(signal: Signal<Window>, assessment: Assessment<Window>, policy: WindowPolicy) -> Verdict<Window>
 window_verdict = compare_window(window_signal, window_assessment, window_policy)
 
-operation merge_windows(items: many Signal<Window>) -> Signal<Device> @ drop(window)
+operation merge_windows(items: many Signal<Window>) -> Signal<Device>
 device_signal = merge_windows(window_signal @ vary(window))
 
-operation merge_window_assessments(items: many Assessment<Window>) -> Assessment<Device> @ drop(window)
+operation merge_window_assessments(items: many Assessment<Window>) -> Assessment<Device>
 device_assessment = merge_window_assessments(window_assessment @ vary(window))
 
 operation evidence(signal: Signal<S>, assessment: Assessment<S>) -> Evidence<S>
@@ -69,10 +69,10 @@ device_evidence = evidence(device_signal, device_assessment)
 operation approve_device(evidence: Evidence<Device>, model: DeviceModel) -> Approved<Device>
 approved_device = approve_device(device_evidence, model)
 
-operation merge_devices(items: many Signal<Device>) -> Signal<Site> @ drop(device)
+operation merge_devices(items: many Signal<Device>) -> Signal<Site>
 site_signal = merge_devices(device_signal @ vary(device))
 
-operation merge_device_assessments(items: many Assessment<Device>) -> Assessment<Site> @ drop(device)
+operation merge_device_assessments(items: many Assessment<Device>) -> Assessment<Site>
 site_assessment = merge_device_assessments(device_assessment @ vary(device))
 
 site_evidence = evidence(site_signal, site_assessment)
@@ -80,10 +80,10 @@ site_evidence = evidence(site_signal, site_assessment)
 operation approve_site(evidence: Evidence<Site>, target: SiteTarget) -> Approved<Site>
 approved_site = approve_site(site_evidence, target)
 
-operation merge_sites(items: many Signal<Site>) -> Signal<Org> @ drop(site)
+operation merge_sites(items: many Signal<Site>) -> Signal<Org>
 org_signal = merge_sites(site_signal @ vary(site))
 
-operation merge_site_assessments(items: many Assessment<Site>) -> Assessment<Org> @ drop(site)
+operation merge_site_assessments(items: many Assessment<Site>) -> Assessment<Org>
 org_assessment = merge_site_assessments(site_assessment @ vary(site))
 
 org_evidence = evidence(org_signal, org_assessment)
@@ -91,5 +91,5 @@ org_evidence = evidence(org_signal, org_assessment)
 operation approve_org(evidence: Evidence<Org>, policy: OrgPolicy) -> Approved<Org>
 approved_org = approve_org(org_evidence, policy)
 
-operation portfolio(items: many Approved<Org>) -> Approved<Portfolio> @ drop(org)
+operation portfolio(items: many Approved<Org>) -> Approved<Portfolio>
 global_portfolio = portfolio(approved_org @ vary(org))

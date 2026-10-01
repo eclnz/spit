@@ -22,6 +22,8 @@ Every variant passed, so the language does not yet decide these things. The lang
 
 ## 1. The call says which dimensions are collected
 
+**Status:** done in step 19.
+
 **Today.**
 - An aggregate is written on the operation (`-> Report @ drop(day)`) and on the call (`report = rollup(digest @ vary(day))`), and the two must agree.
 - Since step 13, the call may leave out `@ vary` when the operation has `@ drop`.

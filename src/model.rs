@@ -765,8 +765,6 @@ pub struct OperationDef {
     /// Every artifact one job writes, in declaration order.
     pub outputs: Vec<OutputPort>,
     pub shape_rule: ShapeRule,
-    /// Dimensions consumed by an aggregate operation.
-    pub aggregated_dimensions: Vec<String>,
     /// The fewest artifacts the many input accepts in one job.
     pub minimum_collection: Option<usize>,
 }
@@ -798,24 +796,8 @@ impl OperationDef {
             inputs,
             outputs,
             shape_rule,
-            aggregated_dimensions: Vec::new(),
             minimum_collection: None,
         }
-    }
-
-    #[must_use]
-    pub fn aggregating(mut self, dimension: impl Into<String>) -> Self {
-        self.aggregated_dimensions = vec![dimension.into()];
-        self
-    }
-
-    #[must_use]
-    pub fn aggregating_dimensions(
-        mut self,
-        dimensions: impl IntoIterator<Item = impl Into<String>>,
-    ) -> Self {
-        self.aggregated_dimensions = dimensions.into_iter().map(Into::into).collect();
-        self
     }
 
     #[must_use]

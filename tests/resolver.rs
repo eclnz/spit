@@ -427,24 +427,39 @@ fn full_inventory() -> SourceInventory {
 }
 
 #[test]
-fn named_ports_and_declared_aggregate_shape_are_checked() {
-    let text = "source raw [site, run]\noperation combine(runs: many) @ drop(run)\nresult = combine(raw @ vary(run))\nsources:\n  raw[site=01,run=2]\n  raw[site=01,run=1]\n";
+fn named_ports_and_the_calls_aggregate_shape_are_checked() {
+    let text = "source raw [site, run]\noperation combine(runs: many)\nresult = combine(raw @ vary(run))\nsources:\n  raw[site=01,run=2]\n  raw[site=01,run=1]\n";
     let (pipeline, inventory) = support::parse_fixture(text).unwrap();
     assert_eq!(pipeline.operations[0].inputs[0].name, "runs");
-    assert_eq!(pipeline.operations[0].aggregated_dimensions, ["run"]);
     let dag = resolve(&pipeline, &inventory.unwrap()).unwrap();
     assert_eq!(dag.artifact(dag.jobs[0].output()).entities.len(), 1);
-
-    let wrong_vary = text.replace("vary(run)", "vary(site)");
-    let (pipeline, inventory) = support::parse_fixture(&wrong_vary).unwrap();
-    assert!(resolve(&pipeline, &inventory.unwrap())
-        .unwrap_err()
-        .to_string()
-        .contains("declares drop(run) but invocation uses vary(site)"));
 
     let wrong_shape = text.replace("result =", "result : Data [site, run] =");
     let (pipeline, inventory) = support::parse_fixture(&wrong_shape).unwrap();
     assert!(resolve(&pipeline, &inventory.unwrap()).is_err());
+}
+
+#[test]
+fn a_many_input_names_its_dimensions_at_the_call() {
+    let missing = "source raw [site, run]\noperation combine(runs: many)\nresult = combine(raw)\n";
+    let error = validate_pipeline(&parse_pipeline(missing).unwrap())
+        .unwrap_err()
+        .to_string();
+    assert!(
+        error.contains("many input `runs` needs `@ vary(dimension)`"),
+        "{error}"
+    );
+
+    let dropped = "source raw [site, run]\noperation combine(runs: many) @ drop(run)\n";
+    let error = parse_pipeline(dropped).unwrap_err();
+    assert_eq!(error.line(), 2);
+    assert!(
+        error.message().contains("remove `@ drop(run)`")
+            && error
+                .message()
+                .contains("`result = combine(input @ vary(run))`"),
+        "{error}"
+    );
 }
 
 #[test]

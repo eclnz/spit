@@ -17,7 +17,7 @@ command anomaly: anomaly {series} {baseline} {output}
 path anomalies: anomalies/{station}/{day}.csv
 anomalies = anomaly(clean, baseline @ same(station))
 
-operation stationreport(site: Site, days: many Series) -> Report @ drop(day)
+operation stationreport(site: Site, days: many Series) -> Report
 command stationreport: stationreport --site {site} --out {output} {days}
 path report: reports/{station}.html
 report = stationreport(site, anomalies @ vary(day))

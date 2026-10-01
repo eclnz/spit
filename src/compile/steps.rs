@@ -9,9 +9,7 @@ use crate::error::ResolveError;
 use crate::model::{
     Cardinality, InputBinding, InputPort, Invocation, OperationDef, ProductDef, ShapeRule,
 };
-use crate::shape::{
-    broadcast_dimensions, dimension_set, effective_binding, step_context, step_driver, BoundInput,
-};
+use crate::shape::{broadcast_dimensions, dimension_set, step_context, step_driver, BoundInput};
 
 use super::{find_product, unsupported};
 
@@ -37,14 +35,8 @@ pub(super) fn step_shape(
     products: &BTreeMap<&str, &ProductDef>,
     outputs: &[&ProductDef],
 ) -> Result<StepShape, ResolveError> {
-    let bindings: Vec<_> = operation
-        .inputs
-        .iter()
-        .zip(&invocation.inputs)
-        .map(|(port, binding)| effective_binding(binding, port, operation))
-        .collect();
     let mut inputs = Vec::new();
-    for (port, binding) in operation.inputs.iter().zip(&bindings) {
+    for (port, binding) in operation.inputs.iter().zip(&invocation.inputs) {
         let product = find_product(products, binding.product_name())?;
         check_selectors(operation, port, binding, product)?;
         inputs.push(BoundInput {
@@ -88,12 +80,6 @@ fn check_shape_rule(
     let many_ports = inputs.iter().filter(|input| input.many).count();
     match &operation.shape_rule {
         ShapeRule::Preserve => {
-            if !operation.aggregated_dimensions.is_empty() {
-                return Err(unsupported(
-                    operation,
-                    "preserve operation cannot declare a dropped dimension",
-                ));
-            }
             if operation.minimum_collection.is_some() {
                 return Err(unsupported(
                     operation,
@@ -132,15 +118,6 @@ fn check_vary(
         return Ok(());
     }
     let varied = driving.vary.join(", ");
-    if !operation.aggregated_dimensions.is_empty()
-        && dimension_set(&operation.aggregated_dimensions) != dimension_set(&driving.vary)
-    {
-        let declared = operation.aggregated_dimensions.join(", ");
-        return Err(unsupported(
-            operation,
-            format!("declares drop({declared}) but invocation uses vary({varied})"),
-        ));
-    }
     let grouped = dimension_set(context);
     let unmatched = inputs
         .iter()
@@ -279,7 +256,7 @@ fn check_selectors(
         Cardinality::Many => {
             if binding.vary.is_empty() {
                 return fail(format!(
-                    "many input `{port_name}` requires vary(dimension) or an operation @ drop(dimension)"
+                    "many input `{port_name}` needs `@ vary(dimension)` naming the dimensions it collects, as in `{name} @ vary(run)`"
                 ));
             }
             if dimension_set(&binding.vary).len() != binding.vary.len() {
