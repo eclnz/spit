@@ -3,6 +3,7 @@
 
 use std::collections::BTreeMap;
 use std::fmt;
+use std::path::PathBuf;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -159,6 +160,10 @@ type Nested<'a> = FxHashMap<EntityBinding, FxHashMap<EntityBinding, Vec<&'a str>
 impl fmt::Display for InventoryText<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let inventory = self.inventory;
+        if let Some(root) = &inventory.root {
+            writeln!(f, "root {}", root.display())?;
+            writeln!(f)?;
+        }
         let source_paths = written_source_paths(inventory, self.rules);
         if !source_paths.is_empty() {
             writeln!(f, "source_paths:")?;
@@ -451,6 +456,22 @@ fn parse_inventory_with_lines(
         let line = strip_comment(original).trim();
         let indent = original.len() - original.trim_start().len();
         if line.is_empty() {
+            continue;
+        }
+        if let Some(folder) = line.strip_prefix("root ") {
+            if section.is_some() {
+                return Err(ParseError::new(
+                    number,
+                    "`root` comes before every section of a .spitout",
+                )
+                .locate(original));
+            }
+            if inventory.root.is_some() {
+                return Err(
+                    ParseError::new(number, "a .spitout names its root once").locate(original)
+                );
+            }
+            inventory.root = Some(PathBuf::from(folder.trim()));
             continue;
         }
         match Header::of(line) {

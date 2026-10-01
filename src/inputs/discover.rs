@@ -96,13 +96,16 @@ pub(super) fn discover(
     let sources = source_patterns(pipeline)?;
     let listing = Listing::of(root)?;
     let mut discovery = Discovery {
+        // SPIT's own files, such as a recipe kept in its dataset, are not
+        // data a rule missed.
         unmatched_files: listing
             .files
             .iter()
             .filter(|file| {
-                !sources
-                    .iter()
-                    .any(|source| match_pattern(&source.pieces, file).is_some())
+                !is_spit_file(file)
+                    && !sources
+                        .iter()
+                        .any(|source| match_pattern(&source.pieces, file).is_some())
             })
             .cloned()
             .collect(),
@@ -652,6 +655,15 @@ fn forced_end(next: Option<&Piece>, rest: &str, longest: usize) -> Option<usize>
         }
         _ => None,
     }
+}
+
+/// Whether `file` is a pipeline, recipe, `.spitout` or `.spitdag`.
+fn is_spit_file(file: &str) -> bool {
+    Path::new(file).extension().is_some_and(|extension| {
+        ["spit", "spitin", "spitout", "spitdag"]
+            .iter()
+            .any(|spit| extension == *spit)
+    })
 }
 
 /// The directories and files under a root, each sorted, as `/`-separated

@@ -42,79 +42,92 @@ pub struct InputSpec {
     /// The pipeline a recipe's `pipeline analysis.spit` line names: relative
     /// to the recipe's folder when parsed at a path.
     pub pipeline: Option<PathBuf>,
+    /// The dataset root a recipe's `root data` line names, relative to the
+    /// recipe's folder when parsed at a path, and the line it is on.
+    pub root: Option<(PathBuf, usize)>,
     pub rules: InputRules,
     pub inventory: Option<SourceInventory>,
 }
 
 /// Parse a `.spitin` file without resolving imports.
 pub fn parse_input_spec(text: &str) -> Result<InputSpec, ParseError> {
-    let (pipeline, document) = parse_recipe(text, |text| {
+    let (header, document) = parse_recipe(text, |text| {
         parse_document_with_imports(text, &BTreeMap::new(), Kind::Recipe)
     })?;
     // Files an `exclude from` line names are read from the working folder.
-    finish_spec(document, pipeline, Some(Path::new("")))
+    finish_spec(document, header, Some(Path::new("")))
 }
 
 /// Parse a `.spitin` file at `path`. Paths inside the recipe, and the
 /// pipeline it names, are relative to its folder unless the CLI supplies
 /// `--root`.
 pub fn parse_input_spec_at(text: &str, path: &Path) -> Result<InputSpec, ParseError> {
-    let (pipeline, document) = parse_recipe(text, |text| {
+    let (header, document) = parse_recipe(text, |text| {
         parse_located_document(text, path, Kind::Recipe)
     })?;
     let folder = path.parent().unwrap_or_else(|| Path::new(""));
-    finish_spec(
-        document,
-        pipeline.map(|pipeline| folder.join(pipeline)),
-        Some(folder),
-    )
+    let header = RecipeHeader {
+        pipeline: header.pipeline.map(|pipeline| folder.join(pipeline)),
+        root: header.root.map(|(root, line)| (folder.join(root), line)),
+    };
+    finish_spec(document, header, Some(folder))
 }
 
 /// Parse a `.spitin` without resolving imports, with where each of its
 /// rules is written, for diagnostics.
 pub(crate) fn parse_recipe_lines(text: &str) -> Result<(InputSpec, SourceMap), ParseError> {
-    let (pipeline, mut document) = parse_recipe(text, |text| {
+    let (header, mut document) = parse_recipe(text, |text| {
         parse_document_with_imports(text, &BTreeMap::new(), Kind::Recipe)
     })?;
     let lines = std::mem::take(&mut document.lines);
     // Its `exclude from` files are left unread: its rules' places are the
     // lines of the recipe, and a file's rows have none there.
-    Ok((finish_spec(document, pipeline, None)?, lines))
+    Ok((finish_spec(document, header, None)?, lines))
 }
 
-/// A recipe's `pipeline` line, and the document its other lines parse to
-/// with `parse` once each is checked to belong in a recipe.
+/// The folders a recipe's `pipeline` and `root` lines name, as written.
+#[derive(Default)]
+struct RecipeHeader {
+    pipeline: Option<PathBuf>,
+    root: Option<(PathBuf, usize)>,
+}
+
+/// A recipe's `pipeline` and `root` lines, and the document its other
+/// lines parse to with `parse` once each is checked to belong in a recipe.
 fn parse_recipe(
     text: &str,
     parse: impl FnOnce(&str) -> Result<ParsedDocument, ParseError>,
-) -> Result<(Option<PathBuf>, ParsedDocument), ParseError> {
-    let (pipeline, text) = pipeline_line(without_bom(text))?;
+) -> Result<(RecipeHeader, ParsedDocument), ParseError> {
+    let (header, text) = header_lines(without_bom(text))?;
     check_input_lines(&text)?;
-    Ok((pipeline, parse(&text)?))
+    Ok((header, parse(&text)?))
 }
 
-/// The pipeline a recipe names with `pipeline analysis.spit`, and the text
-/// with that line blanked so that other lines keep their numbers.
-fn pipeline_line(text: &str) -> Result<(Option<PathBuf>, String), ParseError> {
-    let mut pipeline = None;
+/// The pipeline a recipe names with `pipeline analysis.spit` and the root
+/// it names with `root data`, and the text with those lines blanked so that
+/// other lines keep their numbers.
+fn header_lines(text: &str) -> Result<(RecipeHeader, String), ParseError> {
+    let mut header = RecipeHeader::default();
     let mut rest = String::new();
     for (index, original) in text.lines().enumerate() {
+        let number = index + 1;
         let line = strip_comment(original).trim();
-        match line.strip_prefix("pipeline ") {
-            Some(file) => {
-                if pipeline.is_some() {
-                    return Err(ParseError::new(
-                        index + 1,
-                        "a .spitin names its pipeline once",
-                    ));
-                }
-                pipeline = Some(PathBuf::from(file.trim()));
+        if let Some(file) = line.strip_prefix("pipeline ") {
+            if header.pipeline.is_some() {
+                return Err(ParseError::new(number, "a .spitin names its pipeline once"));
             }
-            None => rest.push_str(original),
+            header.pipeline = Some(PathBuf::from(file.trim()));
+        } else if let Some(folder) = line.strip_prefix("root ") {
+            if header.root.is_some() {
+                return Err(ParseError::new(number, "a .spitin names its root once"));
+            }
+            header.root = Some((PathBuf::from(folder.trim()), number));
+        } else {
+            rest.push_str(original);
         }
         rest.push('\n');
     }
-    Ok((pipeline, rest))
+    Ok((header, rest))
 }
 
 fn check_input_lines(text: &str) -> Result<(), ParseError> {
@@ -158,7 +171,7 @@ fn check_input_lines(text: &str) -> Result<(), ParseError> {
 /// `pipeline`.
 fn finish_spec(
     document: ParsedDocument,
-    pipeline_file: Option<PathBuf>,
+    header: RecipeHeader,
     folder: Option<&Path>,
 ) -> Result<InputSpec, ParseError> {
     let ParsedDocument {
@@ -181,7 +194,8 @@ fn finish_spec(
         read_exclusion_files(&mut inputs, folder)?;
     }
     Ok(InputSpec {
-        pipeline: pipeline_file,
+        pipeline: header.pipeline,
+        root: header.root,
         rules: inputs,
         inventory,
     })

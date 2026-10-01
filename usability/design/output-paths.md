@@ -1,6 +1,6 @@
 # Design: dataset root, output extensions and sidecars
 
-Status: proposal. Nothing here is implemented.
+Status: step 1, the recipe's `root` line, is done. Steps 2 to 5 are proposals.
 
 ## Problem
 
@@ -43,7 +43,18 @@ The folder is relative to the recipe's folder, like the `pipeline` line, and may
 - `--root` still overrides it, for running the same recipe against a copy of the data elsewhere.
 - A recipe that writes its own `sources:` records is still not scanned unless `--root` is given. The `root` line is a default, like the recipe's folder, not a request to scan.
 
-**The recipe inside the root.** When the recipe or its pipeline lies under the folder being scanned, the scan leaves them out instead of counting them as files that match no source rule.
+**The recipe inside the root.** The scan leaves SPIT's own files (`.spit`, `.spitin`, `.spitout` and `.spitdag`) out of the files that match no source rule. That covers the recipe and its pipeline, and also a `.spitout` or `.spitdag` written into the dataset, which would otherwise be reported on the next scan.
+
+**The root in a `.spitout`.** `spit inputs` starts the `.spitout` with the root it settled against, so `dag` and `artifacts` on the `.spitout` need no `--root` either:
+
+```text
+root ../data
+```
+
+- It is relative to the `.spitout`'s folder, so the two can move together. When `spit inputs` prints the `.spitout` instead of writing it with `-o`, its place is unknown, and the root is relative to the working folder, which is right for the common `> file` in that folder.
+- `--root` overrides it, as it overrides the recipe's line.
+- It comes before every section, once. A `.spitout` without one, such as one written by hand, behaves as before: no root unless `--root` gives one.
+- `inputs` records the root whenever it knows one: the flag, the `root` line, or the recipe's folder it scanned. A recipe whose written records are not scanned has a root only from its `root` line.
 
 **Checking.** `spit check` reads no data, but it can warn when the `root` folder does not exist, which the editor then shows on the line. A second `root` line is an error, as a second `pipeline` line is.
 
@@ -51,9 +62,11 @@ The folder is relative to the recipe's folder, like the `pipeline` line, and may
 
 **Where.**
 
-- **Parsing.** `pipeline_line` in `src/inputs/mod.rs` reads and blanks the `pipeline` line. Read `root` the same way, and keep it on the recipe beside its pipeline path.
-- **Resolution.** `settle` in `src/main.rs` defaults the root to the recipe's folder with `root.map_or(folder, …)`. Default it to the recipe's `root` joined to that folder instead, keeping `scan = root.is_some()` for the flag alone. Check that `prepare_recipe`, which falls back to `settled.root`, then verifies source files under it.
-- **Scan.** Leave the recipe and pipeline files out of the unmatched files counted in `src/inputs/discover.rs`.
+- **Parsing.** `header_lines` in `src/inputs/mod.rs` reads and blanks the `pipeline` and `root` lines; `InputSpec::root` keeps the folder and its line.
+- **Resolution.** `settle` in `src/main.rs` returns the dataset root with what it settled; only the flag turns written records into a scan.
+- **`.spitout`.** `SourceInventory::root` holds the line as written; `src/parser/inventory.rs` reads and writes it. `recorded_root` in `src/main.rs` makes it relative to the written file, and `prepare` joins it to the `.spitout`'s folder.
+- **Scan.** `is_spit_file` in `src/inputs/discover.rs`.
+- **Warning.** `missing_root` in `src/diagnostics.rs`.
 
 **Tests.**
 
@@ -63,8 +76,11 @@ The folder is relative to the recipe's folder, like the `pipeline` line, and may
 - A recipe with records and a `root` line is not scanned.
 - A second `root` line is an error; a missing folder is a `check` warning.
 - A recipe inside its own root is not reported as unmatched.
+- A `.spitout` written to another folder records the root relative to itself, and `dag` on it verifies the files from any working folder; `--root` overrides it. Its `root` line is read once, before every section.
 
-**Guide.** The README's "Where files live" section and its `--root` row, the reference's Recipes section, and a recipe-beside-the-pipeline example, which round 3 also asked for. In spit-vscode, highlight `root` as a recipe keyword.
+These are in `tests/dataset_root.rs`. The stored outputs lost their unmatched-file notes, which counted the fixture's own recipe, pipeline and `.spitout`.
+
+**Guide.** The README's "Where files live" section, with a recipe-beside-the-data layout, which round 3 also asked for, and its `--root` row; the reference's Recipes and Inputs sections; `docs/architecture.md`. In spit-vscode, `root` is highlighted in a recipe and a `.spitout`.
 
 ## 2. Extensions on operation outputs
 
@@ -198,8 +214,6 @@ command convert: dcm2niix -z y -b y -o {image.dir} -f {image.stem} {dicom}
 
 ## Open questions
 
-- **The root in a `.spitout`.** `spit inputs` writes a `.spitout`, and `dag` on a `.spitout` has no root unless `--root` is given. Should `inputs` record the recipe's root in the `.spitout`, so the two steps agree without the flag?
-
 - **Missing outputs.** Flags can contradict a declaration: with `-b n`, `dcm2niix` writes no `.json`. The [`.spitdag` format](../../docs/spitdag.md) does not say whether a backend must fail a job whose declared outputs are missing. It should, and this should be stated.
 - **Optional members.** A BIDS `.json` may be absent. Should a group member, or a `beside` output, be allowed to be missing, perhaps using [optional types](../../docs/language-reference.md#optional-types)?
 - **Literal dots.** The agreement rule reads a template's extension from the first `.` after its final placeholder. A literal name such as `report_v1.2` would be misread. Is that rare enough to accept, or should a path whose operation declares an extension be required to omit it?
@@ -207,7 +221,7 @@ command convert: dcm2niix -z y -b y -o {image.dir} -f {image.stem} {dicom}
 
 ## Work order
 
-1. The recipe's `root` line, the scan leaving out the recipe and pipeline, and the guide's recipe-beside-the-pipeline example.
+1. The recipe's `root` line, the root recorded in the `.spitout`, the scan leaving out SPIT's own files, and the guide's layout example. Done.
 2. Extensions on output ports, `ext:`, resolution and the agreement error. Return resolved templates from `spit check` and show them in the editor. Convert `field_survey.spit` and `mrtrix3_act.spit`.
 3. `sidecars` groups and the incomplete-group report in discovery.
 4. `beside` outputs.

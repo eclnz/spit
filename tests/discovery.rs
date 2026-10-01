@@ -426,26 +426,22 @@ fn cli_discovers_sources_under_the_root() {
     let run = |args: &[&str]| {
         Command::new(env!("CARGO_BIN_EXE_spit"))
             .args(args)
+            .current_dir(&tree.0)
             .output()
             .unwrap()
     };
-    let root = tree.0.to_str().unwrap();
-    let discovered = run(&["inputs", recipe.to_str().unwrap(), "--root", root]);
+    let discovered = run(&["inputs", recipe.to_str().unwrap(), "--root", "."]);
     assert!(discovered.status.success());
+    // A printed .spitout records the root relative to the working folder.
     assert_eq!(
         String::from_utf8_lossy(&discovered.stdout),
-        "sources:\n    frame[subject=a,run=1]\n    frame[subject=a,run=2]\n    lut\n"
+        "root .\n\nsources:\n    frame[subject=a,run=1]\n    frame[subject=a,run=2]\n    lut\n"
     );
     assert!(String::from_utf8_lossy(&discovered.stderr).contains("note: found 3 source artifacts"));
     let spitout = tree.0.join("found.spitout");
     fs::write(&spitout, &discovered.stdout).unwrap();
-    let dag = run(&[
-        "dag",
-        pipeline.to_str().unwrap(),
-        spitout.to_str().unwrap(),
-        "--root",
-        root,
-    ]);
+    // The recorded root stands in for `--root`.
+    let dag = run(&["dag", pipeline.to_str().unwrap(), spitout.to_str().unwrap()]);
     let notes = String::from_utf8(dag.stderr).unwrap();
     assert!(dag.status.success(), "{notes}");
     assert!(notes.contains("note: 1 jobs resolved."), "{notes}");
@@ -493,7 +489,9 @@ fn discovery_reports_skipped_files_and_still_succeeds() {
         tree.path().to_str().unwrap(),
     ]);
     assert!(output.status.success(), "{}", text(&output.stderr));
-    assert_eq!(text(&output.stdout), "sources:\n    x[s=a]\n");
+    let stdout = text(&output.stdout);
+    assert!(stdout.starts_with("root "), "{stdout}");
+    assert!(stdout.ends_with("\n\nsources:\n    x[s=a]\n"), "{stdout}");
     assert!(text(&output.stderr).contains("warning: skipped `in/%41.txt`"));
 }
 

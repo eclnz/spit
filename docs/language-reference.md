@@ -235,7 +235,16 @@ path image: data/sub-{sub}/ses-{ses}/image.nii.gz
 
 A recipe may contain `discover`, `exclude`, `drop` and `require` rules, `path product:` rules for source products, and `sources:`/`contexts:` records. It cannot declare sources, operations, steps, commands, stages, imports, or a default `path:` rule; the pipeline still declares each logical `source` with its dimensions and optional type. Rules in a pipeline are an error, and so are records. A source's path rule is written in the pipeline or in the recipe, not both: put it in the pipeline when every dataset for that pipeline shares the layout, and in the recipe when the layout belongs to one dataset.
 
-`spit check recipe.spitin` checks the rules against the pipeline without reading any data: each rule must name a source or discovery with the dimensions it counts. `spit inputs recipe.spitin` scans the recipe's folder, or `--root`, applies the rules, and prints the `.spitout`. A recipe that writes its own `sources:` records is not scanned unless `--root` is given; the scan then replaces them. `spit dag recipe.spitin` runs the same step in memory before resolving jobs, over the pipeline the recipe's `pipeline` line names. A recipe is given alone; the pipeline is not named a second time on the command line.
+A recipe may also name its dataset root, the folder its paths are relative to, once:
+
+```text
+pipeline analysis.spit
+root data
+```
+
+The folder is relative to the recipe's folder, like the `pipeline` line, and may use `..` or be absolute. Without the line, the root is the recipe's folder; `--root` overrides either. A pipeline has no `root` line. `spit check` warns when the folder is not there.
+
+`spit check recipe.spitin` checks the rules against the pipeline without reading any data: each rule must name a source or discovery with the dimensions it counts. `spit inputs recipe.spitin` scans the root, applies the rules, and prints the `.spitout`. A recipe that writes its own `sources:` records is not scanned unless `--root` is given; the scan then replaces them. A `root` line only says where the dataset is: it does not make the recipe's records a scan, and their files must still exist under it. `spit dag recipe.spitin` runs the same step in memory before resolving jobs, over the pipeline the recipe's `pipeline` line names. A recipe is given alone; the pipeline is not named a second time on the command line.
 
 Three rules leave data out, each for a different reason:
 
@@ -332,7 +341,7 @@ A comment on the line is kept as the rule's reason. Values are compared as writt
 
 Exclusions apply before anything else in the recipe. An excluded discovered context expects no files, an excluded file needs to exist nowhere, and a file excluded by name may lie outside every discovered context, such as a misnamed copy. `drop` and `require` rules then see what the exclusions leave.
 
-Files whose whole paths match no source path rule are ignored while scanning. `spit inputs` counts them in a note; `spit inputs dataset.spitin --unmatched` lists their paths relative to the dataset root instead of writing a `.spitout`. Required source paths must match the spelling found by the scan: `pricing/S07.json` does not satisfy `pricing/s07.json`, even on a case-insensitive filesystem. A file with a near miss in an identity value, such as `store=S07` where a job needs `store=s07`, may still match a source rule: it is then a source artifact, and `dag` and `artifacts` warn when it is unused and point to it at the failed join.
+Files whose whole paths match no source path rule are ignored while scanning. `spit inputs` counts them in a note, leaving out SPIT's own `.spit`, `.spitin`, `.spitout` and `.spitdag` files; `spit inputs dataset.spitin --unmatched` lists their paths relative to the dataset root instead of writing a `.spitout`. Required source paths must match the spelling found by the scan: `pricing/S07.json` does not satisfy `pricing/s07.json`, even on a case-insensitive filesystem. A file with a near miss in an identity value, such as `store=S07` where a job needs `store=s07`, may still match a source rule: it is then a source artifact, and `dag` and `artifacts` warn when it is unused and point to it at the failed join.
 
 Rules can also come from a CSV file, relative to the recipe's folder, such as a lab's list of scans that failed quality control:
 
@@ -379,6 +388,14 @@ source_paths:
 ```
 
 The DAG can then use the rule without loading the recipe. A record names no file of its own: its source's path rule gives it.
+
+A `.spitout` that `spit inputs` writes starts with the dataset root it was settled against:
+
+```text
+root ../data
+```
+
+The folder is relative to the `.spitout`'s own folder, or to the working folder when `spit inputs` prints it instead of writing it with `-o`, and may be absolute. `dag` and `artifacts` use it as the root, so they check the source files and run commands from it without `--root`; `--root` overrides it. The line comes before every section, once. A `.spitout` without one, such as one written by hand, has no root unless `--root` gives one.
 
 `spit inputs` also writes what the recipe's `exclude` and `drop` rules removed, each with its rule, where the rule is, how many a counting rule found, and the reason:
 

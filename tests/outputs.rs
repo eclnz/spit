@@ -186,11 +186,17 @@ fn a_dataset_with_gaps_prints_as_before() {
     let runs: [&[&str]; 5] = [
         &["dag", "strict.spitin", "--root", "."],
         &["artifacts", "strict.spitin", "--root", "."],
-        &["inputs", "drop.spitin", "--root", ".", "-o", "/dev/stdout"],
+        &["inputs", "drop.spitin", "--root", ".", "-o", "drop.spitout"],
         &["dag", "drop.spitin", "--root", "."],
         &["artifacts", "drop.spitin", "--root", "."],
     ];
-    let text: String = runs.iter().map(|args| run(&tree, args)).collect();
+    let mut text = String::new();
+    for args in runs {
+        text.push_str(&run(&tree, args));
+        if args[0] == "inputs" {
+            text.push_str(&std::fs::read_to_string(tree.path().join("drop.spitout")).unwrap());
+        }
+    }
     check("gaps", &text);
 }
 
