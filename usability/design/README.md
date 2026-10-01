@@ -10,11 +10,12 @@ The plans that answer the [usability findings](../FINDINGS.md), and the order to
 | [Language changes](language.md) | F6, F9, F10 |
 | [Small CLI and file fixes](small-fixes.md) | B4, B6, B7 |
 | [Closing the guide's gaps](guide.md) | D1–D11 |
+| [Second-study actions](round2-actions.md) | Worked examples, guide packaging, rule explanations, CLI messages, and follow-up trials |
 
 ## Status
 
 - **Done:** steps 1–15 and 17. Phase 1, Phase 2, and Phase 3 are complete; the worked examples and extension update are in place. Step 16 was declined.
-- **Next:** address findings from the [second study round](../ROUND2.md).
+- **Next:** carry out the [second-study action plan](round2-actions.md).
 - **Resolved so far:** B1–B7, F1–F10, D1–D11.
 - **Still open:** prioritize and address the new guide and inspection gaps found in round 2.
 
