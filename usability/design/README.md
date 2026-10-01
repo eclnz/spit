@@ -14,7 +14,7 @@ The plans that answer the [usability findings](../FINDINGS.md), and the order to
 | [One way to write each thing](one-way.md) | Aggregation, dimension order, and syntax conventions for round 3 |
 | [Pilot inspection follow-ups](pre-phase5-inspection.md) | Compact job counts, collection order, and near-case unused sources |
 | [Third-study inspection work](round3-inspection.md) | Job counts and diagnosis examples confirmed after Phase 5 |
-| [Output extensions and sidecars](output-paths.md) | Repeated path rules reported in every round (proposal) |
+| [Dataset root, output extensions and sidecars](output-paths.md) | Repeated path rules reported in every round, and `--root` on every command (proposal) |
 
 ## Status
 
