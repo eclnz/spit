@@ -941,6 +941,16 @@ impl CommandDef {
     }
 }
 
+/// Sources declared together in a `sidecars` block: they share dimensions
+/// and a path stem, and differ by extension, as a photo and its GPS track.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SidecarGroup {
+    pub name: String,
+    pub dimensions: Vec<String>,
+    /// Each member source with its extension, in declaration order.
+    pub members: Vec<(String, String)>,
+}
+
 /// Where the extension a product's file must have is declared.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ExtensionSource {
@@ -1009,6 +1019,9 @@ pub struct Pipeline {
     pub product_paths: BTreeMap<String, PathTemplate>,
     /// Stages in declaration order.
     pub stages: Vec<StageDef>,
+    /// `sidecars` blocks; their members are also ordinary sources, each
+    /// with its path rule.
+    pub sidecar_groups: Vec<SidecarGroup>,
 }
 
 impl Pipeline {
