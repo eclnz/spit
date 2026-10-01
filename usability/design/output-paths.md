@@ -243,7 +243,7 @@ command convert: dcm2niix -z y -b y -o {image.dir} -f {image.stem} {dicom}
 - A file at the dataset root is in folder `.`.
 - Only outputs have `.dir` and `.stem`; an input's is an error, as is any other `.` part. `.stem` needs the output's own extension, declared or given by `beside`, not one from `ext:`, which the operation cannot rely on.
 - `verify` cannot use them, as it cannot use outputs.
-- Tests are in `tests/folder_and_stem.rs`. The usability answer keys keep their version 3 plans; the grader compares jobs, which are unchanged.
+- Tests are in `tests/folder_and_stem.rs`. The usability answer keys are rewritten as version 4 plans; the grader compares jobs, which are unchanged.
 
 ## Not covered
 
