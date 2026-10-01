@@ -173,6 +173,15 @@ fn a_spitout_records_its_root_relative_to_itself() {
 }
 
 #[test]
+fn a_printed_spitout_records_no_root() {
+    let tree = dataset("root-printed", "root data\n");
+    let output = spit_in(tree.path(), &["inputs", "analysis.spitin"]);
+    let (printed, _) = succeeded(&output);
+    assert!(printed.starts_with("source_paths:\n"), "{printed}");
+    assert!(!printed.contains("root"), "{printed}");
+}
+
+#[test]
 fn a_spitout_names_its_root_once_and_first() {
     let twice = spit::parse_source_inventory("root a\nroot b\nsources:\n    x\n").unwrap_err();
     assert!(twice.to_string().contains("names its root once"), "{twice}");

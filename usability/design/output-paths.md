@@ -45,16 +45,16 @@ The folder is relative to the recipe's folder, like the `pipeline` line, and may
 
 **The recipe inside the root.** The scan leaves SPIT's own files (`.spit`, `.spitin`, `.spitout` and `.spitdag`) out of the files that match no source rule. That covers the recipe and its pipeline, and also a `.spitout` or `.spitdag` written into the dataset, which would otherwise be reported on the next scan.
 
-**The root in a `.spitout`.** `spit inputs` starts the `.spitout` with the root it settled against, so `dag` and `artifacts` on the `.spitout` need no `--root` either:
+**The root in a `.spitout`.** `spit inputs -o` starts the `.spitout` it writes with the root it settled against, so `dag` and `artifacts` on the `.spitout` need no `--root` either:
 
 ```text
 root ../data
 ```
 
-- It is relative to the `.spitout`'s folder, so the two can move together. When `spit inputs` prints the `.spitout` instead of writing it with `-o`, its place is unknown, and the root is relative to the working folder, which is right for the common `> file` in that folder.
+- It is relative to the `.spitout`'s folder, so the two can move together. A printed `.spitout` records no root: where it will be kept is unknown, so any root would be a guess, and one relative to the working folder is wrong after `> elsewhere/x.spitout`. It needs `--root`, as before.
 - `--root` overrides it, as it overrides the recipe's line.
-- It comes before every section, once. A `.spitout` without one, such as one written by hand, behaves as before: no root unless `--root` gives one.
-- `inputs` records the root whenever it knows one: the flag, the `root` line, or the recipe's folder it scanned. A recipe whose written records are not scanned has a root only from its `root` line.
+- It comes before every section, once. A `.spitout` without one, printed or written by hand, behaves as before: no root unless `--root` gives one.
+- `inputs -o` records the root whenever it knows one: the flag, the `root` line, or the recipe's folder it scanned. A recipe whose written records are not scanned has a root only from its `root` line. So `dag` on a written `.spitout` checks that its source files exist, where before it did only with `--root`; planning from a `.spitout` without its data would need an opt-out, which waits until that workflow is needed.
 
 **Checking.** `spit check` reads no data, but it can warn when the `root` folder does not exist, which the editor then shows on the line. A second `root` line is an error, as a second `pipeline` line is.
 

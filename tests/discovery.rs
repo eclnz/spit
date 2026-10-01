@@ -432,16 +432,21 @@ fn cli_discovers_sources_under_the_root() {
     };
     let discovered = run(&["inputs", recipe.to_str().unwrap(), "--root", "."]);
     assert!(discovered.status.success());
-    // A printed .spitout records the root relative to the working folder.
+    // A printed .spitout records no root: where it will be kept is unknown.
     assert_eq!(
         String::from_utf8_lossy(&discovered.stdout),
-        "root .\n\nsources:\n    frame[subject=a,run=1]\n    frame[subject=a,run=2]\n    lut\n"
+        "sources:\n    frame[subject=a,run=1]\n    frame[subject=a,run=2]\n    lut\n"
     );
     assert!(String::from_utf8_lossy(&discovered.stderr).contains("note: found 3 source artifacts"));
     let spitout = tree.0.join("found.spitout");
     fs::write(&spitout, &discovered.stdout).unwrap();
-    // The recorded root stands in for `--root`.
-    let dag = run(&["dag", pipeline.to_str().unwrap(), spitout.to_str().unwrap()]);
+    let dag = run(&[
+        "dag",
+        pipeline.to_str().unwrap(),
+        spitout.to_str().unwrap(),
+        "--root",
+        ".",
+    ]);
     let notes = String::from_utf8(dag.stderr).unwrap();
     assert!(dag.status.success(), "{notes}");
     assert!(notes.contains("note: 1 jobs resolved."), "{notes}");
@@ -489,9 +494,7 @@ fn discovery_reports_skipped_files_and_still_succeeds() {
         tree.path().to_str().unwrap(),
     ]);
     assert!(output.status.success(), "{}", text(&output.stderr));
-    let stdout = text(&output.stdout);
-    assert!(stdout.starts_with("root "), "{stdout}");
-    assert!(stdout.ends_with("\n\nsources:\n    x[s=a]\n"), "{stdout}");
+    assert_eq!(text(&output.stdout), "sources:\n    x[s=a]\n");
     assert!(text(&output.stderr).contains("warning: skipped `in/%41.txt`"));
 }
 

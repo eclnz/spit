@@ -185,9 +185,9 @@ This creates two sort jobs for `alpha`, one for `beta`, and one merge job for ea
 Every path SPIT reads or writes, for a source or an output, is relative to one folder: the dataset root. The root is:
 
 - **with a recipe:** the folder its `root` line names, else the recipe's folder;
-- **with a `.spitout`:** the root its `root` line records. A `.spitout` written by hand may leave it out; then `dag` does not check that source files exist, and the `.spitdag` records no root.
+- **with a `.spitout`:** the root its `root` line records. A printed or hand-written `.spitout` has none; then `dag` does not check that source files exist, and the `.spitdag` records no root.
 
-`--root` overrides either, for `inputs`, `dag` and `artifacts` alike: the folder a recipe scans, the base of every path, and where each source file must exist. A recipe's `pipeline` and `root` lines are relative to the recipe's own folder and may use `..`. `spit inputs` records the root in the `.spitout` it writes, relative to that file, or to the working folder when it prints it, so `dag` on the `.spitout` finds the same files.
+`--root` overrides either, for `inputs`, `dag` and `artifacts` alike: the folder a recipe scans, the base of every path, and where each source file must exist. A recipe's `pipeline` and `root` lines are relative to the recipe's own folder and may use `..`. `spit inputs -o` records the root in the `.spitout` it writes, relative to that file, so `dag` on the `.spitout` finds the same files. A printed `.spitout` records none, since where it will be kept is unknown.
 
 Three layouts work well:
 
