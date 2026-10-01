@@ -9,8 +9,8 @@ use std::path::{Path, PathBuf};
 use super::coverage::{apply_drops, DropIndex, EveryGroupDropped};
 use super::exclusions::{Excluder, UnmatchedExclusion};
 use crate::model::{
-    ArtifactInstance, DirectoryDiscovery, EntityBinding, InputRules, Pipeline, ProductDef, Removal,
-    SourceInventory, SourceRecord,
+    ArtifactInstance, DirectoryDiscovery, EntityBinding, InputRules, Pipeline, PipelineIndex,
+    ProductDef, Removal, SourceInventory, SourceRecord,
 };
 use crate::paths::{
     decode_component, encode_component, error, inspect_paths, require_directory,
@@ -223,12 +223,13 @@ fn source_patterns(pipeline: &Pipeline) -> Result<Vec<SourcePattern<'_>>, PathEr
         .iter()
         .flat_map(|invocation| &invocation.outputs)
         .collect();
+    let index = PipelineIndex::new(pipeline);
     pipeline
         .products
         .iter()
         .filter(|product| !outputs.contains(&product.name))
         .map(|product| {
-            let template = pipeline.path_template_for(&product.name).ok_or_else(|| {
+            let template = index.path_template_for(&product.name).ok_or_else(|| {
                 error(format!(
                     "no path rule for source `{}`, so its files cannot be discovered",
                     product.name
@@ -757,7 +758,7 @@ pub(crate) fn locate_sources(
 ) -> Result<(), PathError> {
     let mut binder = PathBinder::new(pipeline);
     for record in &mut inventory.artifacts {
-        if pipeline.path_template_for(&record.product).is_none() {
+        if !binder.index().has_path(&record.product) {
             if record.path.is_some() {
                 return Err(error(format!(
                     "source `{}` has a record path but no path rule",
@@ -766,11 +767,7 @@ pub(crate) fn locate_sources(
             }
             continue;
         }
-        let Some(product) = pipeline
-            .products
-            .iter()
-            .find(|product| product.name == record.product)
-        else {
+        let Some(product) = binder.index().product(&record.product) else {
             continue;
         };
         let artifact = ArtifactInstance::new(
