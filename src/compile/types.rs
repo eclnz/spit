@@ -18,7 +18,7 @@ pub(super) fn infer_types(
     products: &BTreeMap<&str, &ProductDef>,
     outputs: &[&ProductDef],
     inferred_types: &BTreeMap<String, TypeExpr>,
-) -> Result<Vec<TypeExpr>, ResolveError> {
+) -> Result<(Vec<TypeExpr>, Substitutions), ResolveError> {
     let output_product = invocation.output_product();
     let mut substitutions = Substitutions::default();
     for (port, binding) in operation.inputs.iter().zip(&invocation.inputs) {
@@ -46,7 +46,7 @@ pub(super) fn infer_types(
             &output.artifact_type,
         )?;
     }
-    Ok(operation
+    let types = operation
         .outputs
         .iter()
         .zip(outputs)
@@ -60,7 +60,8 @@ pub(super) fn infer_types(
                 inferred
             }
         })
-        .collect())
+        .collect();
+    Ok((types, substitutions))
 }
 
 fn unify_port(

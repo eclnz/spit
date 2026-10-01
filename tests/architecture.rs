@@ -18,7 +18,7 @@ fn layer(module: &str) -> Layer {
         "compile" => Layer::Compile,
         "inputs" => Layer::Inputs,
         "resolver" | "render" => Layer::Resolve,
-        "diagnostics" | "main" | "lib" => Layer::Driver,
+        "diagnostics" | "editor" | "main" | "lib" => Layer::Driver,
         _ => Layer::Shared,
     }
 }
