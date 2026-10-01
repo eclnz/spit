@@ -38,7 +38,7 @@ pub use inputs::{
 pub use lower::parse_pipeline;
 pub use model::{
     stage_within, Artifact, ArtifactId, ArtifactInstance, ArtifactKey, ArtifactReport,
-    ArtifactType, Artifacts, Cardinality, CommandDef, CommandRole, CountRequirement,
+    ArtifactType, Artifacts, Beside, Cardinality, CommandDef, CommandRole, CountRequirement,
     CoverageAction, CoverageGap, CoverageRule, DirectoryDiscovery, EntityBinding, Exclusion, Gap,
     IncompleteJob, InputBinding, InputPort, InputRules, Invocation, Job, OperationDef, OutputPort,
     Pipeline, ProductDef, Removal, ResolvedDag, ShapeRule, SidecarGroup, SourceInventory,

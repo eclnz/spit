@@ -228,11 +228,12 @@ fn check_command_placeholders(
         }
     }
     if role == CommandRole::Run {
+        // A tool writes an output beside another without being told where.
         if let Some(port) = operation
             .outputs
             .iter()
             .enumerate()
-            .find(|(index, _)| !written.contains(index))
+            .find(|(index, port)| port.beside.is_none() && !written.contains(index))
             .map(|(_, port)| port)
         {
             return Err(CommandError::new(format!(

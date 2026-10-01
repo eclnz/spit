@@ -709,6 +709,18 @@ pub struct OutputPort {
     /// The extension the operation's tool gives this output's file, such as
     /// `.nii.gz`, when the operation declares one.
     pub extension: Option<String>,
+    /// For a file the tool writes beside another output without being told
+    /// where: that output, and what this one's name ends with in place of
+    /// its extension.
+    pub beside: Option<Beside>,
+}
+
+/// An output written beside the named port's file, its name that file's
+/// without its extension, then `suffix`: `.json`, or `_mask.nii.gz`.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Beside {
+    pub port: String,
+    pub suffix: String,
 }
 
 impl OutputPort {
@@ -717,7 +729,21 @@ impl OutputPort {
             name: name.into(),
             artifact_type,
             extension: None,
+            beside: None,
         }
+    }
+
+    /// This output written beside `port`, its name ending with `suffix`. Its
+    /// extension is the suffix from its first `.`, if it has one.
+    #[must_use]
+    pub fn beside(mut self, port: impl Into<String>, suffix: impl Into<String>) -> Self {
+        let suffix = suffix.into();
+        self.extension = suffix.find('.').map(|dot| suffix[dot..].to_owned());
+        self.beside = Some(Beside {
+            port: port.into(),
+            suffix,
+        });
+        self
     }
 
     #[must_use]
@@ -1035,8 +1061,19 @@ impl Pipeline {
     }
 
     /// The path template `product` uses: its rule, with the extension
-    /// [`Pipeline::added_extension`] gives it.
+    /// [`Pipeline::added_extension`] gives it, or, for an output written
+    /// beside another, that output's path with its extension replaced.
     pub fn path_template_for(&self, product: &str) -> Option<Cow<'_, PathTemplate>> {
+        if let Some((sibling, sibling_extension, suffix)) = self.beside(product) {
+            // The sibling's own file: `{product}` is its name, not this one's.
+            let template = self
+                .path_template_for(sibling)?
+                .with_product(&sibling.replace("::", "."));
+            let stem = template
+                .without_extension(sibling_extension)
+                .unwrap_or(template);
+            return Some(Cow::Owned(stem.with_extension(suffix)));
+        }
         let template = self.path_rule_for(product)?;
         Some(match self.added_extension(product) {
             Some((extension, _)) => Cow::Owned(template.with_extension(extension)),
@@ -1053,9 +1090,9 @@ impl Pipeline {
             .or(self.path_template.as_ref())
     }
 
-    /// The operation that makes `product`, with the extension it declares
-    /// for that output.
-    pub fn output_extension(&self, product: &str) -> Option<(&str, &str)> {
+    /// The step that makes `product`, the operation it calls, and the port
+    /// that writes it.
+    fn output_port(&self, product: &str) -> Option<(&Invocation, &OperationDef, &OutputPort)> {
         let invocation = self
             .invocations
             .iter()
@@ -1068,8 +1105,32 @@ impl Pipeline {
             .operations
             .iter()
             .find(|operation| operation.name == invocation.operation)?;
-        let extension = operation.outputs.get(index)?.extension.as_deref()?;
-        Some((operation.name.as_str(), extension))
+        Some((invocation, operation, operation.outputs.get(index)?))
+    }
+
+    /// The operation that makes `product`, with the extension it declares
+    /// for that output. An output written beside another has none to
+    /// complete a rule with: its path follows the other's.
+    pub fn output_extension(&self, product: &str) -> Option<(&str, &str)> {
+        let (_, operation, port) = self.output_port(product)?;
+        if port.beside.is_some() {
+            return None;
+        }
+        Some((operation.name.as_str(), port.extension.as_deref()?))
+    }
+
+    /// For an output written beside another, the product it is beside, that
+    /// product's declared extension, and the suffix that replaces it.
+    pub fn beside(&self, product: &str) -> Option<(&str, &str, &str)> {
+        let (invocation, operation, port) = self.output_port(product)?;
+        let beside = port.beside.as_ref()?;
+        let index = operation
+            .outputs
+            .iter()
+            .position(|output| output.name == beside.port)?;
+        let sibling = invocation.outputs.get(index)?;
+        let extension = operation.outputs[index].extension.as_deref()?;
+        Some((sibling.as_str(), extension, beside.suffix.as_str()))
     }
 
     /// The `ext:` default for `product`: its stage's, or the nearest
@@ -1094,6 +1155,9 @@ impl Pipeline {
     /// its operation's, else, when its path is a default rule, the `ext:`
     /// default. A product with its own rule takes only its operation's.
     pub fn expected_extension(&self, product: &str) -> Option<(&str, ExtensionSource)> {
+        if self.beside(product).is_some() {
+            return None;
+        }
         if let Some((operation, extension)) = self.output_extension(product) {
             return Some((extension, ExtensionSource::Operation(operation.to_owned())));
         }

@@ -285,6 +285,13 @@ fn shape_rule(
 /// tool gives its file: `-> Transform .mat`.
 fn parse_outputs(text: &str, number: usize) -> Result<Vec<OutputPort>, ParseError> {
     let Some(list) = text.strip_prefix('(') else {
+        if let Some((_, port)) = text.rsplit_once(" beside ") {
+            return Err(ParseError::new(
+                number,
+                "`beside` names another output of the same operation; name this one, as in `-> (image: Image .nii.gz, meta: Json .json beside image)`",
+            )
+            .at_token(port.trim()));
+        }
         let (text, extension) = split_extension(text, number)?;
         let output_type = if text.is_empty() {
             TypeExpr::Unknown
@@ -303,10 +310,23 @@ fn parse_outputs(text: &str, number: usize) -> Result<Vec<OutputPort>, ParseErro
     if items.is_empty() {
         return Err(ParseError::new(number, "expected at least one output port").at_token(text));
     }
-    items
+    let ports = items
         .into_iter()
         .map(|item| {
-            let (item, extension) = split_extension(item, number)?;
+            let (item, beside) = match item.rsplit_once(" beside ") {
+                Some((item, sibling)) => {
+                    let (item, suffix) = beside_suffix(item.trim(), number)?;
+                    (
+                        item,
+                        Some((identifier(sibling.trim(), number, "output port")?, suffix)),
+                    )
+                }
+                None => (item, None),
+            };
+            let (item, extension) = match beside {
+                Some(_) => (item, None),
+                None => split_extension(item, number)?,
+            };
             let (name, output_type) = match item.split_once(':') {
                 Some((name, output_type)) if !output_type.trim().is_empty() => {
                     (name.trim(), port_type(output_type.trim(), number)?)
@@ -315,9 +335,60 @@ fn parse_outputs(text: &str, number: usize) -> Result<Vec<OutputPort>, ParseErro
                 None => (item, TypeExpr::Unknown),
             };
             let port = OutputPort::new(identifier(name, number, "output port")?, output_type);
-            Ok(with_extension(port, extension))
+            Ok(match beside {
+                Some((sibling, suffix)) => port.beside(sibling, suffix),
+                None => with_extension(port, extension),
+            })
         })
-        .collect()
+        .collect::<Result<Vec<_>, ParseError>>()?;
+    for port in &ports {
+        let Some(beside) = &port.beside else { continue };
+        let (name, sibling) = (&port.name, &beside.port);
+        let problem = match ports.iter().find(|other| &other.name == sibling) {
+            None => format!("`{name}` is written beside `{sibling}`, which is not an output of this operation"),
+            Some(other) if other.beside.is_some() => format!(
+                "`{name}` is written beside `{sibling}`, which is itself written beside another; name an output the tool is told to write"
+            ),
+            Some(other) if other.extension.is_none() => format!(
+                "`{name}` is written beside `{sibling}`, which declares no extension for `{name}` to replace; give `{sibling}` one, as in `{sibling}: Image .nii.gz`"
+            ),
+            Some(_) => continue,
+        };
+        return Err(ParseError::new(number, problem).at_token(sibling));
+    }
+    Ok(ports)
+}
+
+/// An output written beside another: its text before the suffix, and the
+/// suffix its file name ends with, an extension such as `.json` or quoted
+/// text such as `"_mask.nii.gz"`.
+fn beside_suffix(item: &str, number: usize) -> Result<(&str, String), ParseError> {
+    if let Some(quoted) = item.strip_suffix('"') {
+        let open = quoted.rfind('"').ok_or_else(|| {
+            ParseError::new(number, "expected the opening `\"` of the suffix").at_token(item)
+        })?;
+        let suffix = &quoted[open + 1..];
+        let valid = !suffix.is_empty()
+            && suffix
+                .chars()
+                .all(|character| character.is_ascii_alphanumeric() || "._-".contains(character));
+        if !valid {
+            return Err(ParseError::new(
+                number,
+                format!("`\"{suffix}\"` cannot end a file name; use letters, digits, `.`, `-` or `_`, as in `\"_mask.nii.gz\"`"),
+            )
+            .at_token(suffix));
+        }
+        return Ok((quoted[..open].trim(), suffix.to_owned()));
+    }
+    match split_extension(item, number)? {
+        (item, Some(extension)) => Ok((item, extension.to_owned())),
+        (item, None) => Err(ParseError::new(
+            number,
+            format!("an output written beside another names what its file name ends with, as in `{item} .json beside image` or `{item} \"_mask.nii.gz\" beside image`"),
+        )
+        .at_token(item)),
+    }
 }
 
 /// An output's text before its extension, and the extension: types hold no

@@ -99,7 +99,7 @@ trial = simulate(reading, seed @ each(rep))
 summary = average(trial @ vary(rep))
 ```
 
-An output's type may be followed by the extension the tool gives its file, as in `-> Transform .mat`; see [extensions](#extensions).
+An output's type may be followed by the extension the tool gives its file, as in `-> Transform .mat`; see [extensions](#extensions). An output the tool writes next to another without being told where is declared [`beside`](#files-a-tool-writes-beside-another) it.
 
 An operation can write several outputs in one job. Name each output; its name is its placeholder, and the call assigns one product to each:
 
@@ -259,6 +259,25 @@ Extensions are optional. An operation whose tool picks the format from the outpu
 ```
 
 Path rules also find sources. `spit inputs recipe.spitin --root data` lists each file under `data` whose path matches a source's rule, in the pipeline or the recipe, reading entity values from its placeholders. A rule matches a file's whole path, so `responses/{region}/wave{wave}.csv` does not match `wave3.csv.bak` or `wave3.csv.1`, and files that match no rule are left out. Links to files and directories are followed. A value is read only as SPIT writes it, so a file such as `in/%41.txt`, whose value SPIT would write `A`, is skipped with a warning rather than listed under a path no job would use.
+
+### Files a tool writes beside another
+
+Some tools write a second file beside the one they are told to write, such as the `.json` that dcm2niix writes next to its image, or the mask FSL's `bet -m` names after its brain image. Declare such an output `beside` the output it follows, with what its file name ends with in place of that output's extension:
+
+```text
+operation convert(dicom: DicomDir) -> (image: Image .nii.gz, meta: Json .json beside image)
+operation strip(t1: Image) -> (brain: Image .nii.gz, mask: Image "_mask.nii.gz" beside brain)
+```
+
+Its path is its sibling's, without the sibling's extension, then the suffix: beside `out/image/sub=01.nii.gz`, `meta` is `out/image/sub=01.json`, and beside `sub-01_brain.nii.gz`, `mask` is `sub-01_brain_mask.nii.gz`. `{product}` in the sibling's rule stays the sibling's name, since the file is beside the sibling's.
+
+The suffix is an extension, or quoted text of letters, digits, `.`, `-` and `_`; the output's own extension is the suffix from its first `.`. A `beside` output:
+
+- may be left out of the command, since the tool is not told where to write it;
+- has no path rule of its own; its path follows the sibling's;
+- names another output of the same operation, which declares an extension and is not itself written beside another.
+
+Later steps read it as any other output, and the `.spitdag` lists it among the job's outputs. If the tool does not write it, as when a flag turns the sidecar off, the job leaves a declared output missing.
 
 ### Sidecar files
 
