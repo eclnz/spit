@@ -139,7 +139,8 @@ fn path_rules_report_fallbacks_and_strict_paths_reject_them() {
     ]);
     assert!(rules.status.success(), "{}", stderr(&rules));
     let report = stdout(&rules);
-    assert!(report.contains("photo_response (output): explicit"));
+    assert!(report.contains("raw_photo (source): explicit"));
+    assert!(report.contains("photo_response (output): default derivatives/{product}/{entities}.txt, `.txt` from operation `estimate_response`"));
     assert!(report.contains("vegetation (output): default"));
 
     for command in ["check", "dag"] {
@@ -186,7 +187,14 @@ fn check_json_reads_the_pipeline_file_and_dag_json_emits_the_spitdag() {
         "--json",
     ]);
     assert!(check.status.success());
-    assert_eq!(stdout(&check), "{\"diagnostics\":[]}\n");
+    // A clean pipeline also gives each output's path, which its default
+    // rule writes nowhere in full, for an editor to show.
+    assert_eq!(
+        stdout(&check),
+        "{\"diagnostics\":[],\"paths\":[\
+         {\"product\":\"sorted\",\"line\":10,\"path\":\"sorted/{entities}.txt\"},\
+         {\"product\":\"merged\",\"line\":14,\"path\":\"merged/{entities}.txt\"}]}\n"
+    );
     let run = || {
         spit(&[
             "dag",

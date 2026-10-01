@@ -233,7 +233,7 @@ fn source_patterns(pipeline: &Pipeline) -> Result<Vec<SourcePattern<'_>>, PathEr
                     product.name
                 ))
             })?;
-            let pieces = path_pattern(template, product)?;
+            let pieces = path_pattern(&template, product)?;
             Ok(SourcePattern { product, pieces })
         })
         .collect()

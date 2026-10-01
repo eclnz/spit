@@ -157,6 +157,12 @@ pub(crate) enum StatementKind {
     /// A `dimensions [...]` line: the pipeline's dimension order.
     Dimensions(Vec<String>),
     Path(PathRule),
+    /// An `ext:` line: the default extension of `stage`, or, outside every
+    /// stage, of the whole pipeline.
+    Extension {
+        stage: Option<String>,
+        extension: String,
+    },
     /// A flow step, which declares its output products.
     FlowStep(FlowStep),
 }

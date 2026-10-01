@@ -3,8 +3,10 @@
 # frame for calibration, and one surveyed ground map. The commands are
 # illustrative; the pipeline shows how SPIT binds the files they need.
 
-# Default for generated images; formats that differ declare a path below.
-path: derivatives/{product}/{entities}.img
+# Generated files go in a folder per product. Images default to .img; an
+# operation whose tool writes another format declares its extension.
+path: derivatives/{product}/{entities}
+ext: .img
 
 source raw_photo : Image<Photo,Captured> [site, visit, shot]
 path raw_photo: site-{site}/visit-{visit}/photos/site-{site}_visit-{visit}_shot-{shot}_photo.raw
@@ -73,10 +75,9 @@ visit_dark_series = extract_dark(balanced_photo)
 visit_dark = mean_dark(visit_dark_series)
 
 # Classify the ground map in its own space, then remap its class labels.
-operation classify_map(image: Image<Map,S>) -> Image<Classes,S>
+operation classify_map(image: Image<Map,S>) -> Image<Classes,S> .tif
 command classify_map: mapclassify --in {image} --out {output}
 classes_map = classify_map(ground_map)
-path classes_map: derivatives/classes_map/{entities}.tif
 
 operation relabel(labels: Image<Classes,S>, source_classes: ClassTable, target_classes: ClassTable) -> Image<Classes,S>
 command relabel: relabel {labels} {source_classes} {target_classes} {output}
@@ -84,20 +85,17 @@ regions_map = relabel(classes_map, source_classes, target_classes)
 
 # Align the ground map to the corrected photos, then convert the tool's matrix
 # into a transform using the same moving and reference images.
-operation export_tiff(image: Image<K,S>) -> Image<K,S>
+operation export_tiff(image: Image<K,S>) -> Image<K,S> .tif
 command export_tiff: imgconvert {image} {output}
 visit_dark_tiff = export_tiff(visit_dark)
-path visit_dark_tiff: derivatives/visit_dark_tiff/{entities}.tif
 
-operation estimate_alignment(moving: Image<M,S>, reference: Image<N,T>) -> ToolTransform<S,T>
+operation estimate_alignment(moving: Image<M,S>, reference: Image<N,T>) -> ToolTransform<S,T> .mat
 command estimate_alignment: imgalign -in {moving} -ref {reference} -omat {output} -dof 6
 map_to_photo_matrix = estimate_alignment(ground_map, visit_dark_tiff)
-path map_to_photo_matrix: derivatives/map_to_photo_matrix/{entities}.mat
 
-operation convert_alignment(matrix: ToolTransform<S,T>, moving: Image<M,S>, reference: Image<N,T>) -> Transform<S,T>
+operation convert_alignment(matrix: ToolTransform<S,T>, moving: Image<M,S>, reference: Image<N,T>) -> Transform<S,T> .txt
 command convert_alignment: xfmconvert {matrix} {moving} {reference} {output}
 map_to_photo = convert_alignment(map_to_photo_matrix, ground_map, visit_dark_tiff)
-path map_to_photo: derivatives/map_to_photo/{entities}.txt
 
 # The reference image sets the target grid. Continuous images use linear
 # interpolation; label images use nearest-neighbour interpolation.
@@ -119,26 +117,22 @@ operation cover_boundary(image: Image<Cover,S>) -> Image<Mask,S>
 command cover_boundary: coveredge {image} {output}
 boundary = cover_boundary(cover)
 
-operation estimate_response(image: Image<Photo,S>) -> Response<Photo>
+operation estimate_response(image: Image<Photo,S>) -> Response<Photo> .txt
 command estimate_response: imgresponse {image} {output}
 photo_response = estimate_response(balanced_photo)
-path photo_response: derivatives/photo_response/{entities}.txt
 
 operation estimate_vegetation(photo: Image<Photo,S>, response: Response<Photo>) -> Image<Vegetation,S>
 command estimate_vegetation: vegindex {photo} {response} {output}
 vegetation = estimate_vegetation(balanced_photo, photo_response)
 
-operation trace_rows(vegetation: Image<Vegetation,S>, cover: Image<Cover,S>, seed: Image<Mask,S>) -> RowSet<S>
+operation trace_rows(vegetation: Image<Vegetation,S>, cover: Image<Cover,S>, seed: Image<Mask,S>) -> RowSet<S> .rows
 command trace_rows: rowtrace {vegetation} {output} --cover {cover} --seed {seed} --select 1000
 crop_rows = trace_rows(vegetation, cover, boundary)
-path crop_rows: derivatives/crop_rows/{entities}.rows
 
-operation weight_rows(rows: RowSet<S>, vegetation: Image<Vegetation,S>, cover: Image<Cover,S>) -> RowWeights
+operation weight_rows(rows: RowSet<S>, vegetation: Image<Vegetation,S>, cover: Image<Cover,S>) -> RowWeights .txt
 command weight_rows: rowweight {rows} {vegetation} {output} --cover {cover}
 row_weights = weight_rows(crop_rows, vegetation, cover)
-path row_weights: derivatives/row_weights/{entities}.txt
 
-operation build_yield_table(rows: RowSet<S>, regions: Image<Classes,S>, weights: RowWeights) -> YieldTable
+operation build_yield_table(rows: RowSet<S>, regions: Image<Classes,S>, weights: RowWeights) -> YieldTable .csv
 command build_yield_table: yieldtable {rows} {regions} {output} --weights {weights}
 yield_table = build_yield_table(crop_rows, regions_photo, row_weights)
-path yield_table: derivatives/yield_table/{entities}.csv

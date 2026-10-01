@@ -5,7 +5,7 @@ use crate::model::{Cardinality, InputPort, OperationDef, OutputPort, ShapeRule, 
 use crate::types::{parse_type_expr, TypeExpr};
 
 use super::declarations::type_error;
-use super::lexical::{call_parts, comma_items, identifier};
+use super::lexical::{call_parts, comma_items, extension, identifier};
 use super::ParseError;
 
 pub(super) fn parse_operation(line: &str, number: usize) -> Result<OperationDef, ParseError> {
@@ -281,12 +281,20 @@ fn shape_rule(
 }
 
 /// Parse an operation's output: one type, or `(name: Type, ...)` for
-/// several named outputs.
+/// several named outputs. Each type may be followed by the extension the
+/// tool gives its file: `-> Transform .mat`.
 fn parse_outputs(text: &str, number: usize) -> Result<Vec<OutputPort>, ParseError> {
     let Some(list) = text.strip_prefix('(') else {
-        let output_type =
-            parse_type_expr(text, true).map_err(|error| type_error(number, text, error))?;
-        return Ok(vec![OutputPort::new(DEFAULT_OUTPUT, output_type)]);
+        let (text, extension) = split_extension(text, number)?;
+        let output_type = if text.is_empty() {
+            TypeExpr::Unknown
+        } else {
+            port_type(text, number)?
+        };
+        return Ok(vec![with_extension(
+            OutputPort::new(DEFAULT_OUTPUT, output_type),
+            extension,
+        )]);
     };
     let list = list.strip_suffix(')').ok_or_else(|| {
         ParseError::new(number, "expected closing `)` after output ports").at_token(text)
@@ -298,16 +306,37 @@ fn parse_outputs(text: &str, number: usize) -> Result<Vec<OutputPort>, ParseErro
     items
         .into_iter()
         .map(|item| {
+            let (item, extension) = split_extension(item, number)?;
             let (name, output_type) = match item.split_once(':') {
-                Some((name, output_type)) => (name.trim(), port_type(output_type.trim(), number)?),
+                Some((name, output_type)) if !output_type.trim().is_empty() => {
+                    (name.trim(), port_type(output_type.trim(), number)?)
+                }
+                Some((name, _)) => (name.trim(), TypeExpr::Unknown),
                 None => (item, TypeExpr::Unknown),
             };
-            Ok(OutputPort::new(
-                identifier(name, number, "output port")?,
-                output_type,
-            ))
+            let port = OutputPort::new(identifier(name, number, "output port")?, output_type);
+            Ok(with_extension(port, extension))
         })
         .collect()
+}
+
+/// An output's text before its extension, and the extension: types hold no
+/// `.`, so the first one starts it.
+fn split_extension(text: &str, number: usize) -> Result<(&str, Option<&str>), ParseError> {
+    match text.find('.') {
+        Some(dot) => Ok((
+            text[..dot].trim(),
+            Some(extension(text[dot..].trim(), number)?),
+        )),
+        None => Ok((text.trim(), None)),
+    }
+}
+
+fn with_extension(port: OutputPort, extension: Option<&str>) -> OutputPort {
+    match extension {
+        Some(extension) => port.with_extension(extension),
+        None => port,
+    }
 }
 
 fn port_type(text: &str, number: usize) -> Result<TypeExpr, ParseError> {

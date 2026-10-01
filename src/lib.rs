@@ -25,8 +25,9 @@ pub use command::{validate_commands, CommandError, CommandProblem, CommandTempla
 pub use compile::validate_pipeline;
 pub use diagnostics::{
     diagnose, diagnose_checked, diagnose_checked_with_inventory, diagnose_checked_with_records,
-    diagnose_in, diagnose_recipe, diagnose_recipe_against, render_diagnostics_json, Checked,
-    Context, Diagnosis, Diagnostic, DiagnosticSource, FileNames, Records, Severity,
+    diagnose_in, diagnose_recipe, diagnose_recipe_against, render_check_json,
+    render_diagnostics_json, Checked, Context, Diagnosis, Diagnostic, DiagnosticSource, FileNames,
+    Records, Severity, ShownPath,
 };
 pub use error::{DefinitionSubject, NearMiss, PortSite, ResolveError, TypeConflict};
 pub use imports::parse_pipeline_at;

@@ -1,6 +1,6 @@
 # Design: dataset root, output extensions and sidecars
 
-Status: step 1, the recipe's `root` line, is done. Steps 2 to 5 are proposals.
+Status: steps 1 and 2, the recipe's `root` line and extensions on operation outputs, are done. Steps 3 to 5 are proposals.
 
 ## Problem
 
@@ -117,9 +117,19 @@ The error matters: if the tool always writes `.mat`, a rule ending `.txt` names 
 
 **Generic tools.** An operation whose tool picks the format from the output name declares nothing, and the path or default decides, as today. `import_photo`, `import_flat` and `export_tiff` all run `imgconvert`; only `export_tiff` commits to `.tif`. So the extension belongs on the operation, not the command.
 
-**Sources** have no operation. Their path rules keep their full extension.
+**Sources** have no operation. Their own path rules keep their full extension. A source whose files a default rule finds takes `ext:`, like any product on a default rule, so a default stays one rule with one extension.
 
 **Compatibility.** No current pipeline declares an extension or `ext:`, so every pipeline keeps its meaning.
+
+**Built.** As above, with these details settled while building it:
+
+- `-> .txt` gives an untyped output an extension, and `name: .ext` an untyped port one.
+- A default rule that disagrees with several products' extensions is reported once, on the rule.
+- An operation brought in with `use` keeps its extensions, and an imported source keeps the extension its own file's `ext:` gives it.
+- A step whose output is named `ext`, as in `ext: Image = f(x)`, is still a step.
+- `Pipeline::path_template_for` returns the completed template, so binding, discovery and the checks all see one path; `path_rule_for` gives the rule as written.
+- `field_survey.spit` and `mrtrix3_act.spit` are converted, and `dag --paths` gives every artifact the same path as before. `mrtrix3_act.spit` uses a stage `ext:` for its parcellation stage, which stays NIfTI throughout.
+- Tests are in `tests/extensions.rs`.
 
 **Example.** In `field_survey.spit`, the 8 derived `path x:` lines go and every resolved path stays the same:
 
@@ -142,10 +152,14 @@ The other 15 image operations take `.img` from the default. The extension now si
 
 ### Seeing the resolved path
 
-With extensions inherited, a product's path is no longer written in one place, and agents said they wrote explicit paths partly to audit them. `spit check` already resolves every product's template to validate it. It should also return each resolved template, and where each part came from, so the VS Code extension can show `derivatives/yield_table/{entities}.csv` beside `yield_table = …`. The agreement error appears as an ordinary diagnostic, pointing at both the path rule and the operation:
+With extensions inherited, a product's path is no longer written in one place, and agents said they wrote explicit paths partly to audit them. So:
+
+- `spit check --path-rules` shows each product's completed path, and where an added extension is declared: ``yield_table (output): default derivatives/{product}/{entities}.csv, `.csv` from operation `build_yield_table` ``.
+- For a pipeline that checks clean, `check --json` adds a `paths` list: each product whose path no rule writes in full, the line that declares it, and its path with `{product}` and `{stage}` written out. spit-vscode shows it as an inline hint at the end of that line, such as `→ derivatives/yield_table/{entities}.csv`, naming each product on a step with several outputs. A failed check clears the hints, since its lines may have moved.
+- The agreement error is an ordinary diagnostic on the path rule's line:
 
 ```text
-path map_to_photo_matrix ends in .txt, but estimate_alignment writes .mat; drop the extension or use .mat
+path `map_to_photo_matrix` ends in `.txt`, but operation `estimate_alignment` writes `.mat`; drop the extension or use `.mat`
 ```
 
 ## 3. Source groups
@@ -222,7 +236,7 @@ command convert: dcm2niix -z y -b y -o {image.dir} -f {image.stem} {dicom}
 ## Work order
 
 1. The recipe's `root` line, the root recorded in the `.spitout`, the scan leaving out SPIT's own files, and the guide's layout example. Done.
-2. Extensions on output ports, `ext:`, resolution and the agreement error. Return resolved templates from `spit check` and show them in the editor. Convert `field_survey.spit` and `mrtrix3_act.spit`.
+2. Extensions on output ports, `ext:`, resolution and the agreement error. Return resolved templates from `spit check` and show them in the editor. Convert `field_survey.spit` and `mrtrix3_act.spit`. Done.
 3. `sidecars` groups and the incomplete-group report in discovery.
 4. `beside` outputs.
 5. `{x.dir}` and `{x.stem}`, with the `.spitdag` version bump.

@@ -4,7 +4,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
-use crate::model::{ArtifactInstance, EntityBinding, Pipeline, ProductDef};
+use crate::model::{ArtifactInstance, EntityBinding, ExtensionSource, Pipeline, ProductDef};
 use crate::parser::SourceMap;
 
 use super::template::{bind_path, enclosing_path, error, PathError, PathPart, PathPlaceholder};
@@ -27,19 +27,21 @@ pub enum PathRule {
 
 impl PathRule {
     /// The rule `product` takes: its own, else its stage's default, else
-    /// the pipeline's default.
+    /// the pipeline's default, each with any extension added to it.
     fn for_product(pipeline: &Pipeline, product: &str) -> Self {
-        if let Some(template) = pipeline.product_paths.get(product) {
-            Self::Explicit(template.to_string())
-        } else if let Some((stage, template)) = pipeline.stage_path_rule(product) {
+        let Some(template) = pipeline.path_template_for(product) else {
+            return Self::Missing;
+        };
+        let template = template.to_string();
+        if pipeline.product_paths.contains_key(product) {
+            Self::Explicit(template)
+        } else if let Some((stage, _)) = pipeline.stage_path_rule(product) {
             Self::Stage {
                 stage: stage.to_owned(),
-                template: template.to_string(),
+                template,
             }
-        } else if let Some(template) = &pipeline.path_template {
-            Self::Default(template.to_string())
         } else {
-            Self::Missing
+            Self::Default(template)
         }
     }
 }
@@ -49,6 +51,9 @@ pub struct PathCoverageEntry {
     pub product: String,
     pub source: bool,
     pub rule: PathRule,
+    /// The extension added to the rule as written, and where it is
+    /// declared: `` `.mat` from operation `align` ``.
+    pub extension: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -123,41 +128,23 @@ impl fmt::Display for PathCoverage {
         writeln!(f, "Product path coverage:")?;
         for entry in &self.entries {
             let role = if entry.source { "source" } else { "output" };
+            write!(f, "  {} ({role}): ", entry.product)?;
             match &entry.rule {
-                PathRule::Explicit(template) => {
-                    writeln!(f, "  {} ({role}): explicit {template}", entry.product)?;
-                }
-                PathRule::Recipe(template) => {
-                    writeln!(
-                        f,
-                        "  {} ({role}): explicit {template} (recipe)",
-                        entry.product
-                    )?;
-                }
+                PathRule::Explicit(template) => write!(f, "explicit {template}")?,
+                PathRule::Recipe(template) => write!(f, "explicit {template} (recipe)")?,
                 PathRule::Stage { stage, template } => {
-                    writeln!(
-                        f,
-                        "  {} ({role}): stage {stage} default {template}",
-                        entry.product
-                    )?;
+                    write!(f, "stage {stage} default {template}")?;
                 }
-                PathRule::Default(template) => {
-                    writeln!(f, "  {} ({role}): default {template}", entry.product)?;
+                PathRule::Default(template) => write!(f, "default {template}")?,
+                PathRule::Inventory => write!(f, "from the inventory")?,
+                PathRule::Missing if entry.source => {
+                    write!(f, "no rule (a recipe may supply one)")?
                 }
-                PathRule::Inventory => {
-                    writeln!(f, "  {} ({role}): from the inventory", entry.product)?;
-                }
-                PathRule::Missing => {
-                    if entry.source {
-                        writeln!(
-                            f,
-                            "  {} ({role}): no rule (a recipe may supply one)",
-                            entry.product
-                        )?;
-                    } else {
-                        writeln!(f, "  {} ({role}): MISSING", entry.product)?;
-                    }
-                }
+                PathRule::Missing => write!(f, "MISSING")?,
+            }
+            match &entry.extension {
+                Some(extension) => writeln!(f, ", {extension}")?,
+                None => writeln!(f)?,
             }
         }
         Ok(())
@@ -201,10 +188,18 @@ pub(crate) fn collect_paths(
         .collect();
     let mut entries = Vec::new();
     let mut samples: BTreeMap<String, &str> = BTreeMap::new();
+    // One default rule can disagree with many products' extensions; each
+    // disagreement is said once.
+    let mut disagreements = BTreeSet::new();
     for product in &pipeline.products {
         let rule = PathRule::for_product(pipeline, &product.name);
         if rule != PathRule::Missing && !skip.contains(&product.name) {
             let line = lines.path_rule(pipeline, &product.name);
+            if let Some(problem) = extension_disagreement(pipeline, &product.name) {
+                if disagreements.insert(problem.clone()) {
+                    errors.push(error(problem).at(line.clone()));
+                }
+            }
             match validate_path_template(pipeline, product) {
                 Err(e) => errors.push(e.at(line)),
                 // A repeated product name is reported by the resolver as a duplicate.
@@ -228,6 +223,9 @@ pub(crate) fn collect_paths(
             product: product.name.clone(),
             source: !outputs.contains(product.name.as_str()),
             rule,
+            extension: pipeline
+                .added_extension(&product.name)
+                .map(|(extension, source)| format!("`{extension}` from {source}")),
         });
     }
     for (path, product) in &samples {
@@ -241,6 +239,33 @@ pub(crate) fn collect_paths(
         }
     }
     (PathCoverage { entries }, errors)
+}
+
+/// Why `product`'s path rule ends with an extension other than the one its
+/// file must have, if it does. A rule that ends with none is given it.
+fn extension_disagreement(pipeline: &Pipeline, product: &str) -> Option<String> {
+    let (expected, source) = pipeline.expected_extension(product)?;
+    let written = pipeline.path_rule_for(product)?.extension()?;
+    if written == expected {
+        return None;
+    }
+    if pipeline.product_paths.contains_key(product) {
+        return Some(format!(
+            "path `{product}` ends in `{written}`, but {source} writes `{expected}`; drop the extension or use `{expected}`"
+        ));
+    }
+    let default = match pipeline.stage_path_rule(product) {
+        Some((stage, _)) => format!("stage `{stage}`'s default path"),
+        None => "the default path".to_owned(),
+    };
+    Some(match source {
+        ExtensionSource::Operation(_) => format!(
+            "{default} ends in `{written}`, but {source} writes `{expected}`; write {default} without an extension, and give the outputs that use it `ext: {written}`"
+        ),
+        ExtensionSource::Stage(_) | ExtensionSource::Default => format!(
+            "{default} ends in `{written}`, but {source} sets `{expected}`; write the extension once, with `ext:`"
+        ),
+    })
 }
 
 /// Bind a product's path rule to placeholder entities, rejecting rules that

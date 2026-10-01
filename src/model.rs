@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -705,6 +706,9 @@ pub enum ShapeRule {
 pub struct OutputPort {
     pub name: String,
     pub artifact_type: ArtifactType,
+    /// The extension the operation's tool gives this output's file, such as
+    /// `.nii.gz`, when the operation declares one.
+    pub extension: Option<String>,
 }
 
 impl OutputPort {
@@ -712,7 +716,14 @@ impl OutputPort {
         Self {
             name: name.into(),
             artifact_type,
+            extension: None,
         }
+    }
+
+    #[must_use]
+    pub fn with_extension(mut self, extension: impl Into<String>) -> Self {
+        self.extension = Some(extension.into());
+        self
     }
 }
 
@@ -930,6 +941,27 @@ impl CommandDef {
     }
 }
 
+/// Where the extension a product's file must have is declared.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ExtensionSource {
+    /// On the output of the named operation.
+    Operation(String),
+    /// By the named stage's `ext:` line.
+    Stage(String),
+    /// By the pipeline's `ext:` line.
+    Default,
+}
+
+impl fmt::Display for ExtensionSource {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Operation(operation) => write!(f, "operation `{operation}`"),
+            Self::Stage(stage) => write!(f, "stage `{stage}`'s `ext:`"),
+            Self::Default => f.write_str("`ext:`"),
+        }
+    }
+}
+
 /// A named group of steps, such as preprocessing or analysis. A stage owns
 /// the products its steps assign; operations stay global. A nested stage's
 /// name is its path, as in `preprocess/denoise`.
@@ -939,6 +971,9 @@ pub struct StageDef {
     /// The default path rule for the products of this stage and the stages
     /// nested in it that set none, in place of the pipeline's default.
     pub path_template: Option<PathTemplate>,
+    /// The `ext:` default for the same products, in place of the
+    /// pipeline's.
+    pub extension: Option<String>,
 }
 
 /// A directory pattern that discovers concrete entity bindings under a root.
@@ -954,6 +989,7 @@ impl StageDef {
         Self {
             name: name.into(),
             path_template: None,
+            extension: None,
         }
     }
 }
@@ -967,6 +1003,9 @@ pub struct Pipeline {
     pub invocations: Vec<Invocation>,
     pub commands: Vec<CommandDef>,
     pub path_template: Option<PathTemplate>,
+    /// The `ext:` default: the extension a default path rule is completed
+    /// with when the operation declares none.
+    pub extension: Option<String>,
     pub product_paths: BTreeMap<String, PathTemplate>,
     /// Stages in declaration order.
     pub stages: Vec<StageDef>,
@@ -982,13 +1021,84 @@ impl Pipeline {
             .and_then(|invocation| invocation.stage.as_deref())
     }
 
-    /// The path template `product` uses: its own rule, else its stage's
-    /// default, else the pipeline's default.
-    pub fn path_template_for(&self, product: &str) -> Option<&PathTemplate> {
+    /// The path template `product` uses: its rule, with the extension
+    /// [`Pipeline::added_extension`] gives it.
+    pub fn path_template_for(&self, product: &str) -> Option<Cow<'_, PathTemplate>> {
+        let template = self.path_rule_for(product)?;
+        Some(match self.added_extension(product) {
+            Some((extension, _)) => Cow::Owned(template.with_extension(extension)),
+            None => Cow::Borrowed(template),
+        })
+    }
+
+    /// The path rule `product` uses, as written: its own rule, else its
+    /// stage's default, else the pipeline's default.
+    pub fn path_rule_for(&self, product: &str) -> Option<&PathTemplate> {
         self.product_paths
             .get(product)
             .or_else(|| self.stage_path_template(product))
             .or(self.path_template.as_ref())
+    }
+
+    /// The operation that makes `product`, with the extension it declares
+    /// for that output.
+    pub fn output_extension(&self, product: &str) -> Option<(&str, &str)> {
+        let invocation = self
+            .invocations
+            .iter()
+            .find(|invocation| invocation.outputs.iter().any(|output| output == product))?;
+        let index = invocation
+            .outputs
+            .iter()
+            .position(|output| output == product)?;
+        let operation = self
+            .operations
+            .iter()
+            .find(|operation| operation.name == invocation.operation)?;
+        let extension = operation.outputs.get(index)?.extension.as_deref()?;
+        Some((operation.name.as_str(), extension))
+    }
+
+    /// The `ext:` default for `product`: its stage's, or the nearest
+    /// enclosing stage's, else the pipeline's.
+    pub fn default_extension(&self, product: &str) -> Option<(&str, ExtensionSource)> {
+        let staged = self.stage_of(product).and_then(|stage| {
+            stage_and_parents(stage).find_map(|name| {
+                let stage = self
+                    .stages
+                    .iter()
+                    .find(|candidate| candidate.name == name)?;
+                Some((
+                    stage.extension.as_deref()?,
+                    ExtensionSource::Stage(stage.name.clone()),
+                ))
+            })
+        });
+        staged.or_else(|| Some((self.extension.as_deref()?, ExtensionSource::Default)))
+    }
+
+    /// The extension `product`'s file must have, and where it is declared:
+    /// its operation's, else, when its path is a default rule, the `ext:`
+    /// default. A product with its own rule takes only its operation's.
+    pub fn expected_extension(&self, product: &str) -> Option<(&str, ExtensionSource)> {
+        if let Some((operation, extension)) = self.output_extension(product) {
+            return Some((extension, ExtensionSource::Operation(operation.to_owned())));
+        }
+        if self.product_paths.contains_key(product) {
+            return None;
+        }
+        self.default_extension(product)
+    }
+
+    /// The extension added to `product`'s path rule: the one it must have,
+    /// when the rule ends without an extension. A rule that ends with
+    /// another is left as written, and reported by the path checks.
+    pub fn added_extension(&self, product: &str) -> Option<(&str, ExtensionSource)> {
+        let expected = self.expected_extension(product)?;
+        self.path_rule_for(product)?
+            .extension()
+            .is_none()
+            .then_some(expected)
     }
 
     /// The default path rule of the stage that produces `product`, or of the

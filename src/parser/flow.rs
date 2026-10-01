@@ -8,7 +8,7 @@ use super::declarations::{
     parse_dimension_order, parse_discover, parse_invocation_parts, parse_path, parse_product,
 };
 use super::keyword::{removed_section, Keyword};
-use super::lexical::{comma_items, identifier, strip_comment};
+use super::lexical::{comma_items, extension, identifier, strip_comment};
 use super::source_map::{name_place, step_place};
 use super::{FlowOutput, FlowStep, ParseError, StatementKind, Syntax, SHELL_SOURCE_REMOVED};
 
@@ -187,6 +187,10 @@ fn flow_line(
             return Err(ParseError::new(number, SHELL_SOURCE_REMOVED));
         }
         Some((Keyword::Path, _)) => StatementKind::Path(parse_path(stage, original, line, number)?),
+        Some((Keyword::Ext, rest)) => StatementKind::Extension {
+            stage,
+            extension: extension(rest.trim(), number)?.to_owned(),
+        },
         None => flow_statement(original, line, number, stage.as_deref())?,
     };
     syntax.push(original, number, kind);
@@ -209,7 +213,7 @@ fn flow_statement(
             number,
             format!(
                 "`{word}` does not start a statement; {hint}a pipeline line starts with \
-                 source, dimensions, operation, command, verify, path, stage or use, or is a step \
+                 source, dimensions, operation, command, verify, path, ext, stage or use, or is a step \
                  `output = operation(inputs)`, and a recipe line starts with pipeline, \
                  discover, require, drop, exclude or path"
             ),
@@ -277,13 +281,14 @@ fn parse_flow_output(left: &str, number: usize) -> Result<FlowOutput, ParseError
 }
 
 /// The words a statement can start with, for suggesting one.
-const STATEMENT_WORDS: [&str; 13] = [
+const STATEMENT_WORDS: [&str; 14] = [
     "source",
     "dimensions",
     "operation",
     "command",
     "verify",
     "path",
+    "ext",
     "stage",
     "use",
     "pipeline",

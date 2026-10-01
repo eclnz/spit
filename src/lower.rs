@@ -113,6 +113,31 @@ impl PipelineBuilder {
         Ok(())
     }
 
+    fn add_extension(
+        &mut self,
+        stage: Option<&str>,
+        extension: &str,
+        line: usize,
+    ) -> Result<(), ParseError> {
+        let (slot, whose) = match stage {
+            Some(stage) => (
+                &mut self
+                    .pipeline
+                    .stages
+                    .iter_mut()
+                    .find(|definition| definition.name == stage)
+                    .expect("a stage is declared before its lines")
+                    .extension,
+                format!(" for stage `{stage}`"),
+            ),
+            None => (&mut self.pipeline.extension, String::new()),
+        };
+        if slot.replace(extension.to_owned()).is_some() {
+            return Err(ParseError::new(line, format!("duplicate `ext:`{whose}")));
+        }
+        Ok(())
+    }
+
     /// Add a flow step and the products it declares, inferring the
     /// dimensions of those declared without them.
     fn add_flow_step(&mut self, flow: &FlowStep) -> Result<(), ParseError> {
@@ -250,6 +275,9 @@ fn lower_statement(
             builder.dimension_order = Some((order.clone(), statement.place.clone()));
         }
         StatementKind::Path(rule) => builder.add_path(rule, statement.place.line)?,
+        StatementKind::Extension { stage, extension } => {
+            builder.add_extension(stage.as_deref(), extension, statement.place.line)?;
+        }
         StatementKind::FlowStep(flow) => builder.add_flow_step(flow)?,
     }
     Ok(())

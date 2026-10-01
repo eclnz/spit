@@ -23,7 +23,7 @@ use crate::model::{
 use crate::parser::{
     as_read_back, glued_comment, source_record_lines, without_bom, Kind, Rule, SourceMap, Step,
 };
-use crate::paths::{case_collisions, collect_paths};
+use crate::paths::{case_collisions, collect_paths, shown_path, PathTemplate};
 use crate::resolver::first_failure;
 use crate::span::{content_columns, utf16_columns, Located, Place};
 use crate::{
@@ -90,6 +90,18 @@ pub struct Checked {
     pub pipeline: Pipeline,
     /// Every diagnostic found, none of them an error, in line order.
     pub warnings: Vec<Diagnostic>,
+    /// The path of each product whose path is not written out on a line of
+    /// its own, in line order, for an editor to show.
+    pub paths: Vec<ShownPath>,
+}
+
+/// A product's path as its rules give it, `{product}` and `{stage}` written
+/// out, and the line that declares the product: a step's, or a source's.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ShownPath {
+    pub product: String,
+    pub line: usize,
+    pub path: String,
 }
 
 /// Records that passed diagnosis with their pipeline: the inventory they
@@ -288,6 +300,39 @@ pub fn render_diagnostics_json(
     text: &str,
     source_text: Option<&str>,
 ) -> String {
+    format!(
+        "{}\n",
+        Json::object([(
+            "diagnostics",
+            diagnostics_json(diagnostics, text, source_text)
+        )])
+    )
+}
+
+/// As [`render_diagnostics_json`] for a pipeline that checked clean, with
+/// the `paths` an editor shows beside each product's line.
+pub fn render_check_json(diagnostics: &[Diagnostic], text: &str, paths: &[ShownPath]) -> String {
+    let paths = paths.iter().map(|path| {
+        Json::object([
+            ("product", Json::string(&path.product)),
+            ("line", Json::number_or_null(Some(path.line))),
+            ("path", Json::string(&path.path)),
+        ])
+    });
+    format!(
+        "{}\n",
+        Json::object([
+            ("diagnostics", diagnostics_json(diagnostics, text, None)),
+            ("paths", Json::array(paths)),
+        ])
+    )
+}
+
+fn diagnostics_json<'a>(
+    diagnostics: &'a [Diagnostic],
+    text: &'a str,
+    source_text: Option<&'a str>,
+) -> Json<'a> {
     let items = diagnostics.iter().map(|diagnostic| {
         let columns = diagnostic.utf16_columns(text, source_text);
         let mut fields = vec![
@@ -309,7 +354,7 @@ pub fn render_diagnostics_json(
         }
         Json::object(fields)
     });
-    format!("{}\n", Json::object([("diagnostics", Json::array(items))]))
+    Json::array(items)
 }
 
 /// Where a pipeline is, and what applies to it, when diagnosing it.
@@ -371,11 +416,50 @@ struct Parsed {
 impl Parsed {
     /// The document checked with `warnings`, its pipeline as written.
     fn checked(self, warnings: Vec<Diagnostic>) -> Checked {
+        let paths = shown_paths(&self.document.pipeline, &self.document.lines);
         Checked {
             pipeline: self.as_written.unwrap_or(self.document.pipeline),
             warnings,
+            paths,
         }
     }
+}
+
+/// The paths an editor shows: each product's, where it comes from a default
+/// rule or gains an extension, so is written out nowhere. Outputs with no
+/// rule at all show the built-in default they are given.
+fn shown_paths(pipeline: &Pipeline, lines: &SourceMap) -> Vec<ShownPath> {
+    let mut defaulted;
+    let pipeline = if pipeline.path_template.is_none() {
+        defaulted = pipeline.clone();
+        defaulted.path_template = Some(PathTemplate::default_output());
+        &defaulted
+    } else {
+        pipeline
+    };
+    let mut shown: Vec<_> = pipeline
+        .products
+        .iter()
+        .filter(|product| !lines.imported.contains(&product.name))
+        .filter(|product| {
+            !pipeline.product_paths.contains_key(&product.name)
+                || pipeline.added_extension(&product.name).is_some()
+        })
+        .filter_map(|product| {
+            let line = match lines.invocations.get(&product.name) {
+                Some(step) => step.line,
+                // A source with a default rule is shown on its declaration.
+                None => lines.products.get(&product.name)?.line,
+            };
+            Some(ShownPath {
+                product: product.name.clone(),
+                line,
+                path: shown_path(pipeline, &product.name)?,
+            })
+        })
+        .collect();
+    shown.sort_by_key(|path| path.line);
+    shown
 }
 
 /// Collect independent syntax errors throughout the document, then check its

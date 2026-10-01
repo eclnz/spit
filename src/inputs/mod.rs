@@ -151,6 +151,12 @@ fn check_input_lines(text: &str) -> Result<(), ParseError> {
                 "logical sources, dimension orders, operations, commands, stages, and imports belong in the .spit pipeline",
             ));
         }
+        if Keyword::of(line) == Some(Keyword::Ext) {
+            return Err(ParseError::new(
+                index + 1,
+                "`ext:` completes the pipeline's default output paths; it belongs in the .spit pipeline",
+            ));
+        }
         if line.starts_with("path:") {
             return Err(ParseError::new(
                 index + 1,
