@@ -1,0 +1,3 @@
+pipeline resting.spit
+discover sessions: [sub, ses] from dirs sub-{sub}/ses-{ses}
+drop [sub] where sessions count<2

@@ -1,0 +1,5 @@
+pipeline pipeline.spit
+exclude [store=s03] # only one sales week; store_report requires two
+exclude [store=s07] # pricing uses S07, which does not match sales store s07
+exclude pricing[store=S07] # misnamed pricing artifact for s07
+exclude [store=s09] # missing pricing file

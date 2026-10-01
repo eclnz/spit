@@ -1,0 +1,63 @@
+{
+  "run": "s6-diagnose-c",
+  "model": "same-model replicate",
+  "grade": {
+    "pass": true,
+    "expected_jobs": 22,
+    "actual_jobs": 22,
+    "matched_jobs": 22,
+    "expected_by_tool": {
+      "clean_sales": 9,
+      "apply_prices": 9,
+      "store_report": 3,
+      "chain_summary": 1
+    },
+    "actual_by_tool": {
+      "clean_sales": 9,
+      "apply_prices": 9,
+      "store_report": 3,
+      "chain_summary": 1
+    },
+    "missing": [],
+    "extra": []
+  },
+  "telemetry": {
+    "spit_calls": 6,
+    "failed_calls": 1,
+    "calls": [
+      {
+        "n": 1,
+        "args": "dag data/weekly.spitin --paths --commands",
+        "exit": 1
+      },
+      {
+        "n": 2,
+        "args": "artifacts data/weekly.spitin",
+        "exit": 0
+      },
+      {
+        "n": 3,
+        "args": "check data/weekly_ready.spitin",
+        "exit": 0
+      },
+      {
+        "n": 4,
+        "args": "dag data/weekly_ready.spitin -o plan.spitdag",
+        "exit": 0
+      },
+      {
+        "n": 5,
+        "args": "dag data/weekly_ready.spitin --commands",
+        "exit": 0
+      },
+      {
+        "n": 6,
+        "args": "dag data/weekly_ready.spitin -o plan.spitdag",
+        "exit": 0
+      }
+    ]
+  },
+  "audit": {
+    "error": "no participant tool transcript"
+  }
+}

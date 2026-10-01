@@ -1,0 +1,55 @@
+{
+  "run": "s2-cohort-a",
+  "model": "same-model replicate",
+  "grade": {
+    "pass": true,
+    "expected_jobs": 41,
+    "actual_jobs": 41,
+    "matched_jobs": 41,
+    "expected_by_tool": {
+      "motioncorr": 13,
+      "bet": 6,
+      "coreg": 13,
+      "sessionavg": 6,
+      "longitudinal": 3
+    },
+    "actual_by_tool": {
+      "motioncorr": 13,
+      "bet": 6,
+      "coreg": 13,
+      "sessionavg": 6,
+      "longitudinal": 3
+    },
+    "missing": [],
+    "extra": []
+  },
+  "telemetry": {
+    "spit_calls": 4,
+    "failed_calls": 0,
+    "calls": [
+      {
+        "n": 1,
+        "args": "check resting.spitin",
+        "exit": 0
+      },
+      {
+        "n": 2,
+        "args": "inputs resting.spitin --root data -o resting.spitout",
+        "exit": 0
+      },
+      {
+        "n": 3,
+        "args": "dag resting.spitin --root data --commands",
+        "exit": 0
+      },
+      {
+        "n": 4,
+        "args": "dag resting.spitin --root data -o plan.spitdag",
+        "exit": 0
+      }
+    ]
+  },
+  "audit": {
+    "error": "no participant tool transcript"
+  }
+}

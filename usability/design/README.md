@@ -11,12 +11,13 @@ The plans that answer the [usability findings](../FINDINGS.md), and the order to
 | [Small CLI and file fixes](small-fixes.md) | B4, B6, B7 |
 | [Closing the guide's gaps](guide.md) | D1–D11 |
 | [Second-study actions](round2-actions.md) | Worked examples, guide packaging, rule explanations, CLI messages, and follow-up trials |
-| [One way to write each thing](one-way.md) | The variation between round 2's pipelines: aggregation, dimension order, syntax doubles, and the principles for round 3 |
+| [One way to write each thing](one-way.md) | Aggregation, dimension order, and syntax conventions for round 3 |
+| [Pilot inspection follow-ups](round3-inspection.md) | Compact job counts, collection order, and near-case unused sources |
 
 ## Status
 
 - **Done:** steps 1–15 and 17. Phase 1, Phase 2, and Phase 3 are complete; the worked examples and extension update are in place. Step 16 was declined.
-- **Second-study actions:** items 1–4 are done. Item 6, the rerun, becomes round 3, after Phase 5; item 5 is judged from round 3's results.
+- **Second-study actions:** items 1–4 are done. A pre-Phase-5 pilot informed items 5 and 6; the post-Phase-5 study is still next.
 - **Next:** Phase 5, [one way to write each thing](one-way.md): steps 18–22 are done; step 23, round 3, is next.
 - **Resolved so far:** B1–B7, F1–F10, D1–D11.
 

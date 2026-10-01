@@ -1,0 +1,26 @@
+source reading : Reading [station, day]
+path reading: raw/{station}/{day}.csv
+
+source calibration : Calibration [station, revision]
+path calibration: calibration/{station}/rev{revision}.json
+
+source baseline : Baseline [station, recorded]
+path baseline: baseline/{station}/{recorded}.csv
+
+source site : Site [station]
+path site: sites/{station}/site.toml
+
+operation calibrate(reading: Reading, cal: Calibration) -> Clean
+command calibrate: calibrate --cal {cal} --in {reading} --out {output}
+clean = calibrate(reading, calibration @ where(revision=3))
+path clean: clean/{station}/{day}.csv
+
+operation anomaly(clean: Clean, baseline: Baseline) -> Anomaly
+command anomaly: anomaly {clean} {baseline} {output}
+anomalies = anomaly(clean, baseline @ same(station))
+path anomalies: anomalies/{station}/{day}.csv
+
+operation stationreport(anomalies: many Anomaly, site: Site) -> Report @ drop(day)
+command stationreport: stationreport --site {site} --out {output} {anomalies}
+report = stationreport(anomalies, site)
+path report: reports/{station}.html
