@@ -4,9 +4,9 @@ Status: proposal. Nothing here is implemented.
 
 ## Problem
 
-Agents in every usability round called path rules repetitive. Most of that repetition takes one of two forms.
+Agents in every usability round called path rules repetitive; in [round 3](../ROUND3.md) it was, with choosing `--root`, the biggest first-build friction in the cohort task. Most of that repetition takes one of two forms.
 
-**Overrides that only change the extension.** In [`field_survey.spit`](../examples/commands/field_survey/field_survey.spit), all 8 derived `path x:` rules copy the default `derivatives/{product}/{entities}` to change `.img` to `.tif`, `.mat`, `.txt`, `.rows` or `.csv`. In [`mrtrix3_act.spit`](../examples/commands/mrtrix3_act/mrtrix3_act.spit), all 8 derived rules, stage defaults included, do the same. Each copy also stops inheriting from the default: change `derivatives/` to `out/` and the 8 overrides silently keep the old directory.
+**Overrides that only change the extension.** In [`field_survey.spit`](../../examples/commands/field_survey/field_survey.spit), all 8 derived `path x:` rules copy the default `derivatives/{product}/{entities}` to change `.img` to `.tif`, `.mat`, `.txt`, `.rows` or `.csv`. In [`mrtrix3_act.spit`](../../examples/commands/mrtrix3_act/mrtrix3_act.spit), all 8 derived rules, stage defaults included, do the same. Each copy also stops inheriting from the default: change `derivatives/` to `out/` and the 8 overrides silently keep the old directory.
 
 **Sidecars.** `photo_gps`, `photo_imu` and `photo_json` are `raw_photo`'s path with another extension, and each repeats the full template and dimension list. On the derived side, a tool such as `dcm2niix` writes a `.json` beside its image without being given a path for it, which SPIT cannot express today: a command must use every output placeholder, and each output gets its own path rule.
 
@@ -34,6 +34,8 @@ operation fit(runs: many Data) -> (weights: Weights .npz, quality: Metrics .json
 
 An extension starts with `.` and may have several parts, such as `.nii.gz`.
 
+**Optional throughout.** An operation need not declare an extension, and a pipeline need not use `ext:`. Without either, paths resolve exactly as today, including a default `path:` that ends in an extension. A declared extension adds a default and a check; it never forces a pipeline to restructure its path rules. Only the features that depend on knowing where the extension starts need it declared: `{x.stem}`, the sibling of a `beside` output, and the members of a `sidecars` group.
+
 **Default.** `ext:` sets the extension for operations that declare none, at the top level or inside a stage, the same way `path:` does. Default path templates are then written without an extension:
 
 ```text
@@ -43,7 +45,7 @@ ext: .img
 
 **Resolution.** A product's path is the first of:
 
-1. its `path x:` rule, which must agree with the operation's extension, as below;
+1. its `path x:` rule, which must agree with the operation's extension, as below. When the operation declares none, the rule is used as written; `ext:` never applies to it;
 2. the stage's or the top-level `path:` default, followed by the operation's extension, else the stage's `ext:`, else the top-level `ext:`, else nothing.
 
 **Agreement.** When the operation declares an extension, a `path x:` rule for its output may:
@@ -89,7 +91,7 @@ path map_to_photo_matrix ends in .txt, but estimate_alignment writes .mat; drop 
 
 ## 2. Source groups
 
-**Syntax.** A `sidecars` block declares sources that share dimensions and a path stem and differ only by extension. Its body is indented, like a [stage](language-reference.md#stages):
+**Syntax.** A `sidecars` block declares sources that share dimensions and a path stem and differ only by extension. Its body is indented, like a [stage](../../docs/language-reference.md#stages):
 
 ```text
 sidecars photo [site, visit, shot]: site-{site}/visit-{visit}/photos/site-{site}_visit-{visit}_shot-{shot}_photo
@@ -153,8 +155,8 @@ command convert: dcm2niix -z y -b y -o {image.dir} -f {image.stem} {dicom}
 
 ## Open questions
 
-- **Missing outputs.** Flags can contradict a declaration: with `-b n`, `dcm2niix` writes no `.json`. The [`.spitdag` format](spitdag.md) does not say whether a backend must fail a job whose declared outputs are missing. It should, and this should be stated.
-- **Optional members.** A BIDS `.json` may be absent. Should a group member, or a `beside` output, be allowed to be missing, perhaps using [optional types](language-reference.md#optional-types)?
+- **Missing outputs.** Flags can contradict a declaration: with `-b n`, `dcm2niix` writes no `.json`. The [`.spitdag` format](../../docs/spitdag.md) does not say whether a backend must fail a job whose declared outputs are missing. It should, and this should be stated.
+- **Optional members.** A BIDS `.json` may be absent. Should a group member, or a `beside` output, be allowed to be missing, perhaps using [optional types](../../docs/language-reference.md#optional-types)?
 - **Literal dots.** The agreement rule reads a template's extension from the first `.` after its final placeholder. A literal name such as `report_v1.2` would be misread. Is that rare enough to accept, or should a path whose operation declares an extension be required to omit it?
 - **Groups for derived products.** Is `beside` enough, or should an operation's outputs also be able to share a stem when the tool takes each path explicitly?
 
