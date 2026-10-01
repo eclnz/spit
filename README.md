@@ -167,7 +167,7 @@ contexts sessions:
         image
 ```
 
-The `.spitout` lists the source identities found in the dataset. Paths come from the pipeline's source rules; when a recipe defines a source rule instead, the `.spitout` carries that rule once in `source_paths:`. Later steps need neither the recipe nor a rescan. A dataset indexer or person can write the same inventory. Older records with `: path` are accepted only when the path agrees with the declared rule. The text processing example uses [command_demo.spitout](examples/commands/command_demo/command_demo.spitout):
+The `.spitout` lists the source identities found in the dataset. Paths come from the pipeline's source rules; when a recipe defines a source rule instead, the `.spitout` carries that rule once in `source_paths:`. Later steps need neither the recipe nor a rescan. A dataset indexer or person can write the same inventory. A record names no file of its own: its source's path rule gives it. The text processing example uses [command_demo.spitout](examples/commands/command_demo/command_demo.spitout):
 
 ```text
 sources:
