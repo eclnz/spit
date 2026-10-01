@@ -20,7 +20,11 @@ BIN=${SPIT_BIN:-$REPO/target/release/spit}
 
 scen=$1; tag=$2
 [ -n "$scen" ] && [ -n "$tag" ] || { echo "usage: make_run.sh <scenario> <tag>" >&2; exit 2; }
-S=$HARNESS/scenarios/$scen
+# The scenarios are kept in scenarios.zip.
+SCENARIOS=$(mktemp -d)
+trap 'rm -rf "$SCENARIOS"' EXIT
+python3 "$HARNESS/archive.py" unpack "$HARNESS/scenarios.zip" "$SCENARIOS"
+S=$SCENARIOS/scenarios/$scen
 [ -d "$S" ] || { echo "no scenario $scen" >&2; exit 2; }
 [ -x "$BIN" ] || { echo "no binary at $BIN; run cargo build --release" >&2; exit 2; }
 
