@@ -104,7 +104,7 @@ pub static DOCS: [Doc; 43] = [
         name: "command",
         kind: "keyword",
         anchor: "operations-and-commands",
-        example: "command process: process_tool --in {image} --out {output}",
+        example: "command process: process_tool --in {image} --out {@output}",
         summary: "The program an operation runs. Each `{port}` is filled in with an artifact's path, and every output must appear, or its `.dir` or `.stem`, except one written `beside` another. Words are split and quoted as in Bash, and every argument is passed literally: `|`, `>` and `$` are not a shell's. The first word must be an executable on `PATH`, or a path to one.",
     },
     Doc {
@@ -339,11 +339,11 @@ pub static DOCS: [Doc; 43] = [
         summary: "Every dimension as `key-value`, in the pipeline's dimension order, joined by `_`, as `subject-A_run-2`. SPIT warns if a value contains `-`, since a BIDS reader cannot recover it from the file name.",
     },
     Doc {
-        name: "output",
+        name: "@output",
         kind: "placeholder",
         anchor: "operations-and-commands",
-        example: "command process: process_tool --in {image} --out {output}",
-        summary: "The path of the operation's single unnamed output, which the command must use. `output` cannot name an input port.",
+        example: "command process: process_tool --in {image} --out {@output}",
+        summary: "The path of the operation's single unnamed output, which the command must use. The `@` marks it as supplied by SPIT, unlike a named port such as `{image}`.",
     },
     Doc {
         name: ".dir",
@@ -577,7 +577,7 @@ fn rule_word(code: &str, range: Range<usize>, statement: Option<Word>) -> Option
 }
 
 /// The built-in placeholders in `code`: SPIT's own `{@...}` anywhere, and
-/// in a command, `{output}` and an output's `.dir` and `.stem`. `{{` and
+/// in a command, `{@output}` and an output's `.dir` and `.stem`. `{{` and
 /// `}}` are literal braces.
 fn placeholders(code: &str, statement: Option<Word>, found: &mut Vec<(Range<usize>, Word)>) {
     let in_command = matches!(statement, Some(Word::Command | Word::Verify));
@@ -610,7 +610,7 @@ fn placeholders(code: &str, statement: Option<Word>, found: &mut Vec<(Range<usiz
             "@entities" => Some(Word::Entities),
             "@stage" => Some(Word::StageName),
             "@labels" => Some(Word::Labels),
-            "output" if in_command => Some(Word::Output),
+            "@output" if in_command => Some(Word::Output),
             _ => None,
         };
         if let Some(word) = word {

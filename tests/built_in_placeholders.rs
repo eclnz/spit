@@ -140,7 +140,7 @@ fn labels_warn_when_a_value_contains_a_dash() {
     let tree = Tree::new("dashed-label", &["data/in/sub-01-a.txt"]);
     tree.write(
         "pipeline.spit",
-        "path: out/{@product}/{@entities}.txt\nsource raw [sub]\npath raw: in/{@labels}.txt\noperation copy(input)\ncommand copy: cp {input} {output}\nresult = copy(raw)\n",
+        "path: out/{@product}/{@entities}.txt\nsource raw [sub]\npath raw: in/{@labels}.txt\noperation copy(input)\ncommand copy: cp {input} {@output}\nresult = copy(raw)\n",
     );
     let recipe = tree.write("recipe.spitin", "pipeline pipeline.spit\nroot data\n");
     let result = spit(&["dag", recipe.to_str().unwrap()]);
@@ -161,7 +161,7 @@ fn an_explicit_optional_path_has_an_editor_hint() {
     let tree = Tree::new("explicit-optional-path", &[]);
     let pipeline = tree.write(
         "pipeline.spit",
-        "source raw [sub]\npath raw: in/{sub}.txt\noperation copy(input)\ncommand copy: cp {input} {output}\npath result: out/{sub}[/{@stage}]/result.txt\nresult = copy(raw)\n",
+        "source raw [sub]\npath raw: in/{sub}.txt\noperation copy(input)\ncommand copy: cp {input} {@output}\npath result: out/{sub}[/{@stage}]/result.txt\nresult = copy(raw)\n",
     );
     let output = spit(&["check", pipeline.to_str().unwrap(), "--json"]);
     assert!(

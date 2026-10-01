@@ -38,51 +38,51 @@ stage preprocess:
     stage import:
         # Import gradients and phase-encoding metadata with their matching NIfTI.
         operation import_dwi(image: MRI<DWI,$Space>, bvec: GradientDirections, bval: GradientAmplitudes, metadata: AcquisitionMetadata) -> MRI<DWI,$Space>
-        command import_dwi: mrconvert {image} {output} -fslgrad {bvec} {bval} -json_import {metadata}
+        command import_dwi: mrconvert {image} {@output} -fslgrad {bvec} {bval} -json_import {metadata}
         dwi_mif = import_dwi(raw_dwi, dwi_bvec, dwi_bval, dwi_json)
 
         operation import_reverse_b0(image: MRI<B0,Acquired>, metadata: AcquisitionMetadata) -> MRI<B0,Acquired>
-        command import_reverse_b0: mrconvert {image} {output} -json_import {metadata}
+        command import_reverse_b0: mrconvert {image} {@output} -json_import {metadata}
         reverse_b0_mif = import_reverse_b0(reverse_b0, reverse_b0_json)
 
     stage denoise:
         operation denoise(mri: MRI<DWI,S>) -> MRI<DWI,S>
-        command denoise: dwidenoise {mri} {output}
+        command denoise: dwidenoise {mri} {@output}
         denoised_dwi = denoise(dwi_mif)
 
         operation remove_gibbs(mri: MRI<DWI,S>) -> MRI<DWI,S>
-        command remove_gibbs: mrdegibbs {mri} {output}
+        command remove_gibbs: mrdegibbs {mri} {@output}
         degibbsed_dwi = remove_gibbs(denoised_dwi)
 
     stage combine:
         # Consume run to make one session DWI for subsequent motion correction.
         operation concatenate_runs(runs: many MRI<DWI,S>) -> MRI<DWI,S>
-        command concatenate_runs: dwicat {runs} {output}
+        command concatenate_runs: dwicat {runs} {@output}
         session_dwi = concatenate_runs(degibbsed_dwi @ vary(run))
 
         # Extract b=0 volumes, then average them. Both operations can be reused after
         # motion and distortion correction to make a corrected registration target.
         operation extract_b0(mri: MRI<DWI,S>) -> MRI<B0Series,S>
-        command extract_b0: dwiextract {mri} {output} -bzero
+        command extract_b0: dwiextract {mri} {@output} -bzero
         forward_b0_series = extract_b0(session_dwi)
 
         operation mean_b0(mri: MRI<B0Series,S>) -> MRI<B0,S>
-        command mean_b0: mrmath {mri} mean {output} -axis 3
+        command mean_b0: mrmath {mri} mean {@output} -axis 3
         forward_b0 = mean_b0(forward_b0_series)
 
         operation combine_pe_pair(forward: MRI<B0,S>, reverse: MRI<B0,S>) -> MRI<B0Pair,S>
-        command combine_pe_pair: mrcat {forward} {reverse} {output} -axis 3
+        command combine_pe_pair: mrcat {forward} {reverse} {@output} -axis 3
         se_epi_pair = combine_pe_pair(forward_b0, reverse_b0_mif)
 
     stage correct:
         # -rpe_header uses the phase-encoding metadata rather than fixed subject names
         # or acquisition parameters; the paired b=0 headers must be valid.
         operation preprocess_dwi(dwi: MRI<DWI,Acquired>, pe_pair: MRI<B0Pair,Acquired>) -> MRI<DWI,Diffusion>
-        command preprocess_dwi: dwifslpreproc {dwi} {output} -rpe_header -se_epi {pe_pair} -align_seepi
+        command preprocess_dwi: dwifslpreproc {dwi} {@output} -rpe_header -se_epi {pe_pair} -align_seepi
         preprocessed_dwi = preprocess_dwi(session_dwi, se_epi_pair)
 
         operation bias_correct(mri: MRI<DWI,S>) -> MRI<DWI,S>
-        command bias_correct: dwibiascorrect fsl {mri} {output}
+        command bias_correct: dwibiascorrect fsl {mri} {@output}
         corrected_dwi = bias_correct(preprocessed_dwi)
         session_b0_series = extract_b0(corrected_dwi)
         session_b0 = mean_b0(session_b0_series)
@@ -95,47 +95,47 @@ stage anatomy:
 
         # Generate a parcellation in native T1 space, then remap its integer labels.
         operation parcellate_t1(mri: MRI<T1w,S>) -> MRI<Parcellation,S>
-        command parcellate_t1: mri_synthseg --i {mri} --o {output} --parc
+        command parcellate_t1: mri_synthseg --i {mri} --o {@output} --parc
         parcellation_t1 = parcellate_t1(t1w)
 
         operation convert_labels(labels: MRI<Parcellation,S>, source_lut: LookupTable, target_lut: LookupTable) -> MRI<Parcellation,S>
-        command convert_labels: labelconvert {labels} {source_lut} {target_lut} {output}
+        command convert_labels: labelconvert {labels} {source_lut} {target_lut} {@output}
         nodes_t1 = convert_labels(parcellation_t1, source_lut, target_lut)
 
     stage registration:
         # FLIRT handles the T1/b=0 contrast difference. Its matrix is converted to
         # MRtrix coordinates using the same moving and reference images.
         operation export_nifti(mri: MRI<K,S>) -> MRI<K,S> .nii.gz
-        command export_nifti: mrconvert {mri} {output}
+        command export_nifti: mrconvert {mri} {@output}
         session_b0_nifti = export_nifti(session_b0)
 
         operation flirt_register(moving: MRI<M,S>, reference: MRI<N,T>) -> FSLTransform<S,T> .mat
-        command flirt_register: flirt -in {moving} -ref {reference} -omat {output} -dof 6 -cost corratio
+        command flirt_register: flirt -in {moving} -ref {reference} -omat {@output} -dof 6 -cost corratio
         t1_to_dwi_flirt = flirt_register(t1w, session_b0_nifti)
 
         operation convert_flirt(matrix: FSLTransform<S,T>, moving: MRI<M,S>, reference: MRI<N,T>) -> Transform<S,T> .txt
-        command convert_flirt: transformconvert {matrix} {moving} {reference} flirt_import {output}
+        command convert_flirt: transformconvert {matrix} {moving} {reference} flirt_import {@output}
         t1_to_dwi = convert_flirt(t1_to_dwi_flirt, t1w, session_b0_nifti)
 
         # The reference image determines the target voxel grid. Continuous images
         # use linear interpolation; label images use nearest-neighbor interpolation.
         operation mrtransform(moving: MRI<K,S>, transform: Transform<S,T>, reference: MRI<N,T>) -> MRI<K,T>
-        command mrtransform: mrtransform {moving} {output} -linear {transform} -template {reference} -interp linear
+        command mrtransform: mrtransform {moving} {@output} -linear {transform} -template {reference} -interp linear
         t1w_dwi = mrtransform(t1w, t1_to_dwi, session_b0)
 
         operation mrtransform_labels(labels: MRI<Parcellation,S>, transform: Transform<S,T>, reference: MRI<N,T>) -> MRI<Parcellation,T>
-        command mrtransform_labels: mrtransform {labels} {output} -linear {transform} -template {reference} -interp nearest
+        command mrtransform_labels: mrtransform {labels} {@output} -linear {transform} -template {reference} -interp nearest
         nodes_dwi = mrtransform_labels(nodes_t1, t1_to_dwi, session_b0)
 
     stage tissue:
         # Make the 5TT in native T1 space before resampling into diffusion space.
         operation make_5tt(mri: MRI<T1w,S>) -> MRI<Tissue,S>
-        command make_5tt: 5ttgen fsl {mri} {output}
+        command make_5tt: 5ttgen fsl {mri} {@output}
         five_tt_t1 = make_5tt(t1w)
         five_tt = mrtransform(five_tt_t1, t1_to_dwi, session_b0)
 
         operation make_gmwmi(mri: MRI<Tissue,S>) -> MRI<Mask,S>
-        command make_gmwmi: 5tt2gmwmi {mri} {output}
+        command make_gmwmi: 5tt2gmwmi {mri} {@output}
         gmwmi = make_gmwmi(five_tt)
 
 # Fit FODs, track with anatomical constraints, and build the connectome.
@@ -155,14 +155,14 @@ stage tractography:
 
     stage tracking:
         operation track_act(fod: MRI<FOD,S>, tissue: MRI<Tissue,S>, seed: MRI<Mask,S>) -> Tractogram<S> .tck
-        command track_act: tckgen {fod} {output} -act {tissue} -backtrack -seed_gmwmi {seed} -select 1000000
+        command track_act: tckgen {fod} {@output} -act {tissue} -backtrack -seed_gmwmi {seed} -select 1000000
         act_tracks = track_act(wm_fod, five_tt, gmwmi)
 
         operation weight_streamlines(tracks: Tractogram<S>, fod: MRI<FOD,S>, tissue: MRI<Tissue,S>) -> StreamlineWeights .txt
-        command weight_streamlines: tcksift2 {tracks} {fod} {output} -act {tissue}
+        command weight_streamlines: tcksift2 {tracks} {fod} {@output} -act {tissue}
         sift2_weights = weight_streamlines(act_tracks, wm_fod, five_tt)
 
     stage connectome:
         operation build_connectome(tracks: Tractogram<S>, nodes: MRI<Parcellation,S>, weights: StreamlineWeights) -> Connectome .csv
-        command build_connectome: tck2connectome {tracks} {nodes} {output} -tck_weights_in {weights}
+        command build_connectome: tck2connectome {tracks} {nodes} {@output} -tck_weights_in {weights}
         weighted_connectome = build_connectome(act_tracks, nodes_dwi, sift2_weights)

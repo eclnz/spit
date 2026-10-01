@@ -401,7 +401,7 @@ fn a_spitout_alone_drives_jobs_without_its_recipe() {
     let pipeline = tree.path().join("analysis.spit");
     fs::write(
         &pipeline,
-        format!("{PIPELINE}path result: results/{{sub}}_{{ses}}.nii.gz\ncommand process: tool {{image}} {{output}}\n"),
+        format!("{PIPELINE}path result: results/{{sub}}_{{ses}}.nii.gz\ncommand process: tool {{image}} {{@output}}\n"),
     )
     .unwrap();
     let recipe = tree.path().join("dataset.spitin");

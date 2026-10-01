@@ -12,7 +12,7 @@ use support::{text, Tree};
 const PIPELINE: &str = "\
 source image: Image [sub, ses]
 operation process(image: Image) -> Image
-command process: tool {image} {output}
+command process: tool {image} {@output}
 result = process(image)
 path result: results/{sub}_{ses}.nii.gz
 ";

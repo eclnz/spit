@@ -17,11 +17,11 @@ path bold: sub-{sub}/ses-{ses}/run-{run}.nii
 source ref : Ref [sub, ses]
 path ref: sub-{sub}/ses-{ses}/ref.nii
 operation align(bold: Bold, ref: Ref) -> Bold
-command align: align {bold} {ref} {output}
+command align: align {bold} {ref} {@output}
 path aligned: out/sub-{sub}_ses-{ses}_run-{run}.nii
 aligned = align(bold, ref)
 operation average(runs: many Bold) -> Bold
-command average: average {runs} {output}
+command average: average {runs} {@output}
 path average: out/sub-{sub}_ses-{ses}_average.nii
 average = average(aligned @ vary(run))
 ";
@@ -289,7 +289,7 @@ fn an_excluded_file_may_lie_outside_the_discovered_contexts() {
         "pipeline.spit",
         "source sales [store]\npath sales: stores/{store}/sales.csv\n\
          source price [store]\npath price: pricing/{store}.json\n\
-         operation total(sales, price) -> Total\ncommand total: total {sales} {price} {output}\n\
+         operation total(sales, price) -> Total\ncommand total: total {sales} {price} {@output}\n\
          totals = total(sales, price)\n",
     );
     let discover = "pipeline pipeline.spit\ndiscover stores: [store] from dirs stores/{store}\n";

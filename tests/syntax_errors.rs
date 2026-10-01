@@ -164,7 +164,7 @@ fn deletion_messages_name_the_missing_syntax_without_cascading() {
         "source raw : Image [id]",
         "path: out/{@product}/{id}.txt",
         "operation copy(input: Image) -> Image",
-        "command copy: tool {input} {output}",
+        "command copy: tool {input} {@output}",
         "result = copy(raw)",
     ]
     .into_iter()

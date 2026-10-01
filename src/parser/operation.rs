@@ -334,7 +334,15 @@ fn parse_outputs(text: &str, number: usize) -> Result<Vec<OutputPort>, ParseErro
                 Some((name, _)) => (name.trim(), TypeExpr::Unknown),
                 None => (item, TypeExpr::Unknown),
             };
-            let port = OutputPort::new(identifier(name, number, "output port")?, output_type);
+            let name = identifier(name, number, "output port")?;
+            if name == DEFAULT_OUTPUT {
+                return Err(ParseError::new(
+                    number,
+                    "named output port `output` is reserved for the single unnamed output; omit the name and parentheses",
+                )
+                .at_token(name));
+            }
+            let port = OutputPort::new(name, output_type);
             Ok(match beside {
                 Some((sibling, suffix)) => port.beside(sibling, suffix),
                 None => with_extension(port, extension),

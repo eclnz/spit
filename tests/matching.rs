@@ -16,7 +16,7 @@ const COMBINE: &str = "\
 source result [site, run]
 source policy [site]
 operation combine(results: many Result, policy: Policy) -> Summary
-command combine: summarize {results} --policy {policy} {output}
+command combine: summarize {results} --policy {policy} {@output}
 summary = combine(result @ vary(run), policy)
 ";
 

@@ -23,7 +23,7 @@ source spare : Table [id]
 operation clean(table: Table) -> Table
 operation tag(table: Table) -> Tagged<$Key>
 operation unused(table: Table) -> Table
-command clean: tool {table} {output}
+command clean: tool {table} {@output}
 cleaned = clean(raw)
 tagged : Tagged<Label> [id] = tag(cleaned)
 ";
@@ -40,7 +40,7 @@ tagged : Tagged<Label> [id] = tag(cleaned)
     assert!(errors(diagnostics).is_empty());
 
     // A pipeline without commands may be meant for its DAG alone.
-    let without_commands = text.replace("command clean: tool {table} {output}\n", "");
+    let without_commands = text.replace("command clean: tool {table} {@output}\n", "");
     assert!(!rendered(&diagnose(&without_commands, None))
         .iter()
         .any(|line| line.contains("has no command")));
@@ -110,7 +110,7 @@ fn a_product_named_after_its_operation_is_warned_about() {
     let text = "\
 source log : Log [day]
 operation digest(log: Log) -> Digest
-command digest: logdigest {log} {output}
+command digest: logdigest {log} {@output}
 digest = digest(log)
 ";
     let diagnostics = diagnose(text, None);

@@ -25,19 +25,19 @@ path reference: sub-{sub}/ses-{ses}/reference.nii
 
 stage prep:
     operation clean(image: Image<$K>, mask: Mask) -> Image<$K>
-    command clean: denoise {image} --mask {mask} -o {output}
+    command clean: denoise {image} --mask {mask} -o {@output}
     cleaned = clean(image, mask)
 
     operation align(image: Image<$K>, reference: Reference) -> Image<$K>
-    command align: register {image} {reference} {output}
+    command align: register {image} {reference} {@output}
     aligned = align(cleaned, reference)
 
 operation average(images: many Image<$K>) -> Image<$K>
-command average: mean {images} -o {output}
+command average: mean {images} -o {@output}
 averaged = average(aligned @ vary(run))
 
 operation compare(image: Image<$K>, reference: Reference) -> Score
-command compare: score {image} {reference} -o {output}
+command compare: score {image} {reference} -o {@output}
 score = compare(averaged, reference)
 ";
 

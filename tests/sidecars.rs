@@ -14,7 +14,7 @@ sidecars photo [site, shot]: site-{site}/shot-{shot}
     source gps : Track .gpx  # the pose
     source meta .json
 operation load(image: Image, gps: Track, meta) -> Image
-command load: load {image} {gps} {meta} {output}
+command load: load {image} {gps} {meta} {@output}
 loaded = load(raw, gps, meta)
 ";
 

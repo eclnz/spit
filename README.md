@@ -127,11 +127,11 @@ path: {@product}/{@entities}.txt
 path shard: input/{group}/{part}.txt
 
 operation sort_lines(input: Lines) -> Lines
-command sort_lines: sort -u -o {output} {input}
+command sort_lines: sort -u -o {@output} {input}
 sorted = sort_lines(shard)
 
 operation merge(items: many Lines) -> Lines
-command merge: sort -m -u -o {output} {items}
+command merge: sort -m -u -o {@output} {items}
 merged = merge(sorted @ vary(part))
 ```
 
@@ -139,7 +139,7 @@ merged = merge(sorted @ vary(part))
 
 To collect over two dimensions, collect in two steps, one dimension each: after `merged` above, `everything = merge(merged @ vary(group))` collects the per-group results into one artifact. A check that must pass before a job runs is a `verify` line beside its `command`, such as `verify merge: check_lines {items}`; see [the reference](docs/language-reference.md#operations-and-commands).
 
-`path` lines say where artifacts live; an output with no rule goes to `out/{@product}/{@entities}`. `command` lines give the exact executable and argument order. SPIT decides which artifacts belong to each job before filling their paths into a command.
+`path` lines say where artifacts live; an output with no rule goes to `out/{@product}/{@entities}`. `command` lines give the exact executable and argument order: a named input or output uses its port name, such as `{image}`, and the single unnamed output uses SPIT's `{@output}`. SPIT decides which artifacts belong to each job before filling their paths into a command.
 
 A pipeline names no dataset. Rules about what a dataset must hold, and records of what it does hold, go in the files of step 2: `spit check` rejects a `require` rule or a `sources:` record written in a `.spit`.
 

@@ -16,7 +16,7 @@ command convert: dcm2niix -z y -b y -o {image.dir} -f {image.stem} {dicom}
 operation strip(t1: Image) -> (brain: Image .nii.gz, mask: Image \"_mask.nii.gz\" beside brain)
 command strip: bet {t1} {brain.dir}/{brain.stem} -m --mask-name {mask.stem}
 operation flat(dicom) -> .txt
-command flat: dump {dicom} --into {output.dir} --name {output.stem}
+command flat: dump {dicom} --into {@output.dir} --name {@output.stem}
 image, meta = convert(dicom)
 brain, mask = strip(image)
 listing = flat(dicom)
@@ -103,7 +103,7 @@ fn folders_and_names_are_checked() {
         (
             "operation flat(dicom) -> .txt",
             "operation flat(dicom) -> Text",
-            "`{output.stem}` is `output`'s file name without its extension, but `flat` declares none for `output`; give it one, as in `-> Image .nii.gz`",
+            "`{@output.stem}` is `output`'s file name without its extension, but `flat` declares none for `output`; give it one, as in `-> Image .nii.gz`",
         ),
         (
             "{image.stem}",
