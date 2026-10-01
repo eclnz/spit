@@ -1,3 +1,5 @@
 /target/
+# Pipelines, datasets and profiles that profiling/bench.py generates.
+/profiling/work/
 
 *.afphoto
