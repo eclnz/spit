@@ -33,4 +33,4 @@ jobs:
           python -m venv .venv
           .venv/bin/python -m pip install -r .github/messie-requirements.txt
       - name: Check repository folders
-        run: .venv/bin/messie .
+        run: .venv/bin/messie -af .
