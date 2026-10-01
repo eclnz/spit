@@ -598,7 +598,7 @@ fn inputs(args: &CliArgs) -> Result<(), Box<dyn Error>> {
         loaded.names(),
     )?;
     let root = args.value(Flag::Root).map(PathBuf::from);
-    let settled = settle(&loaded, &args.file, root.as_deref())?;
+    let (mut settled, root) = settle(&loaded, &args.file, root.as_deref())?;
     settled.require_complete()?;
     if args.has(Flag::Unmatched) {
         for file in &settled.unmatched_files {
@@ -606,6 +606,11 @@ fn inputs(args: &CliArgs) -> Result<(), Box<dyn Error>> {
         }
         return Ok(());
     }
+    // The .spitout records the dataset root, so `dag` on it needs no
+    // `--root`: relative to the file it is written to, so the two can move
+    // together, or to the working folder when it is printed.
+    let written = args.value(Flag::Output).map(PathBuf::from);
+    settled.inventory.root = root.map(|root| recorded_root(&root, written.as_deref()));
     let text = render_source_inventory(
         &settled.inventory,
         &loaded.checked.pipeline,
@@ -670,28 +675,32 @@ fn load_recipe(file: &str) -> Result<Loaded, Box<dyn Error>> {
     })
 }
 
-/// Run step 2 for the recipe `file`: scan `root`, or the recipe's folder,
-/// or take the records written in the recipe when no root is given.
+/// Run step 2 for the recipe `file`: scan `given`, the root the recipe's
+/// `root` line names, or the recipe's folder; or take the records written
+/// in the recipe when no root is given on the command line. Returns what it
+/// settled, and the dataset root, when known.
 fn settle(
     loaded: &Loaded,
     file: &str,
-    root: Option<&Path>,
-) -> Result<ResolvedInputs, Box<dyn Error>> {
+    given: Option<&Path>,
+) -> Result<(ResolvedInputs, Option<PathBuf>), Box<dyn Error>> {
     let folder = Path::new(file)
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
         .unwrap_or_else(|| Path::new("."))
         .to_owned();
-    let scan = root.is_some();
-    let root = root.map_or(folder, Path::to_path_buf);
     let recipe = &loaded.recipe;
+    let named = recipe.root.as_ref().map(|(root, _)| root.clone());
+    let root = given.map(Path::to_path_buf).or(named);
     // Records written in the recipe stand in for a scan, unless a root to
-    // scan is given.
+    // scan is given on the command line. The recipe's `root` line, like its
+    // folder, only says where the dataset is.
     let source = match &recipe.inventory {
-        Some(records) if !scan => InputSource::Inventory(records.clone()),
-        _ => InputSource::Discover(&root),
+        Some(records) if given.is_none() => InputSource::Inventory(records.clone()),
+        _ => InputSource::Discover(root.as_deref().unwrap_or(&folder)),
     };
     let resolved = recipe.resolve(&loaded.checked.pipeline, source)?;
+    let root = root.or_else(|| resolved.root.clone());
     for skipped in &resolved.skipped {
         eprintln!("warning: skipped {skipped}");
     }
@@ -717,7 +726,47 @@ fn settle(
             root.display()
         );
     }
-    Ok(resolved)
+    Ok((resolved, root))
+}
+
+/// The dataset `root` as a `.spitout` written to `file` records it: relative
+/// to the file's folder, or to the working folder when it is printed.
+fn recorded_root(root: &Path, file: Option<&Path>) -> PathBuf {
+    let full = |path: &Path| {
+        fs::canonicalize(path)
+            .or_else(|_| std::path::absolute(path))
+            .unwrap_or_else(|_| path.to_path_buf())
+    };
+    let root = full(root);
+    let folder = file
+        .and_then(Path::parent)
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    relative_to(&root, &full(folder)).unwrap_or(root)
+}
+
+/// `path` relative to the folder `base`, both absolute, or `None` when they
+/// share no root, as on two Windows drives.
+fn relative_to(path: &Path, base: &Path) -> Option<PathBuf> {
+    let path: Vec<_> = path.components().collect();
+    let base: Vec<_> = base.components().collect();
+    let shared = path
+        .iter()
+        .zip(&base)
+        .take_while(|(left, right)| left == right)
+        .count();
+    if shared == 0 {
+        return None;
+    }
+    let mut relative = PathBuf::new();
+    for _ in shared..base.len() {
+        relative.push("..");
+    }
+    relative.extend(&path[shared..]);
+    if relative.as_os_str().is_empty() {
+        relative.push(".");
+    }
+    Some(relative)
 }
 
 /// What an `exclude` or `drop` rule removed, as a note says it:
@@ -832,6 +881,15 @@ fn prepare(args: &CliArgs) -> Result<Prepared, Box<dyn Error>> {
         Some(&records_text),
         names,
     )?;
+    // A root the records name is relative to their file's folder.
+    let recorded = records.inventory.root.as_ref().map(|recorded| {
+        let folder = match inputs.as_str() {
+            "-" => Path::new(""),
+            file => Path::new(file).parent().unwrap_or_else(|| Path::new("")),
+        };
+        folder.join(recorded)
+    });
+    let root = root.or(recorded);
     let settled = InputSpec::default()
         .resolve(&checked.pipeline, InputSource::Inventory(records.inventory))?;
     Ok(prepared(checked.pipeline, settled, records.report, root))
@@ -846,14 +904,13 @@ fn prepare_recipe(
     lenient: bool,
 ) -> Result<Prepared, Box<dyn Error>> {
     let loaded = load_recipe(file)?;
-    let settled = settle(&loaded, file, root.as_deref())?;
+    let (settled, root) = settle(&loaded, file, root.as_deref())?;
     eprintln!("note: ran `spit inputs {file}` in memory");
     let context = Context {
         path: Some(&loaded.pipeline_file),
         recipe: Some(&loaded.recipe),
         lenient,
     };
-    let root = root.or_else(|| settled.root.clone());
     // The records are written as a .spitout only when a diagnostic needs
     // lines of it to point at.
     let text = &loaded.pipeline_text;

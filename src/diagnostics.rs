@@ -4,7 +4,7 @@ use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::ops::Range;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::command::collect_commands;
 use crate::compile::collect_pipeline;
@@ -557,6 +557,9 @@ pub fn diagnose_recipe(text: &str, path: &Path) -> Vec<Diagnostic> {
                     .into_iter()
                     .map(|(_, problem)| error(problem.to_string())),
             );
+            if let Some(warning) = missing_root(spec.root.as_ref(), text) {
+                diagnostics.push(warning);
+            }
             diagnostics
         }
         Err(diagnostics) => {
@@ -576,6 +579,30 @@ pub fn diagnose_recipe(text: &str, path: &Path) -> Vec<Diagnostic> {
 
 /// Diagnose the text of a `.spitin` recipe against `pipeline`, reading no
 /// data: every rule's error at the rule, then its source paths and records.
+/// A warning on the recipe's `root` line when the folder it names is not
+/// there, which `spit check` can say without reading any data.
+fn missing_root(root: Option<&(PathBuf, usize)>, text: &str) -> Option<Diagnostic> {
+    let (root, line) = root?;
+    if root.is_dir() {
+        return None;
+    }
+    let written = text.lines().nth(line - 1)?;
+    let folder = crate::parser::strip_comment(written)
+        .trim()
+        .strip_prefix("root ")?
+        .trim();
+    let start = written.find(folder)?;
+    let message = format!(
+        "dataset root `{folder}` is not a folder; `spit inputs` and `spit dag` will find no files there"
+    );
+    Some(Diagnostic::new(
+        Severity::Warning,
+        DiagnosticSource::Pipeline,
+        Some(Place::new(*line, start..start + folder.len())),
+        message,
+    ))
+}
+
 pub fn diagnose_recipe_against(text: &str, pipeline: &Pipeline) -> Vec<Diagnostic> {
     let text = without_bom(text);
     let (spec, lines) = match crate::inputs::parse_recipe_lines(text) {

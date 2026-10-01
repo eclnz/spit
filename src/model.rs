@@ -2,6 +2,7 @@ use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::hash::{Hash, Hasher};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
 use rustc_hash::{FxHashMap, FxHashSet, FxHasher};
@@ -1340,6 +1341,9 @@ pub struct SourceInventory {
     /// What the input stage left out, and why: a record, not a rule, so
     /// resolving jobs removes nothing more for it.
     pub removed: Vec<Removal>,
+    /// The dataset root a `.spitout`'s `root` line names, as written:
+    /// relative to the `.spitout`'s folder unless absolute.
+    pub root: Option<PathBuf>,
 }
 
 /// A comparison of how many artifacts or contexts a group holds, as a
