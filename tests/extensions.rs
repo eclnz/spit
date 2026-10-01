@@ -167,6 +167,18 @@ fn a_rule_ending_in_another_extension_is_an_error() {
 }
 
 #[test]
+fn a_dot_earlier_in_the_file_name_is_not_part_of_its_extension() {
+    let pipeline = format!(
+        "path: out/{{@product}}/{{@entities}}\n{STEPS}path matrix: transforms/{{id}}_acq-1.5T.mat\n"
+    );
+    assert_eq!(errors(&pipeline), []);
+    assert_eq!(
+        path(&parse_pipeline(&pipeline).unwrap(), "matrix"),
+        "transforms/{id}_acq-1.5T.mat"
+    );
+}
+
+#[test]
 fn a_default_rule_ending_in_another_extension_is_one_error() {
     // Two products disagree with the default, which is said once.
     let found = errors(&format!(

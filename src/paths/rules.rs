@@ -319,10 +319,12 @@ pub(crate) fn collect_paths(
 /// file must have, if it does. A rule that ends with none is given it.
 fn extension_disagreement(index: &PipelineIndex<'_>, product: &str) -> Option<String> {
     let (expected, source) = index.expected_extension(product)?;
-    let written = index.path_rule_for(product)?.extension()?;
-    if written == expected {
+    let rule = index.path_rule_for(product)?;
+    // A `.` earlier in the file name is not part of its extension.
+    if rule.ends_with(expected) {
         return None;
     }
+    let written = rule.extension()?;
     if index.pipeline.product_paths.contains_key(product) {
         return Some(format!(
             "path `{product}` ends in `{written}`, but {source} writes `{expected}`; drop the extension or use `{expected}`"
