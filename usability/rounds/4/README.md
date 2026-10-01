@@ -1,6 +1,6 @@
 # Usability study: fourth round after the paths work
 
-This round tested the [dataset root, output extensions and sidecars](../../design/output-paths.md) work: `ext:` and extensions on operation outputs, `@` placeholders, and optional path groups. It was kept small to limit cost. Three fresh participants on a smaller model each did one scenario: s1-logs (path rules), s2-cohort (BIDS paths and sidecars), and s5-survey (two outputs and `verify`). Each was told to read the guide once and keep its report short. There was no follow-up and no second participant per task. The [run archives](results.zip) hold each pipeline, recipe, plan and report.
+This round tested the dataset root, output extensions and sidecars (`usability/design/output-paths.md`) work: `ext:` and extensions on operation outputs, `@` placeholders, and optional path groups. It was kept small to limit cost. Three fresh participants on a smaller model each did one scenario: s1-logs (path rules), s2-cohort (BIDS paths and sidecars), and s5-survey (two outputs and `verify`). Each was told to read the guide once and keep its report short. There was no follow-up and no second participant per task. The [run archives](results.zip) hold each pipeline, recipe, plan and report.
 
 ## Method and limits
 
