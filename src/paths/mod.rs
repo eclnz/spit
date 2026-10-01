@@ -5,7 +5,7 @@ mod bind;
 mod rules;
 mod template;
 
-pub(crate) use self::bind::{bound_paths, case_collisions, check_rules};
+pub(crate) use self::bind::{bound_paths, case_collisions, check_rules, dashed_labels};
 pub use self::bind::{
     validate_bound_source_files, validate_source_files, BoundPaths, VerifiedFiles,
 };

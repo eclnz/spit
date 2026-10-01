@@ -23,7 +23,7 @@ use crate::model::{
 use crate::parser::{
     as_read_back, glued_comment, source_record_lines, without_bom, Kind, Rule, SourceMap, Step,
 };
-use crate::paths::{case_collisions, collect_paths, shown_path, PathTemplate};
+use crate::paths::{case_collisions, collect_paths, dashed_labels, shown_path, PathTemplate};
 use crate::resolver::first_failure;
 use crate::span::{content_columns, utf16_columns, Located, Place};
 use crate::{
@@ -833,6 +833,7 @@ fn record_diagnostics(
             return Err(error);
         }
         diagnostics.extend(case_warnings(pipeline, lines, &report.dag));
+        diagnostics.extend(label_warnings(pipeline, lines, &report.dag));
         Ok(report)
     });
     match resolved {
@@ -905,6 +906,22 @@ fn case_warnings(pipeline: &Pipeline, lines: &SourceMap, dag: &ResolvedDag) -> V
                 format!(
                     "`{}[{}]` and `{}[{}]` have paths `{first_path}` and `{second_path}`, which differ only in case, so they are one file where case is ignored, as on macOS and Windows",
                     first.0, first.1, second.0, second.1
+                ),
+            )
+        })
+        .collect()
+}
+
+/// Flag values with a `-` that `{@labels}` writes, as `sub-01-a`, which
+/// BIDS reads as a new entity.
+fn label_warnings(pipeline: &Pipeline, lines: &SourceMap, dag: &ResolvedDag) -> Vec<Diagnostic> {
+    dashed_labels(pipeline, dag)
+        .into_iter()
+        .map(|(product, dimension, value)| {
+            warning(
+                lines.path_rule(pipeline, &product),
+                format!(
+                    "`{{@labels}}` writes `{dimension}-{value}` in the path of `{product}`; BIDS reads each `-` as the end of a key, so it cannot read `{value}` back"
                 ),
             )
         })

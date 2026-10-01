@@ -190,6 +190,31 @@ impl PathTemplate {
         })
     }
 
+    /// Whether `holder`'s product's path has `{@labels}` written out in it.
+    pub(crate) fn writes_labels(&self, holder: Holder<'_>) -> bool {
+        let labels = |part: &PathPart| *part == PathPart::Placeholder(PathPlaceholder::Labels);
+        holder.has(&PathPlaceholder::Labels)
+            && self.parts.iter().any(|part| match part {
+                PathPart::Group(group) => holder.keeps(group) && group.iter().any(labels),
+                part => labels(part),
+            })
+    }
+
+    /// Each dimension a `[...]` group names.
+    pub(crate) fn group_dimensions(&self) -> impl Iterator<Item = &str> {
+        self.parts
+            .iter()
+            .filter_map(|part| match part {
+                PathPart::Group(group) => Some(group),
+                _ => None,
+            })
+            .flatten()
+            .filter_map(|part| match part {
+                PathPart::Placeholder(PathPlaceholder::Dimension(name)) => Some(name.as_str()),
+                _ => None,
+            })
+    }
+
     pub fn as_str(&self) -> &str {
         &self.text
     }

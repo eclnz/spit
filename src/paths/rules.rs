@@ -195,6 +195,45 @@ pub(crate) fn collect_paths(
             );
         }
     }
+    // A group drops a dimension a product lacks, so one no product has,
+    // usually a typo, would be dropped silently.
+    let had: BTreeSet<_> = pipeline
+        .products
+        .iter()
+        .flat_map(|product| product.dimensions.iter().map(String::as_str))
+        .collect();
+    let rules = pipeline
+        .path_template
+        .iter()
+        .map(|template| (template, lines.default_path.clone()))
+        .chain(pipeline.stages.iter().filter_map(|stage| {
+            Some((
+                stage.path_template.as_ref()?,
+                lines.stage_paths.get(&stage.name).cloned(),
+            ))
+        }))
+        .chain(
+            pipeline
+                .product_paths
+                .iter()
+                .filter(|(product, _)| !skip.contains(*product))
+                .map(|(product, template)| (template, lines.paths.get(product).cloned())),
+        );
+    for (template, line) in rules {
+        let unknown: BTreeSet<_> = template
+            .group_dimensions()
+            .filter(|dimension| !had.contains(dimension))
+            .collect();
+        for dimension in unknown {
+            errors.push(
+                error(format!(
+                    "path rule names `{{{dimension}}}`, which no product has"
+                ))
+                .at(line.clone())
+                .focus(format!("{{{dimension}}}")),
+            );
+        }
+    }
     let outputs: BTreeSet<_> = pipeline
         .invocations
         .iter()
