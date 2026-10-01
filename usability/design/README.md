@@ -21,7 +21,7 @@ The plans that answer the [usability findings](../FINDINGS.md), and the order to
 - **Done:** steps 1–15 and 17. Phase 1, Phase 2, and Phase 3 are complete; the worked examples and extension update are in place. Step 16 was declined.
 - **Second-study actions:** items 1–6 are done. The [post-Phase-5 third study](../ROUND3.md) completes the rerun.
 - **Next:** implement the [round-3 inspection work](round3-inspection.md), starting with compact per-operation counts.
-- **Paths:** steps 1 to 4 of [dataset root, output extensions and sidecars](output-paths.md), the recipe's `root` line, extensions on operation outputs, source groups and `beside` outputs, are done; step 5 is a proposal.
+- **Paths:** all five steps of [dataset root, output extensions and sidecars](output-paths.md) are done: the recipe's `root` line, extensions on operation outputs, source groups, `beside` outputs, and `{x.dir}` and `{x.stem}`.
 - **Resolved so far:** B1–B7, F1–F10, D1–D11.
 
 ## Order

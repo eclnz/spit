@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 
 use std::fmt;
 
-use crate::command::{slot, validate_commands, CommandError, Slot};
+use crate::command::{facet, slot, validate_commands, CommandError, Facet, Slot};
 use crate::model::{
     ArtifactId, Cardinality, CommandRole, Job, OperationDef, Pipeline, ResolvedDag,
 };
@@ -154,7 +154,7 @@ fn expand(
     let mut arguments = Vec::new();
     for parts in template {
         if let [Part::Placeholder(name)] = parts.as_slice() {
-            if let Some(Slot::Input(index)) = slot(operation, name) {
+            if let Some(Slot::Input(index)) = slot(operation, facet(name).0) {
                 if operation.inputs[index].cardinality == Cardinality::Many {
                     let artifacts = job.inputs.get(index).ok_or_else(|| lacks(name))?;
                     for artifact in artifacts {
@@ -169,14 +169,28 @@ fn expand(
             match part {
                 Part::Literal(value) => argument.push(ArgPart::Text(value.clone())),
                 Part::Placeholder(name) => {
-                    let artifact = match slot(operation, name) {
+                    let (port, facet) = facet(name);
+                    let slot = slot(operation, port);
+                    let artifact = match slot {
                         Some(Slot::Output(index)) => job.outputs.get(index),
                         Some(Slot::Input(index)) => job.inputs.get(index).and_then(|a| a.first()),
                         // `validate_commands` rejects unknown placeholders.
                         None => None,
                     };
-                    let artifact = artifact.ok_or_else(|| lacks(name))?;
-                    argument.push(path(artifact)?);
+                    let artifact = *artifact.ok_or_else(|| lacks(name))?;
+                    // `validate_commands` allows `.dir` and `.stem` only on
+                    // an output, and `.stem` only with an extension.
+                    argument.push(match (facet, slot) {
+                        (Ok(Facet::Dir), _) => ArgPart::Dir(artifact),
+                        (Ok(Facet::Stem), Some(Slot::Output(index))) => ArgPart::Stem {
+                            artifact,
+                            extension: operation.outputs[index]
+                                .extension
+                                .clone()
+                                .unwrap_or_default(),
+                        },
+                        _ => path(&artifact)?,
+                    });
                 }
             }
         }

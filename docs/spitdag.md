@@ -1,6 +1,6 @@
 # The `.spitdag` format
 
-A `.spitdag` is what `spit dag -o` writes and `spit dag --json` prints: every job a pipeline resolves to over one dataset, each with its files and its commands. A backend that runs the jobs reads nothing else: no pipeline, path rule or command template. This page describes version 3, the version `src/spitdag.rs` writes. See the [README](../README.md) for how a `.spitdag` is made, and `spit dag --commands` for a readable view of the same commands.
+A `.spitdag` is what `spit dag -o` writes and `spit dag --json` prints: every job a pipeline resolves to over one dataset, each with its files and its commands. A backend that runs the jobs reads nothing else: no pipeline, path rule or command template. This page describes version 4, the version `src/spitdag.rs` writes. See the [README](../README.md) for how a `.spitdag` is made, and `spit dag --commands` for a readable view of the same commands.
 
 ## Document
 
@@ -8,7 +8,7 @@ A `.spitdag` is one JSON object, followed by a newline:
 
 ```json
 {
-  "version": 3,
+  "version": 4,
   "generator": {"name": "spit", "version": "0.2.0"},
   "root": "/data/study",
   "external_inputs": [ARTIFACT, ...],
@@ -115,6 +115,14 @@ A command is a list of arguments, and each argument is a list of parts, joined w
 ```
 
 That is four arguments: `tool`, `--in=in/1.txt`, `-o` and `out/1.txt`. A `many` placeholder becomes one argument for each artifact in its collection.
+
+`{image.dir}` and `{image.stem}` in a template become an output file's folder, `.` for the root itself, and its file name without its extension. Each is written with the file it is of, so a backend that moves files knows which one:
+
+```json
+[["-o"], [{"dir": "derivatives/image", "of": "derivatives/image/sub=01.nii.gz"}], ["-f"], [{"stem": "sub=01", "of": "derivatives/image/sub=01.nii.gz"}]]
+```
+
+Use the `dir` or `stem` text as the part, as a `path` part is used. Version 4 added these two parts; a reader written for version 3 does not know them.
 
 Run each argument as one word, exactly as given: no shell is involved, so nothing in it is split, expanded or interpreted. Resolve each path against `root`, or run the command from `root`, where the relative paths name the right files.
 

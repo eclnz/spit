@@ -7,7 +7,7 @@ use crate::command::shell_word;
 use crate::model::{
     identity, push_identity, Artifact, ArtifactReport, EntityBinding, Gap, ResolvedDag,
 };
-use crate::spitdag::{ArgPart, Argument, BoundDag, BoundJob};
+use crate::spitdag::{Argument, BoundDag, BoundJob};
 use crate::types::TypeExpr;
 
 /// The jobs as text, without ports or paths. Each job is written straight
@@ -154,10 +154,7 @@ fn push_command(text: &mut String, dag: &BoundDag, command: &[Argument]) {
     for (index, argument) in command.iter().enumerate() {
         word.clear();
         for part in argument {
-            match part {
-                ArgPart::Text(literal) => word.push_str(literal),
-                ArgPart::Path(id) => word.push_str(dag.path(*id)),
-            }
+            word.push_str(part.text(dag));
         }
         if index > 0 {
             text.push(' ');
