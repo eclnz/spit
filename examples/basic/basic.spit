@@ -1,17 +1,12 @@
-# Sectioned pipeline example; its inputs are in basic.spitout.
-products:
-    bold       : BOLD           [sub, ses, run]
-    t1w        : T1w            [sub, ses]
-    denoised   : DenoisedBOLD   [sub, ses, run]
-    registered : RegisteredBOLD [sub, ses, run]
-    mean_bold  : MeanBOLD       [sub, ses]
+# A small pipeline; its inputs are in basic.spitout.
+source bold : BOLD [sub, ses, run]
+source t1w : T1w [sub, ses]
 
-operations:
-    denoise(BOLD) -> DenoisedBOLD
-    register(DenoisedBOLD, T1w) -> RegisteredBOLD
-    mean(many RegisteredBOLD) -> MeanBOLD
+operation denoise(bold: BOLD) -> DenoisedBOLD
+denoised = denoise(bold)
 
-pipeline:
-    denoised   = denoise(bold)
-    registered = register(denoised, t1w)
-    mean_bold  = mean(registered @ vary(run))
+operation register(bold: DenoisedBOLD, anatomy: T1w) -> RegisteredBOLD
+registered = register(denoised, t1w)
+
+operation mean(runs: many RegisteredBOLD) -> MeanBOLD
+mean_bold = mean(registered @ vary(run))

@@ -53,21 +53,16 @@ fn type_errors_point_to_the_exact_flow_step_even_when_operation_is_reused() {
 }
 
 #[test]
-fn inferred_type_error_points_to_the_consuming_sectioned_step() {
-    let text = "products:\n\
-                  raw : A<Native> [id]\n\
-                  middle : Unknown [id]\n\
-                  final : Unknown [id]\n\
-                operations:\n\
-                  first(A<X>) -> B<X>\n\
-                  second(B<Standard>) -> C\n\
-                pipeline:\n\
-                  middle = first(raw)\n\
-                  final = second(middle)\n";
+fn inferred_type_error_points_to_the_consuming_step() {
+    let text = "source raw : A<Native> [id]\n\
+                operation first(a: A<X>) -> B<X>\n\
+                operation second(b: B<Standard>) -> C\n\
+                middle = first(raw)\n\
+                final = second(middle)\n";
     let issues = errors(diagnose(text, Some("sources:\n")));
     assert_eq!(issues.len(), 1);
     assert_eq!(issues[0].source, DiagnosticSource::Pipeline);
-    assert_eq!(issues[0].line, Some(10));
+    assert_eq!(issues[0].line, Some(5));
     assert!(issues[0].message.contains("B<Native>"));
 }
 
@@ -247,12 +242,13 @@ path other: {product}/{id}/{shard}.csv
 
 #[test]
 fn a_cycle_is_reported_once_at_the_step_it_was_found_at() {
-    let text = "products:\n  a : A [site]\n  b : A [site]\n  c : A [site]\n\n\
-                operations:\n  copy(A) -> A\n\n\
-                pipeline:\n  a = copy(b)\n  b = copy(c)\n  c = copy(a)\n";
+    let text = "operation copy(input: A) -> A\n\
+                a = copy(b)\n\
+                b = copy(c)\n\
+                c = copy(a)\n";
     let issues = errors(diagnose(text, None));
     assert_eq!(issues.len(), 1);
-    assert_eq!(issues[0].line, Some(10));
-    assert_eq!(issues[0].columns, Some(2..3));
+    assert_eq!(issues[0].line, Some(2));
+    assert_eq!(issues[0].columns, Some(0..1));
     assert_eq!(issues[0].message, "pipeline cycle: a -> b -> c -> a");
 }

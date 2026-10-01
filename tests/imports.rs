@@ -8,7 +8,7 @@ use std::path::Path;
 use spit::{diagnose_in, parse_pipeline_at, parse_source_inventory, resolve, Context};
 
 #[test]
-fn unqualified_and_nested_imports_work_in_sectioned_files() {
+fn unqualified_and_nested_imports_work_together() {
     let dir = Tree::new("imports", &[]);
     dir.write(
         "base.spit",
@@ -19,8 +19,9 @@ fn unqualified_and_nested_imports_work_in_sectioned_files() {
         "main.spit",
         "use prep::clean from middle.spit as stage\n\
          use clean from base.spit\n\
-         products:\n  raw [id]\n  middle [id]\n  final [id]\n\
-         pipeline:\n  middle = clean(raw)\n  final = stage::prep::clean(middle)\n\
+         source raw [id]\n\
+         middle = clean(raw)\n\
+         final = stage::prep::clean(middle)\n\
          sources:\n  raw[id=x]\n",
     );
     let text = fs::read_to_string(&main).unwrap();

@@ -236,9 +236,6 @@ fn lower_statement(
             builder.add_command(command.clone(), place.clone());
         }
         StatementKind::Path(rule) => builder.add_path(rule, statement.place.line)?,
-        StatementKind::Step(invocation, step) => {
-            builder.add_invocation(invocation.clone(), step);
-        }
         StatementKind::FlowStep(flow) => builder.add_flow_step(flow)?,
     }
     Ok(())

@@ -153,25 +153,25 @@ fn unclosed_generic_brackets_point_at_the_specific_opener() {
     // The missing `>` belongs to `Stream<`, several layers out from where
     // parsing actually gives up; earlier this fell back to a span covering
     // almost the whole line.
-    let text = "operations:\n  f(Stream<Frame<X>,Y) -> Signal\n";
-    assert_eq!(pointed(text, None), ["error 2: <"]);
+    let text = "operation f(Stream<Frame<X>,Y) -> Signal\n";
+    assert_eq!(pointed(text, None), ["error 1: <"]);
 
-    let stray_closer = "operations:\n  f(Frame<Native>>) -> Signal\n";
-    assert_eq!(pointed(stray_closer, None), ["error 2: >"]);
+    let stray_closer = "operation f(Frame<Native>>) -> Signal\n";
+    assert_eq!(pointed(stray_closer, None), ["error 1: >"]);
 }
 
 #[test]
 fn invalid_type_variables_point_at_the_variable_not_the_whole_type() {
     // A `$` variable used outside a signature, nested inside a larger
     // generic product type: only `$Kind` is wrong, not the whole annotation.
-    let outside_signature = "products:\n  raw : Stream<Frame<$Kind,$Space>,Raw> [id]\n";
-    assert_eq!(pointed(outside_signature, None), ["error 2: $Kind"]);
+    let outside_signature = "source raw : Stream<Frame<$Kind,$Space>,Raw> [id]\n";
+    assert_eq!(pointed(outside_signature, None), ["error 1: $Kind"]);
 
-    let invalid_name = "operations:\n  f(Frame<$1Kind>) -> Signal\n";
-    assert_eq!(pointed(invalid_name, None), ["error 2: $1Kind"]);
+    let invalid_name = "operation f(Frame<$1Kind>) -> Signal\n";
+    assert_eq!(pointed(invalid_name, None), ["error 1: $1Kind"]);
 
-    let variable_with_args = "operations:\n  f(Wrapper<Frame<$Kind<Native>>>) -> Signal\n";
-    assert_eq!(pointed(variable_with_args, None), ["error 2: $Kind"]);
+    let variable_with_args = "operation f(Wrapper<Frame<$Kind<Native>>>) -> Signal\n";
+    assert_eq!(pointed(variable_with_args, None), ["error 1: $Kind"]);
 }
 
 #[test]
@@ -278,16 +278,12 @@ fn display_in_counts_the_column_in_characters() {
 }
 
 #[test]
-fn sectioned_steps_point_at_their_parts() {
+fn steps_point_at_their_parts() {
     let text = "\
-products:
-    raw : Table [id]
-    other : Other [id]
-    result : Table [id]
-operations:
-    clean(Table) -> Table
-pipeline:
-    result = clean(other)
+source raw : Table [id]
+source other : Other [id]
+operation clean(table: Table) -> Table
+result = clean(other)
 ";
-    assert_eq!(pointed(text, None), ["warning 2: raw", "error 8: other"]);
+    assert_eq!(pointed(text, None), ["warning 1: raw", "error 4: other"]);
 }

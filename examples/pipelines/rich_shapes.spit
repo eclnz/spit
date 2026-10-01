@@ -1,18 +1,12 @@
-products:
-    scan [sub, ses, run]
-    ref [sub, ses]
-    cleaned [sub, ses, run]
-    aligned [sub, ses, run]
-    session_mean [sub, ses]
-    subject_mean [sub]
+source scan [sub, ses, run]
+source ref [sub, ses]
 
-operations:
-    clean(one)
-    align(one, one)
-    mean(many)
+operation clean(scan)
+cleaned = clean(scan)
 
-pipeline:
-    cleaned = clean(scan)
-    aligned = align(cleaned, ref)
-    session_mean = mean(aligned @ vary(run))
-    subject_mean = mean(session_mean @ vary(ses))
+operation align(scan, ref)
+aligned = align(cleaned, ref)
+
+operation mean(scans: many)
+session_mean = mean(aligned @ vary(run))
+subject_mean = mean(session_mean @ vary(ses))

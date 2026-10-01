@@ -169,7 +169,7 @@ fn later_known_input_refines_an_earlier_partial_variable_binding() {
 
 #[test]
 fn partial_type_cannot_hide_a_downstream_known_conflict() {
-    let text = "products:\n  partly : Frame<Unknown> [id]\n  known : Frame<Foo> [id]\n  merged [id]\n  final : Frame<Bar> [id]\noperations:\n  merge(A, A) -> A\n  sink(Frame<Bar>) -> Frame<Bar>\npipeline:\n  merged = merge(partly, known)\n  final = sink(merged)\n";
+    let text = "source partly : Frame<Unknown> [id]\nsource known : Frame<Foo> [id]\noperation merge(input1: A, input2: A) -> A\noperation sink(input: Frame<Bar>) -> Frame<Bar>\nmerged = merge(partly, known)\nfinal : Frame<Bar> [id] = sink(merged)\n";
     let pipeline = parse_pipeline(text).unwrap();
     let empty = parse_source_inventory("sources:\n").unwrap();
     assert!(matches!(
@@ -195,7 +195,7 @@ fn unknown_is_indeterminate_without_binding_a_variable() {
 #[test]
 fn unresolved_output_variables_become_unknown_at_job_boundary() {
     let pipeline = parse_pipeline(
-        "products:\n  raw : Unknown [site]\n  result : Unknown [site]\noperations:\n  transform(A<S>) -> B<S>\npipeline:\n  result = transform(raw)\n",
+        "source raw : Unknown [site]\noperation transform(input: A<S>) -> B<S>\nresult = transform(raw)\n",
     )
     .unwrap();
     let inventory = parse_source_inventory("sources:\n  raw[site=A]\n").unwrap();
@@ -209,7 +209,7 @@ fn unresolved_output_variables_become_unknown_at_job_boundary() {
 #[test]
 fn generic_pipeline_infers_output_type_without_pipeline_annotations() {
     let pipeline = parse_pipeline(
-        "products:\n  signal : Signal<Native> [site]\n  denoised : Unknown [site]\noperations:\n  denoise(Signal<S>) -> FilteredSignal<S>\npipeline:\n  denoised = denoise(signal)\n",
+        "source signal : Signal<Native> [site]\noperation denoise(input: Signal<S>) -> FilteredSignal<S>\ndenoised = denoise(signal)\n",
     )
     .unwrap();
     let inventory = parse_source_inventory("sources:\n  signal[site=A]\n").unwrap();
@@ -223,7 +223,7 @@ fn generic_pipeline_infers_output_type_without_pipeline_annotations() {
 #[test]
 fn chained_generic_operations_propagate_concrete_type() {
     let pipeline = parse_pipeline(
-        "products:\n  raw : A<Native> [site]\n  middle : Unknown [site]\n  final : Unknown [site]\noperations:\n  f(A<X>) -> B<X>\n  g(B<Y>) -> C<Y>\npipeline:\n  middle = f(raw)\n  final = g(middle)\n",
+        "source raw : A<Native> [site]\noperation f(input: A<X>) -> B<X>\noperation g(input: B<Y>) -> C<Y>\nmiddle = f(raw)\nfinal = g(middle)\n",
     )
     .unwrap();
     let inventory = parse_source_inventory("sources:\n  raw[site=A]\n").unwrap();
@@ -241,7 +241,7 @@ fn chained_generic_operations_propagate_concrete_type() {
 #[test]
 fn operation_type_variables_do_not_leak_between_invocations() {
     let pipeline = parse_pipeline(
-        "products:\n  a : A<Native> [site]\n  b : A<Standard> [site]\n  out_a : Unknown [site]\n  out_b : Unknown [site]\noperations:\n  convert(A<X>) -> B<X>\npipeline:\n  out_a = convert(a)\n  out_b = convert(b)\n",
+        "source a : A<Native> [site]\nsource b : A<Standard> [site]\noperation convert(input: A<X>) -> B<X>\nout_a = convert(a)\nout_b = convert(b)\n",
     )
     .unwrap();
     let inventory = parse_source_inventory("sources:\n  a[site=01]\n  b[site=01]\n").unwrap();
@@ -321,7 +321,7 @@ fn analytics_join_key_variables_reject_mismatched_relations() {
 #[test]
 fn conflicting_port_bindings_are_a_structured_resolver_error() {
     let pipeline = parse_pipeline(
-        "products:\n  a : A<Native> [site]\n  b : B<Standard> [site]\n  c : Unknown [site]\noperations:\n  op(A<X>, B<X>) -> C<X>\npipeline:\n  c = op(a, b)\n",
+        "source a : A<Native> [site]\nsource b : B<Standard> [site]\noperation op(input1: A<X>, input2: B<X>) -> C<X>\nc = op(a, b)\n",
     )
     .unwrap();
     let inventory = parse_source_inventory("sources:\n  a[site=01]\n  b[site=01]\n").unwrap();
@@ -335,7 +335,7 @@ fn conflicting_port_bindings_are_a_structured_resolver_error() {
 #[test]
 fn declared_output_type_cannot_contradict_inferred_type() {
     let pipeline = parse_pipeline(
-        "products:\n  raw : A<Native> [site]\n  result : B<Standard> [site]\noperations:\n  f(A<X>) -> B<X>\npipeline:\n  result = f(raw)\n",
+        "source raw : A<Native> [site]\noperation f(input: A<X>) -> B<X>\nresult : B<Standard> [site] = f(raw)\n",
     )
     .unwrap();
     let inventory = parse_source_inventory("sources:\n  raw[site=01]\n").unwrap();
@@ -368,7 +368,7 @@ fn resolves_untyped_pipeline_by_shape_and_cardinality() {
 
 #[test]
 fn partially_typed_pipeline_accepts_unknown_and_rejects_known_mismatch() {
-    let text = "products:\n  raw [site]\n  output : Result [site]\noperations:\n  process(Input) -> Result\npipeline:\n  output = process(raw)\nsources:\n  raw[site=01]\n";
+    let text = "source raw [site]\noperation process(input: Input) -> Result\noutput : Result [site] = process(raw)\nsources:\n  raw[site=01]\n";
     let (pipeline, inventory) = support::parse_fixture(text).unwrap();
     assert_eq!(
         resolve(&pipeline, &inventory.unwrap()).unwrap().jobs.len(),

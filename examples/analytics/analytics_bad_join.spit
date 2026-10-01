@@ -1,12 +1,7 @@
 # This should fail: the second input uses AccountKey, but the join requires
 # both relations to share the same key variable K.
-products:
-    events    : Relation<Event,CustomerKey>  [tenant, customer, event]
-    accounts  : Relation<Account,AccountKey> [tenant]
-    joined    : Relation<Joined,CustomerKey>  [tenant, customer, event]
+source events : Relation<Event,CustomerKey> [tenant, customer, event]
+source accounts : Relation<Account,AccountKey> [tenant]
 
-operations:
-    join(Relation<Event,K>, Relation<Account,K>) -> Relation<Joined,K>
-
-pipeline:
-    joined = join(events, accounts)
+operation join(events: Relation<Event,K>, accounts: Relation<Account,K>) -> Relation<Joined,K>
+joined = join(events, accounts)

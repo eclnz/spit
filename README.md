@@ -242,7 +242,7 @@ Beyond the basics above, `.spit` files support typed products, multi-output oper
 
 | Example | Shows |
 | --- | --- |
-| [Basic](examples/basic/basic.spit) | Sectioned syntax, with its recipe and inputs in separate files |
+| [Basic](examples/basic/basic.spit) | A small pipeline, with its recipe and inputs in separate files |
 | [Untyped](examples/types/untyped.spit) | Resolution without types |
 | [Typed](examples/types/typed.spit) | Parameterized symbolic types |
 | [Branching](examples/pipelines/branching.spit) | Shared inputs and branches |
