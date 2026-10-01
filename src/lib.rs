@@ -1,6 +1,7 @@
 //! SPIT: compile artifact pipelines, settle their inputs, and resolve and
 //! bind their jobs into a `.spitdag`.
 
+mod builtins;
 mod command;
 mod compile;
 mod diagnostics;
@@ -22,15 +23,16 @@ mod spitdag;
 mod template;
 mod types;
 
+pub use builtins::{builtin_words, Doc, Word, WordUse, DOCS, REFERENCE};
 pub use command::{validate_commands, CommandError, CommandProblem, CommandTemplate};
 pub use compile::validate_pipeline;
 pub use diagnostics::{
     diagnose, diagnose_checked, diagnose_checked_with_inventory, diagnose_checked_with_records,
-    diagnose_in, diagnose_recipe, diagnose_recipe_against, render_check_json,
+    diagnose_in, diagnose_inputs, diagnose_recipe, diagnose_recipe_against, render_check_json,
     render_diagnostics_json, Checked, Context, Diagnosis, Diagnostic, DiagnosticSource, FileNames,
     Records, Severity, ShownPath,
 };
-pub use editor::{pipeline_hovers, render_editor_json, Hover};
+pub use editor::{pipeline_hovers, render_editor_json, render_words_json, Hover};
 pub use error::{DefinitionSubject, NearMiss, PortSite, ResolveError, TypeConflict};
 pub use imports::parse_pipeline_at;
 pub use inputs::{
