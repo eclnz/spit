@@ -12,7 +12,7 @@ The plans that answer the [usability findings](../FINDINGS.md), and the order to
 | [Closing the guide's gaps](guide.md) | D1–D11 |
 | [Second-study actions](round2-actions.md) | Worked examples, guide packaging, rule explanations, CLI messages, and follow-up trials |
 | [One way to write each thing](one-way.md) | Aggregation, dimension order, and syntax conventions for round 3 |
-| [Pilot inspection follow-ups](round3-inspection.md) | Compact job counts, collection order, and near-case unused sources |
+| [Pilot inspection follow-ups](pre-phase5-inspection.md) | Compact job counts, collection order, and near-case unused sources |
 
 ## Status
 
