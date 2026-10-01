@@ -1,6 +1,7 @@
 //! Path templates and the path one template gives one artifact. Every step
 //! shares this: it knows the model, and nothing about resolving or discovery.
 
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
@@ -105,6 +106,32 @@ impl PathTemplate {
 
     pub(crate) fn parts(&self) -> &[PathPart] {
         &self.parts
+    }
+
+    /// The extension the template ends with: the text of its last file
+    /// name after its final placeholder, from the first `.`, as `.nii.gz`
+    /// in `sub-{sub}_T1w.nii.gz`. Values cannot add a `.`, as they are
+    /// escaped, so only the template's own text can.
+    pub fn extension(&self) -> Option<&str> {
+        let Some(PathPart::Literal(tail)) = self.parts.last() else {
+            return None;
+        };
+        let name = tail.rsplit('/').next().unwrap_or(tail);
+        name.find('.').map(|dot| &name[dot..])
+    }
+
+    /// This template with `extension` added to its end.
+    #[must_use]
+    pub(crate) fn with_extension(&self, extension: &str) -> Self {
+        let mut parts = self.parts.clone();
+        match parts.last_mut() {
+            Some(PathPart::Literal(tail)) => tail.push_str(extension),
+            _ => parts.push(PathPart::Literal(extension.to_owned())),
+        }
+        Self {
+            text: format!("{}{extension}", self.text),
+            parts,
+        }
     }
 
     /// This template with `{product}` written out as `name`, so that an
@@ -237,7 +264,7 @@ impl<'p> PathBinder<'p> {
 /// What every path of one product shares: its template, its name as a
 /// path gives it, and its stage's directories.
 struct ProductPath<'p> {
-    template: &'p PathTemplate,
+    template: Cow<'p, PathTemplate>,
     /// `alias::name` would put colons in file names.
     name: String,
     /// Each nested stage is a directory.
@@ -309,6 +336,25 @@ impl<'p> ProductPath<'p> {
         }
         Ok(relative)
     }
+}
+
+/// `product`'s path template with `{product}` and `{stage}` written out, as
+/// every artifact of it shares them, for showing beside its declaration:
+/// `derivatives/yield_table/{entities}.csv`.
+pub(crate) fn shown_path(pipeline: &Pipeline, product: &str) -> Option<String> {
+    let path = ProductPath::new(pipeline, product).ok()?;
+    let mut shown = String::new();
+    for part in path.template.parts() {
+        match part {
+            PathPart::Literal(value) => shown.push_str(value),
+            PathPart::Placeholder(PathPlaceholder::Product) => shown.push_str(&path.name),
+            PathPart::Placeholder(PathPlaceholder::Stage) => {
+                shown.push_str(path.stage.as_deref().unwrap_or("{stage}"));
+            }
+            PathPart::Placeholder(placeholder) => shown.push_str(&placeholder.to_string()),
+        }
+    }
+    Some(shown)
 }
 
 /// Add what `{entities}` binds to: each dimension as `dimension=value`, in

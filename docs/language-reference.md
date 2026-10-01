@@ -99,6 +99,8 @@ trial = simulate(reading, seed @ each(rep))
 summary = average(trial @ vary(rep))
 ```
 
+An output's type may be followed by the extension the tool gives its file, as in `-> Transform .mat`; see [extensions](#extensions).
+
 An operation can write several outputs in one job. Name each output; its name is its placeholder, and the call assigns one product to each:
 
 ```text
@@ -167,7 +169,7 @@ stage preprocess:
     resorted = sort_lines(merged)    # in `preprocess` itself
 ```
 
-The lines directly in a stage share one indentation. A nested stage without its own `path:` line uses the nearest one around it, and `{stage}` gives one directory per level, as in `preprocess/combine/merged/...`.
+The lines directly in a stage share one indentation. A nested stage without its own `path:` or `ext:` line uses the nearest one around it, and `{stage}` gives one directory per level, as in `preprocess/combine/merged/...`.
 
 SPIT orders stages by the products they read, so a stage needs no `after` clause. Stages must not depend on each other in a cycle, even through steps outside every stage. A nested stage is compared with its siblings, and counts toward its outer stage's place among the outer stage's siblings; a step written in an outer stage itself, like one outside every stage, passes on what it reads. `dag` counts the jobs in each outermost stage and names each job's stage, and the `.spitdag` gives each job its stage as a list of names from outermost to innermost:
 
@@ -216,6 +218,45 @@ Path rules are checked when the pipeline is loaded, even for products with no re
 As in Bash, an unquoted `#` starts a comment only at the start of a word, so `--color=#fff` is one argument. A `#` that ends a word, as in `{output}# note`, stays part of the word; SPIT warns about it, since it reads like a comment. Put a space before `#` to start a comment, or quote the text to keep it.
 
 Place a source path beside its `source` line and a derived path beside its assignment. The default can stay near the top of the file.
+
+### Extensions
+
+A tool decides the format of the file it writes, so an operation can say which extension each output's file has, after its type. A multi-output operation gives one per port:
+
+```text
+operation align(moving: Image, reference: Image) -> Transform .mat
+operation fit(runs: many Data) -> (weights: Weights .npz, quality: Metrics .json) @ min(2)
+```
+
+An extension is a `.` and letters, digits, `-` or `_`, and may have several parts, as `.nii.gz` does. An untyped output may have one too: `-> .txt`.
+
+`ext:` sets the extension for operations that declare none, at the top level or in a stage, as `path:` sets the default path. Default path rules are then written without an extension:
+
+```text
+path: derivatives/{product}/{entities}
+ext: .img
+```
+
+A product's path is its rule, completed with an extension when the rule ends without one:
+
+1. Its own `path product:` rule takes the operation's extension, if the operation declares one. `ext:` never applies to it, and without an operation's extension the rule is used as written.
+2. A default rule, its stage's or the pipeline's, takes the operation's extension, else the nearest stage's `ext:`, else the pipeline's. A source whose files a default rule finds takes `ext:` too.
+
+A rule's extension is the text of its last file name after its final placeholder, from the first `.`, as `.nii.gz` in `sub-{sub}_T1w.nii.gz`. A rule that ends with the extension it would be given is left as it is, so a full BIDS-style path can keep it. A rule that ends with another is an error, since the tool writes a different file from the one the rule names:
+
+```text
+path `matrix` ends in `.txt`, but operation `align` writes `.mat`; drop the extension or use `.mat`
+```
+
+A default rule that ends with an extension while an operation or `ext:` gives its products another is the same error, said once for the rule.
+
+Extensions are optional. An operation whose tool picks the format from the output's name, such as a converter, declares none, and its path rule decides. A pipeline with no extensions and no `ext:` line resolves its paths as written.
+
+`spit check --path-rules` shows each product's path with its extension, and where the extension is declared:
+
+```text
+  matrix (output): default derivatives/{product}/{entities}.mat, `.mat` from operation `align`
+```
 
 Path rules also find sources. `spit inputs recipe.spitin --root data` lists each file under `data` whose path matches a source's rule, in the pipeline or the recipe, reading entity values from its placeholders. A rule matches a file's whole path, so `responses/{region}/wave{wave}.csv` does not match `wave3.csv.bak` or `wave3.csv.1`, and files that match no rule are left out. Links to files and directories are followed. A value is read only as SPIT writes it, so a file such as `in/%41.txt`, whose value SPIT would write `A`, is skipped with a warning rather than listed under a path no job would use.
 

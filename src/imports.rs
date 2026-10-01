@@ -238,11 +238,8 @@ fn import_source(
         name: qualified.to_owned(),
         ..source.clone()
     });
-    if let Some(path) = module
-        .product_paths
-        .get(name)
-        .or(module.path_template.as_ref())
-    {
+    // With the extension its own file's `ext:` gives it, if any.
+    if let Some(path) = module.path_template_for(name) {
         selected
             .product_paths
             .insert(qualified.to_owned(), path.with_product(name));

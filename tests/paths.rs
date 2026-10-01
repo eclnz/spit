@@ -20,7 +20,7 @@ fn path_coverage_exposes_default_fallbacks_and_strict_rejects_them() {
         entry.product == "vegetation" && matches!(entry.rule, PathRule::Default(_))
     }));
     assert!(coverage.entries.iter().any(|entry| {
-        entry.product == "photo_response" && matches!(entry.rule, PathRule::Explicit(_))
+        entry.product == "raw_photo" && matches!(entry.rule, PathRule::Explicit(_))
     }));
     coverage.validate(false).unwrap();
     assert!(coverage

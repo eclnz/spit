@@ -161,6 +161,27 @@ pub(super) fn comma_items(text: &str, number: usize) -> Result<Vec<&str>, ParseE
     Ok(items)
 }
 
+/// A file extension such as `.mat` or `.nii.gz`: one or more parts, each a
+/// `.` and letters, digits, `-` or `_`.
+pub(super) fn extension(text: &str, number: usize) -> Result<&str, ParseError> {
+    let valid = text.starts_with('.')
+        && text[1..].split('.').all(|part| {
+            !part.is_empty()
+                && part
+                    .chars()
+                    .all(|character| character.is_ascii_alphanumeric() || "-_".contains(character))
+        });
+    if valid {
+        Ok(text)
+    } else {
+        Err(ParseError::new(
+            number,
+            format!("`{text}` is not an extension; write one such as `.mat` or `.nii.gz`, with letters, digits, `-` or `_` after each `.`"),
+        )
+        .at_token(text))
+    }
+}
+
 pub(super) fn identifier<'a>(
     value: &'a str,
     number: usize,

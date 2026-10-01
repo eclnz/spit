@@ -24,7 +24,7 @@ use std::process::ExitCode;
 use spit::{
     bind_dag, bind_dag_with, diagnose_checked, diagnose_checked_with_inventory,
     diagnose_checked_with_records, diagnose_recipe, inspect_paths, parse_input_spec_at,
-    render_artifacts, render_bound_dag, render_dag, render_diagnostics_json,
+    render_artifacts, render_bound_dag, render_check_json, render_dag, render_diagnostics_json,
     render_source_inventory, resolve_artifacts_partial, stage_within, unused_sources_summary,
     validate_bound_source_files, validate_source_files, ArtifactReport, BoundDag, BoundPaths,
     Checked, Context, Diagnosis, Diagnostic, DiagnosticSource, FileNames, Gap, InputSource,
@@ -563,11 +563,12 @@ fn check(args: &CliArgs) -> Result<(), Box<dyn Error>> {
     }
     let diagnosis = diagnose_checked(&text, Context::at(path));
     if args.has(Flag::Json) {
-        let diagnostics = match &diagnosis {
-            Ok(checked) => &checked.warnings,
-            Err(all) => all,
+        // Paths are shown only for a pipeline that checks clean.
+        let json = match &diagnosis {
+            Ok(checked) => render_check_json(&checked.warnings, &text, &checked.paths),
+            Err(all) => render_diagnostics_json(all, &text, None),
         };
-        print!("{}", render_diagnostics_json(diagnostics, &text, None));
+        print!("{json}");
         return Ok(());
     }
     let checked = passed(

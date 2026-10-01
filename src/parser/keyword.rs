@@ -18,6 +18,8 @@ pub(crate) enum Keyword {
     Exclude,
     /// `path:` for a default, `path product:` for one product.
     Path,
+    /// `ext:`, the extension a default path is completed with.
+    Ext,
     Stage,
     /// `dimensions [...]`, the order every product's dimensions follow.
     Dimensions,
@@ -52,6 +54,10 @@ impl Keyword {
             if rest.starts_with([' ', ':']) {
                 return Some((Self::Path, rest));
             }
+        }
+        // A step may annotate an output named `ext`: `ext: Image = ...`.
+        if let Some(rest) = line.strip_prefix("ext:") {
+            return (!line.contains('=')).then_some((Self::Ext, rest));
         }
         let (word, rest) = line.split_once(' ')?;
         let (keyword, _) = WORDS.iter().find(|(_, name)| *name == word)?;
