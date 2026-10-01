@@ -1,5 +1,6 @@
 //! Paths bound to the artifacts of resolved jobs, and the files they name.
 
+use std::collections::BTreeMap;
 use std::fmt;
 use std::path::Path;
 
@@ -251,4 +252,40 @@ pub(crate) fn case_collisions(
     }
     collisions.sort_by(|[_, (left, _)], [_, (right, _)]| left.cmp(right));
     collisions
+}
+
+/// Each dimension value with a `-` that `{@labels}` writes into a path,
+/// as `01-a` in `sub-01-a`, which BIDS cannot read back: by dimension and
+/// value, with the first product whose path has it.
+pub(crate) fn dashed_labels(
+    pipeline: &Pipeline,
+    dag: &ResolvedDag,
+) -> Vec<(String, String, String)> {
+    let mut writes: FxHashMap<&str, bool> = FxHashMap::default();
+    let mut found: BTreeMap<(&str, &str), &str> = BTreeMap::new();
+    for id in dag.artifacts.ids() {
+        if dag.source_path(id).is_some() {
+            continue;
+        }
+        let artifact = dag.artifact(id);
+        let labelled = *writes.entry(artifact.product).or_insert_with(|| {
+            pipeline
+                .path_rule_for(artifact.product)
+                .is_some_and(|rule| rule.writes_labels(pipeline.holder(artifact.product)))
+        });
+        if !labelled {
+            continue;
+        }
+        for (dimension, value) in artifact.entities.iter() {
+            if value.contains('-') {
+                found.entry((dimension, value)).or_insert(artifact.product);
+            }
+        }
+    }
+    found
+        .into_iter()
+        .map(|((dimension, value), product)| {
+            (product.to_owned(), dimension.to_owned(), value.to_owned())
+        })
+        .collect()
 }
