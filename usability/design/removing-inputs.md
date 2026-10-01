@@ -1,16 +1,16 @@
 # Design: removing inputs
 
-This design replaces `skip` with two rules and a flag, and records every removal. It resolves [F1](../FINDINGS.md#f1-exclude-individual-artifacts-in-a-recipe), [B1](../FINDINGS.md#b1-a-skip-value-clause-reads-as-exclude-but-keeps-only-matching-groups) and [F2](../FINDINGS.md#f2-record-skipped-and-excluded-groups-with-their-reason), which are one problem: `skip` was never scoped. There is no need to keep existing recipes working.
+This design replaces `skip` with two rules and a flag, and records every removal. It resolves [F1](../rounds/1/README.md#f1-exclude-individual-artifacts-in-a-recipe), [B1](../rounds/1/README.md#b1-a-skip-value-clause-reads-as-exclude-but-keeps-only-matching-groups) and [F2](../rounds/1/README.md#f2-record-skipped-and-excluded-groups-with-their-reason), which are one problem: `skip` was never scoped. There is no need to keep existing recipes working.
 
 ## Why `skip` has to go
 
 A `skip` rule is a `require` rule with its action flipped: the same `CoverageRule`, the same grammar, and the same group logic (`src/model.rs`, `src/inputs/coverage.rs`). Everything the study hit follows from that:
 
-- **It reads backwards.** The clause states what a group must have to be *kept*, but the verb says remove. So `skip bold run=3 per [sub, ses]` removes every session that *lacks* run 3 ([B1](../FINDINGS.md#b1-a-skip-value-clause-reads-as-exclude-but-keeps-only-matching-groups)).
-- **It can only remove a group that fails a count or presence test.** A value clause may not name a grouping dimension, so no named group and no single artifact can be removed ([F1](../FINDINGS.md#f1-exclude-individual-artifacts-in-a-recipe)).
+- **It reads backwards.** The clause states what a group must have to be *kept*, but the verb says remove. So `skip bold run=3 per [sub, ses]` removes every session that *lacks* run 3 ([B1](../rounds/1/README.md#b1-a-skip-value-clause-reads-as-exclude-but-keeps-only-matching-groups)).
+- **It can only remove a group that fails a count or presence test.** A value clause may not name a grouping dimension, so no named group and no single artifact can be removed ([F1](../rounds/1/README.md#f1-exclude-individual-artifacts-in-a-recipe)).
 - **Its result depends on rule order.** Rules apply one after another, each changing the inventory the next sees, and during discovery they run in two passes.
 - **Its groups depend on the target.** A rule on a discovery groups only that discovery's contexts; a rule on a product groups every binding in the inventory.
-- **Its removals are recorded nowhere** but stderr warnings ([F2](../FINDINGS.md#f2-record-skipped-and-excluded-groups-with-their-reason)).
+- **Its removals are recorded nowhere** but stderr warnings ([F2](../rounds/1/README.md#f2-record-skipped-and-excluded-groups-with-their-reason)).
 - **It can make a `require` pass vacuously.** When `skip` removes every group, a following `require … count>=1` checks nothing and passes (`tests/cli.rs`).
 
 The study showed four separate intents behind "leave this out", and `skip` fitted only the first:
@@ -116,12 +116,12 @@ The grammars of `drop` (group first) and `require` (target first) now differ. Al
 5. **Require.** Check every `require` against what is left.
 6. **Record.** Write the inventory and what was removed.
 
-This replaces today's two passes of `skip` in `src/inputs/discover.rs`. It also gives [F7](../FINDINGS.md#f7-a-stray-file-outside-discovered-contexts-should-not-stop-inputs) a way out: a stray file outside every discovered context is an error only after step 2, so `exclude pricing[store=S07]` can name it.
+This replaces today's two passes of `skip` in `src/inputs/discover.rs`. It also gives [F7](../rounds/1/README.md#f7-a-stray-file-outside-discovered-contexts-should-not-stop-inputs) a way out: a stray file outside every discovered context is an error only after step 2, so `exclude pricing[store=S07]` can name it.
 
 ### What removal removes
 
 - **A group:** removing a group removes every artifact and discovered context whose identity lies in it, across products.
-- **Coarser artifacts:** an artifact without all the group's dimensions stays, such as a subject's reference when only its sessions are dropped. If no job then uses it, it is reported as an unused source ([F3](../FINDINGS.md#f3-flag-unused-source-artifacts-and-near-miss-values)).
+- **Coarser artifacts:** an artifact without all the group's dimensions stays, such as a subject's reference when only its sessions are dropped. If no job then uses it, it is reported as an unused source ([F3](../rounds/1/README.md#f3-flag-unused-source-artifacts-and-near-miss-values)).
 - **A joined input:** excluding an input that another input is joined to makes the dependent jobs incomplete, not absent. For example, excluding `t1w[sub=02,ses=02]` leaves that session's runs driving `coreg` with nothing to join. `dag` then fails by default, and its error names the exclusion:
 
 ```text
@@ -158,7 +158,7 @@ removed:
 
 ## `dag --partial`
 
-`dag` keeps failing at a job it cannot complete. Its error now ends by pointing at the next step ([F5](../FINDINGS.md#f5-point-a-failed-dag-at-spit-artifacts)):
+`dag` keeps failing at a job it cannot complete. Its error now ends by pointing at the next step ([F5](../rounds/1/README.md#f5-point-a-failed-dag-at-spit-artifacts)):
 
 ```text
 error: pipeline.spit: line 18, column 26: no `pricing` artifact for input `prices` of `price` at [store=s07,week=2026-W36]
@@ -197,7 +197,7 @@ error: pipeline.spit: line 18, column 26: no `pricing` artifact for input `price
 
 - In `src/parser/keyword.rs`, replace `skip` with `drop` and `exclude`.
 - In `src/parser/declarations.rs` and `src/parser/flow.rs`, parse the new forms and `exclude from`.
-- An unknown statement at the start of a line gets its own error, listing the statements a recipe accepts ([B2](../FINDINGS.md#b2-an-unknown-recipe-statement-is-reported-as-a-bracket-error)).
+- An unknown statement at the start of a line gets its own error, listing the statements a recipe accepts ([B2](../rounds/1/README.md#b2-an-unknown-recipe-statement-is-reported-as-a-bracket-error)).
 - The `.spitout` parser (`src/parser/inventory.rs`) reads and keeps a `removed:` section.
 
 **Input stage.**
@@ -225,7 +225,7 @@ error: pipeline.spit: line 18, column 26: no `pricing` artifact for input `price
 **Guide.**
 
 - Rewrite the Recipes section of `docs/language-reference.md` around the four intents, and update the README and `docs/architecture.md`.
-- Document [D8](../FINDINGS.md#guide-gaps) as part of this: how groups are formed, and how a group with none of the target counts.
+- Document [D8](../rounds/1/README.md#guide-gaps) as part of this: how groups are formed, and how a group with none of the target counts.
 
 **Acceptance.**
 

@@ -1,6 +1,6 @@
 # Design: messages that point at the cause
 
-This plan resolves [B3](../FINDINGS.md#b3-errors-from-a-recipe-run-do-not-name-the-pipeline-file), [B5](../FINDINGS.md#b5-found-and-verified-counts-disagree-without-explanation) and [F3](../FINDINGS.md#f3-flag-unused-source-artifacts-and-near-miss-values). It also records where [B2](../FINDINGS.md#b2-an-unknown-recipe-statement-is-reported-as-a-bracket-error), [F5](../FINDINGS.md#f5-point-a-failed-dag-at-spit-artifacts) and [F8](../FINDINGS.md#f8-say-why-a-value-clause-on-a-grouping-dimension-is-rejected) are handled, since the [removing inputs](removing-inputs.md) design changes the code they touch.
+This plan resolves [B3](../rounds/1/README.md#b3-errors-from-a-recipe-run-do-not-name-the-pipeline-file), [B5](../rounds/1/README.md#b5-found-and-verified-counts-disagree-without-explanation) and [F3](../rounds/1/README.md#f3-flag-unused-source-artifacts-and-near-miss-values). It also records where [B2](../rounds/1/README.md#b2-an-unknown-recipe-statement-is-reported-as-a-bracket-error), [F5](../rounds/1/README.md#f5-point-a-failed-dag-at-spit-artifacts) and [F8](../rounds/1/README.md#f8-say-why-a-value-clause-on-a-grouping-dimension-is-rejected) are handled, since the [removing inputs](removing-inputs.md) design changes the code they touch.
 
 ## B3: name the file a message is about
 

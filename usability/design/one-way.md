@@ -1,6 +1,6 @@
 # Design: one way to write each thing
 
-The [second study](../ROUND2.md) produced 18 correct plans, but no two participants wrote the same pipeline. They differed on these points:
+The [second study](../rounds/2/README.md) produced 18 correct plans, but no two participants wrote the same pipeline. They differed on these points:
 
 - whether to use types;
 - which input drives a sweep;

@@ -1,6 +1,6 @@
 # Actions from the second usability study
 
-This plan follows the [second study](../ROUND2.md). All 18 plans matched their keys, so the goal is to shorten the detours participants reported and make the next study able to test the documentation fairly. Keep domain walkthroughs in [`docs/examples.md`](../../docs/examples.md); keep [`docs/language-reference.md`](../../docs/language-reference.md) focused on language rules and short syntax examples. Named arguments remain out of scope: calls keep positional inputs, with each slot checked against its operation port.
+This plan follows the [second study](../rounds/2/README.md). All 18 plans matched their keys, so the goal is to shorten the detours participants reported and make the next study able to test the documentation fairly. Keep domain walkthroughs in [`docs/examples.md`](../../docs/examples.md); keep [`docs/language-reference.md`](../../docs/language-reference.md) focused on language rules and short syntax examples. Named arguments remain out of scope: calls keep positional inputs, with each slot checked against its operation port.
 
 Work through these items in order. Each implementation step gets its own commit and the checks required by the [roadmap](README.md#checks-before-every-commit). Record any change to an answer key and its reason.
 
@@ -48,6 +48,6 @@ Work through these items in order. Each implementation step gets its own commit 
 
 After items 1–4, rerun `s3-sweep`, `s3-one-board`, `s4-vague`, and `s6-diagnose` in isolated trials; include the cohort follow-up to check the complete recipe example. Use the same model and tasks for replicates. Retain command counts, failed calls, artifacts, reports, and participant tool transcripts so guide use and sandbox access can be audited. Compare the specific detours above, not only whether the answer keys pass. Use those results to decide item 5 before adding a broader CLI view.
 
-The [pre-Phase-5 pilot](../PILOT-PRE-PHASE5.md) and its [inspection ideas](pre-phase5-inspection.md) gave provisional evidence. The pilot host did not provide participant tool transcripts, so its access audit remains unverified.
+The [pre-Phase-5 pilot](../rounds/2-pilot/README.md) and its [inspection ideas](pre-phase5-inspection.md) gave provisional evidence. The pilot host did not provide participant tool transcripts, so its access audit remains unverified.
 
-The [post-Phase-5 study](../ROUND3.md) confirms the selected plans and the [inspection work](round3-inspection.md). Its participant tool transcripts were also unavailable; the study report states the resulting audit limit.
+The [post-Phase-5 study](../rounds/3/README.md) confirms the selected plans and the [inspection work](round3-inspection.md). Its participant tool transcripts were also unavailable; the study report states the resulting audit limit.

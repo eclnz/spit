@@ -1,6 +1,6 @@
 # Design: showing each job's command line
 
-This plan resolves [F4](../FINDINGS.md#f4-show-each-jobs-command-line).
+This plan resolves [F4](../rounds/1/README.md#f4-show-each-jobs-command-line).
 
 ## The problem
 

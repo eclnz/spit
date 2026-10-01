@@ -1,6 +1,0 @@
-pipeline pipeline.spit
-
-exclude [store=s03] # Only one sales week; report needs at least two.
-exclude [store=s07] # Pricing file has store=S07 instead of store=s07.
-exclude pricing[store=S07] # Mis-cased pricing artifact for s07.
-exclude [store=s09] # No pricing file for this store.
