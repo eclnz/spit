@@ -69,18 +69,9 @@ So a leaderboard over every model and every config needs two steps, and scenario
 
 ### Named arguments in a call
 
-**Today.** Call arguments follow port order, although the driving input may be any port. One agent put the driving input first and got a type mismatch at another port.
+**Current behavior.** Call arguments follow port order, although the driving input may be any port. One agent put the driving input first and got a type mismatch at another port.
 
-**Change.** Allow arguments to be named by port, in any order, after any positional ones, as in Python:
-
-```text
-weights = train(seed: seedfile, model: model @ each(model), config: config)
-```
-
-- A name that is not a port, a port given twice, or a positional argument after a named one is an error at the argument.
-- The call parser (`src/parser/operation.rs` and `src/parser/flow.rs`) reorders named arguments into port order, so nothing after the parser changes.
-
-**Priority.** P3. It removes one kind of mistake, but the type mismatch error already names the port and product. Do it after everything else here.
+**Decision.** Keep positional input order. Each argument is checked against its operation port's type, and a mismatch names that port and product. Named calls would weaken the visible order contract and add syntax for a low-priority mistake.
 
 ### Where an `each` dimension goes
 

@@ -13,10 +13,10 @@ The plans that answer the [usability findings](../FINDINGS.md), and the order to
 
 ## Status
 
-- **Done:** steps 1–15. Phase 1, Phase 2, and Phase 3 are complete; the worked examples are in place.
-- **Next:** optional named arguments (step 16), then the second study round.
+- **Done:** steps 1–15 and 17. Phase 1, Phase 2, and Phase 3 are complete; the worked examples and extension update are in place. Step 16 was declined.
+- **Next:** the second study round.
 - **Resolved so far:** B1–B7, F1–F10, D1–D11.
-- **Still open:**
+- **Still open:** the second study round.
 
 ## Order
 
@@ -129,7 +129,7 @@ One design built in three steps, each leaving the tool working. See [removing in
     - Each is an `examples/<group>/<name>/` folder with a `.spit`, `.spitin` and `.spitout`. `tests/examples.rs` checks every pipeline under `examples/`.
     - The study's answer keys are working starting points, but keep the harness's own copies unchanged.
     - Also give the existing examples' recipes data, or a note: `command_demo.spitin` finds no files beside it, and since step 8 `dag` on it fails, correctly, with "has no groups to check".
-16. **F10:** named arguments in a call (optional).
+16. **Named arguments in a call:** declined. Keep positional input order and type checking against each operation port; see [language](language.md#named-arguments-in-a-call).
 17. **The VS Code extension** ([spit-vscode](https://github.com/eclnz/spit-vscode)): highlight `drop`, `exclude`, `where`, `has`, `missing` and `from`; drop `skip`. Add a `file` field to `check --json` diagnostics, so the editor can place a pipeline's error found while checking a recipe ([diagnostics](diagnostics.md#b3-name-the-file-a-message-is-about)).
     Done: the grammar and semantic tokens cover the current rules, `skip` is no longer a keyword, and pipeline errors found from a recipe carry a `file` and are placed on that file in the extension.
     - **More urgent than its place suggests.** Since step 8, a recipe with `skip` is an error, and the extension still highlights `skip` as valid.
