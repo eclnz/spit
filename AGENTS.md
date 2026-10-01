@@ -29,4 +29,34 @@ git show <commit>^:<path>                                        # the plan as i
 - Tools that are still used, such as `usability/harness` and `profiling/`.
 - Records of what happened, such as the usability study's round reports and their results archives under `usability/rounds/`.
 
-**Links.** Permanent files (code, docs, tests and other notes) don't link to a plan, because the link breaks when the plan goes. Cite the commit that deleted the plan instead.
+**Links.** Permanent files (code, docs, tests and other notes) don't link to a plan, because the link breaks when the plan goes. Name the plan's path as plain text instead, which `git log -- <path>` finds, or cite the commit that deleted it.
+
+## Checks before every commit
+
+```sh
+cargo fmt
+cargo build --release
+cargo test --release -q --no-fail-fast        # plain `cargo test` stops at the first failing test binary
+cargo clippy --release --all-targets -q
+usability/harness/rebuild_keys.sh             # expect `ok` for every answer key
+```
+
+- **Messie.** CI also checks the repository's folders with Messie:
+
+  ```sh
+  python3 -m venv /tmp/messie-venv
+  /tmp/messie-venv/bin/pip install -q -r .github/messie-requirements.txt
+  /tmp/messie-venv/bin/messie .
+  ```
+
+- **Stored outputs.** They are under `tests/fixtures/outputs/`. Re-save them with `SPIT_BLESS=1 cargo test --release --test outputs`, then read `git diff tests/fixtures` before committing.
+- **Links.** A changed Markdown file's links and anchors should resolve. GitHub's anchor for `## \`dag --partial\`` is `#dag---partial`.
+- **Speed.** For a change that claims a speed-up, give `profiling/bench.py`'s numbers before and after, and check that output is byte-for-byte the same.
+
+## Conventions
+
+- **Commit messages.** The title is a plain sentence, such as "Replace skip with drop, which names the groups it removes". Then prose saying what was wrong and what changed, then the co-author and session trailers.
+- **No model names** in files pushed to the repository.
+- **Guide updates travel with behaviour.** Each commit updates the README, `docs/language-reference.md`, `docs/spitdag.md` or `docs/architecture.md` for what it changes.
+- **Verify before documenting.** Check every claim in the guide against the binary.
+- **New recipe rule keywords** go in `split_rules` in `tests/support/mod.rs` as well, which separates a test's recipe rules from its pipeline by keyword.
