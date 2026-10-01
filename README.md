@@ -61,7 +61,7 @@ SPIT has no backend yet: nothing in this repository runs a `.spitdag`.
 ## CLI commands and options
 
 ```text
-spit check <pipeline.spit | recipe.spitin> [--path-rules] [--strict-paths] [--json] [--stdin]
+spit check <pipeline.spit | recipe.spitin> [--path-rules] [--strict-paths] [--json] [--stdin] [--hovers]
 spit inputs <recipe.spitin> [--root <directory>] [-o <file>]
 spit dag <recipe.spitin> [--root <directory>] [--strict-paths] [--paths | --json | -o <file>]
 spit dag <pipeline.spit> <inputs.spitout | -> [--strict-paths] [--paths | --json | -o <file>]
@@ -87,8 +87,11 @@ Files come first; options follow them. `spit help` lists the commands, and `spit
 | `--strict-paths` | With `check` and `dag`, require an explicit `path product:` rule for every product, even if a default `path:` rule exists. Source rules settled from a recipe count when building a DAG. |
 | `--json` | With `dag`, print the `.spitdag`. With `check`, print diagnostics as JSON for editor use and stop, succeeding whatever they report. Each diagnostic has a `severity` of `error` or `warning`; those tied to a declaration, call, rule, command, or path include its `line`, and a `column` and `end_column` for the text it is about, such as one input of a call or one `{placeholder}`. Columns are 1-based and count UTF-16 code units, as editors do; `end_column` is one past the last character. |
 | `--stdin` | With `check`, read the file's text from standard input, such as an editor's unsaved buffer. The file's path is still used to resolve `use` imports and a recipe's `pipeline` line. |
+| `--hovers` | With `check --json` on a `.spit` pipeline, include compiler-backed operation and product explanations in a `hovers` array alongside `diagnostics`. Reads no dataset. |
 
 Pass `-` in place of the `.spitout` to read it from standard input.
+
+Editor hovers include signatures, inferred product types and dimensions, call-local generic bindings, producer/consumer relationships, commands, stages, and effective path templates with their provenance. Each hover names its `kind` and `name`, gives a plain-text `signature` and `details` array, and uses the same 1-based UTF-16 `line`, `column`, and exclusive `end_column` convention as diagnostics. Broken lines are recovered so unrelated symbols remain available; steps that fail checking do not claim specialised types. `--hovers` requires `--json` and is supported for pipelines only.
 
 ### Errors and warnings
 

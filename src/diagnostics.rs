@@ -221,6 +221,20 @@ pub fn render_diagnostics_json(
     text: &str,
     source_text: Option<&str>,
 ) -> String {
+    format!(
+        "{}\n",
+        Json::object([(
+            "diagnostics",
+            diagnostics_json(diagnostics, text, source_text)
+        )])
+    )
+}
+
+pub(crate) fn diagnostics_json<'a>(
+    diagnostics: &'a [Diagnostic],
+    text: &str,
+    source_text: Option<&str>,
+) -> Json<'a> {
     let items = diagnostics.iter().map(|diagnostic| {
         let columns = diagnostic.utf16_columns(text, source_text);
         Json::object([
@@ -238,7 +252,7 @@ pub fn render_diagnostics_json(
             ("message", Json::string(&diagnostic.message)),
         ])
     });
-    format!("{}\n", Json::object([("diagnostics", Json::array(items))]))
+    Json::array(items)
 }
 
 /// Where a pipeline is, and what applies to it, when diagnosing it.
@@ -1157,6 +1171,19 @@ fn recover_parse_errors<T>(
     text: &str,
     parse: impl Fn(&str) -> Result<T, ParseError>,
 ) -> Result<T, Vec<ParseError>> {
+    let (parsed, errors) = recover_document(text, parse);
+    match parsed {
+        Some(parsed) if errors.is_empty() => Ok(parsed),
+        _ => Err(errors),
+    }
+}
+
+/// Keep the independently parseable declarations for editor information,
+/// while retaining every error for callers that require a valid document.
+pub(crate) fn recover_document<T>(
+    text: &str,
+    parse: impl Fn(&str) -> Result<T, ParseError>,
+) -> (Option<T>, Vec<ParseError>) {
     let original_lines: Vec<String> = text.lines().map(str::to_owned).collect();
     let mut recovered = original_lines.join("\n");
     let mut offset = 0;
@@ -1171,8 +1198,7 @@ fn recover_parse_errors<T>(
     let mut errors = Vec::new();
     loop {
         match parse(&recovered) {
-            Ok(parsed) if errors.is_empty() => return Ok(parsed),
-            Ok(_) => return Err(errors),
+            Ok(parsed) => return (Some(parsed), errors),
             Err(error) => {
                 let Some(range) = error
                     .line()
@@ -1181,7 +1207,7 @@ fn recover_parse_errors<T>(
                     .filter(|range| !recovered[(*range).clone()].trim().is_empty())
                 else {
                     errors.push(error);
-                    return Err(errors);
+                    return (None, errors);
                 };
                 recovered.replace_range(range.clone(), &" ".repeat(range.len()));
                 // Misplaced records are one error, however many lines.
