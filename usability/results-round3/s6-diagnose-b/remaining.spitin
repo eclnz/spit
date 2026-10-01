@@ -1,0 +1,6 @@
+pipeline data/pipeline.spit
+
+exclude [store=s03]  # one sales week; store_report requires two
+exclude [store=s07]  # pricing file uses uppercase S07, so it does not join with sales store s07
+exclude [store=S07]  # orphan pricing artifact for the excluded s07 store
+exclude [store=s09]  # no pricing file

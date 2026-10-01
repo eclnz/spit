@@ -1,0 +1,6 @@
+pipeline analysis.spit
+
+discover sessions: [sub, ses] from dirs sub-{sub}/ses-{ses}
+drop [sub] where sessions count<2
+path bold: sub-{sub}/ses-{ses}/func/sub-{sub}_ses-{ses}_task-rest_run-{run}_bold.nii.gz
+path t1w: sub-{sub}/ses-{ses}/anat/sub-{sub}_ses-{ses}_T1w.nii.gz

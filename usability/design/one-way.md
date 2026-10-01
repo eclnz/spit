@@ -16,8 +16,8 @@ Every variant passed, so the language does not yet decide these things. The lang
 | --- | --- | --- | --- |
 | 1 | Which dimension an aggregate collapses: the operation's `@ drop` or the call's `@ vary`? | The call, with `@ vary`. Operations lose `@ drop`. | Now |
 | 2 | Where a product's dimension order comes from | One order for the whole pipeline. | Now |
-| 3 | What belongs in the pipeline and what in the recipe | The pipeline says how to compute; the recipe says which data. | After round 3 |
-| 4 | What types are for | To make a swapped or wrong connection fail. | After round 3 |
+| 3 | What belongs in the pipeline and what in the recipe | Keep the current split; test a revision-change task before adding recipe selection. | Decided after round 3 |
+| 4 | What types are for | Keep optional types and positional checks; teach distinct role types that catch a wrong connection. | Decided after round 3 |
 | 5 | Syntax doubles | Keep one form of each. | Now |
 
 ## 1. The call says which dimensions are collected
@@ -120,7 +120,7 @@ This is a principle to test, not a change to make yet. Three features blur it to
   The guide should say so with `s2-cohort-b`'s duplication as the example.
 - **Source path rules** may be in either file. The reference already says which to choose. No change.
 
-Decide after round 3, with decisions 1, 2 and 5 in place.
+**Round 3 decision:** keep the current boundary. Both vague-sensor participants put `where(revision=3)` in the pipeline and completed the task, but neither had to change the approved revision for a new dataset. That observation does not justify a new recipe `select` rule yet. Test a revision-change request before designing one. Keep `@ min` as an operation requirement and `drop` as a dataset cohort rule; the cohort follow-ups used recipe exclusion without changing aggregation syntax.
 
 ## 4. Types catch wrong connections (after round 3)
 
@@ -137,7 +137,7 @@ Round 2 used four styles, and none stopped a wrong connection:
 - whether participants who see that idiom in the examples follow it;
 - whether one-type-per-product disappears when the examples stop using it.
 
-If types remain decoration, consider whether they should stay in the language.
+**Round 3 decision:** keep optional types and positional type checks. One vague-sensor pipeline used distinct role types, while the other was untyped. One cohort pipeline used `Image` for both BOLD and T1w, which would not reject a swap, and the other left input ports untyped. The successful plans do not establish protection from wrong connections. Add an example with distinct input types and a failed swapped call, then test whether participants adopt that idiom. Do not remove type checking on the strength of these passing plans.
 
 ## 5. One form for each syntax double
 
