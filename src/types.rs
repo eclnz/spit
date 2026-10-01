@@ -383,7 +383,7 @@ impl Parser<'_> {
         if !explicit_variable && !name.starts_with(|c: char| c.is_ascii_uppercase()) {
             return Err(TypeParseError::new(
                 token,
-                format!("type `{name}` must start with a capital letter"),
+                format!("type `{name}` must start with a capital letter; use a capitalized type after `:` and pass the lowercase product in the operation call"),
             ));
         }
         if explicit_variable {

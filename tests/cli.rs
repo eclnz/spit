@@ -171,7 +171,7 @@ fn each_option_applies_to_its_commands() {
     assert!(stderr(&conflict).starts_with("error: --json cannot be used with -o\n"));
     // The command lines are a text view; the .spitdag already holds them.
     let commands = spit(&["dag", "a.spit", "b.spitout", "--commands", "-o", "x"]);
-    assert!(stderr(&commands).starts_with("error: --commands cannot be used with -o\n"));
+    assert!(stderr(&commands).starts_with("error: --commands cannot be used with -o; run dag with --commands to inspect command lines, or with -o <file> to save a .spitdag\n"));
     let commands = spit(&["artifacts", "a.spit", "b.spitout", "--commands"]);
     assert!(stderr(&commands).starts_with("error: --commands applies to dag\n"));
     let extra = spit(&["check", "a.spit", "b.spitout"]);
