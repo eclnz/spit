@@ -115,7 +115,7 @@ A `verify` command checks a job's inputs before its command runs, using the tool
 verify register: check_same_grid {moving} {reference}
 ```
 
-`spit dag --commands` shows each job's `verify` lines above the command they guard, with their paths filled in.
+A `verify` command may use any input port, including a `many` one, which is filled in as in the command: `verify fit: validate_panel {waves}` checks every wave a fit job reads. `spit dag --commands` shows each job's `verify` lines above the command they guard, with their paths filled in.
 
 A tool that takes a folder and a name instead of a path, and adds the extension itself, is given an output's folder with `{image.dir}`, and its file name without its extension with `{image.stem}`. Either counts as using the output. `.stem` needs the output to declare its [extension](#extensions), so that SPIT knows where the name ends:
 
@@ -138,7 +138,7 @@ command process: process_tool {image} {output}
 
 ## Stages
 
-A stage groups the steps of one phase of a pipeline, such as preprocessing or analysis. Write `stage name:` at the start of a line and indent the stage's lines beneath it; the next line that is not indented ends the stage. From the [stages example](../examples/stages/stages.spit):
+A stage groups the steps of one phase of a pipeline, such as preprocessing or analysis. Write `stage name:` at the start of a line and indent the stage's lines beneath it; the next line that is not indented ends the stage. A stage is one block: a stage name may not be opened twice, so a step that belongs to it goes inside that block, and steps may use products from a later stage. From the [stages example](../examples/stages/stages.spit):
 
 ```text
 path: {@stage}/{@product}/{@entities}.txt

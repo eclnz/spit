@@ -188,7 +188,7 @@ fn stage_syntax_errors() {
         ),
         (
             "stage prep:\n    stage inner:\n    stage inner:\n",
-            (Some(3), "duplicate stage `prep/inner`"),
+            (Some(3), "duplicate stage `prep/inner`: it is already opened on line 2; a stage is one block, so move these lines into it"),
         ),
         (
             "stage prep\n",
@@ -199,7 +199,7 @@ fn stage_syntax_errors() {
         ),
         (
             "stage prep:\nstage prep:\n",
-            (Some(2), "duplicate stage `prep`"),
+            (Some(2), "duplicate stage `prep`: it is already opened on line 1; a stage is one block, so move these lines into it"),
         ),
         (
             "stage prep:\n    path: a/{@product}/{@entities}\n    path: b/{@product}/{@entities}\n",

@@ -1,0 +1,3 @@
+pipeline cohort.spit
+discover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}
+drop [sub] where sessions count<2

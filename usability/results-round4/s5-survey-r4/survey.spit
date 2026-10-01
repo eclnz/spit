@@ -1,0 +1,26 @@
+dimensions [region, wave]
+
+source response : Raw [region, wave]
+path response: data/responses/{region}/wave{wave}.csv
+
+operation clean(raw: Raw) -> Clean .csv
+command clean: clean_responses {raw} {output}
+cleaned = clean(response)
+path cleaned: build/ingest/clean/{region}/wave{wave}.csv
+
+operation fit(waves: many Clean) -> (coef: Coef .json, diag: Diag .txt)
+verify fit: validate_panel {waves}
+command fit: fit_panel --coef {coef} --diag {diag} {waves}
+coefs, diags = fit(cleaned @ vary(wave))
+path coefs: build/model/coef/{region}.json
+path diags: build/model/diag/{region}.txt
+
+operation plot(coef: Coef) -> Chart .svg
+command plot: plot_region {coef} {output}
+chart = plot(coefs)
+path chart: build/publish/chart/{region}.svg
+
+operation national(coefs: many Coef) -> Table .csv
+command national: national_table --out {output} {coefs}
+nat = national(coefs @ vary(region))
+path nat: build/publish/national.csv

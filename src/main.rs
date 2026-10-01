@@ -738,7 +738,10 @@ fn settle(
     if let Some(root) = &resolved.root {
         let count = resolved.unmatched_files.len();
         if count > 0 {
-            eprintln!("note: {count} files under `{}` match no source rule; `spit inputs {} --unmatched` lists them", root.display(), file);
+            // An example says what kind of file is left out, which is
+            // usually enough to see that leaving it out is right.
+            let example = &resolved.unmatched_files[0];
+            eprintln!("note: {count} files under `{}` match no source rule and are not read, such as `{example}`; `spit inputs {} --unmatched` lists them", root.display(), file);
         }
     }
     let pipeline = &loaded.checked.pipeline;
