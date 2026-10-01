@@ -34,7 +34,8 @@ for S in "$HARNESS"/scenarios/*/; do
   if [ -d "$S/key-followup" ]; then
     W=$TMP/$name-followup
     cp -r "$S/data" "$W"; cp -r "$S/addition/." "$W/"
-    "$BIN" dag "$S/key-followup/pipeline.spit" "$S/key-followup/inputs.spitout" --root "$W" -o "$TMP/$name-followup.spitdag" 2>/dev/null
+    cp "$S/key-followup/pipeline.spit" "$S/key-followup/dataset.spitin" "$W/"
+    "$BIN" dag "$W/dataset.spitin" --root "$W" -o "$TMP/$name-followup.spitdag" 2>/dev/null
     check "$name follow-up" "$S/key-followup/expected.spitdag" "$TMP/$name-followup.spitdag"
   fi
 done
