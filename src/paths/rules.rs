@@ -20,6 +20,12 @@ pub enum PathRule {
         template: String,
     },
     Default(String),
+    /// An output its tool writes beside another's file, whose path follows
+    /// that file's.
+    Beside {
+        sibling: String,
+        template: String,
+    },
     /// A source with no rule whose inventory records each give its file.
     Inventory,
     Missing,
@@ -33,7 +39,12 @@ impl PathRule {
             return Self::Missing;
         };
         let template = template.to_string();
-        if pipeline.product_paths.contains_key(product) {
+        if let Some((sibling, _, _)) = pipeline.beside(product) {
+            Self::Beside {
+                sibling: sibling.to_owned(),
+                template,
+            }
+        } else if pipeline.product_paths.contains_key(product) {
             Self::Explicit(template)
         } else if let Some((stage, _)) = pipeline.stage_path_rule(product) {
             Self::Stage {
@@ -136,6 +147,9 @@ impl fmt::Display for PathCoverage {
                     write!(f, "stage {stage} default {template}")?;
                 }
                 PathRule::Default(template) => write!(f, "default {template}")?,
+                PathRule::Beside { sibling, template } => {
+                    write!(f, "beside {sibling} {template}")?;
+                }
                 PathRule::Inventory => write!(f, "from the inventory")?,
                 PathRule::Missing if entry.source => {
                     write!(f, "no rule (a recipe may supply one)")?
@@ -195,6 +209,17 @@ pub(crate) fn collect_paths(
         let rule = PathRule::for_product(pipeline, &product.name);
         if rule != PathRule::Missing && !skip.contains(&product.name) {
             let line = lines.path_rule(pipeline, &product.name);
+            if let Some((sibling, _, _)) = pipeline.beside(&product.name) {
+                if pipeline.product_paths.contains_key(&product.name) {
+                    errors.push(
+                        error(format!(
+                            "`{}` is written beside `{sibling}`, so its path follows `{sibling}`'s; remove its path rule",
+                            product.name
+                        ))
+                        .at(lines.paths.get(&product.name).cloned()),
+                    );
+                }
+            }
             if let Some(problem) = extension_disagreement(pipeline, &product.name) {
                 if disagreements.insert(problem.clone()) {
                     errors.push(error(problem).at(line.clone()));

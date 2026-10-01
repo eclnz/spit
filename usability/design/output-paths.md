@@ -1,6 +1,6 @@
 # Design: dataset root, output extensions and sidecars
 
-Status: steps 1 to 3, the recipe's `root` line, extensions on operation outputs and source groups, are done. Steps 4 and 5 are proposals.
+Status: steps 1 to 4, the recipe's `root` line, extensions on operation outputs, source groups and `beside` outputs, are done. Step 5 is a proposal.
 
 ## Problem
 
@@ -211,6 +211,14 @@ A `beside` output:
 
 The `.spitdag` is unchanged: a job's `outputs` already lists every output, whether or not its command mentions it.
 
+**Built.** As above, with these details settled while building it:
+
+- `{product}` in the sibling's path stays the sibling's name, since the file is written beside the sibling's: with `path: out/{product}/{entities}`, `meta` beside `image` is `out/image/sub=01.json`, not `out/meta/...`.
+- A `beside` output's own extension is its suffix from the first `.`, so `"_mask.nii.gz"` gives `.nii.gz`, for [`{x.stem}`](#5-directory-and-stem-placeholders).
+- `-> Json .json beside image` on an operation with one output is an error: `beside` names another output.
+- `check --path-rules` reports it as `beside image`, and the editor shows its path like any other.
+- Tests are in `tests/beside.rs`.
+
 ## 5. Directory and stem placeholders
 
 Some tools take an output folder and a name rather than a path. `dcm2niix` takes `-o folder -f name` and adds `.nii.gz` and `.json` itself. Two placeholders cover this:
@@ -246,5 +254,5 @@ command convert: dcm2niix -z y -b y -o {image.dir} -f {image.stem} {dicom}
 1. The recipe's `root` line, the root recorded in the `.spitout`, the scan leaving out SPIT's own files, and the guide's layout example. Done.
 2. Extensions on output ports, `ext:`, resolution and the agreement error. Return resolved templates from `spit check` and show them in the editor. Convert `field_survey.spit` and `mrtrix3_act.spit`. Done.
 3. `sidecars` groups and the incomplete-group report in discovery. Done.
-4. `beside` outputs.
+4. `beside` outputs. Done.
 5. `{x.dir}` and `{x.stem}`, with the `.spitdag` version bump.

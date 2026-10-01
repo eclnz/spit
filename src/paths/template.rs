@@ -120,6 +120,24 @@ impl PathTemplate {
         name.find('.').map(|dot| &name[dot..])
     }
 
+    /// This template without `extension` at its end, or `None` when it does
+    /// not end with it.
+    #[must_use]
+    pub(crate) fn without_extension(&self, extension: &str) -> Option<Self> {
+        let mut parts = self.parts.clone();
+        let Some(PathPart::Literal(tail)) = parts.last_mut() else {
+            return None;
+        };
+        tail.truncate(tail.strip_suffix(extension)?.len());
+        if tail.is_empty() {
+            parts.pop();
+        }
+        Some(Self {
+            text: self.text.strip_suffix(extension)?.to_owned(),
+            parts,
+        })
+    }
+
     /// This template with `extension` added to its end.
     #[must_use]
     pub(crate) fn with_extension(&self, extension: &str) -> Self {
