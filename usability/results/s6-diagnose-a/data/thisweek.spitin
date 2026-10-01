@@ -1,4 +1,0 @@
-pipeline pipeline.spit
-
-skip sales count>=2 per [store]
-skip pricing count=1 per [store]

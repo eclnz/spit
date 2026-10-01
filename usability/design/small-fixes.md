@@ -1,6 +1,6 @@
 # Design: small CLI and file fixes
 
-This plan resolves [B4](../FINDINGS.md#b4-no-command-shows-the-full-set-of-path-rules), [B6](../FINDINGS.md#b6-external_inputs-is-in-text-order) and [B7](../FINDINGS.md#b7-spit-help-promises-a-script). Each is one small, independent commit.
+This plan resolves [B4](../rounds/1/README.md#b4-no-command-shows-the-full-set-of-path-rules), [B6](../rounds/1/README.md#b6-external_inputs-is-in-text-order) and [B7](../rounds/1/README.md#b7-spit-help-promises-a-script). Each is one small, independent commit.
 
 ## B4: show every path rule, whichever file holds it
 

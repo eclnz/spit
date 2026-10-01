@@ -2,7 +2,19 @@
 
 Can someone who has only the `spit` binary and its guide turn a pipeline problem into a correct plan, and how much does it cost them? To find out, we gave AI agents realistic tasks with nothing else: no source, no examples, no tests. We graded their plans against answer keys and logged every `spit` call they made.
 
-The findings are in [FINDINGS.md](FINDINGS.md), written as a backlog of bugs, features and gaps in the guide. Designs that answer them are in [`design/`](design): so far, [removing inputs](design/removing-inputs.md), which replaces `skip`. This page describes how the study was run, what came out, and how to run it again.
+The first round's findings are in [`rounds/1`](rounds/1/README.md), written as a backlog of bugs, features and gaps in the guide. The designs that answer them, and the roadmap they were built in, are in [`design/`](design). This page describes how the study was run, what came out, and how to run it again.
+
+## Rounds
+
+Each round has a folder under [`rounds/`](rounds), holding its report as `README.md` and its run archives as `results.zip`. Unzip an archive in its folder to get `results/`, with one folder per run.
+
+| Round | Report | What it tested |
+| --- | --- | --- |
+| 1 | [`rounds/1`](rounds/1/README.md) | The first study: 14 plans, and the findings backlog |
+| 2 | [`rounds/2`](rounds/2/README.md) | The same scenarios with the new guide, plus two variants: 18 plans |
+| Pilot | [`rounds/2-pilot`](rounds/2-pilot/README.md) | The repaired guide and walkthroughs before Phase 5, in the earlier language: 12 plans |
+| 3 | [`rounds/3`](rounds/3/README.md) | The settled language after Phase 5: 12 plans |
+| 4 | [`rounds/4`](rounds/4/README.md) | A small check of the paths work: 3 plans |
 
 ## Scenarios
 
@@ -42,9 +54,9 @@ All 14 plans matched their keys exactly. No agent was confident and wrong: every
 | s5-survey | 20/20, 8 | 20/20, 5 |
 | s6-diagnose | 22/22 and all 3 causes, 11 | 22/22 and all 3 causes, 20 |
 
-Because the plans were all correct, the useful results are in the friction. That means the errors agents hit, the guesses they recorded, and the time the s2 follow-up took: excluding one run took each agent longer than the rest of the change request combined. See [FINDINGS.md](FINDINGS.md).
+Because the plans were all correct, the useful results are in the friction. That means the errors agents hit, the guesses they recorded, and the time the s2 follow-up took: excluding one run took each agent longer than the rest of the change request combined. See [the round 1 findings](rounds/1/README.md).
 
-Each run's folder in [`results/`](results) holds:
+Each run's folder in [`results.zip`](rounds/1/results.zip) holds:
 
 - the pipeline and recipe files the agent wrote;
 - its report (`REPORT.md`, or `notes.md` condensed from its reply);
@@ -53,17 +65,17 @@ Each run's folder in [`results/`](results) holds:
 
 ### Limits
 
-- **Every scenario was designed to be solvable,** and the briefs pin commands and output paths. A perfect pass rate therefore overstates ease of use. Scenario 3 was changed to two levels of rollup because one step cannot aggregate over two dimensions ([F9](FINDINGS.md#f9-aggregate-over-several-dimensions-in-one-step)).
-- **Agents read the whole 470-line guide before starting.** A person skimming it would likely hit more of the [guide gaps](FINDINGS.md#guide-gaps).
+- **Every scenario was designed to be solvable,** and the briefs pin commands and output paths. A perfect pass rate therefore overstates ease of use. Scenario 3 was changed to two levels of rollup because one step cannot aggregate over two dimensions ([F9](rounds/1/README.md#f9-aggregate-over-several-dimensions-in-one-step)).
+- **Agents read the whole 470-line guide before starting.** A person skimming it would likely hit more of the [guide gaps](rounds/1/README.md#guide-gaps).
 - **One agent reported a garbled `note: Job 1` line.** The wrapper's logging caused it, not SPIT, and it is left out of the findings.
 
 ## Results: round 2
 
-The [second-round report](ROUND2.md) covers 18 trials, including the single-leaderboard and vague-brief variants. All 18 plans matched their keys; it records the participants' reported friction and the limits of comparison with round 1.
+The [second-round report](rounds/2/README.md) covers 18 trials, including the single-leaderboard and vague-brief variants. All 18 plans matched their keys; it records the participants' reported friction and the limits of comparison with round 1.
 
 ## Results: rounds 3 and 4
 
-The [third-round report](ROUND3.md) covers 12 plans after Phase 5. The [fourth-round report](ROUND4.md) is a small, low-cost check of the paths work: three plans, all correct.
+The [third-round report](rounds/3/README.md) covers 12 plans after Phase 5. The [fourth-round report](rounds/4/README.md) is a small, low-cost check of the paths work: three plans, all correct.
 
 ## Run it again
 
