@@ -58,6 +58,8 @@ So a leaderboard over every model and every config needs two steps, and scenario
 
 ### The call's `@ vary` follows from the operation's `@ drop`
 
+**Superseded** by [one way to write each thing](one-way.md#1-the-call-says-which-dimensions-are-collected): the call always writes `@ vary`, and operations lose `@ drop`.
+
 **Today.** An aggregation is written twice: `@ drop(date)` on the operation and `@ vary(date)` on every call, and the two must agree. Two agents called this redundant.
 
 **Change.** When an operation declares `@ drop(...)`, a call's many input may leave out `@ vary(...)`: the call varies the dropped dimensions. A call that writes `@ vary` must still name the same set, and a mismatch stays an error.
@@ -74,5 +76,7 @@ So a leaderboard over every model and every config needs two steps, and scenario
 **Decision.** Keep positional input order. Each argument is checked against its operation port's type, and a mismatch names that port and product. Named calls would weaken the visible order contract and add syntax for a low-priority mistake.
 
 ### Where an `each` dimension goes
+
+**Superseded** by [one way to write each thing](one-way.md#2-one-dimension-order-for-the-pipeline): every product follows the pipeline's dimension order.
 
 No change in behaviour. A dimension broadcast with `@ each(...)` is placed after the driving input's dimensions (`step_context` in `src/shape.rs`), so `trained` is `[config, seed, model]`. This decides the order of `{entities}`. Document it under `each` (see [guide gaps](guide.md)).

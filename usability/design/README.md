@@ -11,13 +11,14 @@ The plans that answer the [usability findings](../FINDINGS.md), and the order to
 | [Small CLI and file fixes](small-fixes.md) | B4, B6, B7 |
 | [Closing the guide's gaps](guide.md) | D1–D11 |
 | [Second-study actions](round2-actions.md) | Worked examples, guide packaging, rule explanations, CLI messages, and follow-up trials |
+| [One way to write each thing](one-way.md) | The variation between round 2's pipelines: aggregation, dimension order, syntax doubles, and the principles for round 3 |
 
 ## Status
 
 - **Done:** steps 1–15 and 17. Phase 1, Phase 2, and Phase 3 are complete; the worked examples and extension update are in place. Step 16 was declined.
-- **Next:** carry out the [second-study action plan](round2-actions.md).
+- **Second-study actions:** items 1–4 are done. Item 6, the rerun, becomes round 3, after Phase 5; item 5 is judged from round 3's results.
+- **Next:** Phase 5, [one way to write each thing](one-way.md), starting with step 18.
 - **Resolved so far:** B1–B7, F1–F10, D1–D11.
-- **Still open:** prioritize and address the new guide and inspection gaps found in round 2.
 
 ## Order
 
@@ -138,6 +139,17 @@ One design built in three steps, each leaving the tool working. See [removing in
     - **Coverage.** The count pattern must accept all six comparisons, and `drop` puts its groups before the source.
     - **Tests.** The repo has `grammar.test.js` and `extension.test.js`.
     - **The `file` field.** A `Diagnostic` (`src/diagnostics.rs`) needs a place in a second file. Today the pipeline's errors inside a recipe check have no line of their own (`diagnose_recipe`).
+
+### Phase 5: one way to write each thing
+
+Settle the forms round 2 left open. See [one way to write each thing](one-way.md). No backward compatibility: each removed form becomes an error that shows the kept form. Each step rewrites the examples, tests, harness keys and guide it affects; the study's result folders stay as recorded.
+
+18. **Remove the sectioned form** (`products:`, `operations:`, `pipeline:`, `commands:`, and a recipe's `constraints:`). It goes first because it halves the parser the next steps change. Convert the 8 sectioned examples and the parser tests to the flow form. See [syntax doubles](one-way.md#5-one-form-for-each-syntax-double).
+19. **The call says which dimensions are collected.** `@ vary` is required on every `many` input; `@ drop` on an operation is an error; `@ min` stays. See [decision 1](one-way.md#1-the-call-says-which-dimensions-are-collected).
+20. **One dimension order for the pipeline,** derived from sources, with `dimensions [...]` required only for pairs no source orders. `@ each` dimensions take their place in it, and product annotations become checks. See [decision 2](one-way.md#2-one-dimension-order-for-the-pipeline).
+21. **The remaining syntax doubles:** `source x []`, the extra `many` port forms and nameless ports, positional placeholders and the `{inputs}` alias, `\{` escapes, `: path` records, and the warning for a product named like its operation. See [syntax doubles](one-way.md#5-one-form-for-each-syntax-double).
+22. **The VS Code extension:** drop `@ drop` and the sectioned headers from the grammar, and add `dimensions`.
+23. **Round 3:** rerun the scenarios with the settled language, as [second-study action 6](round2-actions.md#6-repeat-the-affected-usability-tasks) describes, keeping transcripts. Compare how alike the participants' pipelines are, not only whether the keys pass. Then decide [decision 3](one-way.md#3-the-pipeline-says-how-to-compute-the-recipe-says-which-data-after-round-3) and [decision 4](one-way.md#4-types-catch-wrong-connections-after-round-3).
 
 ## After the work: the second round
 
