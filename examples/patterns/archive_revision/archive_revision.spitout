@@ -1,0 +1,7 @@
+sources:
+    scan[case=A,revision=1]
+    scan[case=A,revision=2]
+    scan[case=B,revision=1]
+    scan[case=B,revision=2]
+    calibration[case=A]
+    calibration[case=B]

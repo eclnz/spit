@@ -1,0 +1,25 @@
+# Each config has its own seeds; every model is tried with every seed.
+source model : Weights [model]
+path model: models/{model}.pt
+source config : Config [config]
+path config: configs/{config}.yaml
+source seed : Seed [config, seed]
+path seed: seeds/{config}/{seed}.json
+source testset : Data
+path testset: eval/testset.parquet
+operation train(model: Weights, config: Config, seed: Seed) -> Weights
+command train: train --model {model} --config {config} --seed {seed} --out {output}
+path trained: runs/{model}/{config}/{seed}/weights.pt
+trained = train(model @ each(model), config, seed)
+operation evaluate(weights: Weights, testset: Data) -> Metrics
+command evaluate: evaluate {weights} {testset} --out {output}
+path metrics: runs/{model}/{config}/{seed}/metrics.json
+metrics = evaluate(trained, testset)
+operation summarise(runs: many Metrics) -> Summary @ drop(seed)
+command summarise: summarise {runs} --out {output}
+path summary: summaries/{model}/{config}.json
+summary = summarise(metrics)
+operation leaderboard(summaries: many Summary) -> Table @ drop(model, config)
+command leaderboard: leaderboard {summaries} --out {output}
+path board: leaderboard.csv
+board = leaderboard(summary)

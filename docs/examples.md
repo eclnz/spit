@@ -1,6 +1,6 @@
 # Examples
 
-Each pipeline below, under [`examples/`](../examples), checks cleanly and sits beside a `.spitin` recipe with its `require` rules and a `.spitout` of its inputs. Run the command from the repository root to see its jobs; add `--paths` to see each artifact's file or `-o plan.spitdag` to write them, or run `spit check` on the `.spit` or `.spitin` alone.
+Each pipeline below, under [`examples/`](../examples), checks cleanly and sits beside a `.spitin` recipe and a `.spitout` of its inputs. Recipes may add discovery, exclusion, drop, or require rules. Run the command from the repository root to see its jobs; add `--paths` to see each artifact's file or `-o plan.spitdag` to write them, or run `spit check` on the `.spit` or `.spitin` alone.
 
 | Pipeline | Shows | Command | Jobs |
 | --- | --- | --- | --- |
@@ -8,11 +8,18 @@ Each pipeline below, under [`examples/`](../examples), checks cleanly and sits b
 | [Observed groups](../examples/pipelines/rich_shapes.spit) | Several subjects and sessions, a reused reference, and two successive aggregations | `cargo run -- dag examples/pipelines/rich_shapes.spit examples/pipelines/rich_shapes.spitout` | 17 |
 | [Nested aggregation](../examples/pipelines/complex.spit) | Partial types, irregular groups, and three successive aggregations | `cargo run -- dag examples/pipelines/complex.spit examples/pipelines/complex.spitout` | 25 |
 | [Selectors](../examples/pipelines/selectors.spit) | `where`, `same`, a verification, a two-output step, and a many input beside a single input | `cargo run -- dag examples/pipelines/selectors.spit examples/pipelines/selectors.spitout` | 17 |
+| [Archive revision](../examples/patterns/archive_revision/archive_revision.spit) | `where` selects the approved revision before joining calibration | `cargo run -- dag examples/patterns/archive_revision/archive_revision.spit examples/patterns/archive_revision/archive_revision.spitout` | 2 |
+| [Per-group reference](../examples/patterns/per_group_reference/per_group_reference.spit) | `same(station)` finds one reference per station despite its measurement-date dimension | `cargo run -- dag examples/patterns/per_group_reference/per_group_reference.spit examples/patterns/per_group_reference/per_group_reference.spitout` | 3 |
+| [Model fit](../examples/patterns/model_fit/model_fit.spit) | One `many` input, two outputs, `@ drop`, `@ min`, and `verify` | `cargo run -- dag examples/patterns/model_fit/model_fit.spit examples/patterns/model_fit/model_fit.spitout` | 2 |
+| [Ragged sweep](../examples/patterns/ragged_sweep/ragged_sweep.spit) | `each(model)` broadcasts over per-config seeds, then `drop` collects the runs | `cargo run -- dag examples/patterns/ragged_sweep/ragged_sweep.spit examples/patterns/ragged_sweep/ragged_sweep.spitout` | 17 |
+| [Cohort](../examples/patterns/cohort/cohort.spit) | BIDS sessions, a dropped subject, and an excluded run | `cargo run -- dag examples/patterns/cohort/cohort.spitin` | 24 |
 | [Analytics](../examples/analytics/analytics.spit) | Five keyed joins, then day, customer, and tenant rollups | `cargo run -- dag examples/analytics/analytics.spit examples/analytics/analytics.spitout` | 34 |
 | [Stages](../examples/stages/stages.spit) | Preprocessing and analysis stages with `{stage}` paths | `cargo run -- dag examples/stages/stages.spit examples/stages/stages.spitout` | 7 |
 | [Nested stages](../examples/stages/nested.spit) | Stages within a stage | `cargo run -- dag examples/stages/nested.spit examples/stages/nested.spitout` | 9 |
 | [Field survey](../examples/commands/field_survey/field_survey.spit) | Sidecar files, calibration, alignment between spaces, and commands | `cargo run -- dag examples/commands/field_survey/field_survey.spit examples/commands/field_survey/field_survey.spitout` | 93 |
 | [MRtrix3 ACT](../examples/commands/mrtrix3_act/mrtrix3_act.spit) | A diffusion MRI pipeline in nested stages, from BIDS import to connectome | `cargo run -- dag examples/commands/mrtrix3_act/mrtrix3_act.spit examples/commands/mrtrix3_act/mrtrix3_act.spitout` | 93 |
+
+The pattern examples each include a `.spitin` recipe and a `.spitout` inventory. The cohort recipe also has small placeholder source files, so its discovery, exclusion, and drop rules can be run directly. The `command_demo.spitin` recipe expects real shard files beside it; use its supplied `.spitout` to inspect the example jobs without creating a dataset.
 
 ## Analytics
 

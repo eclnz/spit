@@ -1,0 +1,30 @@
+contexts sessions:
+    [sub=01,ses=01]:
+        t1w
+        [run=1,2]:
+            bold
+
+    [sub=01,ses=02]:
+        t1w
+        [run=1,2]:
+            bold
+
+    [sub=02,ses=01]:
+        t1w
+        [run=1,2]:
+            bold
+
+    [sub=02,ses=02]:
+        t1w
+        [run=1]:
+            bold
+
+removed:
+    bold[sub=02,ses=02,run=2]
+        rule: exclude bold[sub=02,ses=02,run=2]
+        at: line 6
+        reason: motion spike
+    [sub=03]
+        rule: drop [sub] where t1w count<2
+        at: line 5
+        found: 1

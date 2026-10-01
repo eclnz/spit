@@ -1,0 +1,9 @@
+# Select the approved revision for each case before matching its calibration.
+source scan : Image [case, revision]
+path scan: archive/{case}/r{revision}.nii.gz
+source calibration : Calibration [case]
+path calibration: calibration/{case}.json
+operation prepare(scan: Image, calibration: Calibration) -> Image
+command prepare: prepare --scan {scan} --calibration {calibration} --out {output}
+path prepared: results/{case}.nii.gz
+prepared = prepare(scan @ where(revision=2), calibration)

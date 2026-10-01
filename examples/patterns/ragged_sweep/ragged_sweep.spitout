@@ -1,0 +1,9 @@
+sources:
+    model[model=small]
+    model[model=large]
+    config[config=fast]
+    config[config=deep]
+    seed[config=fast,seed=1]
+    seed[config=fast,seed=2]
+    seed[config=deep,seed=1]
+    testset
