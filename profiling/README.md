@@ -4,6 +4,9 @@
 profiles it with callgrind. Use it to compare a change with the commit
 before it, and to find where the time goes when a stage is slow.
 
+What is left to speed up and clean up, and the data-oriented rules the
+work keeps to, is in [the plan](plan.md).
+
 It needs Python 3 and a release build; `profile` also needs valgrind.
 Generated pipelines, datasets and profiles go in `profiling/work/`, which
 git ignores. Datasets there are reused between runs.
