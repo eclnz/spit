@@ -1,6 +1,6 @@
-# Usability study: third round
+# Usability pilot before Phase 5
 
-The third round tested the repaired offline guide and the new complete walkthroughs on the tasks most affected by the second study's documentation gaps. Two isolated participants each attempted the ragged sweep, single-board sweep, vague sensor brief, diagnosis, and cohort. Two cohort participants then handled the same change request in their existing trial sessions. The [run archives](results-round3/) hold the selected plans, participant reports, and grading results.
+This pilot tested the repaired offline guide and the new complete walkthroughs on the tasks most affected by the second study's documentation gaps. Two isolated participants each attempted the ragged sweep, single-board sweep, vague sensor brief, diagnosis, and cohort. Two cohort participants then handled the same change request in their existing trial sessions. These trials used the earlier language, before Phase 5 changed aggregation syntax, dimension order, and the permitted forms. They do not validate the post-Phase-5 language. The [run archives](results-pre-phase5/) hold the selected plans, participant reports, and grading results.
 
 ## Method and limits
 
@@ -35,6 +35,6 @@ The one failed diagnosis call was an initial `dag` on the damaged dataset; its c
 
 ## Next decisions
 
-- Add a compact, optional per-operation count view to `dag`. The repeated request survived the repaired guide; the [inspection design](design/round3-inspection.md) specifies its text and interactions with existing output flags.
-- Keep `--commands` as the exact preview of `many` argument order, and document that alongside the explicit output dimension example. Decide on a shape-only view only if another task still shows uncertainty after that explanation.
+- Test a compact, optional per-operation count view in the post-Phase-5 study. The repeated request survived the repaired guide; the [inspection ideas](design/pre-phase5-inspection.md) specify candidate text and interactions with existing output flags.
+- Keep `--commands` as the exact preview of `many` argument order. The pilot used an explicit output annotation; Phase 5 replaced that with a pipeline-wide dimension order. Test whether the new rule resolves the remaining uncertainty.
 - Improve the diagnosis walkthrough with the lowercase group and uppercase orphan-source exclusion together. Consider a targeted hint for a near-case unused source left after a group exclusion. Keep `inputs --unmatched` for files that match no source rule; it is a different case from a matched but unused source.
