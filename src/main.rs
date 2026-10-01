@@ -707,6 +707,9 @@ fn settle(
     for skipped in &resolved.skipped {
         eprintln!("warning: skipped {skipped}");
     }
+    for incomplete in &resolved.incomplete_groups {
+        eprintln!("warning: {incomplete}");
+    }
     if let Some(root) = &resolved.root {
         let count = resolved.unmatched_files.len();
         if count > 0 {

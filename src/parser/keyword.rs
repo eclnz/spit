@@ -23,11 +23,13 @@ pub(crate) enum Keyword {
     Stage,
     /// `dimensions [...]`, the order every product's dimensions follow.
     Dimensions,
+    /// `sidecars name [dims]: stem`, which opens a block of sources.
+    Sidecars,
     /// The removed `shell-source:` line, kept to explain its removal.
     ShellSource,
 }
 
-const WORDS: [(Keyword, &str); 12] = [
+const WORDS: [(Keyword, &str); 13] = [
     (Keyword::Use, "use"),
     (Keyword::Source, "source"),
     (Keyword::Discover, "discover"),
@@ -40,6 +42,7 @@ const WORDS: [(Keyword, &str); 12] = [
     (Keyword::Exclude, "exclude"),
     (Keyword::Stage, "stage"),
     (Keyword::Dimensions, "dimensions"),
+    (Keyword::Sidecars, "sidecars"),
 ];
 
 impl Keyword {
@@ -61,7 +64,8 @@ impl Keyword {
         }
         let (word, rest) = line.split_once(' ')?;
         let (keyword, _) = WORDS.iter().find(|(_, name)| *name == word)?;
-        if matches!(keyword, Self::Stage | Self::Dimensions) && line.contains('=') {
+        if matches!(keyword, Self::Stage | Self::Dimensions | Self::Sidecars) && line.contains('=')
+        {
             return None;
         }
         Some((*keyword, rest))

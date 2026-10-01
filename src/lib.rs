@@ -41,7 +41,8 @@ pub use model::{
     ArtifactType, Artifacts, Cardinality, CommandDef, CommandRole, CountRequirement,
     CoverageAction, CoverageGap, CoverageRule, DirectoryDiscovery, EntityBinding, Exclusion, Gap,
     IncompleteJob, InputBinding, InputPort, InputRules, Invocation, Job, OperationDef, OutputPort,
-    Pipeline, ProductDef, Removal, ResolvedDag, ShapeRule, SourceInventory, SourceRecord, StageDef,
+    Pipeline, ProductDef, Removal, ResolvedDag, ShapeRule, SidecarGroup, SourceInventory,
+    SourceRecord, StageDef,
 };
 pub use parser::{parse_source_inventory, render_source_inventory, ParseError, ParseErrorKind};
 pub use paths::{

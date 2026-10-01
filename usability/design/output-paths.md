@@ -1,6 +1,6 @@
 # Design: dataset root, output extensions and sidecars
 
-Status: steps 1 and 2, the recipe's `root` line and extensions on operation outputs, are done. Steps 3 to 5 are proposals.
+Status: steps 1 to 3, the recipe's `root` line, extensions on operation outputs and source groups, are done. Steps 4 and 5 are proposals.
 
 ## Problem
 
@@ -184,6 +184,14 @@ Each member is an ordinary source with the group's dimensions, and its path is t
 
 **Compatibility.** New syntax only.
 
+**Built.** As above, with these details settled while building it:
+
+- The report is a warning, not an error, until [optional members](#open-questions) are decided: a step that reads the missing file still fails at its join, and a step that does not is unaffected. A file an `exclude` rule removes is not counted as missing. Only a scan reports it; records written by hand are not checked.
+- A member is written `source name : Type .ext`, or `source name .ext` untyped; it may not declare dimensions. A group may have no dimensions.
+- Lowering turns each member into an ordinary source and `path` rule, so binding, discovery, imports and the path checks need nothing new; `Pipeline::sidecar_groups` keeps each group for the report. A `path` rule for a member is a duplicate, and two members with one extension bind to one path.
+- A block belongs at the top level of a pipeline, not in a recipe or a stage.
+- `field_survey.spit` declares its photo and flat-field sidecars as groups, and `mrtrix3_act.spit` its DWI runs and reverse b=0; every artifact keeps its path. Tests are in `tests/sidecars.rs`.
+
 ## 4. Implicit outputs
 
 When a tool takes a path for each output, multiple outputs already work. When it writes one file beside another without being given a path for it, two things break: the command has nowhere to put the second placeholder, and the second output's default path is not where the tool writes it.
@@ -237,6 +245,6 @@ command convert: dcm2niix -z y -b y -o {image.dir} -f {image.stem} {dicom}
 
 1. The recipe's `root` line, the root recorded in the `.spitout`, the scan leaving out SPIT's own files, and the guide's layout example. Done.
 2. Extensions on output ports, `ext:`, resolution and the agreement error. Return resolved templates from `spit check` and show them in the editor. Convert `field_survey.spit` and `mrtrix3_act.spit`. Done.
-3. `sidecars` groups and the incomplete-group report in discovery.
+3. `sidecars` groups and the incomplete-group report in discovery. Done.
 4. `beside` outputs.
 5. `{x.dir}` and `{x.stem}`, with the `.spitdag` version bump.

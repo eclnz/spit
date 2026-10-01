@@ -275,6 +275,20 @@ fn lower_statement(
             builder.dimension_order = Some((order.clone(), statement.place.clone()));
         }
         StatementKind::Path(rule) => builder.add_path(rule, statement.place.line)?,
+        StatementKind::SidecarGroup(group) => {
+            if builder
+                .pipeline
+                .sidecar_groups
+                .iter()
+                .any(|existing| existing.name == group.name)
+            {
+                return Err(ParseError::new(
+                    statement.place.line,
+                    format!("duplicate sidecars group `{}`", group.name),
+                ));
+            }
+            builder.pipeline.sidecar_groups.push(group.clone());
+        }
         StatementKind::Extension { stage, extension } => {
             builder.add_extension(stage.as_deref(), extension, statement.place.line)?;
         }

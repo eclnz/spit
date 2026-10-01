@@ -8,19 +8,18 @@
 path: derivatives/{product}/{entities}
 ext: .img
 
-source raw_photo : Image<Photo,Captured> [site, visit, shot]
-path raw_photo: site-{site}/visit-{visit}/photos/site-{site}_visit-{visit}_shot-{shot}_photo.raw
-source photo_gps : GpsTrack [site, visit, shot]
-path photo_gps: site-{site}/visit-{visit}/photos/site-{site}_visit-{visit}_shot-{shot}_photo.gpx
-source photo_imu : ImuTrace [site, visit, shot]
-path photo_imu: site-{site}/visit-{visit}/photos/site-{site}_visit-{visit}_shot-{shot}_photo.imu
-source photo_json : CaptureMetadata [site, visit, shot]
-path photo_json: site-{site}/visit-{visit}/photos/site-{site}_visit-{visit}_shot-{shot}_photo.json
+# Each photo and flat-field frame shares its file name with its sidecars,
+# which differ only by extension.
+sidecars photo [site, visit, shot]: site-{site}/visit-{visit}/photos/site-{site}_visit-{visit}_shot-{shot}_photo
+    source raw_photo : Image<Photo,Captured> .raw
+    source photo_gps : GpsTrack .gpx
+    source photo_imu : ImuTrace .imu
+    source photo_json : CaptureMetadata .json
 
-source flat_field : Image<Flat,Captured> [site, visit]
-path flat_field: site-{site}/visit-{visit}/calibration/site-{site}_visit-{visit}_flat.raw
-source flat_field_json : CaptureMetadata [site, visit]
-path flat_field_json: site-{site}/visit-{visit}/calibration/site-{site}_visit-{visit}_flat.json
+sidecars flat [site, visit]: site-{site}/visit-{visit}/calibration/site-{site}_visit-{visit}_flat
+    source flat_field : Image<Flat,Captured> .raw
+    source flat_field_json : CaptureMetadata .json
+
 source ground_map : Image<Map,Surveyed> [site, visit]
 path ground_map: site-{site}/visit-{visit}/map/site-{site}_visit-{visit}_map.tif
 source source_classes : ClassTable

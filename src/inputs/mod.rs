@@ -142,6 +142,7 @@ fn check_input_lines(text: &str) -> Result<(), ParseError> {
                     | Keyword::Verify
                     | Keyword::Stage
                     | Keyword::Dimensions
+                    | Keyword::Sidecars
                     | Keyword::Use
             )
         );
@@ -254,7 +255,7 @@ impl InputSpec {
     ) -> Result<ResolvedInputs, InputError> {
         validate_pipeline(pipeline)?;
         self.check(pipeline)?;
-        let (mut inventory, skipped, unmatched_files, root, removed) = match source {
+        let (mut inventory, skipped, unmatched_files, root, removed, incomplete) = match source {
             InputSource::Discover(root) => {
                 let located = with_source_paths(pipeline, &self.rules.source_paths);
                 let found = discover(&located, &self.rules, root)?;
@@ -264,12 +265,14 @@ impl InputSpec {
                 if let Some(emptied) = found.emptied {
                     return Err(InputError::EveryGroupDropped(emptied));
                 }
+                let incomplete = incomplete_groups(pipeline, &found.inventory, &found.removed);
                 (
                     found.inventory,
                     found.skipped,
                     found.unmatched_files,
                     Some(root.to_owned()),
                     found.removed,
+                    incomplete,
                 )
             }
             InputSource::Inventory(mut inventory) => {
@@ -288,7 +291,7 @@ impl InputSpec {
                 let dropped = apply_drops(&self.rules, &mut inventory)
                     .map_err(InputError::EveryGroupDropped)?;
                 removed.extend(dropped.iter().map(|group| group.removal()));
-                (inventory, Vec::new(), Vec::new(), None, removed)
+                (inventory, Vec::new(), Vec::new(), None, removed, Vec::new())
             }
         };
         self.merge_source_paths(pipeline, &mut inventory)?;
@@ -303,6 +306,7 @@ impl InputSpec {
             inventory,
             skipped,
             unmatched_files,
+            incomplete_groups: incomplete,
             gaps: checked.gaps,
             root,
         })
@@ -354,6 +358,82 @@ impl InputSpec {
         pipeline
             .path_template
             .get_or_insert_with(PathTemplate::default_output);
+    }
+}
+
+/// Each binding where some of a `sidecars` group's sources were found and
+/// others were neither found nor removed by a rule, said as
+/// `photo[site=A,visit=2,shot=3] has .raw and .gpx but no .imu`.
+fn incomplete_groups(
+    pipeline: &Pipeline,
+    inventory: &SourceInventory,
+    removed: &[crate::model::Removal],
+) -> Vec<String> {
+    let mut said = Vec::new();
+    for group in &pipeline.sidecar_groups {
+        let mut found: BTreeMap<String, BTreeSet<&str>> = BTreeMap::new();
+        for record in &inventory.artifacts {
+            if group
+                .members
+                .iter()
+                .any(|(member, _)| *member == record.product)
+            {
+                let identity = group
+                    .dimensions
+                    .iter()
+                    .map(|dimension| {
+                        format!(
+                            "{dimension}={}",
+                            record.entities.get(dimension).unwrap_or("")
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join(",");
+                found.entry(identity).or_default().insert(&record.product);
+            }
+        }
+        for (identity, present) in found {
+            let removed_here = |member: &str| {
+                removed.iter().any(|removal| {
+                    removal
+                        .product
+                        .as_deref()
+                        .is_none_or(|product| product == member)
+                        && removal.entities.iter().all(|(dimension, value)| {
+                            identity
+                                .split(',')
+                                .any(|pair| pair == format!("{dimension}={value}"))
+                        })
+                })
+            };
+            let (has, lacks): (Vec<_>, Vec<_>) = group
+                .members
+                .iter()
+                .filter(|(member, _)| present.contains(member.as_str()) || !removed_here(member))
+                .partition(|(member, _)| present.contains(member.as_str()));
+            if !lacks.is_empty() {
+                let extensions = |members: Vec<&(String, String)>| {
+                    listed(members.into_iter().map(|(_, extension)| extension.as_str()))
+                };
+                said.push(format!(
+                    "{}[{identity}] has {} but no {}",
+                    group.name,
+                    extensions(has),
+                    extensions(lacks)
+                ));
+            }
+        }
+    }
+    said
+}
+
+/// `a`, `a and b`, or `a, b and c`.
+fn listed<'a>(items: impl Iterator<Item = &'a str>) -> String {
+    let items: Vec<_> = items.collect();
+    match items.split_last() {
+        Some((last, rest)) if !rest.is_empty() => format!("{} and {last}", rest.join(", ")),
+        Some((last, _)) => (*last).to_owned(),
+        None => String::new(),
     }
 }
 
@@ -462,6 +542,9 @@ pub struct ResolvedInputs {
     pub skipped: Vec<String>,
     /// Files under a scanned root that matched no source path rule.
     pub unmatched_files: Vec<String>,
+    /// Each place a scan found some of a `sidecars` group's files and not
+    /// the others, as `photo[site=A,shot=3] has .raw and .gpx but no .imu`.
+    pub incomplete_groups: Vec<String>,
     /// What the `require` rules find missing, with the sources each holds back.
     pub gaps: Vec<CoverageGap>,
     /// The directory that was scanned, when the stage scanned one.

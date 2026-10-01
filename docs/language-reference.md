@@ -260,6 +260,23 @@ Extensions are optional. An operation whose tool picks the format from the outpu
 
 Path rules also find sources. `spit inputs recipe.spitin --root data` lists each file under `data` whose path matches a source's rule, in the pipeline or the recipe, reading entity values from its placeholders. A rule matches a file's whole path, so `responses/{region}/wave{wave}.csv` does not match `wave3.csv.bak` or `wave3.csv.1`, and files that match no rule are left out. Links to files and directories are followed. A value is read only as SPIT writes it, so a file such as `in/%41.txt`, whose value SPIT would write `A`, is skipped with a warning rather than listed under a path no job would use.
 
+### Sidecar files
+
+Files that travel together, such as an image and its JSON metadata, often share a name and differ only by extension. A `sidecars` block declares such sources once, with the dimensions and the path stem they share:
+
+```text
+sidecars photo [site, visit, shot]: site-{site}/visit-{visit}/photos/shot-{shot}
+    source raw_photo : Image<Photo,Captured> .raw
+    source photo_gps : GpsTrack .gpx
+    source photo_json : CaptureMetadata .json
+```
+
+Each member is an ordinary source with the group's dimensions, whose path is the stem and its extension, as `site-{site}/visit-{visit}/photos/shot-{shot}.gpx`; steps read it by name, as any other source. Write each member indented beneath the header as `source name : Type .ext`, or `source name .ext` untyped. The next line that is not indented ends the block. A group with no dimensions names one set of files, as `sidecars config: config/settings`.
+
+A block belongs at the top level of a pipeline. Its members take no dimensions or path rules of their own.
+
+When `spit inputs` scans a dataset, it warns about each place it found some of a group's files and not the others, as `warning: photo[site=A,visit=2,shot=3] has .raw and .gpx but no .json`, before a step fails to find the missing one. A file an `exclude` rule removes is not counted as missing.
+
 ## Recipes
 
 A `.spitin` recipe says how to find one dataset's inputs, keeping everything about the data out of the pipeline. Its first line names the pipeline it serves, relative to the recipe's folder:
