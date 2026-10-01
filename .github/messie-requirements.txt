@@ -1,1 +1,1 @@
-git+https://github.com/eclnz/messie.git@6ed8cefb60e19d0dab9d066143debc0f00b97e60
+git+https://github.com/eclnz/messie.git@ec77290ac604310d091ce70e9ed3082982df016b  # messie v0.2.0
