@@ -153,7 +153,7 @@ impl PathTemplate {
 
     /// Whether the template has a `[...]` group or `{@labels}`, which each
     /// product resolves its own way.
-    fn varies(&self) -> bool {
+    pub(crate) fn varies(&self) -> bool {
         self.parts.iter().any(|part| {
             matches!(
                 part,

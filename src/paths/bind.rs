@@ -264,9 +264,6 @@ pub(crate) fn dashed_labels(
     let mut writes: FxHashMap<&str, bool> = FxHashMap::default();
     let mut found: BTreeMap<(&str, &str), &str> = BTreeMap::new();
     for id in dag.artifacts.ids() {
-        if dag.source_path(id).is_some() {
-            continue;
-        }
         let artifact = dag.artifact(id);
         let labelled = *writes.entry(artifact.product).or_insert_with(|| {
             pipeline
