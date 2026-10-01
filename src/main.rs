@@ -496,6 +496,8 @@ fn main() -> ExitCode {
                 line: None,
                 columns: None,
                 message: error.to_string(),
+                file: None,
+                external_text: None,
             };
             print!("{}", render_diagnostics_json(&[diagnostic], "", None));
             ExitCode::SUCCESS

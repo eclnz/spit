@@ -3,6 +3,9 @@
 use std::io::Write;
 use std::process::{Command, Output, Stdio};
 
+mod support;
+use support::Tree;
+
 /// The output of `spit check --json --stdin` given `pipeline` as the unsaved text.
 fn check_json(pipeline: &[u8]) -> Output {
     let mut child = Command::new(env!("CARGO_BIN_EXE_spit"))
@@ -61,4 +64,29 @@ fn cli_json_columns_count_utf16_code_units() {
         json.contains("\"line\":3,\"column\":10,\"end_column\":16"),
         "{json}"
     );
+}
+
+#[test]
+fn recipe_json_places_pipeline_errors_in_the_pipeline_file() {
+    let tree = Tree::new("json-recipe-file", &[]);
+    let pipeline = tree.write(
+        "analysis.spit",
+        "source raw [id]\noperation copy(one)\nresult = copy(rwa)\n",
+    );
+    let recipe = tree.write("data.spitin", "pipeline analysis.spit\n");
+    let output = Command::new(env!("CARGO_BIN_EXE_spit"))
+        .args(["check", recipe.to_str().unwrap(), "--json"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let json = String::from_utf8(output.stdout).unwrap();
+    assert!(
+        json.contains(&format!("\"file\":\"{}\"", pipeline.display())),
+        "{json}"
+    );
+    assert!(
+        json.contains("\"line\":3,\"column\":15,\"end_column\":18"),
+        "{json}"
+    );
+    assert!(json.contains("unknown product `rwa`"), "{json}");
 }
