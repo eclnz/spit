@@ -235,6 +235,13 @@ impl PathTemplate {
         name.find('.').map(|dot| &name[dot..])
     }
 
+    /// Whether the template ends with `extension` after its last placeholder,
+    /// as `sub-{sub}_acq-1.5T.nii.gz` ends with `.nii.gz`, though the
+    /// extension [`PathTemplate::extension`] reads in it is `.5T.nii.gz`.
+    pub(crate) fn ends_with(&self, extension: &str) -> bool {
+        matches!(self.parts.last(), Some(PathPart::Literal(tail)) if tail.ends_with(extension))
+    }
+
     /// This template without `extension` at its end, or `None` when it does
     /// not end with it.
     #[must_use]
