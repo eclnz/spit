@@ -29,109 +29,109 @@ path target_classes: config/target_classes.txt
 
 # Import each photo with its pose sidecars and capture metadata.
 operation import_photo(image: Image<Photo,$Space>, gps: GpsTrack, imu: ImuTrace, metadata: CaptureMetadata) -> Image<Photo,$Space>
-command import_photo: imgconvert {image} {output} --pose {gps} {imu} --meta {metadata}
+command import_photo: imgconvert {image} {@output} --pose {gps} {imu} --meta {metadata}
 photo_img = import_photo(raw_photo, photo_gps, photo_imu, photo_json)
 
 operation import_flat(image: Image<Flat,Captured>, metadata: CaptureMetadata) -> Image<Flat,Captured>
-command import_flat: imgconvert {image} {output} --meta {metadata}
+command import_flat: imgconvert {image} {@output} --meta {metadata}
 flat_img = import_flat(flat_field, flat_field_json)
 
 operation denoise(image: Image<Photo,S>) -> Image<Photo,S>
-command denoise: imgdenoise {image} {output}
+command denoise: imgdenoise {image} {@output}
 denoised_photo = denoise(photo_img)
 
 operation remove_glare(image: Image<Photo,S>) -> Image<Photo,S>
-command remove_glare: imgdeglare {image} {output}
+command remove_glare: imgdeglare {image} {@output}
 deglared_photo = remove_glare(denoised_photo)
 
 # Consume shot to make one image per visit for the corrections that follow.
 operation stack_shots(shots: many Image<Photo,S>) -> Image<Photo,S>
-command stack_shots: imgstack {shots} {output}
+command stack_shots: imgstack {shots} {@output}
 visit_photo = stack_shots(deglared_photo @ vary(shot))
 
 # Extract dark frames, then average them. Both stages are reused after
 # correction to make a corrected alignment target.
 operation extract_dark(image: Image<Photo,S>) -> Image<DarkSeries,S>
-command extract_dark: imgextract {image} {output} --dark
+command extract_dark: imgextract {image} {@output} --dark
 dark_series = extract_dark(visit_photo)
 
 operation mean_dark(image: Image<DarkSeries,S>) -> Image<Dark,S>
-command mean_dark: imgmath {image} mean {output}
+command mean_dark: imgmath {image} mean {@output}
 dark_frame = mean_dark(dark_series)
 
 operation pair_calibration(dark: Image<Dark,S>, flat: Image<Flat,S>) -> Image<CalibrationPair,S>
-command pair_calibration: imgcat {dark} {flat} {output}
+command pair_calibration: imgcat {dark} {flat} {@output}
 calibration_pair = pair_calibration(dark_frame, flat_img)
 
 operation correct_photo(photo: Image<Photo,Captured>, calibration: Image<CalibrationPair,Captured>) -> Image<Photo,Orthorectified>
-command correct_photo: imgcorrect {photo} {output} --calibration {calibration}
+command correct_photo: imgcorrect {photo} {@output} --calibration {calibration}
 corrected_photo = correct_photo(visit_photo, calibration_pair)
 
 operation balance(image: Image<Photo,S>) -> Image<Photo,S>
-command balance: imgbalance auto {image} {output}
+command balance: imgbalance auto {image} {@output}
 balanced_photo = balance(corrected_photo)
 visit_dark_series = extract_dark(balanced_photo)
 visit_dark = mean_dark(visit_dark_series)
 
 # Classify the ground map in its own space, then remap its class labels.
 operation classify_map(image: Image<Map,S>) -> Image<Classes,S> .tif
-command classify_map: mapclassify --in {image} --out {output}
+command classify_map: mapclassify --in {image} --out {@output}
 classes_map = classify_map(ground_map)
 
 operation relabel(labels: Image<Classes,S>, source_classes: ClassTable, target_classes: ClassTable) -> Image<Classes,S>
-command relabel: relabel {labels} {source_classes} {target_classes} {output}
+command relabel: relabel {labels} {source_classes} {target_classes} {@output}
 regions_map = relabel(classes_map, source_classes, target_classes)
 
 # Align the ground map to the corrected photos, then convert the tool's matrix
 # into a transform using the same moving and reference images.
 operation export_tiff(image: Image<K,S>) -> Image<K,S> .tif
-command export_tiff: imgconvert {image} {output}
+command export_tiff: imgconvert {image} {@output}
 visit_dark_tiff = export_tiff(visit_dark)
 
 operation estimate_alignment(moving: Image<M,S>, reference: Image<N,T>) -> ToolTransform<S,T> .mat
-command estimate_alignment: imgalign -in {moving} -ref {reference} -omat {output} -dof 6
+command estimate_alignment: imgalign -in {moving} -ref {reference} -omat {@output} -dof 6
 map_to_photo_matrix = estimate_alignment(ground_map, visit_dark_tiff)
 
 operation convert_alignment(matrix: ToolTransform<S,T>, moving: Image<M,S>, reference: Image<N,T>) -> Transform<S,T> .txt
-command convert_alignment: xfmconvert {matrix} {moving} {reference} {output}
+command convert_alignment: xfmconvert {matrix} {moving} {reference} {@output}
 map_to_photo = convert_alignment(map_to_photo_matrix, ground_map, visit_dark_tiff)
 
 # The reference image sets the target grid. Continuous images use linear
 # interpolation; label images use nearest-neighbour interpolation.
 operation resample(moving: Image<K,S>, transform: Transform<S,T>, reference: Image<N,T>) -> Image<K,T>
-command resample: imgresample {moving} {output} --transform {transform} --template {reference} --interp linear
+command resample: imgresample {moving} {@output} --transform {transform} --template {reference} --interp linear
 map_photo = resample(ground_map, map_to_photo, visit_dark)
 
 operation resample_labels(labels: Image<Classes,S>, transform: Transform<S,T>, reference: Image<N,T>) -> Image<Classes,T>
-command resample_labels: imgresample {labels} {output} --transform {transform} --template {reference} --interp nearest
+command resample_labels: imgresample {labels} {@output} --transform {transform} --template {reference} --interp nearest
 regions_photo = resample_labels(regions_map, map_to_photo, visit_dark)
 
 # Segment ground cover in map space before resampling into photo space.
 operation segment_cover(image: Image<Map,S>) -> Image<Cover,S>
-command segment_cover: coverseg {image} {output}
+command segment_cover: coverseg {image} {@output}
 cover_map = segment_cover(ground_map)
 cover = resample(cover_map, map_to_photo, visit_dark)
 
 operation cover_boundary(image: Image<Cover,S>) -> Image<Mask,S>
-command cover_boundary: coveredge {image} {output}
+command cover_boundary: coveredge {image} {@output}
 boundary = cover_boundary(cover)
 
 operation estimate_response(image: Image<Photo,S>) -> Response<Photo> .txt
-command estimate_response: imgresponse {image} {output}
+command estimate_response: imgresponse {image} {@output}
 photo_response = estimate_response(balanced_photo)
 
 operation estimate_vegetation(photo: Image<Photo,S>, response: Response<Photo>) -> Image<Vegetation,S>
-command estimate_vegetation: vegindex {photo} {response} {output}
+command estimate_vegetation: vegindex {photo} {response} {@output}
 vegetation = estimate_vegetation(balanced_photo, photo_response)
 
 operation trace_rows(vegetation: Image<Vegetation,S>, cover: Image<Cover,S>, seed: Image<Mask,S>) -> RowSet<S> .rows
-command trace_rows: rowtrace {vegetation} {output} --cover {cover} --seed {seed} --select 1000
+command trace_rows: rowtrace {vegetation} {@output} --cover {cover} --seed {seed} --select 1000
 crop_rows = trace_rows(vegetation, cover, boundary)
 
 operation weight_rows(rows: RowSet<S>, vegetation: Image<Vegetation,S>, cover: Image<Cover,S>) -> RowWeights .txt
-command weight_rows: rowweight {rows} {vegetation} {output} --cover {cover}
+command weight_rows: rowweight {rows} {vegetation} {@output} --cover {cover}
 row_weights = weight_rows(crop_rows, vegetation, cover)
 
 operation build_yield_table(rows: RowSet<S>, regions: Image<Classes,S>, weights: RowWeights) -> YieldTable .csv
-command build_yield_table: yieldtable {rows} {regions} {output} --weights {weights}
+command build_yield_table: yieldtable {rows} {regions} {@output} --weights {weights}
 yield_table = build_yield_table(crop_rows, regions_photo, row_weights)

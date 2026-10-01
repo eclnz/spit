@@ -21,19 +21,19 @@ path seed: seeds/{config}/{seed}.json
 source testset : Data
 path testset: eval/testset.parquet
 operation train(model: Weights, config: Config, seed: Seed) -> Weights
-command train: train --model {model} --config {config} --seed {seed} --out {output}
+command train: train --model {model} --config {config} --seed {seed} --out {@output}
 path trained: runs/{model}/{config}/{seed}/weights.pt
 trained = train(model @ each(model), config, seed)
 operation evaluate(weights: Weights, testset: Data) -> Metrics
-command evaluate: evaluate {weights} {testset} --out {output}
+command evaluate: evaluate {weights} {testset} --out {@output}
 path metrics: runs/{model}/{config}/{seed}/metrics.json
 metrics = evaluate(trained, testset)
 operation summarise(runs: many Metrics) -> Summary
-command summarise: summarise {runs} --out {output}
+command summarise: summarise {runs} --out {@output}
 path summary: summaries/{model}/{config}.json
 summary = summarise(metrics @ vary(seed))
 operation leaderboard(summaries: many Summary) -> Table
-command leaderboard: leaderboard {summaries} --out {output}
+command leaderboard: leaderboard {summaries} --out {@output}
 path board: leaderboard.csv
 board = leaderboard(summary @ vary(model, config))
 ```
@@ -71,19 +71,19 @@ source bold : Bold [sub, ses, run]
 path bold: sub-{sub}/ses-{ses}/func/sub-{sub}_ses-{ses}_task-rest_run-{run}_bold.nii.gz
 
 operation motioncorr(bold: Bold) -> Bold
-command motioncorr: motioncorr {bold} {output}
+command motioncorr: motioncorr {bold} {@output}
 
 operation bet(t1w: T1) -> T1
-command bet: bet {t1w} {output}
+command bet: bet {t1w} {@output}
 
 operation register(bold: Bold, ref: T1) -> Bold
-command register: coreg --ref {ref} --in {bold} --out {output}
+command register: coreg --ref {ref} --in {bold} --out {@output}
 
 operation sessionavg(runs: many Bold) -> Bold
-command sessionavg: sessionavg --out {output} {runs}
+command sessionavg: sessionavg --out {@output} {runs}
 
 operation longitudinal(sessions: many Bold) -> Bold
-command longitudinal: longitudinal --out {output} {sessions}
+command longitudinal: longitudinal --out {@output} {sessions}
 
 stage anat:
     brain = bet(t1w)
@@ -156,13 +156,13 @@ path policy: policy/{station}.toml
 # `where` pins the calibration revision, so it no longer takes part in matching.
 operation calibrate(calibration: Calibration, series: Series) -> Series
 verify calibrate: check_calibration {calibration} {series}
-command calibrate: apply_calibration --calibration {calibration} {series} {output}
+command calibrate: apply_calibration --calibration {calibration} {series} {@output}
 calibrated = calibrate(calibration @ where(revision=2), reading)
 
 # `same(station)` matches the reference on station alone; each station must
 # have exactly one, whatever day it was measured.
 operation compare(series: Series, reference: Series) -> Series
-command compare: subtract_reference {series} {reference} {output}
+command compare: subtract_reference {series} {reference} {@output}
 anomaly = compare(calibrated, reference @ same(station))
 
 # One job writes both bands.
@@ -173,7 +173,7 @@ low_band, high_band = split_bands(anomaly)
 # A many input can sit beside single inputs, each matched once per group.
 # The days arrive in natural order, and fewer than two is an error.
 operation summarise(days: many Series, policy: Policy) -> Summary @ min(2)
-command summarise: summarise --policy {policy} {days} --out {output}
+command summarise: summarise --policy {policy} {days} --out {@output}
 path summary: derived/summary/{station}.json
 summary = summarise(low_band @ vary(day), policy)
 ```
@@ -211,18 +211,18 @@ path shard: input/{group}/{part}.txt
 
 stage preprocess:
     operation sort_lines(input: Lines) -> Lines
-    command sort_lines: sort -u -o {output} {input}
+    command sort_lines: sort -u -o {@output} {input}
     sorted = sort_lines(shard)
 
     operation merge(items: many Lines) -> Lines
-    command merge: sort -m -u -o {output} {items}
+    command merge: sort -m -u -o {@output} {items}
     merged = merge(sorted @ vary(part))
 
 stage analysis:
     path: results/{@product}/{@entities}.txt
 
     operation tally_lines(input: Lines) -> Tally
-    command tally_lines: uniq -c {input} {output}
+    command tally_lines: uniq -c {input} {@output}
     tally = tally_lines(merged)
 ```
 

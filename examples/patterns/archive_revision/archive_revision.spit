@@ -4,6 +4,6 @@ path scan: archive/{case}/r{revision}.nii.gz
 source calibration : Calibration [case]
 path calibration: calibration/{case}.json
 operation prepare(scan: Image, calibration: Calibration) -> Image
-command prepare: prepare --scan {scan} --calibration {calibration} --out {output}
+command prepare: prepare --scan {scan} --calibration {calibration} --out {@output}
 path prepared: results/{case}.nii.gz
 prepared = prepare(scan @ where(revision=2), calibration)

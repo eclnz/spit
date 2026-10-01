@@ -43,13 +43,13 @@ fn rendered(diagnostics: &[Diagnostic], text: &str) -> Vec<String> {
 
 #[test]
 fn a_path_inside_another_artifacts_file_is_rejected() {
-    let text = "source x [s]\npath x: in/{s}.txt\noperation f(a) -> Text\ncommand f: cp {a} {output}\npath y: in/{s}.txt/out.txt\ny = f(x)\n";
+    let text = "source x [s]\npath x: in/{s}.txt\noperation f(a) -> Text\ncommand f: cp {a} {@output}\npath y: in/{s}.txt/out.txt\ny = f(x)\n";
     assert_eq!(
         rendered(&diagnose(text, None), text),
         ["error: line 5, column 9: path rule for `y` puts files inside `in/s.txt`, the path of a `x` file, for the same entities; distinguish their path rules"]
     );
     // Different dimension names hide the overlap until paths are bound.
-    let text = "source x [s]\npath x: in/{s}.txt\nsource z [t]\npath z: in/{t}.txt/out.txt\noperation f(a, b) -> Text\ncommand f: cp {a} {b} {output}\npath: o/{@product}/{@entities}\ny = f(x, z @ where(t=1))\nsources:\n    x[s=1]\n    z[t=1]\n";
+    let text = "source x [s]\npath x: in/{s}.txt\nsource z [t]\npath z: in/{t}.txt/out.txt\noperation f(a, b) -> Text\ncommand f: cp {a} {b} {@output}\npath: o/{@product}/{@entities}\ny = f(x, z @ where(t=1))\nsources:\n    x[s=1]\n    z[t=1]\n";
     let (pipeline, inventory) = support::parse_fixture(text).unwrap();
     let error = bind(&pipeline, &resolve(&pipeline, &inventory.unwrap()).unwrap()).unwrap_err();
     assert!(
@@ -97,11 +97,11 @@ fn paths_that_differ_only_in_case_are_flagged() {
 
 #[test]
 fn shell_operators_in_a_command_are_flagged() {
-    let text = "source x [s]\npath: {@product}/{@entities}\noperation f(a) -> Text\ncommand f: tool {a} {output} 2>&1 | tee '>' log\ny = f(x)\n";
+    let text = "source x [s]\npath: {@product}/{@entities}\noperation f(a) -> Text\ncommand f: tool {a} {@output} 2>&1 | tee '>' log\ny = f(x)\n";
     let messages = rendered(&diagnose(text, None), text);
     assert_eq!(messages.len(), 2, "{messages:?}");
-    assert!(messages[0].starts_with("warning: line 4, column 30: `2>&1` in the command for `f` is passed to the program as an argument"));
-    assert!(messages[1].starts_with("warning: line 4, column 35: `|` in the command"));
+    assert!(messages[0].starts_with("warning: line 4, column 31: `2>&1` in the command for `f` is passed to the program as an argument"));
+    assert!(messages[1].starts_with("warning: line 4, column 36: `|` in the command"));
 }
 
 #[test]

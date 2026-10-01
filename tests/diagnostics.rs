@@ -201,19 +201,19 @@ fn hash_ending_a_word_is_flagged_as_a_likely_comment() {
     let text = "\
 source raw [id]
 operation copy(input)
-command copy: tool --color=#fff {input} {output}# note
+command copy: tool --color=#fff {input} {@output}# note
 result = copy(raw)
 source spare [id]# note
 ";
     assert_eq!(
         rendered(&diagnose(text, None)),
         [
-            "warning: line 3: `#` after `{output}` is part of that word, not a comment; put a space before `#` to start a comment, or quote the text to keep it",
+            "warning: line 3: `#` after `{@output}` is part of that word, not a comment; put a space before `#` to start a comment, or quote the text to keep it",
             "error: line 5: expected closing `]` in product declaration (`#` after `[id]` is part of that word, not a comment; put a space before `#` to start a comment, or quote the text to keep it)",
         ]
     );
     let quoted = text
-        .replace("{output}# note", "{output} # note")
+        .replace("{@output}# note", "{@output} # note")
         .replace("[id]# note", "[id] # note");
     assert_eq!(
         rendered(&diagnose(&quoted, None)),

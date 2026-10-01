@@ -485,7 +485,7 @@ fn a_recipe_run_in_memory_prints_each_pipeline_warning_once() {
         "analysis.spit",
         "source raw : Raw [id]\nsource spare : Raw [id]\npath raw: in/{id}.txt\n\
          path spare: sp/{id}.txt\npath: out/{@product}/{id}.txt\n\
-         operation clean(raw: Raw) -> Clean\ncommand clean: tool {raw} {output}\ncleaned = clean(raw)\n",
+         operation clean(raw: Raw) -> Clean\ncommand clean: tool {raw} {@output}\ncleaned = clean(raw)\n",
     );
     let recipe = tree.write("data.spitin", "pipeline analysis.spit\n");
     for command in ["inputs", "dag", "artifacts"] {
@@ -522,7 +522,7 @@ fn drop_rules_that_remove_every_group_stop_each_command() {
     tree.write(
         "analysis.spit",
         "source image : Img [sub, ses]\npath image: data/sub-{sub}/ses-{ses}/image.nii\n\
-         operation clean(img: Img) -> Clean\ncommand clean: tool {img} {output}\n\
+         operation clean(img: Img) -> Clean\ncommand clean: tool {img} {@output}\n\
          path: out/{@product}/{sub}_{ses}.txt\ncleaned = clean(image)\n",
     );
     // Every subject has one session, so the drop removes every subject;

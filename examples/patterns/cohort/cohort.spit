@@ -8,19 +8,19 @@ source bold : Bold [sub, ses, run]
 path bold: sub-{sub}/ses-{ses}/func/sub-{sub}_ses-{ses}_task-rest_run-{run}_bold.nii.gz
 
 operation motioncorr(bold: Bold) -> Bold
-command motioncorr: motioncorr {bold} {output}
+command motioncorr: motioncorr {bold} {@output}
 
 operation bet(t1w: T1) -> T1
-command bet: bet {t1w} {output}
+command bet: bet {t1w} {@output}
 
 operation register(bold: Bold, ref: T1) -> Bold
-command register: coreg --ref {ref} --in {bold} --out {output}
+command register: coreg --ref {ref} --in {bold} --out {@output}
 
 operation sessionavg(runs: many Bold) -> Bold
-command sessionavg: sessionavg --out {output} {runs}
+command sessionavg: sessionavg --out {@output} {runs}
 
 operation longitudinal(sessions: many Bold) -> Bold
-command longitudinal: longitudinal --out {output} {sessions}
+command longitudinal: longitudinal --out {@output} {sessions}
 
 stage anat:
     brain = bet(t1w)

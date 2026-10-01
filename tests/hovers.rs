@@ -140,8 +140,8 @@ fn product_paths_report_explicit_nearest_stage_pipeline_and_builtin_rules() {
 #[test]
 fn imported_symbols_and_command_references_have_precise_hovers() {
     let tree = Tree::new("hovers-imports", &[]);
-    tree.write("lib.spit", "source raw : Frame<Native> [id]\npath raw: in/{id}.txt\noperation clean(input: Frame<S>) -> Frame<S>\ncommand clean: cp {input} {output}\n");
-    let text = "use lib.spit as prep\nout = prep::clean(prep::raw)\noperation copy(input: Frame<S>) -> Frame<S>\ncommand copy: cp {input} {output}\nverify copy: test -f {input}\n";
+    tree.write("lib.spit", "source raw : Frame<Native> [id]\npath raw: in/{id}.txt\noperation clean(input: Frame<S>) -> Frame<S>\ncommand clean: cp {input} {@output}\n");
+    let text = "use lib.spit as prep\nout = prep::clean(prep::raw)\noperation copy(input: Frame<S>) -> Frame<S>\ncommand copy: cp {input} {@output}\nverify copy: test -f {input}\n";
     let all = pipeline_hovers(text, &tree.path().join("unsaved.spit"));
     assert!(
         !all.iter().any(|hover| hover.line == 1),
@@ -154,7 +154,7 @@ fn imported_symbols_and_command_references_have_precise_hovers() {
     assert!(at(&all, 2, "prep::clean")
         .details
         .iter()
-        .any(|detail| detail == "Command: cp {input} {output}"));
+        .any(|detail| detail == "Command: cp {input} {@output}"));
     assert_eq!(
         at(&all, 2, "prep::clean").end_column - at(&all, 2, "prep::clean").column,
         11
@@ -186,7 +186,7 @@ fn broken_steps_do_not_claim_inferred_types_or_hide_independent_symbols() {
 
 #[test]
 fn hover_ranges_use_utf16_and_exclude_comments_and_literal_text() {
-    let text = "\u{feff}source raw [id]\noperation copy(first, second)\nout = copy(raw @ where(id=😀), raw) # raw copy\ncommand copy: echo raw {output}\n";
+    let text = "\u{feff}source raw [id]\noperation copy(first, second)\nout = copy(raw @ where(id=😀), raw) # raw copy\ncommand copy: echo raw {@output}\n";
     let all = hovers(text);
     assert_eq!(at(&all, 1, "raw").column, 9);
     assert_eq!(at(&all, 3, "copy").column, 7);

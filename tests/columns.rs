@@ -27,7 +27,7 @@ source raw : Table [id]
 operation copy(table: Table) -> Tab le
 bad name = copy(raw)
 operation clean(table: Table) -> Table
-command clean: tool {input {output}
+command clean: tool {input {@output}
 path raw: in/{id.csv
 ";
     assert_eq!(
@@ -36,7 +36,7 @@ path raw: in/{id.csv
             "error 2: 9bad",
             "error 3: Tab le",
             "error 4: bad name",
-            "error 6: tool {input {output}",
+            "error 6: tool {input {@output}",
             "error 7: in/{id.csv",
         ]
     );
@@ -102,12 +102,12 @@ fn warnings_point_at_the_name_or_word() {
 source raw : Table [id]
 source spare : Table [id]
 operation clean(table: Table) -> Table
-command clean: tool {table} {output}# note
+command clean: tool {table} {@output}# note
 cleaned = clean(raw)
 ";
     assert_eq!(
         pointed(text, None),
-        ["warning 2: spare", "warning 4: {output}#"]
+        ["warning 2: spare", "warning 4: {@output}#"]
     );
 }
 
@@ -230,9 +230,9 @@ fn command_errors_about_the_operation_point_at_its_name() {
     let text = "\
 source raw : Table [id]
 operation clean(table: Table) -> Table
-command clean: tool {table} {output}
-command cleen: tool {input} {output}
-command clean: other {table} {output}
+command clean: tool {table} {@output}
+command cleen: tool {input} {@output}
+command clean: other {table} {@output}
 cleaned = clean(raw)
 ";
     assert_eq!(pointed(text, None), ["error 4: cleen", "error 5: clean"]);

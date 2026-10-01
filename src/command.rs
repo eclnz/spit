@@ -36,7 +36,7 @@ pub struct CommandTemplate {
 }
 
 impl CommandTemplate {
-    /// Split and parse a template such as `sort -o {output} {input}`,
+    /// Split and parse a template such as `sort -o {@output} {input}`,
     /// checking its quotes and braces. Arguments are separated by
     /// whitespace; quotes and backslashes keep text in one argument.
     pub fn parse(text: impl Into<String>) -> Result<Self, CommandError> {
@@ -121,13 +121,23 @@ pub(crate) fn facet(name: &str) -> (&str, Result<Facet, &str>) {
 }
 
 pub(crate) fn slot(operation: &OperationDef, name: &str) -> Option<Slot> {
+    if name == "@output" {
+        return operation
+            .outputs
+            .iter()
+            .position(|port| port.name == DEFAULT_OUTPUT)
+            .map(Slot::Output);
+    }
+    if name.starts_with('@') {
+        return None;
+    }
     if let Some(index) = operation.inputs.iter().position(|port| port.name == name) {
         return Some(Slot::Input(index));
     }
     operation
         .outputs
         .iter()
-        .position(|port| port.name == name)
+        .position(|port| port.name == name && port.name != DEFAULT_OUTPUT)
         .map(Slot::Output)
 }
 
@@ -237,7 +247,20 @@ fn check_command_placeholders(
                     ))
                 }
             };
-            match slot(operation, port).ok_or_else(unknown)? {
+            let slot = slot(operation, port).ok_or_else(|| {
+                if port == DEFAULT_OUTPUT
+                    && operation
+                        .outputs
+                        .iter()
+                        .any(|output| output.name == DEFAULT_OUTPUT)
+                {
+                    CommandError::new("`{output}` is now `{@output}` in commands")
+                        .focus(format!("{{{name}}}"))
+                } else {
+                    unknown()
+                }
+            })?;
+            match slot {
                 Slot::Output(index) => {
                     if role == CommandRole::Verify {
                         return Err(CommandError::new(format!(
@@ -247,13 +270,14 @@ fn check_command_placeholders(
                         .focus(format!("{{{name}}}")));
                     }
                     if facet == Facet::Stem && operation.outputs[index].extension.is_none() {
-                        let example = if port == DEFAULT_OUTPUT {
+                        let example = if port == "@output" {
                             "-> Image .nii.gz".to_owned()
                         } else {
                             format!("{port}: Image .nii.gz")
                         };
+                        let port_name = &operation.outputs[index].name;
                         return fail(format!(
-                            "`{{{name}}}` is `{port}`'s file name without its extension, but `{}` declares none for `{port}`; give it one, as in `{example}`",
+                            "`{{{name}}}` is `{port_name}`'s file name without its extension, but `{}` declares none for `{port_name}`; give it one, as in `{example}`",
                             operation.name
                         ));
                     }
@@ -287,7 +311,12 @@ fn check_command_placeholders(
         {
             return Err(CommandError::new(format!(
                 "command for `{}` must use `{{{}}}`",
-                operation.name, port.name
+                operation.name,
+                if port.name == DEFAULT_OUTPUT {
+                    "@output"
+                } else {
+                    &port.name
+                }
             )));
         }
     }

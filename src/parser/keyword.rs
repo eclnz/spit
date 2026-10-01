@@ -110,7 +110,7 @@ pub(crate) fn removed_section(line: &str) -> Option<&'static str> {
         "products:" => "write each source as `source name : Type [dimensions]`, and let each step declare its outputs",
         "operations:" => "write each operation as `operation name(port: Type) -> Type`",
         "pipeline:" => "write each step as `output = operation(inputs)`",
-        "commands:" => "write each command as `command operation: program {input} {output}`",
+        "commands:" => "write each command as `command operation: program {input} {@output}`",
         "constraints:" => "write each rule on its own line, as `require ...` or `drop ...`",
         _ => return None,
     })

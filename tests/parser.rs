@@ -157,24 +157,24 @@ fn flow_form_requires_operation_declaration_before_use() {
 
 #[test]
 fn command_arguments_keep_quoted_hashes_and_strip_comments() {
-    let text = "source raw [id] # source comment\n# whole-line comment\noperation copy(input)\ncommand copy: tool --tag '#run' --label \"part#1\" --color=#fff {input} {output} # command comment\nresult = copy(raw)\n";
+    let text = "source raw [id] # source comment\n# whole-line comment\noperation copy(input)\ncommand copy: tool --tag '#run' --label \"part#1\" --color=#fff {input} {@output} # command comment\nresult = copy(raw)\n";
     let pipeline = parse_pipeline(text).unwrap();
     assert_eq!(
         pipeline.commands[0].template,
-        "tool --tag '#run' --label \"part#1\" --color=#fff {input} {output}"
+        "tool --tag '#run' --label \"part#1\" --color=#fff {input} {@output}"
     );
 }
 
 #[test]
 fn equals_command_keeps_colons_in_arguments() {
     let pipeline = parse_pipeline(
-        "source raw [id]\noperation fetch(input)\ncommand fetch = tool --url https://example.com/a:b {input} {output}\nresult = fetch(raw)\n",
+        "source raw [id]\noperation fetch(input)\ncommand fetch = tool --url https://example.com/a:b {input} {@output}\nresult = fetch(raw)\n",
     )
     .unwrap();
     assert_eq!(pipeline.commands[0].operation, "fetch");
     assert_eq!(
         pipeline.commands[0].template,
-        "tool --url https://example.com/a:b {input} {output}"
+        "tool --url https://example.com/a:b {input} {@output}"
     );
 }
 
@@ -190,23 +190,23 @@ fn shell_source_is_rejected_with_migration_guidance() {
 fn rejects_unbalanced_command_brackets_with_line_number() {
     let cases = [
         (
-            "command normalize: normalize --mode input} {output",
+            "command normalize: normalize --mode input} {@output",
             "unmatched `}`",
         ),
         (
-            "command normalize: normalize --mode {input {output}",
+            "command normalize: normalize --mode {input {@output}",
             "unclosed `{`",
         ),
         (
-            "command normalize: normalize --mode {input} {{output}",
+            "command normalize: normalize --mode {input} {{@output}",
             "unmatched `}`",
         ),
         (
-            "command normalize: normalize --mode {} {output}",
+            "command normalize: normalize --mode {} {@output}",
             "empty placeholder",
         ),
         (
-            "command normalize: normalize '--mode {input} {output}",
+            "command normalize: normalize '--mode {input} {@output}",
             "unterminated quote",
         ),
     ];
@@ -236,12 +236,12 @@ fn path_template_errors_are_reported_while_parsing() {
 #[test]
 fn hash_inside_a_word_is_text_as_in_bash() {
     let pipeline = parse_pipeline(
-        "source raw [id]\noperation copy(input)\ncommand copy: tool --url=https://example.com/#top {input} {output}# note\n",
+        "source raw [id]\noperation copy(input)\ncommand copy: tool --url=https://example.com/#top {input} {@output}# note\n",
     )
     .unwrap();
     assert_eq!(
         pipeline.commands[0].template,
-        "tool --url=https://example.com/#top {input} {output}# note"
+        "tool --url=https://example.com/#top {input} {@output}# note"
     );
     let error = parse_pipeline("source raw [id]# note\n").unwrap_err();
     assert_eq!(error.line(), 1);
@@ -253,6 +253,14 @@ fn input_port_cannot_shadow_output_placeholder() {
         parse_pipeline("source raw [id]\noperation copy(output: Image) -> Image\n").unwrap_err();
     assert_eq!(error.line(), 2);
     assert!(error.message().contains("`output` is reserved"));
+}
+
+#[test]
+fn named_output_cannot_use_the_builtin_placeholder_name() {
+    let error = parse_pipeline("operation copy(image: Image) -> (output: Image)\n").unwrap_err();
+    assert!(error
+        .message()
+        .contains("named output port `output` is reserved"));
 }
 
 #[test]
@@ -349,9 +357,9 @@ fn every_input_port_has_a_name() {
 #[test]
 fn a_command_names_each_port_it_uses() {
     for template in [
-        "tool {input} {output}",
-        "tool {input1} {output}",
-        "tool {inputs} {output}",
+        "tool {input} {@output}",
+        "tool {input1} {@output}",
+        "tool {inputs} {@output}",
     ] {
         let text = format!("operation f(scans: many Scan) -> Out\ncommand f: {template}\n");
         let error = spit::validate_commands(&parse_pipeline(&text).unwrap()).unwrap_err();

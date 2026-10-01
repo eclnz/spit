@@ -125,10 +125,10 @@ fn bound_paths_carry_the_extension() {
         "pipeline.spit",
         &format!(
             "path: out/{{@product}}/{{@entities}}\next: .img\n{STEPS}\
-             command copy: copy {{input}} {{output}}\n\
-             command align: align {{input}} {{output}}\n\
+             command copy: copy {{input}} {{@output}}\n\
+             command align: align {{input}} {{@output}}\n\
              command fit: fit {{input}} {{weights}} {{quality}}\n\
-             command untyped: note {{input}} {{output}}\n"
+             command untyped: note {{input}} {{@output}}\n"
         ),
     );
     tree.write("inputs.spitout", "sources:\n    raw[id=a]\n");

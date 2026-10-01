@@ -12,7 +12,7 @@ fn unqualified_and_nested_imports_work_together() {
     let dir = Tree::new("imports", &[]);
     dir.write(
         "base.spit",
-        "operation clean(input)\ncommand clean: cp {input} {output}\n",
+        "operation clean(input)\ncommand clean: cp {input} {@output}\n",
     );
     dir.write("middle.spit", "use clean from base.spit as prep\n");
     let main = dir.write(
@@ -111,7 +111,7 @@ fn import_all_brings_definitions_but_not_steps() {
     let dir = Tree::new("imports", &[]);
     dir.write(
         "base.spit",
-        "source raw [id]\noperation clean(input)\ncommand clean: cp {input} {output}\ncleaned = clean(raw)\n",
+        "source raw [id]\noperation clean(input)\ncommand clean: cp {input} {@output}\ncleaned = clean(raw)\n",
     );
     let main = dir.write(
         "main.spit",
@@ -165,13 +165,13 @@ fn an_import_may_not_define_again_what_the_file_defines() {
     dir.write(
         "base.spit",
         "source raw [id]\npath raw: in/{id}.txt\noperation clean(input)\n\
-         command clean: tool {input} {output}\n",
+         command clean: tool {input} {@output}\n",
     );
     for (first, name, kind) in [
         ("source raw [id]", "raw", "product"),
         ("operation clean(input)", "clean", "operation"),
         (
-            "command clean: tool {input} {output}",
+            "command clean: tool {input} {@output}",
             "clean",
             "command for operation",
         ),
