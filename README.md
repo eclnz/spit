@@ -51,8 +51,8 @@ SPIT runs in three steps. Each is one command, and each reads the files the prev
 | File | Holds |
 | --- | --- |
 | `.spit` | A pipeline: sources, operations, steps, commands, and path rules. No dataset appears in it. |
-| `.spitin` | A recipe for a dataset's inputs: the pipeline it serves, and its `discover`, `exclude`, `drop` and `require` rules and source paths. |
-| `.spitout` | A dataset's settled inputs: each source artifact, with its file. |
+| `.spitin` | A recipe for a dataset's inputs: the pipeline it serves, its dataset root, and its `discover`, `exclude`, `drop` and `require` rules and source paths. |
+| `.spitout` | A dataset's settled inputs: each source artifact, with its file, and the root they were found under. |
 | `.spitdag` | The resolved jobs, each with its artifacts' files and its command, as JSON, in an order they can run in: all a backend needs to run them, with the dataset folder, the programs the commands need, and a fingerprint of each job's work to tell when it must run again. |
 
 A later step may also take an earlier step's input and run that step in memory: `dag` and `artifacts` take a `.spitin` in place of the `.spitout`. A `.spitin` names its own pipeline, so it is given alone: `spit dag dataset.spitin`. Giving a `.spit` beside it is an error, so the two cannot disagree. A `.spitout` names no pipeline, so it takes one: `spit dag analysis.spit dataset.spitout`.
@@ -107,7 +107,7 @@ error: line 5, column 29: command for `clean` uses unknown placeholder `{result}
 error: line 9, column 14: unknown product `rwa`
 ```
 
-Syntax errors are reported throughout the file first; the remaining checks run once every line parses. A step or rule that uses a declaration which failed is not reported again. Errors stop the command; warnings do not. Warnings flag a source product no step uses, an operation no step uses, a used operation with no `command` once the pipeline has commands, an output type variable that no input binds, a stage with no steps, a shell operator such as `|` or `>` in a command, and a `#` that ends a word, which reads like a comment but is part of the word. With inputs, as in `dag`, they also flag a source with no artifacts, naming the steps it leaves without jobs, any other step that resolves no jobs, and paths that differ only in letter case. A file with no steps is treated as a library of definitions, and imported definitions are never reported as unused. Jobs are resolved only when nothing else is wrong.
+Syntax errors are reported throughout the file first; the remaining checks run once every line parses. A step or rule that uses a declaration which failed is not reported again. Errors stop the command; warnings do not. Warnings flag a source product no step uses, an operation no step uses, a used operation with no `command` once the pipeline has commands, an output type variable that no input binds, a stage with no steps, a shell operator such as `|` or `>` in a command, and a `#` that ends a word, which reads like a comment but is part of the word. With inputs, as in `dag`, they also flag a source with no artifacts, naming the steps it leaves without jobs, any other step that resolves no jobs, paths that differ only in letter case, and a value with a `-` that `{@labels}` writes, which BIDS cannot read back. `check` on a recipe warns when its `root` folder is missing, and `inputs` warns about each `sidecars` group it found only some files of. A file with no steps is treated as a library of definitions, and imported definitions are never reported as unused. Jobs are resolved only when nothing else is wrong.
 
 ## Write a pipeline
 
@@ -249,7 +249,9 @@ To make a plan for the work that can run now, use `spit dag dataset.spitin --par
 
 ## Language reference
 
-Beyond the basics above, `.spit` files support typed products, multi-output operations, `many`/aggregation inputs with selectors (`where`, `same`, `vary`, `each`), symbolic type variables, stages, path placeholders, and `use` imports for sharing definitions across files; `.spitin` recipes add directory discovery, rules that leave data out (`exclude`, `drop`) or require it (`require`). A path can use `{@labels}` for BIDS-style dimension labels and `[...]` for a segment only some products have; the [cohort walkthrough](docs/examples.md#cohort-discovery-exclusion-and-grouped-removal) shows one default path for run, session, and subject outputs. See the [full language reference](docs/language-reference.md) for syntax and rules for each of these.
+Beyond the basics above, `.spit` files support typed products, multi-output operations, `many`/aggregation inputs with selectors (`where`, `same`, `vary`, `each`), symbolic type variables, stages, path placeholders, and `use` imports for sharing definitions across files; `.spitin` recipes add a dataset `root`, directory discovery, and rules that leave data out (`exclude`, `drop`) or require it (`require`).
+
+Paths are written once where they can be. SPIT's own path placeholders take `@`, as `{@product}`, `{@entities}`, `{@stage}` and `{@labels}`, so a bare `{sub}` is always a dimension. An operation names the extension each output's file has, as `-> Transform .mat`, and `ext:` sets one for the rest, so a default path is written without one. An output a tool writes next to another, such as dcm2niix's `.json`, is declared `beside` it and follows its path. A `sidecars` block declares sources that share a path stem and differ by extension. A command can take an output's folder and name, `{image.dir}` and `{image.stem}`, for a tool that adds the extension itself. A path can use `{@labels}` for BIDS-style dimension labels and `[...]` for a segment only some products have; the [cohort walkthrough](docs/examples.md#cohort-discovery-exclusion-and-grouped-removal) shows one default path for run, session, and subject outputs. See the [full language reference](docs/language-reference.md) for syntax and rules for each of these.
 
 ## More examples
 
@@ -262,8 +264,9 @@ Beyond the basics above, `.spit` files support typed products, multi-output oper
 | [Complex](examples/pipelines/complex.spit) | Nested aggregation |
 | [Selectors](examples/pipelines/selectors.spit) | `where`, `same`, a two-output step, a verification, and a many input beside a single input |
 | [Analytics](examples/analytics/analytics.spit) | Joins and rollups |
+| [Cohort](examples/patterns/cohort/cohort.spit) | BIDS sessions with discovery, a dropped subject, an excluded run, and one default path using `[...]` groups and `{@labels}` |
 | [Field survey](examples/commands/field_survey/field_survey.spit) | A larger pipeline with sidecar files, calibration, alignment between spaces, and commands |
-| [MRtrix3 ACT](examples/commands/mrtrix3_act/mrtrix3_act.spit) | A larger pipeline with commands in nested preprocessing, anatomy, and tractography stages, with a folder per stage and per-stage file formats |
+| [MRtrix3 ACT](examples/commands/mrtrix3_act/mrtrix3_act.spit) | A larger pipeline with commands in nested preprocessing, anatomy, and tractography stages, with a folder per stage, per-stage file formats through `ext:`, and DWI sidecars |
 | [Stages](examples/stages/stages.spit) | Preprocessing and analysis stages, a stage's own path default, and `{@stage}` paths |
 | [Nested stages](examples/stages/nested.spit) | Stages within a stage, beside a step in the outer stage itself |
 | [Imports](examples/imports/imported.spit) | Reuse source and operation definitions with `text::` names |
