@@ -65,10 +65,12 @@ impl PipelineBuilder {
     }
 
     fn add_stage(&mut self, name: &str, place: Place) -> Result<(), ParseError> {
-        if self.lines.stages.contains_key(name) {
-            return Err(
-                ParseError::new(place.line, format!("duplicate stage `{name}`")).within(&place),
+        if let Some(first) = self.lines.stages.get(name) {
+            let message = format!(
+                "duplicate stage `{name}`: it is already opened on line {}; a stage is one block, so move these lines into it",
+                first.line
             );
+            return Err(ParseError::new(place.line, message).within(&place));
         }
         self.lines.stages.insert(name.to_owned(), place);
         self.pipeline.stages.push(StageDef::new(name));

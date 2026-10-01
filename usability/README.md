@@ -61,6 +61,10 @@ Each run's folder in [`results/`](results) holds:
 
 The [second-round report](ROUND2.md) covers 18 trials, including the single-leaderboard and vague-brief variants. All 18 plans matched their keys; it records the participants' reported friction and the limits of comparison with round 1.
 
+## Results: rounds 3 and 4
+
+The [third-round report](ROUND3.md) covers 12 plans after Phase 5. The [fourth-round report](ROUND4.md) is a small, low-cost check of the paths work: three plans, all correct.
+
 ## Run it again
 
 The second round also includes two variants: [s3-one-board](harness/scenarios/s3-one-board/brief.md) asks for one leaderboard across model and configuration (39 jobs), and [s4-vague](harness/scenarios/s4-vague/brief.md) gives the station task in less prescriptive terms (19 jobs). The s2 follow-up key now uses a recipe with `exclude` so the corrupted raw run stays in place. The other briefs and datasets stay the same, making their results comparable with round 1.
