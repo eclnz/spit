@@ -1,0 +1,46 @@
+{
+  "run": "s4-vague-a",
+  "model": "same-model replicate",
+  "grade": {
+    "pass": true,
+    "expected_jobs": 19,
+    "actual_jobs": 19,
+    "matched_jobs": 19,
+    "expected_by_tool": {
+      "calibrate": 8,
+      "anomaly": 8,
+      "stationreport": 3
+    },
+    "actual_by_tool": {
+      "calibrate": 8,
+      "anomaly": 8,
+      "stationreport": 3
+    },
+    "missing": [],
+    "extra": []
+  },
+  "telemetry": {
+    "spit_calls": 3,
+    "failed_calls": 0,
+    "calls": [
+      {
+        "n": 1,
+        "args": "check stations.spitin",
+        "exit": 0
+      },
+      {
+        "n": 2,
+        "args": "dag stations.spitin --root data --commands",
+        "exit": 0
+      },
+      {
+        "n": 3,
+        "args": "dag stations.spitin --root data -o plan.spitdag",
+        "exit": 0
+      }
+    ]
+  },
+  "audit": {
+    "error": "no participant tool transcript"
+  }
+}

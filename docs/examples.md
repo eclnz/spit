@@ -234,6 +234,14 @@ sources:
 
 Run `spit dag stages.spit stages.spitout --paths` to see seven jobs: three `sort_lines`, two `merge`, and two `tally_lines`. The sorted and merged outputs use the `preprocess/` path default; the tallies use the `analysis` stage's `results/` override. `spit dag stages.spit stages.spitout -o stages.spitdag` records each job's stage for a backend.
 
+## Inspect a dataset and its plan
+
+Use `spit inputs cohort.spitin` to see discovered source identities and removals before planning. If a dataset has files outside every source path rule, `spit inputs cohort.spitin --unmatched` lists those paths; it does not write an inventory. A file can match a source rule yet remain unused by every job. For example, the sensors inventory contains `calibration[station=north,revision=1]`, which is valid but unselected because the call uses `where(revision=2)`. `spit artifacts sensors.spit sensors.spitout` lists unused sources separately from missing joins.
+
+Use `spit dag sweep.spit sweep.spitout --commands` to inspect expanded commands and the order of a `many` input. Use `--paths` for the file bound to each artifact. Run `spit dag sweep.spit sweep.spitout --json` to inspect the structured plan on standard output, or use `-o sweep.spitdag` to save it. The JSON `jobs` array holds each job's `operation`, `inputs`, `outputs`, `command`, and `verify`; count jobs by `operation` there when a compact per-operation summary is needed. `--commands` and `-o` are separate views of the same plan.
+
+When `dag` stops because an input is missing or ambiguous, run `spit artifacts` with the same recipe or pipeline and inventory to see all incomplete outputs and unused sources. A source whose identity differs only in case or leading zeros can appear as an unused source and in a near-match hint, even though it matched its source path rule during discovery. `--unmatched` only lists files that matched no source rule at all.
+
 ## More example pipelines
 
 Each pipeline below, under [`examples/`](../examples), checks cleanly and sits beside a `.spitin` recipe and a `.spitout` of its inputs. Recipes may add discovery, exclusion, drop, or require rules. Run the command from the repository root to see its jobs; add `--paths` to see each artifact's file or `-o plan.spitdag` to write them, or run `spit check` on the `.spit` or `.spitin` alone.

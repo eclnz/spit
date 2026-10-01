@@ -1,0 +1,6 @@
+pipeline pipeline.spit
+
+exclude [store=s03]  # Only one sales week; store_report requires at least two.
+exclude [store=s07]  # Sales store has no matching pricing artifact.
+exclude [store=S07]  # Mis-cased pricing artifact for s07.
+exclude [store=s09]  # No pricing file for this store.

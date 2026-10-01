@@ -36,7 +36,7 @@ Work through these items in order. Each implementation step gets its own commit 
 
 **Done when:** Focused tests cover the message and option conflict; a user can correct either call from the error or help alone. Existing answer keys resolve to the same jobs.
 
-## 5. Investigate plan-inspection requests with the repaired guide
+## 5. Investigate plan-inspection requests with the repaired guide (done)
 
 **Evidence:** Participants requested per-operation job counts, a preview of output and collection order, and more detail about unmatched or unused files. Both diagnosis participants correctly found the three broken stores but spent time on the uppercase orphan file. Existing `inputs --unmatched`, unused-source notes, `--paths`, and `dag --commands` may already provide part of this information.
 
@@ -44,6 +44,8 @@ Work through these items in order. Each implementation step gets its own commit 
 
 **Done when:** Each request is either answered by a discoverable existing command or has a specific CLI design backed by a repeat observation. Any implemented output is deterministic and does not obscure existing failure messages.
 
-## 6. Repeat the affected usability tasks
+## 6. Repeat the affected usability tasks (done)
 
 After items 1–4, rerun `s3-sweep`, `s3-one-board`, `s4-vague`, and `s6-diagnose` in isolated trials; include the cohort follow-up to check the complete recipe example. Use the same model and tasks for replicates. Retain command counts, failed calls, artifacts, reports, and participant tool transcripts so guide use and sandbox access can be audited. Compare the specific detours above, not only whether the answer keys pass. Use those results to decide item 5 before adding a broader CLI view.
+
+The [third study](../ROUND3.md) and its [inspection design](round3-inspection.md) record the results. The trial host did not provide participant tool transcripts, so the access audit remains unverified; wrapper call logs, plans, and available reports were retained.
