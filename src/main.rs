@@ -577,18 +577,23 @@ fn check(args: &CliArgs) -> Result<(), Box<dyn Error>> {
     let diagnosis = diagnose_checked(&text, Context::at(path));
     if args.has(Flag::Json) {
         // Paths are shown only for a pipeline that checks clean.
-        let (diagnostics, paths) = match &diagnosis {
-            Ok(checked) => (checked.warnings.as_slice(), Some(checked.paths.as_slice())),
-            Err(all) => (all.as_slice(), None),
+        let json = match &diagnosis {
+            Ok(checked) => render_check_json(&checked.warnings, &text, &checked.paths),
+            Err(all) => render_diagnostics_json(all, &text, None),
         };
-        let json = if args.has(Flag::Hovers) {
-            render_editor_json(diagnostics, &text, path, paths.unwrap_or_default())
-        } else if let Some(paths) = paths {
-            render_check_json(diagnostics, &text, paths)
+        if args.has(Flag::Hovers) {
+            let paths = match &diagnosis {
+                Ok(checked) => checked.paths.as_slice(),
+                Err(_) => &[],
+            };
+            let diagnostics = match &diagnosis {
+                Ok(checked) => checked.warnings.as_slice(),
+                Err(all) => all.as_slice(),
+            };
+            print!("{}", render_editor_json(diagnostics, &text, path, paths));
         } else {
-            render_diagnostics_json(diagnostics, &text, None)
-        };
-        print!("{json}");
+            print!("{json}");
+        }
         return Ok(());
     }
     let checked = passed(

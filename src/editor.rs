@@ -1,7 +1,7 @@
 //! Editor explanations of pipeline symbols, using the same compilation as
 //! validation. No inventory is read and no dataset directories are scanned.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::path::Path;
 
 use crate::compile::{collect_pipeline, CompiledStep};
@@ -10,10 +10,7 @@ use crate::diagnostics::{
 };
 use crate::imports::parse_located_document;
 use crate::json::Json;
-use crate::model::{
-    Cardinality, CommandRole, OperationDef, OutputPort, Pipeline, PipelineIndex, ProductDef,
-    DEFAULT_OUTPUT,
-};
+use crate::model::{Cardinality, CommandRole, OperationDef, OutputPort, Pipeline, ProductDef};
 use crate::parser::{without_bom, Kind};
 use crate::paths::{shown_path, PathTemplate};
 use crate::span::{find_word, utf16_columns, Place};
@@ -70,32 +67,6 @@ pub fn pipeline_hovers(text: &str, path: &Path) -> Vec<Hover> {
         .iter()
         .map(|o| (o.name.as_str(), o))
         .collect();
-    // Each product's and operation's explanation is the same wherever it is
-    // named, so each is written once, not at every reference.
-    let index = PipelineIndex::new(pipeline);
-    let consumers = consumers(pipeline);
-    let product_infos: BTreeMap<&str, (String, Vec<String>)> = products
-        .iter()
-        .map(|(&name, product)| {
-            let ty = inferred
-                .get(name)
-                .copied()
-                .unwrap_or(&product.artifact_type);
-            let used_by = consumers.get(name).map_or(&[][..], Vec::as_slice);
-            let details = product_details(&index, product, inferred.contains_key(name), used_by);
-            (name, (product_signature(product, ty), details))
-        })
-        .collect();
-    let operation_infos: BTreeMap<&str, (String, Vec<String>)> = operations
-        .iter()
-        .map(|(&name, operation)| {
-            let info = (
-                operation_signature(operation),
-                operation_details(pipeline, operation),
-            );
-            (name, info)
-        })
-        .collect();
     let mut hovers = Vec::new();
     let text_lines: Vec<_> = text.lines().collect();
     let mut add =
@@ -119,16 +90,32 @@ pub fn pipeline_hovers(text: &str, path: &Path) -> Vec<Hover> {
                 details,
             });
         };
-    let product_info = |name: &str| product_infos.get(name).cloned();
-    let operation_info = |name: &str| operation_infos.get(name).cloned();
+    let product_info = |name: &str| {
+        products.get(name).map(|product| {
+            let ty = inferred
+                .get(name)
+                .copied()
+                .unwrap_or(&product.artifact_type);
+            (
+                product_signature(product, ty),
+                product_details(pipeline, product, inferred.contains_key(name)),
+            )
+        })
+    };
     for (name, place) in &document.lines.products {
         if let Some((signature, details)) = product_info(name) {
             add(place.clone(), "product", name, signature, details);
         }
     }
     for (name, place) in &document.lines.operations {
-        if let Some((signature, details)) = operation_info(name) {
-            add(place.clone(), "operation", name, signature, details);
+        if let Some(operation) = operations.get(name.as_str()) {
+            add(
+                place.clone(),
+                "operation",
+                name,
+                operation_signature(operation),
+                operation_details(pipeline, operation),
+            );
         }
     }
     for invocation in &pipeline.invocations {
@@ -136,7 +123,8 @@ pub fn pipeline_hovers(text: &str, path: &Path) -> Vec<Hover> {
             continue;
         };
         let compiled = steps_by_output.get(invocation.output_product()).copied();
-        if let Some((signature, mut details)) = operation_info(&invocation.operation) {
+        if let Some(operation) = operations.get(invocation.operation.as_str()) {
+            let mut details = operation_details(pipeline, operation);
             if let Some(step) = compiled {
                 details.extend(call_details(step, &products, &inferred));
             } else {
@@ -147,8 +135,8 @@ pub fn pipeline_hovers(text: &str, path: &Path) -> Vec<Hover> {
             add(
                 location.operation(),
                 "operation",
-                &invocation.operation,
-                signature,
+                &operation.name,
+                operation_signature(operation),
                 details,
             );
         }
@@ -205,18 +193,18 @@ pub fn pipeline_hovers(text: &str, path: &Path) -> Vec<Hover> {
         let Some(template) = document.lines.command(index) else {
             continue;
         };
-        if let (Some(line), Some((signature, details))) = (
+        if let (Some(line), Some(operation)) = (
             text_lines.get(template.line.saturating_sub(1)),
-            operation_info(&command.operation),
+            operations.get(command.operation.as_str()),
         ) {
             if let Some(columns) = find_word(&line[..template.columns.start], 0, &command.operation)
             {
                 add(
                     Place::new(template.line, columns),
                     "operation",
-                    &command.operation,
-                    signature,
-                    details,
+                    &operation.name,
+                    operation_signature(operation),
+                    operation_details(pipeline, operation),
                 );
             }
         }
@@ -261,7 +249,7 @@ fn operation_signature(operation: &OperationDef) -> String {
         })
         .collect::<Vec<_>>()
         .join(", ");
-    let outputs = if operation.outputs.len() == 1 && operation.outputs[0].name == DEFAULT_OUTPUT {
+    let outputs = if operation.outputs.len() == 1 && operation.outputs[0].name == "output" {
         output_signature(&operation.outputs[0], false)
     } else {
         format!(
@@ -380,34 +368,11 @@ fn call_details(
     details
 }
 
-/// Each product's readers, as `averaged = average(…)`, in step order.
-fn consumers(pipeline: &Pipeline) -> BTreeMap<&str, Vec<String>> {
-    let mut consumers: BTreeMap<&str, Vec<String>> = BTreeMap::new();
-    for call in &pipeline.invocations {
-        let read: BTreeSet<&str> = call
-            .inputs
-            .iter()
-            .map(|input| input.product_name())
-            .collect();
-        for product in read {
-            consumers.entry(product).or_default().push(format!(
-                "{} = {}(…)",
-                call.outputs.join(", "),
-                call.operation
-            ));
-        }
-    }
-    consumers
-}
-
-fn product_details(
-    index: &PipelineIndex<'_>,
-    product: &ProductDef,
-    inferred: bool,
-    consumers: &[String],
-) -> Vec<String> {
-    let pipeline = index.pipeline;
-    let producer = index.producer(&product.name).map(|(call, _)| call);
+fn product_details(pipeline: &Pipeline, product: &ProductDef, inferred: bool) -> Vec<String> {
+    let producer = pipeline
+        .invocations
+        .iter()
+        .find(|call| call.outputs.contains(&product.name));
     let mut details = vec![match producer {
         Some(call) => format!(
             "Derived product. Produced by {}({}).",
@@ -431,20 +396,30 @@ fn product_details(
             }
         ));
     }
+    let consumers = pipeline
+        .invocations
+        .iter()
+        .filter(|call| {
+            call.inputs
+                .iter()
+                .any(|input| input.product_name() == product.name)
+        })
+        .map(|call| format!("{} = {}(…)", call.outputs.join(", "), call.operation))
+        .collect::<Vec<_>>();
     if !consumers.is_empty() {
         details.push(format!("Used by: {}", consumers.join("; ")));
     }
-    if let Some(stage) = index.stage_of(&product.name) {
+    if let Some(stage) = pipeline.stage_of(&product.name) {
         details.push(format!("Stage: {stage}"));
     }
     let resolved_path = || {
-        shown_path(index, &product.name).or_else(|| {
-            index
+        shown_path(pipeline, &product.name).or_else(|| {
+            pipeline
                 .path_template_for(&product.name)
                 .map(|template| template.to_string())
         })
     };
-    if let Some((sibling, _, _)) = index.beside(&product.name) {
+    if let Some((sibling, _, _)) = pipeline.beside(&product.name) {
         details.push(format!(
             "Path template: {} (beside {sibling}).",
             resolved_path().unwrap_or_default()
@@ -454,7 +429,7 @@ fn product_details(
             "Path template: {} (explicit product rule).",
             resolved_path().unwrap_or_default()
         ));
-    } else if let Some((stage, _)) = index.stage_path_rule(&product.name) {
+    } else if let Some((stage, _)) = pipeline.stage_path_rule(&product.name) {
         details.push(format!(
             "Path template: {} (inherited from stage {stage}).",
             resolved_path().unwrap_or_default()
