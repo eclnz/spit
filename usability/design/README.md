@@ -14,10 +14,9 @@ The plans that answer the [usability findings](../FINDINGS.md), and the order to
 ## Status
 
 - **Done:** steps 1–15. Phase 1, Phase 2, and Phase 3 are complete; the worked examples are in place.
-- **Next:** step 16, optional named arguments, then the VS Code extension.
+- **Next:** optional named arguments (step 16), then the second study round.
 - **Resolved so far:** B1–B7, F1–F10, D1–D11.
 - **Still open:**
-  - the VS Code extension.
 
 ## Order
 
@@ -132,6 +131,7 @@ One design built in three steps, each leaving the tool working. See [removing in
     - Also give the existing examples' recipes data, or a note: `command_demo.spitin` finds no files beside it, and since step 8 `dag` on it fails, correctly, with "has no groups to check".
 16. **F10:** named arguments in a call (optional).
 17. **The VS Code extension** ([spit-vscode](https://github.com/eclnz/spit-vscode)): highlight `drop`, `exclude`, `where`, `has`, `missing` and `from`; drop `skip`. Add a `file` field to `check --json` diagnostics, so the editor can place a pipeline's error found while checking a recipe ([diagnostics](diagnostics.md#b3-name-the-file-a-message-is-about)).
+    Done: the grammar and semantic tokens cover the current rules, `skip` is no longer a keyword, and pipeline errors found from a recipe carry a `file` and are placed on that file in the extension.
     - **More urgent than its place suggests.** Since step 8, a recipe with `skip` is an error, and the extension still highlights `skip` as valid.
     - **Where.** The grammar is `syntaxes/spit.tmLanguage.json`: the constraint pattern near line 137 matches `(require|skip) … count(>=|=)`, and the keyword list is near line 298. `extension.js` near line 266 matches `^(?:require|skip)\s+`.
     - **Coverage.** The count pattern must accept all six comparisons, and `drop` puts its groups before the source.

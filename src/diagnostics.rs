@@ -77,6 +77,11 @@ pub struct Diagnostic {
     /// diagnostic with a line has one; at least the line's content.
     pub columns: Option<Range<usize>>,
     pub message: String,
+    /// A different file from the document being checked, when a recipe's
+    /// pipeline contains the error.
+    pub file: Option<String>,
+    /// Text of that file, used to convert its byte columns to UTF-16.
+    pub external_text: Option<String>,
 }
 
 /// A document that passed every check: its pipeline, and its warnings.
@@ -119,6 +124,8 @@ impl Diagnostic {
             line,
             columns,
             message,
+            file: None,
+            external_text: None,
         }
     }
 
@@ -132,6 +139,8 @@ impl Diagnostic {
             line: error.location.line,
             columns: place.map(|place| place.columns),
             message: error.message(),
+            file: None,
+            external_text: None,
         }
     }
 
@@ -177,18 +186,6 @@ impl Diagnostic {
         }
     }
 
-    /// Its file, line and column, then its message, without its severity:
-    /// `pipeline.spit: line 5, column 12: message`.
-    pub(crate) fn located_message(&self, text: &str, name: &str) -> String {
-        struct Located<'a>(&'a Diagnostic, Option<usize>, &'a str);
-        impl fmt::Display for Located<'_> {
-            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                self.0.write_located(f, self.1, Some(self.2))
-            }
-        }
-        Located(self, self.column_in(text, None), name).to_string()
-    }
-
     /// The 1-based column in characters, given the texts that were diagnosed.
     fn column_in(&self, text: &str, source_text: Option<&str>) -> Option<usize> {
         let columns = self.columns.as_ref()?;
@@ -197,7 +194,10 @@ impl Diagnostic {
     }
 
     /// The name `names` gives the text this diagnostic is in.
-    fn name_in<'a>(&self, names: FileNames<'a>) -> Option<&'a str> {
+    fn name_in<'a>(&'a self, names: FileNames<'a>) -> Option<&'a str> {
+        if let Some(file) = &self.file {
+            return Some(file);
+        }
         match self.source {
             DiagnosticSource::Pipeline => names.pipeline,
             DiagnosticSource::Inventory => names.inventory,
@@ -205,10 +205,10 @@ impl Diagnostic {
     }
 
     /// The diagnosed line, from the pipeline text or the separate inventory.
-    fn line_text<'a>(&self, text: &'a str, source_text: Option<&'a str>) -> Option<&'a str> {
+    fn line_text<'a>(&'a self, text: &'a str, source_text: Option<&'a str>) -> Option<&'a str> {
         let text = match self.source {
             DiagnosticSource::Inventory => source_text?,
-            DiagnosticSource::Pipeline => text,
+            DiagnosticSource::Pipeline => self.external_text.as_deref().unwrap_or(text),
         };
         without_bom(text).lines().nth(self.line?.checked_sub(1)?)
     }
@@ -290,7 +290,7 @@ pub fn render_diagnostics_json(
 ) -> String {
     let items = diagnostics.iter().map(|diagnostic| {
         let columns = diagnostic.utf16_columns(text, source_text);
-        Json::object([
+        let mut fields = vec![
             ("severity", Json::string(diagnostic.severity.as_str())),
             ("source", Json::string(diagnostic.source.as_str())),
             ("line", Json::number_or_null(diagnostic.line)),
@@ -303,7 +303,11 @@ pub fn render_diagnostics_json(
                 Json::number_or_null(columns.as_ref().map(|columns| columns.end + 1)),
             ),
             ("message", Json::string(&diagnostic.message)),
-        ])
+        ];
+        if let Some(file) = &diagnostic.file {
+            fields.push(("file", Json::string(file)));
+        }
+        Json::object(fields)
     });
     format!("{}\n", Json::object([("diagnostics", Json::array(items))]))
 }
@@ -560,7 +564,11 @@ pub fn diagnose_recipe(text: &str, path: &Path) -> Vec<Diagnostic> {
             let pipeline_errors = diagnostics
                 .into_iter()
                 .filter(Diagnostic::is_error)
-                .map(|diagnostic| error(diagnostic.located_message(&pipeline_text, &shown)))
+                .map(|mut diagnostic| {
+                    diagnostic.file = Some(shown.clone());
+                    diagnostic.external_text = Some(pipeline_text.clone());
+                    diagnostic
+                })
                 .collect();
             finish(pipeline_errors, text, None)
         }
