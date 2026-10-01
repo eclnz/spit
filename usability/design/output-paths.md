@@ -1,6 +1,6 @@
 # Design: dataset root, output extensions and sidecars
 
-Status: all five steps are done. [Not covered](#not-covered) and [open questions](#open-questions) remain.
+Status: steps 1 to 5 are done. Steps 6 and 7, `@` for built-in placeholders, and labels with optional groups for BIDS-style names, are planned.
 
 ## Problem
 
@@ -10,7 +10,7 @@ Agents in every usability round called path rules repetitive; in [round 3](../RO
 
 **Sidecars.** `photo_gps`, `photo_imu` and `photo_json` are `raw_photo`'s path with another extension, and each repeats the full template and dimension list. On the derived side, a tool such as `dcm2niix` writes a `.json` beside its image without being given a path for it, which SPIT cannot express today: a command must use every output placeholder, and each output gets its own path rule.
 
-A third form, BIDS derivative names whose entity labels change with each product's dimensions (`…_run-{run}_mc` beside `…_avg`), is out of scope here. See [Not covered](#not-covered).
+A third form, BIDS derivative names whose entity labels change with each product's dimensions (`…_run-{run}_mc` beside `…_avg`), is the subject of [step 7](#7-labels-and-optional-groups).
 
 **The dataset root.** Every path is relative to the dataset root: the recipe's folder, or `--root`. Agents kept the pipeline and recipe in their working folder and the data in `data/`, so every `inputs` and `dag` command needed `--root data`, and each agent had to work out that the flag moves every path at once. One agent first put the recipe inside `data/`, where the scan counted the recipe itself as a file matching no source rule. No one guessed wrong, but several called it the most careful part of the task.
 
@@ -24,6 +24,8 @@ The file format is chosen by the tool, so the extension belongs on the operation
 3. [Source groups](#3-source-groups) for sidecars in the input data.
 4. [Implicit outputs](#4-implicit-outputs): `beside` for files a tool writes next to another output.
 5. [Directory and stem placeholders](#5-directory-and-stem-placeholders) for tools that take a folder and a name instead of a path.
+6. [Built-in path placeholders take `@`](#6-built-in-path-placeholders-take-), so SPIT's names read apart from a pipeline's dimensions.
+7. [Labels and optional groups](#7-labels-and-optional-groups), so one default gives BIDS-style names whose entities depend on the product.
 
 Each of 3 to 5 depends on SPIT knowing an output's extension, so they land after 2. Alongside 2, `spit check` reports each product's resolved path, so the editor can show it (see [Seeing the resolved path](#seeing-the-resolved-path)).
 
@@ -245,9 +247,112 @@ command convert: dcm2niix -z y -b y -o {image.dir} -f {image.stem} {dicom}
 - `verify` cannot use them, as it cannot use outputs.
 - Tests are in `tests/folder_and_stem.rs`. The usability answer keys are rewritten as version 4 plans; the grader compares jobs, which are unchanged.
 
+## 6. Built-in path placeholders take `@`
+
+**Problem.** In `derivatives/{stage}/{product}/{sub}`, nothing in the text says which names are SPIT's and which are the pipeline's dimensions. Agents read plain text, so the editor's colours do not help them, and the built-in words are reserved: no dimension may be called `product`, `stage` or `entities`. Step 7 adds another, so the names are harder to keep track of. `@` already marks SPIT's own clauses, as in `@ vary(run)`.
+
+**Change.**
+
+| Today | After |
+| --- | --- |
+| `{product}` | `{@product}` |
+| `{entities}` | `{@entities}` |
+| `{stage}` | `{@stage}` |
+
+- A dimension stays bare, as `{sub}`. `product`, `stage` and `entities` are no longer reserved, so a dimension may take them.
+- An old form is an error with a hint, as in Phase 5: `{product}` with no `product` dimension says ``no dimension `product`; write `{@product}` for the product's name``.
+- `{output}`, `{image.dir}` and `{image.stem}` are unchanged: they name ports.
+- The built-in default becomes `out/{@product}/{@entities}`.
+
+**Compatibility.** Every pipeline that uses a built-in placeholder changes: the examples, tests, stored outputs, harness scenarios and their keys, the reference, the README, and the editor grammar and its tests. The resolved paths do not change.
+
+## 7. Labels and optional groups
+
+**Problem.** BIDS names spell out each entity, and which entities depends on the product: `mc` has a run, `avg` averaged its runs away, `long` has no session. One default such as `.../sub-{sub}_ses-{ses}_run-{run}_{@product}` fails for `avg`, so the round-3 cohort needed five full rules:
+
+```text
+path mc:    derivatives/sub-{sub}/ses-{ses}/func/sub-{sub}_ses-{ses}_run-{run}_mc.nii.gz
+path brain: derivatives/sub-{sub}/ses-{ses}/anat/sub-{sub}_ses-{ses}_brain.nii.gz
+path coreg: derivatives/sub-{sub}/ses-{ses}/func/sub-{sub}_ses-{ses}_run-{run}_coreg.nii.gz
+path avg:   derivatives/sub-{sub}/ses-{ses}/func/sub-{sub}_ses-{ses}_avg.nii.gz
+path long:  derivatives/sub-{sub}/sub-{sub}_long.nii.gz
+```
+
+**Change.** Two additions to path templates. With them the five rules become one default:
+
+```text
+path: derivatives/sub-{sub}[/ses-{ses}][/{@stage}]/{@labels}_{@product}
+ext: .nii.gz
+
+stage func:
+    mc = motion_correct(bold)
+    coreg = coregister(brain, mc)
+    avg = average(coreg @ vary(run))
+stage anat:
+    brain = brain_extract(t1w)
+long = combine(avg @ vary(ses))
+```
+
+**`{@labels}`** is the product's dimensions as `key-value`, joined by `_`, in the pipeline's dimension order:
+
+| Dimensions | `{@entities}` | `{@labels}` |
+| --- | --- | --- |
+| sub, ses, run | `sub=01__ses=1__run=2` | `sub-01_ses-1_run-2` |
+| sub, ses | `sub=01__ses=1` | `sub-01_ses-1` |
+| sub | `sub=01` | `sub-01` |
+| none | `global` | no value |
+
+**`[...]`** is part of a path some products do not have. A group is kept when every placeholder in it has a value for the product, and dropped whole otherwise, with its text such as `/ses-`. A placeholder has no value when it names a dimension the product lacks, when it is `{@stage}` for a step outside every stage, or when it is `{@labels}` for a product with no dimensions. `{@product}` and `{@entities}` always have one. Outside a group, a placeholder with no value is an error, as today.
+
+The five products resolve to the same files as the five rules:
+
+| Product | Dimensions | Stage | Path |
+| --- | --- | --- | --- |
+| `mc` | sub, ses, run | func | `derivatives/sub-01/ses-1/func/sub-01_ses-1_run-1_mc.nii.gz` |
+| `coreg` | sub, ses, run | func | `derivatives/sub-01/ses-1/func/sub-01_ses-1_run-1_coreg.nii.gz` |
+| `avg` | sub, ses | func | `derivatives/sub-01/ses-1/func/sub-01_ses-1_avg.nii.gz` |
+| `brain` | sub, ses | anat | `derivatives/sub-01/ses-1/anat/sub-01_ses-1_brain.nii.gz` |
+| `long` | sub | none | `derivatives/sub-01/sub-01_long.nii.gz` |
+
+**Rules.**
+
+- A group is decided per product, not per file: a product has a dimension or does not before any data is read. Each product so has one plain template, and binding, discovery and the extension rules work on it unchanged.
+- Groups work in every path rule: defaults, a product's own rule, source rules, and `sidecars` stems.
+- `[[` and `]]` write literal brackets, as `{{` and `}}` do braces. Check first that no existing rule uses `[`.
+- A group may not hold another, and must hold a placeholder.
+- `{@labels}` takes its keys from the dimension names. A dimension named otherwise than its BIDS key, such as `subject`, is written out: `sub-{subject}`.
+- `{@labels}` follows the pipeline's [dimension order](../../docs/language-reference.md#dimension-order), which the sources or a `dimensions [...]` line set; for BIDS, sub, ses, then task, acq, run and the rest.
+- `{@labels}` names every dimension, as `{@entities}` does, for the rule that a path must name each one.
+
+**What the user sees.**
+
+- The editor hint and `spit check --path-rules` show each product's template with its groups resolved and `{@labels}` written out, so no one decodes the default by hand:
+
+  ```text
+  mc = motion_correct(bold)          → derivatives/sub-{sub}/ses-{ses}/func/sub-{sub}_ses-{ses}_run-{run}_mc.nii.gz
+  long = combine(avg @ vary(ses))    → derivatives/sub-{sub}/sub-{sub}_long.nii.gz
+  ```
+
+- Errors, before any data is read:
+  - a placeholder with no value outside a group: ``path rule for `long` uses `{ses}`, which `long` does not have; put it in `[...]` if only some products have it``;
+  - a dimension no product has, even in a group, which is usually a typo: ``path rule names `{sess}`, which no product has``;
+  - a group with no placeholder: ```[/derivatives]` names nothing that could be absent; remove the brackets``;
+  - a group in a group;
+  - two products bound to one path once groups drop, as today.
+- `dag` warns when a value `{@labels}` writes contains `-`, as `sub-01-a`, which BIDS cannot read back.
+
+**To confirm before building.**
+
+1. `{@stage}` as the BIDS datatype folder, `func` or `anat`, or a `path:` default inside each stage, keeping stages for phases.
+2. A product with no dimensions gives `{@labels}` no value, so `[{@labels}_]{@product}` covers one that shares the default; the alternative is an error.
+3. `dag` warns, not fails, on a `-` in a value `{@labels}` writes.
+
+**Not in this step.** A built-in BIDS layout, renaming keys within `{@labels}`, groups in commands, and optional sources or outputs.
+
+**Example.** A BIDS cohort example built from the round-3 task, with the editor hints showing each step's path.
+
 ## Not covered
 
-- **BIDS derivative names.** Names such as `sub-{sub}_ses-{ses}_run-{run}_mc` vary with which dimensions a product has, so a shared template breaks on aggregates. An entity placeholder that writes only the dimensions present, in BIDS form, would address this better than a separate name or directory level.
 - **Outputs a tool names unpredictably.** `dcm2niix` may add `_e2`, `_ph` or `_ROI1` depending on the data. SPIT cannot predict these. A declared output that does not appear should fail the job, which signals that the tool needs other flags or the data needs splitting.
 
 ## Open questions
@@ -264,3 +369,5 @@ command convert: dcm2niix -z y -b y -o {image.dir} -f {image.stem} {dicom}
 3. `sidecars` groups and the incomplete-group report in discovery. Done.
 4. `beside` outputs. Done.
 5. `{x.dir}` and `{x.stem}`, with the `.spitdag` version bump. Done.
+6. `{@product}`, `{@entities}` and `{@stage}`, with the old forms as errors that say what to write, and every pipeline, test, key and document converted.
+7. `{@labels}` and `[...]` groups, the hint and check output with groups resolved, the errors and the `-` warning, and a BIDS cohort example.
