@@ -35,6 +35,6 @@ The one failed diagnosis call was an initial `dag` on the damaged dataset; its c
 
 ## Next decisions
 
-- Test a compact, optional per-operation count view in the post-Phase-5 study. The repeated request survived the repaired guide; the [inspection ideas](../../design/pre-phase5-inspection.md) specify candidate text and interactions with existing output flags.
+- Test a compact, optional per-operation count view in the post-Phase-5 study. The repeated request survived the repaired guide; the inspection ideas (`usability/design/pre-phase5-inspection.md`) specify candidate text and interactions with existing output flags.
 - Keep `--commands` as the exact preview of `many` argument order. The pilot used an explicit output annotation; Phase 5 replaced that with a pipeline-wide dimension order. Test whether the new rule resolves the remaining uncertainty.
 - Improve the diagnosis walkthrough with the lowercase group and uppercase orphan-source exclusion together. Consider a targeted hint for a near-case unused source left after a group exclusion. Keep `inputs --unmatched` for files that match no source rule; it is a different case from a matched but unused source.
