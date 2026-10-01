@@ -2,33 +2,33 @@
 
 Can someone who has only the `spit` binary and its guide turn a pipeline problem into a correct plan, and how much does it cost them? To find out, we gave AI agents realistic tasks with nothing else: no source, no examples, no tests. We graded their plans against answer keys and logged every `spit` call they made.
 
-The first round's findings are in [`rounds/1`](rounds/1/README.md), written as a backlog of bugs, features and gaps in the guide. Every item has been resolved. The designs that answered them, and the roadmap they were built in, were plans under `usability/design/`. They were deleted when the work merged, and `git log -- usability/design` finds them. This page describes how the study was run, what came out, and how to run it again.
+The first round's findings are in `rounds/1/README.md` in [`rounds.zip`](rounds.zip), written as a backlog of bugs, features and gaps in the guide. Every item has been resolved. The designs that answered them, and the roadmap they were built in, were plans under `usability/design/`. They were deleted when the work merged, and `git log -- usability/design` finds them. This page describes how the study was run, what came out, and how to run it again.
 
 ## Rounds
 
-Each round has a folder under [`rounds/`](rounds), holding its report as `README.md` and its run archives as `results.zip`. Unzip an archive in its folder to get `results/`, with one folder per run.
+The rounds are archived in [`rounds.zip`](rounds.zip), so their records do not weigh on the repository. Each round is a folder in it, holding its report as `README.md` and its runs under `results/`, one folder per run. Unpack it with `python3 usability/harness/archive.py unpack usability/rounds.zip <folder>`, or any unzip tool. The files it replaced are in the git history too: `git log -- usability/rounds`.
 
-| Round | Report | What it tested |
+| Round | Report in `rounds.zip` | What it tested |
 | --- | --- | --- |
-| 1 | [`rounds/1`](rounds/1/README.md) | The first study: 14 plans, and the findings backlog |
-| 2 | [`rounds/2`](rounds/2/README.md) | The same scenarios with the new guide, plus two variants: 18 plans |
-| Pilot | [`rounds/2-pilot`](rounds/2-pilot/README.md) | The repaired guide and walkthroughs before Phase 5, in the earlier language: 12 plans |
-| 3 | [`rounds/3`](rounds/3/README.md) | The settled language after Phase 5: 12 plans |
-| 4 | [`rounds/4`](rounds/4/README.md) | A small check of the paths work: 3 plans |
+| 1 | `rounds/1/README.md` | The first study: 14 plans, and the findings backlog |
+| 2 | `rounds/2/README.md` | The same scenarios with the new guide, plus two variants: 18 plans |
+| Pilot | `rounds/2-pilot/README.md` | The repaired guide and walkthroughs before Phase 5, in the earlier language: 12 plans |
+| 3 | `rounds/3/README.md` | The settled language after Phase 5: 12 plans |
+| 4 | `rounds/4/README.md` | A small check of the paths work: 3 plans |
 
 ## Scenarios
 
-Each scenario has a brief written in the user's terms: what to produce and the exact command for each step, but never SPIT syntax. Each has a small dataset with deliberate irregularities, and an answer key: a reference pipeline and the `.spitdag` it resolves to.
+The scenarios are archived in [`harness/scenarios.zip`](harness/scenarios.zip): each is a folder holding its brief, its dataset and its answer keys. The harness scripts unpack it themselves. Each scenario has a brief written in the user's terms: what to produce and the exact command for each step, but never SPIT syntax. Each has a small dataset with deliberate irregularities, and an answer key: a reference pipeline and the `.spitdag` it resolves to.
 
 | Scenario | Task | Irregularities | Tests | Jobs |
 | --- | --- | --- | --- | --- |
-| [s1-logs](harness/scenarios/s1-logs/brief.md) | Daily server logs → digests → weekly report per server → fleet report | A server misses a day; rotated, compressed and notes files | `many`/`vary`, path rules, scanning | 24 |
-| [s2-cohort](harness/scenarios/s2-cohort/brief.md) | BIDS fMRI cohort: motion correction, brain extraction, coregistration, session and subject averages | A subject with one session to exclude; a session with an extra run; JSON sidecars | Recipes, `discover`, `skip` | 41 |
-| [s2 follow-up](harness/scenarios/s2-cohort/followup.md) | Change request to the s2 agent: a new subject, a QC step, and one corrupted run to exclude | The raw file must stay in place | Cost of change | 60 |
-| [s3-sweep](harness/scenarios/s3-sweep/brief.md) | Models × configs × per-config seeds → train, evaluate, summarise, leaderboards | Uneven seed sets; a single test set | `each` then `vary`, a source with no dimensions | 41 |
-| [s4-sensors](harness/scenarios/s4-sensors/brief.md) | Calibrate readings, compare with a baseline, one report per station | Only calibration revision 3 may be used; baselines filed under different dates | `where`, `same`, `many` beside `one` | 19 |
-| [s5-survey](harness/scenarios/s5-survey/brief.md) | Survey panel in ingest, model and publish phases | Waves 1, 2 and 10; a backup file | Stages, two outputs, `verify`, numeric order | 20 |
-| [s6-diagnose](harness/scenarios/s6-diagnose/brief.md) | An inherited pipeline whose run fails: find every cause, then plan without the broken stores | One store with one week, one price list named `S07.json`, one missing | `artifacts`, error messages, `skip` | 22 |
+| s1-logs | Daily server logs → digests → weekly report per server → fleet report | A server misses a day; rotated, compressed and notes files | `many`/`vary`, path rules, scanning | 24 |
+| s2-cohort | BIDS fMRI cohort: motion correction, brain extraction, coregistration, session and subject averages | A subject with one session to exclude; a session with an extra run; JSON sidecars | Recipes, `discover`, `skip` | 41 |
+| s2 follow-up | Change request to the s2 agent: a new subject, a QC step, and one corrupted run to exclude | The raw file must stay in place | Cost of change | 60 |
+| s3-sweep | Models × configs × per-config seeds → train, evaluate, summarise, leaderboards | Uneven seed sets; a single test set | `each` then `vary`, a source with no dimensions | 41 |
+| s4-sensors | Calibrate readings, compare with a baseline, one report per station | Only calibration revision 3 may be used; baselines filed under different dates | `where`, `same`, `many` beside `one` | 19 |
+| s5-survey | Survey panel in ingest, model and publish phases | Waves 1, 2 and 10; a backup file | Stages, two outputs, `verify`, numeric order | 20 |
+| s6-diagnose | An inherited pipeline whose run fails: find every cause, then plan without the broken stores | One store with one week, one price list named `S07.json`, one missing | `artifacts`, error messages, `skip` | 22 |
 
 Commands and output paths are fixed by each brief, so a correct plan is unique up to naming. The [grader](harness/grade.py) compares the multiset of each job's expanded command line, and its verify lines, with the key. Product names, job ids and path rules do not matter.
 
@@ -54,9 +54,9 @@ All 14 plans matched their keys exactly. No agent was confident and wrong: every
 | s5-survey | 20/20, 8 | 20/20, 5 |
 | s6-diagnose | 22/22 and all 3 causes, 11 | 22/22 and all 3 causes, 20 |
 
-Because the plans were all correct, the useful results are in the friction. That means the errors agents hit, the guesses they recorded, and the time the s2 follow-up took: excluding one run took each agent longer than the rest of the change request combined. See [the round 1 findings](rounds/1/README.md).
+Because the plans were all correct, the useful results are in the friction. That means the errors agents hit, the guesses they recorded, and the time the s2 follow-up took: excluding one run took each agent longer than the rest of the change request combined. See the round 1 findings, `rounds/1/README.md` in `rounds.zip`.
 
-Each run's folder in [`results.zip`](rounds/1/results.zip) holds:
+Each run's folder under `rounds/1/results/` in `rounds.zip` holds:
 
 - the pipeline and recipe files the agent wrote;
 - its report (`REPORT.md`, or `notes.md` condensed from its reply);
@@ -65,21 +65,21 @@ Each run's folder in [`results.zip`](rounds/1/results.zip) holds:
 
 ### Limits
 
-- **Every scenario was designed to be solvable,** and the briefs pin commands and output paths. A perfect pass rate therefore overstates ease of use. Scenario 3 was changed to two levels of rollup because one step cannot aggregate over two dimensions ([F9](rounds/1/README.md#f9-aggregate-over-several-dimensions-in-one-step)).
-- **Agents read the whole 470-line guide before starting.** A person skimming it would likely hit more of the [guide gaps](rounds/1/README.md#guide-gaps).
+- **Every scenario was designed to be solvable,** and the briefs pin commands and output paths. A perfect pass rate therefore overstates ease of use. Scenario 3 was changed to two levels of rollup because one step cannot aggregate over two dimensions (F9 in the round 1 findings).
+- **Agents read the whole 470-line guide before starting.** A person skimming it would likely hit more of the guide gaps listed in the round 1 findings.
 - **One agent reported a garbled `note: Job 1` line.** The wrapper's logging caused it, not SPIT, and it is left out of the findings.
 
 ## Results: round 2
 
-The [second-round report](rounds/2/README.md) covers 18 trials, including the single-leaderboard and vague-brief variants. All 18 plans matched their keys; it records the participants' reported friction and the limits of comparison with round 1.
+The second-round report, `rounds/2/README.md` in `rounds.zip`, covers 18 trials, including the single-leaderboard and vague-brief variants. All 18 plans matched their keys; it records the participants' reported friction and the limits of comparison with round 1.
 
 ## Results: rounds 3 and 4
 
-The [third-round report](rounds/3/README.md) covers 12 plans after Phase 5. The [fourth-round report](rounds/4/README.md) is a small, low-cost check of the paths work: three plans, all correct.
+The third-round report, `rounds/3/README.md` in `rounds.zip`, covers 12 plans after Phase 5. The fourth-round report, `rounds/4/README.md`, is a small, low-cost check of the paths work: three plans, all correct.
 
 ## Run it again
 
-The second round also includes two variants: [s3-one-board](harness/scenarios/s3-one-board/brief.md) asks for one leaderboard across model and configuration (39 jobs), and [s4-vague](harness/scenarios/s4-vague/brief.md) gives the station task in less prescriptive terms (19 jobs). The s2 follow-up key now uses a recipe with `exclude` so the corrupted raw run stays in place. The other briefs and datasets stay the same, making their results comparable with round 1.
+The second round also includes two variants: s3-one-board asks for one leaderboard across model and configuration (39 jobs), and s4-vague gives the station task in less prescriptive terms (19 jobs). The s2 follow-up key now uses a recipe with `exclude` so the corrupted raw run stays in place. The other briefs and datasets stay the same, making their results comparable with round 1.
 
 ```sh
 cargo build --release
@@ -91,7 +91,7 @@ usability/harness/make_run.sh s1-logs a        # prints the sandbox path
 
 > Your working folder is `<sandbox>`. Start by reading `<sandbox>/TASK.md` and follow it exactly, including its rules about staying inside that folder. Use absolute paths in every command, since your shell's working directory may reset between commands.
 
-For the s2 follow-up, copy `harness/scenarios/s2-cohort/addition/sub-06` into the sandbox's `data/` once the agent has finished, save its `plan.spitdag` elsewhere for grading, and send it [`followup.md`](harness/scenarios/s2-cohort/followup.md).
+For the s2 follow-up, unpack `harness/scenarios.zip` and copy `scenarios/s2-cohort/addition/sub-06` into the sandbox's `data/` once the agent has finished, save its `plan.spitdag` elsewhere for grading, and send it `scenarios/s2-cohort/followup.md`.
 
 Then grade every run, summarise its calls, and audit its transcript:
 

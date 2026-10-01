@@ -23,6 +23,7 @@ import json
 import os
 import re
 import sys
+import tempfile
 from collections import Counter
 
 HARNESS = os.path.dirname(os.path.abspath(__file__))
@@ -30,6 +31,7 @@ REPO = os.path.dirname(os.path.dirname(HARNESS))
 TRIALS = os.environ.get("SPIT_TRIALS", "/tmp/spit-trials")
 PRIVATE = os.environ.get("SPIT_PRIVATE", "/tmp/spit-trials-private")
 sys.path.insert(0, HARNESS)
+from archive import unpack  # noqa: E402
 from grade import grade  # noqa: E402
 
 FORBIDDEN = [REPO, PRIVATE]
@@ -94,11 +96,14 @@ def main():
     names = sys.argv[2:] or list(runs)
     out = os.path.join(PRIVATE, "results")
     os.makedirs(out, exist_ok=True)
+    # The answer keys are kept in scenarios.zip.
+    keys = tempfile.TemporaryDirectory()
+    unpack(os.path.join(HARNESS, "scenarios.zip"), keys.name)
     print(f'{"run":22} {"model":8} {"grade":5} {"jobs":10} {"spit":>4} {"fail":>4} {"1st ok":>6} {"tools":>5} {"viol":>4}')
     for run in names:
         meta = runs[run]
         sandbox = meta.get("sandbox", run)
-        key = os.path.join(HARNESS, "scenarios", meta["scenario"], meta.get("key", "key"), "expected.spitdag")
+        key = os.path.join(keys.name, "scenarios", meta["scenario"], meta.get("key", "key"), "expected.spitdag")
         plan = os.path.join(TRIALS, sandbox, meta.get("plan", "plan.spitdag"))
         result = {"run": run, "model": meta.get("model"), "grade": grade(key, plan),
                   "telemetry": telemetry(meta.get("logs", sandbox)),
