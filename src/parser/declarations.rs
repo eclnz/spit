@@ -498,7 +498,15 @@ pub(super) fn parse_product(line: &str, number: usize) -> Result<ProductDef, Par
             ParseError::new(number, "expected closing `]` in product declaration")
                 .at_token(bracketed)
         })?;
-        comma_items(dimensions, number)?
+        let items = comma_items(dimensions, number)?;
+        if items.is_empty() {
+            return Err(ParseError::new(
+                number,
+                format!("`{name}` has no dimensions, so it takes no brackets; remove `[]`"),
+            )
+            .at_token(bracketed));
+        }
+        items
     } else {
         Vec::new()
     };

@@ -5,7 +5,7 @@ source config : Config [config]
 path config: configs/{config}.yaml
 source seed : Seed [config, seed]
 path seed: sweep/{config}/seed-{seed}.json
-source testset : Data []
+source testset : Data
 path testset: eval/testset.parquet
 
 operation train(model: Weights, config: Config, seed: Seed) -> Weights

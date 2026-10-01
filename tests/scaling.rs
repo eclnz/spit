@@ -33,10 +33,10 @@ source mask : Mask [sub]
 path mask: sub-{sub}/mask.nii
 source reference : Reference [sub, ses]
 path reference: sub-{sub}/ses-{ses}/reference.nii
-operation clean(Image, Mask) -> Image
-operation align(Image, Reference) -> Image
+operation clean(image: Image, mask: Mask) -> Image
+operation align(image: Image, reference: Reference) -> Image
 operation average(images: many Image) -> Image
-operation compare(Image, Reference) -> Score
+operation compare(image: Image, reference: Reference) -> Score
 cleaned = clean(image, mask)
 aligned = align(cleaned, reference)
 averaged = average(aligned @ vary(run))

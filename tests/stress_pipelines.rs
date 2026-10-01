@@ -185,9 +185,9 @@ fn missing_peer_at_one_slice_does_not_cross_join_another_capture() {
 #[test]
 fn inferred_intermediate_type_mismatch_fails_even_with_no_artifacts() {
     let text = "source raw : A<Native> [id]\n\
-                operation first(A<X>) -> B<X>\n\
+                operation first(a: A<X>) -> B<X>\n\
                 middle = first(raw)\n\
-                operation second(B<Standard>) -> C\n\
+                operation second(b: B<Standard>) -> C\n\
                 final = second(middle)\n";
     let pipeline = parse_pipeline(text).unwrap();
     for sources in ["sources:\n", "sources:\n    raw[id=one]\n"] {
@@ -195,7 +195,7 @@ fn inferred_intermediate_type_mismatch_fails_even_with_no_artifacts() {
         assert!(matches!(
             resolve(&pipeline, &inventory),
             Err(ResolveError::TypeMismatch { site: spit::PortSite { operation, port, .. }, .. })
-                if operation == "second" && port == "input"
+                if operation == "second" && port == "b"
         ));
     }
 }

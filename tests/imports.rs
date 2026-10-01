@@ -12,7 +12,7 @@ fn unqualified_and_nested_imports_work_together() {
     let dir = Tree::new("imports", &[]);
     dir.write(
         "base.spit",
-        "operation clean(one)\ncommand clean: cp {input} {output}\n",
+        "operation clean(input)\ncommand clean: cp {input} {output}\n",
     );
     dir.write("middle.spit", "use clean from base.spit as prep\n");
     let main = dir.write(
@@ -37,7 +37,7 @@ fn unqualified_and_nested_imports_work_together() {
 #[test]
 fn import_errors_point_to_the_use_line() {
     let dir = Tree::new("imports", &[]);
-    dir.write("base.spit", "operation clean(one)\n");
+    dir.write("base.spit", "operation clean(input)\n");
     let main = dir.write("main.spit", "use absent from base.spit\n");
     let error = support::parse_fixture_at(&fs::read_to_string(&main).unwrap(), &main).unwrap_err();
     assert_eq!(error.line(), 1);
@@ -53,7 +53,7 @@ fn import_errors_point_to_the_use_line() {
 
     dir.write(
         "base.spit",
-        "use clean from main.spit\noperation clean(one)\n",
+        "use clean from main.spit\noperation clean(input)\n",
     );
     let error = support::parse_fixture_at(&fs::read_to_string(&main).unwrap(), &main).unwrap_err();
     assert_eq!(error.line(), 1);
@@ -63,7 +63,7 @@ fn import_errors_point_to_the_use_line() {
 #[test]
 fn diagnostics_resolve_imports_using_pipeline_location() {
     let dir = Tree::new("imports", &[]);
-    dir.write("base.spit", "operation clean(one)\n");
+    dir.write("base.spit", "operation clean(input)\n");
     let main = dir.write(
         "main.spit",
         "source raw [id]\nuse clean from base.spit as prep\nresult = prep::clean(raw)\n",
@@ -81,7 +81,7 @@ fn an_imported_source_keeps_its_path_rule_under_its_alias() {
     let dir = Tree::new("imports", &[]);
     dir.write(
         "base.spit",
-        "path: input/{product}/{id}.txt\nsource raw [id]\noperation clean(one)\n",
+        "path: input/{product}/{id}.txt\nsource raw [id]\noperation clean(input)\n",
     );
     let main = dir.write(
         "main.spit",
@@ -96,7 +96,7 @@ fn an_imported_source_keeps_its_path_rule_under_its_alias() {
 #[test]
 fn quoted_import_path_can_contain_as() {
     let dir = Tree::new("imports", &[]);
-    dir.write("base as draft.spit", "operation clean(one)\n");
+    dir.write("base as draft.spit", "operation clean(input)\n");
     let main = dir.write(
         "main.spit",
         "use clean from \"base as draft.spit\" as prep\nsource raw [id]\nresult = prep::clean(raw)\n",
@@ -111,7 +111,7 @@ fn import_all_brings_definitions_but_not_steps() {
     let dir = Tree::new("imports", &[]);
     dir.write(
         "base.spit",
-        "source raw [id]\noperation clean(one)\ncommand clean: cp {input} {output}\ncleaned = clean(raw)\n",
+        "source raw [id]\noperation clean(input)\ncommand clean: cp {input} {output}\ncleaned = clean(raw)\n",
     );
     let main = dir.write(
         "main.spit",
@@ -164,12 +164,12 @@ fn an_import_may_not_define_again_what_the_file_defines() {
     let dir = Tree::new("imports", &[]);
     dir.write(
         "base.spit",
-        "source raw [id]\npath raw: in/{id}.txt\noperation clean(one)\n\
+        "source raw [id]\npath raw: in/{id}.txt\noperation clean(input)\n\
          command clean: tool {input} {output}\n",
     );
     for (first, name, kind) in [
         ("source raw [id]", "raw", "product"),
-        ("operation clean(one)", "clean", "operation"),
+        ("operation clean(input)", "clean", "operation"),
         (
             "command clean: tool {input} {output}",
             "clean",

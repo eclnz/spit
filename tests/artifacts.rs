@@ -66,7 +66,7 @@ fn incomplete(report: &ArtifactReport) -> Vec<String> {
 const ALIGN: &str = "\
 source scan [subject, run]
 source calibration [subject]
-operation clean(Scan) -> Scan
+operation clean(scan: Scan) -> Scan
 cleaned = clean(scan)
 operation align(moving: Scan, reference: Calibration) -> Scan
 aligned = align(cleaned, calibration)
@@ -207,7 +207,7 @@ fn a_coverage_gap_holds_back_its_sources_and_blocks_their_consumers() {
     let text = "\
 source scan [subject, run]
 require scan run=1,2,3 per [subject]
-operation clean(Scan) -> Scan
+operation clean(scan: Scan) -> Scan
 cleaned = clean(scan)
 ";
     let sources = "\
@@ -239,7 +239,7 @@ sources:
     assert_eq!(incomplete(&report), ["cleaned[run=1,subject=02]"]);
     assert!(matches!(
         report.incomplete[0].gaps.as_slice(),
-        [Gap::Blocked { port, .. }] if port == "input"
+        [Gap::Blocked { port, .. }] if port == "scan"
     ));
     assert_eq!(first_error(text, sources), report.coverage[0].error);
 
@@ -247,7 +247,7 @@ sources:
     assert!(rendered.contains("  scan[subject=01,run=1]  (source)\n"));
     assert!(!rendered.contains("  scan[subject=02,run=1]  (source)\n"));
     assert!(rendered.contains(
-        "    - input `input` needs scan[subject=02,run=1], which a coverage gap holds back\n"
+        "    - input `scan` needs scan[subject=02,run=1], which a coverage gap holds back\n"
     ));
     assert!(rendered.contains("Coverage gaps: 2\n"));
     assert!(rendered.contains("    holds back: scan[subject=02,run=1]\n"));

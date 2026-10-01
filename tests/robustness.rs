@@ -106,7 +106,7 @@ fn shell_operators_in_a_command_are_flagged() {
 
 #[test]
 fn a_bare_lowercase_input_names_an_untyped_port() {
-    let pipeline = parse_pipeline("operation f(image, many frames) -> Text\n").unwrap();
+    let pipeline = parse_pipeline("operation f(image, frames: many) -> Text\n").unwrap();
     let ports: Vec<_> = pipeline.operations[0]
         .inputs
         .iter()
@@ -220,7 +220,7 @@ fn command_line_mistakes_are_named() {
 #[test]
 fn a_byte_order_mark_is_ignored_by_every_entry_point() {
     let bom = |text: &str| format!("\u{feff}{text}");
-    let valid = "source raw : Raw [id]\noperation clean(Raw) -> Clean\ncleaned = clean(raw)\n";
+    let valid = "source raw : Raw [id]\noperation clean(raw: Raw) -> Clean\ncleaned = clean(raw)\n";
     let records = "sources:\n  raw[id=a]\n";
     parse_pipeline(&bom(valid)).unwrap();
     spit::parse_source_inventory(&bom(records)).unwrap();

@@ -27,9 +27,9 @@ source reverse_b0_json : AcquisitionMetadata [sub, ses]
 path reverse_b0_json: sub-{sub}/ses-{ses}/fmap/sub-{sub}_ses-{ses}_dir-PA_epi.json
 source t1w : MRI<T1w,Anatomical> [sub, ses]
 path t1w: sub-{sub}/ses-{ses}/anat/sub-{sub}_ses-{ses}_T1w.nii.gz
-source source_lut : LookupTable []
+source source_lut : LookupTable
 path source_lut: config/source_lut.txt
-source target_lut : LookupTable []
+source target_lut : LookupTable
 path target_lut: config/target_lut.txt
 
 # Import each run with its sidecars, clean it, combine the runs into one
@@ -46,12 +46,12 @@ stage preprocess:
         reverse_b0_mif = import_reverse_b0(reverse_b0, reverse_b0_json)
 
     stage denoise:
-        operation denoise(MRI<DWI,S>) -> MRI<DWI,S>
-        command denoise: dwidenoise {input} {output}
+        operation denoise(mri: MRI<DWI,S>) -> MRI<DWI,S>
+        command denoise: dwidenoise {mri} {output}
         denoised_dwi = denoise(dwi_mif)
 
-        operation remove_gibbs(MRI<DWI,S>) -> MRI<DWI,S>
-        command remove_gibbs: mrdegibbs {input} {output}
+        operation remove_gibbs(mri: MRI<DWI,S>) -> MRI<DWI,S>
+        command remove_gibbs: mrdegibbs {mri} {output}
         degibbsed_dwi = remove_gibbs(denoised_dwi)
 
     stage combine:
@@ -62,12 +62,12 @@ stage preprocess:
 
         # Extract b=0 volumes, then average them. Both operations can be reused after
         # motion and distortion correction to make a corrected registration target.
-        operation extract_b0(MRI<DWI,S>) -> MRI<B0Series,S>
-        command extract_b0: dwiextract {input} {output} -bzero
+        operation extract_b0(mri: MRI<DWI,S>) -> MRI<B0Series,S>
+        command extract_b0: dwiextract {mri} {output} -bzero
         forward_b0_series = extract_b0(session_dwi)
 
-        operation mean_b0(MRI<B0Series,S>) -> MRI<B0,S>
-        command mean_b0: mrmath {input} mean {output} -axis 3
+        operation mean_b0(mri: MRI<B0Series,S>) -> MRI<B0,S>
+        command mean_b0: mrmath {mri} mean {output} -axis 3
         forward_b0 = mean_b0(forward_b0_series)
 
         operation combine_pe_pair(forward: MRI<B0,S>, reverse: MRI<B0,S>) -> MRI<B0Pair,S>
@@ -81,8 +81,8 @@ stage preprocess:
         command preprocess_dwi: dwifslpreproc {dwi} {output} -rpe_header -se_epi {pe_pair} -align_seepi
         preprocessed_dwi = preprocess_dwi(session_dwi, se_epi_pair)
 
-        operation bias_correct(MRI<DWI,S>) -> MRI<DWI,S>
-        command bias_correct: dwibiascorrect fsl {input} {output}
+        operation bias_correct(mri: MRI<DWI,S>) -> MRI<DWI,S>
+        command bias_correct: dwibiascorrect fsl {mri} {output}
         corrected_dwi = bias_correct(preprocessed_dwi)
         session_b0_series = extract_b0(corrected_dwi)
         session_b0 = mean_b0(session_b0_series)
@@ -94,8 +94,8 @@ stage anatomy:
         path: derivatives/{stage}/{product}/{entities}.nii.gz
 
         # Generate a parcellation in native T1 space, then remap its integer labels.
-        operation parcellate_t1(MRI<T1w,S>) -> MRI<Parcellation,S>
-        command parcellate_t1: mri_synthseg --i {input} --o {output} --parc
+        operation parcellate_t1(mri: MRI<T1w,S>) -> MRI<Parcellation,S>
+        command parcellate_t1: mri_synthseg --i {mri} --o {output} --parc
         parcellation_t1 = parcellate_t1(t1w)
 
         operation convert_labels(labels: MRI<Parcellation,S>, source_lut: LookupTable, target_lut: LookupTable) -> MRI<Parcellation,S>
@@ -105,8 +105,8 @@ stage anatomy:
     stage registration:
         # FLIRT handles the T1/b=0 contrast difference. Its matrix is converted to
         # MRtrix coordinates using the same moving and reference images.
-        operation export_nifti(MRI<K,S>) -> MRI<K,S>
-        command export_nifti: mrconvert {input} {output}
+        operation export_nifti(mri: MRI<K,S>) -> MRI<K,S>
+        command export_nifti: mrconvert {mri} {output}
         session_b0_nifti = export_nifti(session_b0)
         path session_b0_nifti: derivatives/{stage}/{product}/{entities}.nii.gz
 
@@ -132,13 +132,13 @@ stage anatomy:
 
     stage tissue:
         # Make the 5TT in native T1 space before resampling into diffusion space.
-        operation make_5tt(MRI<T1w,S>) -> MRI<Tissue,S>
-        command make_5tt: 5ttgen fsl {input} {output}
+        operation make_5tt(mri: MRI<T1w,S>) -> MRI<Tissue,S>
+        command make_5tt: 5ttgen fsl {mri} {output}
         five_tt_t1 = make_5tt(t1w)
         five_tt = mrtransform(five_tt_t1, t1_to_dwi, session_b0)
 
-        operation make_gmwmi(MRI<Tissue,S>) -> MRI<Mask,S>
-        command make_gmwmi: 5tt2gmwmi {input} {output}
+        operation make_gmwmi(mri: MRI<Tissue,S>) -> MRI<Mask,S>
+        command make_gmwmi: 5tt2gmwmi {mri} {output}
         gmwmi = make_gmwmi(five_tt)
 
 # Fit FODs, track with anatomical constraints, and build the connectome.
@@ -149,8 +149,8 @@ stage tractography:
     stage responses:
         path: derivatives/{stage}/{product}/{entities}.txt
 
-        operation estimate_responses(MRI<DWI,S>) -> (wm: Response<WM>, gm: Response<GM>, csf: Response<CSF>)
-        command estimate_responses: dwi2response dhollander {input} {wm} {gm} {csf}
+        operation estimate_responses(mri: MRI<DWI,S>) -> (wm: Response<WM>, gm: Response<GM>, csf: Response<CSF>)
+        command estimate_responses: dwi2response dhollander {mri} {wm} {gm} {csf}
         wm_response, gm_response, csf_response = estimate_responses(corrected_dwi)
 
     stage fods:

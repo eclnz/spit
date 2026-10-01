@@ -12,7 +12,7 @@ use spit::{diagnose, DiagnosticSource};
 #[test]
 fn reports_syntax_line_from_unsaved_text() {
     let text =
-        "source raw [id]\noperation copy(one)\nresult = copy(raw @ vary(id) @ vary(extra))\n";
+        "source raw [id]\noperation copy(input)\nresult = copy(raw @ vary(id) @ vary(extra))\n";
     let issues = errors(diagnose(text, None));
     assert_eq!(issues.len(), 1);
     assert_eq!(issues[0].source, DiagnosticSource::Pipeline);
@@ -22,7 +22,7 @@ fn reports_syntax_line_from_unsaved_text() {
 #[test]
 fn reports_independent_syntax_errors_across_a_pipeline() {
     let text =
-        "source raw [id]\nthis is invalid\noperation copy(one)\nalso invalid\nresult = copy(raw)\n";
+        "source raw [id]\nthis is invalid\noperation copy(input)\nalso invalid\nresult = copy(raw)\n";
     let issues = errors(diagnose(text, None));
     assert_eq!(
         issues.iter().map(|issue| issue.line).collect::<Vec<_>>(),
@@ -38,7 +38,7 @@ fn an_error_that_closes_a_stage_is_reported_alone() {
     // The unindented `path:` ends stage `outer`, which would leave the
     // indented stage header after it outside every stage. Only the first
     // error is real: without that line, the header is where it belongs.
-    let text = "path: {product}.txt\nsource raw : Table [id]\noperation copy(Table) -> Table\nstage outer:\n    stage first:\n        a = copy(raw)\npath: {product}.csv\n    stage second:\n        b = copy(a)\n";
+    let text = "path: {product}.txt\nsource raw : Table [id]\noperation copy(table: Table) -> Table\nstage outer:\n    stage first:\n        a = copy(raw)\npath: {product}.csv\n    stage second:\n        b = copy(a)\n";
     let issues = errors(diagnose(text, None));
     assert_eq!(
         issues
@@ -73,7 +73,7 @@ fn reports_pipeline_and_inventory_syntax_errors_together() {
 fn seeded_deletions_report_every_damaged_pipeline_line() {
     let mut original = vec![
         "source raw [id]".to_owned(),
-        "operation copy(one)".to_owned(),
+        "operation copy(input)".to_owned(),
     ];
     original.extend((0..24).map(|index| format!("step_{index:02} = copy(raw)")));
     assert!(errors(diagnose(&original.join("\n"), None)).is_empty());

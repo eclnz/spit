@@ -21,9 +21,9 @@ source flat_field_json : CaptureMetadata [site, visit]
 path flat_field_json: site-{site}/visit-{visit}/calibration/site-{site}_visit-{visit}_flat.json
 source ground_map : Image<Map,Surveyed> [site, visit]
 path ground_map: site-{site}/visit-{visit}/map/site-{site}_visit-{visit}_map.tif
-source source_classes : ClassTable []
+source source_classes : ClassTable
 path source_classes: config/source_classes.txt
-source target_classes : ClassTable []
+source target_classes : ClassTable
 path target_classes: config/target_classes.txt
 
 # Import each photo with its pose sidecars and capture metadata.
@@ -35,12 +35,12 @@ operation import_flat(image: Image<Flat,Captured>, metadata: CaptureMetadata) ->
 command import_flat: imgconvert {image} {output} --meta {metadata}
 flat_img = import_flat(flat_field, flat_field_json)
 
-operation denoise(Image<Photo,S>) -> Image<Photo,S>
-command denoise: imgdenoise {input} {output}
+operation denoise(image: Image<Photo,S>) -> Image<Photo,S>
+command denoise: imgdenoise {image} {output}
 denoised_photo = denoise(photo_img)
 
-operation remove_glare(Image<Photo,S>) -> Image<Photo,S>
-command remove_glare: imgdeglare {input} {output}
+operation remove_glare(image: Image<Photo,S>) -> Image<Photo,S>
+command remove_glare: imgdeglare {image} {output}
 deglared_photo = remove_glare(denoised_photo)
 
 # Consume shot to make one image per visit for the corrections that follow.
@@ -50,12 +50,12 @@ visit_photo = stack_shots(deglared_photo @ vary(shot))
 
 # Extract dark frames, then average them. Both stages are reused after
 # correction to make a corrected alignment target.
-operation extract_dark(Image<Photo,S>) -> Image<DarkSeries,S>
-command extract_dark: imgextract {input} {output} --dark
+operation extract_dark(image: Image<Photo,S>) -> Image<DarkSeries,S>
+command extract_dark: imgextract {image} {output} --dark
 dark_series = extract_dark(visit_photo)
 
-operation mean_dark(Image<DarkSeries,S>) -> Image<Dark,S>
-command mean_dark: imgmath {input} mean {output}
+operation mean_dark(image: Image<DarkSeries,S>) -> Image<Dark,S>
+command mean_dark: imgmath {image} mean {output}
 dark_frame = mean_dark(dark_series)
 
 operation pair_calibration(dark: Image<Dark,S>, flat: Image<Flat,S>) -> Image<CalibrationPair,S>
@@ -66,15 +66,15 @@ operation correct_photo(photo: Image<Photo,Captured>, calibration: Image<Calibra
 command correct_photo: imgcorrect {photo} {output} --calibration {calibration}
 corrected_photo = correct_photo(visit_photo, calibration_pair)
 
-operation balance(Image<Photo,S>) -> Image<Photo,S>
-command balance: imgbalance auto {input} {output}
+operation balance(image: Image<Photo,S>) -> Image<Photo,S>
+command balance: imgbalance auto {image} {output}
 balanced_photo = balance(corrected_photo)
 visit_dark_series = extract_dark(balanced_photo)
 visit_dark = mean_dark(visit_dark_series)
 
 # Classify the ground map in its own space, then remap its class labels.
-operation classify_map(Image<Map,S>) -> Image<Classes,S>
-command classify_map: mapclassify --in {input} --out {output}
+operation classify_map(image: Image<Map,S>) -> Image<Classes,S>
+command classify_map: mapclassify --in {image} --out {output}
 classes_map = classify_map(ground_map)
 path classes_map: derivatives/classes_map/{entities}.tif
 
@@ -84,8 +84,8 @@ regions_map = relabel(classes_map, source_classes, target_classes)
 
 # Align the ground map to the corrected photos, then convert the tool's matrix
 # into a transform using the same moving and reference images.
-operation export_tiff(Image<K,S>) -> Image<K,S>
-command export_tiff: imgconvert {input} {output}
+operation export_tiff(image: Image<K,S>) -> Image<K,S>
+command export_tiff: imgconvert {image} {output}
 visit_dark_tiff = export_tiff(visit_dark)
 path visit_dark_tiff: derivatives/visit_dark_tiff/{entities}.tif
 
@@ -110,17 +110,17 @@ command resample_labels: imgresample {labels} {output} --transform {transform} -
 regions_photo = resample_labels(regions_map, map_to_photo, visit_dark)
 
 # Segment ground cover in map space before resampling into photo space.
-operation segment_cover(Image<Map,S>) -> Image<Cover,S>
-command segment_cover: coverseg {input} {output}
+operation segment_cover(image: Image<Map,S>) -> Image<Cover,S>
+command segment_cover: coverseg {image} {output}
 cover_map = segment_cover(ground_map)
 cover = resample(cover_map, map_to_photo, visit_dark)
 
-operation cover_boundary(Image<Cover,S>) -> Image<Mask,S>
-command cover_boundary: coveredge {input} {output}
+operation cover_boundary(image: Image<Cover,S>) -> Image<Mask,S>
+command cover_boundary: coveredge {image} {output}
 boundary = cover_boundary(cover)
 
-operation estimate_response(Image<Photo,S>) -> Response<Photo>
-command estimate_response: imgresponse {input} {output}
+operation estimate_response(image: Image<Photo,S>) -> Response<Photo>
+command estimate_response: imgresponse {image} {output}
 photo_response = estimate_response(balanced_photo)
 path photo_response: derivatives/photo_response/{entities}.txt
 

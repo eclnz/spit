@@ -20,10 +20,10 @@ fn warnings_flag_unused_definitions_missing_commands_and_unbound_type_variables(
     let text = "\
 source raw : Table [id]
 source spare : Table [id]
-operation clean(Table) -> Table
-operation tag(Table) -> Tagged<$Key>
-operation unused(Table) -> Table
-command clean: tool {input} {output}
+operation clean(table: Table) -> Table
+operation tag(table: Table) -> Tagged<$Key>
+operation unused(table: Table) -> Table
+command clean: tool {table} {output}
 cleaned = clean(raw)
 tagged : Tagged<Label> [id] = tag(cleaned)
 ";
@@ -40,19 +40,19 @@ tagged : Tagged<Label> [id] = tag(cleaned)
     assert!(errors(diagnostics).is_empty());
 
     // A pipeline without commands may be meant for its DAG alone.
-    let without_commands = text.replace("command clean: tool {input} {output}\n", "");
+    let without_commands = text.replace("command clean: tool {table} {output}\n", "");
     assert!(!rendered(&diagnose(&without_commands, None))
         .iter()
         .any(|line| line.contains("has no command")));
 
     // A file with no steps is a library of definitions, used by importing it.
-    let library = "source raw : Table [id]\noperation clean(Table) -> Table\n";
+    let library = "source raw : Table [id]\noperation clean(table: Table) -> Table\n";
     assert!(diagnose(library, None).is_empty());
 }
 
 #[test]
 fn a_line_with_an_error_shows_no_warnings() {
-    let text = "source raw : Table [id]\nsource spare : Table [id, id]\noperation clean(Table) -> Table\ncleaned = clean(raw)\n";
+    let text = "source raw : Table [id]\nsource spare : Table [id, id]\noperation clean(table: Table) -> Table\ncleaned = clean(raw)\n";
     assert_eq!(
         rendered(&diagnose(text, None)),
         ["error: line 2: product `spare` has duplicate or empty dimensions"]
@@ -64,8 +64,8 @@ fn steps_that_resolve_no_jobs_are_reported() {
     let text = "\
 source image [subject]
 source extra [subject]
-operation f(Image) -> Image
-operation g(Image, Image) -> Image
+operation f(image: Image) -> Image
+operation g(image: Image, image2: Image) -> Image
 cleaned = f(image)
 other = f(extra @ where(subject=z))
 both = g(cleaned, image)
@@ -86,7 +86,7 @@ fn steps_that_read_a_product_twice_are_checked_in_linear_time() {
     // Each step reads the one before twice. Following every path from a
     // step back to its sources would take 2^40 visits here.
     let mut text = String::from(
-        "source s0 : T [id]\nsource other : T [id]\noperation g(T, T) -> T\n\
+        "source s0 : T [id]\nsource other : T [id]\noperation g(t: T, t2: T) -> T\n\
          path: out/{product}/{id}.txt\npath s0: in/{id}.txt\npath other: o/{id}.txt\n",
     );
     for step in 1..=40 {
@@ -103,4 +103,21 @@ fn steps_that_read_a_product_twice_are_checked_in_linear_time() {
             && found[0].ends_with("p39, p40"),
         "{found:?}"
     );
+}
+
+#[test]
+fn a_product_named_after_its_operation_is_warned_about() {
+    let text = "\
+source log : Log [day]
+operation digest(log: Log) -> Digest
+command digest: logdigest {log} {output}
+digest = digest(log)
+";
+    let diagnostics = diagnose(text, None);
+    assert_eq!(
+        rendered(&diagnostics),
+        ["warning: line 4: product `digest` has the name of the operation that makes it; name the result instead, so the step reads as what it makes"]
+    );
+    let renamed = text.replace("digest = digest(log)", "daily = digest(log)");
+    assert!(warnings(diagnose(&renamed, None)).is_empty());
 }

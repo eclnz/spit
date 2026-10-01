@@ -33,7 +33,7 @@ fn cli_accepts_stdin_and_returns_json() {
 
 #[test]
 fn cli_reports_semantic_error_line_in_json() {
-    let output = check_json(b"source raw : A<Native> [id]\noperation first(A<X>) -> B<X>\nmiddle = first(raw)\noperation second(B<Standard>) -> C\nfinal = second(middle)\n",);
+    let output = check_json(b"source raw : A<Native> [id]\noperation first(a: A<X>) -> B<X>\nmiddle = first(raw)\noperation second(b: B<Standard>) -> C\nfinal = second(middle)\n",);
     assert!(output.status.success());
     let json = String::from_utf8(output.stdout).unwrap();
     assert!(json.contains("\"line\":5"), "{json}");
@@ -43,7 +43,7 @@ fn cli_reports_semantic_error_line_in_json() {
 #[test]
 fn cli_json_includes_each_severity_and_its_columns() {
     let output = check_json(
-        b"source raw [id]\nsource spare [id]\noperation copy(one)\nresult = copy(rwa)\n",
+        b"source raw [id]\nsource spare [id]\noperation copy(input)\nresult = copy(rwa)\n",
     );
     assert!(output.status.success());
     assert_eq!(
@@ -57,7 +57,8 @@ fn cli_json_includes_each_severity_and_its_columns() {
 
 #[test]
 fn cli_json_columns_count_utf16_code_units() {
-    let output = check_json("source raw [id]\noperation copy(one)\nx = copy(résumé)\n".as_bytes());
+    let output =
+        check_json("source raw [id]\noperation copy(input)\nx = copy(résumé)\n".as_bytes());
     let json = String::from_utf8(output.stdout).unwrap();
     // `é` is two bytes but one UTF-16 code unit, so `résumé` spans 10..16.
     assert!(
@@ -71,7 +72,7 @@ fn recipe_json_places_pipeline_errors_in_the_pipeline_file() {
     let tree = Tree::new("json-recipe-file", &[]);
     let pipeline = tree.write(
         "analysis.spit",
-        "source raw [id]\noperation copy(one)\nresult = copy(rwa)\n",
+        "source raw [id]\noperation copy(input)\nresult = copy(rwa)\n",
     );
     let recipe = tree.write("data.spitin", "pipeline analysis.spit\n");
     let output = Command::new(env!("CARGO_BIN_EXE_spit"))

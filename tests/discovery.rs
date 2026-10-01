@@ -55,7 +55,7 @@ const DISCOVERED: &str = "\
 path: derived/{product}/{entities}.txt
 source frame [subject, run]
 path frame: raw/sub-{subject}/run-{run}.dat
-source lut []
+source lut
 path lut: config/lut.txt
 operation stack(frames: many Frame, lut: Lut) -> Stack
 command stack: stack {frames} {lut} {output}
@@ -248,7 +248,7 @@ fn drop_discovery_group_removes_subject_before_source_checks_and_jobs() {
                 require sessions count>=2 per [sub]\n\
                 source image [sub, ses]\n\
                 path image: data/sub-{sub}/ses-{ses}/image.nii.gz\n\
-                operation process(Image) -> Image\n\
+                operation process(image: Image) -> Image\n\
                 result = process(image)\n\
                 path result: out/sub-{sub}/ses-{ses}/result.nii.gz\n";
     let (pipeline, spec) = parse(text);
@@ -305,7 +305,7 @@ fn drop_source_group_can_omit_missing_files_in_a_discovered_context() {
          source image [sub, ses]\n\
          path image: data/sub-{sub}/ses-{ses}/image.nii.gz\n\
          drop [sub] where image count<2\n\
-         operation process(Image) -> Image\n\
+         operation process(image: Image) -> Image\n\
          result = process(image)\n",
     );
     let inventory = discover_sources(&pipeline, &spec.rules, &tree.0).unwrap();

@@ -6,7 +6,8 @@ use spit::{diagnose, DiagnosticSource};
 
 #[test]
 fn validates_external_inventory_and_semantics() {
-    let text = "source raw : Image [id]\noperation copy(Image) -> Image\nresult = copy(raw)\n";
+    let text =
+        "source raw : Image [id]\noperation copy(image: Image) -> Image\nresult = copy(raw)\n";
     let bad_inventory = "sources:\n  raw[id=x,id=y]\n";
     let issues = errors(diagnose(text, Some(bad_inventory)));
     assert_eq!(issues.len(), 1);
@@ -24,8 +25,8 @@ fn validates_external_inventory_and_semantics() {
 
 #[test]
 fn checked_diagnosis_retains_the_original_pipeline_and_inventory() {
-    let pipeline = "source raw [id]\noperation copy(one)\nresult = copy(raw)\n";
-    let inventory = "sources:\n  raw[id=x]: data/x.txt\n";
+    let pipeline = "source raw [id]\noperation copy(input)\nresult = copy(raw)\n";
+    let inventory = "sources:\n  raw[id=x]\n";
     let recipe = spit::parse_input_spec("path raw: data/{id}.txt\n").unwrap();
     let context = spit::Context {
         recipe: Some(&recipe),
@@ -42,7 +43,7 @@ fn checked_diagnosis_retains_the_original_pipeline_and_inventory() {
 fn type_errors_point_to_the_exact_flow_step_even_when_operation_is_reused() {
     let text = "source camera : Frame<Camera> [id]\n\
                 source lidar : Frame<Lidar> [id]\n\
-                operation inspect(Frame<$Kind>) -> Checked<$Kind>\n\
+                operation inspect(frame: Frame<$Kind>) -> Checked<$Kind>\n\
                 camera_checked = inspect(camera)\n\
                 lidar_checked : Checked<Camera> [id] = inspect(lidar)\n";
     let issues = errors(diagnose(text, None));
@@ -98,7 +99,7 @@ fn duplicate_declaration_points_to_the_second_declaration() {
 
 #[test]
 fn missing_join_input_points_to_the_call() {
-    let text = "source raw [id]\nsource reference [id]\noperation join(left: one, right: one)\nresult = join(raw, reference)\n";
+    let text = "source raw [id]\nsource reference [id]\noperation join(left, right)\nresult = join(raw, reference)\n";
     let issues = errors(diagnose(text, Some("sources:\n  raw[id=x]\n")));
     assert_eq!(issues.len(), 1);
     assert_eq!(issues[0].source, DiagnosticSource::Pipeline);
@@ -133,9 +134,9 @@ fn every_semantic_error_is_reported_once_in_line_order() {
 source raw : Table [id, batch]
 path: {product}/{entities}.csv
 path raw: in/{id}.csv
-operation clean(Table) -> Table
-command clean: tool {input} {result}
-operation join(Table, Table) -> Table
+operation clean(table: Table) -> Table
+command clean: tool {table} {result}
+operation join(table: Table, table2: Table) -> Table
 cleaned = clean(raw)
 joined = join(cleaned)
 typo = clean(rwa)
@@ -159,7 +160,7 @@ source raw : Table [id]
 operation pair(a: Table, a: Table) -> Table
 first = pair(raw, raw)
 second = pair(first, first)
-operation copy(Table) -> Table
+operation copy(table: Table) -> Table
 third = copy(missing)
 fourth = copy(third)
 ";
@@ -199,7 +200,7 @@ fn source_with_wrong_dimensions_points_to_its_inventory_line() {
 fn hash_ending_a_word_is_flagged_as_a_likely_comment() {
     let text = "\
 source raw [id]
-operation copy(one)
+operation copy(input)
 command copy: tool --color=#fff {input} {output}# note
 result = copy(raw)
 source spare [id]# note
@@ -225,7 +226,7 @@ fn path_rule_errors_point_to_the_rule_in_use() {
     let text = "\
 source raw [id]
 path: {entities}.csv
-operation clean(one)
+operation clean(input)
 cleaned = clean(raw)
 source other [id]
 path other: {product}/{id}/{shard}.csv

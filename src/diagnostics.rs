@@ -486,10 +486,9 @@ pub fn diagnose_checked_with_inventory(
     let text = without_bom(text);
     let parsed = recover_parse_errors(text, |text| context.parse(text)).ok()?;
     let document = &parsed.document;
-    let written = parsed.as_written.as_ref().unwrap_or(&document.pipeline);
     let no_rules = InputRules::default();
     let rules = context.recipe.map_or(&no_rules, |recipe| &recipe.rules);
-    let inventory = as_read_back(&settled.inventory, written, rules)?;
+    let inventory = as_read_back(&settled.inventory, rules)?;
     // Checking the settled records again finds what settling found, since
     // only the `drop` rules change records and they ran while settling.
     let gaps = Some(settled.gaps.as_slice());
@@ -1054,6 +1053,7 @@ fn warnings(pipeline: &Pipeline, lines: &SourceMap, skip: &BTreeSet<String>) -> 
         return operation_warnings(pipeline, lines, skip, true);
     }
     let mut warnings = stage_warnings(pipeline, lines);
+    warnings.extend(name_warnings(pipeline, lines));
     warnings.extend(product_warnings(pipeline, lines, skip));
     warnings.extend(operation_warnings(pipeline, lines, skip, false));
     warnings
@@ -1085,6 +1085,31 @@ fn stage_warnings(pipeline: &Pipeline, lines: &SourceMap) -> Vec<Diagnostic> {
             warning(
                 lines.stages.get(&stage.name).cloned(),
                 format!("stage `{}` has no steps", stage.name),
+            )
+        })
+        .collect()
+}
+
+/// Products named after the operation that makes them, as in
+/// `digest = digest(log)`: legal, since the names are separate, but the step
+/// then reads as the operation, not its result.
+fn name_warnings(pipeline: &Pipeline, lines: &SourceMap) -> Vec<Diagnostic> {
+    pipeline
+        .invocations
+        .iter()
+        .flat_map(|invocation| {
+            invocation
+                .outputs
+                .iter()
+                .filter(move |output| **output == invocation.operation)
+        })
+        .map(|output| {
+            warning(
+                lines.invocations.get(output).map(Step::output),
+                format!(
+                    "product `{output}` has the name of the operation that makes it; \
+                     name the result instead, so the step reads as what it makes"
+                ),
             )
         })
         .collect()

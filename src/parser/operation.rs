@@ -1,9 +1,7 @@
 //! Operation declarations: `name(inputs) -> outputs`, with an optional
 //! `@ min(count)` clause.
 
-use crate::model::{
-    Cardinality, DefaultPort, InputPort, OperationDef, OutputPort, ShapeRule, DEFAULT_OUTPUT,
-};
+use crate::model::{Cardinality, InputPort, OperationDef, OutputPort, ShapeRule, DEFAULT_OUTPUT};
 use crate::types::{parse_type_expr, TypeExpr};
 
 use super::declarations::type_error;
@@ -60,8 +58,7 @@ pub(super) fn parse_operation(line: &str, number: usize) -> Result<OperationDef,
     }
     let ports = inputs
         .iter()
-        .enumerate()
-        .map(|(index, input)| parse_input_port(input, index, inputs.len(), number))
+        .map(|input| parse_input_port(input, number))
         .collect::<Result<Vec<_>, _>>()?;
     let shape_rule = shape_rule(&ports, &clauses, number)?;
     let mut operation = OperationDef::with_outputs(name, ports, outputs, shape_rule);
@@ -136,55 +133,122 @@ fn parse_clauses<'a>(
     Ok(parsed)
 }
 
-/// Parse input `index` of `count`: `[name:] [one|many] [Type]`.
-fn parse_input_port<'a>(
-    input: &'a str,
-    index: usize,
-    count: usize,
-    number: usize,
-) -> Result<InputPort, ParseError> {
-    let port_name = |name: &'a str| -> Result<&'a str, ParseError> {
-        let name = identifier(name.trim(), number, "input port")?;
-        if name == DEFAULT_OUTPUT {
-            return Err(ParseError::new(
-                number,
-                format!("input port name `{DEFAULT_OUTPUT}` is reserved for the operation output"),
-            )
-            .at_token(name));
+/// Parse an input port: `name`, `name: Type`, `name: many`, or
+/// `name: many Type`.
+fn parse_input_port(input: &str, number: usize) -> Result<InputPort, ParseError> {
+    let fail = |message: String, token: &str| Err(ParseError::new(number, message).at_token(token));
+    let Some((name, value)) = input.split_once(':') else {
+        // A lowercase word alone names an untyped port; types are capitalised.
+        if let Some(rest) = input
+            .strip_prefix("many ")
+            .or_else(|| input.strip_prefix("one "))
+        {
+            let rest = rest.trim();
+            let keyword = &input[..input.len() - rest.len()].trim();
+            return if rest.starts_with(|c: char| c.is_ascii_lowercase()) {
+                let kind = if *keyword == "many" { " many" } else { "" };
+                fail(
+                    format!("write `{rest}:{kind}`, the port's name first"),
+                    input,
+                )
+            } else {
+                let kind = if *keyword == "many" { "many " } else { "" };
+                fail(
+                    format!(
+                        "an input port needs a name, as in `{}: {kind}{rest}`",
+                        suggested_name(rest)
+                    ),
+                    input,
+                )
+            };
         }
-        Ok(name)
+        return match input {
+            "many" => fail(
+                "an input port needs a name, as in `items: many`".to_owned(),
+                input,
+            ),
+            "one" => fail("an input port needs a name, as in `item`".to_owned(), input),
+            _ if input.starts_with(|c: char| c.is_ascii_lowercase()) => {
+                Ok(InputPort::one(port_name(input, number)?, TypeExpr::Unknown))
+            }
+            _ => fail(
+                format!(
+                    "an input port needs a name, as in `{}: {input}`",
+                    suggested_name(input)
+                ),
+                input,
+            ),
+        };
     };
-    let (mut declared_name, input) = match input.split_once(':') {
-        Some((name, value)) => (Some(port_name(name)?), value.trim()),
-        None => (None, input),
-    };
-    let (cardinality, mut value) = match input {
-        "many" => (Cardinality::Many, ""),
-        "one" => (Cardinality::One, ""),
-        _ => match (input.strip_prefix("many "), input.strip_prefix("one ")) {
-            (Some(value), _) => (Cardinality::Many, value.trim()),
-            (_, Some(value)) => (Cardinality::One, value.trim()),
-            _ => (Cardinality::One, input),
+    let name = port_name(name, number)?;
+    let value = value.trim();
+    let (many, value) = match value {
+        "many" => (true, ""),
+        _ => match value.strip_prefix("many ") {
+            Some(rest) => (true, rest.trim()),
+            None => (false, value),
         },
     };
-    // A lowercase word alone names an untyped port; types are capitalised.
-    if declared_name.is_none() && value.starts_with(|c: char| c.is_ascii_lowercase()) {
-        declared_name = Some(port_name(value)?);
-        value = "";
+    if value == "one" || value.starts_with("one ") {
+        let rest = value.strip_prefix("one").unwrap_or_default().trim();
+        let instead = if rest.is_empty() {
+            name.to_owned()
+        } else {
+            format!("{name}: {rest}")
+        };
+        return fail(
+            format!("an input takes one artifact unless it says `many`; write `{instead}`"),
+            value,
+        );
     }
     let artifact_type = if value.is_empty() {
         TypeExpr::Unknown
     } else {
         port_type(value, number)?
     };
-    let port_name = declared_name.map_or_else(
-        || DefaultPort::for_input(index, count).name(),
-        str::to_owned,
-    );
-    Ok(match cardinality {
-        Cardinality::One => InputPort::one(&port_name, artifact_type),
-        Cardinality::Many => InputPort::many(&port_name, artifact_type),
+    Ok(if many {
+        InputPort::many(name, artifact_type)
+    } else {
+        InputPort::one(name, artifact_type)
     })
+}
+
+/// A port's name, which `output` cannot be.
+fn port_name(name: &str, number: usize) -> Result<&str, ParseError> {
+    let name = identifier(name.trim(), number, "input port")?;
+    if name == DEFAULT_OUTPUT {
+        return Err(ParseError::new(
+            number,
+            format!("input port name `{DEFAULT_OUTPUT}` is reserved for the operation output"),
+        )
+        .at_token(name));
+    }
+    Ok(name)
+}
+
+/// A name to suggest for a port typed `type_text`: its type's name, in
+/// lowercase words joined by `_`.
+fn suggested_name(type_text: &str) -> String {
+    let head = type_text
+        .split(|c: char| !c.is_ascii_alphanumeric())
+        .next()
+        .unwrap_or_default();
+    let mut name = String::new();
+    let mut previous: Option<char> = None;
+    for character in head.chars() {
+        // A word starts at a capital after a lowercase letter, so `MRI`
+        // stays one word and `DenoisedBOLD` is two.
+        if character.is_ascii_uppercase() && previous.is_some_and(|p| p.is_ascii_lowercase()) {
+            name.push('_');
+        }
+        name.push(character.to_ascii_lowercase());
+        previous = Some(character);
+    }
+    if name.is_empty() {
+        "input".to_owned()
+    } else {
+        name
+    }
 }
 
 /// Whether an operation aggregates, which it does with one many input; only

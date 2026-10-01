@@ -4,12 +4,7 @@ use spit::{parse_input_spec, parse_pipeline, parse_source_inventory, render_dag,
 
 #[test]
 fn dimensionless_sources_accept_bare_names_and_match_each_job() {
-    for declaration in [
-        "source testset : Data",
-        "source testset",
-        "source testset : Data []",
-        "source testset []",
-    ] {
+    for declaration in ["source testset : Data", "source testset"] {
         assert_eq!(
             parse_pipeline(&format!("{declaration}\n"))
                 .unwrap()
@@ -31,6 +26,15 @@ fn dimensionless_sources_accept_bare_names_and_match_each_job() {
         .unwrap_err()
         .to_string()
         .contains("optional [dimensions]"));
+    for declaration in ["source testset : Data []", "source testset []"] {
+        let error = parse_pipeline(&format!("{declaration}\n")).unwrap_err();
+        assert!(
+            error
+                .message()
+                .contains("`testset` has no dimensions, so it takes no brackets"),
+            "{error}"
+        );
+    }
 }
 
 /// A pipeline with the same shape as the basic example.
@@ -125,9 +129,9 @@ fn separate_pipeline_still_parses_without_inventory() {
 #[test]
 fn flow_form_infers_intermediate_products_and_keeps_inventory_separate() {
     let text = "source raw : Image<Native> [site, run]\n\
-operation clean(Image<S>) -> Clean<S>\n\
+operation clean(image: Image<S>) -> Clean<S>\n\
 cleaned = clean(raw)\n\
-operation mean(many Clean<S>) -> Mean<S>\n\
+operation mean(cleans: many Clean<S>) -> Mean<S>\n\
 average : Mean<Native> [site] = mean(cleaned @ vary(run))\n\
 sources:\n\
     raw[site=A,run=1]\n\
@@ -153,7 +157,7 @@ fn flow_form_requires_operation_declaration_before_use() {
 
 #[test]
 fn command_arguments_keep_quoted_hashes_and_strip_comments() {
-    let text = "source raw [id] # source comment\n# whole-line comment\noperation copy(one)\ncommand copy: tool --tag '#run' --label \"part#1\" --color=#fff {input} {output} # command comment\nresult = copy(raw)\n";
+    let text = "source raw [id] # source comment\n# whole-line comment\noperation copy(input)\ncommand copy: tool --tag '#run' --label \"part#1\" --color=#fff {input} {output} # command comment\nresult = copy(raw)\n";
     let pipeline = parse_pipeline(text).unwrap();
     assert_eq!(
         pipeline.commands[0].template,
@@ -164,7 +168,7 @@ fn command_arguments_keep_quoted_hashes_and_strip_comments() {
 #[test]
 fn equals_command_keeps_colons_in_arguments() {
     let pipeline = parse_pipeline(
-        "source raw [id]\noperation fetch(one)\ncommand fetch = tool --url https://example.com/a:b {input} {output}\nresult = fetch(raw)\n",
+        "source raw [id]\noperation fetch(input)\ncommand fetch = tool --url https://example.com/a:b {input} {output}\nresult = fetch(raw)\n",
     )
     .unwrap();
     assert_eq!(pipeline.commands[0].operation, "fetch");
@@ -176,7 +180,7 @@ fn equals_command_keeps_colons_in_arguments() {
 
 #[test]
 fn shell_source_is_rejected_with_migration_guidance() {
-    let text = "source raw [id]\noperation copy(one)\nresult = copy(raw)\nshell-source: scripts/functions.sh\n";
+    let text = "source raw [id]\noperation copy(input)\nresult = copy(raw)\nshell-source: scripts/functions.sh\n";
     let error = parse_pipeline(text).unwrap_err();
     assert_eq!(error.line(), 4);
     assert!(error.message().contains("executable available on PATH"));
@@ -232,7 +236,7 @@ fn path_template_errors_are_reported_while_parsing() {
 #[test]
 fn hash_inside_a_word_is_text_as_in_bash() {
     let pipeline = parse_pipeline(
-        "source raw [id]\noperation copy(one)\ncommand copy: tool --url=https://example.com/#top {input} {output}# note\n",
+        "source raw [id]\noperation copy(input)\ncommand copy: tool --url=https://example.com/#top {input} {output}# note\n",
     )
     .unwrap();
     assert_eq!(
@@ -270,22 +274,16 @@ fn removed_sections_say_what_to_write_instead() {
 }
 
 #[test]
-fn a_source_record_may_give_its_file() {
-    let text = "sources:\n    raw[site=A]: data/A/raw.txt\n    raw[site=B]\n";
-    let inventory = parse_source_inventory(text).unwrap();
-    assert_eq!(
-        inventory.artifacts[0].path.as_deref(),
-        Some("data/A/raw.txt")
+fn a_source_record_names_no_file() {
+    let error = parse_source_inventory("sources:\n    raw[site=A]: data/A/raw.txt\n").unwrap_err();
+    assert_eq!(error.line(), 2);
+    assert!(
+        error
+            .message()
+            .contains("its source's path rule gives it, so remove `: data/A/raw.txt`"),
+        "{error}"
     );
-    assert_eq!(inventory.artifacts[1].path, None);
-    let pipeline = parse_pipeline("source raw [site]\n").unwrap();
-    let rendered = spit::render_source_inventory(&inventory, &pipeline, &Default::default());
-    assert_eq!(parse_source_inventory(&rendered).unwrap(), inventory);
-    for bad in [
-        "raw[site=A] data.txt",
-        "raw[site=A]:",
-        "raw[site=A]: /abs.txt",
-    ] {
+    for bad in ["raw[site=A] data.txt", "raw[site=A]:"] {
         let error = parse_source_inventory(&format!("sources:\n{bad}\n")).unwrap_err();
         assert_eq!(error.line(), 2, "{bad}");
     }
@@ -314,5 +312,52 @@ fn nested_sources_expand_each_product_and_run() {
         "contexts sessions:\n    image\n",
     ] {
         assert!(parse_source_inventory(bad).is_err(), "{bad}");
+    }
+}
+
+#[test]
+fn every_input_port_has_a_name() {
+    for (port, expected) in [
+        ("Image", "an input port needs a name, as in `image: Image`"),
+        ("DenoisedBOLD", "as in `denoised_bold: DenoisedBOLD`"),
+        ("MRI<DWI,S>", "as in `mri: MRI<DWI,S>`"),
+        ("many Image", "as in `image: many Image`"),
+        ("many", "as in `items: many`"),
+        ("many frames", "write `frames: many`"),
+        ("one", "as in `item`"),
+        ("one image", "write `image:`"),
+        ("image: one Image", "write `image: Image`"),
+        ("image: one", "write `image`"),
+    ] {
+        let error = parse_pipeline(&format!("operation f({port}) -> Out\n")).unwrap_err();
+        assert!(error.message().contains(expected), "{port}: {error}");
+    }
+    let pipeline = parse_pipeline(
+        "operation f(image, frames: many, mask: Mask, scans: many Scan<S>) -> Out\n",
+    );
+    assert!(pipeline.is_err(), "one many input per operation");
+    let pipeline =
+        parse_pipeline("operation f(image, mask: Mask, scans: many Scan<S>) -> Out\n").unwrap();
+    let ports: Vec<_> = pipeline.operations[0]
+        .inputs
+        .iter()
+        .map(|port| port.name.as_str())
+        .collect();
+    assert_eq!(ports, ["image", "mask", "scans"]);
+}
+
+#[test]
+fn a_command_names_each_port_it_uses() {
+    for template in [
+        "tool {input} {output}",
+        "tool {input1} {output}",
+        "tool {inputs} {output}",
+    ] {
+        let text = format!("operation f(scans: many Scan) -> Out\ncommand f: {template}\n");
+        let error = spit::validate_commands(&parse_pipeline(&text).unwrap()).unwrap_err();
+        assert!(
+            error.to_string().contains("unknown placeholder"),
+            "{template}: {error}"
+        );
     }
 }
