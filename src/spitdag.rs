@@ -14,7 +14,7 @@ use crate::model::{
 use crate::types::TypeExpr;
 
 /// The schema version a `.spitdag` is written with.
-pub const SPITDAG_VERSION: usize = 3;
+pub const SPITDAG_VERSION: usize = 4;
 
 /// A resolved DAG with its paths bound and its commands expanded. Its
 /// artifacts are the resolved DAG's, each kept once with its path; jobs,
@@ -79,6 +79,40 @@ pub enum ArgPart {
     Text(String),
     /// An artifact's file, relative to the dataset root.
     Path(ArtifactId),
+    /// The folder of an artifact's file, as `{image.dir}` gives it.
+    Dir(ArtifactId),
+    /// An artifact's file name without its extension, as `{image.stem}`
+    /// gives it for a tool that adds the extension itself.
+    Stem {
+        artifact: ArtifactId,
+        extension: String,
+    },
+}
+
+impl ArgPart {
+    /// The text this part is in a command, given the DAG it belongs to.
+    pub fn text<'a>(&'a self, dag: &'a BoundDag) -> &'a str {
+        match self {
+            Self::Text(text) => text,
+            Self::Path(artifact) => dag.path(*artifact),
+            Self::Dir(artifact) => folder_of(dag.path(*artifact)),
+            Self::Stem {
+                artifact,
+                extension,
+            } => stem_of(dag.path(*artifact), extension),
+        }
+    }
+}
+
+/// The folder `path` is in, `.` for the root itself.
+fn folder_of(path: &str) -> &str {
+    path.rsplit_once('/').map_or(".", |(folder, _)| folder)
+}
+
+/// The file name of `path` without `extension`.
+fn stem_of<'a>(path: &'a str, extension: &str) -> &'a str {
+    let name = path.rsplit_once('/').map_or(path, |(_, name)| name);
+    name.strip_suffix(extension).unwrap_or(name)
 }
 
 impl<'a> BoundArtifact<'a> {
@@ -196,7 +230,7 @@ impl BoundDag {
                     .iter()
                     .map(|part| match part {
                         ArgPart::Text(text) => Some(text.as_str()),
-                        ArgPart::Path(_) => None,
+                        _ => None,
                     })
                     .collect()
             })
@@ -455,13 +489,26 @@ impl Out for Fnv {
 }
 
 /// An argument is an array of parts: a string for text, `{"path": ...}` for
-/// a file.
+/// a file, and `{"dir": ..., "of": ...}` or `{"stem": ..., "of": ...}` for
+/// its folder or its name without its extension, with the file they are of.
 fn write_command(out: &mut String, dag: &BoundDag, command: &[Argument]) {
     write_array(out, command, |out, argument| {
         write_array(out, argument, |out, part| match part {
             ArgPart::Text(text) => write_string(out, text),
             ArgPart::Path(artifact) => {
                 out.push_str("{\"path\":");
+                write_string(out, dag.path(*artifact));
+                out.push('}');
+            }
+            ArgPart::Dir(artifact) | ArgPart::Stem { artifact, .. } => {
+                let key = if matches!(part, ArgPart::Dir(_)) {
+                    "dir"
+                } else {
+                    "stem"
+                };
+                out.push_str(&format!("{{\"{key}\":"));
+                write_string(out, part.text(dag));
+                out.push_str(",\"of\":");
                 write_string(out, dag.path(*artifact));
                 out.push('}');
             }
@@ -605,7 +652,7 @@ mod tests {
         dag.root = Some("/data/study".into());
         let text = dag.to_json();
         assert!(text.starts_with(&format!(
-            "{{\"version\":3,\"generator\":{{\"name\":\"spit\",\"version\":\"{}\"}},\
+            "{{\"version\":4,\"generator\":{{\"name\":\"spit\",\"version\":\"{}\"}},\
 \"root\":\"/data/study\",\"external_inputs\":[{{\"product\":\"raw\"",
             env!("CARGO_PKG_VERSION")
         )));

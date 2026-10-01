@@ -1,6 +1,6 @@
 # Design: dataset root, output extensions and sidecars
 
-Status: steps 1 to 4, the recipe's `root` line, extensions on operation outputs, source groups and `beside` outputs, are done. Step 5 is a proposal.
+Status: all five steps are done. [Not covered](#not-covered) and [open questions](#open-questions) remain.
 
 ## Problem
 
@@ -237,6 +237,14 @@ command convert: dcm2niix -z y -b y -o {image.dir} -f {image.stem} {dicom}
 
 **`.spitdag`.** A command part is literal text or `{"path": P}` today. These placeholders need parts that still name the artifact, such as `{"dir": P}` and `{"stem": P}`, so a backend knows which artifact the argument refers to. That is a format version bump.
 
+**Built.** As above, with these details settled while building it:
+
+- A part carries its text and the file it is of, `{"dir": "derivatives/image", "of": "derivatives/image/sub=01.nii.gz"}` and `{"stem": "sub=01", "of": ...}`. A backend cannot work out a stem from the path alone, since it does not know the extension, so the text is written out, and `of` names the artifact for one that moves files. The `.spitdag` is now version 4. Existing plans change only in their version: their fingerprints stay the same.
+- A file at the dataset root is in folder `.`.
+- Only outputs have `.dir` and `.stem`; an input's is an error, as is any other `.` part. `.stem` needs the output's own extension, declared or given by `beside`, not one from `ext:`, which the operation cannot rely on.
+- `verify` cannot use them, as it cannot use outputs.
+- Tests are in `tests/folder_and_stem.rs`. The usability answer keys keep their version 3 plans; the grader compares jobs, which are unchanged.
+
 ## Not covered
 
 - **BIDS derivative names.** Names such as `sub-{sub}_ses-{ses}_run-{run}_mc` vary with which dimensions a product has, so a shared template breaks on aggregates. An entity placeholder that writes only the dimensions present, in BIDS form, would address this better than a separate name or directory level.
@@ -255,4 +263,4 @@ command convert: dcm2niix -z y -b y -o {image.dir} -f {image.stem} {dicom}
 2. Extensions on output ports, `ext:`, resolution and the agreement error. Return resolved templates from `spit check` and show them in the editor. Convert `field_survey.spit` and `mrtrix3_act.spit`. Done.
 3. `sidecars` groups and the incomplete-group report in discovery. Done.
 4. `beside` outputs. Done.
-5. `{x.dir}` and `{x.stem}`, with the `.spitdag` version bump.
+5. `{x.dir}` and `{x.stem}`, with the `.spitdag` version bump. Done.

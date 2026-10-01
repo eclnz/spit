@@ -8,7 +8,7 @@ use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
-use crate::model::{Cardinality, CommandRole, OperationDef, Pipeline};
+use crate::model::{Cardinality, CommandRole, OperationDef, Pipeline, DEFAULT_OUTPUT};
 use crate::parser::SourceMap;
 use crate::span::Located;
 use crate::template::{parse_template, Part};
@@ -97,6 +97,27 @@ impl PartialEq<&str> for CommandTemplate {
 pub(crate) enum Slot {
     Input(usize),
     Output(usize),
+}
+
+/// What a placeholder gives of its port's file: the path, or, for an output
+/// as `{image.dir}` and `{image.stem}`, its folder or its file name without
+/// its extension, for a tool that takes a folder and a name.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum Facet {
+    Path,
+    Dir,
+    Stem,
+}
+
+/// A placeholder's port and the facet of its file it gives, or the facet
+/// written when it is not one.
+pub(crate) fn facet(name: &str) -> (&str, Result<Facet, &str>) {
+    match name.split_once('.') {
+        None => (name, Ok(Facet::Path)),
+        Some((port, "dir")) => (port, Ok(Facet::Dir)),
+        Some((port, "stem")) => (port, Ok(Facet::Stem)),
+        Some((port, other)) => (port, Err(other)),
+    }
 }
 
 pub(crate) fn slot(operation: &OperationDef, name: &str) -> Option<Slot> {
@@ -205,7 +226,18 @@ fn check_command_placeholders(
                 ))
                 .focus(format!("{{{name}}}"))
             };
-            match slot(operation, name).ok_or_else(unknown)? {
+            let fail =
+                |message: String| Err(CommandError::new(message).focus(format!("{{{name}}}")));
+            let (port, facet) = facet(name);
+            let facet = match facet {
+                Ok(facet) => facet,
+                Err(other) => {
+                    return fail(format!(
+                        "`{{{name}}}` gives no `.{other}`; write `{{{port}}}` for the file, `{{{port}.dir}}` for its folder, or `{{{port}.stem}}` for its name without its extension"
+                    ))
+                }
+            };
+            match slot(operation, port).ok_or_else(unknown)? {
                 Slot::Output(index) => {
                     if role == CommandRole::Verify {
                         return Err(CommandError::new(format!(
@@ -214,7 +246,24 @@ fn check_command_placeholders(
                         ))
                         .focus(format!("{{{name}}}")));
                     }
+                    if facet == Facet::Stem && operation.outputs[index].extension.is_none() {
+                        let example = if port == DEFAULT_OUTPUT {
+                            "-> Image .nii.gz".to_owned()
+                        } else {
+                            format!("{port}: Image .nii.gz")
+                        };
+                        return fail(format!(
+                            "`{{{name}}}` is `{port}`'s file name without its extension, but `{}` declares none for `{port}`; give it one, as in `{example}`",
+                            operation.name
+                        ));
+                    }
+                    // A folder and a name tell the tool where to write.
                     written.insert(index);
+                }
+                Slot::Input(_) if facet != Facet::Path => {
+                    return fail(format!(
+                        "`{{{name}}}`: only an operation's outputs give `.dir` and `.stem`, for a tool that is told where to write"
+                    ));
                 }
                 Slot::Input(index) => {
                     if operation.inputs[index].cardinality == Cardinality::Many && !whole {

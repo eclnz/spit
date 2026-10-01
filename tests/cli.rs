@@ -206,7 +206,7 @@ fn check_json_reads_the_pipeline_file_and_dag_json_emits_the_spitdag() {
     let dag = run();
     assert!(dag.status.success(), "{}", stderr(&dag));
     let graph = stdout(&dag);
-    assert!(graph.starts_with("{\"version\":3,\"generator\":{\"name\":\"spit\",\"version\":\""));
+    assert!(graph.starts_with("{\"version\":4,\"generator\":{\"name\":\"spit\",\"version\":\""));
     // A `.spitout` alone says nothing of where its files are.
     assert!(
         graph.contains("\"root\":null,\"external_inputs\":["),
