@@ -307,8 +307,8 @@ fn an_excluded_file_may_lie_outside_the_discovered_contexts() {
         "data.spitin",
         &format!("{discover}exclude price[store=S07]  # misnamed\n"),
     );
-    let (ok, _, stderr) = run(&tree, "inputs");
-    assert!(!ok);
+    let (ok, stdout, stderr) = run(&tree, "inputs");
+    assert!(!ok, "unexpected inventory: {stdout}\nstderr: {stderr}");
     assert!(
         stderr.contains("missing source file for `price[store=s07]`"),
         "{stderr}"

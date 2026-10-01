@@ -332,7 +332,7 @@ A comment on the line is kept as the rule's reason. Values are compared as writt
 
 Exclusions apply before anything else in the recipe. An excluded discovered context expects no files, an excluded file needs to exist nowhere, and a file excluded by name may lie outside every discovered context, such as a misnamed copy. `drop` and `require` rules then see what the exclusions leave.
 
-Files whose whole paths match no source path rule are ignored while scanning. `spit inputs` counts them in a note; `spit inputs dataset.spitin --unmatched` lists their paths relative to the dataset root instead of writing a `.spitout`. A file with a near miss in an identity value, such as `store=S07` where a job needs `store=s07`, may still match a source rule: it is then a source artifact, and `dag` and `artifacts` warn when it is unused and point to it at the failed join.
+Files whose whole paths match no source path rule are ignored while scanning. `spit inputs` counts them in a note; `spit inputs dataset.spitin --unmatched` lists their paths relative to the dataset root instead of writing a `.spitout`. Required source paths must match the spelling found by the scan: `pricing/S07.json` does not satisfy `pricing/s07.json`, even on a case-insensitive filesystem. A file with a near miss in an identity value, such as `store=S07` where a job needs `store=s07`, may still match a source rule: it is then a source artifact, and `dag` and `artifacts` warn when it is unused and point to it at the failed join.
 
 Rules can also come from a CSV file, relative to the recipe's folder, such as a lab's list of scans that failed quality control:
 
