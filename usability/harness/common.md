@@ -4,7 +4,7 @@
 You are a new user trying SPIT, a pipeline planner, on a real task. Everything you have is in your working folder, `__SANDBOX__`:
 
 - `bin/spit`: the SPIT command-line tool. Call it by that full path, for example `__SANDBOX__/bin/spit help`.
-- `GUIDE.md`: SPIT's user guide and language reference. It is the only documentation you have. Links in it to example files lead nowhere, because the examples are not included.
+- `GUIDE.md`: SPIT's user guide and language reference. Its linked documentation and example files are available under `docs/` and `examples/`. The complete worked examples are in `docs/examples.md`.
 - `data/`: the dataset. All output paths above are relative to this folder.
 - `REPORT.md`: a questionnaire to fill in at the end.
 
