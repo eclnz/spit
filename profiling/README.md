@@ -4,8 +4,8 @@
 profiles it with callgrind. Use it to compare a change with the commit
 before it, and to find where the time goes when a stage is slow.
 
-What is left to speed up and clean up, and the data-oriented rules the
-work keeps to, is in [the plan](plan.md).
+The rules that keep SPIT's work in step with its data are under
+[Performance](../docs/architecture.md#performance) in the architecture notes.
 
 It needs Python 3 and a release build; `profile` also needs valgrind.
 Generated pipelines, datasets and profiles go in `profiling/work/`, which
