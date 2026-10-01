@@ -38,4 +38,4 @@ The 12 runs on the original six scenarios used 63 `spit` calls, versus 112 repor
 
 The observed failed calls were mostly useful checks: two missing-seed errors, two lowercase-type checks, a `--commands`/`-o` option conflict, and one expected diagnostic failure in s6. Participants also requested shorter job counts by operation and more detail on unmatched or unused source files. These are follow-up ideas, not prerequisites to read the result.
 
-The [action plan](../../design/round2-actions.md) orders the documentation, guide packaging, message, and follow-up study work prompted by these findings.
+The action plan (`usability/design/round2-actions.md`) orders the documentation, guide packaging, message, and follow-up study work prompted by these findings.

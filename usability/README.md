@@ -2,7 +2,7 @@
 
 Can someone who has only the `spit` binary and its guide turn a pipeline problem into a correct plan, and how much does it cost them? To find out, we gave AI agents realistic tasks with nothing else: no source, no examples, no tests. We graded their plans against answer keys and logged every `spit` call they made.
 
-The first round's findings are in [`rounds/1`](rounds/1/README.md), written as a backlog of bugs, features and gaps in the guide. The designs that answer them, and the roadmap they were built in, are in [`design/`](design). This page describes how the study was run, what came out, and how to run it again.
+The first round's findings are in [`rounds/1`](rounds/1/README.md), written as a backlog of bugs, features and gaps in the guide. Every item has been resolved. The designs that answered them, and the roadmap they were built in, were plans under `usability/design/`. They were deleted when the work merged, and `git log -- usability/design` finds them. This page describes how the study was run, what came out, and how to run it again.
 
 ## Rounds
 
