@@ -153,6 +153,7 @@ pub(super) fn discover(
         pipeline,
         root,
         &sources,
+        &listing.files,
         &expected,
         &DropIndex::new(&dropped),
         &mut excluder,
@@ -378,6 +379,7 @@ fn require_source_files(
     pipeline: &Pipeline,
     root: &Path,
     sources: &[SourcePattern<'_>],
+    files: &[String],
     expected: &BTreeMap<&str, BTreeSet<EntityBinding>>,
     dropped: &DropIndex<'_>,
     excluder: &mut Excluder<'_>,
@@ -396,13 +398,17 @@ fn require_source_files(
                 format!("source `{artifact}`")
             })?;
             let full = root.join(&relative);
+            // `is_file` alone accepts `s07.json` when only `S07.json` is
+            // present on a case-insensitive filesystem. The listing keeps
+            // each directory entry's actual spelling.
+            let present = files.binary_search(&relative).is_ok() && full.is_file();
             if excluded {
-                if !full.is_file() {
+                if !present {
                     excluder.artifact(&product.name, binding);
                 }
                 continue;
             }
-            if !full.is_file() {
+            if !present {
                 return Err(error(format!(
                     "missing source file for `{artifact}` at discovered context: `{}`",
                     full.display()
