@@ -50,7 +50,7 @@ usability/harness/rebuild_keys.sh             # expect `ok` for every answer key
   ```sh
   python3 -m venv /tmp/messie-venv
   /tmp/messie-venv/bin/pip install -q -r .github/messie-requirements.txt
-  /tmp/messie-venv/bin/messie .
+  /tmp/messie-venv/bin/messie -af .   # -a judges every folder, -f checks each folder fits its surroundings
   ```
 
 - **Stored outputs.** They are under `tests/fixtures/outputs/`. Re-save them with `SPIT_BLESS=1 cargo test --release --test outputs`, then read `git diff tests/fixtures` before committing.
