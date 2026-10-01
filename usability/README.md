@@ -59,6 +59,8 @@ Each run's folder in [`results/`](results) holds:
 
 ## Run it again
 
+The second round also includes two variants: [s3-one-board](harness/scenarios/s3-one-board/brief.md) asks for one leaderboard across model and configuration (39 jobs), and [s4-vague](harness/scenarios/s4-vague/brief.md) gives the station task in less prescriptive terms (19 jobs). The s2 follow-up key now uses a recipe with `exclude` so the corrupted raw run stays in place. The other briefs and datasets stay the same, making their results comparable with round 1.
+
 ```sh
 cargo build --release
 usability/harness/rebuild_keys.sh              # every answer key still resolves to the same jobs
