@@ -24,7 +24,7 @@ processed = process(image)
 average = mean(processed @ vary(run))
 ```
 
-The input with the most dimensions drives a normal operation and gives its outputs their dimensions, wherever it sits among the ports. For an aggregation, `vary(run)` removes `run` from the output identity; `@ each(...)` adds a dimension, as described under selectors. You can write the output type and dimensions explicitly when helpful:
+The input with the most dimensions drives a normal operation and gives its outputs their dimensions, wherever it sits among the ports. Its observed artifacts determine the initial jobs: an input with `[config, seed]` creates only the config and seed pairs actually present, rather than every combination of known values. For an aggregation, `vary(run)` removes `run` from the output identity; `@ each(...)` adds a dimension, as described under selectors. You can write the output type and dimensions explicitly when helpful:
 
 ```text
 average : Image [subject, visit] = mean(processed @ vary(run))
@@ -40,14 +40,14 @@ operation mean(images: many Image) -> Image @ drop(run)
 command mean: mean_tool {images} --out {output}
 ```
 
-Declare an operation before its first use. Inputs in a call follow the port order in the declaration. A `one` input must resolve to exactly one artifact for each job, so every other input may only use dimensions the driving input has, unless it broadcasts them with `@ each(...)`; SPIT rejects a pipeline that breaks this before reading any inputs, and reports a missing match for a job. A `many` input takes `@ vary(dimension, ...)` from the call or, when omitted, from the operation's `@ drop(dimension, ...)`. An explicit `@ vary` must agree with `@ drop`; without `@ drop`, the call must specify `@ vary`. Its command placeholder expands to one separately quoted argument per artifact, in natural order. Artifacts are compared dimension by dimension in the product's declared order. Within a value, runs of digits compare as numbers and other characters compare one by one, so `run=2` comes before `run=10`, ISO dates such as `2026-09-01` sort by date, and names sort by character (`lr-high`, `lr-low`, `warmup`). Values equal as numbers but written differently, such as `1` and `01`, are then ordered by their text. A many placeholder must occupy a whole argument. An operation takes at most one `many` input, which may sit beside `one` inputs; each of those is matched once per group:
+Declare an operation before its first use. Inputs in a call follow the port order in the declaration, and SPIT checks each product's type against that port. For example, with `operation compare(series: Series, policy: Policy)`, `compare(reading, policy)` uses `reading` as `series`; reversing the arguments is a type error when their types are known. A `one` input must resolve to exactly one artifact for each job, so every other input may only use dimensions the driving input has, unless it broadcasts them with `@ each(...)`; SPIT rejects a pipeline that breaks this before reading any inputs, and reports a missing match for a job. A `many` input takes `@ vary(dimension, ...)` from the call or, when omitted, from the operation's `@ drop(dimension, ...)`. An explicit `@ vary` must agree with `@ drop`; without `@ drop`, the call must specify `@ vary`. Its command placeholder expands to one separately quoted argument per artifact, in natural order. Artifacts are compared dimension by dimension in the product's declared order. Within a value, runs of digits compare as numbers and other characters compare one by one, so `run=2` comes before `run=10`, ISO dates such as `2026-09-01` sort by date, and names sort by character (`lr-high`, `lr-low`, `warmup`). Values equal as numbers but written differently, such as `1` and `01`, are then ordered by their text. A many placeholder must occupy a whole argument. An operation takes at most one `many` input, which may sit beside `one` inputs; each of those is matched once per group:
 
 ```text
 operation summarise(days: many Series, policy: Policy) -> Summary @ drop(day) @ min(2)
 summary = summarise(reading, policy)
 ```
 
-`@ min(2)` rejects a group with fewer than two artifacts. The [model fit example](../examples/patterns/model_fit/model_fit.spit) combines a `many` input, two outputs, `@ drop`, and `verify` in one step.
+`@ min(2)` rejects a group with fewer than two artifacts. The [sensors walkthrough](examples.md#sensors-selectors-verification-and-two-outputs) combines a `many` input, two outputs, and `verify` in a complete plan.
 
 One aggregate can remove several dimensions at once. The operation's `@ drop(...)` and its call's `@ vary(...)` must name the same set; their order within the clauses does not change the collection order. With `summary [model, config]`, this makes one leaderboard over all model and config combinations, ordered first by model and then by config:
 
@@ -56,9 +56,9 @@ operation leaderboard(summaries: many Summary) -> Table @ drop(model, config)
 board = leaderboard(summary)
 ```
 
-`@ min(n)` counts the whole collection, across both dimensions. A call that writes two `@ vary` clauses is an error; put both dimensions in one clause.
+`@ min(n)` counts the whole collection, across both dimensions. A call that writes two `@ vary` clauses is an error; put both dimensions in one clause. The collection order follows the input product's declared dimension order, even if `@ drop` lists those dimensions in another order. The [ragged sweep walkthrough](examples.md#ragged-sweep-correlated-seeds-and-collection-order) shows an explicit `[model, config]` output and the resulting model-first collection.
 
-Selectors narrow what an input matches. The [archive revision](../examples/patterns/archive_revision/archive_revision.spit) and [per-group reference](../examples/patterns/per_group_reference/per_group_reference.spit) examples show `where` and `same` with small inventories:
+Selectors narrow what an input matches. The [sensors walkthrough](examples.md#sensors-selectors-verification-and-two-outputs) shows `where` and `same` with a complete inventory:
 
 ```text
 calibrated = calibrate(reading, calibration @ where(revision=2))
@@ -77,7 +77,7 @@ source parameters : Parameters [scenario]
 forecast = predict(reading, model @ each(scenario), parameters)
 ```
 
-With two stations and two scenarios, this makes four `forecast[station=...,scenario=...]` jobs. The values come from the artifacts of the broadcast input, so adding a scenario to the inputs adds its jobs. Other inputs are matched on the new dimension as usual; here `parameters` supplies the settings for each scenario. Only one input may broadcast a given dimension, and the driving input must not already have it. A broadcast dimension comes after the driving input's dimensions, so here `forecast` has dimensions `[station, scenario]`, the order `{entities}` writes them in. `each` pairs with `vary`, so a sweep can be collected again. The [ragged sweep example](../examples/patterns/ragged_sweep/ragged_sweep.spit) shows models crossed with configurations whose seeds differ:
+With two stations and two scenarios, this makes four `forecast[station=...,scenario=...]` jobs. The values come from the artifacts of the broadcast input, so adding a scenario to the inputs adds its jobs. Other inputs are matched on the new dimension as usual; here `parameters` supplies the settings for each scenario. Only one input may broadcast a given dimension, and the driving input must not already have it. A broadcast dimension comes after the driving input's dimensions, so here `forecast` has dimensions `[station, scenario]`, the order `{entities}` writes them in. `each` pairs with `vary`, so a sweep can be collected again. It crosses only the broadcast input's observed values with each driving artifact; values held by other inputs stay correlated through matching. The [ragged sweep walkthrough](examples.md#ragged-sweep-correlated-seeds-and-collection-order) shows models crossed with observed config/seed pairs without inventing a missing seed:
 
 ```text
 trial = simulate(reading, seed @ each(rep))
@@ -100,7 +100,7 @@ verify register: check_same_grid {moving} {reference}
 
 `spit dag --commands` shows each job's `verify` lines above the command they guard, with their paths filled in.
 
-Input port names are optional. A port written as a lowercase word alone, as in `operation copy(image)`, is named `image` and untyped; type names start with a capital letter. An unnamed single input is `{input}`; multiple unnamed inputs are `{input1}`, `{input2}`, and so on. An operation whose only input is a `many` input can also reach it as `{inputs}`, whatever its name. Named ports give clearer errors, although errors also name the product bound to a port. `{output}` is the path of a single unnamed output, so `output` cannot name an input port. A command must use every output placeholder; a `verify` command may use inputs only. Command templates give ordered words and arguments, not shell pipelines or redirection; an unquoted `|`, `>`, `&&`, or the like is passed to the program as an argument, and SPIT warns about it. Words are split and quoted as in Bash, and every argument is passed literally: `$` and backticks are not expanded. As in Bash, text in single quotes is literal, so `awk '{print $1}'` needs no escaping; a placeholder is filled in unquoted text or double quotes. Write `{{` or `}}`, or `\{` and `\}`, for a literal brace elsewhere. Every command is checked when the pipeline is loaded: braces and quotes must balance, placeholders must name the operation's ports, and `{output}` must appear.
+Input port names are optional. A port written as a lowercase word alone, as in `operation copy(image)`, is named `image` and untyped; type names start with a capital letter. In `source reading : Series [station, day]`, `reading` is the product that identifies artifacts and `Series` is its type: write `operation compare(reading: Series)`, then call it with `compare(reading)`. An unnamed single input is `{input}`; multiple unnamed inputs are `{input1}`, `{input2}`, and so on. An operation whose only input is a `many` input can also reach it as `{inputs}`, whatever its name. Named ports give clearer errors, although errors also name the product bound to a port. `{output}` is the path of a single unnamed output, so `output` cannot name an input port. A command must use every output placeholder; a `verify` command may use inputs only. Command templates give ordered words and arguments, not shell pipelines or redirection; an unquoted `|`, `>`, `&&`, or the like is passed to the program as an argument, and SPIT warns about it. Words are split and quoted as in Bash, and every argument is passed literally: `$` and backticks are not expanded. As in Bash, text in single quotes is literal, so `awk '{print $1}'` needs no escaping; a placeholder is filled in unquoted text or double quotes. Write `{{` or `}}`, or `\{` and `\}`, for a literal brace elsewhere. Every command is checked when the pipeline is loaded: braces and quotes must balance, placeholders must name the operation's ports, and `{output}` must appear.
 
 Products, operations and dimensions have separate names, so a product may share its operation's name (`coreg = coreg(mc, brain)`) and a dimension may share a product's (`model @ each(model)`). An untyped `many` port is written `many items` or `items: many`; a lone `many` is reached as `{inputs}`.
 
@@ -273,7 +273,7 @@ A `require` rule is checked after every `drop` rule, against the groups they lea
 
 ### Drop groups that fail a criterion
 
-The [cohort example](../examples/patterns/cohort/cohort.spitin) uses `drop` to remove a subject with too few sessions and `exclude` to remove one damaged run.
+The [cohort walkthrough](examples.md#cohort-discovery-exclusion-and-grouped-removal) uses `drop` to remove a subject with too few sessions and `exclude` to remove one damaged run.
 
 `drop` removes every group that meets its condition, and reads the way it acts: the groups, then `where`, then what removes one.
 
