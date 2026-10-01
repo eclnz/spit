@@ -4,7 +4,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Range;
 
-use crate::model::{CoverageAction, CoverageRule, Invocation, PipelineIndex};
+use crate::model::{CoverageAction, CoverageRule, Invocation, Pipeline};
 use crate::span::{columns_of, content_columns, find_word, Place};
 
 use super::keyword::Keyword;
@@ -111,10 +111,10 @@ impl SourceMap {
     }
 
     /// The template of the path rule that `product` uses.
-    pub(crate) fn path_rule(&self, index: &PipelineIndex<'_>, product: &str) -> Option<Place> {
-        if index.pipeline.product_paths.contains_key(product) {
+    pub(crate) fn path_rule(&self, pipeline: &Pipeline, product: &str) -> Option<Place> {
+        if pipeline.product_paths.contains_key(product) {
             self.paths.get(product).cloned()
-        } else if let Some((stage, _)) = index.stage_path_rule(product) {
+        } else if let Some((stage, _)) = pipeline.stage_path_rule(product) {
             self.stage_paths.get(stage).cloned()
         } else {
             self.default_path.clone()

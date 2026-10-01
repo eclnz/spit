@@ -7,7 +7,7 @@ use std::fmt;
 
 use rustc_hash::FxHashMap;
 
-use crate::model::{Artifact, DirectoryDiscovery, Pipeline, PipelineIndex};
+use crate::model::{Artifact, DirectoryDiscovery, Pipeline};
 use crate::span::Located;
 use crate::template::{parse_template, Part};
 
@@ -235,13 +235,6 @@ impl PathTemplate {
         name.find('.').map(|dot| &name[dot..])
     }
 
-    /// Whether the template ends with `extension` after its last placeholder,
-    /// as `sub-{sub}_acq-1.5T.nii.gz` ends with `.nii.gz`, though the
-    /// extension [`PathTemplate::extension`] reads in it is `.5T.nii.gz`.
-    pub(crate) fn ends_with(&self, extension: &str) -> bool {
-        matches!(self.parts.last(), Some(PathPart::Literal(tail)) if tail.ends_with(extension))
-    }
-
     /// This template without `extension` at its end, or `None` when it does
     /// not end with it.
     #[must_use]
@@ -466,18 +459,18 @@ pub(crate) fn require_directory(root: &std::path::Path) -> Result<(), PathError>
 /// declared dimension order, which `{@entities}` follows. `label` names the
 /// path in errors: a product's rule, or an artifact.
 pub(crate) fn bind_path(
-    index: &PipelineIndex<'_>,
+    pipeline: &Pipeline,
     dimensions: &[String],
     artifact: Artifact<'_>,
     label: impl Fn() -> String,
 ) -> Result<String, PathError> {
-    ProductPath::new(index, artifact.product)?.bind(dimensions, artifact, label)
+    ProductPath::new(pipeline, artifact.product)?.bind(dimensions, artifact, label)
 }
 
 /// Binds many artifacts' paths, as [`bind_path`] does, finding each
 /// product's template and stage once.
 pub(crate) struct PathBinder<'p> {
-    index: PipelineIndex<'p>,
+    pipeline: &'p Pipeline,
     products: FxHashMap<String, ProductPath<'p>>,
     /// The same, by the product's number in a DAG's artifact table.
     numbered: Vec<Option<ProductPath<'p>>>,
@@ -486,15 +479,10 @@ pub(crate) struct PathBinder<'p> {
 impl<'p> PathBinder<'p> {
     pub(crate) fn new(pipeline: &'p Pipeline) -> Self {
         Self {
-            index: PipelineIndex::new(pipeline),
+            pipeline,
             products: FxHashMap::default(),
             numbered: Vec::new(),
         }
-    }
-
-    /// The pipeline whose paths this binds.
-    pub(crate) fn index(&self) -> &PipelineIndex<'p> {
-        &self.index
     }
 
     /// As [`PathBinder::bind`], for an artifact whose product has `number`
@@ -512,7 +500,7 @@ impl<'p> PathBinder<'p> {
         }
         let product = match &mut self.numbered[number] {
             Some(product) => product,
-            slot => slot.insert(ProductPath::new(&self.index, artifact.product)?),
+            slot => slot.insert(ProductPath::new(self.pipeline, artifact.product)?),
         };
         product.bind(dimensions, artifact, label)
     }
@@ -526,7 +514,7 @@ impl<'p> PathBinder<'p> {
         let product = match self.products.get(artifact.product) {
             Some(product) => product,
             None => {
-                let product = ProductPath::new(&self.index, artifact.product)?;
+                let product = ProductPath::new(self.pipeline, artifact.product)?;
                 self.products
                     .entry(artifact.product.to_owned())
                     .or_insert(product)
@@ -547,11 +535,11 @@ struct ProductPath<'p> {
 }
 
 impl<'p> ProductPath<'p> {
-    fn new(index: &PipelineIndex<'p>, product: &str) -> Result<Self, PathError> {
-        let template = index
+    fn new(pipeline: &'p Pipeline, product: &str) -> Result<Self, PathError> {
+        let template = pipeline
             .path_template_for(product)
             .ok_or_else(|| error(format!("no path template for product `{product}`")))?;
-        let stage = index.stage_of(product).map(|stage| {
+        let stage = pipeline.stage_of(product).map(|stage| {
             let mut directories = String::new();
             for (index, component) in stage.split('/').enumerate() {
                 if index > 0 {
@@ -631,8 +619,8 @@ impl<'p> ProductPath<'p> {
 /// `product`'s path template with `{@product}` and `{@stage}` written out, as
 /// every artifact of it shares them, for showing beside its declaration:
 /// `derivatives/yield_table/{@entities}.csv`.
-pub(crate) fn shown_path(index: &PipelineIndex<'_>, product: &str) -> Option<String> {
-    let path = ProductPath::new(index, product).ok()?;
+pub(crate) fn shown_path(pipeline: &Pipeline, product: &str) -> Option<String> {
+    let path = ProductPath::new(pipeline, product).ok()?;
     let mut shown = String::new();
     for part in path.template.parts() {
         match part {
