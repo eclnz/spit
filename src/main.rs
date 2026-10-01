@@ -606,11 +606,13 @@ fn inputs(args: &CliArgs) -> Result<(), Box<dyn Error>> {
         }
         return Ok(());
     }
-    // The .spitout records the dataset root, so `dag` on it needs no
-    // `--root`: relative to the file it is written to, so the two can move
-    // together, or to the working folder when it is printed.
+    // A written .spitout records the dataset root, so `dag` on it needs no
+    // `--root`: relative to the file, so the two can move together. A
+    // printed one records none, as where it will be kept is unknown.
     let written = args.value(Flag::Output).map(PathBuf::from);
-    settled.inventory.root = root.map(|root| recorded_root(&root, written.as_deref()));
+    settled.inventory.root = root
+        .zip(written)
+        .map(|(root, file)| recorded_root(&root, &file));
     let text = render_source_inventory(
         &settled.inventory,
         &loaded.checked.pipeline,
@@ -730,8 +732,8 @@ fn settle(
 }
 
 /// The dataset `root` as a `.spitout` written to `file` records it: relative
-/// to the file's folder, or to the working folder when it is printed.
-fn recorded_root(root: &Path, file: Option<&Path>) -> PathBuf {
+/// to the file's folder.
+fn recorded_root(root: &Path, file: &Path) -> PathBuf {
     let full = |path: &Path| {
         fs::canonicalize(path)
             .or_else(|_| std::path::absolute(path))
@@ -739,7 +741,7 @@ fn recorded_root(root: &Path, file: Option<&Path>) -> PathBuf {
     };
     let root = full(root);
     let folder = file
-        .and_then(Path::parent)
+        .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
         .unwrap_or_else(|| Path::new("."));
     relative_to(&root, &full(folder)).unwrap_or(root)

@@ -389,13 +389,13 @@ source_paths:
 
 The DAG can then use the rule without loading the recipe. A record names no file of its own: its source's path rule gives it.
 
-A `.spitout` that `spit inputs` writes starts with the dataset root it was settled against:
+A `.spitout` that `spit inputs -o` writes starts with the dataset root it was settled against:
 
 ```text
 root ../data
 ```
 
-The folder is relative to the `.spitout`'s own folder, or to the working folder when `spit inputs` prints it instead of writing it with `-o`, and may be absolute. `dag` and `artifacts` use it as the root, so they check the source files and run commands from it without `--root`; `--root` overrides it. The line comes before every section, once. A `.spitout` without one, such as one written by hand, has no root unless `--root` gives one.
+The folder is relative to the `.spitout`'s own folder, and may be absolute. A printed `.spitout` records no root, since where it will be kept is unknown. `dag` and `artifacts` use it as the root, so they check the source files and run commands from it without `--root`; `--root` overrides it. The line comes before every section, once. A `.spitout` without one, printed or written by hand, has no root unless `--root` gives one.
 
 `spit inputs` also writes what the recipe's `exclude` and `drop` rules removed, each with its rule, where the rule is, how many a counting rule found, and the reason:
 
