@@ -1,6 +1,6 @@
 # Usability study: third round after Phase 5
 
-This round tested the settled language from [Phase 5](../../design/one-way.md) with fresh, isolated participants. Two participants each attempted the ragged sweep, single-board sweep, vague sensor brief, diagnosis, and cohort. The two cohort participants then received the change request in their existing sessions. The [run archives](results.zip) hold the selected plans, pipelines, recipes, participant reports, and grading results. The [earlier pilot](../2-pilot/README.md) used the previous language and is separate from these results.
+This round tested the settled language from Phase 5 (`usability/design/one-way.md`) with fresh, isolated participants. Two participants each attempted the ragged sweep, single-board sweep, vague sensor brief, diagnosis, and cohort. The two cohort participants then received the change request in their existing sessions. The [run archives](results.zip) hold the selected plans, pipelines, recipes, participant reports, and grading results. The [earlier pilot](../2-pilot/README.md) used the previous language and is separate from these results.
 
 ## Method and limits
 
@@ -34,7 +34,7 @@ The one failed call was a sensor pipeline check after a participant wrote `->` w
 
 ## Decisions and next work
 
-- Add an optional `dag --counts` text view, in the order specified by the [inspection design](../../design/round3-inspection.md). The request persisted with the repaired guide and new language. Keep `--commands` for exact argument order.
+- Add an optional `dag --counts` text view, in the order specified by the inspection design (`usability/design/round3-inspection.md`). The request persisted with the repaired guide and new language. Keep `--commands` for exact argument order.
 - Add a short untyped operation signature and a `--root data` recipe invocation to the quick guide. In `docs/examples.md`, add a diagnosis walkthrough with the lowercase store exclusion and uppercase orphan pricing exclusion. Show a matched-but-unused source separately from a file reported by `inputs --unmatched`.
-- Keep the current pipeline/recipe split. The sensor participants both put the approved calibration revision in a pipeline, but this study did not ask them to change revisions for a new dataset. Test such a change request before adding a recipe selection rule; see [decision 3](../../design/one-way.md#3-the-pipeline-says-how-to-compute-the-recipe-says-which-data-after-round-3).
-- Keep optional types and positional port type checking. Recommend distinct types where a wrong connection would otherwise pass; do not treat a passing DAG as evidence that its types protect the pipeline. See [decision 4](../../design/one-way.md#4-types-catch-wrong-connections-after-round-3).
+- Keep the current pipeline/recipe split. The sensor participants both put the approved calibration revision in a pipeline, but this study did not ask them to change revisions for a new dataset. Test such a change request before adding a recipe selection rule; see decision 3 (`usability/design/one-way.md`).
+- Keep optional types and positional port type checking. Recommend distinct types where a wrong connection would otherwise pass; do not treat a passing DAG as evidence that its types protect the pipeline. See decision 4 (`usability/design/one-way.md`).
