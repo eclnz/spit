@@ -299,6 +299,8 @@ cargo test
 
 Runs the full test suite, including the integration tests under `tests/` that check the example pipelines end to end.
 
+To time the CLI on large generated pipelines and datasets, or profile it, see [profiling](profiling/README.md).
+
 ## Contributing
 
 Issues and pull requests are welcome. For a change to the language or resolver, add or update a test under `tests/` and, if it changes behavior described here, update this README or the [language reference](docs/language-reference.md) alongside it.
