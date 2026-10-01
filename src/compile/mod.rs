@@ -11,7 +11,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::error::{DefinitionSubject, ResolveError};
 use crate::model::{Invocation, OperationDef, Pipeline, ProductDef};
-use crate::types::TypeExpr;
+use crate::types::{Substitutions, TypeExpr};
 
 use self::definitions::{
     check_stages, index_operations, index_producers, index_products, invocation_order,
@@ -32,12 +32,14 @@ pub(crate) struct CompiledStep<'a> {
     pub(crate) operation: &'a OperationDef,
     /// Each output's product, with the type inferred for its artifacts.
     pub(crate) outputs: Vec<(&'a ProductDef, TypeExpr)>,
+    /// Type variables bound at this invocation, for editor explanations.
+    pub(crate) substitutions: Substitutions,
     pub(crate) shape: StepShape,
 }
 
 /// Every pipeline error, plus the names that failed or depend on a failure.
 pub(crate) struct PipelineCheck<'a> {
-    pipeline: CompiledPipeline<'a>,
+    pub(crate) pipeline: CompiledPipeline<'a>,
     pub errors: Vec<(DefinitionSubject, ResolveError)>,
     /// Products and operations that are invalid or produced by a step that
     /// could not be checked. Anything using them is skipped rather than
@@ -193,12 +195,14 @@ fn validate_invocation<'a>(
             ),
         ));
     }
-    let inferred = infer_types(invocation, operation, products, &outputs, inferred_types)?;
+    let (inferred, substitutions) =
+        infer_types(invocation, operation, products, &outputs, inferred_types)?;
     let shape = step_shape(invocation, operation, products, &outputs)?;
     Ok(CompiledStep {
         invocation,
         operation,
         outputs: outputs.into_iter().zip(inferred).collect(),
+        substitutions,
         shape,
     })
 }

@@ -24,7 +24,7 @@ use std::process::ExitCode;
 use spit::{
     bind_dag, bind_dag_with, diagnose_checked, diagnose_checked_with_inventory,
     diagnose_checked_with_records, diagnose_recipe, inspect_paths, parse_input_spec_at,
-    render_artifacts, render_bound_dag, render_dag, render_diagnostics_json,
+    render_artifacts, render_bound_dag, render_dag, render_diagnostics_json, render_editor_json,
     render_source_inventory, stage_within, validate_bound_source_files, validate_source_files,
     ArtifactReport, BoundDag, BoundPaths, Checked, Context, Diagnosis, Diagnostic,
     DiagnosticSource, InputSource, InputSpec, PathTemplate, Pipeline, ResolvedDag, ResolvedInputs,
@@ -56,14 +56,14 @@ struct CommandSpec {
 
 impl Command {
     fn spec(self) -> CommandSpec {
-        use Flag::{Json, Output, PathRules, Paths, Root, Stdin, StrictPaths};
+        use Flag::{Hovers, Json, Output, PathRules, Paths, Root, Stdin, StrictPaths};
         match self {
             Self::Check => CommandSpec {
                 name: "check",
                 files: "<pipeline.spit | recipe.spitin>",
                 summary: "step 1: compile a pipeline, or check a recipe against its pipeline; reads no data",
                 example: "spit check analysis.spit\n  spit check dataset.spitin",
-                flags: &[PathRules, StrictPaths, Json, Stdin],
+                flags: &[PathRules, StrictPaths, Json, Stdin, Hovers],
             },
             Self::Inputs => CommandSpec {
                 name: "inputs",
@@ -144,9 +144,10 @@ enum Flag {
     StrictPaths,
     Json,
     Stdin,
+    Hovers,
 }
 
-const FLAGS: [Flag; 7] = [
+const FLAGS: [Flag; 8] = [
     Flag::Root,
     Flag::Output,
     Flag::Paths,
@@ -154,6 +155,7 @@ const FLAGS: [Flag; 7] = [
     Flag::StrictPaths,
     Flag::Json,
     Flag::Stdin,
+    Flag::Hovers,
 ];
 
 /// Pairs of flags that cannot be used together.
@@ -175,6 +177,7 @@ impl Flag {
             Self::StrictPaths => "--strict-paths",
             Self::Json => "--json",
             Self::Stdin => "--stdin",
+            Self::Hovers => "--hovers",
         }
     }
 
@@ -200,6 +203,9 @@ impl Flag {
             (Self::Json, _) => "print the .spitdag",
             (Self::Stdin, _) => {
                 "read the file's text from standard input; the file names its location"
+            }
+            (Self::Hovers, _) => {
+                "include operation and product hovers with --json (pipelines only)"
             }
         }
     }
@@ -259,6 +265,9 @@ impl Flags {
 
     /// Fail if two flags that cannot be used together were both given.
     fn check_conflicts(&self, command: Command) -> Result<(), String> {
+        if self.has(Flag::Hovers) && !self.has(Flag::Json) {
+            return Err(misuse("--hovers requires --json", Some(command)));
+        }
         for (first, second) in CONFLICTS {
             if self.has(first) && self.has(second) {
                 return Err(misuse(
@@ -498,6 +507,9 @@ fn check(args: &CliArgs) -> Result<(), Box<dyn Error>> {
         read_file(file)?
     };
     if is_recipe(file) {
+        if args.has(Flag::Hovers) {
+            return Err("--hovers describes a .spit pipeline, not a recipe".into());
+        }
         if args.has(Flag::PathRules) || args.has(Flag::StrictPaths) {
             return Err("--path-rules and --strict-paths check a pipeline, not a recipe".into());
         }
@@ -516,7 +528,11 @@ fn check(args: &CliArgs) -> Result<(), Box<dyn Error>> {
             Ok(checked) => &checked.warnings,
             Err(all) => all,
         };
-        print!("{}", render_diagnostics_json(diagnostics, &text, None));
+        if args.has(Flag::Hovers) {
+            print!("{}", render_editor_json(diagnostics, &text, path));
+        } else {
+            print!("{}", render_diagnostics_json(diagnostics, &text, None));
+        }
         return Ok(());
     }
     let checked = passed(diagnosis, |checked| &checked.warnings, &text, None)?;

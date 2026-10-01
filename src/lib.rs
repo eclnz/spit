@@ -4,6 +4,7 @@
 mod command;
 mod compile;
 mod diagnostics;
+mod editor;
 mod error;
 mod imports;
 mod inputs;
@@ -27,6 +28,7 @@ pub use diagnostics::{
     diagnose_in, diagnose_recipe, diagnose_recipe_against, render_diagnostics_json, Checked,
     Context, Diagnosis, Diagnostic, DiagnosticSource, Records, Severity,
 };
+pub use editor::{pipeline_hovers, render_editor_json, Hover};
 pub use error::{DefinitionSubject, PortSite, ResolveError, TypeConflict};
 pub use imports::parse_pipeline_at;
 pub use inputs::{
