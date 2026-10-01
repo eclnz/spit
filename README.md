@@ -113,7 +113,7 @@ Here is the complete [text processing example](examples/commands/command_demo/co
 ```text
 source shard : Lines [group, part]
 
-path: {product}/{entities}.txt
+path: {@product}/{@entities}.txt
 path shard: input/{group}/{part}.txt
 
 operation sort_lines(input: Lines) -> Lines
@@ -127,7 +127,7 @@ merged = merge(sorted @ vary(part))
 
 `source` declares a family of input artifacts. A `shard` is identified by its `group` and `part` values. `sorted` keeps those dimensions. `merge` collects all parts of each group and produces one `merged[group=...]` artifact per group. The call's `@ vary(part)` names the dimension it collects.
 
-`path` lines say where artifacts live; an output with no rule goes to `out/{product}/{entities}`. `command` lines give the exact executable and argument order. SPIT decides which artifacts belong to each job before filling their paths into a command.
+`path` lines say where artifacts live; an output with no rule goes to `out/{@product}/{@entities}`. `command` lines give the exact executable and argument order. SPIT decides which artifacts belong to each job before filling their paths into a command.
 
 A pipeline names no dataset. Rules about what a dataset must hold, and records of what it does hold, go in the files of step 2: `spit check` rejects a `require` rule or a `sources:` record written in a `.spit`.
 
@@ -261,7 +261,7 @@ Beyond the basics above, `.spit` files support typed products, multi-output oper
 | [Analytics](examples/analytics/analytics.spit) | Joins and rollups |
 | [Field survey](examples/commands/field_survey/field_survey.spit) | A larger pipeline with sidecar files, calibration, alignment between spaces, and commands |
 | [MRtrix3 ACT](examples/commands/mrtrix3_act/mrtrix3_act.spit) | A larger pipeline with commands in nested preprocessing, anatomy, and tractography stages, with a folder per stage and per-stage file formats |
-| [Stages](examples/stages/stages.spit) | Preprocessing and analysis stages, a stage's own path default, and `{stage}` paths |
+| [Stages](examples/stages/stages.spit) | Preprocessing and analysis stages, a stage's own path default, and `{@stage}` paths |
 | [Nested stages](examples/stages/nested.spit) | Stages within a stage, beside a step in the outer stage itself |
 | [Imports](examples/imports/imported.spit) | Reuse source and operation definitions with `text::` names |
 | [Compiler stress pipelines](examples/stress/README.md) | Deep type inference, deliberate type errors, uneven joins, and large multilevel DAGs |

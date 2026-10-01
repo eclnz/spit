@@ -132,7 +132,7 @@ fn a_coverage_error_names_the_failing_rule_when_rules_share_a_product() {
 fn every_semantic_error_is_reported_once_in_line_order() {
     let text = "\
 source raw : Table [id, batch]
-path: {product}/{entities}.csv
+path: {@product}/{@entities}.csv
 path raw: in/{id}.csv
 operation clean(table: Table) -> Table
 command clean: tool {table} {result}
@@ -225,16 +225,16 @@ source spare [id]# note
 fn path_rule_errors_point_to_the_rule_in_use() {
     let text = "\
 source raw [id]
-path: {entities}.csv
+path: {@entities}.csv
 operation clean(input)
 cleaned = clean(raw)
 source other [id]
-path other: {product}/{id}/{shard}.csv
+path other: {@product}/{id}/{shard}.csv
 ";
     assert_eq!(
         rendered(&diagnose(text, None)),
         [
-            "error: line 2: products `raw` and `cleaned` bind to the same path `id=id.csv` for the same entities; include `{product}` or distinguish their path rules",
+            "error: line 2: products `raw` and `cleaned` bind to the same path `id=id.csv` for the same entities; include `{@product}` or distinguish their path rules",
             "warning: line 5: source product `other` is never used as an input",
             "error: line 6: path template for `other` uses absent dimension `shard`",
         ]

@@ -5,7 +5,6 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use crate::error::{DefinitionSubject, ResolveError};
 use crate::model::{Cardinality, InputBinding, Invocation, OperationDef, Pipeline, ProductDef};
-use crate::paths::PathPlaceholder;
 
 use super::{find_operation, find_product};
 
@@ -70,19 +69,6 @@ fn check_product(product: &ProductDef) -> Result<(), ResolveError> {
             subject: DefinitionSubject::Product(product.name.clone()),
             detail: format!(
                 "product `{}` has duplicate or empty dimensions",
-                product.name
-            ),
-        });
-    }
-    if let Some(dimension) = product
-        .dimensions
-        .iter()
-        .find(|dimension| PathPlaceholder::reserved(dimension).is_some())
-    {
-        return Err(ResolveError::InvalidDefinition {
-            subject: DefinitionSubject::Product(product.name.clone()),
-            detail: format!(
-                "product `{}` cannot have a dimension named `{dimension}`, which path templates reserve for `{{{dimension}}}`",
                 product.name
             ),
         });

@@ -222,7 +222,7 @@ fn rejects_unbalanced_command_brackets_with_line_number() {
 #[test]
 fn path_template_errors_are_reported_while_parsing() {
     let cases = [
-        ("path: {product}/{entities.csv", "unclosed `{`"),
+        ("path: {@product}/{entities.csv", "unclosed `{`"),
         ("path raw: raw/id}.csv", "unmatched `}`"),
     ];
     for (line, expected) in cases {

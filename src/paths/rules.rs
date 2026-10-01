@@ -235,7 +235,7 @@ pub(crate) fn collect_paths(
                     {
                         errors.push(
                             error(format!(
-                                "products `{other}` and `{}` bind to the same path `{sample}` for the same entities; include `{{product}}` or distinguish their path rules",
+                                "products `{other}` and `{}` bind to the same path `{sample}` for the same entities; include `{{@product}}` or distinguish their path rules",
                                 product.name
                             ))
                             .at(line),

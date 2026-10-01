@@ -5,12 +5,12 @@
 # Supply lookup tables that match the SynthSeg parcellation labels.
 
 # Generated images default to .mif in a folder per stage. In each path,
-# {stage} is the stage holding the step, such as preprocess/denoise;
-# {product} is the product it assigns, such as denoised_dwi; and {entities}
+# {@stage} is the stage holding the step, such as preprocess/denoise;
+# {@product} is the product it assigns, such as denoised_dwi; and {@entities}
 # is the artifact's own dimension values, such as sub=01__ses=01__run=01.
 # An operation whose tool writes another format declares its extension, and
 # a stage whose files share one sets its own `ext:`.
-path: derivatives/{stage}/{product}/{entities}
+path: derivatives/{@stage}/{@product}/{@entities}
 ext: .mif
 
 # Each BIDS image shares its name with its sidecars, which differ only by

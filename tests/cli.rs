@@ -140,7 +140,7 @@ fn path_rules_report_fallbacks_and_strict_paths_reject_them() {
     assert!(rules.status.success(), "{}", stderr(&rules));
     let report = stdout(&rules);
     assert!(report.contains("raw_photo (source): explicit"));
-    assert!(report.contains("photo_response (output): default derivatives/{product}/{entities}.txt, `.txt` from operation `estimate_response`"));
+    assert!(report.contains("photo_response (output): default derivatives/{@product}/{@entities}.txt, `.txt` from operation `estimate_response`"));
     assert!(report.contains("vegetation (output): default"));
 
     for command in ["check", "dag"] {
@@ -192,8 +192,8 @@ fn check_json_reads_the_pipeline_file_and_dag_json_emits_the_spitdag() {
     assert_eq!(
         stdout(&check),
         "{\"diagnostics\":[],\"paths\":[\
-         {\"product\":\"sorted\",\"line\":10,\"path\":\"sorted/{entities}.txt\"},\
-         {\"product\":\"merged\",\"line\":14,\"path\":\"merged/{entities}.txt\"}]}\n"
+         {\"product\":\"sorted\",\"line\":10,\"path\":\"sorted/{@entities}.txt\"},\
+         {\"product\":\"merged\",\"line\":14,\"path\":\"merged/{@entities}.txt\"}]}\n"
     );
     let run = || {
         spit(&[
@@ -400,7 +400,7 @@ fn check_prints_every_diagnostic_and_fails_only_on_errors() {
     let broken = directory.join("broken.spit");
     fs::write(
         &broken,
-        "source raw [id, batch]\npath: {product}/{entities}.txt\npath raw: in/{id}.txt\noperation clean(input)\ncleaned = clean(rwa)\n",
+        "source raw [id, batch]\npath: {@product}/{@entities}.txt\npath raw: in/{id}.txt\noperation clean(input)\ncleaned = clean(rwa)\n",
     )
     .unwrap();
     let warned = directory.join("warned.spit");
@@ -484,7 +484,7 @@ fn a_recipe_run_in_memory_prints_each_pipeline_warning_once() {
     tree.write(
         "analysis.spit",
         "source raw : Raw [id]\nsource spare : Raw [id]\npath raw: in/{id}.txt\n\
-         path spare: sp/{id}.txt\npath: out/{product}/{id}.txt\n\
+         path spare: sp/{id}.txt\npath: out/{@product}/{id}.txt\n\
          operation clean(raw: Raw) -> Clean\ncommand clean: tool {raw} {output}\ncleaned = clean(raw)\n",
     );
     let recipe = tree.write("data.spitin", "pipeline analysis.spit\n");
@@ -523,7 +523,7 @@ fn drop_rules_that_remove_every_group_stop_each_command() {
         "analysis.spit",
         "source image : Img [sub, ses]\npath image: data/sub-{sub}/ses-{ses}/image.nii\n\
          operation clean(img: Img) -> Clean\ncommand clean: tool {img} {output}\n\
-         path: out/{product}/{sub}_{ses}.txt\ncleaned = clean(image)\n",
+         path: out/{@product}/{sub}_{ses}.txt\ncleaned = clean(image)\n",
     );
     // Every subject has one session, so the drop removes every subject;
     // before, a `require` after it checked nothing and passed.

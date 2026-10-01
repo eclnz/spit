@@ -1065,7 +1065,7 @@ impl Pipeline {
     /// beside another, that output's path with its extension replaced.
     pub fn path_template_for(&self, product: &str) -> Option<Cow<'_, PathTemplate>> {
         if let Some((sibling, sibling_extension, suffix)) = self.beside(product) {
-            // The sibling's own file: `{product}` is its name, not this one's.
+            // The sibling's own file: `{@product}` is its name, not this one's.
             let template = self
                 .path_template_for(sibling)?
                 .with_product(&sibling.replace("::", "."));

@@ -38,15 +38,16 @@ note = untyped(raw)
 
 #[test]
 fn an_operation_completes_the_default_path_with_its_outputs_extensions() {
-    let pipeline = parse_pipeline(&format!("path: out/{{product}}/{{entities}}\n{STEPS}")).unwrap();
-    assert_eq!(path(&pipeline, "copied"), "out/{product}/{entities}");
-    assert_eq!(path(&pipeline, "matrix"), "out/{product}/{entities}.mat");
-    assert_eq!(path(&pipeline, "weights"), "out/{product}/{entities}.npz");
+    let pipeline =
+        parse_pipeline(&format!("path: out/{{@product}}/{{@entities}}\n{STEPS}")).unwrap();
+    assert_eq!(path(&pipeline, "copied"), "out/{@product}/{@entities}");
+    assert_eq!(path(&pipeline, "matrix"), "out/{@product}/{@entities}.mat");
+    assert_eq!(path(&pipeline, "weights"), "out/{@product}/{@entities}.npz");
     assert_eq!(
         path(&pipeline, "quality"),
-        "out/{product}/{entities}.tar.gz"
+        "out/{@product}/{@entities}.tar.gz"
     );
-    assert_eq!(path(&pipeline, "note"), "out/{product}/{entities}.txt");
+    assert_eq!(path(&pipeline, "note"), "out/{@product}/{@entities}.txt");
     // A source's own rule is untouched.
     assert_eq!(path(&pipeline, "raw"), "in/{id}.raw");
 }
@@ -54,18 +55,18 @@ fn an_operation_completes_the_default_path_with_its_outputs_extensions() {
 #[test]
 fn ext_completes_the_default_for_operations_that_declare_none() {
     let pipeline = parse_pipeline(&format!(
-        "path: out/{{product}}/{{entities}}\next: .img\n{STEPS}"
+        "path: out/{{@product}}/{{@entities}}\next: .img\n{STEPS}"
     ))
     .unwrap();
-    assert_eq!(path(&pipeline, "copied"), "out/{product}/{entities}.img");
+    assert_eq!(path(&pipeline, "copied"), "out/{@product}/{@entities}.img");
     // The operation's own extension wins.
-    assert_eq!(path(&pipeline, "matrix"), "out/{product}/{entities}.mat");
+    assert_eq!(path(&pipeline, "matrix"), "out/{@product}/{@entities}.mat");
 }
 
 #[test]
 fn a_stage_ext_applies_to_its_steps_and_nested_stages() {
     let pipeline = parse_pipeline(
-        "path: out/{product}/{entities}\n\
+        "path: out/{@product}/{@entities}\n\
          ext: .mif\n\
          source raw : Image [id]\n\
          path raw: in/{id}.raw\n\
@@ -80,16 +81,22 @@ fn a_stage_ext_applies_to_its_steps_and_nested_stages() {
          \x20       matrix = align(raw)\n",
     )
     .unwrap();
-    assert_eq!(path(&pipeline, "outside"), "out/{product}/{entities}.mif");
-    assert_eq!(path(&pipeline, "inside"), "out/{product}/{entities}.nii.gz");
-    assert_eq!(path(&pipeline, "nested"), "out/{product}/{entities}.nii.gz");
-    assert_eq!(path(&pipeline, "matrix"), "out/{product}/{entities}.mat");
+    assert_eq!(path(&pipeline, "outside"), "out/{@product}/{@entities}.mif");
+    assert_eq!(
+        path(&pipeline, "inside"),
+        "out/{@product}/{@entities}.nii.gz"
+    );
+    assert_eq!(
+        path(&pipeline, "nested"),
+        "out/{@product}/{@entities}.nii.gz"
+    );
+    assert_eq!(path(&pipeline, "matrix"), "out/{@product}/{@entities}.mat");
 }
 
 #[test]
 fn a_products_own_rule_takes_only_its_operations_extension() {
     let pipeline = parse_pipeline(&format!(
-        "path: out/{{product}}/{{entities}}\next: .img\n{STEPS}\
+        "path: out/{{@product}}/{{@entities}}\next: .img\n{STEPS}\
          path matrix: transforms/{{id}}\n\
          path weights: fits/{{id}}.npz\n\
          path copied: copies/{{id}}\n"
@@ -105,10 +112,10 @@ fn a_products_own_rule_takes_only_its_operations_extension() {
 #[test]
 fn a_source_on_the_default_rule_takes_ext() {
     let pipeline = parse_pipeline(
-        "path: data/{product}/{entities}\next: .csv\nsource table [id]\noperation copy(input)\ncopied = copy(table)\n",
+        "path: data/{@product}/{@entities}\next: .csv\nsource table [id]\noperation copy(input)\ncopied = copy(table)\n",
     )
     .unwrap();
-    assert_eq!(path(&pipeline, "table"), "data/{product}/{entities}.csv");
+    assert_eq!(path(&pipeline, "table"), "data/{@product}/{@entities}.csv");
 }
 
 #[test]
@@ -117,7 +124,7 @@ fn bound_paths_carry_the_extension() {
     tree.write(
         "pipeline.spit",
         &format!(
-            "path: out/{{product}}/{{entities}}\next: .img\n{STEPS}\
+            "path: out/{{@product}}/{{@entities}}\next: .img\n{STEPS}\
              command copy: copy {{input}} {{output}}\n\
              command align: align {{input}} {{output}}\n\
              command fit: fit {{input}} {{weights}} {{quality}}\n\
@@ -148,7 +155,7 @@ fn bound_paths_carry_the_extension() {
 #[test]
 fn a_rule_ending_in_another_extension_is_an_error() {
     let found = errors(&format!(
-        "path: out/{{product}}/{{entities}}\n{STEPS}path matrix: transforms/{{id}}.txt\n"
+        "path: out/{{@product}}/{{@entities}}\n{STEPS}path matrix: transforms/{{id}}.txt\n"
     ));
     assert_eq!(
         found,
@@ -163,7 +170,7 @@ fn a_rule_ending_in_another_extension_is_an_error() {
 fn a_default_rule_ending_in_another_extension_is_one_error() {
     // Two products disagree with the default, which is said once.
     let found = errors(&format!(
-        "path: out/{{product}}/{{entities}}.img\n{STEPS}also = align(raw)\n"
+        "path: out/{{@product}}/{{@entities}}.img\n{STEPS}also = align(raw)\n"
     ));
     let messages: Vec<_> = found.iter().map(|(_, message)| message.as_str()).collect();
     assert!(messages.contains(
@@ -179,13 +186,13 @@ fn a_default_rule_ending_in_another_extension_is_one_error() {
     );
     // A default written with the extension `ext:` also sets.
     let found = errors(
-        "source raw [id]\npath raw: in/{id}\noperation copy(input)\nstage s:\n    path: out/{product}/{entities}.img\n    ext: .txt\n    copied = copy(raw)\n",
+        "source raw [id]\npath raw: in/{id}\noperation copy(input)\nstage s:\n    path: out/{@product}/{@entities}.img\n    ext: .txt\n    copied = copy(raw)\n",
     );
     assert!(found.iter().any(|(line, message)| *line == Some(5)
         && message == "stage `s`'s default path ends in `.img`, but stage `s`'s `ext:` sets `.txt`; write the extension once, with `ext:`"), "{found:?}");
     // The same extension written in both agrees.
     assert_eq!(
-        errors("path: out/{product}/{entities}.img\next: .img\nsource raw [id]\npath raw: in/{id}\noperation copy(input)\ncopied = copy(raw)\n"),
+        errors("path: out/{@product}/{@entities}.img\next: .img\nsource raw [id]\npath raw: in/{id}\noperation copy(input)\ncopied = copy(raw)\n"),
         []
     );
 }
@@ -227,14 +234,14 @@ fn an_imported_operation_brings_its_extension() {
     let tree = Tree::new("extensions-imports", &[]);
     tree.write(
         "tools.spit",
-        "path: in/{product}/{id}\next: .csv\nsource table [id]\noperation align(input) -> Transform .mat\n",
+        "path: in/{@product}/{id}\next: .csv\nsource table [id]\noperation align(input) -> Transform .mat\n",
     );
     let main = tree.write(
         "main.spit",
-        "path: out/{product}/{entities}\nuse table, align from tools.spit as tools\nmatrix = tools::align(tools::table)\n",
+        "path: out/{@product}/{@entities}\nuse table, align from tools.spit as tools\nmatrix = tools::align(tools::table)\n",
     );
     let pipeline = parse_pipeline_at(&fs::read_to_string(&main).unwrap(), &main).unwrap();
-    assert_eq!(path(&pipeline, "matrix"), "out/{product}/{entities}.mat");
+    assert_eq!(path(&pipeline, "matrix"), "out/{@product}/{@entities}.mat");
     // A source keeps the path its own file gives it, extension included.
     assert_eq!(path(&pipeline, "tools::table"), "in/table/{id}.csv");
 }
@@ -244,16 +251,16 @@ fn check_says_where_each_extension_comes_from() {
     let tree = Tree::new("extensions-check", &[]);
     let pipeline = tree.write(
         "pipeline.spit",
-        &format!("path: out/{{product}}/{{entities}}\next: .img\n{STEPS}path matrix: transforms/{{id}}\n"),
+        &format!("path: out/{{@product}}/{{@entities}}\next: .img\n{STEPS}path matrix: transforms/{{id}}\n"),
     );
     let output = spit(&["check", pipeline.to_str().unwrap(), "--path-rules"]);
     assert!(output.status.success(), "{}", text(&output.stderr));
     let rules = text(&output.stdout);
     for line in [
         "  raw (source): explicit in/{id}.raw\n",
-        "  copied (output): default out/{product}/{entities}.img, `.img` from `ext:`\n",
+        "  copied (output): default out/{@product}/{@entities}.img, `.img` from `ext:`\n",
         "  matrix (output): explicit transforms/{id}.mat, `.mat` from operation `align`\n",
-        "  quality (output): default out/{product}/{entities}.tar.gz, `.tar.gz` from operation `fit`\n",
+        "  quality (output): default out/{@product}/{@entities}.tar.gz, `.tar.gz` from operation `fit`\n",
     ] {
         assert!(rules.contains(line), "{line} in {rules}");
     }
@@ -261,7 +268,9 @@ fn check_says_where_each_extension_comes_from() {
     let output = spit(&["check", pipeline.to_str().unwrap(), "--json"]);
     let json = text(&output.stdout);
     assert!(
-        json.contains("{\"product\":\"copied\",\"line\":9,\"path\":\"out/copied/{entities}.img\"}"),
+        json.contains(
+            "{\"product\":\"copied\",\"line\":9,\"path\":\"out/copied/{@entities}.img\"}"
+        ),
         "{json}"
     );
     assert!(

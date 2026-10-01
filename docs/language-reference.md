@@ -32,7 +32,7 @@ average : Image [subject, visit] = mean(processed @ vary(run))
 
 ### Dimension order
 
-A pipeline has one dimension order, and every product lists its dimensions in it. The order decides how a `many` input's artifacts are sorted, so the order of their command arguments, and how `{entities}` and displayed identities are written.
+A pipeline has one dimension order, and every product lists its dimensions in it. The order decides how a `many` input's artifacts are sorted, so the order of their command arguments, and how `{@entities}` and displayed identities are written.
 
 Each source states the order of its own dimensions: `source bold [sub, ses, run]` puts `sub` before `ses` before `run`. Most pipelines need nothing more. Two sources that order a pair differently are an error.
 
@@ -141,7 +141,7 @@ command process: process_tool {image} {output}
 A stage groups the steps of one phase of a pipeline, such as preprocessing or analysis. Write `stage name:` at the start of a line and indent the stage's lines beneath it; the next line that is not indented ends the stage. From the [stages example](../examples/stages/stages.spit):
 
 ```text
-path: {stage}/{product}/{entities}.txt
+path: {@stage}/{@product}/{@entities}.txt
 
 source shard : Lines [group, part]
 path shard: input/{group}/{part}.txt
@@ -156,14 +156,14 @@ stage preprocess:
     merged = merge(sorted @ vary(part))
 
 stage analysis:
-    path: results/{product}/{entities}.txt
+    path: results/{@product}/{@entities}.txt
 
     operation tally_lines(input: Lines) -> Tally
     command tally_lines: uniq -c {input} {output}
     tally = tally_lines(merged)
 ```
 
-A stage owns the products its steps assign. Operations and commands stay global, so one declared in a stage can be used anywhere, and product names are not prefixed: `analysis` reads `merged` by name. Sources and `use` lines belong at the top level. A `path:` line inside a stage is the default for that stage's products only; a `path product:` rule still takes precedence. `{stage}` in a path template is the name of the product's stage.
+A stage owns the products its steps assign. Operations and commands stay global, so one declared in a stage can be used anywhere, and product names are not prefixed: `analysis` reads `merged` by name. Sources and `use` lines belong at the top level. A `path:` line inside a stage is the default for that stage's products only; a `path product:` rule still takes precedence. `{@stage}` in a path template is the name of the product's stage.
 
 Stages nest. A `stage` header inside a stage opens a stage within it, named by its path, such as `preprocess/combine`; a line back at the outer stage's indentation closes it. From the [nested example](../examples/stages/nested.spit):
 
@@ -178,7 +178,7 @@ stage preprocess:
     resorted = sort_lines(merged)    # in `preprocess` itself
 ```
 
-The lines directly in a stage share one indentation. A nested stage without its own `path:` or `ext:` line uses the nearest one around it, and `{stage}` gives one directory per level, as in `preprocess/combine/merged/...`.
+The lines directly in a stage share one indentation. A nested stage without its own `path:` or `ext:` line uses the nearest one around it, and `{@stage}` gives one directory per level, as in `preprocess/combine/merged/...`.
 
 SPIT orders stages by the products they read, so a stage needs no `after` clause. Stages must not depend on each other in a cycle, even through steps outside every stage. A nested stage is compared with its siblings, and counts toward its outer stage's place among the outer stage's siblings; a step written in an outer stage itself, like one outside every stage, passes on what it reads. `dag` counts the jobs in each outermost stage and names each job's stage, and the `.spitdag` gives each job its stage as a list of names from outermost to innermost:
 
@@ -203,11 +203,11 @@ sorted = text::sort_lines(text::shard)
 ## Paths
 
 ```text
-path: results/{product}/{entities}.txt
+path: results/{@product}/{@entities}.txt
 path image: input/{subject}/{visit}/{run}.txt
 ```
 
-`path:` sets a default; without one, outputs go to `out/{product}/{entities}`. `path image:` overrides it for `image`. Each output of a multi-output step has its own product, so its own rule. A `path:` line inside a [stage](#stages) sets the default for that stage's products. Paths are relative to the dataset root: the recipe's folder, or `--root` when given.
+`path:` sets a default; without one, outputs go to `out/{@product}/{@entities}`. `path image:` overrides it for `image`. Each output of a multi-output step has its own product, so its own rule. A `path:` line inside a [stage](#stages) sets the default for that stage's products. Paths are relative to the dataset root: the recipe's folder, or `--root` when given.
 
 A source with no dimensions can use a fixed path, such as `path testset: eval/testset.parquet`.
 
@@ -215,14 +215,14 @@ A template fills these placeholders from the artifact it names, here `aligned[su
 
 | Placeholder | Expands to | Example |
 | --- | --- | --- |
-| `{product}` | The product's name; an imported `alias::name` becomes `alias.name` | `aligned` |
-| `{entities}` | Every dimension as `dim=value`, in the pipeline's dimension order, joined by `__`; `global` for a product with no dimensions | `subject=A__run=2` |
-| `{stage}` | The stage whose block holds the step, one directory per level; an error for a product made outside every stage | `preprocess/align` |
+| `{@product}` | The product's name; an imported `alias::name` becomes `alias.name` | `aligned` |
+| `{@entities}` | Every dimension as `dim=value`, in the pipeline's dimension order, joined by `__`; `global` for a product with no dimensions | `subject=A__run=2` |
+| `{@stage}` | The stage whose block holds the step, one directory per level; an error for a product made outside every stage | `preprocess/align` |
 | `{subject}`, `{run}`, … | The value of a dimension the product declares | `A`, `2` |
 
-`product`, `entities`, and `stage` are reserved: no product may declare a dimension with one of those names. Values keep letters, digits, and `-`; any other byte is written as `%` and two hex digits, so a value never adds a directory.
+SPIT's own placeholders take `@`, and a dimension takes none, so a dimension may be called `product` or `stage`. `{product}` with no such dimension is an error that says to write `{@product}`. Values keep letters, digits, and `-`; any other byte is written as `%` and two hex digits, so a value never adds a directory.
 
-Path rules are checked when the pipeline is loaded, even for products with no resolved jobs. SPIT rejects unbalanced braces, a dimension the product does not declare, a rule that omits one of the product's dimensions (use `{entities}` or name each one), two products whose rules give the same path for the same entities, such as a default rule without `{product}`, and a rule that puts files inside another product's file path, such as `in/{id}.txt/out.txt` beside `in/{id}.txt`. A path must be relative, name a file rather than end in `/`, and contain no empty, `.`, or `..` directory. Missing rules are reported by `--paths` and `--root`, and collisions between resolved artifact paths once jobs are bound. SPIT warns when two artifacts' paths differ only in letter case, such as `id=A` and `id=a`: where case is ignored, as by default on macOS and Windows, they are one file.
+Path rules are checked when the pipeline is loaded, even for products with no resolved jobs. SPIT rejects unbalanced braces, a dimension the product does not declare, a rule that omits one of the product's dimensions (use `{@entities}` or name each one), two products whose rules give the same path for the same entities, such as a default rule without `{@product}`, and a rule that puts files inside another product's file path, such as `in/{id}.txt/out.txt` beside `in/{id}.txt`. A path must be relative, name a file rather than end in `/`, and contain no empty, `.`, or `..` directory. Missing rules are reported by `--paths` and `--root`, and collisions between resolved artifact paths once jobs are bound. SPIT warns when two artifacts' paths differ only in letter case, such as `id=A` and `id=a`: where case is ignored, as by default on macOS and Windows, they are one file.
 
 As in Bash, an unquoted `#` starts a comment only at the start of a word, so `--color=#fff` is one argument. A `#` that ends a word, as in `{output}# note`, stays part of the word; SPIT warns about it, since it reads like a comment. Put a space before `#` to start a comment, or quote the text to keep it.
 
@@ -242,7 +242,7 @@ An extension is a `.` and letters, digits, `-` or `_`, and may have several part
 `ext:` sets the extension for operations that declare none, at the top level or in a stage, as `path:` sets the default path. Default path rules are then written without an extension:
 
 ```text
-path: derivatives/{product}/{entities}
+path: derivatives/{@product}/{@entities}
 ext: .img
 ```
 
@@ -264,7 +264,7 @@ Extensions are optional. An operation whose tool picks the format from the outpu
 `spit check --path-rules` shows each product's path with its extension, and where the extension is declared:
 
 ```text
-  matrix (output): default derivatives/{product}/{entities}.mat, `.mat` from operation `align`
+  matrix (output): default derivatives/{@product}/{@entities}.mat, `.mat` from operation `align`
 ```
 
 Path rules also find sources. `spit inputs recipe.spitin --root data` lists each file under `data` whose path matches a source's rule, in the pipeline or the recipe, reading entity values from its placeholders. A rule matches a file's whole path, so `responses/{region}/wave{wave}.csv` does not match `wave3.csv.bak` or `wave3.csv.1`, and files that match no rule are left out. Links to files and directories are followed. A value is read only as SPIT writes it, so a file such as `in/%41.txt`, whose value SPIT would write `A`, is skipped with a warning rather than listed under a path no job would use.
@@ -278,7 +278,7 @@ operation convert(dicom: DicomDir) -> (image: Image .nii.gz, meta: Json .json be
 operation strip(t1: Image) -> (brain: Image .nii.gz, mask: Image "_mask.nii.gz" beside brain)
 ```
 
-Its path is its sibling's, without the sibling's extension, then the suffix: beside `out/image/sub=01.nii.gz`, `meta` is `out/image/sub=01.json`, and beside `sub-01_brain.nii.gz`, `mask` is `sub-01_brain_mask.nii.gz`. `{product}` in the sibling's rule stays the sibling's name, since the file is beside the sibling's.
+Its path is its sibling's, without the sibling's extension, then the suffix: beside `out/image/sub=01.nii.gz`, `meta` is `out/image/sub=01.json`, and beside `sub-01_brain.nii.gz`, `mask` is `sub-01_brain_mask.nii.gz`. `{@product}` in the sibling's rule stays the sibling's name, since the file is beside the sibling's.
 
 The suffix is an extension, or quoted text of letters, digits, `.`, `-` and `_`; the output's own extension is the suffix from its first `.`. A `beside` output:
 

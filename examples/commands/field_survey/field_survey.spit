@@ -5,7 +5,7 @@
 
 # Generated files go in a folder per product. Images default to .img; an
 # operation whose tool writes another format declares its extension.
-path: derivatives/{product}/{entities}
+path: derivatives/{@product}/{@entities}
 ext: .img
 
 # Each photo and flat-field frame shares its file name with its sidecars,

@@ -15,7 +15,7 @@ use spit::{
 use support::Tree;
 
 const PIPELINE: &str = "\
-path: derivatives/{product}/{entities}.txt
+path: derivatives/{@product}/{@entities}.txt
 source image : Image<T1w> [sub, ses, run]
 path image: sub-{sub}/ses-{ses}/anat/sub-{sub}_ses-{ses}_run-{run}_T1w.nii
 source mask : Mask [sub]

@@ -22,20 +22,19 @@ pub type PathError = Located<PathProblem>;
 /// What a `{name}` in a path template stands for.
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub(crate) enum PathPlaceholder {
-    /// `{product}`: the product's name.
+    /// `{@product}`: the product's name.
     Product,
-    /// `{entities}`: every dimension as `dim=value`, in declared order.
+    /// `{@entities}`: every dimension as `dim=value`, in declared order.
     Entities,
-    /// `{stage}`: the stage whose block holds the step.
+    /// `{@stage}`: the stage whose block holds the step.
     Stage,
     /// Any other name: a dimension the product declares.
     Dimension(String),
 }
 
 impl PathPlaceholder {
-    /// The built-in placeholder `name` always means, if any; no product may
-    /// declare a dimension with such a name.
-    pub(crate) fn reserved(name: &str) -> Option<Self> {
+    /// The built-in placeholder `{@name}` writes, if any.
+    fn built_in(name: &str) -> Option<Self> {
         match name {
             "product" => Some(Self::Product),
             "entities" => Some(Self::Entities),
@@ -44,22 +43,43 @@ impl PathPlaceholder {
         }
     }
 
-    fn parse(name: String) -> Self {
-        Self::reserved(&name).unwrap_or(Self::Dimension(name))
+    /// The placeholder `{name}` is: a built-in as `@product`, or else a
+    /// dimension, which takes no `@`.
+    fn parse(name: String) -> Result<Self, String> {
+        match name.strip_prefix('@') {
+            Some(built_in) => Self::built_in(built_in).ok_or_else(|| {
+                format!(
+                    "unknown built-in placeholder `{{{name}}}`; path templates have `{{@product}}`, `{{@entities}}` and `{{@stage}}`"
+                )
+            }),
+            None => Ok(Self::Dimension(name)),
+        }
     }
 
-    /// The name between the braces.
+    /// What to write instead when a product has no dimension `name`, if
+    /// `name` is a built-in written without its `@`.
+    pub(crate) fn hint(name: &str) -> Option<String> {
+        let meaning = match Self::built_in(name)? {
+            Self::Product => "the product's name",
+            Self::Entities => "every dimension as `dimension=value`",
+            Self::Stage => "the stage that makes it",
+            Self::Dimension(_) => return None,
+        };
+        Some(format!("; write `{{@{name}}}` for {meaning}"))
+    }
+
+    /// The name between the braces, with a built-in's `@`.
     pub(crate) fn name(&self) -> &str {
         match self {
-            Self::Product => "product",
-            Self::Entities => "entities",
-            Self::Stage => "stage",
+            Self::Product => "@product",
+            Self::Entities => "@entities",
+            Self::Stage => "@stage",
             Self::Dimension(name) => name,
         }
     }
 }
 
-/// Reads as the placeholder is written, such as `{stage}`.
+/// Reads as the placeholder is written, such as `{@stage}`.
 impl fmt::Display for PathPlaceholder {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{{{}}}", self.name())
@@ -83,20 +103,21 @@ pub struct PathTemplate {
 impl PathTemplate {
     /// Where outputs go when a pipeline run from a recipe sets no `path:`.
     pub fn default_output() -> Self {
-        Self::parse("out/{product}/{entities}").expect("built-in output path is valid")
+        Self::parse("out/{@product}/{@entities}").expect("built-in output path is valid")
     }
 
-    /// Parse a template such as `derivatives/{stage}/{product}/{entities}.mif`.
+    /// Parse a template such as `derivatives/{@stage}/{@product}/{@entities}.mif`.
     pub fn parse(text: impl Into<String>) -> Result<Self, PathError> {
         let text = text.into();
         let parts = parse_template(&text)
             .map_err(error)?
             .into_iter()
             .map(|part| match part {
-                Part::Literal(value) => PathPart::Literal(value),
-                Part::Placeholder(name) => PathPart::Placeholder(PathPlaceholder::parse(name)),
+                Part::Literal(value) => Ok(PathPart::Literal(value)),
+                Part::Placeholder(name) => PathPlaceholder::parse(name).map(PathPart::Placeholder),
             })
-            .collect();
+            .collect::<Result<_, _>>()
+            .map_err(error)?;
         Ok(Self { text, parts })
     }
 
@@ -152,7 +173,7 @@ impl PathTemplate {
         }
     }
 
-    /// This template with `{product}` written out as `name`, so that an
+    /// This template with `{@product}` written out as `name`, so that an
     /// imported product keeps the path its own file gives it.
     #[must_use]
     pub(crate) fn with_product(&self, name: &str) -> Self {
@@ -211,7 +232,7 @@ pub(crate) fn require_directory(root: &std::path::Path) -> Result<(), PathError>
 }
 
 /// Bind `artifact` to its relative path. `dimensions` gives the product's
-/// declared dimension order, which `{entities}` follows. `label` names the
+/// declared dimension order, which `{@entities}` follows. `label` names the
 /// path in errors: a product's rule, or an artifact.
 pub(crate) fn bind_path(
     pipeline: &Pipeline,
@@ -340,8 +361,9 @@ impl<'p> ProductPath<'p> {
                 PathPart::Placeholder(placeholder @ PathPlaceholder::Dimension(dimension)) => {
                     let value = artifact.entities.get(dimension).ok_or_else(|| {
                         error(format!(
-                            "path template for `{}` uses absent dimension `{dimension}`",
-                            artifact.product
+                            "path template for `{}` uses absent dimension `{dimension}`{}",
+                            artifact.product,
+                            PathPlaceholder::hint(dimension).unwrap_or_default()
                         ))
                         .focus(placeholder.to_string())
                     })?;
@@ -356,9 +378,9 @@ impl<'p> ProductPath<'p> {
     }
 }
 
-/// `product`'s path template with `{product}` and `{stage}` written out, as
+/// `product`'s path template with `{@product}` and `{@stage}` written out, as
 /// every artifact of it shares them, for showing beside its declaration:
-/// `derivatives/yield_table/{entities}.csv`.
+/// `derivatives/yield_table/{@entities}.csv`.
 pub(crate) fn shown_path(pipeline: &Pipeline, product: &str) -> Option<String> {
     let path = ProductPath::new(pipeline, product).ok()?;
     let mut shown = String::new();
@@ -367,7 +389,7 @@ pub(crate) fn shown_path(pipeline: &Pipeline, product: &str) -> Option<String> {
             PathPart::Literal(value) => shown.push_str(value),
             PathPart::Placeholder(PathPlaceholder::Product) => shown.push_str(&path.name),
             PathPart::Placeholder(PathPlaceholder::Stage) => {
-                shown.push_str(path.stage.as_deref().unwrap_or("{stage}"));
+                shown.push_str(path.stage.as_deref().unwrap_or("{@stage}"));
             }
             PathPart::Placeholder(placeholder) => shown.push_str(&placeholder.to_string()),
         }
@@ -375,7 +397,7 @@ pub(crate) fn shown_path(pipeline: &Pipeline, product: &str) -> Option<String> {
     Some(shown)
 }
 
-/// Add what `{entities}` binds to: each dimension as `dimension=value`, in
+/// Add what `{@entities}` binds to: each dimension as `dimension=value`, in
 /// declared order and joined by `__`, or `global` for none.
 fn push_entities(
     relative: &mut String,
