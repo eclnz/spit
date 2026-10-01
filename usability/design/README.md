@@ -15,6 +15,7 @@ The plans that answer the [usability findings](../FINDINGS.md), and the order to
 | [Pilot inspection follow-ups](pre-phase5-inspection.md) | Compact job counts, collection order, and near-case unused sources |
 | [Third-study inspection work](round3-inspection.md) | Job counts and diagnosis examples confirmed after Phase 5 |
 | [Dataset root, output extensions and sidecars](output-paths.md) | Repeated path rules reported in every round, and `--root` on every command (proposal) |
+| [Speed and cleanup after the paths work](paths-performance.md) | The audit of the paths work: `spit check` growing with products × steps, two bugs, and smells, held to the data-oriented rules |
 
 ## Status
 
@@ -22,6 +23,7 @@ The plans that answer the [usability findings](../FINDINGS.md), and the order to
 - **Second-study actions:** items 1–6 are done. The [post-Phase-5 third study](../ROUND3.md) completes the rerun.
 - **Next:** implement the [round-3 inspection work](round3-inspection.md), starting with compact per-operation counts.
 - **Paths:** steps 1 to 7 of [dataset root, output extensions and sidecars](output-paths.md) are done: the recipe's `root` line, extensions on operation outputs, source groups, `beside` outputs, `{x.dir}` and `{x.stem}`, `@` for built-in placeholders, and labels with optional groups.
+- **Speed and cleanup:** steps 1 and 2 of [speed and cleanup after the paths work](paths-performance.md) are done: each product's producer is found once, and a rule ending in its extension after a dot in the file name is accepted. Steps 3 to 10 remain.
 - **Resolved so far:** B1–B7, F1–F10, D1–D11.
 
 ## Order
