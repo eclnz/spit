@@ -444,6 +444,9 @@ fn shown_paths(pipeline: &Pipeline, lines: &SourceMap) -> Vec<ShownPath> {
         .filter(|product| {
             !pipeline.product_paths.contains_key(&product.name)
                 || pipeline.added_extension(&product.name).is_some()
+                || pipeline
+                    .path_rule_for(&product.name)
+                    .is_some_and(PathTemplate::varies)
         })
         .filter_map(|product| {
             let line = match lines.invocations.get(&product.name) {

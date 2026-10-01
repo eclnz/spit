@@ -246,7 +246,7 @@ To make a plan for the work that can run now, use `spit dag dataset.spitin --par
 
 ## Language reference
 
-Beyond the basics above, `.spit` files support typed products, multi-output operations, `many`/aggregation inputs with selectors (`where`, `same`, `vary`, `each`), symbolic type variables, stages, path placeholders, and `use` imports for sharing definitions across files; `.spitin` recipes add directory discovery, rules that leave data out (`exclude`, `drop`) or require it (`require`). See the [full language reference](docs/language-reference.md) for syntax and rules for each of these.
+Beyond the basics above, `.spit` files support typed products, multi-output operations, `many`/aggregation inputs with selectors (`where`, `same`, `vary`, `each`), symbolic type variables, stages, path placeholders, and `use` imports for sharing definitions across files; `.spitin` recipes add directory discovery, rules that leave data out (`exclude`, `drop`) or require it (`require`). A path can use `{@labels}` for BIDS-style dimension labels and `[...]` for a segment only some products have; the [cohort walkthrough](docs/examples.md#cohort-discovery-exclusion-and-grouped-removal) shows one default path for run, session, and subject outputs. See the [full language reference](docs/language-reference.md) for syntax and rules for each of these.
 
 ## More examples
 

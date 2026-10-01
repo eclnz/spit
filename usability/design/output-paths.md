@@ -1,6 +1,6 @@
 # Design: dataset root, output extensions and sidecars
 
-Status: steps 1 to 6 are done. Step 7, labels with optional groups for BIDS-style names, is planned.
+Status: steps 1 to 7 are done.
 
 ## Problem
 
@@ -341,15 +341,15 @@ The five products resolve to the same files as the five rules:
   - two products bound to one path once groups drop, as today.
 - `dag` warns when a value `{@labels}` writes contains `-`, as `sub-01-a`, which BIDS cannot read back.
 
-**To confirm before building.**
+**Decisions.**
 
-1. `{@stage}` as the BIDS datatype folder, `func` or `anat`, or a `path:` default inside each stage, keeping stages for phases.
-2. A product with no dimensions gives `{@labels}` no value, so `[{@labels}_]{@product}` covers one that shares the default; the alternative is an error.
-3. `dag` warns, not fails, on a `-` in a value `{@labels}` writes.
+1. The cohort example uses `{@stage}` as the BIDS datatype folder, `func` or `anat`. A pipeline using stages for processing phases can instead set a `path:` default inside each stage.
+2. A product with no dimensions gives `{@labels}` no value, so `[{@labels}_]{@product}` covers one that shares the default. Outside a group, `{@labels}` on that product is an error.
+3. `dag` warns on a `-` in a value `{@labels}` writes.
 
 **Not in this step.** A built-in BIDS layout, renaming keys within `{@labels}`, groups in commands, and optional sources or outputs.
 
-**Example.** A BIDS cohort example built from the round-3 task, with the editor hints showing each step's path.
+**Example.** The [cohort walkthrough](../../docs/examples.md#cohort-discovery-exclusion-and-grouped-removal) and its [pipeline](../../examples/patterns/cohort/cohort.spit) use one default for the five derived paths. `check --path-rules` and `check --json` show the resolved template for each product, including products with an explicit rule that has a group or labels.
 
 ## Not covered
 
@@ -370,4 +370,4 @@ The five products resolve to the same files as the five rules:
 4. `beside` outputs. Done.
 5. `{x.dir}` and `{x.stem}`, with the `.spitdag` version bump. Done.
 6. `{@product}`, `{@entities}` and `{@stage}`, with the old forms as errors that say what to write, and every pipeline, test, key and document converted. Done.
-7. `{@labels}` and `[...]` groups, the hint and check output with groups resolved, the errors and the `-` warning, and a BIDS cohort example.
+7. `{@labels}` and `[...]` groups, the hint and check output with groups resolved, the errors and the `-` warning, and a BIDS cohort example. Done.

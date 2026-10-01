@@ -7,7 +7,9 @@ use std::fmt;
 use crate::model::{ArtifactInstance, EntityBinding, ExtensionSource, Pipeline, ProductDef};
 use crate::parser::SourceMap;
 
-use super::template::{bind_path, enclosing_path, error, PathError, PathPart, PathPlaceholder};
+use super::template::{
+    bind_path, enclosing_path, error, shown_path, PathError, PathPart, PathPlaceholder,
+};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum PathRule {
@@ -38,7 +40,17 @@ impl PathRule {
         let Some(template) = pipeline.path_template_for(product) else {
             return Self::Missing;
         };
-        let template = template.to_string();
+        let rule_product = pipeline
+            .beside(product)
+            .map_or(product, |(sibling, _, _)| sibling);
+        let template = if pipeline
+            .path_rule_for(rule_product)
+            .is_some_and(|rule| rule.varies())
+        {
+            shown_path(pipeline, product).unwrap_or_else(|| template.to_string())
+        } else {
+            template.to_string()
+        };
         if let Some((sibling, _, _)) = pipeline.beside(product) {
             Self::Beside {
                 sibling: sibling.to_owned(),
