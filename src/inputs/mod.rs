@@ -21,7 +21,8 @@ use crate::error::ResolveError;
 use crate::imports::parse_located_document;
 use crate::lower::{parse_document_with_imports, ParsedDocument};
 use crate::model::{
-    ArtifactInstance, CoverageAction, CoverageGap, InputRules, Pipeline, SourceInventory,
+    ArtifactInstance, CoverageAction, CoverageGap, InputRules, Pipeline, PipelineIndex,
+    SourceInventory,
 };
 use crate::parser::{strip_comment, without_bom, Header, Keyword, Kind, ParseError, SourceMap};
 use crate::paths::{inspect_paths, PathError, PathTemplate};
@@ -222,10 +223,11 @@ impl InputSpec {
             }
         }
         if !self.rules.discoveries.is_empty() {
+            let index = PipelineIndex::new(pipeline);
             for product in &pipeline.products {
-                if pipeline.is_source(&product.name)
+                if index.is_source(&product.name)
                     && !self.rules.source_paths.contains_key(&product.name)
-                    && pipeline.path_template_for(&product.name).is_none()
+                    && !index.has_path(&product.name)
                 {
                     let product = product.name.clone();
                     return Err(InputError::NoDiscoveryPath { product });
