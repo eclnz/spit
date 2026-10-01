@@ -28,7 +28,7 @@ Commands and output paths are fixed by each brief, so a correct plan is unique u
 - **Models and runs.** Each scenario ran twice, each time in a fresh agent: once on a larger model (runs tagged `a`) and once on a smaller, faster one (runs tagged `b`), the latter standing in for a less capable reader. The s2 follow-up was sent to the same two agents after they finished, so they kept their earlier context, as a real user would.
 - **Reports.** Agents answered the questionnaire in [`REPORT.md`](harness/REPORT.md). Where the agent tool would not let them write that file, they returned their answers as text, condensed into `notes.md` in each run's folder.
 
-## Results
+## Results: round 1
 
 All 14 plans matched their keys exactly. No agent was confident and wrong: every agent rated its confidence 4 or 5, and every one was right.
 
@@ -56,6 +56,10 @@ Each run's folder in [`results/`](results) holds:
 - **Every scenario was designed to be solvable,** and the briefs pin commands and output paths. A perfect pass rate therefore overstates ease of use. Scenario 3 was changed to two levels of rollup because one step cannot aggregate over two dimensions ([F9](FINDINGS.md#f9-aggregate-over-several-dimensions-in-one-step)).
 - **Agents read the whole 470-line guide before starting.** A person skimming it would likely hit more of the [guide gaps](FINDINGS.md#guide-gaps).
 - **One agent reported a garbled `note: Job 1` line.** The wrapper's logging caused it, not SPIT, and it is left out of the findings.
+
+## Results: round 2
+
+The [second-round report](ROUND2.md) covers 18 trials, including the single-leaderboard and vague-brief variants. All 18 plans matched their keys; it records the participants' reported friction and the limits of comparison with round 1.
 
 ## Run it again
 

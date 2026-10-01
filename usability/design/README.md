@@ -14,9 +14,9 @@ The plans that answer the [usability findings](../FINDINGS.md), and the order to
 ## Status
 
 - **Done:** steps 1–15 and 17. Phase 1, Phase 2, and Phase 3 are complete; the worked examples and extension update are in place. Step 16 was declined.
-- **Next:** the second study round.
+- **Next:** address findings from the [second study round](../ROUND2.md).
 - **Resolved so far:** B1–B7, F1–F10, D1–D11.
-- **Still open:** participant runs and analysis for the second study round.
+- **Still open:** prioritize and address the new guide and inspection gaps found in round 2.
 
 ## Order
 
@@ -140,7 +140,7 @@ One design built in three steps, each leaving the tool working. See [removing in
 
 ## After the work: the second round
 
-Re-run the [study](../README.md) with the same scenarios, rebuilt against the new guide. The following preparations are done; participant runs and analysis remain:
+The [second study round](../ROUND2.md) is complete. It used the same scenarios with the new guide and these additions:
 
 - The s2 follow-up's answer key comes from a recipe with `exclude`, not an edited `.spitout`.
 - `s3-one-board` uses one leaderboard over model and config, which the old language could not express.
