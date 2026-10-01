@@ -24,9 +24,9 @@ fn syntax_errors_point_at_the_offending_token() {
     let text = "\
 source raw : Table [id]
   source 9bad [id]
-operation copy(Table) -> Tab le
+operation copy(table: Table) -> Tab le
 bad name = copy(raw)
-operation clean(Table) -> Table
+operation clean(table: Table) -> Table
 command clean: tool {input {output}
 path raw: in/{id.csv
 ";
@@ -53,9 +53,9 @@ fn step_errors_point_at_the_part_of_the_step_at_fault() {
     let text = "\
 source raw : Table [id, run]
 source other : Other [id]
-operation clean(Table) -> Table
+operation clean(table: Table) -> Table
 operation join(left: Table, right: Table) -> Table
-operation merge(many Table) -> Table
+operation merge(tables: many Table) -> Table
 cleaned = clean(raw)
 joined = join(cleaned, other)
 typo = clean(rwa)
@@ -78,8 +78,8 @@ merged = merge(cleaned @ vary(batch))
 fn template_errors_point_at_the_placeholder_or_template() {
     let text = "\
 source raw : Table [id]
-operation clean(Table) -> Table
-command clean: tool {input} {result}
+operation clean(table: Table) -> Table
+command clean: tool {table} {result}
 cleaned = clean(raw)
 path: {product}/{entities}.csv
 path raw: in/{id}/{shard}.csv
@@ -101,8 +101,8 @@ fn warnings_point_at_the_name_or_word() {
     let text = "\
 source raw : Table [id]
 source spare : Table [id]
-operation clean(Table) -> Table
-command clean: tool {input} {output}# note
+operation clean(table: Table) -> Table
+command clean: tool {table} {output}# note
 cleaned = clean(raw)
 ";
     assert_eq!(
@@ -132,7 +132,7 @@ fn unclosed_brackets_point_from_the_opener_and_missing_arrows_at_the_type() {
     let text = "\
 source raw : Table [id
 operation copy(input: Table -> Table
-operation tag(Table) Label
+operation tag(table: Table) Label
 result = copy(raw
 require raw count>=1 per [id
 ";
@@ -153,10 +153,10 @@ fn unclosed_generic_brackets_point_at_the_specific_opener() {
     // The missing `>` belongs to `Stream<`, several layers out from where
     // parsing actually gives up; earlier this fell back to a span covering
     // almost the whole line.
-    let text = "operation f(Stream<Frame<X>,Y) -> Signal\n";
+    let text = "operation f(stream: Stream<Frame<X>,Y) -> Signal\n";
     assert_eq!(pointed(text, None), ["error 1: <"]);
 
-    let stray_closer = "operation f(Frame<Native>>) -> Signal\n";
+    let stray_closer = "operation f(frame: Frame<Native>>) -> Signal\n";
     assert_eq!(pointed(stray_closer, None), ["error 1: >"]);
 }
 
@@ -167,17 +167,17 @@ fn invalid_type_variables_point_at_the_variable_not_the_whole_type() {
     let outside_signature = "source raw : Stream<Frame<$Kind,$Space>,Raw> [id]\n";
     assert_eq!(pointed(outside_signature, None), ["error 1: $Kind"]);
 
-    let invalid_name = "operation f(Frame<$1Kind>) -> Signal\n";
+    let invalid_name = "operation f(frame: Frame<$1Kind>) -> Signal\n";
     assert_eq!(pointed(invalid_name, None), ["error 1: $1Kind"]);
 
-    let variable_with_args = "operation f(Wrapper<Frame<$Kind<Native>>>) -> Signal\n";
+    let variable_with_args = "operation f(wrapper: Wrapper<Frame<$Kind<Native>>>) -> Signal\n";
     assert_eq!(pointed(variable_with_args, None), ["error 1: $Kind"]);
 }
 
 #[test]
 fn recipe_rule_errors_point_at_the_product_or_the_grouped_dimensions() {
     let pipeline = spit::parse_pipeline(
-        "source raw : Table [id]\noperation clean(Table) -> Table\ncleaned = clean(raw)\n",
+        "source raw : Table [id]\noperation clean(table: Table) -> Table\ncleaned = clean(raw)\n",
     )
     .unwrap();
     let recipe = "\
@@ -204,7 +204,7 @@ require cleaned count=1 per [id]
 #[test]
 fn errors_in_records_written_in_a_recipe_point_at_the_record() {
     let pipeline = spit::parse_pipeline(
-        "source raw : Table [id, run]\noperation clean(Table) -> Table\ncleaned = clean(raw)\n",
+        "source raw : Table [id, run]\noperation clean(table: Table) -> Table\ncleaned = clean(raw)\n",
     )
     .unwrap();
     for (record, message) in [
@@ -229,10 +229,10 @@ fn errors_in_records_written_in_a_recipe_point_at_the_record() {
 fn command_errors_about_the_operation_point_at_its_name() {
     let text = "\
 source raw : Table [id]
-operation clean(Table) -> Table
-command clean: tool {input} {output}
+operation clean(table: Table) -> Table
+command clean: tool {table} {output}
 command cleen: tool {input} {output}
-command clean: other {input} {output}
+command clean: other {table} {output}
 cleaned = clean(raw)
 ";
     assert_eq!(pointed(text, None), ["error 4: cleen", "error 5: clean"]);
@@ -242,7 +242,7 @@ cleaned = clean(raw)
 fn a_step_output_does_not_repeat_its_inputs_dimension_error() {
     let text = "\
 source raw : Table [id, id]
-operation clean(Table) -> Table
+operation clean(table: Table) -> Table
 cleaned = clean(raw)
 ";
     assert_eq!(pointed(text, None), ["error 1: raw"]);
@@ -250,7 +250,7 @@ cleaned = clean(raw)
 
 #[test]
 fn display_in_counts_the_column_in_characters() {
-    let text = "source raw [id]\noperation copy(one)\nx = copy(résumé)\ny = copy(rwa)\n";
+    let text = "source raw [id]\noperation copy(input)\nx = copy(résumé)\ny = copy(rwa)\n";
     let diagnostics = diagnose(text, None);
     let shown: Vec<_> = diagnostics
         .iter()

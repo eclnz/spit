@@ -9,7 +9,7 @@ source window_policy : WindowPolicy [org, site, window]
 source model : DeviceModel [org, site, device]
 source target : SiteTarget [org, site]
 source policy : OrgPolicy [org]
-source schema : Schema []
+source schema : Schema
 
 path: results/{product}/{entities}.dat
 path raw: input/{org}/{site}/{device}/{window}/{channel}/{segment}.dat

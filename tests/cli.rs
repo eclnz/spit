@@ -267,7 +267,7 @@ fn path_rules_show_a_missing_rule_and_strict_paths_accept_complete_rules() {
     let directory = tree.path();
     let file = directory.join("spit paths.spit");
     let pipeline =
-        "source raw [id]\npath raw: input/{id}.txt\noperation copy(one)\nresult = copy(raw)\n";
+        "source raw [id]\npath raw: input/{id}.txt\noperation copy(input)\nresult = copy(raw)\n";
     fs::write(&file, pipeline).unwrap();
     let missing = spit(&["check", file.to_str().unwrap(), "--path-rules"]);
     assert!(stdout(&missing).contains("result (output): MISSING"));
@@ -282,7 +282,7 @@ fn recipe_path_rules_show_combined_coverage_and_origin() {
     let tree = Tree::new("cli-recipe-paths", &[]);
     let pipeline = tree.write(
         "analysis.spit",
-        "source raw [id]\noperation copy(one)\nresult = copy(raw)\npath result: output/{id}.txt\n",
+        "source raw [id]\noperation copy(input)\nresult = copy(raw)\npath result: output/{id}.txt\n",
     );
     let recipe = tree.write(
         "data.spitin",
@@ -312,7 +312,7 @@ fn recipe_path_rules_show_combined_coverage_and_origin() {
 
     tree.write(
         "analysis.spit",
-        "source raw [id]\noperation copy(one)\nresult = copy(raw)\n",
+        "source raw [id]\noperation copy(input)\nresult = copy(raw)\n",
     );
     let missing = spit(&[
         "check",
@@ -392,13 +392,13 @@ fn check_prints_every_diagnostic_and_fails_only_on_errors() {
     let broken = directory.join("broken.spit");
     fs::write(
         &broken,
-        "source raw [id, batch]\npath: {product}/{entities}.txt\npath raw: in/{id}.txt\noperation clean(one)\ncleaned = clean(rwa)\n",
+        "source raw [id, batch]\npath: {product}/{entities}.txt\npath raw: in/{id}.txt\noperation clean(input)\ncleaned = clean(rwa)\n",
     )
     .unwrap();
     let warned = directory.join("warned.spit");
     fs::write(
         &warned,
-        "source raw [id]\nsource spare [id]\noperation clean(one)\ncleaned = clean(raw)\n",
+        "source raw [id]\nsource spare [id]\noperation clean(input)\ncleaned = clean(raw)\n",
     )
     .unwrap();
     let broken_check = spit(&["check", broken.to_str().unwrap()]);
@@ -477,7 +477,7 @@ fn a_recipe_run_in_memory_prints_each_pipeline_warning_once() {
         "analysis.spit",
         "source raw : Raw [id]\nsource spare : Raw [id]\npath raw: in/{id}.txt\n\
          path spare: sp/{id}.txt\npath: out/{product}/{id}.txt\n\
-         operation clean(Raw) -> Clean\ncommand clean: tool {input} {output}\ncleaned = clean(raw)\n",
+         operation clean(raw: Raw) -> Clean\ncommand clean: tool {raw} {output}\ncleaned = clean(raw)\n",
     );
     let recipe = tree.write("data.spitin", "pipeline analysis.spit\n");
     for command in ["inputs", "dag", "artifacts"] {
@@ -514,7 +514,7 @@ fn drop_rules_that_remove_every_group_stop_each_command() {
     tree.write(
         "analysis.spit",
         "source image : Img [sub, ses]\npath image: data/sub-{sub}/ses-{ses}/image.nii\n\
-         operation clean(Img) -> Clean\ncommand clean: tool {input} {output}\n\
+         operation clean(img: Img) -> Clean\ncommand clean: tool {img} {output}\n\
          path: out/{product}/{sub}_{ses}.txt\ncleaned = clean(image)\n",
     );
     // Every subject has one session, so the drop removes every subject;

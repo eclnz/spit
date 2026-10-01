@@ -464,7 +464,8 @@ fn a_many_input_names_its_dimensions_at_the_call() {
 
 #[test]
 fn pipeline_checks_need_no_inventory() {
-    let text = "source raw : Table [id]\noperation clean(Table) -> Table\n\ncleaned = clean(rwa)\n";
+    let text =
+        "source raw : Table [id]\noperation clean(table: Table) -> Table\n\ncleaned = clean(rwa)\n";
     assert_eq!(
         validate_pipeline(&parse_pipeline(text).unwrap()).unwrap_err(),
         ResolveError::UnknownProduct {
@@ -472,7 +473,7 @@ fn pipeline_checks_need_no_inventory() {
         }
     );
 
-    let text = "source raw : Table [id]\nsource other : Other [id]\noperation clean(Table) -> Table\ncleaned = clean(other)\n";
+    let text = "source raw : Table [id]\nsource other : Other [id]\noperation clean(table: Table) -> Table\ncleaned = clean(other)\n";
     assert!(matches!(
         validate_pipeline(&parse_pipeline(text).unwrap()),
         Err(ResolveError::TypeMismatch { .. })

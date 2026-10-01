@@ -141,13 +141,15 @@ If types remain decoration, consider whether they should stay in the language.
 
 ## 5. One form for each syntax double
 
+**Status:** done in step 21, with one change: brace escapes stay as Bash quoting gives them.
+
 | Today | Keep | Remove |
 | --- | --- | --- |
 | Grouped `products:`, `operations:`, `pipeline:`, `commands:` sections, and a recipe's `constraints:` | The flow form | The sectioned form (`src/parser/sectioned.rs`), used by 8 examples and some parser tests. No round 1 or 2 participant wrote it |
 | `source x`, `source x []` | `source x` | `[]`, with an error that shows the bare form |
 | `name`, `name: Type`, `name: many`, `many name`, a lone `many`, a type alone (`(Image)`) | `name`, `name: Type`, `name: many`, `name: many Type` | `many name`, a lone `many`, and nameless ports |
 | `{input}`, `{input1}`, `{inputs}` for nameless ports, and `{inputs}` as an alias for any lone `many` port | Each port's own name | The positional placeholders and the alias |
-| `{{` and `\{` for a literal brace | `{{` and `}}` | `\{` and `\}` |
+| `{{` and `\{` for a literal brace | `{{` and `}}` in the guide | Nothing: a command follows Bash's quoting, so `\{` and `'{'` are literal as a consequence of that rule, not a second syntax. Rejecting `\{` would add an exception; the reference shows `{{` only |
 | `.spitout` records ending in `: path` | Path rules | The legacy record form |
 | A product named like its operation (`digest = digest(log)`) | Allowed | No removal; `check` warns, and the reference's `coreg = coreg(mc, brain)` example changes |
 

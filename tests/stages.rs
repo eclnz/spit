@@ -48,7 +48,7 @@ fn steps_belong_to_the_stage_whose_block_holds_them() {
 
 #[test]
 fn an_unindented_line_ends_a_stage() {
-    let text = "source raw [id]\noperation copy(A) -> A\nstage first:\n    a = copy(raw)\n\n    # a comment keeps the stage open\n    b = copy(a)\nc = copy(b)\n";
+    let text = "source raw [id]\noperation copy(a: A) -> A\nstage first:\n    a = copy(raw)\n\n    # a comment keeps the stage open\n    b = copy(a)\nc = copy(b)\n";
     let pipeline = parse_pipeline(text).unwrap();
     assert_eq!(pipeline.stage_of("a"), Some("first"));
     assert_eq!(pipeline.stage_of("b"), Some("first"));
@@ -57,7 +57,7 @@ fn an_unindented_line_ends_a_stage() {
 
 #[test]
 fn a_product_named_stage_is_still_a_step() {
-    let text = "source raw [id]\noperation copy(A) -> A\nstage = copy(raw)\n";
+    let text = "source raw [id]\noperation copy(a: A) -> A\nstage = copy(raw)\n";
     let pipeline = parse_pipeline(text).unwrap();
     assert!(pipeline.stages.is_empty());
     assert_eq!(pipeline.invocations[0].outputs, ["stage"]);
@@ -115,7 +115,7 @@ fn a_stage_path_rule_covers_only_that_stage() {
 
 #[test]
 fn stage_placeholder_needs_a_stage() {
-    let text = "path: {stage}/{product}/{entities}\nsource raw [id]\npath raw: in/{id}\noperation copy(A) -> A\nloose = copy(raw)\n";
+    let text = "path: {stage}/{product}/{entities}\nsource raw [id]\npath raw: in/{id}\noperation copy(a: A) -> A\nloose = copy(raw)\n";
     let diagnostics = diagnose(text, None);
     assert_eq!(
         messages(&diagnostics),
@@ -146,7 +146,7 @@ fn path_placeholder_names_are_reserved() {
 #[test]
 fn stages_must_not_depend_on_each_other_in_a_cycle() {
     // `glue` sits outside every stage, so `late` reads from `second` through it.
-    let text = "source raw [id]\noperation copy(A) -> A\noperation pair(A, A) -> A\nstage first:\n    a = copy(raw)\n    d = pair(a, late)\nstage second:\n    b = copy(a)\nglue = copy(b)\nstage third:\n    late = copy(glue)\n";
+    let text = "source raw [id]\noperation copy(a: A) -> A\noperation pair(a: A, a2: A) -> A\nstage first:\n    a = copy(raw)\n    d = pair(a, late)\nstage second:\n    b = copy(a)\nglue = copy(b)\nstage third:\n    late = copy(glue)\n";
     let diagnostics = diagnose(text, None);
     assert_eq!(
         messages(&diagnostics),
@@ -161,7 +161,7 @@ fn stages_must_not_depend_on_each_other_in_a_cycle() {
 
 #[test]
 fn stages_that_only_read_forward_are_accepted() {
-    let text = "source raw [id]\noperation copy(A) -> A\nstage first:\n    a = copy(raw)\nstage second:\n    b = copy(a)\nstage third:\n    c = copy(a)\n    d = copy(b)\n";
+    let text = "source raw [id]\noperation copy(a: A) -> A\nstage first:\n    a = copy(raw)\nstage second:\n    b = copy(a)\nstage third:\n    c = copy(a)\n    d = copy(b)\n";
     assert!(diagnose(text, None).is_empty());
 }
 
@@ -190,14 +190,14 @@ fn stage_syntax_errors() {
             ),
         ),
         (
-            "source raw [id]\noperation copy(A) -> A\nstage prep:\n    a = copy(raw)\n      b = copy(a)\n",
+            "source raw [id]\noperation copy(a: A) -> A\nstage prep:\n    a = copy(raw)\n      b = copy(a)\n",
             (
                 Some(5),
                 "this line is indented differently from the other lines of stage `prep`",
             ),
         ),
         (
-            "source raw [id]\noperation copy(A) -> A\nstage prep:\n    stage inner:\n        a = copy(raw)\n  b = copy(a)\n",
+            "source raw [id]\noperation copy(a: A) -> A\nstage prep:\n    stage inner:\n        a = copy(raw)\n  b = copy(a)\n",
             (
                 Some(6),
                 "this line is indented differently from the other lines of stage `prep`",
@@ -237,7 +237,7 @@ fn stage_syntax_errors() {
 #[test]
 fn an_empty_stage_is_reported() {
     let text =
-        "source raw [id]\noperation copy(A) -> A\nstage prep:\n    a = copy(raw)\nstage later:\n";
+        "source raw [id]\noperation copy(a: A) -> A\nstage prep:\n    a = copy(raw)\nstage later:\n";
     let diagnostics = diagnose(text, None);
     assert_eq!(
         messages(&diagnostics),
@@ -281,7 +281,7 @@ fn nested_stages_are_named_by_their_path() {
 
 #[test]
 fn the_same_name_can_be_nested_in_different_stages() {
-    let text = "source raw [id]\noperation copy(A) -> A\nstage one:\n    stage part:\n        a = copy(raw)\nstage two:\n    stage part:\n        b = copy(a)\n";
+    let text = "source raw [id]\noperation copy(a: A) -> A\nstage one:\n    stage part:\n        a = copy(raw)\nstage two:\n    stage part:\n        b = copy(a)\n";
     assert!(diagnose(text, None).is_empty());
     let pipeline = parse_pipeline(text).unwrap();
     assert_eq!(pipeline.stage_of("b"), Some("two/part"));
@@ -289,7 +289,7 @@ fn the_same_name_can_be_nested_in_different_stages() {
 
 #[test]
 fn nested_stages_nest_their_paths_and_inherit_defaults() {
-    let text = "path: {stage}/{product}/{entities}\nsource raw [id]\npath raw: in/{id}\noperation copy(A) -> A\nstage outer:\n    path: out/{stage}/{product}/{entities}\n    stage inner:\n        a = copy(raw)\n    stage own:\n        path: own/{product}/{entities}\n        b = copy(a)\n";
+    let text = "path: {stage}/{product}/{entities}\nsource raw [id]\npath raw: in/{id}\noperation copy(a: A) -> A\nstage outer:\n    path: out/{stage}/{product}/{entities}\n    stage inner:\n        a = copy(raw)\n    stage own:\n        path: own/{product}/{entities}\n        b = copy(a)\n";
     let (pipeline, _) = support::parse_fixture(text).unwrap();
     let coverage = inspect_paths(&pipeline).unwrap();
     let rule = |product: &str| {
@@ -343,7 +343,7 @@ fn one_stage_includes_the_stages_nested_in_it() {
 #[test]
 fn nested_siblings_must_not_depend_on_each_other_in_a_cycle() {
     // `glue` sits in `outer` itself, so `b` reads from `first` through it.
-    let text = "source raw [id]\noperation copy(A) -> A\nstage outer:\n    glue : Item [id] = copy(a)\n    stage first:\n        a = copy(raw)\n        c : Item [id] = copy(b)\n    stage second:\n        b = copy(glue)\n";
+    let text = "source raw [id]\noperation copy(a: A) -> A\nstage outer:\n    glue : Item [id] = copy(a)\n    stage first:\n        a = copy(raw)\n        c : Item [id] = copy(b)\n    stage second:\n        b = copy(glue)\n";
     assert_eq!(
         messages(&diagnose(text, None)),
         [(
@@ -355,7 +355,7 @@ fn nested_siblings_must_not_depend_on_each_other_in_a_cycle() {
 
 #[test]
 fn nested_stages_count_toward_their_outer_stages_cycles() {
-    let text = "source raw [id]\noperation copy(A) -> A\nstage prep:\n    stage deep:\n        a : Item [id] = copy(late)\n        c = copy(raw)\nstage later:\n    stage deep:\n        late = copy(c)\n";
+    let text = "source raw [id]\noperation copy(a: A) -> A\nstage prep:\n    stage deep:\n        a : Item [id] = copy(late)\n        c = copy(raw)\nstage later:\n    stage deep:\n        late = copy(c)\n";
     assert_eq!(
         messages(&diagnose(text, None)),
         [(
@@ -367,13 +367,13 @@ fn nested_stages_count_toward_their_outer_stages_cycles() {
 
 #[test]
 fn a_nested_stage_may_read_from_its_outer_stage_and_siblings() {
-    let text = "source raw [id]\noperation copy(A) -> A\nstage outer:\n    base = copy(raw)\n    stage first:\n        a = copy(base)\n    stage second:\n        b = copy(a)\n    top = copy(b)\n";
+    let text = "source raw [id]\noperation copy(a: A) -> A\nstage outer:\n    base = copy(raw)\n    stage first:\n        a = copy(base)\n    stage second:\n        b = copy(a)\n    top = copy(b)\n";
     assert!(diagnose(text, None).is_empty());
 }
 
 #[test]
 fn a_stage_whose_steps_are_all_nested_is_not_empty() {
-    let text = "source raw [id]\noperation copy(A) -> A\nstage outer:\n    stage inner:\n        a = copy(raw)\n    stage idle:\n";
+    let text = "source raw [id]\noperation copy(a: A) -> A\nstage outer:\n    stage inner:\n        a = copy(raw)\n    stage idle:\n";
     assert_eq!(
         messages(&diagnose(text, None)),
         [(Some(6), "stage `outer/idle` has no steps")]
@@ -382,7 +382,7 @@ fn a_stage_whose_steps_are_all_nested_is_not_empty() {
 
 #[test]
 fn a_library_may_group_operations_in_stages() {
-    let text = "stage tools:\n    operation copy(A) -> A\n";
+    let text = "stage tools:\n    operation copy(a: A) -> A\n";
     assert!(diagnose(text, None).is_empty());
 }
 

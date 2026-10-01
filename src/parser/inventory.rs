@@ -6,10 +6,8 @@ use std::fmt;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::model::{
-    Artifact, EntityBinding, InputRules, Pipeline, Removal, SourceInventory, SourceRecord,
-};
-use crate::paths::{unusable_path, PathBinder, PathTemplate};
+use crate::model::{EntityBinding, InputRules, Pipeline, Removal, SourceInventory, SourceRecord};
+use crate::paths::PathTemplate;
 
 use super::keyword::{Header, Keyword};
 use super::lexical::{comma_items, identifier, qualified_identifier, strip_comment};
@@ -94,8 +92,7 @@ pub fn render_source_inventory(
     .to_string()
 }
 
-/// Settled `inventory` as writing it as a `.spitout` for `pipeline` and
-/// `rules` and reading that back gives it, but in its own order, or `None`
+/// Settled `inventory` as writing it as a `.spitout` for `rules` and reading that back gives it, but in its own order, or `None`
 /// when a path rule it would write holds a `#`. Settling gives each record
 /// the path its rule gives, which the text leaves out.
 ///
@@ -105,7 +102,6 @@ pub fn render_source_inventory(
 /// memory will differ from its text. `tests/outputs.rs` compares them.
 pub(crate) fn as_read_back(
     inventory: &SourceInventory,
-    pipeline: &Pipeline,
     rules: &InputRules,
 ) -> Option<SourceInventory> {
     let source_paths = written_source_paths(inventory, rules);
@@ -115,13 +111,6 @@ pub(crate) fn as_read_back(
     {
         return None;
     }
-    debug_assert!({
-        let mut located = pipeline.clone();
-        located.product_paths.extend(source_paths.clone());
-        unexpected_paths(&inventory.artifacts, &located)
-            .iter()
-            .all(Option::is_none)
-    });
     let mut read = inventory.clone();
     read.source_paths = source_paths;
     for record in &mut read.artifacts {
@@ -178,14 +167,11 @@ impl fmt::Display for InventoryText<'_> {
             }
             writeln!(f)?;
         }
-        let mut located = self.pipeline.clone();
-        located.product_paths.extend(source_paths);
-        let unexpected = unexpected_paths(&inventory.artifacts, &located);
-        let (nested, flat) = self.nest_records(&unexpected);
+        let (nested, flat) = self.nest_records();
         if !flat.is_empty() {
             writeln!(f, "sources:")?;
-            for (record, path) in flat {
-                self.write_record(f, record, path)?;
+            for record in flat {
+                self.write_record(f, record)?;
             }
             if !inventory.contexts.is_empty() {
                 writeln!(f)?;
@@ -299,13 +285,8 @@ impl InventoryText<'_> {
     /// Split the records into those written under their discovered context
     /// and those written under `sources:`. A single named discovery gives
     /// each record with its dimensions one unambiguous context, and at most
-    /// one remaining dimension can be grouped under it. A record whose path
-    /// is not the one its rule gives stays flat, so the path is kept.
-    /// `unexpected` holds each record's path when its rule does not give it.
-    fn nest_records<'a>(
-        &'a self,
-        unexpected: &[Option<&'a str>],
-    ) -> (Nested<'a>, Vec<(&'a SourceRecord, Option<&'a str>)>) {
+    /// one remaining dimension can be grouped under it.
+    fn nest_records(&self) -> (Nested<'_>, Vec<&SourceRecord>) {
         let inventory = self.inventory;
         let discovery = match inventory.discovered.iter().next() {
             Some((name, contexts)) if inventory.discovered.len() == 1 => self
@@ -314,13 +295,10 @@ impl InventoryText<'_> {
                 .map(|rule| (contexts.iter().collect::<FxHashSet<_>>(), &rule.dimensions)),
             _ => None,
         };
-        let mut nested: Nested<'a> = FxHashMap::default();
+        let mut nested: Nested<'_> = FxHashMap::default();
         let mut flat = Vec::new();
-        for (record, &path) in inventory.artifacts.iter().zip(unexpected) {
+        for record in &inventory.artifacts {
             let under = discovery.as_ref().and_then(|(contexts, dimensions)| {
-                if path.is_some() {
-                    return None;
-                }
                 let parent = record.entities.project(dimensions)?;
                 let remainder = record.entities.except(dimensions);
                 (contexts.contains(&parent) && remainder.len() <= 1).then_some((parent, remainder))
@@ -332,20 +310,14 @@ impl InventoryText<'_> {
                     .entry(remainder)
                     .or_default()
                     .push(&record.product),
-                None => flat.push((record, path)),
+                None => flat.push(record),
             }
         }
         (nested, flat)
     }
 
-    /// A record under `sources:`, with its path only when its rule does not
-    /// give that path.
-    fn write_record(
-        &self,
-        f: &mut fmt::Formatter<'_>,
-        record: &SourceRecord,
-        unexpected: Option<&str>,
-    ) -> fmt::Result {
+    /// A record under `sources:`; its path rule gives its file.
+    fn write_record(&self, f: &mut fmt::Formatter<'_>, record: &SourceRecord) -> fmt::Result {
         if record.entities.is_empty() {
             write!(f, "    {}", record.product)?;
         } else {
@@ -359,9 +331,6 @@ impl InventoryText<'_> {
                 });
             let entities = in_order(&record.entities, &declared);
             write!(f, "    {}[{entities}]", record.product)?;
-        }
-        if let Some(path) = unexpected {
-            write!(f, ": {path}")?;
         }
         writeln!(f)
     }
@@ -435,37 +404,6 @@ impl InventoryText<'_> {
         }
         Ok(())
     }
-}
-
-/// Preserve a legacy record path without a matching rule so rendering an
-/// invalid inventory does not silently discard its file. Resolution rejects
-/// it. Each record's path, when its rule does not give it; each product's
-/// rule is found once.
-fn unexpected_paths<'a>(records: &'a [SourceRecord], pipeline: &Pipeline) -> Vec<Option<&'a str>> {
-    let mut products = FxHashMap::default();
-    for product in &pipeline.products {
-        products.entry(product.name.as_str()).or_insert(product);
-    }
-    let mut binder = PathBinder::new(pipeline);
-    records
-        .iter()
-        .map(|record| {
-            let given = record.path.as_deref()?;
-            let expected = products.get(record.product.as_str()).and_then(|product| {
-                let artifact = Artifact {
-                    product: &record.product,
-                    artifact_type: &product.artifact_type,
-                    entities: &record.entities,
-                };
-                binder
-                    .bind(&product.dimensions, artifact, || {
-                        format!("source `{artifact}`")
-                    })
-                    .ok()
-            });
-            (expected.as_deref() != Some(given)).then_some(given)
-        })
-        .collect()
 }
 
 /// `binding` as `dim=value,...`, in the order of `declared`, then any
@@ -717,22 +655,17 @@ fn parse_source(line: &str, number: usize) -> Result<SourceRecord, ParseError> {
         None => (bindings, ""),
     };
     let entities = parse_bindings(bindings, number)?;
-    let record = SourceRecord::new(product, entities);
     let path = path.trim();
-    if path.is_empty() {
-        return Ok(record);
+    if !path.is_empty() {
+        return Err(ParseError::new(
+            number,
+            format!(
+                "a source record names no file; its source's path rule gives it, so remove `{path}`"
+            ),
+        )
+        .at_token(path));
     }
-    let path = path
-        .strip_prefix(':')
-        .map(str::trim)
-        .filter(|path| !path.is_empty())
-        .ok_or_else(|| {
-            ParseError::new(number, "expected `: path` after a source record").at_token(path)
-        })?;
-    if let Some(reason) = unusable_path(path) {
-        return Err(ParseError::new(number, format!("source path {reason}")).at_token(path));
-    }
-    Ok(record.at(path))
+    Ok(SourceRecord::new(product, entities))
 }
 
 /// Expand a list of source products under an already bound context.

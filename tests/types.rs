@@ -398,7 +398,7 @@ fn a_type_variable_prints_marked_so_it_differs_from_a_named_type() {
         spit::parse_type_expr(&named.to_string(), false).unwrap(),
         named
     );
-    let text = "source raw : T [id]\noperation f(List<T>) -> T\nout = f(raw)\n";
+    let text = "source raw : T [id]\noperation f(list: List<T>) -> T\nout = f(raw)\n";
     let found = spit::diagnose(text, None);
     assert!(
         found[0]

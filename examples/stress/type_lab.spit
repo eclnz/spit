@@ -10,7 +10,7 @@ source lidar_cal : Calibration<Lidar,Sensor,World> [lab, rig]
 source camera_cal : Calibration<Camera,Sensor,World> [lab, rig]
 source reference : Reference<World> [lab, rig]
 source policy : Policy<World> [lab]
-source atlas : Atlas<World> []
+source atlas : Atlas<World>
 
 path: artifacts/{product}/{entities}.bin
 path atlas: config/world-atlas.bin

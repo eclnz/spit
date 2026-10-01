@@ -92,7 +92,7 @@ fn path_rules_that_cannot_separate_artifacts_are_rejected() {
     );
 
     let error = check(
-        "source raw [id]\npath: {entities}.csv\noperation clean(one)\ncleaned = clean(raw)\n",
+        "source raw [id]\npath: {entities}.csv\noperation clean(input)\ncleaned = clean(raw)\n",
     )
     .unwrap_err();
     assert!(error.message().contains("`raw` and `cleaned`"), "{error}");

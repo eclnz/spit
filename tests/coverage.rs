@@ -36,7 +36,7 @@ fn record(product: &str, pairs: &[(&str, &str)]) -> SourceRecord {
 
 #[test]
 fn coverage_rules_can_require_entity_values() {
-    let text = "source image [subject, run]\nrequire image run=1,2 per [subject]\noperation f(Image) -> Image\nout = f(image)\n";
+    let text = "source image [subject, run]\nrequire image run=1,2 per [subject]\noperation f(image: Image) -> Image\nout = f(image)\n";
     let complete = "sources:\n  image[subject=a,run=1]\n  image[subject=a,run=2]\n";
     assert!(resolve_text(text, complete).is_ok());
     let incomplete = "sources:\n  image[subject=a,run=1]\n  image[subject=a,run=3]\n";

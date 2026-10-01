@@ -15,7 +15,7 @@ source calibration
 
 Each `source` declares a product family, not an individual file. `image[subject=A,visit=1,run=2]` identifies one artifact. Types such as `Image` are optional; product names and entity bindings identify artifacts.
 
-Brackets are optional for a source with no dimensions; `source testset : Data` and `source calibration` each declare one artifact, displayed by its bare name. The explicit `[]` form is also accepted. A source with no dimensions matches every job that takes it as an input, without a selector.
+A source with no dimensions takes no brackets: `source testset : Data` and `source calibration` each declare one artifact, displayed by its bare name. A source with no dimensions matches every job that takes it as an input, without a selector.
 
 An assignment introduces a derived product automatically:
 
@@ -115,9 +115,9 @@ verify register: check_same_grid {moving} {reference}
 
 `spit dag --commands` shows each job's `verify` lines above the command they guard, with their paths filled in.
 
-Input port names are optional. A port written as a lowercase word alone, as in `operation copy(image)`, is named `image` and untyped; type names start with a capital letter. In `source reading : Series [station, day]`, `reading` is the product that identifies artifacts and `Series` is its type: write `operation compare(reading: Series)`, then call it with `compare(reading)`. An unnamed single input is `{input}`; multiple unnamed inputs are `{input1}`, `{input2}`, and so on. An operation whose only input is a `many` input can also reach it as `{inputs}`, whatever its name. Named ports give clearer errors, although errors also name the product bound to a port. `{output}` is the path of a single unnamed output, so `output` cannot name an input port. A command must use every output placeholder; a `verify` command may use inputs only. Command templates give ordered words and arguments, not shell pipelines or redirection; an unquoted `|`, `>`, `&&`, or the like is passed to the program as an argument, and SPIT warns about it. Words are split and quoted as in Bash, and every argument is passed literally: `$` and backticks are not expanded. As in Bash, text in single quotes is literal, so `awk '{print $1}'` needs no escaping; a placeholder is filled in unquoted text or double quotes. Write `{{` or `}}`, or `\{` and `\}`, for a literal brace elsewhere. Every command is checked when the pipeline is loaded: braces and quotes must balance, placeholders must name the operation's ports, and `{output}` must appear.
+Every input port has a name, and its placeholder is that name. A port is written `name`, `name: Type`, `name: many`, or `name: many Type`; a lowercase word alone, as in `operation copy(image)`, is an untyped port, and type names start with a capital letter. In `source reading : Series [station, day]`, `reading` is the product that identifies artifacts and `Series` is its type: write `operation compare(reading: Series)`, then call it with `compare(reading)`. `{output}` is the path of a single unnamed output, so `output` cannot name an input port. A command must use every output placeholder; a `verify` command may use inputs only. Command templates give ordered words and arguments, not shell pipelines or redirection; an unquoted `|`, `>`, `&&`, or the like is passed to the program as an argument, and SPIT warns about it. Words are split and quoted as in Bash, and every argument is passed literally: `$` and backticks are not expanded. As in Bash, text in single quotes is literal, so `awk '{print $1}'` needs no escaping; a placeholder is filled in unquoted text or double quotes. Write `{{` or `}}` for a literal brace elsewhere. Every command is checked when the pipeline is loaded: braces and quotes must balance, placeholders must name the operation's ports, and `{output}` must appear.
 
-Products, operations and dimensions have separate names, so a product may share its operation's name (`coreg = coreg(mc, brain)`) and a dimension may share a product's (`model @ each(model)`). An untyped `many` port is written `many items` or `items: many`; a lone `many` is reached as `{inputs}`.
+Products, operations and dimensions have separate names, so a dimension may share a product's (`model @ each(model)`). A product may also share its operation's name, but `spit check` warns: name the result, as in `coregistered = coreg(mc, brain)`, so the step reads as what it makes.
 
 The first word of a command must be an executable available on `PATH` (or an executable path). SPIT emits that command without managing its installation or loading shell functions:
 
@@ -350,7 +350,7 @@ The header names the columns: `product` and `reason` are optional, and every oth
 
 ## Inputs
 
-A `.spitout` lists a dataset's settled source identities. `spit inputs` writes one, and a dataset indexer or a person can write one too. Paths come from rules in the pipeline or, if a recipe supplies a source rule, a `source_paths:` section written once in the `.spitout`. A record ending in `: path` is accepted for older inventories only if that path agrees with its rule. `contexts:` names a group even when one of its required inputs is absent:
+A `.spitout` lists a dataset's settled source identities. `spit inputs` writes one, and a dataset indexer or a person can write one too. Paths come from rules in the pipeline or, if a recipe supplies a source rule, a `source_paths:` section written once in the `.spitout`. `contexts:` names a group even when one of its required inputs is absent:
 
 ```text
 contexts:
@@ -378,7 +378,7 @@ source_paths:
     image: data/sub-{sub}/image.nii.gz
 ```
 
-The DAG can then use the rule without loading the recipe. Per-record paths cannot redirect an artifact away from it.
+The DAG can then use the rule without loading the recipe. A record names no file of its own: its source's path rule gives it.
 
 `spit inputs` also writes what the recipe's `exclude` and `drop` rules removed, each with its rule, where the rule is, how many a counting rule found, and the reason:
 

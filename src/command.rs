@@ -8,7 +8,7 @@ use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
-use crate::model::{Cardinality, CommandRole, DefaultPort, OperationDef, Pipeline};
+use crate::model::{Cardinality, CommandRole, OperationDef, Pipeline};
 use crate::parser::SourceMap;
 use crate::span::Located;
 use crate::template::{parse_template, Part};
@@ -103,15 +103,11 @@ pub(crate) fn slot(operation: &OperationDef, name: &str) -> Option<Slot> {
     if let Some(index) = operation.inputs.iter().position(|port| port.name == name) {
         return Some(Slot::Input(index));
     }
-    if let Some(index) = operation.outputs.iter().position(|port| port.name == name) {
-        return Some(Slot::Output(index));
-    }
-    match operation.inputs.as_slice() {
-        [port] if port.cardinality == Cardinality::Many && name == DefaultPort::Inputs.name() => {
-            Some(Slot::Input(0))
-        }
-        _ => None,
-    }
+    operation
+        .outputs
+        .iter()
+        .position(|port| port.name == name)
+        .map(Slot::Output)
 }
 
 /// Check every declared command against its operation without resolving jobs:

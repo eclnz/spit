@@ -12,7 +12,7 @@ pub use self::bind::{
 pub(crate) use self::rules::collect_paths;
 pub use self::rules::{inspect_paths, PathCoverage, PathCoverageEntry, PathRule};
 pub(crate) use self::template::{
-    decode_component, encode_component, error, require_directory, unusable_path,
-    validate_discovery_rule, PathBinder, PathPart, PathPlaceholder,
+    decode_component, encode_component, error, require_directory, validate_discovery_rule,
+    PathBinder, PathPart, PathPlaceholder,
 };
 pub use self::template::{PathError, PathProblem, PathTemplate};

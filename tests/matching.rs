@@ -161,7 +161,7 @@ fn where_pins_a_dimension_the_driver_lacks() {
 
 #[test]
 fn where_filters_the_driver_and_removes_its_dimension_from_the_output() {
-    let text = "source image [site, echo]\noperation keep(Image) -> Image\nfirst = keep(image @ where(echo=1))\n";
+    let text = "source image [site, echo]\noperation keep(image: Image) -> Image\nfirst = keep(image @ where(echo=1))\n";
     let (pipeline, _) = support::parse_fixture(text).unwrap();
     assert_eq!(pipeline.products[1].dimensions, ["site"]);
     let dag = resolve(
@@ -421,11 +421,11 @@ fn min_rejects_a_collection_that_is_too_small() {
     ));
     for (declaration, expected) in [
         (
-            "operation f(A) -> B @ min(2)",
+            "operation f(a: A) -> B @ min(2)",
             "`@ min(count)` requires a many input",
         ),
         (
-            "operation f(many A) -> B @ min(0)",
+            "operation f(as: many A) -> B @ min(0)",
             "needs a positive integer",
         ),
     ] {

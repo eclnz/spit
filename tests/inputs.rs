@@ -13,7 +13,7 @@ use spit::{parse_input_spec, parse_pipeline, resolve, InputSource, ResolveError,
 
 const PIPELINE: &str = "\
 source image: Image [sub, ses]
-operation process(Image) -> Image
+operation process(image: Image) -> Image
 result = process(image)
 ";
 
@@ -218,7 +218,7 @@ fn a_named_recipe_runs_in_memory_and_defaults_output_paths() {
     fs::write(
         &pipeline_file,
         "source image: Image [sub, ses]\n\
-         operation process(Image) -> Image\n\
+         operation process(image: Image) -> Image\n\
          result = process(image)\n",
     )
     .unwrap();
@@ -277,7 +277,7 @@ fn explicit_spitin_uses_its_own_directory_and_require_reports_gaps() {
     fs::write(
         &pipeline_file,
         "source image [sub, ses]\n\
-         operation process(Image) -> Image\n\
+         operation process(image: Image) -> Image\n\
          result = process(image)\n",
     )
     .unwrap();
@@ -360,7 +360,7 @@ fn a_spitout_writes_values_in_the_declared_dimension_order() {
 #[test]
 fn a_discovered_spitout_groups_sources_by_session() {
     let pipeline = parse_pipeline(
-        "source image: Image [sub, ses, run]\nsource t1w: Image [sub, ses]\nsource lut: Table []\n",
+        "source image: Image [sub, ses, run]\nsource t1w: Image [sub, ses]\nsource lut: Table\n",
     )
     .unwrap();
     let recipe =
@@ -401,7 +401,7 @@ fn a_spitout_alone_drives_jobs_without_its_recipe() {
     let pipeline = tree.path().join("analysis.spit");
     fs::write(
         &pipeline,
-        format!("{PIPELINE}path result: results/{{sub}}_{{ses}}.nii.gz\ncommand process: tool {{input}} {{output}}\n"),
+        format!("{PIPELINE}path result: results/{{sub}}_{{ses}}.nii.gz\ncommand process: tool {{image}} {{output}}\n"),
     )
     .unwrap();
     let recipe = tree.path().join("dataset.spitin");
@@ -455,18 +455,13 @@ fn a_spitout_alone_drives_jobs_without_its_recipe() {
 
 #[test]
 fn a_record_cannot_redirect_one_source_away_from_its_path_rule() {
-    let pipeline =
-        parse_pipeline("source image: Image [sub]\npath image: data/sub-{sub}/image.nii.gz\n")
-            .unwrap();
-    let inventory =
+    let error =
         spit::parse_source_inventory("sources:\n    image[sub=01]: elsewhere/image.nii.gz\n")
-            .unwrap();
-    let error = parse_input_spec("")
-        .unwrap()
-        .resolve(&pipeline, InputSource::Inventory(inventory))
-        .unwrap_err();
+            .unwrap_err();
     assert!(
-        error.to_string().contains("differs from its path rule"),
+        error
+            .to_string()
+            .contains("so remove `: elsewhere/image.nii.gz`"),
         "{error}"
     );
 
@@ -488,7 +483,9 @@ fn a_record_cannot_redirect_one_source_away_from_its_path_rule() {
         .output()
         .unwrap();
     assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("differs from its path rule"));
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("so remove `: elsewhere/image.nii.gz`")
+    );
 }
 
 #[test]

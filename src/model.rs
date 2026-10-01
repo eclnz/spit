@@ -718,46 +718,6 @@ impl OutputPort {
 /// The port name of an operation's only, unnamed output.
 pub(crate) const DEFAULT_OUTPUT: &str = "output";
 
-/// A placeholder a command has without its operation naming the port.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum DefaultPort {
-    /// `{input}`: an operation's only input, when unnamed.
-    Input,
-    /// `{input1}`, `{input2}`, ...: the unnamed inputs of an operation with
-    /// several, numbered from 1.
-    InputAt(usize),
-    /// `{inputs}`: an operation's only input when that is a many input,
-    /// whatever its name.
-    Inputs,
-}
-
-impl DefaultPort {
-    /// The name SPIT gives the unnamed input at `index` of `count` inputs.
-    pub fn for_input(index: usize, count: usize) -> Self {
-        if count == 1 {
-            Self::Input
-        } else {
-            Self::InputAt(index + 1)
-        }
-    }
-
-    /// The name between the braces.
-    pub fn name(self) -> String {
-        match self {
-            Self::Input => "input".to_owned(),
-            Self::InputAt(number) => format!("input{number}"),
-            Self::Inputs => "inputs".to_owned(),
-        }
-    }
-}
-
-/// Reads as the placeholder is written, such as `{input2}`.
-impl fmt::Display for DefaultPort {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{{{}}}", self.name())
-    }
-}
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct OperationDef {
     pub name: String,
