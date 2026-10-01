@@ -4,7 +4,9 @@
 
 use crate::model::{CommandRole, Invocation};
 
-use super::declarations::{parse_discover, parse_invocation_parts, parse_path, parse_product};
+use super::declarations::{
+    parse_dimension_order, parse_discover, parse_invocation_parts, parse_path, parse_product,
+};
 use super::keyword::{removed_section, Keyword};
 use super::lexical::{comma_items, identifier, strip_comment};
 use super::source_map::{name_place, step_place};
@@ -150,6 +152,10 @@ fn flow_line(
             top_level_only("`source`, which declares an input,")?;
             StatementKind::product(original, declaration.trim(), number)?
         }
+        Some((Keyword::Dimensions, declaration)) => {
+            top_level_only("`dimensions`, which orders the whole pipeline,")?;
+            StatementKind::Dimensions(parse_dimension_order(declaration, number)?)
+        }
         Some((Keyword::Discover, declaration)) => {
             top_level_only("`discover`")?;
             StatementKind::Discover(parse_discover(declaration.trim(), number)?)
@@ -203,7 +209,7 @@ fn flow_statement(
             number,
             format!(
                 "`{word}` does not start a statement; {hint}a pipeline line starts with \
-                 source, operation, command, verify, path, stage or use, or is a step \
+                 source, dimensions, operation, command, verify, path, stage or use, or is a step \
                  `output = operation(inputs)`, and a recipe line starts with pipeline, \
                  discover, require, drop, exclude or path"
             ),
@@ -271,8 +277,9 @@ fn parse_flow_output(left: &str, number: usize) -> Result<FlowOutput, ParseError
 }
 
 /// The words a statement can start with, for suggesting one.
-const STATEMENT_WORDS: [&str; 12] = [
+const STATEMENT_WORDS: [&str; 13] = [
     "source",
+    "dimensions",
     "operation",
     "command",
     "verify",

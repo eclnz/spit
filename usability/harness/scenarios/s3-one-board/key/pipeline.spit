@@ -1,3 +1,4 @@
+dimensions [model, config, seed]
 source model : Weights [model]
 path model: models/{model}.pt
 source config : Config [config]
@@ -20,7 +21,7 @@ metrics = evaluate(trained, testset)
 operation summarise(runs: many Metrics) -> Summary
 command summarise: summarise --out {output} {runs}
 path summary: summaries/{model}/{config}.json
-summary : Summary [model, config] = summarise(metrics @ vary(seed))
+summary = summarise(metrics @ vary(seed))
 
 operation leaderboard(summaries: many Summary) -> Table
 command leaderboard: leaderboard --out {output} {summaries}

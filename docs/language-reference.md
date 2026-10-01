@@ -24,11 +24,25 @@ processed = process(image)
 average = mean(processed @ vary(run))
 ```
 
-The input with the most dimensions drives a normal operation and gives its outputs their dimensions, wherever it sits among the ports. Its observed artifacts determine the initial jobs: an input with `[config, seed]` creates only the config and seed pairs actually present, rather than every combination of known values. For an aggregation, `vary(run)` removes `run` from the output identity; `@ each(...)` adds a dimension, as described under selectors. You can write the output type and dimensions explicitly when helpful:
+The input with the most dimensions drives a normal operation and gives its outputs their dimensions, wherever it sits among the ports. Its observed artifacts determine the initial jobs: an input with `[config, seed]` creates only the config and seed pairs actually present, rather than every combination of known values. For an aggregation, `vary(run)` removes `run` from the output identity; `@ each(...)` adds a dimension, as described under selectors. You can write the output type and dimensions explicitly when helpful; SPIT checks them against the step and the [dimension order](#dimension-order):
 
 ```text
 average : Image [subject, visit] = mean(processed @ vary(run))
 ```
+
+### Dimension order
+
+A pipeline has one dimension order, and every product lists its dimensions in it. The order decides how a `many` input's artifacts are sorted, so the order of their command arguments, and how `{entities}` and displayed identities are written.
+
+Each source states the order of its own dimensions: `source bold [sub, ses, run]` puts `sub` before `ses` before `run`. Most pipelines need nothing more. Two sources that order a pair differently are an error.
+
+When a product holds two dimensions that no source orders, declare the order once, anywhere at the top level:
+
+```text
+dimensions [model, config, seed]
+```
+
+This happens when `@ each` broadcasts a dimension that no source shares with the driving input's: in the [ragged sweep](examples.md#ragged-sweep-correlated-seeds-and-collection-order), `trained` holds `model` and `config`, and without the line `spit check` stops there and suggests one. A `dimensions` line names every dimension in the pipeline once, and each source must list its dimensions in that order. A step's output written with its dimensions, as in `summary : Summary [model, config] = ...`, must list them in the pipeline's order; the annotation checks the order, it does not set it.
 
 ## Operations and commands
 
@@ -40,7 +54,7 @@ operation mean(images: many Image) -> Image
 command mean: mean_tool {images} --out {output}
 ```
 
-Declare an operation before its first use. Inputs in a call follow the port order in the declaration, and SPIT checks each product's type against that port. For example, with `operation compare(series: Series, policy: Policy)`, `compare(reading, policy)` uses `reading` as `series`; reversing the arguments is a type error when their types are known. A `one` input must resolve to exactly one artifact for each job, so every other input may only use dimensions the driving input has, unless it broadcasts them with `@ each(...)`; SPIT rejects a pipeline that breaks this before reading any inputs, and reports a missing match for a job. Every `many` input names the dimensions it collects at the call, with `@ vary(dimension, ...)`; the operation only says `many`, so one operation can collect runs in one step and sessions in another. Its command placeholder expands to one separately quoted argument per artifact, in natural order. Artifacts are compared dimension by dimension in the product's declared order. Within a value, runs of digits compare as numbers and other characters compare one by one, so `run=2` comes before `run=10`, ISO dates such as `2026-09-01` sort by date, and names sort by character (`lr-high`, `lr-low`, `warmup`). Values equal as numbers but written differently, such as `1` and `01`, are then ordered by their text. A many placeholder must occupy a whole argument. An operation takes at most one `many` input, which may sit beside `one` inputs; each of those is matched once per group:
+Declare an operation before its first use. Inputs in a call follow the port order in the declaration, and SPIT checks each product's type against that port. For example, with `operation compare(series: Series, policy: Policy)`, `compare(reading, policy)` uses `reading` as `series`; reversing the arguments is a type error when their types are known. A `one` input must resolve to exactly one artifact for each job, so every other input may only use dimensions the driving input has, unless it broadcasts them with `@ each(...)`; SPIT rejects a pipeline that breaks this before reading any inputs, and reports a missing match for a job. Every `many` input names the dimensions it collects at the call, with `@ vary(dimension, ...)`; the operation only says `many`, so one operation can collect runs in one step and sessions in another. Its command placeholder expands to one separately quoted argument per artifact, in natural order. Artifacts are compared dimension by dimension in the pipeline's [dimension order](#dimension-order). Within a value, runs of digits compare as numbers and other characters compare one by one, so `run=2` comes before `run=10`, ISO dates such as `2026-09-01` sort by date, and names sort by character (`lr-high`, `lr-low`, `warmup`). Values equal as numbers but written differently, such as `1` and `01`, are then ordered by their text. A many placeholder must occupy a whole argument. An operation takes at most one `many` input, which may sit beside `one` inputs; each of those is matched once per group:
 
 ```text
 operation summarise(days: many Series, policy: Policy) -> Summary @ min(2)
@@ -56,7 +70,7 @@ operation leaderboard(summaries: many Summary) -> Table
 board = leaderboard(summary @ vary(model, config))
 ```
 
-`@ min(n)` counts the whole collection, across both dimensions. A call that writes two `@ vary` clauses is an error; put both dimensions in one clause. The collection order follows the input product's declared dimension order, even if `@ vary` lists those dimensions in another order. The [ragged sweep walkthrough](examples.md#ragged-sweep-correlated-seeds-and-collection-order) shows an explicit `[model, config]` output and the resulting model-first collection.
+`@ min(n)` counts the whole collection, across both dimensions. A call that writes two `@ vary` clauses is an error; put both dimensions in one clause. The collection order follows the pipeline's [dimension order](#dimension-order), even if `@ vary` lists those dimensions in another order. The [ragged sweep walkthrough](examples.md#ragged-sweep-correlated-seeds-and-collection-order) declares `dimensions [model, config, seed]` and gets a model-first collection.
 
 Selectors narrow what an input matches. The [sensors walkthrough](examples.md#sensors-selectors-verification-and-two-outputs) shows `where` and `same` with a complete inventory:
 
@@ -70,6 +84,7 @@ anomaly = compare(calibrated, reference @ same(station))
 `each` does the reverse of `vary`: it broadcasts an input over a dimension the driving input lacks, so the step runs once for every value and its outputs gain that dimension:
 
 ```text
+dimensions [station, scenario]
 source reading : Series [station]
 source model : Model [scenario]
 source parameters : Parameters [scenario]
@@ -77,7 +92,7 @@ source parameters : Parameters [scenario]
 forecast = predict(reading, model @ each(scenario), parameters)
 ```
 
-With two stations and two scenarios, this makes four `forecast[station=...,scenario=...]` jobs. The values come from the artifacts of the broadcast input, so adding a scenario to the inputs adds its jobs. Other inputs are matched on the new dimension as usual; here `parameters` supplies the settings for each scenario. Only one input may broadcast a given dimension, and the driving input must not already have it. A broadcast dimension comes after the driving input's dimensions, so here `forecast` has dimensions `[station, scenario]`, the order `{entities}` writes them in. `each` pairs with `vary`, so a sweep can be collected again. It crosses only the broadcast input's observed values with each driving artifact; values held by other inputs stay correlated through matching. The [ragged sweep walkthrough](examples.md#ragged-sweep-correlated-seeds-and-collection-order) shows models crossed with observed config/seed pairs without inventing a missing seed:
+With two stations and two scenarios, this makes four `forecast[station=...,scenario=...]` jobs. The values come from the artifacts of the broadcast input, so adding a scenario to the inputs adds its jobs. Other inputs are matched on the new dimension as usual; here `parameters` supplies the settings for each scenario. Only one input may broadcast a given dimension, and the driving input must not already have it. No source holds both `station` and `scenario`, so the `dimensions` line orders them, and `forecast` has dimensions `[station, scenario]`. `each` pairs with `vary`, so a sweep can be collected again. It crosses only the broadcast input's observed values with each driving artifact; values held by other inputs stay correlated through matching. The [ragged sweep walkthrough](examples.md#ragged-sweep-correlated-seeds-and-collection-order) shows models crossed with observed config/seed pairs without inventing a missing seed:
 
 ```text
 trial = simulate(reading, seed @ each(rep))
@@ -190,7 +205,7 @@ A template fills these placeholders from the artifact it names, here `aligned[su
 | Placeholder | Expands to | Example |
 | --- | --- | --- |
 | `{product}` | The product's name; an imported `alias::name` becomes `alias.name` | `aligned` |
-| `{entities}` | Every dimension as `dim=value`, in declared order, joined by `__`; `global` for a product with no dimensions | `subject=A__run=2` |
+| `{entities}` | Every dimension as `dim=value`, in the pipeline's dimension order, joined by `__`; `global` for a product with no dimensions | `subject=A__run=2` |
 | `{stage}` | The stage whose block holds the step, one directory per level; an error for a product made outside every stage | `preprocess/align` |
 | `{subject}`, `{run}`, … | The value of a dimension the product declares | `A`, `2` |
 

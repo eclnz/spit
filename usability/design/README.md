@@ -17,7 +17,7 @@ The plans that answer the [usability findings](../FINDINGS.md), and the order to
 
 - **Done:** steps 1–15 and 17. Phase 1, Phase 2, and Phase 3 are complete; the worked examples and extension update are in place. Step 16 was declined.
 - **Second-study actions:** items 1–4 are done. Item 6, the rerun, becomes round 3, after Phase 5; item 5 is judged from round 3's results.
-- **Next:** Phase 5, [one way to write each thing](one-way.md): steps 18 and 19 are done; step 20 is next.
+- **Next:** Phase 5, [one way to write each thing](one-way.md): steps 18–20 are done; step 21 is next.
 - **Resolved so far:** B1–B7, F1–F10, D1–D11.
 
 ## Order
@@ -149,6 +149,7 @@ Settle the forms round 2 left open. See [one way to write each thing](one-way.md
 19. **The call says which dimensions are collected.** `@ vary` is required on every `many` input; `@ drop` on an operation is an error; `@ min` stays. See [decision 1](one-way.md#1-the-call-says-which-dimensions-are-collected).
     Done: the operation parser rejects `@ drop(...)` with the call to write, a `many` input without `@ vary` names its port, and the inference and the contract check are gone. Every pipeline, test, harness key and walkthrough now writes `@ vary` at the call; the keys resolve to the same jobs.
 20. **One dimension order for the pipeline,** derived from sources, with `dimensions [...]` required only for pairs no source orders. `@ each` dimensions take their place in it, and product annotations become checks. See [decision 2](one-way.md#2-one-dimension-order-for-the-pipeline).
+    Done: lowering orders every product (`src/order.rs`). Sources give the order, `dimensions [...]` declares it, and a pair nothing orders, sources that disagree, a line that leaves out or invents a dimension, and an annotation in another order are errors at their line. The ragged sweep, the reference's `each` example and both sweep keys declare `dimensions [model, config, seed]` or its equivalent; the keys resolve to the same jobs.
 21. **The remaining syntax doubles:** `source x []`, the extra `many` port forms and nameless ports, positional placeholders and the `{inputs}` alias, `\{` escapes, `: path` records, and the warning for a product named like its operation. See [syntax doubles](one-way.md#5-one-form-for-each-syntax-double).
 22. **The VS Code extension:** drop `@ drop` and the sectioned headers from the grammar, and add `dimensions`.
 23. **Round 3:** rerun the scenarios with the settled language, as [second-study action 6](round2-actions.md#6-repeat-the-affected-usability-tasks) describes, keeping transcripts. Compare how alike the participants' pipelines are, not only whether the keys pass. Then decide [decision 3](one-way.md#3-the-pipeline-says-how-to-compute-the-recipe-says-which-data-after-round-3) and [decision 4](one-way.md#4-types-catch-wrong-connections-after-round-3).

@@ -440,6 +440,34 @@ pub(super) fn type_error(number: usize, ty: &str, error: TypeParseError) -> Pars
     ParseError::new(number, error.message).at_token(&ty[error.span])
 }
 
+/// The list after `dimensions`, as in `dimensions [model, config, seed]`.
+pub(super) fn parse_dimension_order(text: &str, number: usize) -> Result<Vec<String>, ParseError> {
+    let text = text.trim();
+    let list = text
+        .strip_prefix('[')
+        .and_then(|list| list.strip_suffix(']'))
+        .ok_or_else(|| {
+            ParseError::new(number, "expected `dimensions [first, second, ...]`").at_token(text)
+        })?;
+    let mut order: Vec<String> = Vec::new();
+    for dimension in comma_items(list, number)? {
+        let dimension = identifier(dimension, number, "dimension")?;
+        if order.iter().any(|known| known == dimension) {
+            return Err(
+                ParseError::new(number, format!("`dimensions` repeats `{dimension}`"))
+                    .at_token(dimension),
+            );
+        }
+        order.push(dimension.to_owned());
+    }
+    if order.is_empty() {
+        return Err(
+            ParseError::new(number, "`dimensions` needs at least one dimension").at_token(text),
+        );
+    }
+    Ok(order)
+}
+
 pub(super) fn parse_product(line: &str, number: usize) -> Result<ProductDef, ParseError> {
     let (declaration, dimensions) = match line.split_once('[') {
         Some((declaration, dimensions)) => (declaration, Some(dimensions)),

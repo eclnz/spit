@@ -1,4 +1,6 @@
 # Each config has its own seeds; every model is tried with every seed.
+# No source orders `model` and `config`, so the pipeline declares it.
+dimensions [model, config, seed]
 source model : Weights [model]
 path model: models/{model}.pt
 source config : Config [config]

@@ -235,6 +235,7 @@ fn selectors_are_checked_against_the_port_and_product() {
 }
 
 const PREDICT: &str = "\
+dimensions [station, scenario]
 source reading [station]
 source model [scenario]
 source parameters [scenario]
@@ -278,6 +279,7 @@ fn each_runs_a_step_for_every_value_an_input_broadcasts() {
 #[test]
 fn a_broadcast_dimension_can_be_collected_again() {
     let text = "\
+dimensions [station, rep]
 source reading [station]
 source seed [rep]
 operation simulate(reading: Series, seed: Seed) -> Series

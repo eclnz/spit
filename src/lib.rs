@@ -10,6 +10,7 @@ mod inputs;
 mod json;
 mod lower;
 mod model;
+mod order;
 mod parser;
 mod paths;
 mod render;

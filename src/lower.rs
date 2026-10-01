@@ -1,6 +1,7 @@
 //! Lower a parsed [`Syntax`] to a [`Pipeline`]: merge imports, check that
-//! names are declared once and before they are used, and infer the
-//! dimensions of the products a flow step declares without them.
+//! names are declared once and before they are used, infer the dimensions
+//! of the products a flow step declares without them, and put every
+//! product's dimensions in the pipeline's order.
 
 use std::collections::BTreeMap;
 
@@ -9,6 +10,7 @@ use crate::model::{
     Cardinality, CommandDef, CoverageRule, Exclusion, InputBinding, InputRules, Invocation,
     OperationDef, Pipeline, ProductDef, SourceInventory, StageDef,
 };
+use crate::order::{order_dimensions, Output};
 use crate::parser::{
     parse_source_inventory, parse_syntax, split_document, without_bom, ExcludeLine, FlowStep, Kind,
     ParseError, ParseErrorKind, PathRule, Rule, SourceMap, Statement, StatementKind, Step, Syntax,
@@ -24,6 +26,10 @@ pub(crate) struct PipelineBuilder {
     pub(crate) pipeline: Pipeline,
     pub(crate) inputs: InputRules,
     pub(crate) lines: SourceMap,
+    /// The `dimensions [...]` line, and where it is.
+    dimension_order: Option<(Vec<String>, Place)>,
+    /// Each product a step makes, and whether the step wrote its dimensions.
+    outputs: BTreeMap<String, Output>,
 }
 
 impl PipelineBuilder {
@@ -133,6 +139,12 @@ impl PipelineBuilder {
         let invocation = invocation.clone();
         let dimensions = inferred_dimensions(&invocation, operation, &self.pipeline);
         for (index, output) in outputs.iter().enumerate() {
+            let declared = if output.dimensions.is_some() {
+                Output::Annotated
+            } else {
+                Output::Inferred
+            };
+            self.outputs.insert(output.name.clone(), declared);
             let product = ProductDef::new(
                 output.name.clone(),
                 output.artifact_type.clone().unwrap_or(TypeExpr::Unknown),
@@ -172,10 +184,16 @@ pub(crate) fn lower(
         lower_statement(&mut builder, imports, statement)
             .map_err(|error| error.within(&statement.place))?;
     }
-    match &syntax.error {
-        Some(error) => Err(error.clone()),
-        None => Ok(builder),
+    if let Some(error) = &syntax.error {
+        return Err(error.clone());
     }
+    order_dimensions(
+        &mut builder.pipeline.products,
+        &builder.outputs,
+        builder.dimension_order.as_ref(),
+        &builder.lines,
+    )?;
+    Ok(builder)
 }
 
 fn lower_statement(
@@ -221,6 +239,15 @@ fn lower_statement(
         }
         StatementKind::Command(command, place) => {
             builder.add_command(command.clone(), place.clone());
+        }
+        StatementKind::Dimensions(order) => {
+            if builder.dimension_order.is_some() {
+                return Err(ParseError::new(
+                    statement.place.line,
+                    "a pipeline has one `dimensions` line",
+                ));
+            }
+            builder.dimension_order = Some((order.clone(), statement.place.clone()));
         }
         StatementKind::Path(rule) => builder.add_path(rule, statement.place.line)?,
         StatementKind::FlowStep(flow) => builder.add_flow_step(flow)?,

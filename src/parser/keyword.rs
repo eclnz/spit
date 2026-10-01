@@ -19,11 +19,13 @@ pub(crate) enum Keyword {
     /// `path:` for a default, `path product:` for one product.
     Path,
     Stage,
+    /// `dimensions [...]`, the order every product's dimensions follow.
+    Dimensions,
     /// The removed `shell-source:` line, kept to explain its removal.
     ShellSource,
 }
 
-const WORDS: [(Keyword, &str); 11] = [
+const WORDS: [(Keyword, &str); 12] = [
     (Keyword::Use, "use"),
     (Keyword::Source, "source"),
     (Keyword::Discover, "discover"),
@@ -35,12 +37,13 @@ const WORDS: [(Keyword, &str); 11] = [
     (Keyword::Drop, "drop"),
     (Keyword::Exclude, "exclude"),
     (Keyword::Stage, "stage"),
+    (Keyword::Dimensions, "dimensions"),
 ];
 
 impl Keyword {
     /// The keyword `line` starts with, and the text after it. A trimmed
-    /// line is expected. `stage` opens a stage only without `=`, since a
-    /// step's output product may be called `stage`.
+    /// line is expected. `stage` and `dimensions` start a statement only
+    /// without `=`, since a step's output product may have either name.
     pub(crate) fn split(line: &str) -> Option<(Self, &str)> {
         if let Some(rest) = line.strip_prefix("shell-source:") {
             return Some((Self::ShellSource, rest));
@@ -52,7 +55,7 @@ impl Keyword {
         }
         let (word, rest) = line.split_once(' ')?;
         let (keyword, _) = WORDS.iter().find(|(_, name)| *name == word)?;
-        if *keyword == Self::Stage && line.contains('=') {
+        if matches!(keyword, Self::Stage | Self::Dimensions) && line.contains('=') {
             return None;
         }
         Some((*keyword, rest))
