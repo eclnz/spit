@@ -25,11 +25,11 @@ use spit::{
     bind_dag, bind_dag_with, diagnose_checked, diagnose_checked_with_inventory,
     diagnose_checked_with_records, diagnose_recipe, inspect_paths, parse_input_spec_at,
     render_artifacts, render_bound_dag, render_check_json, render_dag, render_diagnostics_json,
-    render_source_inventory, resolve_artifacts_partial, stage_within, unused_sources_summary,
-    validate_bound_source_files, validate_source_files, ArtifactReport, BoundDag, BoundPaths,
-    Checked, Context, Diagnosis, Diagnostic, DiagnosticSource, FileNames, Gap, InputSource,
-    InputSpec, LeftOut, PathTemplate, Pipeline, Removal, ResolvedDag, ResolvedInputs, Severity,
-    View,
+    render_editor_json, render_source_inventory, resolve_artifacts_partial, stage_within,
+    unused_sources_summary, validate_bound_source_files, validate_source_files, ArtifactReport,
+    BoundDag, BoundPaths, Checked, Context, Diagnosis, Diagnostic, DiagnosticSource, FileNames,
+    Gap, InputSource, InputSpec, LeftOut, PathTemplate, Pipeline, Removal, ResolvedDag,
+    ResolvedInputs, Severity, View,
 };
 
 #[derive(Clone, Copy, PartialEq)]
@@ -58,7 +58,8 @@ struct CommandSpec {
 impl Command {
     fn spec(self) -> CommandSpec {
         use Flag::{
-            Commands, Json, Output, Partial, PathRules, Paths, Root, Stdin, StrictPaths, Unmatched,
+            Commands, Hovers, Json, Output, Partial, PathRules, Paths, Root, Stdin, StrictPaths,
+            Unmatched,
         };
         match self {
             Self::Check => CommandSpec {
@@ -66,7 +67,7 @@ impl Command {
                 files: "<pipeline.spit | recipe.spitin>",
                 summary: "step 1: compile a pipeline, or check a recipe against its pipeline; reads no data",
                 example: "spit check analysis.spit\n  spit check dataset.spitin",
-                flags: &[PathRules, StrictPaths, Json, Stdin],
+                flags: &[PathRules, StrictPaths, Json, Stdin, Hovers],
             },
             Self::Inputs => CommandSpec {
                 name: "inputs",
@@ -150,9 +151,10 @@ enum Flag {
     StrictPaths,
     Json,
     Stdin,
+    Hovers,
 }
 
-const FLAGS: [Flag; 10] = [
+const FLAGS: [Flag; 11] = [
     Flag::Root,
     Flag::Output,
     Flag::Paths,
@@ -163,6 +165,7 @@ const FLAGS: [Flag; 10] = [
     Flag::StrictPaths,
     Flag::Json,
     Flag::Stdin,
+    Flag::Hovers,
 ];
 
 /// Pairs of flags that cannot be used together.
@@ -190,6 +193,7 @@ impl Flag {
             Self::StrictPaths => "--strict-paths",
             Self::Json => "--json",
             Self::Stdin => "--stdin",
+            Self::Hovers => "--hovers",
         }
     }
 
@@ -224,6 +228,9 @@ impl Flag {
             (Self::Json, _) => "print the .spitdag",
             (Self::Stdin, _) => {
                 "read the file's text from standard input; the file names its location"
+            }
+            (Self::Hovers, _) => {
+                "include operation and product hovers with --json (pipelines only)"
             }
         }
     }
@@ -283,6 +290,9 @@ impl Flags {
 
     /// Fail if two flags that cannot be used together were both given.
     fn check_conflicts(&self, command: Command) -> Result<(), String> {
+        if self.has(Flag::Hovers) && !self.has(Flag::Json) {
+            return Err(misuse("--hovers requires --json", Some(command)));
+        }
         for (first, second) in CONFLICTS {
             if self.has(first) && self.has(second) {
                 if (first, second) == (Flag::Commands, Flag::Output) {
@@ -530,6 +540,9 @@ fn check(args: &CliArgs) -> Result<(), Box<dyn Error>> {
         read_file(file)?
     };
     if is_recipe(file) {
+        if args.has(Flag::Hovers) {
+            return Err("--hovers describes a .spit pipeline, not a recipe".into());
+        }
         let diagnostics = diagnose_recipe(&text, path);
         if args.has(Flag::Json) {
             print!("{}", render_diagnostics_json(&diagnostics, &text, None));
@@ -568,7 +581,19 @@ fn check(args: &CliArgs) -> Result<(), Box<dyn Error>> {
             Ok(checked) => render_check_json(&checked.warnings, &text, &checked.paths),
             Err(all) => render_diagnostics_json(all, &text, None),
         };
-        print!("{json}");
+        if args.has(Flag::Hovers) {
+            let paths = match &diagnosis {
+                Ok(checked) => checked.paths.as_slice(),
+                Err(_) => &[],
+            };
+            let diagnostics = match &diagnosis {
+                Ok(checked) => checked.warnings.as_slice(),
+                Err(all) => all.as_slice(),
+            };
+            print!("{}", render_editor_json(diagnostics, &text, path, paths));
+        } else {
+            print!("{json}");
+        }
         return Ok(());
     }
     let checked = passed(
