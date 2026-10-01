@@ -2,7 +2,7 @@
 # revision, compared with a station reference, split into two bands, and
 # summarised per station under that station's policy.
 
-path: derived/{product}/{entities}.csv
+path: derived/{@product}/{@entities}.csv
 
 source reading : Series [station, day]
 path reading: raw/{station}/{day}.csv

@@ -81,7 +81,7 @@ fn an_imported_source_keeps_its_path_rule_under_its_alias() {
     let dir = Tree::new("imports", &[]);
     dir.write(
         "base.spit",
-        "path: input/{product}/{id}.txt\nsource raw [id]\noperation clean(input)\n",
+        "path: input/{@product}/{id}.txt\nsource raw [id]\noperation clean(input)\n",
     );
     let main = dir.write(
         "main.spit",
@@ -147,7 +147,7 @@ fn an_imported_path_keeps_escaped_braces() {
     let dir = Tree::new("imports", &[]);
     dir.write(
         "base.spit",
-        "path: input/{{product}}/{product}/{id}.txt\nsource raw [id]\n",
+        "path: input/{{product}}/{@product}/{id}.txt\nsource raw [id]\n",
     );
     let main = dir.write("main.spit", "use raw from base.spit as lib\n");
     let (pipeline, _) =

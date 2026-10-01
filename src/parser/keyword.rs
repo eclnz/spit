@@ -126,7 +126,7 @@ mod tests {
             Keyword::split("source raw [id]"),
             Some((Keyword::Source, "raw [id]"))
         );
-        assert_eq!(Keyword::of("path: out/{entities}"), Some(Keyword::Path));
+        assert_eq!(Keyword::of("path: out/{@entities}"), Some(Keyword::Path));
         assert_eq!(Keyword::of("path raw: in/{id}"), Some(Keyword::Path));
         assert_eq!(Keyword::of("paths = f(x)"), None);
         assert_eq!(Keyword::of("stage analysis:"), Some(Keyword::Stage));

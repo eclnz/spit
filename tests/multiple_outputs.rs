@@ -8,7 +8,7 @@ use support::{bound, outputs};
 use spit::{parse_pipeline, parse_source_inventory, render_dag, resolve, validate_commands};
 
 const TISSUES: &str = "\
-path: {product}/{entities}.txt
+path: {@product}/{@entities}.txt
 source dwi : DWI [subject]
 source mask : Mask [subject]
 operation responses(dwi: DWI) -> (wm: Response, csf: Response)

@@ -1,7 +1,7 @@
 //! One dimension order for a pipeline. Each source lists its dimensions in
 //! that order, and a `dimensions [...]` line declares it where the sources
 //! leave a pair unordered. Every product a step makes takes its dimensions
-//! in the same order, so collections, `{entities}` and displayed
+//! in the same order, so collections, `{@entities}` and displayed
 //! identities agree across the pipeline.
 
 use std::collections::{BTreeMap, BTreeSet};

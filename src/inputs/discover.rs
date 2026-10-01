@@ -507,7 +507,7 @@ fn path_pattern(template: &PathTemplate, product: &ProductDef) -> Result<Vec<Pie
                 }
             }
             // A source is made in no stage, so its rule never binds
-            // `{stage}`; `inspect_paths` rejects such a rule first.
+            // `{@stage}`; `inspect_paths` rejects such a rule first.
             PathPart::Placeholder(PathPlaceholder::Stage) => {
                 return Err(error(format!(
                     "path rule for source `{}` uses `{}`, but a source is not made in a stage",

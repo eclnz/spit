@@ -12,7 +12,7 @@ source reference : Reference<World> [lab, rig]
 source policy : Policy<World> [lab]
 source atlas : Atlas<World>
 
-path: artifacts/{product}/{entities}.bin
+path: artifacts/{@product}/{@entities}.bin
 path atlas: config/world-atlas.bin
 
 operation normalize(sample: Stream<Frame<K,S>,P>) -> Stream<Frame<K,S>,Normalized>

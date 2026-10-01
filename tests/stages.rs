@@ -97,13 +97,13 @@ fn a_stage_path_rule_covers_only_that_stage() {
     };
     assert_eq!(
         rule("merged"),
-        PathRule::Default("{stage}/{product}/{entities}.txt".to_owned())
+        PathRule::Default("{@stage}/{@product}/{@entities}.txt".to_owned())
     );
     assert_eq!(
         rule("tally"),
         PathRule::Stage {
             stage: "analysis".to_owned(),
-            template: "results/{product}/{entities}.txt".to_owned(),
+            template: "results/{@product}/{@entities}.txt".to_owned(),
         }
     );
     assert!(coverage.validate(true).is_err());
@@ -115,32 +115,15 @@ fn a_stage_path_rule_covers_only_that_stage() {
 
 #[test]
 fn stage_placeholder_needs_a_stage() {
-    let text = "path: {stage}/{product}/{entities}\nsource raw [id]\npath raw: in/{id}\noperation copy(a: A) -> A\nloose = copy(raw)\n";
+    let text = "path: {@stage}/{@product}/{@entities}\nsource raw [id]\npath raw: in/{id}\noperation copy(a: A) -> A\nloose = copy(raw)\n";
     let diagnostics = diagnose(text, None);
     assert_eq!(
         messages(&diagnostics),
         [(
             Some(1),
-            "path template for `loose` uses `{stage}`, but `loose` is not made in a stage"
+            "path template for `loose` uses `{@stage}`, but `loose` is not made in a stage"
         )]
     );
-}
-
-#[test]
-fn path_placeholder_names_are_reserved() {
-    for name in ["product", "entities", "stage"] {
-        let text = format!("source raw [id, {name}]\n");
-        assert_eq!(
-            messages(&diagnose(&text, None)),
-            [(
-                Some(1),
-                format!(
-                    "product `raw` cannot have a dimension named `{name}`, which path templates reserve for `{{{name}}}`"
-                )
-                .as_str()
-            )]
-        );
-    }
 }
 
 #[test]
@@ -219,7 +202,7 @@ fn stage_syntax_errors() {
             (Some(2), "duplicate stage `prep`"),
         ),
         (
-            "stage prep:\n    path: a/{product}/{entities}\n    path: b/{product}/{entities}\n",
+            "stage prep:\n    path: a/{@product}/{@entities}\n    path: b/{@product}/{@entities}\n",
             (Some(3), "duplicate default path template for stage `prep`"),
         ),
     ];
@@ -289,7 +272,7 @@ fn the_same_name_can_be_nested_in_different_stages() {
 
 #[test]
 fn nested_stages_nest_their_paths_and_inherit_defaults() {
-    let text = "path: {stage}/{product}/{entities}\nsource raw [id]\npath raw: in/{id}\noperation copy(a: A) -> A\nstage outer:\n    path: out/{stage}/{product}/{entities}\n    stage inner:\n        a = copy(raw)\n    stage own:\n        path: own/{product}/{entities}\n        b = copy(a)\n";
+    let text = "path: {@stage}/{@product}/{@entities}\nsource raw [id]\npath raw: in/{id}\noperation copy(a: A) -> A\nstage outer:\n    path: out/{@stage}/{@product}/{@entities}\n    stage inner:\n        a = copy(raw)\n    stage own:\n        path: own/{@product}/{@entities}\n        b = copy(a)\n";
     let (pipeline, _) = support::parse_fixture(text).unwrap();
     let coverage = inspect_paths(&pipeline).unwrap();
     let rule = |product: &str| {
@@ -304,14 +287,14 @@ fn nested_stages_nest_their_paths_and_inherit_defaults() {
         rule("a"),
         PathRule::Stage {
             stage: "outer".to_owned(),
-            template: "out/{stage}/{product}/{entities}".to_owned(),
+            template: "out/{@stage}/{@product}/{@entities}".to_owned(),
         }
     );
     assert_eq!(
         rule("b"),
         PathRule::Stage {
             stage: "outer/own".to_owned(),
-            template: "own/{product}/{entities}".to_owned(),
+            template: "own/{@product}/{@entities}".to_owned(),
         }
     );
     let inventory = spit::parse_source_inventory("sources:\n    raw[id=1]\n").unwrap();

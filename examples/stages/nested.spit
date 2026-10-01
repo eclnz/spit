@@ -1,5 +1,5 @@
 # Nested stages: each stage in `preprocess` is compared only with its siblings.
-path: {stage}/{product}/{entities}.txt
+path: {@stage}/{@product}/{@entities}.txt
 
 source shard : Lines [group, part]
 path shard: input/{group}/{part}.txt
@@ -20,7 +20,7 @@ stage preprocess:
     resorted = sort_lines(merged)
 
 stage analysis:
-    path: results/{product}/{entities}.txt
+    path: results/{@product}/{@entities}.txt
 
     operation tally_lines(input: Lines) -> Tally
     command tally_lines: uniq -c {input} {output}

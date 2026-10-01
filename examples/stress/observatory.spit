@@ -11,7 +11,7 @@ source target : SiteTarget [org, site]
 source policy : OrgPolicy [org]
 source schema : Schema
 
-path: results/{product}/{entities}.dat
+path: results/{@product}/{@entities}.dat
 path raw: input/{org}/{site}/{device}/{window}/{channel}/{segment}.dat
 path schema: config/schema.dat
 

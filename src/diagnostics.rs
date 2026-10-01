@@ -95,7 +95,7 @@ pub struct Checked {
     pub paths: Vec<ShownPath>,
 }
 
-/// A product's path as its rules give it, `{product}` and `{stage}` written
+/// A product's path as its rules give it, `{@product}` and `{@stage}` written
 /// out, and the line that declares the product: a step's, or a source's.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ShownPath {

@@ -84,7 +84,7 @@ fn path_rules_that_cannot_separate_artifacts_are_rejected() {
     let check = |text: &str| inspect_paths(&parse_pipeline(text).unwrap()).map(|_| ());
 
     let error =
-        check("source raw [id, batch]\npath: {product}/{entities}.csv\npath raw: raw/{id}.csv\n")
+        check("source raw [id, batch]\npath: {@product}/{@entities}.csv\npath raw: raw/{id}.csv\n")
             .unwrap_err();
     assert!(
         error.message().contains("omits dimension `batch`"),
@@ -92,12 +92,12 @@ fn path_rules_that_cannot_separate_artifacts_are_rejected() {
     );
 
     let error = check(
-        "source raw [id]\npath: {entities}.csv\noperation clean(input)\ncleaned = clean(raw)\n",
+        "source raw [id]\npath: {@entities}.csv\noperation clean(input)\ncleaned = clean(raw)\n",
     )
     .unwrap_err();
     assert!(error.message().contains("`raw` and `cleaned`"), "{error}");
 
-    let error = check("source raw [id]\npath: {product}/{id}/{shard}.csv\n").unwrap_err();
+    let error = check("source raw [id]\npath: {@product}/{id}/{shard}.csv\n").unwrap_err();
     assert_eq!(
         error.to_string(),
         "path template for `raw` uses absent dimension `shard`"

@@ -1,12 +1,12 @@
 # Design: dataset root, output extensions and sidecars
 
-Status: steps 1 to 5 are done. Steps 6 and 7, `@` for built-in placeholders, and labels with optional groups for BIDS-style names, are planned.
+Status: steps 1 to 6 are done. Step 7, labels with optional groups for BIDS-style names, is planned.
 
 ## Problem
 
 Agents in every usability round called path rules repetitive; in [round 3](../ROUND3.md) it was, with choosing `--root`, the biggest first-build friction in the cohort task. Most of that repetition takes one of two forms.
 
-**Overrides that only change the extension.** In [`field_survey.spit`](../../examples/commands/field_survey/field_survey.spit), all 8 derived `path x:` rules copy the default `derivatives/{product}/{entities}` to change `.img` to `.tif`, `.mat`, `.txt`, `.rows` or `.csv`. In [`mrtrix3_act.spit`](../../examples/commands/mrtrix3_act/mrtrix3_act.spit), all 8 derived rules, stage defaults included, do the same. Each copy also stops inheriting from the default: change `derivatives/` to `out/` and the 8 overrides silently keep the old directory.
+**Overrides that only change the extension.** In [`field_survey.spit`](../../examples/commands/field_survey/field_survey.spit), all 8 derived `path x:` rules copy the default `derivatives/{@product}/{@entities}` to change `.img` to `.tif`, `.mat`, `.txt`, `.rows` or `.csv`. In [`mrtrix3_act.spit`](../../examples/commands/mrtrix3_act/mrtrix3_act.spit), all 8 derived rules, stage defaults included, do the same. Each copy also stops inheriting from the default: change `derivatives/` to `out/` and the 8 overrides silently keep the old directory.
 
 **Sidecars.** `photo_gps`, `photo_imu` and `photo_json` are `raw_photo`'s path with another extension, and each repeats the full template and dimension list. On the derived side, a tool such as `dcm2niix` writes a `.json` beside its image without being given a path for it, which SPIT cannot express today: a command must use every output placeholder, and each output gets its own path rule.
 
@@ -100,7 +100,7 @@ An extension starts with `.` and may have several parts, such as `.nii.gz`.
 **Default.** `ext:` sets the extension for operations that declare none, at the top level or inside a stage, the same way `path:` does. Default path templates are then written without an extension:
 
 ```text
-path: derivatives/{product}/{entities}
+path: derivatives/{@product}/{@entities}
 ext: .img
 ```
 
@@ -137,7 +137,7 @@ The error matters: if the tool always writes `.mat`, a rule ending `.txt` names 
 
 ```text
 # Generated images default to .img; operations that write another format declare it.
-path: derivatives/{product}/{entities}
+path: derivatives/{@product}/{@entities}
 ext: .img
 
 operation classify_map(image: Image<Map,S>) -> Image<Classes,S> .tif
@@ -156,8 +156,8 @@ The other 15 image operations take `.img` from the default. The extension now si
 
 With extensions inherited, a product's path is no longer written in one place, and agents said they wrote explicit paths partly to audit them. So:
 
-- `spit check --path-rules` shows each product's completed path, and where an added extension is declared: ``yield_table (output): default derivatives/{product}/{entities}.csv, `.csv` from operation `build_yield_table` ``.
-- For a pipeline that checks clean, `check --json` adds a `paths` list: each product whose path no rule writes in full, the line that declares it, and its path with `{product}` and `{stage}` written out. spit-vscode shows it as an inline hint at the end of that line, such as `→ derivatives/yield_table/{entities}.csv`, naming each product on a step with several outputs. A failed check clears the hints, since its lines may have moved.
+- `spit check --path-rules` shows each product's completed path, and where an added extension is declared: ``yield_table (output): default derivatives/{@product}/{@entities}.csv, `.csv` from operation `build_yield_table` ``.
+- For a pipeline that checks clean, `check --json` adds a `paths` list: each product whose path no rule writes in full, the line that declares it, and its path with `{@product}` and `{@stage}` written out. spit-vscode shows it as an inline hint at the end of that line, such as `→ derivatives/yield_table/{@entities}.csv`, naming each product on a step with several outputs. A failed check clears the hints, since its lines may have moved.
 - The agreement error is an ordinary diagnostic on the path rule's line:
 
 ```text
@@ -215,7 +215,7 @@ The `.spitdag` is unchanged: a job's `outputs` already lists every output, wheth
 
 **Built.** As above, with these details settled while building it:
 
-- `{product}` in the sibling's path stays the sibling's name, since the file is written beside the sibling's: with `path: out/{product}/{entities}`, `meta` beside `image` is `out/image/sub=01.json`, not `out/meta/...`.
+- `{@product}` in the sibling's path stays the sibling's name, since the file is written beside the sibling's: with `path: out/{@product}/{@entities}`, `meta` beside `image` is `out/image/sub=01.json`, not `out/meta/...`.
 - A `beside` output's own extension is its suffix from the first `.`, so `"_mask.nii.gz"` gives `.nii.gz`, for [`{x.stem}`](#5-directory-and-stem-placeholders).
 - `-> Json .json beside image` on an operation with one output is an error: `beside` names another output.
 - `check --path-rules` reports it as `beside image`, and the editor shows its path like any other.
@@ -260,7 +260,7 @@ command convert: dcm2niix -z y -b y -o {image.dir} -f {image.stem} {dicom}
 | `{stage}` | `{@stage}` |
 
 - A dimension stays bare, as `{sub}`. `product`, `stage` and `entities` are no longer reserved, so a dimension may take them.
-- An old form is an error with a hint, as in Phase 5: `{product}` with no `product` dimension says ``no dimension `product`; write `{@product}` for the product's name``.
+- An old form is an error with a hint, as in Phase 5: `{product}` with no `product` dimension says ``path template for `copied` uses absent dimension `product`; write `{@product}` for the product's name``. An unknown built-in, as `{@name}`, is an error that lists the three.
 - `{output}`, `{image.dir}` and `{image.stem}` are unchanged: they name ports.
 - The built-in default becomes `out/{@product}/{@entities}`.
 
@@ -369,5 +369,5 @@ The five products resolve to the same files as the five rules:
 3. `sidecars` groups and the incomplete-group report in discovery. Done.
 4. `beside` outputs. Done.
 5. `{x.dir}` and `{x.stem}`, with the `.spitdag` version bump. Done.
-6. `{@product}`, `{@entities}` and `{@stage}`, with the old forms as errors that say what to write, and every pipeline, test, key and document converted.
+6. `{@product}`, `{@entities}` and `{@stage}`, with the old forms as errors that say what to write, and every pipeline, test, key and document converted. Done.
 7. `{@labels}` and `[...]` groups, the hint and check output with groups resolved, the errors and the `-` warning, and a BIDS cohort example.

@@ -26,7 +26,7 @@ const MAX_GROWTH: f64 = 9.0;
 const NOISE: Duration = Duration::from_millis(25);
 
 const PIPELINE: &str = "\
-path: out/{product}/{entities}.txt
+path: out/{@product}/{@entities}.txt
 source image : Image [sub, ses, run]
 path image: sub-{sub}/ses-{ses}/image_run-{run}.nii
 source mask : Mask [sub]

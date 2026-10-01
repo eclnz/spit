@@ -87,7 +87,7 @@ fn steps_that_read_a_product_twice_are_checked_in_linear_time() {
     // step back to its sources would take 2^40 visits here.
     let mut text = String::from(
         "source s0 : T [id]\nsource other : T [id]\noperation g(t: T, t2: T) -> T\n\
-         path: out/{product}/{id}.txt\npath s0: in/{id}.txt\npath other: o/{id}.txt\n",
+         path: out/{@product}/{id}.txt\npath s0: in/{id}.txt\npath other: o/{id}.txt\n",
     );
     for step in 1..=40 {
         let input = if step == 1 {

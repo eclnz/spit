@@ -1,5 +1,5 @@
 # Text shards cleaned in one stage and summarised in the next.
-path: {stage}/{product}/{entities}.txt
+path: {@stage}/{@product}/{@entities}.txt
 
 source shard : Lines [group, part]
 path shard: input/{group}/{part}.txt
@@ -14,7 +14,7 @@ stage preprocess:
     merged = merge(sorted @ vary(part))
 
 stage analysis:
-    path: results/{product}/{entities}.txt
+    path: results/{@product}/{@entities}.txt
 
     operation tally_lines(input: Lines) -> Tally
     command tally_lines: uniq -c {input} {output}

@@ -52,7 +52,7 @@ fn unmatched_files_are_counted_and_can_be_listed_without_an_inventory() {
 }
 
 const DISCOVERED: &str = "\
-path: derived/{product}/{entities}.txt
+path: derived/{@product}/{@entities}.txt
 source frame [subject, run]
 path frame: raw/sub-{subject}/run-{run}.dat
 source lut
@@ -107,7 +107,7 @@ fn directory_discovery_finds_observed_subject_session_pairs() {
     );
     let text = "\
 discover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}
-path: results/{product}/{entities}.txt
+path: results/{@product}/{@entities}.txt
 source image [sub, ses]
 path image: data/sub-{sub}/ses-{ses}/image.nii.gz
 operation process(image) -> Output

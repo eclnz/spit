@@ -38,7 +38,7 @@ fn an_error_that_closes_a_stage_is_reported_alone() {
     // The unindented `path:` ends stage `outer`, which would leave the
     // indented stage header after it outside every stage. Only the first
     // error is real: without that line, the header is where it belongs.
-    let text = "path: {product}.txt\nsource raw : Table [id]\noperation copy(table: Table) -> Table\nstage outer:\n    stage first:\n        a = copy(raw)\npath: {product}.csv\n    stage second:\n        b = copy(a)\n";
+    let text = "path: {@product}.txt\nsource raw : Table [id]\noperation copy(table: Table) -> Table\nstage outer:\n    stage first:\n        a = copy(raw)\npath: {@product}.csv\n    stage second:\n        b = copy(a)\n";
     let issues = errors(diagnose(text, None));
     assert_eq!(
         issues
@@ -162,7 +162,7 @@ fn seeded_deletions_report_every_damaged_inventory_line() {
 fn deletion_messages_name_the_missing_syntax_without_cascading() {
     let pipeline: Vec<String> = [
         "source raw : Image [id]",
-        "path: out/{product}/{id}.txt",
+        "path: out/{@product}/{id}.txt",
         "operation copy(input: Image) -> Image",
         "command copy: tool {input} {output}",
         "result = copy(raw)",

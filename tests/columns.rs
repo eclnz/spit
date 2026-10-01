@@ -81,7 +81,7 @@ source raw : Table [id]
 operation clean(table: Table) -> Table
 command clean: tool {table} {result}
 cleaned = clean(raw)
-path: {product}/{entities}.csv
+path: {@product}/{@entities}.csv
 path raw: in/{id}/{shard}.csv
 ";
     assert_eq!(

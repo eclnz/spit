@@ -21,7 +21,7 @@ fn errors(text: &str) -> Vec<String> {
 }
 
 const CONVERT: &str = "\
-path: out/{product}/{entities}
+path: out/{@product}/{@entities}
 source dicom [sub]
 path dicom: in/{sub}
 operation convert(dicom) -> (image: Image .nii.gz, meta: Json .json beside image)
@@ -35,10 +35,13 @@ brain, mask = strip(image)
 #[test]
 fn a_beside_output_takes_its_siblings_path_and_name() {
     let pipeline = parse_pipeline(CONVERT).unwrap();
-    // `{product}` is the sibling's name: the tool writes beside its file.
-    assert_eq!(path(&pipeline, "image"), "out/{product}/{entities}.nii.gz");
-    assert_eq!(path(&pipeline, "meta"), "out/image/{entities}.json");
-    assert_eq!(path(&pipeline, "mask"), "out/brain/{entities}_mask.nii.gz");
+    // `{@product}` is the sibling's name: the tool writes beside its file.
+    assert_eq!(
+        path(&pipeline, "image"),
+        "out/{@product}/{@entities}.nii.gz"
+    );
+    assert_eq!(path(&pipeline, "meta"), "out/image/{@entities}.json");
+    assert_eq!(path(&pipeline, "mask"), "out/brain/{@entities}_mask.nii.gz");
     // Its extension is its suffix's, from the first `.`.
     let strip = pipeline
         .operations
@@ -59,12 +62,12 @@ fn a_beside_output_follows_its_siblings_own_rule() {
         "derivatives/sub-{sub}/anat/sub-{sub}_brain_mask.nii.gz"
     );
     let staged = parse_pipeline(
-        "path: {stage}/{product}/{entities}\nsource dicom [sub]\npath dicom: in/{sub}\n\
+        "path: {@stage}/{@product}/{@entities}\nsource dicom [sub]\npath dicom: in/{sub}\n\
          operation convert(dicom) -> (image: Image .nii.gz, meta .json beside image)\n\
          stage import:\n    image, meta = convert(dicom)\n",
     )
     .unwrap();
-    assert_eq!(path(&staged, "meta"), "{stage}/image/{entities}.json");
+    assert_eq!(path(&staged, "meta"), "{@stage}/image/{@entities}.json");
 }
 
 #[test]
@@ -91,7 +94,7 @@ fn the_command_may_leave_a_beside_output_out_and_the_plan_keeps_it() {
     let output = spit(&["check", pipeline.to_str().unwrap(), "--path-rules"]);
     let rules = text(&output.stdout);
     assert!(
-        rules.contains("  meta (output): beside image out/image/{entities}.json\n"),
+        rules.contains("  meta (output): beside image out/image/{@entities}.json\n"),
         "{rules}"
     );
     // A command that does name it is fine too.
