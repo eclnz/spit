@@ -13,11 +13,10 @@ The plans that answer the [usability findings](../FINDINGS.md), and the order to
 
 ## Status
 
-- **Done:** steps 1–14. Phase 1, Phase 2, and Phase 3 are complete.
-- **Next:** step 15, the worked examples.
-- **Resolved so far:** B1–B7, F1–F10, D1–D10.
+- **Done:** steps 1–15. Phase 1, Phase 2, and Phase 3 are complete; the worked examples are in place.
+- **Next:** step 16, optional named arguments, then the VS Code extension.
+- **Resolved so far:** B1–B7, F1–F10, D1–D11.
 - **Still open:**
-  - D11;
   - the VS Code extension.
 
 ## Order
@@ -127,6 +126,7 @@ One design built in three steps, each leaving the tool working. See [removing in
 ### Phase 4: examples and follow-ups
 
 15. **D11:** the five worked examples, listed in [guide](guide.md#d11-worked-examples).
+    Done: five small pipelines with recipes and inventories under `examples/patterns/`; the cohort has placeholder files for discovery. The reference links each example and the example test checks nested folders and expected job counts.
     - Each is an `examples/<group>/<name>/` folder with a `.spit`, `.spitin` and `.spitout`. `tests/examples.rs` checks every pipeline under `examples/`.
     - The study's answer keys are working starting points, but keep the harness's own copies unchanged.
     - Also give the existing examples' recipes data, or a note: `command_demo.spitin` finds no files beside it, and since step 8 `dag` on it fails, correctly, with "has no groups to check".

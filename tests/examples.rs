@@ -3,7 +3,7 @@
 use std::fs;
 use std::path::PathBuf;
 
-use spit::{diagnose_in, Context};
+use spit::{diagnose_in, parse_pipeline, parse_source_inventory, resolve, Context};
 
 /// Examples that demonstrate a diagnostic, with exactly what they report.
 const EXPECTED: &[(&str, &[&str])] = &[(
@@ -12,17 +12,43 @@ const EXPECTED: &[(&str, &[&str])] = &[(
 )];
 
 fn example_pipelines() -> Vec<PathBuf> {
-    let mut pipelines: Vec<_> = fs::read_dir("examples")
-        .unwrap()
-        .flat_map(|group| fs::read_dir(group.unwrap().path()).unwrap())
-        .map(|entry| entry.unwrap().path())
-        .filter(|path| {
-            path.extension()
+    let mut pending = vec![PathBuf::from("examples")];
+    let mut pipelines = Vec::new();
+    while let Some(directory) = pending.pop() {
+        for entry in fs::read_dir(directory).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                pending.push(path);
+            } else if path
+                .extension()
                 .is_some_and(|extension| extension == "spit")
-        })
-        .collect();
+            {
+                pipelines.push(path);
+            }
+        }
+    }
     pipelines.sort();
     pipelines
+}
+
+#[test]
+fn worked_patterns_resolve_to_the_documented_jobs() {
+    for (name, jobs) in [
+        ("archive_revision", 2),
+        ("per_group_reference", 3),
+        ("model_fit", 2),
+        ("ragged_sweep", 17),
+        ("cohort", 24),
+    ] {
+        let base = PathBuf::from("examples/patterns").join(name).join(name);
+        let pipeline =
+            parse_pipeline(&fs::read_to_string(base.with_extension("spit")).unwrap()).unwrap();
+        let inventory =
+            parse_source_inventory(&fs::read_to_string(base.with_extension("spitout")).unwrap())
+                .unwrap();
+        let dag = resolve(&pipeline, &inventory).unwrap();
+        assert_eq!(dag.jobs.len(), jobs, "{name}");
+    }
 }
 
 #[test]

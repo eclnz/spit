@@ -47,7 +47,7 @@ operation summarise(days: many Series, policy: Policy) -> Summary @ drop(day) @ 
 summary = summarise(reading, policy)
 ```
 
-`@ min(2)` rejects a group with fewer than two artifacts.
+`@ min(2)` rejects a group with fewer than two artifacts. The [model fit example](../examples/patterns/model_fit/model_fit.spit) combines a `many` input, two outputs, `@ drop`, and `verify` in one step.
 
 One aggregate can remove several dimensions at once. The operation's `@ drop(...)` and its call's `@ vary(...)` must name the same set; their order within the clauses does not change the collection order. With `summary [model, config]`, this makes one leaderboard over all model and config combinations, ordered first by model and then by config:
 
@@ -58,7 +58,7 @@ board = leaderboard(summary)
 
 `@ min(n)` counts the whole collection, across both dimensions. A call that writes two `@ vary` clauses is an error; put both dimensions in one clause.
 
-Selectors narrow what an input matches:
+Selectors narrow what an input matches. The [archive revision](../examples/patterns/archive_revision/archive_revision.spit) and [per-group reference](../examples/patterns/per_group_reference/per_group_reference.spit) examples show `where` and `same` with small inventories:
 
 ```text
 calibrated = calibrate(reading, calibration @ where(revision=2))
@@ -77,7 +77,7 @@ source parameters : Parameters [scenario]
 forecast = predict(reading, model @ each(scenario), parameters)
 ```
 
-With two stations and two scenarios, this makes four `forecast[station=...,scenario=...]` jobs. The values come from the artifacts of the broadcast input, so adding a scenario to the inputs adds its jobs. Other inputs are matched on the new dimension as usual; here `parameters` supplies the settings for each scenario. Only one input may broadcast a given dimension, and the driving input must not already have it. A broadcast dimension comes after the driving input's dimensions, so here `forecast` has dimensions `[station, scenario]`, the order `{entities}` writes them in. `each` pairs with `vary`, so a sweep can be collected again:
+With two stations and two scenarios, this makes four `forecast[station=...,scenario=...]` jobs. The values come from the artifacts of the broadcast input, so adding a scenario to the inputs adds its jobs. Other inputs are matched on the new dimension as usual; here `parameters` supplies the settings for each scenario. Only one input may broadcast a given dimension, and the driving input must not already have it. A broadcast dimension comes after the driving input's dimensions, so here `forecast` has dimensions `[station, scenario]`, the order `{entities}` writes them in. `each` pairs with `vary`, so a sweep can be collected again. The [ragged sweep example](../examples/patterns/ragged_sweep/ragged_sweep.spit) shows models crossed with configurations whose seeds differ:
 
 ```text
 trial = simulate(reading, seed @ each(rep))
@@ -272,6 +272,8 @@ require image run=1,2 per [subject, visit]
 A `require` rule is checked after every `drop` rule, against the groups they leave. A rule whose grouping finds no group at all, because nothing in the dataset has those dimensions or a `drop` removed every one, is an error: a check of nothing is not a pass.
 
 ### Drop groups that fail a criterion
+
+The [cohort example](../examples/patterns/cohort/cohort.spitin) uses `drop` to remove a subject with too few sessions and `exclude` to remove one damaged run.
 
 `drop` removes every group that meets its condition, and reads the way it acts: the groups, then `where`, then what removes one.
 
