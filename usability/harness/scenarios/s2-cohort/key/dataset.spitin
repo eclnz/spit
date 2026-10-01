@@ -1,3 +1,0 @@
-pipeline pipeline.spit
-
-drop [sub] where t1w count<2

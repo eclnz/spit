@@ -1,5 +1,0 @@
-pipeline fmri.spit
-
-discover sessions: [sub, ses] from dirs sub-{sub}/ses-{ses}
-exclude bold[sub=02,ses=02,run=3]  # corrupted run
-drop [sub] where sessions count<2

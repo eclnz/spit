@@ -1,3 +1,0 @@
-REPORT written by agent. Found all 3 causes + explained dag stops at first failure, artifacts lists all. Also noted s04/s06/s08 absent (noise, not in data at all - fine).
-Plan via new recipe data/thisweek.spitin with the same two skip rules.
-Biggest difficulty: first tried `discover` stores from sales/{store} dirs -> failed "source file `pricing/S07.json` ... lies outside the discovered contexts" and can't rename. Without discover, skip worked; relies on zero-price-list store counting as 0 (undocumented; confirmed by skip warnings). Nothing flags S07 vs s07 case difference (case warning only within a source).

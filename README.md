@@ -130,6 +130,8 @@ merged = merge(sorted @ vary(part))
 
 `source` declares a family of input artifacts. A `shard` is identified by its `group` and `part` values. `sorted` keeps those dimensions. `merge` collects all parts of each group and produces one `merged[group=...]` artifact per group. The call's `@ vary(part)` names the dimension it collects.
 
+To collect over two dimensions, collect in two steps, one dimension each: after `merged` above, `everything = merge(merged @ vary(group))` collects the per-group results into one artifact. A check that must pass before a job runs is a `verify` line beside its `command`, such as `verify merge: check_lines {items}`; see [the reference](docs/language-reference.md#operations-and-commands).
+
 `path` lines say where artifacts live; an output with no rule goes to `out/{@product}/{@entities}`. `command` lines give the exact executable and argument order. SPIT decides which artifacts belong to each job before filling their paths into a command.
 
 A pipeline names no dataset. Rules about what a dataset must hold, and records of what it does hold, go in the files of step 2: `spit check` rejects a `require` rule or a `sources:` record written in a `.spit`.
