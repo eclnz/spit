@@ -4,12 +4,14 @@ These walkthroughs contain everything needed to reproduce their plans in an empt
 
 ## Ragged sweep: correlated seeds and collection order
 
-Each configuration owns its seeds: `fast` has 1 and 2, while `deep` has only 1. The `seed[config,seed]` artifacts drive training. `model @ each(model)` broadcasts each model over those **observed** config/seed pairs; it does not manufacture `deep` seed 2. Declaring the summary's dimensions as `[model, config]` makes the final `many Summary` collection sort by model, then config. Without that explicit declaration, the derived product's dimensions are `[config, model]` and the final command receives config-first order.
+Each configuration owns its seeds: `fast` has 1 and 2, while `deep` has only 1. The `seed[config,seed]` artifacts drive training. `model @ each(model)` broadcasts each model over those **observed** config/seed pairs; it does not manufacture `deep` seed 2. No source holds both `model` and `config`, so nothing says which comes first; `dimensions [model, config, seed]` declares it once for the whole pipeline. Every product then lists its dimensions in that order, so `trained` is `[model, config, seed]`, `summary` is `[model, config]`, and the final `many Summary` collection sorts by model, then config. Without the line, `spit check` stops at `trained` and suggests it.
 
 Save as `sweep.spit`:
 
 ```spit
 # Each config has its own seeds; every model is tried with every seed.
+# No source orders `model` and `config`, so the pipeline declares it.
+dimensions [model, config, seed]
 source model : Weights [model]
 path model: models/{model}.pt
 source config : Config [config]
@@ -29,7 +31,7 @@ metrics = evaluate(trained, testset)
 operation summarise(runs: many Metrics) -> Summary
 command summarise: summarise {runs} --out {output}
 path summary: summaries/{model}/{config}.json
-summary : Summary [model, config] = summarise(metrics @ vary(seed))
+summary = summarise(metrics @ vary(seed))
 operation leaderboard(summaries: many Summary) -> Table
 command leaderboard: leaderboard {summaries} --out {output}
 path board: leaderboard.csv

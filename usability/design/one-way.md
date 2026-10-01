@@ -59,6 +59,8 @@ This reverses [F10's inference](language.md#the-calls--vary-follows-from-the-ope
 
 ## 2. One dimension order for the pipeline
 
+**Status:** done in step 20.
+
 **Today.**
 - A derived product takes its driver's dimension order, then any `@ each` dimensions appended.
 - The only way to change it is to annotate a product: `summary : Summary [model, config] = …`.

@@ -154,6 +154,8 @@ pub(crate) enum StatementKind {
     /// what it names sits.
     Exclude(declarations::ExcludeLine, Option<String>, Place),
     Command(CommandDef, Place),
+    /// A `dimensions [...]` line: the pipeline's dimension order.
+    Dimensions(Vec<String>),
     Path(PathRule),
     /// A flow step, which declares its output products.
     FlowStep(FlowStep),

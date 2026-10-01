@@ -128,13 +128,14 @@ fn check_input_lines(text: &str) -> Result<(), ParseError> {
                     | Keyword::Command
                     | Keyword::Verify
                     | Keyword::Stage
+                    | Keyword::Dimensions
                     | Keyword::Use
             )
         );
         if pipeline_only {
             return Err(ParseError::new(
                 index + 1,
-                "logical sources, operations, commands, stages, and imports belong in the .spit pipeline",
+                "logical sources, dimension orders, operations, commands, stages, and imports belong in the .spit pipeline",
             ));
         }
         if line.starts_with("path:") {
