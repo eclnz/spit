@@ -4,7 +4,7 @@ This plan follows the [second study](../ROUND2.md). All 18 plans matched their k
 
 Work through these items in order. Each implementation step gets its own commit and the checks required by the [roadmap](README.md#checks-before-every-commit). Record any change to an answer key and its reason.
 
-## 1. Make the worked examples self-contained
+## 1. Make the worked examples self-contained (done)
 
 **Evidence:** Sweep, cohort, sensor, and survey participants asked for complete examples. `docs/examples.md` currently links to example files but does not itself contain their pipelines, recipes, inventories, and results. The trial guide did not include the linked files.
 

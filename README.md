@@ -276,7 +276,7 @@ The pipeline supplies operations and rules; the `.spitout` supplies artifact ide
 - [Language reference](docs/language-reference.md) — full `.spit`, `.spitin` and `.spitout` syntax
 - [The `.spitdag` format](docs/spitdag.md) — every field a backend reads
 - [Architecture](docs/architecture.md) — the internal model: resolution, typing, and the bound DAG
-- [Examples](docs/examples.md) — how to run each example pipeline, and what the larger ones show
+- [Examples](docs/examples.md) — complete walkthroughs for sweeps, cohorts, selectors, and stages, plus the larger pipeline catalog
 
 ## Development
 

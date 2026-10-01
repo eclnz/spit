@@ -1,5 +1,239 @@
 # Examples
 
+These walkthroughs contain everything needed to reproduce their plans in an empty directory. SPIT plans commands; the named tools do not need to be installed to inspect a plan. Save each code block under the filename above it, then run the shown commands with `spit` on your `PATH` (or replace `spit` with `cargo run --` from the repository). The larger example catalog follows the walkthroughs. For syntax rules, see the [language reference](language-reference.md).
+
+## Ragged sweep: correlated seeds and collection order
+
+Each configuration owns its seeds: `fast` has 1 and 2, while `deep` has only 1. The `seed[config,seed]` artifacts drive training. `model @ each(model)` broadcasts each model over those **observed** config/seed pairs; it does not manufacture `deep` seed 2. Declaring the summary's dimensions as `[model, config]` makes the final `many Summary` collection sort by model, then config. Without that explicit declaration, the derived product's dimensions are `[config, model]` and the final command receives config-first order.
+
+Save as `sweep.spit`:
+
+```spit
+# Each config has its own seeds; every model is tried with every seed.
+source model : Weights [model]
+path model: models/{model}.pt
+source config : Config [config]
+path config: configs/{config}.yaml
+source seed : Seed [config, seed]
+path seed: seeds/{config}/{seed}.json
+source testset : Data
+path testset: eval/testset.parquet
+operation train(model: Weights, config: Config, seed: Seed) -> Weights
+command train: train --model {model} --config {config} --seed {seed} --out {output}
+path trained: runs/{model}/{config}/{seed}/weights.pt
+trained = train(model @ each(model), config, seed)
+operation evaluate(weights: Weights, testset: Data) -> Metrics
+command evaluate: evaluate {weights} {testset} --out {output}
+path metrics: runs/{model}/{config}/{seed}/metrics.json
+metrics = evaluate(trained, testset)
+operation summarise(runs: many Metrics) -> Summary @ drop(seed)
+command summarise: summarise {runs} --out {output}
+path summary: summaries/{model}/{config}.json
+summary : Summary [model, config] = summarise(metrics)
+operation leaderboard(summaries: many Summary) -> Table @ drop(model, config)
+command leaderboard: leaderboard {summaries} --out {output}
+path board: leaderboard.csv
+board = leaderboard(summary)
+```
+
+Save as `sweep.spitout`:
+
+```text
+sources:
+    model[model=small]
+    model[model=large]
+    config[config=fast]
+    config[config=deep]
+    seed[config=fast,seed=1]
+    seed[config=fast,seed=2]
+    seed[config=deep,seed=1]
+    testset
+```
+
+Run `spit dag sweep.spit sweep.spitout --commands` to see 17 jobs: six `train`, six `evaluate`, four `summarise`, and one `leaderboard`. For `config=deep`, there are two training jobs, one per model, both with seed 1. The final `leaderboard` command receives summaries in this order: `large/deep`, `large/fast`, `small/deep`, `small/fast`. Run `spit dag sweep.spit sweep.spitout -o sweep.spitdag` to save the plan. The input paths in this inventory are illustrative; add the named files under the paths declared above if you want SPIT to verify their existence with `--root`.
+
+## Cohort: discovery, exclusion, and grouped removal
+
+This recipe discovers session folders, removes a subject with fewer than two sessions, and excludes one damaged run while leaving its file in place. Each retained BOLD run gets motion correction and coregistration. A `many Bold` input collects runs per session; another collects session averages per subject.
+
+Save as `cohort.spit`:
+
+```spit
+# BIDS sessions with a dropped subject and an excluded motion-corrupted run.
+source t1w : T1 [sub, ses]
+path t1w: sub-{sub}/ses-{ses}/anat/sub-{sub}_ses-{ses}_T1w.nii.gz
+source bold : Bold [sub, ses, run]
+path bold: sub-{sub}/ses-{ses}/func/sub-{sub}_ses-{ses}_task-rest_run-{run}_bold.nii.gz
+
+operation motioncorr(bold: Bold) -> Bold
+command motioncorr: motioncorr {bold} {output}
+path mc: derivatives/sub-{sub}/ses-{ses}/func/sub-{sub}_ses-{ses}_run-{run}_mc.nii.gz
+mc = motioncorr(bold)
+
+operation bet(t1w: T1) -> T1
+command bet: bet {t1w} {output}
+path brain: derivatives/sub-{sub}/ses-{ses}/anat/sub-{sub}_ses-{ses}_brain.nii.gz
+brain = bet(t1w)
+
+operation coreg(bold: Bold, ref: T1) -> Bold
+command coreg: coreg --ref {ref} --in {bold} --out {output}
+path coregistered: derivatives/sub-{sub}/ses-{ses}/func/sub-{sub}_ses-{ses}_run-{run}_coreg.nii.gz
+coregistered = coreg(mc, brain)
+
+operation sessionavg(runs: many Bold) -> Bold @ drop(run)
+command sessionavg: sessionavg --out {output} {runs}
+path avg: derivatives/sub-{sub}/ses-{ses}/func/sub-{sub}_ses-{ses}_avg.nii.gz
+avg = sessionavg(coregistered)
+
+operation longitudinal(sessions: many Bold) -> Bold @ drop(ses)
+command longitudinal: longitudinal --out {output} {sessions}
+path long: derivatives/sub-{sub}/sub-{sub}_long.nii.gz
+long = longitudinal(avg)
+```
+
+Save as `cohort.spitin`:
+
+```spit
+pipeline cohort.spit
+
+discover sessions: [sub, ses] from dirs sub-{sub}/ses-{ses}
+# Subject 03 has only one session and is removed as a whole.
+drop [sub] where t1w count<2
+exclude bold[sub=02,ses=02,run=2]    # motion spike
+require t1w count=1 per [sub, ses]
+require bold count>=1 per [sub, ses]
+```
+
+Create a tiny dataset beside those two files. These files can be empty because SPIT plans work without reading their contents:
+
+```sh
+for sub in 01 02 03; do
+  for ses in 01 02; do
+    if [ "$sub" = 03 ] && [ "$ses" = 02 ]; then continue; fi
+    mkdir -p "sub-$sub/ses-$ses/anat" "sub-$sub/ses-$ses/func"
+    touch "sub-$sub/ses-$ses/anat/sub-${sub}_ses-${ses}_T1w.nii.gz"
+    for run in 1 2; do
+      touch "sub-$sub/ses-$ses/func/sub-${sub}_ses-${ses}_task-rest_run-${run}_bold.nii.gz"
+    done
+  done
+done
+```
+
+Run `spit inputs cohort.spitin` to see the four retained sessions and the removal records. Run `spit dag cohort.spitin --commands` to see 24 jobs: seven `motioncorr`, four `bet`, seven `coreg`, four `sessionavg`, and two `longitudinal`. No job reads `bold[sub=02,ses=02,run=2]` or an artifact of subject 03. The removed records remain visible in a saved `.spitdag`.
+
+## Sensors: selectors, verification, and two outputs
+
+A reading has station and day. Calibration has an extra revision, and reference has a measurement date. `where(revision=2)` chooses the approved calibration; `same(station)` matches the one reference for the station regardless of its date. `split_bands` writes two products in one job. `summarise` collects the low bands by day and matches one station policy beside that collection.
+
+Save as `sensors.spit`:
+
+```spit
+# Readings from several stations, calibrated with a chosen calibration
+# revision, compared with a station reference, split into two bands, and
+# summarised per station under that station's policy.
+
+path: derived/{product}/{entities}.csv
+
+source reading : Series [station, day]
+path reading: raw/{station}/{day}.csv
+# Calibration files are kept for every revision; the pipeline picks one.
+source calibration : Calibration [station, revision]
+path calibration: calibration/{station}/r{revision}.json
+# One reference per station, filed under the day it was measured.
+source reference : Series [station, measured]
+path reference: reference/{station}/{measured}.csv
+source policy : Policy [station]
+path policy: policy/{station}.toml
+
+# Every station must have readings for days 1 and 2.
+
+# The input with the most dimensions drives a step, whatever the port order.
+# `where` pins the calibration revision, so it no longer takes part in matching.
+operation calibrate(calibration: Calibration, series: Series) -> Series
+verify calibrate: check_calibration {calibration} {series}
+command calibrate: apply_calibration --calibration {calibration} {series} {output}
+calibrated = calibrate(calibration @ where(revision=2), reading)
+
+# `same(station)` matches the reference on station alone; each station must
+# have exactly one, whatever day it was measured.
+operation compare(series: Series, reference: Series) -> Series
+command compare: subtract_reference {series} {reference} {output}
+anomaly = compare(calibrated, reference @ same(station))
+
+# One job writes both bands.
+operation split_bands(series: Series) -> (low: Series, high: Series)
+command split_bands: band_split {series} --low {low} --high {high}
+low_band, high_band = split_bands(anomaly)
+
+# A many input can sit beside single inputs, each matched once per group.
+# The days arrive in natural order, and fewer than two is an error.
+operation summarise(days: many Series, policy: Policy) -> Summary @ drop(day) @ min(2)
+command summarise: summarise --policy {policy} {days} --out {output}
+path summary: derived/summary/{station}.json
+summary = summarise(low_band @ vary(day), policy)
+```
+
+Save as `sensors.spitout`:
+
+```text
+sources:
+    reading[station=north,day=1]
+    reading[station=north,day=2]
+    reading[station=north,day=10]
+    reading[station=south,day=1]
+    reading[station=south,day=2]
+    calibration[station=north,revision=1]
+    calibration[station=north,revision=2]
+    calibration[station=south,revision=2]
+    reference[station=north,measured=2024-03-01]
+    reference[station=south,measured=2024-02-11]
+    policy[station=north]
+    policy[station=south]
+```
+
+Run `spit dag sensors.spit sensors.spitout --commands` to see 17 jobs: five each of `calibrate`, `compare`, and `split_bands`, then two `summarise` jobs. The `verify calibrate` command appears before each calibration command. The north summary takes days 1, 2, then 10; the unused north calibration revision 1 is reported separately. `Series`, `Calibration`, `Policy`, and `Summary` are types in operation signatures, while `reading`, `calibration`, `policy`, and `summary` are product names. Each call argument occupies the corresponding operation port and is type checked there.
+
+## Stages: preprocessing and analysis
+
+Stages group steps and can set their own output paths. This pipeline sorts three shards, merges the parts in each group, then tallies each merged result. Save as `stages.spit`:
+
+```spit
+# Text shards cleaned in one stage and summarised in the next.
+path: {stage}/{product}/{entities}.txt
+
+source shard : Lines [group, part]
+path shard: input/{group}/{part}.txt
+
+stage preprocess:
+    operation sort_lines(input: Lines) -> Lines
+    command sort_lines: sort -u -o {output} {input}
+    sorted = sort_lines(shard)
+
+    operation merge(items: many Lines) -> Lines @ drop(part)
+    command merge: sort -m -u -o {output} {items}
+    merged = merge(sorted @ vary(part))
+
+stage analysis:
+    path: results/{product}/{entities}.txt
+
+    operation tally_lines(input: Lines) -> Tally
+    command tally_lines: uniq -c {input} {output}
+    tally = tally_lines(merged)
+```
+
+Save as `stages.spitout`:
+
+```text
+sources:
+    shard[group=alpha,part=01]
+    shard[group=alpha,part=02]
+    shard[group=beta,part=01]
+```
+
+Run `spit dag stages.spit stages.spitout --paths` to see seven jobs: three `sort_lines`, two `merge`, and two `tally_lines`. The sorted and merged outputs use the `preprocess/` path default; the tallies use the `analysis` stage's `results/` override. `spit dag stages.spit stages.spitout -o stages.spitdag` records each job's stage for a backend.
+
+## More example pipelines
+
 Each pipeline below, under [`examples/`](../examples), checks cleanly and sits beside a `.spitin` recipe and a `.spitout` of its inputs. Recipes may add discovery, exclusion, drop, or require rules. Run the command from the repository root to see its jobs; add `--paths` to see each artifact's file or `-o plan.spitdag` to write them, or run `spit check` on the `.spit` or `.spitin` alone.
 
 | Pipeline | Shows | Command | Jobs |
