@@ -17,7 +17,7 @@ use crate::json::Json;
 use crate::lower::{parse_document_with_imports, ParsedDocument};
 use crate::model::DEFAULT_OUTPUT;
 use crate::model::{
-    stage_within, ArtifactReport, CommandRole, CoverageGap, InputRules, ResolvedDag,
+    stage_within, ArtifactReport, CommandRole, CoverageGap, InputRules, PipelineIndex, ResolvedDag,
     SourceInventory,
 };
 use crate::parser::{
@@ -440,14 +440,15 @@ fn shown_paths(pipeline: &Pipeline, lines: &SourceMap) -> Vec<ShownPath> {
     } else {
         pipeline
     };
+    let index = PipelineIndex::new(pipeline);
     let mut shown: Vec<_> = pipeline
         .products
         .iter()
         .filter(|product| !lines.imported.contains(&product.name))
         .filter(|product| {
             !pipeline.product_paths.contains_key(&product.name)
-                || pipeline.added_extension(&product.name).is_some()
-                || pipeline
+                || index.added_extension(&product.name).is_some()
+                || index
                     .path_rule_for(&product.name)
                     .is_some_and(PathTemplate::varies)
         })
@@ -460,7 +461,7 @@ fn shown_paths(pipeline: &Pipeline, lines: &SourceMap) -> Vec<ShownPath> {
             Some(ShownPath {
                 product: product.name.clone(),
                 line,
-                path: shown_path(pipeline, &product.name)?,
+                path: shown_path(&index, &product.name)?,
             })
         })
         .collect();
@@ -904,11 +905,12 @@ fn near_miss_warnings(report: &ArtifactReport) -> Vec<Diagnostic> {
 
 /// Flag paths that differ only in case, which are one file on macOS and Windows.
 fn case_warnings(pipeline: &Pipeline, lines: &SourceMap, dag: &ResolvedDag) -> Vec<Diagnostic> {
+    let index = PipelineIndex::new(pipeline);
     case_collisions(pipeline, dag)
         .into_iter()
         .map(|[(first, first_path), (second, second_path)]| {
             warning(
-                lines.path_rule(pipeline, &second.0),
+                lines.path_rule(&index, &second.0),
                 format!(
                     "`{}[{}]` and `{}[{}]` have paths `{first_path}` and `{second_path}`, which differ only in case, so they are one file where case is ignored, as on macOS and Windows",
                     first.0, first.1, second.0, second.1
@@ -921,11 +923,12 @@ fn case_warnings(pipeline: &Pipeline, lines: &SourceMap, dag: &ResolvedDag) -> V
 /// Flag values with a `-` that `{@labels}` writes, as `sub-01-a`, which
 /// BIDS reads as a new entity.
 fn label_warnings(pipeline: &Pipeline, lines: &SourceMap, dag: &ResolvedDag) -> Vec<Diagnostic> {
+    let index = PipelineIndex::new(pipeline);
     dashed_labels(pipeline, dag)
         .into_iter()
         .map(|(product, dimension, value)| {
             warning(
-                lines.path_rule(pipeline, &product),
+                lines.path_rule(&index, &product),
                 format!(
                     "`{{@labels}}` writes `{dimension}-{value}` in the path of `{product}`; BIDS reads each `-` as the end of a key, so it cannot read `{value}` back"
                 ),

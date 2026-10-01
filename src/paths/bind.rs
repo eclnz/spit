@@ -8,7 +8,9 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::rules::inspect_paths;
 use super::template::{error, require_directory, PathBinder, PathError};
-use crate::model::{Artifact, ArtifactId, ArtifactKey, EntityBinding, Pipeline, ResolvedDag};
+use crate::model::{
+    Artifact, ArtifactId, ArtifactKey, EntityBinding, Pipeline, PipelineIndex, ResolvedDag,
+};
 
 /// Check the files needed to start the resolved DAG under a dataset root.
 /// Derived outputs are deliberately excluded because the pipeline creates them.
@@ -261,14 +263,15 @@ pub(crate) fn dashed_labels(
     pipeline: &Pipeline,
     dag: &ResolvedDag,
 ) -> Vec<(String, String, String)> {
+    let index = PipelineIndex::new(pipeline);
     let mut writes: FxHashMap<&str, bool> = FxHashMap::default();
     let mut found: BTreeMap<(&str, &str), &str> = BTreeMap::new();
     for id in dag.artifacts.ids() {
         let artifact = dag.artifact(id);
         let labelled = *writes.entry(artifact.product).or_insert_with(|| {
-            pipeline
+            index
                 .path_rule_for(artifact.product)
-                .is_some_and(|rule| rule.writes_labels(pipeline.holder(artifact.product)))
+                .is_some_and(|rule| rule.writes_labels(index.holder(artifact.product)))
         });
         if !labelled {
             continue;
