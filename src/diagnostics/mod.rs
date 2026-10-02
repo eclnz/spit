@@ -256,7 +256,7 @@ pub fn diagnose_checked_with_inventory(
     let document = &parsed.document;
     let no_rules = InputRules::default();
     let rules = context.recipe.map_or(&no_rules, |recipe| &recipe.rules);
-    let inventory = as_read_back(&settled.inventory, rules)?;
+    let inventory = as_read_back(&settled.inventory, &document.pipeline, rules)?;
     // Checking the settled records again finds what settling found, since
     // only the `drop` rules change records and they ran while settling.
     let gaps = Some(settled.gaps.as_slice());
@@ -450,10 +450,15 @@ fn recipe_path_errors(
         return Vec::new();
     }
     let merged = with_source_paths(pipeline, &source_paths);
-    // A source without a rule of its own in the recipe has its default.
+    // A member of a `sidecars` group has its group's rule, and a source
+    // without a rule of its own in the recipe has its default.
+    let members = pipeline.sidecar_members();
     let mut places = SourceMap::default();
     for name in source_paths.keys() {
-        if let Some(place) = lines.paths.get(name).or(lines.default_path.as_ref()) {
+        let named = members
+            .get(name.as_str())
+            .map_or(name.as_str(), |group| group.name.as_str());
+        if let Some(place) = lines.paths.get(named).or(lines.default_path.as_ref()) {
             places.paths.insert(name.clone(), place.clone());
         }
     }

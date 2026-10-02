@@ -30,6 +30,8 @@ pub(crate) struct PipelineBuilder {
     dimension_order: Option<(Vec<String>, Place)>,
     /// Each product a step makes, and whether the step wrote its dimensions.
     outputs: BTreeMap<String, Output>,
+    /// Where each `sidecars` header is.
+    sidecar_places: BTreeMap<String, Place>,
 }
 
 impl PipelineBuilder {
@@ -214,6 +216,7 @@ pub(crate) fn lower(
     if let Some(error) = &syntax.error {
         return Err(error.clone());
     }
+    check_sidecar_paths(&builder)?;
     order_dimensions(
         &mut builder.pipeline.products,
         &builder.outputs,
@@ -221,6 +224,53 @@ pub(crate) fn lower(
         &builder.lines,
     )?;
     Ok(builder)
+}
+
+/// A `sidecars` group's name is its own, and the group gives its members'
+/// paths: by the `path:` line in its block, or else by the recipe. So no
+/// product shares its name, and no `path` line outside the block names the
+/// group or a member.
+fn check_sidecar_paths(builder: &PipelineBuilder) -> Result<(), ParseError> {
+    let PipelineBuilder {
+        pipeline,
+        lines,
+        sidecar_places,
+        ..
+    } = builder;
+    for group in &pipeline.sidecar_groups {
+        let name = &group.name;
+        if pipeline
+            .products
+            .iter()
+            .any(|product| product.name == *name)
+        {
+            let place = &sidecar_places[name];
+            return Err(ParseError::new(
+                place.line,
+                format!("sidecars group `{name}` shares its name with a product; rename one, since `path {name}:` in a recipe must name one thing"),
+            )
+            .within(place));
+        }
+        if let Some(place) = lines.paths.get(name) {
+            return Err(ParseError::new(
+                place.line,
+                format!("sidecars group `{name}` gives its stem on an indented `path:` line in its block"),
+            )
+            .within(place));
+        }
+        if group.stem.is_none() {
+            for (member, _) in &group.members {
+                if let Some(place) = lines.paths.get(member) {
+                    return Err(ParseError::new(
+                        place.line,
+                        format!("source `{member}` takes its path from sidecars group `{name}`; give the group's stem on an indented `path:` line in its block"),
+                    )
+                    .within(place));
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 fn lower_statement(
@@ -289,6 +339,9 @@ fn lower_statement(
                     format!("duplicate sidecars group `{}`", group.name),
                 ));
             }
+            builder
+                .sidecar_places
+                .insert(group.name.clone(), statement.place.clone());
             builder.pipeline.sidecar_groups.push(group.clone());
         }
         StatementKind::Extension { stage, extension } => {

@@ -10,13 +10,15 @@ ext: .img
 
 # Each photo and flat-field frame shares its file name with its sidecars,
 # which differ only by extension.
-sidecars photo [site, visit, shot]: site-{site}/visit-{visit}/photos/site-{site}_visit-{visit}_shot-{shot}_photo
+sidecars photo [site, visit, shot]:
+    path: site-{site}/visit-{visit}/photos/site-{site}_visit-{visit}_shot-{shot}_photo
     source raw_photo : Image<Photo,Captured> .raw
     source photo_gps : GpsTrack .gpx
     source photo_imu : ImuTrace .imu
     source photo_json : CaptureMetadata .json
 
-sidecars flat [site, visit]: site-{site}/visit-{visit}/calibration/site-{site}_visit-{visit}_flat
+sidecars flat [site, visit]:
+    path: site-{site}/visit-{visit}/calibration/site-{site}_visit-{visit}_flat
     source flat_field : Image<Flat,Captured> .raw
     source flat_field_json : CaptureMetadata .json
 
