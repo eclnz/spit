@@ -1,8 +1,9 @@
 # Profiling
 
 `bench.py` times the `spit` CLI on generated pipelines and datasets, and
-profiles it with callgrind. Use it to compare a change with the commit
-before it, and to find where the time goes when a stage is slow.
+profiles it with callgrind. Use it to check a change against the commit
+before it for a slowdown, and to find where the time goes when a stage is
+slow.
 
 The rules that keep SPIT's work in step with its data are under
 [Performance](../docs/architecture.md#performance) in the architecture notes.
@@ -13,12 +14,16 @@ git ignores. Datasets there are reused between runs.
 
 ```sh
 cargo build --release
-python3 profiling/bench.py pipeline          # spit check on 1000, 2000, 4000 steps
-python3 profiling/bench.py dataset           # spit inputs, dag, check on 1000 and 4000 subjects
+python3 profiling/bench.py pipeline          # spit check on 2000 steps
+python3 profiling/bench.py dataset           # spit inputs, dag, check on 1000 subjects
 python3 profiling/bench.py profile --steps 1000
 ```
 
-Each time is the quickest of five runs (`--repeats`), in milliseconds.
+Each time is the quickest of three runs (`--repeats`), in milliseconds.
+The defaults are one size of each workload, so a run takes seconds: enough
+to catch a regression, such as a step that has become quadratic, not to
+measure how a stage scales. For that, give more sizes, as in
+`--steps 1000,2000,4000` or `--subjects 1000,4000 --extra 0,60`.
 
 ## The workloads
 
@@ -45,6 +50,20 @@ git worktree add ../spit-old <commit>
 python3 profiling/bench.py pipeline --old ../spit-old/target/release/spit
 git worktree remove ../spit-old
 ```
+
+With `--old`, each of the new build's times is compared with the old
+build's, and the command exits with status 1 when one is more than 1.3
+times the old (`--tolerance`) and more than 5 ms slower, a difference small
+times show from run to run:
+
+```text
+slower than 1.3x the old build:
+  2000 steps check: 27.0 -> 85.8 ms (3.17x)
+```
+
+Times vary by 10% or more on a shared machine, so run a failed check again
+before taking it as a regression. The `new+ext` row of `dataset` has no old
+row to compare with.
 
 A build from before `{@product}` is given the old `{product}` spelling, and
 skips `--hovers` and `ext:`, which it does not have.

@@ -281,7 +281,7 @@ Extensions are optional. An operation whose tool picks the format from the outpu
   matrix (output): default derivatives/{@product}/{@entities}.mat, `.mat` from operation `align`
 ```
 
-Path rules also find sources. With `root data`, `spit inputs recipe.spitin` lists each file under `data` whose path matches a source's rule, in the pipeline or the recipe, reading entity values from its placeholders. A rule matches a file's whole path, so `responses/{region}/wave{wave}.csv` does not match `wave3.csv.bak` or `wave3.csv.1`, and files that match no rule are left out. Links to files and directories are followed. A value is read only as SPIT writes it, so a file such as `in/%41.txt`, whose value SPIT would write `A`, is skipped with a warning rather than listed under a path no job would use.
+Path rules also find sources. With `root data`, `spit inputs recipe.spitin` lists each file under `data` whose path matches a source's rule, in the pipeline or the recipe, reading entity values from its placeholders. A rule matches a file's whole path, so `responses/{region}/wave{wave}.csv` does not match `wave3.csv.bak` or `wave3.csv.1`, and files that match no rule are left out. When a source's rule matches no file, the scan warns and names the unmatched file nearest the rule, with the text where the file and the rule part; see [Find incomplete artifacts](../README.md#find-incomplete-artifacts). Links to files and directories are followed. A value is read only as SPIT writes it, so a file such as `in/%41.txt`, whose value SPIT would write `A`, is skipped with a warning rather than listed under a path no job would use.
 
 ### Files a tool writes beside another
 
@@ -313,7 +313,7 @@ operation recon(t1: Image) -> (subject: FsSubject /)
 operation store(table: Table) -> Zarr .zarr/
 ```
 
-A folder's path rule names the folder, without a trailing `/`. `spit inputs` finds a folder source by matching its rule against the folders under the root, and the files inside a folder it finds are read with it, so they are not listed among the files no rule matches. A file whose path matches a folder source's rule, or a folder whose path matches a file source's, is skipped with a warning that says which kind the source reads. `dag` checks that each source folder exists, as it does each source file.
+A folder's path rule names the folder, without a trailing `/`. `spit inputs` finds a folder source by matching its rule against the folders under the root, and the files inside a folder it finds are read with it, so they are not listed among the files no rule matches. A file whose path matches a folder source's rule, or a folder whose path matches a file source's, is skipped with a warning that says which kind the source reads. A folder source whose rule matches no folder is warned about as a file source is, naming the nearest folder rather than the nearest file. `dag` checks that each source folder exists, as it does each source file.
 
 A command is given a folder by its path, as a file is: `{dicom}` above is `dicom/sub=01`. `{subject.dir}` is the folder it is in, and `{subject.stem}` its name without its extension, which for a folder without one is its whole name, so a tool that takes a parent folder and a name can be given both:
 

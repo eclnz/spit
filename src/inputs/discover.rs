@@ -9,14 +9,14 @@ use rustc_hash::FxHashSet;
 
 use super::coverage::{apply_drops, DropIndex, EveryGroupDropped};
 use super::exclusions::{Excluder, UnmatchedExclusion};
-use super::pattern::{match_pattern, path_pattern, read_binding, Piece};
+use super::pattern::{match_pattern, missed_source, path_pattern, MissedSource, Piece};
 use crate::model::{
     ArtifactInstance, DirectoryDiscovery, EntityBinding, InputRules, Pipeline, PipelineIndex,
     ProductDef, Removal, SourceInventory, SourceRecord,
 };
 use crate::paths::{
-    error, inspect_paths, require_directory, validate_discovery_rule, PathBinder, PathError,
-    PathPart, PathPlaceholder, PathTemplate,
+    decode_component, encode_component, error, inspect_paths, require_directory,
+    validate_discovery_rule, PathBinder, PathError, PathPart, PathPlaceholder, PathTemplate,
 };
 
 /// The source files found under a root, what the recipe's rules removed,
@@ -26,6 +26,9 @@ pub struct Discovery {
     pub inventory: SourceInventory,
     /// Files under the root that match no source path rule.
     pub unmatched_files: Vec<String>,
+    /// Each source whose path rule matched no file, with the nearest of
+    /// the unmatched files.
+    pub missed: Vec<MissedSource>,
     /// Each skipped file and why.
     pub skipped: Vec<String>,
     /// What each `exclude` rule removed, then each group a `drop` rule
@@ -97,43 +100,66 @@ pub(super) fn discover(
         .collect::<Result<Vec<_>, _>>()?;
     let sources = source_patterns(pipeline)?;
     let listing = Listing::of(root)?;
-    let (folder_sources, file_sources): (Vec<_>, Vec<_>) =
-        sources.iter().partition(|source| source.product.folder);
-    // A file in a source folder is read with its folder.
-    let folders: FxHashSet<&str> = listing
-        .directories
+    // Each source with its place in `sources`, as file and folder sources:
+    // a file source's rule is matched against files, a folder source's
+    // against folders.
+    let (folder_sources, file_sources): (Vec<_>, Vec<_>) = sources
         .iter()
-        .filter(|directory| matches_any(&folder_sources, directory))
-        .map(String::as_str)
-        .collect();
-    let mut discovery = Discovery::default();
-    for file in &listing.files {
-        // SPIT's own files, such as a recipe kept in its dataset, are not
-        // data a rule missed.
-        if is_spit_file(file)
-            || matches_any(&file_sources, file)
-            || file
-                .match_indices('/')
-                .any(|(end, _)| folders.contains(&file[..end]))
-        {
-            continue;
-        }
-        match first_match(&folder_sources, file) {
-            Some(name) => discovery.skipped.push(format!(
-                "`{file}`: is a file, but source `{name}` reads folders"
-            )),
-            None => discovery.unmatched_files.push(file.clone()),
+        .enumerate()
+        .partition(|(_, source)| source.product.folder);
+    let mut matched = vec![false; sources.len()];
+    // A file in a source folder is read with its folder.
+    let mut folders = FxHashSet::default();
+    for directory in &listing.directories {
+        if let Some((index, _)) = first_match(&folder_sources, directory) {
+            matched[index] = true;
+            folders.insert(directory.as_str());
         }
     }
-    for directory in &listing.directories {
-        if !folders.contains(directory.as_str()) {
-            if let Some(name) = first_match(&file_sources, directory) {
-                discovery.skipped.push(format!(
-                    "`{directory}`: is a folder, but source `{name}` reads files; end its declaration with `/` to read folders"
-                ));
+    let mut discovery = Discovery::default();
+    // SPIT's own files, such as a recipe kept in its dataset, are not data a
+    // rule missed.
+    for file in listing.files.iter().filter(|file| !is_spit_file(file)) {
+        if let Some((index, _)) = first_match(&file_sources, file) {
+            matched[index] = true;
+        } else if !file
+            .match_indices('/')
+            .any(|(end, _)| folders.contains(&file[..end]))
+        {
+            match first_match(&folder_sources, file) {
+                Some((_, source)) => discovery.skipped.push(format!(
+                    "`{file}`: is a file, but source `{}` reads folders",
+                    source.product.name
+                )),
+                None => discovery.unmatched_files.push(file.clone()),
             }
         }
     }
+    for directory in &listing.directories {
+        if folders.contains(directory.as_str()) {
+            continue;
+        }
+        if let Some((_, source)) = first_match(&file_sources, directory) {
+            discovery.skipped.push(format!(
+                "`{directory}`: is a folder, but source `{}` reads files; end its declaration with `/` to read folders",
+                source.product.name
+            ));
+        }
+    }
+    // A folder source that found nothing is compared with the folders.
+    discovery.missed = sources
+        .iter()
+        .zip(&matched)
+        .filter(|(_, matched)| !**matched)
+        .map(|(source, _)| {
+            let (candidates, folder) = if source.product.folder {
+                (&listing.directories, true)
+            } else {
+                (&discovery.unmatched_files, false)
+            };
+            missed_source(&source.product.name, &source.pieces, candidates, folder)
+        })
+        .collect();
     find_contexts(
         &directory_patterns,
         &listing.directories,
@@ -336,26 +362,22 @@ fn expected_bindings<'a>(
     expected
 }
 
-/// Whether a path rule of `sources` matches `path`.
-fn matches_any(sources: &[&SourcePattern<'_>], path: &str) -> bool {
-    sources
-        .iter()
-        .any(|source| match_pattern(&source.pieces, path).is_some())
-}
+/// A source with its place in the pipeline's list of sources.
+type Placed<'s, 'a> = (usize, &'s SourcePattern<'a>);
 
-/// The name of the first of `sources` whose path rule matches `path`.
-fn first_match<'a>(sources: &[&SourcePattern<'a>], path: &str) -> Option<&'a str> {
+/// The first of `sources` whose path rule matches `path`.
+fn first_match<'s, 'a>(sources: &[Placed<'s, 'a>], path: &str) -> Option<Placed<'s, 'a>> {
     sources
         .iter()
-        .find(|source| match_pattern(&source.pieces, path).is_some())
-        .map(|source| source.product.name.as_str())
+        .find(|(_, source)| match_pattern(&source.pieces, path).is_some())
+        .copied()
 }
 
 /// Record each file that a file source's path rule matches, and each folder
 /// that a folder source's matches, unless an `exclude` rule removes it or a
 /// value cannot be read.
 fn find_source_files(
-    kinds: [(&[&SourcePattern<'_>], &[String]); 2],
+    kinds: [(&[Placed<'_, '_>], &[String]); 2],
     expected: &BTreeMap<&str, BTreeSet<EntityBinding>>,
     excluder: &mut Excluder<'_>,
     discovery: &mut Discovery,
@@ -376,13 +398,13 @@ fn find_source_files(
 /// it and no `exclude` rule removes it. It must match one source only, and
 /// lie within the contexts found for that source.
 fn source_record(
-    sources: &[&SourcePattern<'_>],
+    sources: &[Placed<'_, '_>],
     file: &str,
     expected: &BTreeMap<&str, BTreeSet<EntityBinding>>,
     excluder: &mut Excluder<'_>,
     notes: &mut Vec<String>,
 ) -> Result<Option<SourceRecord>, PathError> {
-    let mut matches = sources.iter().filter_map(|source| {
+    let mut matches = sources.iter().filter_map(|(_, source)| {
         match_pattern(&source.pieces, file).map(|bound| (source.product, bound))
     });
     let Some((product, bound)) = matches.next() else {
@@ -502,6 +524,36 @@ fn sort_records(sources: &[SourcePattern<'_>], records: &mut [SourceRecord]) {
             .cmp(&rank(right).0)
             .then_with(|| left.entities.cmp_in(&right.entities, dimensions))
     });
+}
+
+/// The entities `bound` in `path`, decoded, or a note of why a value cannot
+/// be read and the path is skipped.
+fn read_binding(path: &str, bound: BTreeMap<String, &str>) -> Result<EntityBinding, String> {
+    bound
+        .into_iter()
+        .map(|(dimension, encoded)| match readable_value(encoded) {
+            Ok(value) => Ok((dimension, value)),
+            Err(reason) => Err(format!(
+                "`{path}`: `{dimension}` value `{encoded}` {reason}"
+            )),
+        })
+        .collect()
+}
+
+/// Decode a path component. It must be written exactly as SPIT would write
+/// it, so the record's path is the file found.
+fn readable_value(encoded: &str) -> Result<String, &'static str> {
+    let value = decode_component(encoded).ok_or("is not valid `%XX` text")?;
+    if encode_component(&value) != encoded {
+        return Err("is not how SPIT writes a value, so a path made from it would differ");
+    }
+    if value
+        .chars()
+        .any(|character| character.is_whitespace() || ",[]=#".contains(character))
+    {
+        return Err("holds a space or one of `,[]=#`, which an inventory cannot");
+    }
+    Ok(value)
 }
 
 /// Whether `file` is a pipeline, recipe, `.spitout` or `.spitdag`.

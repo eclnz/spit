@@ -147,6 +147,9 @@ pub(crate) fn settle(loaded: &Loaded) -> Result<(ResolvedInputs, PathBuf), Box<d
     for incomplete in &resolved.incomplete_groups {
         eprintln!("warning: {incomplete}");
     }
+    for missed in &resolved.missed_sources {
+        eprintln!("warning: {missed}");
+    }
     if let Some(root) = &resolved.root {
         let count = resolved.unmatched_files.len();
         if count > 0 {
@@ -227,10 +230,24 @@ fn source_path_failure(
         "{failure}\n  no `{product}` files were found under `{}` using path rule `{template}`",
         root.display()
     );
-    if let Some(example) = inputs.unmatched_files.iter().find(|file| {
-        file.to_ascii_lowercase()
-            .contains(&product.to_ascii_lowercase())
-    }) {
+    // The warning `settle` printed names the file nearest the rule. A rule
+    // no file comes near may still be the wrong rule for a file named after
+    // the source.
+    let near = inputs
+        .missed_sources
+        .iter()
+        .any(|missed| missed.product == *product && missed.nearest.is_some());
+    let named = || {
+        inputs.unmatched_files.iter().find(|file| {
+            file.to_ascii_lowercase()
+                .contains(&product.to_ascii_lowercase())
+        })
+    };
+    if near {
+        message.push_str(&format!(
+            "; the warning above names the nearest file. Check the path template; `path {product}:` sets a rule for this source."
+        ));
+    } else if let Some(example) = named() {
         message.push_str(&format!(
             "; `{example}` matched no source rule. Check the path template; `path {product}:` sets a rule for this source."
         ));

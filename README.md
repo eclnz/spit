@@ -257,7 +257,15 @@ An incomplete artifact has a missing or ambiguous input, a collection below its 
 
 `artifacts` also lists, under `Unused sources`, each source that no job reads, whether or not that job can be completed. Some are left out on purpose, such as calibration revisions a `where(revision=3)` selector passes over; others point to a mistake, such as `pricing/S07.json` read as store `S07` where the pipeline needs `s07`. `dag` counts them in a note: `3 source artifacts are used by no job (calibration: 3)`.
 
-When a missing input differs from an unused source only in letter case or leading zeros, the failed `dag` and `artifacts` reports name that source and the differing dimension. They also warn that the source is unused. A genuinely missing source has no such hint. During discovery, `inputs` notes how many files match no source rule. If a `require` count fails because the scan found no files for its source, `inputs` and `dag` name the path rule they used and show an unmatched file containing the source name, when one exists. Run `spit inputs dataset.spitin --unmatched` to list unmatched files, even when a `require` rule fails.
+When a missing input differs from an unused source only in letter case or leading zeros, the failed `dag` and `artifacts` reports name that source and the differing dimension. They also warn that the source is unused. A genuinely missing source has no such hint. During discovery, `inputs` notes how many files match no source rule. A source whose path rule matches no file at all gets a warning that names the unmatched file nearest the rule, and shows where the two part:
+
+```text
+warning: source `bold` matched no files with path rule `data/sub-{sub}/ses-{ses}/func/sub-{sub}_ses-{ses}_run-{run}_bold.nii.gz`
+  the nearest file is `data/sub-01/ses-1/func/sub-01_ses-1_task-rest_run-1_bold.nii.gz`
+  after `data/sub-01/ses-1/func/sub-01_ses-1_`, the file has `task-rest_run-1_bold.nii.gz` where the rule has `run-{run}_bold.nii.gz`
+```
+
+The nearest file is the one the rule matches furthest from its start, and a file is named only when the rule matches some of its start or it ends as the rule does. The warning comes from every scan, with a recipe or a pipeline and `--root`, so `inputs`, `dag` and `artifacts` all give it. If a `require` count fails because the scan found no files for its source, `inputs` and `dag` also name the path rule they used, and when no file comes near the rule, an unmatched file containing the source name. Run `spit inputs dataset.spitin --unmatched` to list unmatched files, even when a `require` rule fails.
 
 To make a plan for the work that can run now, use `spit dag dataset.spitin --partial -o plan.spitdag`. The command succeeds and records each unproducible output and its reasons in `left_out`. A `many` input takes only its complete members, then applies any `@ min(count)` requirement to that smaller collection. For example, a chain summary can use the reports from good stores even when other stores' reports cannot be made. Use `spit artifacts dataset.spitin` to inspect the full set of gaps before running the plan.
 

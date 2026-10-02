@@ -196,6 +196,19 @@ fn a_path_of_the_wrong_kind_is_named() {
 }
 
 #[test]
+fn a_folder_rule_that_matches_nothing_names_the_nearest_folder() {
+    let tree = dataset(&RECON.replace("dicom/sub={sub}", "dicom/subject-{sub}"));
+    let found = run(&tree, &["inputs"]);
+    let stderr = text(&found.stderr);
+    assert!(
+        stderr.contains(
+            "warning: source `dicom` matched no folders with path rule `dicom/subject-{sub}`\n  the nearest folder is `dicom/sub=01`\n  after `dicom/`, the folder has `sub=01` where the rule has `subject-{sub}`"
+        ),
+        "{stderr}"
+    );
+}
+
+#[test]
 fn a_missing_source_folder_is_an_error() {
     let tree = dataset(RECON);
     let pipeline = tree.path().join("pipeline.spit");
