@@ -52,7 +52,7 @@ sources:
     testset
 ```
 
-Run `spit dag sweep.spit sweep.spitout --commands` to see 17 jobs: six `train`, six `evaluate`, four `summarise`, and one `leaderboard`. For `config=deep`, there are two training jobs, one per model, both with seed 1. The final `leaderboard` command receives summaries in this order: `large/deep`, `large/fast`, `small/deep`, `small/fast`. Run `spit dag sweep.spit sweep.spitout -o sweep.spitdag` to save the plan. The input paths in this inventory are illustrative; add the named files under the paths declared above if you want SPIT to verify their existence with `--root`.
+Run `spit dag sweep.spit sweep.spitout --commands` to see 17 jobs: six `train`, six `evaluate`, four `summarise`, and one `leaderboard`. For `config=deep`, there are two training jobs, one per model, both with seed 1. The final `leaderboard` command receives summaries in this order: `large/deep`, `large/fast`, `small/deep`, `small/fast`. Run `spit dag sweep.spit sweep.spitout -o sweep.spitdag` to save the plan. The input paths in this inventory are illustrative. To have SPIT check that they exist, create the named files under the paths declared above and add `root .` as the inventory's first line.
 
 ## Cohort: discovery, exclusion, and grouped removal
 
@@ -100,6 +100,7 @@ Save as `cohort.spitin`:
 
 ```spit
 pipeline cohort.spit
+root .
 
 discover sessions: [sub, ses] from dirs sub-{sub}/ses-{ses}
 # Subject 03 has only one session and is removed as a whole.

@@ -149,10 +149,11 @@ A pipeline names no dataset. Rules about what a dataset must hold, and records o
 
 ## Supply the inputs
 
-A `.spitin` recipe describes how to find a dataset's inputs. Its first line names the pipeline it serves, relative to the recipe's folder. The smallest recipe is that line alone:
+A `.spitin` recipe describes how to find a dataset's inputs. Its first line names the pipeline it serves, relative to the recipe's folder, and its `root` line names the dataset folder, also relative to the recipe's folder. The smallest recipe is those two lines:
 
 ```text
 pipeline analysis.spit
+root .
 ```
 
 `spit inputs` then finds every source by its path rule: each file under the recipe's folder whose path matches a source's rule becomes one of that source's artifacts, with its dimensions read from the path. Nothing else is needed when the files say everything.
@@ -161,6 +162,7 @@ Add rules when they say more than the files do. For example, beside an `analysis
 
 ```text
 pipeline analysis.spit
+root .
 
 discover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}
 drop [sub] where sessions count<2
@@ -188,6 +190,8 @@ contexts sessions:
 The `.spitout` lists the source identities found in the dataset, and the folder it found them in, relative to the `.spitout` itself. Paths come from the pipeline's source rules; when a recipe defines a source rule instead, the `.spitout` carries that rule once in `source_paths:`. Later steps need neither the recipe nor a rescan. A dataset indexer or person can write the same inventory. A record names no file of its own: its source's path rule gives it. The text processing example uses [command_demo.spitout](examples/commands/command_demo/command_demo.spitout):
 
 ```text
+root command_demo_data
+
 sources:
     shard[group=alpha,part=01]
     shard[group=alpha,part=02]

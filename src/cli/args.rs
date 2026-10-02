@@ -41,9 +41,9 @@ impl Command {
             },
             Self::Inputs => CommandSpec {
                 name: "inputs",
-                files: "<recipe.spitin>",
-                summary: "step 2: find a dataset's sources with a recipe, apply `exclude`, `drop` and `require`, and write a .spitout",
-                example: "spit inputs dataset.spitin -o dataset.spitout",
+                files: "<recipe.spitin> or <pipeline.spit>",
+                summary: "step 2: find a dataset's sources with a recipe or a pipeline's path rules, apply a recipe's `exclude`, `drop` and `require`, and write a .spitout",
+                example: "spit inputs dataset.spitin -o dataset.spitout\n  spit inputs analysis.spit --root data -o dataset.spitout",
                 flags: &[Root, Output, Unmatched],
             },
             Self::Dag => CommandSpec {

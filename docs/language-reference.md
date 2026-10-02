@@ -324,6 +324,7 @@ sidecars photo [site, visit, shot]:
 
 # dataset.spitin
 pipeline survey.spit
+root .
 path photo: site-{site}/visit-{visit}/photos/shot-{shot}
 ```
 
@@ -335,10 +336,11 @@ When `spit inputs` scans a dataset, it warns about each place it found some of a
 
 ## Recipes
 
-A `.spitin` recipe says how to find one dataset's inputs, keeping everything about the data out of the pipeline. A dataset that needs nothing but its folder needs no recipe: `spit dag analysis.spit --root data` scans the folder with the pipeline's own path rules. Its first line names the pipeline it serves, relative to the recipe's folder:
+A `.spitin` recipe says how to find one dataset's inputs, keeping everything about the data out of the pipeline. Its first line names the pipeline it serves, relative to the recipe's folder, and its `root` line names the dataset folder:
 
 ```text
 pipeline analysis.spit
+root .
 
 discover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}
 exclude image[sub=04,ses=2]    # scanner fault
@@ -346,6 +348,8 @@ drop [sub] where sessions count<2
 require image count=1 per [sub, ses]
 path image: data/sub-{sub}/ses-{ses}/image.nii.gz
 ```
+
+A dataset that needs nothing but its folder needs no recipe: `spit dag analysis.spit --root data` scans the folder with the pipeline's own path rules.
 
 A recipe may contain `discover`, `exclude`, `drop` and `require` rules, `path product:` rules for source products and for [`sidecars` groups](#sidecar-files) whose block gives no stem, a default `path:` rule for its sources, and `sources:`/`contexts:` records. It cannot declare sources, `sidecars` groups, operations, steps, commands, stages, imports, or `ext:`; the pipeline still declares each logical `source` with its dimensions and optional type. Rules in a pipeline are an error, and so are records. A source's path rule is written in the pipeline or in the recipe, not both: put it in the pipeline when every dataset for that pipeline shares the layout, and in the recipe when the layout belongs to one dataset.
 
@@ -359,6 +363,7 @@ source events .tsv [sub]
 
 # dataset.spitin
 pipeline analysis.spit
+root .
 path: rawdata/sub-{sub}/{@product}
 ```
 
