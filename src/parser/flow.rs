@@ -98,12 +98,6 @@ impl OpenGroup {
                 format!("sidecars group `{group}` holds only its sources, each written `source name : Type .ext`"),
             ));
         };
-        let Some((declaration, written)) = declaration.split_once('.') else {
-            return Err(ParseError::new(
-                number,
-                format!("a source in sidecars group `{group}` names the extension its file adds to the stem, as in `source gps : GpsTrack .gpx`"),
-            ));
-        };
         if let Some(bracket) = declaration.find('[') {
             return Err(ParseError::new(
                 number,
@@ -111,12 +105,16 @@ impl OpenGroup {
             )
             .at_token(&declaration[bracket..]));
         }
-        let extension = extension(&format!(".{}", written.trim()), number)?.to_owned();
-        let declaration = declaration.trim();
         let StatementKind::Product(mut product, place) =
-            StatementKind::product(original, declaration, number)?
+            StatementKind::product(original, declaration.trim(), number)?
         else {
             unreachable!("a source line declares a product");
+        };
+        let Some(extension) = product.extension.clone() else {
+            return Err(ParseError::new(
+                number,
+                format!("a source in sidecars group `{group}` names the extension its file adds to the stem, as in `source gps : GpsTrack .gpx`"),
+            ));
         };
         product.dimensions.clone_from(&self.group.dimensions);
         let template = PathTemplate::parse(format!("{}{extension}", self.stem))

@@ -200,6 +200,13 @@ impl PathTemplate {
             })
     }
 
+    /// Whether the template names `{@stage}` outside a `[...]` group, so
+    /// that only a product made in a stage can use it.
+    pub(crate) fn needs_stage(&self) -> bool {
+        self.parts
+            .contains(&PathPart::Placeholder(PathPlaceholder::Stage))
+    }
+
     /// Each dimension a `[...]` group names.
     pub(crate) fn group_dimensions(&self) -> impl Iterator<Item = &str> {
         self.parts
@@ -582,10 +589,11 @@ impl<'p> ProductPath<'p> {
                 PathPart::Placeholder(PathPlaceholder::Stage) => {
                     let stage = self.stage.as_deref().ok_or_else(|| {
                         error(format!(
-                            "path template for `{}` uses `{}`, but `{}` is not made in a stage",
+                            "path template for `{}` uses `{}`, but `{}` is not made in a stage; write `[{}/]` to leave the stage's directory out for products outside every stage",
                             artifact.product,
                             PathPlaceholder::Stage,
-                            artifact.product
+                            artifact.product,
+                            PathPlaceholder::Stage
                         ))
                         .focus(PathPlaceholder::Stage.to_string())
                     })?;

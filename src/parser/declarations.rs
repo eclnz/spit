@@ -11,7 +11,7 @@ use crate::model::{
 use crate::paths::{validate_discovery_rule, PathTemplate};
 use crate::types::{parse_type_expr, TypeExpr, TypeParseError};
 
-use super::lexical::{call_parts, comma_items, identifier, qualified_identifier};
+use super::lexical::{call_parts, comma_items, extension, identifier, qualified_identifier};
 use super::source_map::tail_place;
 use super::{ParseError, PathRule};
 
@@ -473,18 +473,26 @@ pub(super) fn parse_product(line: &str, number: usize) -> Result<ProductDef, Par
         Some((declaration, dimensions)) => (declaration, Some(dimensions)),
         None => (line, None),
     };
-    let (name, artifact_type) = if let Some((name, ty)) = declaration.split_once(':') {
+    // `name : Type .ext`: the extension follows the type, as on an output.
+    let (named, extension) = match declaration.split_once('.') {
+        Some((named, _)) => {
+            let written = &declaration[named.len()..];
+            (named, Some(extension(written.trim(), number)?.to_owned()))
+        }
+        None => (declaration, None),
+    };
+    let (name, artifact_type) = if let Some((name, ty)) = named.split_once(':') {
         let ty = ty.trim();
         let ty = parse_type_expr(ty, false).map_err(|error| type_error(number, ty, error))?;
         (name.trim(), ty)
     } else {
-        (declaration.trim(), TypeExpr::Unknown)
+        (named.trim(), TypeExpr::Unknown)
     };
     let name = identifier(name, number, "product name").map_err(|error| {
         if dimensions.is_none() && name.split_whitespace().count() > 1 {
             ParseError::new(
                 number,
-                "expected source name, optional `: Type`, and optional [dimensions]",
+                "expected source name, optional `: Type`, optional `.ext`, and optional [dimensions]",
             )
             .at_token(name)
         } else {
@@ -513,7 +521,9 @@ pub(super) fn parse_product(line: &str, number: usize) -> Result<ProductDef, Par
     for dimension in &dimensions {
         identifier(dimension, number, "dimension")?;
     }
-    Ok(ProductDef::new(name, artifact_type, &dimensions))
+    let mut product = ProductDef::new(name, artifact_type, &dimensions);
+    product.extension = extension;
+    Ok(product)
 }
 
 pub(super) fn parse_invocation_parts(

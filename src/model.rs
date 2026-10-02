@@ -453,6 +453,10 @@ pub struct ProductDef {
     pub name: String,
     pub artifact_type: ArtifactType,
     pub dimensions: Vec<String>,
+    /// The extension a source declares its files have, as in
+    /// `source events : Events .tsv [sub]`; `None` for an output, whose
+    /// operation says.
+    pub extension: Option<String>,
 }
 
 impl ProductDef {
@@ -465,6 +469,7 @@ impl ProductDef {
             name: name.into(),
             artifact_type,
             dimensions: owned_strings(dimensions),
+            extension: None,
         }
     }
 }
@@ -982,6 +987,8 @@ pub struct SidecarGroup {
 pub enum ExtensionSource {
     /// On the output of the named operation.
     Operation(String),
+    /// On the named source's declaration.
+    Source(String),
     /// By the named stage's `ext:` line.
     Stage(String),
     /// By the pipeline's `ext:` line.
@@ -992,6 +999,7 @@ impl fmt::Display for ExtensionSource {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Operation(operation) => write!(f, "operation `{operation}`"),
+            Self::Source(source) => write!(f, "source `{source}`"),
             Self::Stage(stage) => write!(f, "stage `{stage}`'s `ext:`"),
             Self::Default => f.write_str("`ext:`"),
         }
@@ -1065,7 +1073,8 @@ impl Pipeline {
     }
 
     /// The path rule `product` uses, as written: its own rule, else its
-    /// stage's default, else the pipeline's default.
+    /// stage's default, else the pipeline's default, unless that needs
+    /// `{@stage}` and `product` is a source.
     pub fn path_rule_for(&self, product: &str) -> Option<&PathTemplate> {
         PipelineIndex::scan(self).path_rule_for(product)
     }
@@ -1090,8 +1099,9 @@ impl Pipeline {
     }
 
     /// The extension `product`'s file must have, and where it is declared:
-    /// its operation's, else, when its path is a default rule, the `ext:`
-    /// default. A product with its own rule takes only its operation's.
+    /// its operation's, or the one a source declares, else, when its path
+    /// is a default rule, the `ext:` default. A product with its own rule
+    /// takes only its operation's or its declared one.
     pub fn expected_extension(&self, product: &str) -> Option<(&str, ExtensionSource)> {
         PipelineIndex::scan(self).expected_extension(product)
     }
@@ -1368,14 +1378,21 @@ impl<'p> PipelineIndex<'p> {
         }
     }
 
-    /// See [`Pipeline::path_rule_for`].
+    /// See [`Pipeline::path_rule_for`]. A default that needs `{@stage}` is
+    /// for products made in a stage, so it does not find a source, which
+    /// is left for a rule of its own or the recipe's default.
     pub(crate) fn path_rule_for(&self, product: &str) -> Option<&'p PathTemplate> {
         let pipeline = self.pipeline;
         pipeline
             .product_paths
             .get(product)
             .or_else(|| self.stage_path_rule(product).map(|(_, template)| template))
-            .or(pipeline.path_template.as_ref())
+            .or_else(|| {
+                pipeline
+                    .path_template
+                    .as_ref()
+                    .filter(|default| !(default.needs_stage() && self.is_source(product)))
+            })
     }
 
     /// The step that makes `product`, the operation it calls, and the port
@@ -1437,6 +1454,11 @@ impl<'p> PipelineIndex<'p> {
         if let Some((operation, extension)) = self.output_extension(product) {
             return Some((extension, ExtensionSource::Operation(operation.to_owned())));
         }
+        if let Some(declared) = self.product(product) {
+            if let Some(extension) = declared.extension.as_deref() {
+                return Some((extension, ExtensionSource::Source(declared.name.clone())));
+            }
+        }
         self.rule_extension(product)
     }
 
@@ -1495,6 +1517,10 @@ pub struct InputRules {
     pub exclusion_files: Vec<(String, usize)>,
     /// Path rules for source products that the recipe, not the pipeline, sets.
     pub source_paths: BTreeMap<String, PathTemplate>,
+    /// The recipe's `path:` line: the rule for each source with none of its
+    /// own, in the pipeline or the recipe. It stays as written;
+    /// [`InputRules::source_paths_for`] gives each source its rule.
+    pub source_default: Option<PathTemplate>,
 }
 
 impl InputRules {
@@ -1504,6 +1530,46 @@ impl InputRules {
             && self.exclusions.is_empty()
             && self.exclusion_files.is_empty()
             && self.source_paths.is_empty()
+            && self.source_default.is_none()
+    }
+
+    /// The sources of `pipeline` that the recipe's default `path:` covers:
+    /// those with no rule in the pipeline or the recipe. None without a
+    /// default.
+    pub fn defaulted_sources<'p>(&self, pipeline: &'p Pipeline) -> Vec<&'p str> {
+        if self.source_default.is_none() {
+            return Vec::new();
+        }
+        let index = PipelineIndex::new(pipeline);
+        pipeline
+            .products
+            .iter()
+            .map(|product| product.name.as_str())
+            .filter(|name| {
+                index.is_source(name)
+                    && !pipeline.product_paths.contains_key(*name)
+                    && !self.source_paths.contains_key(*name)
+            })
+            .collect()
+    }
+
+    /// The path rule the recipe gives each source of `pipeline`: its own,
+    /// else its default for each of [`InputRules::defaulted_sources`].
+    /// Borrowed when the default covers no source.
+    pub fn source_paths_for(&self, pipeline: &Pipeline) -> Cow<'_, BTreeMap<String, PathTemplate>> {
+        let defaulted = self.defaulted_sources(pipeline);
+        let Some(default) = self
+            .source_default
+            .as_ref()
+            .filter(|_| !defaulted.is_empty())
+        else {
+            return Cow::Borrowed(&self.source_paths);
+        };
+        let mut paths = self.source_paths.clone();
+        for name in defaulted {
+            paths.insert(name.to_owned(), default.clone());
+        }
+        Cow::Owned(paths)
     }
 
     /// The discovery rule named `name`, if any.
