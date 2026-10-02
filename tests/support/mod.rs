@@ -151,6 +151,11 @@ pub fn errors(diagnostics: Vec<Diagnostic>) -> Vec<Diagnostic> {
         .collect()
 }
 
+/// The numbers of `ids`, as reports show them.
+pub fn numbers(ids: &[spit::JobId]) -> Vec<usize> {
+    ids.iter().map(|id| id.number()).collect()
+}
+
 /// Every job output, as `product[entities]`, in job order.
 pub fn outputs(dag: &ResolvedDag) -> Vec<String> {
     dag.jobs

@@ -2,21 +2,47 @@
 //! what can and cannot be made.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt;
 
 use crate::error::ResolveError;
 
 use super::{stage_within, Artifact, ArtifactId, ArtifactInstance, Artifacts, SourceInventory};
 
+/// A job's number in its DAG, counted from 1 in the order the resolver
+/// makes jobs, as reports and the `.spitdag` show it. Unlike an
+/// [`ArtifactId`], it is not an index: a DAG cut to one stage keeps its
+/// jobs' numbers.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct JobId(u32);
+
+impl JobId {
+    /// The job numbered `number`.
+    pub(crate) fn new(number: usize) -> Self {
+        Self(u32::try_from(number).expect("fewer than 2^32 jobs in a DAG"))
+    }
+
+    /// The job's number, from 1.
+    pub fn number(self) -> usize {
+        self.0 as usize
+    }
+}
+
+impl fmt::Display for JobId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Job {
-    pub id: usize,
+    pub id: JobId,
     pub operation: String,
     /// The artifacts bound to each input port, in port order. A many port
     /// holds its collection in order; every other port holds one artifact.
     pub inputs: Vec<Vec<ArtifactId>>,
     /// One artifact per output port, in port order.
     pub outputs: Vec<ArtifactId>,
-    pub dependencies: Vec<usize>,
+    pub dependencies: Vec<JobId>,
     /// The stage of the step that made this job, if any.
     pub stage: Option<String>,
 }

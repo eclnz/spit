@@ -312,7 +312,7 @@ fn one_stage_includes_the_stages_nested_in_it() {
         dag.only_stage(stage)
             .jobs
             .iter()
-            .map(|job| job.id)
+            .map(|job| job.id.number())
             .collect()
     };
     assert_eq!(ids("preprocess"), [1, 2, 3, 4, 5, 6, 7]);
@@ -402,7 +402,7 @@ fn every_job_follows_the_jobs_it_depends_on() {
         let dag = resolve(&parsed, &inventory.unwrap()).unwrap();
         assert!(dag.jobs.len() > 1, "{pipeline}");
         for (index, job) in dag.jobs.iter().enumerate() {
-            assert_eq!(job.id, index + 1, "{pipeline}");
+            assert_eq!(job.id.number(), index + 1, "{pipeline}");
             assert!(
                 job.dependencies
                     .iter()
