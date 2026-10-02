@@ -28,9 +28,7 @@ struct CommandSpec {
 
 impl Command {
     fn spec(self) -> CommandSpec {
-        use Flag::{
-            Commands, Hovers, Json, Output, Partial, PathRules, Paths, Root, Stdin, Unmatched,
-        };
+        use Flag::{Commands, Hovers, Json, Output, Partial, PathRules, Paths, Stdin, Unmatched};
         match self {
             Self::Check => CommandSpec {
                 name: "check",
@@ -44,21 +42,21 @@ impl Command {
                 files: "<recipe.spitin>",
                 summary: "step 2: find a dataset's sources with a recipe, apply `exclude`, `drop` and `require`, and write a .spitout",
                 example: "spit inputs dataset.spitin -o dataset.spitout",
-                flags: &[Root, Output, Unmatched],
+                flags: &[Output, Unmatched],
             },
             Self::Dag => CommandSpec {
                 name: "dag",
                 files: "<recipe.spitin> or <pipeline.spit> <inputs.spitout | ->",
                 summary: "step 3: resolve a pipeline's jobs over a dataset's inputs; -o writes the .spitdag",
                 example: "spit dag dataset.spitin -o analysis.spitdag\n  spit dag analysis.spit dataset.spitout -o analysis.spitdag\n  spit dag dataset.spitin --commands",
-                flags: &[Root, Paths, Commands, Partial, Json, Output],
+                flags: &[Paths, Commands, Partial, Json, Output],
             },
             Self::Artifacts => CommandSpec {
                 name: "artifacts",
                 files: "<recipe.spitin> or <pipeline.spit> <inputs.spitout | ->",
                 summary: "step 3: report what can and cannot be made from a dataset's inputs, and why",
                 example: "spit artifacts dataset.spitin\n  spit artifacts analysis.spit dataset.spitout",
-                flags: &[Root],
+                flags: &[],
             },
         }
     }
@@ -111,7 +109,6 @@ impl Command {
 
 #[derive(Clone, Copy, PartialEq)]
 pub(crate) enum Flag {
-    Root,
     Output,
     Paths,
     Commands,
@@ -123,8 +120,7 @@ pub(crate) enum Flag {
     Hovers,
 }
 
-const FLAGS: [Flag; 10] = [
-    Flag::Root,
+const FLAGS: [Flag; 9] = [
     Flag::Output,
     Flag::Paths,
     Flag::Commands,
@@ -150,7 +146,6 @@ const CONFLICTS: [(Flag, Flag); 7] = [
 impl Flag {
     pub(crate) fn name(self) -> &'static str {
         match self {
-            Self::Root => "--root",
             Self::Output => "-o",
             Self::Paths => "--paths",
             Self::Commands => "--commands",
@@ -166,7 +161,6 @@ impl Flag {
     /// What the flag's value is, for a flag that takes one.
     pub(crate) fn value(self) -> Option<&'static str> {
         match self {
-            Self::Root => Some("<directory>"),
             Self::Output => Some("<file>"),
             _ => None,
         }
@@ -174,10 +168,6 @@ impl Flag {
 
     fn help(self, command: Command) -> &'static str {
         match (self, command) {
-            (Self::Root, Command::Inputs) => "the folder to scan; the recipe's folder by default",
-            (Self::Root, _) => {
-                "the dataset folder every path is relative to; the recipe's folder by default"
-            }
             (Self::Output, Command::Inputs) => "write the .spitout to <file>, not standard output",
             (Self::Output, _) => "write the .spitdag to <file>",
             (Self::Paths, _) => "show each artifact's file",
@@ -340,7 +330,12 @@ fn overview(f: &mut fmt::Formatter<'_>) -> fmt::Result {
 fn command_help(f: &mut fmt::Formatter<'_>, command: Command) -> fmt::Result {
     let name = command.name();
     writeln!(f, "spit {name}: {}\n", command.summary())?;
-    writeln!(f, "usage: spit {name} {} [options]", command.files())?;
+    let options = if command.flags().is_empty() {
+        ""
+    } else {
+        " [options]"
+    };
+    writeln!(f, "usage: spit {name} {}{options}", command.files())?;
     if let Some(shortcut) = command.shortcut() {
         writeln!(f, "\n{shortcut}")?;
     }

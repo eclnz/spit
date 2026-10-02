@@ -41,7 +41,10 @@ const FILES: [&str; 8] = [
 fn dataset(name: &str, rules: &str) -> Tree {
     let tree = Tree::new(name, &FILES);
     tree.write("pipeline.spit", PIPELINE);
-    tree.write("data.spitin", &format!("pipeline pipeline.spit\n{rules}"));
+    tree.write(
+        "data.spitin",
+        &format!("pipeline pipeline.spit\nroot .\n{rules}"),
+    );
     tree
 }
 
@@ -118,7 +121,7 @@ fn a_rule_is_checked_against_the_pipeline_without_data() {
         let (ok, _, stderr) = run(&tree, "check");
         assert!(!ok, "{rule}");
         assert!(stderr.contains(message), "{rule}: {stderr}");
-        assert!(stderr.contains("line 2, column 9"), "{rule}: {stderr}");
+        assert!(stderr.contains("line 3, column 9"), "{rule}: {stderr}");
     }
 }
 
@@ -131,7 +134,7 @@ fn an_excluded_run_leaves_its_session_to_the_other_runs() {
     let (ok, stdout, stderr) = run(&tree, "inputs");
     assert!(ok, "{stderr}");
     assert!(
-        stderr.contains("note: excluded bold[sub=02,ses=01,run=3] (line 2): corrupted\n"),
+        stderr.contains("note: excluded bold[sub=02,ses=01,run=3] (line 3): corrupted\n"),
         "{stderr}"
     );
     assert!(
@@ -141,7 +144,7 @@ fn an_excluded_run_leaves_its_session_to_the_other_runs() {
     assert!(
         stdout.ends_with(
             "removed:\n    bold[sub=02,ses=01,run=3]\n        rule: exclude bold[sub=02,ses=01,run=3]\n\
-             \x20       at: line 2\n        reason: corrupted\n"
+             \x20       at: line 3\n        reason: corrupted\n"
         ),
         "{stdout}"
     );
@@ -154,7 +157,7 @@ fn an_excluded_run_leaves_its_session_to_the_other_runs() {
     );
     tree.write(
         "data.spitin",
-        "pipeline pipeline.spit\nexclude bold[sub=02,ses=01,run=3]  # corrupted\nexclude [sub=03]\n",
+        "pipeline pipeline.spit\nroot .\nexclude bold[sub=02,ses=01,run=3]  # corrupted\nexclude [sub=03]\n",
     );
     let recipe = tree.path().join("data.spitin");
     let output = spit(&["dag", recipe.to_str().unwrap(), "--commands"]);
@@ -179,7 +182,7 @@ fn a_group_is_removed_from_every_source_and_recorded_once() {
     let sources = &stdout[..stdout.find("removed:").unwrap()];
     assert!(!sources.contains("sub=02"), "{stdout}");
     assert_eq!(stdout.matches("\n    [sub=02]\n").count(), 1, "{stdout}");
-    assert!(stdout.contains("    [sub=02]\n        rule: exclude [sub=02]\n        at: line 2\n        reason: withdrew\n"), "{stdout}");
+    assert!(stdout.contains("    [sub=02]\n        rule: exclude [sub=02]\n        at: line 3\n        reason: withdrew\n"), "{stdout}");
 }
 
 #[test]
@@ -189,7 +192,7 @@ fn an_exclude_that_matches_nothing_is_an_error_naming_close_values() {
     assert!(!ok);
     assert!(
         stderr.contains(
-            "error: `exclude bold[sub=2,ses=01,run=3]` (line 2) matches nothing in this dataset; it has sub=02"
+            "error: `exclude bold[sub=2,ses=01,run=3]` (line 3) matches nothing in this dataset; it has sub=02"
         ),
         "{stderr}"
     );
@@ -244,7 +247,7 @@ fn a_discovered_context_left_out_needs_no_files() {
     // Without the exclusion, the empty session's reference is missing.
     tree.write(
         "data.spitin",
-        "pipeline pipeline.spit\ndiscover sessions: [sub, ses] from dirs sub-{sub}/ses-{ses}\nexclude [sub=03]\n",
+        "pipeline pipeline.spit\nroot .\ndiscover sessions: [sub, ses] from dirs sub-{sub}/ses-{ses}\nexclude [sub=03]\n",
     );
     let (ok, _, stderr) = run(&tree, "inputs");
     assert!(!ok);
@@ -266,10 +269,10 @@ fn an_expected_file_excluded_by_name_need_not_exist() {
     let (ok, stdout, stderr) = run(&tree, "inputs");
     assert!(ok, "{stderr}");
     assert!(
-        stderr.contains("note: excluded ref[sub=01,ses=02] (line 3): never acquired"),
+        stderr.contains("note: excluded ref[sub=01,ses=02] (line 4): never acquired"),
         "{stderr}"
     );
-    assert!(stdout.contains("    ref[sub=01,ses=02]\n        rule: exclude ref[sub=01,ses=02]\n        at: line 3\n"), "{stdout}");
+    assert!(stdout.contains("    ref[sub=01,ses=02]\n        rule: exclude ref[sub=01,ses=02]\n        at: line 4\n"), "{stdout}");
 }
 
 #[test]
@@ -292,7 +295,8 @@ fn an_excluded_file_may_lie_outside_the_discovered_contexts() {
          operation total(sales, price) -> Total\ncommand total: total {sales} {price} {@output}\n\
          totals = total(sales, price)\n",
     );
-    let discover = "pipeline pipeline.spit\ndiscover stores: [store] from dirs stores/{store}\n";
+    let discover =
+        "pipeline pipeline.spit\nroot .\ndiscover stores: [store] from dirs stores/{store}\n";
     tree.write("data.spitin", discover);
     let (ok, _, stderr) = run(&tree, "inputs");
     assert!(!ok);
@@ -338,7 +342,7 @@ fn a_failed_join_names_the_exclusion_that_caused_it() {
     let (ok, _, stderr) = run(&tree, "dag");
     assert!(!ok);
     assert!(
-        stderr.contains("ref[ses=01,sub=01] was excluded by recipe line 2"),
+        stderr.contains("ref[ses=01,sub=01] was excluded by recipe line 3"),
         "{stderr}"
     );
     assert!(stderr.contains("--partial"), "{stderr}");
@@ -427,8 +431,8 @@ fn the_record_of_what_was_removed_reads_back_and_reaches_the_spitdag() {
     assert!(
         json.contains(
             "\"removed\":[{\"product\":\"bold\",\"entities\":{\"run\":\"3\",\"ses\":\"01\",\"sub\":\"02\"},\
-\"rule\":\"exclude bold[sub=02,ses=01,run=3]\",\"origin\":\"line 2\",\"reason\":\"corrupted: see #140\",\"found\":null},\
-{\"product\":null,\"entities\":{\"sub\":\"03\"},\"rule\":\"exclude [sub=03]\",\"origin\":\"line 3\",\"reason\":null,\"found\":null}]"
+\"rule\":\"exclude bold[sub=02,ses=01,run=3]\",\"origin\":\"line 3\",\"reason\":\"corrupted: see #140\",\"found\":null},\
+{\"product\":null,\"entities\":{\"sub\":\"03\"},\"rule\":\"exclude [sub=03]\",\"origin\":\"line 4\",\"reason\":null,\"found\":null}]"
         ),
         "{json}"
     );

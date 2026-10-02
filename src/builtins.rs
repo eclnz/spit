@@ -231,7 +231,7 @@ pub static DOCS: [Doc; 43] = [
         kind: "keyword",
         anchor: "recipes",
         example: "root data",
-        summary: "The dataset root, the folder paths are relative to. In a recipe it is relative to the recipe's folder, which is the root without the line; in a `.spitout` that `spit inputs -o` writes, it is relative to the `.spitout`'s folder. `--root` overrides either.",
+        summary: "The dataset root, the folder paths are relative to. Every recipe names one, relative to the recipe's folder, and `root .` is that folder; in a `.spitout` that `spit inputs -o` writes, it is relative to the `.spitout`'s folder.",
     },
     Doc {
         name: "discover",

@@ -2,7 +2,7 @@
 //! `artifacts`.
 
 use std::error::Error;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use spit::{
     bind_dag, bind_dag_with, diagnose_checked, diagnose_inputs, diagnose_recipe, inspect_paths,
@@ -133,8 +133,7 @@ pub(crate) fn inputs(args: &CliArgs) -> Result<(), Box<dyn Error>> {
         None,
         loaded.names(),
     )?;
-    let root = args.value(Flag::Root).map(PathBuf::from);
-    let (mut settled, root) = settle(&loaded, &args.file, root.as_deref())?;
+    let (mut settled, root) = settle(&loaded, &args.file)?;
     if args.has(Flag::Unmatched) {
         for file in &settled.unmatched_files {
             println!("{file}");
@@ -142,13 +141,12 @@ pub(crate) fn inputs(args: &CliArgs) -> Result<(), Box<dyn Error>> {
         return Ok(());
     }
     require_complete(&settled, &loaded.checked.pipeline)?;
-    // A written .spitout records the dataset root, so `dag` on it needs no
-    // `--root`: relative to the file, so the two can move together. A
-    // printed one records none, as where it will be kept is unknown.
-    let written = args.value(Flag::Output).map(PathBuf::from);
-    settled.inventory.root = root
-        .zip(written)
-        .map(|(root, file)| recorded_root(&root, &file));
+    // A written .spitout records the dataset root, relative to the file, so
+    // the two can move together. A printed one records none, as where it
+    // will be kept is unknown.
+    settled.inventory.root = args
+        .value(Flag::Output)
+        .map(|file| recorded_root(&root, Path::new(&file)));
     let text = render_source_inventory(
         &settled.inventory,
         &loaded.checked.pipeline,

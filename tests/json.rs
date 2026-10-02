@@ -74,7 +74,7 @@ fn recipe_json_places_pipeline_errors_in_the_pipeline_file() {
         "analysis.spit",
         "source raw [id]\noperation copy(input)\nresult = copy(rwa)\n",
     );
-    let recipe = tree.write("data.spitin", "pipeline analysis.spit\n");
+    let recipe = tree.write("data.spitin", "pipeline analysis.spit\nroot .\n");
     let output = Command::new(env!("CARGO_BIN_EXE_spit"))
         .args(["check", recipe.to_str().unwrap(), "--json"])
         .output()

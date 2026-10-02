@@ -71,32 +71,25 @@ pub(crate) fn load_recipe(file: &str) -> Result<Loaded, Box<dyn Error>> {
     })
 }
 
-/// Run step 2 for the recipe `file`: scan `given`, the root the recipe's
-/// `root` line names, or the recipe's folder; or take the records written
-/// in the recipe when no root is given on the command line. Returns what it
-/// settled, and the dataset root, when known.
+/// Run step 2 for the recipe `file`: scan the root its `root` line names,
+/// or take the records written in the recipe. Returns what it settled, and
+/// the dataset root.
 pub(crate) fn settle(
     loaded: &Loaded,
     file: &str,
-    given: Option<&Path>,
-) -> Result<(ResolvedInputs, Option<PathBuf>), Box<dyn Error>> {
-    let folder = Path::new(file)
-        .parent()
-        .filter(|parent| !parent.as_os_str().is_empty())
-        .unwrap_or_else(|| Path::new("."))
-        .to_owned();
+) -> Result<(ResolvedInputs, PathBuf), Box<dyn Error>> {
     let recipe = &loaded.recipe;
-    let named = recipe.root.as_ref().map(|(root, _)| root.clone());
-    let root = given.map(Path::to_path_buf).or(named);
-    // Records written in the recipe stand in for a scan, unless a root to
-    // scan is given on the command line. The recipe's `root` line, like its
-    // folder, only says where the dataset is.
+    let (root, _) = recipe
+        .root
+        .clone()
+        .expect("a recipe read from a file names its root");
+    // Records written in the recipe stand in for a scan. The `root` line
+    // still says where their files are.
     let source = match &recipe.inventory {
-        Some(records) if given.is_none() => InputSource::Inventory(records.clone()),
-        _ => InputSource::Discover(root.as_deref().unwrap_or(&folder)),
+        Some(records) => InputSource::Inventory(records.clone()),
+        None => InputSource::Discover(&root),
     };
     let resolved = recipe.resolve(&loaded.checked.pipeline, source)?;
-    let root = root.or_else(|| resolved.root.clone());
     for skipped in &resolved.skipped {
         eprintln!("warning: skipped {skipped}");
     }
@@ -306,9 +299,8 @@ pub(crate) fn prepare(args: &CliArgs) -> Result<Prepared, Box<dyn Error>> {
         .into());
     }
     let lenient = args.command == Command::Artifacts || args.has(Flag::Partial);
-    let root = args.value(Flag::Root).map(PathBuf::from);
     if is_recipe(inputs) {
-        return prepare_recipe(inputs, root, lenient);
+        return prepare_recipe(inputs, lenient);
     }
     let Some(pipeline) = given else {
         return Err(format!(
@@ -346,14 +338,13 @@ pub(crate) fn prepare(args: &CliArgs) -> Result<Prepared, Box<dyn Error>> {
         names,
     )?;
     // A root the records name is relative to their file's folder.
-    let recorded = records.inventory.root.as_ref().map(|recorded| {
+    let root = records.inventory.root.as_ref().map(|recorded| {
         let folder = match inputs.as_str() {
             "-" => Path::new(""),
             file => Path::new(file).parent().unwrap_or_else(|| Path::new("")),
         };
         folder.join(recorded)
     });
-    let root = root.or(recorded);
     let settled = InputSpec::default()
         .resolve(&checked.pipeline, InputSource::Inventory(records.inventory))?;
     Ok(prepared(checked.pipeline, settled, records.report, root))
@@ -362,13 +353,9 @@ pub(crate) fn prepare(args: &CliArgs) -> Result<Prepared, Box<dyn Error>> {
 /// Step 2 in memory for the recipe `file`, then step 3's diagnosis of the
 /// records it settles. The pipeline is read and settled once, and its
 /// warnings are printed once, with the records'.
-fn prepare_recipe(
-    file: &str,
-    root: Option<PathBuf>,
-    lenient: bool,
-) -> Result<Prepared, Box<dyn Error>> {
+fn prepare_recipe(file: &str, lenient: bool) -> Result<Prepared, Box<dyn Error>> {
     let loaded = load_recipe(file)?;
-    let (settled, root) = settle(&loaded, file, root.as_deref())?;
+    let (settled, root) = settle(&loaded, file)?;
     eprintln!("note: ran `spit inputs {file}` in memory");
     if !lenient {
         if let Some(failure) = settled.gaps.first().map(|gap| &gap.error) {
@@ -389,7 +376,7 @@ fn prepare_recipe(
     if let Some((checked, records)) = diagnose_checked_with_inventory(text, &settled, context) {
         report(&checked.warnings, text, None, loaded.names())?;
         let pipeline = loaded.checked.pipeline;
-        return Ok(prepared(pipeline, settled, records.report, root));
+        return Ok(prepared(pipeline, settled, records.report, Some(root)));
     }
     let records_text = render_source_inventory(
         &settled.inventory,
@@ -409,7 +396,7 @@ fn prepare_recipe(
         loaded.checked.pipeline,
         settled,
         records.report,
-        root,
+        Some(root),
     ))
 }
 

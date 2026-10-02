@@ -39,7 +39,7 @@ for S in "$TMP"/scenarios/*/; do
     W=$TMP/$name-followup
     cp -r "$S/data" "$W"; cp -r "$S/addition/." "$W/"
     cp "$S/key-followup/pipeline.spit" "$S/key-followup/dataset.spitin" "$W/"
-    "$BIN" dag "$W/dataset.spitin" --root "$W" -o "$TMP/$name-followup.spitdag" 2>/dev/null
+    "$BIN" dag "$W/dataset.spitin" -o "$TMP/$name-followup.spitdag" 2>/dev/null
     check "$name follow-up" "$S/key-followup/expected.spitdag" "$TMP/$name-followup.spitdag"
   fi
 done
