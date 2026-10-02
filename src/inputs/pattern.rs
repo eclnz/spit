@@ -208,6 +208,8 @@ fn forced_end(next: Option<&Piece>, rest: &str, longest: usize) -> Option<usize>
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct MissedSource {
     pub product: String,
+    /// Whether the source reads folders, so its nearest is a folder.
+    pub folder: bool,
     /// The rule as it was matched, with `{@product}` and `{@entities}`
     /// written out and its extension added.
     pub rule: String,
@@ -227,25 +229,26 @@ pub struct NearestFile {
 
 impl fmt::Display for MissedSource {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let kind = if self.folder { "folder" } else { "file" };
         write!(
             f,
-            "source `{}` matched no files with path rule `{}`",
+            "source `{}` matched no {kind}s with path rule `{}`",
             self.product, self.rule
         )?;
         let Some(near) = &self.nearest else {
             return Ok(());
         };
         let (start, rest) = near.file.split_at(near.matched);
-        write!(f, "\n  the nearest file is `{}`\n  ", near.file)?;
+        write!(f, "\n  the nearest {kind} is `{}`\n  ", near.file)?;
         if !start.is_empty() {
             write!(f, "after `{start}`, ")?;
         }
         match (rest.is_empty(), near.expected.is_empty()) {
-            (true, _) => write!(f, "the file ends where the rule has `{}`", near.expected),
-            (false, true) => write!(f, "the file has `{rest}` where the rule ends"),
+            (true, _) => write!(f, "the {kind} ends where the rule has `{}`", near.expected),
+            (false, true) => write!(f, "the {kind} has `{rest}` where the rule ends"),
             (false, false) => write!(
                 f,
-                "the file has `{rest}` where the rule has `{}`",
+                "the {kind} has `{rest}` where the rule has `{}`",
                 near.expected
             ),
         }
@@ -256,8 +259,14 @@ impl fmt::Display for MissedSource {
 /// `files` it comes nearest to: the one it matches furthest from the start,
 /// then the one that shares most of the rule's ending. A file is near only
 /// when the rule matches some of its start, or it ends with the rule's last
-/// literal, such as `_bold.nii.gz`, in full.
-pub(super) fn missed_source(product: &str, pieces: &[Piece], files: &[String]) -> MissedSource {
+/// literal, such as `_bold.nii.gz`, in full. A `folder` source's `files`
+/// are the folders under the root.
+pub(super) fn missed_source(
+    product: &str,
+    pieces: &[Piece],
+    files: &[String],
+    folder: bool,
+) -> MissedSource {
     let ending = match pieces.last() {
         Some(Piece::Literal(last)) => last.as_str(),
         _ => "",
@@ -285,6 +294,7 @@ pub(super) fn missed_source(product: &str, pieces: &[Piece], files: &[String]) -
     }
     MissedSource {
         product: product.to_owned(),
+        folder,
         rule: render(pieces),
         nearest: best.map(|(_, _, near)| near),
     }

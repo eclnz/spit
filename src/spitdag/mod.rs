@@ -17,7 +17,7 @@ use crate::types::TypeExpr;
 use self::write::{write_document, PIECE};
 
 /// The schema version a `.spitdag` is written with.
-pub const SPITDAG_VERSION: usize = 4;
+pub const SPITDAG_VERSION: usize = 5;
 
 /// A resolved DAG with its paths bound and its commands expanded. Its
 /// artifacts are the resolved DAG's, each kept once with its path; jobs,
@@ -41,6 +41,8 @@ pub struct BoundDag {
     paths: Vec<String>,
     /// Each product's dimensions in declared order, by product number.
     dimensions: Vec<Vec<String>>,
+    /// Whether each product's artifacts are folders, by product number.
+    folders: Vec<bool>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -84,8 +86,10 @@ pub struct BoundJob {
 pub struct BoundArtifact<'a> {
     pub product: &'a str,
     pub artifact_type: &'a TypeExpr,
-    /// The file, relative to the dataset root.
+    /// The file or folder, relative to the dataset root.
     pub path: &'a str,
+    /// Whether the artifact is a folder rather than a file.
+    pub folder: bool,
     entities: &'a EntityBinding,
     dimensions: &'a [String],
 }
@@ -158,11 +162,13 @@ impl BoundJob {
 
 impl BoundDag {
     /// `jobs` over `artifacts`, where the artifact with each id has the path
-    /// `paths` holds for it and each product, by number, has `dimensions`.
+    /// `paths` holds for it and each product, by number, has `dimensions`
+    /// and is a folder where `folders` says so.
     pub(crate) fn new(
         artifacts: Artifacts,
         paths: Vec<String>,
         dimensions: Vec<Vec<String>>,
+        folders: Vec<bool>,
         steps: Vec<BoundStep>,
         jobs: Vec<BoundJob>,
     ) -> Self {
@@ -175,6 +181,7 @@ impl BoundDag {
             artifacts,
             paths,
             dimensions,
+            folders,
         }
     }
 
@@ -185,12 +192,14 @@ impl BoundDag {
 
     pub fn artifact(&self, id: ArtifactId) -> BoundArtifact<'_> {
         let artifact = self.artifacts.get(id);
+        let product = self.artifacts.product_of(id) as usize;
         BoundArtifact {
             product: artifact.product,
             artifact_type: artifact.artifact_type,
             path: &self.paths[id.index()],
+            folder: self.folders[product],
             entities: artifact.entities,
-            dimensions: &self.dimensions[self.artifacts.product_of(id) as usize],
+            dimensions: &self.dimensions[product],
         }
     }
 

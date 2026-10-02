@@ -269,7 +269,9 @@ fn check_command_placeholders(
                         ))
                         .focus(format!("{{{name}}}")));
                     }
-                    if facet == Facet::Stem && operation.outputs[index].extension.is_none() {
+                    // A folder without an extension is its whole name.
+                    let output = &operation.outputs[index];
+                    if facet == Facet::Stem && output.extension.is_none() && !output.folder {
                         let example = if port == "@output" {
                             "-> Image .nii.gz".to_owned()
                         } else {

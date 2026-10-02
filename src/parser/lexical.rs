@@ -182,6 +182,30 @@ pub(super) fn extension(text: &str, number: usize) -> Result<&str, ParseError> {
     }
 }
 
+/// What ends a type in a declaration: an extension, a `/` that makes the
+/// product a folder, or both, as in `Image .nii.gz`, `Dicom /` and
+/// `Store .zarr/`. Gives the text before them, the extension, and whether
+/// the product is a folder. Types hold no `.` or `/`, so the first `.`
+/// starts the extension.
+pub(super) fn split_ending(
+    text: &str,
+    number: usize,
+) -> Result<(&str, Option<&str>, bool), ParseError> {
+    let text = text.trim();
+    let (text, folder) = match text.strip_suffix('/') {
+        Some(rest) => (rest.trim_end(), true),
+        None => (text, false),
+    };
+    match text.find('.') {
+        Some(dot) => Ok((
+            text[..dot].trim(),
+            Some(extension(text[dot..].trim(), number)?),
+            folder,
+        )),
+        None => Ok((text, None, folder)),
+    }
+}
+
 pub(super) fn identifier<'a>(
     value: &'a str,
     number: usize,

@@ -203,7 +203,7 @@ fn check_json_reads_the_pipeline_file_and_dag_json_emits_the_spitdag() {
     let dag = run();
     assert!(dag.status.success(), "{}", stderr(&dag));
     let graph = stdout(&dag);
-    assert!(graph.starts_with("{\"version\":4,\"generator\":{\"name\":\"spit\",\"version\":\""));
+    assert!(graph.starts_with("{\"version\":5,\"generator\":{\"name\":\"spit\",\"version\":\""));
     // The `.spitout`'s root, relative to its folder, is recorded in full.
     assert!(
         graph.contains("/examples/commands/command_demo/command_demo_data\",\"external_inputs\":["),

@@ -80,6 +80,8 @@ impl PathRule {
 pub struct PathCoverageEntry {
     pub product: String,
     pub source: bool,
+    /// Whether the product's artifacts are folders.
+    pub folder: bool,
     pub rule: PathRule,
     /// The extension added to the rule as written, and where it is
     /// declared: `` `.mat` from operation `align` ``.
@@ -172,7 +174,8 @@ impl fmt::Display for PathCoverage {
         writeln!(f, "Product path coverage:")?;
         for entry in &self.entries {
             let role = if entry.source { "source" } else { "output" };
-            write!(f, "  {} ({role}): ", entry.product)?;
+            let kind = if entry.folder { " folder" } else { "" };
+            write!(f, "  {} ({role}{kind}): ", entry.product)?;
             match &entry.rule {
                 PathRule::Explicit(template) => write!(f, "explicit {template}")?,
                 PathRule::Recipe(template) => write!(f, "explicit {template} (recipe)")?,
@@ -314,6 +317,7 @@ pub(crate) fn collect_paths(
         entries.push(PathCoverageEntry {
             product: product.name.clone(),
             source: !outputs.contains(product.name.as_str()),
+            folder: index.is_folder(&product.name),
             rule,
             extension: index
                 .added_extension(&product.name)
@@ -322,9 +326,19 @@ pub(crate) fn collect_paths(
     }
     for (path, product) in &samples {
         if let Some((directory, other)) = enclosing_path(&samples, path) {
+            let (inner_made, outer_made) = (outputs.contains(product), outputs.contains(other));
+            let what = match (index.is_folder(other), inner_made, outer_made) {
+                // Nothing writes a source, so a source may sit in a source folder.
+                (true, false, false) => continue,
+                (false, _, _) => format!("a `{other}` file"),
+                (true, _, true) => format!("a `{other}` folder, which its job writes whole"),
+                (true, true, false) => {
+                    format!("a `{other}` source folder, which no job may write inside")
+                }
+            };
             errors.push(
                 error(format!(
-                    "path rule for `{product}` puts files inside `{directory}`, the path of a `{other}` file, for the same entities; distinguish their path rules"
+                    "path rule for `{product}` puts files inside `{directory}`, the path of {what}, for the same entities; distinguish their path rules"
                 ))
                 .at(lines.path_rule(&index, product)),
             );
