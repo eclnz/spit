@@ -46,6 +46,7 @@ pub fn validate_bound_source_files(
         .collect();
     needed.sort_unstable_by_key(|&(artifact, _)| artifact);
     let mut verified = VerifiedFiles::default();
+    let index = PipelineIndex::new(pipeline);
     for (artifact, relative) in needed {
         // In a DAG cut to one stage, as by `ResolvedDag::only_stage`, what
         // other stages make must already exist.
@@ -54,10 +55,16 @@ pub fn validate_bound_source_files(
             .iter()
             .find(|invocation| invocation.outputs.iter().any(|output| output == artifact.0));
         let full_path = root.join(relative);
-        if !full_path.is_file() {
+        let folder = index.is_folder(artifact.0);
+        let (present, kind) = if folder {
+            (full_path.is_dir(), "folder")
+        } else {
+            (full_path.is_file(), "file")
+        };
+        if !present {
             return Err(error(match made_by {
                 Some(invocation) => format!(
-                    "missing file for `{}[{}]`, which {} makes: `{}`",
+                    "missing {kind} for `{}[{}]`, which {} makes: `{}`",
                     artifact.0,
                     artifact.1,
                     invocation.stage.as_ref().map_or_else(
@@ -67,7 +74,7 @@ pub fn validate_bound_source_files(
                     full_path.display()
                 ),
                 None => format!(
-                    "missing source file for `{}[{}]`: `{}`",
+                    "missing source {kind} for `{}[{}]`: `{}`",
                     artifact.0,
                     artifact.1,
                     full_path.display()
@@ -179,8 +186,10 @@ pub(crate) fn bound_paths(
         paths[id.index()] = Some(relative);
     }
     // The first such path in path order is the one reported. Paths share
-    // their directories, so a directory found to hold no file, nor any above
-    // it, is kept, and a path in it needs no more looking up.
+    // their directories, so a directory found to hold no artifact, nor any
+    // above it, is kept, and a path in it needs no more looking up.
+    let index = binder.index();
+    let mut made: Option<Vec<bool>> = None;
     let mut clear: FxHashSet<&str> = FxHashSet::default();
     let enclosed = owners
         .iter()
@@ -198,11 +207,25 @@ pub(crate) fn bound_paths(
             };
             Some((relative, artifact, directory, other))
         })
+        // Few paths are inside another, so only they are judged.
+        .filter_map(|(relative, artifact, directory, other)| {
+            let folder = index.is_folder(dag.artifact(other).product);
+            let made = made.get_or_insert_with(|| outputs_made(dag));
+            let (inner_made, outer_made) = (made[artifact.index()], made[other.index()]);
+            // Nothing writes a source, so a source may sit in a source folder.
+            (!folder || inner_made || outer_made)
+                .then_some((relative, artifact, directory, other, folder, outer_made))
+        })
         .min_by(|left, right| left.0.cmp(right.0));
-    if let Some((_, artifact, directory, other)) = enclosed {
+    if let Some((_, artifact, directory, other, folder, outer_made)) = enclosed {
         let (artifact, other) = (dag.artifact(artifact), dag.artifact(other));
+        let what = match (folder, outer_made) {
+            (false, _) => "which is a file",
+            (true, true) => "a folder its job writes whole",
+            (true, false) => "a source folder, which no job may write inside",
+        };
         return Err(error(format!(
-            "path of `{}[{}]` puts it inside `{directory}`, the path of `{}[{}]`, which is a file",
+            "path of `{}[{}]` puts it inside `{directory}`, the path of `{}[{}]`, {what}",
             artifact.product, artifact.entities, other.product, other.entities
         )));
     }
