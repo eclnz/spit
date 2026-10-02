@@ -236,10 +236,13 @@ fn cardinality(value: Cardinality) -> &'static str {
 }
 
 fn product_signature(product: &ProductDef, ty: &TypeExpr) -> String {
+    let extension = product
+        .extension
+        .as_deref()
+        .map_or(String::new(), |extension| format!(" {extension}"));
     format!(
-        "{}: {} [{}]",
+        "{}: {ty}{extension} [{}]",
         product.name,
-        ty,
         product.dimensions.join(", ")
     )
 }
@@ -460,7 +463,8 @@ fn product_details(
             "Path template: {} (inherited from stage {stage}).",
             resolved_path().unwrap_or_default()
         ));
-    } else if pipeline.path_template.is_some() {
+    } else if index.has_path(&product.name) {
+        // A default that needs `{@stage}` is no source's rule.
         details.push(format!(
             "Path template: {} (pipeline default).",
             resolved_path().unwrap_or_default()
