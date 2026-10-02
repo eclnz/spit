@@ -119,6 +119,52 @@ fn a_source_on_the_default_rule_takes_ext() {
 }
 
 #[test]
+fn a_source_declares_its_extension_as_an_output_does() {
+    let pipeline = parse_pipeline(
+        "path: data/{@product}/{@entities}\next: .csv\nsource image : Image .nii.gz [id]\nsource events .tsv [id]\nsource table [id]\npath events: logs/{id}\noperation copy(a, b, c)\ncopied = copy(image, events, table)\n",
+    )
+    .unwrap();
+    // It completes a default rule in place of `ext:`, and its own rule.
+    assert_eq!(
+        path(&pipeline, "image"),
+        "data/{@product}/{@entities}.nii.gz"
+    );
+    assert_eq!(path(&pipeline, "events"), "logs/{id}.tsv");
+    assert_eq!(path(&pipeline, "table"), "data/{@product}/{@entities}.csv");
+    let declared = &pipeline.products[0];
+    assert_eq!(declared.extension.as_deref(), Some(".nii.gz"));
+    assert_eq!(declared.dimensions, ["id"]);
+    assert_eq!(declared.artifact_type.to_string(), "Image");
+}
+
+#[test]
+fn a_sources_rule_ending_in_another_extension_is_an_error() {
+    let found = errors(
+        "source events .tsv [id]\npath events: logs/{id}.csv\noperation f(x)\ny = f(events)\n",
+    );
+    assert_eq!(
+        found,
+        [(
+            Some(2),
+            "path `events` ends in `.csv`, but source `events` declares `.tsv`; drop the extension or use `.tsv`".to_owned()
+        )]
+    );
+    let found = errors("path: in/{@product}/{@entities}.csv\nsource events .tsv [id]\noperation f(x)\ny = f(events)\n");
+    assert_eq!(
+        found,
+        [(
+            Some(1),
+            "the default path ends in `.csv`, but source `events` declares `.tsv`; write the default path without an extension, so each source's declared extension completes it".to_owned()
+        )]
+    );
+    let bad = parse_pipeline("source raw .c$v [id]\n").unwrap_err();
+    assert!(
+        bad.to_string().contains("`.c$v` is not an extension"),
+        "{bad}"
+    );
+}
+
+#[test]
 fn bound_paths_carry_the_extension() {
     let tree = Tree::new("extensions-bound", &[]);
     tree.write(

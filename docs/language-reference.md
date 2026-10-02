@@ -15,6 +15,8 @@ source calibration
 
 Each `source` declares a product family, not an individual file. `image[subject=A,visit=1,run=2]` identifies one artifact. Types such as `Image` are optional; product names and entity bindings identify artifacts.
 
+A source may declare the extension its files have after its type, as an operation does for its outputs: `source events : Events .tsv [subject]`, or `source events .tsv [subject]` untyped. It completes the source's path rule; see [Extensions](#extensions).
+
 A source with no dimensions takes no brackets: `source testset : Data` and `source calibration` each declare one artifact, displayed by its bare name. A source with no dimensions matches every job that takes it as an input, without a selector.
 
 An assignment introduces a derived product automatically:
@@ -247,7 +249,7 @@ operation align(moving: Image, reference: Image) -> Transform .mat
 operation fit(runs: many Data) -> (weights: Weights .npz, quality: Metrics .json) @ min(2)
 ```
 
-An extension is a `.` and letters, digits, `-` or `_`, and may have several parts, as `.nii.gz` does. An untyped output may have one too: `-> .txt`.
+An extension is a `.` and letters, digits, `-` or `_`, and may have several parts, as `.nii.gz` does. An untyped output may have one too: `-> .txt`. A source declares the extension of the files it reads in the same place, after its type: `source events : Events .tsv [sub]`.
 
 `ext:` sets the extension for operations that declare none, at the top level or in a stage, as `path:` sets the default path. Default path rules are then written without an extension:
 
@@ -258,8 +260,8 @@ ext: .img
 
 A product's path is its rule, completed with an extension when the rule ends without one:
 
-1. Its own `path product:` rule takes the operation's extension, if the operation declares one. `ext:` never applies to it, and without an operation's extension the rule is used as written.
-2. A default rule, its stage's or the pipeline's, takes the operation's extension, else the nearest stage's `ext:`, else the pipeline's. A source whose files the pipeline's default rule finds takes `ext:` too; a recipe's default is used as written.
+1. Its own `path product:` rule takes the operation's extension, or the one a source declares, if there is one. `ext:` never applies to it, and without such an extension the rule is used as written. A recipe's default counts as each source's own rule.
+2. A default rule, its stage's or the pipeline's, takes the operation's extension or the source's, else the nearest stage's `ext:`, else the pipeline's. A source with no declared extension whose files the pipeline's default rule finds takes `ext:` too.
 
 A rule's extension is the text of its last file name after its final placeholder, from the first `.`, as `.nii.gz` in `sub-{sub}_T1w.nii.gz`. A rule that ends with the extension it would be given is left as it is, so a full BIDS-style path can keep it. A rule that ends with another is an error, since the tool writes a different file from the one the rule names:
 
@@ -267,7 +269,7 @@ A rule's extension is the text of its last file name after its final placeholder
 path `matrix` ends in `.txt`, but operation `align` writes `.mat`; drop the extension or use `.mat`
 ```
 
-A default rule that ends with an extension while an operation or `ext:` gives its products another is the same error, said once for the rule.
+A default rule that ends with an extension while an operation, a source, or `ext:` gives its products another is the same error, said once for the rule. For a source the message says the source declares the extension, as in ``path `events` ends in `.csv`, but source `events` declares `.tsv` ``.
 
 Extensions are optional. An operation whose tool picks the format from the output's name, such as a converter, declares none, and its path rule decides. A pipeline with no extensions and no `ext:` line resolves its paths as written.
 
@@ -309,7 +311,7 @@ sidecars photo [site, visit, shot]: site-{site}/visit-{visit}/photos/shot-{shot}
     source photo_json : CaptureMetadata .json
 ```
 
-Each member is an ordinary source with the group's dimensions, whose path is the stem and its extension, as `site-{site}/visit-{visit}/photos/shot-{shot}.gpx`; steps read it by name, as any other source. Write each member indented beneath the header as `source name : Type .ext`, or `source name .ext` untyped. The next line that is not indented ends the block. A group with no dimensions names one set of files, as `sidecars config: config/settings`.
+Each member is an ordinary source with the group's dimensions, whose path is the stem and its extension, as `site-{site}/visit-{visit}/photos/shot-{shot}.gpx`; steps read it by name, as any other source. Write each member indented beneath the header as a source that declares its extension, `source name : Type .ext`, or `source name .ext` untyped. The next line that is not indented ends the block. A group with no dimensions names one set of files, as `sidecars config: config/settings`.
 
 A block belongs at the top level of a pipeline. Its members take no dimensions or path rules of their own.
 
@@ -336,14 +338,15 @@ A recipe's `path:` line is the default for every source with no rule of its own,
 ```text
 # analysis.spit
 path: {@stage}/{@product}/{@entities}
+source t1w : Image .nii.gz [sub]
+source events .tsv [sub]
 
 # dataset.spitin
 pipeline analysis.spit
-path: rawdata/sub-{sub}/{@product}.nii.gz
-path events: rawdata/sub-{sub}/events.tsv
+path: rawdata/sub-{sub}/{@product}
 ```
 
-A source takes its rule in the pipeline, else its rule in the recipe, else the recipe's default, else the pipeline's default. A pipeline default that names `{@stage}` outside a group finds no source, since no source is made in a stage, so it covers only outputs. The recipe's default is used as written: `ext:` completes output paths and does not apply to it, so a source whose files have another extension takes a rule of its own, as `events` does. It cannot name `{@stage}`. `spit check recipe.spitin --path-rules` lists a source it covers as `default ... (recipe)`, and the `.spitout` writes it under `source_paths:` as each such source's rule.
+A source takes its rule in the pipeline, else its rule in the recipe, else the recipe's default, else the pipeline's default. A pipeline default that names `{@stage}` outside a group finds no source, since no source is made in a stage, so it covers only outputs. Each source completes the recipe's default with the extension it declares, so one default finds `rawdata/sub-01/t1w.nii.gz` and `rawdata/sub-01/events.tsv`. `ext:` completes output paths and does not apply to the recipe's default, so a source that declares no extension takes the default as written. It cannot name `{@stage}`. `spit check recipe.spitin --path-rules` lists a source it covers as `default ... (recipe)`, and the `.spitout` writes it under `source_paths:` as each such source's rule.
 
 A recipe may also name its dataset root, the folder its paths are relative to, once:
 

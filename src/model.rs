@@ -453,6 +453,10 @@ pub struct ProductDef {
     pub name: String,
     pub artifact_type: ArtifactType,
     pub dimensions: Vec<String>,
+    /// The extension a source declares its files have, as in
+    /// `source events : Events .tsv [sub]`; `None` for an output, whose
+    /// operation says.
+    pub extension: Option<String>,
 }
 
 impl ProductDef {
@@ -465,6 +469,7 @@ impl ProductDef {
             name: name.into(),
             artifact_type,
             dimensions: owned_strings(dimensions),
+            extension: None,
         }
     }
 }
@@ -982,6 +987,8 @@ pub struct SidecarGroup {
 pub enum ExtensionSource {
     /// On the output of the named operation.
     Operation(String),
+    /// On the named source's declaration.
+    Source(String),
     /// By the named stage's `ext:` line.
     Stage(String),
     /// By the pipeline's `ext:` line.
@@ -992,6 +999,7 @@ impl fmt::Display for ExtensionSource {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Operation(operation) => write!(f, "operation `{operation}`"),
+            Self::Source(source) => write!(f, "source `{source}`"),
             Self::Stage(stage) => write!(f, "stage `{stage}`'s `ext:`"),
             Self::Default => f.write_str("`ext:`"),
         }
@@ -1091,8 +1099,9 @@ impl Pipeline {
     }
 
     /// The extension `product`'s file must have, and where it is declared:
-    /// its operation's, else, when its path is a default rule, the `ext:`
-    /// default. A product with its own rule takes only its operation's.
+    /// its operation's, or the one a source declares, else, when its path
+    /// is a default rule, the `ext:` default. A product with its own rule
+    /// takes only its operation's or its declared one.
     pub fn expected_extension(&self, product: &str) -> Option<(&str, ExtensionSource)> {
         PipelineIndex::scan(self).expected_extension(product)
     }
@@ -1444,6 +1453,11 @@ impl<'p> PipelineIndex<'p> {
         }
         if let Some((operation, extension)) = self.output_extension(product) {
             return Some((extension, ExtensionSource::Operation(operation.to_owned())));
+        }
+        if let Some(declared) = self.product(product) {
+            if let Some(extension) = declared.extension.as_deref() {
+                return Some((extension, ExtensionSource::Source(declared.name.clone())));
+            }
         }
         self.rule_extension(product)
     }

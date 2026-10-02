@@ -712,3 +712,30 @@ fn check_finds_a_bad_recipe_source_path_at_its_line() {
     );
     assert!(diagnose("path: raw/{@product}/{@entities}.nii.gz\n").is_empty());
 }
+
+#[test]
+fn one_recipe_default_covers_sources_of_different_extensions() {
+    let tree = Tree::new(
+        "source-default-extensions",
+        &[
+            "raw/sub-1/image.nii.gz",
+            "raw/sub-1/events.tsv",
+            "raw/sub-1/events.csv",
+        ],
+    );
+    let pipeline = parse_pipeline(
+        "path: {@stage}/{@product}/{@entities}\nsource image : Image .nii.gz [sub]\nsource events .tsv [sub]\nstage prep:\n    operation fit(image: Image, events)\n    fitted = fit(image, events)\n",
+    )
+    .unwrap();
+    let recipe = parse_input_spec("path: raw/sub-{sub}/{@product}\n").unwrap();
+    let resolved = recipe
+        .resolve(&pipeline, InputSource::Discover(tree.path()))
+        .unwrap();
+    let paths: Vec<_> = resolved
+        .inventory
+        .artifacts
+        .iter()
+        .map(|record| record.path.as_deref().unwrap())
+        .collect();
+    assert_eq!(paths, ["raw/sub-1/image.nii.gz", "raw/sub-1/events.tsv"]);
+}
