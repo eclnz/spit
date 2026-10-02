@@ -92,11 +92,6 @@ fn step_modules_do_not_import_later_steps() {
 /// usually two subjects, and is easier to read as two modules.
 const MAX_LINES: usize = 800;
 
-/// Files that were longer than `MAX_LINES` when the limit came in, each
-/// with the most lines it may have. A listed file may shrink but not grow,
-/// and leaves the list once it is within the limit.
-const OVER_LIMIT: &[(&str, usize)] = &[("src/parser/inventory.rs", 804)];
-
 #[test]
 fn rust_files_stay_short() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -106,28 +101,17 @@ fn rust_files_stay_short() {
             source_files(&root.join(folder), &mut files);
         }
     }
-    let mut problems = Vec::new();
-    for file in files {
-        let relative = file.strip_prefix(root).unwrap();
-        let name = relative.to_str().unwrap().replace('\\', "/");
-        let lines = fs::read_to_string(&file).unwrap().lines().count();
-        match OVER_LIMIT.iter().find(|(listed, _)| *listed == name) {
-            Some(&(_, _)) if lines <= MAX_LINES => problems.push(format!(
-                "{name} has {lines} lines, within the limit of {MAX_LINES}: take it out of OVER_LIMIT"
-            )),
-            Some(&(_, most)) if lines > most => problems.push(format!(
-                "{name} has {lines} lines and may not grow past {most}: split it"
-            )),
-            None if lines > MAX_LINES => problems.push(format!(
-                "{name} has {lines} lines, over the limit of {MAX_LINES}: split it"
-            )),
-            _ => {}
-        }
-    }
-    for (listed, _) in OVER_LIMIT {
-        if !root.join(listed).is_file() {
-            problems.push(format!("{listed} is in OVER_LIMIT but no longer exists"));
-        }
-    }
-    assert!(problems.is_empty(), "{}", problems.join("\n"));
+    let long: Vec<_> = files
+        .iter()
+        .filter_map(|file| {
+            let lines = fs::read_to_string(file).unwrap().lines().count();
+            let name = file.strip_prefix(root).unwrap().display();
+            (lines > MAX_LINES).then(|| format!("{name} has {lines} lines: split it"))
+        })
+        .collect();
+    assert!(
+        long.is_empty(),
+        "over the limit of {MAX_LINES} lines:\n{}",
+        long.join("\n")
+    );
 }
