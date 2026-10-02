@@ -98,7 +98,6 @@ const MAX_LINES: usize = 800;
 const OVER_LIMIT: &[(&str, usize)] = &[
     ("src/diagnostics.rs", 1681),
     ("src/main.rs", 1252),
-    ("src/model.rs", 2081),
     ("src/parser/inventory.rs", 804),
     ("src/paths/template.rs", 842),
 ];
