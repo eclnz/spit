@@ -1,0 +1,455 @@
+//! A compiled pipeline, and an index that finds each product's step once.
+
+use std::borrow::Cow;
+use std::collections::{BTreeMap, BTreeSet};
+
+use rustc_hash::{FxHashMap, FxHashSet};
+
+use crate::error::{DefinitionSubject, ResolveError};
+use crate::paths::{Holder, PathTemplate};
+
+use super::{
+    stage_and_parents, ArtifactInstance, CommandDef, EntityBinding, ExtensionSource, Invocation,
+    OperationDef, OutputPort, ProductDef, SidecarGroup, SourceInventory, SourceRecord, StageDef,
+};
+
+/// The logical pipeline: what to make from which sources. It says nothing
+/// about how a dataset's sources are found or filtered; see [`InputRules`].
+#[derive(Clone, Debug, Default)]
+pub struct Pipeline {
+    pub products: Vec<ProductDef>,
+    pub operations: Vec<OperationDef>,
+    pub invocations: Vec<Invocation>,
+    pub commands: Vec<CommandDef>,
+    pub path_template: Option<PathTemplate>,
+    /// The `ext:` default: the extension a default path rule is completed
+    /// with when the operation declares none.
+    pub extension: Option<String>,
+    pub product_paths: BTreeMap<String, PathTemplate>,
+    /// Stages in declaration order.
+    pub stages: Vec<StageDef>,
+    /// `sidecars` blocks; their members are also ordinary sources, each
+    /// with its path rule.
+    pub sidecar_groups: Vec<SidecarGroup>,
+}
+
+impl Pipeline {
+    /// The stage of the step that produces `product`; `None` for a source or
+    /// a step outside every stage.
+    pub fn stage_of(&self, product: &str) -> Option<&str> {
+        PipelineIndex::scan(self).stage_of(product)
+    }
+
+    /// The path template `product` uses: its rule, with the extension
+    /// [`Pipeline::added_extension`] gives it, or, for an output written
+    /// beside another, that output's path with its extension replaced.
+    pub fn path_template_for(&self, product: &str) -> Option<Cow<'_, PathTemplate>> {
+        PipelineIndex::scan(self).path_template_for(product)
+    }
+
+    /// The path rule `product` uses, as written: its own rule, else its
+    /// stage's default, else the pipeline's default.
+    pub fn path_rule_for(&self, product: &str) -> Option<&PathTemplate> {
+        PipelineIndex::scan(self).path_rule_for(product)
+    }
+
+    /// The operation that makes `product`, with the extension it declares
+    /// for that output. An output written beside another has none to
+    /// complete a rule with: its path follows the other's.
+    pub fn output_extension(&self, product: &str) -> Option<(&str, &str)> {
+        PipelineIndex::scan(self).output_extension(product)
+    }
+
+    /// For an output written beside another, the product it is beside, that
+    /// product's declared extension, and the suffix that replaces it.
+    pub fn beside(&self, product: &str) -> Option<(&str, &str, &str)> {
+        PipelineIndex::scan(self).beside(product)
+    }
+
+    /// The `ext:` default for `product`: its stage's, or the nearest
+    /// enclosing stage's, else the pipeline's.
+    pub fn default_extension(&self, product: &str) -> Option<(&str, ExtensionSource)> {
+        PipelineIndex::scan(self).default_extension(product)
+    }
+
+    /// The extension `product`'s file must have, and where it is declared:
+    /// its operation's, else, when its path is a default rule, the `ext:`
+    /// default. A product with its own rule takes only its operation's.
+    pub fn expected_extension(&self, product: &str) -> Option<(&str, ExtensionSource)> {
+        PipelineIndex::scan(self).expected_extension(product)
+    }
+
+    /// The extension added to `product`'s path rule: the one it must have,
+    /// when the rule ends without an extension. A rule that ends with
+    /// another is left as written, and reported by the path checks.
+    pub fn added_extension(&self, product: &str) -> Option<(&str, ExtensionSource)> {
+        PipelineIndex::scan(self).added_extension(product)
+    }
+
+    /// The default path rule of the stage that produces `product`, or of the
+    /// nearest stage around it that sets one, with the stage that sets it.
+    pub fn stage_path_rule(&self, product: &str) -> Option<(&str, &PathTemplate)> {
+        PipelineIndex::scan(self).stage_path_rule(product)
+    }
+
+    pub fn stage_path_template(&self, product: &str) -> Option<&PathTemplate> {
+        self.stage_path_rule(product).map(|(_, template)| template)
+    }
+
+    /// Whether `product` is a source family, which no step produces.
+    pub fn is_source(&self, product: &str) -> bool {
+        PipelineIndex::scan(self).is_source(product)
+    }
+
+    /// Each record of `inventory` as an artifact, by product and in order,
+    /// after checking that it names a source, binds exactly its dimensions,
+    /// and appears once.
+    pub fn source_artifacts(
+        &self,
+        inventory: &SourceInventory,
+    ) -> Result<BTreeMap<String, Vec<ArtifactInstance>>, ResolveError> {
+        let mut artifacts: BTreeMap<String, Vec<ArtifactInstance>> = BTreeMap::new();
+        let mut seen: FxHashSet<(&str, &EntityBinding)> = FxHashSet::default();
+        self.check_sources(inventory, |product, record| {
+            if !seen.insert((&record.product, &record.entities)) {
+                return false;
+            }
+            artifacts
+                .entry(record.product.clone())
+                .or_default()
+                .push(ArtifactInstance {
+                    product: record.product.clone(),
+                    artifact_type: product.artifact_type.clone(),
+                    entities: record.entities.clone(),
+                });
+            true
+        })?;
+        for (name, family) in &mut artifacts {
+            if let Some(product) = self.products.iter().find(|product| product.name == *name) {
+                product.sort_family(family);
+            }
+        }
+        Ok(artifacts)
+    }
+
+    /// Check each record of `inventory` in order: that it names a source
+    /// and binds exactly its dimensions. `add` is given each record that
+    /// passes, with its product, and says whether the record is new; one
+    /// that is not is an error.
+    pub(crate) fn check_sources<'a>(
+        &'a self,
+        inventory: &'a SourceInventory,
+        mut add: impl FnMut(&'a ProductDef, &'a SourceRecord) -> bool,
+    ) -> Result<(), ResolveError> {
+        // Each product with the set of its dimensions, looked up once, not
+        // once per record; the first declaration of a name wins, as when
+        // searching.
+        let mut products = FxHashMap::default();
+        for product in &self.products {
+            products.entry(product.name.as_str()).or_insert_with(|| {
+                let dimensions: BTreeSet<_> =
+                    product.dimensions.iter().map(String::as_str).collect();
+                (product, dimensions)
+            });
+        }
+        let produced: FxHashSet<_> = self
+            .invocations
+            .iter()
+            .flat_map(|invocation| &invocation.outputs)
+            .map(String::as_str)
+            .collect();
+        for record in &inventory.artifacts {
+            let &(product, ref dimensions) =
+                products.get(record.product.as_str()).ok_or_else(|| {
+                    ResolveError::UnknownProduct {
+                        name: record.product.clone(),
+                    }
+                })?;
+            if produced.contains(record.product.as_str()) {
+                return Err(ResolveError::InvalidDefinition {
+                    subject: DefinitionSubject::Product(record.product.clone()),
+                    detail: format!(
+                        "product `{}` cannot be both a source family and an invocation output",
+                        record.product
+                    ),
+                });
+            }
+            let source = || ArtifactInstance {
+                product: record.product.clone(),
+                artifact_type: product.artifact_type.clone(),
+                entities: record.entities.clone(),
+            };
+            let binds_exactly = record.entities.len() == dimensions.len()
+                && record
+                    .entities
+                    .dimensions()
+                    .all(|name| dimensions.contains(name));
+            if !binds_exactly {
+                return Err(ResolveError::InvalidDefinition {
+                    subject: DefinitionSubject::Source(record.clone()),
+                    detail: format!(
+                        "source `{}` must bind exactly the dimensions of product `{}`: [{}]",
+                        source(),
+                        product.name,
+                        product.dimensions.join(", ")
+                    ),
+                });
+            }
+            if !add(product, record) {
+                return Err(ResolveError::DuplicateSourceArtifact { artifact: source() });
+            }
+        }
+        Ok(())
+    }
+}
+
+/// A pipeline, for asking where many products are made and what paths they
+/// take. Each answer needs the step that makes a product; one built with
+/// [`PipelineIndex::new`] finds each once, in hash maps, so asking about
+/// every product takes time in step with the pipeline, not its square. One
+/// from [`PipelineIndex::scan`] searches each time, which costs no more for
+/// a single question.
+pub(crate) struct PipelineIndex<'p> {
+    pub(crate) pipeline: &'p Pipeline,
+    found: Option<Found<'p>>,
+}
+
+/// What a [`PipelineIndex::new`] finds once.
+struct Found<'p> {
+    /// Each product's declaration.
+    products: FxHashMap<&'p str, &'p ProductDef>,
+    /// Each operation by name.
+    operations: FxHashMap<&'p str, &'p OperationDef>,
+    /// Each product a step makes: that step, and the output's position.
+    producers: FxHashMap<&'p str, (&'p Invocation, usize)>,
+}
+
+impl<'p> PipelineIndex<'p> {
+    /// `pipeline` with its products, operations and producers found once.
+    pub(crate) fn new(pipeline: &'p Pipeline) -> Self {
+        // The first of any repeat wins, as a search finds it; repeats are
+        // reported elsewhere.
+        let mut products = FxHashMap::default();
+        for product in &pipeline.products {
+            products.entry(product.name.as_str()).or_insert(product);
+        }
+        let mut operations = FxHashMap::default();
+        for operation in &pipeline.operations {
+            operations
+                .entry(operation.name.as_str())
+                .or_insert(operation);
+        }
+        let mut producers = FxHashMap::default();
+        for invocation in &pipeline.invocations {
+            for (index, output) in invocation.outputs.iter().enumerate() {
+                producers
+                    .entry(output.as_str())
+                    .or_insert((invocation, index));
+            }
+        }
+        Self {
+            pipeline,
+            found: Some(Found {
+                products,
+                operations,
+                producers,
+            }),
+        }
+    }
+
+    /// `pipeline`, searched for each question.
+    pub(crate) fn scan(pipeline: &'p Pipeline) -> Self {
+        Self {
+            pipeline,
+            found: None,
+        }
+    }
+
+    /// `product`'s declaration.
+    pub(crate) fn product(&self, product: &str) -> Option<&'p ProductDef> {
+        match &self.found {
+            Some(found) => found.products.get(product).copied(),
+            None => self
+                .pipeline
+                .products
+                .iter()
+                .find(|declared| declared.name == product),
+        }
+    }
+
+    fn operation(&self, name: &str) -> Option<&'p OperationDef> {
+        match &self.found {
+            Some(found) => found.operations.get(name).copied(),
+            None => self
+                .pipeline
+                .operations
+                .iter()
+                .find(|operation| operation.name == name),
+        }
+    }
+
+    /// The step that makes `product`, and the position of its output.
+    pub(crate) fn producer(&self, product: &str) -> Option<(&'p Invocation, usize)> {
+        match &self.found {
+            Some(found) => found.producers.get(product).copied(),
+            None => self.pipeline.invocations.iter().find_map(|invocation| {
+                let index = invocation
+                    .outputs
+                    .iter()
+                    .position(|output| output == product)?;
+                Some((invocation, index))
+            }),
+        }
+    }
+
+    /// See [`Pipeline::is_source`].
+    pub(crate) fn is_source(&self, product: &str) -> bool {
+        self.product(product).is_some() && self.producer(product).is_none()
+    }
+
+    /// See [`Pipeline::stage_of`].
+    pub(crate) fn stage_of(&self, product: &str) -> Option<&'p str> {
+        self.producer(product)
+            .and_then(|(invocation, _)| invocation.stage.as_deref())
+    }
+
+    /// See [`Pipeline::path_template_for`].
+    pub(crate) fn path_template_for(&self, product: &str) -> Option<Cow<'p, PathTemplate>> {
+        if let Some((sibling, sibling_extension, suffix)) = self.beside(product) {
+            // The sibling's own file: `{@product}` is its name, not this one's.
+            let template = self
+                .path_template_for(sibling)?
+                .with_product(&sibling.replace("::", "."));
+            let stem = template
+                .without_extension(sibling_extension)
+                .unwrap_or(template);
+            return Some(Cow::Owned(stem.with_extension(suffix)));
+        }
+        let template = self.path_rule_for(product)?.resolve(self.holder(product));
+        Some(match self.added_extension(product) {
+            Some((extension, _)) => Cow::Owned(template.with_extension(extension)),
+            None => template,
+        })
+    }
+
+    /// Whether `product` has a path template, without building it.
+    pub(crate) fn has_path(&self, product: &str) -> bool {
+        match self.beside(product) {
+            Some((sibling, _, _)) => self.has_path(sibling),
+            None => self.path_rule_for(product).is_some(),
+        }
+    }
+
+    /// What `product` gives a path template's placeholders: its dimensions
+    /// and whether a stage makes it.
+    pub(crate) fn holder(&self, product: &str) -> Holder<'p> {
+        Holder {
+            dimensions: self
+                .product(product)
+                .map_or(&[][..], |declared| declared.dimensions.as_slice()),
+            in_stage: self.stage_of(product).is_some(),
+        }
+    }
+
+    /// See [`Pipeline::path_rule_for`].
+    pub(crate) fn path_rule_for(&self, product: &str) -> Option<&'p PathTemplate> {
+        let pipeline = self.pipeline;
+        pipeline
+            .product_paths
+            .get(product)
+            .or_else(|| self.stage_path_rule(product).map(|(_, template)| template))
+            .or(pipeline.path_template.as_ref())
+    }
+
+    /// The step that makes `product`, the operation it calls, and the port
+    /// that writes it.
+    fn output_port(
+        &self,
+        product: &str,
+    ) -> Option<(&'p Invocation, &'p OperationDef, &'p OutputPort)> {
+        let (invocation, index) = self.producer(product)?;
+        let operation = self.operation(&invocation.operation)?;
+        Some((invocation, operation, operation.outputs.get(index)?))
+    }
+
+    /// See [`Pipeline::output_extension`].
+    pub(crate) fn output_extension(&self, product: &str) -> Option<(&'p str, &'p str)> {
+        let (_, operation, port) = self.output_port(product)?;
+        if port.beside.is_some() {
+            return None;
+        }
+        Some((operation.name.as_str(), port.extension.as_deref()?))
+    }
+
+    /// See [`Pipeline::beside`].
+    pub(crate) fn beside(&self, product: &str) -> Option<(&'p str, &'p str, &'p str)> {
+        let (invocation, operation, port) = self.output_port(product)?;
+        let beside = port.beside.as_ref()?;
+        let index = operation
+            .outputs
+            .iter()
+            .position(|output| output.name == beside.port)?;
+        let sibling = invocation.outputs.get(index)?;
+        let extension = operation.outputs[index].extension.as_deref()?;
+        Some((sibling.as_str(), extension, beside.suffix.as_str()))
+    }
+
+    /// See [`Pipeline::default_extension`].
+    pub(crate) fn default_extension(&self, product: &str) -> Option<(&'p str, ExtensionSource)> {
+        let pipeline = self.pipeline;
+        let staged = self.stage_of(product).and_then(|stage| {
+            stage_and_parents(stage).find_map(|name| {
+                let stage = pipeline
+                    .stages
+                    .iter()
+                    .find(|candidate| candidate.name == name)?;
+                Some((
+                    stage.extension.as_deref()?,
+                    ExtensionSource::Stage(stage.name.clone()),
+                ))
+            })
+        });
+        staged.or_else(|| Some((pipeline.extension.as_deref()?, ExtensionSource::Default)))
+    }
+
+    /// See [`Pipeline::expected_extension`].
+    pub(crate) fn expected_extension(&self, product: &str) -> Option<(&'p str, ExtensionSource)> {
+        if self.beside(product).is_some() {
+            return None;
+        }
+        if let Some((operation, extension)) = self.output_extension(product) {
+            return Some((extension, ExtensionSource::Operation(operation.to_owned())));
+        }
+        self.rule_extension(product)
+    }
+
+    /// The `ext:` default, for a product whose path is a default rule.
+    fn rule_extension(&self, product: &str) -> Option<(&'p str, ExtensionSource)> {
+        if self.pipeline.product_paths.contains_key(product) {
+            return None;
+        }
+        self.default_extension(product)
+    }
+
+    /// See [`Pipeline::added_extension`].
+    pub(crate) fn added_extension(&self, product: &str) -> Option<(&'p str, ExtensionSource)> {
+        let expected = self.expected_extension(product)?;
+        self.path_rule_for(product)?
+            .extension()
+            .is_none()
+            .then_some(expected)
+    }
+
+    /// See [`Pipeline::stage_path_rule`].
+    pub(crate) fn stage_path_rule(&self, product: &str) -> Option<(&'p str, &'p PathTemplate)> {
+        let pipeline = self.pipeline;
+        let stage = self.stage_of(product)?;
+        stage_and_parents(stage).find_map(|name| {
+            pipeline
+                .stages
+                .iter()
+                .find(|candidate| candidate.name == name)
+                .and_then(|stage| Some((stage.name.as_str(), stage.path_template.as_ref()?)))
+        })
+    }
+}

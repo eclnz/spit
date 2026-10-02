@@ -72,5 +72,5 @@ On the cloud container this was first run on, `spit check` took, in ms:
 
 At `158db65` each product's path checks searched every step for the
 product's producer, so checking took time in proportion to products ×
-steps. `PipelineIndex` in `src/model.rs` finds each producer once. The
+steps. `PipelineIndex` in `src/model/pipeline.rs` finds each producer once. The
 dataset stages were unchanged within noise.
