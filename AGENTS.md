@@ -86,6 +86,13 @@ The five rules under [Performance](docs/architecture.md#performance) come first:
 - **Link the pull requests.** A spit-vscode pull request names the spit pull request it follows, as in "Follows eclnz/spit#42", and the spit pull request names the extension's. Merge the spit pull request first, since the extension needs a SPIT that has the change.
 - **Versions move together.** The extension's version follows SPIT's, so a release of SPIT bumps the extension's `package.json` as well.
 
+## The local runner
+
+[spit-bash](https://github.com/eclnz/spit-bash) runs a `.spitdag`'s jobs on one machine. It reads only the DAG, so it must stay in step with `docs/spitdag.md`.
+
+- **A change to the DAG format needs a change in the runner.** That is any field, argument part, ordering or meaning `docs/spitdag.md` gives, and above all a new `version`. Make the runner's change as part of the same work, with the same branch name in both repositories, and link the pull requests as for the extension. Merge the spit pull request first.
+- **The runner's CI catches drift.** It builds SPIT from `usability`, where SPIT's work merges, and runs its examples on every push and weekly, so a format change merged without the runner's change shows up there as a failure.
+
 ## Checks before every commit
 
 ```sh
