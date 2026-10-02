@@ -1,6 +1,8 @@
 # Three visits across two sites with photos, pose sidecars, a flat-field
 # frame, and a ground map. Every sidecar is a separate source artifact.
 # Shared class tables are global logical artifacts with no entity dimensions.
+root field_survey_data
+
 contexts:
     [site=01,visit=01]
     [site=01,visit=02]

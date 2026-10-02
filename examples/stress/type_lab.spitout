@@ -1,4 +1,6 @@
 # Different slice and capture counts expose accidental positional matching.
+root type_lab_data
+
 contexts:
     [lab=Alpha,rig=R1,capture=C1]
     [lab=Alpha,rig=R1,capture=C2]

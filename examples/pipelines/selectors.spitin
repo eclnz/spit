@@ -1,4 +1,5 @@
 pipeline selectors.spit
+root selectors_data
 
 require reading day=1,2 per [station]
 require policy count=1 per [station]

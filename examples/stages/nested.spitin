@@ -1,3 +1,4 @@
 pipeline nested.spit
+root nested_data
 
 require shard count>=1 per [group]
