@@ -9,7 +9,7 @@ use std::ops::Range;
 
 use crate::json::{write_array, write_number, write_string, ObjectWriter, Out};
 use crate::model::{
-    identity, natural_cmp, ArtifactId, ArtifactInstance, Artifacts, EntityBinding, Removal,
+    identity, natural_cmp, ArtifactId, ArtifactInstance, Artifacts, EntityBinding, JobId, Removal,
 };
 use crate::types::TypeExpr;
 
@@ -45,7 +45,7 @@ pub struct LeftOut {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct BoundJob {
-    pub id: usize,
+    pub id: JobId,
     pub operation: String,
     /// The stage of the step that made this job, as `outer/inner`.
     pub stage: Option<String>,
@@ -53,7 +53,7 @@ pub struct BoundJob {
     pub inputs: Vec<(String, Vec<ArtifactId>)>,
     /// Each output port and its artifact, in port order.
     pub outputs: Vec<(String, ArtifactId)>,
-    pub depends_on: Vec<usize>,
+    pub depends_on: Vec<JobId>,
     /// The command that makes the outputs; `None` when the operation has none.
     pub command: Option<Vec<Argument>>,
     /// Commands that check the inputs before the job runs.
@@ -238,7 +238,7 @@ impl BoundDag {
     }
 
     /// The jobs that depend on each job, by ID.
-    pub fn dependents(&self) -> BTreeMap<usize, Vec<usize>> {
+    pub fn dependents(&self) -> BTreeMap<JobId, Vec<JobId>> {
         let mut dependents: BTreeMap<_, Vec<_>> = BTreeMap::new();
         for job in &self.jobs {
             for &dependency in &job.depends_on {
@@ -392,7 +392,7 @@ fn write_job(
     dag: &BoundDag,
     artifacts: &ArtifactJson,
     job: &BoundJob,
-    dependents: &[usize],
+    dependents: &[JobId],
     work: &mut String,
 ) {
     work.clear();
@@ -426,7 +426,7 @@ fn write_job(
     object.finish();
 
     let mut object = ObjectWriter::start(out);
-    object.field("id", |out| write_number(out, job.id));
+    object.field("id", |out| write_number(out, job.id.number()));
     object.raw("operation", &work[operation]);
     object.field("stage", |out| {
         write_array(
@@ -443,10 +443,14 @@ fn write_job(
     object.raw("inputs", &work[inputs]);
     object.raw("outputs", &work[outputs]);
     object.field("depends_on", |out| {
-        write_array(out, job.depends_on.iter().copied(), write_number);
+        write_array(
+            out,
+            job.depends_on.iter().map(|id| id.number()),
+            write_number,
+        );
     });
     object.field("dependents", |out| {
-        write_array(out, dependents.iter().copied(), write_number);
+        write_array(out, dependents.iter().map(|id| id.number()), write_number);
     });
     object.raw("command", &work[command]);
     object.raw("verify", &work[verify]);
@@ -625,7 +629,7 @@ mod tests {
         let mut dag = bound(|[raw, clean, mean]| {
             vec![
                 BoundJob {
-                    id: 1,
+                    id: JobId::new(1),
                     operation: "clean".into(),
                     stage: Some("prep/denoise".into()),
                     inputs: vec![("raw".into(), vec![raw])],
@@ -638,12 +642,12 @@ mod tests {
                     verify: vec![vec![vec![ArgPart::Path(raw)]]],
                 },
                 BoundJob {
-                    id: 2,
+                    id: JobId::new(2),
                     operation: "mean".into(),
                     stage: None,
                     inputs: vec![("frames".into(), vec![clean])],
                     outputs: vec![("output".into(), mean)],
-                    depends_on: vec![1],
+                    depends_on: vec![JobId::new(1)],
                     command: None,
                     verify: vec![],
                 },
@@ -728,7 +732,7 @@ mod tests {
         let output = artifacts.add(fit, EntityBinding::from_pairs([])).unwrap();
         let paths = ["w/wave1.csv", "w/wave10.csv", "w/wave2.csv", "fit.json"].map(String::from);
         let job = BoundJob {
-            id: 1,
+            id: JobId::new(1),
             operation: "fit".into(),
             stage: None,
             inputs: vec![("waves".into(), waves.to_vec())],
@@ -750,7 +754,7 @@ mod tests {
     #[test]
     fn a_fingerprint_follows_the_work_not_the_job_number() {
         let job = |[raw, clean, _]: [ArtifactId; 3]| BoundJob {
-            id: 1,
+            id: JobId::new(1),
             operation: "clean".into(),
             stage: None,
             inputs: vec![("raw".into(), vec![raw])],
@@ -765,7 +769,7 @@ mod tests {
             text[start..start + 16].to_owned()
         };
         let renumbered = |ids| BoundJob {
-            id: 7,
+            id: JobId::new(7),
             stage: Some("prep".into()),
             ..job(ids)
         };

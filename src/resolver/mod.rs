@@ -7,7 +7,7 @@ mod matching;
 use crate::error::ResolveError;
 use crate::model::{
     ArtifactId, ArtifactInstance, ArtifactReport, ArtifactType, Gap, IncompleteJob, Invocation,
-    OperationDef, Pipeline, ResolvedDag, SourceInventory,
+    JobId, OperationDef, Pipeline, ResolvedDag, SourceInventory,
 };
 
 use crate::compile::{compile, CompiledPipeline};
@@ -166,7 +166,7 @@ struct Resolution {
     /// the outputs of incomplete jobs.
     incomplete: Vec<bool>,
     /// The job that makes each output artifact.
-    producers: Vec<Option<usize>>,
+    producers: Vec<Option<JobId>>,
     dag: ResolvedDag,
     incomplete_jobs: Vec<IncompleteJob>,
 }
@@ -212,7 +212,7 @@ impl Resolution {
         self.grow();
         if expansion.gaps.is_empty() {
             let job = make_job(
-                self.dag.jobs.len() + 1,
+                JobId::new(self.dag.jobs.len() + 1),
                 operation,
                 invocation.stage.clone(),
                 expansion.inputs,

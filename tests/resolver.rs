@@ -5,6 +5,7 @@ use spit::{
     Invocation, OperationDef, Pipeline, ProductDef, ResolveError, ShapeRule, SourceInventory,
     SourceRecord, TypeExpr,
 };
+use support::numbers;
 
 fn artifact(product: &str, pairs: &[(&str, &str)]) -> SourceRecord {
     SourceRecord::new(
@@ -302,9 +303,9 @@ fn tracks_dependencies_through_full_pipeline() {
     let pipeline = full_pipeline();
     let dag = resolve(&pipeline, &full_inventory()).unwrap();
     assert_eq!(dag.jobs.len(), 5);
-    assert_eq!(dag.jobs[2].dependencies, vec![1]);
-    assert_eq!(dag.jobs[3].dependencies, vec![2]);
-    assert_eq!(dag.jobs[4].dependencies, vec![3, 4]);
+    assert_eq!(numbers(&dag.jobs[2].dependencies), vec![1]);
+    assert_eq!(numbers(&dag.jobs[3].dependencies), vec![2]);
+    assert_eq!(numbers(&dag.jobs[4].dependencies), vec![3, 4]);
     let text = render_dag(&dag);
     assert!(text.contains("signal[site=01,day=01,run=1]"));
     assert!(text.contains("mean_signal[site=01,day=01]"));

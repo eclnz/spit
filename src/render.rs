@@ -5,7 +5,7 @@ use std::fmt::{self, Write as _};
 
 use crate::command::shell_word;
 use crate::model::{
-    identity, push_identity, Artifact, ArtifactReport, EntityBinding, Gap, ResolvedDag,
+    identity, push_identity, Artifact, ArtifactReport, EntityBinding, Gap, JobId, ResolvedDag,
 };
 use crate::spitdag::{Argument, BoundDag, BoundJob};
 use crate::types::TypeExpr;
@@ -209,7 +209,7 @@ struct JobWriter {
 
 impl JobWriter {
     /// A job's number, stage and operation, up to its inputs.
-    fn head(&mut self, id: usize, stage: Option<&str>, operation: &str) {
+    fn head(&mut self, id: JobId, stage: Option<&str>, operation: &str) {
         if !self.text.is_empty() {
             self.text.push('\n');
         }
@@ -253,7 +253,7 @@ impl JobWriter {
     }
 
     /// The jobs this one depends on, if any.
-    fn tail(&mut self, depends_on: &[usize]) {
+    fn tail(&mut self, depends_on: &[JobId]) {
         let Some((first, rest)) = depends_on.split_first() else {
             return;
         };
