@@ -641,7 +641,7 @@ fn match_from(
 /// Whether a value can hold `character`: what `encode_component` keeps, and
 /// the `%` of what it escapes.
 ///
-/// Keep in step with `encode_component` in `paths/template.rs`: if a value
+/// Keep in step with `encode_component` in `paths/components.rs`: if a value
 /// could hold a character this denies, `forced_end` would bind it too short
 /// and discovery would miss files.
 fn is_value_character(character: char) -> bool {

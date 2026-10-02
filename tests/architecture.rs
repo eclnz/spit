@@ -95,10 +95,7 @@ const MAX_LINES: usize = 800;
 /// Files that were longer than `MAX_LINES` when the limit came in, each
 /// with the most lines it may have. A listed file may shrink but not grow,
 /// and leaves the list once it is within the limit.
-const OVER_LIMIT: &[(&str, usize)] = &[
-    ("src/parser/inventory.rs", 804),
-    ("src/paths/template.rs", 842),
-];
+const OVER_LIMIT: &[(&str, usize)] = &[("src/parser/inventory.rs", 804)];
 
 #[test]
 fn rust_files_stay_short() {
