@@ -18,6 +18,10 @@ pub struct ProductDef {
     /// `source events : Events .tsv [sub]`; `None` for an output, whose
     /// operation says.
     pub extension: Option<String>,
+    /// Whether the source's artifacts are folders, as in
+    /// `source dicom : Dicom / [sub]`; `false` for an output, whose
+    /// operation says.
+    pub folder: bool,
 }
 
 impl ProductDef {
@@ -31,6 +35,7 @@ impl ProductDef {
             artifact_type,
             dimensions: owned_strings(dimensions),
             extension: None,
+            folder: false,
         }
     }
 }
@@ -83,6 +88,9 @@ pub struct OutputPort {
     /// The extension the operation's tool gives this output's file, such as
     /// `.nii.gz`, when the operation declares one.
     pub extension: Option<String>,
+    /// Whether the tool writes a folder here rather than a file, as in
+    /// `-> (subject: FsSubject /)`.
+    pub folder: bool,
     /// For a file the tool writes beside another output without being told
     /// where: that output, and what this one's name ends with in place of
     /// its extension.
@@ -103,6 +111,7 @@ impl OutputPort {
             name: name.into(),
             artifact_type,
             extension: None,
+            folder: false,
             beside: None,
         }
     }

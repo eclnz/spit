@@ -5,7 +5,7 @@ use crate::model::{Cardinality, InputPort, OperationDef, OutputPort, ShapeRule, 
 use crate::types::{parse_type_expr, TypeExpr};
 
 use super::declarations::type_error;
-use super::lexical::{call_parts, comma_items, extension, identifier};
+use super::lexical::{call_parts, comma_items, identifier, split_ending};
 use super::ParseError;
 
 pub(super) fn parse_operation(line: &str, number: usize) -> Result<OperationDef, ParseError> {
@@ -292,15 +292,16 @@ fn parse_outputs(text: &str, number: usize) -> Result<Vec<OutputPort>, ParseErro
             )
             .at_token(port.trim()));
         }
-        let (text, extension) = split_extension(text, number)?;
+        let (text, extension, folder) = split_ending(text, number)?;
         let output_type = if text.is_empty() {
             TypeExpr::Unknown
         } else {
             port_type(text, number)?
         };
-        return Ok(vec![with_extension(
+        return Ok(vec![with_ending(
             OutputPort::new(DEFAULT_OUTPUT, output_type),
             extension,
+            folder,
         )]);
     };
     let list = list.strip_suffix(')').ok_or_else(|| {
@@ -323,9 +324,9 @@ fn parse_outputs(text: &str, number: usize) -> Result<Vec<OutputPort>, ParseErro
                 }
                 None => (item, None),
             };
-            let (item, extension) = match beside {
-                Some(_) => (item, None),
-                None => split_extension(item, number)?,
+            let (item, extension, folder) = match beside {
+                Some(_) => (item, None, false),
+                None => split_ending(item, number)?,
             };
             let (name, output_type) = match item.split_once(':') {
                 Some((name, output_type)) if !output_type.trim().is_empty() => {
@@ -345,7 +346,7 @@ fn parse_outputs(text: &str, number: usize) -> Result<Vec<OutputPort>, ParseErro
             let port = OutputPort::new(name, output_type);
             Ok(match beside {
                 Some((sibling, suffix)) => port.beside(sibling, suffix),
-                None => with_extension(port, extension),
+                None => with_ending(port, extension, folder),
             })
         })
         .collect::<Result<Vec<_>, ParseError>>()?;
@@ -354,6 +355,9 @@ fn parse_outputs(text: &str, number: usize) -> Result<Vec<OutputPort>, ParseErro
         let (name, sibling) = (&port.name, &beside.port);
         let problem = match ports.iter().find(|other| &other.name == sibling) {
             None => format!("`{name}` is written beside `{sibling}`, which is not an output of this operation"),
+            Some(other) if other.folder => format!(
+                "`{name}` is written beside `{sibling}`, which is a folder, and only a file has files beside it; drop `beside {sibling}` and give the tool `{{{name}}}`"
+            ),
             Some(other) if other.beside.is_some() => format!(
                 "`{name}` is written beside `{sibling}`, which is itself written beside another; name an output the tool is told to write"
             ),
@@ -389,9 +393,14 @@ fn beside_suffix(item: &str, number: usize) -> Result<(&str, String), ParseError
         }
         return Ok((quoted[..open].trim(), suffix.to_owned()));
     }
-    match split_extension(item, number)? {
-        (item, Some(extension)) => Ok((item, extension.to_owned())),
-        (item, None) => Err(ParseError::new(
+    match split_ending(item, number)? {
+        (item, _, true) => Err(ParseError::new(
+            number,
+            "an output written beside another is a file, not a folder; drop the `/`",
+        )
+        .at_token(item)),
+        (item, Some(extension), false) => Ok((item, extension.to_owned())),
+        (item, None, false) => Err(ParseError::new(
             number,
             format!("an output written beside another names what its file name ends with, as in `{item} .json beside image` or `{item} \"_mask.nii.gz\" beside image`"),
         )
@@ -399,23 +408,13 @@ fn beside_suffix(item: &str, number: usize) -> Result<(&str, String), ParseError
     }
 }
 
-/// An output's text before its extension, and the extension: types hold no
-/// `.`, so the first one starts it.
-fn split_extension(text: &str, number: usize) -> Result<(&str, Option<&str>), ParseError> {
-    match text.find('.') {
-        Some(dot) => Ok((
-            text[..dot].trim(),
-            Some(extension(text[dot..].trim(), number)?),
-        )),
-        None => Ok((text.trim(), None)),
-    }
-}
-
-fn with_extension(port: OutputPort, extension: Option<&str>) -> OutputPort {
-    match extension {
+fn with_ending(port: OutputPort, extension: Option<&str>, folder: bool) -> OutputPort {
+    let mut port = match extension {
         Some(extension) => port.with_extension(extension),
         None => port,
-    }
+    };
+    port.folder = folder;
+    port
 }
 
 fn port_type(text: &str, number: usize) -> Result<TypeExpr, ParseError> {

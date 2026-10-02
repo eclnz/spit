@@ -11,7 +11,7 @@ use crate::model::{
 use crate::paths::{validate_discovery_rule, PathTemplate};
 use crate::types::{parse_type_expr, TypeExpr, TypeParseError};
 
-use super::lexical::{call_parts, comma_items, extension, identifier, qualified_identifier};
+use super::lexical::{call_parts, comma_items, identifier, qualified_identifier, split_ending};
 use super::source_map::tail_place;
 use super::{ParseError, PathRule};
 
@@ -473,14 +473,9 @@ pub(super) fn parse_product(line: &str, number: usize) -> Result<ProductDef, Par
         Some((declaration, dimensions)) => (declaration, Some(dimensions)),
         None => (line, None),
     };
-    // `name : Type .ext`: the extension follows the type, as on an output.
-    let (named, extension) = match declaration.split_once('.') {
-        Some((named, _)) => {
-            let written = &declaration[named.len()..];
-            (named, Some(extension(written.trim(), number)?.to_owned()))
-        }
-        None => (declaration, None),
-    };
+    // `name : Type .ext`: the extension follows the type, as on an output,
+    // and a `/` after it makes the source a folder.
+    let (named, extension, folder) = split_ending(declaration, number)?;
     let (name, artifact_type) = if let Some((name, ty)) = named.split_once(':') {
         let ty = ty.trim();
         let ty = parse_type_expr(ty, false).map_err(|error| type_error(number, ty, error))?;
@@ -492,7 +487,7 @@ pub(super) fn parse_product(line: &str, number: usize) -> Result<ProductDef, Par
         if dimensions.is_none() && name.split_whitespace().count() > 1 {
             ParseError::new(
                 number,
-                "expected source name, optional `: Type`, optional `.ext`, and optional [dimensions]",
+                "expected source name, optional `: Type`, optional `.ext`, optional `/` for a folder, and optional [dimensions]",
             )
             .at_token(name)
         } else {
@@ -522,7 +517,8 @@ pub(super) fn parse_product(line: &str, number: usize) -> Result<ProductDef, Par
         identifier(dimension, number, "dimension")?;
     }
     let mut product = ProductDef::new(name, artifact_type, &dimensions);
-    product.extension = extension;
+    product.extension = extension.map(str::to_owned);
+    product.folder = folder;
     Ok(product)
 }
 

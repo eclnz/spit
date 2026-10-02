@@ -276,7 +276,11 @@ fn write_artifact(out: &mut String, artifact: &BoundArtifact<'_>) {
     write_type(out, artifact.artifact_type);
     out.push_str(",\"path\":");
     write_string(out, artifact.path);
-    out.push('}');
+    out.push_str(if artifact.folder {
+        ",\"kind\":\"folder\"}"
+    } else {
+        ",\"kind\":\"file\"}"
+    });
 }
 
 /// A removal as `{"product": ..., "entities": {...}, "rule": ..., "origin":
@@ -375,7 +379,14 @@ mod tests {
         });
         let paths = ["in/1.txt", "out/1.txt", "out/mean.txt"].map(String::from);
         let dimensions = vec![vec!["sub".to_owned(), "run".to_owned()]; 3];
-        BoundDag::new(artifacts, paths.to_vec(), dimensions, steps, jobs(ids))
+        BoundDag::new(
+            artifacts,
+            paths.to_vec(),
+            dimensions,
+            vec![false; 3],
+            steps,
+            jobs(ids),
+        )
     }
 
     #[test]
@@ -412,7 +423,7 @@ mod tests {
         dag.root = Some("/data/study".into());
         let text = dag.to_json();
         assert!(text.starts_with(&format!(
-            "{{\"version\":4,\"generator\":{{\"name\":\"spit\",\"version\":\"{}\"}},\
+            "{{\"version\":5,\"generator\":{{\"name\":\"spit\",\"version\":\"{}\"}},\
 \"root\":\"/data/study\",\"external_inputs\":[{{\"product\":\"raw\"",
             env!("CARGO_PKG_VERSION")
         )));
@@ -498,7 +509,14 @@ mod tests {
         };
         let dimensions = vec![vec!["wave".to_owned()], vec![]];
         let steps = vec![step("fit", None, &["waves"], &["output"])];
-        let dag = BoundDag::new(artifacts, paths.to_vec(), dimensions, steps, vec![job]);
+        let dag = BoundDag::new(
+            artifacts,
+            paths.to_vec(),
+            dimensions,
+            vec![false; 2],
+            steps,
+            vec![job],
+        );
         let order: Vec<_> = dag
             .external_inputs()
             .iter()
@@ -542,7 +560,7 @@ mod tests {
         assert!(print(&job).bytes().all(|byte| byte.is_ascii_hexdigit()));
         // The hash of the work as compact JSON: a change to the JSON writer
         // changes every fingerprint, so it must be deliberate.
-        assert_eq!(print(&job), "72f6d8ecbacfd9ad");
+        assert_eq!(print(&job), "db70745bf9c6ad61");
         let fnv = |text: &str| {
             let mut hex = String::new();
             write_hex(&mut hex, fingerprint(text));

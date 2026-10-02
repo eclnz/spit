@@ -60,7 +60,7 @@ fn a_command_gives_an_outputs_folder_and_name() {
 #[test]
 fn the_plan_names_the_file_each_folder_and_name_is_of() {
     let json = plan(&["--json"]);
-    assert!(json.starts_with("{\"version\":4,"), "{json}");
+    assert!(json.starts_with("{\"version\":5,"), "{json}");
     assert!(
         json.contains(
             "[{\"dir\":\"derivatives/image\",\"of\":\"derivatives/image/sub=01.nii.gz\"}]"
