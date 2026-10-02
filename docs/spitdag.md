@@ -1,6 +1,6 @@
 # The `.spitdag` format
 
-A `.spitdag` is what `spit dag -o` writes and `spit dag --json` prints: every job a pipeline resolves to over one dataset, each with its files and its commands. A backend that runs the jobs reads nothing else: no pipeline, path rule or command template. This page describes version 4, the version `src/spitdag.rs` writes. See the [README](../README.md) for how a `.spitdag` is made, and `spit dag --commands` for a readable view of the same commands.
+A `.spitdag` is what `spit dag -o` writes and `spit dag --json` prints: every job a pipeline resolves to over one dataset, each with its files and its commands. A backend that runs the jobs reads nothing else: no pipeline, path rule or command template. This page describes version 4, the version `src/spitdag` writes. See the [README](../README.md) for how a `.spitdag` is made, and `spit dag --commands` for a readable view of the same commands.
 
 ## Document
 
