@@ -1,3 +1,6 @@
+source_paths:
+    raw: data/{@product}/{@entities}
+
 sources:
     raw[subject=A,repeat=1]
     raw[subject=A,repeat=2]

@@ -15,7 +15,7 @@ use spit::{
 use super::args::{CliArgs, Flag};
 use super::load::{load_recipe, prepare, recorded_root, require_complete, settle};
 use super::output::{
-    is_inputs, is_recipe, job_count, located, passed, read_file, read_stdin, report, write_output,
+    is_inputs, is_recipe, job_count, passed, read_file, read_stdin, report, write_output,
     write_spitdag,
 };
 
@@ -30,7 +30,7 @@ pub(crate) fn check(args: &CliArgs) -> Result<(), Box<dyn Error>> {
         read_file(file)?
     };
     if is_inputs(file) {
-        if args.has(Flag::PathRules) || args.has(Flag::StrictPaths) {
+        if args.has(Flag::PathRules) {
             return Err(
                 "a .spitout has no path rules to show; check its recipe or pipeline".into(),
             );
@@ -61,7 +61,7 @@ pub(crate) fn check(args: &CliArgs) -> Result<(), Box<dyn Error>> {
             return Ok(());
         }
         report(&diagnostics, &text, None, FileNames::default())?;
-        if args.has(Flag::PathRules) || args.has(Flag::StrictPaths) {
+        if args.has(Flag::PathRules) {
             let recipe = parse_input_spec_at(&text, path)?;
             let pipeline_file = recipe
                 .pipeline
@@ -88,12 +88,7 @@ pub(crate) fn check(args: &CliArgs) -> Result<(), Box<dyn Error>> {
             let coverage = inspect_paths(&merged)?
                 .with_recipe_paths(named.iter().map(String::as_str))
                 .with_recipe_default(defaulted.iter().map(String::as_str));
-            if args.has(Flag::PathRules) {
-                println!("{coverage}");
-            }
-            if args.has(Flag::StrictPaths) {
-                coverage.validate(true)?;
-            }
+            println!("{coverage}");
         }
         println!("Recipe valid.");
         return Ok(());
@@ -122,12 +117,8 @@ pub(crate) fn check(args: &CliArgs) -> Result<(), Box<dyn Error>> {
         None,
         FileNames::default(),
     )?;
-    let coverage = inspect_paths(&checked.pipeline)?;
     if args.has(Flag::PathRules) {
-        println!("{coverage}");
-    }
-    if args.has(Flag::StrictPaths) {
-        coverage.validate(true)?;
+        println!("{}", inspect_paths(&checked.pipeline)?);
     }
     println!("Pipeline valid.");
     Ok(())
@@ -183,15 +174,10 @@ pub(crate) fn dag(args: &CliArgs) -> Result<(), Box<dyn Error>> {
         require_complete(&prepared.inputs, &prepared.pipeline)?;
     }
     let dag = &prepared.report.dag;
-    if args.has(Flag::StrictPaths) {
-        inspect_paths(&prepared.bound)?
-            .with_inventory_paths(located(&prepared.inputs))
-            .validate(true)?;
-    }
     // Paths bound to check the source files are bound for the DAG too.
     let mut paths = None;
     if let Some(root) = &prepared.root {
-        let (verified, bound) = validate_bound_source_files(&prepared.bound, dag, root)?;
+        let (verified, bound) = validate_bound_source_files(&prepared.pipeline, dag, root)?;
         eprintln!("note: {verified}");
         paths = Some(bound);
     }
@@ -209,8 +195,8 @@ pub(crate) fn dag(args: &CliArgs) -> Result<(), Box<dyn Error>> {
         eprintln!("note: {unused}; `spit artifacts` lists them");
     }
     let bind = |paths: Option<BoundPaths>| match paths {
-        Some(paths) => bind_dag_with(&prepared.bound, dag, paths),
-        None => bind_dag(&prepared.bound, dag),
+        Some(paths) => bind_dag_with(&prepared.pipeline, dag, paths),
+        None => bind_dag(&prepared.pipeline, dag),
     };
     if args.has(Flag::Output) || args.has(Flag::Json) {
         let mut bound = bind(paths)?;
@@ -266,7 +252,7 @@ pub(crate) fn artifacts(args: &CliArgs) -> Result<(), Box<dyn Error>> {
     let mut report = prepared.report;
     report.coverage = prepared.inputs.gaps;
     if let Some(root) = &prepared.root {
-        validate_source_files(&prepared.bound, &report.dag, root)?;
+        validate_source_files(&prepared.pipeline, &report.dag, root)?;
     }
     print!("{}", render_artifacts(&report));
     Ok(())

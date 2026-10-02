@@ -501,8 +501,7 @@ fn a_spitout_alone_drives_jobs_without_its_recipe() {
     let dag = String::from_utf8(dag.stdout).unwrap();
     assert!(dag.contains("data/sub-5/ses-1/image.nii.gz"), "{dag}");
     assert!(dag.contains("results/5_1.nii.gz"), "{dag}");
-    // The records give every source its file, so no source needs a rule.
-    let checked = spit(&["dag", pipeline, saved, "--root", root, "--strict-paths"]);
+    let checked = spit(&["dag", pipeline, saved, "--root", root]);
     assert!(
         checked.status.success(),
         "{}",
@@ -627,10 +626,10 @@ fn a_recipe_that_does_not_fit_its_pipeline_says_why() {
         ),
         (
             "discover subs: [sub] from dirs data/sub-{sub}\n",
-            spit::InputError::NoDiscoveryPath {
+            spit::InputError::NoSourcePath {
                 product: "raw".into(),
             },
-            "source `raw` needs a path rule in .spitin for directory discovery",
+            "source `raw` has no path rule, so its files cannot be found; write `path raw:` in the pipeline or the recipe, or a default `path:` in the recipe",
         ),
     ] {
         let found = spit::parse_input_spec(recipe)
@@ -747,11 +746,6 @@ fn check_lists_a_recipe_default_as_the_recipes() {
         listing.contains("atlas (source): explicit atlas.nii.gz"),
         "{listing}"
     );
-    let strict = Command::new(env!("CARGO_BIN_EXE_spit"))
-        .args(["check", recipe.to_str().unwrap(), "--strict-paths"])
-        .output()
-        .unwrap();
-    assert!(!strict.status.success());
 }
 
 #[test]

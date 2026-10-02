@@ -131,7 +131,7 @@ fn expanded_examples_resolve() {
 }
 
 #[test]
-fn path_rules_report_fallbacks_and_strict_paths_reject_them() {
+fn path_rules_report_fallbacks_and_check_accepts_them() {
     let rules = spit(&[
         "check",
         "examples/commands/field_survey/field_survey.spit",
@@ -143,19 +143,16 @@ fn path_rules_report_fallbacks_and_strict_paths_reject_them() {
     assert!(report.contains("photo_response (output): default derivatives/{@product}/{@entities}.txt, `.txt` from operation `estimate_response`"));
     assert!(report.contains("vegetation (output): default"));
 
-    for command in ["check", "dag"] {
-        let mut args = vec![command, "examples/commands/field_survey/field_survey.spit"];
-        if command == "dag" {
-            args.push("examples/commands/field_survey/field_survey.spitout");
-        }
-        args.push("--strict-paths");
-        let strict = spit(&args);
-        assert!(!strict.status.success(), "{command}");
-        assert!(
-            stderr(&strict).contains("strict paths requires explicit rules"),
-            "{command}"
-        );
-    }
+    // A rule that resolves is enough, whether it is a product's own or a
+    // default, and `--strict-paths`, which wanted every rule explicit, is gone.
+    let recipe = spit(&["check", "examples/commands/mrtrix3_act/mrtrix3_act.spitin"]);
+    assert!(recipe.status.success(), "{}", stderr(&recipe));
+    let strict = spit(&[
+        "check",
+        "examples/commands/field_survey/field_survey.spit",
+        "--strict-paths",
+    ]);
+    assert!(stderr(&strict).contains("unknown option `--strict-paths`"));
 }
 
 #[test]
@@ -270,19 +267,18 @@ fn dag_json_stage_is_an_array_of_names() {
 }
 
 #[test]
-fn path_rules_show_a_missing_rule_and_strict_paths_accept_complete_rules() {
+fn path_rules_show_the_built_in_default_for_an_output_with_no_rule() {
     let tree = Tree::new("cli-paths", &[]);
     let directory = tree.path();
     let file = directory.join("spit paths.spit");
     let pipeline =
         "source raw [id]\npath raw: input/{id}.txt\noperation copy(input)\nresult = copy(raw)\n";
     fs::write(&file, pipeline).unwrap();
-    let missing = spit(&["check", file.to_str().unwrap(), "--path-rules"]);
-    assert!(stdout(&missing).contains("result (output): MISSING"));
-
-    fs::write(&file, format!("{pipeline}path result: output/{{id}}.txt\n")).unwrap();
-    let complete = spit(&["check", file.to_str().unwrap(), "--strict-paths"]);
-    assert!(complete.status.success(), "{}", stderr(&complete));
+    let built_in = spit(&["check", file.to_str().unwrap(), "--path-rules"]);
+    assert!(built_in.status.success(), "{}", stderr(&built_in));
+    assert!(
+        stdout(&built_in).contains("result (output): built-in default out/{@product}/{@entities}")
+    );
 }
 
 #[test]
@@ -296,12 +292,7 @@ fn recipe_path_rules_show_combined_coverage_and_origin() {
         "data.spitin",
         "pipeline analysis.spit\npath raw: input/{id}.txt\n",
     );
-    let output = spit(&[
-        "check",
-        recipe.to_str().unwrap(),
-        "--path-rules",
-        "--strict-paths",
-    ]);
+    let output = spit(&["check", recipe.to_str().unwrap(), "--path-rules"]);
     assert!(output.status.success(), "{}", stderr(&output));
     let report = stdout(&output);
     assert!(
@@ -318,19 +309,52 @@ fn recipe_path_rules_show_combined_coverage_and_origin() {
     assert!(pipeline_only.status.success(), "{}", stderr(&pipeline_only));
     assert!(stdout(&pipeline_only).contains("raw (source): no rule (a recipe may supply one)"));
 
+    // A recipe must cover every source, since a scan finds each by its rule.
+    tree.write("data.spitin", "pipeline analysis.spit\n");
+    let missing = spit(&["check", recipe.to_str().unwrap()]);
+    assert!(!missing.status.success());
+    assert!(
+        stderr(&missing).contains("source `raw` has no path rule"),
+        "{}",
+        stderr(&missing)
+    );
     tree.write(
+        "data.spitin",
+        "pipeline analysis.spit\npath: input/{@product}/{@entities}\n",
+    );
+    let defaulted = spit(&["check", recipe.to_str().unwrap()]);
+    assert!(defaulted.status.success(), "{}", stderr(&defaulted));
+}
+
+#[test]
+fn a_recorded_source_with_no_path_rule_is_not_looked_for_under_out() {
+    let tree = Tree::new("cli-unruled-source", &[]);
+    let pipeline = tree.write(
         "analysis.spit",
         "source raw [id]\noperation copy(input)\nresult = copy(raw)\n",
     );
-    let missing = spit(&[
-        "check",
-        recipe.to_str().unwrap(),
-        "--path-rules",
-        "--strict-paths",
-    ]);
-    assert!(!missing.status.success());
-    assert!(stdout(&missing).contains("result (output): MISSING"));
-    assert!(stderr(&missing).contains("no path rule for products: result"));
+    let records = tree.write("inputs.spitout", "sources:\n    raw[id=1]\n");
+    let args = [
+        "dag",
+        pipeline.to_str().unwrap(),
+        records.to_str().unwrap(),
+        "--paths",
+    ];
+    let unruled = spit(&args);
+    assert!(!unruled.status.success());
+    assert!(
+        stderr(&unruled).contains("source `raw` has no path rule"),
+        "{}",
+        stderr(&unruled)
+    );
+    tree.write(
+        "inputs.spitout",
+        "source_paths:\n    raw: in/{id}.txt\n\nsources:\n    raw[id=1]\n",
+    );
+    let ruled = spit(&args);
+    assert!(ruled.status.success(), "{}", stderr(&ruled));
+    assert!(stdout(&ruled).contains("path: in/1.txt"));
+    assert!(stdout(&ruled).contains("path: out/result/id=1"));
 }
 
 #[test]

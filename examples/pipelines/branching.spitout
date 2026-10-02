@@ -1,3 +1,7 @@
+source_paths:
+    raw: data/{@product}/{@entities}
+    policy: data/{@product}/{@entities}
+
 sources:
     raw[team=Alpha,period=Q1,item=1]
     raw[team=Alpha,period=Q1,item=2]

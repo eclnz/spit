@@ -10,7 +10,7 @@ use spit::{
 };
 
 #[test]
-fn path_coverage_exposes_default_fallbacks_and_strict_rejects_them() {
+fn path_coverage_exposes_default_fallbacks_and_accepts_them() {
     let (pipeline, _) = support::parse_fixture(include_str!(
         "../examples/commands/field_survey/field_survey.spit"
     ))
@@ -22,12 +22,26 @@ fn path_coverage_exposes_default_fallbacks_and_strict_rejects_them() {
     assert!(coverage.entries.iter().any(|entry| {
         entry.product == "raw_photo" && matches!(entry.rule, PathRule::Explicit(_))
     }));
-    coverage.validate(false).unwrap();
+    coverage.validate(["vegetation", "raw_photo"]).unwrap();
+}
+
+#[test]
+fn an_output_with_no_rule_takes_the_built_in_default_and_a_source_none() {
+    let pipeline =
+        parse_pipeline("source raw [id]\noperation clean(x: Raw) -> Clean\ncleaned = clean(raw)\n")
+            .unwrap();
+    let coverage = inspect_paths(&pipeline).unwrap();
+    assert_eq!(coverage.entries[0].rule, PathRule::Missing);
+    assert_eq!(
+        coverage.entries[1].rule,
+        PathRule::BuiltIn("out/{@product}/{@entities}".to_owned())
+    );
+    coverage.validate(["cleaned"]).unwrap();
     assert!(coverage
-        .validate(true)
+        .validate(["raw", "cleaned"])
         .unwrap_err()
         .to_string()
-        .contains("vegetation"));
+        .contains("source `raw` has no path rule"));
 }
 
 #[test]
@@ -35,7 +49,8 @@ fn path_coverage_catches_missing_and_invalid_rules_without_jobs() {
     let mut pipeline = parse_pipeline("source unused [id]\n").unwrap();
     let coverage = inspect_paths(&pipeline).unwrap();
     assert_eq!(coverage.entries[0].rule, PathRule::Missing);
-    assert!(coverage.validate(false).is_err());
+    assert!(coverage.validate(["unused"]).is_err());
+    coverage.validate([]).unwrap();
 
     pipeline.product_paths.insert(
         "unused".to_owned(),
@@ -50,7 +65,10 @@ fn path_coverage_catches_missing_and_invalid_rules_without_jobs() {
         "unused".to_owned(),
         PathTemplate::parse("input/{id}.txt").unwrap(),
     );
-    inspect_paths(&pipeline).unwrap().validate(true).unwrap();
+    inspect_paths(&pipeline)
+        .unwrap()
+        .validate(["unused"])
+        .unwrap();
 }
 
 #[test]
@@ -71,12 +89,12 @@ fn bound_dag_shows_port_names_and_paths_without_commands() {
     assert!(report.contains("reference: visit_dark_tiff[site=01,visit=01]"));
     assert!(report.contains("path: derivatives/yield_table/site=01__visit=01.csv"));
 
+    // An output no rule covers takes the built-in default.
     pipeline.product_paths.remove("yield_table");
     pipeline.path_template = None;
     assert!(bound(&pipeline, &dag)
-        .unwrap_err()
-        .to_string()
-        .contains("no path rule"));
+        .unwrap()
+        .contains("path: out/yield_table/site=01__visit=01.csv"));
 }
 
 #[test]

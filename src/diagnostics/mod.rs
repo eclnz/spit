@@ -109,14 +109,6 @@ impl Parsed {
 /// rule or gains an extension, so is written out nowhere. Outputs with no
 /// rule at all show the built-in default they are given.
 fn shown_paths(pipeline: &Pipeline, lines: &SourceMap) -> Vec<ShownPath> {
-    let mut defaulted;
-    let pipeline = if pipeline.path_template.is_none() {
-        defaulted = pipeline.clone();
-        defaulted.path_template = Some(PathTemplate::default_output());
-        &defaulted
-    } else {
-        pipeline
-    };
     let index = PipelineIndex::new(pipeline);
     let mut shown: Vec<_> = pipeline
         .products
@@ -413,7 +405,14 @@ pub fn diagnose_recipe_against(text: &str, pipeline: &Pipeline) -> Vec<Diagnosti
             Some(records) => spec
                 .resolve(pipeline, crate::InputSource::Inventory(records.clone()))
                 .map(|_| ()),
-            None => spec.check(pipeline),
+            // A recipe without records is scanned, which finds every
+            // source by its rule.
+            None => spec
+                .check(pipeline)
+                .and_then(|()| match spec.source_without_path(pipeline) {
+                    Some(product) => Err(InputError::NoSourcePath { product }),
+                    None => Ok(()),
+                }),
         };
         if let Err(problem) = checked {
             // Records written in the recipe keep its line numbers.

@@ -1,3 +1,7 @@
+source_paths:
+    raw: data/{@product}/{@entities}
+    reference: data/{@product}/{@entities}
+
 sources:
     raw[sample=01]
     reference[sample=01]
