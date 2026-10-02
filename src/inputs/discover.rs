@@ -5,6 +5,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use rustc_hash::FxHashSet;
+
 use super::coverage::{apply_drops, DropIndex, EveryGroupDropped};
 use super::exclusions::{Excluder, UnmatchedExclusion};
 use super::pattern::{match_pattern, missed_source, path_pattern, MissedSource, Piece};
@@ -98,30 +100,66 @@ pub(super) fn discover(
         .collect::<Result<Vec<_>, _>>()?;
     let sources = source_patterns(pipeline)?;
     let listing = Listing::of(root)?;
+    // Each source with its place in `sources`, as file and folder sources:
+    // a file source's rule is matched against files, a folder source's
+    // against folders.
+    let (folder_sources, file_sources): (Vec<_>, Vec<_>) = sources
+        .iter()
+        .enumerate()
+        .partition(|(_, source)| source.product.folder);
     let mut matched = vec![false; sources.len()];
-    let mut unmatched_files = Vec::new();
+    // A file in a source folder is read with its folder.
+    let mut folders = FxHashSet::default();
+    for directory in &listing.directories {
+        if let Some((index, _)) = first_match(&folder_sources, directory) {
+            matched[index] = true;
+            folders.insert(directory.as_str());
+        }
+    }
+    let mut discovery = Discovery::default();
     // SPIT's own files, such as a recipe kept in its dataset, are not data a
     // rule missed.
     for file in listing.files.iter().filter(|file| !is_spit_file(file)) {
-        match sources
-            .iter()
-            .position(|source| match_pattern(&source.pieces, file).is_some())
+        if let Some((index, _)) = first_match(&file_sources, file) {
+            matched[index] = true;
+        } else if !file
+            .match_indices('/')
+            .any(|(end, _)| folders.contains(&file[..end]))
         {
-            Some(source) => matched[source] = true,
-            None => unmatched_files.push(file.clone()),
+            match first_match(&folder_sources, file) {
+                Some((_, source)) => discovery.skipped.push(format!(
+                    "`{file}`: is a file, but source `{}` reads folders",
+                    source.product.name
+                )),
+                None => discovery.unmatched_files.push(file.clone()),
+            }
         }
     }
-    let missed = sources
+    for directory in &listing.directories {
+        if folders.contains(directory.as_str()) {
+            continue;
+        }
+        if let Some((_, source)) = first_match(&file_sources, directory) {
+            discovery.skipped.push(format!(
+                "`{directory}`: is a folder, but source `{}` reads files; end its declaration with `/` to read folders",
+                source.product.name
+            ));
+        }
+    }
+    // A folder source that found nothing is compared with the folders.
+    discovery.missed = sources
         .iter()
         .zip(&matched)
         .filter(|(_, matched)| !**matched)
-        .map(|(source, _)| missed_source(&source.product.name, &source.pieces, &unmatched_files))
+        .map(|(source, _)| {
+            let (candidates, folder) = if source.product.folder {
+                (&listing.directories, true)
+            } else {
+                (&discovery.unmatched_files, false)
+            };
+            missed_source(&source.product.name, &source.pieces, candidates, folder)
+        })
         .collect();
-    let mut discovery = Discovery {
-        unmatched_files,
-        missed,
-        ..Discovery::default()
-    };
     find_contexts(
         &directory_patterns,
         &listing.directories,
@@ -144,8 +182,10 @@ pub(super) fn discover(
         &discovery.inventory.discovered,
     );
     find_source_files(
-        &sources,
-        &listing.files,
+        [
+            (&file_sources, &listing.files),
+            (&folder_sources, &listing.directories),
+        ],
         &expected,
         &mut excluder,
         &mut discovery,
@@ -167,7 +207,7 @@ pub(super) fn discover(
         pipeline,
         root,
         &sources,
-        &listing.files,
+        &listing,
         &expected,
         &DropIndex::new(&dropped),
         &mut excluder,
@@ -322,18 +362,31 @@ fn expected_bindings<'a>(
     expected
 }
 
-/// Record each file that a source's path rule matches, unless an `exclude`
-/// rule removes it or a value cannot be read.
+/// A source with its place in the pipeline's list of sources.
+type Placed<'s, 'a> = (usize, &'s SourcePattern<'a>);
+
+/// The first of `sources` whose path rule matches `path`.
+fn first_match<'s, 'a>(sources: &[Placed<'s, 'a>], path: &str) -> Option<Placed<'s, 'a>> {
+    sources
+        .iter()
+        .find(|(_, source)| match_pattern(&source.pieces, path).is_some())
+        .copied()
+}
+
+/// Record each file that a file source's path rule matches, and each folder
+/// that a folder source's matches, unless an `exclude` rule removes it or a
+/// value cannot be read.
 fn find_source_files(
-    sources: &[SourcePattern<'_>],
-    files: &[String],
+    kinds: [(&[Placed<'_, '_>], &[String]); 2],
     expected: &BTreeMap<&str, BTreeSet<EntityBinding>>,
     excluder: &mut Excluder<'_>,
     discovery: &mut Discovery,
 ) -> Result<(), PathError> {
-    for file in files {
-        let found = source_record(sources, file, expected, excluder, &mut discovery.skipped)?;
-        discovery.inventory.artifacts.extend(found);
+    for (sources, paths) in kinds {
+        for path in paths {
+            let found = source_record(sources, path, expected, excluder, &mut discovery.skipped)?;
+            discovery.inventory.artifacts.extend(found);
+        }
     }
     let artifacts = &mut discovery.inventory.artifacts;
     artifacts.sort();
@@ -341,17 +394,17 @@ fn find_source_files(
     Ok(())
 }
 
-/// The record for `file`, if a source's rule matches it and no `exclude`
-/// rule removes it. A file must match one source only, and lie within the
-/// contexts found for that source.
+/// The record for `file`, a file or a folder, if a source's rule matches
+/// it and no `exclude` rule removes it. It must match one source only, and
+/// lie within the contexts found for that source.
 fn source_record(
-    sources: &[SourcePattern<'_>],
+    sources: &[Placed<'_, '_>],
     file: &str,
     expected: &BTreeMap<&str, BTreeSet<EntityBinding>>,
     excluder: &mut Excluder<'_>,
     notes: &mut Vec<String>,
 ) -> Result<Option<SourceRecord>, PathError> {
-    let mut matches = sources.iter().filter_map(|source| {
+    let mut matches = sources.iter().filter_map(|(_, source)| {
         match_pattern(&source.pieces, file).map(|bound| (source.product, bound))
     });
     let Some((product, bound)) = matches.next() else {
@@ -365,6 +418,7 @@ fn source_record(
         }
     };
     let name = product.name.as_str();
+    let kind = if product.folder { "folder" } else { "file" };
     // An excluded file may lie outside every discovered context, such as a
     // misnamed copy of one that does.
     if excluder.artifact(name, &binding) {
@@ -375,19 +429,19 @@ fn source_record(
         .is_some_and(|bindings| !bindings.contains(&binding))
     {
         return Err(error(format!(
-            "source file `{file}` for `{name}` lies outside the discovered contexts"
+            "source {kind} `{file}` for `{name}` lies outside the discovered contexts"
         )));
     }
     if let Some((other, _)) = matches.next() {
         return Err(error(format!(
-            "file `{file}` matches the path rules of both `{name}` and `{}`",
+            "{kind} `{file}` matches the path rules of both `{name}` and `{}`",
             other.name
         )));
     }
     Ok(Some(SourceRecord::new(name, binding).at(file)))
 }
 
-/// Require the file of every source binding a discovery rule expects,
+/// Require the file or folder of every source binding a discovery rule expects,
 /// except in groups a `drop` rule removed. An excluded binding needs no file;
 /// when it has none, its exclusion is recorded here, since no file was found
 /// to record it by.
@@ -395,7 +449,7 @@ fn require_source_files(
     pipeline: &Pipeline,
     root: &Path,
     sources: &[SourcePattern<'_>],
-    files: &[String],
+    listing: &Listing,
     expected: &BTreeMap<&str, BTreeSet<EntityBinding>>,
     dropped: &DropIndex<'_>,
     excluder: &mut Excluder<'_>,
@@ -417,7 +471,17 @@ fn require_source_files(
             // `is_file` alone accepts `s07.json` when only `S07.json` is
             // present on a case-insensitive filesystem. The listing keeps
             // each directory entry's actual spelling.
-            let present = files.binary_search(&relative).is_ok() && full.is_file();
+            let (listed, kind) = if product.folder {
+                (&listing.directories, "folder")
+            } else {
+                (&listing.files, "file")
+            };
+            let present = listed.binary_search(&relative).is_ok()
+                && if product.folder {
+                    full.is_dir()
+                } else {
+                    full.is_file()
+                };
             if excluded {
                 if !present {
                     excluder.artifact(&product.name, binding);
@@ -426,7 +490,7 @@ fn require_source_files(
             }
             if !present {
                 return Err(error(format!(
-                    "missing source file for `{artifact}` at discovered context: `{}`",
+                    "missing source {kind} for `{artifact}` at discovered context: `{}`",
                     full.display()
                 )));
             }

@@ -8,7 +8,7 @@ use std::fmt;
 use crate::command::{facet, slot, validate_commands, CommandError, Facet, Slot};
 use crate::model::{
     ArtifactId, Cardinality, CommandDef, CommandRole, DagStep, Job, OperationDef, Pipeline,
-    ResolvedDag,
+    PipelineIndex, ResolvedDag,
 };
 use crate::paths::{bound_paths, check_rules, BoundPaths, PathError};
 use crate::spitdag::{ArgPart, Argument, BoundDag, BoundJob, BoundStep};
@@ -76,11 +76,18 @@ fn bind_jobs(
                 .unwrap_or_default()
         })
         .collect();
+    let index = PipelineIndex::new(pipeline);
+    let folders = dag
+        .artifacts
+        .products()
+        .map(|(product, _)| index.is_folder(product))
+        .collect();
     let paths = paths.into_iter().map(Option::unwrap_or_default).collect();
     Ok(BoundDag::new(
         dag.artifacts.clone(),
         paths,
         dimensions,
+        folders,
         steps.iter().map(StepCommands::bound).collect(),
         jobs,
     ))
@@ -234,7 +241,8 @@ fn expand(
                     };
                     let artifact = *artifact.ok_or_else(|| lacks(name))?;
                     // `validate_commands` allows `.dir` and `.stem` only on
-                    // an output, and `.stem` only with an extension.
+                    // an output, and `.stem` only with an extension or on a
+                    // folder, whose name is its stem.
                     argument.push(match (facet, slot) {
                         (Ok(Facet::Dir), _) => ArgPart::Dir(artifact),
                         (Ok(Facet::Stem), Some(Slot::Output(index))) => ArgPart::Stem {
