@@ -348,9 +348,14 @@ fn extension_disagreement(index: &PipelineIndex<'_>, product: &str) -> Option<St
         return None;
     }
     let written = rule.extension()?;
+    // A tool writes an output's file; a source's is declared.
+    let verb = match source {
+        ExtensionSource::Source(_) => "declares",
+        _ => "writes",
+    };
     if index.pipeline.product_paths.contains_key(product) {
         return Some(format!(
-            "path `{product}` ends in `{written}`, but {source} writes `{expected}`; drop the extension or use `{expected}`"
+            "path `{product}` ends in `{written}`, but {source} {verb} `{expected}`; drop the extension or use `{expected}`"
         ));
     }
     let default = match index.stage_path_rule(product) {
@@ -360,6 +365,9 @@ fn extension_disagreement(index: &PipelineIndex<'_>, product: &str) -> Option<St
     Some(match source {
         ExtensionSource::Operation(_) => format!(
             "{default} ends in `{written}`, but {source} writes `{expected}`; write {default} without an extension, and give the outputs that use it `ext: {written}`"
+        ),
+        ExtensionSource::Source(_) => format!(
+            "{default} ends in `{written}`, but {source} declares `{expected}`; write {default} without an extension, so each source's declared extension completes it"
         ),
         ExtensionSource::Stage(_) | ExtensionSource::Default => format!(
             "{default} ends in `{written}`, but {source} sets `{expected}`; write the extension once, with `ext:`"
