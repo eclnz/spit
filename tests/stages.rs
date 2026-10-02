@@ -67,7 +67,11 @@ fn a_product_named_stage_is_still_a_step() {
 fn jobs_carry_their_stage() {
     let (pipeline, inventory) = support::parse_fixture(&staged()).unwrap();
     let dag = resolve(&pipeline, &inventory.unwrap()).unwrap();
-    let stages: Vec<_> = dag.jobs.iter().map(|job| job.stage.as_deref()).collect();
+    let stages: Vec<_> = dag
+        .jobs
+        .iter()
+        .map(|job| dag.step(job).stage.as_deref())
+        .collect();
     assert_eq!(
         stages,
         [

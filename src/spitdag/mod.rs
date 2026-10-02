@@ -10,6 +10,7 @@ use std::io;
 
 use crate::model::{
     identity, natural_cmp, ArtifactId, ArtifactInstance, Artifacts, EntityBinding, JobId, Removal,
+    StepId,
 };
 use crate::types::TypeExpr;
 
@@ -31,6 +32,9 @@ pub struct BoundDag {
     pub left_out: Vec<LeftOut>,
     /// Each job after the jobs it depends on.
     pub jobs: Vec<BoundJob>,
+    /// Each step of the resolved DAG, with its ports named, which jobs
+    /// refer to by [`StepId`].
+    pub steps: Vec<BoundStep>,
     artifacts: Artifacts,
     /// Each artifact's file, relative to the dataset root, by id; empty for
     /// an artifact no job uses.
@@ -45,16 +49,29 @@ pub struct LeftOut {
     pub reasons: Vec<String>,
 }
 
+/// What every job of one step shares, kept once in the bound DAG rather
+/// than in each job: the operation, the stage, and the names of its ports.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BoundStep {
+    pub operation: String,
+    /// The stage whose block holds the step, as `outer/inner`, if any.
+    pub stage: Option<String>,
+    /// The name of each input port, in port order.
+    pub inputs: Vec<String>,
+    /// The name of each output port, in port order.
+    pub outputs: Vec<String>,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct BoundJob {
     pub id: JobId,
-    pub operation: String,
-    /// The stage of the step that made this job, as `outer/inner`.
-    pub stage: Option<String>,
-    /// Each input port and its artifacts, in port order.
-    pub inputs: Vec<(String, Vec<ArtifactId>)>,
-    /// Each output port and its artifact, in port order.
-    pub outputs: Vec<(String, ArtifactId)>,
+    /// The step that made this job, in [`BoundDag::steps`], which names its
+    /// ports.
+    pub step: StepId,
+    /// The artifacts of each input port, in its step's port order.
+    pub inputs: Vec<Vec<ArtifactId>>,
+    /// The artifact of each output port, in its step's port order.
+    pub outputs: Vec<ArtifactId>,
     pub depends_on: Vec<JobId>,
     /// The command that makes the outputs; `None` when the operation has none.
     pub command: Option<Vec<Argument>>,
@@ -135,10 +152,7 @@ impl<'a> BoundArtifact<'a> {
 impl BoundJob {
     /// Every input artifact, in port order.
     pub fn input_artifacts(&self) -> impl Iterator<Item = ArtifactId> + '_ {
-        self.inputs
-            .iter()
-            .flat_map(|(_, artifacts)| artifacts)
-            .copied()
+        self.inputs.iter().flatten().copied()
     }
 }
 
@@ -149,6 +163,7 @@ impl BoundDag {
         artifacts: Artifacts,
         paths: Vec<String>,
         dimensions: Vec<Vec<String>>,
+        steps: Vec<BoundStep>,
         jobs: Vec<BoundJob>,
     ) -> Self {
         Self {
@@ -156,10 +171,16 @@ impl BoundDag {
             removed: Vec::new(),
             left_out: Vec::new(),
             jobs,
+            steps,
             artifacts,
             paths,
             dimensions,
         }
+    }
+
+    /// The step that made `job`, with its operation, stage and ports.
+    pub fn step(&self, job: &BoundJob) -> &BoundStep {
+        &self.steps[job.step.index()]
     }
 
     pub fn artifact(&self, id: ArtifactId) -> BoundArtifact<'_> {
@@ -181,7 +202,7 @@ impl BoundDag {
     /// Whether each artifact, by id, is an output of a job here.
     fn produced(&self) -> Vec<bool> {
         let mut produced = vec![false; self.paths.len()];
-        for &(_, output) in self.jobs.iter().flat_map(|job| &job.outputs) {
+        for &output in self.jobs.iter().flat_map(|job| &job.outputs) {
             produced[output.index()] = true;
         }
         produced
@@ -214,8 +235,8 @@ impl BoundDag {
         self.jobs
             .iter()
             .flat_map(|job| &job.outputs)
-            .filter(|(_, output)| !read[output.index()])
-            .map(|&(_, output)| self.artifact(output))
+            .filter(|output| !read[output.index()])
+            .map(|&output| self.artifact(output))
             .collect()
     }
 

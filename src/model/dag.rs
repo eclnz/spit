@@ -33,18 +33,41 @@ impl fmt::Display for JobId {
     }
 }
 
+/// A step's place in its DAG's steps, which its jobs refer to it by.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct StepId(u32);
+
+impl StepId {
+    /// The step at `index`.
+    pub(crate) fn new(index: usize) -> Self {
+        Self(u32::try_from(index).expect("fewer than 2^32 steps in a pipeline"))
+    }
+
+    pub fn index(self) -> usize {
+        self.0 as usize
+    }
+}
+
+/// What every job of one step shares, kept once in its DAG rather than in
+/// each job: the operation the step calls and the stage it is written in.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DagStep {
+    pub operation: String,
+    /// The stage whose block holds the step, as `outer/inner`, if any.
+    pub stage: Option<String>,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Job {
     pub id: JobId,
-    pub operation: String,
+    /// The step that made this job, in [`ResolvedDag::steps`].
+    pub step: StepId,
     /// The artifacts bound to each input port, in port order. A many port
     /// holds its collection in order; every other port holds one artifact.
     pub inputs: Vec<Vec<ArtifactId>>,
     /// One artifact per output port, in port order.
     pub outputs: Vec<ArtifactId>,
     pub dependencies: Vec<JobId>,
-    /// The stage of the step that made this job, if any.
-    pub stage: Option<String>,
 }
 
 impl Job {
@@ -67,6 +90,9 @@ impl Job {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ResolvedDag {
     pub jobs: Vec<Job>,
+    /// Each step the resolver expanded, in the order it expanded them,
+    /// which jobs refer to by [`StepId`].
+    pub steps: Vec<DagStep>,
     /// Every artifact the jobs refer to.
     pub artifacts: Artifacts,
     /// Declaration order is retained for readable dry-run output.
@@ -79,6 +105,11 @@ pub struct ResolvedDag {
 }
 
 impl ResolvedDag {
+    /// The step that made `job`.
+    pub fn step(&self, job: &Job) -> &DagStep {
+        &self.steps[job.step.index()]
+    }
+
     pub fn artifact(&self, id: ArtifactId) -> Artifact<'_> {
         self.artifacts.get(id)
     }
@@ -117,14 +148,19 @@ impl ResolvedDag {
     /// every job keeps its number.
     #[must_use]
     pub fn only_stage(&self, stage: &str) -> Self {
-        let jobs: Vec<_> = self
-            .jobs
+        let within: Vec<bool> = self
+            .steps
             .iter()
-            .filter(|job| {
-                job.stage
+            .map(|step| {
+                step.stage
                     .as_deref()
                     .is_some_and(|name| stage_within(name, stage))
             })
+            .collect();
+        let jobs: Vec<_> = self
+            .jobs
+            .iter()
+            .filter(|job| within[job.step.index()])
             .cloned()
             .collect();
         let kept: BTreeSet<_> = jobs.iter().map(|job| job.id).collect();
@@ -136,6 +172,7 @@ impl ResolvedDag {
                     job
                 })
                 .collect(),
+            steps: self.steps.clone(),
             artifacts: self.artifacts.clone(),
             product_dimensions: self.product_dimensions.clone(),
             source_paths: self.source_paths.clone(),

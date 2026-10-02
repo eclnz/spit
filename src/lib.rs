@@ -46,10 +46,10 @@ pub use lower::parse_pipeline;
 pub use model::{
     stage_within, Artifact, ArtifactId, ArtifactInstance, ArtifactKey, ArtifactReport,
     ArtifactType, Artifacts, Beside, Cardinality, CommandDef, CommandRole, CountRequirement,
-    CoverageAction, CoverageGap, CoverageRule, DirectoryDiscovery, EntityBinding, Exclusion, Gap,
-    IncompleteJob, InputBinding, InputPort, InputRules, Invocation, Job, JobId, OperationDef,
-    OutputPort, Pipeline, ProductDef, Removal, ResolvedDag, ShapeRule, SidecarGroup,
-    SourceInventory, SourceRecord, StageDef,
+    CoverageAction, CoverageGap, CoverageRule, DagStep, DirectoryDiscovery, EntityBinding,
+    Exclusion, Gap, IncompleteJob, InputBinding, InputPort, InputRules, Invocation, Job, JobId,
+    OperationDef, OutputPort, Pipeline, ProductDef, Removal, ResolvedDag, ShapeRule, SidecarGroup,
+    SourceInventory, SourceRecord, StageDef, StepId,
 };
 pub use parser::{parse_source_inventory, render_source_inventory, ParseError, ParseErrorKind};
 pub use paths::{
@@ -61,7 +61,7 @@ pub use resolver::{
     bind_dag, bind_dag_with, resolve, resolve_artifacts_excluding, resolve_artifacts_partial,
     BindError,
 };
-pub use spitdag::{ArgPart, Argument, BoundArtifact, BoundDag, BoundJob, LeftOut};
+pub use spitdag::{ArgPart, Argument, BoundArtifact, BoundDag, BoundJob, BoundStep, LeftOut};
 pub use types::{
     parse_type_expr, Compatibility, Substitutions, TypeExpr, TypeParseError, TypeUnifyError,
 };
