@@ -196,3 +196,24 @@ fn suggest_writes_no_spitout() {
         text(&output.stderr)
     );
 }
+
+#[test]
+fn files_in_a_source_folder_are_read_with_it() {
+    let tree = Tree::new(
+        "suggest-folder",
+        &[
+            "dicom/sub-01/0001.dcm",
+            "dicom/sub-01/0002.dcm",
+            "dicom/sub-02/0001.dcm",
+            "notes/sub-01.txt",
+            "notes/sub-02.txt",
+        ],
+    );
+    tree.write(
+        "a.spit",
+        "source dicom : Dicom / [sub]\npath dicom: dicom/sub-{sub}\n",
+    );
+    let out = suggested(&tree, &["inputs", "a.spit", "--root", ".", "--suggest"]);
+    assert!(!out.contains(".dcm"), "{out}");
+    assert!(out.contains("path notes: notes/sub-{sub}.txt"), "{out}");
+}
