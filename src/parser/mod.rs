@@ -6,6 +6,7 @@ mod inventory;
 mod keyword;
 mod lexical;
 mod operation;
+mod render_inventory;
 mod source_map;
 
 use std::fmt;
@@ -21,10 +22,12 @@ use crate::types::TypeExpr;
 use self::flow::parse_flow;
 
 pub(crate) use self::declarations::{parse_use, ExcludeLine, UseSpec};
-pub(crate) use self::inventory::{as_read_back, source_record_lines, split_document};
-pub use self::inventory::{parse_source_inventory, render_source_inventory};
+pub use self::inventory::parse_source_inventory;
+pub(crate) use self::inventory::{source_record_lines, split_document};
 pub(crate) use self::keyword::{Header, Keyword};
 pub(crate) use self::lexical::{glued_comment, strip_comment, without_bom};
+pub(crate) use self::render_inventory::as_read_back;
+pub use self::render_inventory::render_source_inventory;
 pub(crate) use self::source_map::{Rule, SourceMap, Step};
 
 const SHELL_SOURCE_REMOVED: &str =

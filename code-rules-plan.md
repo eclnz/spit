@@ -6,9 +6,9 @@ Bring the code in line with the rules under "Writing the code" in `AGENTS.md`, w
 - [x] Split `src/model.rs` (2,082 lines) into `src/model/`. Commit 799a84a.
 - [x] Split `src/diagnostics.rs` (1,681 lines) into `src/diagnostics/`. Commit c5ae0aa.
 - [x] Split `src/main.rs` (1,252 lines) into `src/cli/`. Commit 5524cb0.
-- [x] Split `src/paths/template.rs` (842 lines) into `template.rs`, `product.rs` and `components.rs`. Commit COMMIT.
-- [ ] Split `src/parser/inventory.rs` (804 lines).
-- [ ] Empty `OVER_LIMIT` in `tests/architecture.rs`.
+- [x] Split `src/paths/template.rs` (842 lines) into `template.rs`, `product.rs` and `components.rs`. Commit 43075ae.
+- [x] Split `src/parser/inventory.rs` (804 lines): writing a `.spitout` is now `render_inventory.rs`. Commit COMMIT.
+- [x] Remove `OVER_LIMIT` from `tests/architecture.rs`, now that every file fits. Commit COMMIT.
 - [ ] Job ids: a `JobId` newtype for `Job::id`, `Job::dependencies`, `BoundJob::id` and `BoundJob::depends_on`, in place of a bare `usize`.
 - [ ] A step table: `ResolvedDag` keeps each step's operation and stage once, and a `Job` holds its step's id instead of copies of both. `BoundDag` does the same, with each step's port names, so a `BoundJob`'s ports are artifact ids in port order. Binding finds each step's commands once instead of searching every command for every job.
 
