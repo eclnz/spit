@@ -19,6 +19,7 @@ pub fn split(text: &str) -> (String, Option<String>) {
         let line = line.trim();
         line == "sources:"
             || line == "contexts:"
+            || line == "source_paths:"
             || (line.starts_with("contexts ") && line.ends_with(':'))
     });
     match start {

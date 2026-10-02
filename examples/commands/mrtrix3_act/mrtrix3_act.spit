@@ -13,24 +13,22 @@
 path: derivatives/{@stage}/{@product}/{@entities}
 ext: .mif
 
-# Each BIDS image shares its name with its sidecars, which differ only by
-# extension.
-sidecars dwi [sub, ses, run]: sub-{sub}/ses-{ses}/dwi/sub-{sub}_ses-{ses}_run-{run}_dwi
+# Each DWI run and reverse-PE b=0 travels with sidecars that share its file
+# name and differ only by extension. Where the files are is the dataset's to
+# say: each recipe gives every source's path, a group's as one stem.
+sidecars dwi [sub, ses, run]:
     source raw_dwi : MRI<DWI,Acquired> .nii.gz
     source dwi_bvec : GradientDirections .bvec
     source dwi_bval : GradientAmplitudes .bval
     source dwi_json : AcquisitionMetadata .json
 
-sidecars reverse_b0_files [sub, ses]: sub-{sub}/ses-{ses}/fmap/sub-{sub}_ses-{ses}_dir-PA_epi
+sidecars reverse_b0_files [sub, ses]:
     source reverse_b0 : MRI<B0,Acquired> .nii.gz
     source reverse_b0_json : AcquisitionMetadata .json
 
 source t1w : MRI<T1w,Anatomical> [sub, ses]
-path t1w: sub-{sub}/ses-{ses}/anat/sub-{sub}_ses-{ses}_T1w.nii.gz
 source source_lut : LookupTable
-path source_lut: config/source_lut.txt
 source target_lut : LookupTable
-path target_lut: config/target_lut.txt
 
 # Import each run with its sidecars, clean it, combine the runs into one
 # session, and correct motion, distortion, and bias.

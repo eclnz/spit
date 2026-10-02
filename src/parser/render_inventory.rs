@@ -39,9 +39,10 @@ pub fn render_source_inventory(
 /// memory will differ from its text. `tests/outputs.rs` compares them.
 pub(crate) fn as_read_back(
     inventory: &SourceInventory,
+    pipeline: &Pipeline,
     rules: &InputRules,
 ) -> Option<SourceInventory> {
-    let source_paths = written_source_paths(inventory, rules);
+    let source_paths = written_source_paths(inventory, pipeline, rules);
     if source_paths
         .values()
         .any(|template| template.to_string().contains('#'))
@@ -67,13 +68,14 @@ pub(crate) fn as_read_back(
 }
 
 /// The source path rules a `.spitout` writes: the inventory's and the
-/// recipe's.
+/// recipe's, a `sidecars` group's written out for each member.
 fn written_source_paths(
     inventory: &SourceInventory,
+    pipeline: &Pipeline,
     rules: &InputRules,
 ) -> BTreeMap<String, PathTemplate> {
     let mut source_paths = inventory.source_paths.clone();
-    source_paths.extend(rules.source_paths.clone());
+    source_paths.extend(rules.named_source_paths(pipeline).into_owned());
     source_paths
 }
 
@@ -100,7 +102,7 @@ impl fmt::Display for InventoryText<'_> {
             writeln!(f, "root {}", root.display())?;
             writeln!(f)?;
         }
-        let source_paths = written_source_paths(inventory, self.rules);
+        let source_paths = written_source_paths(inventory, self.pipeline, self.rules);
         if !source_paths.is_empty() {
             writeln!(f, "source_paths:")?;
             for (name, template) in &source_paths {

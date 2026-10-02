@@ -217,10 +217,21 @@ impl InputSpec {
     /// Check the recipe against the pipeline's source declarations, without
     /// reading any file or record.
     pub fn check(&self, pipeline: &Pipeline) -> Result<(), InputError> {
+        let members = pipeline.sidecar_members();
         for name in self.rules.source_paths.keys() {
             let product = name.clone();
+            if let Some(group) = pipeline.sidecar_group(name) {
+                if group.stem.is_some() {
+                    return Err(InputError::PathInBoth { product });
+                }
+                continue;
+            }
             if !pipeline.is_source(name) {
                 return Err(InputError::NotASource { product });
+            }
+            if let Some(group) = members.get(name.as_str()) {
+                let group = group.name.clone();
+                return Err(InputError::MemberPath { product, group });
             }
             if pipeline.product_paths.contains_key(name) {
                 return Err(InputError::PathInBoth { product });
@@ -456,8 +467,12 @@ pub enum InputError {
     Path(PathError),
     /// The recipe sets a path for a product that is not a source.
     NotASource { product: String },
-    /// A source has a path rule in both the pipeline and the recipe.
+    /// A source or `sidecars` group has a path rule in both the pipeline
+    /// and the recipe.
     PathInBoth { product: String },
+    /// The recipe sets a path for a member of a `sidecars` group, which
+    /// takes the group's.
+    MemberPath { product: String, group: String },
     /// Directory discovery finds every source's files, and this one has no
     /// path rule to find them by.
     NoDiscoveryPath { product: String },
@@ -492,11 +507,15 @@ impl fmt::Display for InputError {
             Self::Path(error) => error.fmt(f),
             Self::NotASource { product } => write!(
                 f,
-                "input path `{product}` must name a source product in the pipeline"
+                "input path `{product}` must name a source product or sidecars group in the pipeline"
             ),
             Self::PathInBoth { product } => write!(
                 f,
-                "source `{product}` has path rules in both .spit and .spitin"
+                "`{product}` has path rules in both .spit and .spitin"
+            ),
+            Self::MemberPath { product, group } => write!(
+                f,
+                "source `{product}` takes its path from sidecars group `{group}`; write `path {group}:` with the group's stem"
             ),
             Self::NoDiscoveryPath { product } => write!(
                 f,

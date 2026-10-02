@@ -43,13 +43,14 @@ impl InputRules {
     }
 
     /// The sources of `pipeline` that the recipe's default `path:` covers:
-    /// those with no rule in the pipeline or the recipe. None without a
-    /// default.
+    /// those with no rule in the pipeline or the recipe, a member of a
+    /// `sidecars` group taking its group's. None without a default.
     pub fn defaulted_sources<'p>(&self, pipeline: &'p Pipeline) -> Vec<&'p str> {
         if self.source_default.is_none() {
             return Vec::new();
         }
         let index = PipelineIndex::new(pipeline);
+        let members = pipeline.sidecar_members();
         pipeline
             .products
             .iter()
@@ -58,25 +59,80 @@ impl InputRules {
                 index.is_source(name)
                     && !pipeline.product_paths.contains_key(*name)
                     && !self.source_paths.contains_key(*name)
+                    && members
+                        .get(name)
+                        .is_none_or(|group| !self.source_paths.contains_key(&group.name))
             })
             .collect()
     }
 
-    /// The path rule the recipe gives each source of `pipeline`: its own,
-    /// else its default for each of [`InputRules::defaulted_sources`].
-    /// Borrowed when the default covers no source.
+    /// The path rule the recipe gives each source of `pipeline` by a
+    /// `path` line: its own, or its `sidecars` group's stem and its
+    /// extension. Borrowed when the recipe names no group.
+    pub fn named_source_paths(
+        &self,
+        pipeline: &Pipeline,
+    ) -> Cow<'_, BTreeMap<String, PathTemplate>> {
+        if !self
+            .source_paths
+            .keys()
+            .any(|name| pipeline.sidecar_group(name).is_some())
+        {
+            return Cow::Borrowed(&self.source_paths);
+        }
+        let mut paths = BTreeMap::new();
+        for (name, template) in &self.source_paths {
+            match pipeline.sidecar_group(name) {
+                Some(group) => paths.extend(
+                    group
+                        .member_paths(template)
+                        .map(|(member, path)| (member.to_owned(), path)),
+                ),
+                None => {
+                    paths.insert(name.clone(), template.clone());
+                }
+            }
+        }
+        Cow::Owned(paths)
+    }
+
+    /// The path rule the recipe gives each source of `pipeline`: its
+    /// [`InputRules::named_source_paths`], else its default for each of
+    /// [`InputRules::defaulted_sources`]. A member of a `sidecars` group
+    /// takes the default with `{@product}` as the group's name, so the
+    /// members still share one stem.
     pub fn source_paths_for(&self, pipeline: &Pipeline) -> Cow<'_, BTreeMap<String, PathTemplate>> {
+        let named = self.named_source_paths(pipeline);
         let defaulted = self.defaulted_sources(pipeline);
         let Some(default) = self
             .source_default
             .as_ref()
             .filter(|_| !defaulted.is_empty())
         else {
-            return Cow::Borrowed(&self.source_paths);
+            return named;
         };
-        let mut paths = self.source_paths.clone();
+        let members = pipeline.sidecar_members();
+        let mut paths = named.into_owned();
+        // A group's members are defaulted together, since none has a rule
+        // of its own.
+        let mut groups = BTreeMap::new();
         for name in defaulted {
-            paths.insert(name.to_owned(), default.clone());
+            match members.get(name) {
+                Some(group) => {
+                    groups.insert(group.name.as_str(), *group);
+                }
+                None => {
+                    paths.insert(name.to_owned(), default.clone());
+                }
+            }
+        }
+        for (name, group) in groups {
+            let stem = default.with_product(name);
+            paths.extend(
+                group
+                    .member_paths(&stem)
+                    .map(|(member, path)| (member.to_owned(), path)),
+            );
         }
         Cow::Owned(paths)
     }

@@ -167,8 +167,8 @@ pub static DOCS: [Doc; 43] = [
         name: "sidecars",
         kind: "keyword",
         anchor: "sidecar-files",
-        example: "sidecars photo [site, shot]: site-{site}/shot-{shot}\n    source raw_photo : Image .raw\n    source photo_json .json",
-        summary: "Declares sources whose files share dimensions and a path stem, and differ only by extension. Each indented member is an ordinary source whose path is the stem and its extension. `spit inputs` warns where it finds some of a group's files and not the others.",
+        example: "sidecars photo [site, shot]:\n    path: site-{site}/shot-{shot}\n    source raw_photo : Image .raw\n    source photo_json .json",
+        summary: "Declares sources whose files share dimensions and a path stem, and differ only by extension. Each indented member is an ordinary source whose path is the stem and its extension. The block's `path:` line gives the stem, or a recipe gives it as `path name:`. `spit inputs` warns where it finds some of a group's files and not the others.",
     },
     Doc {
         name: "many",

@@ -3,14 +3,14 @@
 //! beneath a `stage name:` header.
 
 use crate::model::{CommandRole, Invocation, SidecarGroup};
-use crate::paths::PathTemplate;
+use crate::span::Place;
 
 use super::declarations::{
     parse_dimension_order, parse_discover, parse_invocation_parts, parse_path, parse_product,
 };
 use super::keyword::{removed_section, Keyword};
 use super::lexical::{comma_items, extension, identifier, strip_comment};
-use super::source_map::{name_place, step_place, tail_place};
+use super::source_map::{name_place, step_place};
 use super::{
     FlowOutput, FlowStep, ParseError, PathRule, StatementKind, Syntax, SHELL_SOURCE_REMOVED,
 };
@@ -37,19 +37,35 @@ pub(super) fn parse_flow(text: &str) -> Syntax {
 /// An open `sidecars` block: its header, and the members read so far.
 struct OpenGroup {
     group: SidecarGroup,
-    /// The header line, and the path stem every member's path starts with.
+    /// The header line.
     header: String,
     number: usize,
-    stem: String,
+    /// The `path:` line that gives the group's stem, when the block has
+    /// one, and its text.
+    stem: Option<Stem>,
+}
+
+/// Where a `sidecars` block's `path:` line is, and its text; the group
+/// holds the stem it gives.
+struct Stem {
+    place: Place,
+    line: String,
 }
 
 impl OpenGroup {
-    /// Open a block for `sidecars name [dimensions]: stem`.
+    /// Open a block for `sidecars name [dimensions]:`.
     fn open(original: &str, declaration: &str, number: usize) -> Result<Self, ParseError> {
-        let expected = "expected `sidecars name [dimensions]: path stem`, with each member indented beneath it as `source name : Type .ext`";
-        let (head, stem) = declaration
+        let expected = "expected `sidecars name [dimensions]:`, with each member indented beneath it as `source name : Type .ext`";
+        let (head, rest) = declaration
             .split_once(':')
             .ok_or_else(|| ParseError::new(number, expected))?;
+        if !rest.trim().is_empty() {
+            return Err(ParseError::new(
+                number,
+                "a `sidecars` header ends at its `:`; write the group's path stem on an indented `path:` line beneath it, or leave it to the recipe",
+            )
+            .at_token(rest.trim()));
+        }
         let (name, dimensions) = match head.split_once('[') {
             Some((name, dimensions)) => {
                 let dimensions = dimensions.trim().strip_suffix(']').ok_or_else(|| {
@@ -64,26 +80,69 @@ impl OpenGroup {
             None => (head, Vec::new()),
         };
         let name = identifier(name.trim(), number, "sidecars group name")?;
-        let stem = stem.trim();
-        if stem.is_empty() {
-            return Err(ParseError::new(number, expected));
-        }
-        PathTemplate::parse(stem)
-            .map_err(|error| ParseError::new(number, error.message()).at_token(stem))?;
         Ok(Self {
             group: SidecarGroup {
                 name: name.to_owned(),
                 dimensions,
                 members: Vec::new(),
+                stem: None,
             },
             header: original.to_owned(),
             number,
-            stem: stem.to_owned(),
+            stem: None,
         })
     }
 
+    /// Read a line of the block: its `path:` stem, before any member, or a
+    /// member.
+    fn line(
+        &mut self,
+        syntax: &mut Syntax,
+        original: &str,
+        line: &str,
+        number: usize,
+    ) -> Result<(), ParseError> {
+        if let Some((Keyword::Path, _)) = Keyword::split(line) {
+            return self.path(original, line, number);
+        }
+        self.member(syntax, original, line, number)
+    }
+
+    /// Read `path: stem`, the path every member's file starts with.
+    fn path(&mut self, original: &str, line: &str, number: usize) -> Result<(), ParseError> {
+        let group = &self.group.name;
+        if !line.starts_with("path:") {
+            return Err(ParseError::new(
+                number,
+                format!(
+                    "sidecars group `{group}` gives its stem as `path: stem`, with no product name"
+                ),
+            ));
+        }
+        if self.stem.is_some() {
+            return Err(ParseError::new(
+                number,
+                format!("sidecars group `{group}` has one `path:` line"),
+            ));
+        }
+        if !self.group.members.is_empty() {
+            return Err(ParseError::new(
+                number,
+                format!("the `path:` line of sidecars group `{group}` comes before its sources"),
+            ));
+        }
+        let rule = parse_path(None, original, line, number)?;
+        self.group.stem = Some(rule.template);
+        self.stem = Some(Stem {
+            place: rule.place,
+            line: original.to_owned(),
+        });
+        Ok(())
+    }
+
     /// Add a member, `source name : Type .ext`: a source with the group's
-    /// dimensions, whose path is the stem and its extension.
+    /// dimensions, whose path, when the block gives a stem, is the stem and
+    /// its extension.
     fn member(
         &mut self,
         syntax: &mut Syntax,
@@ -95,7 +154,7 @@ impl OpenGroup {
         let Some((Keyword::Source, declaration)) = Keyword::split(line) else {
             return Err(ParseError::new(
                 number,
-                format!("sidecars group `{group}` holds only its sources, each written `source name : Type .ext`"),
+                format!("sidecars group `{group}` holds only its `path:` stem and its sources, each written `source name : Type .ext`"),
             ));
         };
         if let Some(bracket) = declaration.find('[') {
@@ -117,18 +176,8 @@ impl OpenGroup {
             ));
         };
         product.dimensions.clone_from(&self.group.dimensions);
-        let template = PathTemplate::parse(format!("{}{extension}", self.stem))
-            .map_err(|error| ParseError::new(number, error.message()))?;
-        let rule = PathRule {
-            product: Some(product.name.clone()),
-            stage: None,
-            template,
-            // A member's path is the group's stem.
-            place: tail_place(&self.header, self.number, &self.stem),
-        };
         self.group.members.push((product.name.clone(), extension));
         syntax.push(original, number, StatementKind::Product(product, place));
-        syntax.push(original, number, StatementKind::Path(rule));
         Ok(())
     }
 
@@ -142,6 +191,18 @@ impl OpenGroup {
                     self.group.name
                 ),
             ));
+        }
+        if let (Some(stem), Some(template)) = (&self.stem, &self.group.stem) {
+            // Each member's path is the group's stem and its extension.
+            for (member, template) in self.group.member_paths(template) {
+                let rule = PathRule {
+                    product: Some(member.to_owned()),
+                    stage: None,
+                    template,
+                    place: stem.place.clone(),
+                };
+                syntax.push(&stem.line, stem.place.line, StatementKind::Path(rule));
+            }
         }
         syntax.push(
             &self.header,
@@ -257,7 +318,7 @@ fn flow_line(
     let indented = original.starts_with(char::is_whitespace);
     if let Some(open) = group.as_mut() {
         if indented {
-            return open.member(syntax, original, line, number);
+            return open.line(syntax, original, line, number);
         }
         group.take().expect("a group is open").close(syntax)?;
     }
