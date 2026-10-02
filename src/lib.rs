@@ -40,7 +40,8 @@ pub use error::{DefinitionSubject, NearMiss, PortSite, ResolveError, TypeConflic
 pub use imports::parse_pipeline_at;
 pub use inputs::{
     discover_source_files, discover_sources, parse_input_spec, parse_input_spec_at, Discovery,
-    EveryGroupDropped, InputError, InputSource, InputSpec, ResolvedInputs, UnmatchedExclusion,
+    EveryGroupDropped, InputError, InputSource, InputSpec, MissedSource, NearestFile,
+    ResolvedInputs, UnmatchedExclusion,
 };
 pub use lower::parse_pipeline;
 pub use model::{
