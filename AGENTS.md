@@ -114,9 +114,10 @@ usability/harness/rebuild_keys.sh             # expect `ok` for every answer key
 - **Stored outputs.** They are under `tests/fixtures/outputs/`. Re-save them with `SPIT_BLESS=1 cargo test --release --test outputs`, then read `git diff tests/fixtures` before committing.
 - **Links.** A changed Markdown file's links and anchors should resolve. GitHub's anchor for `## \`dag --partial\`` is `#dag---partial`.
 - **Speed.** A change to performance-related code is benchmarked, whether or not it means to change speed. That is code that runs once per artifact, job, record or step, and any change to how data is laid out, copied, hashed, allocated or written: the model and its tables, parsing, resolving, binding, discovery, and the writers. Build the commit before in a worktree and run `profiling/bench.py pipeline` and `profiling/bench.py dataset` with `--old` set to it, as `profiling/README.md` shows, and check that output is byte-for-byte the same.
-  - **Runs vary.** On a shared machine two runs of the same build can differ by 10% on the small workloads. Run each comparison twice, and run `--old` against itself once to see the noise. A slowdown is a regression when it shows in both runs and is larger than that noise.
+  - **It is a regression check.** With `--old`, each command compares the two builds at one size of its workload, takes a few seconds, and exits with status 1 when a time is more than 1.3 times the old build's and more than 5 ms slower. Give more sizes only to see how a stage scales, such as when a change claims a speed-up.
+  - **Runs vary.** On a shared machine two runs of the same build can differ by 10% or more. When the check fails, run it again; a slowdown is a regression when it fails both times.
   - **No regressions.** Fix a regression before committing. If it is the price of something worth more, the commit message says what and why.
-  - **The numbers go in the commit message**: the `dag` and `check` columns before and after, at the largest sizes, or a line saying every stage was unchanged within noise. A change that claims a speed-up shows it the same way.
+  - **The result goes in the commit message**: a line saying the check passed, or the times it flagged before and after. A change that claims a speed-up shows its `dag` and `check` columns before and after.
 
 ## Conventions
 
