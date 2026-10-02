@@ -67,7 +67,11 @@ fn a_product_named_stage_is_still_a_step() {
 fn jobs_carry_their_stage() {
     let (pipeline, inventory) = support::parse_fixture(&staged()).unwrap();
     let dag = resolve(&pipeline, &inventory.unwrap()).unwrap();
-    let stages: Vec<_> = dag.jobs.iter().map(|job| job.stage.as_deref()).collect();
+    let stages: Vec<_> = dag
+        .jobs
+        .iter()
+        .map(|job| dag.step(job).stage.as_deref())
+        .collect();
     assert_eq!(
         stages,
         [
@@ -315,7 +319,7 @@ fn one_stage_includes_the_stages_nested_in_it() {
         dag.only_stage(stage)
             .jobs
             .iter()
-            .map(|job| job.id)
+            .map(|job| job.id.number())
             .collect()
     };
     assert_eq!(ids("preprocess"), [1, 2, 3, 4, 5, 6, 7]);
@@ -405,7 +409,7 @@ fn every_job_follows_the_jobs_it_depends_on() {
         let dag = resolve(&parsed, &inventory.unwrap()).unwrap();
         assert!(dag.jobs.len() > 1, "{pipeline}");
         for (index, job) in dag.jobs.iter().enumerate() {
-            assert_eq!(job.id, index + 1, "{pipeline}");
+            assert_eq!(job.id.number(), index + 1, "{pipeline}");
             assert!(
                 job.dependencies
                     .iter()

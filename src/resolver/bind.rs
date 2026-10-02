@@ -7,10 +7,11 @@ use std::fmt;
 
 use crate::command::{facet, slot, validate_commands, CommandError, Facet, Slot};
 use crate::model::{
-    ArtifactId, Cardinality, CommandRole, Job, OperationDef, Pipeline, ResolvedDag,
+    ArtifactId, Cardinality, CommandDef, CommandRole, DagStep, Job, OperationDef, Pipeline,
+    ResolvedDag,
 };
 use crate::paths::{bound_paths, check_rules, BoundPaths, PathError};
-use crate::spitdag::{ArgPart, Argument, BoundDag, BoundJob};
+use crate::spitdag::{ArgPart, Argument, BoundDag, BoundJob, BoundStep};
 use crate::template::Part;
 
 /// Bind every artifact of `dag` to its path and expand every job's command
@@ -43,8 +44,8 @@ pub fn bind_dag_with(
     bind_jobs(pipeline, dag, paths.0)
 }
 
-/// Every job of `dag` with its ports named and its commands expanded, over
-/// the path `paths` holds for each artifact.
+/// Every job of `dag` with its commands expanded, over the path `paths`
+/// holds for each artifact, and every step with its ports named.
 fn bind_jobs(
     pipeline: &Pipeline,
     dag: &ResolvedDag,
@@ -55,10 +56,15 @@ fn bind_jobs(
         .iter()
         .map(|operation| (operation.name.as_str(), operation))
         .collect();
+    let steps = dag
+        .steps
+        .iter()
+        .map(|step| StepCommands::new(pipeline, &operations, step))
+        .collect::<Result<Vec<_>, _>>()?;
     let jobs = dag
         .jobs
         .iter()
-        .map(|job| bind_job(pipeline, &operations, dag, &paths, job))
+        .map(|job| bind_job(&steps[job.step.index()], dag, &paths, job))
         .collect::<Result<_, _>>()?;
     let dimensions = dag
         .artifacts
@@ -75,32 +81,85 @@ fn bind_jobs(
         dag.artifacts.clone(),
         paths,
         dimensions,
+        steps.iter().map(StepCommands::bound).collect(),
         jobs,
     ))
 }
 
-/// `job` with its ports named and its commands expanded. `bound_paths`
-/// binds every artifact of every job, so each has a path.
+/// A step's operation and commands, found once for all of its jobs.
+struct StepCommands<'p> {
+    step: &'p DagStep,
+    operation: &'p OperationDef,
+    /// The command that makes the outputs: the first declared for the
+    /// operation, if any.
+    run: Option<&'p CommandDef>,
+    /// The `verify` commands, in the order they are declared.
+    verify: Vec<&'p CommandDef>,
+}
+
+impl<'p> StepCommands<'p> {
+    fn new(
+        pipeline: &'p Pipeline,
+        operations: &BTreeMap<&str, &'p OperationDef>,
+        step: &'p DagStep,
+    ) -> Result<Self, BindError> {
+        let operation = operations
+            .get(step.operation.as_str())
+            .copied()
+            .ok_or_else(|| {
+                BindError::Dag(format!(
+                    "unknown operation `{}` in resolved DAG",
+                    step.operation
+                ))
+            })?;
+        let commands = |role: CommandRole| {
+            pipeline
+                .commands
+                .iter()
+                .filter(move |command| command.operation == step.operation && command.role == role)
+        };
+        Ok(Self {
+            step,
+            operation,
+            run: commands(CommandRole::Run).next(),
+            verify: commands(CommandRole::Verify).collect(),
+        })
+    }
+
+    /// The step as the bound DAG keeps it, with its ports named.
+    fn bound(&self) -> BoundStep {
+        BoundStep {
+            operation: self.step.operation.clone(),
+            stage: self.step.stage.clone(),
+            inputs: self
+                .operation
+                .inputs
+                .iter()
+                .map(|port| port.name.clone())
+                .collect(),
+            outputs: self
+                .operation
+                .outputs
+                .iter()
+                .map(|port| port.name.clone())
+                .collect(),
+        }
+    }
+}
+
+/// `job` with its commands expanded. `bound_paths` binds every artifact of
+/// every job, so each has a path.
 fn bind_job(
-    pipeline: &Pipeline,
-    operations: &BTreeMap<&str, &OperationDef>,
+    step: &StepCommands<'_>,
     dag: &ResolvedDag,
     paths: &[Option<String>],
     job: &Job,
 ) -> Result<BoundJob, BindError> {
-    let operation = operations
-        .get(job.operation.as_str())
-        .copied()
-        .ok_or_else(|| {
-            BindError::Dag(format!(
-                "unknown operation `{}` in resolved DAG",
-                job.operation
-            ))
-        })?;
+    let operation = step.operation;
     if job.inputs.len() != operation.inputs.len() || job.outputs.len() != operation.outputs.len() {
         return Err(BindError::Dag(format!(
             "job {} has different ports from operation `{}`",
-            job.id, job.operation
+            job.id, operation.name
         )));
     }
     let bound = |id: ArtifactId| match &paths[id.index()] {
@@ -110,34 +169,30 @@ fn bind_job(
             dag.artifact(id)
         ))),
     };
-    let mut inputs = Vec::with_capacity(job.inputs.len());
-    for (port, artifacts) in operation.inputs.iter().zip(&job.inputs) {
-        let artifacts = artifacts
-            .iter()
-            .map(|&artifact| bound(artifact))
-            .collect::<Result<_, _>>()?;
-        inputs.push((port.name.clone(), artifacts));
-    }
-    let mut outputs = Vec::with_capacity(job.outputs.len());
-    for (port, &output) in operation.outputs.iter().zip(&job.outputs) {
-        outputs.push((port.name.clone(), bound(output)?));
-    }
-    let commands = |role: CommandRole| {
-        pipeline
-            .commands
-            .iter()
-            .filter(move |command| command.operation == job.operation && command.role == role)
-            .map(|command| expand(command.template.arguments(), operation, job))
-    };
+    let inputs = job
+        .inputs
+        .iter()
+        .map(|artifacts| artifacts.iter().map(|&artifact| bound(artifact)).collect())
+        .collect::<Result<_, _>>()?;
+    let outputs = job
+        .outputs
+        .iter()
+        .map(|&output| bound(output))
+        .collect::<Result<_, _>>()?;
+    let expand_command =
+        |command: &CommandDef| expand(command.template.arguments(), operation, job);
     Ok(BoundJob {
         id: job.id,
-        operation: job.operation.clone(),
-        stage: job.stage.clone(),
+        step: job.step,
         inputs,
         outputs,
         depends_on: job.dependencies.clone(),
-        command: commands(CommandRole::Run).next().transpose()?,
-        verify: commands(CommandRole::Verify).collect::<Result<_, _>>()?,
+        command: step.run.map(expand_command).transpose()?,
+        verify: step
+            .verify
+            .iter()
+            .map(|&command| expand_command(command))
+            .collect::<Result<_, _>>()?,
     })
 }
 

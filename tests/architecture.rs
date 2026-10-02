@@ -18,7 +18,7 @@ fn layer(module: &str) -> Layer {
         "compile" => Layer::Compile,
         "inputs" => Layer::Inputs,
         "resolver" | "render" => Layer::Resolve,
-        "diagnostics" | "editor" | "main" | "lib" => Layer::Driver,
+        "diagnostics" | "editor" | "main" | "cli" | "lib" => Layer::Driver,
         _ => Layer::Shared,
     }
 }
@@ -86,4 +86,32 @@ fn step_modules_do_not_import_later_steps() {
             }
         }
     }
+}
+
+/// The most lines a Rust file may have, tests included. A longer file is
+/// usually two subjects, and is easier to read as two modules.
+const MAX_LINES: usize = 800;
+
+#[test]
+fn rust_files_stay_short() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let mut files = Vec::new();
+    for folder in ["src", "tests", "examples", "benches"] {
+        if root.join(folder).is_dir() {
+            source_files(&root.join(folder), &mut files);
+        }
+    }
+    let long: Vec<_> = files
+        .iter()
+        .filter_map(|file| {
+            let lines = fs::read_to_string(file).unwrap().lines().count();
+            let name = file.strip_prefix(root).unwrap().display();
+            (lines > MAX_LINES).then(|| format!("{name} has {lines} lines: split it"))
+        })
+        .collect();
+    assert!(
+        long.is_empty(),
+        "over the limit of {MAX_LINES} lines:\n{}",
+        long.join("\n")
+    );
 }

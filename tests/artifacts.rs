@@ -7,7 +7,7 @@ use spit::{
     resolve_artifacts_partial, ArtifactReport, Gap, InputSource, ResolveError, ResolvedInputs,
     Severity,
 };
-use support::Tree;
+use support::{numbers, Tree};
 
 /// The document's pipeline, and `inventory` after the input stage.
 fn settle(text: &str, inventory: &str) -> Result<(spit::Pipeline, ResolvedInputs), ResolveError> {
@@ -97,9 +97,9 @@ fn keeps_complete_jobs_and_blocks_consumers_of_incomplete_ones() {
             "merged[subject=01]",
         ]
     );
-    let ids: Vec<_> = report.dag.jobs.iter().map(|job| job.id).collect();
+    let ids: Vec<_> = report.dag.jobs.iter().map(|job| job.id.number()).collect();
     assert_eq!(ids, [1, 2, 3, 4, 5, 6]);
-    assert_eq!(report.dag.jobs[5].dependencies, [4, 5]);
+    assert_eq!(numbers(&report.dag.jobs[5].dependencies), [4, 5]);
 
     assert_eq!(
         incomplete(&report),

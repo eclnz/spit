@@ -6,8 +6,8 @@ mod matching;
 
 use crate::error::ResolveError;
 use crate::model::{
-    ArtifactId, ArtifactInstance, ArtifactReport, ArtifactType, Gap, IncompleteJob, Invocation,
-    OperationDef, Pipeline, ResolvedDag, SourceInventory,
+    ArtifactId, ArtifactInstance, ArtifactReport, ArtifactType, DagStep, Gap, IncompleteJob,
+    Invocation, JobId, OperationDef, Pipeline, ResolvedDag, SourceInventory, StepId,
 };
 
 use crate::compile::{compile, CompiledPipeline};
@@ -122,6 +122,11 @@ fn resolve_artifacts_with_partial(
         }
     }
     for step in &steps {
+        let id = StepId::new(resolution.dag.steps.len());
+        resolution.dag.steps.push(DagStep {
+            operation: step.operation.name.clone(),
+            stage: step.invocation.stage.clone(),
+        });
         let outputs: Vec<u32> = step
             .outputs
             .iter()
@@ -135,7 +140,7 @@ fn resolve_artifacts_with_partial(
             partial,
         );
         for expansion in expansions {
-            resolution.add(step.invocation, step.operation, &outputs, expansion)?;
+            resolution.add(step.invocation, step.operation, id, &outputs, expansion)?;
         }
         for ((product, _), &number) in step.outputs.iter().zip(&outputs) {
             let artifacts = &resolution.dag.artifacts;
@@ -166,7 +171,7 @@ struct Resolution {
     /// the outputs of incomplete jobs.
     incomplete: Vec<bool>,
     /// The job that makes each output artifact.
-    producers: Vec<Option<usize>>,
+    producers: Vec<Option<JobId>>,
     dag: ResolvedDag,
     incomplete_jobs: Vec<IncompleteJob>,
 }
@@ -194,6 +199,7 @@ impl Resolution {
         &mut self,
         invocation: &Invocation,
         operation: &OperationDef,
+        step: StepId,
         products: &[u32],
         expansion: Expansion,
     ) -> Result<(), ResolveError> {
@@ -212,9 +218,8 @@ impl Resolution {
         self.grow();
         if expansion.gaps.is_empty() {
             let job = make_job(
-                self.dag.jobs.len() + 1,
-                operation,
-                invocation.stage.clone(),
+                JobId::new(self.dag.jobs.len() + 1),
+                step,
                 expansion.inputs,
                 outputs,
                 &self.producers,

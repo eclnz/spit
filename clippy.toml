@@ -1,0 +1,10 @@
+# The lints these settings configure are switched on in Cargo.toml, and
+# AGENTS.md says why each rule holds.
+allow-unwrap-in-tests = true
+disallowed-types = [
+    { path = "std::collections::HashMap", reason = "use rustc_hash::FxHashMap: the default hasher is slower and seeded at random" },
+    { path = "std::collections::HashSet", reason = "use rustc_hash::FxHashSet: the default hasher is slower and seeded at random" },
+    { path = "std::rc::Rc", reason = "a table owns each record; hold its id or borrow it" },
+    { path = "std::cell::RefCell", reason = "no shared mutable state" },
+    { path = "std::cell::Cell", reason = "no shared mutable state" },
+]

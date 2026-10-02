@@ -9,10 +9,9 @@ use crate::model::{
 };
 use crate::parser::SourceMap;
 
-use super::template::{
-    bind_path, enclosing_path, error, shown_path, PathError, PathPart, PathPlaceholder,
-    PathTemplate,
-};
+use super::components::enclosing_path;
+use super::product::{bind_path, shown_path};
+use super::template::{error, PathError, PathPart, PathPlaceholder, PathTemplate};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum PathRule {

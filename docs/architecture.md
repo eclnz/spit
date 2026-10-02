@@ -31,7 +31,7 @@ SPIT runs in three steps. Each has its own modules and its own command, and each
 
 A backend would turn a `.spitdag` into something that runs, reading nothing else: no pipeline, path rule or command template. SPIT has none at present.
 
-Shared code (the model, parser, lowering, path templates, and the `BoundDag` in `src/spitdag.rs`) belongs to no step. Step 2 and step 3 each build on step 1, and neither uses the other. `diagnostics.rs` and `main.rs` run the steps in order. `tests/architecture.rs` checks direct module references for forbidden step dependencies. Every module is private: the library's API is what `lib.rs` re-exports.
+Shared code (the model, parser, lowering, path templates, and the `BoundDag` in `src/spitdag`) belongs to no step. Step 2 and step 3 each build on step 1, and neither uses the other. `src/diagnostics` and the command line, `src/main.rs` and `src/cli`, run the steps in order; the command line belongs to the binary and uses only what `lib.rs` exports. `tests/architecture.rs` checks direct module references for forbidden step dependencies. Every module is private: the library's API is what `lib.rs` re-exports.
 
 The parser reads a document as one of two kinds. A pipeline may hold no `discover`, `exclude`, `drop` or `require` rule and no `sources:` or `contexts:` record, and `parse_pipeline` returns it as a `Pipeline`. A recipe holds rules, source paths and records, and `parse_input_spec` returns it as an `InputSpec`. `Pipeline` holds no input rules.
 
@@ -53,7 +53,7 @@ The current type engine has structural unification and type variables, but no su
 
 The resolved DAG has logical identities, plus the file of each source whose record gave one. `bind_dag` binds every other source and output identity with the path templates and expands each command, giving the `BoundDag`. Neither physical discovery nor command execution is part of the resolver.
 
-A DAG keeps each artifact once, in its `Artifacts` table, and jobs refer to artifacts by `ArtifactId`: a dataset has far more job inputs than artifacts. Every artifact of a product has the product's type, so the table keeps a product's name and type once, and each artifact is its product's number and its entities. What belongs to each artifact, such as a source's file or a bound path, is a column indexed by id. The `BoundDag` keeps the same table, with each artifact's path, and a command names a file by its artifact.
+A DAG keeps each artifact once, in its `Artifacts` table, and jobs refer to artifacts by `ArtifactId`: a dataset has far more job inputs than artifacts. Every artifact of a product has the product's type, so the table keeps a product's name and type once, and each artifact is its product's number and its entities. What belongs to each artifact, such as a source's file or a bound path, is a column indexed by id. The `BoundDag` keeps the same table, with each artifact's path, and a command names a file by its artifact. What every job of one step shares is kept once too: `ResolvedDag::steps` holds each step's operation and stage, and a job names its step by `StepId`. `BoundDag::steps` adds each step's port names, so a bound job's inputs and outputs are artifact ids in its step's port order, and binding finds each step's operation and commands once rather than for every job.
 
 ## Command definitions and the bound DAG
 
