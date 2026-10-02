@@ -10,6 +10,6 @@ Bring the code in line with the rules under "Writing the code" in `AGENTS.md`, w
 - [x] Split `src/parser/inventory.rs` (804 lines): writing a `.spitout` is now `render_inventory.rs`. Commit daa31d3.
 - [x] Remove `OVER_LIMIT` from `tests/architecture.rs`, now that every file fits. Commit daa31d3.
 - [x] Job ids: a `JobId` newtype for `Job::id`, `Job::dependencies`, `BoundJob::id` and `BoundJob::depends_on`, in place of a bare `usize`. Commit 976921b.
-- [x] A step table: `ResolvedDag` keeps each step's operation and stage once, and a `Job` holds its step's id instead of copies of both. `BoundDag` does the same, with each step's port names, so a `BoundJob`'s ports are artifact ids in port order. Binding finds each step's commands once instead of searching every command for every job. Commit COMMIT, after splitting `src/spitdag.rs` in aef8860.
+- [x] A step table: `ResolvedDag` keeps each step's operation and stage once, and a `Job` holds its step's id instead of copies of both. `BoundDag` does the same, with each step's port names, so a `BoundJob`'s ports are artifact ids in port order. Binding finds each step's commands once instead of searching every command for every job. Commit c5707e8, after splitting `src/spitdag.rs` in aef8860.
 
 Delete this plan in a separate final commit before the PR merges.
