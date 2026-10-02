@@ -35,6 +35,43 @@ git show <commit>^:<path>                                        # the plan as i
 
 Records and data that people rarely read, and that only a tool needs as files, are kept as zip archives rather than loose files, so they don't bloat the tree. Examples are a study round's reports and runs, and the harness's scenarios. Pack them with `usability/harness/archive.py pack <folder> <archive.zip>`: it sorts the entries and fixes their timestamps, so the same files always give the same archive. A script that needs the files unpacks them to a temporary folder. The loose files stay in the git history.
 
+## Writing the code
+
+SPIT is a compiler, so most of its code is data being turned into other data: text into statements, statements into a `Pipeline`, a pipeline and an inventory into a DAG, a DAG into a `.spitdag`. The code is laid out around that data, not around objects that hide it. These rules describe how the code is written now. A change that breaks one should say why in its commit message.
+
+The five rules under [Performance](docs/architecture.md#performance) come first: one table with columns by id, text interned once, grouping by symbol keys, finding once and then looking up, and doing each piece of work once. The rules below are how the rest of the code keeps to them.
+
+**Data and the functions over it**
+
+- **Plain data, open fields.** A stage's input and output are structs and enums with public fields, such as `Pipeline`, `Job` and `ResolvedDag`. Add a method when it keeps an invariant that open fields can't, as `Artifacts` does with its columns. Don't add a getter or a builder for a field anyone may set.
+- **Enums and `match`, not traits.** A closed set of cases is an enum, and code that handles them matches on it, so the compiler finds every place a new case touches. The crate has one trait, `Out` in `src/json.rs`, which lets the JSON writer write either to a string or to a hasher. Don't add a trait with one implementation, and don't use `dyn` outside `main.rs` unless it saves code.
+- **Stages are functions.** A stage takes what it reads by reference and returns what it makes, as `resolve(&pipeline, &inventory)` does. It keeps no state between calls and holds no handle to an earlier stage.
+
+**Ownership and identity**
+
+- **One owner, and ids or borrows everywhere else.** A table owns its records. Anything else that needs a record holds its id (`ArtifactId`) or borrows it (`Artifact<'a>`). There is no `Rc`, `RefCell` or other shared mutable state, and new code shouldn't add any.
+- **Ids are newtypes over `u32`.** An id wraps a `u32` so that ids of different tables can't be mixed up, and it turns into an index only at the table (`ArtifactId::index`). Job ids are still a bare `usize`, which new code shouldn't copy. Convert a length into an id with `u32::try_from(..).expect(..)`, and give the limit in the message, as in "fewer than 2^32 artifacts in a DAG".
+- **Copy a handle, not a record.** When a value has many holders, share it behind one pointer, as `EntityBinding` does with an `Arc`. Return a `Cow` when a stage usually passes its input through unchanged (`Pipeline::path_template_for`). A `.clone()` of a `String`, a `Vec` or a map inside a loop over artifacts or jobs is a bug unless the commit says why.
+- **Owned text is fine on cold paths.** Errors, diagnostics and the parser's output may hold `String`s. Box a large field of an error variant, as `ResolveError` does, so that `Result` stays small on the path that succeeds.
+
+**Collections and order**
+
+- **Lookups use `FxHashMap` and `FxHashSet`**, from `rustc-hash`. Don't use the standard library's hasher.
+- **Output never depends on hash order.** Anything that reaches a file or the terminal is in a `BTreeMap`, a `BTreeSet` or a sorted `Vec`, or is sorted first. Given the same pipeline, inventory, root and version, the output is the same bytes every time (see `docs/architecture.md`).
+- **Loops and worklists, not recursion, over data the user writes.** A pipeline may hold a chain of 100,000 steps, and recursing once per step overflows the stack (`compile/definitions.rs` has a test for this). Use an explicit stack or queue. Where recursion reads better, as in parsing nested types, cap the depth (`MAX_TYPE_DEPTH` in `src/types.rs`).
+
+**Errors and invariants**
+
+- **Errors are data.** An error is an enum variant whose fields say what went wrong, and `Located<E>` says where. Rendering is separate, in `diagnostics.rs` and `render.rs`, so that the same error can be printed as text or as JSON.
+- **Bad input never panics.** Outside tests, `unwrap` isn't used. `expect` and `unreachable!` state an invariant the code already holds, and their message says what it is, as in `unreachable!("a product's template has its groups resolved")`. Anything a user's file can cause is an error.
+- **Name the other half of an invariant.** When code relies on something another place guarantees, a comment says so with "Keep in step with" and names that place, as the `Ord` for `EntityBinding` does for its hash. Add the comment on both sides.
+- **No `unsafe`.**
+
+**Dependencies and boundaries**
+
+- **Two crates, and a new one must earn its place.** SPIT depends on `mimalloc` and `rustc-hash`. `serde_json` was tried and removed, because the hand-written writer was 15% faster and needed five fewer crates (`1b4b141`). A new dependency needs `profiling/bench.py` numbers, and the output must stay byte-for-byte the same.
+- **The three steps stay apart.** Compile, inputs and resolve don't reach into each other except as `tests/architecture.rs` allows. Every module is private, and the library's API is what `lib.rs` re-exports, so add to `lib.rs` only what a caller outside the crate needs.
+
 ## Checks before every commit
 
 ```sh
