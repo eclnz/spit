@@ -2,8 +2,8 @@
 """Time the `spit` CLI on generated pipelines and datasets, and profile it.
 
 usage:
-    bench.py pipeline [--old BIN] [--new BIN] [--steps 1000,2000,4000]
-    bench.py dataset  [--old BIN] [--new BIN] [--subjects 1000,4000] [--extra 0,60]
+    bench.py pipeline [--old BIN] [--new BIN] [--steps 2000]
+    bench.py dataset  [--old BIN] [--new BIN] [--subjects 1000] [--extra 30]
     bench.py profile  [--new BIN] [--steps 1000] [-- spit-args ...]
 
 `pipeline` times `spit check` on a chain of steps, the size that once made
@@ -18,6 +18,14 @@ functions that take the most instructions, inclusive.
 `cargo build --release` first. `--old` is another build to compare with,
 such as one from a worktree of an earlier commit. A build from before
 `{@product}` is given the old `{product}` spelling automatically.
+
+With `--old`, `pipeline` and `dataset` are a regression check: each of the
+new build's times is compared with the old build's, and the command exits
+with status 1 if one is slower by more than `--tolerance` and by more than
+5 ms, which small times differ by from run to run. The defaults are one
+size of each workload, enough to show a step that has become quadratic in
+seconds; give more sizes, such as `--steps 1000,2000,4000`, to see how a
+stage scales.
 
 Each time is the quickest of several runs, in milliseconds. Generated files
 go in `profiling/work/`, which git ignores; datasets there are reused.
@@ -161,8 +169,36 @@ def numbers(text):
     return [int(value) for value in text.split(",")]
 
 
+# A slowdown smaller than this, in ms, is noise whatever its ratio.
+NOISE_MS = 5
+
+
+def compare(timed, columns, tolerance):
+    """Compare each new time with the old build's for the same row and
+    column, from `timed`, which maps (row, build) to times. Prints the
+    regressions and returns whether there were any."""
+    if not any(build == "old" for _, build in timed):
+        return False
+    regressions = []
+    for (row, build), new in timed.items():
+        old = timed.get((row, "old"))
+        if build != "new" or old is None:
+            continue
+        for column, before, after in zip(columns, old, new):
+            if after > before * tolerance and after - before > NOISE_MS:
+                regressions.append(f"{row} {column}: {before:.1f} -> {after:.1f} ms ({after / before:.2f}x)")
+    if regressions:
+        print(f"\nslower than {tolerance:g}x the old build:")
+        for line in regressions:
+            print(f"  {line}")
+    else:
+        print(f"\nno time is more than {tolerance:g}x the old build's")
+    return bool(regressions)
+
+
 def run_pipeline(args):
     print(f"{'steps':>6}  {'build':<5} {'check':>10} {'--json':>10} {'--hovers':>10}")
+    timed = {}
     for steps in numbers(args.steps):
         for name, binary in builds(args):
             folder = os.path.join(WORK, f"chain-{name}-{steps}")
@@ -174,10 +210,13 @@ def run_pipeline(args):
                 times.append(quickest(hovers, folder, args.repeats))
             cells = "".join(f"{value:>10.1f}" for value in times)
             print(f"{steps:>6}  {name:<5}{cells}")
+            timed[(f"{steps} steps", name)] = times
+    return compare(timed, ["check", "--json", "--hovers"], args.tolerance)
 
 
 def run_dataset(args):
     print(f"{'subjects':>8} {'extra':>5}  {'build':<9} {'inputs':>9} {'dag':>9} {'check':>9}")
+    timed = {}
     for subjects in numbers(args.subjects):
         root = dataset(subjects)
         for extra in numbers(args.extra):
@@ -200,6 +239,8 @@ def run_dataset(args):
                     ]
                     cells = "".join(f"{value:>9.1f}" for value in times)
                     print(f"{subjects:>8} {extra:>5}  {label:<9}{cells}")
+                    timed[(f"{subjects} subjects, {extra} extra", label)] = times
+    return compare(timed, ["inputs", "dag", "check"], args.tolerance)
 
 
 def run_profile(args):
@@ -235,14 +276,17 @@ def main():
     parser.add_argument("mode", choices=["pipeline", "dataset", "profile"])
     parser.add_argument("--new", default=DEFAULT_NEW, help="the build to time (default: target/release/spit)")
     parser.add_argument("--old", help="another build to compare with")
-    parser.add_argument("--steps", default="1000,2000,4000", help="chain lengths for pipeline and profile")
-    parser.add_argument("--subjects", default="1000,4000", help="dataset sizes for dataset")
-    parser.add_argument("--extra", default="0,60", help="steps added to the dataset's pipeline")
-    parser.add_argument("--repeats", type=int, default=5, help="runs per time; the quickest is kept")
+    parser.add_argument("--steps", default="2000", help="chain lengths for pipeline, the first for profile")
+    parser.add_argument("--subjects", default="1000", help="dataset sizes for dataset")
+    parser.add_argument("--extra", default="30", help="steps added to the dataset's pipeline")
+    parser.add_argument("--repeats", type=int, default=3, help="runs per time; the quickest is kept")
+    parser.add_argument("--tolerance", type=float, default=1.3,
+                        help="with --old, how many times slower a time may be (default: 1.3)")
     parser.add_argument("--top", type=int, default=30, help="functions profile prints")
     parser.add_argument("spit", nargs="*", help="after --, extra arguments to `spit check` for profile")
     args = parser.parse_args()
-    {"pipeline": run_pipeline, "dataset": run_dataset, "profile": run_profile}[args.mode](args)
+    regressed = {"pipeline": run_pipeline, "dataset": run_dataset, "profile": run_profile}[args.mode](args)
+    sys.exit(1 if regressed else 0)
 
 
 if __name__ == "__main__":
