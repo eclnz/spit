@@ -10,6 +10,7 @@ mod coverage;
 mod discover;
 mod exclusions;
 mod pattern;
+mod suggest;
 
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
@@ -33,12 +34,13 @@ pub use self::coverage::EveryGroupDropped;
 use self::coverage::{apply_drops, check_before_removal};
 pub(crate) use self::coverage::{check_inventory, InputCheck};
 pub(crate) use self::discover::with_source_paths;
-use self::discover::{discover, locate_sources};
+use self::discover::{discover, locate_sources, unmatched_files};
 pub use self::discover::{discover_source_files, discover_sources, Discovery};
 pub(crate) use self::exclusions::collect_exclusion_errors;
 pub use self::exclusions::UnmatchedExclusion;
 use self::exclusions::{read_exclusion_files, Excluder};
 pub use self::pattern::{MissedSource, NearestFile};
+pub use self::suggest::{SuggestedSource, Suggestions};
 
 /// A recipe's rules and any inventory records written with them.
 #[derive(Clone, Debug, Default)]
@@ -361,6 +363,22 @@ impl InputSpec {
             gaps: checked.gaps,
             root,
         })
+    }
+
+    /// Suggest a source and path rule for each group of files under `root`
+    /// that no source rule matches, by the recipe's rules and `pipeline`'s.
+    /// A source with no rule is not an error here: a group of files may be
+    /// suggested as that source.
+    pub fn suggest(&self, pipeline: &Pipeline, root: &Path) -> Result<Suggestions, InputError> {
+        let located = with_source_paths(pipeline, &self.rules.source_paths_for(pipeline));
+        let (files, declared) = unmatched_files(&located, root)?;
+        let taken = pipeline
+            .products
+            .iter()
+            .map(|product| product.name.as_str())
+            .filter(|name| !declared.iter().any(|product| product.name == *name))
+            .collect();
+        Ok(suggest::suggest(&files, &declared, &taken))
     }
 
     /// Give a pipeline the recipe's source paths, so an editor can check

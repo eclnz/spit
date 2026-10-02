@@ -29,7 +29,8 @@ struct CommandSpec {
 impl Command {
     fn spec(self) -> CommandSpec {
         use Flag::{
-            Commands, Hovers, Json, Output, Partial, PathRules, Paths, Root, Stdin, Unmatched,
+            Commands, Hovers, Json, Output, Partial, PathRules, Paths, Root, Stdin, Suggest,
+            Unmatched,
         };
         match self {
             Self::Check => CommandSpec {
@@ -43,8 +44,8 @@ impl Command {
                 name: "inputs",
                 files: "<recipe.spitin>",
                 summary: "step 2: find a dataset's sources with a recipe, apply `exclude`, `drop` and `require`, and write a .spitout",
-                example: "spit inputs dataset.spitin -o dataset.spitout",
-                flags: &[Root, Output, Unmatched],
+                example: "spit inputs dataset.spitin -o dataset.spitout\n  spit inputs dataset.spitin --suggest",
+                flags: &[Root, Output, Unmatched, Suggest],
             },
             Self::Dag => CommandSpec {
                 name: "dag",
@@ -117,19 +118,21 @@ pub(crate) enum Flag {
     Commands,
     Partial,
     Unmatched,
+    Suggest,
     PathRules,
     Json,
     Stdin,
     Hovers,
 }
 
-const FLAGS: [Flag; 10] = [
+const FLAGS: [Flag; 11] = [
     Flag::Root,
     Flag::Output,
     Flag::Paths,
     Flag::Commands,
     Flag::Partial,
     Flag::Unmatched,
+    Flag::Suggest,
     Flag::PathRules,
     Flag::Json,
     Flag::Stdin,
@@ -137,7 +140,7 @@ const FLAGS: [Flag; 10] = [
 ];
 
 /// Pairs of flags that cannot be used together.
-const CONFLICTS: [(Flag, Flag); 7] = [
+const CONFLICTS: [(Flag, Flag); 9] = [
     (Flag::Json, Flag::Paths),
     (Flag::Json, Flag::Output),
     (Flag::Paths, Flag::Output),
@@ -145,6 +148,8 @@ const CONFLICTS: [(Flag, Flag); 7] = [
     (Flag::Commands, Flag::Output),
     (Flag::Json, Flag::PathRules),
     (Flag::Unmatched, Flag::Output),
+    (Flag::Suggest, Flag::Output),
+    (Flag::Suggest, Flag::Unmatched),
 ];
 
 impl Flag {
@@ -156,6 +161,7 @@ impl Flag {
             Self::Commands => "--commands",
             Self::Partial => "--partial",
             Self::Unmatched => "--unmatched",
+            Self::Suggest => "--suggest",
             Self::PathRules => "--path-rules",
             Self::Json => "--json",
             Self::Stdin => "--stdin",
@@ -186,6 +192,9 @@ impl Flag {
             (Self::Partial, _) => "plan complete jobs and record artifacts that cannot be produced",
             (Self::Unmatched, _) => {
                 "list files matching no source rule instead of writing a .spitout"
+            }
+            (Self::Suggest, _) => {
+                "suggest source and path lines for files matching no source rule, instead of writing a .spitout"
             }
             (Self::PathRules, _) => "list the path rule each product uses",
             (Self::Json, Command::Check) => "print diagnostics as JSON, for editors",
