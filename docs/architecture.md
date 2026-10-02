@@ -31,7 +31,7 @@ SPIT runs in three steps. Each has its own modules and its own command, and each
 
 A backend would turn a `.spitdag` into something that runs, reading nothing else: no pipeline, path rule or command template. SPIT has none at present.
 
-Shared code (the model, parser, lowering, path templates, and the `BoundDag` in `src/spitdag.rs`) belongs to no step. Step 2 and step 3 each build on step 1, and neither uses the other. `src/diagnostics` and the command line, `src/main.rs` and `src/cli`, run the steps in order; the command line belongs to the binary and uses only what `lib.rs` exports. `tests/architecture.rs` checks direct module references for forbidden step dependencies. Every module is private: the library's API is what `lib.rs` re-exports.
+Shared code (the model, parser, lowering, path templates, and the `BoundDag` in `src/spitdag`) belongs to no step. Step 2 and step 3 each build on step 1, and neither uses the other. `src/diagnostics` and the command line, `src/main.rs` and `src/cli`, run the steps in order; the command line belongs to the binary and uses only what `lib.rs` exports. `tests/architecture.rs` checks direct module references for forbidden step dependencies. Every module is private: the library's API is what `lib.rs` re-exports.
 
 The parser reads a document as one of two kinds. A pipeline may hold no `discover`, `exclude`, `drop` or `require` rule and no `sources:` or `contexts:` record, and `parse_pipeline` returns it as a `Pipeline`. A recipe holds rules, source paths and records, and `parse_input_spec` returns it as an `InputSpec`. `Pipeline` holds no input rules.
 
