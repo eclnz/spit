@@ -131,7 +131,7 @@ fn expanded_examples_resolve() {
 }
 
 #[test]
-fn path_rules_report_fallbacks_and_strict_paths_reject_them() {
+fn path_rules_report_fallbacks_and_check_accepts_them() {
     let rules = spit(&[
         "check",
         "examples/commands/field_survey/field_survey.spit",
@@ -143,19 +143,16 @@ fn path_rules_report_fallbacks_and_strict_paths_reject_them() {
     assert!(report.contains("photo_response (output): default derivatives/{@product}/{@entities}.txt, `.txt` from operation `estimate_response`"));
     assert!(report.contains("vegetation (output): default"));
 
-    for command in ["check", "dag"] {
-        let mut args = vec![command, "examples/commands/field_survey/field_survey.spit"];
-        if command == "dag" {
-            args.push("examples/commands/field_survey/field_survey.spitout");
-        }
-        args.push("--strict-paths");
-        let strict = spit(&args);
-        assert!(!strict.status.success(), "{command}");
-        assert!(
-            stderr(&strict).contains("strict paths requires explicit rules"),
-            "{command}"
-        );
-    }
+    // A rule that resolves is enough, whether it is a product's own or a
+    // default, and `--strict-paths`, which wanted every rule explicit, is gone.
+    let recipe = spit(&["check", "examples/commands/mrtrix3_act/mrtrix3_act.spitin"]);
+    assert!(recipe.status.success(), "{}", stderr(&recipe));
+    let strict = spit(&[
+        "check",
+        "examples/commands/field_survey/field_survey.spit",
+        "--strict-paths",
+    ]);
+    assert!(stderr(&strict).contains("unknown option `--strict-paths`"));
 }
 
 #[test]
@@ -207,9 +204,9 @@ fn check_json_reads_the_pipeline_file_and_dag_json_emits_the_spitdag() {
     assert!(dag.status.success(), "{}", stderr(&dag));
     let graph = stdout(&dag);
     assert!(graph.starts_with("{\"version\":4,\"generator\":{\"name\":\"spit\",\"version\":\""));
-    // A `.spitout` alone says nothing of where its files are.
+    // The `.spitout`'s root, relative to its folder, is recorded in full.
     assert!(
-        graph.contains("\"root\":null,\"external_inputs\":["),
+        graph.contains("/examples/commands/command_demo/command_demo_data\",\"external_inputs\":["),
         "{graph}"
     );
     // What a full run leaves behind, and the one program it needs.
@@ -270,19 +267,18 @@ fn dag_json_stage_is_an_array_of_names() {
 }
 
 #[test]
-fn path_rules_show_a_missing_rule_and_strict_paths_accept_complete_rules() {
+fn path_rules_show_the_built_in_default_for_an_output_with_no_rule() {
     let tree = Tree::new("cli-paths", &[]);
     let directory = tree.path();
     let file = directory.join("spit paths.spit");
     let pipeline =
         "source raw [id]\npath raw: input/{id}.txt\noperation copy(input)\nresult = copy(raw)\n";
     fs::write(&file, pipeline).unwrap();
-    let missing = spit(&["check", file.to_str().unwrap(), "--path-rules"]);
-    assert!(stdout(&missing).contains("result (output): MISSING"));
-
-    fs::write(&file, format!("{pipeline}path result: output/{{id}}.txt\n")).unwrap();
-    let complete = spit(&["check", file.to_str().unwrap(), "--strict-paths"]);
-    assert!(complete.status.success(), "{}", stderr(&complete));
+    let built_in = spit(&["check", file.to_str().unwrap(), "--path-rules"]);
+    assert!(built_in.status.success(), "{}", stderr(&built_in));
+    assert!(
+        stdout(&built_in).contains("result (output): built-in default out/{@product}/{@entities}")
+    );
 }
 
 #[test]
@@ -294,14 +290,9 @@ fn recipe_path_rules_show_combined_coverage_and_origin() {
     );
     let recipe = tree.write(
         "data.spitin",
-        "pipeline analysis.spit\npath raw: input/{id}.txt\n",
+        "pipeline analysis.spit\nroot .\npath raw: input/{id}.txt\n",
     );
-    let output = spit(&[
-        "check",
-        recipe.to_str().unwrap(),
-        "--path-rules",
-        "--strict-paths",
-    ]);
+    let output = spit(&["check", recipe.to_str().unwrap(), "--path-rules"]);
     assert!(output.status.success(), "{}", stderr(&output));
     let report = stdout(&output);
     assert!(
@@ -318,19 +309,52 @@ fn recipe_path_rules_show_combined_coverage_and_origin() {
     assert!(pipeline_only.status.success(), "{}", stderr(&pipeline_only));
     assert!(stdout(&pipeline_only).contains("raw (source): no rule (a recipe may supply one)"));
 
+    // A recipe must cover every source, since a scan finds each by its rule.
+    tree.write("data.spitin", "pipeline analysis.spit\nroot .\n");
+    let missing = spit(&["check", recipe.to_str().unwrap()]);
+    assert!(!missing.status.success());
+    assert!(
+        stderr(&missing).contains("source `raw` has no path rule"),
+        "{}",
+        stderr(&missing)
+    );
     tree.write(
+        "data.spitin",
+        "pipeline analysis.spit\nroot .\npath: input/{@product}/{@entities}\n",
+    );
+    let defaulted = spit(&["check", recipe.to_str().unwrap()]);
+    assert!(defaulted.status.success(), "{}", stderr(&defaulted));
+}
+
+#[test]
+fn a_recorded_source_with_no_path_rule_is_not_looked_for_under_out() {
+    let tree = Tree::new("cli-unruled-source", &[]);
+    let pipeline = tree.write(
         "analysis.spit",
         "source raw [id]\noperation copy(input)\nresult = copy(raw)\n",
     );
-    let missing = spit(&[
-        "check",
-        recipe.to_str().unwrap(),
-        "--path-rules",
-        "--strict-paths",
-    ]);
-    assert!(!missing.status.success());
-    assert!(stdout(&missing).contains("result (output): MISSING"));
-    assert!(stderr(&missing).contains("no path rule for products: result"));
+    let records = tree.write("inputs.spitout", "sources:\n    raw[id=1]\n");
+    let args = [
+        "dag",
+        pipeline.to_str().unwrap(),
+        records.to_str().unwrap(),
+        "--paths",
+    ];
+    let unruled = spit(&args);
+    assert!(!unruled.status.success());
+    assert!(
+        stderr(&unruled).contains("source `raw` has no path rule"),
+        "{}",
+        stderr(&unruled)
+    );
+    tree.write(
+        "inputs.spitout",
+        "source_paths:\n    raw: in/{id}.txt\n\nsources:\n    raw[id=1]\n",
+    );
+    let ruled = spit(&args);
+    assert!(ruled.status.success(), "{}", stderr(&ruled));
+    assert!(stdout(&ruled).contains("path: in/1.txt"));
+    assert!(stdout(&ruled).contains("path: out/result/id=1"));
 }
 
 #[test]
@@ -346,7 +370,7 @@ fn a_message_names_the_file_it_is_about_when_that_file_was_not_given() {
     )
     .unwrap();
     let recipe = directory.join("data.spitin");
-    fs::write(&recipe, "pipeline pipeline.spit\n").unwrap();
+    fs::write(&recipe, "pipeline pipeline.spit\nroot .\n").unwrap();
     let shown = pipeline.display().to_string();
 
     // Given the recipe, a failed match in the pipeline names the pipeline.
@@ -428,7 +452,7 @@ fn check_prints_every_diagnostic_and_fails_only_on_errors() {
     assert_eq!(stdout(&warned_check), "Pipeline valid.\n");
     assert!(!warned_dag.status.success());
     assert!(
-        stderr(&warned_dag).starts_with("error: dag needs a pipeline before"),
+        stderr(&warned_dag).contains("needs to know where the data is: add `--root <directory>`"),
         "{}",
         stderr(&warned_dag)
     );
@@ -439,19 +463,8 @@ fn a_recipe_names_its_own_pipeline_for_dag_and_artifacts() {
     let recipe = "examples/commands/command_demo/command_demo.spitin";
     let pipeline = "examples/commands/command_demo/command_demo.spit";
     let inventory = "examples/commands/command_demo/command_demo.spitout";
-    // The example keeps no data beside its recipe; scan a folder that has
-    // the shards its inventory lists.
-    let data = Tree::new(
-        "recipe-alone",
-        &[
-            "input/alpha/01.txt",
-            "input/alpha/02.txt",
-            "input/beta/01.txt",
-        ],
-    );
-    let root = data.path().to_str().unwrap();
     for command in ["dag", "artifacts"] {
-        let alone = spit(&[command, recipe, "--root", root]);
+        let alone = spit(&[command, recipe]);
         assert!(alone.status.success(), "{}", stderr(&alone));
         // The pipeline is the recipe's to name, not the command line's, even
         // when it names the same one.
@@ -487,7 +500,7 @@ fn a_recipe_run_in_memory_prints_each_pipeline_warning_once() {
          path spare: sp/{id}.txt\npath: out/{@product}/{id}.txt\n\
          operation clean(raw: Raw) -> Clean\ncommand clean: tool {raw} {@output}\ncleaned = clean(raw)\n",
     );
-    let recipe = tree.write("data.spitin", "pipeline analysis.spit\n");
+    let recipe = tree.write("data.spitin", "pipeline analysis.spit\nroot .\n");
     for command in ["inputs", "dag", "artifacts"] {
         let output = spit(&[command, recipe.to_str().unwrap()]);
         let errors = stderr(&output);
@@ -507,7 +520,7 @@ fn a_recipe_checks_a_pipeline_saved_with_a_byte_order_mark() {
         "analysis.spit",
         "\u{feff}source raw [id]\npath raw: in/{id}.txt\n",
     );
-    let recipe = tree.write("data.spitin", "\u{feff}pipeline analysis.spit\n");
+    let recipe = tree.write("data.spitin", "\u{feff}pipeline analysis.spit\nroot .\n");
     let output = spit(&["check", recipe.to_str().unwrap()]);
     assert!(output.status.success(), "{}", stderr(&output));
     assert_eq!(stdout(&output), "Recipe valid.\n");
@@ -529,7 +542,7 @@ fn drop_rules_that_remove_every_group_stop_each_command() {
     // before, a `require` after it checked nothing and passed.
     let recipe = tree.write(
         "data.spitin",
-        "pipeline analysis.spit\ndiscover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}\n\
+        "pipeline analysis.spit\nroot .\ndiscover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}\n\
          drop [sub] where sessions count<2\nrequire sessions count>=1 per [sub]\n",
     );
     for command in ["inputs", "dag", "artifacts"] {
@@ -538,7 +551,7 @@ fn drop_rules_that_remove_every_group_stop_each_command() {
         assert!(
             stderr(&output).contains(
                 "error: drop rules removed all 2 [sub] groups, leaving nothing to plan: \
-                 `drop [sub] where sessions count<2` (line 3)"
+                 `drop [sub] where sessions count<2` (line 4)"
             ),
             "{command}: {}",
             stderr(&output)

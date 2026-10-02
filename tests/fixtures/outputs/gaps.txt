@@ -1,11 +1,11 @@
-$ spit dag strict.spitin --root .
+$ spit dag strict.spitin
 exit: 1
 --- stdout
 --- stderr
 note: found 20 source artifacts and 6 contexts under `.`
 note: ran `spit inputs strict.spitin` in memory
 error: source coverage for `image` at [ses=2,sub=02]: expected at least 2 artifact(s), found 1
-$ spit artifacts strict.spitin --root .
+$ spit artifacts strict.spitin
 exit: 0
 --- stdout
 Complete artifacts: 49
@@ -75,11 +75,11 @@ Coverage gaps: 1
 --- stderr
 note: found 20 source artifacts and 6 contexts under `.`
 note: ran `spit inputs strict.spitin` in memory
-$ spit inputs drop.spitin --root . -o drop.spitout
+$ spit inputs drop.spitin -o drop.spitout
 exit: 0
 --- stdout
 --- stderr
-note: dropped [sub=02,ses=2] by `drop [sub, ses] where image count<2` (line 3); found 1
+note: dropped [sub=02,ses=2] by `drop [sub, ses] where image count<2` (line 4); found 1
 note: found 18 source artifacts and 5 contexts under `.`
 note: wrote the .spitout to `drop.spitout`
 root .
@@ -118,9 +118,9 @@ contexts sessions:
 removed:
     [sub=02,ses=2]
         rule: drop [sub, ses] where image count<2
-        at: line 3
+        at: line 4
         found: 1
-$ spit dag drop.spitin --root .
+$ spit dag drop.spitin
 exit: 0
 --- stdout
 Job 1
@@ -403,12 +403,12 @@ Job 30
     score[sub=03,ses=2] : Score
   depends_on: 25
 --- stderr
-note: dropped [sub=02,ses=2] by `drop [sub, ses] where image count<2` (line 3); found 1
+note: dropped [sub=02,ses=2] by `drop [sub, ses] where image count<2` (line 4); found 1
 note: found 18 source artifacts and 5 contexts under `.`
 note: ran `spit inputs drop.spitin` in memory
 note: 18 source files verified.
 note: 30 jobs resolved: 20 in prep, 10 outside stages.
-$ spit artifacts drop.spitin --root .
+$ spit artifacts drop.spitin
 exit: 0
 --- stdout
 Complete artifacts: 48
@@ -463,6 +463,6 @@ Complete artifacts: 48
 
 Incomplete artifacts: 0
 --- stderr
-note: dropped [sub=02,ses=2] by `drop [sub, ses] where image count<2` (line 3); found 1
+note: dropped [sub=02,ses=2] by `drop [sub, ses] where image count<2` (line 4); found 1
 note: found 18 source artifacts and 5 contexts under `.`
 note: ran `spit inputs drop.spitin` in memory

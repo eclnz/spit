@@ -60,13 +60,19 @@ pub fn parse_input_spec(text: &str) -> Result<InputSpec, ParseError> {
     finish_spec(document, header, Some(Path::new("")))
 }
 
-/// Parse a `.spitin` file at `path`. Paths inside the recipe, and the
-/// pipeline it names, are relative to its folder unless the CLI supplies
-/// `--root`.
+/// Parse a `.spitin` file at `path`. The pipeline it names and its root are
+/// relative to its folder, and a recipe that names its pipeline must name
+/// its root: a file says where its data is, whoever runs it.
 pub fn parse_input_spec_at(text: &str, path: &Path) -> Result<InputSpec, ParseError> {
     let (header, document) = parse_recipe(text, |text| {
         parse_located_document(text, path, Kind::Recipe)
     })?;
+    if header.pipeline.is_some() && header.root.is_none() {
+        return Err(ParseError::new(
+            1,
+            "a recipe names its dataset root, the folder its paths are relative to, with a line such as `root data`, or `root .` for the recipe's own folder",
+        ));
+    }
     let folder = path.parent().unwrap_or_else(|| Path::new(""));
     let header = RecipeHeader {
         pipeline: header.pipeline.map(|pipeline| folder.join(pipeline)),
@@ -237,17 +243,10 @@ impl InputSpec {
                 return Err(InputError::PathInBoth { product });
             }
         }
+        // Directory discovery finds every source's files.
         if !self.rules.discoveries.is_empty() {
-            let source_paths = self.rules.source_paths_for(pipeline);
-            let index = PipelineIndex::new(pipeline);
-            for product in &pipeline.products {
-                if index.is_source(&product.name)
-                    && !source_paths.contains_key(&product.name)
-                    && !index.has_path(&product.name)
-                {
-                    let product = product.name.clone();
-                    return Err(InputError::NoDiscoveryPath { product });
-                }
+            if let Some(product) = self.source_without_path(pipeline) {
+                return Err(InputError::NoSourcePath { product });
             }
         }
         if let Some((_, error)) = collect_rule_errors(pipeline, &self.rules, &BTreeSet::new())
@@ -257,6 +256,23 @@ impl InputSpec {
             return Err(error.into());
         }
         Ok(())
+    }
+
+    /// The first source of `pipeline` that no rule covers: not its own in
+    /// either file, nor the recipe's default, nor the pipeline's. A scan
+    /// finds every source by its rule, so it cannot find this one.
+    pub fn source_without_path(&self, pipeline: &Pipeline) -> Option<String> {
+        let source_paths = self.rules.source_paths_for(pipeline);
+        let index = PipelineIndex::new(pipeline);
+        pipeline
+            .products
+            .iter()
+            .find(|product| {
+                index.is_source(&product.name)
+                    && !source_paths.contains_key(&product.name)
+                    && !index.has_path(&product.name)
+            })
+            .map(|product| product.name.clone())
     }
 
     /// Run the input stage: find the contexts and source files a dataset
@@ -276,6 +292,9 @@ impl InputSpec {
         let source_paths = self.rules.source_paths_for(pipeline);
         let (mut inventory, skipped, unmatched_files, root, removed, incomplete) = match source {
             InputSource::Discover(root) => {
+                if let Some(product) = self.source_without_path(pipeline) {
+                    return Err(InputError::NoSourcePath { product });
+                }
                 let located = with_source_paths(pipeline, &source_paths);
                 let found = discover(&located, &self.rules, root)?;
                 if let Some(unmatched) = found.unmatched {
@@ -331,16 +350,12 @@ impl InputSpec {
         })
     }
 
-    /// Give a pipeline the recipe's source paths, and the built-in output
-    /// path when it declares none, so an editor can check every path rule of
-    /// the two files together. Resolving jobs needs neither: the input
-    /// stage writes each source's path into its record.
+    /// Give a pipeline the recipe's source paths, so an editor can check
+    /// every path rule of the two files together. Resolving jobs does not
+    /// need them: the input stage writes each source's path into its record.
     pub fn apply_paths(&self, pipeline: &mut Pipeline) {
         let source_paths = self.rules.source_paths_for(pipeline).into_owned();
         pipeline.product_paths.extend(source_paths);
-        pipeline
-            .path_template
-            .get_or_insert_with(PathTemplate::default_output);
     }
 }
 
@@ -473,9 +488,9 @@ pub enum InputError {
     /// The recipe sets a path for a member of a `sidecars` group, which
     /// takes the group's.
     MemberPath { product: String, group: String },
-    /// Directory discovery finds every source's files, and this one has no
-    /// path rule to find them by.
-    NoDiscoveryPath { product: String },
+    /// A scan finds every source's files, and this one has no path rule to
+    /// find them by.
+    NoSourcePath { product: String },
     /// The recipe and the `.spitout` give a source different path rules.
     ConflictingSourcePaths { product: String },
     /// A `.spitout` gives a path rule for a product that is not a source.
@@ -517,9 +532,9 @@ impl fmt::Display for InputError {
                 f,
                 "source `{product}` takes its path from sidecars group `{group}`; write `path {group}:` with the group's stem"
             ),
-            Self::NoDiscoveryPath { product } => write!(
+            Self::NoSourcePath { product } => write!(
                 f,
-                "source `{product}` needs a path rule in .spitin for directory discovery"
+                "source `{product}` has no path rule, so its files cannot be found; write `path {product}:` in the pipeline or the recipe, or a default `path:` in the recipe"
             ),
             Self::ConflictingSourcePaths { product } => write!(
                 f,

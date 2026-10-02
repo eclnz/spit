@@ -188,9 +188,11 @@ def run_dataset(args):
                 for label, ext in variants:
                     folder = os.path.join(WORK, f"study-{label}-{subjects}-{extra}")
                     write(folder, "analysis.spit", study(binary, extra, ext))
-                    write(folder, "dataset.spitin", RECIPE)
-                    inputs = [binary, "inputs", "dataset.spitin", "--root", root, "-o", "d.spitout"]
-                    dag = [binary, "dag", "analysis.spit", "d.spitout", "--root", root, "-o", "a.spitdag"]
+                    # The recipe names the dataset, and the .spitout records it.
+                    recipe = RECIPE.replace("\n", f"\nroot {root}\n", 1)
+                    write(folder, "dataset.spitin", recipe)
+                    inputs = [binary, "inputs", "dataset.spitin", "-o", "d.spitout"]
+                    dag = [binary, "dag", "analysis.spit", "d.spitout", "-o", "a.spitdag"]
                     times = [
                         quickest(inputs, folder, args.repeats),
                         quickest(dag, folder, args.repeats),

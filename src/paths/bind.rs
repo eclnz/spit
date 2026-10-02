@@ -115,12 +115,12 @@ impl fmt::Display for VerifiedFiles {
     }
 }
 
-/// Check that every product of `pipeline` has a valid path rule, except
-/// sources whose files the inventory gave the DAG.
+/// Check that every product of `pipeline` has a valid path rule, and that
+/// each in `dag` has one, except sources whose files the inventory gave.
 pub(crate) fn check_rules(pipeline: &Pipeline, dag: &ResolvedDag) -> Result<(), PathError> {
     inspect_paths(pipeline)?
         .with_inventory_paths(dag.located_products())
-        .validate(false)
+        .validate(dag.artifacts.products().map(|(product, _)| product))
 }
 
 /// Whether each artifact, by id, is made by one of the resolved jobs.

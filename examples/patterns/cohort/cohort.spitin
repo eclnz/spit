@@ -1,4 +1,5 @@
 pipeline cohort.spit
+root .
 
 discover sessions: [sub, ses] from dirs sub-{sub}/ses-{ses}
 # Subject 03 has only one session and is removed as a whole.

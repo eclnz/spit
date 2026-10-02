@@ -1,4 +1,5 @@
 pipeline observatory.spit
+root observatory_data
 
 require raw count>=1 per [org, site, device, window, channel]
 require calibration count=1 per [org, site, device, channel]

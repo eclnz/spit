@@ -1,3 +1,12 @@
+root analytics_data
+
+source_paths:
+    events: {@product}/{@entities}
+    customers: {@product}/{@entities}
+    subscriptions: {@product}/{@entities}
+    purchases: {@product}/{@entities}
+    campaigns: {@product}/{@entities}
+
 contexts:
     [tenant=acme,customer=alice,day=mon]
     [tenant=acme,customer=alice,day=tue]

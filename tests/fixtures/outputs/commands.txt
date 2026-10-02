@@ -1,4 +1,4 @@
-$ spit dag strict.spitin --root . --commands
+$ spit dag strict.spitin --commands
 exit: 0
 --- stdout
 Job 1  clean  [prep]
@@ -114,7 +114,7 @@ note: ran `spit inputs strict.spitin` in memory
 note: 21 source files verified.
 note: 36 jobs resolved: 24 in prep, 12 outside stages.
 note: commands run from `.`
-$ spit dag strict.spitin --root . --commands --paths
+$ spit dag strict.spitin --commands --paths
 exit: 0
 --- stdout
 Job 1

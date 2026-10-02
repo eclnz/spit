@@ -247,7 +247,7 @@ When `dag` stops because an input is missing or ambiguous, run `spit artifacts` 
 
 ## More example pipelines
 
-Each pipeline below, under [`examples/`](../examples), checks cleanly and sits beside a `.spitin` recipe and a `.spitout` of its inputs. Recipes may add discovery, exclusion, drop, or require rules. Run the command from the repository root to see its jobs; add `--paths` to see each artifact's file or `-o plan.spitdag` to write them, or run `spit check` on the `.spit` or `.spitin` alone.
+Each pipeline below, under [`examples/`](../examples), checks cleanly and sits beside a `.spitin` recipe and a `.spitout` of its inputs. Recipes may add discovery, exclusion, drop, or require rules. Each recipe's `root` line names a folder of empty source files beside it, so `spit dag` on the `.spitin` alone finds the same inputs and jobs as on the `.spit` and `.spitout`, and the `.spitout` records the same root, so `dag` checks those files too. Where the pipeline's own path rules find every source, as in the patterns, the recipe is optional: `cargo run -- dag examples/patterns/model_fit/model_fit.spit --root examples/patterns/model_fit` finds the same jobs. Run the command from the repository root to see its jobs; add `--paths` to see each artifact's file or `-o plan.spitdag` to write them, or run `spit check` on the `.spit` or `.spitin` alone.
 
 | Pipeline | Shows | Command | Jobs |
 | --- | --- | --- | --- |
@@ -290,9 +290,9 @@ To try source discovery with empty placeholder files, run:
 
 ```sh
 sh examples/commands/mrtrix3_act/mock_mrtrix3_inputs.sh
-cargo run -- inputs examples/commands/mrtrix3_act/mrtrix3_act_discover.spitin --root examples/commands/mrtrix3_act/mrtrix3_mock_data -o examples/commands/mrtrix3_act/mrtrix3_mock_data/inputs.spitout
-cargo run -- dag examples/commands/mrtrix3_act/mrtrix3_act.spit examples/commands/mrtrix3_act/mrtrix3_mock_data/inputs.spitout --root examples/commands/mrtrix3_act/mrtrix3_mock_data --paths
-cargo run -- dag examples/commands/mrtrix3_act/mrtrix3_act.spit examples/commands/mrtrix3_act/mrtrix3_mock_data/inputs.spitout --root examples/commands/mrtrix3_act/mrtrix3_mock_data -o examples/commands/mrtrix3_act/mrtrix3_mock_data/jobs.spitdag
+cargo run -- inputs examples/commands/mrtrix3_act/mrtrix3_act_discover.spitin -o examples/commands/mrtrix3_act/mrtrix3_mock_data/inputs.spitout
+cargo run -- dag examples/commands/mrtrix3_act/mrtrix3_act.spit examples/commands/mrtrix3_act/mrtrix3_mock_data/inputs.spitout --paths
+cargo run -- dag examples/commands/mrtrix3_act/mrtrix3_act.spit examples/commands/mrtrix3_act/mrtrix3_mock_data/inputs.spitout -o examples/commands/mrtrix3_act/mrtrix3_mock_data/jobs.spitdag
 ```
 
 The script creates the three sessions and seven DWI runs listed in the example inventory. The recipe has no hand-written context or source records: it discovers session directories and scans the files. `inputs.spitout` nests 39 source identities under three session contexts, with no repeated paths because the pipeline declares them. The DAG contains 93 planned jobs. The files are empty, so the generated MRtrix3, FSL, and SynthSeg commands are for inspection only and cannot process this mock dataset.

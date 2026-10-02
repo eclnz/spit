@@ -145,38 +145,20 @@ fn dropping_written_records_records_the_removed_group() {
 }
 
 #[test]
-fn a_given_root_is_scanned_even_when_the_recipe_has_records() {
+fn records_written_in_a_recipe_are_its_inputs_and_are_not_scanned() {
     let tree = Tree::new("inputs-records", &FILES);
     tree.write("analysis.spit", PIPELINE);
     let recipe = tree.write(
         "analysis.spitin",
-        &format!("pipeline analysis.spit\n{RECIPE}sources:\n  image[sub=old,ses=1]\n"),
+        &format!("pipeline analysis.spit\nroot .\n{RECIPE}sources:\n  image[sub=old,ses=1]\n"),
     );
-    let run = |root: Option<&str>| {
-        let mut args = vec!["inputs", recipe.to_str().unwrap()];
-        args.extend(root.iter().flat_map(|root| ["--root", *root]));
-        Command::new(env!("CARGO_BIN_EXE_spit"))
-            .args(args)
-            .output()
-            .unwrap()
-    };
-    // Without a root, the written records are the inputs.
-    let records = run(None);
+    let records = Command::new(env!("CARGO_BIN_EXE_spit"))
+        .args(["inputs", recipe.to_str().unwrap()])
+        .output()
+        .unwrap();
     let records = String::from_utf8(records.stdout).unwrap();
     assert!(records.contains("sub=old"), "{records}");
-    // Given one, the scan replaces them.
-    let scanned = run(tree.path().to_str());
-    assert!(
-        scanned.status.success(),
-        "{}",
-        String::from_utf8_lossy(&scanned.stderr)
-    );
-    let scanned = String::from_utf8(scanned.stdout).unwrap();
-    assert!(
-        scanned.contains("[sub=1,ses=1]:\n        image"),
-        "{scanned}"
-    );
-    assert!(!scanned.contains("sub=old"), "{scanned}");
+    assert!(!records.contains("[sub=1,ses=1]"), "{records}");
 }
 
 #[test]
@@ -194,7 +176,7 @@ fn missing_source_coverage_names_the_path_rule_and_unmatched_file() {
     );
     let recipe = tree.write(
         "analysis.spitin",
-        "pipeline analysis.spit\npath: t1w sub-{sub}/ses-{ses}\nrequire t1w count=1 per [sub, ses]\n",
+        "pipeline analysis.spit\nroot .\npath: t1w sub-{sub}/ses-{ses}\nrequire t1w count=1 per [sub, ses]\n",
     );
     let run = |extra: &[&str]| {
         Command::new(env!("CARGO_BIN_EXE_spit"))
@@ -283,7 +265,7 @@ fn a_named_recipe_runs_in_memory_and_defaults_output_paths() {
     .unwrap();
     fs::write(
         tree.0.join("analysis.spitin"),
-        "pipeline analysis.spit\n\
+        "pipeline analysis.spit\nroot .\n\
          discover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}\n\
          drop [sub] where sessions count<2\n\
          require sessions count>=2 per [sub]\n\
@@ -312,7 +294,7 @@ fn a_named_recipe_runs_in_memory_and_defaults_output_paths() {
     assert!(paths.status.success(), "{notes}");
     assert!(
         notes.contains(
-            "note: dropped [sub=5] by `drop [sub] where sessions count<2` (line 3); found 1"
+            "note: dropped [sub=5] by `drop [sub] where sessions count<2` (line 4); found 1"
         ),
         "{notes}"
     );
@@ -343,7 +325,7 @@ fn explicit_spitin_uses_its_own_directory_and_require_reports_gaps() {
     let recipe = tree.0.join("dataset/inputs.spitin");
     fs::write(
         &recipe,
-        "pipeline ../pipeline.spit\n\
+        "pipeline ../pipeline.spit\nroot .\n\
          discover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}\n\
          require sessions count>=2 per [sub]\n\
          path image: data/sub-{sub}/ses-{ses}/image.nii.gz\n",
@@ -464,7 +446,7 @@ fn a_spitout_alone_drives_jobs_without_its_recipe() {
     )
     .unwrap();
     let recipe = tree.path().join("dataset.spitin");
-    fs::write(&recipe, format!("pipeline analysis.spit\n{RECIPE}")).unwrap();
+    fs::write(&recipe, format!("pipeline analysis.spit\nroot .\n{RECIPE}")).unwrap();
     let spit = |args: &[&str]| {
         Command::new(env!("CARGO_BIN_EXE_spit"))
             .args(args)
@@ -491,7 +473,6 @@ fn a_spitout_alone_drives_jobs_without_its_recipe() {
     );
     // Step 3 from the .spitout and the pipeline, with the recipe removed.
     fs::remove_file(recipe).unwrap();
-    let root = tree.path().to_str().unwrap();
     let dag = spit(&["dag", pipeline, saved, "--paths"]);
     assert!(
         dag.status.success(),
@@ -501,8 +482,8 @@ fn a_spitout_alone_drives_jobs_without_its_recipe() {
     let dag = String::from_utf8(dag.stdout).unwrap();
     assert!(dag.contains("data/sub-5/ses-1/image.nii.gz"), "{dag}");
     assert!(dag.contains("results/5_1.nii.gz"), "{dag}");
-    // The records give every source its file, so no source needs a rule.
-    let checked = spit(&["dag", pipeline, saved, "--root", root, "--strict-paths"]);
+    // It records the root it was settled against, so its files are checked.
+    let checked = spit(&["dag", pipeline, saved]);
     assert!(
         checked.status.success(),
         "{}",
@@ -627,10 +608,10 @@ fn a_recipe_that_does_not_fit_its_pipeline_says_why() {
         ),
         (
             "discover subs: [sub] from dirs data/sub-{sub}\n",
-            spit::InputError::NoDiscoveryPath {
+            spit::InputError::NoSourcePath {
                 product: "raw".into(),
             },
-            "source `raw` needs a path rule in .spitin for directory discovery",
+            "source `raw` has no path rule, so its files cannot be found; write `path raw:` in the pipeline or the recipe, or a default `path:` in the recipe",
         ),
     ] {
         let found = spit::parse_input_spec(recipe)
@@ -729,7 +710,7 @@ fn check_lists_a_recipe_default_as_the_recipes() {
     fs::write(tree.0.join("staged.spit"), STAGED).unwrap();
     fs::write(
         tree.0.join("staged.spitin"),
-        "pipeline staged.spit\npath: raw/{@product}/{@entities}.nii.gz\n",
+        "pipeline staged.spit\nroot .\npath: raw/{@product}/{@entities}.nii.gz\n",
     )
     .unwrap();
     let recipe = tree.0.join("staged.spitin");
@@ -747,11 +728,6 @@ fn check_lists_a_recipe_default_as_the_recipes() {
         listing.contains("atlas (source): explicit atlas.nii.gz"),
         "{listing}"
     );
-    let strict = Command::new(env!("CARGO_BIN_EXE_spit"))
-        .args(["check", recipe.to_str().unwrap(), "--strict-paths"])
-        .output()
-        .unwrap();
-    assert!(!strict.status.success());
 }
 
 #[test]

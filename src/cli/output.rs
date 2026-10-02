@@ -5,9 +5,7 @@ use std::fs;
 use std::io::{self, Read};
 use std::path::Path;
 
-use spit::{
-    stage_within, BoundDag, Diagnosis, Diagnostic, FileNames, Pipeline, ResolvedDag, ResolvedInputs,
-};
+use spit::{stage_within, BoundDag, Diagnosis, Diagnostic, FileNames, Pipeline, ResolvedDag};
 
 use super::args::{CliArgs, Flag};
 
@@ -48,14 +46,10 @@ pub(crate) fn write_output(args: &CliArgs, text: &str, what: &str) -> Result<(),
     Ok(())
 }
 
-/// Sources whose records give their files, which then need no path rule.
-pub(crate) fn located(inputs: &ResolvedInputs) -> impl Iterator<Item = &str> {
-    inputs
-        .inventory
-        .artifacts
-        .iter()
-        .filter(|record| record.path.is_some())
-        .map(|record| record.product.as_str())
+pub(crate) fn is_pipeline(file: &str) -> bool {
+    Path::new(file)
+        .extension()
+        .is_some_and(|extension| extension == "spit")
 }
 
 pub(crate) fn is_inputs(file: &str) -> bool {

@@ -1,3 +1,9 @@
+root typed_data
+
+source_paths:
+    raw: {@product}/{@entities}
+    reference: {@product}/{@entities}
+
 sources:
     raw[sample=01]
     reference[sample=01]

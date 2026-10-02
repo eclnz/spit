@@ -1,3 +1,5 @@
+root selectors_data
+
 sources:
     reading[station=north,day=1]
     reading[station=north,day=2]

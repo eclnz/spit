@@ -1,4 +1,5 @@
 pipeline mrtrix3_act.spit
+root mrtrix3_mock_data
 
 # Where this dataset keeps each source, in BIDS layout. A sidecars group
 # takes one stem, which each member completes with its extension.

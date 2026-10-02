@@ -1,4 +1,10 @@
 # A source inventory can be supplied by a dataset indexer or a generated manifest.
+root basic_data
+
+source_paths:
+    bold: {@product}/{@entities}
+    t1w: {@product}/{@entities}
+
 contexts:
     [sub=01,ses=01]
 

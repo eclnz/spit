@@ -76,11 +76,11 @@ fn dataset(gaps: bool) -> Tree {
     tree.write("pipeline.spit", PIPELINE);
     tree.write(
         "strict.spitin",
-        &format!("pipeline pipeline.spit\n{DISCOVER}{STRICT}"),
+        &format!("pipeline pipeline.spit\nroot .\n{DISCOVER}{STRICT}"),
     );
     tree.write(
         "drop.spitin",
-        &format!("pipeline pipeline.spit\n{DISCOVER}{DROP}"),
+        &format!("pipeline pipeline.spit\nroot .\n{DISCOVER}{DROP}"),
     );
     tree
 }
@@ -138,24 +138,17 @@ fn check(name: &str, actual: &str) {
 fn a_complete_dataset_prints_as_before() {
     let tree = dataset(false);
     let runs: [&[&str]; 5] = [
-        &[
-            "inputs",
-            "strict.spitin",
-            "--root",
-            ".",
-            "-o",
-            "complete.spitout",
-        ],
-        &["dag", "strict.spitin", "--root", "."],
-        &["dag", "strict.spitin", "--root", ".", "--json"],
-        &["dag", "strict.spitin", "--root", ".", "--paths"],
-        &["artifacts", "strict.spitin", "--root", "."],
+        &["inputs", "strict.spitin", "-o", "complete.spitout"],
+        &["dag", "strict.spitin"],
+        &["dag", "strict.spitin", "--json"],
+        &["dag", "strict.spitin", "--paths"],
+        &["artifacts", "strict.spitin"],
     ];
     let mut text: String = runs.iter().map(|args| run(&tree, args)).collect();
     text.push_str(&std::fs::read_to_string(tree.path().join("complete.spitout")).unwrap());
     check("complete", &text);
     let spitout: [&[&str]; 2] = [
-        &["dag", "pipeline.spit", "complete.spitout", "--root", "."],
+        &["dag", "pipeline.spit", "complete.spitout"],
         &["artifacts", "pipeline.spit", "complete.spitout"],
     ];
     let text: String = spitout.iter().map(|args| run(&tree, args)).collect();
@@ -166,15 +159,8 @@ fn a_complete_dataset_prints_as_before() {
 fn command_lines_print_as_before() {
     let tree = dataset(false);
     let runs: [&[&str]; 2] = [
-        &["dag", "strict.spitin", "--root", ".", "--commands"],
-        &[
-            "dag",
-            "strict.spitin",
-            "--root",
-            ".",
-            "--commands",
-            "--paths",
-        ],
+        &["dag", "strict.spitin", "--commands"],
+        &["dag", "strict.spitin", "--commands", "--paths"],
     ];
     let text: String = runs.iter().map(|args| run(&tree, args)).collect();
     check("commands", &text);
@@ -184,11 +170,11 @@ fn command_lines_print_as_before() {
 fn a_dataset_with_gaps_prints_as_before() {
     let tree = dataset(true);
     let runs: [&[&str]; 5] = [
-        &["dag", "strict.spitin", "--root", "."],
-        &["artifacts", "strict.spitin", "--root", "."],
-        &["inputs", "drop.spitin", "--root", ".", "-o", "drop.spitout"],
-        &["dag", "drop.spitin", "--root", "."],
-        &["artifacts", "drop.spitin", "--root", "."],
+        &["dag", "strict.spitin"],
+        &["artifacts", "strict.spitin"],
+        &["inputs", "drop.spitin", "-o", "drop.spitout"],
+        &["dag", "drop.spitin"],
+        &["artifacts", "drop.spitin"],
     ];
     let mut text = String::new();
     for args in runs {
