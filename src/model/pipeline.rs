@@ -48,7 +48,8 @@ impl Pipeline {
     }
 
     /// The path rule `product` uses, as written: its own rule, else its
-    /// stage's default, else the pipeline's default.
+    /// stage's default, else the pipeline's default, unless that needs
+    /// `{@stage}` and `product` is a source.
     pub fn path_rule_for(&self, product: &str) -> Option<&PathTemplate> {
         PipelineIndex::scan(self).path_rule_for(product)
     }
@@ -73,8 +74,9 @@ impl Pipeline {
     }
 
     /// The extension `product`'s file must have, and where it is declared:
-    /// its operation's, else, when its path is a default rule, the `ext:`
-    /// default. A product with its own rule takes only its operation's.
+    /// its operation's, or the one a source declares, else, when its path
+    /// is a default rule, the `ext:` default. A product with its own rule
+    /// takes only its operation's or its declared one.
     pub fn expected_extension(&self, product: &str) -> Option<(&str, ExtensionSource)> {
         PipelineIndex::scan(self).expected_extension(product)
     }
@@ -351,14 +353,21 @@ impl<'p> PipelineIndex<'p> {
         }
     }
 
-    /// See [`Pipeline::path_rule_for`].
+    /// See [`Pipeline::path_rule_for`]. A default that needs `{@stage}` is
+    /// for products made in a stage, so it does not find a source, which
+    /// is left for a rule of its own or the recipe's default.
     pub(crate) fn path_rule_for(&self, product: &str) -> Option<&'p PathTemplate> {
         let pipeline = self.pipeline;
         pipeline
             .product_paths
             .get(product)
             .or_else(|| self.stage_path_rule(product).map(|(_, template)| template))
-            .or(pipeline.path_template.as_ref())
+            .or_else(|| {
+                pipeline
+                    .path_template
+                    .as_ref()
+                    .filter(|default| !(default.needs_stage() && self.is_source(product)))
+            })
     }
 
     /// The step that makes `product`, the operation it calls, and the port
@@ -419,6 +428,11 @@ impl<'p> PipelineIndex<'p> {
         }
         if let Some((operation, extension)) = self.output_extension(product) {
             return Some((extension, ExtensionSource::Operation(operation.to_owned())));
+        }
+        if let Some(declared) = self.product(product) {
+            if let Some(extension) = declared.extension.as_deref() {
+                return Some((extension, ExtensionSource::Source(declared.name.clone())));
+            }
         }
         self.rule_extension(product)
     }

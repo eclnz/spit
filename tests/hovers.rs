@@ -279,3 +279,17 @@ fn beside_outputs_keep_their_path_and_signature_in_hovers() {
         .iter()
         .any(|detail| detail.contains("out/image/{@entities}.json (beside image)")));
 }
+
+#[test]
+fn a_source_shows_its_extension_and_no_stage_default() {
+    let text = "path: {@stage}/{@product}/{@entities}\n\
+                source events : Events .tsv [sub]\n\
+                stage prep:\n    operation f(x)\n    y = f(events)\n";
+    let events = at(&hovers(text), 2, "events");
+    assert_eq!(events.signature, "events: Events .tsv [sub]");
+    // A default that needs `{@stage}` is no source's rule.
+    assert_eq!(
+        events.details.last().unwrap(),
+        "No pipeline path rule; a recipe or inventory must supply the source path."
+    );
+}

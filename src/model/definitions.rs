@@ -14,6 +14,10 @@ pub struct ProductDef {
     pub name: String,
     pub artifact_type: ArtifactType,
     pub dimensions: Vec<String>,
+    /// The extension a source declares its files have, as in
+    /// `source events : Events .tsv [sub]`; `None` for an output, whose
+    /// operation says.
+    pub extension: Option<String>,
 }
 
 impl ProductDef {
@@ -26,6 +30,7 @@ impl ProductDef {
             name: name.into(),
             artifact_type,
             dimensions: owned_strings(dimensions),
+            extension: None,
         }
     }
 }
@@ -351,6 +356,8 @@ pub struct SidecarGroup {
 pub enum ExtensionSource {
     /// On the output of the named operation.
     Operation(String),
+    /// On the named source's declaration.
+    Source(String),
     /// By the named stage's `ext:` line.
     Stage(String),
     /// By the pipeline's `ext:` line.
@@ -361,6 +368,7 @@ impl fmt::Display for ExtensionSource {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Operation(operation) => write!(f, "operation `{operation}`"),
+            Self::Source(source) => write!(f, "source `{source}`"),
             Self::Stage(stage) => write!(f, "stage `{stage}`'s `ext:`"),
             Self::Default => f.write_str("`ext:`"),
         }

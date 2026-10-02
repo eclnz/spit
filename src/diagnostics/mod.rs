@@ -16,8 +16,8 @@ use crate::command::collect_commands;
 use crate::compile::collect_pipeline;
 use crate::imports::parse_located_document;
 use crate::inputs::{
-    check_inventory, collect_exclusion_errors, collect_rule_errors, InputCheck, InputError,
-    InputSpec, ResolvedInputs,
+    check_inventory, collect_exclusion_errors, collect_rule_errors, with_source_paths, InputCheck,
+    InputError, InputSpec, ResolvedInputs,
 };
 use crate::lower::{parse_document_with_imports, ParsedDocument};
 use crate::model::{ArtifactReport, CoverageGap, InputRules, PipelineIndex, SourceInventory};
@@ -430,7 +430,38 @@ pub fn diagnose_recipe_against(text: &str, pipeline: &Pipeline) -> Vec<Diagnosti
             ));
         }
     }
+    if diagnostics.is_empty() {
+        diagnostics = recipe_path_errors(pipeline, &spec, &lines, text);
+    }
     finish(diagnostics, text, None)
+}
+
+/// Errors in the recipe's source path rules, its default's included, each
+/// at the recipe line that writes the rule. An error placed at one of the
+/// pipeline's rules, such as a collision with an output, has no place.
+fn recipe_path_errors(
+    pipeline: &Pipeline,
+    spec: &InputSpec,
+    lines: &SourceMap,
+    text: &str,
+) -> Vec<Diagnostic> {
+    let source_paths = spec.rules.source_paths_for(pipeline);
+    if source_paths.is_empty() {
+        return Vec::new();
+    }
+    let merged = with_source_paths(pipeline, &source_paths);
+    // A source without a rule of its own in the recipe has its default.
+    let mut places = SourceMap::default();
+    for name in source_paths.keys() {
+        if let Some(place) = lines.paths.get(name).or(lines.default_path.as_ref()) {
+            places.paths.insert(name.clone(), place.clone());
+        }
+    }
+    collect_paths(&merged, &places, &BTreeSet::new())
+        .1
+        .iter()
+        .map(|error| Diagnostic::located(DiagnosticSource::Pipeline, error, text))
+        .collect()
 }
 
 /// Each parse error in `text` as a diagnostic.

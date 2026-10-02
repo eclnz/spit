@@ -131,10 +131,11 @@ impl<'p> ProductPath<'p> {
                 PathPart::Placeholder(PathPlaceholder::Stage) => {
                     let stage = self.stage.as_deref().ok_or_else(|| {
                         error(format!(
-                            "path template for `{}` uses `{}`, but `{}` is not made in a stage",
+                            "path template for `{}` uses `{}`, but `{}` is not made in a stage; write `[{}/]` to leave the stage's directory out for products outside every stage",
                             artifact.product,
                             PathPlaceholder::Stage,
-                            artifact.product
+                            artifact.product,
+                            PathPlaceholder::Stage
                         ))
                         .focus(PathPlaceholder::Stage.to_string())
                     })?;

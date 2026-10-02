@@ -52,14 +52,14 @@ pub fn discover_sources(
 /// readable value.
 ///
 /// Source files are found by the path rules of `pipeline`, with any in
-/// `rules.source_paths` taking precedence.
+/// `rules.source_paths` taking precedence, then `rules.source_default`.
 pub fn discover_source_files(
     pipeline: &Pipeline,
     rules: &InputRules,
     root: &Path,
 ) -> Result<Discovery, PathError> {
     discover(
-        &with_source_paths(pipeline, &rules.source_paths),
+        &with_source_paths(pipeline, &rules.source_paths_for(pipeline)),
         rules,
         root,
     )
@@ -67,7 +67,7 @@ pub fn discover_source_files(
 
 /// `pipeline` with `source_paths`, rules for its sources that it does not
 /// set itself; borrowed when there are none.
-pub(super) fn with_source_paths<'a>(
+pub(crate) fn with_source_paths<'a>(
     pipeline: &'a Pipeline,
     source_paths: &BTreeMap<String, PathTemplate>,
 ) -> Cow<'a, Pipeline> {

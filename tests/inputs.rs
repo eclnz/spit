@@ -582,3 +582,160 @@ fn a_recipe_that_does_not_fit_its_pipeline_says_why() {
         assert_eq!(found.to_string(), message);
     }
 }
+
+const STAGED: &str = "\
+path: {@stage}/{@product}/{@entities}
+source image: Image [sub]
+source mask: Image [sub]
+source atlas: Image
+path atlas: atlas.nii.gz
+stage prep:
+    operation apply(image: Image, mask: Image, atlas: Image) -> Image
+    masked = apply(image, mask, atlas)
+";
+
+#[test]
+fn a_recipe_path_is_the_default_for_sources_with_no_rule() {
+    let tree = Tree::new(
+        "source-default",
+        &[
+            "raw/image/sub=1.nii.gz",
+            "raw/masks/sub-1.nii.gz",
+            "atlas.nii.gz",
+        ],
+    );
+    let pipeline = parse_pipeline(STAGED).unwrap();
+    // The pipeline's default needs a stage, so it finds no source.
+    let coverage = spit::inspect_paths(&pipeline).unwrap().to_string();
+    assert!(
+        coverage.contains("image (source): no rule (a recipe may supply one)"),
+        "{coverage}"
+    );
+    let recipe = parse_input_spec(
+        "path: raw/{@product}/{@entities}.nii.gz\npath mask: raw/masks/sub-{sub}.nii.gz\n",
+    )
+    .unwrap();
+    // Only `image` has no rule of its own; the recipe stays as written.
+    assert_eq!(recipe.rules.defaulted_sources(&pipeline), ["image"]);
+    assert_eq!(recipe.rules.source_paths.len(), 1);
+    let resolved = recipe
+        .resolve(&pipeline, InputSource::Discover(tree.path()))
+        .unwrap();
+    let paths: Vec<_> = resolved
+        .inventory
+        .artifacts
+        .iter()
+        .map(|record| record.path.as_deref().unwrap())
+        .collect();
+    // The pipeline's rule and the recipe's own rule come before its default.
+    assert_eq!(
+        paths,
+        [
+            "raw/image/sub=1.nii.gz",
+            "raw/masks/sub-1.nii.gz",
+            "atlas.nii.gz"
+        ]
+    );
+    // A .spitout writes the default as each source's rule, so it needs no
+    // recipe to resolve.
+    let text = spit::render_source_inventory(&resolved.inventory, &pipeline, &recipe.rules);
+    assert!(
+        text.starts_with(
+            "source_paths:\n    image: raw/{@product}/{@entities}.nii.gz\n    mask: raw/masks/sub-{sub}.nii.gz\n\n"
+        ),
+        "{text}"
+    );
+    let read = spit::parse_source_inventory(&text).unwrap();
+    let alone = spit::InputSpec::default()
+        .resolve(&pipeline, InputSource::Inventory(read))
+        .unwrap();
+    assert_eq!(alone.inventory.artifacts, resolved.inventory.artifacts);
+}
+
+#[test]
+fn a_recipe_path_cannot_name_a_stage() {
+    let error = parse_input_spec("path: x/{@stage}/{@product}/{@entities}\n").unwrap_err();
+    assert_eq!(error.line(), 1);
+    assert!(
+        error
+            .to_string()
+            .contains("a .spitin `path:` is the default for sources, and no source is made in a stage; leave out `{@stage}`"),
+        "{error}"
+    );
+}
+
+#[test]
+fn check_lists_a_recipe_default_as_the_recipes() {
+    let tree = Tree::new("source-default-check", &[]);
+    fs::write(tree.0.join("staged.spit"), STAGED).unwrap();
+    fs::write(
+        tree.0.join("staged.spitin"),
+        "pipeline staged.spit\npath: raw/{@product}/{@entities}.nii.gz\n",
+    )
+    .unwrap();
+    let recipe = tree.0.join("staged.spitin");
+    let check = Command::new(env!("CARGO_BIN_EXE_spit"))
+        .args(["check", recipe.to_str().unwrap(), "--path-rules"])
+        .output()
+        .unwrap();
+    let listing = String::from_utf8_lossy(&check.stdout);
+    assert!(check.status.success(), "{listing}");
+    assert!(
+        listing.contains("image (source): default raw/{@product}/{@entities}.nii.gz (recipe)"),
+        "{listing}"
+    );
+    assert!(
+        listing.contains("atlas (source): explicit atlas.nii.gz"),
+        "{listing}"
+    );
+    let strict = Command::new(env!("CARGO_BIN_EXE_spit"))
+        .args(["check", recipe.to_str().unwrap(), "--strict-paths"])
+        .output()
+        .unwrap();
+    assert!(!strict.status.success());
+}
+
+#[test]
+fn check_finds_a_bad_recipe_source_path_at_its_line() {
+    let pipeline = parse_pipeline(STAGED).unwrap();
+    let diagnose =
+        |recipe: &str| support::rendered(&spit::diagnose_recipe_against(recipe, &pipeline));
+    // A default shared by two sources must tell them apart.
+    assert_eq!(
+        diagnose("path: raw/{@entities}.nii.gz\n"),
+        ["error: line 1: products `image` and `mask` bind to the same path `raw/sub=sub.nii.gz` for the same entities; include `{@product}` or distinguish their path rules"]
+    );
+    // A recipe's own rule is checked too, which only `--path-rules` did.
+    assert_eq!(
+        diagnose("path: raw/{@product}/{@entities}.nii.gz\npath mask: raw/mask.nii.gz\n"),
+        ["error: line 2: path template for `mask` omits dimension `sub`; artifacts differing only in `sub` would share a path"]
+    );
+    assert!(diagnose("path: raw/{@product}/{@entities}.nii.gz\n").is_empty());
+}
+
+#[test]
+fn one_recipe_default_covers_sources_of_different_extensions() {
+    let tree = Tree::new(
+        "source-default-extensions",
+        &[
+            "raw/sub-1/image.nii.gz",
+            "raw/sub-1/events.tsv",
+            "raw/sub-1/events.csv",
+        ],
+    );
+    let pipeline = parse_pipeline(
+        "path: {@stage}/{@product}/{@entities}\nsource image : Image .nii.gz [sub]\nsource events .tsv [sub]\nstage prep:\n    operation fit(image: Image, events)\n    fitted = fit(image, events)\n",
+    )
+    .unwrap();
+    let recipe = parse_input_spec("path: raw/sub-{sub}/{@product}\n").unwrap();
+    let resolved = recipe
+        .resolve(&pipeline, InputSource::Discover(tree.path()))
+        .unwrap();
+    let paths: Vec<_> = resolved
+        .inventory
+        .artifacts
+        .iter()
+        .map(|record| record.path.as_deref().unwrap())
+        .collect();
+    assert_eq!(paths, ["raw/sub-1/image.nii.gz", "raw/sub-1/events.tsv"]);
+}
