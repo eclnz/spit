@@ -18,7 +18,7 @@ fn layer(module: &str) -> Layer {
         "compile" => Layer::Compile,
         "inputs" => Layer::Inputs,
         "resolver" | "render" => Layer::Resolve,
-        "diagnostics" | "editor" | "main" | "lib" => Layer::Driver,
+        "diagnostics" | "editor" | "main" | "cli" | "lib" => Layer::Driver,
         _ => Layer::Shared,
     }
 }
@@ -96,7 +96,6 @@ const MAX_LINES: usize = 800;
 /// with the most lines it may have. A listed file may shrink but not grow,
 /// and leaves the list once it is within the limit.
 const OVER_LIMIT: &[(&str, usize)] = &[
-    ("src/main.rs", 1252),
     ("src/parser/inventory.rs", 804),
     ("src/paths/template.rs", 842),
 ];

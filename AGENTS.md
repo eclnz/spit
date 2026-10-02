@@ -39,14 +39,14 @@ Records and data that people rarely read, and that only a tool needs as files, a
 
 SPIT is a compiler, so most of its code is data being turned into other data: text into statements, statements into a `Pipeline`, a pipeline and an inventory into a DAG, a DAG into a `.spitdag`. The code is laid out around that data, not around objects that hide it. These rules describe how the code is written now. A change that breaks one should say why in its commit message.
 
-Some rules are checked, not just written down. `Cargo.toml` forbids `unsafe` and turns on clippy's `disallowed_types`, which `clippy.toml` sets to the standard library's `HashMap` and `HashSet` with their default hasher, and to `Rc`, `RefCell` and `Cell`. `src/lib.rs` and `src/main.rs` deny `unwrap` outside tests. `tests/architecture.rs` checks file length and the boundaries between steps. `cargo clippy` and `cargo test` run these checks, so the checks before every commit cover them.
+Some rules are checked, not just written down. `Cargo.toml` forbids `unsafe` and turns on clippy's `disallowed_types`, which `clippy.toml` sets to the standard library's `HashMap` and `HashSet` with their default hasher, and to `Rc`, `RefCell` and `Cell`. `src/lib.rs` and `src/main.rs` deny `unwrap` outside tests, in the library and in the command line. `tests/architecture.rs` checks file length and the boundaries between steps. `cargo clippy` and `cargo test` run these checks, so the checks before every commit cover them.
 
 The five rules under [Performance](docs/architecture.md#performance) come first: one table with columns by id, text interned once, grouping by symbol keys, finding once and then looking up, and doing each piece of work once. The rules below are how the rest of the code keeps to them.
 
 **Data and the functions over it**
 
 - **Plain data, open fields.** A stage's input and output are structs and enums with public fields, such as `Pipeline`, `Job` and `ResolvedDag`. Add a method when it keeps an invariant that open fields can't, as `Artifacts` does with its columns. Don't add a getter or a builder for a field anyone may set.
-- **Enums and `match`, not traits.** A closed set of cases is an enum, and code that handles them matches on it, so the compiler finds every place a new case touches. The crate has one trait, `Out` in `src/json.rs`, which lets the JSON writer write either to a string or to a hasher. Don't add a trait with one implementation, and don't use `dyn` outside `main.rs` unless it saves code.
+- **Enums and `match`, not traits.** A closed set of cases is an enum, and code that handles them matches on it, so the compiler finds every place a new case touches. The crate has one trait, `Out` in `src/json.rs`, which lets the JSON writer write either to a string or to a hasher. Don't add a trait with one implementation, and don't use `dyn` outside the command line, `src/main.rs` and `src/cli`, unless it saves code.
 - **Stages are functions.** A stage takes what it reads by reference and returns what it makes, as `resolve(&pipeline, &inventory)` does. It keeps no state between calls and holds no handle to an earlier stage.
 
 **Ownership and identity**

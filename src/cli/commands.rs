@@ -1,0 +1,261 @@
+//! The four commands, one step each: `check`, `inputs`, `dag` and
+//! `artifacts`.
+
+use std::error::Error;
+use std::path::{Path, PathBuf};
+
+use spit::{
+    bind_dag, bind_dag_with, diagnose_checked, diagnose_inputs, diagnose_recipe, inspect_paths,
+    parse_input_spec_at, render_artifacts, render_bound_dag, render_check_json, render_dag,
+    render_diagnostics_json, render_editor_json, render_source_inventory, render_words_json,
+    resolve_artifacts_partial, unused_sources_summary, validate_bound_source_files,
+    validate_source_files, BoundPaths, Context, FileNames, Gap, LeftOut, View,
+};
+
+use super::args::{CliArgs, Flag};
+use super::load::{load_recipe, prepare, recorded_root, settle};
+use super::output::{
+    is_inputs, is_recipe, job_count, located, passed, read_file, read_stdin, report, write_output,
+    write_spitdag,
+};
+
+/// Step 1: compile a pipeline, or check a recipe against the pipeline it
+/// names. Reads no data.
+pub(crate) fn check(args: &CliArgs) -> Result<(), Box<dyn Error>> {
+    let file = &args.file;
+    let path = Path::new(file);
+    let text = if args.has(Flag::Stdin) {
+        read_stdin()?
+    } else {
+        read_file(file)?
+    };
+    if is_inputs(file) {
+        if args.has(Flag::PathRules) || args.has(Flag::StrictPaths) {
+            return Err(
+                "a .spitout has no path rules to show; check its recipe or pipeline".into(),
+            );
+        }
+        let diagnostics = diagnose_inputs(&text);
+        if args.has(Flag::Json) {
+            let json = if args.has(Flag::Hovers) {
+                render_words_json(&diagnostics, &text, Some(&text))
+            } else {
+                render_diagnostics_json(&diagnostics, &text, Some(&text))
+            };
+            print!("{json}");
+            return Ok(());
+        }
+        report(&diagnostics, &text, Some(&text), FileNames::default())?;
+        println!("Inputs valid.");
+        return Ok(());
+    }
+    if is_recipe(file) {
+        let diagnostics = diagnose_recipe(&text, path);
+        if args.has(Flag::Json) {
+            let json = if args.has(Flag::Hovers) {
+                render_words_json(&diagnostics, &text, None)
+            } else {
+                render_diagnostics_json(&diagnostics, &text, None)
+            };
+            print!("{json}");
+            return Ok(());
+        }
+        report(&diagnostics, &text, None, FileNames::default())?;
+        if args.has(Flag::PathRules) || args.has(Flag::StrictPaths) {
+            let recipe = parse_input_spec_at(&text, path)?;
+            let pipeline_file = recipe
+                .pipeline
+                .as_ref()
+                .expect("a checked recipe names its pipeline");
+            let pipeline_text = read_file(&pipeline_file.display().to_string())?;
+            let checked = diagnose_checked(&pipeline_text, Context::at(pipeline_file))
+                .expect("a checked recipe has a valid pipeline");
+            let mut merged = checked.pipeline;
+            merged
+                .product_paths
+                .extend(recipe.rules.source_paths.clone());
+            let coverage = inspect_paths(&merged)?
+                .with_recipe_paths(recipe.rules.source_paths.keys().map(String::as_str));
+            if args.has(Flag::PathRules) {
+                println!("{coverage}");
+            }
+            if args.has(Flag::StrictPaths) {
+                coverage.validate(true)?;
+            }
+        }
+        println!("Recipe valid.");
+        return Ok(());
+    }
+    let diagnosis = diagnose_checked(&text, Context::at(path));
+    if args.has(Flag::Json) {
+        // Paths are shown only for a pipeline that checks clean.
+        let (diagnostics, paths) = match &diagnosis {
+            Ok(checked) => (checked.warnings.as_slice(), Some(checked.paths.as_slice())),
+            Err(all) => (all.as_slice(), None),
+        };
+        let json = if args.has(Flag::Hovers) {
+            render_editor_json(diagnostics, &text, path, paths.unwrap_or_default())
+        } else if let Some(paths) = paths {
+            render_check_json(diagnostics, &text, paths)
+        } else {
+            render_diagnostics_json(diagnostics, &text, None)
+        };
+        print!("{json}");
+        return Ok(());
+    }
+    let checked = passed(
+        diagnosis,
+        |checked| &checked.warnings,
+        &text,
+        None,
+        FileNames::default(),
+    )?;
+    let coverage = inspect_paths(&checked.pipeline)?;
+    if args.has(Flag::PathRules) {
+        println!("{coverage}");
+    }
+    if args.has(Flag::StrictPaths) {
+        coverage.validate(true)?;
+    }
+    println!("Pipeline valid.");
+    Ok(())
+}
+
+/// Step 2: settle a dataset from a recipe and write its `.spitout`.
+pub(crate) fn inputs(args: &CliArgs) -> Result<(), Box<dyn Error>> {
+    let loaded = load_recipe(&args.file)?;
+    report(
+        &loaded.checked.warnings,
+        &loaded.pipeline_text,
+        None,
+        loaded.names(),
+    )?;
+    let root = args.value(Flag::Root).map(PathBuf::from);
+    let (mut settled, root) = settle(&loaded, &args.file, root.as_deref())?;
+    settled.require_complete()?;
+    if args.has(Flag::Unmatched) {
+        for file in &settled.unmatched_files {
+            println!("{file}");
+        }
+        return Ok(());
+    }
+    // A written .spitout records the dataset root, so `dag` on it needs no
+    // `--root`: relative to the file, so the two can move together. A
+    // printed one records none, as where it will be kept is unknown.
+    let written = args.value(Flag::Output).map(PathBuf::from);
+    settled.inventory.root = root
+        .zip(written)
+        .map(|(root, file)| recorded_root(&root, &file));
+    let text = render_source_inventory(
+        &settled.inventory,
+        &loaded.checked.pipeline,
+        &loaded.recipe.rules,
+    );
+    write_output(args, &text, "the .spitout")
+}
+
+/// Step 3: resolve the jobs and print them, or write the `.spitdag`.
+pub(crate) fn dag(args: &CliArgs) -> Result<(), Box<dyn Error>> {
+    let mut prepared = prepare(args)?;
+    if args.has(Flag::Partial) {
+        prepared.report = resolve_artifacts_partial(
+            &prepared.pipeline,
+            &prepared.inputs.dag_inventory(),
+            &prepared.inputs.unavailable(),
+        )?;
+        prepared
+            .report
+            .dag
+            .locate_sources(&prepared.inputs.inventory);
+    } else {
+        prepared.inputs.require_complete()?;
+    }
+    let dag = &prepared.report.dag;
+    if args.has(Flag::StrictPaths) {
+        inspect_paths(&prepared.bound)?
+            .with_inventory_paths(located(&prepared.inputs))
+            .validate(true)?;
+    }
+    // Paths bound to check the source files are bound for the DAG too.
+    let mut paths = None;
+    if let Some(root) = &prepared.root {
+        let (verified, bound) = validate_bound_source_files(&prepared.bound, dag, root)?;
+        eprintln!("note: {verified}");
+        paths = Some(bound);
+    }
+    eprintln!("note: {}", job_count(&prepared.pipeline, dag));
+    if args.has(Flag::Partial) {
+        let left_out: usize = prepared
+            .report
+            .incomplete
+            .iter()
+            .map(|job| job.outputs.len())
+            .sum();
+        eprintln!("note: planned {} jobs; left out {left_out} artifacts that cannot be produced (see left_out)", dag.jobs.len());
+    }
+    if let Some(unused) = unused_sources_summary(&prepared.report) {
+        eprintln!("note: {unused}; `spit artifacts` lists them");
+    }
+    let bind = |paths: Option<BoundPaths>| match paths {
+        Some(paths) => bind_dag_with(&prepared.bound, dag, paths),
+        None => bind_dag(&prepared.bound, dag),
+    };
+    if args.has(Flag::Output) || args.has(Flag::Json) {
+        let mut bound = bind(paths)?;
+        bound.removed = prepared.inputs.inventory.removed.clone();
+        bound.left_out = prepared
+            .report
+            .incomplete
+            .iter()
+            .flat_map(|job| {
+                job.outputs.iter().map(|artifact| LeftOut {
+                    artifact: artifact.clone(),
+                    reasons: job
+                        .gaps
+                        .iter()
+                        .map(|gap| match gap {
+                            Gap::Unmatched(error) => error.to_string(),
+                            Gap::Blocked { port, artifact } => {
+                                format!("input `{port}` needs {artifact}, which cannot be produced")
+                            }
+                        })
+                        .collect(),
+                })
+            })
+            .collect();
+        bound.root = prepared.root.as_deref().map(|root| {
+            std::path::absolute(root)
+                .unwrap_or_else(|_| root.to_path_buf())
+                .to_string_lossy()
+                .into_owned()
+        });
+        return write_spitdag(args, &bound);
+    }
+    let view = View {
+        paths: args.has(Flag::Paths),
+        commands: args.has(Flag::Commands),
+    };
+    if view.paths || view.commands {
+        if view.commands {
+            if let Some(root) = &prepared.root {
+                eprintln!("note: commands run from `{}`", root.display());
+            }
+        }
+        print!("{}", render_bound_dag(&bind(paths)?, view));
+    } else {
+        print!("{}", render_dag(dag));
+    }
+    Ok(())
+}
+
+/// Step 3: what can be made, what cannot, and why.
+pub(crate) fn artifacts(args: &CliArgs) -> Result<(), Box<dyn Error>> {
+    let prepared = prepare(args)?;
+    let mut report = prepared.report;
+    report.coverage = prepared.inputs.gaps;
+    if let Some(root) = &prepared.root {
+        validate_source_files(&prepared.bound, &report.dag, root)?;
+    }
+    print!("{}", render_artifacts(&report));
+    Ok(())
+}
