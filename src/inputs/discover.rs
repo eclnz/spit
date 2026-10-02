@@ -52,15 +52,16 @@ pub fn discover_sources(
 /// readable value.
 ///
 /// Source files are found by the path rules of `pipeline`, with any in
-/// `rules.source_paths` taking precedence.
+/// `rules.source_paths` taking precedence, then `rules.source_default`.
 pub fn discover_source_files(
     pipeline: &Pipeline,
     rules: &InputRules,
     root: &Path,
 ) -> Result<Discovery, PathError> {
+    let rules = rules.for_pipeline(pipeline);
     discover(
         &with_source_paths(pipeline, &rules.source_paths),
-        rules,
+        &rules,
         root,
     )
 }

@@ -88,7 +88,7 @@ pub fn render_source_inventory(
     InventoryText {
         inventory,
         pipeline,
-        rules,
+        rules: &rules.for_pipeline(pipeline),
     }
     .to_string()
 }

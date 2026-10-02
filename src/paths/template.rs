@@ -200,6 +200,13 @@ impl PathTemplate {
             })
     }
 
+    /// Whether the template names `{@stage}` outside a `[...]` group, so
+    /// that only a product made in a stage can use it.
+    pub(crate) fn needs_stage(&self) -> bool {
+        self.parts
+            .contains(&PathPart::Placeholder(PathPlaceholder::Stage))
+    }
+
     /// Each dimension a `[...]` group names.
     pub(crate) fn group_dimensions(&self) -> impl Iterator<Item = &str> {
         self.parts

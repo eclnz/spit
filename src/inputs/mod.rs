@@ -159,12 +159,6 @@ fn check_input_lines(text: &str) -> Result<(), ParseError> {
                 "`ext:` completes the pipeline's default output paths; it belongs in the .spit pipeline",
             ));
         }
-        if line.starts_with("path:") {
-            return Err(ParseError::new(
-                index + 1,
-                "a .spitin path must name a source product, for example `path image: ...`",
-            ));
-        }
         if matches!(Header::of(line), Some(Header::SourcePaths)) {
             return Err(ParseError::new(
                 index + 1,
@@ -176,7 +170,7 @@ fn check_input_lines(text: &str) -> Result<(), ParseError> {
 }
 
 /// A recipe holds rules and records, and paths only for sources; it names
-/// `pipeline`.
+/// `pipeline`. Its `path:` line is the default for sources.
 fn finish_spec(
     document: ParsedDocument,
     header: RecipeHeader,
@@ -186,18 +180,27 @@ fn finish_spec(
         pipeline,
         mut inputs,
         inventory,
-        ..
+        lines,
     } = document;
     if !pipeline.products.is_empty()
         || !pipeline.operations.is_empty()
         || !pipeline.invocations.is_empty()
         || !pipeline.commands.is_empty()
         || !pipeline.stages.is_empty()
-        || pipeline.path_template.is_some()
     {
         return Err(ParseError::new(1, "a .spitin file may contain discovery, coverage, source paths, and inventory records only"));
     }
+    if let Some(default) = &pipeline.path_template {
+        if default.needs_stage() {
+            let line = lines.default_path.as_ref().map_or(1, |place| place.line);
+            return Err(ParseError::new(
+                line,
+                "a .spitin `path:` is the default for sources, and no source is made in a stage; leave out `{@stage}`",
+            ));
+        }
+    }
     inputs.source_paths = pipeline.product_paths;
+    inputs.source_default = pipeline.path_template;
     if let Some(folder) = folder {
         read_exclusion_files(&mut inputs, folder)?;
     }
@@ -210,9 +213,25 @@ fn finish_spec(
 }
 
 impl InputSpec {
+    /// This recipe for `pipeline`, its default source path given to each
+    /// source with no rule of its own; see [`InputRules::for_pipeline`].
+    #[must_use]
+    pub fn for_pipeline(&self, pipeline: &Pipeline) -> Cow<'_, Self> {
+        match self.rules.for_pipeline(pipeline) {
+            Cow::Borrowed(_) => Cow::Borrowed(self),
+            Cow::Owned(rules) => Cow::Owned(Self {
+                rules,
+                ..self.clone()
+            }),
+        }
+    }
+
     /// Check the recipe against the pipeline's source declarations, without
     /// reading any file or record.
     pub fn check(&self, pipeline: &Pipeline) -> Result<(), InputError> {
+        if self.rules.source_default.is_some() {
+            return self.for_pipeline(pipeline).check(pipeline);
+        }
         for name in self.rules.source_paths.keys() {
             let product = name.clone();
             if !pipeline.is_source(name) {
@@ -255,6 +274,9 @@ impl InputSpec {
         pipeline: &Pipeline,
         source: InputSource<'_>,
     ) -> Result<ResolvedInputs, InputError> {
+        if self.rules.source_default.is_some() {
+            return self.for_pipeline(pipeline).resolve(pipeline, source);
+        }
         validate_pipeline(pipeline)?;
         self.check(pipeline)?;
         let (mut inventory, skipped, unmatched_files, root, removed, incomplete) = match source {
@@ -354,9 +376,8 @@ impl InputSpec {
     /// the two files together. Resolving jobs needs neither: the input
     /// stage writes each source's path into its record.
     pub fn apply_paths(&self, pipeline: &mut Pipeline) {
-        pipeline
-            .product_paths
-            .extend(self.rules.source_paths.clone());
+        let rules = self.rules.for_pipeline(pipeline).into_owned();
+        pipeline.product_paths.extend(rules.source_paths);
         pipeline
             .path_template
             .get_or_insert_with(PathTemplate::default_output);

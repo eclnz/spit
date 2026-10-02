@@ -13,8 +13,9 @@ A pipeline has one default path rule, and it does two jobs: it finds sources and
 
 ## Steps
 
-- [x] When a rule's bare `{@stage}` fails for a product outside every stage, say to write `[{@stage}/]`.
-- [ ] Let a recipe's `path:` be the default rule for its sources: parse, expand against the pipeline, label in `--path-rules`, reject `{@stage}`.
-- [ ] Tests, the language reference, the README and `docs/architecture.md`.
+- [x] When a rule's bare `{@stage}` fails for a product outside every stage, say to write `[{@stage}/]`. Commit: "Say to write [{@stage}/] when a product outside every stage meets {@stage}".
+- [x] Let a recipe's `path:` be the default rule for its sources: parse, expand against the pipeline, label in `--path-rules`, reject `{@stage}`. A pipeline default that needs `{@stage}` no longer covers sources. Commit: "Let a recipe's path: be the default rule for its sources".
+- [x] Tests, the language reference, the README and `docs/architecture.md`. Commit: "Let a recipe's path: be the default rule for its sources".
+- [ ] Check a recipe's source rules, its default's included, in `spit check`, which only `--path-rules` did: a default without `{@product}` passed `check` and failed in `inputs`.
 - [ ] Check whether `spit-vscode` needs a change for `path:` in a `.spitin`.
 - [ ] Delete this plan in its own commit before the work merges.
