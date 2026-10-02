@@ -49,6 +49,31 @@ fn unmatched_files_are_counted_and_can_be_listed_without_an_inventory() {
     assert!(!text(&listing.stdout).contains("sources:"));
 }
 
+#[test]
+fn files_at_the_pipelines_output_paths_are_not_unmatched() {
+    let tree = Tree::new(
+        "outputs-not-unmatched",
+        &[
+            "data/in/a.txt",
+            "data/out/clean/cleaned/s=a.csv",
+            "data/out/report.csv",
+            "data/out/clean/cleaned/s=a.csv.bak",
+        ],
+    );
+    tree.write(
+        "pipeline.spit",
+        "source x [s]\npath x: in/{s}.txt\npath: out/{@stage}/{@product}/{@entities}\next: .csv\n\
+         path report: out/report.csv\n\
+         stage clean:\n    operation clean(x) -> Clean\n    command clean: clean {x} {@output}\n    cleaned = clean(x)\n\
+         operation summarize(items: many Clean) -> Report\ncommand summarize: summarize {items} {@output}\n\
+         report = summarize(cleaned @ vary(s))\n",
+    );
+    let recipe = tree.write("recipe.spitin", "pipeline pipeline.spit\nroot data\n");
+    let listing = spit(&["inputs", recipe.to_str().unwrap(), "--unmatched"]);
+    assert!(listing.status.success(), "{}", text(&listing.stderr));
+    assert_eq!(text(&listing.stdout), "out/clean/cleaned/s=a.csv.bak\n");
+}
+
 const DISCOVERED: &str = "\
 path: derived/{@product}/{@entities}.txt
 source frame [subject, run]

@@ -3,17 +3,17 @@
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
-use std::ops::Range;
 use std::path::{Path, PathBuf};
 
 use super::coverage::{apply_drops, DropIndex, EveryGroupDropped};
 use super::exclusions::{Excluder, UnmatchedExclusion};
+use super::pattern::{match_pattern, path_pattern, Piece};
 use crate::model::{
     ArtifactInstance, DirectoryDiscovery, EntityBinding, InputRules, Pipeline, PipelineIndex,
     ProductDef, Removal, SourceInventory, SourceRecord,
 };
 use crate::paths::{
-    decode_component, encode_component, error, inspect_paths, require_directory,
+    decode_component, encode_component, error, inspect_paths, require_directory, stage_directories,
     validate_discovery_rule, PathBinder, PathError, PathPart, PathPlaceholder, PathTemplate,
 };
 
@@ -22,7 +22,8 @@ use crate::paths::{
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Discovery {
     pub inventory: SourceInventory,
-    /// Files under the root that match no source path rule.
+    /// Files under the root that match no source path rule, leaving out
+    /// SPIT's own files and those at the pipeline's output paths.
     pub unmatched_files: Vec<String>,
     /// Each skipped file and why.
     pub skipped: Vec<String>,
@@ -94,10 +95,12 @@ pub(super) fn discover(
         .map(DiscoveryPattern::new)
         .collect::<Result<Vec<_>, _>>()?;
     let sources = source_patterns(pipeline)?;
+    let outputs = output_patterns(pipeline);
     let listing = Listing::of(root)?;
     let mut discovery = Discovery {
-        // SPIT's own files, such as a recipe kept in its dataset, are not
-        // data a rule missed.
+        // SPIT's own files, such as a recipe kept in its dataset, and what
+        // an earlier run of the pipeline wrote under the root are not data a
+        // rule missed.
         unmatched_files: listing
             .files
             .iter()
@@ -106,6 +109,9 @@ pub(super) fn discover(
                     && !sources
                         .iter()
                         .any(|source| match_pattern(&source.pieces, file).is_some())
+                    && !outputs
+                        .iter()
+                        .any(|pieces| match_pattern(pieces, file).is_some())
             })
             .cloned()
             .collect(),
@@ -235,8 +241,30 @@ fn source_patterns(pipeline: &Pipeline) -> Result<Vec<SourcePattern<'_>>, PathEr
                     product.name
                 ))
             })?;
-            let pieces = path_pattern(&template, product)?;
+            let pieces = path_pattern(&template, product, None)?;
             Ok(SourcePattern { product, pieces })
+        })
+        .collect()
+}
+
+/// The path pattern of each product a step of `pipeline` makes. A product
+/// whose path cannot be bound is left out: resolving reports it, and the
+/// scan only uses these to tell an earlier run's files from unmatched ones.
+fn output_patterns(pipeline: &Pipeline) -> Vec<Vec<Piece>> {
+    let index = PipelineIndex::new(pipeline);
+    let outputs: BTreeSet<_> = pipeline
+        .invocations
+        .iter()
+        .flat_map(|invocation| &invocation.outputs)
+        .collect();
+    pipeline
+        .products
+        .iter()
+        .filter(|product| outputs.contains(&product.name))
+        .filter_map(|product| {
+            let template = index.path_template_for(&product.name)?;
+            let stage = stage_directories(&index, &product.name);
+            path_pattern(&template, product, stage.as_deref()).ok()
         })
         .collect()
 }
@@ -479,194 +507,6 @@ fn readable_value(encoded: &str) -> Result<String, &'static str> {
         return Err("holds a space or one of `,[]=#`, which an inventory cannot");
     }
     Ok(value)
-}
-
-enum Piece {
-    Literal(String),
-    /// One path component value, as `bind_path` encodes it.
-    Value(String),
-}
-
-fn path_pattern(template: &PathTemplate, product: &ProductDef) -> Result<Vec<Piece>, PathError> {
-    let mut pieces = Vec::new();
-    for part in template.parts() {
-        match part {
-            PathPart::Literal(value) => pieces.push(Piece::Literal(value.clone())),
-            PathPart::Placeholder(PathPlaceholder::Product) => {
-                pieces.push(Piece::Literal(product.name.replace("::", ".")));
-            }
-            PathPart::Placeholder(PathPlaceholder::Entities) => {
-                if product.dimensions.is_empty() {
-                    pieces.push(Piece::Literal("global".to_owned()));
-                }
-                for (index, dimension) in product.dimensions.iter().enumerate() {
-                    let separator = if index == 0 { "" } else { "__" };
-                    pieces.push(Piece::Literal(format!(
-                        "{separator}{}=",
-                        encode_component(dimension)
-                    )));
-                    pieces.push(Piece::Value(dimension.clone()));
-                }
-            }
-            // A source is made in no stage, so its rule never binds
-            // `{@stage}`; `inspect_paths` rejects such a rule first.
-            PathPart::Placeholder(PathPlaceholder::Stage) => {
-                return Err(error(format!(
-                    "path rule for source `{}` uses `{}`, but a source is not made in a stage",
-                    product.name,
-                    PathPlaceholder::Stage
-                )))
-            }
-            PathPart::Placeholder(PathPlaceholder::Dimension(dimension)) => {
-                pieces.push(Piece::Value(dimension.clone()));
-            }
-            // A source with dimensions has `{@labels}` written out, and
-            // its groups resolved; `inspect_paths` rejects the rest first.
-            PathPart::Placeholder(PathPlaceholder::Labels) => {
-                return Err(error(format!(
-                    "path rule for source `{}` uses `{}`, but the source has no dimensions",
-                    product.name,
-                    PathPlaceholder::Labels
-                )))
-            }
-            PathPart::Group(_) => unreachable!("a product's template has its groups resolved"),
-        }
-    }
-    Ok(pieces)
-}
-
-/// Match `text` against `pieces`, binding each dimension to its encoded
-/// value; a dimension used twice must have the same value both times.
-fn match_pattern<'a>(pieces: &[Piece], text: &'a str) -> Option<BTreeMap<String, &'a str>> {
-    // A match begins with a literal first piece and ends with a literal last
-    // one, which rules out most patterns without searching.
-    if let Some(Piece::Literal(first)) = pieces.first() {
-        if !text.starts_with(first.as_str()) {
-            return None;
-        }
-    }
-    if let Some(Piece::Literal(last)) = pieces.last() {
-        if !text.ends_with(last.as_str()) {
-            return None;
-        }
-    }
-    let mut bound = BTreeMap::new();
-    let mut failed = BTreeSet::new();
-    match_from(pieces, 0, text, 0, &mut bound, &mut failed).then(|| {
-        bound
-            .into_iter()
-            .map(|(dimension, value)| (dimension, &text[value]))
-            .collect()
-    })
-}
-
-/// A position that failed to match: the piece, the offset in the text, and
-/// the values bound for dimensions that later pieces repeat.
-type Attempt = (usize, usize, Vec<(usize, usize)>);
-
-/// Match `pieces[index..]` against `text[offset..]`, binding each dimension
-/// to the byte range of its value in `text`. Where a value's end is not
-/// forced, failed positions are remembered, which keeps ambiguous splits
-/// from taking exponential time.
-fn match_from(
-    pieces: &[Piece],
-    index: usize,
-    text: &str,
-    offset: usize,
-    bound: &mut BTreeMap<String, Range<usize>>,
-    failed: &mut BTreeSet<Attempt>,
-) -> bool {
-    let rest = &text[offset..];
-    let Some(piece) = pieces.get(index) else {
-        return rest.is_empty();
-    };
-    match piece {
-        Piece::Literal(literal) => {
-            rest.starts_with(literal.as_str())
-                && match_from(
-                    pieces,
-                    index + 1,
-                    text,
-                    offset + literal.len(),
-                    bound,
-                    failed,
-                )
-        }
-        Piece::Value(dimension) => {
-            if let Some(value) = bound.get(dimension).map(|value| &text[value.clone()]) {
-                return rest.starts_with(value)
-                    && match_from(pieces, index + 1, text, offset + value.len(), bound, failed);
-            }
-            let longest = rest
-                .find(|character: char| !is_value_character(character))
-                .unwrap_or(rest.len());
-            if let Some(end) = forced_end(pieces.get(index + 1), rest, longest) {
-                if end == 0 {
-                    return false;
-                }
-                bound.insert(dimension.clone(), offset..offset + end);
-                let found = match_from(pieces, index + 1, text, offset + end, bound, failed);
-                if !found {
-                    bound.remove(dimension);
-                }
-                return found;
-            }
-            let later: Vec<_> = bound
-                .iter()
-                .filter(|(dimension, _)| {
-                    pieces
-                        .iter()
-                        .skip(index)
-                        .any(|piece| matches!(piece, Piece::Value(name) if name == *dimension))
-                })
-                .map(|(_, value)| (value.start, value.end))
-                .collect();
-            let attempt = (index, offset, later);
-            if failed.contains(&attempt) {
-                return false;
-            }
-            let found = (1..=longest).any(|end| {
-                bound.insert(dimension.clone(), offset..offset + end);
-                match_from(pieces, index + 1, text, offset + end, bound, failed)
-            });
-            if !found {
-                bound.remove(dimension);
-                failed.insert(attempt);
-            }
-            found
-        }
-    }
-}
-
-/// Whether a value can hold `character`: what `encode_component` keeps, and
-/// the `%` of what it escapes.
-///
-/// Keep in step with `encode_component` in `paths/components.rs`: if a value
-/// could hold a character this denies, `forced_end` would bind it too short
-/// and discovery would miss files.
-fn is_value_character(character: char) -> bool {
-    character.is_ascii_alphanumeric() || character == '-' || character == '%'
-}
-
-/// The one length a value at the start of `rest` can have, when what
-/// follows it decides: the rest of the text at the end of the pattern, or
-/// its first `longest` characters before a literal that starts with a
-/// character no value holds, since every shorter value leaves a value
-/// character where the literal must start. `Some(0)` means none fits; `None`
-/// means several lengths must be tried.
-fn forced_end(next: Option<&Piece>, rest: &str, longest: usize) -> Option<usize> {
-    match next {
-        None => Some(if longest == rest.len() { longest } else { 0 }),
-        Some(Piece::Literal(literal))
-            if literal
-                .chars()
-                .next()
-                .is_some_and(|first| !is_value_character(first)) =>
-        {
-            Some(longest)
-        }
-        _ => None,
-    }
 }
 
 /// Whether `file` is a pipeline, recipe, `.spitout` or `.spitdag`.
