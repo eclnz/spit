@@ -41,9 +41,9 @@ pub fn validate_bound_source_files(
     // first missing file is reported.
     let mut needed: Vec<_> = with_paths(dag, &paths)
         .filter(|(id, _, _)| !made[id.index()])
-        .map(|(_, artifact, relative)| (key(artifact), relative))
+        .map(|(_, artifact, relative)| (artifact.key(), relative))
         .collect();
-    needed.sort_unstable_by(|(left, _), (right, _)| left.cmp(right));
+    needed.sort_unstable_by_key(|&(artifact, _)| artifact);
     let mut verified = VerifiedFiles::default();
     for (artifact, relative) in needed {
         // In a DAG cut to one stage, as by `ResolvedDag::only_stage`, what
@@ -222,10 +222,6 @@ fn with_paths<'a>(
 /// An artifact by its product and entities, as [`ArtifactKey`] without copies.
 type Key<'a> = (&'a str, &'a EntityBinding);
 
-fn key(artifact: Artifact<'_>) -> Key<'_> {
-    (artifact.product, artifact.entities)
-}
-
 /// Pairs of artifacts, with their paths, whose paths differ only in case:
 /// in artifact order, the first artifact with each such path paired with
 /// each later one.
@@ -241,14 +237,14 @@ pub(crate) fn case_collisions(
         folded
             .entry(path.to_lowercase())
             .or_default()
-            .push((key(artifact), path));
+            .push((artifact.key(), path));
     }
     let owned = |((product, entities), path): (Key<'_>, &String)| {
         ((product.to_owned(), entities.clone()), path.clone())
     };
     let mut collisions = Vec::new();
     for mut group in folded.into_values().filter(|group| group.len() > 1) {
-        group.sort_unstable_by(|(left, _), (right, _)| left.cmp(right));
+        group.sort_unstable_by_key(|&(artifact, _)| artifact);
         let first = group[0];
         collisions.extend(group[1..].iter().map(|&later| [owned(first), owned(later)]));
     }

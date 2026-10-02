@@ -890,7 +890,7 @@ fn near_miss_warnings(report: &ArtifactReport) -> Vec<Diagnostic> {
     let unused: BTreeSet<_> = report
         .unused_sources()
         .into_iter()
-        .map(|id| report.dag.artifact(id).to_instance().key())
+        .map(|id| report.dag.artifact(id).key())
         .collect();
     let mut seen = BTreeSet::new();
     let mut warnings = Vec::new();
@@ -904,7 +904,7 @@ fn near_miss_warnings(report: &ArtifactReport) -> Vec<Diagnostic> {
             else {
                 continue;
             };
-            let key = near.artifact.key();
+            let key = near.artifact.view().key();
             if unused.contains(&key) && seen.insert(key) {
                 warnings.push(warning(None, format!(
                     "source {} is used by no job; `{}` differs only in {} from {}, which `{}` needs",
