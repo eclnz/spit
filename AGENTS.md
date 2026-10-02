@@ -39,6 +39,8 @@ Records and data that people rarely read, and that only a tool needs as files, a
 
 SPIT is a compiler, so most of its code is data being turned into other data: text into statements, statements into a `Pipeline`, a pipeline and an inventory into a DAG, a DAG into a `.spitdag`. The code is laid out around that data, not around objects that hide it. These rules describe how the code is written now. A change that breaks one should say why in its commit message.
 
+Some rules are checked, not just written down. `Cargo.toml` forbids `unsafe` and turns on clippy's `disallowed_types`, which `clippy.toml` sets to the standard library's `HashMap`, `HashSet`, `Rc`, `RefCell` and `Cell`. `src/lib.rs` and `src/main.rs` deny `unwrap` outside tests. `tests/architecture.rs` checks file length and the boundaries between steps. `cargo clippy` and `cargo test` run these checks, so the checks before every commit cover them.
+
 The five rules under [Performance](docs/architecture.md#performance) come first: one table with columns by id, text interned once, grouping by symbol keys, finding once and then looking up, and doing each piece of work once. The rules below are how the rest of the code keeps to them.
 
 **Data and the functions over it**
@@ -49,23 +51,27 @@ The five rules under [Performance](docs/architecture.md#performance) come first:
 
 **Ownership and identity**
 
-- **One owner, and ids or borrows everywhere else.** A table owns its records. Anything else that needs a record holds its id (`ArtifactId`) or borrows it (`Artifact<'a>`). There is no `Rc`, `RefCell` or other shared mutable state, and new code shouldn't add any.
+- **One owner, and ids or borrows everywhere else.** A table owns its records. Anything else that needs a record holds its id (`ArtifactId`) or borrows it (`Artifact<'a>`). There is no `Rc`, `RefCell` or other shared mutable state, and clippy rejects them.
 - **Ids are newtypes over `u32`.** An id wraps a `u32` so that ids of different tables can't be mixed up, and it turns into an index only at the table (`ArtifactId::index`). Job ids are still a bare `usize`, which new code shouldn't copy. Convert a length into an id with `u32::try_from(..).expect(..)`, and give the limit in the message, as in "fewer than 2^32 artifacts in a DAG".
 - **Copy a handle, not a record.** When a value has many holders, share it behind one pointer, as `EntityBinding` does with an `Arc`. Return a `Cow` when a stage usually passes its input through unchanged (`Pipeline::path_template_for`). A `.clone()` of a `String`, a `Vec` or a map inside a loop over artifacts or jobs is a bug unless the commit says why.
 - **Owned text is fine on cold paths.** Errors, diagnostics and the parser's output may hold `String`s. Box a large field of an error variant, as `ResolveError` does, so that `Result` stays small on the path that succeeds.
 
 **Collections and order**
 
-- **Lookups use `FxHashMap` and `FxHashSet`**, from `rustc-hash`. Don't use the standard library's hasher.
+- **Lookups use `FxHashMap` and `FxHashSet`**, from `rustc-hash`. Clippy rejects the standard library's `HashMap` and `HashSet`.
 - **Output never depends on hash order.** Anything that reaches a file or the terminal is in a `BTreeMap`, a `BTreeSet` or a sorted `Vec`, or is sorted first. Given the same pipeline, inventory, root and version, the output is the same bytes every time (see `docs/architecture.md`).
 - **Loops and worklists, not recursion, over data the user writes.** A pipeline may hold a chain of 100,000 steps, and recursing once per step overflows the stack (`compile/definitions.rs` has a test for this). Use an explicit stack or queue. Where recursion reads better, as in parsing nested types, cap the depth (`MAX_TYPE_DEPTH` in `src/types.rs`).
 
 **Errors and invariants**
 
 - **Errors are data.** An error is an enum variant whose fields say what went wrong, and `Located<E>` says where. Rendering is separate, in `diagnostics.rs` and `render.rs`, so that the same error can be printed as text or as JSON.
-- **Bad input never panics.** Outside tests, `unwrap` isn't used. `expect` and `unreachable!` state an invariant the code already holds, and their message says what it is, as in `unreachable!("a product's template has its groups resolved")`. Anything a user's file can cause is an error.
+- **Bad input never panics.** Outside tests, `unwrap` isn't used, and clippy rejects it. `expect` and `unreachable!` state an invariant the code already holds, and their message says what it is, as in `unreachable!("a product's template has its groups resolved")`. Anything a user's file can cause is an error.
 - **Name the other half of an invariant.** When code relies on something another place guarantees, a comment says so with "Keep in step with" and names that place, as the `Ord` for `EntityBinding` does for its hash. Add the comment on both sides.
-- **No `unsafe`.**
+- **No `unsafe`.** The compiler rejects it.
+
+**Files and modules**
+
+- **A Rust file has at most 800 lines, tests included.** A longer file usually holds two subjects, which read better as two modules. Split it along the data it handles, as `src/paths` is split into `template.rs`, `rules.rs` and `bind.rs`, not into arbitrary halves. The files that were longer when the limit came in are listed in `OVER_LIMIT` in `tests/architecture.rs`, each with its length then. A listed file may shrink but not grow, and a file that falls within the limit leaves the list.
 
 **Dependencies and boundaries**
 

@@ -8,6 +8,9 @@
 //! A command given files from an earlier step runs the steps between in
 //! memory. Nothing is loaded that the command line does not name.
 
+// Outside tests, `expect` states the invariant it relies on; see AGENTS.md.
+#![deny(clippy::unwrap_used)]
+
 /// SPIT makes and frees many small strings; mimalloc does this faster than
 /// the system allocator.
 #[global_allocator]
