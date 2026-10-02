@@ -87,3 +87,53 @@ fn step_modules_do_not_import_later_steps() {
         }
     }
 }
+
+/// The most lines a Rust file may have, tests included. A longer file is
+/// usually two subjects, and is easier to read as two modules.
+const MAX_LINES: usize = 800;
+
+/// Files that were longer than `MAX_LINES` when the limit came in, each
+/// with the most lines it may have. A listed file may shrink but not grow,
+/// and leaves the list once it is within the limit.
+const OVER_LIMIT: &[(&str, usize)] = &[
+    ("src/diagnostics.rs", 1681),
+    ("src/main.rs", 1252),
+    ("src/model.rs", 2082),
+    ("src/parser/inventory.rs", 804),
+    ("src/paths/template.rs", 842),
+];
+
+#[test]
+fn rust_files_stay_short() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let mut files = Vec::new();
+    for folder in ["src", "tests", "examples", "benches"] {
+        if root.join(folder).is_dir() {
+            source_files(&root.join(folder), &mut files);
+        }
+    }
+    let mut problems = Vec::new();
+    for file in files {
+        let relative = file.strip_prefix(root).unwrap();
+        let name = relative.to_str().unwrap().replace('\\', "/");
+        let lines = fs::read_to_string(&file).unwrap().lines().count();
+        match OVER_LIMIT.iter().find(|(listed, _)| *listed == name) {
+            Some(&(_, _)) if lines <= MAX_LINES => problems.push(format!(
+                "{name} has {lines} lines, within the limit of {MAX_LINES}: take it out of OVER_LIMIT"
+            )),
+            Some(&(_, most)) if lines > most => problems.push(format!(
+                "{name} has {lines} lines and may not grow past {most}: split it"
+            )),
+            None if lines > MAX_LINES => problems.push(format!(
+                "{name} has {lines} lines, over the limit of {MAX_LINES}: split it"
+            )),
+            _ => {}
+        }
+    }
+    for (listed, _) in OVER_LIMIT {
+        if !root.join(listed).is_file() {
+            problems.push(format!("{listed} is in OVER_LIMIT but no longer exists"));
+        }
+    }
+    assert!(problems.is_empty(), "{}", problems.join("\n"));
+}

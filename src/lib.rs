@@ -1,6 +1,9 @@
 //! SPIT: compile artifact pipelines, settle their inputs, and resolve and
 //! bind their jobs into a `.spitdag`.
 
+// Outside tests, `expect` states the invariant it relies on; see AGENTS.md.
+#![deny(clippy::unwrap_used)]
+
 mod builtins;
 mod command;
 mod compile;
