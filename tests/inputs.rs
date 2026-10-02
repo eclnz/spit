@@ -691,3 +691,21 @@ fn check_lists_a_recipe_default_as_the_recipes() {
         .unwrap();
     assert!(!strict.status.success());
 }
+
+#[test]
+fn check_finds_a_bad_recipe_source_path_at_its_line() {
+    let pipeline = parse_pipeline(STAGED).unwrap();
+    let diagnose =
+        |recipe: &str| support::rendered(&spit::diagnose_recipe_against(recipe, &pipeline));
+    // A default shared by two sources must tell them apart.
+    assert_eq!(
+        diagnose("path: raw/{@entities}.nii.gz\n"),
+        ["error: line 1: products `image` and `mask` bind to the same path `raw/sub=sub.nii.gz` for the same entities; include `{@product}` or distinguish their path rules"]
+    );
+    // A recipe's own rule is checked too, which only `--path-rules` did.
+    assert_eq!(
+        diagnose("path: raw/{@product}/{@entities}.nii.gz\npath mask: raw/mask.nii.gz\n"),
+        ["error: line 2: path template for `mask` omits dimension `sub`; artifacts differing only in `sub` would share a path"]
+    );
+    assert!(diagnose("path: raw/{@product}/{@entities}.nii.gz\n").is_empty());
+}
