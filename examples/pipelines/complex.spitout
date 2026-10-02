@@ -1,8 +1,10 @@
+root complex_data
+
 source_paths:
-    reading: data/{@product}/{@entities}
-    gain: data/{@product}/{@entities}
-    baseline: data/{@product}/{@entities}
-    target: data/{@product}/{@entities}
+    reading: {@product}/{@entities}
+    gain: {@product}/{@entities}
+    baseline: {@product}/{@entities}
+    target: {@product}/{@entities}
 
 contexts:
     [site=A,device=D1,window=W1]

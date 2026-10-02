@@ -1,4 +1,5 @@
 pipeline type_lab.spit
+root type_lab_data
 
 require lidar count>=1 per [lab, rig, capture]
 require camera count>=1 per [lab, rig, capture]

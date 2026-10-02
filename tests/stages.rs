@@ -11,7 +11,18 @@ const PIPELINE: &str = "examples/stages/stages.spit";
 const SOURCES: &str = "examples/stages/stages.spitout";
 
 fn staged() -> String {
-    fs::read_to_string(PIPELINE).unwrap() + &fs::read_to_string(SOURCES).unwrap()
+    fs::read_to_string(PIPELINE).unwrap() + &records(SOURCES)
+}
+
+/// A `.spitout`'s records, without the `root` line that comes before every
+/// section, so they can follow a pipeline in one text.
+fn records(file: &str) -> String {
+    fs::read_to_string(file)
+        .unwrap()
+        .lines()
+        .filter(|line| !line.starts_with("root "))
+        .map(|line| format!("{line}\n"))
+        .collect()
 }
 
 fn messages(diagnostics: &[Diagnostic]) -> Vec<(Option<usize>, &str)> {
@@ -246,7 +257,7 @@ const NESTED: &str = "examples/stages/nested.spit";
 const NESTED_SOURCES: &str = "examples/stages/nested.spitout";
 
 fn nested() -> String {
-    fs::read_to_string(NESTED).unwrap() + &fs::read_to_string(NESTED_SOURCES).unwrap()
+    fs::read_to_string(NESTED).unwrap() + &records(NESTED_SOURCES)
 }
 
 #[test]
@@ -404,7 +415,7 @@ fn every_job_follows_the_jobs_it_depends_on() {
             "examples/commands/mrtrix3_act/mrtrix3_act.spitout",
         ),
     ] {
-        let text = fs::read_to_string(pipeline).unwrap() + &fs::read_to_string(sources).unwrap();
+        let text = fs::read_to_string(pipeline).unwrap() + &records(sources);
         let (parsed, inventory) = support::parse_fixture(&text).unwrap();
         let dag = resolve(&parsed, &inventory.unwrap()).unwrap();
         assert!(dag.jobs.len() > 1, "{pipeline}");

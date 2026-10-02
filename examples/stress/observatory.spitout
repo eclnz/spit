@@ -1,4 +1,6 @@
 # Three sites and four devices; channel, window, and segment counts are uneven.
+root observatory_data
+
 contexts:
     [org=North,site=Coast,device=Buoy,window=Dawn,channel=Temp]
     [org=North,site=Coast,device=Buoy,window=Dawn,channel=Pressure]
