@@ -25,6 +25,10 @@ pub struct InputRules {
     pub exclusion_files: Vec<(String, usize)>,
     /// Path rules for source products that the recipe, not the pipeline, sets.
     pub source_paths: BTreeMap<String, PathTemplate>,
+    /// The recipe's `path:` line: the rule for each source with none of its
+    /// own, in the pipeline or the recipe. It stays as written;
+    /// [`InputRules::source_paths_for`] gives each source its rule.
+    pub source_default: Option<PathTemplate>,
 }
 
 impl InputRules {
@@ -34,6 +38,46 @@ impl InputRules {
             && self.exclusions.is_empty()
             && self.exclusion_files.is_empty()
             && self.source_paths.is_empty()
+            && self.source_default.is_none()
+    }
+
+    /// The sources of `pipeline` that the recipe's default `path:` covers:
+    /// those with no rule in the pipeline or the recipe. None without a
+    /// default.
+    pub fn defaulted_sources<'p>(&self, pipeline: &'p Pipeline) -> Vec<&'p str> {
+        if self.source_default.is_none() {
+            return Vec::new();
+        }
+        let index = PipelineIndex::new(pipeline);
+        pipeline
+            .products
+            .iter()
+            .map(|product| product.name.as_str())
+            .filter(|name| {
+                index.is_source(name)
+                    && !pipeline.product_paths.contains_key(*name)
+                    && !self.source_paths.contains_key(*name)
+            })
+            .collect()
+    }
+
+    /// The path rule the recipe gives each source of `pipeline`: its own,
+    /// else its default for each of [`InputRules::defaulted_sources`].
+    /// Borrowed when the default covers no source.
+    pub fn source_paths_for(&self, pipeline: &Pipeline) -> Cow<'_, BTreeMap<String, PathTemplate>> {
+        let defaulted = self.defaulted_sources(pipeline);
+        let Some(default) = self
+            .source_default
+            .as_ref()
+            .filter(|_| !defaulted.is_empty())
+        else {
+            return Cow::Borrowed(&self.source_paths);
+        };
+        let mut paths = self.source_paths.clone();
+        for name in defaulted {
+            paths.insert(name.to_owned(), default.clone());
+        }
+        Cow::Owned(paths)
     }
 
     /// The discovery rule named `name`, if any.

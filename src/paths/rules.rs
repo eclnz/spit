@@ -18,6 +18,8 @@ pub enum PathRule {
     Explicit(String),
     /// An explicit source rule supplied by the recipe.
     Recipe(String),
+    /// The recipe's default `path:` rule, for a source with none of its own.
+    RecipeDefault(String),
     /// The default `path:` rule written inside a stage.
     Stage {
         stage: String,
@@ -101,6 +103,21 @@ impl PathCoverage {
         self
     }
 
+    /// Label the sources whose rule is the recipe's default `path:`, given
+    /// to them as their own after inspecting the merged pipeline.
+    #[must_use]
+    pub fn with_recipe_default<'a>(mut self, products: impl IntoIterator<Item = &'a str>) -> Self {
+        let products: BTreeSet<_> = products.into_iter().collect();
+        for entry in &mut self.entries {
+            if entry.source && products.contains(entry.product.as_str()) {
+                if let PathRule::Explicit(template) = &entry.rule {
+                    entry.rule = PathRule::RecipeDefault(template.clone());
+                }
+            }
+        }
+        self
+    }
+
     /// Mark each source in `products` as having its files given by the
     /// inventory. Binding takes those files over any rule, so the source
     /// needs none.
@@ -133,7 +150,12 @@ impl PathCoverage {
             let fallback: Vec<_> = self
                 .entries
                 .iter()
-                .filter(|entry| matches!(entry.rule, PathRule::Default(_) | PathRule::Stage { .. }))
+                .filter(|entry| {
+                    matches!(
+                        entry.rule,
+                        PathRule::Default(_) | PathRule::Stage { .. } | PathRule::RecipeDefault(_)
+                    )
+                })
                 .map(|entry| entry.product.as_str())
                 .collect();
             if !fallback.is_empty() {
@@ -156,6 +178,7 @@ impl fmt::Display for PathCoverage {
             match &entry.rule {
                 PathRule::Explicit(template) => write!(f, "explicit {template}")?,
                 PathRule::Recipe(template) => write!(f, "explicit {template} (recipe)")?,
+                PathRule::RecipeDefault(template) => write!(f, "default {template} (recipe)")?,
                 PathRule::Stage { stage, template } => {
                     write!(f, "stage {stage} default {template}")?;
                 }
@@ -324,9 +347,14 @@ fn extension_disagreement(index: &PipelineIndex<'_>, product: &str) -> Option<St
         return None;
     }
     let written = rule.extension()?;
+    // A tool writes an output's file; a source's is declared.
+    let verb = match source {
+        ExtensionSource::Source(_) => "declares",
+        _ => "writes",
+    };
     if index.pipeline.product_paths.contains_key(product) {
         return Some(format!(
-            "path `{product}` ends in `{written}`, but {source} writes `{expected}`; drop the extension or use `{expected}`"
+            "path `{product}` ends in `{written}`, but {source} {verb} `{expected}`; drop the extension or use `{expected}`"
         ));
     }
     let default = match index.stage_path_rule(product) {
@@ -336,6 +364,9 @@ fn extension_disagreement(index: &PipelineIndex<'_>, product: &str) -> Option<St
     Some(match source {
         ExtensionSource::Operation(_) => format!(
             "{default} ends in `{written}`, but {source} writes `{expected}`; write {default} without an extension, and give the outputs that use it `ext: {written}`"
+        ),
+        ExtensionSource::Source(_) => format!(
+            "{default} ends in `{written}`, but {source} declares `{expected}`; write {default} without an extension, so each source's declared extension completes it"
         ),
         ExtensionSource::Stage(_) | ExtensionSource::Default => format!(
             "{default} ends in `{written}`, but {source} sets `{expected}`; write the extension once, with `ext:`"

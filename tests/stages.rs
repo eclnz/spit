@@ -125,9 +125,12 @@ fn stage_placeholder_needs_a_stage() {
         messages(&diagnostics),
         [(
             Some(1),
-            "path template for `loose` uses `{@stage}`, but `loose` is not made in a stage"
+            "path template for `loose` uses `{@stage}`, but `loose` is not made in a stage; write `[{@stage}/]` to leave the stage's directory out for products outside every stage"
         )]
     );
+    // The fix the message gives works.
+    let fixed = text.replace("path: {@stage}/", "path: [{@stage}/]");
+    assert_eq!(messages(&diagnose(&fixed, None)), []);
 }
 
 #[test]

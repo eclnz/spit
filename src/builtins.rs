@@ -91,7 +91,7 @@ pub static DOCS: [Doc; 43] = [
         kind: "keyword",
         anchor: "products-and-dimensions",
         example: "source image : Image [subject, visit, run]\nsource calibration",
-        summary: "Declares a product family, not one file: `image[subject=A,visit=1,run=2]` names one artifact. The type is optional. A source with no dimensions takes no brackets and names one artifact, which matches every job that takes it. Its files are found by its `path` rule.",
+        summary: "Declares a product family, not one file: `image[subject=A,visit=1,run=2]` names one artifact. The type is optional, and an extension after it, as in `source events : Events .tsv [sub]`, completes the source's path rule. A source with no dimensions takes no brackets and names one artifact, which matches every job that takes it. Its files are found by its `path` rule.",
     },
     Doc {
         name: "operation",
@@ -119,7 +119,7 @@ pub static DOCS: [Doc; 43] = [
         kind: "keyword",
         anchor: "paths",
         example: "path: results/{@product}/{@entities}.txt\npath image: input/{subject}/{visit}/{run}.txt",
-        summary: "`path:` sets the default rule; without one, outputs go to `out/{@product}/{@entities}`. `path product:` sets one product's rule, and for a source, how its files are found. A `path:` line in a stage is the default for that stage's products. Paths are relative to the dataset root. Text in `[...]` is kept only for a product with a value for every placeholder in it.",
+        summary: "`path:` sets the default rule; without one, outputs go to `out/{@product}/{@entities}`. `path product:` sets one product's rule, and for a source, how its files are found. A `path:` line in a stage is the default for that stage's products, and one in a `.spitin` recipe the default for sources with no rule. Paths are relative to the dataset root. Text in `[...]` is kept only for a product with a value for every placeholder in it.",
     },
     Doc {
         name: "ext",

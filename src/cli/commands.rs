@@ -71,11 +71,17 @@ pub(crate) fn check(args: &CliArgs) -> Result<(), Box<dyn Error>> {
             let checked = diagnose_checked(&pipeline_text, Context::at(pipeline_file))
                 .expect("a checked recipe has a valid pipeline");
             let mut merged = checked.pipeline;
-            merged
-                .product_paths
-                .extend(recipe.rules.source_paths.clone());
+            let defaulted: Vec<String> = recipe
+                .rules
+                .defaulted_sources(&merged)
+                .into_iter()
+                .map(str::to_owned)
+                .collect();
+            let source_paths = recipe.rules.source_paths_for(&merged).into_owned();
+            merged.product_paths.extend(source_paths);
             let coverage = inspect_paths(&merged)?
-                .with_recipe_paths(recipe.rules.source_paths.keys().map(String::as_str));
+                .with_recipe_paths(recipe.rules.source_paths.keys().map(String::as_str))
+                .with_recipe_default(defaulted.iter().map(String::as_str));
             if args.has(Flag::PathRules) {
                 println!("{coverage}");
             }
