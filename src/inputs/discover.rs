@@ -182,6 +182,51 @@ pub(super) fn discover(
     Ok(discovery)
 }
 
+/// The files under `root` that no source rule of `pipeline` matches, sorted
+/// and leaving out SPIT's own files, with the sources that have no rule,
+/// whose files they may be. Unlike [`discover`], a source with no rule is
+/// not an error, and no other rule is applied.
+pub(super) fn unmatched_files<'a>(
+    pipeline: &'a Pipeline,
+    root: &Path,
+) -> Result<(Vec<String>, Vec<&'a ProductDef>), PathError> {
+    require_directory(root)?;
+    let index = PipelineIndex::new(pipeline);
+    let mut patterns = Vec::new();
+    let mut without = Vec::new();
+    for product in sources_of(pipeline) {
+        match index.path_template_for(&product.name) {
+            Some(template) => patterns.push(path_pattern(&template, product)?),
+            None => without.push(product),
+        }
+    }
+    let files = Listing::of(root)?
+        .files
+        .into_iter()
+        .filter(|file| {
+            !is_spit_file(file)
+                && !patterns
+                    .iter()
+                    .any(|pieces| match_pattern(pieces, file).is_some())
+        })
+        .collect();
+    Ok((files, without))
+}
+
+/// The source products of `pipeline`: those no step makes, in the order
+/// the pipeline declares them.
+fn sources_of(pipeline: &Pipeline) -> impl Iterator<Item = &ProductDef> {
+    let outputs: BTreeSet<_> = pipeline
+        .invocations
+        .iter()
+        .flat_map(|invocation| &invocation.outputs)
+        .collect();
+    pipeline
+        .products
+        .iter()
+        .filter(move |product| !outputs.contains(&product.name))
+}
+
 /// A directory discovery rule, checked, as pieces to match.
 struct DiscoveryPattern<'a> {
     rule: &'a DirectoryDiscovery,
@@ -229,16 +274,8 @@ struct SourcePattern<'a> {
 
 /// Every source of `pipeline` with its path pattern; each must have a rule.
 fn source_patterns(pipeline: &Pipeline) -> Result<Vec<SourcePattern<'_>>, PathError> {
-    let outputs: BTreeSet<_> = pipeline
-        .invocations
-        .iter()
-        .flat_map(|invocation| &invocation.outputs)
-        .collect();
     let index = PipelineIndex::new(pipeline);
-    pipeline
-        .products
-        .iter()
-        .filter(|product| !outputs.contains(&product.name))
+    sources_of(pipeline)
         .map(|product| {
             let template = index.path_template_for(&product.name).ok_or_else(|| {
                 error(format!(
@@ -478,7 +515,7 @@ fn read_binding(path: &str, bound: BTreeMap<String, &str>) -> Result<EntityBindi
 
 /// Decode a path component. It must be written exactly as SPIT would write
 /// it, so the record's path is the file found.
-fn readable_value(encoded: &str) -> Result<String, &'static str> {
+pub(super) fn readable_value(encoded: &str) -> Result<String, &'static str> {
     let value = decode_component(encoded).ok_or("is not valid `%XX` text")?;
     if encode_component(&value) != encoded {
         return Err("is not how SPIT writes a value, so a path made from it would differ");
