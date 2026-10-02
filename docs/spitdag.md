@@ -1,6 +1,6 @@
 # The `.spitdag` format
 
-A `.spitdag` is what `spit dag -o` writes and `spit dag --json` prints: every job a pipeline resolves to over one dataset, each with its files and its commands. A backend that runs the jobs reads nothing else: no pipeline, path rule or command template. This page describes version 4, the version `src/spitdag` writes. See the [README](../README.md) for how a `.spitdag` is made, and `spit dag --commands` for a readable view of the same commands.
+A `.spitdag` is what `spit dag -o` writes and `spit dag --json` prints: every job a pipeline resolves to over one dataset, each with its files and its commands. A backend that runs the jobs reads nothing else: no pipeline, path rule or command template. This page describes version 5, the version `src/spitdag` writes. See the [README](../README.md) for how a `.spitdag` is made, and `spit dag --commands` for a readable view of the same commands.
 
 ## Document
 
@@ -8,7 +8,7 @@ A `.spitdag` is one JSON object, followed by a newline:
 
 ```json
 {
-  "version": 4,
+  "version": 5,
   "generator": {"name": "spit", "version": "0.2.1"},
   "root": "/data/study",
   "external_inputs": [ARTIFACT, ...],
@@ -22,7 +22,7 @@ A `.spitdag` is one JSON object, followed by a newline:
 
 | Field | Holds |
 | --- | --- |
-| `version` | The format's version, `4`. A change a reader must know about raises it. |
+| `version` | The format's version, `5`. A change a reader must know about raises it. |
 | `generator` | The program that wrote the file, and its version. |
 | `root` | The absolute dataset folder that every path is relative to, or `null` when it was not known: a `.spitout` that records no root. |
 | `external_inputs` | Every artifact a job reads but no job writes, once each: the sources, and the outputs of stages left out. Ordered by path in natural order, the order `many` inputs take, so `wave2` comes before `wave10`. |
@@ -37,7 +37,7 @@ A `.spitdag` is one JSON object, followed by a newline:
 Every artifact is written the same way, wherever it appears:
 
 ```json
-{"product": "cleaned", "entities": {"sub": "01", "ses": "1"}, "type": {"name": "Image", "args": []}, "path": "derivatives/cleaned/sub=01__ses=1.txt"}
+{"product": "cleaned", "entities": {"sub": "01", "ses": "1"}, "type": {"name": "Image", "args": []}, "path": "derivatives/cleaned/sub=01__ses=1.txt", "kind": "file"}
 ```
 
 | Field | Holds |
@@ -45,7 +45,8 @@ Every artifact is written the same way, wherever it appears:
 | `product` | The product's name. An imported product keeps its prefix, as in `text::shard`. |
 | `entities` | Each dimension and its value, as strings, in the product's declared order. A product with no dimensions has `{}`. |
 | `type` | `null` for an untyped product; `{"name": N, "args": [TYPE, ...]}` for a named type, with its arguments; `{"variable": V}` for a type variable left unbound. |
-| `path` | The artifact's file, relative to `root`. |
+| `path` | The artifact's file or folder, relative to `root`, with no `/` at its end. |
+| `kind` | `"file"`, or `"folder"` for a product declared with a `/`, whose artifact is a folder of files: see [Folders](#folders). Version 5 added it; a reader written for version 4 does not know it. |
 
 ## Removal
 
@@ -130,8 +131,19 @@ Run each argument as one word, exactly as given: no shell is involved, so nothin
 
 A backend runs a job's `verify` commands, in order, before its `command`. If one fails, the job does not run, and neither does any job that depends on it, directly or through others.
 
+## Folders
+
+A job that writes a folder owns it: SPIT rejects a pipeline that would put any other artifact inside it. So a backend may treat the folder as one output:
+
+- Make its parent folder before the command runs, as for a file, but not the folder itself, which the tool makes. Some tools refuse to write into a folder that already exists.
+- Remove a folder left by an earlier run before the command runs, so that files from that run do not mix with this one's.
+- After the command, require the folder to exist. It may be empty.
+- To tell whether a folder changed, look at the files under it, not the folder's own modification time, which changes only when an entry directly in it is added or removed.
+
+A source folder may hold other sources, but never an output.
+
 ## Fingerprint
 
-A job's fingerprint is a 64-bit FNV-1a hash of the compact JSON of what it reads, writes and runs: its `operation`, `inputs`, `outputs`, `command` and `verify`, each artifact with its product, entities, type and path. Its `id`, `stage`, `depends_on` and `dependents` are left out, so the fingerprint follows the work, not where the job falls in the plan.
+A job's fingerprint is a 64-bit FNV-1a hash of the compact JSON of what it reads, writes and runs: its `operation`, `inputs`, `outputs`, `command` and `verify`, each artifact with its product, entities, type, path and kind. Its `id`, `stage`, `depends_on` and `dependents` are left out, so the fingerprint follows the work, not where the job falls in the plan.
 
 The fingerprint changes when the job's command, its files, or which artifacts it reads or writes change. It does not read the files themselves, so it does not change when an input file's contents do; a backend that must rerun a job after its inputs change combines the fingerprint with its own record of the files, such as their modification times or hashes.

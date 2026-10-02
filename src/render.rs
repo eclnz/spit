@@ -87,7 +87,7 @@ pub fn render_bound_dag(dag: &BoundDag, view: View) -> String {
         writer.line(port);
         writer.artifact(&artifact.identity(), artifact.artifact_type);
         if view.paths {
-            writer.path(artifact.path);
+            writer.path(artifact.path, artifact.folder);
         }
     };
     for job in &dag.jobs {
@@ -251,8 +251,10 @@ impl JobWriter {
         self.text.push('\n');
     }
 
-    fn path(&mut self, path: &str) {
-        writeln!(self.text, "      path: {path}").expect("writing to a String");
+    /// An artifact's path, with a `/` after a folder's.
+    fn path(&mut self, path: &str, folder: bool) {
+        let slash = if folder { "/" } else { "" };
+        writeln!(self.text, "      path: {path}{slash}").expect("writing to a String");
     }
 
     /// The jobs this one depends on, if any.

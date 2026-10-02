@@ -236,15 +236,23 @@ fn cardinality(value: Cardinality) -> &'static str {
 }
 
 fn product_signature(product: &ProductDef, ty: &TypeExpr) -> String {
-    let extension = product
-        .extension
-        .as_deref()
-        .map_or(String::new(), |extension| format!(" {extension}"));
     format!(
-        "{}: {ty}{extension} [{}]",
+        "{}: {ty}{} [{}]",
         product.name,
+        ending(product.extension.as_deref(), product.folder),
         product.dimensions.join(", ")
     )
+}
+
+/// What follows a type in a declaration: ` .nii.gz`, ` /` for a folder,
+/// ` .zarr/`, or nothing.
+fn ending(extension: Option<&str>, folder: bool) -> String {
+    let slash = if folder { "/" } else { "" };
+    match extension {
+        Some(extension) => format!(" {extension}{slash}"),
+        None if folder => " /".to_owned(),
+        None => String::new(),
+    }
 }
 
 fn operation_signature(operation: &OperationDef) -> String {
@@ -297,8 +305,8 @@ fn output_signature(port: &OutputPort, named: bool) -> String {
         } else {
             result.push_str(&format!(" \"{}\" beside {}", beside.suffix, beside.port));
         }
-    } else if let Some(extension) = &port.extension {
-        result.push_str(&format!(" {extension}"));
+    } else {
+        result.push_str(&ending(port.extension.as_deref(), port.folder));
     }
     result
 }

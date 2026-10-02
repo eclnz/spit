@@ -175,6 +175,12 @@ impl OpenGroup {
                 format!("a source in sidecars group `{group}` names the extension its file adds to the stem, as in `source gps : GpsTrack .gpx`"),
             ));
         };
+        if product.folder {
+            return Err(ParseError::new(
+                number,
+                format!("a source in sidecars group `{group}` is a file beside the others, not a folder; drop the `/`"),
+            ));
+        }
         product.dimensions.clone_from(&self.group.dimensions);
         self.group.members.push((product.name.clone(), extension));
         syntax.push(original, number, StatementKind::Product(product, place));

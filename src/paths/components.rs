@@ -32,7 +32,7 @@ pub(crate) fn unusable_path(relative: &str) -> Option<&'static str> {
 /// `value` as one path component: ASCII letters, digits and `-` as they
 /// are, every other byte as `%XX`.
 ///
-/// Keep in step with `is_value_character` in `inputs/discover.rs`, which
+/// Keep in step with `is_value_character` in `inputs/pattern.rs`, which
 /// holds that an encoded value has only these characters and `%`:
 /// discovery binds a value without searching when the character after it
 /// cannot be one of them, so a character added here must be added there.
