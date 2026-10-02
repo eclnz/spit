@@ -96,7 +96,6 @@ const MAX_LINES: usize = 800;
 /// with the most lines it may have. A listed file may shrink but not grow,
 /// and leaves the list once it is within the limit.
 const OVER_LIMIT: &[(&str, usize)] = &[
-    ("src/diagnostics.rs", 1681),
     ("src/main.rs", 1252),
     ("src/parser/inventory.rs", 804),
     ("src/paths/template.rs", 842),

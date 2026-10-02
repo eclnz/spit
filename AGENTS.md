@@ -64,7 +64,7 @@ The five rules under [Performance](docs/architecture.md#performance) come first:
 
 **Errors and invariants**
 
-- **Errors are data.** An error is an enum variant whose fields say what went wrong, and `Located<E>` says where. Rendering is separate, in `diagnostics.rs` and `render.rs`, so that the same error can be printed as text or as JSON.
+- **Errors are data.** An error is an enum variant whose fields say what went wrong, and `Located<E>` says where. Rendering is separate, in `src/diagnostics` and `render.rs`, so that the same error can be printed as text or as JSON.
 - **Bad input never panics.** Outside tests, `unwrap` isn't used, and clippy rejects it. `expect` and `unreachable!` state an invariant the code already holds, and their message says what it is, as in `unreachable!("a product's template has its groups resolved")`. Anything a user's file can cause is an error.
 - **Name the other half of an invariant.** When code relies on something another place guarantees, a comment says so with "Keep in step with" and names that place, as the `Ord` for `EntityBinding` does for its hash. Add the comment on both sides.
 - **No `unsafe`.** The compiler rejects it.
