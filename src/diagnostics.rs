@@ -396,6 +396,7 @@ impl<'a> Context<'a> {
                 as_written: None,
             });
         };
+        let recipe = recipe.for_pipeline(&document.pipeline);
         recipe
             .check(&document.pipeline)
             .map_err(|error| ParseError::new(1, error.to_string()))?;

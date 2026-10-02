@@ -580,12 +580,16 @@ fn check(args: &CliArgs) -> Result<(), Box<dyn Error>> {
             let pipeline_text = read_file(&pipeline_file.display().to_string())?;
             let checked = diagnose_checked(&pipeline_text, Context::at(pipeline_file))
                 .expect("a checked recipe has a valid pipeline");
-            let mut merged = checked.pipeline;
-            merged
-                .product_paths
-                .extend(recipe.rules.source_paths.clone());
+            let rules = recipe.rules.for_pipeline(&checked.pipeline);
+            let defaulted = rules
+                .source_paths
+                .keys()
+                .filter(|name| !recipe.rules.source_paths.contains_key(*name));
+            let mut merged = checked.pipeline.clone();
+            merged.product_paths.extend(rules.source_paths.clone());
             let coverage = inspect_paths(&merged)?
-                .with_recipe_paths(recipe.rules.source_paths.keys().map(String::as_str));
+                .with_recipe_paths(recipe.rules.source_paths.keys().map(String::as_str))
+                .with_recipe_default(defaulted.map(String::as_str));
             if args.has(Flag::PathRules) {
                 println!("{coverage}");
             }
@@ -712,7 +716,7 @@ fn load_recipe(file: &str) -> Result<Loaded, Box<dyn Error>> {
         }
     };
     Ok(Loaded {
-        recipe,
+        recipe: recipe.for_pipeline(&checked.pipeline).into_owned(),
         pipeline_name: pipeline_file.display().to_string(),
         pipeline_file,
         pipeline_text,

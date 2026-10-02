@@ -1065,7 +1065,8 @@ impl Pipeline {
     }
 
     /// The path rule `product` uses, as written: its own rule, else its
-    /// stage's default, else the pipeline's default.
+    /// stage's default, else the pipeline's default, unless that needs
+    /// `{@stage}` and `product` is a source.
     pub fn path_rule_for(&self, product: &str) -> Option<&PathTemplate> {
         PipelineIndex::scan(self).path_rule_for(product)
     }
@@ -1368,14 +1369,21 @@ impl<'p> PipelineIndex<'p> {
         }
     }
 
-    /// See [`Pipeline::path_rule_for`].
+    /// See [`Pipeline::path_rule_for`]. A default that needs `{@stage}` is
+    /// for products made in a stage, so it does not find a source, which
+    /// is left for a rule of its own or the recipe's default.
     pub(crate) fn path_rule_for(&self, product: &str) -> Option<&'p PathTemplate> {
         let pipeline = self.pipeline;
         pipeline
             .product_paths
             .get(product)
             .or_else(|| self.stage_path_rule(product).map(|(_, template)| template))
-            .or(pipeline.path_template.as_ref())
+            .or_else(|| {
+                pipeline
+                    .path_template
+                    .as_ref()
+                    .filter(|default| !(default.needs_stage() && self.is_source(product)))
+            })
     }
 
     /// The step that makes `product`, the operation it calls, and the port
@@ -1495,6 +1503,10 @@ pub struct InputRules {
     pub exclusion_files: Vec<(String, usize)>,
     /// Path rules for source products that the recipe, not the pipeline, sets.
     pub source_paths: BTreeMap<String, PathTemplate>,
+    /// The recipe's `path:` line: the rule for each source with none of its
+    /// own, in the pipeline or the recipe, until
+    /// [`InputRules::for_pipeline`] gives it to each.
+    pub source_default: Option<PathTemplate>,
 }
 
 impl InputRules {
@@ -1504,6 +1516,30 @@ impl InputRules {
             && self.exclusions.is_empty()
             && self.exclusion_files.is_empty()
             && self.source_paths.is_empty()
+            && self.source_default.is_none()
+    }
+
+    /// These rules for `pipeline`: the default source path given, as its
+    /// own rule, to each source of `pipeline` with no rule in the pipeline
+    /// or the recipe. Borrowed when there is no default.
+    #[must_use]
+    pub fn for_pipeline(&self, pipeline: &Pipeline) -> Cow<'_, Self> {
+        let Some(default) = &self.source_default else {
+            return Cow::Borrowed(self);
+        };
+        let index = PipelineIndex::new(pipeline);
+        let mut rules = self.clone();
+        rules.source_default = None;
+        for product in &pipeline.products {
+            let name = &product.name;
+            if index.is_source(name)
+                && !pipeline.product_paths.contains_key(name)
+                && !rules.source_paths.contains_key(name)
+            {
+                rules.source_paths.insert(name.clone(), default.clone());
+            }
+        }
+        Cow::Owned(rules)
     }
 
     /// The discovery rule named `name`, if any.
