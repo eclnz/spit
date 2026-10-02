@@ -98,6 +98,25 @@ impl Pipeline {
         self.stage_path_rule(product).map(|(_, template)| template)
     }
 
+    /// The `sidecars` group named `name`.
+    pub fn sidecar_group(&self, name: &str) -> Option<&SidecarGroup> {
+        self.sidecar_groups.iter().find(|group| group.name == name)
+    }
+
+    /// Each member of a `sidecars` group, with its group, to find once and
+    /// then look up.
+    pub fn sidecar_members(&self) -> FxHashMap<&str, &SidecarGroup> {
+        self.sidecar_groups
+            .iter()
+            .flat_map(|group| {
+                group
+                    .members
+                    .iter()
+                    .map(move |(member, _)| (member.as_str(), group))
+            })
+            .collect()
+    }
+
     /// Whether `product` is a source family, which no step produces.
     pub fn is_source(&self, product: &str) -> bool {
         PipelineIndex::scan(self).is_source(product)

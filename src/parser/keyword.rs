@@ -23,7 +23,8 @@ pub(crate) enum Keyword {
     Stage,
     /// `dimensions [...]`, the order every product's dimensions follow.
     Dimensions,
-    /// `sidecars name [dims]: stem`, which opens a block of sources.
+    /// `sidecars name [dims]:`, which opens a block of sources and the
+    /// `path:` stem they share.
     Sidecars,
     /// The removed `shell-source:` line, kept to explain its removal.
     ShellSource,

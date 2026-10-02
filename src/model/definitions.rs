@@ -349,6 +349,22 @@ pub struct SidecarGroup {
     pub dimensions: Vec<String>,
     /// Each member source with its extension, in declaration order.
     pub members: Vec<(String, String)>,
+    /// The stem the block's `path:` line gives, if it has one; otherwise a
+    /// recipe gives it, as `path name: stem`.
+    pub stem: Option<PathTemplate>,
+}
+
+impl SidecarGroup {
+    /// The path rule each member takes from `stem`: the stem and the
+    /// member's extension.
+    pub fn member_paths<'a>(
+        &'a self,
+        stem: &'a PathTemplate,
+    ) -> impl Iterator<Item = (&'a str, PathTemplate)> + 'a {
+        self.members
+            .iter()
+            .map(move |(member, extension)| (member.as_str(), stem.with_extension(extension)))
+    }
 }
 
 /// Where the extension a product's file must have is declared.

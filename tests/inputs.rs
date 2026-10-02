@@ -616,14 +616,14 @@ fn a_recipe_that_does_not_fit_its_pipeline_says_why() {
             spit::InputError::NotASource {
                 product: "out".into(),
             },
-            "input path `out` must name a source product in the pipeline",
+            "input path `out` must name a source product or sidecars group in the pipeline",
         ),
         (
             "path other: y/{sub}.txt\n",
             spit::InputError::PathInBoth {
                 product: "other".into(),
             },
-            "source `other` has path rules in both .spit and .spitin",
+            "`other` has path rules in both .spit and .spitin",
         ),
         (
             "discover subs: [sub] from dirs data/sub-{sub}\n",
