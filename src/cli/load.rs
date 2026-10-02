@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use spit::{
     diagnose_checked, diagnose_checked_with_inventory, diagnose_checked_with_records,
     parse_input_spec_at, render_source_inventory, ArtifactReport, Checked, Context, FileNames,
-    InputSource, InputSpec, PathTemplate, Pipeline, Removal, ResolvedInputs,
+    InputSource, InputSpec, PathTemplate, Pipeline, Removal, ResolveError, ResolvedInputs,
 };
 
 use super::args::{CliArgs, Command, Flag};
@@ -129,6 +129,69 @@ pub(crate) fn settle(
         );
     }
     Ok((resolved, root))
+}
+
+/// Explain a missing scanned source with the path rule the scan used. A
+/// coverage error alone says how many artifacts were found, but not why a
+/// file visible under the root may have been left out.
+pub(crate) fn require_complete(
+    inputs: &ResolvedInputs,
+    pipeline: &Pipeline,
+) -> Result<(), Box<dyn Error>> {
+    let Err(failure) = inputs.require_complete() else {
+        return Ok(());
+    };
+    match source_path_failure(inputs, pipeline, &failure) {
+        Some(message) => Err(message.into()),
+        None => Err(failure.into()),
+    }
+}
+
+fn source_path_failure(
+    inputs: &ResolvedInputs,
+    pipeline: &Pipeline,
+    failure: &ResolveError,
+) -> Option<String> {
+    let ResolveError::CoverageViolation {
+        product,
+        found: 0,
+        discovery: false,
+        ..
+    } = &failure
+    else {
+        return None;
+    };
+    let Some(root) = &inputs.root else {
+        return None;
+    };
+    if inputs
+        .inventory
+        .artifacts
+        .iter()
+        .any(|record| record.product == *product)
+        || !inputs.inventory.removed.is_empty()
+        || !inputs.skipped.is_empty()
+    {
+        return None;
+    }
+    let mut located = pipeline.clone();
+    located
+        .product_paths
+        .extend(inputs.inventory.source_paths.clone());
+    let template = located.path_template_for(product)?;
+    let mut message = format!(
+        "{failure}\n  no `{product}` files were found under `{}` using path rule `{template}`",
+        root.display()
+    );
+    if let Some(example) = inputs.unmatched_files.iter().find(|file| {
+        file.to_ascii_lowercase()
+            .contains(&product.to_ascii_lowercase())
+    }) {
+        message.push_str(&format!(
+            "; `{example}` matched no source rule. Check the path template; `path {product}:` sets a rule for this source."
+        ));
+    }
+    Some(message)
 }
 
 /// The dataset `root` as a `.spitout` written to `file` records it: relative
@@ -308,6 +371,14 @@ fn prepare_recipe(
     let loaded = load_recipe(file)?;
     let (settled, root) = settle(&loaded, file, root.as_deref())?;
     eprintln!("note: ran `spit inputs {file}` in memory");
+    if !lenient {
+        if let Some(failure) = settled.gaps.first().map(|gap| &gap.error) {
+            if let Some(message) = source_path_failure(&settled, &loaded.checked.pipeline, failure)
+            {
+                return Err(message.into());
+            }
+        }
+    }
     let context = Context {
         path: Some(&loaded.pipeline_file),
         recipe: Some(&loaded.recipe),
