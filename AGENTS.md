@@ -71,7 +71,7 @@ The five rules under [Performance](docs/architecture.md#performance) come first:
 
 **Files and modules**
 
-- **A Rust file has at most 800 lines, tests included.** A longer file usually holds two subjects, which read better as two modules. Split it along the data it handles, as `src/paths` is split into `template.rs`, `rules.rs` and `bind.rs`, not into arbitrary halves. The files that were longer when the limit came in are listed in `OVER_LIMIT` in `tests/architecture.rs`, each with its length then. A listed file may shrink but not grow, and a file that falls within the limit leaves the list.
+- **A Rust file has at most 800 lines, tests included.** A longer file usually holds two subjects, which read better as two modules. Split it along the data it handles, as `src/paths` is split into the template itself (`template.rs`), the path it gives one product's artifacts (`product.rs`), path components (`components.rs`), the checks on declared rules (`rules.rs`) and paths bound to a DAG (`bind.rs`), not into arbitrary halves. The files that were longer when the limit came in are listed in `OVER_LIMIT` in `tests/architecture.rs`, each with its length then. A listed file may shrink but not grow, and a file that falls within the limit leaves the list.
 
 **Dependencies and boundaries**
 
