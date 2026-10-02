@@ -78,6 +78,14 @@ The five rules under [Performance](docs/architecture.md#performance) come first:
 - **Two crates, and a new one must earn its place.** SPIT depends on `mimalloc` and `rustc-hash`. `serde_json` was tried and removed, because the hand-written writer was 15% faster and needed five fewer crates (`1b4b141`). A new dependency needs `profiling/bench.py` numbers, and the output must stay byte-for-byte the same.
 - **The three steps stay apart.** Compile, inputs and resolve don't reach into each other except as `tests/architecture.rs` allows. Every module is private, and the library's API is what `lib.rs` re-exports, so add to `lib.rs` only what a caller outside the crate needs.
 
+## The VS Code extension
+
+[spit-vscode](https://github.com/eclnz/spit-vscode) is SPIT's editor extension, and it must stay in step with SPIT. It runs `spit check <file> --json --stdin --hovers` and shows the diagnostics, path hints and hovers that output holds. Its grammar, `syntaxes/spit.tmLanguage.json`, colours SPIT's keywords, headers and placeholders itself, and its README lists them.
+
+- **A change to what the extension reads needs a change in the extension.** That is anything in `check --json` or `--hovers`, any keyword, header, placeholder or other syntax, and the file kinds `check` takes. Make the extension's change as part of the same work, with the same branch name in both repositories. The extension's `extension.test.js` and `grammar.test.js` should cover it.
+- **Link the pull requests.** A spit-vscode pull request names the spit pull request it follows, as in "Follows eclnz/spit#42", and the spit pull request names the extension's. Merge the spit pull request first, since the extension needs a SPIT that has the change.
+- **Versions move together.** The extension's version follows SPIT's, so a release of SPIT bumps the extension's `package.json` as well.
+
 ## Checks before every commit
 
 ```sh
