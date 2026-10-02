@@ -35,17 +35,15 @@ fn unmatched_files_are_counted_and_can_be_listed_without_an_inventory() {
         &["data/in/a.txt", "data/in/a.txt.bak", "data/notes.md"],
     );
     tree.write("pipeline.spit", ONE_SOURCE);
-    let recipe = tree.write("recipe.spitin", "pipeline pipeline.spit\n");
-    let root = tree.path().join("data");
+    let recipe = tree.write("recipe.spitin", "pipeline pipeline.spit\nroot data\n");
     let recipe = recipe.to_str().unwrap();
-    let root = root.to_str().unwrap();
 
-    let regular = spit(&["inputs", recipe, "--root", root]);
+    let regular = spit(&["inputs", recipe]);
     assert!(regular.status.success(), "{}", text(&regular.stderr));
     assert!(text(&regular.stdout).contains("x[s=a]"));
     assert!(text(&regular.stderr).contains("2 files under"));
 
-    let listing = spit(&["inputs", recipe, "--root", root, "--unmatched"]);
+    let listing = spit(&["inputs", recipe, "--unmatched"]);
     assert!(listing.status.success(), "{}", text(&listing.stderr));
     assert_eq!(text(&listing.stdout), "in/a.txt.bak\nnotes.md\n");
     assert!(!text(&listing.stdout).contains("sources:"));
@@ -422,7 +420,7 @@ fn cli_discovers_sources_under_the_root() {
     fs::write(&pipeline, DISCOVERED).unwrap();
     // A recipe with no rules: sources are found by the pipeline's path rules.
     let recipe = tree.0.join("dataset.spitin");
-    fs::write(&recipe, "pipeline pipeline.spit\n").unwrap();
+    fs::write(&recipe, "pipeline pipeline.spit\nroot .\n").unwrap();
     let run = |args: &[&str]| {
         Command::new(env!("CARGO_BIN_EXE_spit"))
             .args(args)
@@ -430,7 +428,7 @@ fn cli_discovers_sources_under_the_root() {
             .output()
             .unwrap()
     };
-    let discovered = run(&["inputs", recipe.to_str().unwrap(), "--root", "."]);
+    let discovered = run(&["inputs", recipe.to_str().unwrap()]);
     assert!(discovered.status.success());
     // A printed .spitout records no root: where it will be kept is unknown.
     assert_eq!(
@@ -438,15 +436,14 @@ fn cli_discovers_sources_under_the_root() {
         "sources:\n    frame[subject=a,run=1]\n    frame[subject=a,run=2]\n    lut\n"
     );
     assert!(String::from_utf8_lossy(&discovered.stderr).contains("note: found 3 source artifacts"));
+    // One written beside the data records it as its root.
     let spitout = tree.0.join("found.spitout");
-    fs::write(&spitout, &discovered.stdout).unwrap();
-    let dag = run(&[
-        "dag",
-        pipeline.to_str().unwrap(),
-        spitout.to_str().unwrap(),
-        "--root",
-        ".",
-    ]);
+    let written = run(&["inputs", recipe.to_str().unwrap(), "-o", "found.spitout"]);
+    assert!(written.status.success());
+    assert!(fs::read_to_string(&spitout)
+        .unwrap()
+        .starts_with("root .\n"));
+    let dag = run(&["dag", pipeline.to_str().unwrap(), spitout.to_str().unwrap()]);
     let notes = String::from_utf8(dag.stderr).unwrap();
     assert!(dag.status.success(), "{notes}");
     assert!(notes.contains("note: 1 jobs resolved."), "{notes}");
@@ -486,13 +483,8 @@ fn discovery_reports_skipped_files_and_still_succeeds() {
     let tree = Tree::new("skipped", &["in/%41.txt", "in/a.txt"]);
     fs::write(tree.path().join("pipeline.spit"), ONE_SOURCE).unwrap();
     let recipe = tree.path().join("dataset.spitin");
-    fs::write(&recipe, "pipeline pipeline.spit\n").unwrap();
-    let output = spit(&[
-        "inputs",
-        recipe.to_str().unwrap(),
-        "--root",
-        tree.path().to_str().unwrap(),
-    ]);
+    fs::write(&recipe, "pipeline pipeline.spit\nroot .\n").unwrap();
+    let output = spit(&["inputs", recipe.to_str().unwrap()]);
     assert!(output.status.success(), "{}", text(&output.stderr));
     assert_eq!(text(&output.stdout), "sources:\n    x[s=a]\n");
     assert!(text(&output.stderr).contains("warning: skipped `in/%41.txt`"));

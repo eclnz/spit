@@ -1,3 +1,9 @@
+root rich_shapes_data
+
+source_paths:
+    scan: {@product}/{@entities}
+    ref: {@product}/{@entities}
+
 contexts:
     [sub=A,ses=1]
     [sub=A,ses=2]

@@ -1,3 +1,9 @@
+root branching_data
+
+source_paths:
+    raw: {@product}/{@entities}
+    policy: {@product}/{@entities}
+
 sources:
     raw[team=Alpha,period=Q1,item=1]
     raw[team=Alpha,period=Q1,item=2]

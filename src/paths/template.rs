@@ -4,6 +4,7 @@
 
 use std::borrow::Cow;
 use std::fmt;
+use std::sync::OnceLock;
 
 use crate::span::Located;
 use crate::template::{parse_template, Part};
@@ -138,9 +139,13 @@ pub struct PathTemplate {
 }
 
 impl PathTemplate {
-    /// Where outputs go when a pipeline run from a recipe sets no `path:`.
-    pub fn default_output() -> Self {
-        Self::parse("out/{@product}/{@entities}").expect("built-in output path is valid")
+    /// Where an output goes when no rule covers it: no rule of its own,
+    /// no stage default and no `path:`. Sources never take it.
+    pub fn built_in_output() -> &'static Self {
+        static BUILT_IN: OnceLock<PathTemplate> = OnceLock::new();
+        BUILT_IN.get_or_init(|| {
+            Self::parse("out/{@product}/{@entities}").expect("built-in output path is valid")
+        })
     }
 
     /// Parse a template such as `derivatives/{@stage}/{@product}/{@entities}.mif`.

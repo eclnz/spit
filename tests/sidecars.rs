@@ -192,7 +192,8 @@ fn a_groups_lines_are_checked() {
 
 #[test]
 fn a_recipe_cannot_declare_a_group() {
-    let error = spit::parse_input_spec("pipeline a.spit\nsidecars photo [id]:\n").unwrap_err();
+    let error =
+        spit::parse_input_spec("pipeline a.spit\nroot .\nsidecars photo [id]:\n").unwrap_err();
     assert!(
         error.to_string().contains("belong in the .spit pipeline"),
         "{error}"
@@ -205,7 +206,7 @@ fn a_recipe_gives_a_groups_stem() {
     tree.write("pipeline.spit", UNPLACED);
     let recipe = tree.write(
         "dataset.spitin",
-        "pipeline pipeline.spit\npath photo: site-{site}/shot-{shot}\n",
+        "pipeline pipeline.spit\nroot .\npath photo: site-{site}/shot-{shot}\n",
     );
     let recipe = recipe.to_str().unwrap();
     let (ok, out, err) = spit(&["inputs", recipe]);
@@ -237,7 +238,7 @@ fn a_recipes_default_gives_a_group_one_stem_named_for_it() {
     tree.write("pipeline.spit", UNPLACED);
     let recipe = tree.write(
         "dataset.spitin",
-        "pipeline pipeline.spit\npath: site-{site}/shot-{shot}/{@product}\n",
+        "pipeline pipeline.spit\nroot .\npath: site-{site}/shot-{shot}/{@product}\n",
     );
     let (ok, out, err) = spit(&["inputs", recipe.to_str().unwrap()]);
     assert!(ok, "{err}");
@@ -274,7 +275,7 @@ fn a_recipes_group_path_is_checked() {
         tree.write("pipeline.spit", pipeline);
         let recipe = tree.write(
             "dataset.spitin",
-            &format!("pipeline pipeline.spit\n{recipe}"),
+            &format!("pipeline pipeline.spit\nroot .\n{recipe}"),
         );
         let (ok, out, err) = spit(&["check", recipe.to_str().unwrap()]);
         assert!(!ok, "{recipe:?}: {out}");
@@ -302,7 +303,7 @@ fn discovery_names_a_group_missing_a_file() {
     tree.write("pipeline.spit", PHOTOS);
     let recipe = tree.write(
         "dataset.spitin",
-        "pipeline pipeline.spit\nexclude meta[site=a,shot=3]\n",
+        "pipeline pipeline.spit\nroot .\nexclude meta[site=a,shot=3]\n",
     );
     let output = Command::new(env!("CARGO_BIN_EXE_spit"))
         .args(["inputs", recipe.to_str().unwrap()])

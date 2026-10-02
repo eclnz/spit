@@ -1,4 +1,5 @@
 pipeline field_survey.spit
+root field_survey_data
 
 require raw_photo count>=2 per [site, visit]
 require flat_field count=1 per [site, visit]

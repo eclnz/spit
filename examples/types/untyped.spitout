@@ -1,3 +1,8 @@
+root untyped_data
+
+source_paths:
+    raw: {@product}/{@entities}
+
 sources:
     raw[subject=A,repeat=1]
     raw[subject=A,repeat=2]

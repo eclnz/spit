@@ -29,8 +29,7 @@ struct CommandSpec {
 impl Command {
     fn spec(self) -> CommandSpec {
         use Flag::{
-            Commands, Hovers, Json, Output, Partial, PathRules, Paths, Root, Stdin, StrictPaths,
-            Unmatched,
+            Commands, Hovers, Json, Output, Partial, PathRules, Paths, Root, Stdin, Unmatched,
         };
         match self {
             Self::Check => CommandSpec {
@@ -38,7 +37,7 @@ impl Command {
                 files: "<pipeline.spit | recipe.spitin | inputs.spitout>",
                 summary: "step 1: compile a pipeline, check a recipe against its pipeline, or check a .spitout's syntax; reads no data",
                 example: "spit check analysis.spit\n  spit check dataset.spitin",
-                flags: &[PathRules, StrictPaths, Json, Stdin, Hovers],
+                flags: &[PathRules, Json, Stdin, Hovers],
             },
             Self::Inputs => CommandSpec {
                 name: "inputs",
@@ -52,7 +51,7 @@ impl Command {
                 files: "<recipe.spitin> or <pipeline.spit> <inputs.spitout | ->",
                 summary: "step 3: resolve a pipeline's jobs over a dataset's inputs; -o writes the .spitdag",
                 example: "spit dag dataset.spitin -o analysis.spitdag\n  spit dag analysis.spit dataset.spitout -o analysis.spitdag\n  spit dag dataset.spitin --commands",
-                flags: &[Root, StrictPaths, Paths, Commands, Partial, Json, Output],
+                flags: &[Root, Paths, Commands, Partial, Json, Output],
             },
             Self::Artifacts => CommandSpec {
                 name: "artifacts",
@@ -119,13 +118,12 @@ pub(crate) enum Flag {
     Partial,
     Unmatched,
     PathRules,
-    StrictPaths,
     Json,
     Stdin,
     Hovers,
 }
 
-const FLAGS: [Flag; 11] = [
+const FLAGS: [Flag; 10] = [
     Flag::Root,
     Flag::Output,
     Flag::Paths,
@@ -133,21 +131,19 @@ const FLAGS: [Flag; 11] = [
     Flag::Partial,
     Flag::Unmatched,
     Flag::PathRules,
-    Flag::StrictPaths,
     Flag::Json,
     Flag::Stdin,
     Flag::Hovers,
 ];
 
 /// Pairs of flags that cannot be used together.
-const CONFLICTS: [(Flag, Flag); 8] = [
+const CONFLICTS: [(Flag, Flag); 7] = [
     (Flag::Json, Flag::Paths),
     (Flag::Json, Flag::Output),
     (Flag::Paths, Flag::Output),
     (Flag::Json, Flag::Commands),
     (Flag::Commands, Flag::Output),
     (Flag::Json, Flag::PathRules),
-    (Flag::Json, Flag::StrictPaths),
     (Flag::Unmatched, Flag::Output),
 ];
 
@@ -161,7 +157,6 @@ impl Flag {
             Self::Partial => "--partial",
             Self::Unmatched => "--unmatched",
             Self::PathRules => "--path-rules",
-            Self::StrictPaths => "--strict-paths",
             Self::Json => "--json",
             Self::Stdin => "--stdin",
             Self::Hovers => "--hovers",
@@ -179,9 +174,8 @@ impl Flag {
 
     fn help(self, command: Command) -> &'static str {
         match (self, command) {
-            (Self::Root, Command::Inputs) => "the folder to scan; the recipe's folder by default",
             (Self::Root, _) => {
-                "the dataset folder every path is relative to; the recipe's folder by default"
+                "with a .spit pipeline and no recipe, the dataset folder to scan, relative to where spit runs"
             }
             (Self::Output, Command::Inputs) => "write the .spitout to <file>, not standard output",
             (Self::Output, _) => "write the .spitdag to <file>",
@@ -194,7 +188,6 @@ impl Flag {
                 "list files matching no source rule instead of writing a .spitout"
             }
             (Self::PathRules, _) => "list the path rule each product uses",
-            (Self::StrictPaths, _) => "require an explicit path rule for every product",
             (Self::Json, Command::Check) => "print diagnostics as JSON, for editors",
             (Self::Json, _) => "print the .spitdag",
             (Self::Stdin, _) => {
@@ -346,7 +339,12 @@ fn overview(f: &mut fmt::Formatter<'_>) -> fmt::Result {
 fn command_help(f: &mut fmt::Formatter<'_>, command: Command) -> fmt::Result {
     let name = command.name();
     writeln!(f, "spit {name}: {}\n", command.summary())?;
-    writeln!(f, "usage: spit {name} {} [options]", command.files())?;
+    let options = if command.flags().is_empty() {
+        ""
+    } else {
+        " [options]"
+    };
+    writeln!(f, "usage: spit {name} {}{options}", command.files())?;
     if let Some(shortcut) = command.shortcut() {
         writeln!(f, "\n{shortcut}")?;
     }

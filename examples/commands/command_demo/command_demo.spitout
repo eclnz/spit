@@ -1,3 +1,5 @@
+root command_demo_data
+
 sources:
     shard[group=alpha,part=01]
     shard[group=alpha,part=02]

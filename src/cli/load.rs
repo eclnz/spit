@@ -9,40 +9,93 @@ use std::path::{Path, PathBuf};
 use spit::{
     diagnose_checked, diagnose_checked_with_inventory, diagnose_checked_with_records,
     parse_input_spec_at, render_source_inventory, ArtifactReport, Checked, Context, FileNames,
-    InputSource, InputSpec, PathTemplate, Pipeline, Removal, ResolveError, ResolvedInputs,
+    InputSource, InputSpec, Pipeline, Removal, ResolveError, ResolvedInputs,
 };
 
 use super::args::{CliArgs, Command, Flag};
-use super::output::{is_recipe, passed, read_file, read_stdin, report, Reported};
+use super::output::{is_pipeline, is_recipe, passed, read_file, read_stdin, report, Reported};
 
-/// A recipe, and the pipeline its `pipeline` line names, checked.
+/// A recipe, and the pipeline its `pipeline` line names, checked; or a
+/// pipeline given with `--root`, as a recipe with no rules.
 pub(crate) struct Loaded {
     pub(crate) recipe: InputSpec,
     /// The file the recipe's `pipeline` line names.
     pipeline_file: PathBuf,
-    /// That file as messages name it.
-    pipeline_name: String,
+    /// That file as messages name it, when the recipe named it rather than
+    /// the command line.
+    pipeline_name: Option<String>,
     pub(crate) pipeline_text: String,
     pub(crate) checked: Checked,
+    /// What `spit inputs` takes to run step 2 again: the recipe, or the
+    /// pipeline and its root.
+    pub(crate) invocation: String,
 }
 
 impl Loaded {
     /// Names for messages about the pipeline, which the user did not give
-    /// on the command line.
+    /// on the command line when a recipe names it.
     pub(crate) fn names(&self) -> FileNames<'_> {
         FileNames {
-            pipeline: Some(&self.pipeline_name),
+            pipeline: self.pipeline_name.as_deref(),
             inventory: None,
         }
     }
 }
 
+/// Read what step 2 starts from: a recipe, or a pipeline with the dataset
+/// folder `--root` gives, which only a pipeline given alone takes.
+pub(crate) fn load_inputs(args: &CliArgs) -> Result<Loaded, Box<dyn Error>> {
+    let file = &args.file;
+    let command = args.command.name();
+    match args.value(Flag::Root) {
+        Some(_) if is_recipe(file) => Err(format!(
+            "`{file}` names its dataset with its `root` line; `--root` is for a pipeline run without a recipe"
+        )
+        .into()),
+        Some(root) if is_pipeline(file) => load_pipeline(file, &root),
+        None if is_pipeline(file) => Err(format!(
+            "`spit {command} {file}` needs to know where the data is: add `--root <directory>`, or run a .spitin recipe"
+        )
+        .into()),
+        _ => load_recipe(file),
+    }
+}
+
+/// Check the pipeline `file`, to scan `root` with its own path rules and
+/// no recipe.
+fn load_pipeline(file: &str, root: &str) -> Result<Loaded, Box<dyn Error>> {
+    let pipeline_file = PathBuf::from(file);
+    let pipeline_text = read_file(file)?;
+    let checked = match diagnose_checked(&pipeline_text, Context::at(&pipeline_file)) {
+        Ok(checked) => checked,
+        Err(all) => {
+            report(&all, &pipeline_text, None, FileNames::default())?;
+            return Err(Reported.into());
+        }
+    };
+    Ok(Loaded {
+        recipe: InputSpec {
+            pipeline: Some(pipeline_file.clone()),
+            root: Some((PathBuf::from(root), 0)),
+            ..InputSpec::default()
+        },
+        pipeline_name: None,
+        pipeline_file,
+        pipeline_text,
+        checked,
+        invocation: format!("{file} --root {root}"),
+    })
+}
+
 /// Read the recipe `file` and check the pipeline it names, printing the
 /// pipeline's diagnostics only when it fails; its warnings are left to the
 /// caller.
-pub(crate) fn load_recipe(file: &str) -> Result<Loaded, Box<dyn Error>> {
+fn load_recipe(file: &str) -> Result<Loaded, Box<dyn Error>> {
     if !is_recipe(file) {
-        return Err(format!("spit inputs reads a .spitin recipe, not `{file}`").into());
+        return Err(format!(
+            "spit inputs reads a .spitin recipe, or a .spit pipeline with `--root`, not `{file}`"
+        )
+        .into());
     }
     let recipe = parse_input_spec_at(&read_file(file)?, Path::new(file))
         .map_err(|error| format!("{file}: {error}"))?;
@@ -64,39 +117,30 @@ pub(crate) fn load_recipe(file: &str) -> Result<Loaded, Box<dyn Error>> {
     };
     Ok(Loaded {
         recipe,
-        pipeline_name: pipeline_file.display().to_string(),
+        pipeline_name: Some(pipeline_file.display().to_string()),
         pipeline_file,
         pipeline_text,
         checked,
+        invocation: file.to_owned(),
     })
 }
 
-/// Run step 2 for the recipe `file`: scan `given`, the root the recipe's
-/// `root` line names, or the recipe's folder; or take the records written
-/// in the recipe when no root is given on the command line. Returns what it
-/// settled, and the dataset root, when known.
-pub(crate) fn settle(
-    loaded: &Loaded,
-    file: &str,
-    given: Option<&Path>,
-) -> Result<(ResolvedInputs, Option<PathBuf>), Box<dyn Error>> {
-    let folder = Path::new(file)
-        .parent()
-        .filter(|parent| !parent.as_os_str().is_empty())
-        .unwrap_or_else(|| Path::new("."))
-        .to_owned();
+/// Run step 2: scan the root the recipe's `root` line or `--root` names,
+/// or take the records written in the recipe. Returns what it settled, and
+/// the dataset root.
+pub(crate) fn settle(loaded: &Loaded) -> Result<(ResolvedInputs, PathBuf), Box<dyn Error>> {
     let recipe = &loaded.recipe;
-    let named = recipe.root.as_ref().map(|(root, _)| root.clone());
-    let root = given.map(Path::to_path_buf).or(named);
-    // Records written in the recipe stand in for a scan, unless a root to
-    // scan is given on the command line. The recipe's `root` line, like its
-    // folder, only says where the dataset is.
+    let (root, _) = recipe
+        .root
+        .clone()
+        .expect("a recipe read from a file names its root, and `--root` gives a pipeline's");
+    // Records written in the recipe stand in for a scan. The `root` line
+    // still says where their files are.
     let source = match &recipe.inventory {
-        Some(records) if given.is_none() => InputSource::Inventory(records.clone()),
-        _ => InputSource::Discover(root.as_deref().unwrap_or(&folder)),
+        Some(records) => InputSource::Inventory(records.clone()),
+        None => InputSource::Discover(&root),
     };
     let resolved = recipe.resolve(&loaded.checked.pipeline, source)?;
-    let root = root.or_else(|| resolved.root.clone());
     for skipped in &resolved.skipped {
         eprintln!("warning: skipped {skipped}");
     }
@@ -109,7 +153,7 @@ pub(crate) fn settle(
             // An example says what kind of file is left out, which is
             // usually enough to see that leaving it out is right.
             let example = &resolved.unmatched_files[0];
-            eprintln!("note: {count} files under `{}` match no source rule and are not read, such as `{example}`; `spit inputs {} --unmatched` lists them", root.display(), file);
+            eprintln!("note: {count} files under `{}` match no source rule and are not read, such as `{example}`; `spit inputs {} --unmatched` lists them", root.display(), loaded.invocation);
         }
     }
     let pipeline = &loaded.checked.pipeline;
@@ -281,7 +325,6 @@ fn removal_note(removal: &Removal, pipeline: &Pipeline) -> String {
 /// to bind paths.
 pub(crate) struct Prepared {
     pub(crate) pipeline: Pipeline,
-    pub(crate) bound: Pipeline,
     pub(crate) inputs: ResolvedInputs,
     /// What the inputs resolve to, from their diagnosis; its sources get
     /// their files from `inputs` in [`prepared`].
@@ -306,10 +349,15 @@ pub(crate) fn prepare(args: &CliArgs) -> Result<Prepared, Box<dyn Error>> {
         )
         .into());
     }
+    if let (Some(_), Some(_)) = (given, args.value(Flag::Root)) {
+        return Err(
+            "`--root` is for a pipeline run without a recipe or .spitout; a .spitout says where its data is with its `root` line, which `spit inputs -o` writes"
+                .into(),
+        );
+    }
     let lenient = args.command == Command::Artifacts || args.has(Flag::Partial);
-    let root = args.value(Flag::Root).map(PathBuf::from);
-    if is_recipe(inputs) {
-        return prepare_recipe(inputs, root, lenient);
+    if given.is_none() && (is_recipe(inputs) || is_pipeline(inputs)) {
+        return prepare_loaded(load_inputs(args)?, lenient);
     }
     let Some(pipeline) = given else {
         return Err(format!(
@@ -347,14 +395,13 @@ pub(crate) fn prepare(args: &CliArgs) -> Result<Prepared, Box<dyn Error>> {
         names,
     )?;
     // A root the records name is relative to their file's folder.
-    let recorded = records.inventory.root.as_ref().map(|recorded| {
+    let root = records.inventory.root.as_ref().map(|recorded| {
         let folder = match inputs.as_str() {
             "-" => Path::new(""),
             file => Path::new(file).parent().unwrap_or_else(|| Path::new("")),
         };
         folder.join(recorded)
     });
-    let root = root.or(recorded);
     let settled = InputSpec::default()
         .resolve(&checked.pipeline, InputSource::Inventory(records.inventory))?;
     Ok(prepared(checked.pipeline, settled, records.report, root))
@@ -363,14 +410,9 @@ pub(crate) fn prepare(args: &CliArgs) -> Result<Prepared, Box<dyn Error>> {
 /// Step 2 in memory for the recipe `file`, then step 3's diagnosis of the
 /// records it settles. The pipeline is read and settled once, and its
 /// warnings are printed once, with the records'.
-fn prepare_recipe(
-    file: &str,
-    root: Option<PathBuf>,
-    lenient: bool,
-) -> Result<Prepared, Box<dyn Error>> {
-    let loaded = load_recipe(file)?;
-    let (settled, root) = settle(&loaded, file, root.as_deref())?;
-    eprintln!("note: ran `spit inputs {file}` in memory");
+fn prepare_loaded(loaded: Loaded, lenient: bool) -> Result<Prepared, Box<dyn Error>> {
+    let (settled, root) = settle(&loaded)?;
+    eprintln!("note: ran `spit inputs {}` in memory", loaded.invocation);
     if !lenient {
         if let Some(failure) = settled.gaps.first().map(|gap| &gap.error) {
             if let Some(message) = source_path_failure(&settled, &loaded.checked.pipeline, failure)
@@ -390,7 +432,7 @@ fn prepare_recipe(
     if let Some((checked, records)) = diagnose_checked_with_inventory(text, &settled, context) {
         report(&checked.warnings, text, None, loaded.names())?;
         let pipeline = loaded.checked.pipeline;
-        return Ok(prepared(pipeline, settled, records.report, root));
+        return Ok(prepared(pipeline, settled, records.report, Some(root)));
     }
     let records_text = render_source_inventory(
         &settled.inventory,
@@ -410,7 +452,7 @@ fn prepare_recipe(
         loaded.checked.pipeline,
         settled,
         records.report,
-        root,
+        Some(root),
     ))
 }
 
@@ -422,15 +464,8 @@ fn prepared(
     root: Option<PathBuf>,
 ) -> Prepared {
     report.dag.locate_sources(&inputs.inventory);
-    // Records give every source its file; outputs with no rule take the
-    // built-in layout.
-    let mut bound = pipeline.clone();
-    bound
-        .path_template
-        .get_or_insert_with(PathTemplate::default_output);
     Prepared {
         pipeline,
-        bound,
         inputs,
         report,
         root,

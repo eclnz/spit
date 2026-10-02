@@ -45,7 +45,7 @@ SPIT runs in three steps. Each is one command, and each reads the files the prev
 | Step | Command | Reads | Writes |
 | --- | --- | --- | --- |
 | 1. Compile | `spit check` | a `.spit` pipeline, or a `.spitin` recipe | nothing: it reports errors and warnings |
-| 2. Build inputs | `spit inputs` | a `.spitin` recipe, its pipeline, and the dataset folder | a `.spitout` |
+| 2. Build inputs | `spit inputs` | a `.spitin` recipe and its pipeline, or a `.spit` pipeline and `--root`, and the dataset folder | a `.spitout` |
 | 3. Resolve jobs | `spit dag`, `spit artifacts` | a `.spit` pipeline and a `.spitout` | a `.spitdag` |
 
 | File | Holds |
@@ -57,17 +57,22 @@ SPIT runs in three steps. Each is one command, and each reads the files the prev
 
 A later step may also take an earlier step's input and run that step in memory: `dag` and `artifacts` take a `.spitin` in place of the `.spitout`. A `.spitin` names its own pipeline, so it is given alone: `spit dag dataset.spitin`. Giving a `.spit` beside it is an error, so the two cannot disagree. A `.spitout` names no pipeline, so it takes one: `spit dag analysis.spit dataset.spitout`.
 
+A recipe is for when a dataset needs more than its folder: rules to find, check or leave out its inputs, or source paths of its own. When the pipeline's path rules already find every source, skip it and name the folder: `spit dag analysis.spit --root data`. That runs `spit inputs` in memory on the pipeline alone, so it takes no `discover`, `exclude`, `drop` or `require` rules. `--root` is taken only this way: a recipe and a `.spitout` each say where their data is with a `root` line.
+
 SPIT has no backend yet: nothing in this repository runs a `.spitdag`.
 
 ## CLI commands and options
 
 ```text
-spit check <pipeline.spit | recipe.spitin | inputs.spitout> [--path-rules] [--strict-paths] [--json] [--stdin] [--hovers]
-spit inputs <recipe.spitin> [--root <directory>] [--unmatched | -o <file>]
-spit dag <recipe.spitin> [--root <directory>] [--strict-paths] [--paths] [--commands] [--partial] [--json | -o <file>]
-spit dag <pipeline.spit> <inputs.spitout | -> [--root <directory>] [--strict-paths] [--paths] [--commands] [--partial] [--json | -o <file>]
-spit artifacts <recipe.spitin> [--root <directory>]
-spit artifacts <pipeline.spit> <inputs.spitout | -> [--root <directory>]
+spit check <pipeline.spit | recipe.spitin | inputs.spitout> [--path-rules] [--json] [--stdin] [--hovers]
+spit inputs <recipe.spitin> [--unmatched | -o <file>]
+spit inputs <pipeline.spit> --root <directory> [--unmatched | -o <file>]
+spit dag <recipe.spitin> [--paths] [--commands] [--partial] [--json | -o <file>]
+spit dag <pipeline.spit> <inputs.spitout | -> [--paths] [--commands] [--partial] [--json | -o <file>]
+spit dag <pipeline.spit> --root <directory> [--paths] [--commands] [--partial] [--json | -o <file>]
+spit artifacts <recipe.spitin>
+spit artifacts <pipeline.spit> <inputs.spitout | ->
+spit artifacts <pipeline.spit> --root <directory>
 ```
 
 Files come first; options follow them. `spit help` lists the commands, and `spit help <command>` or `spit <command> --help` gives one command's options.
@@ -81,14 +86,13 @@ Files come first; options follow them. `spit help` lists the commands, and `spit
 
 | Option | Effect |
 | --- | --- |
+| `--root <directory>` | With a `.spit` pipeline given alone to `inputs`, `dag` or `artifacts`, the dataset folder to scan with the pipeline's own path rules, relative to where `spit` runs. A recipe or `.spitout` names its root with a `root` line instead, and `--root` with either is an error. |
 | `-o <file>`, `--output <file>` | With `inputs`, write the `.spitout` to the file instead of standard output. With `dag`, write the `.spitdag`. |
-| `--root <directory>` | The dataset root: the folder a recipe scans, the base of every path, and where each source file must exist. By default, the folder a recipe's `root` line names, else the recipe's folder, or the root a `.spitout` records; see [Where files live](#where-files-live). |
-| `--path-rules` | With `check`, list the path rule each product uses, with any [extension](docs/language-reference.md#extensions) added to it and where that is declared. |
+| `--path-rules` | With `check`, list the path rule each product uses (its own, a stage's or the pipeline's default, the recipe's, or for an output the built-in `out/{@product}/{@entities}`), with any [extension](docs/language-reference.md#extensions) added to it and where that is declared. |
 | `--unmatched` | With `inputs`, list files under the dataset root that match no source path rule, one per line, instead of writing a `.spitout`. |
 | `--paths` | With `dag`, print the file under every artifact. |
 | `--commands` | With `dag`, print each job's `verify` and command lines with their paths filled in, quoted as a shell reads them, so a line can be pasted into a shell run from the dataset folder. With `--paths`, print them under each job's artifacts. Use it separately from `-o`, which saves a `.spitdag`. |
 | `--partial` | With `dag`, plan jobs whose inputs can be completed and record the artifacts left out of the `.spitdag`. A `many` input uses its complete members. Without it, `dag` stops at an incomplete job. |
-| `--strict-paths` | With `check` and `dag`, require an explicit `path product:` rule for every product, even if a default `path:` rule exists. Source rules settled from a recipe count when building a DAG. |
 | `--json` | With `dag`, print the `.spitdag`. With `check`, print diagnostics as JSON for editor use and stop, succeeding whatever they report. Each diagnostic has a `severity` of `error` or `warning`; those tied to a declaration, call, rule, command, or path include its `line`, and a `column` and `end_column` for the text it is about, such as one input of a call or one `{placeholder}`. Columns are 1-based and count UTF-16 code units, as editors do; `end_column` is one past the last character. When checking a recipe finds an error in its pipeline, the diagnostic includes `file` and positions in that pipeline. For a pipeline that checks clean, a `paths` list gives each product whose path no rule writes in full, with its `line` and its `path`, extension included, for the editor to show. |
 | `--stdin` | With `check`, read the file's text from standard input, such as an editor's unsaved buffer. The file's path is still used to resolve `use` imports and a recipe's `pipeline` line. |
 | `--hovers` | With `check --json`, include what an editor shows on hover: for a pipeline, compiler-backed operation and product explanations in a `hovers` array; for any file, SPIT's own words in `words` and `word_docs`. Reads no dataset. |
@@ -165,7 +169,7 @@ path image: data/sub-{sub}/ses-{ses}/image.nii.gz
 
 `discover` reads the observed subject and session pairs from folders, and the image source expands over them, so a session folder without its image is an error rather than a session that silently has none. `drop [sub] where sessions count<2` removes each subject with fewer than two sessions, reporting each on stderr. `require` instead fails such a group: `require sessions count>=2 per [sub]` names the subject with one session and its count. `sessions` remains a discovery rule name, not a product. `exclude bold[sub=02,ses=01,run=3]  # corrupted` removes one named artifact, and `exclude from qc/excluded.csv` reads such rules from a spreadsheet; the `.spitout` records what each rule removed and why. Logical source types and operations stay in the `.spit`.
 
-`spit check cohort.spitin` checks the rules against the pipeline without reading the dataset. `spit inputs cohort.spitin -o cohort.spitout` scans the recipe's folder, or `--root`, and writes what it found:
+`spit check cohort.spitin` checks the rules against the pipeline without reading the dataset. `spit inputs cohort.spitin -o cohort.spitout` scans the folder its `root` line names, and writes what it found:
 
 ```text
 root .
@@ -196,14 +200,15 @@ This creates two sort jobs for `alpha`, one for `beta`, and one merge job for ea
 
 Every path SPIT reads or writes, for a source or an output, is relative to one folder: the dataset root. The root is:
 
-- **with a recipe:** the folder its `root` line names, else the recipe's folder;
-- **with a `.spitout`:** the root its `root` line records. A printed or hand-written `.spitout` has none; then `dag` does not check that source files exist, and the `.spitdag` records no root.
+- **with a recipe:** the folder its `root` line names. Every recipe has one, `root .` for its own folder, so a recipe always says where its data is, whoever runs it and from wherever;
+- **with a `.spitout`:** the root its `root` line records. A printed or hand-written `.spitout` may have none; then `dag` does not check that source files exist, and the `.spitdag` records no root;
+- **with a pipeline alone:** the folder `--root` gives, relative to where `spit` runs.
 
-`--root` overrides either, for `inputs`, `dag` and `artifacts` alike: the folder a recipe scans, the base of every path, and where each source file must exist. A recipe's `pipeline` and `root` lines are relative to the recipe's own folder and may use `..`. `spit inputs -o` records the root in the `.spitout` it writes, relative to that file, so `dag` on the `.spitout` finds the same files. A printed `.spitout` records none, since where it will be kept is unknown.
+The root is the folder a scan reads, the base of every path, and where each source file must exist. A recipe's or `.spitout`'s root is fixed by its file; `--root` cannot change it. A recipe's `pipeline` and `root` lines are relative to the recipe's own folder and may use `..`. `spit inputs -o` records the root in the `.spitout` it writes, relative to that file, so `dag` on the `.spitout` finds the same files. A printed `.spitout` records none, since where it will be kept is unknown.
 
 Three layouts work well:
 
-- **Everything together:** the pipeline and recipe sit in the dataset folder, and `spit dag data/cohort.spitin` needs no `--root`. The scan ignores SPIT's own files, so they are not reported as matching no source rule.
+- **Everything together:** the pipeline and recipe sit in the dataset folder, the recipe says `root .`, and `spit dag data/cohort.spitin` runs from anywhere. The scan ignores SPIT's own files, so they are not reported as matching no source rule.
 - **The data in a folder of its own:** the pipeline and recipe sit together, and the recipe says where the data is:
 
   ```text
