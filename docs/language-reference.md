@@ -302,18 +302,34 @@ Later steps read it as any other output, and the `.spitdag` lists it among the j
 
 ### Sidecar files
 
-Files that travel together, such as an image and its JSON metadata, often share a name and differ only by extension. A `sidecars` block declares such sources once, with the dimensions and the path stem they share:
+Files that travel together, such as an image and its JSON metadata, often share a name and differ only by extension. A `sidecars` block declares such sources once, with the dimensions they share, and an indented `path:` line gives the path stem they share:
 
 ```text
-sidecars photo [site, visit, shot]: site-{site}/visit-{visit}/photos/shot-{shot}
+sidecars photo [site, visit, shot]:
+    path: site-{site}/visit-{visit}/photos/shot-{shot}
     source raw_photo : Image<Photo,Captured> .raw
     source photo_gps : GpsTrack .gpx
     source photo_json : CaptureMetadata .json
 ```
 
-Each member is an ordinary source with the group's dimensions, whose path is the stem and its extension, as `site-{site}/visit-{visit}/photos/shot-{shot}.gpx`; steps read it by name, as any other source. Write each member indented beneath the header as a source that declares its extension, `source name : Type .ext`, or `source name .ext` untyped. The next line that is not indented ends the block. A group with no dimensions names one set of files, as `sidecars config: config/settings`.
+Each member is an ordinary source with the group's dimensions, whose path is the stem and its extension, as `site-{site}/visit-{visit}/photos/shot-{shot}.gpx`; steps read it by name, as any other source. Write each member indented beneath the header as a source that declares its extension, `source name : Type .ext`, or `source name .ext` untyped. The `path:` line comes before the members, once, and the next line that is not indented ends the block. A group with no dimensions names one set of files, as `sidecars config:` with `path: config/settings`.
 
-A block belongs at the top level of a pipeline. Its members take no dimensions or path rules of their own.
+Without a `path:` line, the stem is the dataset's to give: a [recipe](#recipes) names the group as it would a source, and its members take the stem and their extensions as before:
+
+```text
+# survey.spit
+sidecars photo [site, visit, shot]:
+    source raw_photo : Image<Photo,Captured> .raw
+    source photo_json : CaptureMetadata .json
+
+# dataset.spitin
+pipeline survey.spit
+path photo: site-{site}/visit-{visit}/photos/shot-{shot}
+```
+
+A recipe's default `path:` covers a group with no stem as one product named for the group, so `path: data/{site}/{visit}/{shot}/{@product}` finds `data/a/1/3/photo.raw` and `data/a/1/3/photo.json`. The `.spitout` writes each member's rule under `source_paths:`.
+
+A block belongs at the top level of a pipeline. Its members take no dimensions or path rules of their own, in the pipeline or the recipe, and no product may share the group's name, since `path photo:` names one thing. A group's stem is written in its block or in the recipe, not both; a `path photo:` line in the pipeline is an error that points to the block.
 
 When `spit inputs` scans a dataset, it warns about each place it found some of a group's files and not the others, as `warning: photo[site=A,visit=2,shot=3] has .raw and .gpx but no .json`, before a step fails to find the missing one. A file an `exclude` rule removes is not counted as missing.
 
@@ -331,7 +347,7 @@ require image count=1 per [sub, ses]
 path image: data/sub-{sub}/ses-{ses}/image.nii.gz
 ```
 
-A recipe may contain `discover`, `exclude`, `drop` and `require` rules, `path product:` rules for source products, a default `path:` rule for its sources, and `sources:`/`contexts:` records. It cannot declare sources, `sidecars` groups, operations, steps, commands, stages, imports, or `ext:`; the pipeline still declares each logical `source` with its dimensions and optional type. Rules in a pipeline are an error, and so are records. A source's path rule is written in the pipeline or in the recipe, not both: put it in the pipeline when every dataset for that pipeline shares the layout, and in the recipe when the layout belongs to one dataset.
+A recipe may contain `discover`, `exclude`, `drop` and `require` rules, `path product:` rules for source products and for [`sidecars` groups](#sidecar-files) whose block gives no stem, a default `path:` rule for its sources, and `sources:`/`contexts:` records. It cannot declare sources, `sidecars` groups, operations, steps, commands, stages, imports, or `ext:`; the pipeline still declares each logical `source` with its dimensions and optional type. Rules in a pipeline are an error, and so are records. A source's path rule is written in the pipeline or in the recipe, not both: put it in the pipeline when every dataset for that pipeline shares the layout, and in the recipe when the layout belongs to one dataset.
 
 A recipe's `path:` line is the default for every source with no rule of its own, in the pipeline or the recipe. Where a dataset keeps its inputs is the dataset's to say, so the pipeline's `path:` can say where outputs go, by stage if it likes, and the recipe says where sources are:
 

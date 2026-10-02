@@ -77,10 +77,16 @@ pub(crate) fn check(args: &CliArgs) -> Result<(), Box<dyn Error>> {
                 .into_iter()
                 .map(str::to_owned)
                 .collect();
+            let named: Vec<String> = recipe
+                .rules
+                .named_source_paths(&merged)
+                .keys()
+                .cloned()
+                .collect();
             let source_paths = recipe.rules.source_paths_for(&merged).into_owned();
             merged.product_paths.extend(source_paths);
             let coverage = inspect_paths(&merged)?
-                .with_recipe_paths(recipe.rules.source_paths.keys().map(String::as_str))
+                .with_recipe_paths(named.iter().map(String::as_str))
                 .with_recipe_default(defaulted.iter().map(String::as_str));
             if args.has(Flag::PathRules) {
                 println!("{coverage}");
