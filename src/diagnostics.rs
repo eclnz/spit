@@ -10,8 +10,8 @@ use crate::command::collect_commands;
 use crate::compile::collect_pipeline;
 use crate::imports::parse_located_document;
 use crate::inputs::{
-    check_inventory, collect_exclusion_errors, collect_rule_errors, InputCheck, InputError,
-    InputSpec, ResolvedInputs,
+    check_inventory, collect_exclusion_errors, collect_rule_errors, with_source_paths, InputCheck,
+    InputError, InputSpec, ResolvedInputs,
 };
 use crate::json::Json;
 use crate::lower::{parse_document_with_imports, ParsedDocument};
@@ -396,7 +396,6 @@ impl<'a> Context<'a> {
                 as_written: None,
             });
         };
-        let recipe = recipe.for_pipeline(&document.pipeline);
         recipe
             .check(&document.pipeline)
             .map_err(|error| ParseError::new(1, error.to_string()))?;
@@ -769,14 +768,14 @@ fn recipe_path_errors(
     lines: &SourceMap,
     text: &str,
 ) -> Vec<Diagnostic> {
-    let rules = spec.rules.for_pipeline(pipeline);
-    if rules.source_paths.is_empty() {
+    let source_paths = spec.rules.source_paths_for(pipeline);
+    if source_paths.is_empty() {
         return Vec::new();
     }
-    let mut merged = pipeline.clone();
-    merged.product_paths.extend(rules.source_paths.clone());
+    let merged = with_source_paths(pipeline, &source_paths);
+    // A source without a rule of its own in the recipe has its default.
     let mut places = SourceMap::default();
-    for name in rules.source_paths.keys() {
+    for name in source_paths.keys() {
         if let Some(place) = lines.paths.get(name).or(lines.default_path.as_ref()) {
             places.paths.insert(name.clone(), place.clone());
         }

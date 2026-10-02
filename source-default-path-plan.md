@@ -18,4 +18,5 @@ A pipeline has one default path rule, and it does two jobs: it finds sources and
 - [x] Tests, the language reference, the README and `docs/architecture.md`. Commit: "Let a recipe's path: be the default rule for its sources".
 - [x] Check a recipe's source rules, its default's included, in `spit check`, which only `--path-rules` did: a default without `{@product}` passed `check` and failed in `inputs`. Commit: "Check a recipe's source paths in spit check, each at its line".
 - [x] Check whether `spit-vscode` needs a change for `path:` in a `.spitin`. None: its one grammar already highlights `path:` in every file, and a recipe gets no inline path hints.
+- [x] Keep the recipe as parsed data and derive each source's rule with pure functions, in place of settling the recipe in place behind a flag, following the data-oriented rules in `docs/architecture.md`. Commit: "Derive a recipe's source rules from its data instead of settling it in place".
 - [ ] Delete this plan in its own commit before the work merges.

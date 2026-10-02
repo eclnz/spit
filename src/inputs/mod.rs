@@ -31,7 +31,8 @@ pub(crate) use self::coverage::collect_rule_errors;
 pub use self::coverage::EveryGroupDropped;
 use self::coverage::{apply_drops, check_before_removal};
 pub(crate) use self::coverage::{check_inventory, InputCheck};
-use self::discover::{discover, locate_sources, with_source_paths};
+pub(crate) use self::discover::with_source_paths;
+use self::discover::{discover, locate_sources};
 pub use self::discover::{discover_source_files, discover_sources, Discovery};
 pub(crate) use self::exclusions::collect_exclusion_errors;
 pub use self::exclusions::UnmatchedExclusion;
@@ -213,25 +214,9 @@ fn finish_spec(
 }
 
 impl InputSpec {
-    /// This recipe for `pipeline`, its default source path given to each
-    /// source with no rule of its own; see [`InputRules::for_pipeline`].
-    #[must_use]
-    pub fn for_pipeline(&self, pipeline: &Pipeline) -> Cow<'_, Self> {
-        match self.rules.for_pipeline(pipeline) {
-            Cow::Borrowed(_) => Cow::Borrowed(self),
-            Cow::Owned(rules) => Cow::Owned(Self {
-                rules,
-                ..self.clone()
-            }),
-        }
-    }
-
     /// Check the recipe against the pipeline's source declarations, without
     /// reading any file or record.
     pub fn check(&self, pipeline: &Pipeline) -> Result<(), InputError> {
-        if self.rules.source_default.is_some() {
-            return self.for_pipeline(pipeline).check(pipeline);
-        }
         for name in self.rules.source_paths.keys() {
             let product = name.clone();
             if !pipeline.is_source(name) {
@@ -242,10 +227,11 @@ impl InputSpec {
             }
         }
         if !self.rules.discoveries.is_empty() {
+            let source_paths = self.rules.source_paths_for(pipeline);
             let index = PipelineIndex::new(pipeline);
             for product in &pipeline.products {
                 if index.is_source(&product.name)
-                    && !self.rules.source_paths.contains_key(&product.name)
+                    && !source_paths.contains_key(&product.name)
                     && !index.has_path(&product.name)
                 {
                     let product = product.name.clone();
@@ -274,14 +260,12 @@ impl InputSpec {
         pipeline: &Pipeline,
         source: InputSource<'_>,
     ) -> Result<ResolvedInputs, InputError> {
-        if self.rules.source_default.is_some() {
-            return self.for_pipeline(pipeline).resolve(pipeline, source);
-        }
         validate_pipeline(pipeline)?;
         self.check(pipeline)?;
+        let source_paths = self.rules.source_paths_for(pipeline);
         let (mut inventory, skipped, unmatched_files, root, removed, incomplete) = match source {
             InputSource::Discover(root) => {
-                let located = with_source_paths(pipeline, &self.rules.source_paths);
+                let located = with_source_paths(pipeline, &source_paths);
                 let found = discover(&located, &self.rules, root)?;
                 if let Some(unmatched) = found.unmatched {
                     return Err(InputError::UnmatchedExclusion(unmatched));
@@ -318,7 +302,7 @@ impl InputSpec {
                 (inventory, Vec::new(), Vec::new(), None, removed, Vec::new())
             }
         };
-        self.merge_source_paths(pipeline, &mut inventory)?;
+        merge_source_paths(pipeline, &source_paths, &mut inventory)?;
         let located = with_source_paths(pipeline, &inventory.source_paths);
         inspect_paths(&located)?;
         let checked = check_inventory(pipeline, &self.rules, Cow::Owned(inventory))?;
@@ -336,52 +320,53 @@ impl InputSpec {
         })
     }
 
-    /// Add the recipe's source path rules to those `inventory` carries, as a
-    /// `.spitout` does, so the inventory holds every rule for its sources.
-    /// Each must name a source the pipeline declares no rule for, and the
-    /// two files must not disagree.
-    fn merge_source_paths(
-        &self,
-        pipeline: &Pipeline,
-        inventory: &mut SourceInventory,
-    ) -> Result<(), InputError> {
-        for (name, template) in &self.rules.source_paths {
-            if inventory
-                .source_paths
-                .get(name)
-                .is_some_and(|existing| existing != template)
-            {
-                return Err(InputError::ConflictingSourcePaths {
-                    product: name.clone(),
-                });
-            }
-            inventory
-                .source_paths
-                .insert(name.clone(), template.clone());
-        }
-        for name in inventory.source_paths.keys() {
-            let product = name.clone();
-            if !pipeline.is_source(name) {
-                return Err(InputError::UnknownSourcePath { product });
-            }
-            if pipeline.product_paths.contains_key(name) {
-                return Err(InputError::InventoryPathInBoth { product });
-            }
-        }
-        Ok(())
-    }
-
     /// Give a pipeline the recipe's source paths, and the built-in output
     /// path when it declares none, so an editor can check every path rule of
     /// the two files together. Resolving jobs needs neither: the input
     /// stage writes each source's path into its record.
     pub fn apply_paths(&self, pipeline: &mut Pipeline) {
-        let rules = self.rules.for_pipeline(pipeline).into_owned();
-        pipeline.product_paths.extend(rules.source_paths);
+        let source_paths = self.rules.source_paths_for(pipeline).into_owned();
+        pipeline.product_paths.extend(source_paths);
         pipeline
             .path_template
             .get_or_insert_with(PathTemplate::default_output);
     }
+}
+
+/// Add `source_paths`, the recipe's rule for each source, to those
+/// `inventory` carries, as a `.spitout` does, so the inventory holds every
+/// rule for its sources. Each must name a source the pipeline declares no
+/// rule for, and the two files must not disagree.
+fn merge_source_paths(
+    pipeline: &Pipeline,
+    source_paths: &BTreeMap<String, PathTemplate>,
+    inventory: &mut SourceInventory,
+) -> Result<(), InputError> {
+    for (name, template) in source_paths {
+        if inventory
+            .source_paths
+            .get(name)
+            .is_some_and(|existing| existing != template)
+        {
+            return Err(InputError::ConflictingSourcePaths {
+                product: name.clone(),
+            });
+        }
+        inventory
+            .source_paths
+            .insert(name.clone(), template.clone());
+    }
+    let index = PipelineIndex::new(pipeline);
+    for name in inventory.source_paths.keys() {
+        let product = name.clone();
+        if !index.is_source(name) {
+            return Err(InputError::UnknownSourcePath { product });
+        }
+        if pipeline.product_paths.contains_key(name) {
+            return Err(InputError::InventoryPathInBoth { product });
+        }
+    }
+    Ok(())
 }
 
 /// Each binding where some of a `sidecars` group's sources were found and
