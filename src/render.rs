@@ -5,7 +5,7 @@ use std::fmt::{self, Write as _};
 
 use crate::command::shell_word;
 use crate::model::{
-    identity, push_identity, Artifact, ArtifactReport, EntityBinding, Gap, ResolvedDag,
+    identity, push_identity, Artifact, ArtifactReport, EntityBinding, Gap, JobId, ResolvedDag,
 };
 use crate::spitdag::{Argument, BoundDag, BoundJob};
 use crate::types::TypeExpr;
@@ -41,7 +41,8 @@ pub fn render_dag(dag: &ResolvedDag) -> String {
         writer.text.push('\n');
     };
     for job in &dag.jobs {
-        writer.head(job.id, job.stage.as_deref(), &job.operation);
+        let step = dag.step(job);
+        writer.head(job.id, step.stage.as_deref(), &step.operation);
         for input in job.input_artifacts() {
             artifact(&mut writer, input);
         }
@@ -90,16 +91,17 @@ pub fn render_bound_dag(dag: &BoundDag, view: View) -> String {
         }
     };
     for job in &dag.jobs {
-        writer.head(job.id, job.stage.as_deref(), &job.operation);
-        for (port, artifacts) in &job.inputs {
+        let step = dag.step(job);
+        writer.head(job.id, step.stage.as_deref(), &step.operation);
+        for (port, artifacts) in step.inputs.iter().zip(&job.inputs) {
             for &input in artifacts {
                 artifact(&mut writer, Some(port), input);
             }
         }
         let single = job.outputs.len() == 1;
         writer.outputs(single);
-        for (port, output) in &job.outputs {
-            artifact(&mut writer, (!single).then_some(port.as_str()), *output);
+        for (port, &output) in step.outputs.iter().zip(&job.outputs) {
+            artifact(&mut writer, (!single).then_some(port.as_str()), output);
         }
         writer.tail(&job.depends_on);
         if view.commands {
@@ -122,8 +124,9 @@ fn render_commands(dag: &BoundDag) -> String {
         if !text.is_empty() {
             text.push('\n');
         }
-        write!(text, "Job {}  {}", job.id, job.operation).expect("writing to a String");
-        if let Some(stage) = &job.stage {
+        let step = dag.step(job);
+        write!(text, "Job {}  {}", job.id, step.operation).expect("writing to a String");
+        if let Some(stage) = &step.stage {
             write!(text, "  [{stage}]").expect("writing to a String");
         }
         text.push('\n');
@@ -209,7 +212,7 @@ struct JobWriter {
 
 impl JobWriter {
     /// A job's number, stage and operation, up to its inputs.
-    fn head(&mut self, id: usize, stage: Option<&str>, operation: &str) {
+    fn head(&mut self, id: JobId, stage: Option<&str>, operation: &str) {
         if !self.text.is_empty() {
             self.text.push('\n');
         }
@@ -253,7 +256,7 @@ impl JobWriter {
     }
 
     /// The jobs this one depends on, if any.
-    fn tail(&mut self, depends_on: &[usize]) {
+    fn tail(&mut self, depends_on: &[JobId]) {
         let Some((first, rest)) = depends_on.split_first() else {
             return;
         };
@@ -284,9 +287,10 @@ impl fmt::Display for Report<'_> {
             .filter(|source| !held_back.contains(&(source.product, source.entities)))
             .map(|source| format!("{}  (source)", typed_artifact(dag, source)));
         let made = dag.jobs.iter().flat_map(|job| {
+            let step = dag.step(job);
             job.outputs.iter().map(move |&artifact| {
-                let stage = in_stage(job.stage.as_deref());
-                let operation = &job.operation;
+                let stage = in_stage(step.stage.as_deref());
+                let operation = &step.operation;
                 let artifact = typed_artifact(dag, dag.artifact(artifact));
                 format!("{artifact}  (job {}: {operation}{stage})", job.id)
             })

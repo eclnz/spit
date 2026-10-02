@@ -2,6 +2,8 @@
 //! step makes of declared rules, and paths bound to resolved jobs.
 
 mod bind;
+mod components;
+mod product;
 mod rules;
 mod template;
 
@@ -9,10 +11,9 @@ pub(crate) use self::bind::{bound_paths, case_collisions, check_rules, dashed_la
 pub use self::bind::{
     validate_bound_source_files, validate_source_files, BoundPaths, VerifiedFiles,
 };
+pub(crate) use self::components::{decode_component, encode_component, validate_discovery_rule};
+pub(crate) use self::product::{shown_path, PathBinder};
 pub(crate) use self::rules::collect_paths;
 pub use self::rules::{inspect_paths, PathCoverage, PathCoverageEntry, PathRule};
-pub(crate) use self::template::{
-    decode_component, encode_component, error, require_directory, shown_path,
-    validate_discovery_rule, Holder, PathBinder, PathPart, PathPlaceholder,
-};
+pub(crate) use self::template::{error, require_directory, Holder, PathPart, PathPlaceholder};
 pub use self::template::{PathError, PathProblem, PathTemplate};

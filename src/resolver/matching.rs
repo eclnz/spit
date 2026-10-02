@@ -8,8 +8,8 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use crate::compile::{CompiledStep, StepShape};
 use crate::error::{NearMiss, PortSite, ResolveError};
 use crate::model::{
-    near_reason, ArtifactId, Artifacts, Cardinality, EntityBinding, Gap, Invocation, Job,
-    OperationDef,
+    near_reason, ArtifactId, Artifacts, Cardinality, EntityBinding, Gap, Invocation, Job, JobId,
+    OperationDef, StepId,
 };
 
 /// One job of a step: its inputs, and the context each of its outputs
@@ -315,12 +315,11 @@ fn broadcast_contexts(
 }
 
 pub(super) fn make_job(
-    id: usize,
-    operation: &OperationDef,
-    stage: Option<String>,
+    id: JobId,
+    step: StepId,
     inputs: Vec<Vec<ArtifactId>>,
     outputs: Vec<ArtifactId>,
-    producers: &[Option<usize>],
+    producers: &[Option<JobId>],
 ) -> Job {
     let dependencies: BTreeSet<_> = inputs
         .iter()
@@ -329,10 +328,9 @@ pub(super) fn make_job(
         .collect();
     Job {
         id,
-        operation: operation.name.clone(),
+        step,
         inputs,
         outputs,
         dependencies: dependencies.into_iter().collect(),
-        stage,
     }
 }

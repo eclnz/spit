@@ -3,7 +3,7 @@
 
 mod support;
 
-use support::{bound, outputs};
+use support::{bound, numbers, outputs};
 
 use spit::{parse_pipeline, parse_source_inventory, render_dag, resolve, validate_commands};
 
@@ -36,7 +36,7 @@ fn one_job_owns_every_output_of_an_operation() {
             "csf_fod[subject=a]"
         ]
     );
-    assert_eq!(dag.jobs[1].dependencies, [1]);
+    assert_eq!(numbers(&dag.jobs[1].dependencies), [1]);
     assert!(render_dag(&dag).contains("  outputs:\n    wm_fod[subject=a] : FOD\n"));
     assert!(bound(&pipeline, &dag)
         .unwrap()
