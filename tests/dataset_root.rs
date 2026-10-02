@@ -1,6 +1,6 @@
-//! A recipe's `root` line names where its dataset is, so `inputs` and `dag`
-//! need no `--root`, and a `.spitout` records the root it was settled
-//! against, so `dag` on it needs none either.
+//! A recipe's `root` line names where its dataset is, and every recipe has
+//! one, and a `.spitout` records the root it was settled against, so `dag`
+//! on either knows where the files are.
 
 mod support;
 
@@ -57,7 +57,7 @@ fn succeeded(output: &Output) -> (String, String) {
 }
 
 #[test]
-fn a_root_line_stands_in_for_the_flag() {
+fn a_root_line_says_where_the_data_is() {
     let tree = dataset("root-line", "root data\n");
     let named = spit_in(tree.path(), &["dag", "analysis.spitin", "--commands"]);
     let (named, notes) = succeeded(&named);
@@ -66,11 +66,6 @@ fn a_root_line_stands_in_for_the_flag() {
         named.contains("tool sub-5/ses-1/image.nii.gz results/5_1.nii.gz"),
         "{named}"
     );
-    let flagged = spit_in(
-        tree.path(),
-        &["dag", "analysis.spitin", "--root", "data", "--commands"],
-    );
-    assert_eq!(named, succeeded(&flagged).0);
     let found = spit_in(tree.path(), &["inputs", "analysis.spitin"]);
     let (_, notes) = succeeded(&found);
     assert!(
@@ -80,11 +75,20 @@ fn a_root_line_stands_in_for_the_flag() {
 }
 
 #[test]
-fn the_flag_overrides_the_root_line() {
-    let tree = dataset("root-override", "root elsewhere\n");
+fn a_recipe_must_name_its_root() {
+    let tree = dataset("root-required", "");
+    for command in ["check", "inputs", "dag"] {
+        let output = spit_in(tree.path(), &[command, "analysis.spitin"]);
+        assert!(!output.status.success(), "{command}");
+        assert!(
+            text(&output.stderr).contains("a recipe names its dataset root"),
+            "{command}: {}",
+            text(&output.stderr)
+        );
+    }
+    // The command line cannot stand in for it.
     let output = spit_in(tree.path(), &["dag", "analysis.spitin", "--root", "data"]);
-    let (_, notes) = succeeded(&output);
-    assert!(notes.contains("note: 3 source files verified."), "{notes}");
+    assert!(text(&output.stderr).contains("unknown option `--root`"));
 }
 
 #[test]
@@ -157,19 +161,6 @@ fn a_spitout_records_its_root_relative_to_itself() {
         commands.contains("tool sub-1/ses-2/image.nii.gz"),
         "{commands}"
     );
-    // `--root` overrides it.
-    let output = spit_in(
-        &tree.path().join("plans"),
-        &[
-            "dag",
-            "../analysis.spit",
-            "analysis.spitout",
-            "--root",
-            "../plans",
-        ],
-    );
-    assert!(!output.status.success());
-    assert!(text(&output.stderr).contains("sub-1/ses-1/image.nii.gz"));
 }
 
 #[test]
@@ -230,7 +221,7 @@ fn a_recipe_inside_its_root_is_not_an_unmatched_file() {
     tree.write("data/analysis.spit", PIPELINE);
     tree.write(
         "data/analysis.spitin",
-        &format!("pipeline analysis.spit\n{RULES}"),
+        &format!("pipeline analysis.spit\nroot .\n{RULES}"),
     );
     tree.write("data/notes.txt", "");
     let output = spit_in(tree.path(), &["inputs", "data/analysis.spitin"]);

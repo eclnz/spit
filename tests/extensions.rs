@@ -280,7 +280,7 @@ fn extensions_are_checked_when_parsed() {
 
 #[test]
 fn a_recipe_cannot_set_ext() {
-    let error = spit::parse_input_spec("pipeline a.spit\next: .img\n").unwrap_err();
+    let error = spit::parse_input_spec("pipeline a.spit\nroot .\next: .img\n").unwrap_err();
     assert!(
         error.to_string().contains("belongs in the .spit pipeline"),
         "{error}"

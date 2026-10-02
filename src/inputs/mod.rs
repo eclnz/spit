@@ -60,13 +60,19 @@ pub fn parse_input_spec(text: &str) -> Result<InputSpec, ParseError> {
     finish_spec(document, header, Some(Path::new("")))
 }
 
-/// Parse a `.spitin` file at `path`. Paths inside the recipe, and the
-/// pipeline it names, are relative to its folder unless the CLI supplies
-/// `--root`.
+/// Parse a `.spitin` file at `path`. The pipeline it names and its root are
+/// relative to its folder, and a recipe that names its pipeline must name
+/// its root: a file says where its data is, whoever runs it.
 pub fn parse_input_spec_at(text: &str, path: &Path) -> Result<InputSpec, ParseError> {
     let (header, document) = parse_recipe(text, |text| {
         parse_located_document(text, path, Kind::Recipe)
     })?;
+    if header.pipeline.is_some() && header.root.is_none() {
+        return Err(ParseError::new(
+            1,
+            "a recipe names its dataset root, the folder its paths are relative to, with a line such as `root data`, or `root .` for the recipe's own folder",
+        ));
+    }
     let folder = path.parent().unwrap_or_else(|| Path::new(""));
     let header = RecipeHeader {
         pipeline: header.pipeline.map(|pipeline| folder.join(pipeline)),

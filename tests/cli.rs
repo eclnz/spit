@@ -290,7 +290,7 @@ fn recipe_path_rules_show_combined_coverage_and_origin() {
     );
     let recipe = tree.write(
         "data.spitin",
-        "pipeline analysis.spit\npath raw: input/{id}.txt\n",
+        "pipeline analysis.spit\nroot .\npath raw: input/{id}.txt\n",
     );
     let output = spit(&["check", recipe.to_str().unwrap(), "--path-rules"]);
     assert!(output.status.success(), "{}", stderr(&output));
@@ -310,7 +310,7 @@ fn recipe_path_rules_show_combined_coverage_and_origin() {
     assert!(stdout(&pipeline_only).contains("raw (source): no rule (a recipe may supply one)"));
 
     // A recipe must cover every source, since a scan finds each by its rule.
-    tree.write("data.spitin", "pipeline analysis.spit\n");
+    tree.write("data.spitin", "pipeline analysis.spit\nroot .\n");
     let missing = spit(&["check", recipe.to_str().unwrap()]);
     assert!(!missing.status.success());
     assert!(
@@ -320,7 +320,7 @@ fn recipe_path_rules_show_combined_coverage_and_origin() {
     );
     tree.write(
         "data.spitin",
-        "pipeline analysis.spit\npath: input/{@product}/{@entities}\n",
+        "pipeline analysis.spit\nroot .\npath: input/{@product}/{@entities}\n",
     );
     let defaulted = spit(&["check", recipe.to_str().unwrap()]);
     assert!(defaulted.status.success(), "{}", stderr(&defaulted));
@@ -370,7 +370,7 @@ fn a_message_names_the_file_it_is_about_when_that_file_was_not_given() {
     )
     .unwrap();
     let recipe = directory.join("data.spitin");
-    fs::write(&recipe, "pipeline pipeline.spit\n").unwrap();
+    fs::write(&recipe, "pipeline pipeline.spit\nroot .\n").unwrap();
     let shown = pipeline.display().to_string();
 
     // Given the recipe, a failed match in the pipeline names the pipeline.
@@ -463,19 +463,8 @@ fn a_recipe_names_its_own_pipeline_for_dag_and_artifacts() {
     let recipe = "examples/commands/command_demo/command_demo.spitin";
     let pipeline = "examples/commands/command_demo/command_demo.spit";
     let inventory = "examples/commands/command_demo/command_demo.spitout";
-    // The example keeps no data beside its recipe; scan a folder that has
-    // the shards its inventory lists.
-    let data = Tree::new(
-        "recipe-alone",
-        &[
-            "input/alpha/01.txt",
-            "input/alpha/02.txt",
-            "input/beta/01.txt",
-        ],
-    );
-    let root = data.path().to_str().unwrap();
     for command in ["dag", "artifacts"] {
-        let alone = spit(&[command, recipe, "--root", root]);
+        let alone = spit(&[command, recipe]);
         assert!(alone.status.success(), "{}", stderr(&alone));
         // The pipeline is the recipe's to name, not the command line's, even
         // when it names the same one.
@@ -511,7 +500,7 @@ fn a_recipe_run_in_memory_prints_each_pipeline_warning_once() {
          path spare: sp/{id}.txt\npath: out/{@product}/{id}.txt\n\
          operation clean(raw: Raw) -> Clean\ncommand clean: tool {raw} {@output}\ncleaned = clean(raw)\n",
     );
-    let recipe = tree.write("data.spitin", "pipeline analysis.spit\n");
+    let recipe = tree.write("data.spitin", "pipeline analysis.spit\nroot .\n");
     for command in ["inputs", "dag", "artifacts"] {
         let output = spit(&[command, recipe.to_str().unwrap()]);
         let errors = stderr(&output);
@@ -531,7 +520,7 @@ fn a_recipe_checks_a_pipeline_saved_with_a_byte_order_mark() {
         "analysis.spit",
         "\u{feff}source raw [id]\npath raw: in/{id}.txt\n",
     );
-    let recipe = tree.write("data.spitin", "\u{feff}pipeline analysis.spit\n");
+    let recipe = tree.write("data.spitin", "\u{feff}pipeline analysis.spit\nroot .\n");
     let output = spit(&["check", recipe.to_str().unwrap()]);
     assert!(output.status.success(), "{}", stderr(&output));
     assert_eq!(stdout(&output), "Recipe valid.\n");
@@ -553,7 +542,7 @@ fn drop_rules_that_remove_every_group_stop_each_command() {
     // before, a `require` after it checked nothing and passed.
     let recipe = tree.write(
         "data.spitin",
-        "pipeline analysis.spit\ndiscover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}\n\
+        "pipeline analysis.spit\nroot .\ndiscover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}\n\
          drop [sub] where sessions count<2\nrequire sessions count>=1 per [sub]\n",
     );
     for command in ["inputs", "dag", "artifacts"] {
@@ -562,7 +551,7 @@ fn drop_rules_that_remove_every_group_stop_each_command() {
         assert!(
             stderr(&output).contains(
                 "error: drop rules removed all 2 [sub] groups, leaving nothing to plan: \
-                 `drop [sub] where sessions count<2` (line 3)"
+                 `drop [sub] where sessions count<2` (line 4)"
             ),
             "{command}: {}",
             stderr(&output)

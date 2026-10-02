@@ -195,8 +195,8 @@ fn command_line_mistakes_are_named() {
             "usage: spit check ",
         ),
         (
-            &["dag", "p.spit", "d.spitout", "--root"][..],
-            "--root needs a value: <directory>",
+            &["dag", "p.spit", "d.spitout", "-o"][..],
+            "-o needs a value: <file>",
             "usage: spit dag ",
         ),
         (
@@ -224,7 +224,10 @@ fn a_byte_order_mark_is_ignored_by_every_entry_point() {
     let records = "sources:\n  raw[id=a]\n";
     parse_pipeline(&bom(valid)).unwrap();
     spit::parse_source_inventory(&bom(records)).unwrap();
-    spit::parse_input_spec(&bom("pipeline analysis.spit\npath raw: in/{id}.txt\n")).unwrap();
+    spit::parse_input_spec(&bom(
+        "pipeline analysis.spit\nroot .\npath raw: in/{id}.txt\n",
+    ))
+    .unwrap();
     assert_eq!(
         diagnose(&bom(valid), Some(&bom(records))),
         diagnose(valid, Some(records))

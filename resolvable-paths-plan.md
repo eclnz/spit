@@ -9,4 +9,7 @@
 - [x] `spit check recipe.spitin` fails a source that no rule covers: its own, the recipe's, or a default. Commit: "Check that paths resolve, and remove --strict-paths".
 - [x] Remove `--strict-paths`, now that `check` checks what it should have. Commit: "Check that paths resolve, and remove --strict-paths".
 - [x] Update the README, language reference and architecture notes; run the checks. Commit: "Check that paths resolve, and remove --strict-paths".
+- [x] Give every example recipe data to scan, so `spit dag` runs on each `.spitin`. Commit: "Give every example recipe data to scan".
+- [x] Require a `root` line in every `.spitin` file, so a recipe always says where its data is. Commit: "Require a root line in every recipe, and remove --root".
+- [x] Remove `--root` from `inputs`, `dag` and `artifacts`: the recipe's or `.spitout`'s `root` line says where the data is. Update the tests, stored outputs, answer keys and `profiling/bench.py`, which pass it. Commit: "Require a root line in every recipe, and remove --root".
 - [ ] Delete this plan in its own commit before the work merges.

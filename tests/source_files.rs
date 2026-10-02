@@ -44,14 +44,32 @@ fn survey_tree(missing: Option<&str>) -> Tree {
     Tree::new("mock source tree with spaces", &files)
 }
 
+const SURVEY: &str = include_str!("../examples/commands/field_survey/field_survey.spitout");
+
+/// `records`, a copy of the survey's `.spitout`, written in `tree` with the
+/// tree as its root.
+fn inventory_in(tree: &Tree, records: &str) -> std::path::PathBuf {
+    let records: String = records
+        .lines()
+        .map(|line| {
+            if line.starts_with("root ") {
+                "root ."
+            } else {
+                line
+            }
+        })
+        .map(|line| format!("{line}\n"))
+        .collect();
+    tree.write("field_survey.spitout", &records)
+}
+
 fn check(tree: &Tree) -> Output {
+    let inventory = inventory_in(tree, SURVEY);
     Command::new(env!("CARGO_BIN_EXE_spit"))
         .args([
             "dag",
             "examples/commands/field_survey/field_survey.spit",
-            "examples/commands/field_survey/field_survey.spitout",
-            "--root",
-            tree.path().to_str().unwrap(),
+            inventory.to_str().unwrap(),
         ])
         .output()
         .unwrap()
@@ -92,17 +110,15 @@ fn survey_reports_a_missing_required_file() {
 #[test]
 fn survey_rejects_a_photo_without_an_inventory_sidecar() {
     let fixture = survey_tree(None);
-    let inventory = include_str!("../examples/commands/field_survey/field_survey.spitout")
-        .replace("    photo_imu[site=01,visit=02,shot=02]\n", "");
-    let inventory_path = fixture.0.join("incomplete.spitout");
-    fs::write(&inventory_path, inventory).unwrap();
+    let inventory = inventory_in(
+        &fixture,
+        &SURVEY.replace("    photo_imu[site=01,visit=02,shot=02]\n", ""),
+    );
     let result = Command::new(env!("CARGO_BIN_EXE_spit"))
         .args([
             "dag",
             "examples/commands/field_survey/field_survey.spit",
-            inventory_path.to_str().unwrap(),
-            "--root",
-            fixture.0.to_str().unwrap(),
+            inventory.to_str().unwrap(),
         ])
         .output()
         .unwrap();
@@ -130,22 +146,18 @@ fn survey_reports_a_source_path_that_is_a_directory() {
 #[test]
 fn the_spitdag_records_the_root_as_an_absolute_path() {
     let fixture = survey_tree(None);
-    let example = |file: &str| {
-        format!(
-            "{}/examples/commands/field_survey/{file}",
-            env!("CARGO_MANIFEST_DIR")
-        )
-    };
+    inventory_in(&fixture, SURVEY);
+    let pipeline = format!(
+        "{}/examples/commands/field_survey/field_survey.spit",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    // The `.spitout` is given relative to the working folder, and its root
+    // relative to the `.spitout`.
+    let inventory =
+        std::path::Path::new(fixture.path().file_name().unwrap()).join("field_survey.spitout");
     let result = Command::new(env!("CARGO_BIN_EXE_spit"))
         .current_dir(fixture.path().parent().unwrap())
-        .args([
-            "dag",
-            &example("field_survey.spit"),
-            &example("field_survey.spitout"),
-            "--root",
-            fixture.path().file_name().unwrap().to_str().unwrap(),
-            "--json",
-        ])
+        .args(["dag", &pipeline, inventory.to_str().unwrap(), "--json"])
         .output()
         .unwrap();
     assert!(
