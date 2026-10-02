@@ -754,7 +754,38 @@ pub fn diagnose_recipe_against(text: &str, pipeline: &Pipeline) -> Vec<Diagnosti
             ));
         }
     }
+    if diagnostics.is_empty() {
+        diagnostics = recipe_path_errors(pipeline, &spec, &lines, text);
+    }
     finish(diagnostics, text, None)
+}
+
+/// Errors in the recipe's source path rules, its default's included, each
+/// at the recipe line that writes the rule. An error placed at one of the
+/// pipeline's rules, such as a collision with an output, has no place.
+fn recipe_path_errors(
+    pipeline: &Pipeline,
+    spec: &InputSpec,
+    lines: &SourceMap,
+    text: &str,
+) -> Vec<Diagnostic> {
+    let rules = spec.rules.for_pipeline(pipeline);
+    if rules.source_paths.is_empty() {
+        return Vec::new();
+    }
+    let mut merged = pipeline.clone();
+    merged.product_paths.extend(rules.source_paths.clone());
+    let mut places = SourceMap::default();
+    for name in rules.source_paths.keys() {
+        if let Some(place) = lines.paths.get(name).or(lines.default_path.as_ref()) {
+            places.paths.insert(name.clone(), place.clone());
+        }
+    }
+    collect_paths(&merged, &places, &BTreeSet::new())
+        .1
+        .iter()
+        .map(|error| Diagnostic::located(DiagnosticSource::Pipeline, error, text))
+        .collect()
 }
 
 /// Each parse error in `text` as a diagnostic.
