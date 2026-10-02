@@ -209,7 +209,7 @@ path: results/{@product}/{@entities}.txt
 path image: input/{subject}/{visit}/{run}.txt
 ```
 
-`path:` sets a default; without one, outputs go to `out/{@product}/{@entities}`. `path image:` overrides it for `image`. A recipe's `path:` sets the default for sources instead; see [Recipes](#recipes). Each output of a multi-output step has its own product, so its own rule. A `path:` line inside a [stage](#stages) sets the default for that stage's products. Paths are relative to the [dataset root](#recipes): the folder a recipe's `root` line names, else the recipe's folder, or the root a `.spitout` records; `--root` overrides either.
+`path:` sets a default; without one, outputs go to `out/{@product}/{@entities}`, which `spit check --path-rules` lists as `built-in default`. `path image:` overrides it for `image`. Sources never take the built-in path: a source with no rule needs one from a recipe or a `.spitout`'s `source_paths:`. A recipe's `path:` sets the default for sources instead; see [Recipes](#recipes). Each output of a multi-output step has its own product, so its own rule. A `path:` line inside a [stage](#stages) sets the default for that stage's products. Paths are relative to the [dataset root](#recipes): the folder a recipe's `root` line names, else the recipe's folder, or the root a `.spitout` records; `--root` overrides either.
 
 A source with no dimensions can use a fixed path, such as `path testset: eval/testset.parquet`.
 
@@ -373,7 +373,7 @@ root data
 
 The folder is relative to the recipe's folder, like the `pipeline` line, and may use `..` or be absolute. Without the line, the root is the recipe's folder; `--root` overrides either. A pipeline has no `root` line. `spit check` warns when the folder is not there.
 
-`spit check recipe.spitin` checks the rules against the pipeline without reading any data: each rule must name a source or discovery with the dimensions it counts, and each source path the recipe gives, by its own rule or its default, must pass the [path checks](#paths), such as telling apart the sources a default covers. `spit inputs recipe.spitin` scans the root, applies the rules, and prints the `.spitout`. A recipe that writes its own `sources:` records is not scanned unless `--root` is given; the scan then replaces them. A `root` line only says where the dataset is: it does not make the recipe's records a scan, and their files must still exist under it. `spit dag recipe.spitin` runs the same step in memory before resolving jobs, over the pipeline the recipe's `pipeline` line names. A recipe is given alone; the pipeline is not named a second time on the command line.
+`spit check recipe.spitin` checks the rules against the pipeline without reading any data: each rule must name a source or discovery with the dimensions it counts, every source must have a path rule, by the pipeline, the recipe or a default, since the scan finds each source by its rule, and each source path the recipe gives, by its own rule or its default, must pass the [path checks](#paths), such as telling apart the sources a default covers. `spit inputs recipe.spitin` scans the root, applies the rules, and prints the `.spitout`. A recipe that writes its own `sources:` records is not scanned unless `--root` is given; the scan then replaces them. A `root` line only says where the dataset is: it does not make the recipe's records a scan, and their files must still exist under it. `spit dag recipe.spitin` runs the same step in memory before resolving jobs, over the pipeline the recipe's `pipeline` line names. A recipe is given alone; the pipeline is not named a second time on the command line.
 
 Three rules leave data out, each for a different reason:
 
@@ -488,7 +488,7 @@ The header names the columns: `product` and `reason` are optional, and every oth
 
 ## Inputs
 
-A `.spitout` lists a dataset's settled source identities. `spit inputs` writes one, and a dataset indexer or a person can write one too. Paths come from rules in the pipeline or, if a recipe supplies a source rule, a `source_paths:` section written once in the `.spitout`. `contexts:` names a group even when one of its required inputs is absent:
+A `.spitout` lists a dataset's settled source identities. `spit inputs` writes one, and a dataset indexer or a person can write one too. Paths come from rules in the pipeline or, if a recipe supplies a source rule, a `source_paths:` section written once in the `.spitout`. A source with records needs one or the other; `dag` fails one with neither rather than guess where its files are. `contexts:` names a group even when one of its required inputs is absent:
 
 ```text
 contexts:

@@ -26,6 +26,8 @@ pub enum PathRule {
         template: String,
     },
     Default(String),
+    /// The built-in default, for an output in a pipeline with no `path:`.
+    BuiltIn(String),
     /// An output its tool writes beside another's file, whose path follows
     /// that file's.
     Beside {
@@ -66,6 +68,8 @@ impl PathRule {
                 stage: stage.to_owned(),
                 template,
             }
+        } else if index.pipeline.path_template.is_none() {
+            Self::BuiltIn(template)
         } else {
             Self::Default(template)
         }
@@ -132,40 +136,34 @@ impl PathCoverage {
         self
     }
 
-    /// Missing rules always fail. Strict mode also rejects default fallbacks.
-    pub fn validate(&self, strict: bool) -> Result<(), PathError> {
+    /// Fail the products in `used` that no rule covers. Every output has a
+    /// rule, if only the built-in default, so only a source can have none.
+    pub fn validate<'a>(&self, used: impl IntoIterator<Item = &'a str>) -> Result<(), PathError> {
+        let used: BTreeSet<_> = used.into_iter().collect();
         let missing: Vec<_> = self
             .entries
             .iter()
             .filter(|entry| entry.rule == PathRule::Missing)
             .map(|entry| entry.product.as_str())
+            .filter(|product| used.contains(product))
             .collect();
-        if !missing.is_empty() {
-            return Err(error(format!(
-                "no path rule for products: {}",
-                missing.join(", ")
-            )));
+        if missing.is_empty() {
+            return Ok(());
         }
-        if strict {
-            let fallback: Vec<_> = self
-                .entries
-                .iter()
-                .filter(|entry| {
-                    matches!(
-                        entry.rule,
-                        PathRule::Default(_) | PathRule::Stage { .. } | PathRule::RecipeDefault(_)
-                    )
-                })
-                .map(|entry| entry.product.as_str())
-                .collect();
-            if !fallback.is_empty() {
-                return Err(error(format!(
-                    "strict paths requires explicit rules for products: {}",
-                    fallback.join(", ")
-                )));
-            }
-        }
-        Ok(())
+        let named: Vec<_> = missing
+            .iter()
+            .map(|product| format!("`{product}`"))
+            .collect();
+        let (subject, verb) = match named.len() {
+            1 => ("source", "has"),
+            _ => ("sources", "have"),
+        };
+        Err(error(format!(
+            "{subject} {} {verb} no path rule, so {} files cannot be found; write `path {}:` in the pipeline, in the recipe, or under the .spitout's `source_paths:`",
+            named.join(", "),
+            if named.len() == 1 { "its" } else { "their" },
+            missing[0]
+        )))
     }
 }
 
@@ -183,14 +181,12 @@ impl fmt::Display for PathCoverage {
                     write!(f, "stage {stage} default {template}")?;
                 }
                 PathRule::Default(template) => write!(f, "default {template}")?,
+                PathRule::BuiltIn(template) => write!(f, "built-in default {template}")?,
                 PathRule::Beside { sibling, template } => {
                     write!(f, "beside {sibling} {template}")?;
                 }
                 PathRule::Inventory => write!(f, "from the inventory")?,
-                PathRule::Missing if entry.source => {
-                    write!(f, "no rule (a recipe may supply one)")?
-                }
-                PathRule::Missing => write!(f, "MISSING")?,
+                PathRule::Missing => write!(f, "no rule (a recipe may supply one)")?,
             }
             match &entry.extension {
                 Some(extension) => writeln!(f, ", {extension}")?,

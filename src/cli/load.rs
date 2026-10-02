@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use spit::{
     diagnose_checked, diagnose_checked_with_inventory, diagnose_checked_with_records,
     parse_input_spec_at, render_source_inventory, ArtifactReport, Checked, Context, FileNames,
-    InputSource, InputSpec, PathTemplate, Pipeline, Removal, ResolveError, ResolvedInputs,
+    InputSource, InputSpec, Pipeline, Removal, ResolveError, ResolvedInputs,
 };
 
 use super::args::{CliArgs, Command, Flag};
@@ -281,7 +281,6 @@ fn removal_note(removal: &Removal, pipeline: &Pipeline) -> String {
 /// to bind paths.
 pub(crate) struct Prepared {
     pub(crate) pipeline: Pipeline,
-    pub(crate) bound: Pipeline,
     pub(crate) inputs: ResolvedInputs,
     /// What the inputs resolve to, from their diagnosis; its sources get
     /// their files from `inputs` in [`prepared`].
@@ -422,15 +421,8 @@ fn prepared(
     root: Option<PathBuf>,
 ) -> Prepared {
     report.dag.locate_sources(&inputs.inventory);
-    // Records give every source its file; outputs with no rule take the
-    // built-in layout.
-    let mut bound = pipeline.clone();
-    bound
-        .path_template
-        .get_or_insert_with(PathTemplate::default_output);
     Prepared {
         pipeline,
-        bound,
         inputs,
         report,
         root,

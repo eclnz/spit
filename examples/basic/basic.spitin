@@ -1,4 +1,5 @@
 pipeline basic.spit
+path: data/{@product}/{@entities}
 
 require bold count>=1 per [sub, ses]
 require t1w count=1 per [sub, ses]

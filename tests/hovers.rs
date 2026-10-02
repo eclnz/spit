@@ -130,7 +130,7 @@ fn product_paths_report_explicit_nearest_stage_pipeline_and_builtin_rules() {
     assert!(at(&defaults, 3, "out")
         .details
         .iter()
-        .any(|detail| detail.contains("out/{@product}/{@entities} (built-in output default)")));
+        .any(|detail| detail.contains("out/out/{@entities} (built-in output default)")));
     assert!(at(&defaults, 1, "raw")
         .details
         .iter()

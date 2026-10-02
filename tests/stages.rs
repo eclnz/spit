@@ -110,7 +110,7 @@ fn a_stage_path_rule_covers_only_that_stage() {
             template: "results/{@product}/{@entities}.txt".to_owned(),
         }
     );
-    assert!(coverage.validate(true).is_err());
+    coverage.validate(["merged", "tally"]).unwrap();
     let dag = resolve(&pipeline, &inventory.unwrap()).unwrap();
     let bound = bound(&pipeline, &dag).unwrap();
     assert!(bound.contains("path: preprocess/merged/group=alpha.txt"));

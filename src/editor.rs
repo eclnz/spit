@@ -16,7 +16,7 @@ use crate::model::{
     DEFAULT_OUTPUT,
 };
 use crate::parser::{without_bom, Kind};
-use crate::paths::{shown_path, PathTemplate};
+use crate::paths::shown_path;
 use crate::span::{find_word, utf16_columns, Place};
 use crate::types::TypeExpr;
 
@@ -463,16 +463,16 @@ fn product_details(
             "Path template: {} (inherited from stage {stage}).",
             resolved_path().unwrap_or_default()
         ));
+    } else if producer.is_some() && pipeline.path_template.is_none() {
+        details.push(format!(
+            "Path template: {} (built-in output default).",
+            resolved_path().unwrap_or_default()
+        ));
     } else if index.has_path(&product.name) {
         // A default that needs `{@stage}` is no source's rule.
         details.push(format!(
             "Path template: {} (pipeline default).",
             resolved_path().unwrap_or_default()
-        ));
-    } else if producer.is_some() {
-        details.push(format!(
-            "Path template: {} (built-in output default).",
-            PathTemplate::default_output()
         ));
     } else {
         details.push(

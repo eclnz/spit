@@ -1,3 +1,9 @@
+source_paths:
+    reading: data/{@product}/{@entities}
+    gain: data/{@product}/{@entities}
+    baseline: data/{@product}/{@entities}
+    target: data/{@product}/{@entities}
+
 contexts:
     [site=A,device=D1,window=W1]
     [site=A,device=D1,window=W2]

@@ -49,7 +49,8 @@ impl Pipeline {
 
     /// The path rule `product` uses, as written: its own rule, else its
     /// stage's default, else the pipeline's default, unless that needs
-    /// `{@stage}` and `product` is a source.
+    /// `{@stage}` and `product` is a source. An output in a pipeline with
+    /// no default takes the built-in one.
     pub fn path_rule_for(&self, product: &str) -> Option<&PathTemplate> {
         PipelineIndex::scan(self).path_rule_for(product)
     }
@@ -381,11 +382,12 @@ impl<'p> PipelineIndex<'p> {
             .product_paths
             .get(product)
             .or_else(|| self.stage_path_rule(product).map(|(_, template)| template))
-            .or_else(|| {
-                pipeline
-                    .path_template
-                    .as_ref()
-                    .filter(|default| !(default.needs_stage() && self.is_source(product)))
+            .or_else(|| match &pipeline.path_template {
+                Some(default) => Some(default)
+                    .filter(|default| !(default.needs_stage() && self.is_source(product))),
+                None => self
+                    .producer(product)
+                    .map(|_| PathTemplate::built_in_output()),
             })
     }
 

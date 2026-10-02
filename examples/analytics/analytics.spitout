@@ -1,3 +1,10 @@
+source_paths:
+    events: data/{@product}/{@entities}
+    customers: data/{@product}/{@entities}
+    subscriptions: data/{@product}/{@entities}
+    purchases: data/{@product}/{@entities}
+    campaigns: data/{@product}/{@entities}
+
 contexts:
     [tenant=acme,customer=alice,day=mon]
     [tenant=acme,customer=alice,day=tue]
