@@ -46,6 +46,12 @@ pub(crate) fn write_output(args: &CliArgs, text: &str, what: &str) -> Result<(),
     Ok(())
 }
 
+pub(crate) fn is_pipeline(file: &str) -> bool {
+    Path::new(file)
+        .extension()
+        .is_some_and(|extension| extension == "spit")
+}
+
 pub(crate) fn is_inputs(file: &str) -> bool {
     Path::new(file)
         .extension()

@@ -12,4 +12,5 @@
 - [x] Give every example recipe data to scan, so `spit dag` runs on each `.spitin`. Commit: "Give every example recipe data to scan".
 - [x] Require a `root` line in every `.spitin` file, so a recipe always says where its data is. Commit: "Require a root line in every recipe, and remove --root".
 - [x] Remove `--root` from `inputs`, `dag` and `artifacts`: the recipe's or `.spitout`'s `root` line says where the data is. Update the tests, stored outputs, answer keys and `profiling/bench.py`, which pass it. Commit: "Require a root line in every recipe, and remove --root".
+- [x] Let a pipeline given alone run with `--root`, with no recipe, for datasets that need nothing but their folder; `--root` is an error with a recipe or a `.spitout`. Give the pattern examples their data. Commit: "Run a pipeline on a folder with --root, without a recipe".
 - [ ] Delete this plan in its own commit before the work merges.

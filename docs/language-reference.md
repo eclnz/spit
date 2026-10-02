@@ -335,7 +335,7 @@ When `spit inputs` scans a dataset, it warns about each place it found some of a
 
 ## Recipes
 
-A `.spitin` recipe says how to find one dataset's inputs, keeping everything about the data out of the pipeline. Its first line names the pipeline it serves, relative to the recipe's folder:
+A `.spitin` recipe says how to find one dataset's inputs, keeping everything about the data out of the pipeline. A dataset that needs nothing but its folder needs no recipe: `spit dag analysis.spit --root data` scans the folder with the pipeline's own path rules. Its first line names the pipeline it serves, relative to the recipe's folder:
 
 ```text
 pipeline analysis.spit

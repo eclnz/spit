@@ -13,7 +13,7 @@ use spit::{
 };
 
 use super::args::{CliArgs, Flag};
-use super::load::{load_recipe, prepare, recorded_root, require_complete, settle};
+use super::load::{load_inputs, prepare, recorded_root, require_complete, settle};
 use super::output::{
     is_inputs, is_recipe, job_count, passed, read_file, read_stdin, report, write_output,
     write_spitdag,
@@ -126,14 +126,14 @@ pub(crate) fn check(args: &CliArgs) -> Result<(), Box<dyn Error>> {
 
 /// Step 2: settle a dataset from a recipe and write its `.spitout`.
 pub(crate) fn inputs(args: &CliArgs) -> Result<(), Box<dyn Error>> {
-    let loaded = load_recipe(&args.file)?;
+    let loaded = load_inputs(args)?;
     report(
         &loaded.checked.warnings,
         &loaded.pipeline_text,
         None,
         loaded.names(),
     )?;
-    let (mut settled, root) = settle(&loaded, &args.file)?;
+    let (mut settled, root) = settle(&loaded)?;
     if args.has(Flag::Unmatched) {
         for file in &settled.unmatched_files {
             println!("{file}");
