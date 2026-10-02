@@ -39,7 +39,7 @@ Records and data that people rarely read, and that only a tool needs as files, a
 
 SPIT is a compiler, so most of its code is data being turned into other data: text into statements, statements into a `Pipeline`, a pipeline and an inventory into a DAG, a DAG into a `.spitdag`. The code is laid out around that data, not around objects that hide it. These rules describe how the code is written now. A change that breaks one should say why in its commit message.
 
-Some rules are checked, not just written down. `Cargo.toml` forbids `unsafe` and turns on clippy's `disallowed_types`, which `clippy.toml` sets to the standard library's `HashMap`, `HashSet`, `Rc`, `RefCell` and `Cell`. `src/lib.rs` and `src/main.rs` deny `unwrap` outside tests. `tests/architecture.rs` checks file length and the boundaries between steps. `cargo clippy` and `cargo test` run these checks, so the checks before every commit cover them.
+Some rules are checked, not just written down. `Cargo.toml` forbids `unsafe` and turns on clippy's `disallowed_types`, which `clippy.toml` sets to the standard library's `HashMap` and `HashSet` with their default hasher, and to `Rc`, `RefCell` and `Cell`. `src/lib.rs` and `src/main.rs` deny `unwrap` outside tests. `tests/architecture.rs` checks file length and the boundaries between steps. `cargo clippy` and `cargo test` run these checks, so the checks before every commit cover them.
 
 The five rules under [Performance](docs/architecture.md#performance) come first: one table with columns by id, text interned once, grouping by symbol keys, finding once and then looking up, and doing each piece of work once. The rules below are how the rest of the code keeps to them.
 
@@ -58,7 +58,7 @@ The five rules under [Performance](docs/architecture.md#performance) come first:
 
 **Collections and order**
 
-- **Lookups use `FxHashMap` and `FxHashSet`**, from `rustc-hash`. Clippy rejects the standard library's `HashMap` and `HashSet`.
+- **Lookups use `FxHashMap` and `FxHashSet`**, from `rustc-hash`. They are the standard `HashMap` and `HashSet` with the Fx hasher in place of the default SipHash, which clippy rejects for two reasons. SipHash resists keys chosen to collide, which SPIT, reading the user's own files, has no need of, and it is slower on the small keys SPIT hashes most: product numbers, symbols, and bindings with their hash kept. And it is seeded at random, so a map's order changes from run to run: if that order ever leaked into output, the output would differ between runs, while with Fx the mistake is the same every run and a stored output catches it.
 - **Output never depends on hash order.** Anything that reaches a file or the terminal is in a `BTreeMap`, a `BTreeSet` or a sorted `Vec`, or is sorted first. Given the same pipeline, inventory, root and version, the output is the same bytes every time (see `docs/architecture.md`).
 - **Loops and worklists, not recursion, over data the user writes.** A pipeline may hold a chain of 100,000 steps, and recursing once per step overflows the stack (`compile/definitions.rs` has a test for this). Use an explicit stack or queue. Where recursion reads better, as in parsing nested types, cap the depth (`MAX_TYPE_DEPTH` in `src/types.rs`).
 

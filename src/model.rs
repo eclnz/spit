@@ -480,10 +480,6 @@ pub struct ArtifactInstance {
 pub type ArtifactKey = (String, EntityBinding);
 
 impl ArtifactInstance {
-    pub fn key(&self) -> ArtifactKey {
-        (self.product.clone(), self.entities.clone())
-    }
-
     pub fn new(
         product: impl Into<String>,
         artifact_type: ArtifactType,
@@ -493,6 +489,15 @@ impl ArtifactInstance {
             product: product.into(),
             artifact_type,
             entities,
+        }
+    }
+
+    /// This artifact, borrowed.
+    pub fn view(&self) -> Artifact<'_> {
+        Artifact {
+            product: &self.product,
+            artifact_type: &self.artifact_type,
+            entities: &self.entities,
         }
     }
 }
@@ -507,17 +512,6 @@ impl fmt::Display for ArtifactInstance {
     }
 }
 
-impl ArtifactInstance {
-    /// This artifact, borrowed.
-    pub fn view(&self) -> Artifact<'_> {
-        Artifact {
-            product: &self.product,
-            artifact_type: &self.artifact_type,
-            entities: &self.entities,
-        }
-    }
-}
-
 /// An artifact borrowed from where it is kept, such as a DAG's
 /// [`Artifacts`].
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -527,7 +521,12 @@ pub struct Artifact<'a> {
     pub entities: &'a EntityBinding,
 }
 
-impl Artifact<'_> {
+impl<'a> Artifact<'a> {
+    /// Its product and entities, which identify it, borrowed.
+    pub fn key(self) -> (&'a str, &'a EntityBinding) {
+        (self.product, self.entities)
+    }
+
     /// An owned copy.
     pub fn to_instance(self) -> ArtifactInstance {
         ArtifactInstance {
