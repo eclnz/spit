@@ -615,6 +615,9 @@ fn a_recipe_path_is_the_default_for_sources_with_no_rule() {
         "path: raw/{@product}/{@entities}.nii.gz\npath mask: raw/masks/sub-{sub}.nii.gz\n",
     )
     .unwrap();
+    // Only `image` has no rule of its own; the recipe stays as written.
+    assert_eq!(recipe.rules.defaulted_sources(&pipeline), ["image"]);
+    assert_eq!(recipe.rules.source_paths.len(), 1);
     let resolved = recipe
         .resolve(&pipeline, InputSource::Discover(tree.path()))
         .unwrap();

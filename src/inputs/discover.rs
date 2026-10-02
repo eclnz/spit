@@ -58,17 +58,16 @@ pub fn discover_source_files(
     rules: &InputRules,
     root: &Path,
 ) -> Result<Discovery, PathError> {
-    let rules = rules.for_pipeline(pipeline);
     discover(
-        &with_source_paths(pipeline, &rules.source_paths),
-        &rules,
+        &with_source_paths(pipeline, &rules.source_paths_for(pipeline)),
+        rules,
         root,
     )
 }
 
 /// `pipeline` with `source_paths`, rules for its sources that it does not
 /// set itself; borrowed when there are none.
-pub(super) fn with_source_paths<'a>(
+pub(crate) fn with_source_paths<'a>(
     pipeline: &'a Pipeline,
     source_paths: &BTreeMap<String, PathTemplate>,
 ) -> Cow<'a, Pipeline> {
