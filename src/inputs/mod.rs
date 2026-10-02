@@ -9,6 +9,7 @@
 mod coverage;
 mod discover;
 mod exclusions;
+mod pattern;
 
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
@@ -37,6 +38,7 @@ pub use self::discover::{discover_source_files, discover_sources, Discovery};
 pub(crate) use self::exclusions::collect_exclusion_errors;
 pub use self::exclusions::UnmatchedExclusion;
 use self::exclusions::{read_exclusion_files, Excluder};
+pub use self::pattern::{MissedSource, NearestFile};
 
 /// A recipe's rules and any inventory records written with them.
 #[derive(Clone, Debug, Default)]
@@ -290,48 +292,58 @@ impl InputSpec {
         validate_pipeline(pipeline)?;
         self.check(pipeline)?;
         let source_paths = self.rules.source_paths_for(pipeline);
-        let (mut inventory, skipped, unmatched_files, root, removed, incomplete) = match source {
-            InputSource::Discover(root) => {
-                if let Some(product) = self.source_without_path(pipeline) {
-                    return Err(InputError::NoSourcePath { product });
+        let (mut inventory, skipped, unmatched_files, missed_sources, root, removed, incomplete) =
+            match source {
+                InputSource::Discover(root) => {
+                    if let Some(product) = self.source_without_path(pipeline) {
+                        return Err(InputError::NoSourcePath { product });
+                    }
+                    let located = with_source_paths(pipeline, &source_paths);
+                    let found = discover(&located, &self.rules, root)?;
+                    if let Some(unmatched) = found.unmatched {
+                        return Err(InputError::UnmatchedExclusion(unmatched));
+                    }
+                    if let Some(emptied) = found.emptied {
+                        return Err(InputError::EveryGroupDropped(emptied));
+                    }
+                    let incomplete = incomplete_groups(pipeline, &found.inventory, &found.removed);
+                    (
+                        found.inventory,
+                        found.skipped,
+                        found.unmatched_files,
+                        found.missed,
+                        Some(root.to_owned()),
+                        found.removed,
+                        incomplete,
+                    )
                 }
-                let located = with_source_paths(pipeline, &source_paths);
-                let found = discover(&located, &self.rules, root)?;
-                if let Some(unmatched) = found.unmatched {
-                    return Err(InputError::UnmatchedExclusion(unmatched));
+                InputSource::Inventory(mut inventory) => {
+                    let removes = !self.rules.exclusions.is_empty()
+                        || self
+                            .rules
+                            .constraints
+                            .iter()
+                            .any(|rule| rule.action == CoverageAction::Drop);
+                    if removes {
+                        check_before_removal(pipeline, &self.rules, &inventory)?;
+                    }
+                    let mut excluder = Excluder::new(&self.rules.exclusions);
+                    excluder.apply(&mut inventory);
+                    let mut removed = excluder.finish().map_err(InputError::UnmatchedExclusion)?;
+                    let dropped = apply_drops(&self.rules, &mut inventory)
+                        .map_err(InputError::EveryGroupDropped)?;
+                    removed.extend(dropped.iter().map(|group| group.removal()));
+                    (
+                        inventory,
+                        Vec::new(),
+                        Vec::new(),
+                        Vec::new(),
+                        None,
+                        removed,
+                        Vec::new(),
+                    )
                 }
-                if let Some(emptied) = found.emptied {
-                    return Err(InputError::EveryGroupDropped(emptied));
-                }
-                let incomplete = incomplete_groups(pipeline, &found.inventory, &found.removed);
-                (
-                    found.inventory,
-                    found.skipped,
-                    found.unmatched_files,
-                    Some(root.to_owned()),
-                    found.removed,
-                    incomplete,
-                )
-            }
-            InputSource::Inventory(mut inventory) => {
-                let removes = !self.rules.exclusions.is_empty()
-                    || self
-                        .rules
-                        .constraints
-                        .iter()
-                        .any(|rule| rule.action == CoverageAction::Drop);
-                if removes {
-                    check_before_removal(pipeline, &self.rules, &inventory)?;
-                }
-                let mut excluder = Excluder::new(&self.rules.exclusions);
-                excluder.apply(&mut inventory);
-                let mut removed = excluder.finish().map_err(InputError::UnmatchedExclusion)?;
-                let dropped = apply_drops(&self.rules, &mut inventory)
-                    .map_err(InputError::EveryGroupDropped)?;
-                removed.extend(dropped.iter().map(|group| group.removal()));
-                (inventory, Vec::new(), Vec::new(), None, removed, Vec::new())
-            }
-        };
+            };
         merge_source_paths(pipeline, &source_paths, &mut inventory)?;
         let located = with_source_paths(pipeline, &inventory.source_paths);
         inspect_paths(&located)?;
@@ -344,6 +356,7 @@ impl InputSpec {
             inventory,
             skipped,
             unmatched_files,
+            missed_sources,
             incomplete_groups: incomplete,
             gaps: checked.gaps,
             root,
@@ -584,6 +597,8 @@ pub struct ResolvedInputs {
     pub skipped: Vec<String>,
     /// Files under a scanned root that matched no source path rule.
     pub unmatched_files: Vec<String>,
+    /// Each source whose path rule matched no file under a scanned root.
+    pub missed_sources: Vec<MissedSource>,
     /// Each place a scan found some of a `sidecars` group's files and not
     /// the others, as `photo[site=A,shot=3] has .raw and .gpx but no .imu`.
     pub incomplete_groups: Vec<String>,
