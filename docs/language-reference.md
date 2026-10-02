@@ -15,7 +15,7 @@ source calibration
 
 Each `source` declares a product family, not an individual file. `image[subject=A,visit=1,run=2]` identifies one artifact. Types such as `Image` are optional; product names and entity bindings identify artifacts.
 
-A source may declare the extension its files have after its type, as an operation does for its outputs: `source events : Events .tsv [subject]`, or `source events .tsv [subject]` untyped. It completes the source's path rule; see [Extensions](#extensions).
+A source may declare the extension its files have after its type, as an operation does for its outputs: `source events : Events .tsv [subject]`, or `source events .tsv [subject]` untyped. It completes the source's path rule; see [Extensions](#extensions). A source whose artifacts are folders rather than files ends with `/` in the same place: `source dicom : Dicom / [sub]`; see [Folders](#folders).
 
 A source with no dimensions takes no brackets: `source testset : Data` and `source calibration` each declare one artifact, displayed by its bare name. A source with no dimensions matches every job that takes it as an input, without a selector.
 
@@ -119,7 +119,7 @@ verify register: check_same_grid {moving} {reference}
 
 A `verify` command may use any input port, including a `many` one, which is filled in as in the command: `verify fit: validate_panel {waves}` checks every wave a fit job reads. `spit dag --commands` shows each job's `verify` lines above the command they guard, with their paths filled in.
 
-A tool that takes a folder and a name instead of a path, and adds the extension itself, is given an output's folder with `{image.dir}`, and its file name without its extension with `{image.stem}`. Either counts as using the output. `.stem` needs the output to declare its [extension](#extensions), so that SPIT knows where the name ends:
+A tool that takes a folder and a name instead of a path, and adds the extension itself, is given an output's folder with `{image.dir}`, and its file name without its extension with `{image.stem}`. Either counts as using the output. `.stem` needs the output to declare its [extension](#extensions), so that SPIT knows where the name ends, unless the output is a [folder](#folders), whose stem without one is its whole name:
 
 ```text
 operation convert(dicom: DicomDir) -> (image: Image .nii.gz, meta: Json .json beside image)
@@ -234,7 +234,7 @@ ext: .nii.gz
 
 For `long[sub=01]` outside every stage, that becomes `derivatives/sub-01/sub-01_long.nii.gz`; for `mc[sub=01,ses=01,run=2]` in `func`, it becomes `derivatives/sub-01/ses-01/func/sub-01_ses-01_run-2_mc.nii.gz`. A product with no dimensions can use `[{@labels}_]{@product}`. Groups work in every path rule: a default, a stage's default, a product's own rule, a source's rule in a pipeline or recipe, and a `sidecars` stem, though not in a `discover` pattern, where every directory has each dimension. A group is decided per product, before any data is read, so each product has one plain template. Groups cannot nest and must contain a placeholder that could be absent; `[[` and `]]` write literal brackets. `spit check --path-rules` and `check --json` show each product's resolved template before any data is read.
 
-Path rules are checked when the pipeline is loaded, even for products with no resolved jobs. SPIT rejects unbalanced braces, a dimension the product does not declare outside an optional group, a dimension no product declares even inside a group, a rule that omits one of the product's dimensions (use `{@entities}`, `{@labels}`, or name each one), two products whose rules give the same path for the same entities, such as a default rule without `{@product}`, and a rule that puts files inside another product's file path, such as `in/{id}.txt/out.txt` beside `in/{id}.txt`. A path must be relative, name a file rather than end in `/`, and contain no empty, `.`, or `..` directory. A source no rule covers is reported by `spit check` on a recipe and by `dag`, and collisions between resolved artifact paths once jobs are bound. SPIT warns when two artifacts' paths differ only in letter case, such as `id=A` and `id=a`: where case is ignored, as by default on macOS and Windows, they are one file.
+Path rules are checked when the pipeline is loaded, even for products with no resolved jobs. SPIT rejects unbalanced braces, a dimension the product does not declare outside an optional group, a dimension no product declares even inside a group, a rule that omits one of the product's dimensions (use `{@entities}`, `{@labels}`, or name each one), two products whose rules give the same path for the same entities, such as a default rule without `{@product}`, and a rule that puts files inside another product's file path, such as `in/{id}.txt/out.txt` beside `in/{id}.txt`, or inside a [folder](#folders) a job writes. A path must be relative, name a file rather than end in `/`, and contain no empty, `.`, or `..` directory. A source no rule covers is reported by `spit check` on a recipe and by `dag`, and collisions between resolved artifact paths once jobs are bound. SPIT warns when two artifacts' paths differ only in letter case, such as `id=A` and `id=a`: where case is ignored, as by default on macOS and Windows, they are one file.
 
 As in Bash, an unquoted `#` starts a comment only at the start of a word, so `--color=#fff` is one argument. A `#` that ends a word, as in `{@output}# note`, stays part of the word; SPIT warns about it, since it reads like a comment. Put a space before `#` to start a comment, or quote the text to keep it.
 
@@ -271,6 +271,8 @@ path `matrix` ends in `.txt`, but operation `align` writes `.mat`; drop the exte
 
 A default rule that ends with an extension while an operation, a source, or `ext:` gives its products another is the same error, said once for the rule. For a source the message says the source declares the extension, as in ``path `events` ends in `.csv`, but source `events` declares `.tsv` ``.
 
+A [folder](#folders) takes only the extension it declares, never `ext:`.
+
 Extensions are optional. An operation whose tool picks the format from the output's name, such as a converter, declares none, and its path rule decides. A pipeline with no extensions and no `ext:` line resolves its paths as written.
 
 `spit check --path-rules` shows each product's path with its extension, and where the extension is declared:
@@ -299,6 +301,29 @@ The suffix is an extension, or quoted text of letters, digits, `.`, `-` and `_`;
 - names another output of the same operation, which declares an extension and is not itself written beside another.
 
 Later steps read it as any other output, and the `.spitdag` lists it among the job's outputs. If the tool does not write it, as when a flag turns the sidecar off, the job leaves a declared output missing.
+
+### Folders
+
+Some tools read or write a folder of files rather than one file: a DICOM series, a FreeSurfer subject, a Zarr store. A `/` after a product's type, where an extension goes, makes its artifacts folders. It may follow an extension, as in `.zarr/`:
+
+```text
+source dicom : Dicom / [sub]
+path dicom: dicom/sub={sub}
+operation recon(t1: Image) -> (subject: FsSubject /)
+operation store(table: Table) -> Zarr .zarr/
+```
+
+A folder's path rule names the folder, without a trailing `/`. `spit inputs` finds a folder source by matching its rule against the folders under the root, and the files inside a folder it finds are read with it, so they are not listed among the files no rule matches. A file whose path matches a folder source's rule, or a folder whose path matches a file source's, is skipped with a warning that says which kind the source reads. `dag` checks that each source folder exists, as it does each source file.
+
+A command is given a folder by its path, as a file is: `{dicom}` above is `dicom/sub=01`. `{subject.dir}` is the folder it is in, and `{subject.stem}` its name without its extension, which for a folder without one is its whole name, so a tool that takes a parent folder and a name can be given both:
+
+```text
+command recon: recon-all -i {t1} -sd {subject.dir} -s {subject.stem}
+```
+
+For `subject[sub=01]`, at `out/subject/sub=01`, this passes `-sd out/subject -s sub=01`. `spit dag --paths` shows a folder's path with a `/` after it, `spit check --path-rules` names it `(source folder)` or `(output folder)`, and the `.spitdag` gives each artifact a [`kind`](spitdag.md#artifact).
+
+A job owns the folder it writes, so nothing else may be written in it or read from it: a path rule that puts another product's files inside a folder a job writes is an error, as is one that puts an output inside a source folder. A source may sit in a source folder, such as `dicom/sub={sub}/info.json` beside the `dicom` folder above, since no job writes either. A folder is not written [`beside`](#files-a-tool-writes-beside-another) another output, nor has an output beside it, and a member of a [`sidecars`](#sidecar-files) group is a file.
 
 ### Sidecar files
 

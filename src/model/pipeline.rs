@@ -118,6 +118,12 @@ impl Pipeline {
             .collect()
     }
 
+    /// Whether `product`'s artifacts are folders: its operation's output
+    /// says so, or, for a source, its declaration.
+    pub fn is_folder(&self, product: &str) -> bool {
+        PipelineIndex::scan(self).is_folder(product)
+    }
+
     /// Whether `product` is a source family, which no step produces.
     pub fn is_source(&self, product: &str) -> bool {
         PipelineIndex::scan(self).is_source(product)
@@ -329,6 +335,16 @@ impl<'p> PipelineIndex<'p> {
         self.product(product).is_some() && self.producer(product).is_none()
     }
 
+    /// See [`Pipeline::is_folder`].
+    pub(crate) fn is_folder(&self, product: &str) -> bool {
+        match self.output_port(product) {
+            Some((_, _, port)) => port.folder,
+            None => self
+                .product(product)
+                .is_some_and(|declared| declared.folder),
+        }
+    }
+
     /// See [`Pipeline::stage_of`].
     pub(crate) fn stage_of(&self, product: &str) -> Option<&'p str> {
         self.producer(product)
@@ -458,12 +474,14 @@ impl<'p> PipelineIndex<'p> {
         self.rule_extension(product)
     }
 
-    /// The `ext:` default, for a product whose path is a default rule.
+    /// The `ext:` default, for a product whose path is a default rule. A
+    /// folder takes only the extension it declares.
     fn rule_extension(&self, product: &str) -> Option<(&'p str, ExtensionSource)> {
         if self.pipeline.product_paths.contains_key(product) {
             return None;
         }
-        self.default_extension(product)
+        let default = self.default_extension(product)?;
+        (!self.is_folder(product)).then_some(default)
     }
 
     /// See [`Pipeline::added_extension`].

@@ -5,6 +5,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use rustc_hash::FxHashSet;
+
 use super::coverage::{apply_drops, DropIndex, EveryGroupDropped};
 use super::exclusions::{Excluder, UnmatchedExclusion};
 use super::pattern::{match_pattern, path_pattern, read_binding, Piece};
@@ -95,22 +97,43 @@ pub(super) fn discover(
         .collect::<Result<Vec<_>, _>>()?;
     let sources = source_patterns(pipeline)?;
     let listing = Listing::of(root)?;
-    let mut discovery = Discovery {
+    let (folder_sources, file_sources): (Vec<_>, Vec<_>) =
+        sources.iter().partition(|source| source.product.folder);
+    // A file in a source folder is read with its folder.
+    let folders: FxHashSet<&str> = listing
+        .directories
+        .iter()
+        .filter(|directory| matches_any(&folder_sources, directory))
+        .map(String::as_str)
+        .collect();
+    let mut discovery = Discovery::default();
+    for file in &listing.files {
         // SPIT's own files, such as a recipe kept in its dataset, are not
         // data a rule missed.
-        unmatched_files: listing
-            .files
-            .iter()
-            .filter(|file| {
-                !is_spit_file(file)
-                    && !sources
-                        .iter()
-                        .any(|source| match_pattern(&source.pieces, file).is_some())
-            })
-            .cloned()
-            .collect(),
-        ..Discovery::default()
-    };
+        if is_spit_file(file)
+            || matches_any(&file_sources, file)
+            || file
+                .match_indices('/')
+                .any(|(end, _)| folders.contains(&file[..end]))
+        {
+            continue;
+        }
+        match first_match(&folder_sources, file) {
+            Some(name) => discovery.skipped.push(format!(
+                "`{file}`: is a file, but source `{name}` reads folders"
+            )),
+            None => discovery.unmatched_files.push(file.clone()),
+        }
+    }
+    for directory in &listing.directories {
+        if !folders.contains(directory.as_str()) {
+            if let Some(name) = first_match(&file_sources, directory) {
+                discovery.skipped.push(format!(
+                    "`{directory}`: is a folder, but source `{name}` reads files; end its declaration with `/` to read folders"
+                ));
+            }
+        }
+    }
     find_contexts(
         &directory_patterns,
         &listing.directories,
@@ -133,8 +156,10 @@ pub(super) fn discover(
         &discovery.inventory.discovered,
     );
     find_source_files(
-        &sources,
-        &listing.files,
+        [
+            (&file_sources, &listing.files),
+            (&folder_sources, &listing.directories),
+        ],
         &expected,
         &mut excluder,
         &mut discovery,
@@ -156,7 +181,7 @@ pub(super) fn discover(
         pipeline,
         root,
         &sources,
-        &listing.files,
+        &listing,
         &expected,
         &DropIndex::new(&dropped),
         &mut excluder,
@@ -311,18 +336,35 @@ fn expected_bindings<'a>(
     expected
 }
 
-/// Record each file that a source's path rule matches, unless an `exclude`
-/// rule removes it or a value cannot be read.
+/// Whether a path rule of `sources` matches `path`.
+fn matches_any(sources: &[&SourcePattern<'_>], path: &str) -> bool {
+    sources
+        .iter()
+        .any(|source| match_pattern(&source.pieces, path).is_some())
+}
+
+/// The name of the first of `sources` whose path rule matches `path`.
+fn first_match<'a>(sources: &[&SourcePattern<'a>], path: &str) -> Option<&'a str> {
+    sources
+        .iter()
+        .find(|source| match_pattern(&source.pieces, path).is_some())
+        .map(|source| source.product.name.as_str())
+}
+
+/// Record each file that a file source's path rule matches, and each folder
+/// that a folder source's matches, unless an `exclude` rule removes it or a
+/// value cannot be read.
 fn find_source_files(
-    sources: &[SourcePattern<'_>],
-    files: &[String],
+    kinds: [(&[&SourcePattern<'_>], &[String]); 2],
     expected: &BTreeMap<&str, BTreeSet<EntityBinding>>,
     excluder: &mut Excluder<'_>,
     discovery: &mut Discovery,
 ) -> Result<(), PathError> {
-    for file in files {
-        let found = source_record(sources, file, expected, excluder, &mut discovery.skipped)?;
-        discovery.inventory.artifacts.extend(found);
+    for (sources, paths) in kinds {
+        for path in paths {
+            let found = source_record(sources, path, expected, excluder, &mut discovery.skipped)?;
+            discovery.inventory.artifacts.extend(found);
+        }
     }
     let artifacts = &mut discovery.inventory.artifacts;
     artifacts.sort();
@@ -330,11 +372,11 @@ fn find_source_files(
     Ok(())
 }
 
-/// The record for `file`, if a source's rule matches it and no `exclude`
-/// rule removes it. A file must match one source only, and lie within the
-/// contexts found for that source.
+/// The record for `file`, a file or a folder, if a source's rule matches
+/// it and no `exclude` rule removes it. It must match one source only, and
+/// lie within the contexts found for that source.
 fn source_record(
-    sources: &[SourcePattern<'_>],
+    sources: &[&SourcePattern<'_>],
     file: &str,
     expected: &BTreeMap<&str, BTreeSet<EntityBinding>>,
     excluder: &mut Excluder<'_>,
@@ -354,6 +396,7 @@ fn source_record(
         }
     };
     let name = product.name.as_str();
+    let kind = if product.folder { "folder" } else { "file" };
     // An excluded file may lie outside every discovered context, such as a
     // misnamed copy of one that does.
     if excluder.artifact(name, &binding) {
@@ -364,19 +407,19 @@ fn source_record(
         .is_some_and(|bindings| !bindings.contains(&binding))
     {
         return Err(error(format!(
-            "source file `{file}` for `{name}` lies outside the discovered contexts"
+            "source {kind} `{file}` for `{name}` lies outside the discovered contexts"
         )));
     }
     if let Some((other, _)) = matches.next() {
         return Err(error(format!(
-            "file `{file}` matches the path rules of both `{name}` and `{}`",
+            "{kind} `{file}` matches the path rules of both `{name}` and `{}`",
             other.name
         )));
     }
     Ok(Some(SourceRecord::new(name, binding).at(file)))
 }
 
-/// Require the file of every source binding a discovery rule expects,
+/// Require the file or folder of every source binding a discovery rule expects,
 /// except in groups a `drop` rule removed. An excluded binding needs no file;
 /// when it has none, its exclusion is recorded here, since no file was found
 /// to record it by.
@@ -384,7 +427,7 @@ fn require_source_files(
     pipeline: &Pipeline,
     root: &Path,
     sources: &[SourcePattern<'_>],
-    files: &[String],
+    listing: &Listing,
     expected: &BTreeMap<&str, BTreeSet<EntityBinding>>,
     dropped: &DropIndex<'_>,
     excluder: &mut Excluder<'_>,
@@ -406,7 +449,17 @@ fn require_source_files(
             // `is_file` alone accepts `s07.json` when only `S07.json` is
             // present on a case-insensitive filesystem. The listing keeps
             // each directory entry's actual spelling.
-            let present = files.binary_search(&relative).is_ok() && full.is_file();
+            let (listed, kind) = if product.folder {
+                (&listing.directories, "folder")
+            } else {
+                (&listing.files, "file")
+            };
+            let present = listed.binary_search(&relative).is_ok()
+                && if product.folder {
+                    full.is_dir()
+                } else {
+                    full.is_file()
+                };
             if excluded {
                 if !present {
                     excluder.artifact(&product.name, binding);
@@ -415,7 +468,7 @@ fn require_source_files(
             }
             if !present {
                 return Err(error(format!(
-                    "missing source file for `{artifact}` at discovered context: `{}`",
+                    "missing source {kind} for `{artifact}` at discovered context: `{}`",
                     full.display()
                 )));
             }
