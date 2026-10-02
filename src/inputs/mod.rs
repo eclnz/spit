@@ -9,6 +9,7 @@
 mod coverage;
 mod discover;
 mod exclusions;
+mod pattern;
 
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
