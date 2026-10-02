@@ -1,47 +1,14 @@
-//! Matching a path a scan finds against a path rule, and reading the
-//! dimension values it binds.
+//! Path rules as patterns: matching one against a file or directory, and
+//! how near a file comes to a rule that matches none.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt;
 use std::ops::Range;
 
-use crate::model::{EntityBinding, ProductDef};
-use crate::paths::{
-    decode_component, encode_component, error, PathError, PathPart, PathPlaceholder, PathTemplate,
-};
+use crate::model::ProductDef;
+use crate::paths::{encode_component, error, PathError, PathPart, PathPlaceholder, PathTemplate};
 
-/// The entities `bound` in `path`, decoded, or a note of why a value cannot
-/// be read and the path is skipped.
-pub(super) fn read_binding(
-    path: &str,
-    bound: BTreeMap<String, &str>,
-) -> Result<EntityBinding, String> {
-    bound
-        .into_iter()
-        .map(|(dimension, encoded)| match readable_value(encoded) {
-            Ok(value) => Ok((dimension, value)),
-            Err(reason) => Err(format!(
-                "`{path}`: `{dimension}` value `{encoded}` {reason}"
-            )),
-        })
-        .collect()
-}
-
-/// Decode a path component. It must be written exactly as SPIT would write
-/// it, so the record's path is the file found.
-fn readable_value(encoded: &str) -> Result<String, &'static str> {
-    let value = decode_component(encoded).ok_or("is not valid `%XX` text")?;
-    if encode_component(&value) != encoded {
-        return Err("is not how SPIT writes a value, so a path made from it would differ");
-    }
-    if value
-        .chars()
-        .any(|character| character.is_whitespace() || ",[]=#".contains(character))
-    {
-        return Err("holds a space or one of `,[]=#`, which an inventory cannot");
-    }
-    Ok(value)
-}
-
+/// One piece of a path rule: text written as is, or a dimension's value.
 pub(super) enum Piece {
     Literal(String),
     /// One path component value, as `bind_path` encodes it.
@@ -234,4 +201,169 @@ fn forced_end(next: Option<&Piece>, rest: &str, longest: usize) -> Option<usize>
         }
         _ => None,
     }
+}
+
+/// A source whose path rule matched no file under the scanned root, and the
+/// file left unmatched that comes nearest to it.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MissedSource {
+    pub product: String,
+    /// Whether the source reads folders, so its nearest is a folder.
+    pub folder: bool,
+    /// The rule as it was matched, with `{@product}` and `{@entities}`
+    /// written out and its extension added.
+    pub rule: String,
+    pub nearest: Option<NearestFile>,
+}
+
+/// Where a file parts from a rule it does not match.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NearestFile {
+    pub file: String,
+    /// How many bytes at the start of `file` the rule matches.
+    pub matched: usize,
+    /// The rest of the rule from there, empty when the file goes on past
+    /// the rule's end.
+    pub expected: String,
+}
+
+impl fmt::Display for MissedSource {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let kind = if self.folder { "folder" } else { "file" };
+        write!(
+            f,
+            "source `{}` matched no {kind}s with path rule `{}`",
+            self.product, self.rule
+        )?;
+        let Some(near) = &self.nearest else {
+            return Ok(());
+        };
+        let (start, rest) = near.file.split_at(near.matched);
+        write!(f, "\n  the nearest {kind} is `{}`\n  ", near.file)?;
+        if !start.is_empty() {
+            write!(f, "after `{start}`, ")?;
+        }
+        match (rest.is_empty(), near.expected.is_empty()) {
+            (true, _) => write!(f, "the {kind} ends where the rule has `{}`", near.expected),
+            (false, true) => write!(f, "the {kind} has `{rest}` where the rule ends"),
+            (false, false) => write!(
+                f,
+                "the {kind} has `{rest}` where the rule has `{}`",
+                near.expected
+            ),
+        }
+    }
+}
+
+/// `product`'s rule, `pieces`, which matched no file, with the file of
+/// `files` it comes nearest to: the one it matches furthest from the start,
+/// then the one that shares most of the rule's ending. A file is near only
+/// when the rule matches some of its start, or it ends with the rule's last
+/// literal, such as `_bold.nii.gz`, in full. A `folder` source's `files`
+/// are the folders under the root.
+pub(super) fn missed_source(
+    product: &str,
+    pieces: &[Piece],
+    files: &[String],
+    folder: bool,
+) -> MissedSource {
+    let ending = match pieces.last() {
+        Some(Piece::Literal(last)) => last.as_str(),
+        _ => "",
+    };
+    let shared_ending = |file: &str| {
+        file.bytes()
+            .rev()
+            .zip(ending.bytes().rev())
+            .take_while(|(a, b)| a == b)
+            .count()
+    };
+    let mut best: Option<(usize, usize, NearestFile)> = None;
+    for file in files {
+        let (matched, expected) = reach(pieces, file);
+        let score = (matched, shared_ending(file));
+        let near = matched > 0 || (!ending.is_empty() && score.1 == ending.len());
+        if near && best.as_ref().is_none_or(|(a, b, _)| score > (*a, *b)) {
+            let near = NearestFile {
+                file: file.clone(),
+                matched,
+                expected,
+            };
+            best = Some((score.0, score.1, near));
+        }
+    }
+    MissedSource {
+        product: product.to_owned(),
+        folder,
+        rule: render(pieces),
+        nearest: best.map(|(_, _, near)| near),
+    }
+}
+
+/// How far `pieces` match `text` from its start, in bytes, and the rest of
+/// the rule from there. A literal may match in part, up to a separator
+/// (`/`, `_`, `-` or `.`), so the rest can start inside it: `_run-` against
+/// `_task-` matches `_`, while `sub-` against `ses-` matches nothing.
+///
+/// Every way of splitting values is tried, from an explicit stack: unlike
+/// `match_from`, this keeps no bindings, so a dimension written twice may
+/// take two values. It only says where a file parts from a rule.
+fn reach(pieces: &[Piece], text: &str) -> (usize, String) {
+    let mut furthest = (0, render(pieces));
+    let mut seen = BTreeSet::new();
+    let mut stack = vec![(0, 0)];
+    while let Some((index, offset)) = stack.pop() {
+        if !seen.insert((index, offset)) {
+            continue;
+        }
+        let rest = &text[offset..];
+        let Some(piece) = pieces.get(index) else {
+            if offset > furthest.0 {
+                furthest = (offset, String::new());
+            }
+            continue;
+        };
+        match piece {
+            Piece::Literal(literal) if rest.starts_with(literal.as_str()) => {
+                stack.push((index + 1, offset + literal.len()));
+            }
+            Piece::Literal(literal) => {
+                let common: usize = literal
+                    .chars()
+                    .zip(rest.chars())
+                    .take_while(|(a, b)| a == b)
+                    .map(|(a, _)| a.len_utf8())
+                    .sum();
+                let shared = literal[..common]
+                    .rfind(['/', '_', '-', '.'])
+                    .map_or(0, |separator| separator + 1);
+                if offset + shared > furthest.0 {
+                    let expected =
+                        format!("{}{}", &literal[shared..], render(&pieces[index + 1..]));
+                    furthest = (offset + shared, expected);
+                }
+            }
+            Piece::Value(_) => {
+                let longest = rest
+                    .find(|character: char| !is_value_character(character))
+                    .unwrap_or(rest.len());
+                if longest == 0 && offset > furthest.0 {
+                    furthest = (offset, render(&pieces[index..]));
+                }
+                stack.extend((1..=longest).map(|end| (index + 1, offset + end)));
+            }
+        }
+    }
+    furthest
+}
+
+/// `pieces` written as a path rule.
+fn render(pieces: &[Piece]) -> String {
+    pieces
+        .iter()
+        .map(|piece| match piece {
+            Piece::Literal(literal) => literal.clone(),
+            Piece::Value(dimension) => format!("{{{dimension}}}"),
+        })
+        .collect()
 }
