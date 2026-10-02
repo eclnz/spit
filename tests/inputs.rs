@@ -180,6 +180,65 @@ fn a_given_root_is_scanned_even_when_the_recipe_has_records() {
 }
 
 #[test]
+fn missing_source_coverage_names_the_path_rule_and_unmatched_file() {
+    let tree = Tree::new(
+        "missing-source-path",
+        &[
+            "sub-01/ses-01/dwi/sub-01_ses-01_dwi.nii.gz",
+            "sub-01/ses-01/anat/sub-01_ses-01_T1w.nii.gz",
+        ],
+    );
+    tree.write(
+        "analysis.spit",
+        "source dwi : Image [sub, ses]\npath dwi: sub-{sub}/ses-{ses}/dwi/sub-{sub}_ses-{ses}_dwi.nii.gz\nsource t1w : Image [sub, ses]\n",
+    );
+    let recipe = tree.write(
+        "analysis.spitin",
+        "pipeline analysis.spit\npath: t1w sub-{sub}/ses-{ses}\nrequire t1w count=1 per [sub, ses]\n",
+    );
+    let run = |extra: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_spit"))
+            .arg("inputs")
+            .arg(&recipe)
+            .args(extra)
+            .output()
+            .unwrap()
+    };
+    let failed = run(&[]);
+    assert!(!failed.status.success());
+    let stderr = String::from_utf8(failed.stderr).unwrap();
+    assert!(stderr.contains("source coverage for `t1w`"), "{stderr}");
+    assert!(
+        stderr.contains("using path rule `t1w sub-{sub}/ses-{ses}`"),
+        "{stderr}"
+    );
+    assert!(
+        stderr.contains("`sub-01/ses-01/anat/sub-01_ses-01_T1w.nii.gz` matched no source rule"),
+        "{stderr}"
+    );
+    assert!(stderr.contains("`path t1w:` sets a rule"), "{stderr}");
+
+    let dag = Command::new(env!("CARGO_BIN_EXE_spit"))
+        .arg("dag")
+        .arg(&recipe)
+        .output()
+        .unwrap();
+    assert!(!dag.status.success());
+    let dag_error = String::from_utf8(dag.stderr).unwrap();
+    assert!(
+        dag_error.contains("using path rule `t1w sub-{sub}/ses-{ses}`"),
+        "{dag_error}"
+    );
+
+    let unmatched = run(&["--unmatched"]);
+    assert!(unmatched.status.success());
+    assert_eq!(
+        String::from_utf8(unmatched.stdout).unwrap(),
+        "sub-01/ses-01/anat/sub-01_ses-01_T1w.nii.gz\n"
+    );
+}
+
+#[test]
 fn a_recipe_path_for_an_unknown_source_is_rejected_by_the_stage() {
     let tree = Tree::new("unknown", &FILES);
     let recipe = parse_input_spec(&format!("{RECIPE}path other: x/{{sub}}.txt\n")).unwrap();

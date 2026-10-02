@@ -13,7 +13,7 @@ use spit::{
 };
 
 use super::args::{CliArgs, Flag};
-use super::load::{load_recipe, prepare, recorded_root, settle};
+use super::load::{load_recipe, prepare, recorded_root, require_complete, settle};
 use super::output::{
     is_inputs, is_recipe, job_count, located, passed, read_file, read_stdin, report, write_output,
     write_spitdag,
@@ -138,13 +138,13 @@ pub(crate) fn inputs(args: &CliArgs) -> Result<(), Box<dyn Error>> {
     )?;
     let root = args.value(Flag::Root).map(PathBuf::from);
     let (mut settled, root) = settle(&loaded, &args.file, root.as_deref())?;
-    settled.require_complete()?;
     if args.has(Flag::Unmatched) {
         for file in &settled.unmatched_files {
             println!("{file}");
         }
         return Ok(());
     }
+    require_complete(&settled, &loaded.checked.pipeline)?;
     // A written .spitout records the dataset root, so `dag` on it needs no
     // `--root`: relative to the file, so the two can move together. A
     // printed one records none, as where it will be kept is unknown.
@@ -174,7 +174,7 @@ pub(crate) fn dag(args: &CliArgs) -> Result<(), Box<dyn Error>> {
             .dag
             .locate_sources(&prepared.inputs.inventory);
     } else {
-        prepared.inputs.require_complete()?;
+        require_complete(&prepared.inputs, &prepared.pipeline)?;
     }
     let dag = &prepared.report.dag;
     if args.has(Flag::StrictPaths) {
