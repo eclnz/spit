@@ -236,19 +236,36 @@ pub(super) fn unmatched_files<'a>(
     let mut without = Vec::new();
     for product in sources_of(pipeline) {
         match index.path_template_for(&product.name) {
-            Some(template) => patterns.push(path_pattern(&template, product)?),
+            Some(template) => patterns.push((product.folder, path_pattern(&template, product)?)),
             None => without.push(product),
         }
     }
-    let files = Listing::of(root)?
+    let matches = |folder: bool, path: &str| {
+        patterns.iter().any(|(reads_folders, pieces)| {
+            *reads_folders == folder && match_pattern(pieces, path).is_some()
+        })
+    };
+    let listing = Listing::of(root)?;
+    // As in `discover`, a file in a source folder is read with its folder,
+    // and a file a folder source's rule matches is skipped, not missed.
+    let folders: FxHashSet<_> = listing
+        .directories
+        .iter()
+        .filter(|directory| matches(true, directory))
+        .map(String::as_str)
+        .collect();
+    let files = listing
         .files
-        .into_iter()
+        .iter()
         .filter(|file| {
             !is_spit_file(file)
-                && !patterns
-                    .iter()
-                    .any(|pieces| match_pattern(pieces, file).is_some())
+                && !matches(false, file)
+                && !matches(true, file)
+                && !file
+                    .match_indices('/')
+                    .any(|(end, _)| folders.contains(&file[..end]))
         })
+        .cloned()
         .collect();
     Ok((files, without))
 }
