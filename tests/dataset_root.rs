@@ -88,7 +88,70 @@ fn a_recipe_must_name_its_root() {
     }
     // The command line cannot stand in for it.
     let output = spit_in(tree.path(), &["dag", "analysis.spitin", "--root", "data"]);
-    assert!(text(&output.stderr).contains("unknown option `--root`"));
+    assert!(
+        text(&output.stderr).contains("`--root` is for a pipeline run without a recipe"),
+        "{}",
+        text(&output.stderr)
+    );
+}
+
+#[test]
+fn a_pipeline_runs_without_a_recipe_given_its_data_folder() {
+    let tree = Tree::new("root-pipeline", &FILES);
+    let pipeline = format!("{PIPELINE}path image: sub-{{sub}}/ses-{{ses}}/image.nii.gz\n");
+    tree.write("analysis.spit", &pipeline);
+    let output = spit_in(
+        tree.path(),
+        &["dag", "analysis.spit", "--root", "data", "--commands"],
+    );
+    let (commands, notes) = succeeded(&output);
+    assert!(
+        notes.contains("note: ran `spit inputs analysis.spit --root data` in memory"),
+        "{notes}"
+    );
+    assert!(notes.contains("note: 3 source files verified."), "{notes}");
+    assert!(
+        commands.contains("tool sub-5/ses-1/image.nii.gz results/5_1.nii.gz"),
+        "{commands}"
+    );
+    let output = spit_in(
+        tree.path(),
+        &["artifacts", "analysis.spit", "--root", "data"],
+    );
+    succeeded(&output);
+    // `inputs` writes a .spitout that records the folder, so `dag` on it
+    // needs no `--root`, and may not take one.
+    let output = spit_in(
+        tree.path(),
+        &[
+            "inputs",
+            "analysis.spit",
+            "--root",
+            "data",
+            "-o",
+            "found.spitout",
+        ],
+    );
+    succeeded(&output);
+    let written = std::fs::read_to_string(tree.path().join("found.spitout")).unwrap();
+    assert!(written.starts_with("root data\n\n"), "{written}");
+    let output = spit_in(tree.path(), &["dag", "analysis.spit", "found.spitout"]);
+    let (_, notes) = succeeded(&output);
+    assert!(notes.contains("note: 3 source files verified."), "{notes}");
+    let output = spit_in(
+        tree.path(),
+        &["dag", "analysis.spit", "found.spitout", "--root", "data"],
+    );
+    assert!(!output.status.success());
+    assert!(text(&output.stderr).contains("a .spitout says where its data is"));
+    // Without a recipe or a .spitout, the folder must be given.
+    let output = spit_in(tree.path(), &["dag", "analysis.spit"]);
+    assert!(!output.status.success());
+    assert!(
+        text(&output.stderr).contains("needs to know where the data is: add `--root <directory>`"),
+        "{}",
+        text(&output.stderr)
+    );
 }
 
 #[test]

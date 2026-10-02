@@ -452,7 +452,7 @@ fn check_prints_every_diagnostic_and_fails_only_on_errors() {
     assert_eq!(stdout(&warned_check), "Pipeline valid.\n");
     assert!(!warned_dag.status.success());
     assert!(
-        stderr(&warned_dag).starts_with("error: dag needs a pipeline before"),
+        stderr(&warned_dag).contains("needs to know where the data is: add `--root <directory>`"),
         "{}",
         stderr(&warned_dag)
     );

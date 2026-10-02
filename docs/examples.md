@@ -247,7 +247,7 @@ When `dag` stops because an input is missing or ambiguous, run `spit artifacts` 
 
 ## More example pipelines
 
-Each pipeline below, under [`examples/`](../examples), checks cleanly and sits beside a `.spitin` recipe and a `.spitout` of its inputs. Recipes may add discovery, exclusion, drop, or require rules. Each recipe's `root` line names a folder of empty source files beside it, so `spit dag` on the `.spitin` alone finds the same inputs and jobs as on the `.spit` and `.spitout`, and the `.spitout` records the same root, so `dag` checks those files too. Run the command from the repository root to see its jobs; add `--paths` to see each artifact's file or `-o plan.spitdag` to write them, or run `spit check` on the `.spit` or `.spitin` alone.
+Each pipeline below, under [`examples/`](../examples), checks cleanly and sits beside a `.spitin` recipe and a `.spitout` of its inputs. Recipes may add discovery, exclusion, drop, or require rules. Each recipe's `root` line names a folder of empty source files beside it, so `spit dag` on the `.spitin` alone finds the same inputs and jobs as on the `.spit` and `.spitout`, and the `.spitout` records the same root, so `dag` checks those files too. Where the pipeline's own path rules find every source, as in the patterns, the recipe is optional: `cargo run -- dag examples/patterns/model_fit/model_fit.spit --root examples/patterns/model_fit` finds the same jobs. Run the command from the repository root to see its jobs; add `--paths` to see each artifact's file or `-o plan.spitdag` to write them, or run `spit check` on the `.spit` or `.spitin` alone.
 
 | Pipeline | Shows | Command | Jobs |
 | --- | --- | --- | --- |
