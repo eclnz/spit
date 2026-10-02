@@ -1,13 +1,14 @@
 //! A dataset's inputs: the rules that settle them, what they removed, and
 //! the inventory of sources they leave.
 
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::fmt;
 use std::path::PathBuf;
 
 use crate::paths::PathTemplate;
 
-use super::{owned_strings, DirectoryDiscovery, EntityBinding};
+use super::{owned_strings, DirectoryDiscovery, EntityBinding, Pipeline, PipelineIndex};
 
 /// How a dataset's sources are found and filtered: directory discovery,
 /// `exclude`, `drop` and `require` rules, and where source files live. The input stage
