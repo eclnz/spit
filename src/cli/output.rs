@@ -76,24 +76,28 @@ pub(crate) fn job_count(pipeline: &Pipeline, dag: &ResolvedDag) -> String {
     if pipeline.stages.is_empty() {
         return format!("{total} jobs resolved.");
     }
-    // Each outermost stage counts the jobs of the stages nested in it.
-    let within = |stage: &str| {
-        dag.jobs
+    // Jobs are counted by step, and each outermost stage adds up the steps
+    // of the stages nested in it.
+    let mut jobs = vec![0; dag.steps.len()];
+    for job in &dag.jobs {
+        jobs[job.step.index()] += 1;
+    }
+    let count = |counted: &dyn Fn(Option<&str>) -> bool| -> usize {
+        dag.steps
             .iter()
-            .filter(|job| {
-                job.stage
-                    .as_deref()
-                    .is_some_and(|name| stage_within(name, stage))
-            })
-            .count()
+            .zip(&jobs)
+            .filter(|(step, _)| counted(step.stage.as_deref()))
+            .map(|(_, &count)| count)
+            .sum()
     };
+    let within = |stage: &str| count(&|name| name.is_some_and(|name| stage_within(name, stage)));
     let mut parts: Vec<_> = pipeline
         .stages
         .iter()
         .filter(|stage| !stage.name.contains('/'))
         .map(|stage| format!("{} in {}", within(&stage.name), stage.name))
         .collect();
-    let outside = dag.jobs.iter().filter(|job| job.stage.is_none()).count();
+    let outside = count(&|name| name.is_none());
     if outside > 0 {
         parts.push(format!("{outside} outside stages"));
     }

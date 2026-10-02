@@ -96,10 +96,7 @@ impl ArtifactJson {
     fn new(dag: &BoundDag) -> Self {
         let mut used = vec![false; dag.paths.len()];
         for job in &dag.jobs {
-            for id in job
-                .input_artifacts()
-                .chain(job.outputs.iter().map(|&(_, id)| id))
-            {
+            for id in job.input_artifacts().chain(job.outputs.iter().copied()) {
                 used[id.index()] = true;
             }
         }
@@ -134,12 +131,13 @@ fn write_job(
     dependents: &[JobId],
     work: &mut String,
 ) {
+    let step = dag.step(job);
     work.clear();
     let mut object = ObjectWriter::start(work);
-    let operation = object.field_at("operation", |out| write_string(out, &job.operation));
+    let operation = object.field_at("operation", |out| write_string(out, &step.operation));
     let inputs = object.field_at("inputs", |out| {
         let mut inputs = ObjectWriter::start(out);
-        for (port, ids) in &job.inputs {
+        for (port, ids) in step.inputs.iter().zip(&job.inputs) {
             inputs.field(port, |out| {
                 write_array(out, ids, |out, &id| out.push_str(artifacts.get(id)));
             });
@@ -148,8 +146,8 @@ fn write_job(
     });
     let outputs = object.field_at("outputs", |out| {
         let mut outputs = ObjectWriter::start(out);
-        for (port, artifact) in &job.outputs {
-            outputs.field(port, |out| out.push_str(artifacts.get(*artifact)));
+        for (port, &artifact) in step.outputs.iter().zip(&job.outputs) {
+            outputs.field(port, |out| out.push_str(artifacts.get(artifact)));
         }
         outputs.finish();
     });
@@ -170,7 +168,7 @@ fn write_job(
     object.field("stage", |out| {
         write_array(
             out,
-            job.stage.iter().flat_map(|stage| stage.split('/')),
+            step.stage.iter().flat_map(|stage| stage.split('/')),
             write_string,
         );
     });
@@ -340,12 +338,28 @@ fn write_type(out: &mut String, artifact_type: &TypeExpr) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{Artifacts, EntityBinding};
+    use crate::model::{Artifacts, EntityBinding, StepId};
+    use crate::spitdag::BoundStep;
 
-    /// A DAG of the jobs `jobs` makes from the ids of `raw`, `clean` and
+    /// A step calling `operation` in `stage`, with ports named `inputs` and
+    /// `outputs`.
+    fn step(operation: &str, stage: Option<&str>, inputs: &[&str], outputs: &[&str]) -> BoundStep {
+        let names = |ports: &[&str]| ports.iter().map(|&port| port.to_owned()).collect();
+        BoundStep {
+            operation: operation.to_owned(),
+            stage: stage.map(str::to_owned),
+            inputs: names(inputs),
+            outputs: names(outputs),
+        }
+    }
+
+    /// A DAG of `steps` and the jobs `jobs` makes from the ids of `raw`, `clean` and
     /// `mean`: one artifact each, at `in/1.txt`, `out/1.txt` and
     /// `out/mean.txt`, with entities that need escaping.
-    fn bound(jobs: impl FnOnce([ArtifactId; 3]) -> Vec<BoundJob>) -> BoundDag {
+    fn bound(
+        steps: Vec<BoundStep>,
+        jobs: impl FnOnce([ArtifactId; 3]) -> Vec<BoundJob>,
+    ) -> BoundDag {
         let artifact_type = TypeExpr::applied(
             "MRI",
             vec![
@@ -361,19 +375,22 @@ mod tests {
         });
         let paths = ["in/1.txt", "out/1.txt", "out/mean.txt"].map(String::from);
         let dimensions = vec![vec!["sub".to_owned(), "run".to_owned()]; 3];
-        BoundDag::new(artifacts, paths.to_vec(), dimensions, jobs(ids))
+        BoundDag::new(artifacts, paths.to_vec(), dimensions, steps, jobs(ids))
     }
 
     #[test]
     fn a_spitdag_is_written_with_its_version_and_escapes() {
-        let mut dag = bound(|[raw, clean, mean]| {
+        let steps = vec![
+            step("clean", Some("prep/denoise"), &["raw"], &["output"]),
+            step("mean", None, &["frames"], &["output"]),
+        ];
+        let mut dag = bound(steps, |[raw, clean, mean]| {
             vec![
                 BoundJob {
                     id: JobId::new(1),
-                    operation: "clean".into(),
-                    stage: Some("prep/denoise".into()),
-                    inputs: vec![("raw".into(), vec![raw])],
-                    outputs: vec![("output".into(), clean)],
+                    step: StepId::new(0),
+                    inputs: vec![vec![raw]],
+                    outputs: vec![clean],
                     depends_on: vec![],
                     command: Some(vec![
                         vec![ArgPart::Text("tool".into())],
@@ -383,10 +400,9 @@ mod tests {
                 },
                 BoundJob {
                     id: JobId::new(2),
-                    operation: "mean".into(),
-                    stage: None,
-                    inputs: vec![("frames".into(), vec![clean])],
-                    outputs: vec![("output".into(), mean)],
+                    step: StepId::new(1),
+                    inputs: vec![vec![clean]],
+                    outputs: vec![mean],
                     depends_on: vec![JobId::new(1)],
                     command: None,
                     verify: vec![],
@@ -427,7 +443,7 @@ mod tests {
 
     #[test]
     fn a_removal_is_written_with_its_rule_and_why() {
-        let mut dag = bound(|_| Vec::new());
+        let mut dag = bound(Vec::new(), |_| Vec::new());
         dag.removed = vec![
             Removal {
                 product: Some("bold".into()),
@@ -473,16 +489,16 @@ mod tests {
         let paths = ["w/wave1.csv", "w/wave10.csv", "w/wave2.csv", "fit.json"].map(String::from);
         let job = BoundJob {
             id: JobId::new(1),
-            operation: "fit".into(),
-            stage: None,
-            inputs: vec![("waves".into(), waves.to_vec())],
-            outputs: vec![("output".into(), output)],
+            step: StepId::new(0),
+            inputs: vec![waves.to_vec()],
+            outputs: vec![output],
             depends_on: vec![],
             command: None,
             verify: vec![],
         };
         let dimensions = vec![vec!["wave".to_owned()], vec![]];
-        let dag = BoundDag::new(artifacts, paths.to_vec(), dimensions, vec![job]);
+        let steps = vec![step("fit", None, &["waves"], &["output"])];
+        let dag = BoundDag::new(artifacts, paths.to_vec(), dimensions, steps, vec![job]);
         let order: Vec<_> = dag
             .external_inputs()
             .iter()
@@ -495,22 +511,26 @@ mod tests {
     fn a_fingerprint_follows_the_work_not_the_job_number() {
         let job = |[raw, clean, _]: [ArtifactId; 3]| BoundJob {
             id: JobId::new(1),
-            operation: "clean".into(),
-            stage: None,
-            inputs: vec![("raw".into(), vec![raw])],
-            outputs: vec![("output".into(), clean)],
+            step: StepId::new(0),
+            inputs: vec![vec![raw]],
+            outputs: vec![clean],
             depends_on: vec![],
             command: Some(vec![vec![ArgPart::Text("tool".into())]]),
             verify: vec![],
         };
         let print = |make: &dyn Fn([ArtifactId; 3]) -> BoundJob| {
-            let text = bound(|ids| vec![make(ids)]).to_json();
+            // The same operation and ports, outside a stage and in one.
+            let steps = vec![
+                step("clean", None, &["raw"], &["output"]),
+                step("clean", Some("prep"), &["raw"], &["output"]),
+            ];
+            let text = bound(steps, |ids| vec![make(ids)]).to_json();
             let start = text.find("\"fingerprint\":\"").unwrap() + 15;
             text[start..start + 16].to_owned()
         };
         let renumbered = |ids| BoundJob {
             id: JobId::new(7),
-            stage: Some("prep".into()),
+            step: StepId::new(1),
             ..job(ids)
         };
         assert_eq!(print(&job), print(&renumbered));

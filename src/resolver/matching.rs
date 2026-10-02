@@ -9,7 +9,7 @@ use crate::compile::{CompiledStep, StepShape};
 use crate::error::{NearMiss, PortSite, ResolveError};
 use crate::model::{
     near_reason, ArtifactId, Artifacts, Cardinality, EntityBinding, Gap, Invocation, Job, JobId,
-    OperationDef,
+    OperationDef, StepId,
 };
 
 /// One job of a step: its inputs, and the context each of its outputs
@@ -316,8 +316,7 @@ fn broadcast_contexts(
 
 pub(super) fn make_job(
     id: JobId,
-    operation: &OperationDef,
-    stage: Option<String>,
+    step: StepId,
     inputs: Vec<Vec<ArtifactId>>,
     outputs: Vec<ArtifactId>,
     producers: &[Option<JobId>],
@@ -329,10 +328,9 @@ pub(super) fn make_job(
         .collect();
     Job {
         id,
-        operation: operation.name.clone(),
+        step,
         inputs,
         outputs,
         dependencies: dependencies.into_iter().collect(),
-        stage,
     }
 }
