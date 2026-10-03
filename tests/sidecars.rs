@@ -429,3 +429,74 @@ fn records_count_what_an_earlier_run_removed() {
     assert!(ok, "{err}");
     assert!(!err.contains("but no"), "{err}");
 }
+
+/// `PHOTOS` with a step that reads the image alone, beside the one that
+/// reads every member.
+const TWO_STEPS: &str = "\
+path: out/{@product}/site-{site}_shot-{shot}
+sidecars photo [site, shot]:
+    path: site-{site}/shot-{shot}
+    source raw : Image .raw
+    source gps : Track .gpx
+    source meta .json
+operation load(image: Image, gps: Track, meta) -> Image
+command load: load {image} {gps} {meta} {@output}
+operation thumb(image: Image) -> Image
+command thumb: thumb {image} {@output}
+loaded = load(raw, gps, meta)
+small = thumb(raw)
+";
+
+#[test]
+fn a_missing_member_fails_only_the_steps_that_read_it() {
+    // Shot 2 has no `.json`. No job runs with an input left out: `dag`
+    // stops at `load`, `--partial` plans the rest, and `drop` removes the
+    // group on the record.
+    let tree = Tree::new("sidecars-missing-member", &FILES[..5]);
+    tree.write("pipeline.spit", TWO_STEPS);
+    let recipe = tree.write("dataset.spitin", "pipeline pipeline.spit\nroot .\n");
+    let recipe = recipe.to_str().unwrap();
+
+    let (ok, _, err) = spit(&["dag", recipe]);
+    assert!(!ok);
+    assert!(
+        err.contains("warning: photo[site=a,shot=2] has .raw and .gpx but no .json\n"),
+        "{err}"
+    );
+    assert!(
+        err.contains("no `meta` artifact for input `meta` of `load` at [shot=2,site=a]"),
+        "{err}"
+    );
+
+    let (ok, out, err) = spit(&["dag", recipe, "--partial", "--json"]);
+    assert!(ok, "{err}");
+    for path in [
+        "out/small/site-a_shot-1",
+        "out/small/site-a_shot-2",
+        "out/loaded/site-a_shot-1",
+    ] {
+        assert!(
+            out.contains(&format!("\"path\":\"{path}\"")),
+            "{path}: {out}"
+        );
+    }
+    assert!(!out.contains("out/loaded/site-a_shot-2"), "{out}");
+    assert!(
+        out.contains("\"left_out\":[{\"identity\":\"loaded[shot=2,site=a]\",\"reasons\":[\"no `meta` artifact for input `meta` of `load` at [shot=2,site=a]\"]}]"),
+        "{out}"
+    );
+
+    let dropped = tree.write(
+        "dropped.spitin",
+        "pipeline pipeline.spit\nroot .\ndrop [site, shot] where meta count=0\n",
+    );
+    let (ok, out, err) = spit(&["dag", dropped.to_str().unwrap(), "--json"]);
+    assert!(ok, "{err}");
+    assert!(
+        err.contains("dropped [site=a,shot=2] by `drop [site, shot] where meta count=0`"),
+        "{err}"
+    );
+    assert!(!err.contains("but no"), "{err}");
+    assert!(!out.contains("shot-2"), "{out}");
+    assert!(out.contains("\"left_out\":[]"), "{out}");
+}
