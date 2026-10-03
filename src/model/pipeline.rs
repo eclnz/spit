@@ -247,10 +247,27 @@ impl Pipeline {
     }
 }
 
+/// A product's place in [`Pipeline::products`], by which the columns of a
+/// [`PipelineIndex`] and of lowering hold what belongs to each product.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub(crate) struct ProductId(u32);
+
+impl ProductId {
+    /// The product at `index` in [`Pipeline::products`].
+    pub(crate) fn at(index: usize) -> Self {
+        Self(u32::try_from(index).expect("fewer than 2^32 products in a pipeline"))
+    }
+
+    pub(crate) fn index(self) -> usize {
+        self.0 as usize
+    }
+}
+
 /// A pipeline, for asking where many products are made and what paths they
 /// take. Each answer needs the step that makes a product; one built with
-/// [`PipelineIndex::new`] finds each once, in hash maps, so asking about
-/// every product takes time in step with the pipeline, not its square. One
+/// [`PipelineIndex::new`] numbers each product once and keeps its producer
+/// in a column by [`ProductId`], so asking about every product takes time in
+/// step with the pipeline, not its square. One
 /// from [`PipelineIndex::scan`] searches each time, which costs no more for
 /// a single question.
 pub(crate) struct PipelineIndex<'p> {
@@ -312,12 +329,12 @@ pub(crate) enum PathOrigin<'p> {
 
 /// What a [`PipelineIndex::new`] finds once.
 struct Found<'p> {
-    /// Each product's declaration.
-    products: FxHashMap<&'p str, &'p ProductDef>,
+    /// Each product's id, by name.
+    ids: FxHashMap<&'p str, ProductId>,
     /// Each operation by name.
     operations: FxHashMap<&'p str, &'p OperationDef>,
-    /// Each product a step makes: that step, and the output's position.
-    producers: FxHashMap<&'p str, (&'p Invocation, usize)>,
+    /// The step that makes each product, and the output's position, by id.
+    producers: Vec<Option<(&'p Invocation, usize)>>,
 }
 
 impl<'p> PipelineIndex<'p> {
@@ -325,9 +342,10 @@ impl<'p> PipelineIndex<'p> {
     pub(crate) fn new(pipeline: &'p Pipeline) -> Self {
         // The first of any repeat wins, as a search finds it; repeats are
         // reported elsewhere.
-        let mut products = FxHashMap::default();
-        for product in &pipeline.products {
-            products.entry(product.name.as_str()).or_insert(product);
+        let mut ids = FxHashMap::default();
+        for (index, product) in pipeline.products.iter().enumerate() {
+            ids.entry(product.name.as_str())
+                .or_insert(ProductId::at(index));
         }
         let mut operations = FxHashMap::default();
         for operation in &pipeline.operations {
@@ -335,18 +353,18 @@ impl<'p> PipelineIndex<'p> {
                 .entry(operation.name.as_str())
                 .or_insert(operation);
         }
-        let mut producers = FxHashMap::default();
+        let mut producers = vec![None; pipeline.products.len()];
         for invocation in &pipeline.invocations {
             for (index, output) in invocation.outputs.iter().enumerate() {
-                producers
-                    .entry(output.as_str())
-                    .or_insert((invocation, index));
+                if let Some(id) = ids.get(output.as_str()) {
+                    producers[id.index()].get_or_insert((invocation, index));
+                }
             }
         }
         Self {
             pipeline,
             found: Some(Found {
-                products,
+                ids,
                 operations,
                 producers,
             }),
@@ -361,10 +379,26 @@ impl<'p> PipelineIndex<'p> {
         }
     }
 
+    /// `product`'s id, the first of its name.
+    pub(crate) fn id(&self, product: &str) -> Option<ProductId> {
+        match &self.found {
+            Some(found) => found.ids.get(product).copied(),
+            None => self
+                .pipeline
+                .products
+                .iter()
+                .position(|declared| declared.name == product)
+                .map(ProductId::at),
+        }
+    }
+
     /// `product`'s declaration.
     pub(crate) fn product(&self, product: &str) -> Option<&'p ProductDef> {
         match &self.found {
-            Some(found) => found.products.get(product).copied(),
+            Some(found) => found
+                .ids
+                .get(product)
+                .map(|id| &self.pipeline.products[id.index()]),
             None => self
                 .pipeline
                 .products
@@ -388,7 +422,10 @@ impl<'p> PipelineIndex<'p> {
     /// The step that makes `product`, and the position of its output.
     pub(crate) fn producer(&self, product: &str) -> Option<(&'p Invocation, usize)> {
         match &self.found {
-            Some(found) => found.producers.get(product).copied(),
+            Some(found) => found
+                .ids
+                .get(product)
+                .and_then(|id| found.producers[id.index()]),
             None => self.pipeline.invocations.iter().find_map(|invocation| {
                 let index = invocation
                     .outputs
@@ -435,6 +472,17 @@ impl<'p> PipelineIndex<'p> {
             Some((extension, _)) => Cow::Owned(template.with_extension(extension)),
             None => template,
         })
+    }
+
+    /// Each product's path template, as [`PipelineIndex::path_template_for`]
+    /// gives it, by [`ProductId`]: built once, for a caller that needs every
+    /// product's template more than once.
+    pub(crate) fn path_templates(&self) -> Vec<Option<Cow<'p, PathTemplate>>> {
+        self.pipeline
+            .products
+            .iter()
+            .map(|product| self.path_template_for(&product.name))
+            .collect()
     }
 
     /// Whether `product` has a path template, without building it.

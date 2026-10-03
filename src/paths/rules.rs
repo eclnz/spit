@@ -45,8 +45,13 @@ pub enum PathRule {
 impl PathRule {
     /// The rule `product` takes: its own, else its stage's default, else
     /// the pipeline's default, each with any extension added to it.
-    fn for_product(index: &PipelineIndex<'_>, product: &str) -> Self {
-        let Some(template) = index.path_template_for(product) else {
+    /// `template` is its path template, from [`PipelineIndex::path_templates`].
+    fn for_product(
+        index: &PipelineIndex<'_>,
+        product: &str,
+        template: Option<&PathTemplate>,
+    ) -> Self {
+        let Some(template) = template else {
             return Self::Missing;
         };
         let beside = index.beside(product);
@@ -55,7 +60,7 @@ impl PathRule {
             .path_rule_for(rule_product)
             .is_some_and(PathTemplate::varies)
         {
-            shown_path(index, product).unwrap_or_else(|| template.to_string())
+            shown_path(index, product, template)
         } else {
             template.to_string()
         };
@@ -274,8 +279,12 @@ pub(crate) fn collect_paths(
     // One default rule can disagree with many products' extensions; each
     // disagreement is said once.
     let mut disagreements = FxHashSet::default();
-    for product in &pipeline.products {
-        let rule = PathRule::for_product(&index, &product.name);
+    // Each product's template is built once, for its rule, its shown path
+    // and its checks.
+    let templates = index.path_templates();
+    for (id, product) in pipeline.products.iter().enumerate() {
+        let template = templates[id].as_deref();
+        let rule = PathRule::for_product(&index, &product.name, template);
         if rule != PathRule::Missing && !skip.contains(&product.name) {
             let line = lines.path_rule(&index, &product.name);
             if let Some((sibling, _, _)) = index.beside(&product.name) {
@@ -297,7 +306,7 @@ pub(crate) fn collect_paths(
                     errors.push(error(problem.message).at(line.clone()));
                 }
             }
-            match validate_path_template(&index, product) {
+            match validate_path_template(&index, product, template) {
                 Err(e) => errors.push(e.at(line)),
                 // A repeated product name is reported by the resolver as a duplicate.
                 Ok(sample) => {
@@ -434,9 +443,9 @@ fn extension_disagreement<'p>(
 fn validate_path_template(
     index: &PipelineIndex<'_>,
     product: &ProductDef,
+    template: Option<&PathTemplate>,
 ) -> Result<String, PathError> {
-    let template = index
-        .path_template_for(&product.name)
+    let template = template
         .ok_or_else(|| error(format!("no path template for product `{}`", product.name)))?;
     let placeholders: BTreeSet<_> = template
         .parts()
@@ -464,7 +473,11 @@ fn validate_path_template(
         .map(|dimension| (dimension.clone(), dimension.clone()))
         .collect();
     let artifact = ArtifactInstance::new(&product.name, product.artifact_type.clone(), entities);
-    bind_path(index, &product.dimensions, artifact.view(), || {
-        format!("path rule for `{}`", product.name)
-    })
+    bind_path(
+        index,
+        template,
+        &product.dimensions,
+        artifact.view(),
+        || format!("path rule for `{}`", product.name),
+    )
 }

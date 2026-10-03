@@ -10,7 +10,8 @@ use rustc_hash::FxHashMap;
 use crate::imports::apply_import;
 use crate::model::{
     Cardinality, CheckDef, CommandDef, CoverageRule, Exclusion, InputBinding, InputRules,
-    Invocation, OperationDef, Pipeline, ProductDef, SidecarGroup, SourceInventory, StageDef,
+    Invocation, OperationDef, Pipeline, ProductDef, ProductId, SidecarGroup, SourceInventory,
+    StageDef,
 };
 use crate::order::{order_dimensions, Output};
 use crate::parser::{
@@ -34,9 +35,9 @@ pub(crate) struct PipelineBuilder {
     outputs: BTreeMap<String, Output>,
     /// Where each `sidecars` header is.
     sidecar_places: BTreeMap<String, Place>,
-    /// Each product's place in `pipeline.products`, the first of a name, so
-    /// that a step finds its inputs without searching every product.
-    product_numbers: FxHashMap<String, usize>,
+    /// Each product's id, the first of a name, so that a step finds its
+    /// inputs without searching every product.
+    product_ids: FxHashMap<String, ProductId>,
     /// The position in `pipeline.operations` of each operation by name, the
     /// first of a name, so a step finds what it calls without searching
     /// every operation. Keep in step with `add_operation`, the only place
@@ -47,9 +48,9 @@ pub(crate) struct PipelineBuilder {
 impl PipelineBuilder {
     pub(crate) fn add_product(&mut self, product: ProductDef, place: Place) {
         self.lines.products.insert(product.name.clone(), place);
-        self.product_numbers
+        self.product_ids
             .entry(product.name.clone())
-            .or_insert(self.pipeline.products.len());
+            .or_insert(ProductId::at(self.pipeline.products.len()));
         self.pipeline.products.push(product);
     }
 
@@ -221,7 +222,7 @@ impl PipelineBuilder {
             &invocation,
             operation,
             &self.pipeline.products,
-            &self.product_numbers,
+            &self.product_ids,
         );
         for (index, output) in outputs.iter().enumerate() {
             let declared = if output.dimensions.is_some() {
@@ -414,12 +415,12 @@ fn inferred_dimensions(
     invocation: &Invocation,
     operation: &OperationDef,
     products: &[ProductDef],
-    product_numbers: &FxHashMap<String, usize>,
+    product_ids: &FxHashMap<String, ProductId>,
 ) -> Vec<String> {
     let dimensions = |binding: &InputBinding| {
-        product_numbers
+        product_ids
             .get(&binding.product)
-            .map(|&number| binding.free_dimensions(&products[number].dimensions))
+            .map(|id| binding.free_dimensions(&products[id.index()].dimensions))
     };
     let inputs: Option<Vec<_>> = invocation
         .inputs
