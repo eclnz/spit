@@ -33,7 +33,7 @@ Status is `open`, `claimed (<branch>)`, `decided`, or `done (<commit>)`. Numbers
 | S4 | Syntax: shell metacharacters in commands | open |
 | S5 | Syntax: `path:` in both `.spit` and `.spitin` | open |
 | R1 | Composite operations: provenance and diagnostics design | open |
-| T1 | Sidecar `incomplete_groups` keyed by structured bindings ([#37](https://github.com/eclnz/spit/issues/37)) | claimed (`sidecar-group-keys`) |
+| T1 | Sidecar `incomplete_groups` keyed by structured bindings ([#37](https://github.com/eclnz/spit/issues/37)) | done (`5ab3a16`) |
 | T2 | Incomplete-group warning for `InputSource::Inventory` | open |
 
 Deferred, and not to be claimed without a concrete use case: resources, Slurm, one execution package, dynamic outputs. See [Future direction](#future-direction-deliberately-deferred).
@@ -157,6 +157,8 @@ Test those interactions and malformed input, not only the happy-path example tha
 A narrow review of the usability branch, not a full compiler audit or a measured performance comparison. In `src/parser/flow.rs`, a `sidecars` block parses its members with the ordinary source declaration parser, copies the group's dimensions onto those products, and creates ordinary per-member path rules from the shared stem. The `SidecarGroup` model keeps group metadata for recipe paths and diagnostics; `InputRules::source_paths_for` resolves a recipe's group stem or default into per-source paths. Discovery then uses the standard source-path matcher. That is a good example of specialised syntax lowering into shared compiler data, keeping only the metadata needed for group-specific behaviour.
 
 **T1.** The remaining group-specific diagnostic in `src/inputs/mod.rs` has a real weak point: `incomplete_groups` builds an identity by joining `dimension=value` fragments with commas, then checks removals by splitting that display string. A value containing `,` or `=` can be misread. Issue 37 already identifies this and proposes grouping by structured entity bindings and a member bitset. Fix that loss of structure and test values containing the delimiters; it does not call for replacing the data-oriented architecture.
+
+*Done in `5ab3a16`.* Records are grouped by `GroupKey` with the members found, and removals match by symbol (`EntityBinding::within`). The delimiter case turned out to be unreachable: discovery already skips a value holding `,` or `=`, and this warning is given only for scanned inputs, so no test with such values can reach it. The change still removes the display string used as a key, halves `spit inputs` on a large sidecars dataset, and lists the warnings in value order (`shot=2` before `shot=10`).
 
 **T2.** Check whether the group-level incomplete warning should appear only for scanned inputs: the `InputSource::Inventory` branch currently returns an empty incomplete-group list.
 
