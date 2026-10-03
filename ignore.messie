@@ -1,0 +1,4 @@
+# Files Cargo and clippy require at the crate root, under these names
+/Cargo.toml
+/Cargo.lock
+/clippy.toml

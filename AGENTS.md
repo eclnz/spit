@@ -111,6 +111,8 @@ usability/harness/rebuild_keys.sh             # expect `ok` for every answer key
   /tmp/messie-venv/bin/messie -af .   # -a judges every folder, -f checks each folder fits its surroundings
   ```
 
+  `ignore.messie` at the root leaves out the files Cargo and clippy need there under fixed names, which Messie would otherwise judge as unrelated to the rest of the root. Add a file there only when a tool requires its name and place.
+
 - **Stored outputs.** They are under `tests/fixtures/outputs/`. Re-save them with `SPIT_BLESS=1 cargo test --release --test outputs`, then read `git diff tests/fixtures` before committing.
 - **Links.** A changed Markdown file's links and anchors should resolve. GitHub's anchor for `## \`dag --partial\`` is `#dag---partial`.
 - **Speed.** A change to performance-related code is benchmarked, whether or not it means to change speed. That is code that runs once per artifact, job, record or step, and any change to how data is laid out, copied, hashed, allocated or written: the model and its tables, parsing, resolving, binding, discovery, and the writers. Build the commit before in a worktree and run `profiling/bench.py pipeline` and `profiling/bench.py dataset` with `--old` set to it, as `profiling/README.md` shows, and check that output is byte-for-byte the same.
