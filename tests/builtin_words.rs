@@ -30,8 +30,8 @@ fn words_are_found_by_where_they_are_written() {
         ("path: out/{{@product}}", "@product", None),
         ("ext: .nii.gz", "ext", Some("ext")),
         ("ext: Image = convert(dicom)", "ext", None),
-        ("operation mean(images: many Image) -> Image @ min(2)", "many", Some("many")),
-        ("operation mean(images: many Image) -> Image @ min(2)", "min", Some("min")),
+        ("operation mean(images: many Image @ min(2)) -> Image", "many", Some("many")),
+        ("operation mean(images: many Image @ min(2)) -> Image", "min", Some("min")),
         (
             "operation strip(t1: Image) -> (brain: Image .nii.gz, mask: Image \"_mask.nii.gz\" beside brain)",
             "beside",

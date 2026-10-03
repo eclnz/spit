@@ -18,7 +18,7 @@ path revenue: out/revenue/{store}/{week}.csv
 revenue = price(cleaned, pricing)
 
 # A trend needs at least two weeks.
-operation store_report(weeks: many Revenue) -> Report @ min(2)
+operation store_report(weeks: many Revenue @ min(2)) -> Report
 command store_report: store_report --out {@output} {weeks}
 path report: reports/{store}.pdf
 report = store_report(revenue @ vary(week))
