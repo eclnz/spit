@@ -551,6 +551,25 @@ A rule names a source, some values, or both, and removes every artifact whose id
 
 A comment on the line is kept as the rule's reason. Values are compared as written, so `sub=2` does not match `sub=02`. An exclude that matches nothing is an error, naming any value it comes close to, so a typo or a rule the data has outgrown does not pass unnoticed. `spit check` tests each rule against the pipeline: its source must be one, and each dimension it names must be that source's, or, for values alone, some source's.
 
+Because values are compared as written, a group removed under one spelling keeps a source filed under another. Say store `s07`'s price list was filed as `pricing/S07.json`, so no job can price its sales, and the recipe removes the store for now:
+
+```text
+exclude [store=s07]            # price list filed as S07; renamed next week
+```
+
+`dag` then plans the other stores, and notes that the misnamed file is left over:
+
+```text
+note: 1 source artifact is used by no job: pricing[store=S07]; `spit artifacts` lists them
+```
+
+The group rule did not remove it, since `S07` is not `s07`. A second rule names it, and the note goes:
+
+```text
+exclude [store=s07]            # price list filed as S07; renamed next week
+exclude pricing[store=S07]     # the same list, under the name it was filed as
+```
+
 Exclusions apply before anything else in the recipe. An excluded discovered context expects no files, an excluded file needs to exist nowhere, and a file excluded by name may lie outside every discovered context, such as a misnamed copy. `drop` and `require` rules then see what the exclusions leave.
 
 A placeholder in a source rule matches any text within one folder or file name, and SPIT cannot narrow it to a pattern such as a date: `logs/{server}/{date}.log` reads `logs/web1/notes.log` as `date=notes`. Check the count in `note: found N source artifacts`, and leave out a file whose value does not belong with [`exclude`](#exclude-named-artifacts) or a rule that names more of its path. Files whose whole paths match no source path rule are ignored while scanning. `spit inputs` counts them in a note, naming them when there are at most three and otherwise counting them by extension, leaving out SPIT's own `.spit`, `.spitin`, `.spitout` and `.spitdag` files and any file at a path the pipeline gives one of its outputs, or inside an output folder, such as what an earlier run wrote under the root; `spit inputs dataset.spitin --unmatched` lists their paths relative to the dataset root instead of writing a `.spitout`, even if a `require` rule fails. When a `require` count fails after the scan found no files for its source, `inputs` and `dag` name the path rule used and show an unmatched file whose path contains the source name, when there is one. A recipe's `path:` is a default for sources; use `path source:` for one source. Required source paths must match the spelling found by the scan: `pricing/S07.json` does not satisfy `pricing/s07.json`, even on a case-insensitive filesystem. A file with a near miss in an identity value, such as `store=S07` where a job needs `store=s07`, may still match a source rule: it is then a source artifact, and `dag` and `artifacts` warn when it is unused and point to it at the failed join.
