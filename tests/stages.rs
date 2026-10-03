@@ -187,7 +187,7 @@ fn stage_syntax_errors() {
             ),
         ),
         (
-            "source raw [id]\nstage prep:\n    require raw count>=1 per [id]\n",
+            "source raw [id]\nstage prep:\n    require [id] where raw count>=1\n",
             (
                 Some(3),
                 "`require`, which checks sources, belongs at the top level, outside stage `prep`",

@@ -105,8 +105,8 @@ discover sessions: [sub, ses] from dirs sub-{sub}/ses-{ses}
 # Subject 03 has only one session and is removed as a whole.
 drop [sub] where t1w count<2
 exclude bold[sub=02,ses=02,run=2]    # motion spike
-require t1w count=1 per [sub, ses]
-require bold count>=1 per [sub, ses]
+require [sub, ses] where t1w count=1
+require [sub, ses] where bold count>=1
 ```
 
 Create a tiny dataset beside those two files. These files can be empty because SPIT plans work without reading their contents:

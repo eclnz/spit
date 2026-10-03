@@ -52,8 +52,8 @@ operation mean(signals: many AlignedSignal) -> MeanSignal
 mean_signal = mean(registered @ vary(run))
 ";
 const RECIPE: &str = "\
-require signal count>=1 per [site, day]
-require calibration count=1 per [site, day]
+require [site, day] where signal count>=1
+require [site, day] where calibration count=1
 ";
 const INVENTORY: &str = "\
 contexts:
@@ -81,7 +81,7 @@ fn parses_a_pipeline_its_recipe_and_its_records() {
 #[test]
 fn rules_and_records_belong_outside_the_pipeline() {
     for (text, line, file) in [
-        ("source x [a]\nrequire x count>=1 per [a]\n", 2, ".spitin"),
+        ("source x [a]\nrequire [a] where x count>=1\n", 2, ".spitin"),
         ("source x [a]\ndrop [a] where x count<1\n", 2, ".spitin"),
         ("source x [a]\nexclude x[a=1]\n", 2, ".spitin"),
         (

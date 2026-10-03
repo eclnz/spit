@@ -9,6 +9,7 @@ mod keyword;
 mod lexical;
 mod operation;
 mod render_inventory;
+mod rules;
 mod source_map;
 
 use std::fmt;
@@ -244,7 +245,7 @@ impl StatementKind {
 
     /// A `require` or `drop` rule, the whole content `line` of `original`.
     fn constraint(original: &str, line: &str, number: usize) -> Result<Self, ParseError> {
-        let rule = declarations::parse_coverage_rule(line, number)?;
+        let rule = rules::parse_coverage_rule(line, number)?;
         let place = source_map::rule_place(original, number, &rule);
         Ok(Self::Constraint(rule, place))
     }

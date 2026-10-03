@@ -249,7 +249,7 @@ fn deletion_messages_name_the_missing_syntax_without_cascading() {
         );
     }
     // A recipe's rules are parsed the same way.
-    let error = spit::parse_input_spec("require raw count>=1 per [id\n").unwrap_err();
+    let error = spit::parse_input_spec("require [id where raw count>=1\n").unwrap_err();
     assert!(
         error
             .to_string()

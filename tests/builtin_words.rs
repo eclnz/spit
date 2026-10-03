@@ -62,9 +62,10 @@ fn words_are_found_by_where_they_are_written() {
         ("discover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}", "discover", Some("discover")),
         ("discover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}", "dirs", Some("discover-from")),
         ("discover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}", "sessions", None),
-        ("require image count>=2 per [subject, visit]", "count", Some("count")),
-        ("require image count>=2 per [subject, visit]", "per", Some("per")),
-        ("require image count>=2 per [subject, visit]", "image", None),
+        ("require [subject, visit] where image count>=2", "count", Some("count")),
+        ("require [subject, visit] where image count>=2", "where", Some("require-where")),
+        ("require [subject, visit] where image has run=1,2", "has", Some("require-has")),
+        ("require [subject, visit] where image count>=2", "image", None),
         ("drop [sub] where sessions count<2", "drop", Some("drop")),
         ("drop [sub] where sessions count<2", "where", Some("drop-where")),
         ("drop [sub, ses] where bold missing run=1,2", "missing", Some("missing")),
@@ -187,12 +188,12 @@ fn a_recipe_and_a_spitout_have_words_too() {
     let (ok, json, _) = check(
         "unsaved.spitin",
         &["--json", "--stdin", "--hovers"],
-        "require raw count>=1 per [id]\n",
+        "require [id] where raw count>=1\n",
     );
     assert!(ok);
     assert!(json.contains("name the pipeline"), "{json}");
     assert!(json.contains(r#""word":"require""#));
-    assert!(json.contains(r#""word":"per""#));
+    assert!(json.contains(r#""word":"require-where""#));
     assert!(
         !json.contains("\"hovers\""),
         "a recipe's names are its pipeline's"
