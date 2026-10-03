@@ -326,7 +326,8 @@ impl<'p> PipelineIndex<'p> {
         }
     }
 
-    fn operation(&self, name: &str) -> Option<&'p OperationDef> {
+    /// The operation called `name`.
+    pub(crate) fn operation(&self, name: &str) -> Option<&'p OperationDef> {
         match &self.found {
             Some(found) => found.operations.get(name).copied(),
             None => self
