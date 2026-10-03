@@ -96,12 +96,36 @@ fn paths_that_differ_only_in_case_are_flagged() {
 }
 
 #[test]
-fn shell_operators_in_a_command_are_flagged() {
+fn shell_operators_in_a_command_are_errors() {
     let text = "source x [s]\npath: {@product}/{@entities}\noperation f(a) -> Text\ncommand f: tool {a} {@output} 2>&1 | tee '>' log\ny = f(x)\n";
     let messages = rendered(&diagnose(text, None), text);
-    assert_eq!(messages.len(), 2, "{messages:?}");
-    assert!(messages[0].starts_with("warning: line 4, column 31: `2>&1` in the command for `f` is passed to the program as an argument"));
-    assert!(messages[1].starts_with("warning: line 4, column 36: `|` in the command"));
+    assert_eq!(messages.len(), 1, "{messages:?}");
+    assert!(
+        messages[0].starts_with("error: line 4, column 31: `2>&1` in the command for `f` is not read as a pipe or redirection"),
+        "{messages:?}"
+    );
+    assert!(messages[0].contains("sh -c 'tool \"$1\" | sort > \"$2\"' sh"));
+
+    let verify = "operation f(a) -> Text\nverify f: test -s {a} && true\n";
+    let messages = rendered(&diagnose(verify, None), verify);
+    assert!(
+        messages[0].starts_with("error: line 2, column 23: `&&` in the command for `f`"),
+        "{messages:?}"
+    );
+
+    let check = "check big: test -s {@path} || false\n";
+    let messages = rendered(&diagnose(check, None), check);
+    assert!(
+        messages[0].starts_with("error: line 1, column 28: `||` in check `big`"),
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn quoted_operators_and_a_shell_script_stay_arguments() {
+    let text = "source x [s]\npath: {@product}/{@entities}\noperation f(a) -> Text\ncommand f: sh -c 'cut -f1 \"$1\" > \"$2\"' sh {a} {@output} '|' \\;\ny = f(x)\n";
+    let messages = rendered(&diagnose(text, None), text);
+    assert!(messages.is_empty(), "{messages:?}");
 }
 
 #[test]

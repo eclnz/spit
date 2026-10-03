@@ -5,6 +5,7 @@
 use crate::command::CommandTemplate;
 use crate::model::{CheckDef, CheckUse};
 
+use super::command::reject_shell_operators;
 use super::lexical::{comma_items, identifier, qualified_identifier};
 use super::ParseError;
 
@@ -57,13 +58,14 @@ pub(super) fn parse_check(line: &str, number: usize) -> Result<CheckDef, ParseEr
     if template.is_empty() {
         return Err(ParseError::new(number, "check command must not be empty").at_token(line));
     }
-    let template = CommandTemplate::parse(template).map_err(|error| {
+    let parsed = CommandTemplate::parse(template).map_err(|error| {
         ParseError::new(number, format!("check `{name}`: {}", error.message())).at_token(template)
     })?;
+    reject_shell_operators(template, &parsed, &format!("check `{name}`"), number)?;
     Ok(CheckDef {
         name: name.to_owned(),
         parameters: names,
-        template,
+        template: parsed,
     })
 }
 

@@ -7,6 +7,7 @@
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
+use std::ops::Range;
 
 use crate::model::{Cardinality, CommandRole, OperationDef, Pipeline, DEFAULT_OUTPUT};
 use crate::parser::SourceMap;
@@ -31,8 +32,9 @@ pub(crate) type Argument = Vec<Part>;
 pub struct CommandTemplate {
     text: String,
     arguments: Vec<Argument>,
-    /// Unquoted words a shell would read as operators, such as `|` or `>`.
-    operators: Vec<String>,
+    /// Where in `text` each unquoted word a shell would read as an
+    /// operator, such as `|` or `>`, is.
+    operators: Vec<Range<usize>>,
 }
 
 impl CommandTemplate {
@@ -45,7 +47,7 @@ impl CommandTemplate {
         let operators = words
             .iter()
             .filter(|word| word.bare && is_shell_operator(&word.text))
-            .map(|word| word.text.clone())
+            .map(|word| word.at.clone())
             .collect();
         let arguments = words
             .iter()
@@ -61,8 +63,9 @@ impl CommandTemplate {
         })
     }
 
-    /// Unquoted words a shell would read as operators, such as `|` or `>`.
-    pub fn shell_operators(&self) -> &[String] {
+    /// Where in the template's text each unquoted word a shell would read
+    /// as an operator, such as `|` or `>`, is. The parser rejects them.
+    pub(crate) fn shell_operators(&self) -> &[Range<usize>] {
         &self.operators
     }
 
@@ -347,6 +350,8 @@ struct Word {
     text: String,
     /// Whether the word was written without quotes or backslashes.
     bare: bool,
+    /// Where the word is in the template, quotes included.
+    at: Range<usize>,
 }
 
 /// Whether `word` is a shell operator such as `|`, `&&`, `;`, `>`, or `2>&1`.
@@ -367,13 +372,17 @@ fn split_arguments(template: &str) -> Result<Vec<Word>, CommandError> {
     let mut quote = None;
     let mut started = false;
     let mut bare = true;
+    let mut start = 0;
     let literal = |argument: &mut String, value: char| match value {
         '{' => argument.push_str("{{"),
         '}' => argument.push_str("}}"),
         value => argument.push(value),
     };
-    let mut chars = template.chars();
-    while let Some(character) = chars.next() {
+    let mut chars = template.char_indices();
+    while let Some((index, character)) = chars.next() {
+        if !started && !(quote.is_none() && character.is_whitespace()) {
+            start = index;
+        }
         match (quote, character) {
             (None, '\'' | '"') => {
                 quote = Some(character);
@@ -383,7 +392,7 @@ fn split_arguments(template: &str) -> Result<Vec<Word>, CommandError> {
             (Some('\''), '\'') | (Some('"'), '"') => quote = None,
             (Some('\''), value) => literal(&mut argument, value),
             (_, '\\') => {
-                let escaped = chars
+                let (_, escaped) = chars
                     .next()
                     .ok_or_else(|| CommandError::new("trailing backslash in command"))?;
                 // As in Bash, a backslash inside double quotes escapes only
@@ -400,6 +409,7 @@ fn split_arguments(template: &str) -> Result<Vec<Word>, CommandError> {
                     arguments.push(Word {
                         text: std::mem::take(&mut argument),
                         bare,
+                        at: start..index,
                     });
                     started = false;
                     bare = true;
@@ -418,6 +428,7 @@ fn split_arguments(template: &str) -> Result<Vec<Word>, CommandError> {
         arguments.push(Word {
             text: argument,
             bare,
+            at: start..template.len(),
         });
     }
     Ok(arguments)
