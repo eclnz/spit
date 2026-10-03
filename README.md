@@ -212,10 +212,12 @@ spit inputs analysis.spit --root data --suggest
 
 ```text
 # 3 files, such as sub-01/ses-1/func/sub-01_ses-1_task-rest_run-1_bold.nii.gz
+# sub: 01, 02; ses: 1; run: 1, 2
 # for `bold`, which the pipeline declares
 path bold: sub-{sub}/ses-{ses}/func/sub-{sub}_ses-{ses}_task-rest_run-{run}_bold.nii.gz
 
 # 4 files, such as sub-01/ses-1/anat/sub-01_ses-1_T1w.json
+# sub: 01, 02; ses: 1
 sidecars t1w [sub, ses]:
     path: sub-{sub}/ses-{ses}/anat/sub-{sub}_ses-{ses}_T1w
     source t1w_json .json
@@ -225,7 +227,19 @@ sidecars t1w [sub, ses]:
 #   participants.tsv
 ```
 
-A group that a source the pipeline declares without a rule fits, by its name or its dimensions, gets only its `path` line. Files that share a stem and differ by extension, as an image and its JSON, become a [`sidecars`](docs/language-reference.md#sidecar-files) block. A dimension no word names is called `dim1`, `dim2` and so on, with a note to rename it, and a plain top folder, as `baseline/` beside `raw/`, keeps its files apart. Given a recipe, `spit inputs cohort.spitin --suggest` prints the `path` lines for the recipe, and the `source` and `sidecars` lines, as comments, for the pipeline the recipe names. Every rule is checked against its files before it is printed, and nothing is written: read the lines, rename what needs it, and paste them in.
+Each group's second line gives the values each dimension holds, the first two and the last when there are more than five, so a value that does not belong shows before the rule is pasted. A group that a source the pipeline declares without a rule fits, by its name or its dimensions, gets only its `path` line. Files that share a stem and differ by extension, as an image and its JSON, become a [`sidecars`](docs/language-reference.md#sidecar-files) block. A dimension no word names takes the word before it and a `_`, as `field` in `field_001`; else it is called `date` when every value is a date such as `2024-01-15`, `year` when every value is a year, and `dim1`, `dim2` and so on otherwise, with a note to rename it. A plain top folder, as `baseline/` beside `raw/`, keeps its files apart, while `site_north/` and `site_south/` are one folder with a `site` dimension. A group of the same suffix as a larger one is named for a word of its own, as `bold_nback` beside `bold`.
+
+Real folders have strays, and a suggestion does not bend its rule to fit them. When nearly every file of a group shares its keys, as `Subject01/Visit1/` and `Subject02/Visit2/` beside one `subject04/visit1/`, the stray files are left out of the rule rather than turning every word into a `dim`. A file that a suggested rule nearly matches, such as a `.bak` copy, a `_repeat` scan or one with an extra `acq-` entity, is listed with the rule and where the two part:
+
+```text
+# 2 files a rule above nearly matches but will not read; rename them, or give them a rule of their own:
+#   Subject01/Visit1/T1_2024-01-15.nii.bak
+#     `t1`: after `Subject01/Visit1/T1_2024-01-15.nii`, the file has `.bak` where the rule ends
+#   Subject10/Visit1/T1_2024-02-11_repeat.nii
+#     `t1`: after `Subject10/Visit1/T1_2024-02-11`, the file has `_repeat.nii` where the rule has `.nii`
+```
+
+Files that share their shape with no other, such as `participants.tsv` or `README`, are listed last; a rule made only of dimensions, such as `{dim1}`, would read every file and folder beside them, so none is suggested. Given a recipe, `spit inputs cohort.spitin --suggest` prints the `path` lines for the recipe, and the `source` and `sidecars` lines, as comments, for the pipeline the recipe names. Every rule is checked against its files before it is printed, and nothing is written: read the lines, rename what needs it, and paste them in.
 
 ## Where files live
 
