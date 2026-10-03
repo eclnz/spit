@@ -18,13 +18,15 @@ use std::error::Error;
 use std::fmt;
 use std::path::{Path, PathBuf};
 
+use rustc_hash::FxHashMap;
+
 use crate::compile::validate_pipeline;
 use crate::error::ResolveError;
 use crate::imports::parse_located_document;
 use crate::lower::{parse_document_with_imports, ParsedDocument};
 use crate::model::{
-    ArtifactInstance, CoverageAction, CoverageGap, InputRules, Pipeline, PipelineIndex,
-    SourceInventory,
+    ArtifactInstance, CoverageAction, CoverageGap, EntityBinding, GroupKey, InputRules, Pipeline,
+    PipelineIndex, Removal, SourceInventory,
 };
 use crate::parser::{strip_comment, without_bom, Header, Keyword, Kind, ParseError, SourceMap};
 use crate::paths::{inspect_paths, PathError, PathTemplate};
@@ -428,61 +430,95 @@ fn merge_source_paths(
 
 /// Each binding where some of a `sidecars` group's sources were found and
 /// others were neither found nor removed by a rule, said as
-/// `photo[site=A,visit=2,shot=3] has .raw and .gpx but no .imu`.
+/// `photo[site=A,visit=2,shot=3] has .raw and .gpx but no .imu`, by group
+/// and then by value.
+///
+/// Records are grouped by the symbols they bind, in one pass, and only an
+/// incomplete group's binding is written as text.
 fn incomplete_groups(
     pipeline: &Pipeline,
     inventory: &SourceInventory,
-    removed: &[crate::model::Removal],
+    removed: &[Removal],
 ) -> Vec<String> {
-    let mut said = Vec::new();
-    for group in &pipeline.sidecar_groups {
-        let mut found: BTreeMap<String, BTreeSet<&str>> = BTreeMap::new();
-        for record in &inventory.artifacts {
-            if group
+    let groups = &pipeline.sidecar_groups;
+    if groups.is_empty() {
+        return Vec::new();
+    }
+    // Each member source's group and its place among the group's members.
+    let member_of: FxHashMap<&str, (usize, usize)> = groups
+        .iter()
+        .enumerate()
+        .flat_map(|(group, sidecars)| {
+            sidecars
                 .members
                 .iter()
-                .any(|(member, _)| *member == record.product)
-            {
-                let identity = group
-                    .dimensions
-                    .iter()
-                    .map(|dimension| {
-                        format!(
-                            "{dimension}={}",
-                            record.entities.get(dimension).unwrap_or("")
-                        )
-                    })
-                    .collect::<Vec<_>>()
-                    .join(",");
-                found.entry(identity).or_default().insert(&record.product);
-            }
-        }
-        for (identity, present) in found {
+                .enumerate()
+                .map(move |(member, (name, _))| (name.as_str(), (group, member)))
+        })
+        .collect();
+    // For each group, the members found at each binding of its dimensions,
+    // with a record's binding to name the place by.
+    type Found<'a> = FxHashMap<GroupKey, (&'a EntityBinding, Vec<bool>)>;
+    let mut found: Vec<Found<'_>> = vec![FxHashMap::default(); groups.len()];
+    for record in &inventory.artifacts {
+        let Some(&(group, member)) = member_of.get(record.product.as_str()) else {
+            continue;
+        };
+        let sidecars = &groups[group];
+        let Some(key) = record.entities.group_key(&sidecars.dimensions) else {
+            continue;
+        };
+        found[group]
+            .entry(key)
+            .or_insert_with(|| (&record.entities, vec![false; sidecars.members.len()]))
+            .1[member] = true;
+    }
+    let mut said = Vec::new();
+    for (sidecars, found) in groups.iter().zip(found) {
+        let mut incomplete: Vec<_> = found
+            .into_values()
+            .filter(|(_, present)| present.contains(&false))
+            .collect();
+        incomplete
+            .sort_unstable_by(|(left, _), (right, _)| left.cmp_in(right, &sidecars.dimensions));
+        for (binding, present) in incomplete {
             let removed_here = |member: &str| {
                 removed.iter().any(|removal| {
                     removal
                         .product
                         .as_deref()
                         .is_none_or(|product| product == member)
-                        && removal.entities.iter().all(|(dimension, value)| {
-                            identity
-                                .split(',')
-                                .any(|pair| pair == format!("{dimension}={value}"))
-                        })
+                        && removal.entities.within(binding, &sidecars.dimensions)
                 })
             };
-            let (has, lacks): (Vec<_>, Vec<_>) = group
+            let (has, lacks): (Vec<_>, Vec<_>) = sidecars
                 .members
                 .iter()
-                .filter(|(member, _)| present.contains(member.as_str()) || !removed_here(member))
-                .partition(|(member, _)| present.contains(member.as_str()));
+                .zip(&present)
+                .filter(|&((member, _), &here)| here || !removed_here(member))
+                .partition(|&(_, &here)| here);
             if !lacks.is_empty() {
-                let extensions = |members: Vec<&(String, String)>| {
-                    listed(members.into_iter().map(|(_, extension)| extension.as_str()))
+                let extensions = |members: Vec<(&(String, String), &bool)>| {
+                    listed(
+                        members
+                            .into_iter()
+                            .map(|((_, extension), _)| extension.as_str()),
+                    )
                 };
+                let values = sidecars
+                    .dimensions
+                    .iter()
+                    .map(|dimension| {
+                        let value = binding
+                            .get(dimension)
+                            .expect("a binding with a key binds its dimensions");
+                        format!("{dimension}={value}")
+                    })
+                    .collect::<Vec<_>>()
+                    .join(",");
                 said.push(format!(
-                    "{}[{identity}] has {} but no {}",
-                    group.name,
+                    "{}[{values}] has {} but no {}",
+                    sidecars.name,
                     extensions(has),
                     extensions(lacks)
                 ));
