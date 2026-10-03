@@ -350,10 +350,10 @@ pub fn diagnose_recipe(text: &str, path: &Path) -> Vec<Diagnostic> {
     }
 }
 
-/// Diagnose the text of a `.spitin` recipe against `pipeline`, reading no
-/// data: every rule's error at the rule, then its source paths and records.
 /// A warning on the recipe's `root` line when the folder it names is not
-/// there, which `spit check` can say without reading any data.
+/// there, which `spit check` can say without reading any data. Not an
+/// error: the recipe may be checked on one machine and run on another,
+/// where the folder is; `spit inputs` stops on it where it runs.
 fn missing_root(root: Option<&(PathBuf, usize)>, text: &str) -> Option<Diagnostic> {
     let (root, line) = root?;
     if root.is_dir() {
@@ -366,7 +366,7 @@ fn missing_root(root: Option<&(PathBuf, usize)>, text: &str) -> Option<Diagnosti
         .trim();
     let start = written.find(folder)?;
     let message = format!(
-        "dataset root `{folder}` is not a folder; `spit inputs` and `spit dag` will find no files there"
+        "dataset root `{folder}` is not a folder here; `spit inputs` and `spit dag` stop with an error unless it is one where they run"
     );
     Some(Diagnostic::new(
         Severity::Warning,
@@ -376,6 +376,8 @@ fn missing_root(root: Option<&(PathBuf, usize)>, text: &str) -> Option<Diagnosti
     ))
 }
 
+/// Diagnose the text of a `.spitin` recipe against `pipeline`, reading no
+/// data: every rule's error at the rule, then its source paths and records.
 pub fn diagnose_recipe_against(text: &str, pipeline: &Pipeline) -> Vec<Diagnostic> {
     let text = without_bom(text);
     let (spec, lines) = match crate::inputs::parse_recipe_lines(text) {
