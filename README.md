@@ -419,6 +419,7 @@ The pipeline supplies operations and rules; the `.spitout` supplies artifact ide
 
 - [Documentation home](docs/index.md) — guided chapters for learning the language and inspecting plans
 - [Getting started](docs/getting-started.md) — build SPIT and inspect a complete example
+- [Language catalog](docs/reference/index.md) — browse keywords, operation forms, selectors, and placeholders
 - [Language reference](docs/language-reference.md) — full `.spit`, `.spitin` and `.spitout` syntax
 - [Command line reference](docs/cli.md) — command forms and inspection flags
 - [The `.spitdag` format](docs/spitdag.md) — every field a backend reads
