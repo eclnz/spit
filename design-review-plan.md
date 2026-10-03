@@ -21,7 +21,7 @@ Status is `open`, `claimed (<branch>)`, `decided`, or `done (<commit>)`. Numbers
 
 | # | Item | Status |
 |---|------|--------|
-| 1 | Optional runtime checks in the job contract | open |
+| 1 | Optional runtime checks in the job contract | claimed (`runtime-checks`) |
 | 2 | Optional-file and output semantics, from one real workflow ([#35](https://github.com/eclnz/spit/issues/35)) | open |
 | 3 | Lower the cost of binding existing data: judge `inputs --suggest` on irregular datasets | open |
 | 4a | `dag --counts` | done (`370a18f`) |
