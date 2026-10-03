@@ -417,10 +417,15 @@ The pipeline supplies operations and rules; the `.spitout` supplies artifact ide
 
 ## Documentation
 
+- [Documentation home](docs/index.md) — guided chapters for learning the language and inspecting plans
+- [Getting started](docs/getting-started.md) — build SPIT and inspect a complete example
 - [Language reference](docs/language-reference.md) — full `.spit`, `.spitin` and `.spitout` syntax
+- [Command line reference](docs/cli.md) — command forms and inspection flags
 - [The `.spitdag` format](docs/spitdag.md) — every field a backend reads
 - [Architecture](docs/architecture.md) — the internal model: resolution, typing, and the bound DAG
 - [Examples](docs/examples.md) — complete walkthroughs for sweeps, cohorts, selectors, and stages, plus the larger pipeline catalog
+
+To browse and search these pages locally, run `python3 -m pip install -r .github/docs-requirements.txt` and `mkdocs serve` from the repository root. `mkdocs build --strict` checks the documentation site before publishing it.
 
 ## Development
 
