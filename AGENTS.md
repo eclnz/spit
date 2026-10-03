@@ -1,5 +1,7 @@
 # Notes for agents
 
+> **Temporary: the design review plan.** `design-review-plan.md` at the root sets the current direction for SPIT, its runner and its extension: runtime checks in the job contract, optional outputs, binding existing data, inspection, the two-file model, a syntax audit and reuse. Read it before starting work, and before proposing a feature that it covers. Work from it is trunk-based on `dev`: claim an item in its tracker with a commit pushed to `dev` before you start, keep branches short and merge them back soon, and record each step's commit as it lands. The plan's first section says how. The commit that deletes the plan deletes this note too.
+
 ## Plan files
 
 Write plans in Markdown while a feature is being built: designs, roadmaps, audits, lists of steps. They help the work, and they help whoever picks it up next. But once a feature is done, a plan is clutter. Plans pile up, they go stale, and nobody knows whether they can be deleted. So a plan lives only as long as the work it plans. Once the work is merged, git keeps the plan, not the tree.
