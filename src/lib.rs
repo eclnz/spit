@@ -36,7 +36,7 @@ pub use diagnostics::{
     render_diagnostics_json, Checked, Context, Diagnosis, Diagnostic, DiagnosticSource, FileNames,
     Records, Severity, ShownPath,
 };
-pub use editor::{pipeline_hovers, render_editor_json, render_words_json, Hover};
+pub use editor::{pipeline_hovers, render_editor_json, render_words_json, Hover, HoverKind};
 pub use error::{DefinitionSubject, NearMiss, PortSite, ResolveError, TypeConflict};
 pub use imports::parse_pipeline_at;
 pub use inputs::{
