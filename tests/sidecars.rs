@@ -361,3 +361,64 @@ fn discovery_names_incomplete_groups_in_value_order() {
         "{notes}"
     );
 }
+
+/// Records of two shots: the first complete, the second without its `.json`.
+const SHOT_RECORDS: &str = "\
+sources:
+    raw[site=a,shot=1]
+    gps[site=a,shot=1]
+    meta[site=a,shot=1]
+    raw[site=a,shot=2]
+    gps[site=a,shot=2]
+";
+
+#[test]
+fn records_name_a_group_missing_a_file() {
+    let tree = Tree::new("sidecars-incomplete-records", &FILES);
+    tree.write("pipeline.spit", PHOTOS);
+    let recipe = tree.write(
+        "dataset.spitin",
+        &format!("pipeline pipeline.spit\nroot .\n{SHOT_RECORDS}"),
+    );
+    let (ok, _, err) = spit(&["inputs", recipe.to_str().unwrap()]);
+    assert!(ok, "{err}");
+    assert!(
+        err.contains("warning: photo[site=a,shot=2] has .raw and .gpx but no .json\n"),
+        "{err}"
+    );
+
+    // A `.spitout` with the same records warns when a command reads it.
+    let pipeline = tree.path().join("pipeline.spit");
+    let inputs = tree.write("inputs.spitout", SHOT_RECORDS);
+    let (ok, _, err) = spit(&[
+        "artifacts",
+        pipeline.to_str().unwrap(),
+        inputs.to_str().unwrap(),
+    ]);
+    assert!(ok, "{err}");
+    assert_eq!(
+        err.matches("warning: photo[site=a,shot=2] has .raw and .gpx but no .json\n")
+            .count(),
+        1,
+        "{err}"
+    );
+}
+
+#[test]
+fn records_count_what_an_earlier_run_removed() {
+    let tree = Tree::new("sidecars-removed-records", &[]);
+    let pipeline = tree.write("pipeline.spit", PHOTOS);
+    let inputs = tree.write(
+        "inputs.spitout",
+        &format!(
+            "{SHOT_RECORDS}removed:\n    meta[site=a,shot=2]\n        rule: exclude meta[site=a,shot=2]\n        at: line 3\n"
+        ),
+    );
+    let (ok, _, err) = spit(&[
+        "artifacts",
+        pipeline.to_str().unwrap(),
+        inputs.to_str().unwrap(),
+    ]);
+    assert!(ok, "{err}");
+    assert!(!err.contains("but no"), "{err}");
+}

@@ -356,7 +356,7 @@ A recipe's default `path:` covers a group with no stem as one product named for 
 
 A block belongs at the top level of a pipeline. Its members take no dimensions or path rules of their own, in the pipeline or the recipe, and no product may share the group's name, since `path photo:` names one thing. A group's stem is written in its block or in the recipe, not both; a `path photo:` line in the pipeline is an error that points to the block.
 
-When `spit inputs` scans a dataset, it warns about each place it found some of a group's files and not the others, as `warning: photo[site=A,visit=2,shot=3] has .raw and .gpx but no .json`, before a step fails to find the missing one. The warnings come group by group, and within a group in value order, so `shot=2` comes before `shot=10`. A file an `exclude` rule removes is not counted as missing.
+When `spit inputs` scans a dataset, or a command reads records from a recipe or a `.spitout`, it warns about each place that holds some of a group's sources and not the others, as `warning: photo[site=A,visit=2,shot=3] has .raw and .gpx but no .json`, before a step fails to find the missing one. The warnings come group by group, and within a group in value order, so `shot=2` comes before `shot=10`. A file an `exclude` or `drop` rule removes is not counted as missing, nor is one a `.spitout`'s `removed:` section lists.
 
 ## Recipes
 
