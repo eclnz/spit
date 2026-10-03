@@ -7,7 +7,9 @@ use rustc_hash::FxHashMap;
 
 use crate::model::{Artifact, Pipeline, PipelineIndex};
 
-use super::template::{error, push_escaped, PathError, PathPart, PathPlaceholder, PathTemplate};
+use super::template::{
+    error, product_text, push_escaped, PathError, PathPart, PathPlaceholder, PathTemplate,
+};
 
 use super::components::{push_encoded, unusable_path};
 
@@ -102,7 +104,7 @@ impl<'p> ProductPath<'p> {
             .ok_or_else(|| error(format!("no path template for product `{product}`")))?;
         Ok(Self {
             template,
-            name: product.replace("::", "."),
+            name: product_text(product).into_owned(),
             stage: stage_directories(index, product),
         })
     }

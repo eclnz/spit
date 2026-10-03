@@ -214,7 +214,7 @@ A step outside every stage stays valid.
 
 ## Reuse definitions
 
-Import operations, source families and [checks](#checks) from another `.spit` file. The path is relative to the file containing the `use` line. An operation brings its `command`; a source brings its path rule; either brings the checks it attaches. Imports do not bring pipeline steps.
+Import operations, source families, [`sidecars` groups](#sidecar-files) and [checks](#checks) from another `.spit` file. The path is relative to the file containing the `use` line. An operation brings its `command`; a source brings its path rule; either brings the checks it attaches. A `sidecars` group comes whole, with its members as sources and its stem if it gives one, so a recipe names it as `text::photo` and a binding that has some of its members is reported as where the group is written. A member cannot be imported alone: name its group. Imports do not bring pipeline steps.
 
 ```text
 use text.spit as text

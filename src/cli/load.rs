@@ -9,8 +9,9 @@ use std::path::{Path, PathBuf};
 
 use spit::{
     diagnose_checked, diagnose_checked_with_inventory, diagnose_checked_with_records,
-    parse_input_spec_at, render_source_inventory, ArtifactReport, Checked, Context, FileNames,
-    InputSource, InputSpec, Pipeline, Removal, ResolveError, ResolvedInputs,
+    parse_input_spec_at, render_source_inventory, ArtifactReport, Checked, Context,
+    DimensionOrders, FileNames, InputSource, InputSpec, Pipeline, Removal, ResolveError,
+    ResolvedInputs,
 };
 
 use super::args::{CliArgs, Command, Flag};
@@ -166,8 +167,9 @@ pub(crate) fn settle(loaded: &Loaded) -> Result<(ResolvedInputs, PathBuf), Box<d
         }
     }
     let pipeline = &loaded.checked.pipeline;
+    let orders = DimensionOrders::new(pipeline);
     for removal in &resolved.inventory.removed {
-        eprintln!("note: {}", removal_note(removal, pipeline));
+        eprintln!("note: {}", removal_note(removal, &orders));
     }
     if let Some(root) = &resolved.root {
         let contexts = if recipe.rules.discoveries.is_empty() {
@@ -356,31 +358,11 @@ fn relative_to(path: &Path, base: &Path) -> Option<PathBuf> {
 /// What an `exclude` or `drop` rule removed, as a note says it:
 /// `excluded bold[sub=02,run=3] (line 4): corrupted`, or `dropped [sub=03]
 /// by \`drop [sub] where sessions count<2\` (line 6); found 1`.
-fn removal_note(removal: &Removal, pipeline: &Pipeline) -> String {
+fn removal_note(removal: &Removal, orders: &DimensionOrders<'_>) -> String {
     // An artifact's dimensions in its product's order; a group's in the
     // order the pipeline first declares them, as the .spitout writes it.
-    let declared: Vec<String> = match &removal.product {
-        Some(name) => pipeline
-            .products
-            .iter()
-            .find(|product| &product.name == name)
-            .map(|product| product.dimensions.clone())
-            .unwrap_or_default(),
-        None => {
-            let mut order: Vec<String> = Vec::new();
-            for dimension in pipeline
-                .products
-                .iter()
-                .flat_map(|product| &product.dimensions)
-            {
-                if !order.contains(dimension) {
-                    order.push(dimension.clone());
-                }
-            }
-            order
-        }
-    };
-    let identity = removal.identity_in(&declared);
+    let declared = orders.of(removal);
+    let identity = removal.identity_in(declared);
     let origin = removal.origin.as_deref().unwrap_or("the recipe");
     let mut note = if removal.is_exclusion() {
         format!("excluded {identity} ({origin})")
