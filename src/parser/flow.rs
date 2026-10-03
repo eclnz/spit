@@ -399,6 +399,9 @@ fn flow_line(
             };
             StatementKind::command(original, declaration.trim(), number, role)?
         }
+        Some((Keyword::Check, declaration)) => {
+            StatementKind::check(original, declaration.trim(), number)?
+        }
         Some((Keyword::ShellSource, _)) => {
             return Err(ParseError::new(number, SHELL_SOURCE_REMOVED));
         }
@@ -441,7 +444,7 @@ fn flow_statement(
             number,
             format!(
                 "`{word}` does not start a statement; {hint}a pipeline line starts with \
-                 source, sidecars, dimensions, operation, command, verify, path, ext, stage or use, or is a step \
+                 source, sidecars, dimensions, operation, command, verify, check, path, ext, stage or use, or is a step \
                  `output = operation(inputs)`, and a recipe line starts with pipeline, \
                  root, discover, require, drop, exclude or path"
             ),
@@ -465,7 +468,7 @@ fn flow_statement(
     } else {
         Err(ParseError::new(
             number,
-            "expected source, discover, operation, command, verify, require, path, stage, or output = operation(inputs)",
+            "expected source, discover, operation, command, verify, check, require, path, stage, or output = operation(inputs)",
         ))
     }
 }
@@ -494,6 +497,13 @@ fn parse_flow_step(line: &str, number: usize) -> Result<(Invocation, Vec<FlowOut
 fn parse_flow_output(left: &str, number: usize) -> Result<FlowOutput, ParseError> {
     if left.contains(':') {
         let product = parse_product(left, number)?;
+        if !product.checks.is_empty() {
+            return Err(ParseError::new(
+                number,
+                "a step's product takes no `@ check(...)`; attach the check to the operation's output, as in `-> Image @ check(nonempty)`",
+            )
+            .at_token(left));
+        }
         Ok(FlowOutput {
             name: product.name,
             artifact_type: Some(product.artifact_type),
@@ -509,13 +519,14 @@ fn parse_flow_output(left: &str, number: usize) -> Result<FlowOutput, ParseError
 }
 
 /// The words a statement can start with, for suggesting one.
-const STATEMENT_WORDS: [&str; 15] = [
+const STATEMENT_WORDS: [&str; 16] = [
     "source",
     "sidecars",
     "dimensions",
     "operation",
     "command",
     "verify",
+    "check",
     "path",
     "ext",
     "stage",

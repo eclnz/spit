@@ -143,7 +143,7 @@ pub(crate) fn slot(operation: &OperationDef, name: &str) -> Option<Slot> {
 
 /// Check every declared command against its operation without resolving jobs:
 /// the template must name only known placeholders and write every output; a
-/// `verify` command may read inputs only.
+/// `verify` command may read inputs only. Checks are checked too.
 pub fn validate_commands(pipeline: &Pipeline) -> Result<(), CommandError> {
     let lines = SourceMap::default();
     match collect_commands(pipeline, &lines, &BTreeSet::new())
@@ -155,8 +155,9 @@ pub fn validate_commands(pipeline: &Pipeline) -> Result<(), CommandError> {
     }
 }
 
-/// Check every command, collecting each error. Commands for operations in
-/// `skip` belong to declarations that already failed and are not checked.
+/// Check every command, collecting each error, and then every `check` and
+/// its uses. Commands for operations in `skip` belong to declarations that
+/// already failed and are not checked.
 pub(crate) fn collect_commands(
     pipeline: &Pipeline,
     lines: &SourceMap,
@@ -214,6 +215,7 @@ pub(crate) fn collect_commands(
             errors.push(e.at(line));
         }
     }
+    errors.extend(crate::check::collect_checks(pipeline, lines, skip));
     errors
 }
 

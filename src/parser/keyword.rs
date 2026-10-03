@@ -11,6 +11,8 @@ pub(crate) enum Keyword {
     Operation,
     Command,
     Verify,
+    /// `check name(params): command`, a test of one artifact.
+    Check,
     Require,
     /// `skip`, which `drop` replaced; kept to say so.
     Skip,
@@ -30,13 +32,14 @@ pub(crate) enum Keyword {
     ShellSource,
 }
 
-const WORDS: [(Keyword, &str); 13] = [
+const WORDS: [(Keyword, &str); 14] = [
     (Keyword::Use, "use"),
     (Keyword::Source, "source"),
     (Keyword::Discover, "discover"),
     (Keyword::Operation, "operation"),
     (Keyword::Command, "command"),
     (Keyword::Verify, "verify"),
+    (Keyword::Check, "check"),
     (Keyword::Require, "require"),
     (Keyword::Skip, "skip"),
     (Keyword::Drop, "drop"),
@@ -68,6 +71,16 @@ impl Keyword {
         if matches!(keyword, Self::Stage | Self::Dimensions | Self::Sidecars) && line.contains('=')
         {
             return None;
+        }
+        // A step may make a product named `check`, as in `check = f(x)` or
+        // `check : Report = f(x)`; a declaration names the check before any
+        // `:` or `=`.
+        if *keyword == Self::Check {
+            let head = rest.split(':').next().unwrap_or_default();
+            let named = rest.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_');
+            if !named || head.contains('=') {
+                return None;
+            }
         }
         Some((*keyword, rest))
     }
@@ -132,6 +145,12 @@ mod tests {
         assert_eq!(Keyword::of("paths = f(x)"), None);
         assert_eq!(Keyword::of("stage analysis:"), Some(Keyword::Stage));
         assert_eq!(Keyword::of("stage = f(x)"), None);
+        assert_eq!(
+            Keyword::of("check ndim(n): check_ndim {@path} {n}"),
+            Some(Keyword::Check)
+        );
+        assert_eq!(Keyword::of("check = f(x)"), None);
+        assert_eq!(Keyword::of("check : Report = f(x)"), None);
         assert_eq!(Keyword::of("sources:"), None);
         assert_eq!(
             Header::of("contexts visits:"),

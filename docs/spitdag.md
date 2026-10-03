@@ -1,6 +1,6 @@
 # The `.spitdag` format
 
-A `.spitdag` is what `spit dag -o` writes and `spit dag --json` prints: every job a pipeline resolves to over one dataset, each with its files and its commands. A backend that runs the jobs reads nothing else: no pipeline, path rule or command template. This page describes version 5, the version `src/spitdag` writes. See the [README](../README.md) for how a `.spitdag` is made, and `spit dag --commands` for a readable view of the same commands.
+A `.spitdag` is what `spit dag -o` writes and `spit dag --json` prints: every job a pipeline resolves to over one dataset, each with its files and its commands. A backend that runs the jobs reads nothing else: no pipeline, path rule or command template. This page describes version 6, the version `src/spitdag` writes. See the [README](../README.md) for how a `.spitdag` is made, and `spit dag --commands` for a readable view of the same commands.
 
 ## Document
 
@@ -8,7 +8,7 @@ A `.spitdag` is one JSON object, followed by a newline:
 
 ```json
 {
-  "version": 5,
+  "version": 6,
   "generator": {"name": "spit", "version": "0.2.2"},
   "root": "/data/study",
   "external_inputs": [ARTIFACT, ...],
@@ -22,12 +22,12 @@ A `.spitdag` is one JSON object, followed by a newline:
 
 | Field | Holds |
 | --- | --- |
-| `version` | The format's version, `5`. A change a reader must know about raises it. |
+| `version` | The format's version, `6`. A change a reader must know about raises it. Version 6 added each job's [`checks`](#checks). |
 | `generator` | The program that wrote the file, and its version. |
 | `root` | The absolute dataset folder that every path is relative to, or `null` when it was not known: a `.spitout` that records no root. |
 | `external_inputs` | Every artifact a job reads but no job writes, once each: the sources, and the outputs of stages left out. Ordered by path in natural order, the order `many` inputs take, so `wave2` comes before `wave10`. |
 | `targets` | Every artifact a job writes but no job reads: what a full run leaves behind. Ordered by the job that writes it. |
-| `executables` | The program each command and `verify` command starts with, once each, in text order. A command whose first word is a path names no program and is left out. A backend can check these are installed before running anything. |
+| `executables` | The program each command, `verify` command and check starts with, once each, in text order. A command whose first word is a path names no program and is left out. A backend can check these are installed before running anything. |
 | `removed` | What the input stage left out of the dataset, and why: see [Removal](#removal). `[]` when nothing was. |
 | `left_out` | Outputs whose jobs could not be planned, each with its reasons: see [Left out](#left-out). `[]` for a complete plan. |
 | `jobs` | Every job, each after the jobs it depends on. |
@@ -90,7 +90,8 @@ Each output that could not be produced has its identity and the input gaps that 
   "depends_on": [1, 2],
   "dependents": [6],
   "command": [ARGUMENT, ...],
-  "verify": [[ARGUMENT, ...], ...]
+  "verify": [[ARGUMENT, ...], ...],
+  "checks": [CHECK, ...]
 }
 ```
 
@@ -106,6 +107,7 @@ Each output that could not be produced has its identity and the input gaps that 
 | `dependents` | The jobs that read this job's outputs. |
 | `command` | The command that writes the outputs, or `null` for an operation with none. |
 | `verify` | The commands that check the inputs before `command` runs, in order; `[]` for none. |
+| `checks` | The checks of single artifacts the job reads and writes, in the order they run: see [Checks](#checks). `[]` for none. |
 
 ### Commands
 
@@ -131,6 +133,30 @@ Run each argument as one word, exactly as given: no shell is involved, so nothin
 
 A backend runs a job's `verify` commands, in order, before its `command`. If one fails, the job does not run, and neither does any job that depends on it, directly or through others.
 
+## Checks
+
+Each check runs one command on one artifact:
+
+```json
+{"when": "after", "check": "ndim(4)", "port": "output", "path": "derivatives/dwi/sub=01.mif", "command": [["check_ndim"], [{"path": "derivatives/dwi/sub=01.mif"}], ["4"]]}
+```
+
+| Field | Holds |
+| --- | --- |
+| `when` | `"before"` for a check of an input, which runs before the job's `verify` commands and its `command`; `"after"` for a check of an output, which runs after `command`, once the output exists. |
+| `check` | The check as the pipeline attaches it, such as `ndim(4)` or `nonempty`, for reporting a failure. |
+| `port` | The input port, for `"before"`, or the output port, for `"after"`, whose artifact it checks. |
+| `path` | The checked artifact's path, relative to `root`. |
+| `command` | The check's command, as a [command](#commands) is written. |
+
+The `"before"` checks come first, then the `"after"` checks; within each, by port, then by artifact in the port's order, then in the order the pipeline attaches them. An input's checks include those of the source it reads. A check the job that writes an artifact runs on it is not repeated by a job in the same file that reads it.
+
+### Running checks
+
+A backend runs a job in this order: the `"before"` checks, the `verify` commands, `command`, the check that every output exists, then the `"after"` checks. If any fails, the job fails, even when `command` exited with status 0, and no job that depends on it runs. Report a failure with the check, the port and the path, as in `check ndim(4) failed on output derivatives/dwi/sub=01.mif`.
+
+Checks are left out of the job's [fingerprint](#fingerprint), which identifies the job's work: a changed check does not make a job's outputs out of date. A backend that records successful jobs records the checks each passed with, such as the JSON of its `checks`. When a job is otherwise current but its checks differ from the record, the backend runs the checks alone on the existing files rather than rerunning `command`. If one fails, the job fails and its record is dropped, so the next run reruns it.
+
 ## Folders
 
 A job that writes a folder owns it: SPIT rejects a pipeline that would put any other artifact inside it. So a backend may treat the folder as one output:
@@ -144,6 +170,6 @@ A source folder may hold other sources, but never an output.
 
 ## Fingerprint
 
-A job's fingerprint is a 64-bit FNV-1a hash of the compact JSON of what it reads, writes and runs: its `operation`, `inputs`, `outputs`, `command` and `verify`, each artifact with its product, entities, type, path and kind. Its `id`, `stage`, `depends_on` and `dependents` are left out, so the fingerprint follows the work, not where the job falls in the plan.
+A job's fingerprint is a 64-bit FNV-1a hash of the compact JSON of what it reads, writes and runs: its `operation`, `inputs`, `outputs`, `command` and `verify`, each artifact with its product, entities, type, path and kind. Its `id`, `stage`, `depends_on`, `dependents` and `checks` are left out, so the fingerprint follows the work, not where the job falls in the plan.
 
 The fingerprint changes when the job's command, its files, or which artifacts it reads or writes change. It does not read the files themselves, so it does not change when an input file's contents do; a backend that must rerun a job after its inputs change combines the fingerprint with its own record of the files, such as their modification times or hashes.

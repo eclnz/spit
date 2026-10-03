@@ -5,7 +5,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::lower::{parse_document_with_imports, ParsedDocument, PipelineBuilder};
-use crate::model::{CommandDef, CommandRole, OperationDef, Pipeline, ProductDef};
+use crate::model::{
+    CheckDef, CheckUse, CommandDef, CommandRole, OperationDef, Pipeline, ProductDef,
+};
 use crate::parser::{parse_use, strip_comment, without_bom, Keyword, Kind, ParseError, UseSpec};
 use crate::span::Place;
 
@@ -38,6 +40,25 @@ pub(crate) fn apply_import(
     );
     for command in &imported.commands {
         builder.add_command(command.clone(), place.clone());
+    }
+    // Two imports may bring the same check, which is one check; a
+    // different check of the same name is a conflict.
+    for check in &imported.checks {
+        match builder
+            .pipeline
+            .checks
+            .iter()
+            .find(|c| c.name == check.name)
+        {
+            Some(existing) if existing == check => {}
+            Some(_) => {
+                return Err(ParseError::new(
+                    line,
+                    format!("import conflicts with check `{}`", check.name),
+                ))
+            }
+            None => builder.add_check(check.clone(), place.clone()),
+        }
     }
     for product in &imported.products {
         builder.add_product(product.clone(), place.clone());
@@ -121,10 +142,14 @@ fn select_import(module: &Pipeline, spec: &UseSpec, line: usize) -> Result<Pipel
                 format!("imported file has duplicate definition `{name}`"),
             ));
         }
-        if operation.is_none() && source.is_none() {
+        let check = module.checks.iter().find(|check| check.name == name);
+        if operation.is_none() && source.is_none() && check.is_none() {
             return Err(ParseError::new(
                 line,
-                format!("`{name}` is not a source or operation in `{}`", spec.path),
+                format!(
+                    "`{name}` is not a source, operation or check in `{}`",
+                    spec.path
+                ),
             ));
         }
         if operation.is_some() && source.is_some() && !import_all {
@@ -137,17 +162,75 @@ fn select_import(module: &Pipeline, spec: &UseSpec, line: usize) -> Result<Pipel
             .alias
             .as_ref()
             .map_or_else(|| name.to_owned(), |alias| format!("{alias}::{name}"));
+        let alias = spec.alias.as_deref();
         if let Some(operation) = operation {
             import_operation(&mut selected, module, operation, &qualified, line)?;
+            let checks = operation.inputs.iter().map(|port| &port.checks);
+            let checks = checks.chain(operation.outputs.iter().map(|port| &port.checks));
+            for used in checks.flatten() {
+                import_check(&mut selected, module, &used.check, alias);
+            }
         }
         if let Some(source) = source {
             import_source(&mut selected, module, source, &qualified, line)?;
+            for used in &source.checks {
+                import_check(&mut selected, module, &used.check, alias);
+            }
+        }
+        if check.is_some() {
+            import_check(&mut selected, module, name, alias);
         }
     }
+    qualify_checks(&mut selected, spec.alias.as_deref());
     Ok(selected)
 }
 
-/// What `use path` brings in: every operation and source, each name once.
+/// Bring in `module`'s check `name`, once however many imports use it.
+fn import_check(selected: &mut Pipeline, module: &Pipeline, name: &str, alias: Option<&str>) {
+    let qualified = qualified_check(name, alias);
+    if selected.checks.iter().any(|check| check.name == qualified) {
+        return;
+    }
+    if let Some(check) = module.checks.iter().find(|check| check.name == name) {
+        selected.checks.push(CheckDef {
+            name: qualified,
+            ..check.clone()
+        });
+    }
+}
+
+fn qualified_check(name: &str, alias: Option<&str>) -> String {
+    alias.map_or_else(|| name.to_owned(), |alias| format!("{alias}::{name}"))
+}
+
+/// Name the checks the imported ports and sources use as they are imported.
+fn qualify_checks(selected: &mut Pipeline, alias: Option<&str>) {
+    if alias.is_none() {
+        return;
+    }
+    let qualify = |uses: &mut Vec<CheckUse>| {
+        for used in uses {
+            used.check = qualified_check(&used.check, alias);
+        }
+    };
+    for operation in &mut selected.operations {
+        operation
+            .inputs
+            .iter_mut()
+            .for_each(|port| qualify(&mut port.checks));
+        operation
+            .outputs
+            .iter_mut()
+            .for_each(|port| qualify(&mut port.checks));
+    }
+    selected
+        .products
+        .iter_mut()
+        .for_each(|product| qualify(&mut product.checks));
+}
+
+/// What `use path` brings in: every operation, source and check, each name
+/// once.
 fn reusable_names(module: &Pipeline) -> Vec<&str> {
     let mut seen = BTreeSet::new();
     module
@@ -161,6 +244,7 @@ fn reusable_names(module: &Pipeline) -> Vec<&str> {
                 .filter(|product| is_source(module, product))
                 .map(|product| product.name.as_str()),
         )
+        .chain(module.checks.iter().map(|check| check.name.as_str()))
         .filter(|name| seen.insert(*name))
         .collect()
 }

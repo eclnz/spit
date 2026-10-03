@@ -5,6 +5,7 @@
 #![deny(clippy::unwrap_used)]
 
 mod builtins;
+mod check;
 mod command;
 mod compile;
 mod diagnostics;
@@ -65,7 +66,10 @@ pub use resolver::{
     bind_dag, bind_dag_with, resolve, resolve_artifacts_excluding, resolve_artifacts_partial,
     BindError,
 };
-pub use spitdag::{ArgPart, Argument, BoundArtifact, BoundDag, BoundJob, BoundStep, LeftOut};
+pub use spitdag::{
+    ArgPart, Argument, BoundArtifact, BoundCheck, BoundDag, BoundJob, BoundStep, LeftOut,
+    StepCheck, When,
+};
 pub use types::{
     parse_type_expr, Compatibility, Substitutions, TypeExpr, TypeParseError, TypeUnifyError,
 };

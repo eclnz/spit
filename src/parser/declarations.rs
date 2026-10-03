@@ -11,6 +11,7 @@ use crate::model::{
 use crate::paths::{validate_discovery_rule, PathTemplate};
 use crate::types::{parse_type_expr, TypeExpr, TypeParseError};
 
+use super::check::{only_checks, split_clauses};
 use super::lexical::{call_parts, comma_items, identifier, qualified_identifier, split_ending};
 use super::source_map::tail_place;
 use super::{ParseError, PathRule};
@@ -534,6 +535,8 @@ pub(super) fn parse_dimension_order(text: &str, number: usize) -> Result<Vec<Str
 }
 
 pub(super) fn parse_product(line: &str, number: usize) -> Result<ProductDef, ParseError> {
+    let (line, clauses) = split_clauses(line, "expected `@ check(...)` after a source", number)?;
+    let checks = only_checks(&clauses, "a source", number)?;
     let (declaration, dimensions) = match line.split_once('[') {
         Some((declaration, dimensions)) => (declaration, Some(dimensions)),
         None => (line, None),
@@ -584,6 +587,7 @@ pub(super) fn parse_product(line: &str, number: usize) -> Result<ProductDef, Par
     let mut product = ProductDef::new(name, artifact_type, &dimensions);
     product.extension = extension.map(str::to_owned);
     product.folder = folder;
+    product.checks = checks;
     Ok(product)
 }
 

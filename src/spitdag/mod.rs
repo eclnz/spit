@@ -14,10 +14,12 @@ use crate::model::{
 };
 use crate::types::TypeExpr;
 
+pub use crate::check::When;
+
 use self::write::{write_document, PIECE};
 
 /// The schema version a `.spitdag` is written with.
-pub const SPITDAG_VERSION: usize = 5;
+pub const SPITDAG_VERSION: usize = 6;
 
 /// A resolved DAG with its paths bound and its commands expanded. Its
 /// artifacts are the resolved DAG's, each kept once with its path; jobs,
@@ -62,6 +64,28 @@ pub struct BoundStep {
     pub inputs: Vec<String>,
     /// The name of each output port, in port order.
     pub outputs: Vec<String>,
+    /// The checks its jobs run, which their [`BoundCheck`]s refer to by
+    /// index.
+    pub checks: Vec<StepCheck>,
+}
+
+/// A check every job of a step runs on the artifacts of one port.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StepCheck {
+    pub when: When,
+    /// The input port, or for [`When::After`] the output port, by index.
+    pub port: usize,
+    /// The check as written, as in `ndim(4)`.
+    pub written: String,
+}
+
+/// A check one job runs on one artifact.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BoundCheck {
+    /// The check, in its step's [`BoundStep::checks`].
+    pub check: usize,
+    pub artifact: ArtifactId,
+    pub command: Vec<Argument>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -79,6 +103,9 @@ pub struct BoundJob {
     pub command: Option<Vec<Argument>>,
     /// Commands that check the inputs before the job runs.
     pub verify: Vec<Vec<Argument>>,
+    /// The checks of single artifacts: those on inputs, then those on
+    /// outputs.
+    pub checks: Vec<BoundCheck>,
 }
 
 /// An artifact of a bound DAG, with its path.
@@ -255,7 +282,10 @@ impl BoundDag {
     pub fn executables(&self) -> BTreeSet<String> {
         self.jobs
             .iter()
-            .flat_map(|job| job.command.iter().chain(&job.verify))
+            .flat_map(|job| {
+                let checks = job.checks.iter().map(|check| &check.command);
+                job.command.iter().chain(&job.verify).chain(checks)
+            })
             .filter_map(|command| {
                 command
                     .first()?
