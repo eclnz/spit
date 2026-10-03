@@ -7,8 +7,8 @@ use std::collections::BTreeMap;
 
 use crate::imports::apply_import;
 use crate::model::{
-    Cardinality, CommandDef, CoverageRule, Exclusion, InputBinding, InputRules, Invocation,
-    OperationDef, Pipeline, ProductDef, SourceInventory, StageDef,
+    Cardinality, CheckDef, CommandDef, CoverageRule, Exclusion, InputBinding, InputRules,
+    Invocation, OperationDef, Pipeline, ProductDef, SourceInventory, StageDef,
 };
 use crate::order::{order_dimensions, Output};
 use crate::parser::{
@@ -57,6 +57,11 @@ impl PipelineBuilder {
     pub(crate) fn add_command(&mut self, command: CommandDef, place: Place) {
         self.lines.commands.push(place);
         self.pipeline.commands.push(command);
+    }
+
+    pub(crate) fn add_check(&mut self, check: CheckDef, place: Place) {
+        self.lines.checks.push(place);
+        self.pipeline.checks.push(check);
     }
 
     fn add_invocation(&mut self, invocation: Invocation, step: &Step) {
@@ -316,6 +321,9 @@ fn lower_statement(
         }
         StatementKind::Command(command, place) => {
             builder.add_command(command.clone(), place.clone());
+        }
+        StatementKind::Check(check, place) => {
+            builder.add_check(check.clone(), place.clone());
         }
         StatementKind::Dimensions(order) => {
             if builder.dimension_order.is_some() {

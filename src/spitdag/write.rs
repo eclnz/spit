@@ -8,7 +8,7 @@ use crate::json::{write_array, write_number, write_string, ObjectWriter, Out};
 use crate::model::{ArtifactId, JobId, Removal};
 use crate::types::TypeExpr;
 
-use super::{ArgPart, Argument, BoundArtifact, BoundDag, BoundJob, SPITDAG_VERSION};
+use super::{ArgPart, Argument, BoundArtifact, BoundDag, BoundJob, When, SPITDAG_VERSION};
 
 /// How much of a document [`BoundDag::write_json`] holds before writing it.
 pub(crate) const PIECE: usize = 1 << 16;
@@ -191,6 +191,25 @@ fn write_job(
     });
     object.raw("command", &work[command]);
     object.raw("verify", &work[verify]);
+    // A check tests the files a job reads or writes, not the job's work, so
+    // the fingerprint leaves the checks out: a changed check is run again on
+    // the files, without rerunning the job.
+    object.field("checks", |out| {
+        write_array(out, &job.checks, |out, check| {
+            let declared = &step.checks[check.check];
+            let ports = match declared.when {
+                When::Before => &step.inputs,
+                When::After => &step.outputs,
+            };
+            let mut item = ObjectWriter::start(out);
+            item.string("when", declared.when.as_str());
+            item.string("check", &declared.written);
+            item.string("port", &ports[declared.port]);
+            item.string("path", dag.path(check.artifact));
+            item.field("command", |out| write_command(out, dag, &check.command));
+            item.finish();
+        });
+    });
     object.finish();
 }
 
@@ -354,6 +373,7 @@ mod tests {
             stage: stage.map(str::to_owned),
             inputs: names(inputs),
             outputs: names(outputs),
+            checks: vec![],
         }
     }
 
@@ -408,6 +428,7 @@ mod tests {
                         vec![ArgPart::Text("--in=".into()), ArgPart::Path(raw)],
                     ]),
                     verify: vec![vec![vec![ArgPart::Path(raw)]]],
+                    checks: vec![],
                 },
                 BoundJob {
                     id: JobId::new(2),
@@ -417,13 +438,14 @@ mod tests {
                     depends_on: vec![JobId::new(1)],
                     command: None,
                     verify: vec![],
+                    checks: vec![],
                 },
             ]
         });
         dag.root = Some("/data/study".into());
         let text = dag.to_json();
         assert!(text.starts_with(&format!(
-            "{{\"version\":5,\"generator\":{{\"name\":\"spit\",\"version\":\"{}\"}},\
+            "{{\"version\":6,\"generator\":{{\"name\":\"spit\",\"version\":\"{}\"}},\
 \"root\":\"/data/study\",\"external_inputs\":[{{\"product\":\"raw\"",
             env!("CARGO_PKG_VERSION")
         )));
@@ -506,6 +528,7 @@ mod tests {
             depends_on: vec![],
             command: None,
             verify: vec![],
+            checks: vec![],
         };
         let dimensions = vec![vec!["wave".to_owned()], vec![]];
         let steps = vec![step("fit", None, &["waves"], &["output"])];
@@ -535,6 +558,7 @@ mod tests {
             depends_on: vec![],
             command: Some(vec![vec![ArgPart::Text("tool".into())]]),
             verify: vec![],
+            checks: vec![],
         };
         let print = |make: &dyn Fn([ArtifactId; 3]) -> BoundJob| {
             // The same operation and ports, outside a stage and in one.

@@ -1,5 +1,6 @@
 //! Parse flow-style pipelines and separate source inventories.
 
+mod check;
 mod declarations;
 mod flow;
 mod inventory;
@@ -12,7 +13,7 @@ mod source_map;
 use std::fmt;
 
 use crate::model::{
-    CommandDef, CommandRole, CoverageRule, DirectoryDiscovery, Invocation, OperationDef,
+    CheckDef, CommandDef, CommandRole, CoverageRule, DirectoryDiscovery, Invocation, OperationDef,
     ProductDef, SidecarGroup,
 };
 use crate::paths::PathTemplate;
@@ -158,6 +159,8 @@ pub(crate) enum StatementKind {
     /// what it names sits.
     Exclude(declarations::ExcludeLine, Option<String>, Place),
     Command(CommandDef, Place),
+    /// A `check` declaration, and where its name is.
+    Check(CheckDef, Place),
     /// A `dimensions [...]` line: the pipeline's dimension order.
     Dimensions(Vec<String>),
     Path(PathRule),
@@ -244,6 +247,14 @@ impl StatementKind {
         let place = source_map::tail_place(original, number, declaration.trim());
         let reason = lexical::comment_text(original).map(str::to_owned);
         Ok(Self::Exclude(rule, reason, place))
+    }
+
+    /// A `check` declaration, `declaration` being the text after its
+    /// keyword in `original`.
+    fn check(original: &str, declaration: &str, number: usize) -> Result<Self, ParseError> {
+        let check = check::parse_check(declaration, number)?;
+        let place = source_map::name_place(original, number, declaration, &check.name);
+        Ok(Self::Check(check, place))
     }
 
     /// A command, or a `verify` command, for an operation.

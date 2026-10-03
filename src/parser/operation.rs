@@ -1,40 +1,41 @@
 //! Operation declarations: `name(inputs) -> outputs`, with an optional
-//! `@ min(count)` clause.
+//! `@ min(count)` clause, and `@ check(...)` on any port.
 
 use crate::model::{Cardinality, InputPort, OperationDef, OutputPort, ShapeRule, DEFAULT_OUTPUT};
 use crate::types::{parse_type_expr, TypeExpr};
 
+use super::check::{only_checks, split_clauses, Clause};
 use super::declarations::type_error;
 use super::lexical::{call_parts, comma_items, identifier, split_ending};
 use super::ParseError;
 
 pub(super) fn parse_operation(line: &str, number: usize) -> Result<OperationDef, ParseError> {
-    let mut clauses = line.split('@');
-    let line = clauses.next().unwrap_or_default().trim_end();
-    let clauses = parse_clauses(clauses, number)?;
-    let (signature, outputs) = if let Some((signature, output)) = line.split_once("->") {
-        (signature, parse_outputs(output.trim(), number)?)
+    let open = line
+        .find('(')
+        .filter(|&open| !line[..open].contains("->"))
+        .ok_or_else(|| ParseError::new(number, "expected `(` after operation name"))?;
+    // An unclosed signature runs to its `->`, for `call_parts` to report.
+    let (signature, rest) = match matching_paren(line, open) {
+        Some(close) => line.split_at(close + 1),
+        None => line.split_at(line.find("->").unwrap_or(line.len())),
+    };
+    let signature = signature.trim_end();
+    let rest = rest.trim();
+    let (outputs, trailing) = if let Some(output) = rest.strip_prefix("->") {
+        parse_outputs(output.trim(), number)?
     } else {
+        if !rest.is_empty() && !rest.starts_with('@') {
+            return Err(
+                ParseError::new(number, "expected `->` before operation output type")
+                    .at_token(rest),
+            );
+        }
         (
-            line,
             vec![OutputPort::new(DEFAULT_OUTPUT, TypeExpr::Unknown)],
+            split_clauses(rest, number)?.1,
         )
     };
-    let signature = signature.trim();
-    if !signature.contains('(') {
-        return Err(ParseError::new(number, "expected `(` after operation name"));
-    }
-    if !line.contains("->") {
-        if let Some((_, trailing)) = signature.split_once(')') {
-            let trailing = trailing.trim();
-            if !trailing.is_empty() {
-                return Err(
-                    ParseError::new(number, "expected `->` before operation output type")
-                        .at_token(trailing),
-                );
-            }
-        }
-    }
+    let clauses = parse_clauses(trailing, number)?;
     let (name, inputs) = call_parts(signature, number)?;
     identifier(name, number, "operation name")?;
     if let Some((dimensions, clause)) = clauses.drop {
@@ -68,6 +69,24 @@ pub(super) fn parse_operation(line: &str, number: usize) -> Result<OperationDef,
     Ok(operation)
 }
 
+/// The index of the `)` that closes the `(` at `open`, if any.
+fn matching_paren(text: &str, open: usize) -> Option<usize> {
+    let mut depth = 0usize;
+    for (index, character) in text[open..].char_indices() {
+        match character {
+            '(' => depth += 1,
+            ')' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(open + index);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
 /// The `@ min(count)` clause after a signature, and a removed `@ drop(...)`
 /// clause with its text, kept to say what to write instead.
 #[derive(Default)]
@@ -76,18 +95,15 @@ struct Clauses<'a> {
     min: Option<usize>,
 }
 
-fn parse_clauses<'a>(
-    clauses: impl Iterator<Item = &'a str>,
-    number: usize,
-) -> Result<Clauses<'a>, ParseError> {
+fn parse_clauses(clauses: Vec<Clause<'_>>, number: usize) -> Result<Clauses<'_>, ParseError> {
     let expected = "expected `@ min(count)` after operation signature";
     let mut parsed = Clauses::default();
-    for clause in clauses {
-        let clause = clause.trim();
-        let (keyword, argument) = clause
-            .split_once('(')
-            .and_then(|(keyword, rest)| Some((keyword.trim(), rest.strip_suffix(')')?.trim())))
-            .ok_or_else(|| ParseError::new(number, expected).at_token(clause))?;
+    for Clause {
+        keyword,
+        argument,
+        text: clause,
+    } in clauses
+    {
         match keyword {
             "drop" if parsed.drop.is_none() => {
                 let dimensions = comma_items(argument, number)?;
@@ -127,6 +143,13 @@ fn parse_clauses<'a>(
                         .at_token(keyword),
                 )
             }
+            "check" => {
+                return Err(ParseError::new(
+                    number,
+                    "`@ check(...)` follows the port it checks, as in `(image: Image @ check(nonempty))` or `-> (mask: Mask @ check(nonempty))`",
+                )
+                .at_token(clause))
+            }
             _ => return Err(ParseError::new(number, expected).at_token(keyword)),
         }
     }
@@ -134,8 +157,17 @@ fn parse_clauses<'a>(
 }
 
 /// Parse an input port: `name`, `name: Type`, `name: many`, or
-/// `name: many Type`.
+/// `name: many Type`, then any `@ check(...)` clauses.
 fn parse_input_port(input: &str, number: usize) -> Result<InputPort, ParseError> {
+    let (input, clauses) = split_clauses(input, number)?;
+    let checks = only_checks(&clauses, "an input port", number)?;
+    let mut port = parse_port(input, number)?;
+    port.checks = checks;
+    Ok(port)
+}
+
+/// An input port without its clauses.
+fn parse_port(input: &str, number: usize) -> Result<InputPort, ParseError> {
     let fail = |message: String, token: &str| Err(ParseError::new(number, message).at_token(token));
     let Some((name, value)) = input.split_once(':') else {
         // A lowercase word alone names an untyped port; types are capitalised.
@@ -282,9 +314,19 @@ fn shape_rule(
 
 /// Parse an operation's output: one type, or `(name: Type, ...)` for
 /// several named outputs. Each type may be followed by the extension the
-/// tool gives its file: `-> Transform .mat`.
-fn parse_outputs(text: &str, number: usize) -> Result<Vec<OutputPort>, ParseError> {
+/// tool gives its file, as in `-> Transform .mat`, and then by its checks.
+/// Also gives the operation's own clauses after the outputs.
+fn parse_outputs(
+    text: &str,
+    number: usize,
+) -> Result<(Vec<OutputPort>, Vec<Clause<'_>>), ParseError> {
     let Some(list) = text.strip_prefix('(') else {
+        let (text, clauses) = split_clauses(text, number)?;
+        // An output's checks are its own; anything else is the operation's.
+        let (checks, clauses): (Vec<_>, Vec<_>) = clauses
+            .into_iter()
+            .partition(|clause| clause.keyword == "check");
+        let checks = only_checks(&checks, "an output", number)?;
         if let Some((_, port)) = text.rsplit_once(" beside ") {
             return Err(ParseError::new(
                 number,
@@ -298,15 +340,23 @@ fn parse_outputs(text: &str, number: usize) -> Result<Vec<OutputPort>, ParseErro
         } else {
             port_type(text, number)?
         };
-        return Ok(vec![with_ending(
+        let mut port = with_ending(
             OutputPort::new(DEFAULT_OUTPUT, output_type),
             extension,
             folder,
-        )]);
+        );
+        port.checks = checks;
+        return Ok((vec![port], clauses));
     };
-    let list = list.strip_suffix(')').ok_or_else(|| {
-        ParseError::new(number, "expected closing `)` after output ports").at_token(text)
-    })?;
+    let closing =
+        || ParseError::new(number, "expected closing `)` after output ports").at_token(text);
+    let close = matching_paren(text, 0).ok_or_else(closing)?;
+    let trailing = text[close + 1..].trim();
+    if !trailing.is_empty() && !trailing.starts_with('@') {
+        return Err(closing());
+    }
+    let clauses = split_clauses(trailing, number)?.1;
+    let list = &list[..close - 1];
     let items = comma_items(list, number)?;
     if items.is_empty() {
         return Err(ParseError::new(number, "expected at least one output port").at_token(text));
@@ -314,6 +364,8 @@ fn parse_outputs(text: &str, number: usize) -> Result<Vec<OutputPort>, ParseErro
     let ports = items
         .into_iter()
         .map(|item| {
+            let (item, clauses) = split_clauses(item, number)?;
+            let checks = only_checks(&clauses, "an output", number)?;
             let (item, beside) = match item.rsplit_once(" beside ") {
                 Some((item, sibling)) => {
                     let (item, suffix) = beside_suffix(item.trim(), number)?;
@@ -343,7 +395,8 @@ fn parse_outputs(text: &str, number: usize) -> Result<Vec<OutputPort>, ParseErro
                 )
                 .at_token(name));
             }
-            let port = OutputPort::new(name, output_type);
+            let mut port = OutputPort::new(name, output_type);
+            port.checks = checks;
             Ok(match beside {
                 Some((sibling, suffix)) => port.beside(sibling, suffix),
                 None => with_ending(port, extension, folder),
@@ -368,7 +421,7 @@ fn parse_outputs(text: &str, number: usize) -> Result<Vec<OutputPort>, ParseErro
         };
         return Err(ParseError::new(number, problem).at_token(sibling));
     }
-    Ok(ports)
+    Ok((ports, clauses))
 }
 
 /// An output written beside another: its text before the suffix, and the
