@@ -13,6 +13,7 @@ use crate::model::{Cardinality, CommandRole, OperationDef, Pipeline, DEFAULT_OUT
 use crate::parser::SourceMap;
 use crate::span::Located;
 use crate::template::{parse_template, Part};
+use crate::types::TypeExpr;
 
 /// An error in a command, such as an unknown `{placeholder}`.
 pub type CommandError = Located<CommandProblem>;
@@ -120,6 +121,42 @@ pub(crate) fn facet(name: &str) -> (&str, Result<Facet, &str>) {
         Some((port, "dir")) => (port, Ok(Facet::Dir)),
         Some((port, "stem")) => (port, Ok(Facet::Stem)),
         Some((port, other)) => (port, Err(other)),
+    }
+}
+
+/// What to write instead of an unknown placeholder `name` that reads as
+/// an output: `{@output}` for a named output, or the reverse.
+fn output_advice(operation: &OperationDef, name: &str) -> String {
+    let (port, facet) = name.find('.').map_or((name, ""), |dot| name.split_at(dot));
+    let named: Vec<_> = operation
+        .outputs
+        .iter()
+        .filter(|output| output.name != DEFAULT_OUTPUT && output.beside.is_none())
+        .map(|output| format!("`{{{}{facet}}}`", output.name))
+        .collect();
+    if port == "@output" {
+        return match named.as_slice() {
+            [] => String::new(),
+            [one] => format!("; `{}`'s output is named, so write {one}", operation.name),
+            several => format!(
+                "; `{}` names its outputs, so write one of {}",
+                operation.name,
+                several.join(", ")
+            ),
+        };
+    }
+    match operation.outputs.as_slice() {
+        [output] if output.name == DEFAULT_OUTPUT && !port.starts_with('@') => {
+            let output_type = match &output.artifact_type {
+                TypeExpr::Unknown => "Type".to_owned(),
+                known => known.to_string(),
+            };
+            format!(
+                "; `{}`'s output is unnamed, so write `{{@output{facet}}}`, or name it, as in `-> {port}: {output_type}`",
+                operation.name
+            )
+        }
+        _ => String::new(),
     }
 }
 
@@ -236,8 +273,9 @@ fn check_command_placeholders(
             };
             let unknown = || {
                 CommandError::new(format!(
-                    "command for `{}` uses unknown placeholder `{{{name}}}`",
-                    operation.name
+                    "command for `{}` uses unknown placeholder `{{{name}}}`{}",
+                    operation.name,
+                    output_advice(operation, name)
                 ))
                 .focus(format!("{{{name}}}"))
             };

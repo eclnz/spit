@@ -260,7 +260,7 @@ fn named_output_cannot_use_the_builtin_placeholder_name() {
     let error = parse_pipeline("operation copy(image: Image) -> (output: Image)\n").unwrap_err();
     assert!(error
         .message()
-        .contains("named output port `output` is reserved"));
+        .contains("the name `output` is reserved for a single unnamed output"));
 }
 
 #[test]

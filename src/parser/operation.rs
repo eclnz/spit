@@ -402,8 +402,8 @@ fn shape_rule(ports: &[InputPort], number: usize) -> Result<ShapeRule, ParseErro
     })
 }
 
-/// Parse an operation's output: one type, or `(name: Type, ...)` for
-/// several named outputs. Each type may be followed by the extension the
+/// Parse an operation's output: one type, one `name: Type`, or
+/// `(name: Type, ...)` for several named outputs. Each type may be followed by the extension the
 /// tool gives its file, as in `-> Transform .mat`, and then by its checks.
 /// Also gives the operation's own clauses after the outputs.
 fn parse_outputs(
@@ -425,16 +425,34 @@ fn parse_outputs(
             .at_token(port.trim()));
         }
         let (text, extension, folder) = split_ending(text, number)?;
-        let output_type = if text.is_empty() {
-            TypeExpr::Unknown
-        } else {
-            port_type(text, number)?
+        // A type holds no `:`, so one names the single output, as in
+        // `-> mask: Mask`, written as each of several outputs is.
+        let port = match text.split_once(':') {
+            Some((name, output_type)) => {
+                let name = name.trim();
+                if name.starts_with(|c: char| c.is_ascii_uppercase()) {
+                    let instead = name.to_ascii_lowercase();
+                    return Err(ParseError::new(
+                        number,
+                        format!("`{name}` before `:` names the output, and starts with a capital letter as a type does; name it in lowercase, as in `-> {instead}:{output_type}`"),
+                    )
+                    .at_token(name));
+                }
+                named_port(text, number)?
+            }
+            None if text.is_empty() => OutputPort::new(DEFAULT_OUTPUT, TypeExpr::Unknown),
+            None if text.starts_with(|c: char| c.is_ascii_lowercase())
+                && identifier(text, number, "output port").is_ok() =>
+            {
+                return Err(ParseError::new(
+                    number,
+                    format!("a type starts with a capital letter, so `{text}` is not one; to name the output `{text}`, give its type after `:`, as in `-> {text}: Type`"),
+                )
+                .at_token(text));
+            }
+            None => OutputPort::new(DEFAULT_OUTPUT, port_type(text, number)?),
         };
-        let mut port = with_ending(
-            OutputPort::new(DEFAULT_OUTPUT, output_type),
-            extension,
-            folder,
-        );
+        let mut port = with_ending(port, extension, folder);
         port.checks = checks;
         return Ok((vec![port], clauses));
     };
@@ -470,22 +488,7 @@ fn parse_outputs(
                 Some(_) => (item, None, false),
                 None => split_ending(item, number)?,
             };
-            let (name, output_type) = match item.split_once(':') {
-                Some((name, output_type)) if !output_type.trim().is_empty() => {
-                    (name.trim(), port_type(output_type.trim(), number)?)
-                }
-                Some((name, _)) => (name.trim(), TypeExpr::Unknown),
-                None => (item, TypeExpr::Unknown),
-            };
-            let name = identifier(name, number, "output port")?;
-            if name == DEFAULT_OUTPUT {
-                return Err(ParseError::new(
-                    number,
-                    "named output port `output` is reserved for the single unnamed output; omit the name and parentheses",
-                )
-                .at_token(name));
-            }
-            let mut port = OutputPort::new(name, output_type);
+            let mut port = named_port(item, number)?;
             port.checks = checks;
             Ok(match beside {
                 Some((sibling, suffix)) => port.beside(sibling, suffix),
@@ -512,6 +515,26 @@ fn parse_outputs(
         return Err(ParseError::new(number, problem).at_token(sibling));
     }
     Ok((ports, clauses))
+}
+
+/// A named output, `name: Type`, `name:` or `name`, without its ending.
+fn named_port(item: &str, number: usize) -> Result<OutputPort, ParseError> {
+    let (name, output_type) = match item.split_once(':') {
+        Some((name, output_type)) if !output_type.trim().is_empty() => {
+            (name.trim(), port_type(output_type.trim(), number)?)
+        }
+        Some((name, _)) => (name.trim(), TypeExpr::Unknown),
+        None => (item.trim(), TypeExpr::Unknown),
+    };
+    let name = identifier(name, number, "output port")?;
+    if name == DEFAULT_OUTPUT {
+        return Err(ParseError::new(
+            number,
+            "the name `output` is reserved for a single unnamed output, written `-> Type` and used as `{@output}`; give this output another name",
+        )
+        .at_token(name));
+    }
+    Ok(OutputPort::new(name, output_type))
 }
 
 /// An output written beside another: its text before the suffix, and the
