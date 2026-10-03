@@ -288,8 +288,10 @@ A product's path is its rule, completed with an extension when the rule ends wit
 A rule's extension is the text of its last file name after its final placeholder, from the first `.`, as `.nii.gz` in `sub-{sub}_T1w.nii.gz`. A rule that ends with the extension it would be given is left as it is, so a full BIDS-style path can keep it. A rule that ends with another is an error, since the tool writes a different file from the one the rule names:
 
 ```text
-path `matrix` ends in `.txt`, but operation `align` writes `.mat`; drop the extension or use `.mat`
+path `matrix` ends in `.txt`, but operation `align` writes `.mat`; drop the extension or use `.mat`; SPIT reads the extension from the first `.` after the last placeholder, so keep `.` out of the name before it
 ```
+
+A `.` in a name after the last placeholder is read as the start of the extension too, so `out/{sub}_acq-1.5T` for an operation that writes `.csv` is this error, with `.5T` as the extension. Keep `.` out of names, as `acq-1p5T`, which takes `.csv`; a rule that writes the whole name with its extension, as `out/{sub}_acq-1.5T.csv`, is left as it is. An extension may hold digits and more than one `.`, as `.7z` and `.tar.gz` do.
 
 A default rule that ends with an extension while an operation, a source, or `ext:` gives its products another is the same error, said once for the rule. For a source the message says the source declares the extension, as in ``path `events` ends in `.csv`, but source `events` declares `.tsv` ``.
 
