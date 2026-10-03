@@ -65,8 +65,8 @@ SPIT has no backend yet: nothing in this repository runs a `.spitdag`.
 
 ```text
 spit check <pipeline.spit | recipe.spitin | inputs.spitout> [--path-rules] [--json] [--stdin] [--hovers]
-spit inputs <recipe.spitin> [--unmatched | -o <file>]
-spit inputs <pipeline.spit> --root <directory> [--unmatched | -o <file>]
+spit inputs <recipe.spitin> [--unmatched | --suggest | -o <file>]
+spit inputs <pipeline.spit> --root <directory> [--unmatched | --suggest | -o <file>]
 spit dag <recipe.spitin> [--paths] [--commands] [--partial] [--json | -o <file>]
 spit dag <pipeline.spit> <inputs.spitout | -> [--paths] [--commands] [--partial] [--json | -o <file>]
 spit dag <pipeline.spit> --root <directory> [--paths] [--commands] [--partial] [--json | -o <file>]
@@ -90,6 +90,7 @@ Files come first; options follow them. `spit help` lists the commands, and `spit
 | `-o <file>`, `--output <file>` | With `inputs`, write the `.spitout` to the file instead of standard output. With `dag`, write the `.spitdag`. |
 | `--path-rules` | With `check`, list the path rule each product uses (its own, a stage's or the pipeline's default, the recipe's, or for an output the built-in `out/{@product}/{@entities}`), with any [extension](docs/language-reference.md#extensions) added to it and where that is declared. |
 | `--unmatched` | With `inputs`, list files under the dataset root that match no source path rule, one per line, instead of writing a `.spitout`. |
+| `--suggest` | With `inputs`, print `source` and `path` lines for the files under the dataset root that match no source path rule, instead of writing a `.spitout`; see [Start from the files](#start-from-the-files). |
 | `--paths` | With `dag`, print the file under every artifact. |
 | `--commands` | With `dag`, print each job's `verify` and command lines with their paths filled in, quoted as a shell reads them, so a line can be pasted into a shell run from the dataset folder. With `--paths`, print them under each job's artifacts. Use it separately from `-o`, which saves a `.spitdag`. |
 | `--partial` | With `dag`, plan jobs whose inputs can be completed and record the artifacts left out of the `.spitdag`. A `many` input uses its complete members. Without it, `dag` stops at an incomplete job. |
@@ -195,6 +196,31 @@ sources:
 ```
 
 This creates two sort jobs for `alpha`, one for `beta`, and one merge job for each group. Add another shard and SPIT creates the corresponding job without changing the pipeline.
+
+### Start from the files
+
+When the data already exists, `spit inputs --suggest` writes the source path rules from it. It groups the files no rule matches by shape, makes the parts that differ between a group's files its dimensions, and prints lines to paste in. A dimension takes its name from the key before it, as `sub` in `sub-01` or `wave` in `wave3`. A key with a number, as `ses-1`, stays a dimension even when every file has the same one, and a key with a word, as `task-rest`, stays as text. Given a pipeline whose `bold` source has no rule yet:
+
+```sh
+spit inputs analysis.spit --root data --suggest
+```
+
+```text
+# 3 files, such as sub-01/ses-1/func/sub-01_ses-1_task-rest_run-1_bold.nii.gz
+# for `bold`, which the pipeline declares
+path bold: sub-{sub}/ses-{ses}/func/sub-{sub}_ses-{ses}_task-rest_run-{run}_bold.nii.gz
+
+# 4 files, such as sub-01/ses-1/anat/sub-01_ses-1_T1w.json
+sidecars t1w [sub, ses]:
+    path: sub-{sub}/ses-{ses}/anat/sub-{sub}_ses-{ses}_T1w
+    source t1w_json .json
+    source t1w_nii_gz .nii.gz
+
+# 1 file like no other, each a source with no dimensions if a step reads it:
+#   participants.tsv
+```
+
+A group that a source the pipeline declares without a rule fits, by its name or its dimensions, gets only its `path` line. Files that share a stem and differ by extension, as an image and its JSON, become a [`sidecars`](docs/language-reference.md#sidecar-files) block. A dimension no word names is called `dim1`, `dim2` and so on, with a note to rename it, and a plain top folder, as `baseline/` beside `raw/`, keeps its files apart. Given a recipe, `spit inputs cohort.spitin --suggest` prints the `path` lines for the recipe, and the `source` and `sidecars` lines, as comments, for the pipeline the recipe names. Every rule is checked against its files before it is printed, and nothing is written: read the lines, rename what needs it, and paste them in.
 
 ## Where files live
 
