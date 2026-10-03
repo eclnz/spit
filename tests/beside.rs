@@ -150,3 +150,33 @@ fn a_beside_output_names_a_sibling_with_an_extension() {
         assert!(error.to_string().contains(message), "{outputs}: {error}");
     }
 }
+
+#[test]
+fn a_beside_output_cannot_share_a_path_with_another_product() {
+    // `meta` is written at `out/{sub}.json`, where `note` writes too.
+    let found = errors(
+        "path: out/{@entities}\nsource dicom [sub]\npath dicom: in/{sub}\n\
+         operation convert(dicom) -> (image: Image .nii.gz, meta: Json .json beside image)\n\
+         command convert: convert {dicom} {image}\n\
+         operation note(dicom) -> Json .json\ncommand note: note {dicom} {@output}\n\
+         image, meta = convert(dicom)\nn = note(dicom)\n",
+    );
+    assert!(
+        found
+            .iter()
+            .any(|message| message.contains("bind to the same path")),
+        "{found:?}"
+    );
+}
+
+#[test]
+fn the_path_rule_listing_says_where_a_beside_output_gets_its_path() {
+    let tree = Tree::new("beside-listing", &[]);
+    let file = tree.write("a.spit", CONVERT);
+    let output = spit(&["check", file.to_str().unwrap(), "--path-rules"]);
+    let listing = text(&output.stdout);
+    assert!(
+        listing.contains("meta (output): beside image out/image/{@entities}.json"),
+        "{listing}"
+    );
+}
