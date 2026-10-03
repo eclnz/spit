@@ -145,6 +145,12 @@ merged = merge(sorted @ vary(part))
 
 `source` declares a family of input artifacts. A `shard` is identified by its `group` and `part` values. `sorted` keeps those dimensions. `merge` collects all parts of each group and produces one `merged[group=...]` artifact per group. The call's `@ vary(part)` names the dimension it collects.
 
+Each step names what it makes, and the operation names what it does: `sorted = sort_lines(shard)`, not `sort_lines = sort_lines(shard)`. Later steps then read `merge(sorted ...)`, and the same operation can make two products, as `merge` does below. A product named after its operation is allowed, but `spit check` warns:
+
+```text
+warning: line 10, column 1: product `sort_lines` has the name of the operation that makes it; name the result instead, so the step reads as what it makes
+```
+
 To collect over two dimensions, collect in two steps, one dimension each: after `merged` above, `everything = merge(merged @ vary(group))` collects the per-group results into one artifact. A check that must pass before a job runs is a `verify` line beside its `command`, such as `verify merge: check_lines {items}`; see [the reference](docs/language-reference.md#operations-and-commands). A test of one file, such as that an output is not empty, is a [`check`](docs/language-reference.md#checks) declared once and attached to ports: `check nonempty: test -s {@path}`, then `-> Lines @ check(nonempty)`.
 
 `path` lines say where artifacts live; an output with no rule goes to `out/{@product}/{@entities}`. `command` lines give the exact executable and argument order: a named input or output uses its port name, such as `{image}`, and the single unnamed output uses SPIT's `{@output}`. SPIT decides which artifacts belong to each job before filling their paths into a command.
