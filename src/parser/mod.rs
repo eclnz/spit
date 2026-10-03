@@ -1,6 +1,7 @@
 //! Parse flow-style pipelines and separate source inventories.
 
 mod check;
+mod command;
 mod declarations;
 mod flow;
 mod inventory;
@@ -272,7 +273,7 @@ impl StatementKind {
         number: usize,
         role: CommandRole,
     ) -> Result<Self, ParseError> {
-        let command = declarations::parse_command(declaration, number, role)?;
+        let command = command::parse_command(declaration, number, role)?;
         let place = source_map::tail_place(original, number, command.template.as_str());
         Ok(Self::Command(command, place))
     }

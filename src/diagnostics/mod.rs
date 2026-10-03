@@ -32,10 +32,7 @@ use crate::{
 
 use places::{error_location, subject_place};
 use recovery::recover_parse_errors;
-use warnings::{
-    case_warnings, empty_step_warnings, label_warnings, near_miss_warnings, operator_warnings,
-    warnings,
-};
+use warnings::{case_warnings, empty_step_warnings, label_warnings, near_miss_warnings, warnings};
 
 /// Where a pipeline is, and what applies to it, when diagnosing it.
 #[derive(Clone, Copy, Debug, Default)]
@@ -699,7 +696,6 @@ fn pipeline_diagnostics(
             .map(|error| Diagnostic::located(source, error, text)),
     );
     diagnostics.extend(warnings(pipeline, lines, &checked.poisoned));
-    diagnostics.extend(operator_warnings(pipeline, lines, text));
     diagnostics
 }
 
