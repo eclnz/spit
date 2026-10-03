@@ -336,7 +336,7 @@ fn pasted_suggestions_for_an_irregular_dataset_read_their_files() {
     let lines = suggested(&tree, &["inputs", "empty.spit", "--root", ".", "--suggest"]);
     tree.write(
         "b.spit",
-        &format!("{lines}\noperation view(t1) -> .txt\ncommand view: cat {{t1}} > {{@output}}\nseen = view(t1)\n"),
+        &format!("{lines}\noperation view(t1) -> .txt\ncommand view: cp {{t1}} {{@output}}\nseen = view(t1)\n"),
     );
     let output = spit(&tree, &["inputs", "b.spit", "--root", "."]);
     let stderr = text(&output.stderr);
