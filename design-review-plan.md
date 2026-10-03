@@ -27,7 +27,7 @@ Status is `open`, `claimed (<branch>)`, `decided`, or `done (<commit>)`. Numbers
 | 4a | `dag --counts` | done (`370a18f`) |
 | 4b | Diagnostic severity audit ([#45](https://github.com/eclnz/spit/issues/45)) | open |
 | 5 | The two-file mental model | claimed (`two-files`) |
-| S1 | Syntax: operations declared inside a stage | open |
+| S1 | Syntax: operations declared inside a stage | claimed (`stage-scope`) |
 | S2 | Syntax: `@ min(n)` beside the `many` port | decided, claimed (`many-min`) |
 | S3 | Syntax: `require` and `drop` clause order ([#36](https://github.com/eclnz/spit/issues/36)) | claimed (`require-drop-order`) |
 | S4 | Syntax: shell metacharacters in commands | open |
