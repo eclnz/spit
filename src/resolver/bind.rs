@@ -5,17 +5,20 @@ use std::collections::BTreeMap;
 
 use std::fmt;
 
+use crate::check::{step_checks, StepCheck, When, CHECKED_PATH};
 use crate::command::{facet, slot, validate_commands, CommandError, Facet, Slot};
 use crate::model::{
     ArtifactId, Cardinality, CommandDef, CommandRole, DagStep, Job, OperationDef, Pipeline,
     PipelineIndex, ResolvedDag,
 };
 use crate::paths::{bound_paths, check_rules, BoundPaths, PathError};
-use crate::spitdag::{ArgPart, Argument, BoundDag, BoundJob, BoundStep};
+use crate::spitdag::{
+    ArgPart, Argument, BoundCheck, BoundDag, BoundJob, BoundStep, StepCheck as BoundStepCheck,
+};
 use crate::template::Part;
 
-/// Bind every artifact of `dag` to its path and expand every job's command
-/// and `verify` commands. A job whose operation has no command keeps none;
+/// Bind every artifact of `dag` to its path and expand every job's command,
+/// `verify` commands and checks. A job whose operation has no command keeps none;
 /// a backend that runs jobs reports it.
 pub fn bind_dag(pipeline: &Pipeline, dag: &ResolvedDag) -> Result<BoundDag, BindError> {
     // Keep in step with `bind_dag_with`, which skips the steps up to the
@@ -61,10 +64,14 @@ fn bind_jobs(
         .iter()
         .map(|step| StepCommands::new(pipeline, &operations, step))
         .collect::<Result<Vec<_>, _>>()?;
+    let mut produced = vec![false; dag.artifacts.len()];
+    for &output in dag.jobs.iter().flat_map(|job| &job.outputs) {
+        produced[output.index()] = true;
+    }
     let jobs = dag
         .jobs
         .iter()
-        .map(|job| bind_job(&steps[job.step.index()], dag, &paths, job))
+        .map(|job| bind_job(&steps[job.step.index()], dag, &paths, &produced, job))
         .collect::<Result<_, _>>()?;
     let dimensions = dag
         .artifacts
@@ -102,6 +109,8 @@ struct StepCommands<'p> {
     run: Option<&'p CommandDef>,
     /// The `verify` commands, in the order they are declared.
     verify: Vec<&'p CommandDef>,
+    /// The checks every job runs, in the order they run.
+    checks: Vec<StepCheck<'p>>,
 }
 
 impl<'p> StepCommands<'p> {
@@ -125,11 +134,16 @@ impl<'p> StepCommands<'p> {
                 .iter()
                 .filter(move |command| command.operation == step.operation && command.role == role)
         };
+        let invocation = pipeline
+            .invocations
+            .iter()
+            .find(|invocation| invocation.outputs == step.outputs);
         Ok(Self {
             step,
             operation,
             run: commands(CommandRole::Run).next(),
             verify: commands(CommandRole::Verify).collect(),
+            checks: step_checks(pipeline, operation, invocation),
         })
     }
 
@@ -150,6 +164,15 @@ impl<'p> StepCommands<'p> {
                 .iter()
                 .map(|port| port.name.clone())
                 .collect(),
+            checks: self
+                .checks
+                .iter()
+                .map(|check| BoundStepCheck {
+                    when: check.when,
+                    port: check.port,
+                    written: check.written.clone(),
+                })
+                .collect(),
         }
     }
 }
@@ -160,6 +183,7 @@ fn bind_job(
     step: &StepCommands<'_>,
     dag: &ResolvedDag,
     paths: &[Option<String>],
+    produced: &[bool],
     job: &Job,
 ) -> Result<BoundJob, BindError> {
     let operation = step.operation;
@@ -200,7 +224,71 @@ fn bind_job(
             .iter()
             .map(|&command| expand_command(command))
             .collect::<Result<_, _>>()?,
+        checks: bind_checks(&step.checks, produced, job),
     })
+}
+
+/// The checks `job` runs, each on one artifact: an input's checks on each
+/// artifact of its port, in order, then an output's. An input check that the
+/// job making the artifact in this DAG runs already is left out.
+fn bind_checks(checks: &[StepCheck<'_>], produced: &[bool], job: &Job) -> Vec<BoundCheck> {
+    let mut bound = Vec::new();
+    let mut start = 0;
+    // The checks of one port are next to each other.
+    while start < checks.len() {
+        let (when, port) = (checks[start].when, checks[start].port);
+        let end = start
+            + checks[start..]
+                .iter()
+                .take_while(|check| check.when == when && check.port == port)
+                .count();
+        let artifacts = match when {
+            When::Before => job.inputs.get(port).map_or(&[][..], Vec::as_slice),
+            When::After => job.outputs.get(port).map_or(&[][..], std::slice::from_ref),
+        };
+        for &artifact in artifacts {
+            for (index, check) in checks.iter().enumerate().take(end).skip(start) {
+                if check.covered && produced[artifact.index()] {
+                    continue;
+                }
+                bound.push(BoundCheck {
+                    check: index,
+                    artifact,
+                    command: check_command(check, artifact),
+                });
+            }
+        }
+        start = end;
+    }
+    bound
+}
+
+/// A check's command for `artifact`: `{@path}` is its path, and each
+/// parameter the text the check's use gives it.
+fn check_command(check: &StepCheck<'_>, artifact: ArtifactId) -> Vec<Argument> {
+    let definition = check.check;
+    definition
+        .template
+        .arguments()
+        .iter()
+        .map(|parts| {
+            parts
+                .iter()
+                .map(|part| match part {
+                    Part::Literal(text) => ArgPart::Text(text.clone()),
+                    Part::Placeholder(name) if name == CHECKED_PATH => ArgPart::Path(artifact),
+                    Part::Placeholder(name) => {
+                        let index = definition
+                            .parameters
+                            .iter()
+                            .position(|parameter| parameter == name)
+                            .expect("collect_checks makes sure a check reads only its parameters");
+                        ArgPart::Text(check.arguments[index].clone())
+                    }
+                })
+                .collect()
+        })
+        .collect()
 }
 
 /// A command's arguments for one job. A many input's placeholder, which is a

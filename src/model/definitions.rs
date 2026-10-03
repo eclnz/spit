@@ -22,6 +22,9 @@ pub struct ProductDef {
     /// `source dicom : Dicom / [sub]`; `false` for an output, whose
     /// operation says.
     pub folder: bool,
+    /// The checks a source's artifacts must pass before a job reads them, as
+    /// in `source t1w : Image [sub] @ check(ndim(3))`; none for an output.
+    pub checks: Vec<CheckUse>,
 }
 
 impl ProductDef {
@@ -36,6 +39,7 @@ impl ProductDef {
             dimensions: owned_strings(dimensions),
             extension: None,
             folder: false,
+            checks: Vec::new(),
         }
     }
 }
@@ -51,6 +55,9 @@ pub struct InputPort {
     pub name: String,
     pub artifact_type: ArtifactType,
     pub cardinality: Cardinality,
+    /// The checks each artifact the port reads must pass before the job
+    /// runs, as in `dwi: DWI @ check(ndim(4))`.
+    pub checks: Vec<CheckUse>,
 }
 
 impl InputPort {
@@ -59,6 +66,7 @@ impl InputPort {
             name: name.into(),
             artifact_type,
             cardinality: Cardinality::One,
+            checks: Vec::new(),
         }
     }
 
@@ -67,6 +75,7 @@ impl InputPort {
             name: name.into(),
             artifact_type,
             cardinality: Cardinality::Many,
+            checks: Vec::new(),
         }
     }
 }
@@ -95,6 +104,9 @@ pub struct OutputPort {
     /// where: that output, and what this one's name ends with in place of
     /// its extension.
     pub beside: Option<Beside>,
+    /// The checks the artifact must pass after the command writes it, as in
+    /// `-> Image @ check(nonempty)`.
+    pub checks: Vec<CheckUse>,
 }
 
 /// An output written beside the named port's file, its name that file's
@@ -113,6 +125,7 @@ impl OutputPort {
             extension: None,
             folder: false,
             beside: None,
+            checks: Vec::new(),
         }
     }
 
@@ -347,6 +360,36 @@ impl CommandDef {
             role: CommandRole::Verify,
             ..Self::new(operation, template)
         }
+    }
+}
+
+/// A test of one artifact, declared once as `check name(params): command`
+/// and attached where it applies with `@ check(name(arguments))`. Its
+/// command reads `{@path}`, the artifact, and each `{param}`, the text the
+/// attachment gives; a nonzero exit fails the job.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CheckDef {
+    pub name: String,
+    pub parameters: Vec<String>,
+    pub template: CommandTemplate,
+}
+
+/// A check attached to a port or a source, with the text it gives each of
+/// the check's parameters, as in `ndim(3)`.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CheckUse {
+    pub check: String,
+    pub arguments: Vec<String>,
+}
+
+/// Reads as written: `nonempty`, or `ndim(3)` with arguments.
+impl fmt::Display for CheckUse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.check)?;
+        if !self.arguments.is_empty() {
+            write!(f, "({})", self.arguments.join(", "))?;
+        }
+        Ok(())
     }
 }
 

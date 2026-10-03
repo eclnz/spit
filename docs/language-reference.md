@@ -138,6 +138,28 @@ The first word of a command must be an executable available on `PATH` (or an exe
 command process: process_tool {image} {@output}
 ```
 
+## Checks
+
+A `check` tests one artifact once its file exists, with the tools that understand it. Declare it once, then attach it with `@ check(...)` where it applies:
+
+```text
+check ndim(n): check_ndim {@path} {n}
+check nonempty: test -s {@path}
+
+source t1w : Image .nii.gz [sub] @ check(ndim(3))
+
+operation denoise(dwi: DWI @ check(ndim(4))) -> DWI .mif @ check(nonempty)
+operation split(table: Table) -> (left: Table @ check(nonempty), right: Table)
+```
+
+`{@path}` is the artifact being checked, and the check must use it. Each `{param}` is the word given where the check is attached: `ndim(4)` runs `check_ndim` with the artifact's path and `4`. A check may use nothing else, so it reads one artifact and never adds a dependency, and it must use every parameter. A check with no parameters is written without parentheses, where it is declared and where it is attached. An argument is one word, with no spaces, quotes, braces, commas or parentheses. The command is split and quoted like any [command](#operations-and-commands).
+
+`@ check(...)` follows an input port's type, an output's type and extension, or a source's dimensions, and may name several checks, as in `@ check(nonempty, ndim(3))`. The checks on an input port, and those of the source it reads, run on each artifact the port reads before the job's `verify` commands and command; a `many` port checks each artifact of its collection. The checks on an output run after the command, once the file exists, before the job counts as done. Several checks on one artifact all run; none replaces another. A step's product takes no checks: attach them to the operation's output.
+
+SPIT does not run checks. It writes each job's checks into the `.spitdag`, bound to the artifacts they test (see [checks](spitdag.md#checks)), and a backend runs them. A failed check fails the job, even when its command succeeded, and the jobs that depend on it do not run. When the job that writes an artifact checks it after its command, a job in the same plan that reads it does not run the same check again. `spit dag --commands` shows each job's checks as `check:` lines, in the order they run.
+
+Checks are global, as operations are. `use` brings in the checks of the operations and sources it imports, and `use ndim from checks.spit` imports a check by name. With `as`, an imported check takes the prefix too, as in `@ check(img::ndim(3))`; see [reuse](#reuse-definitions).
+
 ## Stages
 
 A stage groups the steps of one phase of a pipeline, such as preprocessing or analysis. Write `stage name:` at the start of a line and indent the stage's lines beneath it; the next line that is not indented ends the stage. A stage is one block: a stage name may not be opened twice, so a step that belongs to it goes inside that block, and steps may use products from a later stage. From the [stages example](../examples/stages/stages.spit):
@@ -192,7 +214,7 @@ A step outside every stage stays valid.
 
 ## Reuse definitions
 
-Import operations and source families from another `.spit` file. The path is relative to the file containing the `use` line. An operation brings its `command`; a source brings its path rule. Imports do not bring pipeline steps.
+Import operations, source families and [checks](#checks) from another `.spit` file. The path is relative to the file containing the `use` line. An operation brings its `command`; a source brings its path rule; either brings the checks it attaches. Imports do not bring pipeline steps.
 
 ```text
 use text.spit as text

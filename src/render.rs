@@ -7,7 +7,7 @@ use crate::command::shell_word;
 use crate::model::{
     identity, push_identity, Artifact, ArtifactReport, EntityBinding, Gap, JobId, ResolvedDag,
 };
-use crate::spitdag::{Argument, BoundDag, BoundJob};
+use crate::spitdag::{Argument, BoundDag, BoundJob, When};
 use crate::types::TypeExpr;
 
 /// The jobs as text, without ports or paths. Each job is written straight
@@ -163,7 +163,8 @@ pub fn render_bound_dag(dag: &BoundDag, view: View) -> String {
     writer.text
 }
 
-/// Each job as its heading, then its `verify` lines and its command line:
+/// Each job as its heading, then its commands, as its `verify` lines and its
+/// command line:
 ///
 /// ```text
 /// Job 12  fit_panel  [model]
@@ -187,8 +188,22 @@ fn render_commands(dag: &BoundDag) -> String {
     text
 }
 
-/// A job's `verify` lines, then its `run` line.
+/// A job's commands in the order a backend runs them: its input checks,
+/// `verify` lines, `run` line, then its output checks.
 fn push_command_lines(text: &mut String, dag: &BoundDag, job: &BoundJob) {
+    let step = dag.step(job);
+    let checks = |text: &mut String, when: When| {
+        for check in job
+            .checks
+            .iter()
+            .filter(|c| step.checks[c.check].when == when)
+        {
+            text.push_str("  check:  ");
+            push_command(text, dag, &check.command);
+            text.push('\n');
+        }
+    };
+    checks(text, When::Before);
     for verify in &job.verify {
         text.push_str("  verify: ");
         push_command(text, dag, verify);
@@ -200,6 +215,7 @@ fn push_command_lines(text: &mut String, dag: &BoundDag, job: &BoundJob) {
         None => text.push_str("(no command)"),
     }
     text.push('\n');
+    checks(text, When::After);
 }
 
 /// A command's arguments, each with its paths filled in and quoted as a

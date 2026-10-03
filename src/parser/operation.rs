@@ -1,46 +1,58 @@
 //! Operation declarations: `name(inputs) -> outputs`, where a `many`
-//! input may carry an `@ min(count)` clause.
+//! input may carry an `@ min(count)` clause, and any port `@ check(...)`.
 
 use crate::model::{Cardinality, InputPort, OperationDef, OutputPort, ShapeRule, DEFAULT_OUTPUT};
 use crate::types::{parse_type_expr, TypeExpr};
 
+use super::check::{only_checks, split_clauses, Clause};
 use super::declarations::type_error;
 use super::lexical::{call_parts, comma_items, identifier, split_ending};
 use super::ParseError;
 
 pub(super) fn parse_operation(line: &str, number: usize) -> Result<OperationDef, ParseError> {
-    // Clauses after the inputs belong to the whole signature; those inside
-    // them stay with their ports.
-    let inputs_end = inputs_end(line).unwrap_or(0);
-    let cut = line[inputs_end..]
-        .find('@')
-        .map_or(line.len(), |at| inputs_end + at);
-    let (line, trailing) = line.split_at(cut);
-    let line = line.trim_end();
-    let clauses = parse_clauses(trailing.split('@').skip(1), TRAILING, number)?;
-    let (signature, outputs) = if let Some((signature, output)) = line.split_once("->") {
-        (signature, parse_outputs(output.trim(), number)?)
+    let open = line
+        .find('(')
+        .filter(|&open| !line[..open].contains("->"))
+        .ok_or_else(|| ParseError::new(number, "expected `(` after operation name"))?;
+    // An unclosed signature runs to its `->`, for `call_parts` to report.
+    let (signature, rest) = match matching_paren(line, open) {
+        Some(close) => line.split_at(close + 1),
+        None => line.split_at(line.find("->").unwrap_or(line.len())),
+    };
+    let signature = signature.trim_end();
+    let rest = rest.trim();
+    // Clauses after the outputs belong to the whole signature; those inside
+    // the inputs, or after an output, stay with their ports.
+    let (outputs, trailing) = if let Some(output) = rest.strip_prefix("->") {
+        parse_outputs(output.trim(), number)?
     } else {
+        if !rest.is_empty() && !rest.starts_with('@') {
+            return Err(
+                ParseError::new(number, "expected `->` before operation output type")
+                    .at_token(rest),
+            );
+        }
         (
-            line,
             vec![OutputPort::new(DEFAULT_OUTPUT, TypeExpr::Unknown)],
+            split_clauses(rest, TRAILING, number)?.1,
         )
     };
-    let signature = signature.trim();
-    if !signature.contains('(') {
-        return Err(ParseError::new(number, "expected `(` after operation name"));
+    if let Some(clause) = trailing.iter().find(|clause| clause.keyword == "check") {
+        return Err(ParseError::new(
+            number,
+            "`@ check(...)` follows the port it checks, as in `(image: Image @ check(nonempty))` or `-> (mask: Mask @ check(nonempty))`",
+        )
+        .at_token(clause.text));
     }
-    if !line.contains("->") {
-        if let Some((_, trailing)) = signature.split_once(')') {
-            let trailing = trailing.trim();
-            if !trailing.is_empty() {
-                return Err(
-                    ParseError::new(number, "expected `->` before operation output type")
-                        .at_token(trailing),
-                );
-            }
+    // The line without its trailing clauses, to rewrite a misplaced minimum.
+    let line = match trailing.first() {
+        Some(clause) => {
+            let start = clause.text.as_ptr() as usize - line.as_ptr() as usize;
+            line[..start].trim_end().trim_end_matches('@').trim_end()
         }
-    }
+        None => line,
+    };
+    let clauses = parse_clauses(trailing.iter().map(|clause| clause.text), TRAILING, number)?;
     let (name, inputs) = call_parts(signature, number)?;
     identifier(name, number, "operation name")?;
     if let Some((dimensions, clause)) = clauses.drop {
@@ -80,18 +92,16 @@ pub(super) fn parse_operation(line: &str, number: usize) -> Result<OperationDef,
     Ok(operation)
 }
 
-/// One past the `)` that closes the input list, so an `@` clause inside it
-/// stays with its port, or `None` if the list is never opened or closed.
-fn inputs_end(line: &str) -> Option<usize> {
-    let open = line.find('(')?;
-    let mut depth = 0_usize;
-    for (index, character) in line[open..].char_indices() {
+/// The index of the `)` that closes the `(` at `open`, if any.
+fn matching_paren(text: &str, open: usize) -> Option<usize> {
+    let mut depth = 0usize;
+    for (index, character) in text[open..].char_indices() {
         match character {
             '(' => depth += 1,
             ')' => {
                 depth -= 1;
                 if depth == 0 {
-                    return Some(open + index + 1);
+                    return Some(open + index);
                 }
             }
             _ => {}
@@ -100,20 +110,25 @@ fn inputs_end(line: &str) -> Option<usize> {
     None
 }
 
-/// An input port and the minimum its `@ min(count)` clause sets, which
-/// only a `many` port may have.
+/// An input port with its checks, and the minimum its `@ min(count)`
+/// clause sets, which only a `many` port may have.
 fn parse_port_with_minimum(
     input: &str,
     number: usize,
 ) -> Result<(InputPort, Option<usize>), ParseError> {
-    let Some((port, clauses)) = input.split_once('@') else {
-        return Ok((parse_input_port(input, number)?, None));
-    };
-    let clauses = parse_clauses(clauses.split('@'), ON_PORT, number)?;
+    let (input, clauses) = split_clauses(input, ON_PORT, number)?;
+    let (checks, clauses): (Vec<_>, Vec<_>) = clauses
+        .into_iter()
+        .partition(|clause| clause.keyword == "check");
+    let mut port = parse_input_port(input, number)?;
+    port.checks = only_checks(&checks, "an input port", number)?;
+    if clauses.is_empty() {
+        return Ok((port, None));
+    }
+    let clauses = parse_clauses(clauses.iter().map(|clause| clause.text), ON_PORT, number)?;
     if let Some((_, clause)) = clauses.drop {
         return Err(ParseError::new(number, ON_PORT).at_token(clause));
     }
-    let port = parse_input_port(port.trim_end(), number)?;
     let Some((count, clause)) = clauses.min else {
         unreachable!("a clause that is not `drop` is `min`, or parsing failed")
     };
@@ -176,8 +191,12 @@ fn misplaced_minimum(
 const TRAILING: &str =
     "nothing follows an operation's outputs; write `@ min(count)` on its many input";
 
+/// What a clause after an output may be.
+const AFTER_OUTPUT: &str = "nothing follows an operation's outputs but their `@ check(...)`; \
+     write `@ min(count)` on its many input";
+
 /// What a clause on an input port may be.
-const ON_PORT: &str = "expected `@ min(count)` on a many input";
+const ON_PORT: &str = "expected `@ min(count)` on a many input, or `@ check(...)`";
 
 /// An `@ min(count)` clause, and a removed `@ drop(...)` clause, each with
 /// its text, kept to point at it and to say what to write instead.
@@ -385,9 +404,19 @@ fn shape_rule(ports: &[InputPort], number: usize) -> Result<ShapeRule, ParseErro
 
 /// Parse an operation's output: one type, or `(name: Type, ...)` for
 /// several named outputs. Each type may be followed by the extension the
-/// tool gives its file: `-> Transform .mat`.
-fn parse_outputs(text: &str, number: usize) -> Result<Vec<OutputPort>, ParseError> {
+/// tool gives its file, as in `-> Transform .mat`, and then by its checks.
+/// Also gives the operation's own clauses after the outputs.
+fn parse_outputs(
+    text: &str,
+    number: usize,
+) -> Result<(Vec<OutputPort>, Vec<Clause<'_>>), ParseError> {
     let Some(list) = text.strip_prefix('(') else {
+        let (text, clauses) = split_clauses(text, AFTER_OUTPUT, number)?;
+        // An output's checks are its own; anything else is the operation's.
+        let (checks, clauses): (Vec<_>, Vec<_>) = clauses
+            .into_iter()
+            .partition(|clause| clause.keyword == "check");
+        let checks = only_checks(&checks, "an output", number)?;
         if let Some((_, port)) = text.rsplit_once(" beside ") {
             return Err(ParseError::new(
                 number,
@@ -401,15 +430,23 @@ fn parse_outputs(text: &str, number: usize) -> Result<Vec<OutputPort>, ParseErro
         } else {
             port_type(text, number)?
         };
-        return Ok(vec![with_ending(
+        let mut port = with_ending(
             OutputPort::new(DEFAULT_OUTPUT, output_type),
             extension,
             folder,
-        )]);
+        );
+        port.checks = checks;
+        return Ok((vec![port], clauses));
     };
-    let list = list.strip_suffix(')').ok_or_else(|| {
-        ParseError::new(number, "expected closing `)` after output ports").at_token(text)
-    })?;
+    let closing =
+        || ParseError::new(number, "expected closing `)` after output ports").at_token(text);
+    let close = matching_paren(text, 0).ok_or_else(closing)?;
+    let trailing = text[close + 1..].trim();
+    if !trailing.is_empty() && !trailing.starts_with('@') {
+        return Err(closing());
+    }
+    let clauses = split_clauses(trailing, TRAILING, number)?.1;
+    let list = &list[..close - 1];
     let items = comma_items(list, number)?;
     if items.is_empty() {
         return Err(ParseError::new(number, "expected at least one output port").at_token(text));
@@ -417,6 +454,8 @@ fn parse_outputs(text: &str, number: usize) -> Result<Vec<OutputPort>, ParseErro
     let ports = items
         .into_iter()
         .map(|item| {
+            let (item, clauses) = split_clauses(item, AFTER_OUTPUT, number)?;
+            let checks = only_checks(&clauses, "an output", number)?;
             let (item, beside) = match item.rsplit_once(" beside ") {
                 Some((item, sibling)) => {
                     let (item, suffix) = beside_suffix(item.trim(), number)?;
@@ -446,7 +485,8 @@ fn parse_outputs(text: &str, number: usize) -> Result<Vec<OutputPort>, ParseErro
                 )
                 .at_token(name));
             }
-            let port = OutputPort::new(name, output_type);
+            let mut port = OutputPort::new(name, output_type);
+            port.checks = checks;
             Ok(match beside {
                 Some((sibling, suffix)) => port.beside(sibling, suffix),
                 None => with_ending(port, extension, folder),
@@ -471,7 +511,7 @@ fn parse_outputs(text: &str, number: usize) -> Result<Vec<OutputPort>, ParseErro
         };
         return Err(ParseError::new(number, problem).at_token(sibling));
     }
-    Ok(ports)
+    Ok((ports, clauses))
 }
 
 /// An output written beside another: its text before the suffix, and the

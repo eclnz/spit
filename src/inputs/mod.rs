@@ -168,6 +168,7 @@ fn check_input_lines(text: &str) -> Result<(), ParseError> {
                     | Keyword::Operation
                     | Keyword::Command
                     | Keyword::Verify
+                    | Keyword::Check
                     | Keyword::Stage
                     | Keyword::Dimensions
                     | Keyword::Sidecars
