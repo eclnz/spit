@@ -337,6 +337,7 @@ impl InputSpec {
                     let dropped = apply_drops(&self.rules, &mut inventory)
                         .map_err(InputError::EveryGroupDropped)?;
                     removed.extend(dropped.iter().map(|group| group.removal()));
+                    let incomplete = incomplete_groups(pipeline, &inventory, &removed);
                     (
                         inventory,
                         Vec::new(),
@@ -344,7 +345,7 @@ impl InputSpec {
                         Vec::new(),
                         None,
                         removed,
-                        Vec::new(),
+                        incomplete,
                     )
                 }
             };
@@ -429,7 +430,8 @@ fn merge_source_paths(
 }
 
 /// Each binding where some of a `sidecars` group's sources were found and
-/// others were neither found nor removed by a rule, said as
+/// others were neither found nor removed, by `removed` or a removal
+/// `inventory` already records from an earlier run, said as
 /// `photo[site=A,visit=2,shot=3] has .raw and .gpx but no .imu`, by group
 /// and then by value.
 ///
@@ -483,7 +485,7 @@ fn incomplete_groups(
             .sort_unstable_by(|(left, _), (right, _)| left.cmp_in(right, &sidecars.dimensions));
         for (binding, present) in incomplete {
             let removed_here = |member: &str| {
-                removed.iter().any(|removal| {
+                inventory.removed.iter().chain(removed).any(|removal| {
                     removal
                         .product
                         .as_deref()
@@ -653,8 +655,9 @@ pub struct ResolvedInputs {
     pub unmatched_files: Vec<String>,
     /// Each source whose path rule matched no file under a scanned root.
     pub missed_sources: Vec<MissedSource>,
-    /// Each place a scan found some of a `sidecars` group's files and not
-    /// the others, as `photo[site=A,shot=3] has .raw and .gpx but no .imu`.
+    /// Each place the scan or records hold some of a `sidecars` group's
+    /// sources and not the others, as `photo[site=A,shot=3] has .raw and
+    /// .gpx but no .imu`.
     pub incomplete_groups: Vec<String>,
     /// What the `require` rules find missing, with the sources each holds back.
     pub gaps: Vec<CoverageGap>,
