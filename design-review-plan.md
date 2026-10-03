@@ -34,7 +34,7 @@ Status is `open`, `claimed (<branch>)`, `decided`, or `done (<commit>)`. Numbers
 | S5 | Syntax: `path:` in both `.spit` and `.spitin` | open |
 | R1 | Composite operations: provenance and diagnostics design | open |
 | T1 | Sidecar `incomplete_groups` keyed by structured bindings ([#37](https://github.com/eclnz/spit/issues/37)) | done (`5ab3a16`) |
-| T2 | Incomplete-group warning for `InputSource::Inventory` | claimed (`inventory-incomplete-groups`) |
+| T2 | Incomplete-group warning for `InputSource::Inventory` | done (`8ef0e50`) |
 
 Deferred, and not to be claimed without a concrete use case: resources, Slurm, one execution package, dynamic outputs. See [Future direction](#future-direction-deliberately-deferred).
 
@@ -161,6 +161,8 @@ A narrow review of the usability branch, not a full compiler audit or a measured
 *Done in `5ab3a16`.* Records are grouped by `GroupKey` with the members found, and removals match by symbol (`EntityBinding::within`). The delimiter case turned out to be unreachable: discovery already skips a value holding `,` or `=`, and this warning is given only for scanned inputs, so no test with such values can reach it. The change still removes the display string used as a key, halves `spit inputs` on a large sidecars dataset, and lists the warnings in value order (`shot=2` before `shot=10`).
 
 **T2.** Check whether the group-level incomplete warning should appear only for scanned inputs: the `InputSource::Inventory` branch currently returns an empty incomplete-group list.
+
+*Done in `8ef0e50`.* Decided: the warning describes the sources, not how they were found, so records in a recipe or a `.spitout` get it too. A removal the records already list under `removed:` counts, so a file an earlier scan excluded is not reported missing. `dag` and `artifacts` on a `.spitout` now print it. The editor's diagnosis never showed this warning, for scans or records, and still doesn't; making it a located diagnostic would belong with 4b.
 
 General lesson: keep typed or interned identities through parsing, matching, resolution, and diagnostics; format them as text only when presenting a message. Some feature-specific handling is right when it owns real group semantics. The smell is duplicate interpretations of the same artifact identity in separate phases, particularly a presentation string reused as a key.
 
