@@ -15,6 +15,7 @@ The rounds are archived in [`rounds.zip`](rounds.zip), so their records do not w
 | Pilot | `rounds/2-pilot/README.md` | The repaired guide and walkthroughs before Phase 5, in the earlier language: 12 plans |
 | 3 | `rounds/3/README.md` | The settled language after Phase 5: 12 plans |
 | 4 | `rounds/4/README.md` | A small check of the paths work: 3 plans |
+| 5 | `rounds/5/README.md` | Every scenario twice, with the s2 follow-up: 16 trials; only the participants' difficulties were kept |
 
 ## Scenarios
 
@@ -23,12 +24,12 @@ The scenarios are archived in [`harness/scenarios.zip`](harness/scenarios.zip): 
 | Scenario | Task | Irregularities | Tests | Jobs |
 | --- | --- | --- | --- | --- |
 | s1-logs | Daily server logs → digests → weekly report per server → fleet report | A server misses a day; rotated, compressed and notes files | `many`/`vary`, path rules, scanning | 24 |
-| s2-cohort | BIDS fMRI cohort: motion correction, brain extraction, coregistration, session and subject averages | A subject with one session to exclude; a session with an extra run; JSON sidecars | Recipes, `discover`, `skip` | 41 |
+| s2-cohort | BIDS fMRI cohort: motion correction, brain extraction, coregistration, session and subject averages | A subject with one session to exclude; a session with an extra run; JSON sidecars | Recipes, `discover`, `drop` | 41 |
 | s2 follow-up | Change request to the s2 agent: a new subject, a QC step, and one corrupted run to exclude | The raw file must stay in place | Cost of change | 60 |
 | s3-sweep | Models × configs × per-config seeds → train, evaluate, summarise, leaderboards | Uneven seed sets; a single test set | `each` then `vary`, a source with no dimensions | 41 |
 | s4-sensors | Calibrate readings, compare with a baseline, one report per station | Only calibration revision 3 may be used; baselines filed under different dates | `where`, `same`, `many` beside `one` | 19 |
 | s5-survey | Survey panel in ingest, model and publish phases | Waves 1, 2 and 10; a backup file | Stages, two outputs, `verify`, numeric order | 20 |
-| s6-diagnose | An inherited pipeline whose run fails: find every cause, then plan without the broken stores | One store with one week, one price list named `S07.json`, one missing | `artifacts`, error messages, `skip` | 22 |
+| s6-diagnose | An inherited pipeline whose run fails: find every cause, then plan without the broken stores | One store with one week, one price list named `S07.json`, one missing | `artifacts`, error messages, `drop` | 22 |
 
 Commands and output paths are fixed by each brief, so a correct plan is unique up to naming. The [grader](harness/grade.py) compares the multiset of each job's expanded command line, and its verify lines, with the key. Product names, job ids and path rules do not matter.
 
@@ -76,6 +77,10 @@ The second-round report, `rounds/2/README.md` in `rounds.zip`, covers 18 trials,
 ## Results: rounds 3 and 4
 
 The third-round report, `rounds/3/README.md` in `rounds.zip`, covers 12 plans after Phase 5. The fourth-round report, `rounds/4/README.md`, is a small, low-cost check of the paths work: three plans, all correct.
+
+## Results: round 5
+
+The fifth-round report, `rounds/5/README.md` in `rounds.zip`, covers 16 trials and the two cohort follow-ups. Only each participant's difficulties were archived, in `rounds/5/difficulties.md`, so it gives no grades. It records what the participants asked for, chiefly notes that name the files and sources a plan leaves out and one guide example that joins and collects, and the changes made for them.
 
 ## Run it again
 
