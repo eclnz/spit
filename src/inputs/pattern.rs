@@ -10,7 +10,8 @@ use rustc_hash::FxHashSet;
 
 use crate::model::{Pipeline, PipelineIndex, ProductDef};
 use crate::paths::{
-    encode_component, error, stage_directories, PathError, PathPart, PathPlaceholder, PathTemplate,
+    encode_component, error, product_text, stage_directories, PathError, PathPart, PathPlaceholder,
+    PathTemplate,
 };
 
 /// One piece of a path rule: text written as is, or a dimension's value.
@@ -32,7 +33,7 @@ pub(super) fn path_pattern(
         match part {
             PathPart::Literal(value) => pieces.push(Piece::Literal(value.clone())),
             PathPart::Placeholder(PathPlaceholder::Product) => {
-                pieces.push(Piece::Literal(product.name.replace("::", ".")));
+                pieces.push(Piece::Literal(product_text(&product.name).into_owned()));
             }
             PathPart::Placeholder(PathPlaceholder::Entities) => {
                 if product.dimensions.is_empty() {

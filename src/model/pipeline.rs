@@ -10,8 +10,8 @@ use crate::paths::{Holder, PathTemplate};
 
 use super::{
     stage_and_parents, ArtifactInstance, CheckDef, CommandDef, EntityBinding, ExtensionSource,
-    Invocation, OperationDef, OutputPort, ProductDef, SidecarGroup, SourceInventory, SourceRecord,
-    StageDef,
+    Invocation, OperationDef, OutputPort, ProductDef, Removal, SidecarGroup, SourceInventory,
+    SourceRecord, StageDef,
 };
 
 /// The logical pipeline: what to make from which sources. It says nothing
@@ -37,6 +37,19 @@ pub struct Pipeline {
 }
 
 impl Pipeline {
+    /// The pipeline's dimensions, each once, in the order its products
+    /// declare them: how the `.spitout` and a note about what was removed
+    /// write a group.
+    pub fn dimension_order(&self) -> Vec<String> {
+        let mut seen = FxHashSet::default();
+        self.products
+            .iter()
+            .flat_map(|product| &product.dimensions)
+            .filter(|dimension| seen.insert(dimension.as_str()))
+            .cloned()
+            .collect()
+    }
+
     /// The stage of the step that produces `product`; `None` for a source or
     /// a step outside every stage.
     pub fn stage_of(&self, product: &str) -> Option<&str> {
@@ -245,6 +258,58 @@ pub(crate) struct PipelineIndex<'p> {
     found: Option<Found<'p>>,
 }
 
+/// The order a pipeline's dimensions are written in, to write what an input
+/// rule removed: an artifact's in its product's order, and a group's in the
+/// order the pipeline first declares them, as the `.spitout` writes it. Found
+/// once, so that writing every removal takes time in step with their number.
+pub struct DimensionOrders<'p> {
+    products: FxHashMap<&'p str, &'p [String]>,
+    pipeline: Vec<String>,
+}
+
+impl<'p> DimensionOrders<'p> {
+    pub fn new(pipeline: &'p Pipeline) -> Self {
+        let mut products = FxHashMap::default();
+        for product in &pipeline.products {
+            // The first of a repeated name wins, as a search finds it.
+            products
+                .entry(product.name.as_str())
+                .or_insert(product.dimensions.as_slice());
+        }
+        Self {
+            products,
+            pipeline: pipeline.dimension_order(),
+        }
+    }
+
+    /// The dimensions `removal` is written in.
+    pub fn of(&self, removal: &Removal) -> &[String] {
+        removal
+            .product
+            .as_deref()
+            .and_then(|name| self.products.get(name).copied())
+            .unwrap_or(&self.pipeline)
+    }
+}
+
+/// Where the path rule of a product comes from, in the order a product looks
+/// for one. Keep in step with [`PipelineIndex::path_origin`], the only place
+/// that chooses, and with the places that say so: the editor's hover, the
+/// `--path-rules` listing and the source map's line for the rule.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum PathOrigin<'p> {
+    /// The product's own `path product:` rule.
+    Explicit,
+    /// The default of the named stage, or of the nearest stage around it
+    /// that sets one.
+    Stage(&'p str),
+    /// The pipeline's `path:` default.
+    Default,
+    /// The built-in default, `out/{@product}/{@entities}`, for an output in
+    /// a pipeline with no `path:` default.
+    BuiltIn,
+}
+
 /// What a [`PipelineIndex::new`] finds once.
 struct Found<'p> {
     /// Each product's declaration.
@@ -308,7 +373,8 @@ impl<'p> PipelineIndex<'p> {
         }
     }
 
-    fn operation(&self, name: &str) -> Option<&'p OperationDef> {
+    /// The operation called `name`.
+    pub(crate) fn operation(&self, name: &str) -> Option<&'p OperationDef> {
         match &self.found {
             Some(found) => found.operations.get(name).copied(),
             None => self
@@ -358,9 +424,7 @@ impl<'p> PipelineIndex<'p> {
     pub(crate) fn path_template_for(&self, product: &str) -> Option<Cow<'p, PathTemplate>> {
         if let Some((sibling, sibling_extension, suffix)) = self.beside(product) {
             // The sibling's own file: `{@product}` is its name, not this one's.
-            let template = self
-                .path_template_for(sibling)?
-                .with_product(&sibling.replace("::", "."));
+            let template = self.path_template_for(sibling)?.with_product(sibling);
             let stem = template
                 .without_extension(sibling_extension)
                 .unwrap_or(template);
@@ -392,22 +456,33 @@ impl<'p> PipelineIndex<'p> {
         }
     }
 
-    /// See [`Pipeline::path_rule_for`]. A default that needs `{@stage}` is
-    /// for products made in a stage, so it does not find a source, which
-    /// is left for a rule of its own or the recipe's default.
+    /// See [`Pipeline::path_rule_for`].
     pub(crate) fn path_rule_for(&self, product: &str) -> Option<&'p PathTemplate> {
+        self.path_origin(product).map(|(_, template)| template)
+    }
+
+    /// The path rule `product` uses, as written, and where it comes from.
+    /// An output written beside another has no rule of its own, whatever
+    /// this finds; ask [`PipelineIndex::beside`] first.
+    ///
+    /// A default that needs `{@stage}` is for products made in a stage, so
+    /// it does not find a source, which is left for a rule of its own or
+    /// the recipe's default.
+    pub(crate) fn path_origin(&self, product: &str) -> Option<(PathOrigin<'p>, &'p PathTemplate)> {
         let pipeline = self.pipeline;
-        pipeline
-            .product_paths
-            .get(product)
-            .or_else(|| self.stage_path_rule(product).map(|(_, template)| template))
-            .or_else(|| match &pipeline.path_template {
-                Some(default) => Some(default)
-                    .filter(|default| !(default.needs_stage() && self.is_source(product))),
-                None => self
-                    .producer(product)
-                    .map(|_| PathTemplate::built_in_output()),
-            })
+        if let Some(template) = pipeline.product_paths.get(product) {
+            return Some((PathOrigin::Explicit, template));
+        }
+        if let Some((stage, template)) = self.stage_path_rule(product) {
+            return Some((PathOrigin::Stage(stage), template));
+        }
+        match &pipeline.path_template {
+            Some(default) => (!(default.needs_stage() && self.is_source(product)))
+                .then_some((PathOrigin::Default, default)),
+            None => self
+                .producer(product)
+                .map(|_| (PathOrigin::BuiltIn, PathTemplate::built_in_output())),
+        }
     }
 
     /// The step that makes `product`, the operation it calls, and the port

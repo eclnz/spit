@@ -497,6 +497,9 @@ fn parse_outputs(
         let Some(beside) = &port.beside else { continue };
         let (name, sibling) = (&port.name, &beside.port);
         let problem = match ports.iter().find(|other| &other.name == sibling) {
+            Some(_) if name == sibling => format!(
+                "`{name}` is written beside itself; name another output of this operation, whose file it follows"
+            ),
             None => format!("`{name}` is written beside `{sibling}`, which is not an output of this operation"),
             Some(other) if other.folder => format!(
                 "`{name}` is written beside `{sibling}`, which is a folder, and only a file has files beside it; drop `beside {sibling}` and give the tool `{{{name}}}`"
