@@ -28,7 +28,7 @@ Status is `open`, `claimed (<branch>)`, `decided`, or `done (<commit>)`. Numbers
 | 4b | Diagnostic severity audit ([#45](https://github.com/eclnz/spit/issues/45)) | open |
 | 5 | The two-file mental model | open |
 | S1 | Syntax: operations declared inside a stage | open |
-| S2 | Syntax: `@ min(n)` beside the `many` port | claimed (`many-min`) |
+| S2 | Syntax: `@ min(n)` beside the `many` port | decided, claimed (`many-min`) |
 | S3 | Syntax: `require` and `drop` clause order ([#36](https://github.com/eclnz/spit/issues/36)) | open |
 | S4 | Syntax: shell metacharacters in commands | open |
 | S5 | Syntax: `path:` in both `.spit` and `.spitin` | open |
@@ -116,6 +116,21 @@ The central idiom is promising: `source` declares artifact families, `operation`
 | S3 | `require t1w count=1 per [sub, ses]` and `drop [sub, ses] where t1w count<2` | Related group rules use different clause order ([issue 36](https://github.com/eclnz/spit/issues/36)). | Test a shared group-first form such as `require [sub, ses] where t1w count=1`, keeping the distinction that `require` fails and `drop` removes. Do not change it for visual symmetry alone if study participants find the current form clearer. |
 | S4 | `command process: ...` uses familiar shell quoting, but unquoted `\|`, `>` or `&&` are literal arguments; SPIT currently warns. | Readers may expect shell behaviour and get a runtime error that could have been caught during checking. | Not settled in the review. Decide whether these become errors, an explicit shell form, or stay warnings with a clearer message; make the notation reflect the execution model either way. |
 | S5 | `path:` and `path product:` are allowed in both `.spit` and `.spitin`, with ownership and fallback that depend on context. | The same words can obscure whether a rule is reusable or dataset-specific. | Explain and test the existing precedence as an intentional default and fallback; improve diagnostics before adding further overlapping directives. A source cannot currently have its own path rule in both files. |
+
+**S2 design (decided).** Write the minimum on the `many` port it constrains, with the same `@ clause(...)` form a call uses on the argument it selects (`input @ vary(run)`):
+
+```text
+operation summarise(days: many Series @ min(2)) -> Summary
+operation fit(waves: many Table @ min(2), policy: Policy) -> Coef
+operation collect(items: many @ min(3)) -> Bundle
+```
+
+- *Evidence.* Study participants in rounds 1 to 3 read the trailing `@ min(2)` correctly every time ("needs at least two weekly revenue artifacts"), so this is not a fix for observed confusion. It is for consistency: item 1 attaches checks to ports, and that syntax should find port modifiers already beside their ports. Plain `many` with no minimum is unchanged.
+- *Rejected.* `many(2) Series` reads as exactly two; `at least 2 Series` adds words; keeping both forms gives two ways to write one thing.
+- *Migration.* The trailing form becomes an error that gives the rewrite for that line, as the removed `@ drop(...)` does. SPIT is pre-1.0 and has done this before (`{output}` to `{@output}`).
+- *Phase and lowering.* The parser owns it. It lowers to the existing `OperationDef::minimum_collection`, so compile, resolve, `--partial`, imports and the resolver's messages are unchanged. An operation takes at most one `many` input, so the operation-level field is exact; if that limit is ever lifted, the field moves to `InputPort` then.
+- *Invariants and diagnostics.* A positive integer, once per port, only on a `many` port; each error points at the clause on its port. The hover shows the minimum beside its port.
+- *Beyond spit.* spit-vscode's grammar marks `@ min(n)` inside the parentheses, on a branch named `many-min`; the s6 harness scenario's pipeline is rewritten (its answer key's jobs do not change). The DAG format and spit-bash are untouched.
 
 The proposed language design rule: place modifiers beside the construct they constrain; make indentation's scope obvious; order related clauses consistently; make the command notation reflect its actual execution model. S1 and S2 deserve attention before adding check and resource syntax, since those features would otherwise inherit unclear placement. Keep the concise happy path: an untyped source, a small operation, and an assignment should stay easy to write.
 
