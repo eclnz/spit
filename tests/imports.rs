@@ -41,7 +41,7 @@ fn import_errors_point_to_the_use_line() {
     let main = dir.write("main.spit", "use absent from base.spit\n");
     let error = support::parse_fixture_at(&fs::read_to_string(&main).unwrap(), &main).unwrap_err();
     assert_eq!(error.line(), 1);
-    assert!(error.message().contains("not a source or operation"));
+    assert!(error.message().contains("not a source, operation or check"));
 
     let main = dir.write(
         "main.spit",

@@ -12,8 +12,8 @@ use crate::diagnostics::{
 use crate::imports::parse_located_document;
 use crate::json::Json;
 use crate::model::{
-    Cardinality, CommandRole, OperationDef, OutputPort, Pipeline, PipelineIndex, ProductDef,
-    DEFAULT_OUTPUT,
+    Cardinality, CheckDef, CheckUse, CommandRole, OperationDef, OutputPort, Pipeline,
+    PipelineIndex, ProductDef, DEFAULT_OUTPUT,
 };
 use crate::parser::{without_bom, Kind};
 use crate::paths::shown_path;
@@ -127,6 +127,18 @@ pub fn pipeline_hovers(text: &str, path: &Path) -> Vec<Hover> {
             add(place.clone(), "product", name, signature, details);
         }
     }
+    for (check, place) in pipeline.checks.iter().zip(&document.lines.checks) {
+        let details = vec![
+            "Checks one artifact: a backend runs it on each artifact of a port or source that attaches it, and a nonzero exit fails the job.".to_owned(),
+        ];
+        add(
+            place.clone(),
+            "check",
+            &check.name,
+            check_signature(check),
+            details,
+        );
+    }
     for (name, place) in &document.lines.operations {
         if let Some((signature, details)) = operation_info(name) {
             add(place.clone(), "operation", name, signature, details);
@@ -237,11 +249,30 @@ fn cardinality(value: Cardinality) -> &'static str {
 
 fn product_signature(product: &ProductDef, ty: &TypeExpr) -> String {
     format!(
-        "{}: {ty}{} [{}]",
+        "{}: {ty}{} [{}]{}",
         product.name,
         ending(product.extension.as_deref(), product.folder),
-        product.dimensions.join(", ")
+        product.dimensions.join(", "),
+        checks_text(&product.checks)
     )
+}
+
+/// ` @ check(a, b(1))` for the checks a port or source attaches, or nothing.
+fn checks_text(checks: &[CheckUse]) -> String {
+    if checks.is_empty() {
+        return String::new();
+    }
+    let checks: Vec<_> = checks.iter().map(ToString::to_string).collect();
+    format!(" @ check({})", checks.join(", "))
+}
+
+fn check_signature(check: &CheckDef) -> String {
+    let parameters = if check.parameters.is_empty() {
+        String::new()
+    } else {
+        format!("({})", check.parameters.join(", "))
+    };
+    format!("check {}{parameters}: {}", check.name, check.template)
 }
 
 /// What follows a type in a declaration: ` .nii.gz`, ` /` for a folder,
@@ -261,14 +292,15 @@ fn operation_signature(operation: &OperationDef) -> String {
         .iter()
         .map(|port| {
             format!(
-                "{}: {}{}",
+                "{}: {}{}{}",
                 port.name,
                 if port.cardinality == Cardinality::Many {
                     "many "
                 } else {
                     ""
                 },
-                port.artifact_type
+                port.artifact_type,
+                checks_text(&port.checks)
             )
         })
         .collect::<Vec<_>>()
@@ -308,6 +340,7 @@ fn output_signature(port: &OutputPort, named: bool) -> String {
     } else {
         result.push_str(&ending(port.extension.as_deref(), port.folder));
     }
+    result.push_str(&checks_text(&port.checks));
     result
 }
 

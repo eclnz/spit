@@ -154,6 +154,7 @@ fn check_input_lines(text: &str) -> Result<(), ParseError> {
                     | Keyword::Operation
                     | Keyword::Command
                     | Keyword::Verify
+                    | Keyword::Check
                     | Keyword::Stage
                     | Keyword::Dimensions
                     | Keyword::Sidecars
@@ -163,7 +164,7 @@ fn check_input_lines(text: &str) -> Result<(), ParseError> {
         if pipeline_only {
             return Err(ParseError::new(
                 index + 1,
-                "logical sources, dimension orders, operations, commands, stages, and imports belong in the .spit pipeline",
+                "logical sources, dimension orders, operations, commands, checks, stages, and imports belong in the .spit pipeline",
             ));
         }
         if Keyword::of(line) == Some(Keyword::Ext) {

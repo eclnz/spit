@@ -62,6 +62,9 @@ pub enum Word {
     SourcePaths,
     Contexts,
     Removed,
+    Check,
+    CheckClause,
+    PathPlaceholder,
 }
 
 /// What a word's hover says.
@@ -85,7 +88,7 @@ impl Word {
 }
 
 /// Every word's documentation, in the order of [`Word`].
-pub static DOCS: [Doc; 43] = [
+pub static DOCS: [Doc; 46] = [
     Doc {
         name: "source",
         kind: "keyword",
@@ -387,6 +390,27 @@ pub static DOCS: [Doc; 43] = [
         example: "removed:\n    [sub=07]\n        rule: drop [sub] where sessions count<2\n        at: line 6\n        found: 1",
         summary: "What the recipe's `exclude` and `drop` rules removed, each with its rule, line, count found and reason. A record, not a rule: the records above already leave these out, and `dag` copies it into the `.spitdag`.",
     },
+    Doc {
+        name: "check",
+        kind: "keyword",
+        anchor: "checks",
+        example: "check ndim(n): check_ndim {@path} {n}\ncheck nonempty: test -s {@path}",
+        summary: "Declares a test of one artifact, run by a backend: `{@path}` is the artifact, and each `{param}` the text an `@ check(...)` gives it. A nonzero exit fails the job, even when its command succeeded. SPIT does not run it.",
+    },
+    Doc {
+        name: "check-clause",
+        kind: "selector",
+        anchor: "checks",
+        example: "operation denoise(dwi: DWI @ check(ndim(4))) -> DWI @ check(nonempty)",
+        summary: "Attaches checks to a port or a source. An input's checks, and its source's, run on each artifact before the job's command; an output's run after it, before the job counts as done.",
+    },
+    Doc {
+        name: "@path",
+        kind: "placeholder",
+        anchor: "checks",
+        example: "check nonempty: test -s {@path}",
+        summary: "In a `check`, the path of the artifact being checked. A check's command must use it.",
+    },
 ];
 
 /// One use of a word: its 1-based line and 1-based UTF-16 columns, the end
@@ -468,6 +492,7 @@ fn statement(line: &str) -> Option<(Word, usize)> {
             Keyword::Operation => Word::Operation,
             Keyword::Command => Word::Command,
             Keyword::Verify => Word::Verify,
+            Keyword::Check => Word::Check,
             Keyword::Require => Word::Require,
             Keyword::Drop => Word::Drop,
             Keyword::Exclude => Word::Exclude,
@@ -548,6 +573,7 @@ fn rule_word(code: &str, range: Range<usize>, statement: Option<Word>) -> Option
         "where" => Some(Word::Where),
         "same" => Some(Word::Same),
         "min" => Some(Word::Min),
+        "check" => Some(Word::CheckClause),
         _ => None,
     };
     if let Some(word) = selector {
@@ -581,6 +607,7 @@ fn rule_word(code: &str, range: Range<usize>, statement: Option<Word>) -> Option
 /// `}}` are literal braces.
 fn placeholders(code: &str, statement: Option<Word>, found: &mut Vec<(Range<usize>, Word)>) {
     let in_command = matches!(statement, Some(Word::Command | Word::Verify));
+    let in_check = statement == Some(Word::Check);
     let bytes = code.as_bytes();
     let mut index = 0;
     while index < bytes.len() {
@@ -611,6 +638,7 @@ fn placeholders(code: &str, statement: Option<Word>, found: &mut Vec<(Range<usiz
             "@stage" => Some(Word::StageName),
             "@labels" => Some(Word::Labels),
             "@output" if in_command => Some(Word::Output),
+            "@path" if in_check => Some(Word::PathPlaceholder),
             _ => None,
         };
         if let Some(word) = word {
