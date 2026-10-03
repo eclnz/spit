@@ -26,6 +26,11 @@ nav:
       - Recipes and input inventories: guide/recipes.md
       - Inspecting and diagnosing plans: guide/inspection.md
   - Reference:
+      - Language catalog: reference/index.md
+      - Keywords and records: reference/keywords.md
+      - Operations and calls: reference/operations.md
+      - Selectors and clauses: reference/selectors.md
+      - Placeholders: reference/placeholders.md
       - Complete language reference: language-reference.md
       - Command line: cli.md
       - DAG format: spitdag.md

@@ -15,6 +15,7 @@ SPIT turns a description of artifact families and operations into a concrete job
 | Describe a dataset and its exceptions | [Recipes and input inventories](guide/recipes.md) |
 | Find out why a job is missing | [Inspecting and diagnosing plans](guide/inspection.md) |
 | Look up exact syntax | [Complete language reference](language-reference.md) |
+| Browse every keyword, selector, and placeholder | [Language catalog](reference/index.md) |
 | Look up flags or DAG fields | [Command line](cli.md) · [DAG format](spitdag.md) |
 
 The [examples](examples.md) show complete pipelines and datasets, including a ragged parameter sweep, a cohort with missing inputs, and a sensor pipeline with selectors and two outputs.

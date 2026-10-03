@@ -36,13 +36,17 @@ Jobs are determined by matching artifact identities at the step. An input with t
 
 ## Dimension order matters
 
-Every product's dimensions follow one order. For most pipelines, source declarations establish it. When separate sources introduce dimensions that no source orders together, write a top-level order:
+Every product's dimensions follow one pipeline-wide order. Each source orders the dimensions in its own declaration: `source seed [config, seed]` puts `config` before `seed`. If a step combines dimensions whose relative order no source establishes, add one top-level `dimensions` line naming every dimension. For example, broadcasting `model` over seeds grouped by `config` combines dimensions from separate sources:
 
 ```spit
 dimensions [model, config, seed]
+source model [model]
+source seed [config, seed]
+operation train(model, seed) -> Weights
+trained = train(model @ each(model), seed)
 ```
 
-This order controls displayed identities, `{@entities}` in paths, and the order of artifacts passed through a `many` command placeholder. SPIT checks declared output dimensions against the inferred ones. See [dimension order](../language-reference.md#dimension-order).
+Neither source says whether `model` comes before `config`; the `dimensions` line settles that. Conflicting orders in source declarations are an error. The pipeline-wide order controls displayed identities, `{@entities}` in paths, and the order of artifacts passed through a `many` command placeholder. SPIT checks declared output dimensions against the inferred ones. See [dimension order](../language-reference.md#dimension-order).
 
 ## Files have distinct roles
 

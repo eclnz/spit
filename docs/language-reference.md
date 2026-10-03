@@ -1,6 +1,6 @@
 # Language reference
 
-This is the full syntax reference for `.spit` pipelines, `.spitin` recipes, and `.spitout` inputs. Start with the [guided introduction](index.md) or [getting started](getting-started.md) if you are new to SPIT; the [architecture](architecture.md) page describes the internal model.
+This is the full syntax reference for `.spit` pipelines, `.spitin` recipes, and `.spitout` inputs. For a quick lookup by keyword or construct, use the [language catalog](reference/index.md). Start with the [guided introduction](index.md) or [getting started](getting-started.md) if you are new to SPIT; the [architecture](architecture.md) page describes the internal model.
 
 A `#` that starts a word begins a comment, as in Bash. A `#` inside a word or in quotes is kept, so `--color=#fff` and `'#run'` are ordinary arguments.
 
@@ -36,7 +36,7 @@ average : Image [subject, visit] = mean(processed @ vary(run))
 
 A pipeline has one dimension order, and every product lists its dimensions in it. The order decides how a `many` input's artifacts are sorted, so the order of their command arguments, and how `{@entities}` and displayed identities are written.
 
-Each source states the order of its own dimensions: `source bold [sub, ses, run]` puts `sub` before `ses` before `run`. Most pipelines need nothing more. Two sources that order a pair differently are an error.
+Each source states the order of its own dimensions: `source bold [sub, ses, run]` puts `sub` before `ses` before `run`. These declarations establish the pipeline's order wherever they relate its dimensions. Two sources that order a pair differently are an error.
 
 When a product holds two dimensions that no source orders, declare the order once, anywhere at the top level:
 
