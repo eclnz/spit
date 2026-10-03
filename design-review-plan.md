@@ -85,6 +85,29 @@ Rerun rule: a changed or newly added check must invalidate a previous success cl
 
 This changes the DAG format, so it needs the matching change in spit-bash (see `AGENTS.md`), and syntax that the extension's grammar must learn.
 
+**Item 1 design (decided, branch `runtime-checks` in all three repositories).** A `check` declares a test of one artifact once; `@ check(...)` attaches it to a port, beside S2's `@ min(n)`, or to a source:
+
+```text
+check ndim(n): check_ndim {@path} {n}
+check nonempty: test -s {@path}
+
+source t1w : Image .nii.gz [sub] @ check(ndim(3))
+operation denoise(dwi: DWI @ check(ndim(4))) -> DWI .mif @ check(ndim(4), nonempty)
+operation split(items: many Table @ min(2) @ check(nonempty)) -> (left: Table @ check(nonempty), right: Table)
+```
+
+- *Declaration.* `check name: command` or `check name(param, ...): command`. The command is an ordinary command template. `{@path}` is the artifact being checked, and each `{param}` is the literal text given where the check is attached. It must use `{@path}`, and may use nothing else: no port, no output, no `.dir` or `.stem`. A check reads one artifact and never adds a dependency. Checks are global, as operations are, and `use` imports them with the operations and sources that attach them.
+- *Attachment.* `@ check(a, b(1), ...)` follows an input port's type, an output's type and extension, or a source's dimensions. Arguments are bare words or double-quoted text, and their count must match the parameters. A `many` port checks each artifact in its collection. Several checks accumulate, and none overrides another. Checks on a step's result product, and checks in a `.spitin`, wait for a concrete case.
+- *Where they run.* An input check, from an input port or from the source that the artifact belongs to, runs before the job's `verify` and command. An output check runs after the command and after the existence check, before the job counts as a success. A failed check fails the job, even when the command exited 0, and the report names the check as written (`ndim(4)`), the port and the artifact's path. When the producing job in the same DAG already runs the identical command as an output check, the consumer's input check on that artifact is left out. A source's checks are input checks of each job that reads it.
+- *Rerun rule (question 3).* Recheck existing files; don't recompute. Checks are left out of the job `fingerprint`, which stays the identity of the job's work, so a changed check doesn't rerun a long job. A runner instead records which checks passed with each success, and when a current job's checks differ from its record, it runs the checks alone on the existing files. If one fails, the job fails and its record is dropped, so the next run recomputes the job. `adopt` records no checks, so the next `run` checks adopted outputs without recomputing them.
+
+The four questions:
+
+1. *Phase.* The parser owns `check` lines and `@ check(...)` clauses. Compile checks names, arity and each check's template, just as it checks commands at load. The resolver binds checks to concrete artifacts beside `verify` (`resolver/bind.rs`), and `src/spitdag` writes them.
+2. *Lowering.* Checks get a model of their own, `CheckDef` (a name, parameters and a `CommandTemplate`), plus a list of uses on `InputPort`, `OutputPort` and `ProductDef`. `verify` checks a job across several inputs before it runs, so it can't express an output postcondition or a single artifact's check. Checks reuse the command template, its quoting and its argument parts, and the `executables` list. Bound, each check is one entry in a new job field, `checks`, in DAG version 6. Each entry is `{"when": "before"|"after", "check": "ndim(4)", "port": "dwi", "path": P, "command": [ARGUMENT, ...]}`, ordered with the before checks first, then by port, then by artifact, then in the order the checks are attached.
+3. *Invariants.* Checks never change the graph: jobs, paths, dependencies, counts and fingerprints are the same with or without them. The order is deterministic. A check reads only its artifact. Names are unique among checks, and a check name may match an operation or product name, as their namespaces are separate.
+4. *Interactions.* Selectors: none, since checks attach to ports, not to calls. Imports: as above, prefixed as operations are. Stages: none. Paths: `{@path}` is the bound path, a folder's included. Partial plans: only planned jobs carry checks. Diagnostics point at the clause or the declaration. A port's hover lists its checks. `dag --commands` shows `check:` lines. `executables` includes the checks' programs. spit-vscode's grammar learns `check`, `@ check(...)` and `{@path}`. spit-bash reads version 6, runs the checks, and adds a `check` plan status.
+
 ### 2. Resolve optional-file and output semantics with a real workflow
 
 [Issue 35](https://github.com/eclnz/spit/issues/35) leaves open optional sidecar members and outputs a command may or may not create, as well as the backend's missing-output contract. Work through one genuine case before adding a general optional type. If a sidecar is absent, the graph needs to say whether to skip the job, use a different operation, proceed without that argument, or fail. "Optional" syntax alone does not settle that behaviour.
