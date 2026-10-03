@@ -23,7 +23,7 @@ Status is `open`, `claimed (<branch>)`, `decided`, or `done (<commit>)`. Numbers
 |---|------|--------|
 | 1 | Optional runtime checks in the job contract | claimed (`runtime-checks`) |
 | 2 | Optional-file and output semantics, from one real workflow ([#35](https://github.com/eclnz/spit/issues/35)) | open |
-| 3 | Lower the cost of binding existing data: judge `inputs --suggest` on irregular datasets | open |
+| 3 | Lower the cost of binding existing data: judge `inputs --suggest` on irregular datasets | claimed (`suggest-irregular`) |
 | 4a | `dag --counts` | done (`370a18f`) |
 | 4b | Diagnostic severity audit ([#45](https://github.com/eclnz/spit/issues/45)) | open |
 | 5 | The two-file mental model | claimed (`two-files`) |
