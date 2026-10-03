@@ -95,7 +95,7 @@ Files come first; options follow them. `spit help` lists the commands, and `spit
 | `--suggest` | With `inputs`, print `source` and `path` lines for the files under the dataset root that match no source path rule, instead of writing a `.spitout`; see [Start from the files](#start-from-the-files). |
 | `--paths` | With `dag`, print the file under every artifact. |
 | `--counts` | With `dag`, print how many jobs each step resolves instead of the jobs: one row per step, as `cleaned = clean`, with its stage when the pipeline has stages, then the total. A step that resolves no jobs shows `0`, so an empty step or an unexpected expansion stands out before the plan is run. With `--commands` or `--paths`, print the counts before the jobs. With `-o`, print the counts and write the `.spitdag` too. It cannot be combined with `--json`, which prints the `.spitdag` itself. |
-| `--commands` | With `dag`, print each job's checks, `verify` and command lines with their paths filled in, quoted as a shell reads them, so a line can be pasted into a shell run from the dataset folder. With `--paths`, print them under each job's artifacts. Use it separately from `-o`, which saves a `.spitdag`. |
+| `--commands` | With `dag`, print each job's checks, `verify` and command lines with their paths filled in, quoted as a shell reads them, so a line can be pasted into a shell run from the dataset folder. With `--paths`, print them under each job's artifacts. With `-o`, print the commands and write the `.spitdag` too, so the plan checked is the plan saved. |
 | `--partial` | With `dag`, plan jobs whose inputs can be completed and record the artifacts left out of the `.spitdag`. A `many` input uses its complete members. Without it, `dag` stops at an incomplete job. |
 | `--json` | With `dag`, print the `.spitdag`. With `check`, print diagnostics as JSON for editor use and stop, succeeding whatever they report. Each diagnostic has a `severity` of `error` or `warning`; those tied to a declaration, call, rule, command, or path include its `line`, and a `column` and `end_column` for the text it is about, such as one input of a call or one `{placeholder}`. Columns are 1-based and count UTF-16 code units, as editors do; `end_column` is one past the last character. When checking a recipe finds an error in its pipeline, the diagnostic includes `file` and positions in that pipeline. For a pipeline that checks clean, a `paths` list gives each product whose path no rule writes in full, with its `line` and its `path`, extension included, for the editor to show. |
 | `--stdin` | With `check`, read the file's text from standard input, such as an editor's unsaved buffer. The file's path is still used to resolve `use` imports and a recipe's `pipeline` line. |
@@ -144,6 +144,12 @@ merged = merge(sorted @ vary(part))
 ```
 
 `source` declares a family of input artifacts. A `shard` is identified by its `group` and `part` values. `sorted` keeps those dimensions. `merge` collects all parts of each group and produces one `merged[group=...]` artifact per group. The call's `@ vary(part)` names the dimension it collects.
+
+Each step names what it makes, and the operation names what it does: `sorted = sort_lines(shard)`, not `sort_lines = sort_lines(shard)`. Later steps then read `merge(sorted ...)`, and the same operation can make two products, as `merge` does below. A product named after its operation is allowed, but `spit check` warns:
+
+```text
+warning: line 10, column 1: product `sort_lines` has the name of the operation that makes it; name the result instead, so the step reads as what it makes
+```
 
 To collect over two dimensions, collect in two steps, one dimension each: after `merged` above, `everything = merge(merged @ vary(group))` collects the per-group results into one artifact. A check that must pass before a job runs is a `verify` line beside its `command`, such as `verify merge: check_lines {items}`; see [the reference](docs/language-reference.md#operations-and-commands). A test of one file, such as that an output is not empty, is a [`check`](docs/language-reference.md#checks) declared once and attached to ports: `check nonempty: test -s {@path}`, then `-> Lines @ check(nonempty)`.
 

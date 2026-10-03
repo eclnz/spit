@@ -104,6 +104,26 @@ path extra: in/{subject}.extra
     ]);
     assert!(written.status.success(), "{}", stderr(&written));
     assert!(stdout(&written).ends_with("   4  total\n"));
+
+    // With --commands and -o, the commands are printed as --commands alone
+    // prints them, and the .spitdag written is the one -o alone writes.
+    let commands = spit(&["dag", pipeline, inputs, "--commands"]);
+    let both_dag = tree.path().join("both.spitdag");
+    let both = spit(&[
+        "dag",
+        pipeline,
+        inputs,
+        "--commands",
+        "-o",
+        both_dag.to_str().unwrap(),
+    ]);
+    assert!(both.status.success(), "{}", stderr(&both));
+    assert_eq!(stdout(&both), stdout(&commands));
+    assert!(stdout(&both).starts_with("Job 1"), "{}", stdout(&both));
+    assert_eq!(
+        fs::read_to_string(&both_dag).unwrap(),
+        fs::read_to_string(&dag).unwrap()
+    );
     assert!(fs::read_to_string(&dag).unwrap().contains("\"jobs\""));
 
     // With --commands or --paths, the counts come before the jobs.
@@ -229,9 +249,8 @@ fn each_option_applies_to_its_commands() {
     assert!(stderr(&output).starts_with("error: --paths applies to dag\n"));
     let conflict = spit(&["dag", "a.spit", "b.spitout", "--json", "-o", "x"]);
     assert!(stderr(&conflict).starts_with("error: --json cannot be used with -o\n"));
-    // The command lines are a text view; the .spitdag already holds them.
-    let commands = spit(&["dag", "a.spit", "b.spitout", "--commands", "-o", "x"]);
-    assert!(stderr(&commands).starts_with("error: --commands cannot be used with -o; run dag with --commands to inspect command lines, or with -o <file> to save a .spitdag\n"));
+    let paths = spit(&["dag", "a.spit", "b.spitout", "--paths", "-o", "x"]);
+    assert!(stderr(&paths).starts_with("error: --paths cannot be used with -o\n"));
     let commands = spit(&["artifacts", "a.spit", "b.spitout", "--commands"]);
     assert!(stderr(&commands).starts_with("error: --commands applies to dag\n"));
     let extra = spit(&["check", "a.spit", "b.spitout"]);
