@@ -347,6 +347,12 @@ pub(crate) fn collect_paths(
     (PathCoverage { entries }, errors)
 }
 
+/// Ends the message about a product's own rule ending in another extension,
+/// since a `.` that belongs to a name, as in `acq-1.5T`, starts one.
+/// Keep in step with `PathTemplate::extension`, which reads it so.
+const EXTENSION_START: &str =
+    "; SPIT reads the extension from the first `.` after the last placeholder, so keep `.` out of the name before it";
+
 /// Why `product`'s path rule ends with an extension other than the one its
 /// file must have, if it does. A rule that ends with none is given it.
 fn extension_disagreement(index: &PipelineIndex<'_>, product: &str) -> Option<String> {
@@ -364,7 +370,7 @@ fn extension_disagreement(index: &PipelineIndex<'_>, product: &str) -> Option<St
     };
     if index.pipeline.product_paths.contains_key(product) {
         return Some(format!(
-            "path `{product}` ends in `{written}`, but {source} {verb} `{expected}`; drop the extension or use `{expected}`"
+            "path `{product}` ends in `{written}`, but {source} {verb} `{expected}`; drop the extension or use `{expected}`{EXTENSION_START}"
         ));
     }
     let default = match index.stage_path_rule(product) {
