@@ -153,7 +153,9 @@ pub(crate) enum StatementKind {
     /// A `source` declaration.
     Product(ProductDef, Place),
     Discover(DirectoryDiscovery),
-    Operation(OperationDef, Place),
+    /// An `operation` declaration, where its name sits, and the stage its
+    /// line is in, if any. The operation is global either way.
+    Operation(OperationDef, Place, Option<String>),
     Constraint(CoverageRule, Rule),
     /// An `exclude` rule, its reason from the line's comment, and where
     /// what it names sits.
@@ -226,11 +228,17 @@ impl StatementKind {
         Ok(Self::Product(product, place))
     }
 
-    /// An operation declared by `declaration`, a slice of `original`.
-    fn operation(original: &str, declaration: &str, number: usize) -> Result<Self, ParseError> {
+    /// An operation declared by `declaration`, a slice of `original`, on a
+    /// line in `stage`.
+    fn operation(
+        original: &str,
+        declaration: &str,
+        number: usize,
+        stage: Option<String>,
+    ) -> Result<Self, ParseError> {
         let operation = operation::parse_operation(declaration, number)?;
         let place = source_map::name_place(original, number, declaration, &operation.name);
-        Ok(Self::Operation(operation, place))
+        Ok(Self::Operation(operation, place, stage))
     }
 
     /// A `require` or `drop` rule, the whole content `line` of `original`.

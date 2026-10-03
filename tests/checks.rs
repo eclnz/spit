@@ -191,6 +191,27 @@ fn checks_and_their_uses_are_checked_where_they_are_written() {
 }
 
 #[test]
+fn a_many_port_takes_its_minimum_and_its_checks_in_either_order() {
+    for port in [
+        "items: many Text @ min(2) @ check(nonempty)",
+        "items: many Text @ check(nonempty) @ min(2)",
+    ] {
+        let pipeline = format!(
+            "{CHECKS}source raw : Text [id]\noperation merge({port}) -> Text\nall = merge(raw @ vary(id))\n"
+        );
+        assert_eq!(errors(&pipeline), Vec::<String>::new(), "{port}");
+        let parsed = spit::parse_pipeline(&pipeline).unwrap();
+        let operation = &parsed.operations[0];
+        assert_eq!(operation.minimum_collection, Some(2));
+        assert_eq!(operation.inputs[0].checks[0].to_string(), "nonempty");
+    }
+    assert!(errors(&format!(
+        "{CHECKS}operation f(x @ check(nonempty) @ min(2)) -> Y\n"
+    ))[0]
+        .contains("`@ min(count)` goes on a `many` input"));
+}
+
+#[test]
 fn a_step_may_still_make_a_product_named_check() {
     assert!(errors("source raw [id]\noperation f(x) -> Y\ncheck = f(raw)\n").is_empty());
 }

@@ -4,7 +4,7 @@
 use std::error::Error;
 use std::fmt::Write;
 
-use spit::{SuggestedSource, Suggestions};
+use spit::{NearlyMatched, SuggestedSource, Suggestions};
 
 use super::load::Loaded;
 use super::output::is_recipe;
@@ -21,6 +21,7 @@ pub(crate) fn suggest(loaded: &Loaded, file: &str) -> Result<(), Box<dyn Error>>
         .expect("a recipe read from a file names its root, and `--root` gives a pipeline's");
     let suggestions = loaded.recipe.suggest(&loaded.checked.pipeline, root)?;
     if suggestions.sources.is_empty()
+        && suggestions.near.is_empty()
         && suggestions.alone.is_empty()
         && suggestions.unfitted.is_empty()
     {
@@ -50,8 +51,14 @@ fn render(suggestions: &Suggestions, pipeline: Option<&str>) -> String {
         }
         write_source(&mut text, source, pipeline);
     }
+    if !suggestions.near.is_empty() {
+        if !text.is_empty() {
+            text.push('\n');
+        }
+        write_near(&mut text, &suggestions.near);
+    }
     if !suggestions.alone.is_empty() {
-        if !suggestions.sources.is_empty() {
+        if !text.is_empty() {
             text.push('\n');
         }
         let count = suggestions.alone.len();
@@ -91,6 +98,7 @@ fn write_source(text: &mut String, source: &SuggestedSource, pipeline: Option<&s
         "# {} {files}, such as {}",
         source.files, source.example
     );
+    write_values(text, source);
     let dimensions = source.dimensions.join(", ");
     if !source.members.is_empty() {
         write_sidecars(text, source, pipeline);
@@ -169,6 +177,58 @@ fn write_notes(text: &mut String, source: &SuggestedSource) {
             "# this rule also matches {} other file{}; a file two rules match is an error, so make one more specific",
             source.overlaps,
             if source.overlaps == 1 { "" } else { "s" }
+        );
+    }
+}
+
+/// The values each dimension holds, so a stray such as `subject04` among
+/// `Subject01` and `Subject02` shows before the rule is pasted: up to five,
+/// else the first two and the last.
+fn write_values(text: &mut String, source: &SuggestedSource) {
+    if source.dimensions.is_empty() {
+        return;
+    }
+    let each: Vec<String> = source
+        .dimensions
+        .iter()
+        .zip(&source.values)
+        .map(|(name, values)| {
+            let shown = if values.len() <= 5 {
+                values.join(", ")
+            } else {
+                format!(
+                    "{}, {}, ..., {} ({} values)",
+                    values[0],
+                    values[1],
+                    values[values.len() - 1],
+                    values.len()
+                )
+            };
+            format!("{name}: {shown}")
+        })
+        .collect();
+    let _ = writeln!(text, "# {}", each.join("; "));
+}
+
+/// The files a rule above nearly matches, each with where it parts from
+/// the rule, so a `.bak` copy or a rescan with one more entity is seen.
+fn write_near(text: &mut String, near: &[NearlyMatched]) {
+    let count = near.len();
+    let _ = writeln!(
+        text,
+        "# {count} file{} a rule above nearly matches but will not read; rename {}, or give {} a rule of {} own:",
+        if count == 1 { "" } else { "s" },
+        if count == 1 { "it" } else { "them" },
+        if count == 1 { "it" } else { "them" },
+        if count == 1 { "its" } else { "their" },
+    );
+    for miss in near {
+        let _ = writeln!(text, "#   {}", miss.file.file);
+        let _ = writeln!(
+            text,
+            "#     `{}`: {}",
+            miss.source,
+            miss.file.parting("file")
         );
     }
 }

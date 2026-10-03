@@ -377,7 +377,7 @@ fn flow_line(
             StatementKind::Discover(parse_discover(declaration.trim(), number)?)
         }
         Some((Keyword::Operation, declaration)) => {
-            StatementKind::operation(original, declaration.trim(), number)?
+            StatementKind::operation(original, declaration.trim(), number, stage.clone())?
         }
         Some((keyword @ (Keyword::Require | Keyword::Skip | Keyword::Drop), _)) => {
             top_level_only(if keyword == Keyword::Require {
@@ -416,6 +416,11 @@ fn flow_line(
     Ok(())
 }
 
+/// Where a pipeline's dataset is said, for a `root` or `pipeline` line
+/// written in a pipeline.
+const RECIPE_HEADER: &str = "which names its pipeline and the dataset folder it is bound to; \
+     a pipeline given alone takes its folder from `--root`";
+
 /// A line that starts with no keyword: a step, or a mistake.
 fn flow_statement(
     original: &str,
@@ -424,6 +429,13 @@ fn flow_statement(
     stage: Option<&str>,
 ) -> Result<StatementKind, ParseError> {
     if let Some(word) = unknown_keyword(line) {
+        if word == "root" || word == "pipeline" {
+            return Err(ParseError::new(
+                number,
+                format!("`{word}` belongs in a .spitin recipe, {RECIPE_HEADER}"),
+            )
+            .at_token(word));
+        }
         let hint = STATEMENT_WORDS
             .iter()
             .find(|keyword| edit_distance(word, keyword) <= 2)
@@ -434,7 +446,7 @@ fn flow_statement(
                 "`{word}` does not start a statement; {hint}a pipeline line starts with \
                  source, sidecars, dimensions, operation, command, verify, check, path, ext, stage or use, or is a step \
                  `output = operation(inputs)`, and a recipe line starts with pipeline, \
-                 discover, require, drop, exclude or path"
+                 root, discover, require, drop, exclude or path"
             ),
         )
         .at_token(word));

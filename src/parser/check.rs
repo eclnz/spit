@@ -76,11 +76,13 @@ pub(super) struct Clause<'a> {
 }
 
 /// Split `text` at its first `@` outside brackets into what it declares
-/// and the clauses after it, each `@ keyword(argument)`.
-pub(super) fn split_clauses(
-    text: &str,
+/// and the clauses after it, each `@ keyword(argument)`; `expected` says
+/// what may be written there, for a clause that is not of that form.
+pub(super) fn split_clauses<'a>(
+    text: &'a str,
+    expected: &str,
     number: usize,
-) -> Result<(&str, Vec<Clause<'_>>), ParseError> {
+) -> Result<(&'a str, Vec<Clause<'a>>), ParseError> {
     let Some(at) = top_level_at(text) else {
         return Ok((text, Vec::new()));
     };
@@ -92,13 +94,7 @@ pub(super) fn split_clauses(
         let (keyword, argument) = clause
             .split_once('(')
             .and_then(|(keyword, rest)| Some((keyword.trim(), rest.strip_suffix(')')?.trim())))
-            .ok_or_else(|| {
-                ParseError::new(
-                    number,
-                    "expected `@ clause(...)`, as in `@ check(nonempty)`",
-                )
-                .at_token(clause)
-            })?;
+            .ok_or_else(|| ParseError::new(number, expected).at_token(clause))?;
         clauses.push(Clause {
             keyword,
             argument,
@@ -147,13 +143,15 @@ pub(super) fn check_uses(clause: &Clause<'_>, number: usize) -> Result<Vec<Check
             };
             let name = qualified_identifier(name, number, "check name")?;
             let arguments = match arguments {
-                Some(arguments) if arguments.trim().is_empty() => return Err(ParseError::new(
-                    number,
-                    format!(
+                Some(arguments) if arguments.trim().is_empty() => {
+                    return Err(ParseError::new(
+                        number,
+                        format!(
                         "check `{name}` is given no arguments; write `{name}` without parentheses"
                     ),
-                )
-                .at_token(item)),
+                    )
+                    .at_token(item))
+                }
                 Some(arguments) => comma_items(arguments, number)?
                     .into_iter()
                     .map(|argument| check_argument(argument, number))
@@ -228,18 +226,18 @@ mod tests {
     #[test]
     fn clauses_split_after_the_port_and_name_their_checks() {
         let (port, clauses) =
-            split_clauses("dwi: DWI @ check(ndim(4), nonempty) @ check(x)", 1).unwrap();
+            split_clauses("dwi: DWI @ check(ndim(4), nonempty) @ check(x)", "", 1).unwrap();
         assert_eq!(port, "dwi: DWI");
         assert_eq!(clauses.len(), 2);
         let uses = check_uses(&clauses[0], 1).unwrap();
         let written: Vec<_> = uses.iter().map(ToString::to_string).collect();
         assert_eq!(written, ["ndim(4)", "nonempty"]);
-        let (port, clauses) = split_clauses("items: many Table<Image @ x>", 1).unwrap();
+        let (port, clauses) = split_clauses("items: many Table<Image @ x>", "", 1).unwrap();
         assert_eq!(port, "items: many Table<Image @ x>");
         assert!(clauses.is_empty());
-        let (_, clauses) = split_clauses("x @ check(a(\"b c\"))", 1).unwrap();
+        let (_, clauses) = split_clauses("x @ check(a(\"b c\"))", "", 1).unwrap();
         assert!(check_uses(&clauses[0], 1).is_err());
-        let (_, clauses) = split_clauses("x @ check()", 1).unwrap();
+        let (_, clauses) = split_clauses("x @ check()", "", 1).unwrap();
         assert!(check_uses(&clauses[0], 1).is_err());
     }
 }

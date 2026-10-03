@@ -291,17 +291,19 @@ fn operation_signature(operation: &OperationDef) -> String {
         .inputs
         .iter()
         .map(|port| {
-            format!(
-                "{}: {}{}{}",
+            let many = port.cardinality == Cardinality::Many;
+            let mut text = format!(
+                "{}: {}{}",
                 port.name,
-                if port.cardinality == Cardinality::Many {
-                    "many "
-                } else {
-                    ""
-                },
-                port.artifact_type,
-                checks_text(&port.checks)
-            )
+                if many { "many " } else { "" },
+                port.artifact_type
+            );
+            // An operation has at most one many input, which its minimum counts.
+            if let (true, Some(minimum)) = (many, operation.minimum_collection) {
+                text.push_str(&format!(" @ min({minimum})"));
+            }
+            text.push_str(&checks_text(&port.checks));
+            text
         })
         .collect::<Vec<_>>()
         .join(", ");
@@ -318,11 +320,7 @@ fn operation_signature(operation: &OperationDef) -> String {
                 .join(", ")
         )
     };
-    let mut signature = format!("operation {}({inputs}) -> {outputs}", operation.name);
-    if let Some(minimum) = operation.minimum_collection {
-        signature.push_str(&format!(" @ min({minimum})"));
-    }
-    signature
+    format!("operation {}({inputs}) -> {outputs}", operation.name)
 }
 
 fn output_signature(port: &OutputPort, named: bool) -> String {

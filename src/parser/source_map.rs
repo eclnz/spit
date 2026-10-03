@@ -17,6 +17,9 @@ pub(crate) struct SourceMap {
     pub(crate) products: BTreeMap<String, Place>,
     /// Each operation's declared name.
     pub(crate) operations: BTreeMap<String, Place>,
+    /// The stage each operation declared inside one is declared in. The
+    /// operation is global; its place should still hold its calls.
+    pub(crate) operation_stages: BTreeMap<String, String>,
     /// Each step, keyed by the product it produces.
     pub(crate) invocations: BTreeMap<String, Step>,
     /// The last coverage rule for each product.

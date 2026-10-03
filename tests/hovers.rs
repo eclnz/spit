@@ -82,14 +82,19 @@ fn bindings_are_local_and_multi_outputs_have_their_own_types() {
 
 #[test]
 fn aggregate_hovers_show_inference_and_output_dimensions() {
-    let all = hovers("source raw : Frame<Native> [id, run]\noperation merge(items: many Frame<S>) -> Frame<S> @ min(2)\nmerged : Frame<Native> [id] = merge(raw @ vary(run))\n");
+    let all = hovers("source raw : Frame<Native> [id, run]\noperation merge(items: many Frame<S> @ min(2)) -> Frame<S>\nmerged : Frame<Native> [id] = merge(raw @ vary(run))\n");
     assert_eq!(
         at(&all, 3, "merged").signature,
         "merged: Frame<Native> [id]"
     );
     let call = at(&all, 3, "merge");
     assert!(call.signature.contains("many Frame<$S>"));
-    assert!(call.signature.contains("@ min(2)"));
+    assert!(
+        call.signature
+            .contains("(items: many Frame<$S> @ min(2)) -> "),
+        "{}",
+        call.signature
+    );
     assert!(call
         .details
         .iter()
