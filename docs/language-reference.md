@@ -322,7 +322,7 @@ The suffix is an extension, or quoted text of letters, digits, `.`, `-` and `_`;
 - has no path rule of its own; its path follows the sibling's;
 - names another output of the same operation, which declares an extension and is not itself written beside another.
 
-Later steps read it as any other output, and the `.spitdag` lists it among the job's outputs. If the tool does not write it, as when a flag turns the sidecar off, the job leaves a declared output missing.
+Later steps read it as any other output, and the `.spitdag` lists it among the job's outputs. A declared output is never optional: if the tool does not write it, the job fails as if its command had failed, and the jobs that read its outputs do not run (see [missing outputs](spitdag.md#missing-outputs)). Whether a tool writes a sidecar usually depends on how it is run, as `dcm2niix -b n` writes no `.json`, so the same flag leaves it out of every job; an operation run that way declares no `meta`. A tool that writes a file only for some data, as dcm2niix writes `.bval` and `.bvec` only for a diffusion series, is two operations, each called on the sources it fits.
 
 ### Folders
 
@@ -379,6 +379,11 @@ A recipe's default `path:` covers a group with no stem as one product named for 
 A block belongs at the top level of a pipeline. Its members take no dimensions or path rules of their own, in the pipeline or the recipe, and no product may share the group's name, since `path photo:` names one thing. A group's stem is written in its block or in the recipe, not both; a `path photo:` line in the pipeline is an error that points to the block.
 
 When `spit inputs` scans a dataset, or a command reads records from a recipe or a `.spitout`, it warns about each place that holds some of a group's sources and not the others, as `warning: photo[site=A,visit=2,shot=3] has .raw and .gpx but no .json`, before a step fails to find the missing one. The warnings come group by group, and within a group in value order, so `shot=2` comes before `shot=10`. A file an `exclude` or `drop` rule removes is not counted as missing, nor is one a `.spitout`'s `removed:` section lists.
+
+A missing member is a warning because it matters only to a step that reads it. With `sidecars t1w [sub]` holding `anat .nii.gz` and `anat_meta .json`, and no `sub-02_T1w.json`, `brain = strip(anat)` plans every subject, while plain `dag` stops at `times = readout(anat, anat_meta)`: ``no `anat_meta` artifact for input `meta` of `readout` at [sub=02]``. SPIT never runs a job with an input left out. To plan the rest, either:
+
+- run `dag --partial`, which keeps `brain[sub=02]` and lists `times[sub=02]` with its reason under the `.spitdag`'s `left_out`; or
+- remove the subject in the recipe, with a reason, as `drop [sub] where anat_meta count=0  # no BIDS sidecar`, which removes all of `sub=02`'s inputs, `brain` included.
 
 ## Recipes
 
