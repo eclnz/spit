@@ -10,7 +10,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use crate::error::{DefinitionSubject, ResolveError};
 use crate::model::{
     ArtifactInstance, CountRequirement, CoverageAction, CoverageGap, CoverageRule, EntityBinding,
-    GroupKey, InputRules, Pipeline, Removal, SourceInventory,
+    GroupKey, InputRules, Pipeline, PipelineIndex, Removal, SourceInventory,
 };
 use crate::shape::dimension_set;
 
@@ -257,14 +257,11 @@ fn missing_values<'a>(
 pub(crate) fn check_coverage_rule(
     rule_index: usize,
     rule: &CoverageRule,
-    pipeline: &Pipeline,
+    pipeline: &PipelineIndex<'_>,
     rules: &InputRules,
 ) -> Result<(), ResolveError> {
     let discovery = rules.discovery(&rule.product);
-    let product = pipeline
-        .products
-        .iter()
-        .find(|product| product.name == rule.product);
+    let product = pipeline.product(&rule.product);
     if discovery.is_some() && product.is_some() {
         return Err(ResolveError::InvalidDefinition {
             subject: DefinitionSubject::Constraint(rule_index),
@@ -421,12 +418,15 @@ pub(crate) fn collect_rule_errors(
     rules: &InputRules,
     poisoned: &BTreeSet<String>,
 ) -> Vec<(DefinitionSubject, ResolveError)> {
-    let mut errors = super::exclusions::collect_exclusion_errors(pipeline, rules);
+    // Found once: each rule asks which products are sources and which is
+    // named.
+    let products = PipelineIndex::new(pipeline);
+    let mut errors = super::exclusions::collect_exclusion_errors(&products, rules);
     for (index, rule) in rules.constraints.iter().enumerate() {
         if poisoned.contains(&rule.product) {
             continue;
         }
-        if let Err(error) = check_coverage_rule(index, rule, pipeline, rules) {
+        if let Err(error) = check_coverage_rule(index, rule, &products, rules) {
             // Keep the more specific subject a definition error names.
             let subject = match &error {
                 ResolveError::InvalidDefinition { subject, .. } => subject.clone(),

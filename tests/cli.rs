@@ -58,9 +58,41 @@ fn dag_resolves_a_pipeline_over_a_spitout() {
         "dag",
         "examples/types/typed.spit",
         "examples/types/typed.spitout",
+        "--jobs",
     ]);
     assert!(output.status.success(), "{}", stderr(&output));
     assert!(stdout(&output).starts_with("Job 1\n"));
+}
+
+#[test]
+fn plain_dag_prints_the_commands_and_jobs_lists_the_artifacts() {
+    let recipe = "examples/commands/command_demo/command_demo.spitin";
+    let plain = spit(&["dag", recipe]);
+    let commands = spit(&["dag", recipe, "--commands"]);
+    assert!(plain.status.success(), "{}", stderr(&plain));
+    assert_eq!(stdout(&plain), stdout(&commands));
+    assert!(stdout(&plain).starts_with("Job 1  sort_lines\n  run:    sort"));
+
+    let jobs = spit(&["dag", recipe, "--jobs"]);
+    assert!(stdout(&jobs).starts_with("Job 1\n  operation: sort_lines\n  inputs:\n"));
+    for other in ["--commands", "--paths", "--json"] {
+        let conflict = spit(&["dag", recipe, "--jobs", other]);
+        assert!(
+            stderr(&conflict).starts_with(&format!("error: --jobs cannot be used with {other}\n"))
+                || stderr(&conflict)
+                    .starts_with(&format!("error: {other} cannot be used with --jobs\n")),
+            "{other}: {}",
+            stderr(&conflict)
+        );
+    }
+
+    // A pipeline without commands points to the listing.
+    let bare = spit(&["dag", "examples/basic/basic.spitin"]);
+    assert!(bare.status.success(), "{}", stderr(&bare));
+    assert!(stderr(&bare).contains(
+        "note: no job has a command; `dag --jobs` lists each job's inputs and outputs\n"
+    ));
+    assert!(!stderr(&plain).contains("no job has a command"));
 }
 
 #[test]

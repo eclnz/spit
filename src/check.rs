@@ -8,7 +8,7 @@
 use std::collections::BTreeMap;
 
 use crate::command::CommandError;
-use crate::model::{CheckDef, CheckUse, Invocation, OperationDef, Pipeline};
+use crate::model::{CheckDef, CheckUse, Invocation, OperationDef, Pipeline, PipelineIndex};
 use crate::parser::SourceMap;
 use crate::span::Place;
 use crate::template::Part;
@@ -174,10 +174,11 @@ pub(crate) struct StepCheck<'p> {
 /// input runs its port's checks and its source's. Every check use names a
 /// declared check, which [`collect_checks`] makes sure of.
 pub(crate) fn step_checks<'p>(
-    pipeline: &'p Pipeline,
+    index: &PipelineIndex<'p>,
     operation: &'p OperationDef,
     invocation: Option<&'p Invocation>,
 ) -> Vec<StepCheck<'p>> {
+    let pipeline = index.pipeline;
     if pipeline.checks.is_empty() {
         return Vec::new();
     }
@@ -193,9 +194,9 @@ pub(crate) fn step_checks<'p>(
         let product = invocation.and_then(|invocation| invocation.inputs.get(port));
         let product = product.map(|binding| binding.product_name());
         let source = product
-            .and_then(|name| pipeline.products.iter().find(|p| p.name == name))
+            .and_then(|name| index.product(name))
             .map_or(&[][..], |product| product.checks.as_slice());
-        let produced = product.and_then(|name| producer_checks(pipeline, name));
+        let produced = product.and_then(|name| producer_checks(index, name));
         let mut seen: Vec<&CheckUse> = Vec::new();
         for used in input.checks.iter().chain(source) {
             if seen.contains(&used) {
@@ -228,18 +229,8 @@ pub(crate) fn step_checks<'p>(
 }
 
 /// The checks the step that makes `product` runs on it after its command.
-fn producer_checks<'p>(pipeline: &'p Pipeline, product: &str) -> Option<&'p [CheckUse]> {
-    let invocation = pipeline
-        .invocations
-        .iter()
-        .find(|invocation| invocation.outputs.iter().any(|output| output == product))?;
-    let port = invocation
-        .outputs
-        .iter()
-        .position(|output| output == product)?;
-    let operation = pipeline
-        .operations
-        .iter()
-        .find(|operation| operation.name == invocation.operation)?;
+fn producer_checks<'p>(index: &PipelineIndex<'p>, product: &str) -> Option<&'p [CheckUse]> {
+    let (invocation, port) = index.producer(product)?;
+    let operation = index.operation(&invocation.operation)?;
     Some(&operation.outputs.get(port)?.checks)
 }

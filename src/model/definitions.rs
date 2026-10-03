@@ -420,7 +420,7 @@ impl SidecarGroup {
 }
 
 /// Where the extension a product's file must have is declared.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum ExtensionSource {
     /// On the output of the named operation.
     Operation(String),

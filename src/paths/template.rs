@@ -138,6 +138,18 @@ pub struct PathTemplate {
     parts: Vec<PathPart>,
 }
 
+/// What `{@product}` writes for the product `name`: `alias::name` becomes
+/// `alias.name`, since colons would go into file names. Keep in step with
+/// the placeholder's expansion in `ProductPath::new` and `path_pattern`,
+/// which write this too.
+pub(crate) fn product_text(name: &str) -> std::borrow::Cow<'_, str> {
+    if name.contains("::") {
+        std::borrow::Cow::Owned(name.replace("::", "."))
+    } else {
+        std::borrow::Cow::Borrowed(name)
+    }
+}
+
 impl PathTemplate {
     /// Where an output goes when no rule covers it: no rule of its own,
     /// no stage default and no `path:`. Sources never take it.
@@ -288,10 +300,12 @@ impl PathTemplate {
         }
     }
 
-    /// This template with `{@product}` written out as `name`, so that an
-    /// imported product keeps the path its own file gives it.
+    /// This template with `{@product}` written out as the text of the
+    /// product `name`, so that an imported product keeps the path its own
+    /// file gives it.
     #[must_use]
     pub(crate) fn with_product(&self, name: &str) -> Self {
+        let name = &product_text(name);
         fn named(parts: &[PathPart], name: &str) -> Vec<PathPart> {
             parts
                 .iter()
