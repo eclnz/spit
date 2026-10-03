@@ -125,6 +125,7 @@ fn resolve_artifacts_with_partial(
         let id = StepId::new(resolution.dag.steps.len());
         resolution.dag.steps.push(DagStep {
             operation: step.operation.name.clone(),
+            outputs: step.invocation.outputs.clone(),
             stage: step.invocation.stage.clone(),
         });
         let outputs: Vec<u32> = step
