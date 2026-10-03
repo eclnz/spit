@@ -75,7 +75,7 @@ Editor hovers come from `src/editor.rs` and `src/builtins.rs`, which read a docu
 
 `spit dag -o plan.spitdag` writes the `BoundDag`, and `spit dag --json` prints it, as schema version 5: `{"version":5,"generator":{...},"root":...,"external_inputs":[...],"targets":[...],"executables":[...],"jobs":[...]}`.
 
-- `generator` names the program that wrote the file and its version, as `{"name":"spit","version":"0.2.1"}`.
+- `generator` names the program that wrote the file and its version, as `{"name":"spit","version":"0.2.2"}`.
 - `root` is the absolute dataset folder every path is relative to: the recipe's root or the root a `.spitout` records. It is `null` when `dag` was given no folder, as with a `.spitout` that records no root, and the backend must then be told where the dataset is.
 - `external_inputs` contains every job input whose producer is outside the graph: the sources. A backend can check they exist before it starts.
 - `targets` contains every output no job reads: what a full run leaves behind. Every other output is an intermediate a backend may remove once its readers have run.
