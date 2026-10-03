@@ -25,7 +25,7 @@ Status is `open`, `claimed (<branch>)`, `decided`, or `done (<commit>)`. Numbers
 | 2 | Optional-file and output semantics, from one real workflow ([#35](https://github.com/eclnz/spit/issues/35)) | open |
 | 3 | Lower the cost of binding existing data: judge `inputs --suggest` on irregular datasets | claimed (`suggest-irregular`) |
 | 4a | `dag --counts` | done (`370a18f`) |
-| 4b | Diagnostic severity audit ([#45](https://github.com/eclnz/spit/issues/45)) | claimed (`severity-audit`) |
+| 4b | Diagnostic severity audit ([#45](https://github.com/eclnz/spit/issues/45)) | done (`b45f28e`) |
 | 5 | The two-file mental model | claimed (`two-files`) |
 | S1 | Syntax: operations declared inside a stage | decided, claimed (`stage-scope`) |
 | S2 | Syntax: `@ min(n)` beside the `many` port | done (`5131495`) |
@@ -123,6 +123,10 @@ A proposed `dag --counts` view would show total jobs and counts by operation. Th
 *4a done in `370a18f`.* `dag --counts` prints one row per step (`cleaned = clean`, its stage, its job count), keeps steps with no jobs as `0`, then the total; it combines with `-o`. It counts the jobs planned: with `--partial`, the artifacts left out are not yet counted per step, which `IncompleteJob` would need a step id for.
 
 Keep the severity of compiler feedback consistent with whether it blocks a valid graph. [Issue 45](https://github.com/eclnz/spit/issues/45) asks whether errors that do not fail `check` should instead be warnings, especially in the VS Code extension. Audit those cases at the compiler's diagnostic level so CLI and editor users see the same distinction; the editor should render severity rather than decide it.
+
+*4b done in `b45f28e`.* The audit found no diagnostic that the editor marks as an error while `check` passes. Issue 45's example, the note about `--strict-paths`, went with that flag in `b1c5dbd`. Severity is set once, in `src/diagnostics`. `check` prints that list and fails exactly when it holds an error. `check --json` gives the editor the same list, and spit-vscode maps `warning` to a warning and anything else to an error, so it decides nothing. Each later command runs the diagnosis of the steps before it, so an error stops them all. The warnings are all right as warnings. They are unused or misnamed definitions, an empty stage, an unbound output type variable, a shell operator, a `#` joined to a word, and an operation with no command, which still makes a valid graph since `command` may be `null`. With inputs there are also empty steps, case collisions, dashed labels and near misses. One warning misstated what follows it. A recipe's missing `root` said `inputs` would "find no files", but `inputs` stops with an error. It stays a warning, since the folder may exist on the machine that runs the recipe, and the message now says that `inputs` and `dag` stop. `tests/severity.rs` holds `check` and `check --json` to the same diagnostics and severities, for each warning and for the examples. `docs/architecture.md` states the rule. spit-vscode needs no change.
+
+*Deferred, not a severity question.* `check` on a recipe that writes its records inline settles them, but it does not report what `dag` then reports for them: the incomplete `sidecars` group warning (T2), and a job input those records lack. `check` reads no data, and resolving jobs belongs to `dag`. Showing the group warning in the editor would need `incomplete_groups` to return structured groups that can be placed on a record line, not strings. It is worth an issue if inline records are used much.
 
 ### 5. Clarify the two-file mental model
 
