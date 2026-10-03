@@ -29,7 +29,7 @@ Status is `open`, `claimed (<branch>)`, `decided`, or `done (<commit>)`. Numbers
 | 5 | The two-file mental model | claimed (`two-files`) |
 | S1 | Syntax: operations declared inside a stage | open |
 | S2 | Syntax: `@ min(n)` beside the `many` port | decided, claimed (`many-min`) |
-| S3 | Syntax: `require` and `drop` clause order ([#36](https://github.com/eclnz/spit/issues/36)) | open |
+| S3 | Syntax: `require` and `drop` clause order ([#36](https://github.com/eclnz/spit/issues/36)) | claimed (`require-drop-order`) |
 | S4 | Syntax: shell metacharacters in commands | open |
 | S5 | Syntax: `path:` in both `.spit` and `.spitin` | claimed (`two-files`) |
 | R1 | Composite operations: provenance and diagnostics design | open |
