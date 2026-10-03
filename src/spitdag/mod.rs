@@ -244,8 +244,7 @@ impl BoundDag {
         produced
     }
 
-    /// The inputs no job here makes, each once, by path: sources, and the
-    /// outputs of stages left out.
+    /// The inputs no job here makes, each once, by path: the sources.
     pub fn external_inputs(&self) -> Vec<BoundArtifact<'_>> {
         let mut seen = self.produced();
         let mut external = Vec::new();
