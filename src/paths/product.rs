@@ -100,20 +100,10 @@ impl<'p> ProductPath<'p> {
         let template = index
             .path_template_for(product)
             .ok_or_else(|| error(format!("no path template for product `{product}`")))?;
-        let stage = index.stage_of(product).map(|stage| {
-            let mut directories = String::new();
-            for (index, component) in stage.split('/').enumerate() {
-                if index > 0 {
-                    directories.push('/');
-                }
-                push_encoded(&mut directories, component);
-            }
-            directories
-        });
         Ok(Self {
             template,
             name: product.replace("::", "."),
-            stage,
+            stage: stage_directories(index, product),
         })
     }
 
@@ -176,6 +166,21 @@ impl<'p> ProductPath<'p> {
         }
         Ok(relative)
     }
+}
+
+/// The directories `{@stage}` gives `product`'s paths, each nested stage
+/// one, or `None` for a product made in no stage.
+pub(crate) fn stage_directories(index: &PipelineIndex<'_>, product: &str) -> Option<String> {
+    index.stage_of(product).map(|stage| {
+        let mut directories = String::new();
+        for (index, component) in stage.split('/').enumerate() {
+            if index > 0 {
+                directories.push('/');
+            }
+            push_encoded(&mut directories, component);
+        }
+        directories
+    })
 }
 
 /// `product`'s path template with `{@product}` and `{@stage}` written out, as

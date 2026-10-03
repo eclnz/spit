@@ -9,7 +9,9 @@ use rustc_hash::FxHashSet;
 
 use super::coverage::{apply_drops, DropIndex, EveryGroupDropped};
 use super::exclusions::{Excluder, UnmatchedExclusion};
-use super::pattern::{match_pattern, missed_source, path_pattern, MissedSource, Piece};
+use super::pattern::{
+    match_pattern, missed_source, path_pattern, MissedSource, OutputPaths, Piece,
+};
 use crate::model::{
     ArtifactInstance, DirectoryDiscovery, EntityBinding, InputRules, Pipeline, PipelineIndex,
     ProductDef, Removal, SourceInventory, SourceRecord,
@@ -24,7 +26,8 @@ use crate::paths::{
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Discovery {
     pub inventory: SourceInventory,
-    /// Files under the root that match no source path rule.
+    /// Files under the root that match no source path rule, leaving out
+    /// SPIT's own files and those at the pipeline's output paths.
     pub unmatched_files: Vec<String>,
     /// Each source whose path rule matched no file, with the nearest of
     /// the unmatched files.
@@ -116,9 +119,11 @@ pub(super) fn discover(
             folders.insert(directory.as_str());
         }
     }
+    let outputs = OutputPaths::of(pipeline, &listing.directories);
     let mut discovery = Discovery::default();
-    // SPIT's own files, such as a recipe kept in its dataset, are not data a
-    // rule missed.
+    // SPIT's own files, such as a recipe kept in its dataset, and what an
+    // earlier run of the pipeline wrote under the root are not data a rule
+    // missed.
     for file in listing.files.iter().filter(|file| !is_spit_file(file)) {
         if let Some((index, _)) = first_match(&file_sources, file) {
             matched[index] = true;
@@ -131,7 +136,8 @@ pub(super) fn discover(
                     "`{file}`: is a file, but source `{}` reads folders",
                     source.product.name
                 )),
-                None => discovery.unmatched_files.push(file.clone()),
+                None if !outputs.hold(file) => discovery.unmatched_files.push(file.clone()),
+                None => {}
             }
         }
     }
@@ -223,9 +229,10 @@ pub(super) fn discover(
 }
 
 /// The files under `root` that no source rule of `pipeline` matches, sorted
-/// and leaving out SPIT's own files, with the sources that have no rule,
-/// whose files they may be. Unlike [`discover`], a source with no rule is
-/// not an error, and no other rule is applied.
+/// and leaving out SPIT's own files and those at its output paths, with
+/// the sources that have no rule, whose files they may be. Unlike
+/// [`discover`], a source with no rule is not an error, and no other rule
+/// is applied.
 pub(super) fn unmatched_files<'a>(
     pipeline: &'a Pipeline,
     root: &Path,
@@ -236,7 +243,9 @@ pub(super) fn unmatched_files<'a>(
     let mut without = Vec::new();
     for product in sources_of(pipeline) {
         match index.path_template_for(&product.name) {
-            Some(template) => patterns.push((product.folder, path_pattern(&template, product)?)),
+            Some(template) => {
+                patterns.push((product.folder, path_pattern(&template, product, None)?));
+            }
             None => without.push(product),
         }
     }
@@ -246,6 +255,7 @@ pub(super) fn unmatched_files<'a>(
         })
     };
     let listing = Listing::of(root)?;
+    let outputs = OutputPaths::of(pipeline, &listing.directories);
     // As in `discover`, a file in a source folder is read with its folder,
     // and a file a folder source's rule matches is skipped, not missed.
     let folders: FxHashSet<_> = listing
@@ -264,6 +274,7 @@ pub(super) fn unmatched_files<'a>(
                 && !file
                     .match_indices('/')
                     .any(|(end, _)| folders.contains(&file[..end]))
+                && !outputs.hold(file)
         })
         .cloned()
         .collect();
@@ -340,7 +351,7 @@ fn source_patterns(pipeline: &Pipeline) -> Result<Vec<SourcePattern<'_>>, PathEr
                     product.name
                 ))
             })?;
-            let pieces = path_pattern(&template, product)?;
+            let pieces = path_pattern(&template, product, None)?;
             Ok(SourcePattern { product, pieces })
         })
         .collect()
