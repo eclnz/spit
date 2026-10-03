@@ -317,3 +317,47 @@ fn discovery_names_a_group_missing_a_file() {
     );
     assert_eq!(notes.matches("warning:").count(), 1, "{notes}");
 }
+
+#[test]
+fn discovery_names_incomplete_groups_in_value_order() {
+    let tree = Tree::new(
+        "sidecars-incomplete-order",
+        &[
+            "site-b/shot-10.raw",
+            "site-b/shot-10.gpx",
+            "site-b/shot-2.raw",
+            "site-b/shot-2.json",
+            "site-a/shot-10.raw",
+            "site-a/shot-10.gpx",
+            "site-a/shot-10.json",
+            // A rule removes only part of a group: the `.json` it removes
+            // is not missing, the `.gpx` still is.
+            "site-a/shot-3.raw",
+            "site-a/shot-3.json",
+        ],
+    );
+    tree.write("pipeline.spit", PHOTOS);
+    let recipe = tree.write(
+        "dataset.spitin",
+        "pipeline pipeline.spit\nroot .\nexclude meta[site=a,shot=3]\n",
+    );
+    let output = Command::new(env!("CARGO_BIN_EXE_spit"))
+        .args(["inputs", recipe.to_str().unwrap()])
+        .output()
+        .unwrap();
+    let notes = text(&output.stderr);
+    assert!(output.status.success(), "{notes}");
+    let warnings: Vec<_> = notes
+        .lines()
+        .filter(|line| line.starts_with("warning:"))
+        .collect();
+    assert_eq!(
+        warnings,
+        [
+            "warning: photo[site=a,shot=3] has .raw but no .gpx",
+            "warning: photo[site=b,shot=2] has .raw and .json but no .gpx",
+            "warning: photo[site=b,shot=10] has .raw and .gpx but no .json",
+        ],
+        "{notes}"
+    );
+}
