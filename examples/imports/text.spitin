@@ -1,4 +1,4 @@
 pipeline text.spit
 root text_data
 
-require shard count>=1 per [group]
+require [group] where shard count>=1

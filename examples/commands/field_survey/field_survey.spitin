@@ -1,6 +1,6 @@
 pipeline field_survey.spit
 root field_survey_data
 
-require raw_photo count>=2 per [site, visit]
-require flat_field count=1 per [site, visit]
-require ground_map count=1 per [site, visit]
+require [site, visit] where raw_photo count>=2
+require [site, visit] where flat_field count=1
+require [site, visit] where ground_map count=1

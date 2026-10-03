@@ -112,7 +112,7 @@ fn missing_join_input_points_to_the_call() {
 #[test]
 fn a_coverage_error_names_the_failing_rule_when_rules_share_a_product() {
     let recipe = spit::parse_input_spec(
-        "require raw count>=1 per [site]\nrequire raw count>=2 per [site]\n",
+        "require [site] where raw count>=1\nrequire [site] where raw count>=2\n",
     )
     .unwrap();
     let context = spit::Context {

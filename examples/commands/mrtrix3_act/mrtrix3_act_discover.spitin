@@ -10,6 +10,6 @@ path source_lut: config/source_lut.txt
 path target_lut: config/target_lut.txt
 
 discover sessions: [sub, ses] from dirs sub-{sub}/ses-{ses}
-require raw_dwi count>=2 per [sub, ses]
-require reverse_b0 count=1 per [sub, ses]
-require t1w count=1 per [sub, ses]
+require [sub, ses] where raw_dwi count>=2
+require [sub, ses] where reverse_b0 count=1
+require [sub, ses] where t1w count=1

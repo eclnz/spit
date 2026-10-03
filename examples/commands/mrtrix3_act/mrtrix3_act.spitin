@@ -10,6 +10,6 @@ path target_lut: config/target_lut.txt
 path dwi: sub-{sub}/ses-{ses}/dwi/sub-{sub}_ses-{ses}_run-{run}_dwi
 path reverse_b0_files: sub-{sub}/ses-{ses}/fmap/sub-{sub}_ses-{ses}_dir-PA_epi
 
-require raw_dwi count>=2 per [sub, ses]
-require reverse_b0 count=1 per [sub, ses]
-require t1w count=1 per [sub, ses]
+require [sub, ses] where raw_dwi count>=2
+require [sub, ses] where reverse_b0 count=1
+require [sub, ses] where t1w count=1

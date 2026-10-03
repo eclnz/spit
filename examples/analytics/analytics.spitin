@@ -2,8 +2,8 @@ pipeline analytics.spit
 root analytics_data
 path: {@product}/{@entities}
 
-require events count>=1 per [tenant, customer, day]
-require customers count=1 per [tenant, customer]
-require subscriptions count=1 per [tenant, customer]
-require purchases count=1 per [tenant, customer]
-require campaigns count=1 per [tenant, customer]
+require [tenant, customer, day] where events count>=1
+require [tenant, customer] where customers count=1
+require [tenant, customer] where subscriptions count=1
+require [tenant, customer] where purchases count=1
+require [tenant, customer] where campaigns count=1
