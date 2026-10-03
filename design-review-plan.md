@@ -26,12 +26,12 @@ Status is `open`, `claimed (<branch>)`, `decided`, or `done (<commit>)`. Numbers
 | 3 | Lower the cost of binding existing data: judge `inputs --suggest` on irregular datasets | open |
 | 4a | `dag --counts` | done (`370a18f`) |
 | 4b | Diagnostic severity audit ([#45](https://github.com/eclnz/spit/issues/45)) | open |
-| 5 | The two-file mental model | open |
+| 5 | The two-file mental model | claimed (`two-files`) |
 | S1 | Syntax: operations declared inside a stage | open |
 | S2 | Syntax: `@ min(n)` beside the `many` port | decided, claimed (`many-min`) |
 | S3 | Syntax: `require` and `drop` clause order ([#36](https://github.com/eclnz/spit/issues/36)) | open |
 | S4 | Syntax: shell metacharacters in commands | open |
-| S5 | Syntax: `path:` in both `.spit` and `.spitin` | open |
+| S5 | Syntax: `path:` in both `.spit` and `.spitin` | claimed (`two-files`) |
 | R1 | Composite operations: provenance and diagnostics design | open |
 | T1 | Sidecar `incomplete_groups` keyed by structured bindings ([#37](https://github.com/eclnz/spit/issues/37)) | done (`5ab3a16`) |
 | T2 | Incomplete-group warning for `InputSource::Inventory` | done (`8ef0e50`) |
