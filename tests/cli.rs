@@ -120,7 +120,9 @@ path extra: in/{subject}.extra
 
     let conflict = spit(&["dag", pipeline, inputs, "--counts", "--json"]);
     assert!(!conflict.status.success());
-    assert!(stderr(&conflict).contains("--counts cannot be used with --json"));
+    assert!(stderr(&conflict).contains(
+        "--counts cannot be used with --json; run dag with --counts to see how many jobs each step resolves, or with --json to print the .spitdag"
+    ));
 }
 
 #[test]
