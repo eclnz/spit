@@ -85,7 +85,7 @@ fn drop_rules_are_applied_by_the_stage_before_jobs_exist() {
 #[test]
 fn require_gaps_are_the_stages_to_report_and_do_not_reach_the_resolver() {
     let tree = Tree::new("missing", &FILES);
-    let recipe = format!("{RECIPE}require sessions count>=2 per [sub]\n");
+    let recipe = format!("{RECIPE}require [sub] where sessions count>=2\n");
     let resolved = inventory_of(&recipe, &tree);
     assert_eq!(resolved.gaps.len(), 1);
     assert!(matches!(
@@ -107,9 +107,10 @@ fn require_gaps_are_the_stages_to_report_and_do_not_reach_the_resolver() {
 
 #[test]
 fn a_recipe_can_settle_records_that_were_already_written() {
-    let recipe =
-        parse_input_spec("path image: data/{sub}/{ses}.nii.gz\nrequire image count>=2 per [sub]\n")
-            .unwrap();
+    let recipe = parse_input_spec(
+        "path image: data/{sub}/{ses}.nii.gz\nrequire [sub] where image count>=2\n",
+    )
+    .unwrap();
     let inventory = spit::parse_source_inventory(
         "sources:\n  image[sub=1, ses=1]\n  image[sub=2, ses=1]\n  image[sub=2, ses=2]\n",
     )
@@ -176,7 +177,7 @@ fn missing_source_coverage_names_the_path_rule_and_unmatched_file() {
     );
     let recipe = tree.write(
         "analysis.spitin",
-        "pipeline analysis.spit\nroot .\npath: t1w sub-{sub}/ses-{ses}\nrequire t1w count=1 per [sub, ses]\n",
+        "pipeline analysis.spit\nroot .\npath: t1w sub-{sub}/ses-{ses}\nrequire [sub, ses] where t1w count=1\n",
     );
     let run = |extra: &[&str]| {
         Command::new(env!("CARGO_BIN_EXE_spit"))
@@ -268,7 +269,7 @@ fn a_named_recipe_runs_in_memory_and_defaults_output_paths() {
         "pipeline analysis.spit\nroot .\n\
          discover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}\n\
          drop [sub] where sessions count<2\n\
-         require sessions count>=2 per [sub]\n\
+         require [sub] where sessions count>=2\n\
          path image: data/sub-{sub}/ses-{ses}/image.nii.gz\n",
     )
     .unwrap();
@@ -327,7 +328,7 @@ fn explicit_spitin_uses_its_own_directory_and_require_reports_gaps() {
         &recipe,
         "pipeline ../pipeline.spit\nroot .\n\
          discover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}\n\
-         require sessions count>=2 per [sub]\n\
+         require [sub] where sessions count>=2\n\
          path image: data/sub-{sub}/ses-{ses}/image.nii.gz\n",
     )
     .unwrap();

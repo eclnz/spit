@@ -4,7 +4,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Range;
 
-use crate::model::{CoverageAction, CoverageRule, Invocation, PathOrigin, PipelineIndex};
+use crate::model::{CoverageRule, Invocation, PathOrigin, PipelineIndex};
 use crate::span::{columns_of, content_columns, find_word, Place};
 
 use super::keyword::Keyword;
@@ -218,15 +218,10 @@ pub(super) fn rule_place(original: &str, number: usize, rule: &CoverageRule) -> 
     let content = &original[whole.clone()];
     let after_keyword =
         whole.end - Keyword::split(content).map_or(content.len(), |(_, rest)| rest.len());
-    // A `drop` rule writes its groups before its source; `require`, after.
-    let groups_first = rule.action == CoverageAction::Drop;
-    let open = if groups_first {
-        original[after_keyword..whole.end]
-            .find('[')
-            .map(|offset| after_keyword + offset)
-    } else {
-        None
-    };
+    // `drop` and `require` both write their groups before their source.
+    let open = original[after_keyword..whole.end]
+        .find('[')
+        .map(|offset| after_keyword + offset);
     let from = match open {
         Some(open) => original[open..whole.end]
             .find(']')
@@ -234,12 +229,7 @@ pub(super) fn rule_place(original: &str, number: usize, rule: &CoverageRule) -> 
         None => after_keyword,
     };
     let product = find_word(original, from, &rule.product).unwrap_or_else(|| whole.clone());
-    let dimensions = match open {
-        Some(open) => open..from,
-        None => original[product.end..whole.end]
-            .find('[')
-            .map_or_else(|| whole.clone(), |offset| product.end + offset..whole.end),
-    };
+    let dimensions = open.map_or_else(|| whole.clone(), |open| open..from);
     Rule {
         line: number,
         whole,

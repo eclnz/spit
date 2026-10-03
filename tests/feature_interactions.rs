@@ -126,7 +126,7 @@ fn a_scan_and_its_records_settle_to_the_same_plan() {
     );
     let rules = "exclude bold[sub=2,ses=1,run=2]   # bad\n\
                  drop [sub] where t1w count<1\n\
-                 require bold count>=1 per [sub, ses]\n";
+                 require [sub, ses] where bold count>=1\n";
     let header = "pipeline p.spit\nroot d\n";
     let base = tree.write("base.spitin", header);
     let raw = tree.path().join("raw.spitout");

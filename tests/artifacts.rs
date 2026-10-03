@@ -206,7 +206,7 @@ sources:
 fn a_coverage_gap_holds_back_its_sources_and_blocks_their_consumers() {
     let text = "\
 source scan [subject, run]
-require scan run=1,2,3 per [subject]
+require [subject] where scan has run=1,2,3
 operation clean(scan: Scan) -> Scan
 cleaned = clean(scan)
 ";

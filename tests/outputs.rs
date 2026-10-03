@@ -44,13 +44,13 @@ score = compare(averaged, reference)
 const DISCOVER: &str = "discover sessions: [sub, ses] from dirs sub-{sub}/ses-{ses}\n";
 /// A `require` rule that the gaps dataset fails.
 const STRICT: &str = "\
-require image count>=2 per [sub, ses]
-require reference count=1 per [sub, ses]
+require [sub, ses] where image count>=2
+require [sub, ses] where reference count=1
 ";
 /// A `drop` rule that removes what the gaps dataset lacks.
 const DROP: &str = "\
 drop [sub, ses] where image count<2
-require reference count=1 per [sub, ses]
+require [sub, ses] where reference count=1
 ";
 
 /// Three subjects with a mask, each with two sessions of a reference and

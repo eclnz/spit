@@ -43,12 +43,13 @@ pub enum Word {
     Discover,
     DiscoverFrom,
     Require,
-    Per,
+    RequireWhere,
     Count,
     Drop,
     DropWhere,
     Missing,
     Has,
+    RequireHas,
     Exclude,
     ExcludeFrom,
     Product,
@@ -88,7 +89,7 @@ impl Word {
 }
 
 /// Every word's documentation, in the order of [`Word`].
-pub static DOCS: [Doc; 46] = [
+pub static DOCS: [Doc; 47] = [
     Doc {
         name: "source",
         kind: "keyword",
@@ -254,21 +255,21 @@ pub static DOCS: [Doc; 46] = [
         name: "require",
         kind: "keyword",
         anchor: "constraints",
-        example: "require image count>=2 per [subject, visit]\nrequire image run=1,2 per [subject, visit]",
+        example: "require [subject, visit] where image count>=2\nrequire [subject, visit] where image has run=1,2",
         summary: "Stops the run if any group fails, checked against what `exclude` and `drop` leave. A rule counts artifacts or requires particular values in each group. A rule that finds no group at all is an error.",
     },
     Doc {
-        name: "per",
+        name: "require-where",
         kind: "keyword",
         anchor: "constraints",
-        example: "require image count=1 per [subject, visit]",
-        summary: "The dimensions a `require` rule groups by. Each group is checked on its own.",
+        example: "require [subject, visit] where image count=1",
+        summary: "Introduces a `require` rule's condition, after the groups it checks: the source or discovery rule to count, then a `count`, `has` values, or both. Each group is checked on its own.",
     },
     Doc {
         name: "count",
         kind: "keyword",
         anchor: "constraints",
-        example: "require image count>=2 per [subject, visit]\ndrop [sub] where sessions count<2",
+        example: "require [subject, visit] where image count>=2\ndrop [sub] where sessions count<2",
         summary: "How many artifacts of a source, or contexts of a discovery, each group holds, compared with `=`, `!=`, `>=`, `<=`, `>` or `<`.",
     },
     Doc {
@@ -298,6 +299,13 @@ pub static DOCS: [Doc; 46] = [
         anchor: "drop-groups-that-fail-a-criterion",
         example: "drop [sub, ses] where bold has run=3",
         summary: "Removes each group with one of the values: here, a session with a run 3.",
+    },
+    Doc {
+        name: "require-has",
+        kind: "keyword",
+        anchor: "constraints",
+        example: "require [subject, visit] where image has run=1,2",
+        summary: "Requires each group to hold every one of the values: here, a run 1 and a run 2 in each visit.",
     },
     Doc {
         name: "exclude",
@@ -594,7 +602,8 @@ fn rule_word(code: &str, range: Range<usize>, statement: Option<Word>) -> Option
         (Word::Require | Word::Drop, "count") if after.starts_with(['=', '!', '>', '<']) => {
             Some(Word::Count)
         }
-        (Word::Require, "per") if after.starts_with('[') => Some(Word::Per),
+        (Word::Require, "where") if before.ends_with(']') => Some(Word::RequireWhere),
+        (Word::Require, "has") if before.contains(" where ") => Some(Word::RequireHas),
         (Word::Drop, "where") if before.ends_with(']') => Some(Word::DropWhere),
         (Word::Drop, "missing") if before.contains(" where ") => Some(Word::Missing),
         (Word::Drop, "has") if before.contains(" where ") => Some(Word::Has),

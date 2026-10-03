@@ -1,4 +1,4 @@
 pipeline stages.spit
 root stages_data
 
-require shard count>=1 per [group]
+require [group] where shard count>=1

@@ -112,7 +112,7 @@ fn a_coverage_failure_points_to_the_nearest_file() {
         "pipeline a.spit\nroot data\n\
          path bold: sub-{sub}/ses-{ses}/func/sub-{sub}_ses-{ses}_run-{run}_bold.nii.gz\n\
          path t1w: sub-{sub}/ses-{ses}/anat/sub-{sub}_ses-{ses}_T1w.nii.gz\n\
-         require bold count>=1 per [sub, ses]\n",
+         require [sub, ses] where bold count>=1\n",
     );
     let stderr = stderr(&tree, &["inputs", "a.spitin"]);
     assert!(

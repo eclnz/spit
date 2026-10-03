@@ -2,5 +2,5 @@ pipeline branching.spit
 root branching_data
 path: {@product}/{@entities}
 
-require raw count>=1 per [team, period]
-require policy count=1 per [team]
+require [team, period] where raw count>=1
+require [team] where policy count=1

@@ -403,7 +403,7 @@ pub struct CoverageRule {
 }
 
 /// Reads as written: `drop [sub] where sessions count<2`, or `require
-/// image run=1,2 per [sub]`.
+/// [sub] where image has run=1,2`.
 impl fmt::Display for CoverageRule {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let clause = |values: &BTreeMap<String, Vec<String>>| {
@@ -415,14 +415,19 @@ impl fmt::Display for CoverageRule {
         };
         match self.action {
             CoverageAction::Require => {
-                write!(f, "require {}", self.product)?;
+                write!(
+                    f,
+                    "require [{}] where {}",
+                    self.group_by.join(", "),
+                    self.product
+                )?;
                 if let Some(count) = self.count {
                     write!(f, " {}", count.as_written())?;
                 }
                 if !self.values.is_empty() {
-                    write!(f, " {}", clause(&self.values))?;
+                    write!(f, " has {}", clause(&self.values))?;
                 }
-                write!(f, " per [{}]", self.group_by.join(", "))
+                Ok(())
             }
             CoverageAction::Drop => {
                 write!(

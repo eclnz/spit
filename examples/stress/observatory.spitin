@@ -1,10 +1,10 @@
 pipeline observatory.spit
 root observatory_data
 
-require raw count>=1 per [org, site, device, window, channel]
-require calibration count=1 per [org, site, device, channel]
-require clock count=1 per [org, site]
-require window_policy count=1 per [org, site, window]
-require model count=1 per [org, site, device]
-require target count=1 per [org, site]
-require policy count=1 per [org]
+require [org, site, device, window, channel] where raw count>=1
+require [org, site, device, channel] where calibration count=1
+require [org, site] where clock count=1
+require [org, site, window] where window_policy count=1
+require [org, site, device] where model count=1
+require [org, site] where target count=1
+require [org] where policy count=1
