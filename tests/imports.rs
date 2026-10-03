@@ -218,3 +218,24 @@ fn an_import_may_not_define_again_what_the_file_defines() {
         );
     }
 }
+
+/// Pins what `use` does with a `sidecars` group today, which is to bring each
+/// member in as an ordinary source and leave the group behind (#68).
+#[test]
+fn an_imported_sidecar_member_is_an_ordinary_source() {
+    let dir = Tree::new("imports", &[]);
+    dir.write(
+        "lib.spit",
+        "sidecars photo [shot]:\n    path: photos/{shot}\n    source raw : Image .raw\n    source meta : Json .json\n",
+    );
+    let main = dir.write(
+        "main.spit",
+        "use lib.spit as l\noperation cp(x: Image) -> Image\ncommand cp: cp {x} {@output}\nout = cp(l::raw)\n",
+    );
+    let pipeline = parse_pipeline_at(&fs::read_to_string(&main).unwrap(), &main).unwrap();
+    assert!(pipeline.sidecar_groups.is_empty());
+    let paths: Vec<_> = ["l::raw", "l::meta"]
+        .map(|name| pipeline.path_template_for(name).unwrap().to_string())
+        .into();
+    assert_eq!(paths, ["photos/{shot}.raw", "photos/{shot}.json"]);
+}
