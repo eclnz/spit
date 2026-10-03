@@ -53,6 +53,8 @@ impl StepId {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DagStep {
     pub operation: String,
+    /// The products it makes, one per output port, as the step names them.
+    pub outputs: Vec<String>,
     /// The stage whose block holds the step, as `outer/inner`, if any.
     pub stage: Option<String>,
 }
