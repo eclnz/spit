@@ -142,12 +142,11 @@ const FLAGS: [Flag; 12] = [
 ];
 
 /// Pairs of flags that cannot be used together.
-const CONFLICTS: [(Flag, Flag); 10] = [
+const CONFLICTS: [(Flag, Flag); 9] = [
     (Flag::Json, Flag::Paths),
     (Flag::Json, Flag::Output),
     (Flag::Paths, Flag::Output),
     (Flag::Json, Flag::Commands),
-    (Flag::Commands, Flag::Output),
     (Flag::Json, Flag::PathRules),
     (Flag::Unmatched, Flag::Output),
     (Flag::Suggest, Flag::Output),
@@ -191,7 +190,7 @@ impl Flag {
             (Self::Output, _) => "write the .spitdag to <file>",
             (Self::Paths, _) => "show each artifact's file",
             (Self::Commands, _) => {
-                "show each job's command lines, as a shell would run them; cannot combine with -o"
+                "show each job's command lines, as a shell would run them; with -o, as well as writing the .spitdag"
             }
             (Self::Counts, _) => {
                 "show how many jobs each step resolves, not the jobs; before them with --commands or --paths; with -o, as well as writing the .spitdag; cannot combine with --json"
@@ -277,9 +276,6 @@ impl Flags {
             if self.has(first) && self.has(second) {
                 // Two views of `dag` that cannot share its output say how to get each.
                 let hint = match (first, second) {
-                    (Flag::Commands, Flag::Output) => {
-                        "; run dag with --commands to inspect command lines, or with -o <file> to save a .spitdag"
-                    }
                     (Flag::Counts, Flag::Json) => {
                         "; run dag with --counts to see how many jobs each step resolves, or with --json to print the .spitdag"
                     }

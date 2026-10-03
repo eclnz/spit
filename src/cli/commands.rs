@@ -9,8 +9,8 @@ use spit::{
     parse_input_spec_at, render_artifacts, render_bound_dag, render_check_json, render_dag,
     render_diagnostics_json, render_editor_json, render_source_inventory, render_step_counts,
     render_words_json, resolve_artifacts_partial, unused_sources_summary,
-    validate_bound_source_files, validate_source_files, BoundPaths, Context, FileNames, Gap,
-    LeftOut, View,
+    validate_bound_source_files, validate_source_files, BoundDag, BoundPaths, Context, FileNames,
+    Gap, LeftOut, View,
 };
 
 use super::args::{CliArgs, Flag};
@@ -204,6 +204,22 @@ pub(crate) fn dag(args: &CliArgs) -> Result<(), Box<dyn Error>> {
     if args.has(Flag::Counts) {
         print!("{}", render_step_counts(dag));
     }
+    let view = View {
+        paths: args.has(Flag::Paths),
+        commands: args.has(Flag::Commands),
+    };
+    // Print the jobs as `view` shows them, after the counts if there are any.
+    let print_view = |bound: &BoundDag| {
+        if view.commands {
+            if let Some(root) = &prepared.root {
+                eprintln!("note: commands run from `{}`", root.display());
+            }
+        }
+        if args.has(Flag::Counts) {
+            println!();
+        }
+        print!("{}", render_bound_dag(bound, view));
+    };
     if args.has(Flag::Output) || args.has(Flag::Json) {
         let mut bound = bind(paths)?;
         bound.removed = prepared.inputs.inventory.removed.clone();
@@ -233,23 +249,15 @@ pub(crate) fn dag(args: &CliArgs) -> Result<(), Box<dyn Error>> {
                 .to_string_lossy()
                 .into_owned()
         });
-        return write_spitdag(args, &bound);
-    }
-    let view = View {
-        paths: args.has(Flag::Paths),
-        commands: args.has(Flag::Commands),
-    };
-    if view.paths || view.commands {
+        write_spitdag(args, &bound)?;
+        // With -o, the .spitdag goes to its file and the commands to stdout.
         if view.commands {
-            if let Some(root) = &prepared.root {
-                eprintln!("note: commands run from `{}`", root.display());
-            }
+            print_view(&bound);
         }
-        // The counts come first, a blank line from the jobs.
-        if args.has(Flag::Counts) {
-            println!();
-        }
-        print!("{}", render_bound_dag(&bind(paths)?, view));
+        return Ok(());
+    }
+    if view.paths || view.commands {
+        print_view(&bind(paths)?);
     } else if !args.has(Flag::Counts) {
         print!("{}", render_dag(dag));
     }

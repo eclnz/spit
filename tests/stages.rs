@@ -145,19 +145,29 @@ fn stage_placeholder_needs_a_stage() {
 }
 
 #[test]
-fn stages_must_not_depend_on_each_other_in_a_cycle() {
-    // `glue` sits outside every stage, so `late` reads from `second` through it.
+fn stages_may_read_from_each_other_in_a_cycle() {
+    // A stage groups steps and scopes their paths; jobs are ordered by what
+    // they read, so `first` and `third` may each read from the other.
     let text = "source raw [id]\noperation copy(a: A) -> A\noperation pair(a: A, a2: A) -> A\nstage first:\n    a = copy(raw)\n    d = pair(a, late)\nstage second:\n    b = copy(a)\nglue = copy(b)\nstage third:\n    late = copy(glue)\n";
-    let diagnostics = diagnose(text, None);
-    assert_eq!(
-        messages(&diagnostics),
-        [(
-            Some(4),
-            "stages must not depend on each other in a cycle: `d` in `first` reads `late` from `third`, `late` in `third` reads `b` from `second`, and `b` in `second` reads `a` from `first`"
-        )]
-    );
+    assert_eq!(messages(&diagnose(text, None)), []);
     let (pipeline, _) = support::parse_fixture(text).unwrap();
-    assert!(resolve(&pipeline, &Default::default()).is_err());
+    let inventory = spit::parse_source_inventory("sources:\n    raw[id=1]\n").unwrap();
+    let dag = resolve(&pipeline, &inventory).unwrap();
+    let order: Vec<_> = dag
+        .jobs
+        .iter()
+        .map(|job| dag.steps[job.step.index()].stage.as_deref())
+        .collect();
+    assert_eq!(
+        order,
+        [
+            Some("first"),
+            Some("second"),
+            None,
+            Some("third"),
+            Some("first")
+        ]
+    );
 }
 
 #[test]
@@ -205,10 +215,6 @@ fn stage_syntax_errors() {
             ),
         ),
         (
-            "stage prep:\n    stage inner:\n    stage inner:\n",
-            (Some(3), "duplicate stage `prep/inner`: it is already opened on line 2; a stage is one block, so move these lines into it"),
-        ),
-        (
             "stage a:\n    operation copy(x: Text) -> Text\nstage b:\n    operation copy(x: Text) -> Text\n",
             (Some(4), "duplicate operation `copy`: it is already declared on line 2; operations are global even when declared in a stage, so give this one another name"),
         ),
@@ -224,12 +230,16 @@ fn stage_syntax_errors() {
             ),
         ),
         (
-            "stage prep:\nstage prep:\n",
-            (Some(2), "duplicate stage `prep`: it is already opened on line 1; a stage is one block, so move these lines into it"),
-        ),
-        (
             "stage prep:\n    path: a/{@product}/{@entities}\n    path: b/{@product}/{@entities}\n",
             (Some(3), "duplicate default path template for stage `prep`"),
+        ),
+        (
+            "stage prep:\n    path: a/{@product}/{@entities}\nstage prep:\n    path: b/{@product}/{@entities}\n",
+            (Some(4), "duplicate default path template for stage `prep`"),
+        ),
+        (
+            "stage prep:\n    ext: .txt\nstage prep:\n    ext: .csv\n",
+            (Some(4), "duplicate `ext:` for stage `prep`"),
         ),
     ];
     for (text, expected) in cases {
@@ -241,6 +251,37 @@ fn stage_syntax_errors() {
             .collect();
         assert_eq!(messages(&errors), [expected], "{text}");
     }
+}
+
+#[test]
+fn a_stage_opened_again_continues_its_first_block() {
+    // As in the usability study: `func` split into two blocks around a step
+    // of another stage. The second block's steps join `func`, and take its
+    // default path, wherever in the two blocks that is written.
+    let text = "source raw [id]\npath raw: in/{@entities}\noperation copy(a: A) -> A\nstage func:\n    a = copy(raw)\nstage anat:\n    b = copy(a)\nstage func:\n    path: f/{@product}/{@entities}\n    c = copy(b)\n    stage inner:\n        d = copy(c)\nstage func:\n    stage inner:\n        e = copy(d)\n";
+    assert_eq!(messages(&diagnose(text, None)), []);
+    let (pipeline, _) = support::parse_fixture(text).unwrap();
+    let names: Vec<_> = pipeline.stages.iter().map(|stage| &stage.name).collect();
+    assert_eq!(names, ["func", "anat", "func/inner"]);
+    assert_eq!(pipeline.stage_of("a"), Some("func"));
+    assert_eq!(pipeline.stage_of("c"), Some("func"));
+    assert_eq!(pipeline.stage_of("e"), Some("func/inner"));
+    let inventory = spit::parse_source_inventory("sources:\n    raw[id=1]\n").unwrap();
+    let dag = resolve(&pipeline, &inventory).unwrap();
+    let bound = bound(&pipeline, &dag).unwrap();
+    for product in ["a", "c", "d", "e"] {
+        assert!(
+            bound.contains(&format!("path: f/{product}/id=1")),
+            "{bound}"
+        );
+    }
+    assert!(bound.contains("path: out/b/id=1"), "{bound}");
+    // A header that opens a stage again is no place to report it from.
+    let empty = "source raw [id]\noperation copy(a: A) -> A\nstage prep:\nstage prep:\n    a = copy(raw)\nstage idle:\nstage idle:\n";
+    assert_eq!(
+        messages(&diagnose(empty, None)),
+        [(Some(6), "stage `idle` has no steps")]
+    );
 }
 
 #[test]
@@ -331,47 +372,21 @@ fn nested_stages_nest_their_paths_and_inherit_defaults() {
 }
 
 #[test]
-fn one_stage_includes_the_stages_nested_in_it() {
-    let (pipeline, inventory) = support::parse_fixture(&nested()).unwrap();
-    let dag = resolve(&pipeline, &inventory.unwrap()).unwrap();
-    let ids = |stage: &str| -> Vec<_> {
-        dag.only_stage(stage)
-            .jobs
-            .iter()
-            .map(|job| job.id.number())
-            .collect()
-    };
-    assert_eq!(ids("preprocess"), [1, 2, 3, 4, 5, 6, 7]);
-    assert_eq!(ids("preprocess/combine"), [4, 5]);
-    assert_eq!(ids("pre"), Vec::<usize>::new());
+fn an_outer_stage_counts_the_jobs_of_the_stages_nested_in_it() {
     let (ok, _, stderr) = spit(&["dag", NESTED, NESTED_SOURCES]);
     assert!(ok, "{stderr}");
     assert!(stderr.contains("9 jobs resolved: 7 in preprocess, 2 in analysis."));
 }
 
 #[test]
-fn nested_siblings_must_not_depend_on_each_other_in_a_cycle() {
-    // `glue` sits in `outer` itself, so `b` reads from `first` through it.
-    let text = "source raw [id]\noperation copy(a: A) -> A\nstage outer:\n    glue : Item [id] = copy(a)\n    stage first:\n        a = copy(raw)\n        c : Item [id] = copy(b)\n    stage second:\n        b = copy(glue)\n";
-    assert_eq!(
-        messages(&diagnose(text, None)),
-        [(
-            Some(5),
-            "stages must not depend on each other in a cycle: `c` in `outer/first` reads `b` from `outer/second` and `b` in `outer/second` reads `a` from `outer/first`"
-        )]
-    );
-}
-
-#[test]
-fn nested_stages_count_toward_their_outer_stages_cycles() {
-    let text = "source raw [id]\noperation copy(a: A) -> A\nstage prep:\n    stage deep:\n        a : Item [id] = copy(late)\n        c = copy(raw)\nstage later:\n    stage deep:\n        late = copy(c)\n";
-    assert_eq!(
-        messages(&diagnose(text, None)),
-        [(
-            Some(3),
-            "stages must not depend on each other in a cycle: `a` in `prep` reads `late` from `later` and `late` in `later` reads `c` from `prep`"
-        )]
-    );
+fn nested_stages_may_read_from_each_other_in_a_cycle() {
+    // Siblings within one stage, through a step in the outer stage itself.
+    let siblings = "source raw [id]\noperation copy(a: A) -> A\nstage outer:\n    glue : Item [id] = copy(a)\n    stage first:\n        a = copy(raw)\n        c : Item [id] = copy(b)\n    stage second:\n        b = copy(glue)\n";
+    // Stages nested in two outer stages that read from each other.
+    let across = "source raw [id]\noperation copy(a: A) -> A\nstage prep:\n    stage deep:\n        a : Item [id] = copy(late)\n        c = copy(raw)\nstage later:\n    stage deep:\n        late = copy(c)\n";
+    for text in [siblings, across] {
+        assert_eq!(messages(&diagnose(text, None)), [], "{text}");
+    }
 }
 
 #[test]
@@ -451,19 +466,8 @@ fn a_library_may_group_operations_in_stages() {
 
 #[test]
 fn verified_files_name_what_was_checked() {
-    let verified = |sources, made_elsewhere| {
-        spit::VerifiedFiles {
-            sources,
-            made_elsewhere,
-        }
-        .to_string()
-    };
-    assert_eq!(verified(39, 0), "39 source files verified.");
-    assert_eq!(verified(0, 2), "2 files made outside the stage verified.");
-    assert_eq!(
-        verified(3, 2),
-        "3 source files and 2 files made outside the stage verified."
-    );
+    let verified = spit::VerifiedFiles { sources: 39 }.to_string();
+    assert_eq!(verified, "39 source files verified.");
 }
 
 #[test]

@@ -1,10 +1,10 @@
 //! Checks of declarations that need no inventory: products, operations,
 //! the steps that produce each product, stages, and the order steps run in.
 
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::error::{DefinitionSubject, ResolveError};
-use crate::model::{Cardinality, InputBinding, Invocation, OperationDef, Pipeline, ProductDef};
+use crate::model::{Cardinality, Invocation, OperationDef, Pipeline, ProductDef};
 
 use super::{find_operation, find_product};
 
@@ -159,29 +159,8 @@ fn check_operation(operation: &OperationDef) -> Result<(), ResolveError> {
     Ok(())
 }
 
-/// Each stage is declared once and holds only steps, and stages must not
-/// depend on each other in a cycle. A step outside every stage passes the
-/// stages it reads from on to the steps that read from it.
-pub(super) fn check_stages(
-    pipeline: &Pipeline,
-    producers: &BTreeMap<String, usize>,
-    errors: &mut Vec<(DefinitionSubject, ResolveError)>,
-) {
-    check_stage_declarations(pipeline, errors);
-    let upstream = stage_dependencies(pipeline, producers);
-    check_stage_cycles(pipeline, &upstream, errors);
-}
-
-fn stage_error(name: &str, detail: String) -> (DefinitionSubject, ResolveError) {
-    let subject = DefinitionSubject::Stage(name.to_owned());
-    (
-        subject.clone(),
-        ResolveError::InvalidDefinition { subject, detail },
-    )
-}
-
 /// Each stage is declared once, and each step's stage is declared.
-fn check_stage_declarations(
+pub(super) fn check_stages(
     pipeline: &Pipeline,
     errors: &mut Vec<(DefinitionSubject, ResolveError)>,
 ) {
@@ -214,143 +193,12 @@ fn check_stage_declarations(
     }
 }
 
-/// For each stage, the sibling stages it reads from, with one product it
-/// makes and the product it reads for each.
-type StageDependencies<'a> = BTreeMap<String, BTreeMap<String, (&'a str, &'a str)>>;
-
-/// Which stages each stage reads from. Nested stages are compared with their
-/// siblings only: the stages that split off where two stages' names part. A
-/// step written in an outer stage itself, or outside every stage, passes on
-/// what it reads.
-fn stage_dependencies<'a>(
-    pipeline: &'a Pipeline,
-    producers: &BTreeMap<String, usize>,
-) -> StageDependencies<'a> {
-    let mut upstream: StageDependencies<'a> = BTreeMap::new();
-    for invocation in &pipeline.invocations {
-        let Some(stage) = invocation.stage.as_deref() else {
-            continue;
-        };
-        let consumer: Vec<_> = stage.split('/').collect();
-        let mut pending: Vec<&str> = invocation
-            .inputs
-            .iter()
-            .map(InputBinding::product_name)
-            .collect();
-        let mut visited = BTreeSet::new();
-        while let Some(product) = pending.pop() {
-            if !visited.insert(product) {
-                continue;
-            }
-            let Some(producer) = producers
-                .get(product)
-                .map(|&index| &pipeline.invocations[index])
-            else {
-                continue;
-            };
-            let made: Vec<_> = producer
-                .stage
-                .as_deref()
-                .map_or_else(Vec::new, |name| name.split('/').collect());
-            let shared = consumer
-                .iter()
-                .zip(&made)
-                .take_while(|(left, right)| left == right)
-                .count();
-            if shared == made.len() && shared < consumer.len() {
-                // Made in a stage around this one, or outside every stage.
-                pending.extend(producer.inputs.iter().map(InputBinding::product_name));
-            } else if shared < made.len() && shared < consumer.len() {
-                upstream
-                    .entry(consumer[..=shared].join("/"))
-                    .or_default()
-                    .entry(made[..=shared].join("/"))
-                    .or_insert_with(|| (invocation.output_product(), product));
-            }
-            // Otherwise the producer is in this stage or one nested in it,
-            // and records what it reads itself.
-        }
-    }
-    upstream
-}
-
-/// Report each cycle of stages that read from each other, once.
-fn check_stage_cycles(
-    pipeline: &Pipeline,
-    upstream: &StageDependencies<'_>,
-    errors: &mut Vec<(DefinitionSubject, ResolveError)>,
-) {
-    let mut reported = BTreeSet::new();
-    for stage in &pipeline.stages {
-        let start = stage.name.as_str();
-        if reported.contains(start) {
-            continue;
-        }
-        let Some(cycle) = stage_cycle(upstream, start) else {
-            continue;
-        };
-        let steps: Vec<_> = cycle
-            .windows(2)
-            .map(|pair| {
-                let (made, read) = upstream[pair[0]][pair[1]];
-                format!(
-                    "`{made}` in `{}` reads `{read}` from `{}`",
-                    pair[0], pair[1]
-                )
-            })
-            .collect();
-        reported.extend(cycle.iter().map(std::borrow::ToOwned::to_owned));
-        errors.push(stage_error(
-            start,
-            format!(
-                "stages must not depend on each other in a cycle: {}",
-                join_list(&steps)
-            ),
-        ));
-    }
-}
-
-/// `a`, `a and b`, or `a, b, and c`.
-fn join_list(items: &[String]) -> String {
-    match items {
-        [] => String::new(),
-        [only] => only.clone(),
-        [first, second] => format!("{first} and {second}"),
-        [rest @ .., last] => format!("{}, and {last}", rest.join(", ")),
-    }
-}
-
-/// The stages from `start` back to itself through the stages each reads
-/// from, beginning and ending with `start`, if there is such a path.
-fn stage_cycle<'a>(upstream: &'a StageDependencies<'_>, start: &'a str) -> Option<Vec<&'a str>> {
-    let mut previous: BTreeMap<&str, &str> = BTreeMap::new();
-    let mut queue = VecDeque::from([start]);
-    while let Some(stage) = queue.pop_front() {
-        for next in upstream
-            .get(stage)
-            .into_iter()
-            .flat_map(BTreeMap::keys)
-            .map(String::as_str)
-        {
-            if next == start {
-                let mut path = Vec::new();
-                let mut at = stage;
-                while at != start {
-                    path.push(at);
-                    at = previous[at];
-                }
-                path.push(start);
-                path.reverse();
-                path.push(start);
-                return Some(path);
-            }
-            if !previous.contains_key(next) {
-                previous.insert(next, stage);
-                queue.push_back(next);
-            }
-        }
-    }
-    None
+fn stage_error(name: &str, detail: String) -> (DefinitionSubject, ResolveError) {
+    let subject = DefinitionSubject::Stage(name.to_owned());
+    (
+        subject.clone(),
+        ResolveError::InvalidDefinition { subject, detail },
+    )
 }
 
 pub(super) fn index_producers(

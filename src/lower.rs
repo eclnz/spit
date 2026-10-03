@@ -34,18 +34,20 @@ pub(crate) struct PipelineBuilder {
     outputs: BTreeMap<String, Output>,
     /// Where each `sidecars` header is.
     sidecar_places: BTreeMap<String, Place>,
-    /// The position in the pipeline of each product and operation by name,
-    /// the first of a repeated name, so a step finds what it calls without
-    /// searching every declaration. Keep in step with `add_product` and
-    /// `add_operation`, the only places that add either.
-    product_at: FxHashMap<String, usize>,
+    /// Each product's place in `pipeline.products`, the first of a name, so
+    /// that a step finds its inputs without searching every product.
+    product_numbers: FxHashMap<String, usize>,
+    /// The position in `pipeline.operations` of each operation by name, the
+    /// first of a name, so a step finds what it calls without searching
+    /// every operation. Keep in step with `add_operation`, the only place
+    /// that adds one.
     operation_at: FxHashMap<String, usize>,
 }
 
 impl PipelineBuilder {
     pub(crate) fn add_product(&mut self, product: ProductDef, place: Place) {
         self.lines.products.insert(product.name.clone(), place);
-        self.product_at
+        self.product_numbers
             .entry(product.name.clone())
             .or_insert(self.pipeline.products.len());
         self.pipeline.products.push(product);
@@ -112,17 +114,15 @@ impl PipelineBuilder {
         self.pipeline.invocations.push(invocation);
     }
 
-    fn add_stage(&mut self, name: &str, place: Place) -> Result<(), ParseError> {
-        if let Some(first) = self.lines.stages.get(name) {
-            let message = format!(
-                "duplicate stage `{name}`: it is already opened on line {}; a stage is one block, so move these lines into it",
-                first.line
-            );
-            return Err(ParseError::new(place.line, message).within(&place));
+    /// Open stage `name`. A stage opened again continues where its first
+    /// block left off: its steps join the same stage, and the source map keeps
+    /// the first header as the stage's place.
+    fn add_stage(&mut self, name: &str, place: Place) {
+        if self.lines.stages.contains_key(name) {
+            return;
         }
         self.lines.stages.insert(name.to_owned(), place);
         self.pipeline.stages.push(StageDef::new(name));
-        Ok(())
     }
 
     fn add_path(&mut self, rule: &PathRule, line: usize) -> Result<(), ParseError> {
@@ -211,10 +211,12 @@ impl PipelineBuilder {
                 .with_kind(ParseErrorKind::UndeclaredOperation { name: name.clone() })
             })?;
         let invocation = invocation.clone();
-        let (at, products) = (&self.product_at, &self.pipeline.products);
-        let dimensions = inferred_dimensions(&invocation, operation, |name| {
-            at.get(name).map(|&index| &products[index])
-        });
+        let dimensions = inferred_dimensions(
+            &invocation,
+            operation,
+            &self.pipeline.products,
+            &self.product_numbers,
+        );
         for (index, output) in outputs.iter().enumerate() {
             let declared = if output.dimensions.is_some() {
                 Output::Annotated
@@ -328,7 +330,7 @@ fn lower_statement(
 ) -> Result<(), ParseError> {
     match &statement.kind {
         StatementKind::Import => apply_import(builder, imports, &statement.place)?,
-        StatementKind::Stage { name, place } => builder.add_stage(name, place.clone())?,
+        StatementKind::Stage { name, place } => builder.add_stage(name, place.clone()),
         StatementKind::Product(product, place) => {
             builder.add_product(product.clone(), place.clone());
         }
@@ -405,13 +407,16 @@ fn lower_statement(
 
 /// The dimensions a flow step's undeclared outputs take: those of the input
 /// that drives it, less a varied or pinned dimension.
-fn inferred_dimensions<'a>(
+fn inferred_dimensions(
     invocation: &Invocation,
     operation: &OperationDef,
-    product: impl Fn(&str) -> Option<&'a ProductDef>,
+    products: &[ProductDef],
+    product_numbers: &FxHashMap<String, usize>,
 ) -> Vec<String> {
     let dimensions = |binding: &InputBinding| {
-        product(&binding.product).map(|product| binding.free_dimensions(&product.dimensions))
+        product_numbers
+            .get(&binding.product)
+            .map(|&number| binding.free_dimensions(&products[number].dimensions))
     };
     let inputs: Option<Vec<_>> = invocation
         .inputs

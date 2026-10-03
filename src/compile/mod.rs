@@ -81,7 +81,7 @@ pub(crate) fn collect_pipeline(pipeline: &Pipeline) -> PipelineCheck<'_> {
         &mut errors,
         &mut poisoned,
     );
-    check_stages(pipeline, &producers, &mut errors);
+    check_stages(pipeline, &mut errors);
     let order = match invocation_order(&pipeline.invocations, &producers) {
         Ok(order) => order,
         Err(cycle) => {
