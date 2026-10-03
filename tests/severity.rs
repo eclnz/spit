@@ -113,7 +113,7 @@ path raw: in/{id}.txt
 source spare [id]
 stage empty:
 operation clean(input)
-command clean: tool {input} > {@output}
+command clean: tool {input} {@output}
 operation summary(input) -> Report<T>
 operation unused(input)
 clean = clean(raw)
@@ -145,7 +145,7 @@ fn check_and_its_json_give_each_diagnostic_one_severity() {
     tree.write("broken.spitout", "sources:\n    raw[id=1\n");
 
     let cases: &[(&str, &[&str])] = &[
-        ("warned.spit", &["warning"; 7]),
+        ("warned.spit", &["warning"; 6]),
         ("broken.spit", &["warning", "error", "error"]),
         ("comment.spit", &["warning"]),
         ("good.spit", &[]),

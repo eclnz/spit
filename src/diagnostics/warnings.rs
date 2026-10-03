@@ -85,50 +85,6 @@ pub(super) fn label_warnings(
         .collect()
 }
 
-/// Flag unquoted shell operators such as `>` or `|`, which SPIT passes to
-/// the program as arguments.
-pub(super) fn operator_warnings(
-    pipeline: &Pipeline,
-    lines: &SourceMap,
-    text: &str,
-) -> Vec<Diagnostic> {
-    let mut warnings = Vec::new();
-    for (index, command) in pipeline.commands.iter().enumerate() {
-        if lines.imported.contains(&command.operation) {
-            continue;
-        }
-        let place = lines.command(index);
-        let line_text = place
-            .as_ref()
-            .and_then(|place| text.lines().nth(place.line.checked_sub(1)?));
-        for operator in command.template.shell_operators() {
-            let columns = place.as_ref().zip(line_text).and_then(|(place, line)| {
-                let start = place.columns.start;
-                let region = line.get(start..place.columns.end)?;
-                region
-                    .match_indices(operator.as_str())
-                    .find(|(at, _)| {
-                        let before = region[..*at].chars().next_back();
-                        let after = region[at + operator.len()..].chars().next();
-                        before.is_none_or(char::is_whitespace)
-                            && after.is_none_or(char::is_whitespace)
-                    })
-                    .map(|(at, _)| start + at..start + at + operator.len())
-            });
-            warnings.push(warning(
-                place.as_ref().map(|place| {
-                    Place::new(place.line, columns.unwrap_or_else(|| place.columns.clone()))
-                }),
-                format!(
-                    "`{operator}` in the command for `{}` is passed to the program as an argument, not read as a pipe or redirection, since commands do not run through a shell; quote it to pass it on purpose",
-                    command.operation
-                ),
-            ));
-        }
-    }
-    warnings
-}
-
 /// Legal but likely mistaken pipeline text. Names in `skip` already have an
 /// error. Nothing is reported as unused in a file with no steps, which is a
 /// library of definitions, nor for imported names: a library is imported for

@@ -3,10 +3,9 @@
 
 use std::collections::BTreeMap;
 
-use crate::command::CommandTemplate;
 use crate::model::{
-    CommandDef, CommandRole, CountRequirement, CoverageAction, CoverageRule, DirectoryDiscovery,
-    InputBinding, Invocation, ProductDef,
+    CountRequirement, CoverageAction, CoverageRule, DirectoryDiscovery, InputBinding, Invocation,
+    ProductDef,
 };
 use crate::paths::{validate_discovery_rule, PathTemplate};
 use crate::types::{parse_type_expr, TypeExpr, TypeParseError};
@@ -16,50 +15,7 @@ use super::lexical::{call_parts, comma_items, identifier, qualified_identifier, 
 use super::source_map::tail_place;
 use super::{ParseError, PathRule};
 
-pub(super) fn parse_command(
-    line: &str,
-    number: usize,
-    role: CommandRole,
-) -> Result<CommandDef, ParseError> {
-    let delimiter = declaration_delimiter(line).ok_or_else(|| {
-        ParseError::new(
-            number,
-            match role {
-                CommandRole::Run => "expected command: operation: executable [arguments]",
-                CommandRole::Verify => "expected verify operation: executable [arguments]",
-            },
-        )
-    })?;
-    let (operation, rest) = line.split_at(delimiter);
-    let operation = qualified_identifier(operation.trim(), number, "command operation")?;
-    let template = rest[1..].trim();
-    if template.is_empty() {
-        return Err(ParseError::new(
-            number,
-            "command template must not be empty",
-        ));
-    }
-    let parsed = CommandTemplate::parse(template).map_err(|error| {
-        ParseError::new(
-            number,
-            format!("command `{operation}`: {}", error.message()),
-        )
-        .at_token(template)
-    })?;
-    Ok(CommandDef {
-        role,
-        ..CommandDef::new(operation, parsed)
-    })
-}
-
-fn declaration_delimiter(line: &str) -> Option<usize> {
-    [single_colon(line), line.find('=')]
-        .into_iter()
-        .flatten()
-        .min()
-}
-
-fn single_colon(line: &str) -> Option<usize> {
+pub(super) fn single_colon(line: &str) -> Option<usize> {
     line.char_indices().find_map(|(index, character)| {
         (character == ':' && !line[..index].ends_with(':') && !line[index + 1..].starts_with(':'))
             .then_some(index)
