@@ -180,7 +180,7 @@ sources:
 fn a_small_collection_leaves_other_groups_complete() {
     let text = "\
 source day [site, date]
-operation summarise(days: many Day) -> Summary @ min(2)
+operation summarise(days: many Day @ min(2)) -> Summary
 summary = summarise(day @ vary(date))
 ";
     let sources = "\
