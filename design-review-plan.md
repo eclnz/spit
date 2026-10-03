@@ -29,7 +29,7 @@ Status is `open`, `claimed (<branch>)`, `decided`, or `done (<commit>)`. Numbers
 | 5 | The two-file mental model | claimed (`two-files`) |
 | S1 | Syntax: operations declared inside a stage | claimed (`stage-scope`) |
 | S2 | Syntax: `@ min(n)` beside the `many` port | decided, claimed (`many-min`) |
-| S3 | Syntax: `require` and `drop` clause order ([#36](https://github.com/eclnz/spit/issues/36)) | claimed (`require-drop-order`) |
+| S3 | Syntax: `require` and `drop` clause order ([#36](https://github.com/eclnz/spit/issues/36)) | decided, claimed (`require-drop-order`) |
 | S4 | Syntax: shell metacharacters in commands | claimed (`shell-meta`) |
 | S5 | Syntax: `path:` in both `.spit` and `.spitin` | claimed (`two-files`) |
 | R1 | Composite operations: provenance and diagnostics design | open |
@@ -163,6 +163,14 @@ operation collect(items: many @ min(3)) -> Bundle
 - *Phase and lowering.* The parser owns it. It lowers to the existing `OperationDef::minimum_collection`, so compile, resolve, `--partial`, imports and the resolver's messages are unchanged. An operation takes at most one `many` input, so the operation-level field is exact; if that limit is ever lifted, the field moves to `InputPort` then.
 - *Invariants and diagnostics.* A positive integer, once per port, only on a `many` port; each error points at the clause on its port. The hover shows the minimum beside its port.
 - *Beyond spit.* spit-vscode's grammar marks `@ min(n)` inside the parentheses, on a branch named `many-min`; the s6 harness scenario's pipeline is rewritten (its answer key's jobs do not change). The DAG format and spit-bash are untouched.
+
+**S3 design (decided: keep both orders).** `require t1w count=1 per [sub, ses]` and `drop [sub, ses] where t1w count=0` keep their shapes. The grammar does not change; the only change is diagnostics: a rule written in the other rule's order is an error that gives the line in its own order.
+
+- *Evidence.* In `usability/rounds.zip`, every `drop` written in rounds 2-pilot to 4 (13 runs, all `drop [sub] where sessions count<2`) was written right first time, and reports singled out its note (`dropped [sub=03] by drop [sub] where sessions count<2`) as the most useful message. `require` was written once, in round 1 (s2-cohort-a), correctly and unprompted: `require t1w count=1 per [sub, ses]`. No run misread or miswrote it, so there is no confusion for alignment to fix. The removing-inputs design (`git show 1b30e26^:usability/design/removing-inputs.md`) left alignment open for the same reason: `require` "already reads correctly".
+- *Why not align.* Round 1's B1 is the evidence on shared shapes: `skip` shared `require`'s grammar with the opposite action, and `skip bold run=3 per [sub, ses]` kept the very sessions it meant to remove. `drop`'s order is part of that fix: its `where` filters, naming the groups that go. In `require [sub, ses] where t1w count=1` the same `where` would have to assert, the opposite polarity behind one word, and it reads as a filter ("require the sessions where t1w count=1"), so two rules that differ by one keyword would mean opposite things. `drop`'s `missing` and `has` have no `require` counterpart either. That is change for visual symmetry alone, which the audit rules out.
+- *Rejected.* `require [sub, ses] where …` (above); `drop t1w count=0 per [sub, ses]`, which undoes the B1 fix; accepting both orders, which is two ways to write one thing.
+- *What changes.* Writing `require [sub, ses] where t1w count=1` or `drop t1w count=0 per [sub, ses]` by analogy with the other rule gives an error naming the rule in its own order, as `skip` does now. `require … where … missing …` and a `drop` with values but no `has` or `missing` get the general shape, since their intent can't be read off.
+- *Phase and lowering.* The recipe parser only; `CoverageRule`, settling, the `.spitout`, the DAG and spit-bash are untouched. spit-vscode's grammar colours both keywords already and needs no change.
 
 The proposed language design rule: place modifiers beside the construct they constrain; make indentation's scope obvious; order related clauses consistently; make the command notation reflect its actual execution model. S1 and S2 deserve attention before adding check and resource syntax, since those features would otherwise inherit unclear placement. Keep the concise happy path: an untyped source, a small operation, and an assignment should stay easy to write.
 
