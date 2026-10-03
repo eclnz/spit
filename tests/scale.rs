@@ -9,13 +9,9 @@ use spit::{parse_pipeline, parse_source_inventory, resolve, validate_pipeline};
 
 /// A chain of `steps` steps, each reading the one before.
 fn chain(steps: usize) -> String {
-    let mut text = String::from("products:\n");
-    for index in 0..=steps {
-        text += &format!("    p{index} : T [sub]\n");
-    }
-    text += "\noperations:\n    step(T) -> T\n\npipeline:\n";
+    let mut text = String::from("source p0 : T [sub]\noperation step(input: T) -> T\n");
     for index in 1..=steps {
-        text += &format!("    p{index} = step(p{})\n", index - 1);
+        text += &format!("p{index} = step(p{})\n", index - 1);
     }
     text
 }
@@ -32,10 +28,8 @@ fn a_long_chain_of_steps_compiles_without_overflowing_the_stack() {
 #[test]
 #[ignore = "slow in a debug build; run with --release"]
 fn many_sources_resolve_in_reasonable_time() {
-    let pipeline = parse_pipeline(
-        "products:\n    raw : T [sub]\n    out : U [sub]\n\noperations:\n    f(T) -> U\n\npipeline:\n    out = f(raw)\n",
-    )
-    .unwrap();
+    let pipeline =
+        parse_pipeline("source raw : T [sub]\noperation f(input: T) -> U\nout = f(raw)\n").unwrap();
     let mut records = String::from("sources:\n");
     for index in 0..40_000 {
         records += &format!("    raw[sub={index}]\n");

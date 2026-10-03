@@ -2,6 +2,7 @@
 //! validation. No inventory is read and no dataset directories are scanned.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt::Write;
 use std::path::Path;
 
 use crate::builtins::{builtin_words, words_json};
@@ -28,10 +29,29 @@ pub struct Hover {
     pub line: usize,
     pub column: usize,
     pub end_column: usize,
-    pub kind: String,
+    pub kind: HoverKind,
     pub name: String,
     pub signature: String,
     pub details: Vec<String>,
+}
+
+/// What a hover explains.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum HoverKind {
+    Product,
+    Operation,
+    Check,
+}
+
+impl HoverKind {
+    /// The kind's name in `check --hovers` JSON.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Product => "product",
+            Self::Operation => "operation",
+            Self::Check => "check",
+        }
+    }
 }
 
 /// Explain declarations and references in a pipeline, including unsaved
@@ -100,7 +120,7 @@ pub fn pipeline_hovers(text: &str, path: &Path) -> Vec<Hover> {
     let mut hovers = Vec::new();
     let text_lines: Vec<_> = text.lines().collect();
     let mut add =
-        |place: Place, kind: &str, name: &str, signature: String, details: Vec<String>| {
+        |place: Place, kind: HoverKind, name: &str, signature: String, details: Vec<String>| {
             let Some(line) = text_lines.get(place.line.saturating_sub(1)) else {
                 return;
             };
@@ -114,7 +134,7 @@ pub fn pipeline_hovers(text: &str, path: &Path) -> Vec<Hover> {
                 line: place.line,
                 column: columns.start + 1 + if place.line == 1 { bom_column } else { 0 },
                 end_column: columns.end + 1 + if place.line == 1 { bom_column } else { 0 },
-                kind: kind.to_owned(),
+                kind,
                 name: name.to_owned(),
                 signature,
                 details,
@@ -124,7 +144,7 @@ pub fn pipeline_hovers(text: &str, path: &Path) -> Vec<Hover> {
     let operation_info = |name: &str| operation_infos.get(name).cloned();
     for (name, place) in &document.lines.products {
         if let Some((signature, details)) = product_info(name) {
-            add(place.clone(), "product", name, signature, details);
+            add(place.clone(), HoverKind::Product, name, signature, details);
         }
     }
     for (check, place) in pipeline.checks.iter().zip(&document.lines.checks) {
@@ -133,7 +153,7 @@ pub fn pipeline_hovers(text: &str, path: &Path) -> Vec<Hover> {
         ];
         add(
             place.clone(),
-            "check",
+            HoverKind::Check,
             &check.name,
             check_signature(check),
             details,
@@ -141,7 +161,13 @@ pub fn pipeline_hovers(text: &str, path: &Path) -> Vec<Hover> {
     }
     for (name, place) in &document.lines.operations {
         if let Some((signature, details)) = operation_info(name) {
-            add(place.clone(), "operation", name, signature, details);
+            add(
+                place.clone(),
+                HoverKind::Operation,
+                name,
+                signature,
+                details,
+            );
         }
     }
     for invocation in &pipeline.invocations {
@@ -159,7 +185,7 @@ pub fn pipeline_hovers(text: &str, path: &Path) -> Vec<Hover> {
             }
             add(
                 location.operation(),
-                "operation",
+                HoverKind::Operation,
                 &invocation.operation,
                 signature,
                 details,
@@ -169,7 +195,7 @@ pub fn pipeline_hovers(text: &str, path: &Path) -> Vec<Hover> {
             if let Some((signature, details)) = product_info(name) {
                 add(
                     location.output_at(index),
-                    "product",
+                    HoverKind::Product,
                     name,
                     signature,
                     details,
@@ -192,7 +218,7 @@ pub fn pipeline_hovers(text: &str, path: &Path) -> Vec<Hover> {
                         cardinality(port.cardinality)
                     ));
                 }
-                add(place, "product", name, signature, details);
+                add(place, HoverKind::Product, name, signature, details);
             }
         }
     }
@@ -206,7 +232,7 @@ pub fn pipeline_hovers(text: &str, path: &Path) -> Vec<Hover> {
             if let Some(columns) = find_word(&line[..template.columns.start], 0, name) {
                 add(
                     Place::new(template.line, columns),
-                    "product",
+                    HoverKind::Product,
                     name,
                     signature,
                     details,
@@ -226,7 +252,7 @@ pub fn pipeline_hovers(text: &str, path: &Path) -> Vec<Hover> {
             {
                 add(
                     Place::new(template.line, columns),
-                    "operation",
+                    HoverKind::Operation,
                     &command.operation,
                     signature,
                     details,
@@ -300,7 +326,7 @@ fn operation_signature(operation: &OperationDef) -> String {
             );
             // An operation has at most one many input, which its minimum counts.
             if let (true, Some(minimum)) = (many, operation.minimum_collection) {
-                text.push_str(&format!(" @ min({minimum})"));
+                let _ = write!(text, " @ min({minimum})");
             }
             text.push_str(&checks_text(&port.checks));
             text
@@ -331,9 +357,9 @@ fn output_signature(port: &OutputPort, named: bool) -> String {
     };
     if let Some(beside) = &port.beside {
         if beside.suffix.starts_with('.') {
-            result.push_str(&format!(" {} beside {}", beside.suffix, beside.port));
+            let _ = write!(result, " {} beside {}", beside.suffix, beside.port);
         } else {
-            result.push_str(&format!(" \"{}\" beside {}", beside.suffix, beside.port));
+            let _ = write!(result, " \"{}\" beside {}", beside.suffix, beside.port);
         }
     } else {
         result.push_str(&ending(port.extension.as_deref(), port.folder));
@@ -574,7 +600,7 @@ fn hovers_json(hovers: &[Hover]) -> Json<'_> {
             ("line", Json::Number(hover.line)),
             ("column", Json::Number(hover.column)),
             ("end_column", Json::Number(hover.end_column)),
-            ("kind", Json::string(&hover.kind)),
+            ("kind", Json::string(hover.kind.name())),
             ("name", Json::string(&hover.name)),
             ("signature", Json::string(&hover.signature)),
             (
