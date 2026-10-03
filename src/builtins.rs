@@ -216,7 +216,7 @@ pub static DOCS: [Doc; 43] = [
         name: "min",
         kind: "selector",
         anchor: "operations-and-commands",
-        example: "operation summarise(days: many Series) -> Summary @ min(2)",
+        example: "operation summarise(days: many Series @ min(2)) -> Summary",
         summary: "Rejects a group whose `many` input has fewer artifacts than the minimum. With `dag --partial`, it counts what is left once incomplete members are removed.",
     },
     Doc {
