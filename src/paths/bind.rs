@@ -50,10 +50,7 @@ pub fn validate_bound_source_files(
     for (artifact, relative) in needed {
         // In a DAG cut to one stage, as by `ResolvedDag::only_stage`, what
         // other stages make must already exist.
-        let made_by = pipeline
-            .invocations
-            .iter()
-            .find(|invocation| invocation.outputs.iter().any(|output| output == artifact.0));
+        let made_by = index.producer(artifact.0).map(|(invocation, _)| invocation);
         let full_path = root.join(relative);
         let folder = index.is_folder(artifact.0);
         let (present, kind) = if folder {
