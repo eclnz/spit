@@ -143,6 +143,7 @@ pub(super) fn warnings(
         return operation_warnings(pipeline, lines, skip, true);
     }
     let mut warnings = stage_warnings(pipeline, lines);
+    warnings.extend(placement_warnings(pipeline, lines));
     warnings.extend(name_warnings(pipeline, lines));
     warnings.extend(product_warnings(pipeline, lines, skip));
     warnings.extend(operation_warnings(pipeline, lines, skip, false));
@@ -178,6 +179,76 @@ fn stage_warnings(pipeline: &Pipeline, lines: &SourceMap) -> Vec<Diagnostic> {
             )
         })
         .collect()
+}
+
+/// Operations declared in a stage but called outside it. An operation is
+/// global wherever it is declared, so this is legal, but the stage reads as
+/// if it held the operation's uses; say where the declaration would.
+fn placement_warnings(pipeline: &Pipeline, lines: &SourceMap) -> Vec<Diagnostic> {
+    /// The first call outside the declaring stage, and the innermost stage
+    /// holding the declaration and every call, `None` for the top level.
+    struct Outside<'a> {
+        line: Option<usize>,
+        stage: Option<&'a str>,
+        common: Option<&'a str>,
+    }
+    let mut outside: BTreeMap<&str, Outside> = BTreeMap::new();
+    for invocation in &pipeline.invocations {
+        let operation = invocation.operation.as_str();
+        let Some(declared) = lines.operation_stages.get(operation) else {
+            continue;
+        };
+        let called = invocation.stage.as_deref();
+        if called.is_some_and(|stage| stage_within(stage, declared)) {
+            continue;
+        }
+        let entry = outside.entry(operation).or_insert_with(|| Outside {
+            line: invocation
+                .outputs
+                .first()
+                .and_then(|output| lines.invocations.get(output))
+                .map(|step| step.line),
+            stage: called,
+            common: Some(declared),
+        });
+        entry.common = entry
+            .common
+            .zip(called)
+            .and_then(|(common, called)| common_stage(common, called));
+    }
+    outside
+        .into_iter()
+        .map(|(operation, found)| {
+            let declared = &lines.operation_stages[operation];
+            let called = found
+                .stage
+                .map_or_else(|| "outside every stage".to_owned(), |stage| format!("in stage `{stage}`"));
+            let on_line = found.line.map(|line| format!(" on line {line}")).unwrap_or_default();
+            let target = found.common.map_or_else(
+                || "the top level, outside every stage".to_owned(),
+                |stage| format!("stage `{stage}`, which holds every call"),
+            );
+            warning(
+                lines.operations.get(operation).cloned(),
+                format!(
+                    "operation `{operation}` is declared in stage `{declared}` but called {called}{on_line}; a stage does not limit where its operations are used, so declare it in {target}"
+                ),
+            )
+        })
+        .collect()
+}
+
+/// The innermost stage holding both `first` and `second`, if any.
+fn common_stage<'a>(first: &'a str, second: &str) -> Option<&'a str> {
+    let mut end = None;
+    for (index, _) in first.match_indices('/').chain([(first.len(), "")]) {
+        if stage_within(second, &first[..index]) {
+            end = Some(index);
+        } else {
+            break;
+        }
+    }
+    end.map(|end| &first[..end])
 }
 
 /// Products named after the operation that makes them, as in

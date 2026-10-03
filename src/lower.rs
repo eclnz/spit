@@ -40,9 +40,37 @@ impl PipelineBuilder {
         self.pipeline.products.push(product);
     }
 
-    pub(crate) fn add_operation(&mut self, operation: OperationDef, place: Place) {
+    /// Add `operation`, declared at `place` in `stage`, unless an operation
+    /// of its name is already declared or imported.
+    pub(crate) fn add_operation(
+        &mut self,
+        operation: OperationDef,
+        place: Place,
+        stage: Option<&str>,
+    ) -> Result<(), ParseError> {
+        if let Some(first) = self.lines.operations.get(&operation.name) {
+            let name = &operation.name;
+            let earlier = if self.lines.imported.contains(name) {
+                format!("the `use` on line {} imports one", first.line)
+            } else {
+                format!("it is already declared on line {}", first.line)
+            };
+            let global = if stage.is_some() || self.lines.operation_stages.contains_key(name) {
+                "; operations are global even when declared in a stage, so give this one another name"
+            } else {
+                ""
+            };
+            let message = format!("duplicate operation `{name}`: {earlier}{global}");
+            return Err(ParseError::new(place.line, message).within(&place));
+        }
+        if let Some(stage) = stage {
+            self.lines
+                .operation_stages
+                .insert(operation.name.clone(), stage.to_owned());
+        }
         self.lines.operations.insert(operation.name.clone(), place);
         self.pipeline.operations.push(operation);
+        Ok(())
     }
 
     pub(crate) fn add_constraint(&mut self, mut constraint: CoverageRule, rule: Rule) {
@@ -293,8 +321,8 @@ fn lower_statement(
             }
             builder.inputs.discoveries.push(discovery.clone());
         }
-        StatementKind::Operation(operation, place) => {
-            builder.add_operation(operation.clone(), place.clone());
+        StatementKind::Operation(operation, place, stage) => {
+            builder.add_operation(operation.clone(), place.clone(), stage.as_deref())?;
         }
         StatementKind::Constraint(constraint, rule) => {
             builder.add_constraint(constraint.clone(), rule.clone());

@@ -43,7 +43,7 @@ pub(crate) fn apply_import(
         builder.add_product(product.clone(), place.clone());
     }
     for operation in &imported.operations {
-        builder.add_operation(operation.clone(), place.clone());
+        builder.add_operation(operation.clone(), place.clone(), None)?;
     }
     let lines = &mut builder.lines;
     lines.imported.extend(
