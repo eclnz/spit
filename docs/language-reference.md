@@ -411,6 +411,8 @@ Three rules leave data out, each for a different reason:
 
 They apply in that order, however they are written: first every `exclude`, then every `drop`, each judged against what the exclusions leave, then every `require`, checked against what the drops leave. What `exclude` and `drop` remove is reported on stderr as notes and recorded in the `.spitout`.
 
+`drop` and `require` are written in different orders, because their conditions point opposite ways. A `drop` names the groups first and then, after `where`, what removes one; a `require` names the source first and then what every group must have, with the groups after `per`. A rule written in the other's order, such as `require [sub, ses] where t1w count=1`, is an error that gives it in its own order.
+
 Rules that count form their groups from every artifact and discovered context in the dataset, whichever source or discovery found it. `drop [store] where pricing count=0` groups by every store any source or discovery has, so a store with sales but no price list is a group with none: its count is 0.
 
 ### Discover contexts from directories

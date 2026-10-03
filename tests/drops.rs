@@ -145,6 +145,47 @@ fn a_skip_rule_is_an_error_that_names_the_drop_rule_to_write() {
 }
 
 #[test]
+fn a_rule_in_the_other_rules_order_is_an_error_that_names_it_in_its_own() {
+    let require = "`require` names the source first, then the groups after `per`";
+    let drop = "`drop` names the groups first, then `where`";
+    for (rule, message) in [
+        (
+            "require [sub, ses] where t1w count=1",
+            format!("{require}: write `require t1w count=1 per [sub, ses]`"),
+        ),
+        (
+            "require [sub] where bold has run=1,2",
+            format!("{require}: write `require bold run=1,2 per [sub]`"),
+        ),
+        (
+            "require [sub] where bold missing run=1",
+            format!("{require}, as in `require t1w count=1 per [sub, ses]`"),
+        ),
+        (
+            "drop t1w count=0 per [sub, ses]",
+            format!("{drop}: write `drop [sub, ses] where t1w count=0`"),
+        ),
+        (
+            "drop bold run=3 per [sub, ses]",
+            format!(
+                "{drop}: write `drop [sub, ses] where bold has run=3` to remove the groups \
+                 that have them, or `drop [sub, ses] where bold missing run=3` to remove the \
+                 groups that lack one"
+            ),
+        ),
+        (
+            "drop bold count=1 run=3 per [sub]",
+            format!("{drop}, as in `drop [sub] where sessions count<2`"),
+        ),
+    ] {
+        let error = parse_input_spec(&format!("{rule}\n"))
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains(&message), "{rule}: {error}");
+    }
+}
+
+#[test]
 fn a_group_with_none_of_the_target_counts_zero() {
     // Subject 3 has runs but no T1w, so its group holds no T1w.
     let settled = settle("drop [sub] where t1w count=0\n").unwrap();
