@@ -24,7 +24,7 @@ Status is `open`, `claimed (<branch>)`, `decided`, or `done (<commit>)`. Numbers
 | 1 | Optional runtime checks in the job contract | open |
 | 2 | Optional-file and output semantics, from one real workflow ([#35](https://github.com/eclnz/spit/issues/35)) | open |
 | 3 | Lower the cost of binding existing data: judge `inputs --suggest` on irregular datasets | open |
-| 4a | `dag --counts` | claimed (`dag-counts`) |
+| 4a | `dag --counts` | done (`370a18f`) |
 | 4b | Diagnostic severity audit ([#45](https://github.com/eclnz/spit/issues/45)) | open |
 | 5 | The two-file mental model | open |
 | S1 | Syntax: operations declared inside a stage | open |
@@ -96,6 +96,8 @@ The project has improved path diagnostics and can scan a dataset without a recip
 ### 4. Make a resolved graph easy to sanity-check
 
 A proposed `dag --counts` view would show total jobs and counts by operation. That would quickly reveal unintended expansion or an unexpectedly empty stage. It improves inspection rather than expressivity, so it follows the job-contract questions in priority.
+
+*4a done in `370a18f`.* `dag --counts` prints one row per step (`cleaned = clean`, its stage, its job count), keeps steps with no jobs as `0`, then the total; it combines with `-o`. It counts the jobs planned: with `--partial`, the artifacts left out are not yet counted per step, which `IncompleteJob` would need a step id for.
 
 Keep the severity of compiler feedback consistent with whether it blocks a valid graph. [Issue 45](https://github.com/eclnz/spit/issues/45) asks whether errors that do not fail `check` should instead be warnings, especially in the VS Code extension. Audit those cases at the compiler's diagnostic level so CLI and editor users see the same distinction; the editor should render severity rather than decide it.
 
