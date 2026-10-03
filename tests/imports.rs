@@ -41,7 +41,9 @@ fn import_errors_point_to_the_use_line() {
     let main = dir.write("main.spit", "use absent from base.spit\n");
     let error = support::parse_fixture_at(&fs::read_to_string(&main).unwrap(), &main).unwrap_err();
     assert_eq!(error.line(), 1);
-    assert!(error.message().contains("not a source, operation or check"));
+    assert!(error
+        .message()
+        .contains("not a source, operation, sidecars group or check"));
 
     let main = dir.write(
         "main.spit",
@@ -219,23 +221,77 @@ fn an_import_may_not_define_again_what_the_file_defines() {
     }
 }
 
-/// Pins what `use` does with a `sidecars` group today, which is to bring each
-/// member in as an ordinary source and leave the group behind (#68).
+const PHOTOS: &str = "sidecars photo [shot]:\n    path: photos/{shot}\n    source raw : Image .raw\n    source meta : Json .json\n";
+
+const COPY: &str =
+    "operation cp(x: Image) -> Image\ncommand cp: cp {x} {@output}\nout = cp(l::raw)\n";
+
+/// `use` brings a `sidecars` group in whole: the group, as `alias::name`,
+/// and its members, as the sources `alias::member` with their paths.
 #[test]
-fn an_imported_sidecar_member_is_an_ordinary_source() {
+fn an_import_brings_a_sidecars_group_in_whole() {
     let dir = Tree::new("imports", &[]);
+    dir.write("lib.spit", PHOTOS);
+    for (use_line, group) in [
+        ("use lib.spit as l", "l::photo"),
+        ("use photo from lib.spit as l", "l::photo"),
+    ] {
+        let main = dir.write("main.spit", &format!("{use_line}\n{COPY}"));
+        let pipeline = parse_pipeline_at(&fs::read_to_string(&main).unwrap(), &main).unwrap();
+        let [imported] = pipeline.sidecar_groups.as_slice() else {
+            panic!("one group, found {:?}", pipeline.sidecar_groups);
+        };
+        assert_eq!(imported.name, group);
+        assert_eq!(
+            imported.members,
+            [
+                ("l::raw".to_owned(), ".raw".to_owned()),
+                ("l::meta".to_owned(), ".json".to_owned())
+            ]
+        );
+        let paths: Vec<_> = ["l::raw", "l::meta"]
+            .map(|name| pipeline.path_template_for(name).unwrap().to_string())
+            .into();
+        assert_eq!(paths, ["photos/{shot}.raw", "photos/{shot}.json"]);
+    }
+}
+
+#[test]
+fn a_sidecars_member_is_not_imported_alone() {
+    let dir = Tree::new("imports", &[]);
+    dir.write("lib.spit", PHOTOS);
+    let main = dir.write("main.spit", "use raw from lib.spit as l\n");
+    let error = parse_pipeline_at(&fs::read_to_string(&main).unwrap(), &main).unwrap_err();
+    assert_eq!(error.line(), 1);
+    assert_eq!(
+        error.message(),
+        "`raw` is a member of sidecars group `photo`; import the group, `photo`, to bring its members"
+    );
+}
+
+/// An imported group keeps what the group is for: a recipe gives its stem by
+/// the group's qualified name, and a binding that has some members and not
+/// others is reported as it is where the group is written.
+#[test]
+fn an_imported_sidecars_group_still_reports_incomplete_bindings() {
+    let dir = Tree::new("imports", &["d/p/1.raw", "d/p/1.json", "d/p/2.raw"]);
     dir.write(
         "lib.spit",
-        "sidecars photo [shot]:\n    path: photos/{shot}\n    source raw : Image .raw\n    source meta : Json .json\n",
+        "sidecars photo [shot]:\n    source raw : Image .raw\n    source meta : Json .json\n",
     );
-    let main = dir.write(
-        "main.spit",
-        "use lib.spit as l\noperation cp(x: Image) -> Image\ncommand cp: cp {x} {@output}\nout = cp(l::raw)\n",
+    dir.write(
+        "top.spit",
+        "use photo from lib.spit as l\noperation cp(x: Image, m: Json) -> Image\n\
+         command cp: cp {x} {m} {@output}\nout = cp(l::raw, l::meta)\n",
     );
-    let pipeline = parse_pipeline_at(&fs::read_to_string(&main).unwrap(), &main).unwrap();
-    assert!(pipeline.sidecar_groups.is_empty());
-    let paths: Vec<_> = ["l::raw", "l::meta"]
-        .map(|name| pipeline.path_template_for(name).unwrap().to_string())
-        .into();
-    assert_eq!(paths, ["photos/{shot}.raw", "photos/{shot}.json"]);
+    let recipe = dir.write(
+        "top.spitin",
+        "pipeline top.spit\nroot d\npath l::photo: p/{shot}\n",
+    );
+    let output = support::spit(&["inputs", recipe.to_str().unwrap()]);
+    let stderr = support::text(&output.stderr);
+    assert!(
+        stderr.contains("l::photo[shot=2] has .raw but no .json"),
+        "{stderr}"
+    );
 }

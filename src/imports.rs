@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 use crate::lower::{parse_document_with_imports, ParsedDocument, PipelineBuilder};
 use crate::model::{
     CheckDef, CheckUse, CommandDef, CommandRole, OperationDef, Pipeline, PipelineIndex, ProductDef,
+    SidecarGroup,
 };
 use crate::parser::{parse_use, strip_comment, without_bom, Keyword, Kind, ParseError, UseSpec};
 use crate::span::Place;
@@ -63,6 +64,9 @@ pub(crate) fn apply_import(
             None => builder.add_check(check.clone(), place.clone()),
         }
     }
+    for group in &imported.sidecar_groups {
+        builder.add_sidecar_group(group.clone(), place.clone());
+    }
     for product in &imported.products {
         builder.add_product(product.clone(), place.clone());
     }
@@ -89,7 +93,7 @@ pub(crate) fn apply_import(
 }
 
 /// What `pipeline` defines that an import may not define again, by kind.
-fn defined(pipeline: &Pipeline) -> [(&'static str, Vec<&str>); 4] {
+fn defined(pipeline: &Pipeline) -> [(&'static str, Vec<&str>); 5] {
     let products = pipeline
         .products
         .iter()
@@ -112,6 +116,14 @@ fn defined(pipeline: &Pipeline) -> [(&'static str, Vec<&str>); 4] {
             "path for product",
             pipeline.product_paths.keys().map(String::as_str).collect(),
         ),
+        (
+            "sidecars group",
+            pipeline
+                .sidecar_groups
+                .iter()
+                .map(|group| group.name.as_str())
+                .collect(),
+        ),
     ]
 }
 
@@ -123,6 +135,10 @@ struct Module<'m> {
     operations: FxHashMap<&'m str, Vec<&'m OperationDef>>,
     /// Every source of a name.
     sources: FxHashMap<&'m str, Vec<&'m ProductDef>>,
+    /// Each `sidecars` group by name.
+    groups: FxHashMap<&'m str, &'m SidecarGroup>,
+    /// Each member of a `sidecars` group, with its group.
+    members: FxHashMap<&'m str, &'m SidecarGroup>,
     /// The first check of a name.
     checks: FxHashMap<&'m str, &'m CheckDef>,
     /// Each operation's commands, in order.
@@ -159,10 +175,17 @@ impl<'m> Module<'m> {
                 .or_default()
                 .push(command);
         }
+        let groups = module
+            .sidecar_groups
+            .iter()
+            .map(|group| (group.name.as_str(), group))
+            .collect();
         Self {
             index,
             operations,
             sources,
+            groups,
+            members: module.sidecar_members(),
             checks,
             commands,
         }
@@ -194,8 +217,19 @@ fn select_import(module: &Pipeline, spec: &UseSpec, line: usize) -> Result<Pipel
         ));
     }
     for name in names {
+        // A member comes with its group, and is no source of its own.
+        if let Some(group) = module.members.get(name) {
+            return Err(ParseError::new(
+                line,
+                format!(
+                    "`{name}` is a member of sidecars group `{}`; import the group, `{}`, to bring its members",
+                    group.name, group.name
+                ),
+            ));
+        }
         let operations = module.operations.get(name).map_or(&[][..], Vec::as_slice);
         let sources = module.sources.get(name).map_or(&[][..], Vec::as_slice);
+        let group = module.groups.get(name).copied();
         if operations.len() > 1 || sources.len() > 1 {
             return Err(ParseError::new(
                 line,
@@ -204,16 +238,16 @@ fn select_import(module: &Pipeline, spec: &UseSpec, line: usize) -> Result<Pipel
         }
         let (operation, source) = (operations.first().copied(), sources.first().copied());
         let check = module.checks.get(name).copied();
-        if operation.is_none() && source.is_none() && check.is_none() {
+        if operation.is_none() && source.is_none() && group.is_none() && check.is_none() {
             return Err(ParseError::new(
                 line,
                 format!(
-                    "`{name}` is not a source, operation or check in `{}`",
+                    "`{name}` is not a source, operation, sidecars group or check in `{}`",
                     spec.path
                 ),
             ));
         }
-        if operation.is_some() && source.is_some() && !import_all {
+        if operation.is_some() && (source.is_some() || group.is_some()) && !import_all {
             return Err(ParseError::new(
                 line,
                 format!("import name `{name}` matches both a source and an operation"),
@@ -237,6 +271,9 @@ fn select_import(module: &Pipeline, spec: &UseSpec, line: usize) -> Result<Pipel
             for used in &source.checks {
                 import_check(&mut selected, &module, &used.check, alias);
             }
+        }
+        if let Some(group) = group {
+            import_group(&mut selected, &module, group, spec.alias.as_deref(), line)?;
         }
         if check.is_some() {
             import_check(&mut selected, &module, name, alias);
@@ -295,6 +332,7 @@ fn qualify_checks(selected: &mut Pipeline, alias: Option<&str>) {
 /// once.
 fn reusable_names<'m>(index: &PipelineIndex<'m>) -> Vec<&'m str> {
     let module = index.pipeline;
+    let members = module.sidecar_members();
     let mut seen = BTreeSet::new();
     module
         .operations
@@ -305,7 +343,14 @@ fn reusable_names<'m>(index: &PipelineIndex<'m>) -> Vec<&'m str> {
                 .products
                 .iter()
                 .filter(|product| index.is_source(&product.name))
+                .filter(|product| !members.contains_key(product.name.as_str()))
                 .map(|product| product.name.as_str()),
+        )
+        .chain(
+            module
+                .sidecar_groups
+                .iter()
+                .map(|group| group.name.as_str()),
         )
         .chain(module.checks.iter().map(|check| check.name.as_str()))
         .filter(|name| seen.insert(*name))
@@ -376,6 +421,40 @@ fn import_source(
             .product_paths
             .insert(qualified.to_owned(), path.with_product(name));
     }
+    Ok(())
+}
+
+/// Import a `sidecars` group as `alias::name`, whole: its members become the
+/// sources `alias::member`, each with its path and checks, as when imported
+/// on its own, so the group's diagnostics and a recipe's stem for it work as
+/// they do in the file the group is written in.
+fn import_group(
+    selected: &mut Selection,
+    module: &Module<'_>,
+    group: &SidecarGroup,
+    alias: Option<&str>,
+    line: usize,
+) -> Result<(), ParseError> {
+    let qualify = |name: &str| qualified_check(name, alias);
+    let mut members = Vec::new();
+    for (member, extension) in &group.members {
+        let source = module
+            .sources
+            .get(member.as_str())
+            .and_then(|sources| sources.first().copied())
+            .expect("a sidecars group's members are declared as sources");
+        import_source(selected, module, source, &qualify(member), line)?;
+        for used in &source.checks {
+            import_check(selected, module, &used.check, alias);
+        }
+        members.push((qualify(member), extension.clone()));
+    }
+    selected.pipeline.sidecar_groups.push(SidecarGroup {
+        name: qualify(&group.name),
+        dimensions: group.dimensions.clone(),
+        members,
+        stem: group.stem.clone(),
+    });
     Ok(())
 }
 

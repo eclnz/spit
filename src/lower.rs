@@ -10,7 +10,7 @@ use rustc_hash::FxHashMap;
 use crate::imports::apply_import;
 use crate::model::{
     Cardinality, CheckDef, CommandDef, CoverageRule, Exclusion, InputBinding, InputRules,
-    Invocation, OperationDef, Pipeline, ProductDef, SourceInventory, StageDef,
+    Invocation, OperationDef, Pipeline, ProductDef, SidecarGroup, SourceInventory, StageDef,
 };
 use crate::order::{order_dimensions, Output};
 use crate::parser::{
@@ -86,6 +86,12 @@ impl PipelineBuilder {
             .insert(operation.name.clone(), self.pipeline.operations.len());
         self.pipeline.operations.push(operation);
         Ok(())
+    }
+
+    /// Add a `sidecars` group declared, or imported, at `place`.
+    pub(crate) fn add_sidecar_group(&mut self, group: SidecarGroup, place: Place) {
+        self.sidecar_places.insert(group.name.clone(), place);
+        self.pipeline.sidecar_groups.push(group);
     }
 
     pub(crate) fn add_constraint(&mut self, mut constraint: CoverageRule, rule: Rule) {
@@ -392,10 +398,7 @@ fn lower_statement(
                     format!("duplicate sidecars group `{}`", group.name),
                 ));
             }
-            builder
-                .sidecar_places
-                .insert(group.name.clone(), statement.place.clone());
-            builder.pipeline.sidecar_groups.push(group.clone());
+            builder.add_sidecar_group(group.clone(), statement.place.clone());
         }
         StatementKind::Extension { stage, extension } => {
             builder.add_extension(stage.as_deref(), extension, statement.place.line)?;
