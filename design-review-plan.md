@@ -34,7 +34,7 @@ Status is `open`, `claimed (<branch>)`, `decided`, or `done (<commit>)`. Numbers
 | S5 | Syntax: `path:` in both `.spit` and `.spitin` | open |
 | R1 | Composite operations: provenance and diagnostics design | open |
 | T1 | Sidecar `incomplete_groups` keyed by structured bindings ([#37](https://github.com/eclnz/spit/issues/37)) | done (`5ab3a16`) |
-| T2 | Incomplete-group warning for `InputSource::Inventory` | open |
+| T2 | Incomplete-group warning for `InputSource::Inventory` | claimed (`inventory-incomplete-groups`) |
 
 Deferred, and not to be claimed without a concrete use case: resources, Slurm, one execution package, dynamic outputs. See [Future direction](#future-direction-deliberately-deferred).
 
