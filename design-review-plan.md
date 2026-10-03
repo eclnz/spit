@@ -29,7 +29,7 @@ Status is `open`, `claimed (<branch>)`, `decided`, or `done (<commit>)`. Numbers
 | 5 | The two-file mental model | claimed (`two-files`) |
 | S1 | Syntax: operations declared inside a stage | decided, claimed (`stage-scope`) |
 | S2 | Syntax: `@ min(n)` beside the `many` port | done (`5131495`) |
-| S3 | Syntax: `require` and `drop` clause order ([#36](https://github.com/eclnz/spit/issues/36)) | decided, claimed (`require-drop-order`) |
+| S3 | Syntax: `require` and `drop` clause order ([#36](https://github.com/eclnz/spit/issues/36)) | done (`3c6d843`) |
 | S4 | Syntax: shell metacharacters in commands | decided, claimed (`shell-meta`) |
 | S5 | Syntax: `path:` in both `.spit` and `.spitin` | claimed (`two-files`) |
 | R1 | Composite operations: provenance and diagnostics design | open |
@@ -173,6 +173,8 @@ operation collect(items: many @ min(3)) -> Bundle
 - *Rejected.* `require [sub, ses] where …` (above); `drop t1w count=0 per [sub, ses]`, which undoes the B1 fix; accepting both orders, which is two ways to write one thing.
 - *What changes.* Writing `require [sub, ses] where t1w count=1` or `drop t1w count=0 per [sub, ses]` by analogy with the other rule gives an error naming the rule in its own order, as `skip` does now. `require … where … missing …` and a `drop` with values but no `has` or `missing` get the general shape, since their intent can't be read off.
 - *Phase and lowering.* The recipe parser only; `CoverageRule`, settling, the `.spitout`, the DAG and spit-bash are untouched. spit-vscode's grammar colours both keywords already and needs no change.
+
+*Done in `3c6d843`* (merged in `79f87fe`). The errors give the rule in its own order, and the language reference says why the two orders differ. Issue #36's bullet on one grammar for `require` and `drop` is answered by this decision; its other two ideas stay open there.
 
 **S4 design (decided, branch `shell-meta`).** A command stays a list of program arguments, which is how every backend runs it, and an unquoted shell operator becomes an error. A command that needs a pipe or a redirection names its shell, as any other program, and takes its paths as positional parameters:
 
