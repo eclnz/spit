@@ -1,0 +1,33 @@
+site_name: SPIT documentation
+site_description: The SPIT pipeline language and command line
+repo_url: https://github.com/eclnz/spit
+repo_name: eclnz/spit
+docs_dir: docs
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - navigation.indexes
+    - content.code.copy
+    - search.suggest
+markdown_extensions:
+  - tables
+  - toc:
+      permalink: true
+nav:
+  - Home: index.md
+  - Getting started: getting-started.md
+  - Language guide:
+      - How SPIT thinks about data: guide/concepts.md
+      - Pipelines and operations: guide/pipelines.md
+      - Types and reusable definitions: guide/types-and-reuse.md
+      - Matching and collections: guide/matching.md
+      - Paths and file kinds: guide/paths.md
+      - Recipes and input inventories: guide/recipes.md
+      - Inspecting and diagnosing plans: guide/inspection.md
+  - Reference:
+      - Complete language reference: language-reference.md
+      - Command line: cli.md
+      - DAG format: spitdag.md
+  - Examples: examples.md
+  - Architecture: architecture.md
