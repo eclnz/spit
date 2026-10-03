@@ -91,7 +91,7 @@ The five rules under [Performance](docs/architecture.md#performance) come first:
 [spit-bash](https://github.com/eclnz/spit-bash) runs a `.spitdag`'s jobs on one machine. It reads only the DAG, so it must stay in step with `docs/spitdag.md`.
 
 - **A change to the DAG format needs a change in the runner.** That is any field, argument part, ordering or meaning `docs/spitdag.md` gives, and above all a new `version`. Make the runner's change as part of the same work, with the same branch name in both repositories, and link the pull requests as for the extension. Merge the spit pull request first.
-- **The runner's CI catches drift.** It builds SPIT from `usability`, where SPIT's work merges, and runs its examples on every push and weekly, so a format change merged without the runner's change shows up there as a failure.
+- **The runner's CI catches drift.** It builds SPIT from `dev`, where SPIT's work merges, and runs its examples on every push and weekly, so a format change merged without the runner's change shows up there as a failure.
 
 ## Checks before every commit
 
@@ -123,6 +123,7 @@ usability/harness/rebuild_keys.sh             # expect `ok` for every answer key
 
 ## Conventions
 
+- **Branches.** Work merges into `dev`, which carries the next release's version. `main` holds the latest release, and moves to `dev` only when `dev`'s CI is green.
 - **Commit messages.** The title is a plain sentence, such as "Replace skip with drop, which names the groups it removes". Then prose saying what was wrong and what changed, then the co-author and session trailers.
 - **No model names** in files pushed to the repository.
 - **Guide updates travel with behaviour.** Each commit updates the README, `docs/language-reference.md`, `docs/spitdag.md` or `docs/architecture.md` for what it changes.

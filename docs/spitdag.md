@@ -9,7 +9,7 @@ A `.spitdag` is one JSON object, followed by a newline:
 ```json
 {
   "version": 5,
-  "generator": {"name": "spit", "version": "0.2.1"},
+  "generator": {"name": "spit", "version": "0.2.2"},
   "root": "/data/study",
   "external_inputs": [ARTIFACT, ...],
   "targets": [ARTIFACT, ...],
