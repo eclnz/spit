@@ -239,13 +239,32 @@ pub fn render_artifacts(report: &ArtifactReport) -> String {
     Report(report).to_string()
 }
 
-/// How many sources no job reads, by product in source order, as
-/// `3 source artifacts are used by no job (calibration: 3)`; `None` when
+/// How many sources no job reads, and which: each by its identity when
+/// there are at most three, as `1 source artifact is used by no job:
+/// price[store=S07]`, else how many of each product in source order, as
+/// `4 source artifacts are used by no job (calibration: 4)`; `None` when
 /// every source is read.
 pub fn unused_sources_summary(report: &ArtifactReport) -> Option<String> {
     let unused = report.unused_sources();
     if unused.is_empty() {
         return None;
+    }
+    let noun = if unused.len() == 1 {
+        "artifact is"
+    } else {
+        "artifacts are"
+    };
+    if unused.len() <= 3 {
+        let dag = &report.dag;
+        let named: Vec<_> = unused
+            .iter()
+            .map(|&source| render_artifact(dag, dag.artifact(source)))
+            .collect();
+        return Some(format!(
+            "{} source {noun} used by no job: {}",
+            unused.len(),
+            named.join(", ")
+        ));
     }
     let mut counts: Vec<(&str, usize)> = Vec::new();
     for &source in &unused {
@@ -259,11 +278,6 @@ pub fn unused_sources_summary(report: &ArtifactReport) -> Option<String> {
         .iter()
         .map(|(product, count)| format!("{product}: {count}"))
         .collect();
-    let noun = if unused.len() == 1 {
-        "artifact is"
-    } else {
-        "artifacts are"
-    };
     Some(format!(
         "{} source {noun} used by no job ({})",
         unused.len(),
