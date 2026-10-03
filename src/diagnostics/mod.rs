@@ -415,11 +415,16 @@ pub fn diagnose_recipe_against(text: &str, pipeline: &Pipeline) -> Vec<Diagnosti
                 }),
         };
         if let Err(problem) = checked {
-            // Records written in the recipe keep its line numbers.
+            // Records written in the recipe keep its line numbers, and a
+            // path the recipe should not give is at its `path` line.
             let place = match &problem {
                 InputError::Resolve(error) => {
                     error_location(pipeline, &lines, error, text, false).1
                 }
+                InputError::NotASource { product }
+                | InputError::OutputPath { product }
+                | InputError::PathInBoth { product }
+                | InputError::MemberPath { product, .. } => lines.paths.get(product).cloned(),
                 _ => None,
             };
             diagnostics.push(Diagnostic::error(
