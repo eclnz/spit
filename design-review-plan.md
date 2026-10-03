@@ -30,7 +30,7 @@ Status is `open`, `claimed (<branch>)`, `decided`, or `done (<commit>)`. Numbers
 | S1 | Syntax: operations declared inside a stage | claimed (`stage-scope`) |
 | S2 | Syntax: `@ min(n)` beside the `many` port | decided, claimed (`many-min`) |
 | S3 | Syntax: `require` and `drop` clause order ([#36](https://github.com/eclnz/spit/issues/36)) | decided, claimed (`require-drop-order`) |
-| S4 | Syntax: shell metacharacters in commands | claimed (`shell-meta`) |
+| S4 | Syntax: shell metacharacters in commands | decided, claimed (`shell-meta`) |
 | S5 | Syntax: `path:` in both `.spit` and `.spitin` | claimed (`two-files`) |
 | R1 | Composite operations: provenance and diagnostics design | open |
 | T1 | Sidecar `incomplete_groups` keyed by structured bindings ([#37](https://github.com/eclnz/spit/issues/37)) | done (`5ab3a16`) |
@@ -171,6 +171,24 @@ operation collect(items: many @ min(3)) -> Bundle
 - *Rejected.* `require [sub, ses] where …` (above); `drop t1w count=0 per [sub, ses]`, which undoes the B1 fix; accepting both orders, which is two ways to write one thing.
 - *What changes.* Writing `require [sub, ses] where t1w count=1` or `drop t1w count=0 per [sub, ses]` by analogy with the other rule gives an error naming the rule in its own order, as `skip` does now. `require … where … missing …` and a `drop` with values but no `has` or `missing` get the general shape, since their intent can't be read off.
 - *Phase and lowering.* The recipe parser only; `CoverageRule`, settling, the `.spitout`, the DAG and spit-bash are untouched. spit-vscode's grammar colours both keywords already and needs no change.
+
+**S4 design (decided, branch `shell-meta`).** A command stays a list of program arguments, which is how every backend runs it, and an unquoted shell operator becomes an error. A command that needs a pipe or a redirection names its shell, as any other program, and takes its paths as positional parameters:
+
+```text
+command first: sh -c 'cut -f1 "$1" > "$2"' sh {table} {@output}
+command bad:   cut -f1 {table} > {@output}
+#   error: `>` in the command for `bad` is not a redirection: commands run without a shell.
+#          Quote it ('>') to pass it to the program, or run a shell: sh -c '... > "$2"' sh {table} {@output}
+```
+
+- *Evidence.* No participant in rounds 1 to 4 wrote a shell operator in a command, so this is about a mistake the checker can see, not one the study saw. Checked against the binary on `dev`: the `sh -c` line above works today, and `dag --commands` prints it as `sh -c 'cut -f1 "$1" > "$2"' sh x.txt out/col/name=x`. The bare `>` becomes the argument `'>'`, and the job fails only when it runs (`cut: '>': No such file`), or `dag -o` saves it with no more than a warning.
+- *Why an error.* A bare `|`, `>`, `&&`, `;` or `2>&1` never does what it looks like, and quoting it keeps the literal meaning with one character more, so the error takes away nothing anyone can mean. It is the same kind of rule as the old `{output}` spelling: likely-mistaken text with one fix.
+- *Rejected: an explicit shell form* (such as `shell first: cut -f1 {table} > {@output}`). Every placeholder would have to be quoted for the shell, and correctly in each context (bare, in `"..."`, in `'...'`, inside `$(...)`), so SPIT would need a shell quoting model it does not have. It adds a keyword the extension's grammar and the guide must learn, and the program it runs is still `sh -c`, which the explicit idiom already states. Positional parameters (`"$1"`) mean a path is never parsed again as shell text, so spaces and quotes in paths stay safe. Revisit only if real pipelines show the idiom is too noisy.
+- *Rejected: a clearer warning.* A warning doesn't stop `dag -o`, and the job fails later on the runner, which is the cost the review names.
+- *Phase and lowering.* The parser owns it: `CommandTemplate::parse` already marks each bare operator word while it splits the template, so the operator is reported as a `CommandProblem` there, located on its column, instead of being stored for a later warning. Nothing new is lowered. The DAG format, spit-bash and `--commands` are unchanged.
+- *Invariants and diagnostics.* Every argument in the DAG means what it looks like. Quoted or escaped operators (`'>'`, `\;`) stay literal arguments, and operators inside a quoted `sh -c` script are not looked at. The rule applies to `verify` commands as well, and to an imported library, whose error is reported in the library, as any other command error is. The warning and its "unquoted shell operator" line in the README go; `check --json` gives an error where it gave a warning.
+- *Beyond spit.* The extension shows the severity that `check --json` gives, and its grammar doesn't colour operators, so no change is expected there; that still needs checking against `extension.test.js` on a branch named `shell-meta`. The language reference documents the `sh -c` idiom. Item 4b should count this as one warning moved to an error.
+- *Considered, left out.* An unquoted `$VAR`, a backtick or a glob such as `*` is also passed literally, but each one is a legitimate argument to some programs, which isn't true of an operator word. They stay as the guide describes them.
 
 The proposed language design rule: place modifiers beside the construct they constrain; make indentation's scope obvious; order related clauses consistently; make the command notation reflect its actual execution model. S1 and S2 deserve attention before adding check and resource syntax, since those features would otherwise inherit unclear placement. Keep the concise happy path: an untyped source, a small operation, and an assignment should stay easy to write.
 
