@@ -5,7 +5,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use crate::model::{
-    ArtifactInstance, EntityBinding, ExtensionSource, Pipeline, PipelineIndex, ProductDef,
+    ArtifactInstance, EntityBinding, ExtensionSource, PathOrigin, Pipeline, PipelineIndex,
+    ProductDef,
 };
 use crate::parser::SourceMap;
 
@@ -56,22 +57,18 @@ impl PathRule {
         } else {
             template.to_string()
         };
-        if let Some((sibling, _, _)) = beside {
-            Self::Beside {
+        match (beside, index.path_origin(product)) {
+            (Some((sibling, _, _)), _) => Self::Beside {
                 sibling: sibling.to_owned(),
                 template,
-            }
-        } else if index.pipeline.product_paths.contains_key(product) {
-            Self::Explicit(template)
-        } else if let Some((stage, _)) = index.stage_path_rule(product) {
-            Self::Stage {
+            },
+            (None, Some((PathOrigin::Explicit, _))) => Self::Explicit(template),
+            (None, Some((PathOrigin::Stage(stage), _))) => Self::Stage {
                 stage: stage.to_owned(),
                 template,
-            }
-        } else if index.pipeline.path_template.is_none() {
-            Self::BuiltIn(template)
-        } else {
-            Self::Default(template)
+            },
+            (None, Some((PathOrigin::BuiltIn, _))) => Self::BuiltIn(template),
+            (None, Some((PathOrigin::Default, _)) | None) => Self::Default(template),
         }
     }
 }
@@ -362,14 +359,15 @@ fn extension_disagreement(index: &PipelineIndex<'_>, product: &str) -> Option<St
         ExtensionSource::Source(_) => "declares",
         _ => "writes",
     };
-    if index.pipeline.product_paths.contains_key(product) {
+    let origin = index.path_origin(product).map(|(origin, _)| origin);
+    if origin == Some(PathOrigin::Explicit) {
         return Some(format!(
             "path `{product}` ends in `{written}`, but {source} {verb} `{expected}`; drop the extension or use `{expected}`"
         ));
     }
-    let default = match index.stage_path_rule(product) {
-        Some((stage, _)) => format!("stage `{stage}`'s default path"),
-        None => "the default path".to_owned(),
+    let default = match origin {
+        Some(PathOrigin::Stage(stage)) => format!("stage `{stage}`'s default path"),
+        _ => "the default path".to_owned(),
     };
     Some(match source {
         ExtensionSource::Operation(_) => format!(

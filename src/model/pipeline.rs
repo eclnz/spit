@@ -245,6 +245,24 @@ pub(crate) struct PipelineIndex<'p> {
     found: Option<Found<'p>>,
 }
 
+/// Where the path rule of a product comes from, in the order a product looks
+/// for one. Keep in step with [`PipelineIndex::path_origin`], the only place
+/// that chooses, and with the places that say so: the editor's hover, the
+/// `--path-rules` listing and the source map's line for the rule.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum PathOrigin<'p> {
+    /// The product's own `path product:` rule.
+    Explicit,
+    /// The default of the named stage, or of the nearest stage around it
+    /// that sets one.
+    Stage(&'p str),
+    /// The pipeline's `path:` default.
+    Default,
+    /// The built-in default, `out/{@product}/{@entities}`, for an output in
+    /// a pipeline with no `path:` default.
+    BuiltIn,
+}
+
 /// What a [`PipelineIndex::new`] finds once.
 struct Found<'p> {
     /// Each product's declaration.
@@ -358,9 +376,7 @@ impl<'p> PipelineIndex<'p> {
     pub(crate) fn path_template_for(&self, product: &str) -> Option<Cow<'p, PathTemplate>> {
         if let Some((sibling, sibling_extension, suffix)) = self.beside(product) {
             // The sibling's own file: `{@product}` is its name, not this one's.
-            let template = self
-                .path_template_for(sibling)?
-                .with_product(&sibling.replace("::", "."));
+            let template = self.path_template_for(sibling)?.with_product(sibling);
             let stem = template
                 .without_extension(sibling_extension)
                 .unwrap_or(template);
@@ -392,22 +408,33 @@ impl<'p> PipelineIndex<'p> {
         }
     }
 
-    /// See [`Pipeline::path_rule_for`]. A default that needs `{@stage}` is
-    /// for products made in a stage, so it does not find a source, which
-    /// is left for a rule of its own or the recipe's default.
+    /// See [`Pipeline::path_rule_for`].
     pub(crate) fn path_rule_for(&self, product: &str) -> Option<&'p PathTemplate> {
+        self.path_origin(product).map(|(_, template)| template)
+    }
+
+    /// The path rule `product` uses, as written, and where it comes from.
+    /// An output written beside another has no rule of its own, whatever
+    /// this finds; ask [`PipelineIndex::beside`] first.
+    ///
+    /// A default that needs `{@stage}` is for products made in a stage, so
+    /// it does not find a source, which is left for a rule of its own or
+    /// the recipe's default.
+    pub(crate) fn path_origin(&self, product: &str) -> Option<(PathOrigin<'p>, &'p PathTemplate)> {
         let pipeline = self.pipeline;
-        pipeline
-            .product_paths
-            .get(product)
-            .or_else(|| self.stage_path_rule(product).map(|(_, template)| template))
-            .or_else(|| match &pipeline.path_template {
-                Some(default) => Some(default)
-                    .filter(|default| !(default.needs_stage() && self.is_source(product))),
-                None => self
-                    .producer(product)
-                    .map(|_| PathTemplate::built_in_output()),
-            })
+        if let Some(template) = pipeline.product_paths.get(product) {
+            return Some((PathOrigin::Explicit, template));
+        }
+        if let Some((stage, template)) = self.stage_path_rule(product) {
+            return Some((PathOrigin::Stage(stage), template));
+        }
+        match &pipeline.path_template {
+            Some(default) => (!(default.needs_stage() && self.is_source(product)))
+                .then_some((PathOrigin::Default, default)),
+            None => self
+                .producer(product)
+                .map(|_| (PathOrigin::BuiltIn, PathTemplate::built_in_output())),
+        }
     }
 
     /// The step that makes `product`, the operation it calls, and the port
