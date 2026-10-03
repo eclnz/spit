@@ -13,7 +13,7 @@ use crate::diagnostics::{
 use crate::imports::parse_located_document;
 use crate::json::Json;
 use crate::model::{
-    Cardinality, CheckDef, CheckUse, CommandRole, OperationDef, OutputPort, Pipeline,
+    Cardinality, CheckDef, CheckUse, CommandRole, OperationDef, OutputPort, PathOrigin, Pipeline,
     PipelineIndex, ProductDef, DEFAULT_OUTPUT,
 };
 use crate::parser::{without_bom, Kind};
@@ -475,7 +475,6 @@ fn product_details(
     inferred: bool,
     consumers: &[String],
 ) -> Vec<String> {
-    let pipeline = index.pipeline;
     let producer = index.producer(&product.name).map(|(call, _)| call);
     let mut details = vec![match producer {
         Some(call) => format!(
@@ -513,37 +512,31 @@ fn product_details(
                 .map(|template| template.to_string())
         })
     };
-    if let Some((sibling, _, _)) = index.beside(&product.name) {
-        details.push(format!(
-            "Path template: {} (beside {sibling}).",
-            resolved_path().unwrap_or_default()
-        ));
-    } else if pipeline.product_paths.contains_key(&product.name) {
-        details.push(format!(
-            "Path template: {} (explicit product rule).",
-            resolved_path().unwrap_or_default()
-        ));
-    } else if let Some((stage, _)) = index.stage_path_rule(&product.name) {
-        details.push(format!(
-            "Path template: {} (inherited from stage {stage}).",
-            resolved_path().unwrap_or_default()
-        ));
-    } else if producer.is_some() && pipeline.path_template.is_none() {
-        details.push(format!(
-            "Path template: {} (built-in output default).",
-            resolved_path().unwrap_or_default()
-        ));
-    } else if index.has_path(&product.name) {
-        // A default that needs `{@stage}` is no source's rule.
-        details.push(format!(
-            "Path template: {} (pipeline default).",
-            resolved_path().unwrap_or_default()
-        ));
-    } else {
-        details.push(
-            "No pipeline path rule; a recipe or inventory must supply the source path.".to_owned(),
-        );
-    }
+    let path = resolved_path().unwrap_or_default();
+    details.push(
+        match (
+            index.beside(&product.name),
+            index.path_origin(&product.name),
+        ) {
+            (Some((sibling, _, _)), _) => format!("Path template: {path} (beside {sibling})."),
+            (None, Some((PathOrigin::Explicit, _))) => {
+                format!("Path template: {path} (explicit product rule).")
+            }
+            (None, Some((PathOrigin::Stage(stage), _))) => {
+                format!("Path template: {path} (inherited from stage {stage}).")
+            }
+            (None, Some((PathOrigin::BuiltIn, _))) => {
+                format!("Path template: {path} (built-in output default).")
+            }
+            (None, Some((PathOrigin::Default, _))) => {
+                format!("Path template: {path} (pipeline default).")
+            }
+            (None, None) => {
+                "No pipeline path rule; a recipe or inventory must supply the source path."
+                    .to_owned()
+            }
+        },
+    );
     details
 }
 

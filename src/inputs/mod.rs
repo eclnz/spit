@@ -252,6 +252,7 @@ impl InputSpec {
     /// reading any file or record.
     pub fn check(&self, pipeline: &Pipeline) -> Result<(), InputError> {
         let members = pipeline.sidecar_members();
+        let index = PipelineIndex::new(pipeline);
         for name in self.rules.source_paths.keys() {
             let product = name.clone();
             if let Some(group) = pipeline.sidecar_group(name) {
@@ -260,12 +261,8 @@ impl InputSpec {
                 }
                 continue;
             }
-            if !pipeline.is_source(name) {
-                if pipeline
-                    .products
-                    .iter()
-                    .any(|declared| declared.name == *name)
-                {
+            if !index.is_source(name) {
+                if index.product(name).is_some() {
                     return Err(InputError::OutputPath { product });
                 }
                 return Err(InputError::NotASource { product });

@@ -10,7 +10,7 @@ use rustc_hash::FxHashMap;
 use crate::imports::apply_import;
 use crate::model::{
     Cardinality, CheckDef, CommandDef, CoverageRule, Exclusion, InputBinding, InputRules,
-    Invocation, OperationDef, Pipeline, ProductDef, SourceInventory, StageDef,
+    Invocation, OperationDef, Pipeline, ProductDef, SidecarGroup, SourceInventory, StageDef,
 };
 use crate::order::{order_dimensions, Output};
 use crate::parser::{
@@ -37,6 +37,11 @@ pub(crate) struct PipelineBuilder {
     /// Each product's place in `pipeline.products`, the first of a name, so
     /// that a step finds its inputs without searching every product.
     product_numbers: FxHashMap<String, usize>,
+    /// The position in `pipeline.operations` of each operation by name, the
+    /// first of a name, so a step finds what it calls without searching
+    /// every operation. Keep in step with `add_operation`, the only place
+    /// that adds one.
+    operation_at: FxHashMap<String, usize>,
 }
 
 impl PipelineBuilder {
@@ -77,8 +82,16 @@ impl PipelineBuilder {
                 .insert(operation.name.clone(), stage.to_owned());
         }
         self.lines.operations.insert(operation.name.clone(), place);
+        self.operation_at
+            .insert(operation.name.clone(), self.pipeline.operations.len());
         self.pipeline.operations.push(operation);
         Ok(())
+    }
+
+    /// Add a `sidecars` group declared, or imported, at `place`.
+    pub(crate) fn add_sidecar_group(&mut self, group: SidecarGroup, place: Place) {
+        self.sidecar_places.insert(group.name.clone(), place);
+        self.pipeline.sidecar_groups.push(group);
     }
 
     pub(crate) fn add_constraint(&mut self, mut constraint: CoverageRule, rule: Rule) {
@@ -191,10 +204,9 @@ impl PipelineBuilder {
         } = flow;
         let name = &invocation.operation;
         let operation = self
-            .pipeline
-            .operations
-            .iter()
-            .find(|operation| &operation.name == name)
+            .operation_at
+            .get(name)
+            .map(|&index| &self.pipeline.operations[index])
             .ok_or_else(|| {
                 let place = step.operation();
                 ParseError::new(
@@ -386,10 +398,7 @@ fn lower_statement(
                     format!("duplicate sidecars group `{}`", group.name),
                 ));
             }
-            builder
-                .sidecar_places
-                .insert(group.name.clone(), statement.place.clone());
-            builder.pipeline.sidecar_groups.push(group.clone());
+            builder.add_sidecar_group(group.clone(), statement.place.clone());
         }
         StatementKind::Extension { stage, extension } => {
             builder.add_extension(stage.as_deref(), extension, statement.place.line)?;

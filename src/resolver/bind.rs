@@ -1,9 +1,9 @@
 //! Bind a resolved DAG for a backend: give each artifact its path and expand
 //! each job's commands into arguments, so the result needs no pipeline.
 
-use std::collections::BTreeMap;
-
 use std::fmt;
+
+use rustc_hash::FxHashMap;
 
 use crate::check::{step_checks, StepCheck, When, CHECKED_PATH};
 use crate::command::{facet, slot, validate_commands, CommandError, Facet, Slot};
@@ -54,15 +54,20 @@ fn bind_jobs(
     dag: &ResolvedDag,
     paths: Vec<Option<String>>,
 ) -> Result<BoundDag, BindError> {
-    let operations: BTreeMap<&str, &OperationDef> = pipeline
-        .operations
-        .iter()
-        .map(|operation| (operation.name.as_str(), operation))
-        .collect();
+    // Found once, since each step asks for its operation, commands and
+    // producers.
+    let index = PipelineIndex::new(pipeline);
+    let mut commands: FxHashMap<&str, Vec<&CommandDef>> = FxHashMap::default();
+    for command in &pipeline.commands {
+        commands
+            .entry(command.operation.as_str())
+            .or_default()
+            .push(command);
+    }
     let steps = dag
         .steps
         .iter()
-        .map(|step| StepCommands::new(pipeline, &operations, step))
+        .map(|step| StepCommands::new(&index, &commands, step))
         .collect::<Result<Vec<_>, _>>()?;
     let mut produced = vec![false; dag.artifacts.len()];
     for &output in dag.jobs.iter().flat_map(|job| &job.outputs) {
@@ -83,7 +88,6 @@ fn bind_jobs(
                 .unwrap_or_default()
         })
         .collect();
-    let index = PipelineIndex::new(pipeline);
     let folders = dag
         .artifacts
         .products()
@@ -115,35 +119,36 @@ struct StepCommands<'p> {
 
 impl<'p> StepCommands<'p> {
     fn new(
-        pipeline: &'p Pipeline,
-        operations: &BTreeMap<&str, &'p OperationDef>,
+        index: &PipelineIndex<'p>,
+        commands: &FxHashMap<&str, Vec<&'p CommandDef>>,
         step: &'p DagStep,
     ) -> Result<Self, BindError> {
-        let operation = operations
-            .get(step.operation.as_str())
-            .copied()
-            .ok_or_else(|| {
-                BindError::Dag(format!(
-                    "unknown operation `{}` in resolved DAG",
-                    step.operation
-                ))
-            })?;
+        let operation = index.operation(&step.operation).ok_or_else(|| {
+            BindError::Dag(format!(
+                "unknown operation `{}` in resolved DAG",
+                step.operation
+            ))
+        })?;
         let commands = |role: CommandRole| {
-            pipeline
-                .commands
-                .iter()
-                .filter(move |command| command.operation == step.operation && command.role == role)
+            commands
+                .get(step.operation.as_str())
+                .into_iter()
+                .flatten()
+                .copied()
+                .filter(move |command| command.role == role)
         };
-        let invocation = pipeline
-            .invocations
-            .iter()
-            .find(|invocation| invocation.outputs == step.outputs);
+        // The step's invocation is the one that makes its first output.
+        let invocation = step
+            .outputs
+            .first()
+            .and_then(|output| index.producer(output))
+            .map(|(invocation, _)| invocation);
         Ok(Self {
             step,
             operation,
             run: commands(CommandRole::Run).next(),
             verify: commands(CommandRole::Verify).collect(),
-            checks: step_checks(pipeline, operation, invocation),
+            checks: step_checks(index, operation, invocation),
         })
     }
 

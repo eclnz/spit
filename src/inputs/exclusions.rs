@@ -2,12 +2,13 @@
 //! written in a recipe or read from a CSV file, and recording what each
 //! removed.
 
+use std::borrow::Cow;
 use std::collections::BTreeSet;
 use std::path::Path;
 
 use crate::error::{DefinitionSubject, ResolveError};
 use crate::model::{
-    near_reason, EntityBinding, Exclusion, InputRules, Pipeline, Removal, SourceInventory,
+    near_reason, EntityBinding, Exclusion, InputRules, PipelineIndex, Removal, SourceInventory,
 };
 use crate::parser::ParseError;
 
@@ -174,10 +175,18 @@ fn is_qualified_identifier(text: &str) -> bool {
 /// product must be a source, and each dimension it names must be one of that
 /// source's or, for a rule naming no source, of some source.
 pub(crate) fn collect_exclusion_errors(
-    pipeline: &Pipeline,
+    products: &PipelineIndex<'_>,
     rules: &InputRules,
 ) -> Vec<(DefinitionSubject, ResolveError)> {
+    let pipeline = products.pipeline;
     let mut errors = Vec::new();
+    // The dimensions of every source, for the rules that name none.
+    let all_dimensions: Vec<&str> = pipeline
+        .products
+        .iter()
+        .filter(|product| products.is_source(&product.name))
+        .flat_map(|product| product.dimensions.iter().map(String::as_str))
+        .collect();
     for (index, rule) in rules.exclusions.iter().enumerate() {
         // A rule written in the recipe is placed at its line; a row of a
         // file is not, so its message says where it is.
@@ -190,28 +199,25 @@ pub(crate) fn collect_exclusion_errors(
             subject: DefinitionSubject::Exclusion(index),
             detail: format!("`{rule}`{at}: {detail}"),
         };
-        let dimensions: Vec<&str> = match &rule.product {
+        let dimensions: Cow<'_, [&str]> = match &rule.product {
             Some(name) => {
-                if !pipeline.is_source(name) {
+                if !products.is_source(name) {
                     errors.push((
                         DefinitionSubject::Exclusion(index),
                         problem(format!("`{name}` is not a source")),
                     ));
                     continue;
                 }
-                pipeline
-                    .products
-                    .iter()
-                    .filter(|product| &product.name == name)
-                    .flat_map(|product| product.dimensions.iter().map(String::as_str))
-                    .collect()
+                Cow::Owned(
+                    pipeline
+                        .products
+                        .iter()
+                        .filter(|product| &product.name == name)
+                        .flat_map(|product| product.dimensions.iter().map(String::as_str))
+                        .collect(),
+                )
             }
-            None => pipeline
-                .products
-                .iter()
-                .filter(|product| pipeline.is_source(&product.name))
-                .flat_map(|product| product.dimensions.iter().map(String::as_str))
-                .collect(),
+            None => Cow::Borrowed(all_dimensions.as_slice()),
         };
         for (dimension, _) in &rule.values {
             if !dimensions.contains(&dimension.as_str()) {

@@ -209,10 +209,15 @@ pub(crate) fn dag(args: &CliArgs) -> Result<(), Box<dyn Error>> {
         commands: args.has(Flag::Commands),
     };
     // Print the jobs as `view` shows them, after the counts if there are any.
-    let print_view = |bound: &BoundDag| {
+    let print_view = |bound: &BoundDag, view: View| {
         if view.commands {
             if let Some(root) = &prepared.root {
                 eprintln!("note: commands run from `{}`", root.display());
+            }
+            if bound.jobs.iter().all(|job| job.command.is_none()) && !bound.jobs.is_empty() {
+                eprintln!(
+                    "note: no job has a command; `dag --jobs` lists each job's inputs and outputs"
+                );
             }
         }
         if args.has(Flag::Counts) {
@@ -252,14 +257,22 @@ pub(crate) fn dag(args: &CliArgs) -> Result<(), Box<dyn Error>> {
         write_spitdag(args, &bound)?;
         // With -o, the .spitdag goes to its file and the commands to stdout.
         if view.commands {
-            print_view(&bound);
+            print_view(&bound, view);
         }
         return Ok(());
     }
-    if view.paths || view.commands {
-        print_view(&bind(paths)?);
-    } else if !args.has(Flag::Counts) {
+    if args.has(Flag::Jobs) {
+        if args.has(Flag::Counts) {
+            println!();
+        }
         print!("{}", render_dag(dag));
+    } else if view.paths || view.commands || !args.has(Flag::Counts) {
+        // Plain `dag` shows the commands, as `--commands` does.
+        let view = View {
+            commands: view.commands || !view.paths,
+            ..view
+        };
+        print_view(&bind(paths)?, view);
     }
     Ok(())
 }
