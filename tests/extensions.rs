@@ -146,7 +146,7 @@ fn a_sources_rule_ending_in_another_extension_is_an_error() {
         found,
         [(
             Some(2),
-            "path `events` ends in `.csv`, but source `events` declares `.tsv`; drop the extension or use `.tsv`".to_owned()
+            "path `events` ends in `.csv`, but source `events` declares `.tsv`; drop the extension or use `.tsv`; SPIT reads the extension from the first `.` after the last placeholder, so keep `.` out of the name before it".to_owned()
         )]
     );
     let found = errors("path: in/{@product}/{@entities}.csv\nsource events .tsv [id]\noperation f(x)\ny = f(events)\n");
@@ -207,7 +207,7 @@ fn a_rule_ending_in_another_extension_is_an_error() {
         found,
         [(
             Some(12),
-            "path `matrix` ends in `.txt`, but operation `align` writes `.mat`; drop the extension or use `.mat`".to_owned()
+            "path `matrix` ends in `.txt`, but operation `align` writes `.mat`; drop the extension or use `.mat`; SPIT reads the extension from the first `.` after the last placeholder, so keep `.` out of the name before it".to_owned()
         )]
     );
 }
