@@ -3,7 +3,7 @@
 
 use std::collections::BTreeSet;
 
-use super::draft::{pieces, Draft};
+use super::draft::{is_placeholder_name, pieces, Draft};
 use super::SuggestedSource;
 use crate::inputs::pattern::match_pattern;
 use crate::model::ProductDef;
@@ -22,16 +22,25 @@ pub(super) fn name_sources(
     let mut chosen: Vec<(Draft, String, Option<&ProductDef>)> = drafts
         .into_iter()
         .map(|draft| {
+            // A word that names a dimension, as `site` in `site_{site}`,
+            // would name the source after one of its parts.
+            let names = draft.names();
             let word = draft
                 .suffix
                 .clone()
                 .or_else(|| draft.name_words.last().cloned())
                 .or_else(|| draft.folder_words.last().cloned())
+                .filter(|word| !names.contains(word))
+                .or_else(|| {
+                    let last = draft.extension.rsplit('.').next().unwrap_or_default();
+                    (!last.is_empty()).then(|| last.to_owned())
+                })
                 .unwrap_or_else(|| "files".to_owned());
             let name = identifier(&word);
             (draft, name, None)
         })
         .collect();
+    distinguish(&mut chosen);
     // A declared source takes the one draft named for it, else the one whose
     // name starts with its own or its with the draft's, as `t1` and `t1w`,
     // else the one whose dimensions are its own.
@@ -102,7 +111,6 @@ pub(super) fn name_sources(
             None if sidecars => unique_name(name, "", &mut used),
             None => unique_name(name, &draft.extension, &mut used),
         };
-        let (draft, _, product) = &group[0];
         let members = if sidecars {
             group
                 .iter()
@@ -115,6 +123,8 @@ pub(super) fn name_sources(
         } else {
             Vec::new()
         };
+        let values = values(&group);
+        let (draft, _, product) = &group[0];
         let unnamed = draft
             .names()
             .into_iter()
@@ -134,15 +144,66 @@ pub(super) fn name_sources(
             declared: product.map(|product| product.dimensions.clone()),
             overlaps,
             members,
+            values,
         });
     }
     (sources, unfitted)
 }
 
-/// Whether `name` is one `name_unnamed` gave.
-fn is_placeholder_name(name: &str) -> bool {
-    name.strip_prefix("dim")
-        .is_some_and(|number| !number.is_empty() && number.chars().all(|c| c.is_ascii_digit()))
+/// Give a draft named as an earlier one a word of its own after the name,
+/// as `bold_nback` beside `bold` for files with `task-nback` where the
+/// earlier ones have `task-rest`: the last word that stays the same in its
+/// names, then in its folders, that no earlier draft of that name has. A
+/// draft with no such word keeps the name, as the members of a `sidecars`
+/// group do, and a number or its extension tells it apart later.
+fn distinguish(chosen: &mut [(Draft, String, Option<&ProductDef>)]) {
+    for index in 1..chosen.len() {
+        let (earlier, rest) = chosen.split_at_mut(index);
+        let (draft, name, _) = &mut rest[0];
+        let same: Vec<&Draft> = earlier
+            .iter()
+            .filter(|(_, other, _)| other == name)
+            .map(|(other, _, _)| other)
+            .collect();
+        if same.is_empty() {
+            continue;
+        }
+        let has = |other: &Draft, word: &String| {
+            other.name_words.contains(word) || other.folder_words.contains(word)
+        };
+        let own = draft
+            .name_words
+            .iter()
+            .rev()
+            .chain(draft.folder_words.iter().rev())
+            .find(|word| !same.iter().any(|other| has(other, word)));
+        if let Some(word) = own {
+            let last = word.rsplit('-').next().unwrap_or(word);
+            *name = format!("{name}_{}", identifier(last));
+        }
+    }
+}
+
+/// The values each dimension holds in a group's files, in order: by number
+/// when every value is one, as `2` before `10`.
+fn values(group: &[(Draft, String, Option<&ProductDef>)]) -> Vec<Vec<String>> {
+    let (first, _, _) = &group[0];
+    (0..first.dimensions.len())
+        .map(|index| {
+            let all: BTreeSet<&String> = group
+                .iter()
+                .flat_map(|(draft, _, _)| &draft.dimensions[index].values)
+                .collect();
+            let mut values: Vec<String> = all.into_iter().cloned().collect();
+            if values
+                .iter()
+                .all(|value| value.chars().all(|c| c.is_ascii_digit()))
+            {
+                values.sort_by(|a, b| a.len().cmp(&b.len()).then(a.cmp(b)));
+            }
+            values
+        })
+        .collect()
 }
 
 /// Give a draft for a declared source that source's dimension names, where

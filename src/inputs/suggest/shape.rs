@@ -78,17 +78,44 @@ impl<'a> Shape<'a> {
     /// What files of one source share: how deep they are, their extension
     /// and BIDS suffix, and their top folder when it is a plain word, as
     /// `baseline` or `readings`, since such folders usually hold different
-    /// kinds of data.
+    /// kinds of data. Of a top folder such as `site_north`, only the word
+    /// before its first `_` counts, so `site_north` and `site_south` stay
+    /// together, their second words a dimension.
     pub(super) fn key(&self) -> (usize, Option<&'a str>, &'a str, Option<&'a str>) {
         let top = self.components[0].text;
         let plain =
             self.components.len() > 1 && top.chars().all(|c| c.is_ascii_alphabetic() || c == '_');
+        let first = top.split('_').next().unwrap_or(top);
         (
             self.components.len(),
-            plain.then_some(top),
+            plain.then_some(first),
             self.extension,
             self.suffix,
         )
+    }
+
+    /// The text between the words of every component, and the word of
+    /// letters that starts each `key-value` or `key1` unit, as `sub` in
+    /// `sub-01` or `Visit` in `Visit1`. Files of one rule share it; one
+    /// that differs, as `subject04` among `Subject01` and `Subject02`, is a
+    /// stray.
+    ///
+    /// Keep in step with `read_words` in `draft.rs`, which joins words into
+    /// units the same way.
+    pub(super) fn skeleton(&self) -> Vec<&'a str> {
+        let mut all = Vec::new();
+        for component in &self.components {
+            for (index, word) in component.words.iter().enumerate() {
+                all.push(component.separators[index]);
+                let keys = index + 1 < component.words.len()
+                    && matches!(component.separators[index + 1], "-" | "")
+                    && word.chars().all(|c| c.is_ascii_alphabetic());
+                all.push(if keys { word } else { "" });
+            }
+            all.push(component.separators[component.words.len()]);
+            all.push("/");
+        }
+        all
     }
 
     /// The text between the words of every component, which files of one

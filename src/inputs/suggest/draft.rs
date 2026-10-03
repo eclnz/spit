@@ -91,7 +91,22 @@ impl Draft {
         };
         name_unnamed(&mut draft.dimensions);
         draft.rule = draft.render();
-        draft.matches_its_files().then_some(draft)
+        (draft.names_its_files() && draft.matches_its_files()).then_some(draft)
+    }
+
+    /// Whether the rule's file name holds a word or an extension, not only
+    /// dimensions: a rule such as `{dim1}` would read every file beside
+    /// its own, and every folder too.
+    fn names_its_files(&self) -> bool {
+        self.parts
+            .iter()
+            .rev()
+            .filter_map(|part| match part {
+                Part::Text(text) => Some(text),
+                Part::Dimension(_) => None,
+            })
+            .take_while(|text| !text.contains('/'))
+            .any(|text| text.contains(|c: char| c.is_ascii_alphanumeric()))
     }
 
     pub(super) fn render(&self) -> String {
@@ -134,6 +149,14 @@ impl Draft {
             .to_owned()
     }
 
+    /// How many of its dimensions no word names.
+    pub(super) fn unnamed(&self) -> usize {
+        self.dimensions
+            .iter()
+            .filter(|dimension| dimension.name.as_deref().is_some_and(is_placeholder_name))
+            .count()
+    }
+
     pub(super) fn names(&self) -> Vec<String> {
         self.dimensions
             .iter()
@@ -149,6 +172,11 @@ impl Draft {
 /// starts with a word of letters that stays the same, as `sub-01` or
 /// `wave3`, has that word as text and names the dimension after it, which
 /// it keeps when its value has a digit, whether or not the value differs.
+/// A unit that differs after a word of letters and a `_`, as `001` in
+/// `field_001`, is named for that word.
+///
+/// Keep in step with `Shape::skeleton` in `shape.rs`, which finds the same
+/// keys.
 fn read_words(
     components: &[&Component<'_>],
     parts: &mut Vec<Part>,
@@ -179,8 +207,12 @@ fn read_words(
             _ => units.push(vec![position]),
         }
     }
+    // The word of letters the last unit was, when it stayed the same.
+    let mut word_before: Option<&str> = None;
     for unit in &units {
-        parts.push(Part::Text(first.separators[unit[0]].to_owned()));
+        let separator = first.separators[unit[0]];
+        let after_word = word_before.take().filter(|_| separator == "_");
+        parts.push(Part::Text(separator.to_owned()));
         let keyed = unit.len() > 1
             && constant(unit[0])
             && first.words[unit[0]]
@@ -198,6 +230,9 @@ fn read_words(
             if text.chars().any(|c| c.is_ascii_alphabetic()) {
                 words.push(text.clone());
             }
+            if unit.len() == 1 && text.chars().all(|c| c.is_ascii_alphabetic()) {
+                word_before = Some(first.words[unit[0]]);
+            }
             parts.push(Part::Text(text));
             continue;
         } else if keyed {
@@ -208,7 +243,11 @@ fn read_words(
             unit.as_slice()
         };
         let values = components.iter().map(|c| joined(c, varying)).collect();
-        let name = keyed.then(|| first.words[unit[0]].to_ascii_lowercase());
+        let name = if keyed {
+            Some(first.words[unit[0]].to_ascii_lowercase())
+        } else {
+            after_word.map(str::to_ascii_lowercase)
+        };
         dimensions.push(Dimension { name, values });
         parts.push(Part::Dimension(dimensions.len() - 1));
     }
@@ -264,12 +303,25 @@ fn merge_dimensions(dimensions: Vec<Dimension>, parts: Vec<Part>) -> (Vec<Dimens
     (kept, parts)
 }
 
-/// Name each dimension no word names `dim1`, `dim2` and so on, skipping
-/// names taken.
+/// Name each dimension no word names: `date` when every value is a date
+/// such as `2024-01-15`, `year` when every value is a year, else `dim1`,
+/// `dim2` and so on, skipping names taken.
 fn name_unnamed(dimensions: &mut [Dimension]) {
-    let taken: BTreeSet<_> = dimensions.iter().filter_map(|d| d.name.clone()).collect();
+    let mut taken: BTreeSet<_> = dimensions.iter().filter_map(|d| d.name.clone()).collect();
     let mut number = 1;
     for dimension in dimensions.iter_mut().filter(|d| d.name.is_none()) {
+        let guess = if dimension.values.iter().all(|value| is_date(value)) {
+            Some("date")
+        } else if dimension.values.iter().all(|value| is_year(value)) {
+            Some("year")
+        } else {
+            None
+        };
+        if let Some(guess) = guess.filter(|guess| !taken.contains(*guess)) {
+            taken.insert(guess.to_owned());
+            dimension.name = Some(guess.to_owned());
+            continue;
+        }
         while taken.contains(&format!("dim{number}")) {
             number += 1;
         }
@@ -278,8 +330,26 @@ fn name_unnamed(dimensions: &mut [Dimension]) {
     }
 }
 
+/// Whether `value` is written as a date, `2024-01-15`.
+fn is_date(value: &str) -> bool {
+    let parts: Vec<_> = value.split('-').collect();
+    parts.len() == 3
+        && [4, 2, 2]
+            .iter()
+            .zip(&parts)
+            .all(|(&length, part)| part.len() == length && part.chars().all(|c| c.is_ascii_digit()))
+        && is_year(parts[0])
+}
+
+/// Whether `value` is a year from 1900 to 2099.
+fn is_year(value: &str) -> bool {
+    value.len() == 4
+        && (value.starts_with("19") || value.starts_with("20"))
+        && value.chars().all(|c| c.is_ascii_digit())
+}
+
 /// `text` as a rule writes it: braces and brackets doubled.
-fn escape(text: &str) -> String {
+pub(super) fn escape(text: &str) -> String {
     text.replace('{', "{{")
         .replace('}', "}}")
         .replace('[', "[[")
@@ -301,4 +371,10 @@ pub(super) fn pieces(rule: &str) -> Option<Vec<Piece>> {
             _ => None,
         })
         .collect()
+}
+
+/// Whether `name` is one `name_unnamed` gave.
+pub(super) fn is_placeholder_name(name: &str) -> bool {
+    name.strip_prefix("dim")
+        .is_some_and(|number| !number.is_empty() && number.chars().all(|c| c.is_ascii_digit()))
 }

@@ -42,7 +42,7 @@ pub(crate) use self::exclusions::collect_exclusion_errors;
 pub use self::exclusions::UnmatchedExclusion;
 use self::exclusions::{read_exclusion_files, Excluder};
 pub use self::pattern::{MissedSource, NearestFile};
-pub use self::suggest::{SuggestedSource, Suggestions};
+pub use self::suggest::{NearlyMatched, SuggestedSource, Suggestions};
 
 /// A recipe's rules and any inventory records written with them.
 #[derive(Clone, Debug, Default)]
