@@ -271,6 +271,9 @@ fn check_warns_when_the_root_is_missing() {
     let (json, _) = succeeded(&output);
     assert!(json.contains("\"severity\":\"warning\""), "{json}");
     assert!(json.contains("\"line\":2"), "{json}");
+    // The warning says what the later steps do: stop.
+    let output = spit_in(tree.path(), &["inputs", "analysis.spitin"]);
+    assert!(!output.status.success());
     // A root that is there draws no warning.
     let tree = dataset("root-present", "root data\n");
     let output = spit_in(tree.path(), &["check", "analysis.spitin"]);
