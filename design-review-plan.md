@@ -32,7 +32,7 @@ Status is `open`, `claimed (<branch>)`, `decided`, or `done (<commit>)`. Numbers
 | S3 | Syntax: `require` and `drop` clause order ([#36](https://github.com/eclnz/spit/issues/36)) | done (`3c6d843`) |
 | S4 | Syntax: shell metacharacters in commands | done (`03c9a18`) |
 | S5 | Syntax: `path:` in both `.spit` and `.spitin` | done (`b72f2e9`) |
-| R1 | Composite operations: provenance and diagnostics design | open |
+| R1 | Composite operations: provenance and diagnostics design | moved to [#53](https://github.com/eclnz/spit/issues/53) |
 | T1 | Sidecar `incomplete_groups` keyed by structured bindings ([#37](https://github.com/eclnz/spit/issues/37)) | done (`5ab3a16`) |
 | T2 | Incomplete-group warning for `InputSource::Inventory` | done (`8ef0e50`) |
 
