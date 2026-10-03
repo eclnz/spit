@@ -133,6 +133,12 @@ Run each argument as one word, exactly as given: no shell is involved, so nothin
 
 A backend runs a job's `verify` commands, in order, before its `command`. If one fails, the job does not run, and neither does any job that depends on it, directly or through others.
 
+### Missing outputs
+
+Every artifact in a job's `outputs` must exist once its `command` exits with status 0: a file, or for a `"folder"`, a folder, which may be empty. A job that leaves one missing fails, as a failed `command` does: a backend does not record it as a success, does not run its `"after"` checks, and runs no job that depends on it. Report each missing output with its port and path, as in `output meta derivatives/image/sub=01.json was not created`.
+
+A declared output is never optional. A tool may skip a file because of how it is run, as `dcm2niix -b n` writes no `.json` sidecar; the job then fails, and the fix is an operation that does not declare that output.
+
 ## Checks
 
 Each check runs one command on one artifact:
