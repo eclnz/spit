@@ -28,7 +28,7 @@ Status is `open`, `claimed (<branch>)`, `decided`, or `done (<commit>)`. Numbers
 | 4b | Diagnostic severity audit ([#45](https://github.com/eclnz/spit/issues/45)) | claimed (`severity-audit`) |
 | 5 | The two-file mental model | claimed (`two-files`) |
 | S1 | Syntax: operations declared inside a stage | claimed (`stage-scope`) |
-| S2 | Syntax: `@ min(n)` beside the `many` port | decided, claimed (`many-min`) |
+| S2 | Syntax: `@ min(n)` beside the `many` port | done (`5131495`) |
 | S3 | Syntax: `require` and `drop` clause order ([#36](https://github.com/eclnz/spit/issues/36)) | decided, claimed (`require-drop-order`) |
 | S4 | Syntax: shell metacharacters in commands | decided, claimed (`shell-meta`) |
 | S5 | Syntax: `path:` in both `.spit` and `.spitin` | claimed (`two-files`) |
@@ -163,6 +163,8 @@ operation collect(items: many @ min(3)) -> Bundle
 - *Phase and lowering.* The parser owns it. It lowers to the existing `OperationDef::minimum_collection`, so compile, resolve, `--partial`, imports and the resolver's messages are unchanged. An operation takes at most one `many` input, so the operation-level field is exact; if that limit is ever lifted, the field moves to `InputPort` then.
 - *Invariants and diagnostics.* A positive integer, once per port, only on a `many` port; each error points at the clause on its port. The hover shows the minimum beside its port.
 - *Beyond spit.* spit-vscode's grammar marks `@ min(n)` inside the parentheses, on a branch named `many-min`; the s6 harness scenario's pipeline is rewritten (its answer key's jobs do not change). The DAG format and spit-bash are untouched.
+
+*Done in `5131495`, with spit-vscode `a2be334`.* As designed. Also: `rebuild_keys.sh` stopped silently when a key failed to resolve, which hid the s6 break until its exit status was checked; it now prints `FAIL` with the error. Agents running it should still check its exit status.
 
 **S3 design (decided: keep both orders).** `require t1w count=1 per [sub, ses]` and `drop [sub, ses] where t1w count=0` keep their shapes. The grammar does not change; the only change is diagnostics: a rule written in the other rule's order is an error that gives the line in its own order.
 
