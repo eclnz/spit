@@ -26,12 +26,12 @@ Status is `open`, `claimed (<branch>)`, `decided`, or `done (<commit>)`. Numbers
 | 3 | Lower the cost of binding existing data: judge `inputs --suggest` on irregular datasets | claimed (`suggest-irregular`) |
 | 4a | `dag --counts` | done (`370a18f`) |
 | 4b | Diagnostic severity audit ([#45](https://github.com/eclnz/spit/issues/45)) | claimed (`severity-audit`) |
-| 5 | The two-file mental model | claimed (`two-files`) |
+| 5 | The two-file mental model | done (`b72f2e9`) |
 | S1 | Syntax: operations declared inside a stage | decided, claimed (`stage-scope`) |
 | S2 | Syntax: `@ min(n)` beside the `many` port | done (`5131495`) |
 | S3 | Syntax: `require` and `drop` clause order ([#36](https://github.com/eclnz/spit/issues/36)) | done (`3c6d843`) |
 | S4 | Syntax: shell metacharacters in commands | decided, claimed (`shell-meta`) |
-| S5 | Syntax: `path:` in both `.spit` and `.spitin` | claimed (`two-files`) |
+| S5 | Syntax: `path:` in both `.spit` and `.spitin` | done (`b72f2e9`) |
 | R1 | Composite operations: provenance and diagnostics design | open |
 | T1 | Sidecar `incomplete_groups` keyed by structured bindings ([#37](https://github.com/eclnz/spit/issues/37)) | done (`5ab3a16`) |
 | T2 | Incomplete-group warning for `InputSource::Inventory` | done (`8ef0e50`) |
@@ -134,8 +134,10 @@ Explain `.spit` in one sentence as the reusable graph and `.spitin` as a dataset
 - *The model in one sentence each.* A `.spit` pipeline is the reusable graph: what work to do and where its results go, for any dataset. A `.spitin` recipe binds that pipeline to one dataset: where its folder is, where its sources are when the pipeline does not say, and which of its data to leave out or require.
 - *Ownership.* Every directive belongs to one file, except `path`. Pipeline only: `source`, `sidecars`, `dimensions`, `operation`, `command`, `verify`, steps, `stage`, `use`, `ext:`, and an output's `path`. Recipe only: `pipeline`, `root`, `discover`, `exclude`, `drop`, `require`, records. A source's own `path name:` goes in either file, never both. A default `path:` goes in either, with different reach: the pipeline's covers outputs and any source no other rule covers, the recipe's covers sources only.
 - *Precedence, kept as it is.* A source takes its own rule (from whichever file has it), else the recipe's default, else the pipeline's default. The dataset's word on where its inputs are beats the pipeline's general default; a rule written for one source beats any default. Outputs never read the recipe. This is already implemented and documented; a test now pins all four levels.
-- *Diagnostics.* A declaration in the wrong file says which file owns it, at its line: a step in a recipe, `root` in a pipeline, an output's or unknown product's `path` in a recipe, and a source path written in both files, which now points at the recipe's line, names the pipeline's, and says how to choose. Message text and places only; the `check --json` shape is unchanged, so spit-vscode needs no change.
+- *Diagnostics.* A declaration in the wrong file says which file owns it, at its line: a step in a recipe, `root` in a pipeline, an output's or unknown product's `path` in a recipe, and a source path written in both files, which now points at the recipe's line and says how to choose. Message text and places only; the `check --json` shape is unchanged, so spit-vscode needs no change.
 - *Docs.* The README and the language reference open their recipe sections with the two sentences and the ownership table, and give the precedence as a list.
+
+*5 and S5 done in `b72f2e9`.* As designed, plus a new `InputError::OutputPath` for an output's `path` in a recipe, and the README's smallest recipe gaining the `root` line a recipe requires. `tests/two_files.rs` pins the precedence and each message at its line. Deferred: the both-files error does not give the pipeline's line, since the recipe's diagnosis holds only the compiled `Pipeline`, not its source map; the message names the file, and nobody in the rounds asked for more. If round 5 shows people still unsure which file owns a declaration, reopen this with that evidence rather than adding a directive.
 
 ## Language syntax audit
 
