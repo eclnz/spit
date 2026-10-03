@@ -6,14 +6,21 @@
 //! does not fail it; it catches a stage becoming quadratic, not a few
 //! percent. Before settling was fixed, it took 13.6 times as long here;
 //! every stage now takes under 5.
+//!
+//! Checking a pipeline is timed the same way, over a chain of steps and one
+//! four times as long, with its paths and hovers, so that a check that
+//! compares every step with every other fails it. A cost that shows only on far longer chains, as lowering's
+//! search for each step's inputs once did, is left to `tests/scale.rs`.
 
 mod support;
 
 use std::time::{Duration, Instant};
 
+use std::path::Path;
+
 use spit::{
-    bind_dag, diagnose_checked_with_records, parse_input_spec, parse_pipeline, render_dag,
-    render_source_inventory, resolve, Context, InputSource,
+    bind_dag, diagnose_checked, diagnose_checked_with_records, parse_input_spec, parse_pipeline,
+    pipeline_hovers, render_dag, render_source_inventory, resolve, Context, InputSource,
 };
 use support::Tree;
 
@@ -123,24 +130,81 @@ fn stage_times(subjects: usize) -> Vec<(&'static str, Duration)> {
     best
 }
 
-#[test]
-fn each_stage_grows_in_step_with_the_dataset() {
-    let small = stage_times(SUBJECTS);
-    let large = stage_times(SUBJECTS * 4);
+/// The stages that took more than `MAX_GROWTH` times as long on the large
+/// input as on the small one, where `what` names the sizes.
+fn grew_too_fast(
+    small: &[(&'static str, Duration)],
+    large: &[(&'static str, Duration)],
+    what: (usize, usize, &str),
+) -> Vec<String> {
+    let (small_size, large_size, unit) = what;
     let mut slow = Vec::new();
-    for ((stage, small), (_, large)) in small.iter().zip(&large) {
+    for ((stage, small), (_, large)) in small.iter().zip(large) {
         let growth = large.as_secs_f64() / small.max(&Duration::from_micros(1)).as_secs_f64();
         eprintln!("{stage}: {small:?}, then {large:?}: {growth:.1} times as long");
         if *large > NOISE && growth > MAX_GROWTH {
             slow.push(format!(
-                "{stage}: {small:?} for {SUBJECTS} subjects, {large:?} for {}, {growth:.1} times as long",
-                SUBJECTS * 4
+                "{stage}: {small:?} for {small_size} {unit}, {large:?} for {large_size}, {growth:.1} times as long"
             ));
         }
     }
+    slow
+}
+
+#[test]
+fn each_stage_grows_in_step_with_the_dataset() {
+    let small = stage_times(SUBJECTS);
+    let large = stage_times(SUBJECTS * 4);
+    let slow = grew_too_fast(&small, &large, (SUBJECTS, SUBJECTS * 4, "subjects"));
     assert!(
         slow.is_empty(),
         "stages that grew faster than the dataset:\n{}",
+        slow.join("\n")
+    );
+}
+
+/// Steps in the short chain; the long one has four times as many.
+const STEPS: usize = 1_000;
+
+/// A chain of `steps` steps, each reading the one before, with a default
+/// path rule so that every product's path is worked out.
+fn chain(steps: usize) -> String {
+    let mut text = String::from(
+        "path: out/{@product}/{@entities}.txt\nsource p0 : T [sub]\npath p0: in/{sub}.txt\noperation step(input: T) -> T\n",
+    );
+    for index in 1..=steps {
+        text += &format!("p{index} = step(p{})\n", index - 1);
+    }
+    text
+}
+
+/// How long checking a chain of `steps` steps takes, and its hovers, at
+/// the quickest of three runs.
+fn pipeline_times(steps: usize) -> Vec<(&'static str, Duration)> {
+    let text = chain(steps);
+    let mut best = [Duration::MAX; 2];
+    for _ in 0..3 {
+        let start = Instant::now();
+        let checked = diagnose_checked(&text, Context::default()).unwrap();
+        best[0] = best[0].min(start.elapsed());
+        assert_eq!(checked.paths.len(), steps);
+
+        let start = Instant::now();
+        let hovers = pipeline_hovers(&text, Path::new("chain.spit"));
+        best[1] = best[1].min(start.elapsed());
+        assert!(hovers.len() > steps);
+    }
+    vec![("check", best[0]), ("hovers", best[1])]
+}
+
+#[test]
+fn checking_grows_in_step_with_the_pipeline() {
+    let short = pipeline_times(STEPS);
+    let long = pipeline_times(STEPS * 4);
+    let slow = grew_too_fast(&short, &long, (STEPS, STEPS * 4, "steps"));
+    assert!(
+        slow.is_empty(),
+        "stages that grew faster than the pipeline:\n{}",
         slow.join("\n")
     );
 }
