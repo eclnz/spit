@@ -238,19 +238,33 @@ impl fmt::Display for MissedSource {
         let Some(near) = &self.nearest else {
             return Ok(());
         };
-        let (start, rest) = near.file.split_at(near.matched);
-        write!(f, "\n  the nearest {kind} is `{}`\n  ", near.file)?;
-        if !start.is_empty() {
-            write!(f, "after `{start}`, ")?;
-        }
-        match (rest.is_empty(), near.expected.is_empty()) {
-            (true, _) => write!(f, "the {kind} ends where the rule has `{}`", near.expected),
-            (false, true) => write!(f, "the {kind} has `{rest}` where the rule ends"),
-            (false, false) => write!(
-                f,
-                "the {kind} has `{rest}` where the rule has `{}`",
-                near.expected
-            ),
+        write!(
+            f,
+            "\n  the nearest {kind} is `{}`\n  {}",
+            near.file,
+            near.parting(kind)
+        )
+    }
+}
+
+impl NearestFile {
+    /// Where the file parts from the rule, as "after `sub-01_`, the file
+    /// has `acq-2_T1w` where the rule has `T1w`"; `kind` is `file` or
+    /// `folder`.
+    pub fn parting(&self, kind: &str) -> String {
+        let (start, rest) = self.file.split_at(self.matched);
+        let after = if start.is_empty() {
+            String::new()
+        } else {
+            format!("after `{start}`, ")
+        };
+        let expected = &self.expected;
+        match (rest.is_empty(), expected.is_empty()) {
+            (true, _) => format!("{after}the {kind} ends where the rule has `{expected}`"),
+            (false, true) => format!("{after}the {kind} has `{rest}` where the rule ends"),
+            (false, false) => {
+                format!("{after}the {kind} has `{rest}` where the rule has `{expected}`")
+            }
         }
     }
 }
@@ -308,7 +322,7 @@ pub(super) fn missed_source(
 /// Every way of splitting values is tried, from an explicit stack: unlike
 /// `match_from`, this keeps no bindings, so a dimension written twice may
 /// take two values. It only says where a file parts from a rule.
-fn reach(pieces: &[Piece], text: &str) -> (usize, String) {
+pub(super) fn reach(pieces: &[Piece], text: &str) -> (usize, String) {
     let mut furthest = (0, render(pieces));
     let mut seen = BTreeSet::new();
     let mut stack = vec![(0, 0)];
