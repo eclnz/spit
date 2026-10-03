@@ -23,15 +23,15 @@ Status is `open`, `claimed (<branch>)`, `decided`, or `done (<commit>)`. Numbers
 |---|------|--------|
 | 1 | Optional runtime checks in the job contract | claimed (`runtime-checks`) |
 | 2 | Optional-file and output semantics, from one real workflow ([#35](https://github.com/eclnz/spit/issues/35)) | open |
-| 3 | Lower the cost of binding existing data: judge `inputs --suggest` on irregular datasets | open |
+| 3 | Lower the cost of binding existing data: judge `inputs --suggest` on irregular datasets | claimed (`suggest-irregular`) |
 | 4a | `dag --counts` | done (`370a18f`) |
-| 4b | Diagnostic severity audit ([#45](https://github.com/eclnz/spit/issues/45)) | open |
-| 5 | The two-file mental model | open |
-| S1 | Syntax: operations declared inside a stage | open |
+| 4b | Diagnostic severity audit ([#45](https://github.com/eclnz/spit/issues/45)) | claimed (`severity-audit`) |
+| 5 | The two-file mental model | claimed (`two-files`) |
+| S1 | Syntax: operations declared inside a stage | claimed (`stage-scope`) |
 | S2 | Syntax: `@ min(n)` beside the `many` port | decided, claimed (`many-min`) |
-| S3 | Syntax: `require` and `drop` clause order ([#36](https://github.com/eclnz/spit/issues/36)) | open |
-| S4 | Syntax: shell metacharacters in commands | open |
-| S5 | Syntax: `path:` in both `.spit` and `.spitin` | open |
+| S3 | Syntax: `require` and `drop` clause order ([#36](https://github.com/eclnz/spit/issues/36)) | claimed (`require-drop-order`) |
+| S4 | Syntax: shell metacharacters in commands | claimed (`shell-meta`) |
+| S5 | Syntax: `path:` in both `.spit` and `.spitin` | claimed (`two-files`) |
 | R1 | Composite operations: provenance and diagnostics design | open |
 | T1 | Sidecar `incomplete_groups` keyed by structured bindings ([#37](https://github.com/eclnz/spit/issues/37)) | done (`5ab3a16`) |
 | T2 | Incomplete-group warning for `InputSource::Inventory` | done (`8ef0e50`) |
@@ -127,6 +127,15 @@ Keep the severity of compiler feedback consistent with whether it blocks a valid
 ### 5. Clarify the two-file mental model
 
 Explain `.spit` in one sentence as the reusable graph and `.spitin` as a dataset binding and exception layer. Review each shared directive for clear default and override semantics. Keep the no-recipe `--root` path for simple cases rather than requiring a nearly empty recipe. Use real first-pipeline attempts to find where users cannot tell which file owns a declaration.
+
+**5 and S5 design (decided, on `two-files`).** Handled together: `path` is the only directive both files take, so the two-file model and S5 are one question. No syntax changes; the work is the explanation and the diagnostics.
+
+- *Evidence.* Across rounds 1 to 4, one participant (round 1, s1-logs-b) wrote a source's path in both files, and understood `` `log` has path rules in both .spit and .spitin `` at once, asking only for a line number and for the guide to say which file to prefer (round 1 findings D7, B3). Round 3's cohort participants put source paths in the recipe in one run and in the pipeline in the other, with no hesitation either way. The commonest doubt, about 8 participants in round 1 (D1), was whether a recipe needs any rule at all; the no-recipe `--root` path since answers it, and stays. Nothing in the rounds asks for a new directive or a different precedence.
+- *The model in one sentence each.* A `.spit` pipeline is the reusable graph: what work to do and where its results go, for any dataset. A `.spitin` recipe binds that pipeline to one dataset: where its folder is, where its sources are when the pipeline does not say, and which of its data to leave out or require.
+- *Ownership.* Every directive belongs to one file, except `path`. Pipeline only: `source`, `sidecars`, `dimensions`, `operation`, `command`, `verify`, steps, `stage`, `use`, `ext:`, and an output's `path`. Recipe only: `pipeline`, `root`, `discover`, `exclude`, `drop`, `require`, records. A source's own `path name:` goes in either file, never both. A default `path:` goes in either, with different reach: the pipeline's covers outputs and any source no other rule covers, the recipe's covers sources only.
+- *Precedence, kept as it is.* A source takes its own rule (from whichever file has it), else the recipe's default, else the pipeline's default. The dataset's word on where its inputs are beats the pipeline's general default; a rule written for one source beats any default. Outputs never read the recipe. This is already implemented and documented; a test now pins all four levels.
+- *Diagnostics.* A declaration in the wrong file says which file owns it, at its line: a step in a recipe, `root` in a pipeline, an output's or unknown product's `path` in a recipe, and a source path written in both files, which now points at the recipe's line, names the pipeline's, and says how to choose. Message text and places only; the `check --json` shape is unchanged, so spit-vscode needs no change.
+- *Docs.* The README and the language reference open their recipe sections with the two sentences and the ownership table, and give the precedence as a list.
 
 ## Language syntax audit
 
