@@ -21,7 +21,7 @@ Status is `open`, `claimed (<branch>)`, `decided`, or `done (<commit>)`. Numbers
 
 | # | Item | Status |
 |---|------|--------|
-| 1 | Optional runtime checks in the job contract | claimed (`runtime-checks`) |
+| 1 | Optional runtime checks in the job contract | done (`df6a61a`) |
 | 2 | Optional-file and output semantics, from one real workflow ([#35](https://github.com/eclnz/spit/issues/35)) | open |
 | 3 | Lower the cost of binding existing data: judge `inputs --suggest` on irregular datasets | done (`7f12083`) |
 | 4a | `dag --counts` | done (`370a18f`) |
@@ -107,6 +107,14 @@ The four questions:
 2. *Lowering.* Checks get a model of their own, `CheckDef` (a name, parameters and a `CommandTemplate`), plus a list of uses on `InputPort`, `OutputPort` and `ProductDef`. `verify` checks a job across several inputs before it runs, so it can't express an output postcondition or a single artifact's check. Checks reuse the command template, its quoting and its argument parts, and the `executables` list. Bound, each check is one entry in a new job field, `checks`, in DAG version 6. Each entry is `{"when": "before"|"after", "check": "ndim(4)", "port": "dwi", "path": P, "command": [ARGUMENT, ...]}`, ordered with the before checks first, then by port, then by artifact, then in the order the checks are attached.
 3. *Invariants.* Checks never change the graph: jobs, paths, dependencies, counts and fingerprints are the same with or without them. The order is deterministic. A check reads only its artifact. Names are unique among checks, and a check name may match an operation or product name, as their namespaces are separate.
 4. *Interactions.* Selectors: none, since checks attach to ports, not to calls. Imports: as above, prefixed as operations are. Stages: none. Paths: `{@path}` is the bound path, a folder's included. Partial plans: only planned jobs carry checks. Diagnostics point at the clause or the declaration. A port's hover lists its checks. `dag --commands` shows `check:` lines. `executables` includes the checks' programs. spit-vscode's grammar learns `check`, `@ check(...)` and `{@path}`. spit-bash reads version 6, runs the checks, and adds a `check` plan status.
+
+*Done in `df6a61a`* (spit, from `18172c7` and the merge with S2 in `33a2bf7`), with spit-bash `926333a` and spit-vscode `6d69212`, each merged into its `dev`. As built, and where it differs from the design above:
+
+- *Arguments are bare words.* Quoted text is left out until a check needs a space or a comma. An argument may not hold whitespace, quotes, braces, commas, parentheses or `@`.
+- *Errors.* A check must use every parameter it declares. A check with no parameters is written without parentheses, both where it is declared and where it is used. `@ check(...)` after an operation's outputs, or on a step's product, is an error that says where the check goes.
+- *Imports.* `use ndim from checks.spit` imports a check by name, and a whole-file `use` brings every check. Two imports of one identical check are one check.
+- *Rerun state.* spit-bash keeps a hash of each job's `checks` in its record, in state version 3, and still reads version 2. A job with no command whose outputs exist is checked on every run. A dependent that is skipped as current is not held back by a failed recheck upstream; the failed job's record is dropped, so the next run reruns it and its dependents.
+- *Deferred:* checks on a step's result product, checks in a `.spitin`, and hovers on a check's name where it is used (the declaration and the clause word have hovers).
 
 ### 2. Resolve optional-file and output semantics with a real workflow
 
