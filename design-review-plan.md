@@ -33,7 +33,7 @@ Status is `open`, `claimed (<branch>)`, `decided`, or `done (<commit>)`. Numbers
 | S4 | Syntax: shell metacharacters in commands | open |
 | S5 | Syntax: `path:` in both `.spit` and `.spitin` | open |
 | R1 | Composite operations: provenance and diagnostics design | open |
-| T1 | Sidecar `incomplete_groups` keyed by structured bindings ([#37](https://github.com/eclnz/spit/issues/37)) | open |
+| T1 | Sidecar `incomplete_groups` keyed by structured bindings ([#37](https://github.com/eclnz/spit/issues/37)) | claimed (`sidecar-group-keys`) |
 | T2 | Incomplete-group warning for `InputSource::Inventory` | open |
 
 Deferred, and not to be claimed without a concrete use case: resources, Slurm, one execution package, dynamic outputs. See [Future direction](#future-direction-deliberately-deferred).
