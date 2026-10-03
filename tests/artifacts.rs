@@ -294,7 +294,7 @@ sources:
     assert_eq!(incomplete(&report), ["totals[store=s09]"]);
     assert_eq!(
         spit::unused_sources_summary(&report).unwrap(),
-        "2 source artifacts are used by no job (cal: 1, price: 1)"
+        "2 source artifacts are used by no job: cal[station=north,revision=1], price[store=S07]"
     );
     let rendered = render_artifacts(&report);
     assert!(

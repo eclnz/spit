@@ -94,7 +94,7 @@ Files come first; options follow them. `spit help` lists the commands, and `spit
 | `--unmatched` | With `inputs`, list files under the dataset root that match no source path rule, one per line, leaving out files at the pipeline's output paths, instead of writing a `.spitout`. |
 | `--suggest` | With `inputs`, print `source` and `path` lines for the files under the dataset root that match no source path rule, instead of writing a `.spitout`; see [Start from the files](#start-from-the-files). |
 | `--paths` | With `dag`, print the file under every artifact. |
-| `--counts` | With `dag`, print how many jobs each step resolves instead of the jobs: one row per step, as `cleaned = clean`, with its stage when the pipeline has stages, then the total. A step that resolves no jobs shows `0`, so an empty step or an unexpected expansion stands out before the plan is run. With `-o`, print the counts and write the `.spitdag` too. |
+| `--counts` | With `dag`, print how many jobs each step resolves instead of the jobs: one row per step, as `cleaned = clean`, with its stage when the pipeline has stages, then the total. A step that resolves no jobs shows `0`, so an empty step or an unexpected expansion stands out before the plan is run. With `--commands` or `--paths`, print the counts before the jobs. With `-o`, print the counts and write the `.spitdag` too. |
 | `--commands` | With `dag`, print each job's checks, `verify` and command lines with their paths filled in, quoted as a shell reads them, so a line can be pasted into a shell run from the dataset folder. With `--paths`, print them under each job's artifacts. Use it separately from `-o`, which saves a `.spitdag`. |
 | `--partial` | With `dag`, plan jobs whose inputs can be completed and record the artifacts left out of the `.spitdag`. A `many` input uses its complete members. Without it, `dag` stops at an incomplete job. |
 | `--json` | With `dag`, print the `.spitdag`. With `check`, print diagnostics as JSON for editor use and stop, succeeding whatever they report. Each diagnostic has a `severity` of `error` or `warning`; those tied to a declaration, call, rule, command, or path include its `line`, and a `column` and `end_column` for the text it is about, such as one input of a call or one `{placeholder}`. Columns are 1-based and count UTF-16 code units, as editors do; `end_column` is one past the last character. When checking a recipe finds an error in its pipeline, the diagnostic includes `file` and positions in that pipeline. For a pipeline that checks clean, a `paths` list gives each product whose path no rule writes in full, with its `line` and its `path`, extension included, for the editor to show. |
@@ -150,6 +150,61 @@ To collect over two dimensions, collect in two steps, one dimension each: after 
 `path` lines say where artifacts live; an output with no rule goes to `out/{@product}/{@entities}`. `command` lines give the exact executable and argument order: a named input or output uses its port name, such as `{image}`, and the single unnamed output uses SPIT's `{@output}`. SPIT decides which artifacts belong to each job before filling their paths into a command.
 
 A pipeline names no dataset. Rules about what a dataset must hold, and records of what it does hold, go in the files of step 2: `spit check` rejects a `require` rule or a `sources:` record written in a `.spit`.
+
+### Join, collect, and check the plan
+
+Most pipelines join a few sources and collect their results in levels. This one calibrates daily readings with the approved calibration revision, compares each with its station's baseline, which is filed under the date it was recorded rather than a reading's day, and collects the results per station and then across stations:
+
+```text
+source reading [station, day]
+source calibration [station, revision]
+source baseline [station, recorded]
+
+path reading: readings/{station}/{day}.csv
+path calibration: calibration/{station}-r{revision}.csv
+path baseline: baseline/{station}-{recorded}.csv
+path: {@product}/{@entities}.csv
+
+operation calibrate(series, table) -> Series
+command calibrate: calibrate {series} {table} {@output}
+operation compare(series, reference) -> Series
+command compare: compare {series} {reference} {@output}
+operation summarise(series: many) -> Report
+command summarise: summarise {series} {@output}
+
+calibrated = calibrate(reading, calibration @ where(revision=3))
+anomaly = compare(calibrated, baseline @ same(station))
+station_report = summarise(anomaly @ vary(day))
+fleet_report = summarise(station_report @ vary(station))
+```
+
+- `reading` has the most dimensions, so it drives `calibrate`: one job per reading.
+- `@ where(revision=3)` keeps that revision and takes `revision` out of matching, so each reading gets its station's revision 3. The other revisions stay unused, and `dag` names them in a note.
+- `@ same(station)` matches the baseline on `station` alone, whatever its `recorded` date. Each station must have exactly one.
+- A port is `one` unless it says `many`: write `series`, or `series: Series` with a type, and `series: many` for a collection. There is no `one` keyword.
+- `@ vary(day)` collects each station's days into one `station_report[station=...]`, in natural order, so `2026-09-02` comes before `2026-09-10`. `@ vary(station)` then collects those into one `fleet_report`, which has no dimensions, so its path is `fleet_report/global.csv`. Each level of a rollup is its own step.
+- `@ each(model)` does the reverse of `vary`: it runs a step once per value of a dimension the driving input lacks. The [ragged sweep walkthrough](docs/examples.md#ragged-sweep-correlated-seeds-and-collection-order) crosses every model with the config and seed pairs a dataset holds, then collects them in two levels.
+
+Before saving a plan, check it in three commands:
+
+```sh
+spit check stations.spit --path-rules        # the pipeline compiles; where each product goes
+spit dag stations.spit --root data --counts --commands   # jobs per step, then every command line
+spit dag stations.spit --root data -o stations.spitdag   # save it
+```
+
+With two stations and two days, `--counts` prints:
+
+```text
+jobs  step
+   4  calibrated = calibrate
+   4  anomaly = compare
+   2  station_report = summarise
+   1  fleet_report = summarise
+  11  total
+```
+
+A count far from what the data should give, such as a step multiplied by an extra dimension, or a step with `0`, shows a mistake before anything runs. `--commands` shows each `many` input in the order the tool receives it.
 
 ## Supply the inputs
 
@@ -300,9 +355,9 @@ Incomplete artifacts: 2
 
 An incomplete artifact has a missing or ambiguous input, a collection below its `@ min(count)`, or an input that is itself incomplete, so a gap early in the pipeline is traced through every step that depends on it. Given a recipe, a group that fails a `require` rule is listed under `Coverage gaps`, and its sources are held back from every job. A step creates jobs only for the artifacts that drive it, so a context with no driving artifact at all appears only through the coverage gaps and steps that notice it missing. The command succeeds whatever it finds; the complete artifacts are the ones the pipeline could produce from these inputs today.
 
-`artifacts` also lists, under `Unused sources`, each source that no job reads, whether or not that job can be completed. Some are left out on purpose, such as calibration revisions a `where(revision=3)` selector passes over; others point to a mistake, such as `pricing/S07.json` read as store `S07` where the pipeline needs `s07`. `dag` counts them in a note: `3 source artifacts are used by no job (calibration: 3)`.
+`artifacts` also lists, under `Unused sources`, each source that no job reads, whether or not that job can be completed. Some are left out on purpose, such as calibration revisions a `where(revision=3)` selector passes over; others point to a mistake, such as `pricing/S07.json` read as store `S07` where the pipeline needs `s07`. `dag` names them in a note when there are at most three, as `2 source artifacts are used by no job: calibration[station=north,revision=1], calibration[station=north,revision=2]`, and otherwise counts them by product, as `5 source artifacts are used by no job (calibration: 5)`.
 
-When a missing input differs from an unused source only in letter case or leading zeros, the failed `dag` and `artifacts` reports name that source and the differing dimension. They also warn that the source is unused. A genuinely missing source has no such hint. During discovery, `inputs` notes how many files match no source rule; files at the pipeline's own output paths, such as an earlier run's, are not counted. A source whose path rule matches no file at all gets a warning that names the unmatched file nearest the rule, and shows where the two part:
+When a missing input differs from an unused source only in letter case or leading zeros, the failed `dag` and `artifacts` reports name that source and the differing dimension. They also warn that the source is unused. A genuinely missing source has no such hint. During discovery, `inputs` notes how many files match no source rule, naming them when there are at most three and otherwise counting them by extension, as ``24 files under `.` match no source rule and are not read (23 `.json`, 1 `.tsv`), such as `dataset_description.json` ``; files at the pipeline's own output paths, such as an earlier run's, are not counted. A source whose path rule matches no file at all gets a warning that names the unmatched file nearest the rule, and shows where the two part:
 
 ```text
 warning: source `bold` matched no files with path rule `data/sub-{sub}/ses-{ses}/func/sub-{sub}_ses-{ses}_run-{run}_bold.nii.gz`
