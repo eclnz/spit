@@ -33,6 +33,13 @@ source target_lut : LookupTable
 # Import each run with its sidecars, clean it, combine the runs into one
 # session, and correct motion, distortion, and bias.
 stage preprocess:
+    # Extract b=0 volumes, then average them. Both operations can be reused after
+    # motion and distortion correction to make a corrected registration target.
+    operation extract_b0(mri: MRI<DWI,S>) -> MRI<B0Series,S>
+    command extract_b0: dwiextract {mri} {@output} -bzero
+    operation mean_b0(mri: MRI<B0Series,S>) -> MRI<B0,S>
+    command mean_b0: mrmath {mri} mean {@output} -axis 3
+
     stage import:
         # Import gradients and phase-encoding metadata with their matching NIfTI.
         operation import_dwi(image: MRI<DWI,$Space>, bvec: GradientDirections, bval: GradientAmplitudes, metadata: AcquisitionMetadata) -> MRI<DWI,$Space>
@@ -58,14 +65,8 @@ stage preprocess:
         command concatenate_runs: dwicat {runs} {@output}
         session_dwi = concatenate_runs(degibbsed_dwi @ vary(run))
 
-        # Extract b=0 volumes, then average them. Both operations can be reused after
-        # motion and distortion correction to make a corrected registration target.
-        operation extract_b0(mri: MRI<DWI,S>) -> MRI<B0Series,S>
-        command extract_b0: dwiextract {mri} {@output} -bzero
         forward_b0_series = extract_b0(session_dwi)
 
-        operation mean_b0(mri: MRI<B0Series,S>) -> MRI<B0,S>
-        command mean_b0: mrmath {mri} mean {@output} -axis 3
         forward_b0 = mean_b0(forward_b0_series)
 
         operation combine_pe_pair(forward: MRI<B0,S>, reverse: MRI<B0,S>) -> MRI<B0Pair,S>
@@ -87,6 +88,11 @@ stage preprocess:
 
 # Parcellate and segment the T1w, and align both with the corrected DWI.
 stage anatomy:
+    # The reference image determines the target voxel grid. Continuous images
+    # use linear interpolation; label images use nearest-neighbor interpolation.
+    operation mrtransform(moving: MRI<K,S>, transform: Transform<S,T>, reference: MRI<N,T>) -> MRI<K,T>
+    command mrtransform: mrtransform {moving} {@output} -linear {transform} -template {reference} -interp linear
+
     stage parcellation:
         # SynthSeg writes NIfTI, so the remapped labels stay NIfTI too.
         ext: .nii.gz
@@ -115,10 +121,6 @@ stage anatomy:
         command convert_flirt: transformconvert {matrix} {moving} {reference} flirt_import {@output}
         t1_to_dwi = convert_flirt(t1_to_dwi_flirt, t1w, session_b0_nifti)
 
-        # The reference image determines the target voxel grid. Continuous images
-        # use linear interpolation; label images use nearest-neighbor interpolation.
-        operation mrtransform(moving: MRI<K,S>, transform: Transform<S,T>, reference: MRI<N,T>) -> MRI<K,T>
-        command mrtransform: mrtransform {moving} {@output} -linear {transform} -template {reference} -interp linear
         t1w_dwi = mrtransform(t1w, t1_to_dwi, session_b0)
 
         operation mrtransform_labels(labels: MRI<Parcellation,S>, transform: Transform<S,T>, reference: MRI<N,T>) -> MRI<Parcellation,T>

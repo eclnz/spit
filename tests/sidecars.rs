@@ -195,7 +195,7 @@ fn a_recipe_cannot_declare_a_group() {
     let error =
         spit::parse_input_spec("pipeline a.spit\nroot .\nsidecars photo [id]:\n").unwrap_err();
     assert!(
-        error.to_string().contains("belong in the .spit pipeline"),
+        error.to_string().contains("belongs in the .spit pipeline"),
         "{error}"
     );
 }
@@ -268,6 +268,11 @@ fn a_recipes_group_path_is_checked() {
         (
             UNPLACED,
             "path loaded: x/{site}/{shot}\n",
+            "`loaded` is made by a step, so its path belongs in the .spit pipeline",
+        ),
+        (
+            UNPLACED,
+            "path missing: x/{site}/{shot}\n",
             "must name a source product or sidecars group",
         ),
     ] {
@@ -280,6 +285,8 @@ fn a_recipes_group_path_is_checked() {
         let (ok, out, err) = spit(&["check", recipe.to_str().unwrap()]);
         assert!(!ok, "{recipe:?}: {out}");
         assert!(err.contains(message), "{message}: {err}");
+        // Each is reported at the recipe's `path` line.
+        assert!(err.contains("error: line 3, "), "{err}");
     }
 }
 
