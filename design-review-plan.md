@@ -27,7 +27,7 @@ Status is `open`, `claimed (<branch>)`, `decided`, or `done (<commit>)`. Numbers
 | 4a | `dag --counts` | done (`370a18f`) |
 | 4b | Diagnostic severity audit ([#45](https://github.com/eclnz/spit/issues/45)) | done (`b45f28e`) |
 | 5 | The two-file mental model | done (`b72f2e9`) |
-| S1 | Syntax: operations declared inside a stage | decided, claimed (`stage-scope`) |
+| S1 | Syntax: operations declared inside a stage | done (`ff3ec35`) |
 | S2 | Syntax: `@ min(n)` beside the `many` port | done (`5131495`) |
 | S3 | Syntax: `require` and `drop` clause order ([#36](https://github.com/eclnz/spit/issues/36)) | done (`3c6d843`) |
 | S4 | Syntax: shell metacharacters in commands | decided, claimed (`shell-meta`) |
@@ -211,6 +211,8 @@ command bad:   cut -f1 {table} > {@output}
 - *Phase and lowering.* The parser records the stage a declaration sits in, as it already does for a step, and lowering keeps it in `SourceMap` beside the declaration's place; the model, `OperationDef`, compile, resolve, the `.spitdag` and spit-bash are untouched. The check is a lint in `src/diagnostics/warnings.rs`, beside "stage has no steps", using `stage_within`. It reads each local step once, with one lookup per step.
 - *Invariants and diagnostics.* No change to what checks or resolves, so the `.spitdag` stays byte-identical for every pipeline. One warning per operation, at its declaration, in line order; it names the first outside call's line and stage and the stage to move to. Imported operations get none: `use` is the explicit way to share, and a library is linted on its own. Commands and `verify` follow their operation by name and are not checked separately.
 - *Beyond spit.* No syntax changes, so spit-vscode's grammar is unchanged; the warning reaches the editor through `check --json` like every other located warning, and `extension.test.js` needs no change. The MRtrix example moves its 3 shared operations. The one harness scenario that declares operations in stages, s5-survey, calls each only in its own stage, so it gets no warning and no answer key changes.
+
+*Done in `ff3ec35`.* As designed. The duplicate-name error moved from compile into lowering, as a duplicate stage's did, so only the first duplicate in a file is reported, and it names the line of the first declaration, or the `use` that imports one. Left out on purpose: checking where a `command` or `verify` sits against its operation's stage, and an editor hover naming an operation's stage; neither had a case behind it.
 
 The proposed language design rule: place modifiers beside the construct they constrain; make indentation's scope obvious; order related clauses consistently; make the command notation reflect its actual execution model. S1 and S2 deserve attention before adding check and resource syntax, since those features would otherwise inherit unclear placement. Keep the concise happy path: an untyped source, a small operation, and an assignment should stay easy to write.
 
