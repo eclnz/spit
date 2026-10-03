@@ -99,17 +99,15 @@ impl PipelineBuilder {
         self.pipeline.invocations.push(invocation);
     }
 
-    fn add_stage(&mut self, name: &str, place: Place) -> Result<(), ParseError> {
-        if let Some(first) = self.lines.stages.get(name) {
-            let message = format!(
-                "duplicate stage `{name}`: it is already opened on line {}; a stage is one block, so move these lines into it",
-                first.line
-            );
-            return Err(ParseError::new(place.line, message).within(&place));
+    /// Open stage `name`. A stage opened again continues where its first
+    /// block left off: its steps join the same stage, and the source map keeps
+    /// the first header as the stage's place.
+    fn add_stage(&mut self, name: &str, place: Place) {
+        if self.lines.stages.contains_key(name) {
+            return;
         }
         self.lines.stages.insert(name.to_owned(), place);
         self.pipeline.stages.push(StageDef::new(name));
-        Ok(())
     }
 
     fn add_path(&mut self, rule: &PathRule, line: usize) -> Result<(), ParseError> {
@@ -313,7 +311,7 @@ fn lower_statement(
 ) -> Result<(), ParseError> {
     match &statement.kind {
         StatementKind::Import => apply_import(builder, imports, &statement.place)?,
-        StatementKind::Stage { name, place } => builder.add_stage(name, place.clone())?,
+        StatementKind::Stage { name, place } => builder.add_stage(name, place.clone()),
         StatementKind::Product(product, place) => {
             builder.add_product(product.clone(), place.clone());
         }

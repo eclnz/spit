@@ -6,12 +6,11 @@ use std::fmt;
 
 use crate::error::ResolveError;
 
-use super::{stage_within, Artifact, ArtifactId, ArtifactInstance, Artifacts, SourceInventory};
+use super::{Artifact, ArtifactId, ArtifactInstance, Artifacts, SourceInventory};
 
 /// A job's number in its DAG, counted from 1 in the order the resolver
 /// makes jobs, as reports and the `.spitdag` show it. Unlike an
-/// [`ArtifactId`], it is not an index: a DAG cut to one stage keeps its
-/// jobs' numbers.
+/// [`ArtifactId`], it is not an index into a table: the first job is 1.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct JobId(u32);
 
@@ -143,43 +142,6 @@ impl ResolvedDag {
     /// The products with a source whose inventory record gave its file.
     pub fn located_products(&self) -> impl Iterator<Item = &str> {
         self.located.iter().map(String::as_str)
-    }
-
-    /// Only the jobs of `stage` and the stages nested in it. Their inputs from
-    /// other stages are taken as files that already exist, so dependencies on those jobs are dropped;
-    /// every job keeps its number.
-    #[must_use]
-    pub fn only_stage(&self, stage: &str) -> Self {
-        let within: Vec<bool> = self
-            .steps
-            .iter()
-            .map(|step| {
-                step.stage
-                    .as_deref()
-                    .is_some_and(|name| stage_within(name, stage))
-            })
-            .collect();
-        let jobs: Vec<_> = self
-            .jobs
-            .iter()
-            .filter(|job| within[job.step.index()])
-            .cloned()
-            .collect();
-        let kept: BTreeSet<_> = jobs.iter().map(|job| job.id).collect();
-        Self {
-            jobs: jobs
-                .into_iter()
-                .map(|mut job| {
-                    job.dependencies.retain(|id| kept.contains(id));
-                    job
-                })
-                .collect(),
-            steps: self.steps.clone(),
-            artifacts: self.artifacts.clone(),
-            product_dimensions: self.product_dimensions.clone(),
-            source_paths: self.source_paths.clone(),
-            located: self.located.clone(),
-        }
     }
 }
 
