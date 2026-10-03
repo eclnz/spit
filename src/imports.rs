@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use crate::lower::{parse_document_with_imports, ParsedDocument, PipelineBuilder};
 use crate::model::{
-    CheckDef, CheckUse, CommandDef, CommandRole, OperationDef, Pipeline, ProductDef,
+    CheckDef, CheckUse, CommandDef, CommandRole, OperationDef, Pipeline, PipelineIndex, ProductDef,
 };
 use crate::parser::{parse_use, strip_comment, without_bom, Keyword, Kind, ParseError, UseSpec};
 use crate::span::Place;
@@ -113,11 +113,12 @@ fn defined(pipeline: &Pipeline) -> [(&'static str, Vec<&str>); 4] {
 }
 
 fn select_import(module: &Pipeline, spec: &UseSpec, line: usize) -> Result<Pipeline, ParseError> {
+    let index = PipelineIndex::new(module);
     let mut selected = Pipeline::default();
     let import_all = spec.names.is_none();
     let names: Vec<&str> = match &spec.names {
         Some(names) => names.iter().map(String::as_str).collect(),
-        None => reusable_names(module),
+        None => reusable_names(&index),
     };
     if names.is_empty() {
         return Err(ParseError::new(
@@ -134,7 +135,7 @@ fn select_import(module: &Pipeline, spec: &UseSpec, line: usize) -> Result<Pipel
         let mut sources = module
             .products
             .iter()
-            .filter(|product| product.name == name && is_source(module, product));
+            .filter(|product| product.name == name && index.is_source(&product.name));
         let source = sources.next();
         if operations.next().is_some() || sources.next().is_some() {
             return Err(ParseError::new(
@@ -231,7 +232,8 @@ fn qualify_checks(selected: &mut Pipeline, alias: Option<&str>) {
 
 /// What `use path` brings in: every operation, source and check, each name
 /// once.
-fn reusable_names(module: &Pipeline) -> Vec<&str> {
+fn reusable_names<'m>(index: &PipelineIndex<'m>) -> Vec<&'m str> {
+    let module = index.pipeline;
     let mut seen = BTreeSet::new();
     module
         .operations
@@ -241,20 +243,12 @@ fn reusable_names(module: &Pipeline) -> Vec<&str> {
             module
                 .products
                 .iter()
-                .filter(|product| is_source(module, product))
+                .filter(|product| index.is_source(&product.name))
                 .map(|product| product.name.as_str()),
         )
         .chain(module.checks.iter().map(|check| check.name.as_str()))
         .filter(|name| seen.insert(*name))
         .collect()
-}
-
-/// Whether `product` is a source, which no step produces.
-fn is_source(module: &Pipeline, product: &ProductDef) -> bool {
-    !module
-        .invocations
-        .iter()
-        .any(|invocation| invocation.outputs.contains(&product.name))
 }
 
 /// Import an operation as `qualified`, with its commands.

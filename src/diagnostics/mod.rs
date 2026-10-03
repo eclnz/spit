@@ -323,7 +323,7 @@ pub fn diagnose_recipe(text: &str, path: &Path) -> Vec<Diagnostic> {
                 ..InputRules::default()
             };
             diagnostics.extend(
-                collect_exclusion_errors(&checked.pipeline, &rows)
+                collect_exclusion_errors(&PipelineIndex::new(&checked.pipeline), &rows)
                     .into_iter()
                     .map(|(_, problem)| error(problem.to_string())),
             );
