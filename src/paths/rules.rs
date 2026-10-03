@@ -4,6 +4,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
+use rustc_hash::FxHashSet;
+
 use crate::model::{
     ArtifactInstance, EntityBinding, ExtensionSource, PathOrigin, Pipeline, PipelineIndex,
     ProductDef,
@@ -271,7 +273,7 @@ pub(crate) fn collect_paths(
     let mut samples: BTreeMap<String, &str> = BTreeMap::new();
     // One default rule can disagree with many products' extensions; each
     // disagreement is said once.
-    let mut disagreements = BTreeSet::new();
+    let mut disagreements = FxHashSet::default();
     for product in &pipeline.products {
         let rule = PathRule::for_product(&index, &product.name);
         if rule != PathRule::Missing && !skip.contains(&product.name) {
@@ -288,8 +290,11 @@ pub(crate) fn collect_paths(
                 }
             }
             if let Some(problem) = extension_disagreement(&index, &product.name) {
-                if disagreements.insert(problem.clone()) {
-                    errors.push(error(problem).at(line.clone()));
+                if problem
+                    .said_once
+                    .is_none_or(|said| disagreements.insert(said))
+                {
+                    errors.push(error(problem.message).at(line.clone()));
                 }
             }
             match validate_path_template(&index, product) {
@@ -300,9 +305,20 @@ pub(crate) fn collect_paths(
                         .insert(sample.clone(), &product.name)
                         .filter(|other| *other != product.name)
                     {
+                        // A `beside` output has no rule to change, so the way out
+                        // is its sibling's rule, or the other product's.
+                        let fix = match (index.beside(&product.name), index.beside(other)) {
+                            (Some((sibling, _, _)), _) => beside_fix(&product.name, sibling, other),
+                            (None, Some((sibling, _, _))) => {
+                                beside_fix(other, sibling, &product.name)
+                            }
+                            (None, None) => {
+                                "include `{@product}` or distinguish their path rules".to_owned()
+                            }
+                        };
                         errors.push(
                             error(format!(
-                                "products `{other}` and `{}` bind to the same path `{sample}` for the same entities; include `{{@product}}` or distinguish their path rules",
+                                "products `{other}` and `{}` bind to the same path `{sample}` for the same entities; {fix}",
                                 product.name
                             ))
                             .at(line),
@@ -350,9 +366,29 @@ pub(crate) fn collect_paths(
 const EXTENSION_START: &str =
     "; SPIT reads the extension from the first `.` after the last placeholder, so keep `.` out of the name before it";
 
+/// What to change when `beside`, written beside `sibling`, has the path of
+/// `other`: it has no rule of its own, so change `other`'s or `sibling`'s.
+fn beside_fix(beside: &str, sibling: &str, other: &str) -> String {
+    format!("`{beside}` follows `{sibling}`'s path, so change the path rule of `{other}` or of `{sibling}`")
+}
+
+/// A path rule that ends with an extension other than the one its file must
+/// have.
+struct Disagreement<'p> {
+    message: String,
+    /// What a default rule's message is about, since one default can
+    /// disagree with many products and is said once: the stage whose default
+    /// it is, the extension it ends with, the one it should, and where that
+    /// is declared. `None` for a product's own rule, which is said for each.
+    said_once: Option<(Option<&'p str>, &'p str, &'p str, ExtensionSource)>,
+}
+
 /// Why `product`'s path rule ends with an extension other than the one its
 /// file must have, if it does. A rule that ends with none is given it.
-fn extension_disagreement(index: &PipelineIndex<'_>, product: &str) -> Option<String> {
+fn extension_disagreement<'p>(
+    index: &PipelineIndex<'p>,
+    product: &str,
+) -> Option<Disagreement<'p>> {
     let (expected, source) = index.expected_extension(product)?;
     let rule = index.path_rule_for(product)?;
     // A `.` earlier in the file name is not part of its extension.
@@ -367,15 +403,19 @@ fn extension_disagreement(index: &PipelineIndex<'_>, product: &str) -> Option<St
     };
     let origin = index.path_origin(product).map(|(origin, _)| origin);
     if origin == Some(PathOrigin::Explicit) {
-        return Some(format!(
-            "path `{product}` ends in `{written}`, but {source} {verb} `{expected}`; drop the extension or use `{expected}`{EXTENSION_START}"
-        ));
+        return Some(Disagreement {
+            message: format!(
+                "path `{product}` ends in `{written}`, but {source} {verb} `{expected}`; drop the extension or use `{expected}`{EXTENSION_START}"
+            ),
+            said_once: None,
+        });
     }
-    let default = match origin {
-        Some(PathOrigin::Stage(stage)) => format!("stage `{stage}`'s default path"),
-        _ => "the default path".to_owned(),
+    let (stage, default) = match origin {
+        Some(PathOrigin::Stage(stage)) => (Some(stage), format!("stage `{stage}`'s default path")),
+        _ => (None, "the default path".to_owned()),
     };
-    Some(match source {
+    let said_once = Some((stage, written, expected, source.clone()));
+    let message = match source {
         ExtensionSource::Operation(_) => format!(
             "{default} ends in `{written}`, but {source} writes `{expected}`; write {default} without an extension, and give the outputs that use it `ext: {written}`"
         ),
@@ -385,7 +425,8 @@ fn extension_disagreement(index: &PipelineIndex<'_>, product: &str) -> Option<St
         ExtensionSource::Stage(_) | ExtensionSource::Default => format!(
             "{default} ends in `{written}`, but {source} sets `{expected}`; write the extension once, with `ext:`"
         ),
-    })
+    };
+    Some(Disagreement { message, said_once })
 }
 
 /// Bind a product's path rule to placeholder entities, rejecting rules that

@@ -162,9 +162,9 @@ fn a_beside_output_cannot_share_a_path_with_another_product() {
          image, meta = convert(dicom)\nn = note(dicom)\n",
     );
     assert!(
-        found
-            .iter()
-            .any(|message| message.contains("bind to the same path")),
+        found.iter().any(|message| message.contains(
+            "`meta` follows `image`'s path, so change the path rule of `n` or of `image`"
+        )),
         "{found:?}"
     );
 }
@@ -178,5 +178,17 @@ fn the_path_rule_listing_says_where_a_beside_output_gets_its_path() {
     assert!(
         listing.contains("meta (output): beside image out/image/{@entities}.json"),
         "{listing}"
+    );
+}
+
+#[test]
+fn an_output_cannot_be_written_beside_itself() {
+    let found = errors(
+        "source s [id]\npath s: in/{id}\noperation f(x: Image) -> (a: Image .x beside a)\n\
+         command f: tool {x}\nr = f(s)\n",
+    );
+    assert_eq!(
+        found,
+        ["`a` is written beside itself; name another output of this operation, whose file it follows"]
     );
 }
