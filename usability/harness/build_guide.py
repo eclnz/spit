@@ -18,10 +18,10 @@ intro = re.sub(r"<img[^>]*>\n\n", "", readme[: readme.index("## Contents")])
 body = readme[readme.index("## The three steps") : readme.index("## Language reference")]
 how = readme[readme.index("## How SPIT works") : readme.index("## Documentation")]
 reference = reference[reference.index("\n", reference.index("This is the full syntax")) + 1 :]
-reference = reference.replace("](../README.md)", "](README.md)")
-reference = reference.replace("](../examples/", "](examples/")
-reference = reference.replace("](architecture.md)", "](docs/architecture.md)")
-reference = reference.replace("](examples.md", "](docs/examples.md")
+# The reference's links are relative to docs/, and the guide sits at the trial
+# root beside README.md, examples/ and docs/.
+reference = re.sub(r"\]\((?![#/]|\w+://)(?=[\w.-]+\.md)", "](docs/", reference)
+reference = re.sub(r"\]\(\.\./", "](", reference)
 
 guide = intro + body + how + "\n# Language reference\n" + reference
 open(sys.argv[1], "w").write(guide.replace("cargo run -- ", "spit "))
