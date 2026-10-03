@@ -209,6 +209,14 @@ fn stage_syntax_errors() {
             (Some(3), "duplicate stage `prep/inner`: it is already opened on line 2; a stage is one block, so move these lines into it"),
         ),
         (
+            "stage a:\n    operation copy(x: Text) -> Text\nstage b:\n    operation copy(x: Text) -> Text\n",
+            (Some(4), "duplicate operation `copy`: it is already declared on line 2; operations are global even when declared in a stage, so give this one another name"),
+        ),
+        (
+            "operation copy(x: Text) -> Text\noperation copy(x: Text) -> Text\n",
+            (Some(2), "duplicate operation `copy`: it is already declared on line 1"),
+        ),
+        (
             "stage prep\n",
             (
                 Some(1),
@@ -379,6 +387,60 @@ fn a_stage_whose_steps_are_all_nested_is_not_empty() {
         messages(&diagnose(text, None)),
         [(Some(6), "stage `outer/idle` has no steps")]
     );
+}
+
+#[test]
+fn an_operation_called_outside_its_stage_says_where_to_declare_it() {
+    let declared = "source raw [id]\nstage prep:\n    stage clean:\n        operation copy(a: A) -> A\n        a = copy(raw)\n";
+    let warning = |called: &str, line: usize, target: &str| {
+        format!("operation `copy` is declared in stage `prep/clean` but called {called} on line {line}; a stage does not limit where its operations are used, so declare it in {target}")
+    };
+    let cases = [
+        (
+            "    stage merge:\n        b = copy(a)\n",
+            warning(
+                "in stage `prep/merge`",
+                7,
+                "stage `prep`, which holds every call",
+            ),
+        ),
+        (
+            "stage report:\n    b = copy(a)\n",
+            warning("in stage `report`", 7, "the top level, outside every stage"),
+        ),
+        (
+            "b = copy(a)\n",
+            warning(
+                "outside every stage",
+                6,
+                "the top level, outside every stage",
+            ),
+        ),
+    ];
+    for (calls, expected) in cases {
+        let text = format!("{declared}{calls}");
+        let diagnostics = diagnose(&text, None);
+        assert_eq!(
+            messages(&diagnostics),
+            [(Some(4), expected.as_str())],
+            "{text}"
+        );
+    }
+}
+
+#[test]
+fn the_stage_to_declare_in_holds_every_outside_call() {
+    let text = "source raw [id]\nstage a:\n    stage b:\n        operation copy(x: Text) -> Text\n        one = copy(raw)\n    stage c:\n        two = copy(one)\n    stage cd:\n        stage e:\n            three = copy(two)\n";
+    assert_eq!(
+        messages(&diagnose(text, None)),
+        [(Some(4), "operation `copy` is declared in stage `a/b` but called in stage `a/c` on line 7; a stage does not limit where its operations are used, so declare it in stage `a`, which holds every call")]
+    );
+}
+
+#[test]
+fn an_operation_called_within_its_stage_is_in_place() {
+    let text = "source raw [id]\nstage prep:\n    operation copy(a: A) -> A\n    stage clean:\n        a = copy(raw)\n    b = copy(a)\n";
+    assert!(diagnose(text, None).is_empty());
 }
 
 #[test]
