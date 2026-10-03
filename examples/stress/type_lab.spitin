@@ -1,9 +1,9 @@
 pipeline type_lab.spit
 root type_lab_data
 
-require lidar count>=1 per [lab, rig, capture]
-require camera count>=1 per [lab, rig, capture]
-require lidar_cal count=1 per [lab, rig]
-require camera_cal count=1 per [lab, rig]
-require reference count=1 per [lab, rig]
-require policy count=1 per [lab]
+require [lab, rig, capture] where lidar count>=1
+require [lab, rig, capture] where camera count>=1
+require [lab, rig] where lidar_cal count=1
+require [lab, rig] where camera_cal count=1
+require [lab, rig] where reference count=1
+require [lab] where policy count=1

@@ -146,20 +146,20 @@ fn a_skip_rule_is_an_error_that_names_the_drop_rule_to_write() {
 
 #[test]
 fn a_rule_in_the_other_rules_order_is_an_error_that_names_it_in_its_own() {
-    let require = "`require` names the source first, then the groups after `per`";
+    let require = "`require` names the groups first, then `where`, as `drop` does";
     let drop = "`drop` names the groups first, then `where`";
     for (rule, message) in [
         (
-            "require [sub, ses] where t1w count=1",
-            format!("{require}: write `require t1w count=1 per [sub, ses]`"),
+            "require t1w count=1 per [sub, ses]",
+            format!("{require}: write `require [sub, ses] where t1w count=1`"),
         ),
         (
-            "require [sub] where bold has run=1,2",
-            format!("{require}: write `require bold run=1,2 per [sub]`"),
+            "require bold run=1,2 per [sub]",
+            format!("{require}: write `require [sub] where bold has run=1,2`"),
         ),
         (
-            "require [sub] where bold missing run=1",
-            format!("{require}, as in `require t1w count=1 per [sub, ses]`"),
+            "require bold count>=2 run=1,2 per [sub]",
+            format!("{require}: write `require [sub] where bold count>=2 has run=1,2`"),
         ),
         (
             "drop t1w count=0 per [sub, ses]",
@@ -252,15 +252,15 @@ fn removing_every_group_is_an_error() {
 fn require_is_checked_after_the_drops_and_never_over_nothing() {
     // After subject 3 is dropped, every subject has a T1w per session.
     let settled =
-        settle("drop [sub] where t1w count<1\nrequire t1w count=1 per [sub, ses]\n").unwrap();
+        settle("drop [sub] where t1w count<1\nrequire [sub, ses] where t1w count=1\n").unwrap();
     assert!(settled.gaps.is_empty(), "{:?}", settled.gaps);
     // Without the drop, subject 3's session lacks its T1w.
-    let settled = settle("require t1w count=1 per [sub, ses]\n").unwrap();
+    let settled = settle("require [sub, ses] where t1w count=1\n").unwrap();
     assert_eq!(settled.gaps.len(), 1);
     // A grouping no record has forms no group to check.
     let pipeline = parse_pipeline("source x [a]\nsource y [b]\n").unwrap();
     let records = parse_source_inventory("sources:\n    y[b=1]\n").unwrap();
-    let settled = parse_input_spec("require x count>=1 per [a]\n")
+    let settled = parse_input_spec("require [a] where x count>=1\n")
         .unwrap()
         .resolve(&pipeline, InputSource::Inventory(records))
         .unwrap();
@@ -270,13 +270,13 @@ fn require_is_checked_after_the_drops_and_never_over_nothing() {
     ));
     assert_eq!(
         settled.require_complete().unwrap_err().to_string(),
-        "`require x count>=1 per [a]` has no groups to check: nothing in the dataset has those dimensions"
+        "`require [a] where x count>=1` has no groups to check: nothing in the dataset has those dimensions"
     );
     // Each comparison `require` takes.
     for (rule, gaps) in [
-        ("require bold count<=2 per [sub, ses]", 1),
-        ("require bold count>1 per [sub, ses]", 1),
-        ("require bold count!=3 per [sub, ses]", 1),
+        ("require [sub, ses] where bold count<=2", 1),
+        ("require [sub, ses] where bold count>1", 1),
+        ("require [sub, ses] where bold count!=3", 1),
     ] {
         let settled = settle(&format!("{rule}\n")).unwrap();
         assert_eq!(settled.gaps.len(), gaps, "{rule}: {:?}", settled.gaps);

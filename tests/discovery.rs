@@ -263,7 +263,7 @@ fn coverage_can_target_the_named_discovery_rule() {
         ],
     );
     let text = "discover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}\n\
-                require sessions count>=2 per [sub]\n";
+                require [sub] where sessions count>=2\n";
     let (pipeline, spec) = parse(text);
     let inventory = discover_sources(&pipeline, &spec.rules, &tree.0).unwrap();
     assert_eq!(inventory.discovered["sessions"].len(), 9);
@@ -287,7 +287,7 @@ fn coverage_can_target_the_named_discovery_rule() {
         Err(ResolveError::CoverageViolation { product, context, found: 1, discovery: true, .. })
             if product == "sessions" && context.get("sub") == Some("5")
     ));
-    let values = text.replace("count>=2", "ses=1,2");
+    let values = text.replace("count>=2", "has ses=1,2");
     let (pipeline, spec) = parse(&values);
     assert!(matches!(
         settle(&pipeline, &spec, &inventory).require_complete(),
@@ -314,7 +314,7 @@ fn drop_discovery_group_removes_subject_before_source_checks_and_jobs() {
     );
     let text = "discover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}\n\
                 drop [sub] where sessions count<2\n\
-                require sessions count>=2 per [sub]\n\
+                require [sub] where sessions count>=2\n\
                 source image [sub, ses]\n\
                 path image: data/sub-{sub}/ses-{ses}/image.nii.gz\n\
                 operation process(image: Image) -> Image\n\
@@ -415,7 +415,7 @@ fn discovery_coverage_uses_only_its_own_bindings() {
     let (pipeline, spec) = parse(
         "discover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}\n\
          discover controls: [sub, ses] from dirs controls/sub-{sub}/ses-{ses}\n\
-         require sessions count>=2 per [sub]\n",
+         require [sub] where sessions count>=2\n",
     );
     let inventory = discover_sources(&pipeline, &spec.rules, &tree.0).unwrap();
     assert_eq!(inventory.contexts.len(), 2);

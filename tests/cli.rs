@@ -624,7 +624,7 @@ fn drop_rules_that_remove_every_group_stop_each_command() {
     let recipe = tree.write(
         "data.spitin",
         "pipeline analysis.spit\nroot .\ndiscover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}\n\
-         drop [sub] where sessions count<2\nrequire sessions count>=1 per [sub]\n",
+         drop [sub] where sessions count<2\nrequire [sub] where sessions count>=1\n",
     );
     for command in ["inputs", "dag", "artifacts"] {
         let output = spit(&[command, recipe.to_str().unwrap()]);

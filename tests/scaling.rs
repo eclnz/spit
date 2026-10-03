@@ -52,8 +52,8 @@ score = compare(averaged, reference)
 
 const RECIPE: &str = "\
 discover sessions: [sub, ses] from dirs sub-{sub}/ses-{ses}
-require image count>=2 per [sub, ses]
-require reference count=1 per [sub, ses]
+require [sub, ses] where image count>=2
+require [sub, ses] where reference count=1
 drop [sub, ses] where image count<1
 ";
 

@@ -398,7 +398,7 @@ root .
 discover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}
 exclude image[sub=04,ses=2]    # scanner fault
 drop [sub] where sessions count<2
-require image count=1 per [sub, ses]
+require [sub, ses] where image count=1
 path image: data/sub-{sub}/ses-{ses}/image.nii.gz
 ```
 
@@ -438,11 +438,11 @@ Three rules leave data out, each for a different reason:
 | Remove named artifacts or groups, such as a corrupted run | `exclude` | `exclude bold[sub=02,ses=02,run=3]  # corrupted` |
 | Remove every group that fails a criterion, as the data changes | `drop` | `drop [sub] where sessions count<2` |
 | Plan what can be completed despite missing inputs | `dag --partial` | `spit dag dataset.spitin --partial -o plan.spitdag` |
-| Stop, when the data is incomplete | `require` | `require t1w count=1 per [sub, ses]` |
+| Stop, when the data is incomplete | `require` | `require [sub, ses] where t1w count=1` |
 
 They apply in that order, however they are written: first every `exclude`, then every `drop`, each judged against what the exclusions leave, then every `require`, checked against what the drops leave. What `exclude` and `drop` remove is reported on stderr as notes and recorded in the `.spitout`.
 
-`drop` and `require` are written in different orders, because their conditions point opposite ways. A `drop` names the groups first and then, after `where`, what removes one; a `require` names the source first and then what every group must have, with the groups after `per`. A rule written in the other's order, such as `require [sub, ses] where t1w count=1`, is an error that gives it in its own order.
+`drop` and `require` are written the same way: the groups, then `where`, then the source or discovery rule to count and a condition. A `drop` removes each group that meets its condition; a `require` stops the run unless every group meets its own. A `require` in the older order, source first and the groups after `per`, as in `require t1w count=1 per [sub, ses]`, is an error that gives the rule rewritten.
 
 Rules that count form their groups from every artifact and discovered context in the dataset, whichever source or discovery found it. `drop [store] where pricing count=0` groups by every store any source or discovery has, so a store with sales but no price list is a group with none: its count is 0.
 
@@ -488,8 +488,8 @@ Sources whose dimensions fit within the rule's dimensions expand over the observ
 `require` can target the name of a discovery rule directly:
 
 ```text
-require sessions count>=2 per [sub]
-require sessions ses=1,2 per [sub]
+require [sub] where sessions count>=2
+require [sub] where sessions has ses=1,2
 ```
 
 The first rule needs at least two observed session bindings per subject. The second specifically needs sessions `1` and `2`. These rules count the directories matched by `sessions`, not artifacts from a product called `sessions`. Records keep the rule name as `contexts sessions:` followed by its `[sub=...,ses=...]` records, which `spit inputs` writes.
@@ -497,14 +497,14 @@ The first rule needs at least two observed session bindings per subject. The sec
 ### Constraints
 
 ```text
-require image count>=2 per [subject, visit]
-require reference count=1 per [subject, visit]
+require [subject, visit] where image count>=2
+require [subject, visit] where reference count=1
 ```
 
-Constraints, written in a recipe, check each observed group, and fail the run if any group fails. They do not set a total subject or visit count. The count takes any comparison: `count=1`, `count!=1`, `count>=2`, `count<=2`, `count>2` or `count<2`. A rule can also require particular values in each group, alone or with a count:
+Constraints, written in a recipe, check each observed group, and fail the run if any group fails. They do not set a total subject or visit count. The count takes any comparison: `count=1`, `count!=1`, `count>=2`, `count<=2`, `count>2` or `count<2`. A rule can also require particular values in each group with `has`, alone or after a count, as in `require [subject, visit] where image count>=2 has run=1,2`:
 
 ```text
-require image run=1,2 per [subject, visit]
+require [subject, visit] where image has run=1,2
 ```
 
 A `require` rule is checked after every `drop` rule, against the groups they leave. A rule whose grouping finds no group at all, because nothing in the dataset has those dimensions or a `drop` removed every one, is an error: a check of nothing is not a pass.

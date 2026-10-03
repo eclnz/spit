@@ -139,7 +139,7 @@ fn check_and_its_json_give_each_diagnostic_one_severity() {
     tree.write("missing_root.spitin", "pipeline good.spit\nroot nowhere\n");
     tree.write(
         "bad_rule.spitin",
-        "pipeline good.spit\nroot .\nrequire nothing count=1 per [id]\n",
+        "pipeline good.spit\nroot .\nrequire [id] where nothing count=1\n",
     );
     tree.write("broken_pipeline.spitin", "pipeline broken.spit\nroot .\n");
     tree.write("broken.spitout", "sources:\n    raw[id=1\n");
