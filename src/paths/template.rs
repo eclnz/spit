@@ -238,6 +238,9 @@ impl PathTemplate {
     /// name after its final placeholder, from the first `.`, as `.nii.gz`
     /// in `sub-{sub}_T1w.nii.gz`. Values cannot add a `.`, as they are
     /// escaped, so only the template's own text can.
+    ///
+    /// Keep in step with `EXTENSION_START` in `rules.rs`, which tells the
+    /// user how the extension is read.
     pub fn extension(&self) -> Option<&str> {
         let Some(PathPart::Literal(tail)) = self.parts.last() else {
             return None;
