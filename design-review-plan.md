@@ -30,7 +30,7 @@ Status is `open`, `claimed (<branch>)`, `decided`, or `done (<commit>)`. Numbers
 | S1 | Syntax: operations declared inside a stage | done (`ff3ec35`) |
 | S2 | Syntax: `@ min(n)` beside the `many` port | done (`5131495`) |
 | S3 | Syntax: `require` and `drop` clause order ([#36](https://github.com/eclnz/spit/issues/36)) | done (`3c6d843`) |
-| S4 | Syntax: shell metacharacters in commands | decided, claimed (`shell-meta`) |
+| S4 | Syntax: shell metacharacters in commands | done (`03c9a18`) |
 | S5 | Syntax: `path:` in both `.spit` and `.spitin` | done (`b72f2e9`) |
 | R1 | Composite operations: provenance and diagnostics design | open |
 | T1 | Sidecar `incomplete_groups` keyed by structured bindings ([#37](https://github.com/eclnz/spit/issues/37)) | done (`5ab3a16`) |
@@ -214,6 +214,8 @@ command bad:   cut -f1 {table} > {@output}
 - *Invariants and diagnostics.* Every argument in the DAG means what it looks like. Quoted or escaped operators (`'>'`, `\;`) stay literal arguments, and operators inside a quoted `sh -c` script are not looked at. The rule applies to `verify` commands as well, and to an imported library, whose error is reported in the library, as any other command error is. The warning and its "unquoted shell operator" line in the README go; `check --json` gives an error where it gave a warning.
 - *Beyond spit.* The extension shows the severity that `check --json` gives, and its grammar doesn't colour operators, so no change is expected there; that still needs checking against `extension.test.js` on a branch named `shell-meta`. The language reference documents the `sh -c` idiom. Item 4b should count this as one warning moved to an error.
 - *Considered, left out.* An unquoted `$VAR`, a backtick or a glob such as `*` is also passed literally, but each one is a legitimate argument to some programs, which isn't true of an operator word. They stay as the guide describes them.
+
+*Done in `03c9a18`* (merged in `8b6b88f`). As designed. The error sits on the operator's column and gives a fixed `sh -c 'tool "$1" | sort > "$2"'` example. `command` and `verify` lines moved into `src/parser/command.rs` beside the check, which kept `declarations.rs` under 800 lines. For 4b, the one warning moved to an error. spit-vscode needed no change: none of its tests use this diagnostic, and it shows the severity it is given.
 
 **S1 design (decided: definitions stay global, and their place must hold their calls).** Neither candidate as written. An `operation`, its `command` and its `verify` may still be declared inside a stage, and stay global, so imports, the DAG and every later phase are unchanged. What changes is that a stage-declared operation called outside the stage that declares it is a warning at the declaration, naming the call and where to move the declaration: the innermost stage that holds every call, else the top level. Indentation then tells the truth about where an operation is used, without making stages into modules. A duplicate operation name, which is where reading a stage as a scope goes wrong today, says the operation is global and where the first one is.
 
