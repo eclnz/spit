@@ -38,55 +38,33 @@ pub fn validate_bound_source_files(
     check_rules(pipeline, dag)?;
     let paths = bound_paths(pipeline, dag)?;
     let made = outputs_made(dag);
-    // What the jobs read and none makes, checked in artifact order so the
-    // first missing file is reported.
+    // What the jobs read and none makes, the sources, checked in artifact
+    // order so the first missing file is reported.
     let mut needed: Vec<_> = with_paths(dag, &paths)
         .filter(|(id, _, _)| !made[id.index()])
         .map(|(_, artifact, relative)| (artifact.key(), relative))
         .collect();
     needed.sort_unstable_by_key(|&(artifact, _)| artifact);
-    let mut verified = VerifiedFiles::default();
     let index = PipelineIndex::new(pipeline);
-    for (artifact, relative) in needed {
-        // In a DAG cut to one stage, as by `ResolvedDag::only_stage`, what
-        // other stages make must already exist.
-        let made_by = pipeline
-            .invocations
-            .iter()
-            .find(|invocation| invocation.outputs.iter().any(|output| output == artifact.0));
+    for &(artifact, relative) in &needed {
         let full_path = root.join(relative);
-        let folder = index.is_folder(artifact.0);
-        let (present, kind) = if folder {
+        let (present, kind) = if index.is_folder(artifact.0) {
             (full_path.is_dir(), "folder")
         } else {
             (full_path.is_file(), "file")
         };
         if !present {
-            return Err(error(match made_by {
-                Some(invocation) => format!(
-                    "missing {kind} for `{}[{}]`, which {} makes: `{}`",
-                    artifact.0,
-                    artifact.1,
-                    invocation.stage.as_ref().map_or_else(
-                        || "an earlier step".to_owned(),
-                        |stage| format!("stage `{stage}`")
-                    ),
-                    full_path.display()
-                ),
-                None => format!(
-                    "missing source {kind} for `{}[{}]`: `{}`",
-                    artifact.0,
-                    artifact.1,
-                    full_path.display()
-                ),
-            }));
-        }
-        if made_by.is_some() {
-            verified.made_elsewhere += 1;
-        } else {
-            verified.sources += 1;
+            return Err(error(format!(
+                "missing source {kind} for `{}[{}]`: `{}`",
+                artifact.0,
+                artifact.1,
+                full_path.display()
+            )));
         }
     }
+    let verified = VerifiedFiles {
+        sources: needed.len(),
+    };
     Ok((verified, BoundPaths(paths)))
 }
 
@@ -100,25 +78,12 @@ pub struct BoundPaths(pub(crate) Vec<Option<String>>);
 pub struct VerifiedFiles {
     /// Files of source products.
     pub sources: usize,
-    /// Outputs of steps whose jobs the DAG leaves out, such as another
-    /// stage's when one stage is selected.
-    pub made_elsewhere: usize,
 }
 
 impl fmt::Display for VerifiedFiles {
-    /// Reads as `3 source files verified.`, naming only counts above zero.
+    /// Reads as `3 source files verified.`
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut parts = Vec::new();
-        if self.sources > 0 || self.made_elsewhere == 0 {
-            parts.push(format!("{} source files", self.sources));
-        }
-        if self.made_elsewhere > 0 {
-            parts.push(format!(
-                "{} files made outside the stage",
-                self.made_elsewhere
-            ));
-        }
-        write!(f, "{} verified.", parts.join(" and "))
+        write!(f, "{} source files verified.", self.sources)
     }
 }
 
