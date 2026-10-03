@@ -91,7 +91,7 @@ Files come first; options follow them. `spit help` lists the commands, and `spit
 | `--root <directory>` | With a `.spit` pipeline given alone to `inputs`, `dag` or `artifacts`, the dataset folder to scan with the pipeline's own path rules, relative to where `spit` runs. A recipe or `.spitout` names its root with a `root` line instead, and `--root` with either is an error. |
 | `-o <file>`, `--output <file>` | With `inputs`, write the `.spitout` to the file instead of standard output. With `dag`, write the `.spitdag`. |
 | `--path-rules` | With `check`, list the path rule each product uses (its own, a stage's or the pipeline's default, the recipe's, or for an output the built-in `out/{@product}/{@entities}`), with any [extension](docs/language-reference.md#extensions) added to it and where that is declared. |
-| `--unmatched` | With `inputs`, list files under the dataset root that match no source path rule, one per line, instead of writing a `.spitout`. |
+| `--unmatched` | With `inputs`, list files under the dataset root that match no source path rule, one per line, leaving out files at the pipeline's output paths, instead of writing a `.spitout`. |
 | `--suggest` | With `inputs`, print `source` and `path` lines for the files under the dataset root that match no source path rule, instead of writing a `.spitout`; see [Start from the files](#start-from-the-files). |
 | `--paths` | With `dag`, print the file under every artifact. |
 | `--counts` | With `dag`, print how many jobs each step resolves instead of the jobs: one row per step, as `cleaned = clean`, with its stage when the pipeline has stages, then the total. A step that resolves no jobs shows `0`, so an empty step or an unexpected expansion stands out before the plan is run. With `-o`, print the counts and write the `.spitdag` too. |
@@ -204,7 +204,7 @@ This creates two sort jobs for `alpha`, one for `beta`, and one merge job for ea
 
 ### Start from the files
 
-When the data already exists, `spit inputs --suggest` writes the source path rules from it. It groups the files no rule matches by shape, makes the parts that differ between a group's files its dimensions, and prints lines to paste in. A dimension takes its name from the key before it, as `sub` in `sub-01` or `wave` in `wave3`. A key with a number, as `ses-1`, stays a dimension even when every file has the same one, and a key with a word, as `task-rest`, stays as text. Given a pipeline whose `bold` source has no rule yet:
+When the data already exists, `spit inputs --suggest` writes the source path rules from it. It groups the files no rule matches by shape, leaving out files at the pipeline's own output paths, makes the parts that differ between a group's files its dimensions, and prints lines to paste in. A dimension takes its name from the key before it, as `sub` in `sub-01` or `wave` in `wave3`. A key with a number, as `ses-1`, stays a dimension even when every file has the same one, and a key with a word, as `task-rest`, stays as text. Given a pipeline whose `bold` source has no rule yet:
 
 ```sh
 spit inputs analysis.spit --root data --suggest
@@ -302,7 +302,7 @@ An incomplete artifact has a missing or ambiguous input, a collection below its 
 
 `artifacts` also lists, under `Unused sources`, each source that no job reads, whether or not that job can be completed. Some are left out on purpose, such as calibration revisions a `where(revision=3)` selector passes over; others point to a mistake, such as `pricing/S07.json` read as store `S07` where the pipeline needs `s07`. `dag` counts them in a note: `3 source artifacts are used by no job (calibration: 3)`.
 
-When a missing input differs from an unused source only in letter case or leading zeros, the failed `dag` and `artifacts` reports name that source and the differing dimension. They also warn that the source is unused. A genuinely missing source has no such hint. During discovery, `inputs` notes how many files match no source rule. A source whose path rule matches no file at all gets a warning that names the unmatched file nearest the rule, and shows where the two part:
+When a missing input differs from an unused source only in letter case or leading zeros, the failed `dag` and `artifacts` reports name that source and the differing dimension. They also warn that the source is unused. A genuinely missing source has no such hint. During discovery, `inputs` notes how many files match no source rule; files at the pipeline's own output paths, such as an earlier run's, are not counted. A source whose path rule matches no file at all gets a warning that names the unmatched file nearest the rule, and shows where the two part:
 
 ```text
 warning: source `bold` matched no files with path rule `data/sub-{sub}/ses-{ses}/func/sub-{sub}_ses-{ses}_run-{run}_bold.nii.gz`

@@ -1,12 +1,17 @@
-//! Path rules as patterns: matching one against a file or directory, and
-//! how near a file comes to a rule that matches none.
+//! Path rules as patterns: matching one against a file or directory, where
+//! a pipeline's outputs lie, and how near a file comes to a rule that
+//! matches none.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::ops::Range;
 
-use crate::model::ProductDef;
-use crate::paths::{encode_component, error, PathError, PathPart, PathPlaceholder, PathTemplate};
+use rustc_hash::FxHashSet;
+
+use crate::model::{Pipeline, PipelineIndex, ProductDef};
+use crate::paths::{
+    encode_component, error, stage_directories, PathError, PathPart, PathPlaceholder, PathTemplate,
+};
 
 /// One piece of a path rule: text written as is, or a dimension's value.
 pub(super) enum Piece {
@@ -15,9 +20,12 @@ pub(super) enum Piece {
     Value(String),
 }
 
+/// The pieces `product`'s paths match. `stage` is the directories
+/// `{@stage}` gives it, `None` for a source.
 pub(super) fn path_pattern(
     template: &PathTemplate,
     product: &ProductDef,
+    stage: Option<&str>,
 ) -> Result<Vec<Piece>, PathError> {
     let mut pieces = Vec::new();
     for part in template.parts() {
@@ -39,15 +47,19 @@ pub(super) fn path_pattern(
                     pieces.push(Piece::Value(dimension.clone()));
                 }
             }
-            // A source is made in no stage, so its rule never binds
-            // `{@stage}`; `inspect_paths` rejects such a rule first.
-            PathPart::Placeholder(PathPlaceholder::Stage) => {
-                return Err(error(format!(
-                    "path rule for source `{}` uses `{}`, but a source is not made in a stage",
-                    product.name,
-                    PathPlaceholder::Stage
-                )))
-            }
+            PathPart::Placeholder(PathPlaceholder::Stage) => match stage {
+                Some(stage) => pieces.push(Piece::Literal(stage.to_owned())),
+                // A source is made in no stage, so its rule never binds
+                // `{@stage}`; `inspect_paths` rejects such a rule first.
+                None => {
+                    return Err(error(format!(
+                        "path rule for `{}` uses `{}`, but `{}` is not made in a stage",
+                        product.name,
+                        PathPlaceholder::Stage,
+                        product.name
+                    )))
+                }
+            },
             PathPart::Placeholder(PathPlaceholder::Dimension(dimension)) => {
                 pieces.push(Piece::Value(dimension.clone()));
             }
@@ -64,6 +76,68 @@ pub(super) fn path_pattern(
         }
     }
     Ok(pieces)
+}
+
+/// Where the products a step of a pipeline makes lie under a root, to tell
+/// what an earlier run wrote from files no rule matches.
+pub(super) struct OutputPaths<'l> {
+    /// The pattern of each file output.
+    files: Vec<Vec<Piece>>,
+    /// The directories a folder output's pattern matches.
+    folders: FxHashSet<&'l str>,
+}
+
+impl<'l> OutputPaths<'l> {
+    /// Each output's completed path template, with `{@stage}` written out
+    /// as binding does. An output whose path cannot be bound is left out:
+    /// resolving reports it.
+    pub(super) fn of(pipeline: &Pipeline, directories: &'l [String]) -> Self {
+        let index = PipelineIndex::new(pipeline);
+        let outputs: BTreeSet<_> = pipeline
+            .invocations
+            .iter()
+            .flat_map(|invocation| &invocation.outputs)
+            .collect();
+        let mut files = Vec::new();
+        let mut folder_patterns = Vec::new();
+        for product in &pipeline.products {
+            if !outputs.contains(&product.name) {
+                continue;
+            }
+            let Some(template) = index.path_template_for(&product.name) else {
+                continue;
+            };
+            let stage = stage_directories(&index, &product.name);
+            let Ok(pieces) = path_pattern(&template, product, stage.as_deref()) else {
+                continue;
+            };
+            if index.is_folder(&product.name) {
+                folder_patterns.push(pieces);
+            } else {
+                files.push(pieces);
+            }
+        }
+        let folders = directories
+            .iter()
+            .filter(|directory| {
+                folder_patterns
+                    .iter()
+                    .any(|pieces| match_pattern(pieces, directory).is_some())
+            })
+            .map(String::as_str)
+            .collect();
+        Self { files, folders }
+    }
+
+    /// Whether `file` is at an output's path, or inside an output folder.
+    pub(super) fn hold(&self, file: &str) -> bool {
+        self.files
+            .iter()
+            .any(|pieces| match_pattern(pieces, file).is_some())
+            || file
+                .match_indices('/')
+                .any(|(end, _)| self.folders.contains(&file[..end]))
+    }
 }
 
 /// Match `text` against `pieces`, binding each dimension to its encoded
