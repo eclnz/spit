@@ -55,6 +55,8 @@ SPIT runs in three steps. Each is one command, and each reads the files the prev
 | `.spitout` | A dataset's settled inputs: each source artifact, with its file, and the root they were found under. |
 | `.spitdag` | The resolved jobs, each with its artifacts' files and its command, as JSON, in an order they can run in: all a backend needs to run them, with the dataset folder, the programs the commands need, and a fingerprint of each job's work to tell when it must run again. |
 
+The pipeline and the recipe split along one line. A `.spit` pipeline is the reusable graph: what work to do and where its results go, for any dataset. A `.spitin` recipe binds that pipeline to one dataset: where its folder is, where its sources are when the pipeline does not say, and which of its data to leave out or require. Each line belongs in one of the two, except `path`, which can say where a source is from either; see [Which file a line belongs in](docs/language-reference.md#which-file-a-line-belongs-in).
+
 A later step may also take an earlier step's input and run that step in memory: `dag` and `artifacts` take a `.spitin` in place of the `.spitout`. A `.spitin` names its own pipeline, so it is given alone: `spit dag dataset.spitin`. Giving a `.spit` beside it is an error, so the two cannot disagree. A `.spitout` names no pipeline, so it takes one: `spit dag analysis.spit dataset.spitout`.
 
 A recipe is for when a dataset needs more than its folder: rules to find, check or leave out its inputs, or source paths of its own. When the pipeline's path rules already find every source, skip it and name the folder: `spit dag analysis.spit --root data`. That runs `spit inputs` in memory on the pipeline alone, so it takes no `discover`, `exclude`, `drop` or `require` rules. `--root` is taken only this way: a recipe and a `.spitout` each say where their data is with a `root` line.
@@ -120,7 +122,7 @@ error: line 5, column 29: command for `clean` uses unknown placeholder `{result}
 error: line 9, column 14: unknown product `rwa`
 ```
 
-Syntax errors are reported throughout the file first; the remaining checks run once every line parses. A step or rule that uses a declaration which failed is not reported again. Errors stop the command; warnings do not. Warnings flag a source product no step uses, an operation no step uses, a used operation with no `command` once the pipeline has commands, an operation declared in a stage but called outside it, an output type variable that no input binds, a stage with no steps, a shell operator such as `|` or `>` in a command, and a `#` that ends a word, which reads like a comment but is part of the word. With inputs, as in `dag`, they also flag a source with no artifacts, naming the steps it leaves without jobs, any other step that resolves no jobs, paths that differ only in letter case, and a value with a `-` that `{@labels}` writes, which BIDS cannot read back. `check` on a recipe warns when its `root` folder is missing, and `inputs` warns about each `sidecars` group it found only some files of. A file with no steps is treated as a library of definitions, and imported definitions are never reported as unused. Jobs are resolved only when nothing else is wrong.
+Syntax errors are reported throughout the file first; the remaining checks run once every line parses. A step or rule that uses a declaration which failed is not reported again. Errors stop the command; warnings do not. Warnings flag a source product no step uses, an operation no step uses, a used operation with no `command` once the pipeline has commands, a product named after the operation that makes it, an operation declared in a stage but called outside it, an output type variable that no input binds, a stage with no steps, a shell operator such as `|` or `>` in a command, and a `#` that ends a word, which reads like a comment but is part of the word. With inputs, as in `dag`, they also flag a source with no artifacts, naming the steps it leaves without jobs, any other step that resolves no jobs, paths that differ only in letter case, and a value with a `-` that `{@labels}` writes, which BIDS cannot read back. `check` on a recipe warns when its `root` folder is missing, and `inputs` warns about each `sidecars` group it found only some files of. A file with no steps is treated as a library of definitions, and imported definitions are never reported as unused. Jobs are resolved only when nothing else is wrong.
 
 ## Write a pipeline
 
@@ -151,18 +153,20 @@ A pipeline names no dataset. Rules about what a dataset must hold, and records o
 
 ## Supply the inputs
 
-A `.spitin` recipe describes how to find a dataset's inputs. Its first line names the pipeline it serves, relative to the recipe's folder. The smallest recipe is that line alone:
+A `.spitin` recipe describes how to find a dataset's inputs. Its first line names the pipeline it serves, relative to the recipe's folder, and its `root` line names the dataset folder. The smallest recipe is those two lines:
 
 ```text
 pipeline analysis.spit
+root data
 ```
 
-`spit inputs` then finds every source by its path rule: each file under the recipe's folder whose path matches a source's rule becomes one of that source's artifacts, with its dimensions read from the path. Nothing else is needed when the files say everything.
+`spit inputs` then finds every source by its path rule: each file under the root whose path matches a source's rule becomes one of that source's artifacts, with its dimensions read from the path. When that is all a dataset needs, the recipe can be left out: `spit inputs analysis.spit --root data` does the same.
 
 Add rules when they say more than the files do. For example, beside an `analysis.spit` that declares `source image: Image [sub, ses]`, `cohort.spitin` might read:
 
 ```text
 pipeline analysis.spit
+root .
 
 discover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}
 drop [sub] where sessions count<2

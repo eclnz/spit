@@ -25,13 +25,13 @@ Status is `open`, `claimed (<branch>)`, `decided`, or `done (<commit>)`. Numbers
 | 2 | Optional-file and output semantics, from one real workflow ([#35](https://github.com/eclnz/spit/issues/35)) | open |
 | 3 | Lower the cost of binding existing data: judge `inputs --suggest` on irregular datasets | claimed (`suggest-irregular`) |
 | 4a | `dag --counts` | done (`370a18f`) |
-| 4b | Diagnostic severity audit ([#45](https://github.com/eclnz/spit/issues/45)) | claimed (`severity-audit`) |
-| 5 | The two-file mental model | claimed (`two-files`) |
+| 4b | Diagnostic severity audit ([#45](https://github.com/eclnz/spit/issues/45)) | done (`b45f28e`) |
+| 5 | The two-file mental model | done (`b72f2e9`) |
 | S1 | Syntax: operations declared inside a stage | decided, claimed (`stage-scope`) |
-| S2 | Syntax: `@ min(n)` beside the `many` port | decided, claimed (`many-min`) |
-| S3 | Syntax: `require` and `drop` clause order ([#36](https://github.com/eclnz/spit/issues/36)) | decided, claimed (`require-drop-order`) |
+| S2 | Syntax: `@ min(n)` beside the `many` port | done (`5131495`) |
+| S3 | Syntax: `require` and `drop` clause order ([#36](https://github.com/eclnz/spit/issues/36)) | done (`3c6d843`) |
 | S4 | Syntax: shell metacharacters in commands | decided, claimed (`shell-meta`) |
-| S5 | Syntax: `path:` in both `.spit` and `.spitin` | claimed (`two-files`) |
+| S5 | Syntax: `path:` in both `.spit` and `.spitin` | done (`b72f2e9`) |
 | R1 | Composite operations: provenance and diagnostics design | open |
 | T1 | Sidecar `incomplete_groups` keyed by structured bindings ([#37](https://github.com/eclnz/spit/issues/37)) | done (`5ab3a16`) |
 | T2 | Incomplete-group warning for `InputSource::Inventory` | done (`8ef0e50`) |
@@ -124,6 +124,10 @@ A proposed `dag --counts` view would show total jobs and counts by operation. Th
 
 Keep the severity of compiler feedback consistent with whether it blocks a valid graph. [Issue 45](https://github.com/eclnz/spit/issues/45) asks whether errors that do not fail `check` should instead be warnings, especially in the VS Code extension. Audit those cases at the compiler's diagnostic level so CLI and editor users see the same distinction; the editor should render severity rather than decide it.
 
+*4b done in `b45f28e`.* The audit found no diagnostic that the editor marks as an error while `check` passes. Issue 45's example, the note about `--strict-paths`, went with that flag in `b1c5dbd`. Severity is set once, in `src/diagnostics`. `check` prints that list and fails exactly when it holds an error. `check --json` gives the editor the same list, and spit-vscode maps `warning` to a warning and anything else to an error, so it decides nothing. Each later command runs the diagnosis of the steps before it, so an error stops them all. The warnings are all right as warnings. They are unused or misnamed definitions, an empty stage, an unbound output type variable, a shell operator, a `#` joined to a word, and an operation with no command, which still makes a valid graph since `command` may be `null`. With inputs there are also empty steps, case collisions, dashed labels and near misses. One warning misstated what follows it. A recipe's missing `root` said `inputs` would "find no files", but `inputs` stops with an error. It stays a warning, since the folder may exist on the machine that runs the recipe, and the message now says that `inputs` and `dag` stop. `tests/severity.rs` holds `check` and `check --json` to the same diagnostics and severities, for each warning and for the examples. `docs/architecture.md` states the rule. spit-vscode needs no change.
+
+*Deferred, not a severity question.* `check` on a recipe that writes its records inline settles them, but it does not report what `dag` then reports for them: the incomplete `sidecars` group warning (T2), and a job input those records lack. `check` reads no data, and resolving jobs belongs to `dag`. Showing the group warning in the editor would need `incomplete_groups` to return structured groups that can be placed on a record line, not strings. It is worth an issue if inline records are used much.
+
 ### 5. Clarify the two-file mental model
 
 Explain `.spit` in one sentence as the reusable graph and `.spitin` as a dataset binding and exception layer. Review each shared directive for clear default and override semantics. Keep the no-recipe `--root` path for simple cases rather than requiring a nearly empty recipe. Use real first-pipeline attempts to find where users cannot tell which file owns a declaration.
@@ -134,8 +138,10 @@ Explain `.spit` in one sentence as the reusable graph and `.spitin` as a dataset
 - *The model in one sentence each.* A `.spit` pipeline is the reusable graph: what work to do and where its results go, for any dataset. A `.spitin` recipe binds that pipeline to one dataset: where its folder is, where its sources are when the pipeline does not say, and which of its data to leave out or require.
 - *Ownership.* Every directive belongs to one file, except `path`. Pipeline only: `source`, `sidecars`, `dimensions`, `operation`, `command`, `verify`, steps, `stage`, `use`, `ext:`, and an output's `path`. Recipe only: `pipeline`, `root`, `discover`, `exclude`, `drop`, `require`, records. A source's own `path name:` goes in either file, never both. A default `path:` goes in either, with different reach: the pipeline's covers outputs and any source no other rule covers, the recipe's covers sources only.
 - *Precedence, kept as it is.* A source takes its own rule (from whichever file has it), else the recipe's default, else the pipeline's default. The dataset's word on where its inputs are beats the pipeline's general default; a rule written for one source beats any default. Outputs never read the recipe. This is already implemented and documented; a test now pins all four levels.
-- *Diagnostics.* A declaration in the wrong file says which file owns it, at its line: a step in a recipe, `root` in a pipeline, an output's or unknown product's `path` in a recipe, and a source path written in both files, which now points at the recipe's line, names the pipeline's, and says how to choose. Message text and places only; the `check --json` shape is unchanged, so spit-vscode needs no change.
+- *Diagnostics.* A declaration in the wrong file says which file owns it, at its line: a step in a recipe, `root` in a pipeline, an output's or unknown product's `path` in a recipe, and a source path written in both files, which now points at the recipe's line and says how to choose. Message text and places only; the `check --json` shape is unchanged, so spit-vscode needs no change.
 - *Docs.* The README and the language reference open their recipe sections with the two sentences and the ownership table, and give the precedence as a list.
+
+*5 and S5 done in `b72f2e9`.* As designed, plus a new `InputError::OutputPath` for an output's `path` in a recipe, and the README's smallest recipe gaining the `root` line a recipe requires. `tests/two_files.rs` pins the precedence and each message at its line. Deferred: the both-files error does not give the pipeline's line, since the recipe's diagnosis holds only the compiled `Pipeline`, not its source map; the message names the file, and nobody in the rounds asked for more. If round 5 shows people still unsure which file owns a declaration, reopen this with that evidence rather than adding a directive.
 
 ## Language syntax audit
 
@@ -164,6 +170,8 @@ operation collect(items: many @ min(3)) -> Bundle
 - *Invariants and diagnostics.* A positive integer, once per port, only on a `many` port; each error points at the clause on its port. The hover shows the minimum beside its port.
 - *Beyond spit.* spit-vscode's grammar marks `@ min(n)` inside the parentheses, on a branch named `many-min`; the s6 harness scenario's pipeline is rewritten (its answer key's jobs do not change). The DAG format and spit-bash are untouched.
 
+*Done in `5131495`, with spit-vscode `a2be334`.* As designed. Also: `rebuild_keys.sh` stopped silently when a key failed to resolve, which hid the s6 break until its exit status was checked; it now prints `FAIL` with the error. Agents running it should still check its exit status.
+
 **S3 design (decided: keep both orders).** `require t1w count=1 per [sub, ses]` and `drop [sub, ses] where t1w count=0` keep their shapes. The grammar does not change; the only change is diagnostics: a rule written in the other rule's order is an error that gives the line in its own order.
 
 - *Evidence.* In `usability/rounds.zip`, every `drop` written in rounds 2-pilot to 4 (13 runs, all `drop [sub] where sessions count<2`) was written right first time, and reports singled out its note (`dropped [sub=03] by drop [sub] where sessions count<2`) as the most useful message. `require` was written once, in round 1 (s2-cohort-a), correctly and unprompted: `require t1w count=1 per [sub, ses]`. No run misread or miswrote it, so there is no confusion for alignment to fix. The removing-inputs design (`git show 1b30e26^:usability/design/removing-inputs.md`) left alignment open for the same reason: `require` "already reads correctly".
@@ -171,6 +179,8 @@ operation collect(items: many @ min(3)) -> Bundle
 - *Rejected.* `require [sub, ses] where …` (above); `drop t1w count=0 per [sub, ses]`, which undoes the B1 fix; accepting both orders, which is two ways to write one thing.
 - *What changes.* Writing `require [sub, ses] where t1w count=1` or `drop t1w count=0 per [sub, ses]` by analogy with the other rule gives an error naming the rule in its own order, as `skip` does now. `require … where … missing …` and a `drop` with values but no `has` or `missing` get the general shape, since their intent can't be read off.
 - *Phase and lowering.* The recipe parser only; `CoverageRule`, settling, the `.spitout`, the DAG and spit-bash are untouched. spit-vscode's grammar colours both keywords already and needs no change.
+
+*Done in `3c6d843`* (merged in `79f87fe`). The errors give the rule in its own order, and the language reference says why the two orders differ. Issue #36's bullet on one grammar for `require` and `drop` is answered by this decision; its other two ideas stay open there.
 
 **S4 design (decided, branch `shell-meta`).** A command stays a list of program arguments, which is how every backend runs it, and an unquoted shell operator becomes an error. A command that needs a pipe or a redirection names its shell, as any other program, and takes its paths as positional parameters:
 
