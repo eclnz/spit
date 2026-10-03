@@ -22,7 +22,7 @@ Status is `open`, `claimed (<branch>)`, `decided`, or `done (<commit>)`. Numbers
 | # | Item | Status |
 |---|------|--------|
 | 1 | Optional runtime checks in the job contract | done (`df6a61a`) |
-| 2 | Optional-file and output semantics, from one real workflow ([#35](https://github.com/eclnz/spit/issues/35)) | open |
+| 2 | Optional-file and output semantics, from one real workflow ([#35](https://github.com/eclnz/spit/issues/35)) | claimed (`optional-outputs`) |
 | 3 | Lower the cost of binding existing data: judge `inputs --suggest` on irregular datasets | done (`7f12083`) |
 | 4a | `dag --counts` | done (`370a18f`) |
 | 4b | Diagnostic severity audit ([#45](https://github.com/eclnz/spit/issues/45)) | done (`b45f28e`) |
