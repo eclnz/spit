@@ -1,6 +1,8 @@
 //! Resolve file imports and merge their selected definitions into a pipeline.
 
 use std::collections::{BTreeMap, BTreeSet};
+
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -25,6 +27,7 @@ pub(crate) fn apply_import(
         )
     })?;
     for ((kind, existing), (_, imported)) in defined(pipeline).into_iter().zip(defined(imported)) {
+        let existing: FxHashSet<_> = existing.into_iter().collect();
         if let Some(name) = imported.into_iter().find(|name| existing.contains(name)) {
             return Err(ParseError::new(
                 line,
@@ -112,13 +115,77 @@ fn defined(pipeline: &Pipeline) -> [(&'static str, Vec<&str>); 4] {
     ]
 }
 
+/// An imported file's operations, sources, checks and commands by name, found
+/// once, so that each name an import selects is looked up, not searched for.
+struct Module<'m> {
+    index: PipelineIndex<'m>,
+    /// Every operation of a name, to find a repeat.
+    operations: FxHashMap<&'m str, Vec<&'m OperationDef>>,
+    /// Every source of a name.
+    sources: FxHashMap<&'m str, Vec<&'m ProductDef>>,
+    /// The first check of a name.
+    checks: FxHashMap<&'m str, &'m CheckDef>,
+    /// Each operation's commands, in order.
+    commands: FxHashMap<&'m str, Vec<&'m CommandDef>>,
+}
+
+impl<'m> Module<'m> {
+    fn new(module: &'m Pipeline) -> Self {
+        let index = PipelineIndex::new(module);
+        let mut operations: FxHashMap<_, Vec<_>> = FxHashMap::default();
+        for operation in &module.operations {
+            operations
+                .entry(operation.name.as_str())
+                .or_default()
+                .push(operation);
+        }
+        let mut sources: FxHashMap<_, Vec<_>> = FxHashMap::default();
+        for product in &module.products {
+            if index.is_source(&product.name) {
+                sources
+                    .entry(product.name.as_str())
+                    .or_default()
+                    .push(product);
+            }
+        }
+        let mut checks = FxHashMap::default();
+        for check in &module.checks {
+            checks.entry(check.name.as_str()).or_insert(check);
+        }
+        let mut commands: FxHashMap<_, Vec<_>> = FxHashMap::default();
+        for command in &module.commands {
+            commands
+                .entry(command.operation.as_str())
+                .or_default()
+                .push(command);
+        }
+        Self {
+            index,
+            operations,
+            sources,
+            checks,
+            commands,
+        }
+    }
+}
+
+/// What an import has selected so far, with the names it holds, so that a
+/// repeat is found by lookup.
+#[derive(Default)]
+struct Selection {
+    pipeline: Pipeline,
+    operations: FxHashSet<String>,
+    products: FxHashSet<String>,
+    checks: FxHashSet<String>,
+}
+
 fn select_import(module: &Pipeline, spec: &UseSpec, line: usize) -> Result<Pipeline, ParseError> {
-    let index = PipelineIndex::new(module);
-    let mut selected = Pipeline::default();
+    let module = Module::new(module);
+    let mut selected = Selection::default();
     let import_all = spec.names.is_none();
     let names: Vec<&str> = match &spec.names {
         Some(names) => names.iter().map(String::as_str).collect(),
-        None => reusable_names(&index),
+        None => reusable_names(&module.index),
     };
     if names.is_empty() {
         return Err(ParseError::new(
@@ -127,23 +194,16 @@ fn select_import(module: &Pipeline, spec: &UseSpec, line: usize) -> Result<Pipel
         ));
     }
     for name in names {
-        let mut operations = module
-            .operations
-            .iter()
-            .filter(|operation| operation.name == name);
-        let operation = operations.next();
-        let mut sources = module
-            .products
-            .iter()
-            .filter(|product| product.name == name && index.is_source(&product.name));
-        let source = sources.next();
-        if operations.next().is_some() || sources.next().is_some() {
+        let operations = module.operations.get(name).map_or(&[][..], Vec::as_slice);
+        let sources = module.sources.get(name).map_or(&[][..], Vec::as_slice);
+        if operations.len() > 1 || sources.len() > 1 {
             return Err(ParseError::new(
                 line,
                 format!("imported file has duplicate definition `{name}`"),
             ));
         }
-        let check = module.checks.iter().find(|check| check.name == name);
+        let (operation, source) = (operations.first().copied(), sources.first().copied());
+        let check = module.checks.get(name).copied();
         if operation.is_none() && source.is_none() && check.is_none() {
             return Err(ParseError::new(
                 line,
@@ -165,37 +225,38 @@ fn select_import(module: &Pipeline, spec: &UseSpec, line: usize) -> Result<Pipel
             .map_or_else(|| name.to_owned(), |alias| format!("{alias}::{name}"));
         let alias = spec.alias.as_deref();
         if let Some(operation) = operation {
-            import_operation(&mut selected, module, operation, &qualified, line)?;
+            import_operation(&mut selected, &module, operation, &qualified, line)?;
             let checks = operation.inputs.iter().map(|port| &port.checks);
             let checks = checks.chain(operation.outputs.iter().map(|port| &port.checks));
             for used in checks.flatten() {
-                import_check(&mut selected, module, &used.check, alias);
+                import_check(&mut selected, &module, &used.check, alias);
             }
         }
         if let Some(source) = source {
-            import_source(&mut selected, module, source, &qualified, line)?;
+            import_source(&mut selected, &module, source, &qualified, line)?;
             for used in &source.checks {
-                import_check(&mut selected, module, &used.check, alias);
+                import_check(&mut selected, &module, &used.check, alias);
             }
         }
         if check.is_some() {
-            import_check(&mut selected, module, name, alias);
+            import_check(&mut selected, &module, name, alias);
         }
     }
-    qualify_checks(&mut selected, spec.alias.as_deref());
-    Ok(selected)
+    qualify_checks(&mut selected.pipeline, spec.alias.as_deref());
+    Ok(selected.pipeline)
 }
 
 /// Bring in `module`'s check `name`, once however many imports use it.
-fn import_check(selected: &mut Pipeline, module: &Pipeline, name: &str, alias: Option<&str>) {
+fn import_check(selected: &mut Selection, module: &Module<'_>, name: &str, alias: Option<&str>) {
     let qualified = qualified_check(name, alias);
-    if selected.checks.iter().any(|check| check.name == qualified) {
+    if selected.checks.contains(&qualified) {
         return;
     }
-    if let Some(check) = module.checks.iter().find(|check| check.name == name) {
-        selected.checks.push(CheckDef {
+    if let Some(check) = module.checks.get(name) {
+        selected.checks.insert(qualified.clone());
+        selected.pipeline.checks.push(CheckDef {
             name: qualified,
-            ..check.clone()
+            ..(*check).clone()
         });
     }
 }
@@ -253,18 +314,17 @@ fn reusable_names<'m>(index: &PipelineIndex<'m>) -> Vec<&'m str> {
 
 /// Import an operation as `qualified`, with its commands.
 fn import_operation(
-    selected: &mut Pipeline,
-    module: &Pipeline,
+    selected: &mut Selection,
+    module: &Module<'_>,
     operation: &OperationDef,
     qualified: &str,
     line: usize,
 ) -> Result<(), ParseError> {
     let name = &operation.name;
-    let commands: Vec<_> = module
+    let commands = module
         .commands
-        .iter()
-        .filter(|command| &command.operation == name)
-        .collect();
+        .get(name.as_str())
+        .map_or(&[][..], Vec::as_slice);
     if commands
         .iter()
         .filter(|command| command.role == CommandRole::Run)
@@ -276,49 +336,43 @@ fn import_operation(
             format!("imported file has duplicate command for `{name}`"),
         ));
     }
-    if selected
-        .operations
-        .iter()
-        .any(|existing| existing.name == qualified)
-    {
+    if !selected.operations.insert(qualified.to_owned()) {
         return Err(ParseError::new(line, format!("duplicate import `{name}`")));
     }
-    selected.operations.push(OperationDef {
+    selected.pipeline.operations.push(OperationDef {
         name: qualified.to_owned(),
         ..operation.clone()
     });
     selected
+        .pipeline
         .commands
-        .extend(commands.into_iter().map(|command| CommandDef {
+        .extend(commands.iter().map(|command| CommandDef {
             operation: qualified.to_owned(),
-            ..command.clone()
+            ..(*command).clone()
         }));
     Ok(())
 }
 
 /// Import a source as `qualified`, with its path rule.
 fn import_source(
-    selected: &mut Pipeline,
-    module: &Pipeline,
+    selected: &mut Selection,
+    module: &Module<'_>,
     source: &ProductDef,
     qualified: &str,
     line: usize,
 ) -> Result<(), ParseError> {
     let name = &source.name;
-    if selected
-        .products
-        .iter()
-        .any(|existing| existing.name == qualified)
-    {
+    if !selected.products.insert(qualified.to_owned()) {
         return Err(ParseError::new(line, format!("duplicate import `{name}`")));
     }
-    selected.products.push(ProductDef {
+    selected.pipeline.products.push(ProductDef {
         name: qualified.to_owned(),
         ..source.clone()
     });
     // With the extension its own file's `ext:` gives it, if any.
-    if let Some(path) = module.path_template_for(name) {
+    if let Some(path) = module.index.path_template_for(name) {
         selected
+            .pipeline
             .product_paths
             .insert(qualified.to_owned(), path.with_product(name));
     }

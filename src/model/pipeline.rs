@@ -10,8 +10,8 @@ use crate::paths::{Holder, PathTemplate};
 
 use super::{
     stage_and_parents, ArtifactInstance, CheckDef, CommandDef, EntityBinding, ExtensionSource,
-    Invocation, OperationDef, OutputPort, ProductDef, SidecarGroup, SourceInventory, SourceRecord,
-    StageDef,
+    Invocation, OperationDef, OutputPort, ProductDef, Removal, SidecarGroup, SourceInventory,
+    SourceRecord, StageDef,
 };
 
 /// The logical pipeline: what to make from which sources. It says nothing
@@ -37,6 +37,19 @@ pub struct Pipeline {
 }
 
 impl Pipeline {
+    /// The pipeline's dimensions, each once, in the order its products
+    /// declare them: how the `.spitout` and a note about what was removed
+    /// write a group.
+    pub fn dimension_order(&self) -> Vec<String> {
+        let mut seen = FxHashSet::default();
+        self.products
+            .iter()
+            .flat_map(|product| &product.dimensions)
+            .filter(|dimension| seen.insert(dimension.as_str()))
+            .cloned()
+            .collect()
+    }
+
     /// The stage of the step that produces `product`; `None` for a source or
     /// a step outside every stage.
     pub fn stage_of(&self, product: &str) -> Option<&str> {
@@ -243,6 +256,40 @@ impl Pipeline {
 pub(crate) struct PipelineIndex<'p> {
     pub(crate) pipeline: &'p Pipeline,
     found: Option<Found<'p>>,
+}
+
+/// The order a pipeline's dimensions are written in, to write what an input
+/// rule removed: an artifact's in its product's order, and a group's in the
+/// order the pipeline first declares them, as the `.spitout` writes it. Found
+/// once, so that writing every removal takes time in step with their number.
+pub struct DimensionOrders<'p> {
+    products: FxHashMap<&'p str, &'p [String]>,
+    pipeline: Vec<String>,
+}
+
+impl<'p> DimensionOrders<'p> {
+    pub fn new(pipeline: &'p Pipeline) -> Self {
+        let mut products = FxHashMap::default();
+        for product in &pipeline.products {
+            // The first of a repeated name wins, as a search finds it.
+            products
+                .entry(product.name.as_str())
+                .or_insert(product.dimensions.as_slice());
+        }
+        Self {
+            products,
+            pipeline: pipeline.dimension_order(),
+        }
+    }
+
+    /// The dimensions `removal` is written in.
+    pub fn of(&self, removal: &Removal) -> &[String] {
+        removal
+            .product
+            .as_deref()
+            .and_then(|name| self.products.get(name).copied())
+            .unwrap_or(&self.pipeline)
+    }
 }
 
 /// Where the path rule of a product comes from, in the order a product looks
