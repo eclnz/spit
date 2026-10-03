@@ -421,6 +421,9 @@ pub(crate) fn prepare(args: &CliArgs) -> Result<Prepared, Box<dyn Error>> {
     });
     let settled = InputSpec::default()
         .resolve(&checked.pipeline, InputSource::Inventory(records.inventory))?;
+    for incomplete in &settled.incomplete_groups {
+        eprintln!("warning: {incomplete}");
+    }
     Ok(prepared(checked.pipeline, settled, records.report, root))
 }
 
