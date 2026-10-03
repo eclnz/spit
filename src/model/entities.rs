@@ -317,6 +317,15 @@ impl EntityBinding {
             .map(GroupKey)
     }
 
+    /// Whether each value this binds is among `dimensions` and bound alike
+    /// in `other`, compared by symbol.
+    pub(crate) fn within(&self, other: &Self, dimensions: &[String]) -> bool {
+        self.pairs().iter().all(|&(dimension, value)| {
+            dimensions.iter().any(|name| name == dimension.text)
+                && other.pair(dimension.text) == Some(value)
+        })
+    }
+
     /// Compare values dimension by dimension in `dimensions` order, reading
     /// runs of digits as numbers, so `run=2` sorts before `run=10`.
     pub fn cmp_in(&self, other: &Self, dimensions: &[String]) -> Ordering {
