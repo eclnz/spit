@@ -139,7 +139,7 @@ fn a_complete_dataset_prints_as_before() {
     let tree = dataset(false);
     let runs: [&[&str]; 5] = [
         &["inputs", "strict.spitin", "-o", "complete.spitout"],
-        &["dag", "strict.spitin"],
+        &["dag", "strict.spitin", "--jobs"],
         &["dag", "strict.spitin", "--json"],
         &["dag", "strict.spitin", "--paths"],
         &["artifacts", "strict.spitin"],
@@ -148,7 +148,7 @@ fn a_complete_dataset_prints_as_before() {
     text.push_str(&std::fs::read_to_string(tree.path().join("complete.spitout")).unwrap());
     check("complete", &text);
     let spitout: [&[&str]; 2] = [
-        &["dag", "pipeline.spit", "complete.spitout"],
+        &["dag", "pipeline.spit", "complete.spitout", "--jobs"],
         &["artifacts", "pipeline.spit", "complete.spitout"],
     ];
     let text: String = spitout.iter().map(|args| run(&tree, args)).collect();
@@ -158,9 +158,11 @@ fn a_complete_dataset_prints_as_before() {
 #[test]
 fn command_lines_print_as_before() {
     let tree = dataset(false);
-    let runs: [&[&str]; 2] = [
+    let runs: [&[&str]; 3] = [
         &["dag", "strict.spitin", "--commands"],
         &["dag", "strict.spitin", "--commands", "--paths"],
+        // Plain `dag` prints the commands, as `--commands` does.
+        &["dag", "strict.spitin"],
     ];
     let text: String = runs.iter().map(|args| run(&tree, args)).collect();
     check("commands", &text);
@@ -173,7 +175,7 @@ fn a_dataset_with_gaps_prints_as_before() {
         &["dag", "strict.spitin"],
         &["artifacts", "strict.spitin"],
         &["inputs", "drop.spitin", "-o", "drop.spitout"],
-        &["dag", "drop.spitin"],
+        &["dag", "drop.spitin", "--jobs"],
         &["artifacts", "drop.spitin"],
     ];
     let mut text = String::new();
