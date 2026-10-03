@@ -11,9 +11,10 @@ mod draft;
 mod naming;
 mod shape;
 
-use self::draft::Draft;
+use self::draft::{escape, pieces, Draft};
 use self::naming::name_sources;
 use self::shape::Shape;
+use super::pattern::{reach, NearestFile, Piece};
 use crate::model::ProductDef;
 
 /// A source for each group of files that share a shape, and the files that
@@ -21,6 +22,9 @@ use crate::model::ProductDef;
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Suggestions {
     pub sources: Vec<SuggestedSource>,
+    /// Files no suggested rule matches, but one matches the start of, as a
+    /// `.bak` copy or a file with one more entity than its neighbours.
+    pub near: Vec<NearlyMatched>,
     /// Files no other file shares a shape with, each of which could be a
     /// source with no dimensions, and files no rule can be written for,
     /// such as one with a space in its path.
@@ -28,6 +32,16 @@ pub struct Suggestions {
     /// Sources the pipeline declares without a path rule that no group of
     /// files fits on its own.
     pub unfitted: Vec<String>,
+}
+
+/// A file a suggested rule nearly matches, and where the two part.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NearlyMatched {
+    /// The source, or the `sidecars` member, whose rule it is.
+    pub source: String,
+    /// The rule, with its extension.
+    pub rule: String,
+    pub file: NearestFile,
 }
 
 /// One suggested source and its path rule.
@@ -52,6 +66,9 @@ pub struct SuggestedSource {
     /// its JSON, the `sidecars` members: each one's name and extension.
     /// `rule` is then the stem, and `name` the group's. Empty for a source.
     pub members: Vec<(String, String)>,
+    /// The values each dimension holds in the files, in the order of
+    /// `dimensions`.
+    pub values: Vec<Vec<String>>,
 }
 
 /// Suggest a source for each group of `files` that share a shape. A group
@@ -79,28 +96,135 @@ pub(super) fn suggest(
         // A group whose rule SPIT would not read as written is split by the
         // words of its folders and names, so a stray folder loses only its
         // own files.
-        let mut finer: BTreeMap<_, Vec<&Shape<'_>>> = BTreeMap::new();
-        match Draft::of(&shapes.iter().collect::<Vec<_>>()) {
-            Some(draft) if shapes.len() > 1 => drafts.push(draft),
-            _ => {
+        let shapes: Vec<_> = shapes.iter().collect();
+        match Draft::of(&shapes).filter(|_| shapes.len() > 1) {
+            Some(draft) => without_strays(&shapes, draft, &mut drafts, &mut alone),
+            None => {
+                let mut finer: BTreeMap<_, Vec<&Shape<'_>>> = BTreeMap::new();
                 for shape in &shapes {
                     finer.entry(shape.separators()).or_default().push(shape);
                 }
-            }
-        }
-        for shapes in finer.into_values() {
-            match Draft::of(&shapes).filter(|_| shapes.len() > 1) {
-                Some(draft) => drafts.push(draft),
-                None => alone.extend(shapes.iter().map(|shape| shape.file.to_owned())),
+                for shapes in finer.into_values() {
+                    match Draft::of(&shapes).filter(|_| shapes.len() > 1) {
+                        Some(draft) => without_strays(&shapes, draft, &mut drafts, &mut alone),
+                        None => alone.extend(shapes.iter().map(|shape| shape.file.to_owned())),
+                    }
+                }
             }
         }
     }
     drafts.sort_by(|a, b| b.files.len().cmp(&a.files.len()).then(a.rule.cmp(&b.rule)));
     let (sources, unfitted) = name_sources(drafts, declared, taken, files);
     alone.sort();
+    let (near, alone) = near_misses(alone, &sources);
     Suggestions {
         sources,
+        near,
         alone,
         unfitted,
     }
+}
+
+/// Push `draft`, the rule for `shapes`, unless a few of them are strays:
+/// when at least three in four share a skeleton, and their own rule names
+/// more of its dimensions, as `Subject{subject}/Visit{visit}` does beside
+/// one `subject04/visit1`, each skeleton's files get their own rule, and a
+/// skeleton of one file is left alone.
+fn without_strays<'a>(
+    shapes: &[&Shape<'a>],
+    draft: Draft,
+    drafts: &mut Vec<Draft>,
+    alone: &mut Vec<String>,
+) {
+    let mut skeletons: BTreeMap<_, Vec<&Shape<'a>>> = BTreeMap::new();
+    for &shape in shapes {
+        skeletons.entry(shape.skeleton()).or_default().push(shape);
+    }
+    let most = skeletons.values().max_by_key(|shapes| shapes.len());
+    let better = skeletons.len() > 1
+        && most.is_some_and(|most| {
+            most.len() * 4 >= shapes.len() * 3
+                && Draft::of(most).is_some_and(|own| own.unnamed() < draft.unnamed())
+        });
+    if !better {
+        drafts.push(draft);
+        return;
+    }
+    for shapes in skeletons.into_values() {
+        match Draft::of(&shapes).filter(|_| shapes.len() > 1) {
+            Some(draft) => drafts.push(draft),
+            None => alone.extend(shapes.iter().map(|shape| shape.file.to_owned())),
+        }
+    }
+}
+
+/// The files of `alone` a suggested rule nearly matches, each with the rule
+/// that matches most of its start, then shares most of its ending, as
+/// `_T1w.json`, and the files left.
+fn near_misses(
+    alone: Vec<String>,
+    sources: &[SuggestedSource],
+) -> (Vec<NearlyMatched>, Vec<String>) {
+    let rules: Vec<(&str, String, Vec<Piece>)> = sources
+        .iter()
+        .flat_map(|source| {
+            let rules: Vec<(&str, String)> = if source.members.is_empty() {
+                vec![(source.name.as_str(), source.rule.clone())]
+            } else {
+                source
+                    .members
+                    .iter()
+                    .map(|(name, extension)| {
+                        (
+                            name.as_str(),
+                            format!("{}{}", source.rule, escape(extension)),
+                        )
+                    })
+                    .collect()
+            };
+            rules.into_iter().filter_map(|(name, rule)| {
+                let pieces = pieces(&rule)?;
+                Some((name, rule, pieces))
+            })
+        })
+        .collect();
+    let mut near = Vec::new();
+    let mut left = Vec::new();
+    for file in alone {
+        let mut best: Option<((usize, usize), &str, &str, String)> = None;
+        for (name, rule, pieces) in &rules {
+            let (matched, expected) = reach(pieces, &file);
+            let ending = match pieces.last() {
+                Some(Piece::Literal(last)) => shared_ending(last, &file),
+                _ => 0,
+            };
+            let score = (matched, ending);
+            if matched > 0 && best.as_ref().is_none_or(|(most, ..)| score > *most) {
+                best = Some((score, name, rule, expected));
+            }
+        }
+        match best {
+            Some(((matched, _), source, rule, expected)) => near.push(NearlyMatched {
+                source: source.to_owned(),
+                rule: rule.to_owned(),
+                file: NearestFile {
+                    file,
+                    matched,
+                    expected,
+                },
+            }),
+            None => left.push(file),
+        }
+    }
+    (near, left)
+}
+
+/// How many bytes `literal` and `file` share at their ends.
+fn shared_ending(literal: &str, file: &str) -> usize {
+    literal
+        .bytes()
+        .rev()
+        .zip(file.bytes().rev())
+        .take_while(|(a, b)| a == b)
+        .count()
 }
