@@ -61,7 +61,7 @@ A later step may also take an earlier step's input and run that step in memory: 
 
 A recipe is for when a dataset needs more than its folder: rules to find, check or leave out its inputs, or source paths of its own. When the pipeline's path rules already find every source, skip it and name the folder: `spit dag analysis.spit --root data`. That runs `spit inputs` in memory on the pipeline alone, so it takes no `discover`, `exclude`, `drop` or `require` rules. `--root` is taken only this way: a recipe and a `.spitout` each say where their data is with a `root` line.
 
-SPIT has no backend yet: nothing in this repository runs a `.spitdag`.
+SPIT itself runs nothing. A backend runs the `.spitdag`: [spit-bash](https://github.com/eclnz/spit-bash) runs its jobs on one machine, as in `spit-bash run dataset.spitin -j 4`, and takes the same files as `spit dag`.
 
 ## CLI commands and options
 
@@ -352,7 +352,7 @@ Run `cargo test --test source_files` to see the field survey example checked aga
                         3. dag ──► .spitdag
 ```
 
-The pipeline supplies operations and rules; the `.spitout` supplies artifact identities and their files. Resolution checks dimensions, matching, cardinality, and any known types, then binds each artifact to its file and expands each command into its arguments. Step 2 and step 3 each build on step 1 and never on each other, and a backend would read only the `.spitdag`. SPIT does not inspect file contents or command-specific metadata itself; `verify` commands and `check`s run those checks with your own tools.
+The pipeline supplies operations and rules; the `.spitout` supplies artifact identities and their files. Resolution checks dimensions, matching, cardinality, and any known types, then binds each artifact to its file and expands each command into its arguments. Step 2 and step 3 each build on step 1 and never on each other, and a backend reads only the `.spitdag`. SPIT does not inspect file contents or command-specific metadata itself; `verify` commands and `check`s run those checks with your own tools.
 
 ## Documentation
 
