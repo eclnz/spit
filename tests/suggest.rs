@@ -346,3 +346,27 @@ fn pasted_suggestions_for_an_irregular_dataset_read_their_files() {
         "{stderr}"
     );
 }
+
+#[test]
+fn files_at_the_pipelines_output_paths_are_not_suggested_as_sources() {
+    let tree = Tree::new(
+        "suggest-outputs",
+        &[
+            "data/sub-01/ses-1/func/sub-01_ses-1_task-rest_run-1_bold.nii.gz",
+            "data/sub-02/ses-1/func/sub-02_ses-1_task-rest_run-1_bold.nii.gz",
+            "data/out/moco/sub=01__ses=1__run=1.nii.gz",
+            "data/out/moco/sub=02__ses=1__run=1.nii.gz",
+        ],
+    );
+    tree.write("a.spit", &format!("source bold [sub, ses, run]\n{STEPS}"));
+    let expected = "\
+# 2 files, such as sub-01/ses-1/func/sub-01_ses-1_task-rest_run-1_bold.nii.gz
+# sub: 01, 02; ses: 1; run: 1
+# for `bold`, which the pipeline declares
+path bold: sub-{sub}/ses-{ses}/func/sub-{sub}_ses-{ses}_task-rest_run-{run}_bold.nii.gz
+";
+    assert_eq!(
+        suggested(&tree, &["inputs", "a.spit", "--root", "data", "--suggest"]),
+        expected
+    );
+}
