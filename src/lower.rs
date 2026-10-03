@@ -5,6 +5,8 @@
 
 use std::collections::BTreeMap;
 
+use rustc_hash::FxHashMap;
+
 use crate::imports::apply_import;
 use crate::model::{
     Cardinality, CheckDef, CommandDef, CoverageRule, Exclusion, InputBinding, InputRules,
@@ -32,11 +34,20 @@ pub(crate) struct PipelineBuilder {
     outputs: BTreeMap<String, Output>,
     /// Where each `sidecars` header is.
     sidecar_places: BTreeMap<String, Place>,
+    /// The position in the pipeline of each product and operation by name,
+    /// the first of a repeated name, so a step finds what it calls without
+    /// searching every declaration. Keep in step with `add_product` and
+    /// `add_operation`, the only places that add either.
+    product_at: FxHashMap<String, usize>,
+    operation_at: FxHashMap<String, usize>,
 }
 
 impl PipelineBuilder {
     pub(crate) fn add_product(&mut self, product: ProductDef, place: Place) {
         self.lines.products.insert(product.name.clone(), place);
+        self.product_at
+            .entry(product.name.clone())
+            .or_insert(self.pipeline.products.len());
         self.pipeline.products.push(product);
     }
 
@@ -69,6 +80,8 @@ impl PipelineBuilder {
                 .insert(operation.name.clone(), stage.to_owned());
         }
         self.lines.operations.insert(operation.name.clone(), place);
+        self.operation_at
+            .insert(operation.name.clone(), self.pipeline.operations.len());
         self.pipeline.operations.push(operation);
         Ok(())
     }
@@ -185,10 +198,9 @@ impl PipelineBuilder {
         } = flow;
         let name = &invocation.operation;
         let operation = self
-            .pipeline
-            .operations
-            .iter()
-            .find(|operation| &operation.name == name)
+            .operation_at
+            .get(name)
+            .map(|&index| &self.pipeline.operations[index])
             .ok_or_else(|| {
                 let place = step.operation();
                 ParseError::new(
@@ -199,7 +211,10 @@ impl PipelineBuilder {
                 .with_kind(ParseErrorKind::UndeclaredOperation { name: name.clone() })
             })?;
         let invocation = invocation.clone();
-        let dimensions = inferred_dimensions(&invocation, operation, &self.pipeline);
+        let (at, products) = (&self.product_at, &self.pipeline.products);
+        let dimensions = inferred_dimensions(&invocation, operation, |name| {
+            at.get(name).map(|&index| &products[index])
+        });
         for (index, output) in outputs.iter().enumerate() {
             let declared = if output.dimensions.is_some() {
                 Output::Annotated
@@ -390,17 +405,13 @@ fn lower_statement(
 
 /// The dimensions a flow step's undeclared outputs take: those of the input
 /// that drives it, less a varied or pinned dimension.
-fn inferred_dimensions(
+fn inferred_dimensions<'a>(
     invocation: &Invocation,
     operation: &OperationDef,
-    pipeline: &Pipeline,
+    product: impl Fn(&str) -> Option<&'a ProductDef>,
 ) -> Vec<String> {
     let dimensions = |binding: &InputBinding| {
-        pipeline
-            .products
-            .iter()
-            .find(|product| product.name == binding.product)
-            .map(|product| binding.free_dimensions(&product.dimensions))
+        product(&binding.product).map(|product| binding.free_dimensions(&product.dimensions))
     };
     let inputs: Option<Vec<_>> = invocation
         .inputs
