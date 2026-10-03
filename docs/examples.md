@@ -172,7 +172,7 @@ low_band, high_band = split_bands(anomaly)
 
 # A many input can sit beside single inputs, each matched once per group.
 # The days arrive in natural order, and fewer than two is an error.
-operation summarise(days: many Series, policy: Policy) -> Summary @ min(2)
+operation summarise(days: many Series @ min(2), policy: Policy) -> Summary
 command summarise: summarise --policy {policy} {days} --out {@output}
 path summary: derived/summary/{station}.json
 summary = summarise(low_band @ vary(day), policy)
@@ -282,7 +282,7 @@ The ACT example starts from BIDS NIfTI DWI runs with their gradient and JSON sid
 
 Outputs land in a folder per stage through one `{@stage}` path default. `ext: .mif` gives every image its extension, the parcellation stage sets `.nii.gz` for its own, and `estimate_responses` names `.txt` for each of its three outputs. A `sidecars` group declares each DWI run's `.nii.gz`, `.bvec`, `.bval` and `.json` once. The pipeline gives no source a path: each recipe holds the BIDS layout, with one stem for each group, so the same pipeline runs on a dataset laid out another way by changing the recipe.
 
-Image products share one type, `MRI<Kind,Space>`, and product names carry the processing state, so `raw_dwi` and `denoised_dwi` are both `MRI<DWI,Acquired>`. Type variables let one operation serve several products: `extract_b0` and `mean_b0` run on both acquired and corrected DWI, and `mrtransform` moves both T1w and tissue images. Label images use their own operation for nearest-neighbor resampling.
+Image products share one type, `MRI<Kind,Space>`, and product names carry the processing state, so `raw_dwi` and `denoised_dwi` are both `MRI<DWI,Acquired>`. Type variables let one operation serve several products: `extract_b0` and `mean_b0` run on both acquired and corrected DWI, and `mrtransform` moves both T1w and tissue images. So each of them is declared in the outer stage that holds all its calls, `preprocess` or `anatomy`, while every other operation sits beside its one step. Label images use their own operation for nearest-neighbor resampling.
 
 SPIT emits these command lines; it does not read acquisition metadata, check transforms, or judge image quality.
 

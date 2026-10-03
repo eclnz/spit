@@ -121,7 +121,7 @@ fn the_line_names_every_dimension_once_and_no_other() {
 
     let recipe = spit::parse_input_spec("dimensions [sub]\n").unwrap_err();
     assert!(
-        recipe.to_string().contains("belong in the .spit pipeline"),
+        recipe.to_string().contains("belongs in the .spit pipeline"),
         "{recipe}"
     );
 }

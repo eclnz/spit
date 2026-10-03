@@ -59,11 +59,11 @@ command mean: mean_tool {images} --out {@output}
 Declare an operation before its first use. Inputs in a call follow the port order in the declaration, and SPIT checks each product's type against that port. For example, with `operation compare(series: Series, policy: Policy)`, `compare(reading, policy)` uses `reading` as `series`; reversing the arguments is a type error when their types are known. A `one` input must resolve to exactly one artifact for each job, so every other input may only use dimensions the driving input has, unless it broadcasts them with `@ each(...)`; SPIT rejects a pipeline that breaks this before reading any inputs, and reports a missing match for a job. Every `many` input names the dimensions it collects at the call, with `@ vary(dimension, ...)`; the operation only says `many`, so one operation can collect runs in one step and sessions in another. Its command placeholder expands to one separately quoted argument per artifact, in natural order. Artifacts are compared dimension by dimension in the pipeline's [dimension order](#dimension-order). Within a value, runs of digits compare as numbers and other characters compare one by one, so `run=2` comes before `run=10`, ISO dates such as `2026-09-01` sort by date, and names sort by character (`lr-high`, `lr-low`, `warmup`). Values equal as numbers but written differently, such as `1` and `01`, are then ordered by their text. A many placeholder must occupy a whole argument. An operation takes at most one `many` input, which may sit beside `one` inputs; each of those is matched once per group:
 
 ```text
-operation summarise(days: many Series, policy: Policy) -> Summary @ min(2)
+operation summarise(days: many Series @ min(2), policy: Policy) -> Summary
 summary = summarise(reading @ vary(day), policy)
 ```
 
-`@ min(2)` rejects a group with fewer than two artifacts. The [sensors walkthrough](examples.md#sensors-selectors-verification-and-two-outputs) combines a `many` input, two outputs, and `verify` in a complete plan.
+`@ min(2)` on the `many` input rejects a group with fewer than two artifacts; untyped, it is `days: many @ min(2)`. It goes beside the input it counts, not after the outputs: `-> Summary @ min(2)` is an error that gives the line rewritten. The [sensors walkthrough](examples.md#sensors-selectors-verification-and-two-outputs) combines a `many` input, two outputs, and `verify` in a complete plan.
 
 One aggregate can remove several dimensions at once. List them in one `@ vary(...)`; their order within the clause does not change the collection order. With `summary [model, config]`, this makes one leaderboard over all model and config combinations, ordered first by model and then by config:
 
@@ -165,7 +165,7 @@ stage analysis:
     tally = tally_lines(merged)
 ```
 
-A stage owns the products its steps assign. Operations and commands stay global, so one declared in a stage can be used anywhere, and product names are not prefixed: `analysis` reads `merged` by name. Sources and `use` lines belong at the top level. A `path:` line inside a stage is the default for that stage's products only; a `path product:` rule still takes precedence. `{@stage}` in a path template is the name of the product's stage. A product made outside every stage, such as a step at the top level, has none, so a default that covers it writes the stage as an [optional group](#paths), `[{@stage}/]`; SPIT's error says so.
+A stage owns the products its steps assign. Operations and commands stay global, so one declared in a stage can be used anywhere, and product names are not prefixed: `analysis` reads `merged` by name. Declare an operation in the stage that holds its calls, or at the top level: SPIT warns about one called outside the stage it is declared in, and names the innermost stage that holds every call, else the top level. Two operations may not share a name, even in different stages. Sources and `use` lines belong at the top level. A `path:` line inside a stage is the default for that stage's products only; a `path product:` rule still takes precedence. `{@stage}` in a path template is the name of the product's stage. A product made outside every stage, such as a step at the top level, has none, so a default that covers it writes the stage as an [optional group](#paths), `[{@stage}/]`; SPIT's error says so.
 
 Stages nest. A `stage` header inside a stage opens a stage within it, named by its path, such as `preprocess/combine`; a line back at the outer stage's indentation closes it. From the [nested example](../examples/stages/nested.spit):
 
@@ -246,7 +246,7 @@ A tool decides the format of the file it writes, so an operation can say which e
 
 ```text
 operation align(moving: Image, reference: Image) -> Transform .mat
-operation fit(runs: many Data) -> (weights: Weights .npz, quality: Metrics .json) @ min(2)
+operation fit(runs: many Data @ min(2)) -> (weights: Weights .npz, quality: Metrics .json)
 ```
 
 An extension is a `.` and letters, digits, `-` or `_`, and may have several parts, as `.nii.gz` does. An untyped output may have one too: `-> .txt`. A source declares the extension of the files it reads in the same place, after its type: `source events : Events .tsv [sub]`.
@@ -360,10 +360,11 @@ When `spit inputs` scans a dataset, or a command reads records from a recipe or 
 
 ## Recipes
 
-A `.spitin` recipe says how to find one dataset's inputs, keeping everything about the data out of the pipeline. A dataset that needs nothing but its folder needs no recipe: `spit dag analysis.spit --root data` scans the folder with the pipeline's own path rules. Its first line names the pipeline it serves, relative to the recipe's folder:
+A `.spitin` recipe says how to find one dataset's inputs, keeping everything about the data out of the pipeline. A dataset that needs nothing but its folder needs no recipe: `spit dag analysis.spit --root data` scans the folder with the pipeline's own path rules. Its first line names the pipeline it serves, relative to the recipe's folder, and its `root` line the dataset folder:
 
 ```text
 pipeline analysis.spit
+root .
 
 discover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}
 exclude image[sub=04,ses=2]    # scanner fault
@@ -372,7 +373,7 @@ require image count=1 per [sub, ses]
 path image: data/sub-{sub}/ses-{ses}/image.nii.gz
 ```
 
-A recipe may contain `discover`, `exclude`, `drop` and `require` rules, `path product:` rules for source products and for [`sidecars` groups](#sidecar-files) whose block gives no stem, a default `path:` rule for its sources, and `sources:`/`contexts:` records. It cannot declare sources, `sidecars` groups, operations, steps, commands, stages, imports, or `ext:`; the pipeline still declares each logical `source` with its dimensions and optional type. Rules in a pipeline are an error, and so are records. A source's path rule is written in the pipeline or in the recipe, not both: put it in the pipeline when every dataset for that pipeline shares the layout, and in the recipe when the layout belongs to one dataset.
+A recipe may contain `discover`, `exclude`, `drop` and `require` rules, `path product:` rules for source products and for [`sidecars` groups](#sidecar-files) whose block gives no stem, a default `path:` rule for its sources, and `sources:`/`contexts:` records. It cannot declare sources, `sidecars` groups, operations, steps, commands, stages, imports, or `ext:`; the pipeline still declares each logical `source` with its dimensions and optional type. Rules in a pipeline are an error, and so are records.
 
 A recipe's `path:` line is the default for every source with no rule of its own, in the pipeline or the recipe. Where a dataset keeps its inputs is the dataset's to say, so the pipeline's `path:` can say where outputs go, by stage if it likes, and the recipe says where sources are:
 
@@ -384,10 +385,11 @@ source events .tsv [sub]
 
 # dataset.spitin
 pipeline analysis.spit
+root .
 path: rawdata/sub-{sub}/{@product}
 ```
 
-A source takes its rule in the pipeline, else its rule in the recipe, else the recipe's default, else the pipeline's default. A pipeline default that names `{@stage}` outside a group finds no source, since no source is made in a stage, so it covers only outputs. Each source completes the recipe's default with the extension it declares, so one default finds `rawdata/sub-01/t1w.nii.gz` and `rawdata/sub-01/events.tsv`. `ext:` completes output paths and does not apply to the recipe's default, so a source that declares no extension takes the default as written. It cannot name `{@stage}`. `spit check recipe.spitin --path-rules` lists a source it covers as `default ... (recipe)`, and the `.spitout` writes it under `source_paths:` as each such source's rule.
+A source takes the recipe's default only when it has no rule of its own, and the pipeline's default only when the recipe has none; see [Which file a line belongs in](#which-file-a-line-belongs-in). A pipeline default that names `{@stage}` outside a group finds no source, since no source is made in a stage, so it covers only outputs. Each source completes the recipe's default with the extension it declares, so one default finds `rawdata/sub-01/t1w.nii.gz` and `rawdata/sub-01/events.tsv`. `ext:` completes output paths and does not apply to the recipe's default, so a source that declares no extension takes the default as written. It cannot name `{@stage}`. `spit check recipe.spitin --path-rules` lists a source it covers as `default ... (recipe)`, and the `.spitout` writes it under `source_paths:` as each such source's rule.
 
 A recipe names its dataset root, the folder its paths are relative to, once, on the line after `pipeline` by convention:
 
@@ -411,7 +413,36 @@ Three rules leave data out, each for a different reason:
 
 They apply in that order, however they are written: first every `exclude`, then every `drop`, each judged against what the exclusions leave, then every `require`, checked against what the drops leave. What `exclude` and `drop` remove is reported on stderr as notes and recorded in the `.spitout`.
 
+`drop` and `require` are written in different orders, because their conditions point opposite ways. A `drop` names the groups first and then, after `where`, what removes one; a `require` names the source first and then what every group must have, with the groups after `per`. A rule written in the other's order, such as `require [sub, ses] where t1w count=1`, is an error that gives it in its own order.
+
 Rules that count form their groups from every artifact and discovered context in the dataset, whichever source or discovery found it. `drop [store] where pricing count=0` groups by every store any source or discovery has, so a store with sales but no price list is a group with none: its count is 0.
+
+### Which file a line belongs in
+
+A `.spit` pipeline is the reusable graph: what work to do and where its results go, for any dataset. A `.spitin` recipe binds that pipeline to one dataset: where its folder is, where its sources are when the pipeline does not say, and which of its data to leave out or require. So each line belongs in one file, except a path rule:
+
+| Line | Pipeline | Recipe |
+| --- | --- | --- |
+| `source`, `sidecars`, `dimensions`, `operation`, `command`, `verify`, steps, `stage`, `use`, `ext:` | yes | no |
+| `path product:` for a product a step makes | yes | no |
+| `path product:` for a source or a `sidecars` group | either one, not both | either one, not both |
+| `path:`, a default | covers outputs, and sources nothing else covers | covers sources only |
+| `pipeline`, `root`, `discover`, `exclude`, `drop`, `require`, `sources:`, `contexts:` | no | yes |
+
+Put a source's own rule in the pipeline when every dataset for that pipeline shares the layout, and in the recipe when the layout belongs to one dataset. A line in the wrong file is an error that says which file it belongs in, at its line:
+
+```text
+error: line 3, column 1: a step belongs in the .spit pipeline, which every dataset shares; a .spitin binds it to one dataset with its `root`, source paths, and `discover`, `exclude`, `drop` and `require` rules
+error: line 3, column 13: `image` has path rules in both .spit and .spitin; keep the pipeline's if every dataset has this layout, or the recipe's if only this one does
+```
+
+A source takes the first path rule of these that it has:
+
+1. its own `path source:` rule, from whichever file gives it;
+2. the recipe's default `path:`;
+3. the pipeline's default `path:`, unless it names `{@stage}` outside a group.
+
+A rule written for one source comes before any default, and the dataset's default for its inputs comes before the pipeline's general one. An output's path never comes from the recipe. `spit check recipe.spitin --path-rules` shows which rule each source takes, and marks those the recipe gives `(recipe)`.
 
 ### Discover contexts from directories
 
