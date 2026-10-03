@@ -22,7 +22,7 @@ Status is `open`, `claimed (<branch>)`, `decided`, or `done (<commit>)`. Numbers
 | # | Item | Status |
 |---|------|--------|
 | 1 | Optional runtime checks in the job contract | done (`df6a61a`) |
-| 2 | Optional-file and output semantics, from one real workflow ([#35](https://github.com/eclnz/spit/issues/35)) | claimed (`optional-outputs`) |
+| 2 | Optional-file and output semantics, from one real workflow ([#35](https://github.com/eclnz/spit/issues/35)) | done (`b35902e`) |
 | 3 | Lower the cost of binding existing data: judge `inputs --suggest` on irregular datasets | done (`7f12083`) |
 | 4a | `dag --counts` | done (`370a18f`) |
 | 4b | Diagnostic severity audit ([#45](https://github.com/eclnz/spit/issues/45)) | done (`b45f28e`) |
@@ -157,6 +157,8 @@ The four questions:
 4. *Interactions.* Selectors, imports, stages and paths: none. Partial plans: `left_out` gives the missing member as the reason. Checks: a missing output fails before the `"after"` checks run, so a check never runs on a file that is not there. Folders: a folder output must exist and may be empty, as before. `adopt` already leaves a job whose output is missing. `check --json` and the syntax are unchanged, so spit-vscode needs no change.
 
 Steps: (a) this design, merged to `dev` before code; (b) `docs/spitdag.md` states the missing-output rule, the language reference says a `beside` output the tool does not write fails the job and what a missing `sidecars` member does to the steps that read it; `tests/sidecars.rs` pins fail, `--partial` and `drop` for a missing member; (c) spit-bash, branch `optional-outputs`: the failure names each missing output's port and path. Left open in #35: literal dots, and groups for derived products, which this case does not touch. Deferred: a recipe rule that expects a member to be missing, so that plain `dag` leaves out only the jobs that read it and keeps the subject's others, as `--partial` does for one run; wait for a dataset where `--partial` hides a gap that mattered.
+
+*Done in `b35902e`* (merged in `1c0d1e1`), with spit-bash `61bccc2` on its branch `optional-outputs`. As designed: no compiler code changed, so no benchmark; `docs/spitdag.md` has a "Missing outputs" section, the language reference covers a `beside` output the tool does not write and a missing `sidecars` member, and `tests/sidecars.rs` pins fail, `--partial` and `drop`. spit-bash's failure now reads `command succeeded but did not create output meta derivatives/image/sub=01.json`. spit-vscode needs no change. Literal dots and groups for derived products stay open in #35.
 
 ### 3. Lower the cost of binding existing data
 
