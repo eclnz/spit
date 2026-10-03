@@ -5,6 +5,8 @@
 
 use std::collections::BTreeMap;
 
+use rustc_hash::FxHashMap;
+
 use crate::imports::apply_import;
 use crate::model::{
     Cardinality, CheckDef, CommandDef, CoverageRule, Exclusion, InputBinding, InputRules,
@@ -32,11 +34,17 @@ pub(crate) struct PipelineBuilder {
     outputs: BTreeMap<String, Output>,
     /// Where each `sidecars` header is.
     sidecar_places: BTreeMap<String, Place>,
+    /// Each product's place in `pipeline.products`, the first of a name, so
+    /// that a step finds its inputs without searching every product.
+    product_numbers: FxHashMap<String, usize>,
 }
 
 impl PipelineBuilder {
     pub(crate) fn add_product(&mut self, product: ProductDef, place: Place) {
         self.lines.products.insert(product.name.clone(), place);
+        self.product_numbers
+            .entry(product.name.clone())
+            .or_insert(self.pipeline.products.len());
         self.pipeline.products.push(product);
     }
 
@@ -199,7 +207,12 @@ impl PipelineBuilder {
                 .with_kind(ParseErrorKind::UndeclaredOperation { name: name.clone() })
             })?;
         let invocation = invocation.clone();
-        let dimensions = inferred_dimensions(&invocation, operation, &self.pipeline);
+        let dimensions = inferred_dimensions(
+            &invocation,
+            operation,
+            &self.pipeline.products,
+            &self.product_numbers,
+        );
         for (index, output) in outputs.iter().enumerate() {
             let declared = if output.dimensions.is_some() {
                 Output::Annotated
@@ -393,14 +406,13 @@ fn lower_statement(
 fn inferred_dimensions(
     invocation: &Invocation,
     operation: &OperationDef,
-    pipeline: &Pipeline,
+    products: &[ProductDef],
+    product_numbers: &FxHashMap<String, usize>,
 ) -> Vec<String> {
     let dimensions = |binding: &InputBinding| {
-        pipeline
-            .products
-            .iter()
-            .find(|product| product.name == binding.product)
-            .map(|product| binding.free_dimensions(&product.dimensions))
+        product_numbers
+            .get(&binding.product)
+            .map(|&number| binding.free_dimensions(&products[number].dimensions))
     };
     let inputs: Option<Vec<_>> = invocation
         .inputs

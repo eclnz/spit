@@ -439,14 +439,7 @@ fn render(parts: &[PathPart]) -> String {
     let mut text = String::new();
     for part in parts {
         match part {
-            PathPart::Literal(value) => {
-                for character in value.chars() {
-                    if matches!(character, '{' | '}' | '[' | ']') {
-                        text.push(character);
-                    }
-                    text.push(character);
-                }
-            }
+            PathPart::Literal(value) => push_escaped(&mut text, value),
             PathPart::Placeholder(placeholder) => text.push_str(&placeholder.to_string()),
             PathPart::Group(group) => {
                 text.push('[');
@@ -456,6 +449,17 @@ fn render(parts: &[PathPart]) -> String {
         }
     }
     text
+}
+
+/// Add `value` to a template's text as a literal, doubling the `{`, `}`, `[`
+/// and `]` that would otherwise open or close a placeholder or a group.
+pub(crate) fn push_escaped(text: &mut String, value: &str) {
+    for character in value.chars() {
+        if matches!(character, '{' | '}' | '[' | ']') {
+            text.push(character);
+        }
+        text.push(character);
+    }
 }
 
 pub(crate) fn error(message: impl Into<String>) -> PathError {
