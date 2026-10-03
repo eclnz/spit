@@ -3,8 +3,6 @@
 
 use std::borrow::Cow;
 
-use rustc_hash::FxHashMap;
-
 use crate::model::{Artifact, Pipeline, PipelineIndex};
 
 use super::template::{
@@ -13,23 +11,27 @@ use super::template::{
 
 use super::components::{push_encoded, unusable_path};
 
-/// Bind `artifact` to its relative path. `dimensions` gives the product's
-/// declared dimension order, which `{@entities}` follows. `label` names the
-/// path in errors: a product's rule, or an artifact.
+/// Bind `artifact` to its relative path by its product's path template,
+/// `template`. `dimensions` gives the product's declared dimension order,
+/// which `{@entities}` follows. `label` names the path in errors: a
+/// product's rule, or an artifact.
 pub(crate) fn bind_path(
     index: &PipelineIndex<'_>,
+    template: &PathTemplate,
     dimensions: &[String],
     artifact: Artifact<'_>,
     label: impl Fn() -> String,
 ) -> Result<String, PathError> {
-    ProductPath::new(index, artifact.product)?.bind(dimensions, artifact, label)
+    ProductPath::with_template(index, artifact.product, Cow::Borrowed(template))
+        .bind(dimensions, artifact, label)
 }
 
 /// Binds many artifacts' paths, as [`bind_path`] does, finding each
 /// product's template and stage once.
 pub(crate) struct PathBinder<'p> {
     index: PipelineIndex<'p>,
-    products: FxHashMap<String, ProductPath<'p>>,
+    /// Each pipeline product's, by its id, once it is needed.
+    products: Vec<Option<ProductPath<'p>>>,
     /// The same, by the product's number in a DAG's artifact table.
     numbered: Vec<Option<ProductPath<'p>>>,
 }
@@ -38,7 +40,9 @@ impl<'p> PathBinder<'p> {
     pub(crate) fn new(pipeline: &'p Pipeline) -> Self {
         Self {
             index: PipelineIndex::new(pipeline),
-            products: FxHashMap::default(),
+            products: std::iter::repeat_with(|| None)
+                .take(pipeline.products.len())
+                .collect(),
             numbered: Vec::new(),
         }
     }
@@ -74,14 +78,14 @@ impl<'p> PathBinder<'p> {
         artifact: Artifact<'_>,
         label: impl Fn() -> String,
     ) -> Result<String, PathError> {
-        let product = match self.products.get(artifact.product) {
+        let Some(id) = self.index.id(artifact.product) else {
+            // Not one of the pipeline's products: nothing shares its path.
+            let product = ProductPath::new(&self.index, artifact.product)?;
+            return product.bind(dimensions, artifact, label);
+        };
+        let product = match &mut self.products[id.index()] {
             Some(product) => product,
-            None => {
-                let product = ProductPath::new(&self.index, artifact.product)?;
-                self.products
-                    .entry(artifact.product.to_owned())
-                    .or_insert(product)
-            }
+            slot => slot.insert(ProductPath::new(&self.index, artifact.product)?),
         };
         product.bind(dimensions, artifact, label)
     }
@@ -102,11 +106,20 @@ impl<'p> ProductPath<'p> {
         let template = index
             .path_template_for(product)
             .ok_or_else(|| error(format!("no path template for product `{product}`")))?;
-        Ok(Self {
+        Ok(Self::with_template(index, product, template))
+    }
+
+    /// `product`'s, with `template` already built.
+    fn with_template(
+        index: &PipelineIndex<'p>,
+        product: &str,
+        template: Cow<'p, PathTemplate>,
+    ) -> Self {
+        Self {
             template,
             name: product_text(product).into_owned(),
             stage: stage_directories(index, product),
-        })
+        }
     }
 
     fn bind(
@@ -185,11 +198,15 @@ pub(crate) fn stage_directories(index: &PipelineIndex<'_>, product: &str) -> Opt
     })
 }
 
-/// `product`'s path template with `{@product}` and `{@stage}` written out, as
-/// every artifact of it shares them, for showing beside its declaration:
-/// `derivatives/yield_table/{@entities}.csv`.
-pub(crate) fn shown_path(index: &PipelineIndex<'_>, product: &str) -> Option<String> {
-    let path = ProductPath::new(index, product).ok()?;
+/// `product`'s path template, `template`, with `{@product}` and `{@stage}`
+/// written out, as every artifact of it shares them, for showing beside its
+/// declaration: `derivatives/yield_table/{@entities}.csv`.
+pub(crate) fn shown_path(
+    index: &PipelineIndex<'_>,
+    product: &str,
+    template: &PathTemplate,
+) -> String {
+    let path = ProductPath::with_template(index, product, Cow::Borrowed(template));
     let mut shown = String::new();
     for part in path.template.parts() {
         match part {
@@ -202,7 +219,7 @@ pub(crate) fn shown_path(index: &PipelineIndex<'_>, product: &str) -> Option<Str
             PathPart::Group(_) => unreachable!("a product's template has its groups resolved"),
         }
     }
-    Some(shown)
+    shown
 }
 
 /// Add what `{@entities}` binds to: each dimension as `dimension=value`, in

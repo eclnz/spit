@@ -107,18 +107,20 @@ impl Parsed {
 /// rule at all show the built-in default they are given.
 fn shown_paths(pipeline: &Pipeline, lines: &SourceMap) -> Vec<ShownPath> {
     let index = PipelineIndex::new(pipeline);
+    let templates = index.path_templates();
     let mut shown: Vec<_> = pipeline
         .products
         .iter()
-        .filter(|product| !lines.imported.contains(&product.name))
-        .filter(|product| {
+        .zip(&templates)
+        .filter(|(product, _)| !lines.imported.contains(&product.name))
+        .filter(|(product, _)| {
             !pipeline.product_paths.contains_key(&product.name)
                 || index.added_extension(&product.name).is_some()
                 || index
                     .path_rule_for(&product.name)
                     .is_some_and(PathTemplate::varies)
         })
-        .filter_map(|product| {
+        .filter_map(|(product, template)| {
             let line = match lines.invocations.get(&product.name) {
                 Some(step) => step.line,
                 // A source with a default rule is shown on its declaration.
@@ -127,7 +129,7 @@ fn shown_paths(pipeline: &Pipeline, lines: &SourceMap) -> Vec<ShownPath> {
             Some(ShownPath {
                 product: product.name.clone(),
                 line,
-                path: shown_path(&index, &product.name)?,
+                path: shown_path(&index, &product.name, template.as_deref()?),
             })
         })
         .collect();

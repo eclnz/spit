@@ -506,11 +506,9 @@ fn product_details(
         details.push(format!("Stage: {stage}"));
     }
     let resolved_path = || {
-        shown_path(index, &product.name).or_else(|| {
-            index
-                .path_template_for(&product.name)
-                .map(|template| template.to_string())
-        })
+        index
+            .path_template_for(&product.name)
+            .map(|template| shown_path(index, &product.name, &template))
     };
     let path = resolved_path().unwrap_or_default();
     details.push(
