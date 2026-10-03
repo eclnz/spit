@@ -41,12 +41,45 @@ fn unmatched_files_are_counted_and_can_be_listed_without_an_inventory() {
     let regular = spit(&["inputs", recipe]);
     assert!(regular.status.success(), "{}", text(&regular.stderr));
     assert!(text(&regular.stdout).contains("x[s=a]"));
-    assert!(text(&regular.stderr).contains("2 files under"));
+    assert!(
+        text(&regular.stderr)
+            .contains("match no source rule and are not read: `in/a.txt.bak` and `notes.md`"),
+        "{}",
+        text(&regular.stderr)
+    );
 
     let listing = spit(&["inputs", recipe, "--unmatched"]);
     assert!(listing.status.success(), "{}", text(&listing.stderr));
     assert_eq!(text(&listing.stdout), "in/a.txt.bak\nnotes.md\n");
     assert!(!text(&listing.stdout).contains("sources:"));
+}
+
+#[test]
+fn many_unmatched_files_are_counted_by_extension() {
+    let tree = Tree::new(
+        "unmatched-by-extension",
+        &[
+            "data/in/a.txt",
+            "data/in/a.json",
+            "data/in/b.json",
+            "data/in/c.json",
+            "data/notes.md",
+            "data/README",
+        ],
+    );
+    tree.write("pipeline.spit", ONE_SOURCE);
+    let recipe = tree.write("recipe.spitin", "pipeline pipeline.spit\nroot data\n");
+    let output = spit(&["inputs", recipe.to_str().unwrap()]);
+    assert!(output.status.success(), "{}", text(&output.stderr));
+    assert!(text(&output.stderr).contains("note: 5 files under `"));
+    assert!(
+        text(&output.stderr).contains(
+            "/data` match no source rule and are not read \
+             (3 `.json`, 1 with no extension, 1 `.md`), such as `README`"
+        ),
+        "{}",
+        text(&output.stderr)
+    );
 }
 
 #[test]
@@ -81,7 +114,7 @@ fn files_at_the_pipelines_output_paths_are_not_unmatched() {
     let regular = spit(&["inputs", recipe]);
     assert!(regular.status.success(), "{}", text(&regular.stderr));
     assert!(
-        text(&regular.stderr).contains("1 files under"),
+        text(&regular.stderr).contains("1 file under"),
         "{}",
         text(&regular.stderr)
     );

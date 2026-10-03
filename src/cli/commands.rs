@@ -245,6 +245,10 @@ pub(crate) fn dag(args: &CliArgs) -> Result<(), Box<dyn Error>> {
                 eprintln!("note: commands run from `{}`", root.display());
             }
         }
+        // The counts come first, a blank line from the jobs.
+        if args.has(Flag::Counts) {
+            println!();
+        }
         print!("{}", render_bound_dag(&bind(paths)?, view));
     } else if !args.has(Flag::Counts) {
         print!("{}", render_dag(dag));

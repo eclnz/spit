@@ -142,7 +142,7 @@ const FLAGS: [Flag; 12] = [
 ];
 
 /// Pairs of flags that cannot be used together.
-const CONFLICTS: [(Flag, Flag); 12] = [
+const CONFLICTS: [(Flag, Flag); 10] = [
     (Flag::Json, Flag::Paths),
     (Flag::Json, Flag::Output),
     (Flag::Paths, Flag::Output),
@@ -153,8 +153,6 @@ const CONFLICTS: [(Flag, Flag); 12] = [
     (Flag::Suggest, Flag::Output),
     (Flag::Suggest, Flag::Unmatched),
     (Flag::Counts, Flag::Json),
-    (Flag::Counts, Flag::Paths),
-    (Flag::Counts, Flag::Commands),
 ];
 
 impl Flag {
@@ -196,7 +194,7 @@ impl Flag {
                 "show each job's command lines, as a shell would run them; cannot combine with -o"
             }
             (Self::Counts, _) => {
-                "show how many jobs each step resolves, not the jobs; with -o, as well as writing the .spitdag"
+                "show how many jobs each step resolves, not the jobs; before them with --commands or --paths; with -o, as well as writing the .spitdag; cannot combine with --json"
             }
             (Self::Partial, _) => "plan complete jobs and record artifacts that cannot be produced",
             (Self::Unmatched, _) => {
@@ -277,14 +275,22 @@ impl Flags {
         }
         for (first, second) in CONFLICTS {
             if self.has(first) && self.has(second) {
-                if (first, second) == (Flag::Commands, Flag::Output) {
-                    return Err(misuse(
-                        format_args!("--commands cannot be used with -o; run dag with --commands to inspect command lines, or with -o <file> to save a .spitdag"),
-                        Some(command),
-                    ));
-                }
+                // Two views of `dag` that cannot share its output say how to get each.
+                let hint = match (first, second) {
+                    (Flag::Commands, Flag::Output) => {
+                        "; run dag with --commands to inspect command lines, or with -o <file> to save a .spitdag"
+                    }
+                    (Flag::Counts, Flag::Json) => {
+                        "; run dag with --counts to see how many jobs each step resolves, or with --json to print the .spitdag"
+                    }
+                    _ => "",
+                };
                 return Err(misuse(
-                    format_args!("{} cannot be used with {}", first.name(), second.name()),
+                    format_args!(
+                        "{} cannot be used with {}{hint}",
+                        first.name(),
+                        second.name()
+                    ),
                     Some(command),
                 ));
             }

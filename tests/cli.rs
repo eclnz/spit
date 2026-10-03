@@ -106,15 +106,23 @@ path extra: in/{subject}.extra
     assert!(stdout(&written).ends_with("   4  total\n"));
     assert!(fs::read_to_string(&dag).unwrap().contains("\"jobs\""));
 
-    for view in ["--json", "--paths", "--commands"] {
-        let conflict = spit(&["dag", pipeline, inputs, "--counts", view]);
-        assert!(!conflict.status.success());
+    // With --commands or --paths, the counts come before the jobs.
+    for view in ["--paths", "--commands"] {
+        let both = spit(&["dag", pipeline, inputs, "--counts", view]);
+        assert!(both.status.success(), "{view}: {}", stderr(&both));
         assert!(
-            stderr(&conflict).contains("cannot be used with"),
+            stdout(&both).starts_with("jobs  step\n")
+                && stdout(&both).contains("   4  total\n\nJob 1"),
             "{view}: {}",
-            stderr(&conflict)
+            stdout(&both)
         );
     }
+
+    let conflict = spit(&["dag", pipeline, inputs, "--counts", "--json"]);
+    assert!(!conflict.status.success());
+    assert!(stderr(&conflict).contains(
+        "--counts cannot be used with --json; run dag with --counts to see how many jobs each step resolves, or with --json to print the .spitdag"
+    ));
 }
 
 #[test]
