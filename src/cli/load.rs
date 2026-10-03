@@ -2,6 +2,7 @@
 //! in memory: settling a recipe's inputs, and preparing a pipeline and
 //! inventory for `dag` and `artifacts`.
 
+use std::collections::BTreeMap;
 use std::error::Error;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -151,12 +152,17 @@ pub(crate) fn settle(loaded: &Loaded) -> Result<(ResolvedInputs, PathBuf), Box<d
         eprintln!("warning: {missed}");
     }
     if let Some(root) = &resolved.root {
-        let count = resolved.unmatched_files.len();
-        if count > 0 {
-            // An example says what kind of file is left out, which is
-            // usually enough to see that leaving it out is right.
-            let example = &resolved.unmatched_files[0];
-            eprintln!("note: {count} files under `{}` match no source rule and are not read, such as `{example}`; `spit inputs {} --unmatched` lists them", root.display(), loaded.invocation);
+        if !resolved.unmatched_files.is_empty() {
+            let them = if resolved.unmatched_files.len() == 1 {
+                "it"
+            } else {
+                "them"
+            };
+            eprintln!(
+                "note: {}; `spit inputs {} --unmatched` lists {them}",
+                unmatched_files_note(&resolved.unmatched_files, root),
+                loaded.invocation
+            );
         }
     }
     let pipeline = &loaded.checked.pipeline;
@@ -176,6 +182,58 @@ pub(crate) fn settle(loaded: &Loaded) -> Result<(ResolvedInputs, PathBuf), Box<d
         );
     }
     Ok((resolved, root))
+}
+
+/// How many files the scan left out, and which: each of them when there
+/// are a few, else how many have each extension and one example. That is
+/// usually enough to see that leaving them out is right, as for a
+/// dataset's JSON sidecars, without listing them all.
+fn unmatched_files_note(files: &[String], root: &Path) -> String {
+    let count = files.len();
+    let root = root.display();
+    if count == 1 {
+        return format!(
+            "1 file under `{root}` matches no source rule and is not read: `{}`",
+            files[0]
+        );
+    }
+    if count <= 3 {
+        let quoted: Vec<_> = files.iter().map(|file| format!("`{file}`")).collect();
+        let (last, rest) = quoted.split_last().expect("at least two files");
+        return format!(
+            "{count} files under `{root}` match no source rule and are not read: {} and {last}",
+            rest.join(", ")
+        );
+    }
+    let mut by_extension: BTreeMap<&str, usize> = BTreeMap::new();
+    for file in files {
+        let name = file.rsplit('/').next().unwrap_or(file);
+        let extension = match name.rfind('.') {
+            Some(dot) if dot > 0 => &name[dot..],
+            _ => "",
+        };
+        *by_extension.entry(extension).or_default() += 1;
+    }
+    let mut kinds: Vec<(&str, usize)> = by_extension.into_iter().collect();
+    // The most common first; the map's order breaks ties.
+    kinds.sort_by_key(|&(_, n)| std::cmp::Reverse(n));
+    let shown = if kinds.len() > 4 { 3 } else { kinds.len() };
+    let mut parts: Vec<String> = kinds[..shown]
+        .iter()
+        .map(|(extension, n)| match *extension {
+            "" => format!("{n} with no extension"),
+            extension => format!("{n} `{extension}`"),
+        })
+        .collect();
+    let others: usize = kinds[shown..].iter().map(|(_, n)| n).sum();
+    if others > 0 {
+        parts.push(format!("{others} others"));
+    }
+    format!(
+        "{count} files under `{root}` match no source rule and are not read ({}), such as `{}`",
+        parts.join(", "),
+        files[0]
+    )
 }
 
 /// Explain a missing scanned source with the path rule the scan used. A

@@ -292,7 +292,12 @@ fn a_recipe_inside_its_root_is_not_an_unmatched_file() {
     tree.write("data/notes.txt", "");
     let output = spit_in(tree.path(), &["inputs", "data/analysis.spitin"]);
     let (_, notes) = succeeded(&output);
-    assert!(notes.contains("note: 1 files under"), "{notes}");
+    assert!(
+        notes.contains(
+            "note: 1 file under `data/.` matches no source rule and is not read: `notes.txt`"
+        ),
+        "{notes}"
+    );
     let output = spit_in(
         tree.path(),
         &["inputs", "data/analysis.spitin", "--unmatched"],
