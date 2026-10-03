@@ -7,7 +7,7 @@ use rustc_hash::FxHashMap;
 
 use crate::model::{Artifact, Pipeline, PipelineIndex};
 
-use super::template::{error, PathError, PathPart, PathPlaceholder, PathTemplate};
+use super::template::{error, push_escaped, PathError, PathPart, PathPlaceholder, PathTemplate};
 
 use super::components::{push_encoded, unusable_path};
 
@@ -191,7 +191,7 @@ pub(crate) fn shown_path(index: &PipelineIndex<'_>, product: &str) -> Option<Str
     let mut shown = String::new();
     for part in path.template.parts() {
         match part {
-            PathPart::Literal(value) => shown.push_str(value),
+            PathPart::Literal(value) => push_escaped(&mut shown, value),
             PathPart::Placeholder(PathPlaceholder::Product) => shown.push_str(&path.name),
             PathPart::Placeholder(PathPlaceholder::Stage) => {
                 shown.push_str(path.stage.as_deref().unwrap_or("{@stage}"));
