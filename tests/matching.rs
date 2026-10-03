@@ -38,7 +38,7 @@ fn a_many_input_can_share_an_operation_with_single_inputs() {
 
 #[test]
 fn one_aggregate_can_vary_two_dimensions_in_product_order() {
-    let pipeline = "source summary [model, config]\noperation leaderboard(summaries: many Summary) -> Table @ min(3)\noverall = leaderboard(summary @ vary(model, config))\n";
+    let pipeline = "source summary [model, config]\noperation leaderboard(summaries: many Summary @ min(3)) -> Table\noverall = leaderboard(summary @ vary(model, config))\n";
     let inventory = "sources:\n  summary[model=b,config=1]\n  summary[model=a,config=10]\n  summary[model=a,config=2]\n";
     let dag = resolve_text(pipeline, inventory).unwrap();
     assert_eq!(dag.jobs.len(), 1);
@@ -409,7 +409,7 @@ stacked = stack(frame @ vary(run))
 
 #[test]
 fn min_rejects_a_collection_that_is_too_small() {
-    let text = "source frame [subject, run]\noperation stack(frames: many Frame) -> Stack @ min(2)\nstacked = stack(frame @ vary(run))\n";
+    let text = "source frame [subject, run]\noperation stack(frames: many Frame @ min(2)) -> Stack\nstacked = stack(frame @ vary(run))\n";
     let result = resolve_text(
         text,
         "sources:\n  frame[subject=a,run=1]\n  frame[subject=a,run=2]\n  frame[subject=b,run=1]\n",
@@ -425,8 +425,28 @@ fn min_rejects_a_collection_that_is_too_small() {
             "`@ min(count)` requires a many input",
         ),
         (
-            "operation f(as: many A) -> B @ min(0)",
+            "operation f(as: many A @ min(0)) -> B",
             "needs a positive integer",
+        ),
+        (
+            "operation f(a: A @ min(2)) -> B",
+            "`@ min(count)` goes on a `many` input; `a` takes one artifact",
+        ),
+        (
+            "operation f(as: many A @ min(2) @ min(3)) -> B",
+            "duplicate `@ min(...)`",
+        ),
+        (
+            "operation f(as: many A @ vary(run)) -> B",
+            "expected `@ min(count)` on a many input",
+        ),
+        (
+            "operation f(b: B, as: many A) -> (c: C, d: D) @ min(2)",
+            "write a many input's minimum beside it: `f(b: B, as: many A @ min(2)) -> (c: C, d: D)`",
+        ),
+        (
+            "operation f(as: many A) -> B @ other",
+            "nothing follows an operation's outputs",
         ),
     ] {
         let error = parse_pipeline(&format!("{declaration}\n")).unwrap_err();

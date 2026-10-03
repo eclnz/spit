@@ -1,5 +1,5 @@
-//! Operation declarations: `name(inputs) -> outputs`, with an optional
-//! `@ min(count)` clause, and `@ check(...)` on any port.
+//! Operation declarations: `name(inputs) -> outputs`, where a `many`
+//! input may carry an `@ min(count)` clause, and any port `@ check(...)`.
 
 use crate::model::{Cardinality, InputPort, OperationDef, OutputPort, ShapeRule, DEFAULT_OUTPUT};
 use crate::types::{parse_type_expr, TypeExpr};
@@ -21,6 +21,8 @@ pub(super) fn parse_operation(line: &str, number: usize) -> Result<OperationDef,
     };
     let signature = signature.trim_end();
     let rest = rest.trim();
+    // Clauses after the outputs belong to the whole signature; those inside
+    // the inputs, or after an output, stay with their ports.
     let (outputs, trailing) = if let Some(output) = rest.strip_prefix("->") {
         parse_outputs(output.trim(), number)?
     } else {
@@ -32,10 +34,25 @@ pub(super) fn parse_operation(line: &str, number: usize) -> Result<OperationDef,
         }
         (
             vec![OutputPort::new(DEFAULT_OUTPUT, TypeExpr::Unknown)],
-            split_clauses(rest, number)?.1,
+            split_clauses(rest, TRAILING, number)?.1,
         )
     };
-    let clauses = parse_clauses(trailing, number)?;
+    if let Some(clause) = trailing.iter().find(|clause| clause.keyword == "check") {
+        return Err(ParseError::new(
+            number,
+            "`@ check(...)` follows the port it checks, as in `(image: Image @ check(nonempty))` or `-> (mask: Mask @ check(nonempty))`",
+        )
+        .at_token(clause.text));
+    }
+    // The line without its trailing clauses, to rewrite a misplaced minimum.
+    let line = match trailing.first() {
+        Some(clause) => {
+            let start = clause.text.as_ptr() as usize - line.as_ptr() as usize;
+            line[..start].trim_end().trim_end_matches('@').trim_end()
+        }
+        None => line,
+    };
+    let clauses = parse_clauses(trailing.iter().map(|clause| clause.text), TRAILING, number)?;
     let (name, inputs) = call_parts(signature, number)?;
     identifier(name, number, "operation name")?;
     if let Some((dimensions, clause)) = clauses.drop {
@@ -57,13 +74,19 @@ pub(super) fn parse_operation(line: &str, number: usize) -> Result<OperationDef,
             "operation needs at least one input",
         ));
     }
-    let ports = inputs
-        .iter()
-        .map(|input| parse_input_port(input, number))
-        .collect::<Result<Vec<_>, _>>()?;
-    let shape_rule = shape_rule(&ports, &clauses, number)?;
+    let mut minimum = None;
+    let mut ports = Vec::with_capacity(inputs.len());
+    for input in &inputs {
+        let (port, at_least) = parse_port_with_minimum(input, number)?;
+        minimum = minimum.or(at_least);
+        ports.push(port);
+    }
+    let shape_rule = shape_rule(&ports, number)?;
+    if let Some((count, clause)) = clauses.min {
+        return Err(misplaced_minimum(name, &inputs, &ports, line, count, number).at_token(clause));
+    }
     let mut operation = OperationDef::with_outputs(name, ports, outputs, shape_rule);
-    if let Some(minimum) = clauses.min {
+    if let Some(minimum) = minimum {
         operation = operation.at_least(minimum);
     }
     Ok(operation)
@@ -87,23 +110,116 @@ fn matching_paren(text: &str, open: usize) -> Option<usize> {
     None
 }
 
-/// The `@ min(count)` clause after a signature, and a removed `@ drop(...)`
-/// clause with its text, kept to say what to write instead.
+/// An input port with its checks, and the minimum its `@ min(count)`
+/// clause sets, which only a `many` port may have.
+fn parse_port_with_minimum(
+    input: &str,
+    number: usize,
+) -> Result<(InputPort, Option<usize>), ParseError> {
+    let (input, clauses) = split_clauses(input, ON_PORT, number)?;
+    let (checks, clauses): (Vec<_>, Vec<_>) = clauses
+        .into_iter()
+        .partition(|clause| clause.keyword == "check");
+    let mut port = parse_input_port(input, number)?;
+    port.checks = only_checks(&checks, "an input port", number)?;
+    if clauses.is_empty() {
+        return Ok((port, None));
+    }
+    let clauses = parse_clauses(clauses.iter().map(|clause| clause.text), ON_PORT, number)?;
+    if let Some((_, clause)) = clauses.drop {
+        return Err(ParseError::new(number, ON_PORT).at_token(clause));
+    }
+    let Some((count, clause)) = clauses.min else {
+        unreachable!("a clause that is not `drop` is `min`, or parsing failed")
+    };
+    if port.cardinality != Cardinality::Many {
+        return Err(ParseError::new(
+            number,
+            format!(
+                "`@ min(count)` goes on a `many` input; `{}` takes one artifact",
+                port.name
+            ),
+        )
+        .at_token(clause));
+    }
+    Ok((port, Some(count)))
+}
+
+/// The error for a minimum written after the signature: the line as it is
+/// written now, with the minimum beside the `many` input it counts.
+fn misplaced_minimum(
+    name: &str,
+    inputs: &[&str],
+    ports: &[InputPort],
+    line: &str,
+    count: usize,
+    number: usize,
+) -> ParseError {
+    let Some(many) = ports
+        .iter()
+        .position(|port| port.cardinality == Cardinality::Many)
+    else {
+        return ParseError::new(number, "`@ min(count)` requires a many input");
+    };
+    let inputs: Vec<String> = inputs
+        .iter()
+        .enumerate()
+        .map(|(index, input)| {
+            let input = input.trim();
+            if index == many {
+                format!("{input} @ min({count})")
+            } else {
+                input.to_owned()
+            }
+        })
+        .collect();
+    let outputs = line
+        .split_once("->")
+        .map(|(_, outputs)| format!(" -> {}", outputs.trim()))
+        .unwrap_or_default();
+    ParseError::new(
+        number,
+        format!(
+            "write a many input's minimum beside it: `{name}({}){outputs}`",
+            inputs.join(", ")
+        ),
+    )
+}
+
+/// What a clause after the signature may be: none is now, but `min` and
+/// `drop`, which were, are read to say what to write instead.
+const TRAILING: &str =
+    "nothing follows an operation's outputs; write `@ min(count)` on its many input";
+
+/// What a clause after an output may be.
+const AFTER_OUTPUT: &str = "nothing follows an operation's outputs but their `@ check(...)`; \
+     write `@ min(count)` on its many input";
+
+/// What a clause on an input port may be.
+const ON_PORT: &str = "expected `@ min(count)` on a many input, or `@ check(...)`";
+
+/// An `@ min(count)` clause, and a removed `@ drop(...)` clause, each with
+/// its text, kept to point at it and to say what to write instead.
 #[derive(Default)]
 struct Clauses<'a> {
     drop: Option<(Vec<String>, &'a str)>,
-    min: Option<usize>,
+    min: Option<(usize, &'a str)>,
 }
 
-fn parse_clauses(clauses: Vec<Clause<'_>>, number: usize) -> Result<Clauses<'_>, ParseError> {
-    let expected = "expected `@ min(count)` after operation signature";
+/// The clauses split at each `@`; `expected` says what else may be written
+/// where they are.
+fn parse_clauses<'a>(
+    clauses: impl Iterator<Item = &'a str>,
+    expected: &str,
+    number: usize,
+) -> Result<Clauses<'a>, ParseError> {
     let mut parsed = Clauses::default();
-    for Clause {
-        keyword,
-        argument,
-        text: clause,
-    } in clauses
-    {
+    for clause in clauses {
+        let clause = clause.trim();
+        let (keyword, argument) = clause
+            .split_once('(')
+            .and_then(|(keyword, rest)| Some((keyword.trim(), rest.strip_suffix(')')?.trim())))
+            .ok_or_else(|| ParseError::new(number, expected).at_token(clause))?;
         match keyword {
             "drop" if parsed.drop.is_none() => {
                 let dimensions = comma_items(argument, number)?;
@@ -135,20 +251,13 @@ fn parse_clauses(clauses: Vec<Clause<'_>>, number: usize) -> Result<Clauses<'_>,
                         ParseError::new(number, "`@ min(count)` needs a positive integer")
                             .at_token(argument)
                     })?;
-                parsed.min = Some(count);
+                parsed.min = Some((count, clause));
             }
             "drop" | "min" => {
                 return Err(
                     ParseError::new(number, format!("duplicate `@ {keyword}(...)`"))
                         .at_token(keyword),
                 )
-            }
-            "check" => {
-                return Err(ParseError::new(
-                    number,
-                    "`@ check(...)` follows the port it checks, as in `(image: Image @ check(nonempty))` or `-> (mask: Mask @ check(nonempty))`",
-                )
-                .at_token(clause))
             }
             _ => return Err(ParseError::new(number, expected).at_token(keyword)),
         }
@@ -157,17 +266,8 @@ fn parse_clauses(clauses: Vec<Clause<'_>>, number: usize) -> Result<Clauses<'_>,
 }
 
 /// Parse an input port: `name`, `name: Type`, `name: many`, or
-/// `name: many Type`, then any `@ check(...)` clauses.
+/// `name: many Type`.
 fn parse_input_port(input: &str, number: usize) -> Result<InputPort, ParseError> {
-    let (input, clauses) = split_clauses(input, number)?;
-    let checks = only_checks(&clauses, "an input port", number)?;
-    let mut port = parse_port(input, number)?;
-    port.checks = checks;
-    Ok(port)
-}
-
-/// An input port without its clauses.
-fn parse_port(input: &str, number: usize) -> Result<InputPort, ParseError> {
     let fail = |message: String, token: &str| Err(ParseError::new(number, message).at_token(token));
     let Some((name, value)) = input.split_once(':') else {
         // A lowercase word alone names an untyped port; types are capitalised.
@@ -283,13 +383,8 @@ fn suggested_name(type_text: &str) -> String {
     }
 }
 
-/// Whether an operation aggregates, which it does with one many input; only
-/// then may it require a minimum count.
-fn shape_rule(
-    ports: &[InputPort],
-    clauses: &Clauses,
-    number: usize,
-) -> Result<ShapeRule, ParseError> {
+/// Whether an operation aggregates, which it does with one many input.
+fn shape_rule(ports: &[InputPort], number: usize) -> Result<ShapeRule, ParseError> {
     let many = ports
         .iter()
         .filter(|port| port.cardinality == Cardinality::Many)
@@ -300,16 +395,11 @@ fn shape_rule(
             "an operation takes at most one `many` input; each job groups one collection",
         ));
     }
-    if many == 1 {
-        return Ok(ShapeRule::Aggregate);
-    }
-    if clauses.min.is_some() {
-        return Err(ParseError::new(
-            number,
-            "`@ min(count)` requires a many input",
-        ));
-    }
-    Ok(ShapeRule::Preserve)
+    Ok(if many == 1 {
+        ShapeRule::Aggregate
+    } else {
+        ShapeRule::Preserve
+    })
 }
 
 /// Parse an operation's output: one type, or `(name: Type, ...)` for
@@ -321,7 +411,7 @@ fn parse_outputs(
     number: usize,
 ) -> Result<(Vec<OutputPort>, Vec<Clause<'_>>), ParseError> {
     let Some(list) = text.strip_prefix('(') else {
-        let (text, clauses) = split_clauses(text, number)?;
+        let (text, clauses) = split_clauses(text, AFTER_OUTPUT, number)?;
         // An output's checks are its own; anything else is the operation's.
         let (checks, clauses): (Vec<_>, Vec<_>) = clauses
             .into_iter()
@@ -355,7 +445,7 @@ fn parse_outputs(
     if !trailing.is_empty() && !trailing.starts_with('@') {
         return Err(closing());
     }
-    let clauses = split_clauses(trailing, number)?.1;
+    let clauses = split_clauses(trailing, TRAILING, number)?.1;
     let list = &list[..close - 1];
     let items = comma_items(list, number)?;
     if items.is_empty() {
@@ -364,7 +454,7 @@ fn parse_outputs(
     let ports = items
         .into_iter()
         .map(|item| {
-            let (item, clauses) = split_clauses(item, number)?;
+            let (item, clauses) = split_clauses(item, AFTER_OUTPUT, number)?;
             let checks = only_checks(&clauses, "an output", number)?;
             let (item, beside) = match item.rsplit_once(" beside ") {
                 Some((item, sibling)) => {

@@ -77,6 +77,35 @@ fn diagnostics_resolve_imports_using_pipeline_location() {
 }
 
 #[test]
+fn an_operation_a_library_declares_in_a_stage_may_be_used_anywhere() {
+    let dir = Tree::new("imports", &[]);
+    dir.write("base.spit", "stage tools:\n    operation clean(input)\n");
+    let main = dir.write(
+        "main.spit",
+        "source raw [id]\nuse base.spit\nstage prep:\n    result = clean(raw)\n",
+    );
+    let text = fs::read_to_string(&main).unwrap();
+    assert!(diagnose_in(&text, None, Context::at(&main)).is_empty());
+}
+
+#[test]
+fn a_local_operation_may_not_take_an_imported_name() {
+    let dir = Tree::new("imports", &[]);
+    dir.write("base.spit", "operation clean(input)\n");
+    let main = dir.write(
+        "main.spit",
+        "source raw [id]\nuse base.spit\nstage prep:\n    operation clean(input)\n    result = clean(raw)\n",
+    );
+    let text = fs::read_to_string(&main).unwrap();
+    let errors = diagnose_in(&text, None, Context::at(&main));
+    assert_eq!(errors[0].line, Some(4));
+    assert_eq!(
+        errors[0].message,
+        "duplicate operation `clean`: the `use` on line 2 imports one; operations are global even when declared in a stage, so give this one another name"
+    );
+}
+
+#[test]
 fn an_imported_source_keeps_its_path_rule_under_its_alias() {
     let dir = Tree::new("imports", &[]);
     dir.write(

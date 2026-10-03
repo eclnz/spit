@@ -42,7 +42,7 @@ pub(crate) use self::exclusions::collect_exclusion_errors;
 pub use self::exclusions::UnmatchedExclusion;
 use self::exclusions::{read_exclusion_files, Excluder};
 pub use self::pattern::{MissedSource, NearestFile};
-pub use self::suggest::{SuggestedSource, Suggestions};
+pub use self::suggest::{NearlyMatched, SuggestedSource, Suggestions};
 
 /// A recipe's rules and any inventory records written with them.
 #[derive(Clone, Debug, Default)]
@@ -144,6 +144,20 @@ fn header_lines(text: &str) -> Result<(RecipeHeader, String), ParseError> {
     Ok((header, rest))
 }
 
+/// Why a line belongs in the pipeline rather than the recipe: what each
+/// file holds.
+const PIPELINE_ONLY: &str = ", which every dataset shares; a .spitin binds it to one dataset with \
+     its `root`, source paths, and `discover`, `exclude`, `drop` and `require` rules";
+
+/// Whether a line that starts with no keyword is a step, `out = f(in)`,
+/// rather than a record, whose `[` comes before any `=`.
+fn is_step(line: &str) -> bool {
+    Keyword::of(line).is_none()
+        && line
+            .split_once('=')
+            .is_some_and(|(outputs, call)| !outputs.contains('[') && call.contains('('))
+}
+
 fn check_input_lines(text: &str) -> Result<(), ParseError> {
     for (index, original) in text.lines().enumerate() {
         let line = strip_comment(original).trim();
@@ -162,9 +176,16 @@ fn check_input_lines(text: &str) -> Result<(), ParseError> {
             )
         );
         if pipeline_only {
+            let word = line.split_once([' ', ':']).map_or(line, |(word, _)| word);
             return Err(ParseError::new(
                 index + 1,
-                "logical sources, dimension orders, operations, commands, checks, stages, and imports belong in the .spit pipeline",
+                format!("`{word}` belongs in the .spit pipeline{PIPELINE_ONLY}"),
+            ));
+        }
+        if is_step(line) {
+            return Err(ParseError::new(
+                index + 1,
+                format!("a step belongs in the .spit pipeline{PIPELINE_ONLY}"),
             ));
         }
         if Keyword::of(line) == Some(Keyword::Ext) {
@@ -240,6 +261,13 @@ impl InputSpec {
                 continue;
             }
             if !pipeline.is_source(name) {
+                if pipeline
+                    .products
+                    .iter()
+                    .any(|declared| declared.name == *name)
+                {
+                    return Err(InputError::OutputPath { product });
+                }
                 return Err(InputError::NotASource { product });
             }
             if let Some(group) = members.get(name.as_str()) {
@@ -550,8 +578,11 @@ pub enum InputError {
     /// A path rule is invalid, or a file under the root is missing or
     /// cannot be read.
     Path(PathError),
-    /// The recipe sets a path for a product that is not a source.
+    /// The recipe sets a path for a product the pipeline does not declare.
     NotASource { product: String },
+    /// The recipe sets a path for a product a step makes, whose path is
+    /// the pipeline's to give.
+    OutputPath { product: String },
     /// A source or `sidecars` group has a path rule in both the pipeline
     /// and the recipe.
     PathInBoth { product: String },
@@ -594,9 +625,13 @@ impl fmt::Display for InputError {
                 f,
                 "input path `{product}` must name a source product or sidecars group in the pipeline"
             ),
+            Self::OutputPath { product } => write!(
+                f,
+                "`{product}` is made by a step, so its path belongs in the .spit pipeline; a .spitin gives paths only for sources"
+            ),
             Self::PathInBoth { product } => write!(
                 f,
-                "`{product}` has path rules in both .spit and .spitin"
+                "`{product}` has path rules in both .spit and .spitin; keep the pipeline's if every dataset has this layout, or the recipe's if only this one does"
             ),
             Self::MemberPath { product, group } => write!(
                 f,
