@@ -23,7 +23,7 @@ Status is `open`, `claimed (<branch>)`, `decided`, or `done (<commit>)`. Numbers
 |---|------|--------|
 | 1 | Optional runtime checks in the job contract | claimed (`runtime-checks`) |
 | 2 | Optional-file and output semantics, from one real workflow ([#35](https://github.com/eclnz/spit/issues/35)) | open |
-| 3 | Lower the cost of binding existing data: judge `inputs --suggest` on irregular datasets | claimed (`suggest-irregular`) |
+| 3 | Lower the cost of binding existing data: judge `inputs --suggest` on irregular datasets | done (`7f12083`) |
 | 4a | `dag --counts` | done (`370a18f`) |
 | 4b | Diagnostic severity audit ([#45](https://github.com/eclnz/spit/issues/45)) | done (`b45f28e`) |
 | 5 | The two-file mental model | done (`b72f2e9`) |
@@ -115,6 +115,13 @@ The four questions:
 ### 3. Lower the cost of binding existing data
 
 The project has improved path diagnostics and can scan a dataset without a recipe. [PR 52](https://github.com/eclnz/spit/pull/52), open when reviewed and since merged, adds `spit inputs --suggest` to generate source and path lines from existing files. This addresses a usability-study finding directly. Judge it by whether a user can inspect, correct, and trust suggestions for irregular datasets; keep suggested declarations editable and verify them with the actual matcher.
+
+*Done in `7f12083` (merged in `9ec8bcb`; the module split before it is `2b0412b`).* Judged on five irregular trees: BIDS with a rescan (`acq-rescan`), a missing session, a session-less subject, `derivatives/` and `sourcedata/`; a lab's own layout with `subject04/visit1` among `Subject01/Visit1`, a `.bak`, a `_repeat` scan and a name with a space; loggers under `site_north/2023/` with `_corrected`, `.CSV` and `~` files; a plate of wells; ML runs by config and seed. Every pasted rule read its files, so the rules could be trusted, but a suggestion was hard to inspect and easy to spoil. What changed:
+
+- *Inspect.* Each group prints the values each dimension holds, so `Notes, notes` or a decimal split at its `.` shows before pasting. A file a suggested rule nearly matches is listed with that rule and where the two part, in the words a missed source's nearest file uses, instead of only "like no other".
+- *Correct.* A stray folder no longer spoils its group: when at least three files in four share their keys and the rule then names more dimensions, the others are left out. Dimensions are named after a `word_` before them, or `date` and `year` by their values, before `dimN`. `site_north/` and `site_south/` are one folder. A second group of one suffix is named for its own word (`bold_nback`, `bold_preproc`), and no source takes a dimension's name.
+- *Trust.* A rule whose file name is only dimensions (`{dim1}` for `README` and `CHANGES`) is no longer suggested, since it read every file and folder beside them.
+- *Left as they are.* A value cannot hold `.`, so `lr-0.01` gives `lr-{lr}.{dim1}`; the values line shows it, and the fix belongs to the value rules, not to suggestions. Case differences are not folded (`subject04` is listed alone, not near `Subject{subject}`), and a plain top folder such as `baseline/` beside `lr-0.01/` still keeps its files apart. Suggestions ignore the pipeline's existing rules when finding near misses; `inputs` already names a missed source's nearest file. None of this reaches `check --json`, the DAG or spit-bash.
 
 ### 4. Make a resolved graph easy to sanity-check
 
