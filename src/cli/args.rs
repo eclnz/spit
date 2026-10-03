@@ -29,7 +29,7 @@ struct CommandSpec {
 impl Command {
     fn spec(self) -> CommandSpec {
         use Flag::{
-            Commands, Counts, Hovers, Json, Output, Partial, PathRules, Paths, Root, Stdin,
+            Commands, Counts, Hovers, Jobs, Json, Output, Partial, PathRules, Paths, Root, Stdin,
             Suggest, Unmatched,
         };
         match self {
@@ -50,9 +50,9 @@ impl Command {
             Self::Dag => CommandSpec {
                 name: "dag",
                 files: "<recipe.spitin> or <pipeline.spit> <inputs.spitout | ->",
-                summary: "step 3: resolve a pipeline's jobs over a dataset's inputs; -o writes the .spitdag",
-                example: "spit dag dataset.spitin -o analysis.spitdag\n  spit dag analysis.spit dataset.spitout -o analysis.spitdag\n  spit dag dataset.spitin --commands\n  spit dag dataset.spitin --counts",
-                flags: &[Root, Paths, Commands, Counts, Partial, Json, Output],
+                summary: "step 3: resolve a pipeline's jobs over a dataset's inputs and print their commands; -o writes the .spitdag",
+                example: "spit dag dataset.spitin\n  spit dag dataset.spitin -o analysis.spitdag\n  spit dag analysis.spit dataset.spitout -o analysis.spitdag\n  spit dag dataset.spitin --counts",
+                flags: &[Root, Paths, Commands, Jobs, Counts, Partial, Json, Output],
             },
             Self::Artifacts => CommandSpec {
                 name: "artifacts",
@@ -116,6 +116,7 @@ pub(crate) enum Flag {
     Output,
     Paths,
     Commands,
+    Jobs,
     Counts,
     Partial,
     Unmatched,
@@ -126,11 +127,12 @@ pub(crate) enum Flag {
     Hovers,
 }
 
-const FLAGS: [Flag; 12] = [
+const FLAGS: [Flag; 13] = [
     Flag::Root,
     Flag::Output,
     Flag::Paths,
     Flag::Commands,
+    Flag::Jobs,
     Flag::Counts,
     Flag::Partial,
     Flag::Unmatched,
@@ -142,7 +144,7 @@ const FLAGS: [Flag; 12] = [
 ];
 
 /// Pairs of flags that cannot be used together.
-const CONFLICTS: [(Flag, Flag); 9] = [
+const CONFLICTS: [(Flag, Flag); 13] = [
     (Flag::Json, Flag::Paths),
     (Flag::Json, Flag::Output),
     (Flag::Paths, Flag::Output),
@@ -152,6 +154,10 @@ const CONFLICTS: [(Flag, Flag); 9] = [
     (Flag::Suggest, Flag::Output),
     (Flag::Suggest, Flag::Unmatched),
     (Flag::Counts, Flag::Json),
+    (Flag::Jobs, Flag::Commands),
+    (Flag::Jobs, Flag::Paths),
+    (Flag::Jobs, Flag::Json),
+    (Flag::Jobs, Flag::Output),
 ];
 
 impl Flag {
@@ -161,6 +167,7 @@ impl Flag {
             Self::Output => "-o",
             Self::Paths => "--paths",
             Self::Commands => "--commands",
+            Self::Jobs => "--jobs",
             Self::Counts => "--counts",
             Self::Partial => "--partial",
             Self::Unmatched => "--unmatched",
@@ -190,8 +197,9 @@ impl Flag {
             (Self::Output, _) => "write the .spitdag to <file>",
             (Self::Paths, _) => "show each artifact's file",
             (Self::Commands, _) => {
-                "show each job's command lines, as a shell would run them; with -o, as well as writing the .spitdag"
+                "show each job's command lines, as a shell would run them, as plain dag does; with -o, as well as writing the .spitdag"
             }
+            (Self::Jobs, _) => "list each job's input and output artifacts instead of its commands",
             (Self::Counts, _) => {
                 "show how many jobs each step resolves, not the jobs; before them with --commands or --paths; with -o, as well as writing the .spitdag; cannot combine with --json"
             }

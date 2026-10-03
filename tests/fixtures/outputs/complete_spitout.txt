@@ -1,4 +1,4 @@
-$ spit dag pipeline.spit complete.spitout
+$ spit dag pipeline.spit complete.spitout --jobs
 exit: 0
 --- stdout
 Job 1
