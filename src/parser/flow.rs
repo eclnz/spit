@@ -377,7 +377,7 @@ fn flow_line(
             StatementKind::Discover(parse_discover(declaration.trim(), number)?)
         }
         Some((Keyword::Operation, declaration)) => {
-            StatementKind::operation(original, declaration.trim(), number)?
+            StatementKind::operation(original, declaration.trim(), number, stage.clone())?
         }
         Some((keyword @ (Keyword::Require | Keyword::Skip | Keyword::Drop), _)) => {
             top_level_only(if keyword == Keyword::Require {
