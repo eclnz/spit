@@ -120,7 +120,7 @@ removed:
         rule: drop [sub, ses] where image count<2
         at: line 4
         found: 1
-$ spit dag drop.spitin
+$ spit dag drop.spitin --jobs
 exit: 0
 --- stdout
 Job 1
