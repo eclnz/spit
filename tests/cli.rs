@@ -64,6 +64,60 @@ fn dag_resolves_a_pipeline_over_a_spitout() {
 }
 
 #[test]
+fn dag_counts_the_jobs_of_each_step_and_keeps_empty_steps() {
+    let tree = Tree::new("dag-counts", &[]);
+    let pipeline = tree.write(
+        "pipeline.spit",
+        "\
+source image [subject]
+source extra [subject]
+operation f(image: Image) -> Image
+operation g(image: Image, image2: Image) -> Image
+cleaned = f(image)
+other = f(extra @ where(subject=z))
+both = g(cleaned, image)
+path image: in/{subject}.img
+path extra: in/{subject}.extra
+",
+    );
+    let inputs = tree.write(
+        "inputs.spitout",
+        "sources:\n  image[subject=a]\n  image[subject=b]\n  extra[subject=a]\n",
+    );
+    let (pipeline, inputs) = (pipeline.to_str().unwrap(), inputs.to_str().unwrap());
+    let output = spit(&["dag", pipeline, inputs, "--counts"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(
+        stdout(&output),
+        "jobs  step\n   2  cleaned = f\n   0  other = f\n   2  both = g\n   4  total\n"
+    );
+
+    // With -o, the counts are printed and the .spitdag is written.
+    let dag = tree.path().join("plan.spitdag");
+    let written = spit(&[
+        "dag",
+        pipeline,
+        inputs,
+        "--counts",
+        "-o",
+        dag.to_str().unwrap(),
+    ]);
+    assert!(written.status.success(), "{}", stderr(&written));
+    assert!(stdout(&written).ends_with("   4  total\n"));
+    assert!(fs::read_to_string(&dag).unwrap().contains("\"jobs\""));
+
+    for view in ["--json", "--paths", "--commands"] {
+        let conflict = spit(&["dag", pipeline, inputs, "--counts", view]);
+        assert!(!conflict.status.success());
+        assert!(
+            stderr(&conflict).contains("cannot be used with"),
+            "{view}: {}",
+            stderr(&conflict)
+        );
+    }
+}
+
+#[test]
 fn partial_dag_plans_the_complete_stores_and_records_the_rest() {
     let recipe = format!(
         "{}/tests/fixtures/weekly_stores/weekly.spitin",

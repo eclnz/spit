@@ -55,6 +55,58 @@ pub fn render_dag(dag: &ResolvedDag) -> String {
     writer.text
 }
 
+/// How many jobs each step resolves, one row per step in the order they
+/// were resolved, then the total, as
+///
+/// ```text
+/// jobs  step                  stage
+///    4  sorted = sort_lines   preprocess/clean
+///    0  report = summarise    analysis
+///    4  total
+/// ```
+///
+/// A step that resolves no jobs keeps its row, so an empty step shows.
+pub fn render_step_counts(dag: &ResolvedDag) -> String {
+    let mut jobs = vec![0_usize; dag.steps.len()];
+    for job in &dag.jobs {
+        jobs[job.step.index()] += 1;
+    }
+    let steps: Vec<String> = dag
+        .steps
+        .iter()
+        .map(|step| format!("{} = {}", step.outputs.join(", "), step.operation))
+        .collect();
+    let total = dag.jobs.len().to_string();
+    let count_width = total.len().max("jobs".len());
+    let step_width = steps
+        .iter()
+        .map(String::len)
+        .max()
+        .unwrap_or(0)
+        .max("step".len());
+    let staged = dag.steps.iter().any(|step| step.stage.is_some());
+    let mut text = String::new();
+    let mut row = |count: &str, step: &str, stage: &str| {
+        let line = if staged {
+            format!("{count:>count_width$}  {step:<step_width$}  {stage}")
+        } else {
+            format!("{count:>count_width$}  {step}")
+        };
+        text.push_str(line.trim_end());
+        text.push('\n');
+    };
+    row("jobs", "step", "stage");
+    for ((step, name), count) in dag.steps.iter().zip(&steps).zip(&jobs) {
+        row(
+            &count.to_string(),
+            name,
+            step.stage.as_deref().unwrap_or(""),
+        );
+    }
+    row(&total, "total", "");
+    text
+}
+
 /// What every artifact of one product shows: its dimensions in declared
 /// order, when known, and its type as ` : Type`, or nothing when unknown.
 struct ProductText<'a> {
