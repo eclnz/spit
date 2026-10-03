@@ -28,19 +28,24 @@ check() { # name, expected, fresh
   else echo "FAIL  $1"; python3 "$HARNESS/grade.py" "$2" "$3"; status=1; fi
 }
 
+resolve() { # name, recipe, spitdag: resolve the key, or say why it cannot
+  if "$BIN" dag "$2" -o "$3" 2>"$TMP/error"; then return 0; fi
+  echo "FAIL  $1: dag failed"; sed 's/^/      /' "$TMP/error"; status=1; return 1
+}
+
 for S in "$TMP"/scenarios/*/; do
   name=$(basename "$S"); W=$TMP/$name
   cp -r "$S/data" "$W"; cp "$S"/key/*.spit* "$W"/ 2>/dev/null || true
   rm -f "$W/expected.spitdag"
-  "$BIN" dag "$W/dataset.spitin" -o "$TMP/$name.spitdag" 2>/dev/null
-  check "$name" "$S/key/expected.spitdag" "$TMP/$name.spitdag"
+  resolve "$name" "$W/dataset.spitin" "$TMP/$name.spitdag" &&
+    check "$name" "$S/key/expected.spitdag" "$TMP/$name.spitdag"
 
   if [ -d "$S/key-followup" ]; then
     W=$TMP/$name-followup
     cp -r "$S/data" "$W"; cp -r "$S/addition/." "$W/"
     cp "$S/key-followup/pipeline.spit" "$S/key-followup/dataset.spitin" "$W/"
-    "$BIN" dag "$W/dataset.spitin" -o "$TMP/$name-followup.spitdag" 2>/dev/null
-    check "$name follow-up" "$S/key-followup/expected.spitdag" "$TMP/$name-followup.spitdag"
+    resolve "$name follow-up" "$W/dataset.spitin" "$TMP/$name-followup.spitdag" &&
+      check "$name follow-up" "$S/key-followup/expected.spitdag" "$TMP/$name-followup.spitdag"
   fi
 done
 if [ "$WRITE" = --write ]; then

@@ -1,5 +1,5 @@
-//! Operation declarations: `name(inputs) -> outputs`, with an optional
-//! `@ min(count)` clause.
+//! Operation declarations: `name(inputs) -> outputs`, where a `many`
+//! input may carry an `@ min(count)` clause.
 
 use crate::model::{Cardinality, InputPort, OperationDef, OutputPort, ShapeRule, DEFAULT_OUTPUT};
 use crate::types::{parse_type_expr, TypeExpr};
@@ -9,9 +9,15 @@ use super::lexical::{call_parts, comma_items, identifier, split_ending};
 use super::ParseError;
 
 pub(super) fn parse_operation(line: &str, number: usize) -> Result<OperationDef, ParseError> {
-    let mut clauses = line.split('@');
-    let line = clauses.next().unwrap_or_default().trim_end();
-    let clauses = parse_clauses(clauses, number)?;
+    // Clauses after the inputs belong to the whole signature; those inside
+    // them stay with their ports.
+    let inputs_end = inputs_end(line).unwrap_or(0);
+    let cut = line[inputs_end..]
+        .find('@')
+        .map_or(line.len(), |at| inputs_end + at);
+    let (line, trailing) = line.split_at(cut);
+    let line = line.trim_end();
+    let clauses = parse_clauses(trailing.split('@').skip(1), TRAILING, number)?;
     let (signature, outputs) = if let Some((signature, output)) = line.split_once("->") {
         (signature, parse_outputs(output.trim(), number)?)
     } else {
@@ -56,31 +62,138 @@ pub(super) fn parse_operation(line: &str, number: usize) -> Result<OperationDef,
             "operation needs at least one input",
         ));
     }
-    let ports = inputs
-        .iter()
-        .map(|input| parse_input_port(input, number))
-        .collect::<Result<Vec<_>, _>>()?;
-    let shape_rule = shape_rule(&ports, &clauses, number)?;
+    let mut minimum = None;
+    let mut ports = Vec::with_capacity(inputs.len());
+    for input in &inputs {
+        let (port, at_least) = parse_port_with_minimum(input, number)?;
+        minimum = minimum.or(at_least);
+        ports.push(port);
+    }
+    let shape_rule = shape_rule(&ports, number)?;
+    if let Some((count, clause)) = clauses.min {
+        return Err(misplaced_minimum(name, &inputs, &ports, line, count, number).at_token(clause));
+    }
     let mut operation = OperationDef::with_outputs(name, ports, outputs, shape_rule);
-    if let Some(minimum) = clauses.min {
+    if let Some(minimum) = minimum {
         operation = operation.at_least(minimum);
     }
     Ok(operation)
 }
 
-/// The `@ min(count)` clause after a signature, and a removed `@ drop(...)`
-/// clause with its text, kept to say what to write instead.
+/// One past the `)` that closes the input list, so an `@` clause inside it
+/// stays with its port, or `None` if the list is never opened or closed.
+fn inputs_end(line: &str) -> Option<usize> {
+    let open = line.find('(')?;
+    let mut depth = 0_usize;
+    for (index, character) in line[open..].char_indices() {
+        match character {
+            '(' => depth += 1,
+            ')' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(open + index + 1);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// An input port and the minimum its `@ min(count)` clause sets, which
+/// only a `many` port may have.
+fn parse_port_with_minimum(
+    input: &str,
+    number: usize,
+) -> Result<(InputPort, Option<usize>), ParseError> {
+    let Some((port, clauses)) = input.split_once('@') else {
+        return Ok((parse_input_port(input, number)?, None));
+    };
+    let clauses = parse_clauses(clauses.split('@'), ON_PORT, number)?;
+    if let Some((_, clause)) = clauses.drop {
+        return Err(ParseError::new(number, ON_PORT).at_token(clause));
+    }
+    let port = parse_input_port(port.trim_end(), number)?;
+    let Some((count, clause)) = clauses.min else {
+        unreachable!("a clause that is not `drop` is `min`, or parsing failed")
+    };
+    if port.cardinality != Cardinality::Many {
+        return Err(ParseError::new(
+            number,
+            format!(
+                "`@ min(count)` goes on a `many` input; `{}` takes one artifact",
+                port.name
+            ),
+        )
+        .at_token(clause));
+    }
+    Ok((port, Some(count)))
+}
+
+/// The error for a minimum written after the signature: the line as it is
+/// written now, with the minimum beside the `many` input it counts.
+fn misplaced_minimum(
+    name: &str,
+    inputs: &[&str],
+    ports: &[InputPort],
+    line: &str,
+    count: usize,
+    number: usize,
+) -> ParseError {
+    let Some(many) = ports
+        .iter()
+        .position(|port| port.cardinality == Cardinality::Many)
+    else {
+        return ParseError::new(number, "`@ min(count)` requires a many input");
+    };
+    let inputs: Vec<String> = inputs
+        .iter()
+        .enumerate()
+        .map(|(index, input)| {
+            let input = input.trim();
+            if index == many {
+                format!("{input} @ min({count})")
+            } else {
+                input.to_owned()
+            }
+        })
+        .collect();
+    let outputs = line
+        .split_once("->")
+        .map(|(_, outputs)| format!(" -> {}", outputs.trim()))
+        .unwrap_or_default();
+    ParseError::new(
+        number,
+        format!(
+            "write a many input's minimum beside it: `{name}({}){outputs}`",
+            inputs.join(", ")
+        ),
+    )
+}
+
+/// What a clause after the signature may be: none is now, but `min` and
+/// `drop`, which were, are read to say what to write instead.
+const TRAILING: &str =
+    "nothing follows an operation's outputs; write `@ min(count)` on its many input";
+
+/// What a clause on an input port may be.
+const ON_PORT: &str = "expected `@ min(count)` on a many input";
+
+/// An `@ min(count)` clause, and a removed `@ drop(...)` clause, each with
+/// its text, kept to point at it and to say what to write instead.
 #[derive(Default)]
 struct Clauses<'a> {
     drop: Option<(Vec<String>, &'a str)>,
-    min: Option<usize>,
+    min: Option<(usize, &'a str)>,
 }
 
+/// The clauses split at each `@`; `expected` says what else may be written
+/// where they are.
 fn parse_clauses<'a>(
     clauses: impl Iterator<Item = &'a str>,
+    expected: &str,
     number: usize,
 ) -> Result<Clauses<'a>, ParseError> {
-    let expected = "expected `@ min(count)` after operation signature";
     let mut parsed = Clauses::default();
     for clause in clauses {
         let clause = clause.trim();
@@ -119,7 +232,7 @@ fn parse_clauses<'a>(
                         ParseError::new(number, "`@ min(count)` needs a positive integer")
                             .at_token(argument)
                     })?;
-                parsed.min = Some(count);
+                parsed.min = Some((count, clause));
             }
             "drop" | "min" => {
                 return Err(
@@ -251,13 +364,8 @@ fn suggested_name(type_text: &str) -> String {
     }
 }
 
-/// Whether an operation aggregates, which it does with one many input; only
-/// then may it require a minimum count.
-fn shape_rule(
-    ports: &[InputPort],
-    clauses: &Clauses,
-    number: usize,
-) -> Result<ShapeRule, ParseError> {
+/// Whether an operation aggregates, which it does with one many input.
+fn shape_rule(ports: &[InputPort], number: usize) -> Result<ShapeRule, ParseError> {
     let many = ports
         .iter()
         .filter(|port| port.cardinality == Cardinality::Many)
@@ -268,16 +376,11 @@ fn shape_rule(
             "an operation takes at most one `many` input; each job groups one collection",
         ));
     }
-    if many == 1 {
-        return Ok(ShapeRule::Aggregate);
-    }
-    if clauses.min.is_some() {
-        return Err(ParseError::new(
-            number,
-            "`@ min(count)` requires a many input",
-        ));
-    }
-    Ok(ShapeRule::Preserve)
+    Ok(if many == 1 {
+        ShapeRule::Aggregate
+    } else {
+        ShapeRule::Preserve
+    })
 }
 
 /// Parse an operation's output: one type, or `(name: Type, ...)` for
