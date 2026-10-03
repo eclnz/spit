@@ -7,9 +7,10 @@ use std::path::Path;
 use spit::{
     bind_dag, bind_dag_with, diagnose_checked, diagnose_inputs, diagnose_recipe, inspect_paths,
     parse_input_spec_at, render_artifacts, render_bound_dag, render_check_json, render_dag,
-    render_diagnostics_json, render_editor_json, render_source_inventory, render_words_json,
-    resolve_artifacts_partial, unused_sources_summary, validate_bound_source_files,
-    validate_source_files, BoundPaths, Context, FileNames, Gap, LeftOut, View,
+    render_diagnostics_json, render_editor_json, render_source_inventory, render_step_counts,
+    render_words_json, resolve_artifacts_partial, unused_sources_summary,
+    validate_bound_source_files, validate_source_files, BoundPaths, Context, FileNames, Gap,
+    LeftOut, View,
 };
 
 use super::args::{CliArgs, Flag};
@@ -200,6 +201,9 @@ pub(crate) fn dag(args: &CliArgs) -> Result<(), Box<dyn Error>> {
         Some(paths) => bind_dag_with(&prepared.pipeline, dag, paths),
         None => bind_dag(&prepared.pipeline, dag),
     };
+    if args.has(Flag::Counts) {
+        print!("{}", render_step_counts(dag));
+    }
     if args.has(Flag::Output) || args.has(Flag::Json) {
         let mut bound = bind(paths)?;
         bound.removed = prepared.inputs.inventory.removed.clone();
@@ -242,7 +246,7 @@ pub(crate) fn dag(args: &CliArgs) -> Result<(), Box<dyn Error>> {
             }
         }
         print!("{}", render_bound_dag(&bind(paths)?, view));
-    } else {
+    } else if !args.has(Flag::Counts) {
         print!("{}", render_dag(dag));
     }
     Ok(())

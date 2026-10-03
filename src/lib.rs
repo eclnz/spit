@@ -57,7 +57,10 @@ pub use paths::{
     inspect_paths, validate_bound_source_files, validate_source_files, BoundPaths, PathCoverage,
     PathCoverageEntry, PathError, PathProblem, PathRule, PathTemplate, VerifiedFiles,
 };
-pub use render::{render_artifacts, render_bound_dag, render_dag, unused_sources_summary, View};
+pub use render::{
+    render_artifacts, render_bound_dag, render_dag, render_step_counts, unused_sources_summary,
+    View,
+};
 pub use resolver::{
     bind_dag, bind_dag_with, resolve, resolve_artifacts_excluding, resolve_artifacts_partial,
     BindError,

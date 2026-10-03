@@ -67,9 +67,9 @@ SPIT has no backend yet: nothing in this repository runs a `.spitdag`.
 spit check <pipeline.spit | recipe.spitin | inputs.spitout> [--path-rules] [--json] [--stdin] [--hovers]
 spit inputs <recipe.spitin> [--unmatched | --suggest | -o <file>]
 spit inputs <pipeline.spit> --root <directory> [--unmatched | --suggest | -o <file>]
-spit dag <recipe.spitin> [--paths] [--commands] [--partial] [--json | -o <file>]
-spit dag <pipeline.spit> <inputs.spitout | -> [--paths] [--commands] [--partial] [--json | -o <file>]
-spit dag <pipeline.spit> --root <directory> [--paths] [--commands] [--partial] [--json | -o <file>]
+spit dag <recipe.spitin> [--paths] [--commands] [--counts] [--partial] [--json | -o <file>]
+spit dag <pipeline.spit> <inputs.spitout | -> [--paths] [--commands] [--counts] [--partial] [--json | -o <file>]
+spit dag <pipeline.spit> --root <directory> [--paths] [--commands] [--counts] [--partial] [--json | -o <file>]
 spit artifacts <recipe.spitin>
 spit artifacts <pipeline.spit> <inputs.spitout | ->
 spit artifacts <pipeline.spit> --root <directory>
@@ -92,6 +92,7 @@ Files come first; options follow them. `spit help` lists the commands, and `spit
 | `--unmatched` | With `inputs`, list files under the dataset root that match no source path rule, one per line, instead of writing a `.spitout`. |
 | `--suggest` | With `inputs`, print `source` and `path` lines for the files under the dataset root that match no source path rule, instead of writing a `.spitout`; see [Start from the files](#start-from-the-files). |
 | `--paths` | With `dag`, print the file under every artifact. |
+| `--counts` | With `dag`, print how many jobs each step resolves instead of the jobs: one row per step, as `cleaned = clean`, with its stage when the pipeline has stages, then the total. A step that resolves no jobs shows `0`, so an empty step or an unexpected expansion stands out before the plan is run. With `-o`, print the counts and write the `.spitdag` too. |
 | `--commands` | With `dag`, print each job's `verify` and command lines with their paths filled in, quoted as a shell reads them, so a line can be pasted into a shell run from the dataset folder. With `--paths`, print them under each job's artifacts. Use it separately from `-o`, which saves a `.spitdag`. |
 | `--partial` | With `dag`, plan jobs whose inputs can be completed and record the artifacts left out of the `.spitdag`. A `many` input uses its complete members. Without it, `dag` stops at an incomplete job. |
 | `--json` | With `dag`, print the `.spitdag`. With `check`, print diagnostics as JSON for editor use and stop, succeeding whatever they report. Each diagnostic has a `severity` of `error` or `warning`; those tied to a declaration, call, rule, command, or path include its `line`, and a `column` and `end_column` for the text it is about, such as one input of a call or one `{placeholder}`. Columns are 1-based and count UTF-16 code units, as editors do; `end_column` is one past the last character. When checking a recipe finds an error in its pipeline, the diagnostic includes `file` and positions in that pipeline. For a pipeline that checks clean, a `paths` list gives each product whose path no rule writes in full, with its `line` and its `path`, extension included, for the editor to show. |
