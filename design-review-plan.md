@@ -120,6 +120,44 @@ The four questions:
 
 [Issue 35](https://github.com/eclnz/spit/issues/35) leaves open optional sidecar members and outputs a command may or may not create, as well as the backend's missing-output contract. Work through one genuine case before adding a general optional type. If a sidecar is absent, the graph needs to say whether to skip the job, use a different operation, proceed without that argument, or fail. "Optional" syntax alone does not settle that behaviour.
 
+**Item 2 design (decided, branch `optional-outputs`): no optional type; a missing declared file fails, and the existing tools choose to skip.** The case is #35's: `dcm2niix -b n` writes no BIDS `.json`, and a BIDS dataset lacks some subjects' `.json`. Worked through against the binary on `dev` with this pipeline and three subjects, the second without `sub-02_T1w.json`:
+
+```text
+source dicom : DicomDir/ [sub]
+path dicom: dicom/sub-{sub}
+operation convert(dicom: DicomDir) -> (image: Image .nii.gz, meta: Json .json beside image)
+command convert: dcm2niix -b n -z y -f {image.stem} -o {image.dir} {dicom}
+nifti, nifti_meta = convert(dicom)
+
+sidecars t1w [sub]:
+    path: sub-{sub}/anat/sub-{sub}_T1w
+    source anat : Image .nii.gz
+    source anat_meta : Json .json
+operation strip(t1: Image) -> Image .nii.gz
+command strip: bet {t1} {@output}
+operation readout(t1: Image, meta: Json) -> Table .tsv
+command readout: readout_time {t1} {meta} {@output}
+brain = strip(anat)
+times = readout(anat, anat_meta)
+```
+
+- *The output (`-b n`): fail.* Whether dcm2niix writes the `.json` is decided by the command's flags, which are the same for every job of the operation, not by the data. So the sidecar is not optional per job: it is always written or never written, and the operation that passes `-b n` should not declare `meta`. SPIT cannot read a tool's flags, so it cannot see the contradiction; the backend can. **The backend's contract**: a job whose command exits 0 but leaves a declared output missing (a file, or a folder) fails, exactly as a failed command does. It records no success, its `"after"` checks do not run, its dependents do not run, and the report names the output's port and path. spit-bash already fails such a job ("command succeeded but did not create every output"); `docs/spitdag.md` now states the rule as part of version 6 rather than only in the order its "Running checks" section gives, and spit-bash's message names the port and path. No version bump: no reader's behaviour changes. An output a tool writes only for some data, such as dcm2niix's `.bval` and `.bvec` for a diffusion series only, is "use a different operation", chosen by source: declare `convert_dwi` with those outputs `beside` its image and call it on the diffusion source. An output known only after the command runs stays under deferred dynamic outputs.
+- *The member (`anat_meta` missing for `sub=02`): fail by default, skip by choice, never proceed without it.* Each answer, as the binary gives it today:
+  - *Fail.* `spit inputs` warns `t1w[sub=02] has .nii.gz but no .json`, and plain `dag` stops at the step that reads the member: `no anat_meta artifact for input meta of readout at [sub=02]`. That is the right default: an absence nobody expected stops the plan before anything runs.
+  - *Skip.* `dag --partial` plans the other 8 jobs, `brain[sub=02]` included, and lists `times[sub=02]` in `left_out` with that reason. A recipe can instead remove the subject on the record, `drop [sub] where anat_meta count=0  # no BIDS sidecar`, which removes all of `sub=02`, `brain` too, and notes why.
+  - *Proceed without the argument: no.* `readout`'s JSON carries the phase-encoding and timing a tool needs; running it with one argument fewer changes the result silently, which is the one outcome the graph must not hide. A tool for which the JSON is truly optional is a second operation without that port, which is the next answer.
+  - *A different operation.* Today only by source or by `exclude`: the graph has no per-artifact dispatch on whether a file exists, and this case does not need one.
+  - The incomplete-group warning stays a warning, as #35 left it: a missing member matters only to a step that reads it, and that step's error is the error. `strip(anat)` plans all three subjects.
+
+The four questions:
+
+1. *Phase.* None new in the compiler. The output contract is the backend's, written in `docs/spitdag.md` and kept by spit-bash. A missing member stays where it is today: discovery warns about the group, the resolver reports the step's missing input, and `dag --partial` or a recipe's `drop` skip it.
+2. *Lowering.* Nothing to lower: a `beside` output and a `sidecars` member are already ordinary outputs and sources, and an optional type would need a new form at every phase (a port that may bind nothing, a command argument that may vanish, a `left_out` that is not a gap) with no case behind it.
+3. *Invariants.* Every declared output exists after a job that succeeds; every argument of a planned job's command names an artifact that exists or that an earlier job writes; a job never runs with an argument left out. The DAG format, fingerprints and plans are unchanged.
+4. *Interactions.* Selectors, imports, stages and paths: none. Partial plans: `left_out` gives the missing member as the reason. Checks: a missing output fails before the `"after"` checks run, so a check never runs on a file that is not there. Folders: a folder output must exist and may be empty, as before. `adopt` already leaves a job whose output is missing. `check --json` and the syntax are unchanged, so spit-vscode needs no change.
+
+Steps: (a) this design, merged to `dev` before code; (b) `docs/spitdag.md` states the missing-output rule, the language reference says a `beside` output the tool does not write fails the job and what a missing `sidecars` member does to the steps that read it; `tests/sidecars.rs` pins fail, `--partial` and `drop` for a missing member; (c) spit-bash, branch `optional-outputs`: the failure names each missing output's port and path. Left open in #35: literal dots, and groups for derived products, which this case does not touch. Deferred: a recipe rule that expects a member to be missing, so that plain `dag` leaves out only the jobs that read it and keeps the subject's others, as `--partial` does for one run; wait for a dataset where `--partial` hides a gap that mattered.
+
 ### 3. Lower the cost of binding existing data
 
 The project has improved path diagnostics and can scan a dataset without a recipe. [PR 52](https://github.com/eclnz/spit/pull/52), open when reviewed and since merged, adds `spit inputs --suggest` to generate source and path lines from existing files. This addresses a usability-study finding directly. Judge it by whether a user can inspect, correct, and trust suggestions for irregular datasets; keep suggested declarations editable and verify them with the actual matcher.
