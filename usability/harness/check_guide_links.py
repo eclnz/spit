@@ -10,6 +10,8 @@ from urllib.parse import unquote
 root = Path(sys.argv[1]).resolve()
 documents = [root / "GUIDE.md", root / "README.md", *sorted((root / "docs").glob("*.md"))]
 errors = []
+# Developer docs that a trial leaves out on purpose.
+LEFT_OUT = [root / "profiling"]
 
 
 def anchors(document):
@@ -32,6 +34,8 @@ for document in documents:
             continue
         path_part, _, anchor = unquote(link).partition("#")
         target = (document.parent / path_part).resolve() if path_part else document
+        if any(target.is_relative_to(left_out) for left_out in LEFT_OUT):
+            continue
         if not target.is_relative_to(root) or not target.exists():
             errors.append(f"{document.relative_to(root)}: missing {link}")
         elif anchor and target.suffix == ".md" and anchor not in anchors(target):
