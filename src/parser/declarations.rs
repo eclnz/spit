@@ -221,6 +221,9 @@ pub(super) fn parse_coverage_rule(line: &str, number: usize) -> Result<CoverageR
     let rest = line
         .strip_prefix("require ")
         .ok_or_else(|| ParseError::new(number, syntax))?;
+    if rest.trim_start().starts_with('[') {
+        return Err(require_in_drop_order(rest, number));
+    }
     let (target, terms, dimensions) = parse_require_parts(rest, number, syntax)?;
     let mut rule = CoverageRule::new(target, &dimensions, CountRequirement::AtLeast(1));
     rule.count = terms.count;
@@ -250,6 +253,11 @@ fn parse_require_parts<'a>(
 fn parse_drop(rest: &str, number: usize) -> Result<CoverageRule, ParseError> {
     let syntax = "expected `drop [dimensions] where source` and one condition: `count<2`, `missing run=1,2` or `has run=3`";
     let rest = rest.trim_start();
+    if !rest.starts_with('[') {
+        if let Some(error) = drop_in_require_order(rest, number) {
+            return Err(error);
+        }
+    }
     let close = rest
         .find(']')
         .filter(|_| rest.starts_with('['))
@@ -299,6 +307,63 @@ fn parse_drop(rest: &str, number: usize) -> Result<CoverageRule, ParseError> {
         }
     }
     Ok(rule)
+}
+
+/// The error for a `require` rule written in `drop`'s order, groups first,
+/// with the rule in `require`'s order when its condition reads cleanly.
+/// `missing` has no `require` counterpart, so it gets the general shape.
+fn require_in_drop_order(rest: &str, number: usize) -> ParseError {
+    let suggestion = parse_drop(rest, number)
+        .ok()
+        .filter(|rule| rule.values.is_empty())
+        .map(|rule| {
+            let condition = match rule.count {
+                Some(count) => count.as_written(),
+                None => value_terms(&rule.has),
+            };
+            format!(
+                "require {} {condition} per [{}]",
+                rule.product,
+                rule.group_by.join(", ")
+            )
+        });
+    let shape = "`require` names the source first, then the groups after `per`";
+    let message = match suggestion {
+        Some(rule) => format!("{shape}: write `{rule}`"),
+        None => format!("{shape}, as in `require t1w count=1 per [sub, ses]`"),
+    };
+    ParseError::new(number, message)
+}
+
+/// The error for a `drop` rule written in `require`'s order, source first,
+/// or `None` when the text does not read as one. A count keeps its
+/// comparison; values could mean `has` or `missing`, so both are named.
+fn drop_in_require_order(rest: &str, number: usize) -> Option<ParseError> {
+    let syntax = "expected `drop [dimensions] where source`";
+    let (product, terms, dimensions) = parse_require_parts(rest, number, syntax).ok()?;
+    let start = format!("drop [{}] where {product}", dimensions.join(", "));
+    let shape = "`drop` names the groups first, then `where`";
+    let message = match (terms.count, terms.values.is_empty()) {
+        (Some(count), true) => format!("{shape}: write `{start} {}`", count.as_written()),
+        (None, false) => {
+            let values = value_terms(&owned_values(terms.values));
+            format!(
+                "{shape}: write `{start} has {values}` to remove the groups that have them, \
+                 or `{start} missing {values}` to remove the groups that lack one"
+            )
+        }
+        _ => format!("{shape}, as in `drop [sub] where sessions count<2`"),
+    };
+    Some(ParseError::new(number, message))
+}
+
+/// Values as a rule writes them: `run=1,2 echo=1`.
+fn value_terms(values: &BTreeMap<String, Vec<String>>) -> String {
+    values
+        .iter()
+        .map(|(dimension, listed)| format!("{dimension}={}", listed.join(",")))
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// The error for a `skip` rule, which `drop` replaces, with the `drop` rule
