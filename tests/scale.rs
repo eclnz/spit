@@ -8,8 +8,8 @@ use std::time::{Duration, Instant};
 mod support;
 
 use spit::{
-    diagnose, diagnose_in, parse_pipeline, parse_source_inventory, resolve, validate_pipeline,
-    Context,
+    diagnose, diagnose_in, parse_pipeline, parse_source_inventory, render_diagnostics_json,
+    resolve, validate_pipeline, Context, FileNames, SourceLines,
 };
 
 /// A chain of `steps` steps, each reading the one before.
@@ -95,6 +95,55 @@ fn many_calls_to_an_operation_that_failed_to_declare_are_left_out_in_reasonable_
     let issues = diagnose(&text, None);
     assert_eq!(issues.len(), 1);
     assert!(start.elapsed() < Duration::from_secs(10));
+}
+
+/// The best of a few runs of `work`, which steadies a timing against noise.
+fn best_of(runs: usize, mut work: impl FnMut()) -> Duration {
+    (0..runs)
+        .map(|_| {
+            let start = Instant::now();
+            work();
+            start.elapsed()
+        })
+        .min()
+        .unwrap_or_default()
+}
+
+/// Rendering finds each diagnostic's line by its number, not by counting
+/// from the top of the file, so it costs the diagnostics, not the diagnostics
+/// times the length of the file. This runs with the normal tests: it compares
+/// four times the bad lines to one, so a slow machine does not fail it, and
+/// quadratic rendering, which takes sixteen times as long, does.
+#[test]
+fn rendering_diagnostics_costs_the_diagnostics_not_the_length_of_the_file() {
+    let small = bad_steps(2_000, |index| format!("p{index} = step(raw @ bogus(sub))"));
+    let large = bad_steps(8_000, |index| format!("p{index} = step(raw @ bogus(sub))"));
+    let (few, many) = (diagnose(&small, None), diagnose(&large, None));
+    assert_eq!((few.len(), many.len()), (2_000, 8_000));
+    let render = |diagnostics: &[spit::Diagnostic], text: &str| {
+        let json = render_diagnostics_json(diagnostics, text, None);
+        let lines = SourceLines::new(diagnostics, text, None);
+        let shown: usize = diagnostics
+            .iter()
+            .map(|diagnostic| {
+                diagnostic
+                    .display_with(&lines, FileNames::default())
+                    .to_string()
+                    .len()
+            })
+            .sum();
+        assert!(json.len() > shown);
+    };
+    let (one, four) = (
+        best_of(5, || render(&few, &small)),
+        best_of(5, || render(&many, &large)),
+    );
+    // Linear is about 4; quadratic is about 16. Below a millisecond a ratio
+    // is only noise.
+    assert!(
+        four < Duration::from_millis(50) || four < one * 10,
+        "{one:?} for 2,000 bad lines, {four:?} for 8,000"
+    );
 }
 
 /// A source and an operation `step`, as `bad_steps` starts, then `more`.
