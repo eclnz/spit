@@ -138,6 +138,32 @@ The first word of a command must be an executable available on `PATH` (or an exe
 command process: process_tool {image} {@output}
 ```
 
+### Operations carried out by steps
+
+An operation may be carried out by steps instead of a command: its header ends in `:`, and its steps are indented beneath it. A call to it looks like any other call, and becomes the body's steps over the caller's products, each with its own jobs:
+
+```text
+operation clean(x: Lines, t: Table) -> Lines
+command clean: clean {x} {t} {@output}
+operation merge(xs: many Lines) -> Lines
+command merge: merge {xs} {@output}
+operation count(x: Lines) -> Count
+command count: wc {x} {@output}
+
+operation summarise(reads: Lines, table: Table) -> (merged: Lines, total: Count):
+    cleaned = clean(reads, table)
+    merged = merge(cleaned @ vary(lane))
+    total = count(merged)
+
+first, first_total = summarise(raw, calibration @ where(revision=2))
+```
+
+The body reads the operation's inputs, by their port names, and the products its earlier steps make, and it makes each named output once. Its outputs are the products the caller names: here `first` and `first_total`. A product the body makes for itself is filed under the call's first output, so `cleaned` is `first::cleaned`, written `first.cleaned` in a path, and a second call of `summarise` files its own apart. Only the outputs are the caller's to read: a step that reads `first::cleaned` is an error that says to make it an output.
+
+A selector the caller gives an input holds wherever the body reads it, beside the body's own: above, every `clean` job reads revision 2, and `merge` collects each group's lanes. A call in a stage puts every step it makes in that stage. A body may call another operation with a body, which is expanded in turn; every operation a body calls is declared before it. An output written with a type, as `total: Count`, gives the caller's product that type, and SPIT checks it against the step that makes it. An error in a step the call makes, such as a type the step does not accept, is reported at the call.
+
+An operation with a body names its outputs, as `-> (result: Type)`, since its steps assign them by name. An output takes its extension, folder and place from the step that writes it, so the header gives only its name and type. Such an operation takes no `command` or `verify` line; its steps' operations have their own.
+
 ## Checks
 
 A `check` tests one artifact once its file exists, with the tools that understand it. Declare it once, then attach it with `@ check(...)` where it applies:
