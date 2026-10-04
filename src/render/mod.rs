@@ -3,8 +3,6 @@
 use std::collections::BTreeSet;
 use std::fmt::{self, Write as _};
 
-use rustc_hash::{FxHashMap, FxHashSet};
-
 use crate::command::shell_word;
 use crate::model::{
     identity, push_identity, Artifact, ArtifactInstance, ArtifactReport, Call, CallId,
@@ -12,6 +10,8 @@ use crate::model::{
 };
 use crate::spitdag::{Argument, BoundDag, BoundJob, StepCall, When};
 use crate::types::TypeExpr;
+
+mod targets;
 
 /// The jobs as text, without ports or paths. Each job is written straight
 /// into the text, with each product's dimensions and type found and
@@ -607,75 +607,6 @@ impl Report<'_> {
                 )
             }
         }
-    }
-
-    /// The incomplete artifacts by final target: each one no other incomplete
-    /// job needs, then the incomplete artifacts it waits on, nested, each
-    /// shown once under its target with its own reasons. A reason that names
-    /// an incomplete artifact is that artifact's place in the tree instead.
-    fn write_targets(
-        &self,
-        f: &mut fmt::Formatter<'_>,
-        held_back: &BTreeSet<(&str, &EntityBinding)>,
-    ) -> fmt::Result {
-        type Key<'k> = (&'k str, &'k EntityBinding);
-        let incomplete = &self.report.incomplete;
-        let mut made_by: FxHashMap<Key<'_>, (usize, usize)> = FxHashMap::default();
-        let mut needed: FxHashSet<Key<'_>> = FxHashSet::default();
-        for (job, incomplete_job) in incomplete.iter().enumerate() {
-            for (output, artifact) in incomplete_job.outputs.iter().enumerate() {
-                made_by.insert((&artifact.product, &artifact.entities), (job, output));
-            }
-            for gap in &incomplete_job.gaps {
-                if let Gap::Blocked { artifact, .. } = gap {
-                    needed.insert((&artifact.product, &artifact.entities));
-                }
-            }
-        }
-        let count: usize = incomplete.iter().map(|job| job.outputs.len()).sum();
-        let mut targets = Vec::new();
-        for job in incomplete {
-            for artifact in &job.outputs {
-                if !needed.contains(&(artifact.product.as_str(), &artifact.entities)) {
-                    targets.push((job, artifact));
-                }
-            }
-        }
-        writeln!(
-            f,
-            "\nFinal targets that cannot be made: {} (incomplete artifacts: {count})",
-            targets.len()
-        )?;
-        let mut shown: FxHashSet<Key<'_>> = FxHashSet::default();
-        for (job, target) in targets {
-            shown.clear();
-            let mut stack = vec![(job, target, 1_usize)];
-            while let Some((job, artifact, depth)) = stack.pop() {
-                self.write_output(f, job, artifact, &"  ".repeat(depth))?;
-                let indent = "  ".repeat(depth + 1);
-                let mut waits = Vec::new();
-                for gap in &job.gaps {
-                    let Gap::Blocked {
-                        artifact: input, ..
-                    } = gap
-                    else {
-                        self.write_gap(f, gap, held_back, &indent)?;
-                        continue;
-                    };
-                    let key = (input.product.as_str(), &input.entities);
-                    match made_by.get(&key) {
-                        Some(&(inner, output)) if shown.insert(key) => {
-                            let inner = &incomplete[inner];
-                            waits.push((inner, &inner.outputs[output], depth + 1));
-                        }
-                        Some(_) => {}
-                        None => self.write_gap(f, gap, held_back, &indent)?,
-                    }
-                }
-                stack.extend(waits.into_iter().rev());
-            }
-        }
-        Ok(())
     }
 
     /// The sources no job reads, when there are any.
