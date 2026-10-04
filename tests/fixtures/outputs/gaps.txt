@@ -75,6 +75,24 @@ Coverage gaps: 1
 --- stderr
 note: found 20 source artifacts and 6 contexts under `.`
 note: ran `spit inputs strict.spitin` in memory
+$ spit artifacts strict.spitin --by-target
+exit: 0
+--- stdout
+Complete artifacts: 49
+
+Final targets that cannot be made: 1 (incomplete artifacts: 4)
+  score[sub=02,ses=2] : Score  (compare)
+    averaged[sub=02,ses=2] : Image<T1w>  (average)
+      aligned[sub=02,ses=2,run=1] : Image<T1w>  (align, stage prep)
+        cleaned[sub=02,ses=2,run=1] : Image<T1w>  (clean, stage prep)
+          - input `image` needs image[sub=02,ses=2,run=1], which a coverage gap holds back
+
+Coverage gaps: 1
+  source coverage for `image` at [ses=2,sub=02]: expected at least 2 artifact(s), found 1
+    holds back: image[sub=02,ses=2,run=1]
+--- stderr
+note: found 20 source artifacts and 6 contexts under `.`
+note: ran `spit inputs strict.spitin` in memory
 $ spit inputs drop.spitin -o drop.spitout
 exit: 0
 --- stdout

@@ -142,9 +142,10 @@ fn command_lines_print_as_before() {
 #[test]
 fn a_dataset_with_gaps_prints_as_before() {
     let tree = dataset(true);
-    let runs: [&[&str]; 5] = [
+    let runs: [&[&str]; 6] = [
         &["dag", "strict.spitin"],
         &["artifacts", "strict.spitin"],
+        &["artifacts", "strict.spitin", "--by-target"],
         &["inputs", "drop.spitin", "-o", "drop.spitout"],
         &["dag", "drop.spitin", "--jobs"],
         &["artifacts", "drop.spitin"],

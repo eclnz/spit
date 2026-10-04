@@ -61,8 +61,8 @@ pub use paths::{
     PathCoverageEntry, PathError, PathProblem, PathRule, PathTemplate, VerifiedFiles,
 };
 pub use render::{
-    render_artifacts, render_bound_dag, render_call, render_dag, render_step_counts,
-    unused_sources_summary, View,
+    render_artifacts, render_artifacts_by_target, render_bound_dag, render_call, render_dag,
+    render_step_counts, unused_sources_summary, View,
 };
 pub use resolver::{
     bind_dag, bind_dag_with, resolve, resolve_artifacts_excluding, resolve_artifacts_partial,

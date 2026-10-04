@@ -202,6 +202,28 @@ fn partial_dag_plans_the_complete_stores_and_records_the_rest() {
 }
 
 #[test]
+fn artifacts_by_target_groups_the_weekly_stores_under_their_final_target() {
+    let recipe = format!(
+        "{}/tests/fixtures/weekly_stores/weekly.spitin",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let grouped = spit(&["artifacts", &recipe, "--by-target"]);
+    assert!(grouped.status.success(), "{}", stderr(&grouped));
+    let text = stdout(&grouped);
+    assert!(text.starts_with("Complete artifacts: 50\n\nFinal targets that cannot be made: 1 (incomplete artifacts: 10)\n  summary : Report  (chain_summary)\n    report[store=s03]"));
+    // A reason's second line lines up under its first.
+    assert!(text.contains(
+        "\n        pricing[store=S07] exists; its `store` differs only in letter case\n"
+    ));
+    assert!(!text.contains("(job "));
+    assert!(text.contains("\nUnused sources: 1\n"));
+
+    let plain = spit(&["artifacts", &recipe]);
+    assert!(stdout(&plain).contains("Incomplete artifacts: 10\n"));
+    assert!(stdout(&plain).contains("(job "));
+}
+
+#[test]
 fn partial_on_complete_inputs_has_the_same_jobs() {
     let files = ["examples/types/typed.spit", "examples/types/typed.spitout"];
     let full = spit(&["dag", files[0], files[1], "--json"]);

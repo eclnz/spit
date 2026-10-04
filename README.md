@@ -97,6 +97,7 @@ Files come first; options follow them. `spit help` lists the commands, and `spit
 | `--counts` | With `dag`, print how many jobs each step resolves instead of the jobs: one row per step, as `cleaned = clean`, with its stage when the pipeline has stages, then the total. A step that resolves no jobs shows `0`, so an empty step or an unexpected expansion stands out before the plan is run. The steps a call to an [operation carried out by steps](docs/language-reference.md#operations-carried-out-by-steps) makes are indented under the call, with the call's jobs in all. With `--commands` or `--paths`, print the counts before the jobs. With `-o`, print the counts and write the `.spitdag` too. It cannot be combined with `--json`, which prints the `.spitdag` itself. |
 | `--commands` | With `dag`, print each job's checks, `verify` and command lines with their paths filled in, quoted as a shell reads them, so a line can be pasted into a shell run from the dataset folder. A job a call to an operation carried out by steps made starts with a `from:` line naming the call and the body's step. This is what plain `dag` prints. With `--paths`, print them under each job's artifacts. With `-o`, print the commands and write the `.spitdag` too, so the plan checked is the plan saved. |
 | `--jobs` | With `dag`, list each job's operation, stage, and input and output artifacts with their types, in place of its commands. A pipeline whose operations have no `command` lines plans with this view; plain `dag` notes when no job has a command. |
+| `--by-target` | With `artifacts`, group the incomplete artifacts by final target: each incomplete artifact no other incomplete job needs, with the incomplete artifacts it waits on nested under it, and each reason once. The complete artifacts are counted, not listed. |
 | `--partial` | With `dag`, plan jobs whose inputs can be completed and record the artifacts left out of the `.spitdag`. A `many` input uses its complete members. Without it, `dag` stops at an incomplete job. |
 | `--json` | With `dag`, print the `.spitdag`. With `check`, print diagnostics as JSON for editor use and stop, succeeding whatever they report. Each diagnostic has a `severity` of `error` or `warning`; those tied to a declaration, call, rule, command, or path include its `line`, and a `column` and `end_column` for the text it is about, such as one input of a call or one `{placeholder}`. Columns are 1-based and count UTF-16 code units, as editors do; `end_column` is one past the last character. When checking a recipe finds an error in its pipeline, the diagnostic includes `file` and positions in that pipeline. An error in a step a call to an [operation carried out by steps](docs/language-reference.md#operations-carried-out-by-steps) makes is placed at the call, and its `related` list gives each place in the body it comes from, each with its `line`, `column`, `end_column`, a `message`, and the `file` when it is another file, such as a library. For a pipeline that checks clean, a `paths` list gives each product whose path no rule writes in full, with its `line` and its `path`, extension included, for the editor to show. |
 | `--stdin` | With `check`, read the file's text from standard input, such as an editor's unsaved buffer. The file's path is still used to resolve `use` imports and a recipe's `pipeline` line. |
@@ -357,6 +358,17 @@ Incomplete artifacts: 2
     - no `calibration` artifact for input `reference` of `align` at [run=1,subject=02]
   merged[subject=02] : Scan  (merge)
     - input `runs` needs aligned[subject=02,run=1], which cannot be produced
+```
+
+`spit artifacts dataset.spitin --by-target` answers "why can't this final report be made" without repeating a reason for every artifact it holds back. A final target is an incomplete artifact that no other incomplete job needs; each is printed once, with the incomplete artifacts it waits on nested under it and their reasons beneath. An artifact that two branches both wait on is shown under the first only. For the example above:
+
+```text
+Complete artifacts: 10
+
+Final targets that cannot be made: 1 (incomplete artifacts: 2)
+  merged[subject=02] : Scan  (merge)
+    aligned[subject=02,run=1] : Scan  (align)
+      - no `calibration` artifact for input `reference` of `align` at [run=1,subject=02]
 ```
 
 An incomplete artifact has a missing or ambiguous input, a collection below its `@ min(count)`, or an input that is itself incomplete, so a gap early in the pipeline is traced through every step that depends on it. Given a recipe, a group that fails a `require` rule is listed under `Coverage gaps`, and its sources are held back from every job. A step creates jobs only for the artifacts that drive it, so a context with no driving artifact at all appears only through the coverage gaps and steps that notice it missing. The command succeeds whatever it finds; the complete artifacts are the ones the pipeline could produce from these inputs today.
