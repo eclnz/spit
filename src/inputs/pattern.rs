@@ -11,14 +11,36 @@ use rustc_hash::FxHashSet;
 use crate::model::{Pipeline, PipelineIndex, ProductDef};
 use crate::paths::{
     encode_component, error, product_text, stage_directories, PathError, PathPart, PathPlaceholder,
-    PathTemplate,
+    PathTemplate, Shape,
 };
 
 /// One piece of a path rule: text written as is, or a dimension's value.
 pub(super) enum Piece {
     Literal(String),
-    /// One path component value, as `bind_path` encodes it.
-    Value(String),
+    /// One path component value, as `bind_path` encodes it, with the shape
+    /// the rule gives it, if any.
+    Value(String, Option<Shape>),
+}
+
+/// Give every `Value` of a dimension the shape any of them has, so a
+/// dimension written twice, as `{id:digits}/{id}`, is read with it both
+/// times. A template has one shape per dimension at most.
+pub(super) fn inherit_shapes(pieces: &mut [Piece]) {
+    let shapes: Vec<(String, Shape)> = pieces
+        .iter()
+        .filter_map(|piece| match piece {
+            Piece::Value(name, Some(shape)) => Some((name.clone(), *shape)),
+            _ => None,
+        })
+        .collect();
+    for piece in pieces {
+        if let Piece::Value(name, shape @ None) = piece {
+            *shape = shapes
+                .iter()
+                .find(|(shaped, _)| shaped == name)
+                .map(|(_, shape)| *shape);
+        }
+    }
 }
 
 /// The pieces `product`'s paths match. `stage` is the directories
@@ -45,7 +67,7 @@ pub(super) fn path_pattern(
                         "{separator}{}=",
                         encode_component(dimension)
                     )));
-                    pieces.push(Piece::Value(dimension.clone()));
+                    pieces.push(Piece::Value(dimension.clone(), None));
                 }
             }
             PathPart::Placeholder(PathPlaceholder::Stage) => match stage {
@@ -61,8 +83,8 @@ pub(super) fn path_pattern(
                     )))
                 }
             },
-            PathPart::Placeholder(PathPlaceholder::Dimension(dimension)) => {
-                pieces.push(Piece::Value(dimension.clone()));
+            PathPart::Placeholder(PathPlaceholder::Dimension(dimension, shape)) => {
+                pieces.push(Piece::Value(dimension.clone(), *shape));
             }
             // A source with dimensions has `{@labels}` written out, and
             // its groups resolved; `inspect_paths` rejects the rest first.
@@ -76,6 +98,7 @@ pub(super) fn path_pattern(
             PathPart::Group(_) => unreachable!("a product's template has its groups resolved"),
         }
     }
+    inherit_shapes(&mut pieces);
     Ok(pieces)
 }
 
@@ -201,7 +224,7 @@ fn match_from(
                     failed,
                 )
         }
-        Piece::Value(dimension) => {
+        Piece::Value(dimension, shape) => {
             if let Some(value) = bound.get(dimension).map(|value| &text[value.clone()]) {
                 return rest.starts_with(value)
                     && match_from(pieces, index + 1, text, offset + value.len(), bound, failed);
@@ -210,7 +233,7 @@ fn match_from(
                 .find(|character: char| !is_value_character(character))
                 .unwrap_or(rest.len());
             if let Some(end) = forced_end(pieces.get(index + 1), rest, longest) {
-                if end == 0 {
+                if end == 0 || !shape.is_none_or(|shape| shape.matches(&rest[..end])) {
                     return false;
                 }
                 bound.insert(dimension.clone(), offset..offset + end);
@@ -226,7 +249,7 @@ fn match_from(
                     pieces
                         .iter()
                         .skip(index)
-                        .any(|piece| matches!(piece, Piece::Value(name) if name == *dimension))
+                        .any(|piece| matches!(piece, Piece::Value(name, _) if name == *dimension))
                 })
                 .map(|(_, value)| (value.start, value.end))
                 .collect();
@@ -234,7 +257,7 @@ fn match_from(
             if failed.contains(&attempt) {
                 return false;
             }
-            let found = (1..=longest).any(|end| {
+            let found = value_ends(*shape, rest, longest).any(|end| {
                 bound.insert(dimension.clone(), offset..offset + end);
                 match_from(pieces, index + 1, text, offset + end, bound, failed)
             });
@@ -245,6 +268,23 @@ fn match_from(
             found
         }
     }
+}
+
+/// The lengths, up to `longest`, a value at the start of `rest` may have
+/// and keep to `shape`. A shape of one length has only that one, so the
+/// value needs no search; any other is tested at each length.
+fn value_ends(
+    shape: Option<Shape>,
+    rest: &str,
+    longest: usize,
+) -> impl Iterator<Item = usize> + '_ {
+    let fixed = shape.and_then(Shape::fixed_length);
+    let (first, last) = match fixed {
+        Some(length) if length <= longest => (length, length),
+        Some(_) => (1, 0),
+        None => (1, longest),
+    };
+    (first..=last).filter(move |&end| shape.is_none_or(|shape| shape.matches(&rest[..end])))
 }
 
 /// Whether a value can hold `character`: what `encode_component` keeps, and
@@ -432,14 +472,16 @@ pub(super) fn reach(pieces: &[Piece], text: &str) -> (usize, String) {
                     furthest = (offset + shared, expected);
                 }
             }
-            Piece::Value(_) => {
+            Piece::Value(_, shape) => {
                 let longest = rest
                     .find(|character: char| !is_value_character(character))
                     .unwrap_or(rest.len());
-                if longest == 0 && offset > furthest.0 {
+                let mut ends = value_ends(*shape, rest, longest).peekable();
+                // No value here: the text has none, or none of the shape.
+                if ends.peek().is_none() && offset > furthest.0 {
                     furthest = (offset, render(&pieces[index..]));
                 }
-                stack.extend((1..=longest).map(|end| (index + 1, offset + end)));
+                stack.extend(ends.map(|end| (index + 1, offset + end)));
             }
         }
     }
@@ -452,7 +494,8 @@ fn render(pieces: &[Piece]) -> String {
         .iter()
         .map(|piece| match piece {
             Piece::Literal(literal) => literal.clone(),
-            Piece::Value(dimension) => format!("{{{dimension}}}"),
+            Piece::Value(dimension, None) => format!("{{{dimension}}}"),
+            Piece::Value(dimension, Some(shape)) => format!("{{{dimension}:{shape}}}"),
         })
         .collect()
 }

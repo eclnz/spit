@@ -11,6 +11,7 @@ use crate::model::{
     ProductDef,
 };
 use crate::parser::SourceMap;
+use crate::span::Place;
 
 use super::components::enclosing_path;
 use super::product::{bind_path, shown_path};
@@ -274,6 +275,7 @@ pub(crate) fn collect_paths(
         .iter()
         .flat_map(|invocation| invocation.outputs.iter().map(String::as_str))
         .collect();
+    shape_errors(pipeline, lines, skip, &outputs, &mut errors);
     let mut entries = Vec::new();
     let mut samples: BTreeMap<String, &str> = BTreeMap::new();
     // One default rule can disagree with many products' extensions; each
@@ -457,7 +459,9 @@ fn validate_path_template(
         .collect();
     if !placeholders.contains(&PathPlaceholder::Entities) {
         if let Some(dimension) = product.dimensions.iter().find(|dimension| {
-            !placeholders.contains(&PathPlaceholder::Dimension((*dimension).clone()))
+            !placeholders.iter().any(
+                |placeholder| matches!(placeholder, PathPlaceholder::Dimension(name, _) if name == *dimension),
+            )
         }) {
             return Err(error(format!(
                 "path template for `{}` omits dimension `{dimension}`; artifacts differing only in `{dimension}` would share a path",
@@ -480,4 +484,48 @@ fn validate_path_template(
         artifact.view(),
         || format!("path rule for `{}`", product.name),
     )
+}
+
+/// A shape narrows the files a source's rule finds, so it has no place in a
+/// rule that also writes paths: an output's own rule, or a `path:` default
+/// for a pipeline or a stage, which outputs take. Each is an error, since a
+/// check that never ran would pass.
+fn shape_errors(
+    pipeline: &Pipeline,
+    lines: &SourceMap,
+    skip: &BTreeSet<String>,
+    outputs: &BTreeSet<&str>,
+    errors: &mut Vec<PathError>,
+) {
+    let mut report = |template: &PathTemplate, line: Option<Place>, owner: String| {
+        for (dimension, shape) in template.shaped() {
+            let placeholder = format!("{{{dimension}:{shape}}}");
+            errors.push(
+                error(format!(
+                    "`{placeholder}` has a shape, but shapes narrow a source's path rule only; {owner}"
+                ))
+                .at(line.clone())
+                .focus(placeholder),
+            );
+        }
+    };
+    if let Some(template) = &pipeline.path_template {
+        let owner = "`path:` is the default for outputs too; write the shape in `path source:` for each source".to_owned();
+        report(template, lines.default_path.clone(), owner);
+    }
+    for stage in &pipeline.stages {
+        if let Some(template) = &stage.path_template {
+            let owner = format!(
+                "stage `{}`'s `path:` is the default for its products; write the shape in `path source:` for each source",
+                stage.name
+            );
+            report(template, lines.stage_paths.get(&stage.name).cloned(), owner);
+        }
+    }
+    for (product, template) in &pipeline.product_paths {
+        if !skip.contains(product) && outputs.contains(product.as_str()) {
+            let owner = format!("`{product}` is made by a step");
+            report(template, lines.paths.get(product).cloned(), owner);
+        }
+    }
 }

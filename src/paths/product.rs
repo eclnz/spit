@@ -149,7 +149,7 @@ impl<'p> ProductPath<'p> {
                 PathPart::Placeholder(PathPlaceholder::Entities) => {
                     push_entities(&mut relative, artifact, dimensions)?;
                 }
-                PathPart::Placeholder(placeholder @ PathPlaceholder::Dimension(dimension)) => {
+                PathPart::Placeholder(placeholder @ PathPlaceholder::Dimension(dimension, _)) => {
                     let value = artifact.entities.get(dimension).ok_or_else(|| {
                         error(format!(
                             "path template for `{}` uses absent dimension `{dimension}`{}",

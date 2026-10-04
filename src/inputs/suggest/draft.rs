@@ -6,13 +6,29 @@ use std::collections::BTreeSet;
 
 use super::shape::{Component, Shape};
 use crate::inputs::discover::readable_value;
-use crate::inputs::pattern::{match_pattern, Piece};
-use crate::paths::{PathPart, PathPlaceholder, PathTemplate};
+use crate::inputs::pattern::{inherit_shapes, match_pattern, Piece};
+use crate::paths::{
+    is_date, is_year, PathPart, PathPlaceholder, PathTemplate, Shape as ValueShape,
+};
 
 /// A dimension of a group: what names it, and its value in each file.
 pub(super) struct Dimension {
     pub(super) name: Option<String>,
     pub(super) values: Vec<String>,
+}
+
+impl Dimension {
+    /// The shape every value has, if it is a date or a year, so the rule
+    /// reads only files named so and the next scan shows a stray.
+    fn value_shape(&self) -> Option<ValueShape> {
+        if self.values.iter().all(|value| is_date(value)) {
+            Some(ValueShape::Date)
+        } else if self.values.iter().all(|value| is_year(value)) {
+            Some(ValueShape::Year)
+        } else {
+            None
+        }
+    }
 }
 
 /// One piece of a suggested rule.
@@ -114,10 +130,14 @@ impl Draft {
             .iter()
             .map(|part| match part {
                 Part::Text(text) => escape(text),
-                Part::Dimension(index) => format!(
-                    "{{{}}}",
-                    self.dimensions[*index].name.as_deref().unwrap_or("")
-                ),
+                Part::Dimension(index) => {
+                    let dimension = &self.dimensions[*index];
+                    let name = dimension.name.as_deref().unwrap_or("");
+                    match dimension.value_shape() {
+                        Some(shape) => format!("{{{name}:{shape}}}"),
+                        None => format!("{{{name}}}"),
+                    }
+                }
             })
             .collect()
     }
@@ -330,24 +350,6 @@ fn name_unnamed(dimensions: &mut [Dimension]) {
     }
 }
 
-/// Whether `value` is written as a date, `2024-01-15`.
-fn is_date(value: &str) -> bool {
-    let parts: Vec<_> = value.split('-').collect();
-    parts.len() == 3
-        && [4, 2, 2]
-            .iter()
-            .zip(&parts)
-            .all(|(&length, part)| part.len() == length && part.chars().all(|c| c.is_ascii_digit()))
-        && is_year(parts[0])
-}
-
-/// Whether `value` is a year from 1900 to 2099.
-fn is_year(value: &str) -> bool {
-    value.len() == 4
-        && (value.starts_with("19") || value.starts_with("20"))
-        && value.chars().all(|c| c.is_ascii_digit())
-}
-
 /// `text` as a rule writes it: braces and brackets doubled.
 pub(super) fn escape(text: &str) -> String {
     text.replace('{', "{{")
@@ -360,17 +362,19 @@ pub(super) fn escape(text: &str) -> String {
 /// dimensions, or `None` when it does not parse.
 pub(super) fn pieces(rule: &str) -> Option<Vec<Piece>> {
     let template = PathTemplate::parse(rule).ok()?;
-    template
+    let mut pieces: Vec<Piece> = template
         .parts()
         .iter()
         .map(|part| match part {
             PathPart::Literal(text) => Some(Piece::Literal(text.clone())),
-            PathPart::Placeholder(PathPlaceholder::Dimension(name)) => {
-                Some(Piece::Value(name.clone()))
+            PathPart::Placeholder(PathPlaceholder::Dimension(name, shape)) => {
+                Some(Piece::Value(name.clone(), *shape))
             }
             _ => None,
         })
-        .collect()
+        .collect::<Option<_>>()?;
+    inherit_shapes(&mut pieces);
+    Some(pieces)
 }
 
 /// Whether `name` is one `name_unnamed` gave.
