@@ -635,3 +635,21 @@ out = flip(cal @ where(revision=1), raw)
         "Derived product. Produced by flip(cal, raw), by its step out = clean(raw, cal)."
     );
 }
+
+#[test]
+fn a_call_is_not_named_as_an_import_is() {
+    let tree = support::Tree::new("composite-alias", &[]);
+    tree.write("parts.spit", "source cleaned : Lines [group, lane]\n");
+    let text = format!(
+        "{BASE}{SUMMARISE}use parts.spit as m\nm, t = summarise(raw, cal @ where(revision=2))\n"
+    );
+    let main = tree.write("main.spit", &text);
+    let errors: Vec<_> = support::errors(spit::diagnose_in(&text, None, spit::Context::at(&main)))
+        .into_iter()
+        .map(|error| format!("{}: {}", error.line.unwrap_or_default(), error.message))
+        .collect();
+    assert_eq!(
+        errors,
+        ["20: this call files the products it makes for itself under `m::`, as an import does `m::cleaned`; rename the call's first output or the import's alias"]
+    );
+}

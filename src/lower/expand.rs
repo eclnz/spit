@@ -57,6 +57,7 @@ impl PipelineBuilder {
                 &flow.step,
                 calls,
                 &mut self.intermediates,
+                &self.lines.imported,
             )?;
             pending.extend(steps.into_iter().rev());
         }
@@ -192,6 +193,7 @@ fn expand(
     step: &Step,
     calls: &mut Vec<Call>,
     intermediates: &mut FxHashMap<String, CallId>,
+    imported: &BTreeSet<String>,
 ) -> Result<Vec<Pending>, ParseError> {
     let Pending {
         invocation: caller,
@@ -225,6 +227,23 @@ fn expand(
         ));
     }
     let instance = caller.output_product().to_owned();
+    // The call files its own products under `instance::`, which an import
+    // aliased `instance` would share.
+    let prefix = format!("{instance}::");
+    if let Some(taken) = imported
+        .range(prefix.clone()..)
+        .next()
+        .filter(|name| name.starts_with(&prefix))
+    {
+        let place = at();
+        return Err(ParseError::new(
+            place.line,
+            format!(
+                "this call files the products it makes for itself under `{prefix}`, as an import does `{taken}`; rename the call's first output or the import's alias"
+            ),
+        )
+        .within(&place));
+    }
     let id = CallId::at(calls.len());
     calls.push(Call {
         operation: name.clone(),
