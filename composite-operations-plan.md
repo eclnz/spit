@@ -6,6 +6,17 @@ Nothing here is built yet. Statements under [What SPIT does today](#what-spit-do
 
 The plan lives at the repository root, as earlier plans did (`design-review-plan.md`, `folder-artifacts-plan.md`; `git log --diff-filter=D --name-only -- '*-plan.md'` lists them). `docs/` holds the user guide, which stays in the tree, so a plan does not belong there. Following `AGENTS.md`, the last commit before the feature merges deletes this file, after `docs/language-reference.md`, `docs/spitdag.md` and `docs/architecture.md` describe what was built.
 
+## Decisions
+
+These were settled after the plan was first written, and take precedence over anything below that reads otherwise.
+
+- **No new keyword.** A composite is an operation whose header ends in `:` with an indented body of steps, in place of `command` lines. Both are operations: called the same way, imported the same way, in one namespace. An operation with a body and a `command` line is an error. Below, "composite" means such an operation.
+- **No dimensions on ports.** A call whose argument lacks a dimension the body uses fails at the call anyway, since every expanded product maps to the call's step, so `[run]` on a port adds syntax for little.
+- **Outputs are named.** An operation with a body writes its outputs `-> (name: Type, ...)`, since its steps assign them by name.
+- **Calls show in the views that exist.** No `check --calls`: the commands view gains a `from:` line, `--counts` groups a call's steps, and hovers explain a call.
+- **Step 1 is narrowed.** A body step records the file and line it is written at, which is all a composite needs. Placing every imported definition at its own line, for import errors in general, is separate work for its own issue.
+- **Open questions 2 and 4 to 10** take the recommendations given under [Open questions](#open-questions); question 1 is answered by the first decision, and question 3 by the second.
+
 ## What SPIT does today
 
 These were each run against the binary, on small files in a scratch folder.
@@ -79,7 +90,7 @@ These were each run against the binary, on small files in a scratch folder.
 A composite is declared with a header like an operation's, followed by an indented body of steps, as a `stage` or `sidecars` block is written:
 
 ```text
-composite name(port: Type [dims] @ check(...), ...) -> (out: Type @ check(...), ...):
+operation name(port: Type @ check(...), ...) -> (out: Type @ check(...), ...):
     step
     step
 ```
@@ -87,7 +98,7 @@ composite name(port: Type [dims] @ check(...), ...) -> (out: Type @ check(...), 
 **Ports.**
 
 - Input ports are written as an operation's are: `name`, `name: Type`, `name: many Type`.
-- A port may also list dimensions in brackets: `raw: MRI<DWI,Acquired> [run]`. The list says which dimensions the body names. A product passed to the port must have at least those dimensions, and any others it has pass through, as with any step. The body names a dimension in `@ vary(run)`, `@ each(...)`, `@ where(...)` or `@ same(...)`, and the port must declare each one it names. This lets SPIT report a missing dimension at the call, rather than deep inside the body.
+- A port may also list dimensions in brackets: `raw: MRI<DWI,Acquired>`. The list says which dimensions the body names. A product passed to the port must have at least those dimensions, and any others it has pass through, as with any step. The body names a dimension in `@ vary(run)`, `@ each(...)`, `@ where(...)` or `@ same(...)`, and the port must declare each one it names. This lets SPIT report a missing dimension at the call, rather than deep inside the body.
 - A port may carry `@ check(...)`, as an operation's input port does.
 
 **Outputs.**
@@ -152,7 +163,7 @@ operation mrtransform(moving: MRI<K,S>, transform: Transform<S,T>, reference: MR
 command mrtransform: mrtransform {moving} {@output} -linear {transform} -template {reference} -interp linear
 
 # One session's runs, cleaned, combined and corrected, with its mean b=0.
-composite clean_dwi_session(raw: MRI<DWI,Acquired> [run], bvec: GradientDirections [run], bval: GradientAmplitudes [run], metadata: AcquisitionMetadata [run], reverse: MRI<B0,Acquired>, reverse_metadata: AcquisitionMetadata) -> (dwi: MRI<DWI,Diffusion> @ check(ndim(4)), b0: MRI<B0,Diffusion> @ check(ndim(3))):
+operation clean_dwi_session(raw: MRI<DWI,Acquired>, bvec: GradientDirections, bval: GradientAmplitudes, metadata: AcquisitionMetadata, reverse: MRI<B0,Acquired>, reverse_metadata: AcquisitionMetadata) -> (dwi: MRI<DWI,Diffusion> @ check(ndim(4)), b0: MRI<B0,Diffusion> @ check(ndim(3))):
     imported = import_dwi(raw, bvec, bval, metadata)
     reverse_mif = import_reverse_b0(reverse, reverse_metadata)
     denoised = denoise(imported)
@@ -168,7 +179,7 @@ composite clean_dwi_session(raw: MRI<DWI,Acquired> [run], bvec: GradientDirectio
 
 # Align an image with the diffusion data: FLIRT across contrasts, the matrix
 # converted to MRtrix coordinates, then a linear resampling.
-composite register_to_dwi(moving: MRI<K,S>, reference: MRI<N,T>, reference_nifti: MRI<N,T>) -> (aligned: MRI<K,T>, transform: Transform<S,T>):
+operation register_to_dwi(moving: MRI<K,S>, reference: MRI<N,T>, reference_nifti: MRI<N,T>) -> (aligned: MRI<K,T>, transform: Transform<S,T>):
     matrix = flirt_register(moving, reference_nifti)
     transform = convert_flirt(matrix, moving, reference_nifti)
     aligned = mrtransform(moving, transform, reference)
@@ -236,7 +247,7 @@ command mark_duplicates: gatk MarkDuplicates -I {bam} -O {marked} -M {metrics} -
 operation call_gvcf(reference: Fasta, bam: Bam, index: BamIndex) -> Gvcf .g.vcf.gz
 command call_gvcf: gatk HaplotypeCaller -R {reference} -I {bam} -O {@output} -ERC GVCF
 
-composite align_sample(reference: Fasta, r1: Fastq [lane], r2: Fastq [lane]) -> (bam: Bam @ check(bam_ok), gvcf: Gvcf @ check(nonempty)):
+operation align_sample(reference: Fasta, r1: Fastq, r2: Fastq) -> (bam: Bam @ check(bam_ok), gvcf: Gvcf @ check(nonempty)):
     aligned = bwa_align(reference, r1, r2)
     sorted = sort_reads(aligned)
     merged = merge_lanes(sorted @ vary(lane))
@@ -533,15 +544,13 @@ Each step merges on its own, keeps output byte-for-byte the same unless it says 
 
 | # | Step | Repositories | Done |
 | --- | --- | --- | --- |
-| 1 | Add `FileId`, `SourceFiles` and `FilePlace`, and give imported operations, sources, checks and commands the place where they are written. A diagnostic in an imported file gets `file` and its own line, and imported paths are shown relative to the pipeline. Existing tests that expect the `use` line are re-blessed. | spit, spit-vscode (test only: the `file` path already works) | |
-| 2 | Add `related` to `Diagnostic`, to `check --json`, and to the text form (`-->` lines). Use it first for import errors: related to the `use` line. | spit, spit-vscode (`DiagnosticRelatedInformation`) | |
-| 3 | Parse `composite` declarations into `CompositeDef`, with the library checks: body only reads ports and its own products, assigns every output once, names only dimensions its ports declare, and has no cycles. Add keyword docs in `builtins.rs` and a section in `docs/language-reference.md`. No calls yet: a call to a composite is an error that says calls come in a later version. | spit, spit-vscode (grammar, README) | |
-| 4 | Import composites through `select_import`, with their body's operations and checks, qualified. | spit | |
-| 5 | Expand calls in lowering (`src/expand.rs`): instance names, renaming, nesting by worklist, provenance in `Invocation::origin` and `Pipeline::calls`, call-site errors located through `SourceMap::invocations`, privacy of intermediates, boundary type checks. Add the germline fixture and an MRtrix composite example under `examples/`. | spit | |
-| 6 | Add composite checks: output checks and input-port checks, attached in `src/check.rs`. | spit | |
-| 7 | Write `.spitdag` version 7, with `pipeline_files` and `origin`. Add the hand-written blob hash. Update `docs/spitdag.md`. | spit, spit-bash (accept v7, show the call on failure) | |
-| 8 | Add the inspection commands: `check --calls`, grouping in `dag --counts`, the `from:` line in `dag --commands`, call-aware reasons in `artifacts` and `left_out`, and composite hovers. | spit, spit-vscode (hover labels) | |
-| 9 | Add the acceptance tests above as integration tests with stored outputs, and update the usability harness's answer keys if any change. | spit | |
-| 10 | Move how composites work into `docs/architecture.md`, then delete this plan in a commit of its own. | spit | |
+| 1 | Parse an operation's body into `OperationDef::steps`, each step with its place, and check it where it is declared: its steps call operations declared before it, read only its ports and its own products, and assign every output once. Calling such an operation is an error until step 2. | spit | |
+| 2 | Expand calls in lowering: instance names, renaming, selectors merged at ports, nested bodies by worklist, `Pipeline::calls` and `Invocation::origin`, call-site errors through `SourceMap::invocations`, private intermediates, output types from the declaration. | spit | |
+| 3 | Import operations with bodies through `select_import`, with the operations and checks their steps use, qualified. | spit | |
+| 4 | Checks on a composite's ports and outputs, carried by the expanded steps and run by `step_checks`. | spit | |
+| 5 | Write `.spitdag` version 7, with `pipeline_files` and each job's `origin`, and the hand-written blob hash. | spit, spit-bash | |
+| 6 | Show calls: `from:` in the commands view, grouping in `--counts`, call-aware reasons in `artifacts` and `left_out`, hovers, and `related` locations in diagnostics. | spit, spit-vscode | |
+| 7 | Examples (MRtrix and germline), the guide, and the acceptance tests as stored outputs. | spit | |
+| 8 | Move how composites work into `docs/architecture.md`, then delete this plan in a commit of its own. | spit | |
 
-Steps 1 and 2 are useful without composites, and can merge first. Step 7 is the only step that changes the `.spitdag` format.
+Step 5 is the only step that changes the `.spitdag` format.
