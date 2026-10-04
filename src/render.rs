@@ -5,8 +5,8 @@ use std::fmt::{self, Write as _};
 
 use crate::command::shell_word;
 use crate::model::{
-    identity, push_identity, Artifact, ArtifactReport, CallId, EntityBinding, Gap, JobId, Pipeline,
-    ResolvedDag,
+    identity, push_identity, Artifact, ArtifactReport, Call, CallId, EntityBinding, Gap, JobId,
+    Pipeline, ResolvedDag,
 };
 use crate::spitdag::{Argument, BoundDag, BoundJob, StepCall, When};
 use crate::types::TypeExpr;
@@ -319,6 +319,12 @@ fn push_origin(text: &mut String, dag: &BoundDag, origin: &StepCall) {
     text.push_str(&place(chain[0].file, origin.line));
 }
 
+/// A call to an operation carried out by steps as written, its arguments
+/// left out: `m, t = summarise(...)`.
+pub fn render_call(call: &Call) -> String {
+    format!("{} = {}(...)", call.outputs.join(", "), call.operation)
+}
+
 /// A command's arguments, each with its paths filled in and quoted as a
 /// shell reads it, separated by spaces.
 fn push_command(text: &mut String, dag: &BoundDag, command: &[Argument]) {
@@ -336,8 +342,8 @@ fn push_command(text: &mut String, dag: &BoundDag, command: &[Argument]) {
 }
 
 /// What can be made from a DAG's sources, what cannot, and why.
-pub fn render_artifacts(report: &ArtifactReport) -> String {
-    Report(report).to_string()
+pub fn render_artifacts(pipeline: &Pipeline, report: &ArtifactReport) -> String {
+    Report { pipeline, report }.to_string()
 }
 
 /// How many sources no job reads, and which: each by its identity when
@@ -453,11 +459,16 @@ impl JobWriter {
     }
 }
 
-struct Report<'a>(&'a ArtifactReport);
+/// A report, and the pipeline it was resolved from, which names the calls
+/// its incomplete jobs came from.
+struct Report<'a> {
+    pipeline: &'a Pipeline,
+    report: &'a ArtifactReport,
+}
 
 impl fmt::Display for Report<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let report = self.0;
+        let report = self.report;
         let dag = &report.dag;
         let held_back: BTreeSet<_> = report
             .coverage
@@ -498,15 +509,24 @@ impl Report<'_> {
         f: &mut fmt::Formatter<'_>,
         held_back: &BTreeSet<(&str, &EntityBinding)>,
     ) -> fmt::Result {
-        let dag = &self.0.dag;
-        let incomplete = &self.0.incomplete;
+        let dag = &self.report.dag;
+        let incomplete = &self.report.incomplete;
         let count: usize = incomplete.iter().map(|job| job.outputs.len()).sum();
         writeln!(f, "\nIncomplete artifacts: {count}")?;
         for job in incomplete {
             let stage = in_stage(job.stage.as_deref());
             for artifact in &job.outputs {
                 let artifact = typed_artifact(dag, artifact.view());
-                writeln!(f, "  {artifact}  ({}{stage})", job.operation)?;
+                write!(f, "  {artifact}  ({}{stage}", job.operation)?;
+                if let Some(call) = job.call.map(|call| self.pipeline.written_call(call)) {
+                    write!(
+                        f,
+                        ", in `{}` on line {}",
+                        render_call(call),
+                        call.place.line
+                    )?;
+                }
+                writeln!(f, ")")?;
             }
             for gap in &job.gaps {
                 match gap {
@@ -529,11 +549,11 @@ impl Report<'_> {
 
     /// The sources no job reads, when there are any.
     fn write_unused(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let unused = self.0.unused_sources();
+        let unused = self.report.unused_sources();
         if unused.is_empty() {
             return Ok(());
         }
-        let dag = &self.0.dag;
+        let dag = &self.report.dag;
         writeln!(f, "\nUnused sources: {}", unused.len())?;
         for source in unused {
             writeln!(f, "  {}", typed_artifact(dag, dag.artifact(source)))?;
@@ -543,7 +563,7 @@ impl Report<'_> {
 
     /// Each missing requirement, and the sources it holds back.
     fn write_coverage(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let coverage = &self.0.coverage;
+        let coverage = &self.report.coverage;
         if coverage.is_empty() {
             return Ok(());
         }
@@ -554,7 +574,7 @@ impl Report<'_> {
                 let sources: Vec<_> = gap
                     .sources
                     .iter()
-                    .map(|source| render_artifact(&self.0.dag, source.view()))
+                    .map(|source| render_artifact(&self.report.dag, source.view()))
                     .collect();
                 writeln!(f, "    holds back: {}", sources.join(", "))?;
             }

@@ -1,12 +1,13 @@
 //! Where in the text an error is: the part of a declaration, step, rule or
 //! inventory record it is about.
 
-use crate::model::DEFAULT_OUTPUT;
+use crate::model::{Call, DEFAULT_OUTPUT};
 use crate::parser::{source_record_lines, Rule, SourceMap, Step};
+use crate::render::render_call;
 use crate::span::{content_columns, Place};
 use crate::{DefinitionSubject, EntityBinding, Pipeline, ResolveError};
 
-use super::DiagnosticSource;
+use super::{DiagnosticSource, Related};
 
 /// The part of a declaration, step, or rule that a pipeline error is about.
 pub(super) fn subject_place(
@@ -201,4 +202,120 @@ fn inventory_record_lines(
                 .then_some(line)
         })
         .collect()
+}
+
+/// Where an error about a step that a call to an operation carried out by
+/// steps made is reported: at the call written in the text diagnosed, with
+/// the call named before the message, and each call it is nested in and
+/// the body's step as related places.
+pub(super) struct InCall {
+    pub(super) place: Place,
+    pub(super) prefix: String,
+    pub(super) related: Vec<Related>,
+}
+
+/// The product of the step `error` is about, and the port when it names
+/// one.
+pub(super) fn error_step(error: &ResolveError) -> Option<(&str, Option<&str>)> {
+    match error {
+        ResolveError::TypeMismatch { site, .. }
+        | ResolveError::TypeVariableConflict { site, .. }
+        | ResolveError::MissingInput { site, .. }
+        | ResolveError::AmbiguousInput { site, .. }
+        | ResolveError::CollectionTooSmall { site, .. } => {
+            Some((&site.output_product, Some(&site.port)))
+        }
+        _ => None,
+    }
+}
+
+/// Where an error about the step making `output`, at `port` when known, is
+/// reported, when a call made that step. The place is the argument the
+/// caller gave when the port reads one of the call's inputs, its output
+/// when the port makes one of the call's outputs, and the whole call
+/// otherwise: what the caller can change.
+pub(super) fn in_call(
+    pipeline: &Pipeline,
+    lines: &SourceMap,
+    output: &str,
+    port: Option<&str>,
+) -> Option<InCall> {
+    let invocation = pipeline
+        .invocations
+        .iter()
+        .find(|invocation| invocation.outputs.iter().any(|name| name == output))?;
+    let origin = invocation.origin.as_ref()?;
+    // The calls the step is nested in, innermost first.
+    let chain: Vec<&Call> =
+        std::iter::successors(Some(&pipeline.calls[origin.call.index()]), |call| {
+            call.parent.map(|parent| &pipeline.calls[parent.index()])
+        })
+        .collect();
+    let root = chain.last()?;
+    // Every step a call makes is mapped to the call written in the text.
+    let step = lines.invocations.get(root.outputs.first()?)?;
+    let operation = |name: &str| {
+        pipeline
+            .operations
+            .iter()
+            .find(|operation| operation.name == name)
+    };
+    let part = port.and_then(|port| {
+        let called = operation(&invocation.operation)?;
+        if let Some(index) = called.inputs.iter().position(|input| input.name == port) {
+            let product = &invocation.inputs.get(index)?.product;
+            return step.input(root.inputs.iter().position(|input| input == product)?);
+        }
+        let index = called
+            .outputs
+            .iter()
+            .position(|output| output.name == port)?;
+        let product = invocation.outputs.get(index)?;
+        let at = root.outputs.iter().position(|output| output == product)?;
+        Some(step.output_at(at))
+    });
+    let related = |file: Option<String>, place: &Place, message: String| {
+        let line_text = file.as_ref().map(|file| {
+            lines
+                .file_texts
+                .get(file)
+                .and_then(|text| text.lines().nth(place.line.checked_sub(1)?))
+                .unwrap_or_default()
+                .to_owned()
+        });
+        Related {
+            file,
+            line: place.line,
+            columns: place.columns.clone(),
+            line_text,
+            message,
+        }
+    };
+    let file_of = |name: &str| operation(name).and_then(|operation| operation.file.clone());
+    // Each call nested in the one written, outermost first, then the step.
+    let mut places: Vec<Related> = chain
+        .windows(2)
+        .rev()
+        .map(|pair| {
+            let (call, parent) = (pair[0], pair[1]);
+            related(
+                file_of(&parent.operation),
+                &call.place,
+                format!(
+                    "the call of `{}` in the body of `{}`",
+                    call.operation, parent.operation
+                ),
+            )
+        })
+        .collect();
+    places.push(related(
+        file_of(&chain[0].operation),
+        &origin.step,
+        format!("the step in the body of `{}`", chain[0].operation),
+    ));
+    Some(InCall {
+        place: part.unwrap_or_else(|| step.call()),
+        prefix: format!("in `{}`: ", render_call(root)),
+        related: places,
+    })
 }

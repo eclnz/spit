@@ -79,7 +79,7 @@ Each output that could not be produced has its identity and the input gaps that 
 {"identity": "report[store=s07]", "reasons": ["input `weeks` needs revenue[store=s07,week=2026-W36], which cannot be produced"]}
 ```
 
-`dag --partial` fills this array while keeping every complete job. Plain `dag` fails if any output would be left out. The reasons are the same kinds shown by `spit artifacts`: a missing or ambiguous input, a collection below `@ min`, or an input artifact whose job cannot be completed. A `many` input in a partial plan uses only its complete members, so a downstream aggregate may still run.
+`dag --partial` fills this array while keeping every complete job. Plain `dag` fails if any output would be left out. A reason about a step that a call to an [operation carried out by steps](language-reference.md#operations-carried-out-by-steps) made starts with the call, as ``in `m, t = L::summarise(...)`: ``. The reasons are the same kinds shown by `spit artifacts`: a missing or ambiguous input, a collection below `@ min`, or an input artifact whose job cannot be completed. A `many` input in a partial plan uses only its complete members, so a downstream aggregate may still run.
 
 ## Job
 

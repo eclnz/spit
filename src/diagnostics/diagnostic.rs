@@ -61,6 +61,35 @@ pub struct Diagnostic {
     pub file: Option<String>,
     /// Text of that file, used to convert its byte columns to UTF-16.
     pub external_text: Option<String>,
+    /// Other places the diagnostic is about, such as the step in a
+    /// library's body that a call it is reported at made.
+    pub related: Vec<Related>,
+}
+
+/// A place a diagnostic is also about, with what it is.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Related {
+    /// The file it is in, from the pipeline's folder; `None` for the file
+    /// of the diagnostic's own line.
+    pub file: Option<String>,
+    pub line: usize,
+    /// The byte range within the line.
+    pub columns: Range<usize>,
+    /// The line itself, to count its columns in characters or UTF-16 code
+    /// units; `None` for a line of the diagnostic's own file.
+    pub line_text: Option<String>,
+    pub message: String,
+}
+
+impl Related {
+    /// The line's text, from `text`, the text of the diagnostic's own line,
+    /// when it is in it.
+    fn line_in<'a>(&'a self, text: &'a str) -> Option<&'a str> {
+        match &self.line_text {
+            Some(line) => Some(line),
+            None => without_bom(text).lines().nth(self.line.checked_sub(1)?),
+        }
+    }
 }
 
 /// A document that passed every check: its pipeline, and its warnings.
@@ -117,6 +146,7 @@ impl Diagnostic {
             message,
             file: None,
             external_text: None,
+            related: Vec::new(),
         }
     }
 
@@ -136,6 +166,7 @@ impl Diagnostic {
             message: error.message(),
             file: None,
             external_text: None,
+            related: Vec::new(),
         }
     }
 
@@ -178,6 +209,7 @@ impl Diagnostic {
             diagnostic: self,
             column: self.column_in(text, source_text),
             name: self.name_in(names),
+            text,
         }
     }
 
@@ -214,11 +246,23 @@ impl Diagnostic {
         column: Option<usize>,
         name: Option<&str>,
     ) -> fmt::Result {
-        write!(f, "{}: ", self.severity.as_str())?;
-        self.write_located(f, column, name)
+        self.write_with(f, column, name, &self.message)
     }
 
-    /// The diagnostic's place, then its message. A named file leads the
+    /// As [`Diagnostic::write`], with `message` in place of its own.
+    fn write_with(
+        &self,
+        f: &mut fmt::Formatter<'_>,
+        column: Option<usize>,
+        name: Option<&str>,
+        message: &str,
+    ) -> fmt::Result {
+        write!(f, "{}: ", self.severity.as_str())?;
+        self.write_located(f, column, name)?;
+        f.write_str(message)
+    }
+
+    /// The diagnostic's place, before its message. A named file leads the
     /// place; an unnamed inventory is called `inventory`. A diagnostic about
     /// the pipeline with no line, such as a recipe rule's coverage gap, is
     /// about no line of the pipeline, so the pipeline is not named.
@@ -241,7 +285,7 @@ impl Diagnostic {
             (Some(line), None) => write!(f, "line {line}: ")?,
             (None, _) => {}
         }
-        f.write_str(&self.message)
+        Ok(())
     }
 }
 
@@ -258,11 +302,50 @@ struct DisplayIn<'a> {
     diagnostic: &'a Diagnostic,
     column: Option<usize>,
     name: Option<&'a str>,
+    text: &'a str,
 }
 
+/// Each related place follows on a line of its own, as
+/// `  --> lib.spit: line 9, column 5: step in the body of `summarise``.
 impl fmt::Display for DisplayIn<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.diagnostic.write(f, self.column, self.name)
+        let diagnostic = self.diagnostic;
+        if diagnostic.related.is_empty() {
+            return diagnostic.write(f, self.column, self.name);
+        }
+        // The related places follow the message's first line, before the
+        // lines that explain it.
+        let (first, rest) = diagnostic
+            .message
+            .split_once('\n')
+            .map_or((diagnostic.message.as_str(), None), |(first, rest)| {
+                (first, Some(rest))
+            });
+        diagnostic.write_with(f, self.column, self.name, first)?;
+        for related in &diagnostic.related {
+            f.write_str("\n  --> ")?;
+            let file = related.file.as_deref().or(self.name);
+            if let Some(file) = file {
+                write!(f, "{file}: ")?;
+            }
+            write!(f, "line {}", related.line)?;
+            if let Some(column) = related
+                .line_in(
+                    self.diagnostic
+                        .external_text
+                        .as_deref()
+                        .unwrap_or(self.text),
+                )
+                .and_then(|line| line.get(..related.columns.start))
+            {
+                write!(f, ", column {}", column.chars().count() + 1)?;
+            }
+            write!(f, ": {}", related.message)?;
+        }
+        if let Some(rest) = rest {
+            write!(f, "\n{rest}")?;
+        }
+        Ok(())
     }
 }
 
@@ -337,6 +420,33 @@ pub(crate) fn diagnostics_json<'a>(
         ];
         if let Some(file) = &diagnostic.file {
             fields.push(("file", Json::string(file)));
+        }
+        if !diagnostic.related.is_empty() {
+            fields.push((
+                "related",
+                Json::array(diagnostic.related.iter().map(|related| {
+                    let columns = related
+                        .line_in(diagnostic.external_text.as_deref().unwrap_or(text))
+                        .map(|line| utf16_columns(line, &related.columns));
+                    let mut fields = Vec::with_capacity(6);
+                    if let Some(file) = &related.file {
+                        fields.push(("file", Json::string(file)));
+                    }
+                    fields.extend([
+                        ("line", Json::number_or_null(Some(related.line))),
+                        (
+                            "column",
+                            Json::number_or_null(columns.as_ref().map(|columns| columns.start + 1)),
+                        ),
+                        (
+                            "end_column",
+                            Json::number_or_null(columns.as_ref().map(|columns| columns.end + 1)),
+                        ),
+                        ("message", Json::string(&related.message)),
+                    ]);
+                    Json::object(fields)
+                })),
+            ));
         }
         Json::object(fields)
     });

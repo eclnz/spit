@@ -224,7 +224,7 @@ fn a_call_is_checked_at_the_call() {
         // A type the body's steps do not accept is reported at the call.
         (
             "y, z = summarise(cal, cal @ where(revision=1))\n",
-            "19: type mismatch at `clean.x`: product `cal` is Table, expected Lines",
+            "19: in `y, z = summarise(...)`: type mismatch at `clean.x`: product `cal` is Table, expected Lines",
         ),
     ] {
         assert_eq!(errors(&format!("{BASE}{SUMMARISE}{call}")), [expected], "{call}");
@@ -242,7 +242,7 @@ out = wrap(raw, cal @ where(revision=1))
     );
     assert_eq!(
         errors(&text),
-        ["16: type mismatch at `clean.output`: product `out` is Count, expected Lines"]
+        ["16: in `out = wrap(...)`: type mismatch at `clean.output`: product `out` is Count, expected Lines"]
     );
 }
 
@@ -510,5 +510,88 @@ jobs  step
             "Job 13  merge\n  run:    merge out/a/group=a.txt out/a/group=b.txt out/all/global.txt\n"
         ),
         "{commands}"
+    );
+}
+
+#[test]
+fn an_error_in_a_call_points_at_the_argument_the_caller_gave_and_into_the_body() {
+    // `flip` takes its inputs in the other order from `clean`'s, so the
+    // argument at fault is the call's second.
+    let text = format!(
+        "{BASE}
+operation flip(t: Table, x: Lines) -> (y: Lines):
+    y = clean(x, t)
+out = flip(raw, cal)
+"
+    );
+    let errors = support::errors(diagnose(&text, None));
+    let [error] = errors.as_slice() else {
+        panic!("{errors:?}")
+    };
+    let line = "out = flip(raw, cal)";
+    assert_eq!(error.line, Some(16));
+    assert_eq!(error.columns, Some(16..19), "{}", &line[16..19]);
+    assert_eq!(
+        error.message,
+        "in `out = flip(...)`: type mismatch at `clean.x`: product `cal` is Table, expected Lines"
+    );
+    assert_eq!(
+        format!("{}", error.display_in(&text, None)),
+        "error: line 16, column 17: in `out = flip(...)`: type mismatch at `clean.x`: product `cal` is Table, expected Lines\n  \
+         --> line 15, column 9: the step in the body of `flip`"
+    );
+}
+
+#[test]
+fn an_error_in_an_imported_nested_call_relates_each_call_and_the_step() {
+    let tree = support::Tree::new("composite-related", &[]);
+    library(&tree);
+    let main = tree.write(
+        "main.spit",
+        "\
+use summarise from libs/lib.spit as L
+source raw : Lines [group, lane]
+source cal : Table [group, revision]
+m, t = L::summarise(cal, raw)
+",
+    );
+    let output = support::spit(&["check", main.to_str().unwrap(), "--json"]);
+    let json = support::text(&output.stdout);
+    assert!(
+        json.contains(
+            "\"line\":4,\"column\":21,\"end_column\":24,\
+\"message\":\"in `m, t = L::summarise(...)`: type mismatch at `L::clean.x`: product `cal` is Table, expected Lines\",\
+\"related\":[\
+{\"file\":\"libs/lib.spit\",\"line\":13,\"column\":15,\"end_column\":33,\"message\":\"the call of `L::tidy` in the body of `L::summarise`\"},\
+{\"file\":\"libs/lib.spit\",\"line\":10,\"column\":9,\"end_column\":20,\"message\":\"the step in the body of `L::tidy`\"}]"
+        ),
+        "{json}"
+    );
+    let output = support::spit(&["check", main.to_str().unwrap()]);
+    assert!(
+        support::text(&output.stderr).contains(
+            "line 4, column 21: in `m, t = L::summarise(...)`: type mismatch at `L::clean.x`: product `cal` is Table, expected Lines\n  \
+             --> libs/lib.spit: line 13, column 15: the call of `L::tidy` in the body of `L::summarise`\n  \
+             --> libs/lib.spit: line 10, column 9: the step in the body of `L::tidy`\n"
+        ),
+        "{}",
+        support::text(&output.stderr)
+    );
+}
+
+#[test]
+fn what_cannot_be_made_names_the_call_it_comes_from() {
+    let records = RECORDS.replace("    cal[group=b,revision=2]\n", "");
+    let text = format!("{BASE}{SUMMARISE}m, t = summarise(raw, cal @ where(revision=2))\n");
+    let (pipeline, _) = support::parse_fixture(&text).unwrap();
+    let inventory = spit::parse_source_inventory(&records).unwrap();
+    let report = spit::resolve_artifacts_excluding(&pipeline, &inventory, &[]).unwrap();
+    let rendered = spit::render_artifacts(&pipeline, &report);
+    assert!(
+        rendered.contains(
+            "  m::cleaned[group=b,lane=1] : Lines  (clean, in `m, t = summarise(...)` on line 19)\n    \
+             - no `cal` artifact for input `t` of `clean` at [group=b,lane=1]\n"
+        ),
+        "{rendered}"
     );
 }

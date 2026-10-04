@@ -576,6 +576,7 @@ fn parse_document_at_inner(
             .map_or_else(|_| git_blob_id(raw.as_bytes()), |bytes| git_blob_id(&bytes)),
     }];
     let mut imports = BTreeMap::new();
+    let mut file_texts = BTreeMap::new();
     for (index, original) in text.lines().enumerate() {
         let line = strip_comment(original).trim();
         if Keyword::of(line) != Some(Keyword::Use) {
@@ -629,11 +630,18 @@ fn parse_document_at_inner(
         let module = module?;
         let folder = spec.path.replace('\\', "/");
         let folder = folder.rsplit_once('/').map(|(folder, _)| folder);
+        let rebased = |path: &str| match folder {
+            Some(folder) => format!("{folder}/{path}"),
+            None => path.to_owned(),
+        };
+        if let Some(own) = module.pipeline.files.first() {
+            file_texts.insert(rebased(&own.path), without_bom(&imported_text).to_owned());
+        }
+        for (path, text) in &module.lines.file_texts {
+            file_texts.insert(rebased(path), text.clone());
+        }
         for file in &module.pipeline.files {
-            let path = match folder {
-                Some(folder) => format!("{folder}/{}", file.path),
-                None => file.path.clone(),
-            };
+            let path = rebased(&file.path);
             if !files.iter().any(|known: &SourceFile| known.path == path) {
                 files.push(SourceFile {
                     path,
@@ -645,5 +653,6 @@ fn parse_document_at_inner(
     }
     let mut document = parse_document_with_imports(text, &imports, kind)?;
     document.pipeline.files = files;
+    document.lines.file_texts = file_texts;
     Ok(document)
 }

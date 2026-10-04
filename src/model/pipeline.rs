@@ -9,7 +9,7 @@ use crate::error::{DefinitionSubject, ResolveError};
 use crate::paths::{Holder, PathTemplate};
 
 use super::{
-    stage_and_parents, ArtifactInstance, Call, CheckDef, CommandDef, EntityBinding,
+    stage_and_parents, ArtifactInstance, Call, CallId, CheckDef, CommandDef, EntityBinding,
     ExtensionSource, Invocation, OperationDef, OutputPort, ProductDef, Removal, SidecarGroup,
     SourceInventory, SourceRecord, StageDef,
 };
@@ -53,6 +53,16 @@ pub struct SourceFile {
 }
 
 impl Pipeline {
+    /// The call written in the pipeline that `call` was made by: `call`
+    /// itself, or the outermost of the calls it is nested in.
+    pub fn written_call(&self, call: CallId) -> &Call {
+        let mut call = &self.calls[call.index()];
+        while let Some(parent) = call.parent {
+            call = &self.calls[parent.index()];
+        }
+        call
+    }
+
     /// The position in [`Pipeline::files`] of the file declaring the
     /// operation `name`, if the pipeline was read from files.
     pub fn file_of(&self, name: &str) -> Option<usize> {

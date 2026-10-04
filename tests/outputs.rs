@@ -240,8 +240,8 @@ fn recipes_diagnosed_in_memory_match_their_text() {
             "{case}"
         );
         assert_eq!(
-            render_artifacts(&records.report),
-            render_artifacts(&text_records.report),
+            render_artifacts(&checked.pipeline, &records.report),
+            render_artifacts(&text_checked.pipeline, &text_records.report),
             "{case}"
         );
         assert_eq!(
