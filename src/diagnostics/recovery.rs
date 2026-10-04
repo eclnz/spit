@@ -57,7 +57,9 @@ pub(crate) fn recover_document<T>(
                         }
                     }
                 }
-                if !depends_on_invalid_operation(&error, &errors, &original_lines) {
+                if !depends_on_invalid_operation(&error, &errors, &original_lines)
+                    && !empties_failed_body(&error, &errors, &original_lines)
+                {
                     errors.push(error);
                 }
             }
@@ -75,14 +77,61 @@ fn depends_on_invalid_operation(
     let ParseErrorKind::UndeclaredOperation { name: operation } = error.kind() else {
         return false;
     };
-    previous_errors.iter().any(|previous| {
-        original_lines
-            .get(previous.line().saturating_sub(1))
-            .and_then(|line| line.trim().strip_prefix("operation "))
+    let declares = |line: &str| {
+        line.trim()
+            .strip_prefix("operation ")
             .is_some_and(|declaration| match declaration.split_once('(') {
                 Some((name, _)) => name.trim() == operation,
                 // Without `(` the name boundary is unknown, so accept a prefix.
                 None => declaration.starts_with(operation.as_str()),
             })
+    };
+    previous_errors.iter().any(|previous| {
+        let failed = previous.line().saturating_sub(1);
+        if original_lines
+            .get(failed)
+            .is_some_and(|line| declares(line))
+        {
+            return true;
+        }
+        // An error in a step of the operation's body: the nearest line above
+        // it that is not indented beneath a header declares the operation.
+        original_lines
+            .get(failed)
+            .is_some_and(|line| line.starts_with(char::is_whitespace))
+            && original_lines[..failed]
+                .iter()
+                .rev()
+                .find(|line| !line.trim().is_empty() && !body_line(line))
+                .is_some_and(|line| declares(line))
     })
+}
+
+/// Whether `line` is indented, as a step of an operation's body is.
+fn body_line(line: &str) -> bool {
+    line.starts_with(char::is_whitespace) && !line.trim_start().starts_with("operation ")
+}
+
+/// A body left with no steps because each of its steps already failed, and
+/// was blanked, would only repeat those errors.
+fn empties_failed_body(
+    error: &ParseError,
+    previous_errors: &[ParseError],
+    original_lines: &[String],
+) -> bool {
+    if *error.kind() != ParseErrorKind::EmptyBody {
+        return false;
+    }
+    let header = error.line();
+    // The body's lines: those after the header, up to the first that is
+    // not indented.
+    let end = original_lines
+        .iter()
+        .enumerate()
+        .skip(header)
+        .find(|(_, line)| !line.trim().is_empty() && !line.starts_with(char::is_whitespace))
+        .map_or(original_lines.len(), |(index, _)| index);
+    previous_errors
+        .iter()
+        .any(|previous| previous.line() > header && previous.line() <= end)
 }

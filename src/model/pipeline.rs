@@ -9,9 +9,9 @@ use crate::error::{DefinitionSubject, ResolveError};
 use crate::paths::{Holder, PathTemplate};
 
 use super::{
-    stage_and_parents, ArtifactInstance, CheckDef, CommandDef, EntityBinding, ExtensionSource,
-    Invocation, OperationDef, OutputPort, ProductDef, Removal, SidecarGroup, SourceInventory,
-    SourceRecord, StageDef,
+    stage_and_parents, ArtifactInstance, Call, CheckDef, CommandDef, EntityBinding,
+    ExtensionSource, Invocation, OperationDef, OutputPort, ProductDef, Removal, SidecarGroup,
+    SourceInventory, SourceRecord, StageDef,
 };
 
 /// The logical pipeline: what to make from which sources. It says nothing
@@ -34,6 +34,9 @@ pub struct Pipeline {
     /// `sidecars` blocks; their members are also ordinary sources, each
     /// with its path rule.
     pub sidecar_groups: Vec<SidecarGroup>,
+    /// Each call to an operation with a body, which `invocations` holds as
+    /// the body's steps; a step's [`Invocation::origin`] names its call.
+    pub calls: Vec<Call>,
 }
 
 impl Pipeline {

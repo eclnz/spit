@@ -1,5 +1,6 @@
 //! Parse flow-style pipelines and separate source inventories.
 
+mod body;
 mod check;
 mod command;
 mod declarations;
@@ -16,11 +17,10 @@ use std::fmt;
 
 use crate::model::{
     CheckDef, CommandDef, CommandRole, CoverageRule, DirectoryDiscovery, Invocation, OperationDef,
-    ProductDef, SidecarGroup,
+    ProductDef, SidecarGroup, StepOutput,
 };
 use crate::paths::PathTemplate;
 use crate::span::{address_of, columns_at, content_columns, Focus, Located, Place};
-use crate::types::TypeExpr;
 
 use self::flow::parse_flow;
 
@@ -65,6 +65,8 @@ pub enum ParseErrorKind {
     MisplacedRecords {
         lines: Vec<usize>,
     },
+    /// An operation's header opens a body, but no step follows it.
+    EmptyBody,
 }
 
 impl ParseError {
@@ -198,15 +200,8 @@ pub(crate) struct PathRule {
 #[derive(Clone, Debug)]
 pub(crate) struct FlowStep {
     pub(crate) invocation: Invocation,
-    pub(crate) outputs: Vec<FlowOutput>,
+    pub(crate) outputs: Vec<StepOutput>,
     pub(crate) step: Step,
-}
-
-#[derive(Clone, Debug)]
-pub(crate) struct FlowOutput {
-    pub(crate) name: String,
-    pub(crate) artifact_type: Option<TypeExpr>,
-    pub(crate) dimensions: Option<Vec<String>>,
 }
 
 /// What a document may hold. A pipeline holds neither input rules nor
@@ -238,8 +233,15 @@ impl StatementKind {
         number: usize,
         stage: Option<String>,
     ) -> Result<Self, ParseError> {
-        let operation = operation::parse_operation(declaration, number)?;
-        let place = source_map::name_place(original, number, declaration, &operation.name);
+        // A header ending in `:` opens a body of steps; the `:` is no part
+        // of the signature.
+        let declaration = declaration.trim();
+        let signature = declaration
+            .strip_suffix(':')
+            .unwrap_or(declaration)
+            .trim_end();
+        let operation = operation::parse_operation(signature, number)?;
+        let place = source_map::name_place(original, number, signature, &operation.name);
         Ok(Self::Operation(operation, place, stage))
     }
 
