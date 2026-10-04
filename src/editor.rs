@@ -13,8 +13,8 @@ use crate::diagnostics::{
 use crate::imports::parse_located_document;
 use crate::json::Json;
 use crate::model::{
-    CallId, Cardinality, CheckDef, CheckUse, CommandRole, Invocation, OperationDef, OutputPort,
-    PathOrigin, Pipeline, PipelineIndex, ProductDef, DEFAULT_OUTPUT,
+    Cardinality, CheckDef, CheckUse, CommandRole, Invocation, OperationDef, OutputPort, PathOrigin,
+    Pipeline, PipelineIndex, ProductDef, DEFAULT_OUTPUT,
 };
 use crate::parser::{without_bom, Kind};
 use crate::paths::shown_path;
@@ -227,7 +227,14 @@ pub fn pipeline_hovers(text: &str, path: &Path) -> Vec<Hover> {
             }
         }
     }
-    for (id, call) in pipeline.calls.iter().enumerate() {
+    // The steps each written call expands to, grouped once.
+    let mut expanded: Vec<Vec<String>> = vec![Vec::new(); pipeline.calls.len()];
+    for step in &pipeline.invocations {
+        if let Some(origin) = &step.origin {
+            expanded[pipeline.written_call_id(origin.call).index()].push(written_step(step));
+        }
+    }
+    for (call, steps) in pipeline.calls.iter().zip(&expanded) {
         if call.parent.is_some() {
             continue;
         }
@@ -239,10 +246,7 @@ pub fn pipeline_hovers(text: &str, path: &Path) -> Vec<Hover> {
             continue;
         };
         if let Some((signature, mut details)) = operation_info(&call.operation) {
-            details.push(format!(
-                "This call expands to: {}",
-                expanded_steps(pipeline, CallId::at(id)).join("; ")
-            ));
+            details.push(format!("This call expands to: {}", steps.join("; ")));
             add(
                 location.operation(),
                 HoverKind::Operation,
@@ -557,21 +561,6 @@ fn written_step(invocation: &Invocation) -> String {
             .collect::<Vec<_>>()
             .join(", ")
     )
-}
-
-/// The steps `call` expands to, nested calls' included, as written over
-/// the caller's products.
-fn expanded_steps(pipeline: &Pipeline, call: CallId) -> Vec<String> {
-    pipeline
-        .invocations
-        .iter()
-        .filter(|step| {
-            step.origin
-                .as_ref()
-                .is_some_and(|origin| pipeline.written_call_id(origin.call) == call)
-        })
-        .map(written_step)
-        .collect()
 }
 
 fn product_details(

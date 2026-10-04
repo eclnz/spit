@@ -6,9 +6,11 @@
 
 use std::collections::BTreeSet;
 
+use rustc_hash::FxHashMap;
+
 use crate::model::{
-    Call, CallId, CheckUse, InputBinding, Invocation, OperationDef, Port, StepOrigin, StepOutput,
-    DEFAULT_OUTPUT,
+    Call, CallId, CheckUse, InputBinding, Invocation, OperationDef, Pipeline, Port, StepOrigin,
+    StepOutput, DEFAULT_OUTPUT,
 };
 use crate::parser::{FlowStep, ParseError, Step};
 use crate::types::TypeExpr;
@@ -44,8 +46,18 @@ impl PipelineBuilder {
                 );
                 continue;
             }
-            let operation = self.pipeline.operations[operation].clone();
-            let steps = self.expand(next, &operation, &flow.step)?;
+            // The operations are read and the calls written: disjoint
+            // fields, so the body is borrowed, not copied.
+            let Pipeline {
+                operations, calls, ..
+            } = &mut self.pipeline;
+            let steps = expand(
+                next,
+                &operations[operation],
+                &flow.step,
+                calls,
+                &mut self.intermediates,
+            )?;
             pending.extend(steps.into_iter().rev());
         }
         Ok(())
@@ -66,198 +78,19 @@ impl PipelineBuilder {
         })
     }
 
-    /// Replace `call` of `operation` by the body's steps over the caller's
-    /// products, recording the call. `step` is where the call written in
-    /// the pipeline is, which the steps a nested call makes share.
-    fn expand(
-        &mut self,
-        call: Pending,
-        operation: &OperationDef,
-        step: &Step,
-    ) -> Result<Vec<Pending>, ParseError> {
-        let Pending {
-            invocation: caller,
-            outputs: written,
-        } = call;
-        let name = &caller.operation;
-        let at = || match &caller.origin {
-            Some(origin) => origin.step.clone(),
-            None => step.call(),
-        };
-        let mismatch = |what: &str, takes: usize, given: usize| {
-            let place = at();
-            ParseError::new(
-                place.line,
-                format!("operation `{name}` takes {takes} {what}, but this call gives {given}"),
-            )
-            .within(&place)
-        };
-        if caller.inputs.len() != operation.inputs.len() {
-            return Err(mismatch(
-                "inputs",
-                operation.inputs.len(),
-                caller.inputs.len(),
-            ));
-        }
-        if caller.outputs.len() != operation.outputs.len() {
-            return Err(mismatch(
-                "outputs",
-                operation.outputs.len(),
-                caller.outputs.len(),
-            ));
-        }
-        let instance = caller.output_product().to_owned();
-        let id = CallId::at(self.pipeline.calls.len());
-        self.pipeline.calls.push(Call {
-            operation: name.clone(),
-            instance: instance.clone(),
-            outputs: caller.outputs.clone(),
-            inputs: caller
-                .inputs
-                .iter()
-                .map(|binding| binding.product.clone())
-                .collect(),
-            parent: caller.origin.as_ref().map(|origin| origin.call),
-            place: at(),
-        });
-        // The body's own products, under the call's name.
-        let rename = |product: &str| match operation
-            .outputs
-            .iter()
-            .position(|port| port.name == product)
-        {
-            Some(index) => caller.outputs[index].clone(),
-            None => format!("{instance}::{product}"),
-        };
-        // The checks on each of the operation's ports: its own, and those
-        // the body this call is in gave the call, if any.
-        let port_checks = |port: Port| -> Vec<CheckUse> {
-            let declared = match port {
-                Port::Input(index) => &operation.inputs[index].checks,
-                Port::Output(index) => &operation.outputs[index].checks,
-            };
-            let given = caller
-                .checks
-                .iter()
-                .filter(|(at, _)| *at == port)
-                .map(|(_, check)| check);
-            declared.iter().chain(given).cloned().collect()
-        };
-        let mut steps = Vec::with_capacity(operation.steps.len());
-        for body in &operation.steps {
-            // A step that reads a port, or makes an output, runs its checks.
-            let mut checks = Vec::new();
-            let mut inputs = Vec::with_capacity(body.invocation.inputs.len());
-            for (position, binding) in body.invocation.inputs.iter().enumerate() {
-                let port = operation
-                    .inputs
-                    .iter()
-                    .position(|port| port.name == binding.product);
-                if let Some(port) = port {
-                    checks.extend(
-                        port_checks(Port::Input(port))
-                            .into_iter()
-                            .map(|check| (Port::Input(position), check)),
-                    );
-                }
-                inputs.push(match port {
-                    Some(port) => merge(&caller.inputs[port], binding).map_err(|problem| {
-                        let place = at();
-                        ParseError::new(place.line, problem).within(&place)
-                    })?,
-                    None => InputBinding {
-                        product: rename(&binding.product),
-                        ..binding.clone()
-                    },
-                });
-            }
-            let outputs = body
-                .outputs
-                .iter()
-                .map(|output| {
-                    match operation
-                        .outputs
-                        .iter()
-                        .position(|port| port.name == output.name)
-                    {
-                        // What the caller wrote of its product, else the
-                        // type the operation declares for it.
-                        Some(index) => {
-                            let mut product = written[index].clone();
-                            let declared = &operation.outputs[index].artifact_type;
-                            if product.artifact_type.is_none()
-                                && *declared != TypeExpr::Unknown
-                                && !declared.has_variables()
-                            {
-                                product.artifact_type = Some(declared.clone());
-                            }
-                            product
-                        }
-                        None => StepOutput {
-                            name: rename(&output.name),
-                            ..output.clone()
-                        },
-                    }
-                })
-                .collect();
-            for (position, output) in body.invocation.outputs.iter().enumerate() {
-                if let Some(port) = operation
-                    .outputs
-                    .iter()
-                    .position(|port| port.name == *output)
-                {
-                    checks.extend(
-                        port_checks(Port::Output(port))
-                            .into_iter()
-                            .map(|check| (Port::Output(position), check)),
-                    );
-                }
-            }
-            for output in &body.outputs {
-                if !operation
-                    .outputs
-                    .iter()
-                    .any(|port| port.name == output.name)
-                {
-                    self.intermediates
-                        .insert(rename(&output.name), (id, caller.operation.clone()));
-                }
-            }
-            steps.push(Pending {
-                invocation: Invocation {
-                    operation: body.invocation.operation.clone(),
-                    inputs,
-                    outputs: body
-                        .invocation
-                        .outputs
-                        .iter()
-                        .map(|output| rename(output))
-                        .collect(),
-                    stage: caller.stage.clone(),
-                    origin: Some(StepOrigin {
-                        call: id,
-                        step: body.place.clone(),
-                    }),
-                    checks,
-                },
-                outputs,
-            });
-        }
-        Ok(steps)
-    }
-
     /// Fail a step written in the pipeline that reads a product a call made
     /// for itself: only the body's outputs are the caller's to read.
     fn reject_intermediates(&self, flow: &FlowStep) -> Result<(), ParseError> {
         for (index, binding) in flow.invocation.inputs.iter().enumerate() {
-            if let Some((call, operation)) = self.intermediates.get(&binding.product) {
+            if let Some(call) = self.intermediates.get(&binding.product) {
                 let call = &self.pipeline.calls[call.index()];
+                let operation = &call.operation;
                 let place = flow.step.input(index).unwrap_or_else(|| flow.step.call());
                 return Err(ParseError::new(
                     place.line,
                     format!(
                         "`{}` is made inside the call `{} = {operation}(...)` on line {}; make it an output of `{operation}` to read it here",
-                        binding.product, call.instance, call.place.line
+                        binding.product, call.outputs[0], call.place.line
                     ),
                 )
                 .within(&place));
@@ -348,6 +181,185 @@ impl PipelineBuilder {
         }
         Ok(())
     }
+}
+
+/// Replace `call` of `operation` by the body's steps over the caller's
+/// products, recording the call. `step` is where the call written in
+/// the pipeline is, which the steps a nested call makes share.
+fn expand(
+    call: Pending,
+    operation: &OperationDef,
+    step: &Step,
+    calls: &mut Vec<Call>,
+    intermediates: &mut FxHashMap<String, CallId>,
+) -> Result<Vec<Pending>, ParseError> {
+    let Pending {
+        invocation: caller,
+        outputs: written,
+    } = call;
+    let name = &caller.operation;
+    let at = || match &caller.origin {
+        Some(origin) => origin.step.clone(),
+        None => step.call(),
+    };
+    let mismatch = |what: &str, takes: usize, given: usize| {
+        let place = at();
+        ParseError::new(
+            place.line,
+            format!("operation `{name}` takes {takes} {what}, but this call gives {given}"),
+        )
+        .within(&place)
+    };
+    if caller.inputs.len() != operation.inputs.len() {
+        return Err(mismatch(
+            "inputs",
+            operation.inputs.len(),
+            caller.inputs.len(),
+        ));
+    }
+    if caller.outputs.len() != operation.outputs.len() {
+        return Err(mismatch(
+            "outputs",
+            operation.outputs.len(),
+            caller.outputs.len(),
+        ));
+    }
+    let instance = caller.output_product().to_owned();
+    let id = CallId::at(calls.len());
+    calls.push(Call {
+        operation: name.clone(),
+        outputs: caller.outputs.clone(),
+        inputs: caller
+            .inputs
+            .iter()
+            .map(|binding| binding.product.clone())
+            .collect(),
+        parent: caller.origin.as_ref().map(|origin| origin.call),
+        place: at(),
+    });
+    // The body's own products, under the call's name.
+    let rename = |product: &str| match operation
+        .outputs
+        .iter()
+        .position(|port| port.name == product)
+    {
+        Some(index) => caller.outputs[index].clone(),
+        None => format!("{instance}::{product}"),
+    };
+    // The checks on each of the operation's ports: its own, and those
+    // the body this call is in gave the call, if any.
+    let port_checks = |port: Port| -> Vec<CheckUse> {
+        let declared = match port {
+            Port::Input(index) => &operation.inputs[index].checks,
+            Port::Output(index) => &operation.outputs[index].checks,
+        };
+        let given = caller
+            .checks
+            .iter()
+            .filter(|(at, _)| *at == port)
+            .map(|(_, check)| check);
+        declared.iter().chain(given).cloned().collect()
+    };
+    let mut steps = Vec::with_capacity(operation.steps.len());
+    for body in &operation.steps {
+        // A step that reads a port, or makes an output, runs its checks.
+        let mut checks = Vec::new();
+        let mut inputs = Vec::with_capacity(body.invocation.inputs.len());
+        for (position, binding) in body.invocation.inputs.iter().enumerate() {
+            let port = operation
+                .inputs
+                .iter()
+                .position(|port| port.name == binding.product);
+            if let Some(port) = port {
+                checks.extend(
+                    port_checks(Port::Input(port))
+                        .into_iter()
+                        .map(|check| (Port::Input(position), check)),
+                );
+            }
+            inputs.push(match port {
+                Some(port) => merge(&caller.inputs[port], binding).map_err(|problem| {
+                    let place = at();
+                    ParseError::new(place.line, problem).within(&place)
+                })?,
+                None => InputBinding {
+                    product: rename(&binding.product),
+                    ..binding.clone()
+                },
+            });
+        }
+        let outputs = body
+            .outputs
+            .iter()
+            .map(|output| {
+                match operation
+                    .outputs
+                    .iter()
+                    .position(|port| port.name == output.name)
+                {
+                    // What the caller wrote of its product, else the
+                    // type the operation declares for it.
+                    Some(index) => {
+                        let mut product = written[index].clone();
+                        let declared = &operation.outputs[index].artifact_type;
+                        if product.artifact_type.is_none()
+                            && *declared != TypeExpr::Unknown
+                            && !declared.has_variables()
+                        {
+                            product.artifact_type = Some(declared.clone());
+                        }
+                        product
+                    }
+                    None => StepOutput {
+                        name: rename(&output.name),
+                        ..output.clone()
+                    },
+                }
+            })
+            .collect();
+        for (position, output) in body.invocation.outputs.iter().enumerate() {
+            if let Some(port) = operation
+                .outputs
+                .iter()
+                .position(|port| port.name == *output)
+            {
+                checks.extend(
+                    port_checks(Port::Output(port))
+                        .into_iter()
+                        .map(|check| (Port::Output(position), check)),
+                );
+            }
+        }
+        for output in &body.outputs {
+            if !operation
+                .outputs
+                .iter()
+                .any(|port| port.name == output.name)
+            {
+                intermediates.insert(rename(&output.name), id);
+            }
+        }
+        steps.push(Pending {
+            invocation: Invocation {
+                operation: body.invocation.operation.clone(),
+                inputs,
+                outputs: body
+                    .invocation
+                    .outputs
+                    .iter()
+                    .map(|output| rename(output))
+                    .collect(),
+                stage: caller.stage.clone(),
+                origin: Some(StepOrigin {
+                    call: id,
+                    step: body.place.clone(),
+                }),
+                checks,
+            },
+            outputs,
+        });
+    }
+    Ok(steps)
 }
 
 /// The binding a body step gives a port, over the caller's argument: the

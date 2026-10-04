@@ -104,17 +104,25 @@ fn bind_jobs(
         jobs,
     );
     bound.pipeline_files.clone_from(&pipeline.files);
+    // Each operation's file, found once, then each call's looked up.
+    let declared_in = pipeline.operation_files();
+    let files: Vec<Option<usize>> = pipeline
+        .calls
+        .iter()
+        .map(|call| declared_in.get(call.operation.as_str()).copied().flatten())
+        .collect();
     bound.calls = pipeline
         .calls
         .iter()
-        .map(|call| BoundCall {
+        .zip(&files)
+        .map(|(call, &file)| BoundCall {
             operation: call.operation.clone(),
-            instance: call.instance.clone(),
+            instance: call.outputs[0].clone(),
             parent: call.parent.map(CallId::index),
-            file: pipeline.file_of(&call.operation),
+            file,
             // A call in a body is written in the file declaring the body.
             at_file: match call.parent {
-                Some(parent) => pipeline.file_of(&pipeline.calls[parent.index()].operation),
+                Some(parent) => files[parent.index()],
                 None => (!pipeline.files.is_empty()).then_some(0),
             },
             at_line: call.place.line,

@@ -77,7 +77,7 @@ fn a_call_becomes_its_bodys_steps_over_the_callers_products() {
     // The call is recorded, and each step names it.
     assert_eq!(pipeline.calls.len(), 1);
     assert_eq!(pipeline.calls[0].operation, "summarise");
-    assert_eq!(pipeline.calls[0].instance, "merged");
+    assert_eq!(pipeline.calls[0].outputs[0], "merged");
     assert!(pipeline.invocations.iter().all(|step| step
         .origin
         .as_ref()
@@ -150,7 +150,7 @@ stage report:
     // The inner call is the outer call's child.
     assert_eq!(pipeline.calls.len(), 2);
     assert_eq!(pipeline.calls[1].operation, "tidy");
-    assert_eq!(pipeline.calls[1].instance, "m::cleaned");
+    assert_eq!(pipeline.calls[1].outputs[0], "m::cleaned");
     assert_eq!(pipeline.calls[1].parent.map(|call| call.index()), Some(0));
     assert_eq!(outputs(&text).len(), 8);
 }

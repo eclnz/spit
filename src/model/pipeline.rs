@@ -66,17 +66,26 @@ impl Pipeline {
         call
     }
 
-    /// The position in [`Pipeline::files`] of the file declaring the
-    /// operation `name`, if the pipeline was read from files.
-    pub fn file_of(&self, name: &str) -> Option<usize> {
-        let operation = self
-            .operations
+    /// The position in [`Pipeline::files`] of the file declaring each
+    /// operation, by name, when the pipeline was read from files: the
+    /// operation's `file`, or else the pipeline's own, the first.
+    pub fn operation_files(&self) -> FxHashMap<&str, Option<usize>> {
+        let at: FxHashMap<&str, usize> = self
+            .files
             .iter()
-            .find(|operation| operation.name == name)?;
-        match &operation.file {
-            Some(file) => self.files.iter().position(|known| known.path == *file),
-            None => (!self.files.is_empty()).then_some(0),
-        }
+            .enumerate()
+            .map(|(index, file)| (file.path.as_str(), index))
+            .collect();
+        self.operations
+            .iter()
+            .map(|operation| {
+                let file = match &operation.file {
+                    Some(file) => at.get(file.as_str()).copied(),
+                    None => (!self.files.is_empty()).then_some(0),
+                };
+                (operation.name.as_str(), file)
+            })
+            .collect()
     }
 }
 
