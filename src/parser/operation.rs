@@ -4,7 +4,7 @@
 use crate::model::{Cardinality, InputPort, OperationDef, OutputPort, ShapeRule, DEFAULT_OUTPUT};
 use crate::types::{parse_type_expr, TypeExpr};
 
-use super::check::{only_checks, split_clauses, Clause};
+use super::check::{only_checks, output_checks, split_clauses, Clause};
 use super::declarations::type_error;
 use super::lexical::{call_parts, comma_items, identifier, split_ending};
 use super::ParseError;
@@ -416,7 +416,7 @@ fn parse_outputs(
         let (checks, clauses): (Vec<_>, Vec<_>) = clauses
             .into_iter()
             .partition(|clause| clause.keyword == "check");
-        let checks = only_checks(&checks, "an output", number)?;
+        let (checks, exempt) = output_checks(&checks, "an output", number)?;
         if let Some((_, port)) = text.rsplit_once(" beside ") {
             return Err(ParseError::new(
                 number,
@@ -436,6 +436,7 @@ fn parse_outputs(
             folder,
         );
         port.checks = checks;
+        port.exempt = exempt;
         return Ok((vec![port], clauses));
     };
     let closing =
@@ -455,7 +456,7 @@ fn parse_outputs(
         .into_iter()
         .map(|item| {
             let (item, clauses) = split_clauses(item, AFTER_OUTPUT, number)?;
-            let checks = only_checks(&clauses, "an output", number)?;
+            let (checks, exempt) = output_checks(&clauses, "an output", number)?;
             let (item, beside) = match item.rsplit_once(" beside ") {
                 Some((item, sibling)) => {
                     let (item, suffix) = beside_suffix(item.trim(), number, "output")?;
@@ -487,6 +488,7 @@ fn parse_outputs(
             }
             let mut port = OutputPort::new(name, output_type);
             port.checks = checks;
+            port.exempt = exempt;
             Ok(match beside {
                 Some((sibling, suffix)) => port.beside(sibling, suffix),
                 None => with_ending(port, extension, folder),

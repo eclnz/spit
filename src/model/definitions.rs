@@ -112,6 +112,9 @@ pub struct OutputPort {
     /// The checks the artifact must pass after the command writes it, as in
     /// `-> Image @ check(nonempty)`.
     pub checks: Vec<CheckUse>,
+    /// The default checks of the file or stage that this output opts out
+    /// of, as in `-> Image @ check(!nonempty)`.
+    pub exempt: Vec<CheckUse>,
 }
 
 /// An output written beside the named port's file, its name that file's
@@ -131,6 +134,7 @@ impl OutputPort {
             folder: false,
             beside: None,
             checks: Vec::new(),
+            exempt: Vec::new(),
         }
     }
 
@@ -532,6 +536,17 @@ pub struct StageDef {
     /// The `ext:` default for the same products, in place of the
     /// pipeline's.
     pub extension: Option<String>,
+    /// The `check:` default of this stage's outputs, added to those of the
+    /// stages around it.
+    pub checks: DefaultChecks,
+}
+
+/// A `check:` line: the checks every output of a file or stage runs, and
+/// the checks of the scope around it that its outputs do not.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct DefaultChecks {
+    pub checks: Vec<CheckUse>,
+    pub exempt: Vec<CheckUse>,
 }
 
 /// A directory pattern that discovers concrete entity bindings under a root.
@@ -548,6 +563,7 @@ impl StageDef {
             name: name.into(),
             path_template: None,
             extension: None,
+            checks: DefaultChecks::default(),
         }
     }
 }

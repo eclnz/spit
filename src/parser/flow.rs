@@ -2,15 +2,16 @@
 //! `outputs = operation(inputs)`, and stages whose lines are indented
 //! beneath a `stage name:` header.
 
-use crate::model::{CommandRole, Invocation};
+use crate::model::{CommandRole, DefaultChecks, Invocation};
 
 use super::body::OpenBody;
+use super::check::parse_default_checks;
 use super::declarations::{
     parse_dimension_order, parse_discover, parse_invocation_parts, parse_path, parse_product,
 };
 use super::keyword::{removed_section, Keyword};
 use super::lexical::{comma_items, extension, identifier, strip_comment};
-use super::source_map::{name_place, step_place};
+use super::source_map::{name_place, step_place, tail_place};
 use super::{FlowStep, ParseError, StatementKind, StepOutput, Syntax, SHELL_SOURCE_REMOVED};
 
 pub(super) fn parse_flow(text: &str) -> Syntax {
@@ -231,6 +232,17 @@ fn flow_line(
         }
         Some((Keyword::Check, declaration)) => {
             StatementKind::check(original, declaration.trim(), number)?
+        }
+        Some((Keyword::Checks, list)) => {
+            let (uses, exempt) = parse_default_checks(list.trim(), number)?;
+            StatementKind::DefaultChecks {
+                stage,
+                checks: DefaultChecks {
+                    checks: uses,
+                    exempt,
+                },
+                place: tail_place(original, number, list.trim()),
+            }
         }
         Some((Keyword::ShellSource, _)) => {
             return Err(ParseError::new(number, SHELL_SOURCE_REMOVED));

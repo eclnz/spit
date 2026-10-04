@@ -8,7 +8,10 @@
 use std::collections::BTreeMap;
 
 use crate::command::CommandError;
-use crate::model::{CheckDef, CheckUse, Invocation, OperationDef, Pipeline, PipelineIndex, Port};
+use crate::model::{
+    stage_and_parents, CheckDef, CheckUse, DefaultChecks, Invocation, OperationDef, Pipeline,
+    PipelineIndex, Port,
+};
 use crate::parser::SourceMap;
 use crate::span::Place;
 use crate::template::Part;
@@ -79,12 +82,35 @@ pub(crate) fn collect_checks(
         }
         for port in &operation.outputs {
             uses(&port.checks, place.clone());
+            uses(&port.exempt, place.clone());
         }
+    }
+    uses_default(
+        &mut uses,
+        &pipeline.default_checks,
+        lines.default_checks.clone(),
+    );
+    for stage in &pipeline.stages {
+        uses_default(
+            &mut uses,
+            &stage.checks,
+            lines.stage_checks.get(&stage.name).cloned(),
+        );
     }
     for product in &pipeline.products {
         uses(&product.checks, lines.products.get(&product.name).cloned());
     }
     errors
+}
+
+/// Check the uses of one `check:` list, those it adds and those it drops.
+fn uses_default(
+    uses: &mut impl FnMut(&[CheckUse], Option<Place>),
+    defaults: &DefaultChecks,
+    place: Option<Place>,
+) {
+    uses(&defaults.checks, place.clone());
+    uses(&defaults.exempt, place);
 }
 
 fn count(number: usize, noun: &str) -> String {
@@ -228,9 +254,9 @@ pub(crate) fn step_checks<'p>(
             });
         }
     }
-    for (port, output) in operation.outputs.iter().enumerate() {
+    for port in 0..operation.outputs.len() {
         let mut seen: Vec<&CheckUse> = Vec::new();
-        for used in output.checks.iter().chain(added(Port::Output(port))) {
+        for used in output_checks(pipeline, operation, invocation, port) {
             if seen.contains(&used) {
                 continue;
             }
@@ -248,23 +274,56 @@ pub(crate) fn step_checks<'p>(
     checks
 }
 
-/// The checks the step that makes `product` runs on it after its command:
-/// its operation's on that output, and those the step adds.
+/// The checks the step that makes `product` runs on it after its command.
 fn producer_checks<'p>(index: &PipelineIndex<'p>, product: &str) -> Option<Vec<&'p CheckUse>> {
     let (invocation, port) = index.producer(product)?;
     let operation = index.operation(&invocation.operation)?;
+    Some(output_checks(
+        index.pipeline,
+        operation,
+        Some(invocation),
+        port,
+    ))
+}
+
+/// The checks the step of `invocation` runs on its output `port` after the
+/// command, in order: the defaults of its file and stages, then the
+/// operation's own, then those the step adds. The defaults are those of
+/// the file, then each stage around the call from the outermost in, each
+/// list adding to the ones before it and dropping the checks it names with
+/// `!`; the output's own `!` drops more, for that output alone.
+fn output_checks<'p>(
+    pipeline: &'p Pipeline,
+    operation: &'p OperationDef,
+    invocation: Option<&'p Invocation>,
+    port: usize,
+) -> Vec<&'p CheckUse> {
+    let output = &operation.outputs[port];
+    let mut checks: Vec<&CheckUse> = Vec::new();
+    let mut apply = |defaults: &'p DefaultChecks| {
+        for used in &defaults.checks {
+            if !checks.contains(&used) {
+                checks.push(used);
+            }
+        }
+        checks.retain(|used| !defaults.exempt.contains(used));
+    };
+    apply(&pipeline.default_checks);
+    if let Some(stage) = invocation.and_then(|invocation| invocation.stage.as_deref()) {
+        let mut around: Vec<&str> = stage_and_parents(stage).collect();
+        around.reverse();
+        for name in around {
+            if let Some(definition) = pipeline.stages.iter().find(|stage| stage.name == name) {
+                apply(&definition.checks);
+            }
+        }
+    }
+    checks.retain(|used| !output.exempt.contains(used));
     let added = invocation
-        .checks
+        .map_or(&[][..], |invocation| invocation.checks.as_slice())
         .iter()
         .filter(|(at, _)| *at == Port::Output(port))
         .map(|(_, check)| check);
-    Some(
-        operation
-            .outputs
-            .get(port)?
-            .checks
-            .iter()
-            .chain(added)
-            .collect(),
-    )
+    checks.extend(output.checks.iter().chain(added));
+    checks
 }

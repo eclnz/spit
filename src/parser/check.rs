@@ -121,8 +121,12 @@ fn top_level_at(text: &str) -> Option<usize> {
     None
 }
 
-/// The checks a `@ check(...)` clause attaches: `nonempty, ndim(3)`.
-pub(super) fn check_uses(clause: &Clause<'_>, number: usize) -> Result<Vec<CheckUse>, ParseError> {
+/// The checks a `@ check(...)` clause attaches: `nonempty, ndim(3)`, and
+/// for an output, the defaults it opts out of, written `!nonempty`.
+pub(super) fn check_uses(
+    clause: &Clause<'_>,
+    number: usize,
+) -> Result<(Vec<CheckUse>, Vec<CheckUse>), ParseError> {
     let items = comma_items(clause.argument, number)?;
     if items.is_empty() {
         return Err(ParseError::new(
@@ -131,41 +135,73 @@ pub(super) fn check_uses(clause: &Clause<'_>, number: usize) -> Result<Vec<Check
         )
         .at_token(clause.text));
     }
-    items
-        .into_iter()
-        .map(|item| {
-            let (name, arguments) = match item.split_once('(') {
-                Some((name, rest)) => {
-                    let arguments = rest.strip_suffix(')').ok_or_else(|| {
-                        ParseError::new(number, "expected closing `)`").at_token(item)
-                    })?;
-                    (name.trim(), Some(arguments))
-                }
-                None => (item, None),
-            };
-            let name = qualified_identifier(name, number, "check name")?;
-            let arguments = match arguments {
-                Some(arguments) if arguments.trim().is_empty() => {
-                    return Err(ParseError::new(
-                        number,
-                        format!(
-                        "check `{name}` is given no arguments; write `{name}` without parentheses"
-                    ),
-                    )
-                    .at_token(item))
-                }
-                Some(arguments) => comma_items(arguments, number)?
-                    .into_iter()
-                    .map(|argument| check_argument(argument, number))
-                    .collect::<Result<_, _>>()?,
-                None => Vec::new(),
-            };
-            Ok(CheckUse {
-                check: name.to_owned(),
-                arguments,
-            })
-        })
-        .collect()
+    check_list(items, number)
+}
+
+/// The text of a `check:` default list, `nonempty, ndim(3), !other`: the
+/// checks it adds, then those it opts out of.
+pub(super) fn parse_default_checks(
+    text: &str,
+    number: usize,
+) -> Result<(Vec<CheckUse>, Vec<CheckUse>), ParseError> {
+    let items = comma_items(text, number)?;
+    if items.is_empty() {
+        return Err(ParseError::new(
+            number,
+            "expected the checks to run on every output, as in `check: nonempty, ndim(3)`",
+        ));
+    }
+    check_list(items, number)
+}
+
+/// The checks `items` use, then the ones they opt out of.
+fn check_list(
+    items: Vec<&str>,
+    number: usize,
+) -> Result<(Vec<CheckUse>, Vec<CheckUse>), ParseError> {
+    let mut uses = Vec::new();
+    let mut exempt = Vec::new();
+    for item in items {
+        let (written, opt_out) = match item.strip_prefix('!') {
+            Some(rest) => (rest.trim_start(), true),
+            None => (item, false),
+        };
+        let used = check_use(written, item, number)?;
+        if opt_out { &mut exempt } else { &mut uses }.push(used);
+    }
+    Ok((uses, exempt))
+}
+
+/// One check, `nonempty` or `ndim(3)`; `item` is it as written, for errors.
+fn check_use(written: &str, item: &str, number: usize) -> Result<CheckUse, ParseError> {
+    let (name, arguments) = match written.split_once('(') {
+        Some((name, rest)) => {
+            let arguments = rest
+                .strip_suffix(')')
+                .ok_or_else(|| ParseError::new(number, "expected closing `)`").at_token(item))?;
+            (name.trim(), Some(arguments))
+        }
+        None => (written, None),
+    };
+    let name = qualified_identifier(name, number, "check name")?;
+    let arguments = match arguments {
+        Some(arguments) if arguments.trim().is_empty() => {
+            return Err(ParseError::new(
+                number,
+                format!("check `{name}` is given no arguments; write `{name}` without parentheses"),
+            )
+            .at_token(item))
+        }
+        Some(arguments) => comma_items(arguments, number)?
+            .into_iter()
+            .map(|argument| check_argument(argument, number))
+            .collect::<Result<_, _>>()?,
+        None => Vec::new(),
+    };
+    Ok(CheckUse {
+        check: name.to_owned(),
+        arguments,
+    })
 }
 
 /// An argument to a check: one word, which the check's command gets as it
@@ -184,13 +220,33 @@ fn check_argument(argument: &str, number: usize) -> Result<String, ParseError> {
 }
 
 /// The checks of `clauses`, which may only be `@ check(...)`; `what` names
-/// where they are written for the error about any other clause.
+/// where they are written for the error about any other clause. Opting out
+/// of a default, `!name`, is for an output alone.
 pub(super) fn only_checks(
     clauses: &[Clause<'_>],
     what: &str,
     number: usize,
 ) -> Result<Vec<CheckUse>, ParseError> {
+    let (checks, exempt) = output_checks(clauses, what, number)?;
+    if let Some(used) = exempt.first() {
+        return Err(ParseError::new(
+            number,
+            format!("{what} cannot opt out of a default check; `!{used}` belongs on an output"),
+        )
+        .at_token(&used.check));
+    }
+    Ok(checks)
+}
+
+/// The checks of `clauses`, as [`only_checks`], and the default checks an
+/// output opts out of.
+pub(super) fn output_checks(
+    clauses: &[Clause<'_>],
+    what: &str,
+    number: usize,
+) -> Result<(Vec<CheckUse>, Vec<CheckUse>), ParseError> {
     let mut checks = Vec::new();
+    let mut exempt = Vec::new();
     for clause in clauses {
         if clause.keyword != "check" {
             return Err(ParseError::new(
@@ -202,14 +258,16 @@ pub(super) fn only_checks(
             )
             .at_token(clause.text));
         }
-        checks.extend(check_uses(clause, number)?);
+        let (uses, opted_out) = check_uses(clause, number)?;
+        checks.extend(uses);
+        exempt.extend(opted_out);
     }
-    Ok(checks)
+    Ok((checks, exempt))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{check_uses, parse_check, split_clauses};
+    use super::{check_uses, parse_check, parse_default_checks, split_clauses};
 
     #[test]
     fn a_check_declares_its_parameters_and_command() {
@@ -226,12 +284,23 @@ mod tests {
     }
 
     #[test]
+    fn a_default_list_separates_the_checks_it_drops() {
+        let (uses, exempt) = parse_default_checks("nonempty, ndim(3), !lines(2)", 1).unwrap();
+        assert_eq!(uses.len(), 2);
+        assert_eq!(exempt.len(), 1);
+        assert_eq!(exempt[0].to_string(), "lines(2)");
+        assert!(parse_default_checks("", 1).is_err());
+        assert!(parse_default_checks("nonempty,, x", 1).is_err());
+    }
+
+    #[test]
     fn clauses_split_after_the_port_and_name_their_checks() {
         let (port, clauses) =
             split_clauses("dwi: DWI @ check(ndim(4), nonempty) @ check(x)", "", 1).unwrap();
         assert_eq!(port, "dwi: DWI");
         assert_eq!(clauses.len(), 2);
-        let uses = check_uses(&clauses[0], 1).unwrap();
+        let (uses, exempt) = check_uses(&clauses[0], 1).unwrap();
+        assert!(exempt.is_empty());
         let written: Vec<_> = uses.iter().map(ToString::to_string).collect();
         assert_eq!(written, ["ndim(4)", "nonempty"]);
         let (port, clauses) = split_clauses("items: many Table<Image @ x>", "", 1).unwrap();

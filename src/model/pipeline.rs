@@ -9,9 +9,9 @@ use crate::error::{DefinitionSubject, ResolveError};
 use crate::paths::{Holder, PathTemplate};
 
 use super::{
-    stage_and_parents, ArtifactInstance, Call, CallId, CheckDef, CommandDef, EntityBinding,
-    ExtensionSource, Invocation, OperationDef, OutputPort, ProductDef, Removal, SidecarGroup,
-    SourceInventory, SourceRecord, StageDef,
+    stage_and_parents, ArtifactInstance, Call, CallId, CheckDef, CommandDef, DefaultChecks,
+    EntityBinding, ExtensionSource, Invocation, OperationDef, OutputPort, ProductDef, Removal,
+    SidecarGroup, SourceInventory, SourceRecord, StageDef,
 };
 
 /// The logical pipeline: what to make from which sources. It says nothing
@@ -24,6 +24,8 @@ pub struct Pipeline {
     pub commands: Vec<CommandDef>,
     /// `check` declarations, in declaration order.
     pub checks: Vec<CheckDef>,
+    /// The `check:` default of every output in the file, outside any stage.
+    pub default_checks: DefaultChecks,
     pub path_template: Option<PathTemplate>,
     /// The `ext:` default: the extension a default path rule is completed
     /// with when the operation declares none.

@@ -16,8 +16,8 @@ mod source_map;
 use std::fmt;
 
 use crate::model::{
-    CheckDef, CommandDef, CommandRole, CoverageRule, DirectoryDiscovery, Invocation, OperationDef,
-    ProductDef, StepOutput,
+    CheckDef, CommandDef, CommandRole, CoverageRule, DefaultChecks, DirectoryDiscovery, Invocation,
+    OperationDef, ProductDef, StepOutput,
 };
 use crate::paths::PathTemplate;
 use crate::span::{address_of, columns_at, content_columns, Focus, Located, Place};
@@ -175,6 +175,14 @@ pub(crate) enum StatementKind {
     Extension {
         stage: Option<String>,
         extension: String,
+    },
+    /// A `check:` line: the checks of every output in `stage` or, outside
+    /// every stage, in the whole file.
+    DefaultChecks {
+        stage: Option<String>,
+        checks: DefaultChecks,
+        /// Where the list sits.
+        place: Place,
     },
     /// A flow step, which declares its output products.
     FlowStep(FlowStep),
