@@ -546,8 +546,8 @@ Each step merges on its own, keeps output byte-for-byte the same unless it says 
 | --- | --- | --- | --- |
 | 1 | Parse an operation's body into `OperationDef::steps`, each step with its place, and check it where it is declared: its steps call operations declared before it, read only its ports and its own products, and assign every output once. Calling such an operation is an error until step 2. | spit | e11653b |
 | 2 | Expand calls in lowering: instance names, renaming, selectors merged at ports, nested bodies by worklist, `Pipeline::calls` and `Invocation::origin`, call-site errors through `SourceMap::invocations`, private intermediates, output types from the declaration. | spit | e11653b |
-| 3 | Import operations with bodies through `select_import`, with the operations and checks their steps use, qualified. | spit | |
-| 4 | Checks on a composite's ports and outputs, carried by the expanded steps and run by `step_checks`. | spit | |
+| 3 | Import operations with bodies through `select_import`, with the operations and checks their steps use, qualified. | spit | e08c650 |
+| 4 | Checks on a composite's ports and outputs, carried by the expanded steps and run by `step_checks`. | spit | e08c650 |
 | 5 | Write `.spitdag` version 7, with `pipeline_files` and each job's `origin`, and the hand-written blob hash. | spit, spit-bash | |
 | 6 | Show calls: `from:` in the commands view, grouping in `--counts`, call-aware reasons in `artifacts` and `left_out`, hovers, and `related` locations in diagnostics. | spit, spit-vscode | |
 | 7 | Examples (MRtrix and germline), the guide, and the acceptance tests as stored outputs. | spit | |
