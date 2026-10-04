@@ -1,6 +1,7 @@
-//! Values of one dimension that differ only in letter case, such as store
-//! `s07` in the sales and `S07` in the price list. SPIT compares values as
-//! written, so the two are different stores; listing them together shows a
+//! Values of one dimension that differ only in ASCII letter case, such as
+//! store `s07` in the sales and `S07` in the price list. Letters outside
+//! ASCII are not folded: `é` and `É` are different values with no note.
+//! SPIT compares values as written, so the two are different stores; listing them together shows a
 //! reader which sources are probably one thing under two spellings.
 
 use std::collections::BTreeMap;
@@ -17,17 +18,21 @@ pub struct Spelling {
     pub products: Vec<String>,
     /// An `exclude` rule removed a group with this value. A product's own
     /// artifact removed by name is not counted, since its group remains.
+    /// The note marks a spelling `(excluded)` only when no source of it
+    /// remains, so a spelling an `exclude` rule removed only some of, as
+    /// `exclude [store=s01,week=w1]` does of `s01`, is listed with its
+    /// remaining products and not marked.
     pub excluded: bool,
 }
 
-/// The spellings of one value that differ only in letter case, sorted.
+/// The spellings of one value that differ only in ASCII letter case, sorted.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CaseVariants {
     pub dimension: String,
     pub spellings: Vec<Spelling>,
 }
 
-/// Each set of values of a dimension that differ only in letter case, among
+/// Each set of values of a dimension that differ only in ASCII letter case, among
 /// the sources the inventory holds and the groups it removed, in dimension
 /// then value order. A set where every spelling was removed is left out: the
 /// reader has dealt with it.
@@ -166,6 +171,25 @@ mod tests {
     #[test]
     fn a_set_with_every_spelling_removed_is_left_out() {
         assert!(case_variants(&inventory(&[], &["s07", "S07"])).is_empty());
+    }
+
+    #[test]
+    fn letters_outside_ascii_are_not_folded() {
+        assert!(case_variants(&inventory(
+            &[
+                ("sales", "é1"),
+                ("pricing", "É1"),
+                ("sales", "ß"),
+                ("pricing", "SS")
+            ],
+            &[]
+        ))
+        .is_empty());
+        // The ASCII letters of a value fold even beside others that do not.
+        assert_eq!(
+            case_variants(&inventory(&[("sales", "é1a"), ("pricing", "é1A")], &[])).len(),
+            1
+        );
     }
 
     #[test]

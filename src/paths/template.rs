@@ -192,6 +192,16 @@ impl PathTemplate {
         Ok(Self { text, parts })
     }
 
+    /// Fail when two placeholders of this template, with nothing between
+    /// them, both take a shape of any length. `parse` checks the template
+    /// as written; a product whose `[...]` group is dropped has a different
+    /// one, so the same check runs on `resolve`'s result.
+    pub(crate) fn check_open_shapes(&self) -> Result<(), String> {
+        let mut all = Vec::new();
+        flatten(&self.parts, &mut all);
+        open_shapes_apart(&all, &self.text)
+    }
+
     /// Whether the template has a `[...]` group or `{@labels}`, which each
     /// product resolves its own way.
     pub(crate) fn varies(&self) -> bool {
@@ -451,20 +461,22 @@ fn parse_parts(text: &str) -> Result<Vec<PathPart>, String> {
     Ok(parts)
 }
 
+/// The parts of `parts` with each `[...]` group's parts in its place.
+fn flatten<'a>(parts: &'a [PathPart], out: &mut Vec<&'a PathPart>) {
+    for part in parts {
+        match part {
+            PathPart::Group(group) => flatten(group, out),
+            part => out.push(part),
+        }
+    }
+}
+
 /// Fail when a dimension has two shapes, or when two placeholders with
 /// nothing between them both take a shape of any length, as `{a:digits}{b:digits}`
 /// does: where one ends and the other starts is not written down.
 fn check_shapes(parts: &[PathPart], text: &str) -> Result<(), String> {
-    fn flat<'a>(parts: &'a [PathPart], out: &mut Vec<&'a PathPart>) {
-        for part in parts {
-            match part {
-                PathPart::Group(group) => flat(group, out),
-                part => out.push(part),
-            }
-        }
-    }
     let mut all = Vec::new();
-    flat(parts, &mut all);
+    flatten(parts, &mut all);
     let mut shapes: Vec<(&str, Shape)> = Vec::new();
     for part in &all {
         if let PathPart::Placeholder(PathPlaceholder::Dimension(name, Some(shape))) = part {
@@ -479,6 +491,13 @@ fn check_shapes(parts: &[PathPart], text: &str) -> Result<(), String> {
             }
         }
     }
+    open_shapes_apart(&all, text)
+}
+
+/// Fail when two placeholders with nothing between them both take a shape
+/// of any length, as `{a:digits}{b:digits}` does. `all` is the template's
+/// parts with groups flattened away.
+fn open_shapes_apart(all: &[&PathPart], text: &str) -> Result<(), String> {
     let open = |part: &&PathPart| {
         matches!(
             part,
