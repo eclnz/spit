@@ -251,24 +251,20 @@ impl InputSpec {
     /// Check the recipe against the pipeline's source declarations, without
     /// reading any file or record.
     pub fn check(&self, pipeline: &Pipeline) -> Result<(), InputError> {
-        let members = pipeline.sidecar_members();
         let index = PipelineIndex::new(pipeline);
         for name in self.rules.source_paths.keys() {
             let product = name.clone();
-            if let Some(group) = pipeline.sidecar_group(name) {
-                if group.stem.is_some() {
-                    return Err(InputError::PathInBoth { product });
-                }
-                continue;
-            }
             if !index.is_source(name) {
                 if index.product(name).is_some() {
                     return Err(InputError::OutputPath { product });
                 }
                 return Err(InputError::NotASource { product });
             }
-            if let Some(group) = members.get(name.as_str()) {
-                let group = group.name.clone();
+            if let Some(group) = index
+                .product(name)
+                .and_then(|source| source.beside.as_ref())
+            {
+                let group = group.sibling.clone();
                 return Err(InputError::MemberPath { product, group });
             }
             if pipeline.product_paths.contains_key(name) {
@@ -295,15 +291,12 @@ impl InputSpec {
     /// finds every source by its rule, so it cannot find this one.
     pub fn source_without_path(&self, pipeline: &Pipeline) -> Option<String> {
         let source_paths = self.rules.source_paths_for(pipeline);
-        let index = PipelineIndex::new(pipeline);
+        let located = with_source_paths(pipeline, &source_paths);
+        let index = PipelineIndex::new(&located);
         pipeline
             .products
             .iter()
-            .find(|product| {
-                index.is_source(&product.name)
-                    && !source_paths.contains_key(&product.name)
-                    && !index.has_path(&product.name)
-            })
+            .find(|product| index.is_source(&product.name) && !index.has_path(&product.name))
             .map(|product| product.name.clone())
     }
 
@@ -448,6 +441,15 @@ fn merge_source_paths(
         if !index.is_source(name) {
             return Err(InputError::UnknownSourcePath { product });
         }
+        if let Some(beside) = index
+            .product(name)
+            .and_then(|source| source.beside.as_ref())
+        {
+            return Err(InputError::MemberPath {
+                product,
+                group: beside.sibling.clone(),
+            });
+        }
         if pipeline.product_paths.contains_key(name) {
             return Err(InputError::InventoryPathInBoth { product });
         }
@@ -455,7 +457,7 @@ fn merge_source_paths(
     Ok(())
 }
 
-/// Each binding where some of a `sidecars` group's sources were found and
+/// Each binding where some of a main source's companions were found and
 /// others were neither found nor removed, by `removed` or a removal
 /// `inventory` already records from an earlier run, said as
 /// `photo[site=A,visit=2,shot=3] has .raw and .gpx but no .imu`, by group
@@ -580,11 +582,10 @@ pub enum InputError {
     /// The recipe sets a path for a product a step makes, whose path is
     /// the pipeline's to give.
     OutputPath { product: String },
-    /// A source or `sidecars` group has a path rule in both the pipeline
+    /// A source has a path rule in both the pipeline
     /// and the recipe.
     PathInBoth { product: String },
-    /// The recipe sets a path for a member of a `sidecars` group, which
-    /// takes the group's.
+    /// The recipe sets a path for a companion, which follows its main source.
     MemberPath { product: String, group: String },
     /// A scan finds every source's files, and this one has no path rule to
     /// find them by.
@@ -620,7 +621,7 @@ impl fmt::Display for InputError {
             Self::Path(error) => error.fmt(f),
             Self::NotASource { product } => write!(
                 f,
-                "input path `{product}` must name a source product or sidecars group in the pipeline"
+                "input path `{product}` must name a source product in the pipeline"
             ),
             Self::OutputPath { product } => write!(
                 f,
@@ -632,7 +633,7 @@ impl fmt::Display for InputError {
             ),
             Self::MemberPath { product, group } => write!(
                 f,
-                "source `{product}` takes its path from sidecars group `{group}`; write `path {group}:` with the group's stem"
+                "source `{product}` is beside `{group}` and takes its path from it; write `path {group}:` instead"
             ),
             Self::NoSourcePath { product } => write!(
                 f,
@@ -688,7 +689,7 @@ pub struct ResolvedInputs {
     pub unmatched_files: Vec<String>,
     /// Each source whose path rule matched no file under a scanned root.
     pub missed_sources: Vec<MissedSource>,
-    /// Each place the scan or records hold some of a `sidecars` group's
+    /// Each place the scan or records hold some of a companion group's
     /// sources and not the others, as `photo[site=A,shot=3] has .raw and
     /// .gpx but no .imu`.
     pub incomplete_groups: Vec<String>,

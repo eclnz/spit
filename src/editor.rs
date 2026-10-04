@@ -357,9 +357,9 @@ fn output_signature(port: &OutputPort, named: bool) -> String {
     };
     if let Some(beside) = &port.beside {
         if beside.suffix.starts_with('.') {
-            let _ = write!(result, " {} beside {}", beside.suffix, beside.port);
+            let _ = write!(result, " {} beside {}", beside.suffix, beside.sibling);
         } else {
-            let _ = write!(result, " \"{}\" beside {}", beside.suffix, beside.port);
+            let _ = write!(result, " \"{}\" beside {}", beside.suffix, beside.sibling);
         }
     } else {
         result.push_str(&ending(port.extension.as_deref(), port.folder));

@@ -101,7 +101,7 @@ fn write_source(text: &mut String, source: &SuggestedSource, pipeline: Option<&s
     write_values(text, source);
     let dimensions = source.dimensions.join(", ");
     if !source.members.is_empty() {
-        write_sidecars(text, source, pipeline);
+        write_beside_sources(text, source, pipeline);
         return;
     }
     match &source.declared {
@@ -131,19 +131,18 @@ fn write_source(text: &mut String, source: &SuggestedSource, pipeline: Option<&s
     let _ = writeln!(text, "path {}: {}", source.name, source.rule);
 }
 
-/// A `sidecars` block for files that share a stem: in the pipeline with its
-/// stem, or in the recipe's pipeline with the stem in the recipe.
-fn write_sidecars(text: &mut String, source: &SuggestedSource, pipeline: Option<&str>) {
+/// Sources sharing a file stem: the first has the path and dimensions;
+/// each companion follows it with `beside`.
+fn write_beside_sources(text: &mut String, source: &SuggestedSource, pipeline: Option<&str>) {
+    let Some((anchor, extension)) = source.members.first() else {
+        return;
+    };
     let mut block = format!(
-        "sidecars {} [{}]:\n",
-        source.name,
+        "source {anchor} {extension} [{}]\n",
         source.dimensions.join(", ")
     );
-    if pipeline.is_none() {
-        let _ = writeln!(block, "    path: {}", source.rule);
-    }
-    for (name, extension) in &source.members {
-        let _ = writeln!(block, "    source {name} {extension}");
+    for (name, extension) in source.members.iter().skip(1) {
+        let _ = writeln!(block, "source {name} {extension} beside {anchor}");
     }
     match pipeline {
         Some(pipeline) => {
@@ -152,11 +151,12 @@ fn write_sidecars(text: &mut String, source: &SuggestedSource, pipeline: Option<
                 let _ = writeln!(text, "#   {line}");
             }
             write_notes(text, source);
-            let _ = writeln!(text, "path {}: {}", source.name, source.rule);
+            let _ = writeln!(text, "path {anchor}: {}{extension}", source.rule);
         }
         None => {
             write_notes(text, source);
             text.push_str(&block);
+            let _ = writeln!(text, "path {anchor}: {}{extension}", source.rule);
         }
     }
 }

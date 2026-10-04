@@ -16,7 +16,7 @@ use std::fmt;
 
 use crate::model::{
     CheckDef, CommandDef, CommandRole, CoverageRule, DirectoryDiscovery, Invocation, OperationDef,
-    ProductDef, SidecarGroup,
+    ProductDef,
 };
 use crate::paths::PathTemplate;
 use crate::span::{address_of, columns_at, content_columns, Focus, Located, Place};
@@ -168,9 +168,6 @@ pub(crate) enum StatementKind {
     /// A `dimensions [...]` line: the pipeline's dimension order.
     Dimensions(Vec<String>),
     Path(PathRule),
-    /// A `sidecars` block, once its members, each an ordinary `Product`
-    /// with its `Path`, are read.
-    SidecarGroup(SidecarGroup),
     /// An `ext:` line: the default extension of `stage`, or, outside every
     /// stage, of the whole pipeline.
     Extension {

@@ -41,9 +41,7 @@ fn import_errors_point_to_the_use_line() {
     let main = dir.write("main.spit", "use absent from base.spit\n");
     let error = support::parse_fixture_at(&fs::read_to_string(&main).unwrap(), &main).unwrap_err();
     assert_eq!(error.line(), 1);
-    assert!(error
-        .message()
-        .contains("not a source, operation, sidecars group or check"));
+    assert!(error.message().contains("not a source, operation or check"));
 
     let main = dir.write(
         "main.spit",
@@ -221,7 +219,7 @@ fn an_import_may_not_define_again_what_the_file_defines() {
     }
 }
 
-const PHOTOS: &str = "sidecars photo [shot]:\n    path: photos/{shot}\n    source raw : Image .raw\n    source meta : Json .json\n";
+const PHOTOS: &str = "source raw : Image .raw [shot]\npath raw: photos/{shot}.raw\nsource meta : Json .json beside raw\n";
 
 const COPY: &str =
     "operation cp(x: Image) -> Image\ncommand cp: cp {x} {@output}\nout = cp(l::raw)\n";
@@ -233,8 +231,8 @@ fn an_import_brings_a_sidecars_group_in_whole() {
     let dir = Tree::new("imports", &[]);
     dir.write("lib.spit", PHOTOS);
     for (use_line, group) in [
-        ("use lib.spit as l", "l::photo"),
-        ("use photo from lib.spit as l", "l::photo"),
+        ("use lib.spit as l", "l::raw"),
+        ("use raw from lib.spit as l", "l::raw"),
     ] {
         let main = dir.write("main.spit", &format!("{use_line}\n{COPY}"));
         let pipeline = parse_pipeline_at(&fs::read_to_string(&main).unwrap(), &main).unwrap();
@@ -260,12 +258,12 @@ fn an_import_brings_a_sidecars_group_in_whole() {
 fn a_sidecars_member_is_not_imported_alone() {
     let dir = Tree::new("imports", &[]);
     dir.write("lib.spit", PHOTOS);
-    let main = dir.write("main.spit", "use raw from lib.spit as l\n");
+    let main = dir.write("main.spit", "use meta from lib.spit as l\n");
     let error = parse_pipeline_at(&fs::read_to_string(&main).unwrap(), &main).unwrap_err();
     assert_eq!(error.line(), 1);
     assert_eq!(
         error.message(),
-        "`raw` is a member of sidecars group `photo`; import the group, `photo`, to bring its members"
+        "source `meta` is beside `raw`; import `raw` to bring its companions"
     );
 }
 
@@ -277,21 +275,21 @@ fn an_imported_sidecars_group_still_reports_incomplete_bindings() {
     let dir = Tree::new("imports", &["d/p/1.raw", "d/p/1.json", "d/p/2.raw"]);
     dir.write(
         "lib.spit",
-        "sidecars photo [shot]:\n    source raw : Image .raw\n    source meta : Json .json\n",
+        "source raw : Image .raw [shot]\nsource meta : Json .json beside raw\n",
     );
     dir.write(
         "top.spit",
-        "use photo from lib.spit as l\noperation cp(x: Image, m: Json) -> Image\n\
+        "use raw from lib.spit as l\noperation cp(x: Image, m: Json) -> Image\n\
          command cp: cp {x} {m} {@output}\nout = cp(l::raw, l::meta)\n",
     );
     let recipe = dir.write(
         "top.spitin",
-        "pipeline top.spit\nroot d\npath l::photo: p/{shot}\n",
+        "pipeline top.spit\nroot d\npath l::raw: p/{shot}.raw\n",
     );
     let output = support::spit(&["inputs", recipe.to_str().unwrap()]);
     let stderr = support::text(&output.stderr);
     assert!(
-        stderr.contains("l::photo[shot=2] has .raw but no .json"),
+        stderr.contains("l::raw[shot=2] has .raw but no .json"),
         "{stderr}"
     );
 }
