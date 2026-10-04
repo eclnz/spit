@@ -653,3 +653,46 @@ fn a_call_is_not_named_as_an_import_is() {
         ["20: this call files the products it makes for itself under `m::`, as an import does `m::cleaned`; rename the call's first output or the import's alias"]
     );
 }
+
+#[test]
+fn calls_list_each_written_call_with_its_steps_and_the_calls_in_them() {
+    let tree = support::Tree::new("composite-calls", &[]);
+    library(&tree);
+    let text = "\
+use summarise from libs/lib.spit as L
+source raw : Lines [group, lane]
+source cal : Table [group, revision]
+
+stage report:
+    m, t = L::summarise(raw, cal @ where(revision=2))
+";
+    let main = tree.write("main.spit", text);
+    let (pipeline, _) = support::parse_fixture_at(text, &main).unwrap();
+    let blob = &pipeline.files[1].blob[..7];
+    assert_eq!(
+        spit::render_calls(&pipeline),
+        format!(
+            "\
+m, t = L::summarise(…)  line 6  [report]
+  L::summarise  libs/lib.spit  blob {blob}
+  line 13  m::cleaned = L::tidy(raw, cal)
+    line 10  m::cleaned = L::clean(raw, cal)
+  line 14  m = L::merge(m::cleaned)
+  line 15  t = L::C::count(m)
+"
+        )
+    );
+    let json = spit::render_calls_json(&pipeline);
+    assert!(json.starts_with(&format!(
+        "[{{\"id\":0,\"parent\":null,\"operation\":\"L::summarise\",\"outputs\":[\"m\",\"t\"],\"inputs\":[\"raw\",\"cal\"],\"line\":6,\"stage\":\"report\",\"file\":\"libs/lib.spit\",\"blob\":\"{}\",\"steps\":[{{\"line\":14,",
+        pipeline.files[1].blob
+    )), "{json}");
+    // The call in the body is its own entry, under its caller.
+    assert!(json.contains(
+        "{\"id\":1,\"parent\":0,\"operation\":\"L::tidy\",\"outputs\":[\"m::cleaned\"],\"inputs\":[\"raw\",\"cal\"],\"line\":13,\"stage\":\"report\",\"file\":\"libs/lib.spit\",\"blob\":"
+    ), "{json}");
+    // Nothing is listed for a pipeline with no calls.
+    let (plain, _) = support::parse_fixture(&format!("{BASE}\n")).unwrap();
+    assert_eq!(spit::render_calls(&plain), "");
+    assert_eq!(spit::render_calls_json(&plain), "[]");
+}

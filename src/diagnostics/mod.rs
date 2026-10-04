@@ -343,10 +343,16 @@ pub fn diagnose_recipe(text: &str, path: &Path) -> Vec<Diagnostic> {
                 .into_iter()
                 .filter(Diagnostic::is_error)
                 .map(|mut diagnostic| {
-                    diagnostic.file = Some(shown.clone());
-                    diagnostic.external_text = Some(Arc::clone(&external));
                     // A library's path is from the pipeline's folder.
                     let folder = pipeline_path.parent().unwrap_or_else(|| Path::new(""));
+                    match &mut diagnostic.file {
+                        // An error in a library keeps its own file and text.
+                        Some(file) => *file = folder.join(&*file).display().to_string(),
+                        None => {
+                            diagnostic.file = Some(shown.clone());
+                            diagnostic.external_text = Some(Arc::clone(&external));
+                        }
+                    }
                     for related in &mut diagnostic.related {
                         if let Some(file) = &mut related.file {
                             *file = folder.join(&*file).display().to_string();
@@ -647,6 +653,7 @@ fn finish(
                 .filter(|diagnostic| {
                     diagnostic.is_error()
                         && diagnostic.source == source
+                        && diagnostic.file.is_none()
                         && diagnostic.line == number
                 })
                 .collect();
@@ -753,27 +760,35 @@ fn within_call(
 /// Order by source and line, keep only the first error on each line, and
 /// drop warnings on a line that already has an error.
 fn order(mut diagnostics: Vec<Diagnostic>) -> Vec<Diagnostic> {
-    let key = |diagnostic: &Diagnostic| {
+    // Those in the text diagnosed first, then each other file's.
+    fn key(diagnostic: &Diagnostic) -> impl Ord + '_ {
         (
             diagnostic.source == DiagnosticSource::Inventory,
+            diagnostic.file.as_deref(),
             diagnostic.line.is_none(),
             diagnostic.line,
+            diagnostic.severity,
         )
-    };
-    diagnostics.sort_by_key(|diagnostic| (key(diagnostic), diagnostic.severity));
+    }
+    diagnostics.sort_by(|a, b| key(a).cmp(&key(b)));
     let mut errored = BTreeSet::new();
-    diagnostics.retain(|diagnostic| {
-        let Some(line) = diagnostic.line else {
-            return true;
-        };
-        let place = (diagnostic.source, line);
-        if errored.contains(&place) {
-            return false;
-        }
-        if diagnostic.is_error() {
-            errored.insert(place);
-        }
-        true
-    });
+    let keep: Vec<bool> = diagnostics
+        .iter()
+        .map(|diagnostic| {
+            let Some(line) = diagnostic.line else {
+                return true;
+            };
+            let place = (diagnostic.source, diagnostic.file.as_deref(), line);
+            if errored.contains(&place) {
+                return false;
+            }
+            if diagnostic.is_error() {
+                errored.insert(place);
+            }
+            true
+        })
+        .collect();
+    let mut keep = keep.into_iter();
+    diagnostics.retain(|_| keep.next().unwrap_or(true));
     diagnostics
 }

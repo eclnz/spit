@@ -13,11 +13,12 @@ use crate::diagnostics::{
 use crate::imports::parse_located_document_recovering;
 use crate::json::Json;
 use crate::model::{
-    Cardinality, CheckDef, CheckUse, CommandRole, Invocation, OperationDef, OutputPort, PathOrigin,
-    Pipeline, PipelineIndex, ProductDef, DEFAULT_OUTPUT,
+    Cardinality, CheckDef, CheckUse, CommandRole, OperationDef, OutputPort, PathOrigin, Pipeline,
+    PipelineIndex, ProductDef, DEFAULT_OUTPUT,
 };
 use crate::parser::{without_bom, Kind};
 use crate::paths::shown_path;
+use crate::render::written_step;
 use crate::span::{find_word, utf16_columns, Place};
 use crate::types::TypeExpr;
 
@@ -549,20 +550,6 @@ fn consumers(pipeline: &Pipeline) -> BTreeMap<&str, Vec<String>> {
 }
 
 /// A step as written, as `cleaned = clean(reads, table)`.
-fn written_step(invocation: &Invocation) -> String {
-    format!(
-        "{} = {}({})",
-        invocation.outputs.join(", "),
-        invocation.operation,
-        invocation
-            .inputs
-            .iter()
-            .map(|input| input.product_name())
-            .collect::<Vec<_>>()
-            .join(", ")
-    )
-}
-
 fn product_details(
     index: &PipelineIndex<'_>,
     product: &ProductDef,

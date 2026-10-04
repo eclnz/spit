@@ -120,6 +120,10 @@ impl ParseError {
         if self.location.columns.is_none() {
             let token = match self.location.focus.take() {
                 Some(Focus::Address(address)) => columns_at(line, &address),
+                Some(other @ Focus::Imported(_)) => {
+                    self.location.focus = Some(other);
+                    None
+                }
                 _ => None,
             };
             self.location.columns = Some(token.unwrap_or_else(|| content_columns(line)));
