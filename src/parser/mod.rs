@@ -150,11 +150,16 @@ pub(crate) struct Statement {
     /// The statement's line content, for errors about it as a whole.
     pub(crate) place: Place,
     pub(crate) kind: StatementKind,
-    /// Reading the statement's line changed how later lines read, beyond
-    /// adding the statement: it closed a stage, fixed the indentation of
-    /// a stage's lines, or ended a body that a later line is indented
-    /// beneath. A blank line would not, so a failing statement that does
-    /// this cannot be passed over as if its line were blank.
+    /// Reading the statement's line changed how a later line reads, beyond
+    /// adding the statement: it closed a stage that the later line is
+    /// indented beneath, fixed the indentation of a stage's lines that
+    /// the later line does not share, or ended a body that the later line
+    /// is indented beneath. A blank line would not, so a failing statement
+    /// that did this cannot be passed over as if its line were blank. The
+    /// parser marks it when it reads the later line (`parse_flow` and
+    /// `flow_rest` in `src/parser/flow.rs`), and for the header of an
+    /// operation with a body, which blanking would leave to its steps, when
+    /// it closes or fixes a stage at all.
     pub(crate) stateful: bool,
 }
 
@@ -264,7 +269,12 @@ impl StatementKind {
             .trim_end();
         let operation = operation::parse_operation(signature, number)?;
         let place = source_map::name_place(original, number, signature, &operation.name);
-        Ok(Self::Operation(operation, place.clone(), stage, place.columns))
+        Ok(Self::Operation(
+            operation,
+            place.clone(),
+            stage,
+            place.columns,
+        ))
     }
 
     /// A `require` or conditional `exclude` rule, the whole content `line` of `original`.

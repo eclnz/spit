@@ -19,8 +19,9 @@ use crate::model::{
 };
 use crate::order::{order_dimensions, Output};
 use crate::parser::{
-    empty_body, parse_source_inventory, parse_syntax, split_document, without_bom, ExcludeLine, Kind,
-    ParseError, ParseErrorKind, PathRule, Rule, SourceMap, Statement, StatementKind, Step, Syntax,
+    empty_body, parse_source_inventory, parse_syntax, split_document, without_bom, ExcludeLine,
+    Kind, ParseError, ParseErrorKind, PathRule, Rule, SourceMap, Statement, StatementKind, Step,
+    Syntax,
 };
 use crate::shape::{step_context, step_driver, BoundInput};
 use crate::span::Place;
@@ -571,8 +572,9 @@ fn lower_body(
     let StatementKind::Operation(operation, place, stage, ended) = &statement.kind else {
         unreachable!("an operation is lowered from an operation statement");
     };
-    let BodyCheck { mut failed, unmade } =
-        builder.check_body(operation, place).map_err(Failure::from)?;
+    let BodyCheck { mut failed, unmade } = builder
+        .check_body(operation, place)
+        .map_err(Failure::from)?;
     let all_failed = failed.len() == operation.steps.len();
     if all_failed && statement.stateful {
         // Were the header blank, the lines after it would not read the same.
