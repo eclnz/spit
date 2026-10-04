@@ -372,3 +372,79 @@ m, t = L::summarise(raw, cal @ where(revision=2))
         job("5")
     );
 }
+
+#[test]
+fn the_spitdag_names_each_file_read_each_call_and_where_each_job_comes_from() {
+    let tree = support::Tree::new("composite-origin", &[]);
+    library(&tree);
+    let text = format!(
+        "\
+use summarise from libs/lib.spit as L
+path: out/{{@product}}/{{@entities}}.txt
+source raw : Lines [group, lane]
+path raw: in/{{group}}/r{{lane}}.txt
+source cal : Table [group, revision]
+path cal: cal/{{group}}-r{{revision}}.txt
+m, t = L::summarise(raw, cal @ where(revision=2))
+{RECORDS}"
+    );
+    let main = tree.write("main.spit", &text);
+    let (pipeline, records) = support::parse_fixture_at(&text, &main).unwrap();
+    let dag = resolve(&pipeline, &records.unwrap()).unwrap();
+    let bound = spit::bind_dag(&pipeline, &dag).unwrap();
+    let files: Vec<_> = bound
+        .pipeline_files
+        .iter()
+        .map(|file| file.path.as_str())
+        .collect();
+    assert_eq!(files, ["main.spit", "libs/lib.spit", "libs/sub/count.spit"]);
+    // `git hash-object` prints these ids.
+    let blob = |path: &str| {
+        let bytes = std::fs::read(tree.path().join(path)).unwrap();
+        let mut sha = std::process::Command::new("git")
+            .args(["hash-object", "--stdin"])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        std::io::Write::write_all(&mut sha.stdin.take().unwrap(), &bytes).unwrap();
+        support::text(&sha.wait_with_output().unwrap().stdout)
+            .trim()
+            .to_owned()
+    };
+    for file in &bound.pipeline_files {
+        assert_eq!(file.blob, blob(&file.path), "{}", file.path);
+    }
+    let calls: Vec<_> = bound
+        .calls
+        .iter()
+        .map(|call| {
+            (
+                call.operation.as_str(),
+                call.instance.as_str(),
+                call.parent,
+                call.file,
+                call.at_file,
+                call.at_line,
+            )
+        })
+        .collect();
+    assert_eq!(
+        calls,
+        [
+            ("L::summarise", "m", None, Some(1), Some(0), 7),
+            // The call to `tidy` in the body of `summarise`, on its line 13.
+            ("L::tidy", "m::cleaned", Some(0), Some(1), Some(1), 13),
+        ]
+    );
+    let origins: Vec<_> = bound
+        .steps
+        .iter()
+        .map(|step| {
+            step.origin
+                .as_ref()
+                .map(|origin| (origin.call, origin.line))
+        })
+        .collect();
+    assert_eq!(origins, [Some((1, 10)), Some((0, 14)), Some((0, 15))]);
+}

@@ -4,6 +4,7 @@
 // Outside tests, `expect` states the invariant it relies on; see AGENTS.md.
 #![deny(clippy::unwrap_used)]
 
+mod blob;
 mod builtins;
 mod check;
 mod command;
@@ -47,11 +48,12 @@ pub use inputs::{
 pub use lower::parse_pipeline;
 pub use model::{
     stage_within, Artifact, ArtifactId, ArtifactInstance, ArtifactKey, ArtifactReport,
-    ArtifactType, Artifacts, Beside, Cardinality, CommandDef, CommandRole, CountRequirement,
-    CoverageAction, CoverageGap, CoverageRule, DagStep, DimensionOrders, DirectoryDiscovery,
-    EntityBinding, Exclusion, Gap, IncompleteJob, InputBinding, InputPort, InputRules, Invocation,
-    Job, JobId, OperationDef, OutputPort, Pipeline, ProductDef, Removal, ResolvedDag, ShapeRule,
-    SidecarGroup, SourceInventory, SourceRecord, StageDef, StepId,
+    ArtifactType, Artifacts, Beside, BodyStep, Call, CallId, Cardinality, CommandDef, CommandRole,
+    CountRequirement, CoverageAction, CoverageGap, CoverageRule, DagStep, DimensionOrders,
+    DirectoryDiscovery, EntityBinding, Exclusion, Gap, IncompleteJob, InputBinding, InputPort,
+    InputRules, Invocation, Job, JobId, OperationDef, OutputPort, Pipeline, Port, ProductDef,
+    Removal, ResolvedDag, ShapeRule, SidecarGroup, SourceFile, SourceInventory, SourceRecord,
+    StageDef, StepId, StepOrigin, StepOutput,
 };
 pub use parser::{parse_source_inventory, render_source_inventory, ParseError, ParseErrorKind};
 pub use paths::{
@@ -67,8 +69,8 @@ pub use resolver::{
     BindError,
 };
 pub use spitdag::{
-    ArgPart, Argument, BoundArtifact, BoundCheck, BoundDag, BoundJob, BoundStep, LeftOut,
-    StepCheck, When,
+    ArgPart, Argument, BoundArtifact, BoundCall, BoundCheck, BoundDag, BoundJob, BoundStep,
+    LeftOut, StepCall, StepCheck, When,
 };
 pub use types::{
     parse_type_expr, Compatibility, Substitutions, TypeExpr, TypeParseError, TypeUnifyError,

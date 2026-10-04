@@ -93,7 +93,7 @@ fn the_plan_marks_each_folder() {
 
     let json = run(&tree, &["dag", "--json"]);
     let json = text(&json.stdout);
-    assert!(json.starts_with("{\"version\":6,"), "{json}");
+    assert!(json.starts_with("{\"version\":7,"), "{json}");
     assert!(
         json.contains("\"path\":\"dicom/sub=01\",\"kind\":\"folder\"}"),
         "{json}"

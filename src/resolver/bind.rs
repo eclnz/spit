@@ -8,12 +8,13 @@ use rustc_hash::FxHashMap;
 use crate::check::{step_checks, StepCheck, When, CHECKED_PATH};
 use crate::command::{facet, slot, validate_commands, CommandError, Facet, Slot};
 use crate::model::{
-    ArtifactId, Cardinality, CommandDef, CommandRole, DagStep, Job, OperationDef, Pipeline,
+    ArtifactId, CallId, Cardinality, CommandDef, CommandRole, DagStep, Job, OperationDef, Pipeline,
     PipelineIndex, ResolvedDag,
 };
 use crate::paths::{bound_paths, check_rules, BoundPaths, PathError};
 use crate::spitdag::{
-    ArgPart, Argument, BoundCheck, BoundDag, BoundJob, BoundStep, StepCheck as BoundStepCheck,
+    ArgPart, Argument, BoundCall, BoundCheck, BoundDag, BoundJob, BoundStep, StepCall,
+    StepCheck as BoundStepCheck,
 };
 use crate::template::Part;
 
@@ -94,14 +95,32 @@ fn bind_jobs(
         .map(|(product, _)| index.is_folder(product))
         .collect();
     let paths = paths.into_iter().map(Option::unwrap_or_default).collect();
-    Ok(BoundDag::new(
+    let mut bound = BoundDag::new(
         dag.artifacts.clone(),
         paths,
         dimensions,
         folders,
         steps.iter().map(StepCommands::bound).collect(),
         jobs,
-    ))
+    );
+    bound.pipeline_files.clone_from(&pipeline.files);
+    bound.calls = pipeline
+        .calls
+        .iter()
+        .map(|call| BoundCall {
+            operation: call.operation.clone(),
+            instance: call.instance.clone(),
+            parent: call.parent.map(CallId::index),
+            file: pipeline.file_of(&call.operation),
+            // A call in a body is written in the file declaring the body.
+            at_file: match call.parent {
+                Some(parent) => pipeline.file_of(&pipeline.calls[parent.index()].operation),
+                None => (!pipeline.files.is_empty()).then_some(0),
+            },
+            at_line: call.place.line,
+        })
+        .collect();
+    Ok(bound)
 }
 
 /// A step's operation and commands, found once for all of its jobs.
@@ -169,6 +188,10 @@ impl<'p> StepCommands<'p> {
                 .iter()
                 .map(|port| port.name.clone())
                 .collect(),
+            origin: self.step.origin.as_ref().map(|origin| StepCall {
+                call: origin.call.index(),
+                line: origin.step.line,
+            }),
             checks: self
                 .checks
                 .iter()
