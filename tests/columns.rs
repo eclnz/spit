@@ -287,3 +287,28 @@ result = clean(other)
 ";
     assert_eq!(pointed(text, None), ["warning 1: raw", "error 4: other"]);
 }
+
+/// A line is found as `str::lines` finds it: `\r\n` and `\n` end a line, a
+/// final line needs no newline, and a line past the end has no column.
+#[test]
+fn lines_are_found_as_str_lines_finds_them() {
+    let lf = "source raw [id]\noperation copy(input)\nx = copy(résumé)\n";
+    for text in [
+        lf.to_owned(),
+        lf.replace('\n', "\r\n"),
+        lf.trim_end().to_owned(),
+        lf.replace('\n', "\r\n").trim_end().to_owned(),
+    ] {
+        let diagnostics = diagnose(&text, None);
+        assert_eq!(diagnostics.len(), 1);
+        let shown = diagnostics[0].display_in(&text, None).to_string();
+        assert!(shown.starts_with("error: line 3, column 10: "), "{shown}");
+        assert_eq!(diagnostics[0].utf16_columns(&text, None), Some(9..15));
+        let lines = spit::SourceLines::new(&diagnostics, &text, None);
+        assert_eq!(diagnostics[0].utf16_columns_in(&lines), Some(9..15));
+    }
+    // Asked about a text that does not reach the line, there is no column.
+    let diagnostics = diagnose(lf, None);
+    assert_eq!(diagnostics[0].utf16_columns("", None), None);
+    assert_eq!(diagnostics[0].utf16_columns("one\ntwo", None), None);
+}

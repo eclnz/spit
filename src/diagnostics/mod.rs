@@ -11,6 +11,7 @@ pub(crate) use recovery::recover_document;
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use crate::command::collect_commands;
 use crate::compile::collect_pipeline;
@@ -24,7 +25,7 @@ use crate::model::{ArtifactReport, CoverageGap, InputRules, PipelineIndex, Sourc
 use crate::parser::{as_read_back, glued_comment, without_bom, Kind, Rule, SourceMap};
 use crate::paths::{collect_paths, shown_path, PathTemplate};
 use crate::resolver::first_failure;
-use crate::span::{content_columns, Place};
+use crate::span::{content_columns, Lines, Place};
 use crate::{
     parse_source_inventory, resolve_artifacts_excluding, DefinitionSubject, ParseError, Pipeline,
     ResolveError,
@@ -337,12 +338,13 @@ pub fn diagnose_recipe(text: &str, path: &Path) -> Vec<Diagnostic> {
             diagnostics
         }
         Err(diagnostics) => {
+            let external: Arc<str> = Arc::from(pipeline_text.as_str());
             let pipeline_errors = diagnostics
                 .into_iter()
                 .filter(Diagnostic::is_error)
                 .map(|mut diagnostic| {
                     diagnostic.file = Some(shown.clone());
-                    diagnostic.external_text = Some(pipeline_text.clone());
+                    diagnostic.external_text = Some(Arc::clone(&external));
                     // A library's path is from the pipeline's folder.
                     let folder = pipeline_path.parent().unwrap_or_else(|| Path::new(""));
                     for related in &mut diagnostic.related {
@@ -623,13 +625,15 @@ fn finish(
     text: &str,
     source_text: Option<&str>,
 ) -> Vec<Diagnostic> {
+    let pipeline_lines = Lines::new(text);
+    let inventory_lines = source_text.map(Lines::new);
     let texts = [
-        (DiagnosticSource::Pipeline, Some(text)),
-        (DiagnosticSource::Inventory, source_text),
+        (DiagnosticSource::Pipeline, Some(&pipeline_lines)),
+        (DiagnosticSource::Inventory, inventory_lines.as_ref()),
     ];
-    for (source, text) in texts {
-        let Some(text) = text else { continue };
-        for (index, line) in text.lines().enumerate() {
+    for (source, lines) in texts {
+        let Some(lines) = lines else { continue };
+        for (index, line) in lines.iter().enumerate() {
             let Some(columns) = glued_comment(line) else {
                 continue;
             };
@@ -665,13 +669,13 @@ fn finish(
         if diagnostic.columns.is_some() {
             continue;
         }
-        let text = match diagnostic.source {
-            DiagnosticSource::Inventory => source_text.unwrap_or(text),
-            DiagnosticSource::Pipeline => text,
+        let lines = match diagnostic.source {
+            DiagnosticSource::Inventory => inventory_lines.as_ref().unwrap_or(&pipeline_lines),
+            DiagnosticSource::Pipeline => &pipeline_lines,
         };
         diagnostic.columns = diagnostic
             .line
-            .and_then(|line| text.lines().nth(line.checked_sub(1)?))
+            .and_then(|line| lines.get(line))
             .map(content_columns);
     }
     order(diagnostics)

@@ -3,11 +3,12 @@
 
 use std::fmt;
 use std::ops::Range;
+use std::sync::Arc;
 
 use crate::json::Json;
 use crate::model::{ArtifactReport, SourceInventory};
 use crate::parser::without_bom;
-use crate::span::{utf16_columns, Located, Place};
+use crate::span::{utf16_columns, Lines, Located, Place};
 use crate::Pipeline;
 
 /// Which input text a diagnostic refers to.
@@ -60,7 +61,7 @@ pub struct Diagnostic {
     /// pipeline contains the error.
     pub file: Option<String>,
     /// Text of that file, used to convert its byte columns to UTF-16.
-    pub external_text: Option<String>,
+    pub external_text: Option<Arc<str>>,
     /// Other places the diagnostic is about, such as the step in a
     /// library's body that a call it is reported at made.
     pub related: Vec<Related>,
@@ -84,11 +85,57 @@ pub struct Related {
 impl Related {
     /// The line's text, from `text`, the text of the diagnostic's own line,
     /// when it is in it.
-    fn line_in<'a>(&'a self, text: &'a str) -> Option<&'a str> {
+    fn line_in<'a>(&'a self, lines: &Lines<'a>) -> Option<&'a str> {
         match &self.line_text {
             Some(line) => Some(line),
-            None => without_bom(text).lines().nth(self.line.checked_sub(1)?),
+            None => lines.get(self.line),
         }
+    }
+}
+
+/// The lines of the texts some diagnostics were found in, collected once, so
+/// that each diagnostic's line is found by its number and rendering costs
+/// the diagnostics, not the diagnostics times the length of the file. Build
+/// it once for a list of diagnostics and render each with it.
+pub struct SourceLines<'a> {
+    pipeline: Lines<'a>,
+    inventory: Option<Lines<'a>>,
+    /// The lines of each distinct text that diagnostics of another file
+    /// name, found by the pointer the diagnostics share.
+    external: Vec<(&'a Arc<str>, Lines<'a>)>,
+}
+
+impl<'a> SourceLines<'a> {
+    /// The lines of `text`, of `source_text` when given, and of the texts
+    /// `diagnostics` name as another file's. A leading byte order mark is not
+    /// part of a line.
+    pub fn new(diagnostics: &'a [Diagnostic], text: &'a str, source_text: Option<&'a str>) -> Self {
+        let mut external: Vec<(&'a Arc<str>, Lines<'a>)> = Vec::new();
+        for diagnostic in diagnostics {
+            let Some(other) = &diagnostic.external_text else {
+                continue;
+            };
+            if !external.iter().any(|(known, _)| Arc::ptr_eq(known, other)) {
+                external.push((other, Lines::new(without_bom(other))));
+            }
+        }
+        Self {
+            pipeline: Lines::new(without_bom(text)),
+            inventory: source_text.map(|text| Lines::new(without_bom(text))),
+            external,
+        }
+    }
+
+    /// The lines of the pipeline text, or of the text of another file when
+    /// `diagnostic` is in one.
+    fn pipeline_of(&self, diagnostic: &Diagnostic) -> &Lines<'a> {
+        let Some(other) = &diagnostic.external_text else {
+            return &self.pipeline;
+        };
+        self.external
+            .iter()
+            .find(|(known, _)| Arc::ptr_eq(known, other))
+            .map_or(&self.pipeline, |(_, lines)| lines)
     }
 }
 
@@ -181,8 +228,15 @@ impl Diagnostic {
     /// The columns counted in UTF-16 code units, as editors count them, given
     /// the texts that were diagnosed.
     pub fn utf16_columns(&self, text: &str, source_text: Option<&str>) -> Option<Range<usize>> {
+        let diagnostics = std::slice::from_ref(self);
+        self.utf16_columns_in(&SourceLines::new(diagnostics, text, source_text))
+    }
+
+    /// As [`Diagnostic::utf16_columns`], finding the line in `lines`, which
+    /// is built once for every diagnostic of the texts.
+    pub fn utf16_columns_in(&self, lines: &SourceLines<'_>) -> Option<Range<usize>> {
         let columns = self.columns.as_ref()?;
-        Some(utf16_columns(self.line_text(text, source_text)?, columns))
+        Some(utf16_columns(self.line_text(lines)?, columns))
     }
 
     /// Renders as `error: line 5, column 12: message`, with the 1-based
@@ -205,18 +259,39 @@ impl Diagnostic {
         source_text: Option<&'a str>,
         names: FileNames<'a>,
     ) -> impl fmt::Display + 'a {
+        let diagnostics = std::slice::from_ref(self);
+        let lines = SourceLines::new(diagnostics, text, source_text);
+        self.display_with(&lines, names)
+    }
+
+    /// As [`Diagnostic::display_named`], finding lines in `lines`, which is
+    /// built once for every diagnostic of the texts.
+    pub fn display_with<'a>(
+        &'a self,
+        lines: &SourceLines<'a>,
+        names: FileNames<'a>,
+    ) -> impl fmt::Display + 'a {
         DisplayIn {
             diagnostic: self,
-            column: self.column_in(text, source_text),
+            column: self.column_in(lines),
             name: self.name_in(names),
-            text,
+            related_columns: self
+                .related
+                .iter()
+                .map(|related| {
+                    related
+                        .line_in(lines.pipeline_of(self))
+                        .and_then(|line| line.get(..related.columns.start))
+                        .map(|before| before.chars().count() + 1)
+                })
+                .collect(),
         }
     }
 
     /// The 1-based column in characters, given the texts that were diagnosed.
-    fn column_in(&self, text: &str, source_text: Option<&str>) -> Option<usize> {
+    fn column_in(&self, lines: &SourceLines<'_>) -> Option<usize> {
         let columns = self.columns.as_ref()?;
-        let line = self.line_text(text, source_text)?;
+        let line = self.line_text(lines)?;
         Some(line.get(..columns.start)?.chars().count() + 1)
     }
 
@@ -232,12 +307,12 @@ impl Diagnostic {
     }
 
     /// The diagnosed line, from the pipeline text or the separate inventory.
-    fn line_text<'a>(&'a self, text: &'a str, source_text: Option<&'a str>) -> Option<&'a str> {
-        let text = match self.source {
-            DiagnosticSource::Inventory => source_text?,
-            DiagnosticSource::Pipeline => self.external_text.as_deref().unwrap_or(text),
+    fn line_text<'a>(&self, lines: &SourceLines<'a>) -> Option<&'a str> {
+        let lines = match self.source {
+            DiagnosticSource::Inventory => lines.inventory.as_ref()?,
+            DiagnosticSource::Pipeline => lines.pipeline_of(self),
         };
-        without_bom(text).lines().nth(self.line?.checked_sub(1)?)
+        lines.get(self.line?)
     }
 
     fn write(
@@ -302,7 +377,9 @@ struct DisplayIn<'a> {
     diagnostic: &'a Diagnostic,
     column: Option<usize>,
     name: Option<&'a str>,
-    text: &'a str,
+    /// The 1-based column of each related place, in characters, when its
+    /// line is known.
+    related_columns: Vec<Option<usize>>,
 }
 
 /// Each related place follows on a line of its own, as
@@ -322,23 +399,15 @@ impl fmt::Display for DisplayIn<'_> {
                 (first, Some(rest))
             });
         diagnostic.write_with(f, self.column, self.name, first)?;
-        for related in &diagnostic.related {
+        for (related, column) in diagnostic.related.iter().zip(&self.related_columns) {
             f.write_str("\n  --> ")?;
             let file = related.file.as_deref().or(self.name);
             if let Some(file) = file {
                 write!(f, "{file}: ")?;
             }
             write!(f, "line {}", related.line)?;
-            if let Some(column) = related
-                .line_in(
-                    self.diagnostic
-                        .external_text
-                        .as_deref()
-                        .unwrap_or(self.text),
-                )
-                .and_then(|line| line.get(..related.columns.start))
-            {
-                write!(f, ", column {}", column.chars().count() + 1)?;
+            if let Some(column) = column {
+                write!(f, ", column {column}")?;
             }
             write!(f, ": {}", related.message)?;
         }
@@ -399,11 +468,12 @@ pub(crate) fn shown_paths_json(paths: &[ShownPath]) -> Json<'_> {
 
 pub(crate) fn diagnostics_json<'a>(
     diagnostics: &'a [Diagnostic],
-    text: &str,
-    source_text: Option<&str>,
+    text: &'a str,
+    source_text: Option<&'a str>,
 ) -> Json<'a> {
+    let lines = SourceLines::new(diagnostics, text, source_text);
     let items = diagnostics.iter().map(|diagnostic| {
-        let columns = diagnostic.utf16_columns(text, source_text);
+        let columns = diagnostic.utf16_columns_in(&lines);
         let mut fields = vec![
             ("severity", Json::string(diagnostic.severity.as_str())),
             ("source", Json::string(diagnostic.source.as_str())),
@@ -426,7 +496,7 @@ pub(crate) fn diagnostics_json<'a>(
                 "related",
                 Json::array(diagnostic.related.iter().map(|related| {
                     let columns = related
-                        .line_in(diagnostic.external_text.as_deref().unwrap_or(text))
+                        .line_in(lines.pipeline_of(diagnostic))
                         .map(|line| utf16_columns(line, &related.columns));
                     let mut fields = Vec::with_capacity(6);
                     if let Some(file) = &related.file {
