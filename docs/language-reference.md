@@ -652,11 +652,11 @@ Because values are compared as written, a group removed under one spelling keeps
 exclude [store=s07]            # price list filed as S07; renamed next week
 ```
 
-`inputs`, `dag` and `artifacts` list the spellings together, so the two are seen as one store filed twice. The note names each spelling with the sources that have it, and `(excluded)` for one a rule removed:
+Given a `.spitin` recipe, `inputs`, `dag` and `artifacts` list the spellings together as they settle its inputs, so the two are seen as one store filed twice. Only ASCII letters fold, so `é` and `É` are different values with no note; and a `.spitout` given directly to `dag` or `artifacts` has no settling step, so it gets no note. The note names each spelling with the sources that have it, and `(excluded)` for one a rule removed:
 
 ```text
 note: excluded [store=s07] (line 3)
-note: `store` has values that differ only in letter case, which are different values to SPIT: `S07` in pricing, `s07` (excluded)
+note: `store` has values that differ only in ASCII letter case, which are different values to SPIT: `S07` in pricing, `s07` (excluded)
 ```
 
 The note comes up before any rule too, as ``... `S07` in pricing, `s07` in sales``. It names at most three sets for a dimension, then counts the rest. `dag` then plans the other stores, and notes that the misnamed file is left over:

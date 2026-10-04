@@ -189,8 +189,8 @@ pub(crate) fn settle(loaded: &Loaded) -> Result<(ResolvedInputs, PathBuf), Box<d
     Ok((resolved, root))
 }
 
-/// One note for each dimension with values that differ only in letter case,
-/// as ``store has values that differ only in letter case: `S07` in pricing,
+/// One note for each dimension with values that differ only in ASCII letter
+/// case, as ``store has values that differ only in ASCII letter case: `S07` in pricing,
 /// `s07` in sales``, so the sources of one thing under two spellings are
 /// seen together. At most three sets of a dimension are named.
 fn case_variant_notes(sets: &[CaseVariants]) -> Vec<String> {
@@ -229,7 +229,7 @@ fn case_variant_notes(sets: &[CaseVariants]) -> Vec<String> {
             String::new()
         };
         notes.push(format!(
-            "`{dimension}` has values that differ only in letter case, which are different values to SPIT: {}{more}",
+            "`{dimension}` has values that differ only in ASCII letter case, which are different values to SPIT: {}{more}",
             named.join("; ")
         ));
         start = end;

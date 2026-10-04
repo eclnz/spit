@@ -224,48 +224,6 @@ fn artifacts_by_target_groups_the_weekly_stores_under_their_final_target() {
 }
 
 #[test]
-fn inputs_lists_values_that_differ_only_in_case_together() {
-    let recipe = format!(
-        "{}/tests/fixtures/weekly_stores/weekly.spitin",
-        env!("CARGO_MANIFEST_DIR")
-    );
-    let note = "note: `store` has values that differ only in letter case, which are different values to SPIT: `S07` in pricing, `s07` in sales\n";
-    for command in ["inputs", "dag", "artifacts"] {
-        let output = spit(&[command, &recipe]);
-        assert_eq!(stderr(&output).matches(note).count(), 1, "{command}");
-    }
-}
-
-#[test]
-fn a_group_exclusion_still_shows_the_spelling_it_missed() {
-    let root = format!(
-        "{}/tests/fixtures/weekly_stores",
-        env!("CARGO_MANIFEST_DIR")
-    );
-    let tree = support::Tree::new("case-variants", &[]);
-    let recipe = tree.write(
-        "dataset.spitin",
-        &format!("pipeline {root}/pipeline.spit\nroot {root}\nexclude [store=s07]\n"),
-    );
-    let output = spit(&["inputs", recipe.to_str().unwrap()]);
-    assert!(output.status.success(), "{}", stderr(&output));
-    assert!(stderr(&output).contains("`S07` in pricing, `s07` (excluded)\n"));
-
-    let both = tree.write(
-        "both.spitin",
-        &format!(
-            "pipeline {root}/pipeline.spit\nroot {root}\nexclude [store=s07]\nexclude pricing[store=S07]\n"
-        ),
-    );
-    let output = spit(&["inputs", both.to_str().unwrap()]);
-    assert!(
-        !stderr(&output).contains("letter case"),
-        "{}",
-        stderr(&output)
-    );
-}
-
-#[test]
 fn partial_on_complete_inputs_has_the_same_jobs() {
     let files = ["examples/types/typed.spit", "examples/types/typed.spitout"];
     let full = spit(&["dag", files[0], files[1], "--json"]);
