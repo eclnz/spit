@@ -31,8 +31,7 @@ pub struct Pipeline {
     pub product_paths: BTreeMap<String, PathTemplate>,
     /// Stages in declaration order.
     pub stages: Vec<StageDef>,
-    /// `sidecars` blocks; their members are also ordinary sources, each
-    /// with its path rule.
+    /// Source families joined by `beside`, for reporting missing companions.
     pub sidecar_groups: Vec<SidecarGroup>,
     /// Each call to an operation with a body, which `invocations` holds as
     /// the body's steps; a step's [`Invocation::origin`] names its call.
@@ -119,8 +118,8 @@ impl Pipeline {
         PipelineIndex::scan(self).output_extension(product)
     }
 
-    /// For an output written beside another, the product it is beside, that
-    /// product's declared extension, and the suffix that replaces it.
+    /// For a source or output written beside another, its sibling, the
+    /// sibling's declared extension, and the suffix that replaces it.
     pub fn beside(&self, product: &str) -> Option<(&str, &str, &str)> {
         PipelineIndex::scan(self).beside(product)
     }
@@ -156,12 +155,12 @@ impl Pipeline {
         self.stage_path_rule(product).map(|(_, template)| template)
     }
 
-    /// The `sidecars` group named `name`.
+    /// The source and companions anchored by `name`.
     pub fn sidecar_group(&self, name: &str) -> Option<&SidecarGroup> {
         self.sidecar_groups.iter().find(|group| group.name == name)
     }
 
-    /// Each member of a `sidecars` group, with its group, to find once and
+    /// Each member of a companion group, with its group, to find once and
     /// then look up.
     pub fn sidecar_members(&self) -> FxHashMap<&str, &SidecarGroup> {
         self.sidecar_groups
@@ -596,12 +595,18 @@ impl<'p> PipelineIndex<'p> {
 
     /// See [`Pipeline::beside`].
     pub(crate) fn beside(&self, product: &str) -> Option<(&'p str, &'p str, &'p str)> {
+        if self.is_source(product) {
+            let beside = self.product(product)?.beside.as_ref()?;
+            let sibling = self.product(&beside.sibling)?;
+            let extension = sibling.extension.as_deref()?;
+            return Some((sibling.name.as_str(), extension, beside.suffix.as_str()));
+        }
         let (invocation, operation, port) = self.output_port(product)?;
         let beside = port.beside.as_ref()?;
         let index = operation
             .outputs
             .iter()
-            .position(|output| output.name == beside.port)?;
+            .position(|output| output.name == beside.sibling)?;
         let sibling = invocation.outputs.get(index)?;
         let extension = operation.outputs[index].extension.as_deref()?;
         Some((sibling.as_str(), extension, beside.suffix.as_str()))
