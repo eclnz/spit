@@ -204,6 +204,28 @@ impl Diagnostic {
         error: &Located<E>,
         text: &str,
     ) -> Self {
+        if let Some(imported) = error.location.imported() {
+            return Self {
+                severity: Severity::Error,
+                source,
+                line: Some(imported.place.line),
+                columns: Some(imported.place.columns.clone()),
+                message: error.message(),
+                file: Some(imported.file.clone()),
+                external_text: Some(Arc::clone(&imported.text)),
+                related: imported
+                    .uses
+                    .iter()
+                    .map(|used| Related {
+                        file: used.file.clone(),
+                        line: used.place.line,
+                        columns: used.place.columns.clone(),
+                        line_text: Some(used.text.clone()),
+                        message: "imported here".to_owned(),
+                    })
+                    .collect(),
+            };
+        }
         let place = error.location.place_in(text);
         Self {
             severity: Severity::Error,

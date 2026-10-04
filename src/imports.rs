@@ -4,7 +4,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::fs;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
+
+mod located;
 
 use crate::blob::git_blob_id;
 use crate::lower::{parse_document_recovering, Failure, ParsedDocument, PipelineBuilder};
@@ -14,6 +16,7 @@ use crate::model::{
 };
 use crate::parser::{parse_use, strip_comment, without_bom, Keyword, Kind, ParseError, UseSpec};
 use crate::span::Place;
+use located::{in_import, named_in, rebase, relative_path, ImportedAt};
 
 /// Merge what the `use` line at `place` imports into `builder`. An import
 /// that fails for what it brings in, before it has changed anything, leaves
@@ -585,41 +588,15 @@ pub(crate) fn parse_located_document_recovering(
 ) -> Result<ParsedDocument, Vec<ParseError>> {
     let root = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
     let base = root.parent().map_or_else(PathBuf::new, Path::to_path_buf);
-    parse_document_at_inner(text, &root, &base, &mut vec![root.clone()], kind)
-}
-
-/// `target` as a path from the folder `base`, written with `/` and `..`, so
-/// that a message names a file the same wherever the checkout is. Both are
-/// absolute, or both are not.
-fn relative_path(base: &Path, target: &Path) -> String {
-    fn normal(path: &Path) -> Vec<Component<'_>> {
-        let mut parts: Vec<Component<'_>> = Vec::new();
-        for part in path.components() {
-            match part {
-                Component::CurDir => {}
-                Component::ParentDir if matches!(parts.last(), Some(Component::Normal(_))) => {
-                    parts.pop();
-                }
-                part => parts.push(part),
-            }
-        }
-        parts
-    }
-    if base.is_absolute() != target.is_absolute() {
-        return target.display().to_string();
-    }
-    let (base, target) = (normal(base), normal(target));
-    let common = base.iter().zip(&target).take_while(|(a, b)| a == b).count();
-    let parts: Vec<String> = base[common..]
-        .iter()
-        .map(|_| "..".to_owned())
-        .chain(
-            target[common..]
-                .iter()
-                .map(|part| part.as_os_str().to_string_lossy().into_owned()),
-        )
-        .collect();
-    parts.join("/")
+    let name = root
+        .file_name()
+        .map_or_else(String::new, |name| name.to_string_lossy().into_owned());
+    parse_document_at_inner(text, &root, &base, &mut vec![root.clone()], kind).map_err(|errors| {
+        errors
+            .into_iter()
+            .map(|error| named_in(error, &name))
+            .collect()
+    })
 }
 
 /// Parse `text`, the file at `path` as read, with its imports. The parsed
@@ -714,25 +691,17 @@ fn read_imports(
         let module =
             parse_document_at_inner(&imported_text, &canonical, base, stack, Kind::Pipeline)
                 .map_err(|errors| {
-                    let error = &errors[0];
-                    ParseError::new(
+                    let at = ImportedAt {
                         number,
-                        format!(
-                            "in `{}` at line {}: {}",
-                            shown(&canonical),
-                            error.line(),
-                            error.message()
-                        ),
-                    )
+                        use_line: original,
+                        spec_path: &rebase(&spec.path, ""),
+                        text: &imported_text,
+                    };
+                    in_import(&errors[0], at, |file| rebase(&spec.path, file))
                 });
         stack.pop();
         let module = module?;
-        let folder = spec.path.replace('\\', "/");
-        let folder = folder.rsplit_once('/').map(|(folder, _)| folder);
-        let rebased = |path: &str| match folder {
-            Some(folder) => format!("{folder}/{path}"),
-            None => path.to_owned(),
-        };
+        let rebased = |file: &str| rebase(&spec.path, file);
         if let Some(own) = module.pipeline.files.first() {
             file_texts.insert(rebased(&own.path), without_bom(&imported_text).to_owned());
         }
