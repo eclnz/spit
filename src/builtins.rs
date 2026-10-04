@@ -64,13 +64,16 @@ pub enum Word {
     Check,
     CheckClause,
     PathPlaceholder,
+    ShapeDigits,
+    ShapeYear,
+    ShapeDate,
 }
 
 /// What a word's hover says.
 pub struct Doc {
     /// The word's name in `check --json`, unique among words.
     pub name: &'static str,
-    /// `keyword`, `selector`, `placeholder` or `header`.
+    /// `keyword`, `selector`, `placeholder`, `shape` or `header`.
     pub kind: &'static str,
     /// The section of the language reference it summarises.
     pub anchor: &'static str,
@@ -87,7 +90,7 @@ impl Word {
 }
 
 /// Every word's documentation, in the order of [`Word`].
-pub static DOCS: [Doc; 45] = [
+pub static DOCS: [Doc; 48] = [
     Doc {
         name: "source",
         kind: "keyword",
@@ -403,6 +406,27 @@ pub static DOCS: [Doc; 45] = [
         example: "check nonempty: test -s {@path}",
         summary: "In a `check`, the path of the artifact being checked. A check's command must use it.",
     },
+    Doc {
+        name: "digits",
+        kind: "shape",
+        anchor: "shapes-on-a-source-placeholder",
+        example: "path run: raw/run-{run:digits}.csv",
+        summary: "A shape for a placeholder in a source's path rule: one or more digits, as `07` or `120`. A file whose name has anything else there is not read as that source. Leading zeros are kept in the value.",
+    },
+    Doc {
+        name: "year",
+        kind: "shape",
+        anchor: "shapes-on-a-source-placeholder",
+        example: "path report: reports/{year:year}/summary.csv",
+        summary: "A shape for a placeholder in a source's path rule: four digits, from 1900 to 2099, as `2026`.",
+    },
+    Doc {
+        name: "date",
+        kind: "shape",
+        anchor: "shapes-on-a-source-placeholder",
+        example: "path log: logs/{server}/{date:date}.log",
+        summary: "A shape for a placeholder in a source's path rule: a date written `YYYY-MM-DD`, a real day in a year from 1900 to 2099, as `2026-09-01`. `2026-13-01` and `2026-9-1` are not read.",
+    },
 ];
 
 /// One use of a word: its 1-based line and 1-based UTF-16 columns, the end
@@ -639,6 +663,19 @@ fn placeholders(code: &str, statement: Option<Word>, found: &mut Vec<(Range<usiz
         };
         if let Some(word) = word {
             found.push((start..end, word));
+        } else if !in_command && !in_check {
+            // A shape after the `:` of a dimension, as in `{date:date}`.
+            if let Some((dimension, shape)) = name.split_once(':') {
+                let word = match shape {
+                    "digits" => Some(Word::ShapeDigits),
+                    "year" => Some(Word::ShapeYear),
+                    "date" => Some(Word::ShapeDate),
+                    _ => None,
+                };
+                if let (Some(word), false) = (word, dimension.starts_with('@')) {
+                    found.push((end - shape.len()..end, word));
+                }
+            }
         } else if in_command {
             for (suffix, word) in [(".dir", Word::Dir), (".stem", Word::Stem)] {
                 if name.len() > suffix.len() && name.ends_with(suffix) {

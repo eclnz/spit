@@ -380,6 +380,33 @@ Extensions are optional. An operation whose tool picks the format from the outpu
 
 Path rules also find sources. With `root data`, `spit inputs recipe.spitin` lists each file under `data` whose path matches a source's rule, in the pipeline or the recipe, reading entity values from its placeholders. A rule matches a file's whole path, so `responses/{region}/wave{wave}.csv` does not match `wave3.csv.bak` or `wave3.csv.1`, and files that match no rule are left out. When a source's rule matches no file, the scan warns and names the unmatched file nearest the rule, with the text where the file and the rule part; see [Find incomplete artifacts](../README.md#find-incomplete-artifacts). To write the rules for data that already exists, `spit inputs --suggest` prints a rule for each group of files no rule matches; see [Start from the files](../README.md#start-from-the-files). Links to files and directories are followed. A value is read only as SPIT writes it, so a file such as `in/%41.txt`, whose value SPIT would write `A`, is skipped with a warning rather than listed under a path no job would use.
 
+### Shapes on a source placeholder
+
+A placeholder in a source rule matches any text within one folder or file name, so `logs/{server}/{date}.log` reads `logs/web1/notes.log` as `date=notes`. A shape after a `:` narrows it:
+
+```text
+path log: logs/{server}/{date:date}.log
+path run: raw/sub-{sub:digits}_run-{run:digits}.csv
+```
+
+| Shape | Matches | Example |
+| --- | --- | --- |
+| `digits` | one or more digits; leading zeros stay in the value | `07`, `120` |
+| `year` | four digits, from 1900 to 2099 | `2026` |
+| `date` | `YYYY-MM-DD`, a real day in a year from 1900 to 2099 | `2026-09-01` |
+
+With `{date:date}`, `logs/web1/notes.log`, `2026-9-1.log`, `20260901.log`, `2026-09-01-final.log` and `2026-02-30.log` match no rule, so they are not source artifacts. They are counted with the other files no rule matches, and `spit inputs --unmatched` lists them. When a source then matches no file, the warning names the nearest one: `after `logs/web1/`, the file has `notes.log` where the rule has `{date:date}.log``. The set of shapes is closed; it is not a pattern language.
+
+Where a shape may be written:
+
+- In a source's `path` rule, in the pipeline or a recipe's `path source:` or `path:` line, and in a `.spitout`'s `source_paths:`. A recipe's `path:` is a default for sources only.
+- In a `discover ... from dirs` pattern, as `discover days: [day] from dirs data/{day:date}`.
+- Not in an output's rule, nor in a pipeline or stage `path:` default, which outputs take: a shape only narrows what is read, so on a rule that writes it would check nothing, and SPIT says so. A source whose rule is a pipeline default writes its shape in `path source:` instead. `{@entities}` and `{@labels}` take no shape either; write `sub-{sub:digits}`.
+
+A shape reads the text of a value, which holds letters, digits and `-` only, so no shape contains `.`, `_` or `/`: `2026_09_02.log` matches no `{date}` at all, and a `.` after a placeholder still starts the extension. A dimension written twice, as `{id:digits}/{id}`, has its shape in both places; give it one shape only. Two placeholders with nothing between them may not both take a shape of any length, as `{a:digits}{b:digits}` does, since where one ends is not written; `{year:year}{n:digits}` is fine, because a year is four digits, and `{date:date}-{run:digits}` has its `-`. A file that both a shaped rule and a general rule match, such as `{date:date}.log` and `{name}.log`, is still an error naming both sources; SPIT has no precedence between rules, so shape both or name more of the path. A record in a `.spitout` or an `inputs` file whose value fails its rule's shape is an error, since discovery would not read its file.
+
+`spit inputs --suggest` writes `{date:date}` and `{year:year}` for dimensions whose values are all dates or all years.
+
 ### Files a tool writes beside another
 
 Some tools write a second file beside the one they are told to write, such as the `.json` that dcm2niix writes next to its image, or the mask FSL's `bet -m` names after its brain image. Declare such an output `beside` the output it follows, with what its file name ends with in place of that output's extension:
@@ -640,7 +667,7 @@ exclude pricing[store=S07]     # the same list, under the name it was filed as
 
 Named exclusions apply before scanning and missing-file validation. An excluded discovered context expects no files, an excluded file needs to exist nowhere, and a file excluded by name may lie outside every discovered context, such as a misnamed copy. Conditional exclusions then see what named exclusions leave, and `require` checks the final inventory.
 
-A placeholder in a source rule matches any text within one folder or file name, and SPIT cannot narrow it to a pattern such as a date: `logs/{server}/{date}.log` reads `logs/web1/notes.log` as `date=notes`. Check the count in `note: found N source artifacts`, and leave out a file whose value does not belong with [`exclude`](#exclude-named-artifacts) or a rule that names more of its path. Files whose whole paths match no source path rule are ignored while scanning. `spit inputs` counts them in a note, naming them when there are at most three and otherwise counting them by extension, leaving out SPIT's own `.spit`, `.spitin`, `.spitout` and `.spitdag` files and any file at a path the pipeline gives one of its outputs, or inside an output folder, such as what an earlier run wrote under the root; `spit inputs dataset.spitin --unmatched` lists their paths relative to the dataset root instead of writing a `.spitout`, even if a `require` rule fails. When a `require` count fails after the scan found no files for its source, `inputs` and `dag` name the path rule used and show an unmatched file whose path contains the source name, when there is one. A recipe's `path:` is a default for sources; use `path source:` for one source. Required source paths must match the spelling found by the scan: `pricing/S07.json` does not satisfy `pricing/s07.json`, even on a case-insensitive filesystem. A file with a near miss in an identity value, such as `store=S07` where a job needs `store=s07`, may still match a source rule: it is then a source artifact, and `dag` and `artifacts` warn when it is unused and point to it at the failed join.
+A placeholder in a source rule matches any text within one folder or file name unless it takes a [shape](#shapes-on-a-source-placeholder), as `{date:date}`. Without one, `logs/{server}/{date}.log` reads `logs/web1/notes.log` as `date=notes`: check the count in `note: found N source artifacts`, and leave out a file whose value does not belong with [`exclude`](#exclude-named-artifacts), a shape, or a rule that names more of its path. Files whose whole paths match no source path rule are ignored while scanning. `spit inputs` counts them in a note, naming them when there are at most three and otherwise counting them by extension, leaving out SPIT's own `.spit`, `.spitin`, `.spitout` and `.spitdag` files and any file at a path the pipeline gives one of its outputs, or inside an output folder, such as what an earlier run wrote under the root; `spit inputs dataset.spitin --unmatched` lists their paths relative to the dataset root instead of writing a `.spitout`, even if a `require` rule fails. When a `require` count fails after the scan found no files for its source, `inputs` and `dag` name the path rule used and show an unmatched file whose path contains the source name, when there is one. A recipe's `path:` is a default for sources; use `path source:` for one source. Required source paths must match the spelling found by the scan: `pricing/S07.json` does not satisfy `pricing/s07.json`, even on a case-insensitive filesystem. A file with a near miss in an identity value, such as `store=S07` where a job needs `store=s07`, may still match a source rule: it is then a source artifact, and `dag` and `artifacts` warn when it is unused and point to it at the failed join.
 
 Rules can also come from a CSV file, relative to the recipe's folder, such as a lab's list of scans that failed quality control:
 

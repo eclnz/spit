@@ -153,10 +153,13 @@ fn a_plain_top_folder_keeps_its_files_apart() {
     tree.write("empty.spit", "");
     let out = suggested(&tree, &["inputs", "empty.spit", "--root", ".", "--suggest"]);
     assert!(
-        out.contains("path baseline: baseline/{dim1}/{date}.csv"),
+        out.contains("path baseline: baseline/{dim1}/{date:date}.csv"),
         "{out}"
     );
-    assert!(out.contains("path raw: raw/{dim1}/{date}.csv"), "{out}");
+    assert!(
+        out.contains("path raw: raw/{dim1}/{date:date}.csv"),
+        "{out}"
+    );
 }
 
 #[test]
@@ -239,7 +242,7 @@ fn a_stray_folder_loses_only_its_own_files() {
     let out = suggested(&tree, &["inputs", "empty.spit", "--root", ".", "--suggest"]);
     // `subject04` alone would otherwise turn every word into `dim1`, `dim2`.
     assert!(
-        out.contains("source t1 [subject, visit, date]\npath t1: Subject{subject}/Visit{visit}/T1_{date}.nii\n"),
+        out.contains("source t1 [subject, visit, date]\npath t1: Subject{subject}/Visit{visit}/T1_{date:date}.nii\n"),
         "{out}"
     );
     assert!(
@@ -298,7 +301,7 @@ fn dates_years_and_a_word_before_name_dimensions() {
     // `site_north` and `site_south` are one folder, and the source is not
     // named for its `site` dimension.
     assert!(
-        out.contains("source csv [site, year, logger, date]\npath csv: site_{site}/{year}/logger{logger}/{date}.csv\n"),
+        out.contains("source csv [site, year, logger, date]\npath csv: site_{site}/{year:year}/logger{logger}/{date:date}.csv\n"),
         "{out}"
     );
     assert!(
