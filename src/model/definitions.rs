@@ -374,11 +374,8 @@ impl CallId {
 pub struct Call {
     /// The operation called, as the caller names it.
     pub operation: String,
-    /// The name its products are filed under: the call's first output, so
-    /// that a product `p` of the body is `instance::p`.
-    pub instance: String,
-    /// The products the call assigns, as it writes them; the first is
-    /// `instance`.
+    /// The products the call assigns, as it writes them. The first names
+    /// the call: a product `p` the body makes for itself is `first::p`.
     pub outputs: Vec<String>,
     /// The products the call reads, one per input, as it writes them.
     pub inputs: Vec<String>,

@@ -48,7 +48,7 @@ pub(crate) struct PipelineBuilder {
     operation_at: FxHashMap<String, usize>,
     /// Each product a call made for itself, with the call and the operation
     /// it calls, which steps written in the pipeline may not read.
-    intermediates: FxHashMap<String, (CallId, String)>,
+    intermediates: FxHashMap<String, CallId>,
 }
 
 impl PipelineBuilder {
