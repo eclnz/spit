@@ -456,6 +456,20 @@ pub fn render_check_json(diagnostics: &[Diagnostic], text: &str, paths: &[ShownP
     )
 }
 
+/// As [`render_diagnostics_json`], with the `calls` a pipeline that checked
+/// clean makes, as `render_calls_json` writes them: `check --calls --json`.
+pub fn render_calls_check_json(diagnostics: &[Diagnostic], text: &str, calls: &str) -> String {
+    let mut out = String::new();
+    let mut object = crate::json::ObjectWriter::start(&mut out);
+    object.field("diagnostics", |out| {
+        diagnostics_json(diagnostics, text, None).write_to(out);
+    });
+    object.raw("calls", calls);
+    object.finish();
+    out.push('\n');
+    out
+}
+
 pub(crate) fn shown_paths_json(paths: &[ShownPath]) -> Json<'_> {
     Json::array(paths.iter().map(|path| {
         Json::object([

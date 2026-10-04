@@ -682,7 +682,17 @@ m, t = L::summarise(…)  line 6  [report]
 "
         )
     );
+    let json = spit::render_calls_json(&pipeline);
+    assert!(json.starts_with(&format!(
+        "[{{\"id\":0,\"parent\":null,\"operation\":\"L::summarise\",\"outputs\":[\"m\",\"t\"],\"inputs\":[\"raw\",\"cal\"],\"line\":6,\"stage\":\"report\",\"file\":\"libs/lib.spit\",\"blob\":\"{}\",\"steps\":[{{\"line\":14,",
+        pipeline.files[1].blob
+    )), "{json}");
+    // The call in the body is its own entry, under its caller.
+    assert!(json.contains(
+        "{\"id\":1,\"parent\":0,\"operation\":\"L::tidy\",\"outputs\":[\"m::cleaned\"],\"inputs\":[\"raw\",\"cal\"],\"line\":13,\"stage\":\"report\",\"file\":\"libs/lib.spit\",\"blob\":"
+    ), "{json}");
     // Nothing is listed for a pipeline with no calls.
     let (plain, _) = support::parse_fixture(&format!("{BASE}\n")).unwrap();
     assert_eq!(spit::render_calls(&plain), "");
+    assert_eq!(spit::render_calls_json(&plain), "[]");
 }

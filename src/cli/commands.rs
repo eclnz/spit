@@ -7,10 +7,11 @@ use std::path::Path;
 use spit::{
     bind_dag, bind_dag_with, diagnose_checked, diagnose_inputs, diagnose_recipe, inspect_paths,
     parse_input_spec_at, render_artifacts, render_artifacts_by_target, render_bound_dag,
-    render_call, render_calls, render_check_json, render_dag, render_diagnostics_json,
-    render_editor_json, render_source_inventory, render_step_counts, render_words_json,
-    resolve_artifacts_partial, unused_sources_summary, validate_bound_source_files,
-    validate_source_files, BoundDag, BoundPaths, Context, FileNames, Gap, LeftOut, View,
+    render_call, render_calls, render_calls_check_json, render_calls_json, render_check_json,
+    render_dag, render_diagnostics_json, render_editor_json, render_source_inventory,
+    render_step_counts, render_words_json, resolve_artifacts_partial, unused_sources_summary,
+    validate_bound_source_files, validate_source_files, BoundDag, BoundPaths, Context, FileNames,
+    Gap, LeftOut, View,
 };
 
 use super::args::{CliArgs, Flag};
@@ -105,7 +106,15 @@ pub(crate) fn check(args: &CliArgs) -> Result<(), Box<dyn Error>> {
             Ok(checked) => (checked.warnings.as_slice(), Some(checked.paths.as_slice())),
             Err(all) => (all.as_slice(), None),
         };
-        let json = if args.has(Flag::Hovers) {
+        let json = if args.has(Flag::Calls) {
+            match &diagnosis {
+                Ok(checked) => {
+                    let calls = render_calls_json(&checked.pipeline);
+                    render_calls_check_json(diagnostics, &text, &calls)
+                }
+                Err(_) => render_diagnostics_json(diagnostics, &text, None),
+            }
+        } else if args.has(Flag::Hovers) {
             render_editor_json(diagnostics, &text, path, paths.unwrap_or_default())
         } else if let Some(paths) = paths {
             render_check_json(diagnostics, &text, paths)
