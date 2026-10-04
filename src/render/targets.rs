@@ -9,9 +9,15 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use super::{render_artifact, Report};
 use crate::model::{ArtifactInstance, EntityBinding, Gap, IncompleteJob};
 
-/// The indent of a line `depth` levels in, two spaces a level.
+/// How many levels of nesting `--by-target` indents. A line deeper than
+/// this stays at the last indent, so a chain of N steps writes N lines of
+/// bounded indent, not N lines each two spaces wider than the one before.
+const MAX_INDENT_DEPTH: usize = 20;
+
+/// The indent of a line `depth` levels in, two spaces a level, to at most
+/// `MAX_INDENT_DEPTH` levels.
 fn indent_of(depth: usize) -> String {
-    "  ".repeat(depth)
+    "  ".repeat(depth.min(MAX_INDENT_DEPTH))
 }
 
 impl Report<'_> {

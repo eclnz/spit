@@ -360,7 +360,7 @@ Incomplete artifacts: 2
     - input `runs` needs aligned[subject=02,run=1], which cannot be produced
 ```
 
-`spit artifacts dataset.spitin --by-target` answers "why can't this final report be made" without repeating a reason for every artifact it holds back. A final target is an incomplete artifact that no other incomplete job needs; each is printed once, with the incomplete artifacts it waits on nested under it and their reasons beneath. An artifact that two branches, or two targets, both wait on is written under the first only; each later job that waits on it has a line naming it and saying where it is, ``- input `a` needs a[k=1], shown above`` under the same target and ``- input `gg` needs gg, shown under uu[k=1]`` under an earlier one. For the example above:
+`spit artifacts dataset.spitin --by-target` answers "why can't this final report be made" without repeating a reason for every artifact it holds back. A final target is an incomplete artifact that no other incomplete job needs; each is printed once, with the incomplete artifacts it waits on nested under it and their reasons beneath. An artifact that two branches, or two targets, both wait on is written under the first only; each later job that waits on it has a line naming it and saying where it is, ``- input `a` needs a[k=1], shown above`` under the same target and ``- input `gg` needs gg, shown under uu[k=1]`` under an earlier one. A chain more than 20 levels deep stays at the 20th indent, so a long chain costs a line for each step and not a wider indent for each; each line is still the artifact the line above it waits on. For the example above:
 
 ```text
 Complete artifacts: 10
