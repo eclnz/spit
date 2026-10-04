@@ -29,8 +29,8 @@ struct CommandSpec {
 impl Command {
     fn spec(self) -> CommandSpec {
         use Flag::{
-            Commands, Counts, Hovers, Jobs, Json, Output, Partial, PathRules, Paths, Root, Stdin,
-            Suggest, Unmatched,
+            ByTarget, Commands, Counts, Hovers, Jobs, Json, Output, Partial, PathRules, Paths,
+            Root, Stdin, Suggest, Unmatched,
         };
         match self {
             Self::Check => CommandSpec {
@@ -58,8 +58,8 @@ impl Command {
                 name: "artifacts",
                 files: "<recipe.spitin> or <pipeline.spit> <inputs.spitout | ->",
                 summary: "step 3: report what can and cannot be made from a dataset's inputs, and why",
-                example: "spit artifacts dataset.spitin\n  spit artifacts analysis.spit dataset.spitout",
-                flags: &[Root],
+                example: "spit artifacts dataset.spitin\n  spit artifacts dataset.spitin --by-target\n  spit artifacts analysis.spit dataset.spitout",
+                flags: &[Root, ByTarget],
             },
         }
     }
@@ -119,6 +119,7 @@ pub(crate) enum Flag {
     Jobs,
     Counts,
     Partial,
+    ByTarget,
     Unmatched,
     Suggest,
     PathRules,
@@ -127,7 +128,7 @@ pub(crate) enum Flag {
     Hovers,
 }
 
-const FLAGS: [Flag; 13] = [
+const FLAGS: [Flag; 14] = [
     Flag::Root,
     Flag::Output,
     Flag::Paths,
@@ -135,6 +136,7 @@ const FLAGS: [Flag; 13] = [
     Flag::Jobs,
     Flag::Counts,
     Flag::Partial,
+    Flag::ByTarget,
     Flag::Unmatched,
     Flag::Suggest,
     Flag::PathRules,
@@ -170,6 +172,7 @@ impl Flag {
             Self::Jobs => "--jobs",
             Self::Counts => "--counts",
             Self::Partial => "--partial",
+            Self::ByTarget => "--by-target",
             Self::Unmatched => "--unmatched",
             Self::Suggest => "--suggest",
             Self::PathRules => "--path-rules",
@@ -204,6 +207,9 @@ impl Flag {
                 "show how many jobs each step resolves, not the jobs; before them with --commands or --paths; with -o, as well as writing the .spitdag; cannot combine with --json"
             }
             (Self::Partial, _) => "plan complete jobs and record artifacts that cannot be produced",
+            (Self::ByTarget, _) => {
+                "group the incomplete artifacts by final target, with the incomplete artifacts each waits on nested under it, and list the complete artifacts by count only"
+            }
             (Self::Unmatched, _) => {
                 "list files matching no source rule instead of writing a .spitout"
             }
