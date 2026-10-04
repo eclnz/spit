@@ -6,11 +6,11 @@ use std::path::Path;
 
 use spit::{
     bind_dag, bind_dag_with, diagnose_checked, diagnose_inputs, diagnose_recipe, inspect_paths,
-    parse_input_spec_at, render_artifacts, render_bound_dag, render_call, render_check_json,
-    render_dag, render_diagnostics_json, render_editor_json, render_source_inventory,
-    render_step_counts, render_words_json, resolve_artifacts_partial, unused_sources_summary,
-    validate_bound_source_files, validate_source_files, BoundDag, BoundPaths, Context, FileNames,
-    Gap, LeftOut, View,
+    parse_input_spec_at, render_artifacts, render_artifacts_by_target, render_bound_dag,
+    render_call, render_check_json, render_dag, render_diagnostics_json, render_editor_json,
+    render_source_inventory, render_step_counts, render_words_json, resolve_artifacts_partial,
+    unused_sources_summary, validate_bound_source_files, validate_source_files, BoundDag,
+    BoundPaths, Context, FileNames, Gap, LeftOut, View,
 };
 
 use super::args::{CliArgs, Flag};
@@ -292,6 +292,11 @@ pub(crate) fn artifacts(args: &CliArgs) -> Result<(), Box<dyn Error>> {
     if let Some(root) = &prepared.root {
         validate_source_files(&prepared.pipeline, &report.dag, root)?;
     }
-    print!("{}", render_artifacts(&prepared.pipeline, &report));
+    let text = if args.has(Flag::ByTarget) {
+        render_artifacts_by_target(&prepared.pipeline, &report)
+    } else {
+        render_artifacts(&prepared.pipeline, &report)
+    };
+    print!("{text}");
     Ok(())
 }

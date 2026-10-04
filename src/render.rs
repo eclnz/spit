@@ -3,10 +3,12 @@
 use std::collections::BTreeSet;
 use std::fmt::{self, Write as _};
 
+use rustc_hash::{FxHashMap, FxHashSet};
+
 use crate::command::shell_word;
 use crate::model::{
-    identity, push_identity, Artifact, ArtifactReport, Call, CallId, EntityBinding, Gap, JobId,
-    Pipeline, ResolvedDag,
+    identity, push_identity, Artifact, ArtifactInstance, ArtifactReport, Call, CallId,
+    EntityBinding, Gap, IncompleteJob, JobId, Pipeline, ResolvedDag,
 };
 use crate::spitdag::{Argument, BoundDag, BoundJob, StepCall, When};
 use crate::types::TypeExpr;
@@ -343,7 +345,24 @@ fn push_command(text: &mut String, dag: &BoundDag, command: &[Argument]) {
 
 /// What can be made from a DAG's sources, what cannot, and why.
 pub fn render_artifacts(pipeline: &Pipeline, report: &ArtifactReport) -> String {
-    Report { pipeline, report }.to_string()
+    Report {
+        pipeline,
+        report,
+        by_target: false,
+    }
+    .to_string()
+}
+
+/// The same report with the incomplete artifacts grouped by final target:
+/// each incomplete artifact no other incomplete job needs, with the
+/// incomplete artifacts it waits on nested under it, and each reason once.
+pub fn render_artifacts_by_target(pipeline: &Pipeline, report: &ArtifactReport) -> String {
+    Report {
+        pipeline,
+        report,
+        by_target: true,
+    }
+    .to_string()
 }
 
 /// How many sources no job reads, and which: each by its identity when
@@ -464,6 +483,9 @@ impl JobWriter {
 struct Report<'a> {
     pipeline: &'a Pipeline,
     report: &'a ArtifactReport,
+    /// Group the incomplete artifacts by final target, and count the
+    /// complete ones without listing them.
+    by_target: bool,
 }
 
 impl fmt::Display for Report<'_> {
@@ -493,10 +515,16 @@ impl fmt::Display for Report<'_> {
         });
         let complete: Vec<_> = sources.chain(made).collect();
         writeln!(f, "Complete artifacts: {}", complete.len())?;
-        for line in complete {
-            writeln!(f, "  {line}")?;
+        if !self.by_target {
+            for line in complete {
+                writeln!(f, "  {line}")?;
+            }
         }
-        self.write_incomplete(f, &held_back)?;
+        if self.by_target {
+            self.write_targets(f, &held_back)?;
+        } else {
+            self.write_incomplete(f, &held_back)?;
+        }
         self.write_unused(f)?;
         self.write_coverage(f)
     }
@@ -509,39 +537,142 @@ impl Report<'_> {
         f: &mut fmt::Formatter<'_>,
         held_back: &BTreeSet<(&str, &EntityBinding)>,
     ) -> fmt::Result {
-        let dag = &self.report.dag;
         let incomplete = &self.report.incomplete;
         let count: usize = incomplete.iter().map(|job| job.outputs.len()).sum();
         writeln!(f, "\nIncomplete artifacts: {count}")?;
         for job in incomplete {
-            let stage = in_stage(job.stage.as_deref());
             for artifact in &job.outputs {
-                let artifact = typed_artifact(dag, artifact.view());
-                write!(f, "  {artifact}  ({}{stage}", job.operation)?;
-                if let Some(call) = job.call.map(|call| self.pipeline.written_call(call)) {
-                    write!(
-                        f,
-                        ", in `{}` on line {}",
-                        render_call(call),
-                        call.place.line
-                    )?;
-                }
-                writeln!(f, ")")?;
+                self.write_output(f, job, artifact, "  ")?;
             }
             for gap in &job.gaps {
-                match gap {
-                    Gap::Unmatched(error) => writeln!(f, "    - {error}")?,
-                    Gap::Blocked { port, artifact } => {
-                        let key = (artifact.product.as_str(), &artifact.entities);
-                        let reason = if held_back.contains(&key) {
-                            "a coverage gap holds back"
-                        } else {
-                            "cannot be produced"
-                        };
-                        let artifact = render_artifact(dag, artifact.view());
-                        writeln!(f, "    - input `{port}` needs {artifact}, which {reason}")?;
+                self.write_gap(f, gap, held_back, "    ")?;
+            }
+        }
+        Ok(())
+    }
+
+    /// An incomplete output and the call it came from.
+    fn write_output(
+        &self,
+        f: &mut fmt::Formatter<'_>,
+        job: &IncompleteJob,
+        artifact: &ArtifactInstance,
+        indent: &str,
+    ) -> fmt::Result {
+        let stage = in_stage(job.stage.as_deref());
+        let artifact = typed_artifact(&self.report.dag, artifact.view());
+        write!(f, "{indent}{artifact}  ({}{stage}", job.operation)?;
+        if let Some(call) = job.call.map(|call| self.pipeline.written_call(call)) {
+            write!(
+                f,
+                ", in `{}` on line {}",
+                render_call(call),
+                call.place.line
+            )?;
+        }
+        writeln!(f, ")")
+    }
+
+    /// One reason a job is incomplete.
+    fn write_gap(
+        &self,
+        f: &mut fmt::Formatter<'_>,
+        gap: &Gap,
+        held_back: &BTreeSet<(&str, &EntityBinding)>,
+        indent: &str,
+    ) -> fmt::Result {
+        match gap {
+            Gap::Unmatched(error) => {
+                // A reason's own lines after the first, as a near-miss hint,
+                // are written to line up under a dash 4 columns in.
+                // Keep in step with `ResolveError`'s `Display`, which writes
+                // those lines 4 spaces in.
+                if indent.len() == 4 {
+                    return writeln!(f, "{indent}- {error}");
+                }
+                let error = error.to_string().replace("\n    ", &format!("\n{indent}"));
+                writeln!(f, "{indent}- {error}")
+            }
+            Gap::Blocked { port, artifact } => {
+                let key = (artifact.product.as_str(), &artifact.entities);
+                let reason = if held_back.contains(&key) {
+                    "a coverage gap holds back"
+                } else {
+                    "cannot be produced"
+                };
+                let artifact = render_artifact(&self.report.dag, artifact.view());
+                writeln!(
+                    f,
+                    "{indent}- input `{port}` needs {artifact}, which {reason}"
+                )
+            }
+        }
+    }
+
+    /// The incomplete artifacts by final target: each one no other incomplete
+    /// job needs, then the incomplete artifacts it waits on, nested, each
+    /// shown once under its target with its own reasons. A reason that names
+    /// an incomplete artifact is that artifact's place in the tree instead.
+    fn write_targets(
+        &self,
+        f: &mut fmt::Formatter<'_>,
+        held_back: &BTreeSet<(&str, &EntityBinding)>,
+    ) -> fmt::Result {
+        type Key<'k> = (&'k str, &'k EntityBinding);
+        let incomplete = &self.report.incomplete;
+        let mut made_by: FxHashMap<Key<'_>, (usize, usize)> = FxHashMap::default();
+        let mut needed: FxHashSet<Key<'_>> = FxHashSet::default();
+        for (job, incomplete_job) in incomplete.iter().enumerate() {
+            for (output, artifact) in incomplete_job.outputs.iter().enumerate() {
+                made_by.insert((&artifact.product, &artifact.entities), (job, output));
+            }
+            for gap in &incomplete_job.gaps {
+                if let Gap::Blocked { artifact, .. } = gap {
+                    needed.insert((&artifact.product, &artifact.entities));
+                }
+            }
+        }
+        let count: usize = incomplete.iter().map(|job| job.outputs.len()).sum();
+        let mut targets = Vec::new();
+        for job in incomplete {
+            for artifact in &job.outputs {
+                if !needed.contains(&(artifact.product.as_str(), &artifact.entities)) {
+                    targets.push((job, artifact));
+                }
+            }
+        }
+        writeln!(
+            f,
+            "\nFinal targets that cannot be made: {} (incomplete artifacts: {count})",
+            targets.len()
+        )?;
+        let mut shown: FxHashSet<Key<'_>> = FxHashSet::default();
+        for (job, target) in targets {
+            shown.clear();
+            let mut stack = vec![(job, target, 1_usize)];
+            while let Some((job, artifact, depth)) = stack.pop() {
+                self.write_output(f, job, artifact, &"  ".repeat(depth))?;
+                let indent = "  ".repeat(depth + 1);
+                let mut waits = Vec::new();
+                for gap in &job.gaps {
+                    let Gap::Blocked {
+                        artifact: input, ..
+                    } = gap
+                    else {
+                        self.write_gap(f, gap, held_back, &indent)?;
+                        continue;
+                    };
+                    let key = (input.product.as_str(), &input.entities);
+                    match made_by.get(&key) {
+                        Some(&(inner, output)) if shown.insert(key) => {
+                            let inner = &incomplete[inner];
+                            waits.push((inner, &inner.outputs[output], depth + 1));
+                        }
+                        Some(_) => {}
+                        None => self.write_gap(f, gap, held_back, &indent)?,
                     }
                 }
+                stack.extend(waits.into_iter().rev());
             }
         }
         Ok(())
