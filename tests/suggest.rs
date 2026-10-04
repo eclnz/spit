@@ -56,10 +56,9 @@ path bold: sub-{sub}/ses-{ses}/func/sub-{sub}_ses-{ses}_task-rest_run-{run}_bold
 
 # 4 files, such as sub-01/ses-1/anat/sub-01_ses-1_T1w.json
 # sub: 01, 02; ses: 1
-sidecars t1w [sub, ses]:
-    path: sub-{sub}/ses-{ses}/anat/sub-{sub}_ses-{ses}_T1w
-    source t1w_json .json
-    source t1w_nii_gz .nii.gz
+source t1w_json .json [sub, ses]
+source t1w_nii_gz .nii.gz beside t1w_json
+path t1w_json: sub-{sub}/ses-{ses}/anat/sub-{sub}_ses-{ses}_T1w.json
 
 # 1 file like no other, each a source with no dimensions if a step reads it:
 #   participants.tsv
@@ -81,10 +80,9 @@ fn a_recipe_gets_its_path_rules_and_its_pipeline_the_source_lines() {
     assert!(
         out.contains(
             "# in a.spit:\n\
-             #   sidecars t1w [sub, ses]:\n\
-             #       source t1w_json .json\n\
-             #       source t1w_nii_gz .nii.gz\n\
-             path t1w: sub-{sub}/ses-{ses}/anat/sub-{sub}_ses-{ses}_T1w\n"
+             #   source t1w_json .json [sub, ses]\n\
+             #   source t1w_nii_gz .nii.gz beside t1w_json\n\
+             path t1w_json: sub-{sub}/ses-{ses}/anat/sub-{sub}_ses-{ses}_T1w.json\n"
         ),
         "{out}"
     );

@@ -15,16 +15,14 @@ ext: .mif
 
 # Each DWI run and reverse-PE b=0 travels with sidecars that share its file
 # name and differ only by extension. Where the files are is the dataset's to
-# say: each recipe gives every source's path, a group's as one stem.
-sidecars dwi [sub, ses, run]:
-    source raw_dwi : MRI<DWI,Acquired> .nii.gz
-    source dwi_bvec : GradientDirections .bvec
-    source dwi_bval : GradientAmplitudes .bval
-    source dwi_json : AcquisitionMetadata .json
+# say: each recipe gives each main source's complete path.
+source raw_dwi : MRI<DWI,Acquired> .nii.gz [sub, ses, run]
+source dwi_bvec : GradientDirections .bvec beside raw_dwi
+source dwi_bval : GradientAmplitudes .bval beside raw_dwi
+source dwi_json : AcquisitionMetadata .json beside raw_dwi
 
-sidecars reverse_b0_files [sub, ses]:
-    source reverse_b0 : MRI<B0,Acquired> .nii.gz
-    source reverse_b0_json : AcquisitionMetadata .json
+source reverse_b0 : MRI<B0,Acquired> .nii.gz [sub, ses]
+source reverse_b0_json : AcquisitionMetadata .json beside reverse_b0
 
 source t1w : MRI<T1w,Anatomical> [sub, ses]
 source source_lut : LookupTable
