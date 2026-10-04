@@ -308,6 +308,17 @@ pub(crate) fn collect_paths(
                     errors.push(error(problem.message).at(line.clone()));
                 }
             }
+            // `parse` checked the rule as written; a dropped group can leave
+            // two open shapes touching in this product's path.
+            if let Some(Err(message)) = template.map(PathTemplate::check_open_shapes) {
+                errors.push(
+                    error(format!(
+                        "in the path rule for `{}`, once the groups its dimensions lack are dropped: {message}",
+                        product.name
+                    ))
+                    .at(line.clone()),
+                );
+            }
             match validate_path_template(&index, product, template) {
                 Err(e) => errors.push(e.at(line)),
                 // A repeated product name is reported by the resolver as a duplicate.
@@ -510,13 +521,13 @@ fn shape_errors(
         }
     };
     if let Some(template) = &pipeline.path_template {
-        let owner = "`path:` is the default for outputs too; write the shape in `path source:` for each source".to_owned();
+        let owner = "`path:` is the default for outputs too; write the shape in a `path` rule for each source, as `path <source>: ...`".to_owned();
         report(template, lines.default_path.clone(), owner);
     }
     for stage in &pipeline.stages {
         if let Some(template) = &stage.path_template {
             let owner = format!(
-                "stage `{}`'s `path:` is the default for its products; write the shape in `path source:` for each source",
+                "stage `{}`'s `path:` is the default for its products; write the shape in a `path` rule for each source, as `path <source>: ...`",
                 stage.name
             );
             report(template, lines.stage_paths.get(&stage.name).cloned(), owner);
