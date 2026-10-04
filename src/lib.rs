@@ -33,9 +33,10 @@ pub use command::{validate_commands, CommandError, CommandProblem, CommandTempla
 pub use compile::validate_pipeline;
 pub use diagnostics::{
     diagnose, diagnose_checked, diagnose_checked_with_inventory, diagnose_checked_with_records,
-    diagnose_in, diagnose_inputs, diagnose_recipe, diagnose_recipe_against, render_check_json,
-    render_diagnostics_json, Checked, Context, Diagnosis, Diagnostic, DiagnosticSource, FileNames,
-    Records, Related, Severity, ShownPath, SourceLines,
+    diagnose_in, diagnose_inputs, diagnose_recipe, diagnose_recipe_against,
+    render_calls_check_json, render_check_json, render_diagnostics_json, Checked, Context,
+    Diagnosis, Diagnostic, DiagnosticSource, FileNames, Records, Related, Severity, ShownPath,
+    SourceLines,
 };
 pub use editor::{pipeline_hovers, render_editor_json, render_words_json, Hover, HoverKind};
 pub use error::{DefinitionSubject, NearMiss, PortSite, ResolveError, TypeConflict};
@@ -62,8 +63,8 @@ pub use paths::{
     PathCoverageEntry, PathError, PathProblem, PathRule, PathTemplate, VerifiedFiles,
 };
 pub use render::{
-    render_artifacts, render_artifacts_by_target, render_bound_dag, render_call, render_dag,
-    render_step_counts, unused_sources_summary, View,
+    render_artifacts, render_artifacts_by_target, render_bound_dag, render_call, render_calls,
+    render_calls_json, render_dag, render_step_counts, unused_sources_summary, View,
 };
 pub use resolver::{
     bind_dag, bind_dag_with, resolve, resolve_artifacts_excluding, resolve_artifacts_partial,

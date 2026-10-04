@@ -347,11 +347,16 @@ impl Parser<'_> {
         }
     }
 
-    /// A one-byte span at the current offset, or an empty span at the
-    /// end of the text when nothing is left to point at.
+    /// A one-character span at the current offset, or an empty span at
+    /// the end of the text when nothing is left to point at. The offset
+    /// always sits on a character boundary, so the span does too.
     fn here(&self) -> Range<usize> {
-        let end = (self.offset + 1).min(self.text.len()).max(self.offset);
-        self.offset..end
+        let width = self
+            .text
+            .get(self.offset..)
+            .and_then(|rest| rest.chars().next())
+            .map_or(0, char::len_utf8);
+        self.offset..self.offset + width
     }
 
     fn expression(&mut self) -> Result<TypeExpr, TypeParseError> {

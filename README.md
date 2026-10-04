@@ -66,7 +66,7 @@ SPIT itself runs nothing. A backend runs the `.spitdag`: [spit-bash](https://git
 ## CLI commands and options
 
 ```text
-spit check <pipeline.spit | recipe.spitin | inputs.spitout> [--path-rules] [--json] [--stdin] [--hovers]
+spit check <pipeline.spit | recipe.spitin | inputs.spitout> [--path-rules] [--calls] [--json] [--stdin] [--hovers]
 spit inputs <recipe.spitin> [--unmatched | --suggest | -o <file>]
 spit inputs <pipeline.spit> --root <directory> [--unmatched | --suggest | -o <file>]
 spit dag <recipe.spitin> [--paths | --jobs] [--commands] [--counts] [--partial] [--json | -o <file>]
@@ -91,6 +91,7 @@ Files come first; options follow them. `spit help` lists the commands, and `spit
 | `--root <directory>` | With a `.spit` pipeline given alone to `inputs`, `dag` or `artifacts`, the dataset folder to scan with the pipeline's own path rules, relative to where `spit` runs. A recipe or `.spitout` names its root with a `root` line instead, and `--root` with either is an error. |
 | `-o <file>`, `--output <file>` | With `inputs`, write the `.spitout` to the file instead of standard output. With `dag`, write the `.spitdag`. |
 | `--path-rules` | With `check`, list the path rule each product uses (its own, a stage's or the pipeline's default, the recipe's, or for an output the built-in `out/{@product}/{@entities}`), with any [extension](docs/language-reference.md#extensions) added to it and where that is declared. |
+| `--calls` | With `check` on a pipeline, list each call to an [operation carried out by steps](docs/language-reference.md#operations-carried-out-by-steps) before the final `Pipeline valid.`, with the steps it expands to and no data read: the call as written, its line and stage, the operation's file and the first seven characters of that file's git blob id, then each step with the line of the library's body that writes it. A call in a body is shown under its caller, with its own steps beneath it. With `--json`, print `{"diagnostics":[...],"calls":[...]}` instead of the usual `check --json` output: one entry per call, in the order the pipeline's calls are made, with `id`, `parent` (the `id` of the call it is nested in, or `null`), `operation`, `outputs`, `inputs`, `line`, `stage`, `file`, `blob` and `steps`, each step with its `line`, `operation`, `outputs` and `inputs`; `calls` is left out when the pipeline has errors. It cannot combine with `--path-rules` or `--hovers`, and a recipe or `.spitout` has no calls to list. |
 | `--unmatched` | With `inputs`, list files under the dataset root that match no source path rule, one per line, leaving out files at the pipeline's output paths, instead of writing a `.spitout`. |
 | `--suggest` | With `inputs`, print `source` and `path` lines for the files under the dataset root that match no source path rule, instead of writing a `.spitout`; see [Start from the files](#start-from-the-files). |
 | `--paths` | With `dag`, print the file under every artifact. |

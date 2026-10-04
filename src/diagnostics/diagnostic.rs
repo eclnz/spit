@@ -204,6 +204,28 @@ impl Diagnostic {
         error: &Located<E>,
         text: &str,
     ) -> Self {
+        if let Some(imported) = error.location.imported() {
+            return Self {
+                severity: Severity::Error,
+                source,
+                line: Some(imported.place.line),
+                columns: Some(imported.place.columns.clone()),
+                message: error.message(),
+                file: Some(imported.file.clone()),
+                external_text: Some(Arc::clone(&imported.text)),
+                related: imported
+                    .uses
+                    .iter()
+                    .map(|used| Related {
+                        file: used.file.clone(),
+                        line: used.place.line,
+                        columns: used.place.columns.clone(),
+                        line_text: Some(used.text.clone()),
+                        message: "imported here".to_owned(),
+                    })
+                    .collect(),
+            };
+        }
         let place = error.location.place_in(text);
         Self {
             severity: Severity::Error,
@@ -454,6 +476,20 @@ pub fn render_check_json(diagnostics: &[Diagnostic], text: &str, paths: &[ShownP
             ("paths", shown_paths_json(paths)),
         ])
     )
+}
+
+/// As [`render_diagnostics_json`], with the `calls` a pipeline that checked
+/// clean makes, as `render_calls_json` writes them: `check --calls --json`.
+pub fn render_calls_check_json(diagnostics: &[Diagnostic], text: &str, calls: &str) -> String {
+    let mut out = String::new();
+    let mut object = crate::json::ObjectWriter::start(&mut out);
+    object.field("diagnostics", |out| {
+        diagnostics_json(diagnostics, text, None).write_to(out);
+    });
+    object.raw("calls", calls);
+    object.finish();
+    out.push('\n');
+    out
 }
 
 pub(crate) fn shown_paths_json(paths: &[ShownPath]) -> Json<'_> {

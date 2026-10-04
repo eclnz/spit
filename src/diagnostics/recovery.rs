@@ -5,6 +5,7 @@ use std::collections::BTreeSet;
 
 use rustc_hash::FxHashSet;
 
+use crate::parser::{parse_use, strip_comment, Keyword, UseSpec};
 use crate::{ParseError, ParseErrorKind};
 
 /// Blank the lines that failed, preserving all later line numbers. This
@@ -91,6 +92,8 @@ struct Failures<'a> {
     /// The declarations with no `(`, where the name boundary is unknown, so
     /// a call's name matches as a prefix.
     unnamed: Vec<&'a str>,
+    /// The `use` lines that failed.
+    failed_uses: Vec<UseSpec>,
     /// The line of each error kept.
     error_lines: BTreeSet<usize>,
 }
@@ -110,6 +113,7 @@ impl<'a> Failures<'a> {
             above,
             named: FxHashSet::default(),
             unnamed: Vec::new(),
+            failed_uses: Vec::new(),
             error_lines: BTreeSet::new(),
         }
     }
@@ -133,6 +137,15 @@ impl<'a> Failures<'a> {
 
     /// Note the operation `line` declares, if it declares one.
     fn declare(&mut self, line: &'a str) {
+        // A `use` line that failed brought in no operation, so a call of one
+        // it would have brought in only repeats its error.
+        let trimmed = strip_comment(line).trim();
+        if Keyword::of(trimmed) == Some(Keyword::Use) {
+            if let Ok(spec) = parse_use(trimmed, 0) {
+                self.failed_uses.push(spec);
+            }
+            return;
+        }
         let Some(declaration) = line.trim().strip_prefix("operation ") else {
             return;
         };
@@ -151,6 +164,19 @@ impl<'a> Failures<'a> {
             return false;
         };
         self.named.contains(operation.as_str())
+            || self.failed_uses.iter().any(|spec| {
+                let local = match &spec.alias {
+                    Some(alias) => operation
+                        .strip_prefix(alias.as_str())
+                        .and_then(|rest| rest.strip_prefix("::")),
+                    None => Some(operation.as_str()),
+                };
+                local.is_some_and(|local| {
+                    spec.names
+                        .as_ref()
+                        .is_none_or(|names| names.iter().any(|name| name == local))
+                })
+            })
             || self
                 .unnamed
                 .iter()

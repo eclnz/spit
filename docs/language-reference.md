@@ -172,6 +172,19 @@ error: line 4, column 21: in `m, t = L::summarise(...)`: type mismatch at `L::cl
 
 A check on an input or output of such an operation, as `reads: Lines @ check(lines(2))`, runs on every step that reads that input or makes that output, beside the checks of the step's own operation; the same check on one artifact runs once. Imported, it brings the operations its steps call, and their commands and checks, under the same prefix, so `use summarise from lib.spit as L` brings `L::clean` too.
 
+`spit check pipeline.spit --calls` lists each call's steps before any data is read. It shows the call, its line and stage, the file that declares the operation with its file's blob id, then each step with the line of the body that writes it; a call in a body is shown under its caller:
+
+```text
+m, t = L::summarise(…)  line 6  [report]
+  L::summarise  libs/lib.spit  blob 3b18e5c
+  line 13  m::cleaned = L::tidy(raw, cal)
+    line 10  m::cleaned = L::clean(raw, cal)
+  line 14  m = L::merge(m::cleaned)
+  line 15  t = L::C::count(m)
+```
+
+With `--json` the same calls are the `calls` array of `{"diagnostics":[...],"calls":[...]}`, one object per call with its `steps`, a nested call having its caller's `id` as `parent`.
+
 `spit dag --counts` lists a call's steps under it, with the call's jobs in all, so `summarise` over two groups of two lanes shows:
 
 ```text
@@ -295,7 +308,14 @@ use text.spit as text
 sorted = text::sort_lines(text::shard)
 ```
 
-`as text` gives every imported name a prefix. Without it, `use text.spit` brings the names into the current scope. To import only a few definitions, use `use shard, sort_lines from text.spit as text`. A source imported as `text::shard` also uses that name in a recipe and a `.spitout`. SPIT reports missing names, import cycles, and name collisions.
+`as text` gives every imported name a prefix. Without it, `use text.spit` brings the names into the current scope. To import only a few definitions, use `use shard, sort_lines from text.spit as text`. A source imported as `text::shard` also uses that name in a recipe and a `.spitout`. SPIT reports missing names, import cycles, and name collisions. A message names a library by its path from the pipeline's folder, such as `libs/text.spit`, wherever the checkout is. An error in a library's own text is reported in the library, at its own line, and the `use` line that reads it follows as a related place:
+
+```text
+error: libs/text.spit: line 4, column 15: the body of `wrap` reads `nope`, which is neither one of its inputs nor made by an earlier step of it
+  --> pipeline.spit: line 1, column 1: imported here
+```
+
+A library that imports a broken library lists each `use` line, nearest the error first. `spit check --json` gives the same: the diagnostic's `file` is `libs/text.spit`, and its `related` list holds each `use` line with its `file`.
 
 ## Paths
 

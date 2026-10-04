@@ -6,6 +6,8 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+mod located;
+
 use crate::blob::git_blob_id;
 use crate::lower::{parse_document_recovering, Failure, ParsedDocument, PipelineBuilder};
 use crate::model::{
@@ -14,6 +16,7 @@ use crate::model::{
 };
 use crate::parser::{parse_use, strip_comment, without_bom, Keyword, Kind, ParseError, UseSpec};
 use crate::span::Place;
+use located::{in_import, named_in, rebase, relative_path, ImportedAt};
 
 /// Merge what the `use` line at `place` imports into `builder`. An import
 /// that fails for what it brings in, before it has changed anything, leaves
@@ -584,7 +587,16 @@ pub(crate) fn parse_located_document_recovering(
     kind: Kind,
 ) -> Result<ParsedDocument, Vec<ParseError>> {
     let root = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
-    parse_document_at_inner(text, &root, &mut vec![root.clone()], kind)
+    let base = root.parent().map_or_else(PathBuf::new, Path::to_path_buf);
+    let name = root
+        .file_name()
+        .map_or_else(String::new, |name| name.to_string_lossy().into_owned());
+    parse_document_at_inner(text, &root, &base, &mut vec![root.clone()], kind).map_err(|errors| {
+        errors
+            .into_iter()
+            .map(|error| named_in(error, &name))
+            .collect()
+    })
 }
 
 /// Parse `text`, the file at `path` as read, with its imports. The parsed
@@ -593,6 +605,7 @@ pub(crate) fn parse_located_document_recovering(
 fn parse_document_at_inner(
     raw: &str,
     path: &Path,
+    base: &Path,
     stack: &mut Vec<PathBuf>,
     kind: Kind,
 ) -> Result<ParsedDocument, Vec<ParseError>> {
@@ -608,8 +621,16 @@ fn parse_document_at_inner(
     }];
     let mut imports = BTreeMap::new();
     let mut file_texts = BTreeMap::new();
-    read_imports(text, path, stack, &mut files, &mut imports, &mut file_texts)
-        .map_err(|error| vec![error])?;
+    read_imports(
+        text,
+        path,
+        base,
+        stack,
+        &mut files,
+        &mut imports,
+        &mut file_texts,
+    )
+    .map_err(|error| vec![error])?;
     let mut document = parse_document_recovering(text, &imports, kind)?;
     document.pipeline.files = files;
     document.lines.file_texts = file_texts;
@@ -621,6 +642,7 @@ fn parse_document_at_inner(
 fn read_imports(
     text: &str,
     path: &Path,
+    base: &Path,
     stack: &mut Vec<PathBuf>,
     files: &mut Vec<SourceFile>,
     imports: &mut BTreeMap<usize, Pipeline>,
@@ -637,53 +659,49 @@ fn read_imports(
             .parent()
             .unwrap_or_else(|| Path::new("."))
             .join(&spec.path);
+        // Messages name a library from the pipeline's folder. The canonical
+        // path, which two spellings of one file share, finds an import cycle.
+        let shown = |path: &Path| relative_path(base, path);
         let canonical = fs::canonicalize(&imported_path).map_err(|error| {
             ParseError::new(
                 number,
-                format!("cannot load import `{}`: {error}", imported_path.display()),
+                format!("cannot load import `{}`: {error}", shown(&imported_path)),
             )
         })?;
         if stack.contains(&canonical) {
             return Err(ParseError::new(
                 number,
-                format!("import cycle through `{}`", canonical.display()),
+                format!("import cycle through `{}`", shown(&canonical)),
             ));
         }
         // A device such as `/dev/zero` would never finish reading.
         if !canonical.is_file() {
             return Err(ParseError::new(
                 number,
-                format!("import `{}` is not a regular file", canonical.display()),
+                format!("import `{}` is not a regular file", shown(&canonical)),
             ));
         }
         let imported_text = fs::read_to_string(&canonical).map_err(|error| {
             ParseError::new(
                 number,
-                format!("cannot read import `{}`: {error}", canonical.display()),
+                format!("cannot read import `{}`: {error}", shown(&canonical)),
             )
         })?;
         stack.push(canonical.clone());
-        let module = parse_document_at_inner(&imported_text, &canonical, stack, Kind::Pipeline)
-            .map_err(|errors| {
-                let error = &errors[0];
-                ParseError::new(
-                    number,
-                    format!(
-                        "in `{}` at line {}: {}",
-                        canonical.display(),
-                        error.line(),
-                        error.message()
-                    ),
-                )
-            });
+        let module =
+            parse_document_at_inner(&imported_text, &canonical, base, stack, Kind::Pipeline)
+                .map_err(|errors| {
+                    let at = ImportedAt {
+                        number,
+                        use_line: original,
+                        spec_path: &rebase(&spec.path, ""),
+                        text: &imported_text,
+                    };
+                    in_import(&errors[0], at, |file| rebase(&spec.path, file))
+                });
         stack.pop();
         let module = module?;
-        let folder = spec.path.replace('\\', "/");
-        let folder = folder.rsplit_once('/').map(|(folder, _)| folder);
-        let rebased = |path: &str| match folder {
-            Some(folder) => format!("{folder}/{path}"),
-            None => path.to_owned(),
-        };
+        let rebased = |file: &str| rebase(&spec.path, file);
         if let Some(own) = module.pipeline.files.first() {
             file_texts.insert(rebased(&own.path), without_bom(&imported_text).to_owned());
         }

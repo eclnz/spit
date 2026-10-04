@@ -84,6 +84,29 @@ fn every_job_of_a_call_can_be_inspected() {
 }
 
 #[test]
+fn a_calls_steps_are_listed_without_reading_data() {
+    let mut text = run(MRTRIX, &["check", "act.spit", "--calls"], None);
+    text.push_str(&run(GERMLINE, &["check", "somatic.spit", "--calls"], None));
+    // The same calls as JSON, beside the diagnostics `check --json` gives; a
+    // pipeline that fails lists none.
+    text.push_str(&run(
+        GERMLINE,
+        &["check", "somatic.spit", "--calls", "--json"],
+        None,
+    ));
+    let broken = std::fs::read_to_string(Path::new(MRTRIX).join("act.spit")).unwrap();
+    let broken = broken.replace("clean_dwi_session(raw_dwi,", "clean_dwi_session(t1w,");
+    text.push_str(&run(
+        MRTRIX,
+        &["check", "act.spit", "--calls", "--json", "--stdin"],
+        Some(&broken),
+    ));
+    // A recipe has no calls to list.
+    text.push_str(&run(MRTRIX, &["check", "act.spitin", "--calls"], None));
+    support::check_output("composites_calls", &text);
+}
+
+#[test]
 fn a_call_makes_the_jobs_the_steps_it_replaces_made() {
     // The session call makes the 48 jobs of the ACT example's hand-written
     // `preprocess` stage, the same number of each operation.

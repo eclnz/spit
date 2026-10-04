@@ -167,7 +167,9 @@ fn parse_use_path(text: &str, number: usize) -> Result<(String, Option<String>),
 /// Turn a [`TypeParseError`] into a [`ParseError`] pointing at the specific
 /// token within `ty` that the type parser rejected, rather than all of `ty`.
 pub(super) fn type_error(number: usize, ty: &str, error: TypeParseError) -> ParseError {
-    ParseError::new(number, error.message).at_token(&ty[error.span])
+    // Fall back to the whole type if a span is ever not a valid range in `ty`.
+    let token = ty.get(error.span).unwrap_or(ty);
+    ParseError::new(number, error.message).at_token(token)
 }
 
 /// The list after `dimensions`, as in `dimensions [model, config, seed]`.
