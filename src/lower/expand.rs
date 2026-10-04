@@ -42,7 +42,7 @@ impl PipelineBuilder {
             let operation = self
                 .called(&next.invocation, &flow.step)
                 .map_err(|error| Failure {
-                    error,
+                    error: Box::new(error),
                     clean: untouched,
                 })?;
             if self.pipeline.operations[operation].steps.is_empty() {
@@ -67,9 +67,9 @@ impl PipelineBuilder {
                 &mut self.intermediates,
                 &self.lines.imported,
             )
-            .map_err(|(error, early)| Failure {
-                error,
-                clean: untouched && early,
+            .map_err(|failure| Failure {
+                clean: untouched && failure.clean,
+                ..failure
             })?;
             untouched = false;
             pending.extend(steps.into_iter().rev());
@@ -208,7 +208,7 @@ fn expand(
     calls: &mut Vec<Call>,
     intermediates: &mut FxHashMap<String, CallId>,
     imported: &BTreeSet<String>,
-) -> Result<Vec<Pending>, (ParseError, bool)> {
+) -> Result<Vec<Pending>, Failure> {
     let Pending {
         invocation: caller,
         outputs: written,
@@ -227,16 +227,18 @@ fn expand(
         .within(&place)
     };
     if caller.inputs.len() != operation.inputs.len() {
-        return Err((
-            mismatch("inputs", operation.inputs.len(), caller.inputs.len()),
-            true,
-        ));
+        return Err(Failure::clean(mismatch(
+            "inputs",
+            operation.inputs.len(),
+            caller.inputs.len(),
+        )));
     }
     if caller.outputs.len() != operation.outputs.len() {
-        return Err((
-            mismatch("outputs", operation.outputs.len(), caller.outputs.len()),
-            true,
-        ));
+        return Err(Failure::clean(mismatch(
+            "outputs",
+            operation.outputs.len(),
+            caller.outputs.len(),
+        )));
     }
     let instance = caller.output_product().to_owned();
     // The call files its own products under `instance::`, which an import
@@ -248,7 +250,7 @@ fn expand(
         .filter(|name| name.starts_with(&prefix))
     {
         let place = at();
-        return Err((
+        return Err(Failure::clean(
             ParseError::new(
                 place.line,
                 format!(
@@ -256,7 +258,6 @@ fn expand(
                 ),
             )
             .within(&place),
-            true,
         ));
     }
     let id = CallId::at(calls.len());
@@ -314,7 +315,7 @@ fn expand(
             inputs.push(match port {
                 Some(port) => merge(&caller.inputs[port], binding).map_err(|problem| {
                     let place = at();
-                    (ParseError::new(place.line, problem).within(&place), false)
+                    Failure::from(ParseError::new(place.line, problem).within(&place))
                 })?,
                 None => InputBinding {
                     product: rename(&binding.product),

@@ -96,7 +96,8 @@ struct Effect {
 
 /// A line that failed to parse, and what reading on from it needs.
 struct Failed {
-    error: ParseError,
+    /// Boxed, so that `Result` stays small where a line parses.
+    error: Box<ParseError>,
     /// Reading on as if the line were blank would not read the rest the
     /// way blanking it would.
     stop: bool,
@@ -108,7 +109,7 @@ impl Failed {
     /// A failure that left the parse as it was.
     fn clean(error: ParseError) -> Self {
         Self {
-            error,
+            error: Box::new(error),
             stop: false,
             ended_body: None,
         }
@@ -263,7 +264,7 @@ fn flow_line(
         let ended = body.take().expect("a body is open");
         ended_body = Some(ended.header_indent());
         ended.close(syntax).map_err(|error| Failed {
-            error,
+            error: Box::new(error),
             stop: true,
             ended_body: None,
         })?;
@@ -274,7 +275,7 @@ fn flow_line(
             ended_body,
         })
         .map_err(|error| Failed {
-            error,
+            error: Box::new(error),
             stop: false,
             ended_body,
         })
