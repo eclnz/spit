@@ -6,10 +6,11 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crate::blob::git_blob_id;
 use crate::lower::{parse_document_with_imports, ParsedDocument, PipelineBuilder};
 use crate::model::{
     CheckDef, CheckUse, CommandDef, CommandRole, OperationDef, Pipeline, PipelineIndex, ProductDef,
-    SidecarGroup,
+    SidecarGroup, SourceFile,
 };
 use crate::parser::{parse_use, strip_comment, without_bom, Keyword, Kind, ParseError, UseSpec};
 use crate::span::Place;
@@ -552,15 +553,28 @@ pub(crate) fn parse_located_document(
     kind: Kind,
 ) -> Result<ParsedDocument, ParseError> {
     let root = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
-    parse_document_at_inner(without_bom(text), &root, &mut vec![root.clone()], kind)
+    parse_document_at_inner(text, &root, &mut vec![root.clone()], kind)
 }
 
+/// Parse `text`, the file at `path` as read, with its imports. The parsed
+/// pipeline lists the file first among its files, then each file an
+/// import read, relative to `path`'s folder.
 fn parse_document_at_inner(
-    text: &str,
+    raw: &str,
     path: &Path,
     stack: &mut Vec<PathBuf>,
     kind: Kind,
 ) -> Result<ParsedDocument, ParseError> {
+    let text = without_bom(raw);
+    let mut files = vec![SourceFile {
+        path: path
+            .file_name()
+            .map_or_else(String::new, |name| name.to_string_lossy().into_owned()),
+        // The file as git holds it: the text given may be rebuilt from its
+        // lines, as error recovery does, without its last newline.
+        blob: fs::read(path)
+            .map_or_else(|_| git_blob_id(raw.as_bytes()), |bytes| git_blob_id(&bytes)),
+    }];
     let mut imports = BTreeMap::new();
     for (index, original) in text.lines().enumerate() {
         let line = strip_comment(original).trim();
@@ -598,9 +612,8 @@ fn parse_document_at_inner(
                 format!("cannot read import `{}`: {error}", canonical.display()),
             )
         })?;
-        let imported_text = without_bom(&imported_text);
         stack.push(canonical.clone());
-        let module = parse_document_at_inner(imported_text, &canonical, stack, Kind::Pipeline)
+        let module = parse_document_at_inner(&imported_text, &canonical, stack, Kind::Pipeline)
             .map_err(|error| {
                 ParseError::new(
                     number,
@@ -613,7 +626,24 @@ fn parse_document_at_inner(
                 )
             });
         stack.pop();
-        imports.insert(number, select_import(&module?.pipeline, &spec, number)?);
+        let module = module?;
+        let folder = spec.path.replace('\\', "/");
+        let folder = folder.rsplit_once('/').map(|(folder, _)| folder);
+        for file in &module.pipeline.files {
+            let path = match folder {
+                Some(folder) => format!("{folder}/{}", file.path),
+                None => file.path.clone(),
+            };
+            if !files.iter().any(|known: &SourceFile| known.path == path) {
+                files.push(SourceFile {
+                    path,
+                    blob: file.blob.clone(),
+                });
+            }
+        }
+        imports.insert(number, select_import(&module.pipeline, &spec, number)?);
     }
-    parse_document_with_imports(text, &imports, kind)
+    let mut document = parse_document_with_imports(text, &imports, kind)?;
+    document.pipeline.files = files;
+    Ok(document)
 }

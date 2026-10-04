@@ -37,6 +37,34 @@ pub struct Pipeline {
     /// Each call to an operation with a body, which `invocations` holds as
     /// the body's steps; a step's [`Invocation::origin`] names its call.
     pub calls: Vec<Call>,
+    /// The files the pipeline was read from: its own first, then each file
+    /// an import read, once. Empty for a pipeline parsed without a path.
+    pub files: Vec<SourceFile>,
+}
+
+/// A file a pipeline was read from.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct SourceFile {
+    /// Relative to the pipeline's folder, with `/` between folders; the
+    /// pipeline's own file is its name.
+    pub path: String,
+    /// Its git blob id, as `git hash-object` prints it.
+    pub blob: String,
+}
+
+impl Pipeline {
+    /// The position in [`Pipeline::files`] of the file declaring the
+    /// operation `name`, if the pipeline was read from files.
+    pub fn file_of(&self, name: &str) -> Option<usize> {
+        let operation = self
+            .operations
+            .iter()
+            .find(|operation| operation.name == name)?;
+        match &operation.file {
+            Some(file) => self.files.iter().position(|known| known.path == *file),
+            None => (!self.files.is_empty()).then_some(0),
+        }
+    }
 }
 
 impl Pipeline {
