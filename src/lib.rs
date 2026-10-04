@@ -41,9 +41,10 @@ pub use editor::{pipeline_hovers, render_editor_json, render_words_json, Hover, 
 pub use error::{DefinitionSubject, NearMiss, PortSite, ResolveError, TypeConflict};
 pub use imports::parse_pipeline_at;
 pub use inputs::{
-    discover_source_files, discover_sources, parse_input_spec, parse_input_spec_at, Discovery,
-    EveryGroupDropped, InputError, InputSource, InputSpec, MissedSource, NearestFile,
-    NearlyMatched, ResolvedInputs, SuggestedSource, Suggestions, UnmatchedExclusion,
+    case_variants, discover_source_files, discover_sources, parse_input_spec, parse_input_spec_at,
+    CaseVariants, Discovery, EveryGroupDropped, InputError, InputSource, InputSpec, MissedSource,
+    NearestFile, NearlyMatched, ResolvedInputs, Spelling, SuggestedSource, Suggestions,
+    UnmatchedExclusion,
 };
 pub use lower::parse_pipeline;
 pub use model::{
@@ -61,8 +62,8 @@ pub use paths::{
     PathCoverageEntry, PathError, PathProblem, PathRule, PathTemplate, VerifiedFiles,
 };
 pub use render::{
-    render_artifacts, render_bound_dag, render_call, render_dag, render_step_counts,
-    unused_sources_summary, View,
+    render_artifacts, render_artifacts_by_target, render_bound_dag, render_call, render_dag,
+    render_step_counts, unused_sources_summary, View,
 };
 pub use resolver::{
     bind_dag, bind_dag_with, resolve, resolve_artifacts_excluding, resolve_artifacts_partial,

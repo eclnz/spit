@@ -3,9 +3,9 @@ mod support;
 use std::process::Command;
 
 use spit::{
-    diagnose, parse_source_inventory, render_artifacts, resolve, resolve_artifacts_excluding,
-    resolve_artifacts_partial, ArtifactReport, Gap, InputSource, ResolveError, ResolvedInputs,
-    Severity,
+    diagnose, parse_source_inventory, render_artifacts, render_artifacts_by_target, resolve,
+    resolve_artifacts_excluding, resolve_artifacts_partial, ArtifactReport, Gap, InputSource,
+    ResolveError, ResolvedInputs, Severity,
 };
 use support::{numbers, Tree};
 
@@ -391,4 +391,76 @@ fn cli_lists_incomplete_artifacts_where_check_fails() {
     assert!(String::from_utf8(check.stderr)
         .unwrap()
         .contains("no `calibration` artifact for input `reference`"));
+}
+
+#[test]
+fn by_target_nests_what_each_final_target_waits_on() {
+    let (pipeline, _) = settle(ALIGN, ALIGN_SOURCES).unwrap();
+    let report = report(ALIGN, ALIGN_SOURCES).unwrap();
+    assert_eq!(
+        render_artifacts_by_target(&pipeline, &report),
+        "\
+Complete artifacts: 10
+
+Final targets that cannot be made: 1 (incomplete artifacts: 2)
+  merged[subject=02] : Scan  (merge)
+    aligned[subject=02,run=1] : Scan  (align)
+      - no `calibration` artifact for input `reference` of `align` at [run=1,subject=02]
+"
+    );
+}
+
+#[test]
+fn by_target_gives_each_target_its_own_tree_and_shows_an_artifact_once_under_it() {
+    let text = "\
+source day [site, date]
+source rate [site]
+operation price(day: Day, rate: Rate) -> Priced
+operation total(days: many Priced) -> Total
+operation both(total: Total) -> Both
+priced = price(day, rate)
+total = total(priced @ vary(date))
+both = both(total)
+";
+    let sources = "\
+sources:
+    day[site=a,date=1]
+    day[site=a,date=2]
+    day[site=b,date=1]
+    rate[site=a]
+";
+    let (pipeline, _) = settle(text, sources).unwrap();
+    let report = report(text, sources).unwrap();
+    let grouped = render_artifacts_by_target(&pipeline, &report);
+    // `both[site=b]` is the only final target of site b; site a is complete.
+    assert!(
+        grouped.contains("Final targets that cannot be made: 1 (incomplete artifacts: 3)\n"),
+        "{grouped}"
+    );
+    assert_eq!(
+        grouped.matches("priced[site=b,date=1]").count(),
+        1,
+        "{grouped}"
+    );
+    assert_eq!(grouped.matches("total[site=b]").count(), 1, "{grouped}");
+    // The order is the same every time.
+    assert_eq!(grouped, render_artifacts_by_target(&pipeline, &report));
+}
+
+#[test]
+fn by_target_on_a_complete_dataset_has_no_targets_section() {
+    let text = "\
+source day [site]
+operation summarise(day: Day) -> Summary
+summary = summarise(day)
+";
+    let sources = "sources:\n    day[site=a]\n";
+    let (pipeline, _) = settle(text, sources).unwrap();
+    let report = report(text, sources).unwrap();
+    let grouped = render_artifacts_by_target(&pipeline, &report);
+    assert!(grouped.starts_with("Complete artifacts: 2\n"), "{grouped}");
+    assert!(
+        grouped.contains("Final targets that cannot be made: 0"),
+        "{grouped}"
+    );
 }

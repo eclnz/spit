@@ -11,6 +11,7 @@ mod discover;
 mod exclusions;
 mod pattern;
 mod suggest;
+mod variants;
 
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
@@ -43,6 +44,7 @@ pub use self::exclusions::UnmatchedExclusion;
 use self::exclusions::{read_exclusion_files, Excluder};
 pub use self::pattern::{MissedSource, NearestFile};
 pub use self::suggest::{NearlyMatched, SuggestedSource, Suggestions};
+pub use self::variants::{case_variants, CaseVariants, Spelling};
 
 /// A recipe's rules and any inventory records written with them.
 #[derive(Clone, Debug, Default)]
