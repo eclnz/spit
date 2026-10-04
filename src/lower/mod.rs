@@ -9,6 +9,8 @@ use rustc_hash::FxHashMap;
 
 mod expand;
 
+use expand::BodyCheck;
+
 use crate::imports::apply_import;
 use crate::model::{
     CallId, Cardinality, CheckDef, CommandDef, CommandRole, CoverageRule, DefaultChecks, Exclusion,
@@ -17,7 +19,7 @@ use crate::model::{
 };
 use crate::order::{order_dimensions, Output};
 use crate::parser::{
-    parse_source_inventory, parse_syntax, split_document, without_bom, ExcludeLine, Kind,
+    empty_body, parse_source_inventory, parse_syntax, split_document, without_bom, ExcludeLine, Kind,
     ParseError, ParseErrorKind, PathRule, Rule, SourceMap, Statement, StatementKind, Step, Syntax,
 };
 use crate::shape::{step_context, step_driver, BoundInput};
@@ -346,7 +348,7 @@ pub(crate) fn lower(
                 "`discover`, `require` and `exclude` rules belong in a .spitin recipe, not a pipeline",
             )))
         } else {
-            lower_statement(&mut builder, imports, statement)
+            lower_statement(&mut builder, imports, statement, &mut errors)
         };
         if let Err(failure) = lowered {
             let error = failure.error.within(&statement.place);
@@ -423,10 +425,13 @@ fn check_source_beside_paths(builder: &PipelineBuilder) -> Result<(), ParseError
     Ok(())
 }
 
+/// Lower `statement`. The errors of steps in the body of an operation, which
+/// come before the statement's own, go to `errors`.
 fn lower_statement(
     builder: &mut PipelineBuilder,
     imports: &BTreeMap<usize, Pipeline>,
     statement: &Statement,
+    errors: &mut Vec<ParseError>,
 ) -> Result<(), Failure> {
     match &statement.kind {
         StatementKind::Import => apply_import(builder, imports, &statement.place)?,
@@ -488,19 +493,13 @@ fn lower_statement(
             }
             builder.inputs.discoveries.push(discovery.clone());
         }
-        StatementKind::Operation(operation, place, stage) => {
-            if !operation.steps.is_empty() {
-                builder.check_body(operation, place)?;
+        StatementKind::Operation(operation, place, stage, _) => {
+            if operation.steps.is_empty() {
+                return builder
+                    .add_operation(operation.clone(), place.clone(), stage.as_deref())
+                    .map_err(Failure::clean);
             }
-            // Blanking the header of an operation with a body would leave
-            // its steps to read as lines of their own.
-            let clean = operation.steps.is_empty();
-            builder
-                .add_operation(operation.clone(), place.clone(), stage.as_deref())
-                .map_err(|error| Failure {
-                    error: Box::new(error),
-                    clean,
-                })?;
+            lower_body(builder, statement, errors)?;
         }
         StatementKind::Constraint(constraint, rule) => {
             builder.add_constraint(constraint.clone(), rule.clone());
@@ -547,6 +546,53 @@ fn lower_statement(
         StatementKind::FlowStep(flow) => builder.add_flow_step(flow)?,
     }
     Ok(())
+}
+
+/// Lower `statement`, an operation with a body. A step of the body that
+/// fails to check has its error given to `errors` and is left out, as
+/// blanking its line would leave it, and the steps after it are checked
+/// without it, so that a body with many bad steps is checked once. The
+/// operation is added with the steps that are left, and a body left with
+/// none is an error on the header, which is blank in the end.
+fn lower_body(
+    builder: &mut PipelineBuilder,
+    statement: &Statement,
+    errors: &mut Vec<ParseError>,
+) -> Result<(), Failure> {
+    let StatementKind::Operation(operation, place, stage, ended) = &statement.kind else {
+        unreachable!("an operation is lowered from an operation statement");
+    };
+    let BodyCheck { mut failed, unmade } =
+        builder.check_body(operation, place).map_err(Failure::from)?;
+    let all_failed = failed.len() == operation.steps.len();
+    if all_failed && statement.stateful {
+        // Were the header blank, the lines after it would not read the same.
+        // The next parse reads the body with no steps.
+        let (_, last) = failed.pop().expect("a body has a step");
+        errors.extend(failed.into_iter().map(|(_, error)| error));
+        return Err(Failure::from(last));
+    }
+    let mut kept = operation.clone();
+    if !failed.is_empty() {
+        let mut position = 0;
+        let mut left_out = failed.iter().map(|(step, _)| *step).peekable();
+        kept.steps.retain(|_| {
+            position += 1;
+            left_out.next_if_eq(&(position - 1)).is_none()
+        });
+    }
+    errors.extend(failed.into_iter().map(|(_, error)| error));
+    if all_failed {
+        let line = statement.place.line;
+        errors.push(empty_body(&operation.name, line).within(&Place::new(line, ended.clone())));
+        return Ok(());
+    }
+    if let Some(error) = unmade {
+        return Err(Failure::from(error));
+    }
+    builder
+        .add_operation(kept, place.clone(), stage.as_deref())
+        .map_err(Failure::from)
 }
 
 /// The dimensions a flow step's undeclared outputs take: those of the input
