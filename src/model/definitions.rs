@@ -373,6 +373,9 @@ pub struct Call {
     /// The name its products are filed under: the call's first output, so
     /// that a product `p` of the body is `instance::p`.
     pub instance: String,
+    /// The products the call assigns, as it writes them; the first is
+    /// `instance`.
+    pub outputs: Vec<String>,
     /// The call whose body holds this one, for a call in a body.
     pub parent: Option<CallId>,
     /// Where the call is written: in the pipeline, or in the body of the

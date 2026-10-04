@@ -111,6 +111,7 @@ impl PipelineBuilder {
         self.pipeline.calls.push(Call {
             operation: name.clone(),
             instance: instance.clone(),
+            outputs: caller.outputs.clone(),
             parent: caller.origin.as_ref().map(|origin| origin.call),
             place: at(),
         });

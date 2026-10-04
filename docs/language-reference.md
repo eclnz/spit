@@ -164,6 +164,20 @@ A selector the caller gives an input holds wherever the body reads it, beside th
 
 A check on an input or output of such an operation, as `reads: Lines @ check(lines(2))`, runs on every step that reads that input or makes that output, beside the checks of the step's own operation; the same check on one artifact runs once. Imported, it brings the operations its steps call, and their commands and checks, under the same prefix, so `use summarise from lib.spit as L` brings `L::clean` too.
 
+`spit dag --counts` lists a call's steps under it, with the call's jobs in all, so `summarise` over two groups of two lanes shows:
+
+```text
+jobs  step
+      first, first_total = summarise
+   4    first::cleaned = clean
+   2    first = merge
+   2    first_total = count
+   8    in this call
+   8  total
+```
+
+`spit dag --commands` starts each job a call made with a `from:` line: each call the job is nested in, outermost first, as `first = summarise (pipeline.spit line 19)`, then the file and line of the body's step that made it. The `.spitdag` holds the same, under each job's [`origin`](spitdag.md#where-jobs-come-from).
+
 An operation with a body names its outputs, as `-> (result: Type)`, since its steps assign them by name. An output takes its extension, folder and place from the step that writes it, so the header gives only its name and type. Such an operation takes no `command` or `verify` line; its steps' operations have their own.
 
 ## Checks
