@@ -42,6 +42,16 @@ tumour_bam, tumour_gvcf = gl::align_sample(…)  line 16
   line 31  tumour_gvcf = gl::call_gvcf(reference, tumour_bam, tumour_bam::index)
 Pipeline valid.
 --- stderr
+$ spit check somatic.spit --calls --json
+exit: 0
+--- stdout
+{"diagnostics":[],"calls":[{"id":0,"parent":null,"operation":"gl::align_sample","outputs":["normal_bam","normal_gvcf"],"inputs":["reference","normal_r1","normal_r2"],"line":15,"stage":null,"file":"germline.spit","blob":"bb00cd99f3c616d55959c656968dadcd6a0f0fb3","steps":[{"line":27,"operation":"gl::bwa_align","outputs":["normal_bam::aligned"],"inputs":["reference","normal_r1","normal_r2"]},{"line":28,"operation":"gl::sort_reads","outputs":["normal_bam::sorted"],"inputs":["normal_bam::aligned"]},{"line":29,"operation":"gl::merge_lanes","outputs":["normal_bam::merged"],"inputs":["normal_bam::sorted"]},{"line":30,"operation":"gl::mark_duplicates","outputs":["normal_bam","normal_bam::index","normal_bam::metrics"],"inputs":["normal_bam::merged"]},{"line":31,"operation":"gl::call_gvcf","outputs":["normal_gvcf"],"inputs":["reference","normal_bam","normal_bam::index"]}]},{"id":1,"parent":null,"operation":"gl::align_sample","outputs":["tumour_bam","tumour_gvcf"],"inputs":["reference","tumour_r1","tumour_r2"],"line":16,"stage":null,"file":"germline.spit","blob":"bb00cd99f3c616d55959c656968dadcd6a0f0fb3","steps":[{"line":27,"operation":"gl::bwa_align","outputs":["tumour_bam::aligned"],"inputs":["reference","tumour_r1","tumour_r2"]},{"line":28,"operation":"gl::sort_reads","outputs":["tumour_bam::sorted"],"inputs":["tumour_bam::aligned"]},{"line":29,"operation":"gl::merge_lanes","outputs":["tumour_bam::merged"],"inputs":["tumour_bam::sorted"]},{"line":30,"operation":"gl::mark_duplicates","outputs":["tumour_bam","tumour_bam::index","tumour_bam::metrics"],"inputs":["tumour_bam::merged"]},{"line":31,"operation":"gl::call_gvcf","outputs":["tumour_gvcf"],"inputs":["reference","tumour_bam","tumour_bam::index"]}]}]}
+--- stderr
+$ spit check act.spit --calls --json --stdin
+exit: 0
+--- stdout
+{"diagnostics":[{"severity":"warning","source":"pipeline","line":10,"column":8,"end_column":15,"message":"source product `raw_dwi` is never used as an input"},{"severity":"error","source":"pipeline","line":21,"column":56,"end_column":59,"message":"in `corrected_dwi, session_b0 = mrx::clean_dwi_session(...)`: type mismatch at `mrx::import_dwi.image`: product `t1w` is MRI<T1w,Anatomical>, expected MRI<DWI,$Space>","related":[{"file":"mrtrix_dwi.spit","line":38,"column":16,"end_column":53,"message":"the step in the body of `mrx::clean_dwi_session`"}]}]}
+--- stderr
 $ spit check act.spitin --calls
 exit: 1
 --- stdout

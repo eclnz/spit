@@ -4,6 +4,7 @@
 
 use std::fmt::Write as _;
 
+use crate::json::Json;
 use crate::model::{CallId, Invocation, Pipeline};
 
 /// How many characters of a file's git blob id the listing shows.
@@ -103,4 +104,87 @@ pub(crate) fn written_step(step: &Invocation) -> String {
         step.operation,
         inputs.join(", ")
     )
+}
+
+/// The calls as a JSON array, for other tools: one object per call with
+/// steps, in the order of [`Pipeline::calls`], so a call's `parent` is the
+/// `id` of an earlier entry.
+///
+/// ```text
+/// {"id":0,"parent":null,"operation":"L::summarise","outputs":["m","t"],
+///  "inputs":["raw","cal"],"line":6,"stage":"report","file":"libs/lib.spit",
+///  "blob":"3b18e5c…","steps":[{"line":13,"operation":"L::tidy",
+///  "outputs":["m::cleaned"],"inputs":["raw","cal"]}]}
+/// ```
+///
+/// `line` is where the call is written: in the pipeline, or in the file of
+/// its parent's operation. A step's `line` is in the file of its call's
+/// operation. `file` and `blob` are `null` when the pipeline was read
+/// without a path. A call whose steps are all calls in turn has no step
+/// of its own, and is listed with its `steps` empty.
+pub fn render_calls_json(pipeline: &Pipeline) -> String {
+    let files = pipeline.operation_files();
+    // Each call's own steps, and the stage of the first step it holds
+    // anywhere, which is the call's.
+    let mut steps: Vec<Vec<&Invocation>> = vec![Vec::new(); pipeline.calls.len()];
+    let mut stages: Vec<Option<&str>> = vec![None; pipeline.calls.len()];
+    for step in &pipeline.invocations {
+        let Some(origin) = &step.origin else { continue };
+        steps[origin.call.index()].push(step);
+        let mut call = Some(origin.call);
+        while let Some(id) = call {
+            stages[id.index()].get_or_insert(step.stage.as_deref().unwrap_or(""));
+            call = pipeline.calls[id.index()].parent;
+        }
+    }
+    let optional =
+        |value: Option<&str>| value.map_or(Json::Null, |text| Json::string(text.to_owned()));
+    let calls = pipeline
+        .calls
+        .iter()
+        .enumerate()
+        .filter_map(|(index, call)| {
+            let stage = (*stages.get(index)?)?;
+            let file = files
+                .get(call.operation.as_str())
+                .copied()
+                .flatten()
+                .map(|file| &pipeline.files[file]);
+            let step_objects = steps[index].iter().filter_map(|step| {
+                let origin = step.origin.as_ref()?;
+                Some(Json::object([
+                    ("line", Json::Number(origin.step.line)),
+                    ("operation", Json::string(&step.operation)),
+                    ("outputs", strings(&step.outputs)),
+                    (
+                        "inputs",
+                        Json::array(
+                            step.inputs
+                                .iter()
+                                .map(|input| Json::string(input.product_name())),
+                        ),
+                    ),
+                ]))
+            });
+            Some(Json::object([
+                ("id", Json::Number(index)),
+                (
+                    "parent",
+                    Json::number_or_null(call.parent.map(CallId::index)),
+                ),
+                ("operation", Json::string(&call.operation)),
+                ("outputs", strings(&call.outputs)),
+                ("inputs", strings(&call.inputs)),
+                ("line", Json::Number(call.place.line)),
+                ("stage", optional((!stage.is_empty()).then_some(stage))),
+                ("file", optional(file.map(|file| file.path.as_str()))),
+                ("blob", optional(file.map(|file| file.blob.as_str()))),
+                ("steps", Json::array(step_objects)),
+            ]))
+        });
+    Json::array(calls).to_string()
+}
+
+fn strings(items: &[String]) -> Json<'_> {
+    Json::array(items.iter().map(|item| Json::string(item.as_str())))
 }

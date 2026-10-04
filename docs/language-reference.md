@@ -183,6 +183,8 @@ m, t = L::summarise(…)  line 6  [report]
   line 15  t = L::C::count(m)
 ```
 
+With `--json` the same calls are the `calls` array of `{"diagnostics":[...],"calls":[...]}`, one object per call with its `steps`, a nested call having its caller's `id` as `parent`.
+
 `spit dag --counts` lists a call's steps under it, with the call's jobs in all, so `summarise` over two groups of two lanes shows:
 
 ```text
