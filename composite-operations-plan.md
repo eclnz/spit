@@ -550,7 +550,7 @@ Each step merges on its own, keeps output byte-for-byte the same unless it says 
 | 4 | Checks on a composite's ports and outputs, carried by the expanded steps and run by `step_checks`. | spit | e08c650 |
 | 5 | Write `.spitdag` version 7, with `pipeline_files` and each job's `origin`, and the hand-written blob hash. | spit, spit-bash | 7b86d76; eclnz/spit-bash#3 |
 | 6 | Show calls: `from:` in the commands view, grouping in `--counts`, call-aware reasons in `artifacts` and `left_out`, hovers, and `related` locations in diagnostics. | spit, spit-vscode | 7cb3ebf, 44d6433, cc43f77; eclnz/spit-vscode#21 |
-| 7 | Examples (MRtrix and germline), the guide, and the acceptance tests as stored outputs. | spit | |
+| 7 | Examples (MRtrix and germline), the guide, and the acceptance tests as stored outputs. | spit | this commit |
 | 8 | Move how composites work into `docs/architecture.md`, then delete this plan in a commit of its own. | spit | |
 
 Step 5 is the only step that changes the `.spitdag` format.

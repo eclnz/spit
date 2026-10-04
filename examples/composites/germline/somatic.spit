@@ -1,0 +1,16 @@
+# A tumour and its matched normal from each patient, each aligned and called
+# by one call to `align_sample`. `spit dag somatic.spitin --paths` shows the
+# two calls' products filed apart, as `normal_bam.aligned` and
+# `tumour_bam.aligned`.
+use align_sample from germline.spit as gl
+
+path: out/{@product}/{@entities}
+
+source reference : Fasta .fa
+source normal_r1 : Fastq .fastq.gz [patient, lane]
+source normal_r2 : Fastq .fastq.gz [patient, lane]
+source tumour_r1 : Fastq .fastq.gz [patient, lane]
+source tumour_r2 : Fastq .fastq.gz [patient, lane]
+
+normal_bam, normal_gvcf = gl::align_sample(reference, normal_r1, normal_r2)
+tumour_bam, tumour_gvcf = gl::align_sample(reference, tumour_r1, tumour_r2)
