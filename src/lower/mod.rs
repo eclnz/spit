@@ -142,39 +142,40 @@ impl PipelineBuilder {
         self.pipeline.stages.push(StageDef::new(name));
     }
 
+    /// Add a path rule. A rule that repeats one already given fails before
+    /// it changes anything, as a blank line would leave the builder.
     fn add_path(&mut self, rule: &PathRule, line: usize) -> Result<(), ParseError> {
         let Self {
             pipeline, lines, ..
         } = self;
         let template = rule.template.clone();
         if let Some(product) = &rule.product {
-            lines.paths.insert(product.clone(), rule.place.clone());
-            if pipeline
-                .product_paths
-                .insert(product.clone(), template)
-                .is_some()
-            {
+            if pipeline.product_paths.contains_key(product) {
                 return Err(ParseError::new(
                     line,
                     format!("duplicate path template for product `{product}`"),
                 ));
             }
+            lines.paths.insert(product.clone(), rule.place.clone());
+            pipeline.product_paths.insert(product.clone(), template);
         } else if let Some(stage) = &rule.stage {
             let definition = pipeline
                 .stages
                 .iter_mut()
                 .find(|definition| &definition.name == stage)
                 .expect("a stage is declared before its lines");
-            if definition.path_template.replace(template).is_some() {
+            if definition.path_template.is_some() {
                 return Err(ParseError::new(
                     line,
                     format!("duplicate default path template for stage `{stage}`"),
                 ));
             }
+            definition.path_template = Some(template);
             lines.stage_paths.insert(stage.clone(), rule.place.clone());
-        } else if pipeline.path_template.replace(template).is_some() {
+        } else if pipeline.path_template.is_some() {
             return Err(ParseError::new(line, "duplicate default path template"));
         } else {
+            pipeline.path_template = Some(template);
             lines.default_path = Some(rule.place.clone());
         }
         Ok(())
@@ -199,12 +200,15 @@ impl PipelineBuilder {
             ),
             None => (&mut self.pipeline.extension, String::new()),
         };
-        if slot.replace(extension.to_owned()).is_some() {
+        if slot.is_some() {
             return Err(ParseError::new(line, format!("duplicate `ext:`{whose}")));
         }
+        *slot = Some(extension.to_owned());
         Ok(())
     }
 
+    /// Add a `check:` list. One that repeats the list already given fails
+    /// before it changes anything, as a blank line would leave the builder.
     fn add_default_checks(
         &mut self,
         stage: Option<&str>,
@@ -214,7 +218,7 @@ impl PipelineBuilder {
         let Self {
             pipeline, lines, ..
         } = self;
-        let (slot, placed, whose) = match stage {
+        let (slot, whose) = match stage {
             Some(stage) => (
                 &mut pipeline
                     .stages
@@ -222,14 +226,9 @@ impl PipelineBuilder {
                     .find(|definition| definition.name == stage)
                     .expect("a stage is declared before its lines")
                     .checks,
-                lines.stage_checks.entry(stage.to_owned()).or_default(),
                 format!(" for stage `{stage}`"),
             ),
-            None => (
-                &mut pipeline.default_checks,
-                lines.default_checks.get_or_insert_with(Place::default),
-                String::new(),
-            ),
+            None => (&mut pipeline.default_checks, String::new()),
         };
         if *slot != DefaultChecks::default() {
             return Err(ParseError::new(
@@ -239,6 +238,10 @@ impl PipelineBuilder {
             .within(place));
         }
         *slot = checks.clone();
+        let placed = match stage {
+            Some(stage) => lines.stage_checks.entry(stage.to_owned()).or_default(),
+            None => lines.default_checks.get_or_insert_with(Place::default),
+        };
         *placed = place.clone();
         Ok(())
     }
@@ -534,14 +537,20 @@ fn lower_statement(
             }
             builder.dimension_order = Some((order.clone(), statement.place.clone()));
         }
-        StatementKind::Path(rule) => builder.add_path(rule, statement.place.line)?,
+        StatementKind::Path(rule) => builder
+            .add_path(rule, statement.place.line)
+            .map_err(Failure::clean)?,
         StatementKind::DefaultChecks {
             stage,
             checks,
             place,
-        } => builder.add_default_checks(stage.as_deref(), checks, place)?,
+        } => builder
+            .add_default_checks(stage.as_deref(), checks, place)
+            .map_err(Failure::clean)?,
         StatementKind::Extension { stage, extension } => {
-            builder.add_extension(stage.as_deref(), extension, statement.place.line)?;
+            builder
+                .add_extension(stage.as_deref(), extension, statement.place.line)
+                .map_err(Failure::clean)?;
         }
         StatementKind::FlowStep(flow) => builder.add_flow_step(flow)?,
     }

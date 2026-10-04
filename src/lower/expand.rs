@@ -229,8 +229,9 @@ pub(super) struct BodyCheck {
 }
 
 /// Replace `call` of `operation` by the body's steps over the caller's
-/// products, recording the call. An error comes with whether it came before
-/// the call was recorded. `step` is where the call written in
+/// products, recording the call. The call is recorded once its steps are
+/// made, so an error leaves `calls` and `intermediates` as they were, which
+/// the error says. `step` is where the call written in
 /// the pipeline is, which the steps a nested call makes share.
 fn expand(
     call: Pending,
@@ -292,17 +293,6 @@ fn expand(
         ));
     }
     let id = CallId::at(calls.len());
-    calls.push(Call {
-        operation: name.clone(),
-        outputs: caller.outputs.clone(),
-        inputs: caller
-            .inputs
-            .iter()
-            .map(|binding| binding.product.clone())
-            .collect(),
-        parent: caller.origin.as_ref().map(|origin| origin.call),
-        place: at(),
-    });
     // The body's own products, under the call's name.
     let rename = |product: &str| match operation
         .outputs
@@ -327,6 +317,8 @@ fn expand(
         declared.iter().chain(given).cloned().collect()
     };
     let mut steps = Vec::with_capacity(operation.steps.len());
+    // The products the body makes for itself, filed once the steps are made.
+    let mut made = Vec::new();
     for body in &operation.steps {
         // A step that reads a port, or makes an output, runs its checks.
         let mut checks = Vec::new();
@@ -346,7 +338,7 @@ fn expand(
             inputs.push(match port {
                 Some(port) => merge(&caller.inputs[port], binding).map_err(|problem| {
                     let place = at();
-                    Failure::from(ParseError::new(place.line, problem).within(&place))
+                    Failure::clean(ParseError::new(place.line, problem).within(&place))
                 })?,
                 None => InputBinding {
                     product: rename(&binding.product),
@@ -402,7 +394,7 @@ fn expand(
                 .iter()
                 .any(|port| port.name == output.name)
             {
-                intermediates.insert(rename(&output.name), id);
+                made.push(rename(&output.name));
             }
         }
         steps.push(Pending {
@@ -425,6 +417,18 @@ fn expand(
             outputs,
         });
     }
+    calls.push(Call {
+        operation: name.clone(),
+        outputs: caller.outputs.clone(),
+        inputs: caller
+            .inputs
+            .iter()
+            .map(|binding| binding.product.clone())
+            .collect(),
+        parent: caller.origin.as_ref().map(|origin| origin.call),
+        place: at(),
+    });
+    intermediates.extend(made.into_iter().map(|product| (product, id)));
     Ok(steps)
 }
 
