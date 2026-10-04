@@ -60,9 +60,11 @@ fn a_group_exclusion_still_shows_the_spelling_it_missed() {
 /// A sales pipeline with one source, and a recipe over `files` with `rules`.
 fn sales_recipe(name: &str, files: &[&str], rules: &str) -> (Tree, String) {
     let tree = Tree::new(name, files);
+    // Keep case variants in separate week folders so both files exist on
+    // filesystems that ignore case, while the scanner retains each spelling.
     tree.write(
         "pipeline.spit",
-        "source sales : Sales [store, week]\npath sales: sales/{store}/{week}.csv\noperation clean(sales: Sales) -> Sales\ncommand clean: clean_sales {sales} {@output}\npath cleaned: out/{store}/{week}.csv\ncleaned = clean(sales)\n",
+        "source sales : Sales [store, week]\npath sales: sales/{week}/{store}.csv\noperation clean(sales: Sales) -> Sales\ncommand clean: clean_sales {sales} {@output}\npath cleaned: out/{store}/{week}.csv\ncleaned = clean(sales)\n",
     );
     let recipe = tree.write(
         "dataset.spitin",
@@ -76,7 +78,7 @@ fn sales_recipe(name: &str, files: &[&str], rules: &str) -> (Tree, String) {
 fn a_partial_exclusion_lists_the_spelling_it_left_with_its_remaining_sources() {
     let (_tree, recipe) = sales_recipe(
         "case-partial",
-        &["sales/s01/w1.csv", "sales/s01/w2.csv", "sales/S01/w1.csv"],
+        &["sales/w1/s01.csv", "sales/w2/s01.csv", "sales/w3/S01.csv"],
         "exclude [store=s01,week=w1]\n",
     );
     let output = spit(&["inputs", &recipe]);
@@ -90,14 +92,14 @@ fn a_partial_exclusion_lists_the_spelling_it_left_with_its_remaining_sources() {
         stderr(&output)
     );
     assert!(!stderr(&output).contains("(excluded)"));
-    assert!(stdout(&output).contains("sales[store=S01,week=w1]"));
+    assert!(stdout(&output).contains("sales[store=S01,week=w3]"));
     assert!(stdout(&output).contains("sales[store=s01,week=w2]"));
     assert!(!stdout(&output).contains("sales[store=s01,week=w1]"));
 }
 
 #[test]
 fn values_that_differ_only_outside_ascii_get_no_case_note() {
-    let (_tree, recipe) = sales_recipe("case-unicode", &["sales/é1/w1.csv", "sales/É1/w1.csv"], "");
+    let (_tree, recipe) = sales_recipe("case-unicode", &["sales/w1/é1.csv", "sales/w2/É1.csv"], "");
     let output = spit(&["inputs", &recipe]);
     assert!(output.status.success(), "{}", stderr(&output));
     assert!(
@@ -111,7 +113,7 @@ fn values_that_differ_only_outside_ascii_get_no_case_note() {
 fn a_spitout_given_directly_gets_no_case_note() {
     let (tree, recipe) = sales_recipe(
         "case-spitout",
-        &["sales/s01/w1.csv", "sales/S01/w1.csv"],
+        &["sales/w1/s01.csv", "sales/w2/S01.csv"],
         "",
     );
     let inputs = spit(&["inputs", &recipe]);
