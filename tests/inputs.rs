@@ -66,13 +66,13 @@ fn jobs_resolve_from_the_logical_pipeline_and_the_stages_inventory() {
 #[test]
 fn drop_rules_are_applied_by_the_stage_before_jobs_exist() {
     let tree = Tree::new("drop", &FILES);
-    let recipe = format!("{RECIPE}drop [sub] where sessions count<2\n");
+    let recipe = format!("{RECIPE}exclude [sub] where sessions count<2\n");
     let resolved = inventory_of(&recipe, &tree);
     assert_eq!(resolved.inventory.artifacts.len(), 2);
     let removed = &resolved.inventory.removed;
     assert_eq!(removed.len(), 1);
     assert_eq!(removed[0].identity(), "[sub=5]");
-    assert_eq!(removed[0].rule, "drop [sub] where sessions count<2");
+    assert_eq!(removed[0].rule, "exclude [sub] where sessions count<2");
     assert_eq!(removed[0].found, Some(1));
     let dag = resolve(
         &parse_pipeline(PIPELINE).unwrap(),
@@ -127,7 +127,7 @@ fn a_recipe_can_settle_records_that_were_already_written() {
 
 #[test]
 fn dropping_written_records_records_the_removed_group() {
-    let recipe = parse_input_spec("drop [sub] where image count<2\n").unwrap();
+    let recipe = parse_input_spec("exclude [sub] where image count<2\n").unwrap();
     let inventory = spit::parse_source_inventory(
         "sources:\n  image[sub=1,ses=1]\n  image[sub=2,ses=1]\n  image[sub=2,ses=2]\n",
     )
@@ -268,7 +268,7 @@ fn a_named_recipe_runs_in_memory_and_defaults_output_paths() {
         tree.0.join("analysis.spitin"),
         "pipeline analysis.spit\nroot .\n\
          discover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}\n\
-         drop [sub] where sessions count<2\n\
+         exclude [sub] where sessions count<2\n\
          require [sub] where sessions count>=2\n\
          path image: data/sub-{sub}/ses-{ses}/image.nii.gz\n",
     )
@@ -295,7 +295,7 @@ fn a_named_recipe_runs_in_memory_and_defaults_output_paths() {
     assert!(paths.status.success(), "{notes}");
     assert!(
         notes.contains(
-            "note: dropped [sub=5] by `drop [sub] where sessions count<2` (line 4); found 1"
+            "note: excluded [sub=5] by `exclude [sub] where sessions count<2` (line 4); found 1"
         ),
         "{notes}"
     );

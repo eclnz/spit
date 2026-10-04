@@ -534,7 +534,7 @@ mod tests {
             Removal {
                 product: None,
                 entities: EntityBinding::from_pairs([("sub", "03")]),
-                rule: "drop [sub] where sessions count<2".into(),
+                rule: "exclude [sub] where sessions count<2".into(),
                 origin: None,
                 reason: None,
                 found: Some(1),
@@ -545,7 +545,7 @@ mod tests {
             text.contains(
                 "\"removed\":[{\"product\":\"bold\",\"entities\":{\"run\":\"3\",\"sub\":\"02\"},\
 \"rule\":\"exclude bold[run=3,sub=02]\",\"origin\":\"line 4\",\"reason\":\"motion \\\"spike\\\"\",\
-\"found\":null},{\"product\":null,\"entities\":{\"sub\":\"03\"},\"rule\":\"drop [sub] where sessions count<2\",\
+\"found\":null},{\"product\":null,\"entities\":{\"sub\":\"03\"},\"rule\":\"exclude [sub] where sessions count<2\",\
 \"origin\":null,\"reason\":null,\"found\":1}]"
             ),
             "{text}"

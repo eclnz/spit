@@ -79,7 +79,7 @@ $ spit inputs drop.spitin -o drop.spitout
 exit: 0
 --- stdout
 --- stderr
-note: dropped [sub=02,ses=2] by `drop [sub, ses] where image count<2` (line 4); found 1
+note: excluded [sub=02,ses=2] by `exclude [sub, ses] where image count<2` (line 4); found 1
 note: found 18 source artifacts and 5 contexts under `.`
 note: wrote the .spitout to `drop.spitout`
 root .
@@ -117,7 +117,7 @@ contexts sessions:
 
 removed:
     [sub=02,ses=2]
-        rule: drop [sub, ses] where image count<2
+        rule: exclude [sub, ses] where image count<2
         at: line 4
         found: 1
 $ spit dag drop.spitin --jobs
@@ -403,7 +403,7 @@ Job 30
     score[sub=03,ses=2] : Score
   depends_on: 25
 --- stderr
-note: dropped [sub=02,ses=2] by `drop [sub, ses] where image count<2` (line 4); found 1
+note: excluded [sub=02,ses=2] by `exclude [sub, ses] where image count<2` (line 4); found 1
 note: found 18 source artifacts and 5 contexts under `.`
 note: ran `spit inputs drop.spitin` in memory
 note: 18 source files verified.
@@ -463,6 +463,6 @@ Complete artifacts: 48
 
 Incomplete artifacts: 0
 --- stderr
-note: dropped [sub=02,ses=2] by `drop [sub, ses] where image count<2` (line 4); found 1
+note: excluded [sub=02,ses=2] by `exclude [sub, ses] where image count<2` (line 4); found 1
 note: found 18 source artifacts and 5 contexts under `.`
 note: ran `spit inputs drop.spitin` in memory

@@ -103,7 +103,7 @@ pipeline cohort.spit
 
 discover sessions: [sub, ses] from dirs sub-{sub}/ses-{ses}
 # Subject 03 has only one session and is removed as a whole.
-drop [sub] where t1w count<2
+exclude [sub] where t1w count<2
 exclude bold[sub=02,ses=02,run=2]    # motion spike
 require [sub, ses] where t1w count=1
 require [sub, ses] where bold count>=1
@@ -295,7 +295,7 @@ When `dag` stops because an input is missing or ambiguous, run `spit artifacts` 
 
 ## More example pipelines
 
-Each pipeline below, under [`examples/`](../examples), checks cleanly and sits beside a `.spitin` recipe and a `.spitout` of its inputs. Recipes may add discovery, exclusion, drop, or require rules. Each recipe's `root` line names a folder of empty source files beside it, so `spit dag` on the `.spitin` alone finds the same inputs and jobs as on the `.spit` and `.spitout`, and the `.spitout` records the same root, so `dag` checks those files too. Where the pipeline's own path rules find every source, as in the patterns, the recipe is optional: `cargo run -- dag examples/patterns/model_fit/model_fit.spit --root examples/patterns/model_fit` finds the same jobs. Run the command from the repository root to see its jobs; add `--paths` to see each artifact's file or `-o plan.spitdag` to write them, or run `spit check` on the `.spit` or `.spitin` alone.
+Each pipeline below, under [`examples/`](../examples), checks cleanly and sits beside a `.spitin` recipe and a `.spitout` of its inputs. Recipes may add discovery, named or conditional exclusion, or require rules. Each recipe's `root` line names a folder of empty source files beside it, so `spit dag` on the `.spitin` alone finds the same inputs and jobs as on the `.spit` and `.spitout`, and the `.spitout` records the same root, so `dag` checks those files too. Where the pipeline's own path rules find every source, as in the patterns, the recipe is optional: `cargo run -- dag examples/patterns/model_fit/model_fit.spit --root examples/patterns/model_fit` finds the same jobs. Run the command from the repository root to see its jobs; add `--paths` to see each artifact's file or `-o plan.spitdag` to write them, or run `spit check` on the `.spit` or `.spitin` alone.
 
 | Pipeline | Shows | Command | Jobs |
 | --- | --- | --- | --- |
@@ -316,7 +316,7 @@ Each pipeline below, under [`examples/`](../examples), checks cleanly and sits b
 | [Diffusion preprocessing by steps](../examples/composites/mrtrix/act.spit) | Two calls to operations a library carries out by steps | `cargo run -- dag examples/composites/mrtrix/act.spitin` | 60 |
 | [Variant calling by steps](../examples/composites/germline/somatic.spit) | One operation carried out by steps, called for a tumour and its normal | `cargo run -- dag examples/composites/germline/somatic.spitin` | 14 |
 
-The pattern examples each include a `.spitin` recipe and a `.spitout` inventory. The cohort recipe also has small placeholder source files, so its discovery, exclusion, and drop rules can be run directly. The `command_demo.spitin` recipe expects real shard files beside it; use its supplied `.spitout` to inspect the example jobs without creating a dataset.
+The pattern examples each include a `.spitin` recipe and a `.spitout` inventory. The cohort recipe also has small placeholder source files, so its discovery and both exclusion forms can be run directly. The `command_demo.spitin` recipe expects real shard files beside it; use its supplied `.spitout` to inspect the example jobs without creating a dataset.
 
 ## Analytics
 

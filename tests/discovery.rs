@@ -313,7 +313,7 @@ fn drop_discovery_group_removes_subject_before_source_checks_and_jobs() {
         ],
     );
     let text = "discover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}\n\
-                drop [sub] where sessions count<2\n\
+                exclude [sub] where sessions count<2\n\
                 require [sub] where sessions count>=2\n\
                 source image [sub, ses]\n\
                 path image: data/sub-{sub}/ses-{ses}/image.nii.gz\n\
@@ -373,7 +373,7 @@ fn drop_source_group_can_omit_missing_files_in_a_discovered_context() {
         "discover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}\n\
          source image [sub, ses]\n\
          path image: data/sub-{sub}/ses-{ses}/image.nii.gz\n\
-         drop [sub] where image count<2\n\
+         exclude [sub] where image count<2\n\
          operation process(image: Image) -> Image\n\
          result = process(image)\n",
     );
@@ -390,7 +390,7 @@ fn drop_source_group_can_omit_missing_files_in_a_discovered_context() {
 fn drop_does_not_hide_invalid_inventory_bindings() {
     let (pipeline, spec) = parse(
         "discover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}\n\
-         drop [sub] where sessions count<2\n",
+         exclude [sub] where sessions count<2\n",
     );
     let inventory = parse_source_inventory("contexts sessions:\n[sub=5]\n").unwrap();
     let error = spec

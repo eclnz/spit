@@ -43,7 +43,7 @@ impl Command {
             Self::Inputs => CommandSpec {
                 name: "inputs",
                 files: "<recipe.spitin>",
-                summary: "step 2: find a dataset's sources with a recipe, apply `exclude`, `drop` and `require`, and write a .spitout",
+                summary: "step 2: find a dataset's sources with a recipe, apply `exclude` and `require`, and write a .spitout",
                 example: "spit inputs dataset.spitin -o dataset.spitout\n  spit inputs dataset.spitin --suggest",
                 flags: &[Root, Output, Unmatched, Suggest],
             },
