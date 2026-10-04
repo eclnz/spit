@@ -35,6 +35,11 @@ impl Shape {
 
     /// How long every value of this shape is, if all are the same length;
     /// then a placeholder's end needs no searching.
+    ///
+    /// Keep in step with `Shape::matches`: a shape has a fixed length only
+    /// if `matches` accepts values of that length alone. `value_ends` in
+    /// `inputs/pattern.rs` and `check_shapes` in `paths/template.rs` rely on
+    /// it, and a unit test below checks it.
     pub(crate) fn fixed_length(self) -> Option<usize> {
         match self {
             Self::Digits => None,
@@ -47,6 +52,9 @@ impl Shape {
     ///
     /// Keep in step with `is_value_character` in `inputs/pattern.rs`: no
     /// shape may accept a character a value cannot hold.
+    ///
+    /// Keep in step with `Shape::fixed_length`: it says how long the values
+    /// accepted here are, when they are all one length.
     pub(crate) fn matches(self, value: &str) -> bool {
         match self {
             Self::Digits => !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit()),
@@ -115,6 +123,44 @@ pub(crate) fn is_date(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{shape_names, Shape};
+
+    /// Every value `matches` accepts has `fixed_length`, when there is one,
+    /// and a shape without one accepts values of more than one length.
+    #[test]
+    fn a_fixed_length_is_the_length_of_every_value() {
+        let samples = [
+            "0",
+            "7",
+            "07",
+            "120",
+            "1999",
+            "2024",
+            "1900",
+            "2099",
+            "2024-02-29",
+            "2026-09-01",
+            "1900-12-31",
+            "2099-01-01",
+        ];
+        for shape in Shape::ALL {
+            let lengths: std::collections::BTreeSet<_> = samples
+                .iter()
+                .filter(|value| shape.matches(value))
+                .map(|value| value.len())
+                .collect();
+            match shape.fixed_length() {
+                Some(length) => assert_eq!(lengths, [length].into(), "{shape}"),
+                None => assert!(lengths.len() > 1, "{shape}"),
+            }
+        }
+    }
+
+    #[test]
+    fn the_century_rule_for_leap_days() {
+        assert!(Shape::Date.matches("2000-02-29") && Shape::Date.matches("2024-02-29"));
+        assert!(!Shape::Date.matches("1900-02-29") && !Shape::Date.matches("2100-02-29"));
+        assert!(!Shape::Year.matches("1899") && !Shape::Year.matches("2100"));
+    }
 
     #[test]
     fn a_date_must_be_a_real_day() {

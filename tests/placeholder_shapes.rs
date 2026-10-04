@@ -324,3 +324,192 @@ fn a_suggested_rule_has_the_shape_and_reads_its_files() {
     let stdout = text(&run(&tree, &["inputs", "a.spitin", "--suggest"]).stdout);
     assert!(stdout.contains("{date:date}.log"), "{stdout}");
 }
+
+#[test]
+fn two_sources_with_one_dimension_name_collide_whatever_their_shapes() {
+    let said =
+        check("source a [d]\nsource b [d]\npath a: in/{d:date}.log\npath b: in/{d:digits}.log\n");
+    assert!(
+        said.contains(
+            "products `a` and `b` bind to the same path `in/d.log` for the same entities"
+        ),
+        "{said}"
+    );
+    let named =
+        check("source a [d]\nsource b [n]\npath a: in/{d:date}.log\npath b: in/{n:digits}.log\n");
+    assert!(named.contains("Pipeline valid."), "{named}");
+}
+
+#[test]
+fn the_default_owner_error_names_the_rule_to_write() {
+    let said = check(
+        "source s [d]\npath: in/{d:digits}.txt\noperation f(s) -> .txt\ncommand f: f {s} {@output}\no = f(s)\n",
+    );
+    assert!(
+        said.contains("write the shape in a `path` rule for each source, as `path <source>: ...`"),
+        "{said}"
+    );
+    assert!(!said.contains("path source:"), "{said}");
+    let fixed =
+        check("source s [d]\npath: out/{@product}/{@entities}\npath s: in/{d:digits}.txt\n");
+    assert!(fixed.contains("Pipeline valid."), "{fixed}");
+}
+
+#[test]
+fn a_dropped_group_can_leave_two_open_shapes_touching() {
+    let tree = Tree::new("shapes-dropped", &["in/12.txt", "in/1-x2.txt"]);
+    tree.write("a.spit", "source s [a, b]\nsource t [a, b, c]\n");
+    tree.write(
+        "a.spitin",
+        "pipeline a.spit\nroot .\npath: in/{a:digits}[-{c}]{b:digits}.txt\n",
+    );
+    let said = text(&run(&tree, &["check", "a.spitin"]).stderr);
+    assert!(
+        said.contains("in the path rule for `s`, once the groups its dimensions lack are dropped"),
+        "{said}"
+    );
+    assert!(
+        said.contains("no text between two shapes of any length"),
+        "{said}"
+    );
+    // The product with `c` keeps its group, so it is not named.
+    assert!(!said.contains("rule for `t`"), "{said}");
+}
+
+#[test]
+fn a_dropped_group_leaving_a_separator_is_fine() {
+    let tree = Tree::new("shapes-kept", &[]);
+    tree.write("a.spit", "source s [a, b]\nsource t [a, b, c]\n");
+    tree.write(
+        "a.spitin",
+        "pipeline a.spit\nroot .\npath: in/{a:digits}-[{c}-]{b:digits}.txt\n",
+    );
+    let said = text(&run(&tree, &["check", "a.spitin"]).stdout);
+    assert!(said.contains("Recipe valid."), "{said}");
+}
+
+#[test]
+fn a_shape_beside_an_unshaped_placeholder_splits_shortest_first() {
+    let tree = Tree::new("shapes-mixed", &["in/123.txt", "in/1x.txt"]);
+    tree.write("a.spit", "source s [a, b]\npath s: in/{a:digits}{b}.txt\n");
+    tree.write("a.spitin", "pipeline a.spit\nroot .\n");
+    let stdout = text(&run(&tree, &["inputs", "a.spitin"]).stdout);
+    assert!(stdout.contains("s[a=1,b=23]"), "{stdout}");
+    assert!(stdout.contains("s[a=1,b=x]"), "{stdout}");
+}
+
+#[test]
+fn a_date_on_a_leap_day_follows_the_century_rule() {
+    let files = [
+        "in/1900-02-29.log",
+        "in/2000-02-29.log",
+        "in/2024-02-29.log",
+        "in/2100-02-29.log",
+        "in/1899-01-01.log",
+        "in/2100-01-01.log",
+        "in/2023-02-29.log",
+    ];
+    let tree = Tree::new("shapes-century", &files);
+    tree.write("a.spit", "source s [d]\npath s: in/{d:date}.log\n");
+    tree.write("a.spitin", "pipeline a.spit\nroot .\n");
+    let stdout = text(&run(&tree, &["inputs", "a.spitin"]).stdout);
+    let found: Vec<_> = stdout
+        .lines()
+        .filter(|line| line.contains("s[d="))
+        .collect();
+    assert_eq!(found.len(), 2, "{stdout}");
+    assert!(stdout.contains("s[d=2000-02-29]") && stdout.contains("s[d=2024-02-29]"));
+}
+
+#[test]
+fn a_folder_source_takes_a_shape() {
+    let tree = Tree::new(
+        "shapes-folder",
+        &[
+            "runs/2024/a.txt",
+            "runs/2025/a.txt",
+            "runs/abc/a.txt",
+            "runs/2124/a.txt",
+        ],
+    );
+    tree.write("a.spit", "source s : T / [y]\npath s: runs/{y:year}\n");
+    tree.write("a.spitin", "pipeline a.spit\nroot .\n");
+    let stdout = text(&run(&tree, &["inputs", "a.spitin"]).stdout);
+    assert!(
+        stdout.contains("s[y=2024]") && stdout.contains("s[y=2025]"),
+        "{stdout}"
+    );
+    assert!(
+        !stdout.contains("abc") && !stdout.contains("2124"),
+        "{stdout}"
+    );
+}
+
+#[test]
+fn a_beside_companion_inherits_the_shape() {
+    let tree = Tree::new(
+        "shapes-beside",
+        &[
+            "site-a/2024-01-05.raw",
+            "site-a/2024-01-05.json",
+            "site-a/notes.raw",
+            "site-a/notes.json",
+        ],
+    );
+    tree.write(
+        "a.spit",
+        "source raw .raw [site, d]\npath raw: site-{site}/{d:date}.raw\nsource meta .json beside raw\n",
+    );
+    tree.write("a.spitin", "pipeline a.spit\nroot .\n");
+    let rules = text(&run(&tree, &["check", "a.spit", "--path-rules"]).stdout);
+    assert!(
+        rules.contains("beside raw site-{site}/{d:date}.json"),
+        "{rules}"
+    );
+    let stdout = text(&run(&tree, &["inputs", "a.spitin"]).stdout);
+    assert!(stdout.contains("raw[site=a,d=2024-01-05]"), "{stdout}");
+    assert!(stdout.contains("meta[site=a,d=2024-01-05]"), "{stdout}");
+    assert!(!stdout.contains("notes"), "{stdout}");
+}
+
+#[test]
+fn a_shape_inside_an_optional_group_applies_where_the_group_is_kept() {
+    let tree = Tree::new(
+        "shapes-group",
+        &[
+            "in/2024-01-05.txt",
+            "in/2024-01-05-2.txt",
+            "in/2024-01-06-xx.txt",
+            "in/2024-01-07-3.txt",
+        ],
+    );
+    tree.write("a.spit", "source s [d]\nsource t [d, v]\n");
+    tree.write(
+        "a.spitin",
+        "pipeline a.spit\nroot .\npath s: in/{d:date}.txt\npath t: in/{d:date}[-{v:digits}].txt\n",
+    );
+    let stdout = text(&run(&tree, &["inputs", "a.spitin"]).stdout);
+    assert!(stdout.contains("t[d=2024-01-05,v=2]"), "{stdout}");
+    assert!(stdout.contains("t[d=2024-01-07,v=3]"), "{stdout}");
+    assert!(!stdout.contains("xx"), "{stdout}");
+    assert!(stdout.contains("s[d=2024-01-05]"), "{stdout}");
+}
+
+#[test]
+fn a_recipes_shared_default_takes_a_shape() {
+    let tree = Tree::new(
+        "shapes-recipe-default",
+        &["in/2024-01-05.txt", "in/2024-01-06.txt", "in/notes.txt"],
+    );
+    tree.write("p.spit", "source s [d]\n");
+    tree.write(
+        "a.spitin",
+        "pipeline p.spit\nroot .\npath: in/{d:date}.txt\n",
+    );
+    let stdout = text(&run(&tree, &["inputs", "a.spitin"]).stdout);
+    assert!(
+        stdout.contains("s[d=2024-01-05]") && stdout.contains("s[d=2024-01-06]"),
+        "{stdout}"
+    );
+    assert!(!stdout.contains("notes"), "{stdout}");
+}

@@ -321,3 +321,79 @@ fn each_call_to_a_misspelled_operation_is_an_error_of_its_own() {
     let expected: Vec<_> = (3..103).map(Some).collect();
     assert_eq!(lines, expected);
 }
+
+/// The lines of the errors in `text`, with what each says.
+fn error_lines(text: &str) -> Vec<(usize, String)> {
+    errors(diagnose(text, None))
+        .iter()
+        .map(|issue| {
+            (
+                issue.line.expect("an error has a line"),
+                issue.message.clone(),
+            )
+        })
+        .collect()
+}
+
+/// The numbers of the lines of `found`.
+fn lines_of(found: &[(usize, String)]) -> Vec<usize> {
+    found.iter().map(|(line, _)| *line).collect()
+}
+
+/// A step of a body that fails to check is left out, as blanking its line
+/// would leave it, so the steps after it are checked without it.
+#[test]
+fn each_bad_step_of_a_body_is_an_error_and_the_operation_keeps_the_rest() {
+    let text = "source raw : T [sub]\noperation step(input: T) -> T\noperation body(input: T) -> (out: T):\n    a = nostep(input)\n    out = step(input)\n    b = step(missing)\n    out = step(input)\n    c = step(a)\nq = body(raw)\nr = step(q)\n";
+    let found = error_lines(text);
+    assert_eq!(lines_of(&found), [4, 6, 7, 8], "{found:?}");
+    assert!(found[2].1.contains("already has `out`"), "{found:?}");
+    // `a` is made by the step that failed, so the step that reads it fails.
+    assert!(found[3].1.contains("reads `a`"), "{found:?}");
+}
+
+/// A body whose every step fails has nothing left, which repeats the errors
+/// of its steps and is not reported, nor is a call to the operation.
+#[test]
+fn a_body_with_every_step_failing_is_reported_by_its_steps_alone() {
+    let text = "source raw : T [sub]\noperation step(input: T) -> T\noperation body(input: T) -> (out: T):\n    out = nostep(input)\n    x = step(missing)\nq = body(raw)\nr = step(q)\n";
+    let found = error_lines(text);
+    assert_eq!(lines_of(&found), [4, 5], "{found:?}");
+}
+
+/// A rule that repeats one is an error that leaves the first as it was.
+#[test]
+fn a_repeated_path_extension_or_check_list_is_an_error_of_its_own() {
+    let text = "source raw : T [sub]\noperation step(input: T) -> T\npath: a\npath: b\npath raw: c\npath raw: d\next: .x\next: .y\ncheck: nonempty\ncheck: nonempty\nstage s:\n    path: a\n    path: b\n    ext: .x\n    ext: .y\n";
+    let found = error_lines(text);
+    assert_eq!(lines_of(&found), [4, 6, 8, 10, 13, 15], "{found:?}");
+}
+
+/// The first line of a stage fixes how far its lines are indented. Were it
+/// blank, the next would fix it, and the lines after would be read against
+/// that.
+#[test]
+fn blanking_the_first_line_of_a_stage_leaves_the_next_to_set_its_indentation() {
+    let text = "source raw : T [sub]\noperation step(input: T) -> T\nstage s:\n    a = nostep(raw)\n      b = step(raw)\n    c = step(raw)\n";
+    let found = error_lines(text);
+    assert_eq!(lines_of(&found), [4, 6], "{found:?}");
+    assert!(found[1].1.contains("indented differently"), "{found:?}");
+}
+
+/// A line that closes a stage and fails leaves it open for a line indented
+/// beneath its header, as a blank line would.
+#[test]
+fn blanking_a_line_that_closes_a_stage_leaves_it_open_for_the_lines_after() {
+    let text = "source raw : T [sub]\noperation step(input: T) -> T\nstage s:\n    a = step(raw)\np = nostep(raw)\n    b = step(raw)\nq = step(raw)\n";
+    let found = error_lines(text);
+    assert_eq!(lines_of(&found), [5], "{found:?}");
+}
+
+/// A call whose arguments clash with what its operation's body reads fails
+/// without recording the call, so each call is an error of its own.
+#[test]
+fn each_call_whose_selectors_clash_with_its_body_is_an_error_of_its_own() {
+    let text = "source raw : T [sub]\noperation step(input: T) -> T\noperation inner(input: T) -> (out: T):\n    out = step(input @ where(sub=1))\noperation outer(input: T) -> (out: T):\n    out = inner(input @ where(sub=1))\nm = outer(raw @ where(sub=2))\nn = outer(raw @ where(sub=2))\nk = outer(raw)\n";
+    let found = error_lines(text);
+    assert_eq!(lines_of(&found), [7, 8], "{found:?}");
+}
