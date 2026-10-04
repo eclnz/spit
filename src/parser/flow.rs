@@ -214,13 +214,24 @@ fn flow_line(
             top_level_only(if keyword == Keyword::Require {
                 "`require`, which checks sources,"
             } else {
-                "`drop`, which removes groups,"
+                "`drop`, which is replaced by conditional `exclude`,"
             })?;
             StatementKind::constraint(original, line, number)?
         }
         Some((Keyword::Exclude, declaration)) => {
             top_level_only("`exclude`, which removes sources,")?;
-            StatementKind::exclude(original, declaration, number)?
+            let groups = declaration.trim_start();
+            if groups.contains(" where ")
+                || groups.contains(" per [")
+                || (groups.starts_with('[')
+                    && groups.split_once(']').is_some_and(|(dimensions, _)| {
+                        dimensions.len() > 1 && !dimensions.contains('=')
+                    }))
+            {
+                StatementKind::constraint(original, line, number)?
+            } else {
+                StatementKind::exclude(original, declaration, number)?
+            }
         }
         Some((keyword @ (Keyword::Command | Keyword::Verify), declaration)) => {
             let role = if keyword == Keyword::Command {
@@ -288,7 +299,7 @@ fn flow_statement(
                 "`{word}` does not start a statement; {hint}a pipeline line starts with \
                  source, dimensions, operation, command, verify, check, path, ext, stage or use, or is a step \
                  `output = operation(inputs)`, and a recipe line starts with pipeline, \
-                 root, discover, require, drop, exclude or path"
+                 root, discover, require, exclude or path"
             ),
         )
         .at_token(word));

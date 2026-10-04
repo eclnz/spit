@@ -82,7 +82,7 @@ fn parses_a_pipeline_its_recipe_and_its_records() {
 fn rules_and_records_belong_outside_the_pipeline() {
     for (text, line, file) in [
         ("source x [a]\nrequire [a] where x count>=1\n", 2, ".spitin"),
-        ("source x [a]\ndrop [a] where x count<1\n", 2, ".spitin"),
+        ("source x [a]\nexclude [a] where x count<1\n", 2, ".spitin"),
         ("source x [a]\nexclude x[a=1]\n", 2, ".spitin"),
         (
             "discover s: [a] from dirs d/{a}\nsource x [a]\n",

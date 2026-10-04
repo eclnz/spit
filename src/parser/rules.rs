@@ -1,4 +1,4 @@
-//! A recipe's coverage rules: `require` and `drop`, which both name their
+//! A recipe's coverage rules: `require` and conditional `exclude`, which name their
 //! groups first, then `where` and the source they count, and the errors for
 //! a rule written in another rule's order or in an old form.
 
@@ -10,8 +10,14 @@ use super::lexical::{comma_items, identifier, qualified_identifier};
 use super::ParseError;
 
 pub(super) fn parse_coverage_rule(line: &str, number: usize) -> Result<CoverageRule, ParseError> {
-    if let Some(rest) = line.strip_prefix("drop ") {
+    if let Some(rest) = line.strip_prefix("exclude ") {
         return parse_drop(rest, number);
+    }
+    if let Some(rest) = line.strip_prefix("drop ") {
+        return Err(ParseError::new(
+            number,
+            format!("`drop` is replaced by conditional `exclude`: write `exclude {rest}`"),
+        ));
     }
     if let Some(rest) = line.strip_prefix("skip ") {
         return Err(skip_replaced(rest, number));
@@ -76,7 +82,7 @@ fn parse_require(rest: &str, number: usize, syntax: &str) -> Result<CoverageRule
     Ok(rule)
 }
 
-/// The groups, `where`, and source that begin a `drop` or `require` rule,
+/// The groups, `where`, and source that begin a conditional `exclude` or `require` rule,
 /// with the tokens after the source. `example` shows the shape when `where`
 /// is missing.
 fn parse_groups_where<'a>(
@@ -127,18 +133,18 @@ fn parse_require_parts<'a>(
     Ok((product, terms, dimensions))
 }
 
-/// Parse the text after `drop`: `[dimensions] where source condition`, the
+/// Parse the text after conditional `exclude`: `[dimensions] where source condition`, the
 /// condition one of `count<2` (any comparison), `missing dimension=value,...`
 /// or `has dimension=value,...`.
 fn parse_drop(rest: &str, number: usize) -> Result<CoverageRule, ParseError> {
-    let syntax = "expected `drop [dimensions] where source` and one condition: `count<2`, `missing run=1,2` or `has run=3`";
+    let syntax = "expected `exclude [dimensions] where source` and one condition: `count<2`, `missing run=1,2` or `has run=3`";
     let rest = rest.trim_start();
     if !rest.starts_with('[') {
         if let Some(error) = drop_in_require_order(rest, number) {
             return Err(error);
         }
     }
-    let example = "drop [sub] where sessions count<2";
+    let example = "exclude [sub] where sessions count<2";
     let (dimensions, product, mut tokens) = parse_groups_where(rest, number, example, syntax)?;
     let mut rule = CoverageRule::new(product, &dimensions, CountRequirement::AtLeast(1));
     rule.action = CoverageAction::Drop;
@@ -167,9 +173,11 @@ fn parse_drop(rest: &str, number: usize) -> Result<CoverageRule, ParseError> {
                 .transpose()?
                 .ok_or_else(|| ParseError::new(number, syntax).at_token(token))?;
             if let Some(extra) = listed.first() {
-                return Err(
-                    ParseError::new(number, "a `drop` rule takes one condition").at_token(extra)
-                );
+                return Err(ParseError::new(
+                    number,
+                    "a conditional `exclude` rule takes one condition",
+                )
+                .at_token(extra));
             }
             rule.count = Some(count);
         }
@@ -194,18 +202,18 @@ fn require_in_old_order(rest: &str, number: usize) -> Option<ParseError> {
     }
     Some(ParseError::new(
         number,
-        format!("`require` names the groups first, then `where`, as `drop` does: write `{rule}`"),
+        format!("`require` names the groups first, then `where`: write `{rule}`"),
     ))
 }
 
-/// The error for a `drop` rule written in `require`'s order, source first,
+/// The error for a conditional `exclude` rule written source first,
 /// or `None` when the text does not read as one. A count keeps its
 /// comparison; values could mean `has` or `missing`, so both are named.
 fn drop_in_require_order(rest: &str, number: usize) -> Option<ParseError> {
-    let syntax = "expected `drop [dimensions] where source`";
+    let syntax = "expected `exclude [dimensions] where source`";
     let (product, terms, dimensions) = parse_require_parts(rest, number, syntax).ok()?;
-    let start = format!("drop [{}] where {product}", dimensions.join(", "));
-    let shape = "`drop` names the groups first, then `where`";
+    let start = format!("exclude [{}] where {product}", dimensions.join(", "));
+    let shape = "conditional `exclude` names the groups first, then `where`";
     let message = match (terms.count, terms.values.is_empty()) {
         (Some(count), true) => format!("{shape}: write `{start} {}`", count.as_written()),
         (None, false) => {
@@ -215,7 +223,7 @@ fn drop_in_require_order(rest: &str, number: usize) -> Option<ParseError> {
                  or `{start} missing {values}` to remove the groups that lack one"
             )
         }
-        _ => format!("{shape}, as in `drop [sub] where sessions count<2`"),
+        _ => format!("{shape}, as in `exclude [sub] where sessions count<2`"),
     };
     Some(ParseError::new(number, message))
 }
@@ -229,7 +237,7 @@ fn value_terms(values: &BTreeMap<String, Vec<String>>) -> String {
         .join(" ")
 }
 
-/// The error for a `skip` rule, which `drop` replaces, with the `drop` rule
+/// The error for a `skip` rule, which conditional `exclude` replaces, with the rule
 /// that removes the same groups when the old rule reads cleanly.
 fn skip_replaced(rest: &str, number: usize) -> ParseError {
     let old = "expected `skip product count>=2 per [dimensions]`";
@@ -241,13 +249,13 @@ fn skip_replaced(rest: &str, number: usize) -> ParseError {
                 let mut lines = Vec::new();
                 if let Some(count) = terms.count {
                     lines.push(format!(
-                        "drop [{groups}] where {product} {}",
+                        "exclude [{groups}] where {product} {}",
                         count.negated().as_written()
                     ));
                 }
                 for (dimension, values) in &terms.values {
                     lines.push(format!(
-                        "drop [{groups}] where {product} missing {dimension}={}",
+                        "exclude [{groups}] where {product} missing {dimension}={}",
                         values.join(",")
                     ));
                 }
@@ -255,9 +263,9 @@ fn skip_replaced(rest: &str, number: usize) -> ParseError {
             });
     let message = match suggestion {
         Some(rule) => format!(
-            "`skip` is replaced by `drop`, which names the groups to remove: write `{rule}`"
+            "`skip` is replaced by conditional `exclude`, which names the groups to remove: write `{rule}`"
         ),
-        None => "`skip` is replaced by `drop`, which names the groups to remove, as in `drop [sub] where sessions count<2`".to_owned(),
+        None => "`skip` is replaced by conditional `exclude`, which names the groups to remove, as in `exclude [sub] where sessions count<2`".to_owned(),
     };
     ParseError::new(number, message)
 }

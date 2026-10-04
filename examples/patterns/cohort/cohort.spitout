@@ -25,6 +25,6 @@ removed:
         at: line 6
         reason: motion spike
     [sub=03]
-        rule: drop [sub] where t1w count<2
+        rule: exclude [sub] where t1w count<2
         at: line 5
         found: 1

@@ -396,12 +396,12 @@ fn a_missing_member_fails_only_the_steps_that_read_it() {
 
     let dropped = tree.write(
         "dropped.spitin",
-        "pipeline pipeline.spit\nroot .\ndrop [site, shot] where meta count=0\n",
+        "pipeline pipeline.spit\nroot .\nexclude [site, shot] where meta count=0\n",
     );
     let (ok, out, err) = spit(&["dag", dropped.to_str().unwrap(), "--json"]);
     assert!(ok, "{err}");
     assert!(
-        err.contains("dropped [site=a,shot=2] by `drop [site, shot] where meta count=0`"),
+        err.contains("excluded [site=a,shot=2] by `exclude [site, shot] where meta count=0`"),
         "{err}"
     );
     assert!(!err.contains("but no"), "{err}");

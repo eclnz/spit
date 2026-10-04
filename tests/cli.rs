@@ -656,15 +656,15 @@ fn drop_rules_that_remove_every_group_stop_each_command() {
     let recipe = tree.write(
         "data.spitin",
         "pipeline analysis.spit\nroot .\ndiscover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}\n\
-         drop [sub] where sessions count<2\nrequire [sub] where sessions count>=1\n",
+         exclude [sub] where sessions count<2\nrequire [sub] where sessions count>=1\n",
     );
     for command in ["inputs", "dag", "artifacts"] {
         let output = spit(&[command, recipe.to_str().unwrap()]);
         assert!(!output.status.success(), "{command}");
         assert!(
             stderr(&output).contains(
-                "error: drop rules removed all 2 [sub] groups, leaving nothing to plan: \
-                 `drop [sub] where sessions count<2` (line 4)"
+                "error: conditional exclude rules removed all 2 [sub] groups, leaving nothing to plan: \
+                 `exclude [sub] where sessions count<2` (line 4)"
             ),
             "{command}: {}",
             stderr(&output)
