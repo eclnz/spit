@@ -10,7 +10,8 @@ use rustc_hash::FxHashMap;
 use crate::imports::apply_import;
 use crate::model::{
     Cardinality, CheckDef, CommandDef, CoverageRule, Exclusion, InputBinding, InputRules,
-    Invocation, OperationDef, Pipeline, ProductDef, SidecarGroup, SourceInventory, StageDef,
+    Invocation, OperationDef, Pipeline, ProductDef, ProductId, SidecarGroup, SourceInventory,
+    StageDef,
 };
 use crate::order::{order_dimensions, Output};
 use crate::parser::{
@@ -32,9 +33,9 @@ pub(crate) struct PipelineBuilder {
     dimension_order: Option<(Vec<String>, Place)>,
     /// Each product a step makes, and whether the step wrote its dimensions.
     outputs: BTreeMap<String, Output>,
-    /// Each product's place in `pipeline.products`, the first of a name, so
-    /// that a step finds its inputs without searching every product.
-    product_numbers: FxHashMap<String, usize>,
+    /// Each product's id, the first of a name, so a step finds its inputs
+    /// without searching every product.
+    product_ids: FxHashMap<String, ProductId>,
     /// Each main source with companions, found once when the first
     /// companion is declared. Keep in step with `add_sidecar_group`.
     sidecar_group_numbers: FxHashMap<String, usize>,
@@ -48,9 +49,9 @@ pub(crate) struct PipelineBuilder {
 impl PipelineBuilder {
     pub(crate) fn add_product(&mut self, product: ProductDef, place: Place) {
         self.lines.products.insert(product.name.clone(), place);
-        self.product_numbers
+        self.product_ids
             .entry(product.name.clone())
-            .or_insert(self.pipeline.products.len());
+            .or_insert(ProductId::at(self.pipeline.products.len()));
         self.pipeline.products.push(product);
     }
 
@@ -224,7 +225,7 @@ impl PipelineBuilder {
             &invocation,
             operation,
             &self.pipeline.products,
-            &self.product_numbers,
+            &self.product_ids,
         );
         for (index, output) in outputs.iter().enumerate() {
             let declared = if output.dimensions.is_some() {
@@ -316,9 +317,9 @@ fn lower_statement(
             if let Some(beside) = &product.beside {
                 let sibling = &beside.sibling;
                 let anchor = builder
-                    .product_numbers
+                    .product_ids
                     .get(sibling)
-                    .and_then(|&index| builder.pipeline.products.get(index))
+                    .and_then(|&id| builder.pipeline.products.get(id.index()))
                     .ok_or_else(|| {
                         ParseError::new(
                             place.line,
@@ -419,12 +420,12 @@ fn inferred_dimensions(
     invocation: &Invocation,
     operation: &OperationDef,
     products: &[ProductDef],
-    product_numbers: &FxHashMap<String, usize>,
+    product_ids: &FxHashMap<String, ProductId>,
 ) -> Vec<String> {
     let dimensions = |binding: &InputBinding| {
-        product_numbers
+        product_ids
             .get(&binding.product)
-            .map(|&number| binding.free_dimensions(&products[number].dimensions))
+            .map(|id| binding.free_dimensions(&products[id.index()].dimensions))
     };
     let inputs: Option<Vec<_>> = invocation
         .inputs
