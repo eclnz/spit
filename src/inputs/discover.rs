@@ -533,20 +533,17 @@ fn require_source_files(
                 format!("source `{artifact}`")
             })?;
             let full = root.join(&relative);
-            // `is_file` alone accepts `s07.json` when only `S07.json` is
-            // present on a case-insensitive filesystem. The listing keeps
-            // each directory entry's actual spelling.
+            // The listing keeps each directory entry's actual spelling, which
+            // `is_file` alone would not on a case-insensitive filesystem
+            // (`s07.json` when only `S07.json` is present). It also holds
+            // only files and folders, symbolic links followed, so a hit needs
+            // no `stat`. Keep in step with `Listing::walk`.
             let (listed, kind) = if product.folder {
                 (&listing.directories, "folder")
             } else {
                 (&listing.files, "file")
             };
-            let present = listed.binary_search(&relative).is_ok()
-                && if product.folder {
-                    full.is_dir()
-                } else {
-                    full.is_file()
-                };
+            let present = listed.binary_search(&relative).is_ok();
             if excluded {
                 if !present {
                     excluder.artifact(&product.name, binding);
@@ -655,6 +652,9 @@ impl Listing {
     /// listing gives each entry's type, and only a link changes where an
     /// entry is, so only a link is looked up and resolved; a directory
     /// inside is its directory's canonical path and its name.
+    ///
+    /// Keep in step with `require_source_files`, which trusts that every
+    /// entry here is a file or a directory and does not `stat` it again.
     fn walk(
         &mut self,
         directory: &Path,
