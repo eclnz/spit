@@ -562,3 +562,55 @@ Final targets that cannot be made: 3 (incomplete artifacts: 4)
 "
     );
 }
+
+/// A chain of `steps` steps whose first reads a source that is missing, so
+/// that every step is incomplete and the last is the only final target.
+fn broken_chain(steps: usize) -> (String, &'static str) {
+    let mut text = String::from(
+        "source p0 [sub]\nsource miss [sub]\noperation first(a: T, b: T) -> T\noperation step(input: T) -> T\np1 = first(p0, miss)\n",
+    );
+    for index in 2..=steps {
+        text += &format!("p{index} = step(p{})\n", index - 1);
+    }
+    (text, "sources:\n    p0[sub=1]\n")
+}
+
+#[test]
+fn by_target_stops_indenting_past_twenty_levels() {
+    let (text, sources) = broken_chain(24);
+    let (pipeline, _) = settle(&text, sources).unwrap();
+    let report = report(&text, sources).unwrap();
+    let grouped = render_artifacts_by_target(&pipeline, &report);
+    let indents: Vec<usize> = grouped
+        .lines()
+        .skip(3)
+        .map(|line| line.len() - line.trim_start().len())
+        .collect();
+    // p24 is the target at the first indent; each step waits on the one
+    // before, with the reason of p1 under it.
+    assert_eq!(indents.len(), 25, "{grouped}");
+    assert_eq!(indents[0], 2);
+    assert_eq!(indents[19], 40);
+    assert!(
+        indents[20..].iter().all(|&indent| indent == 40),
+        "{indents:?}"
+    );
+}
+
+#[test]
+fn by_target_output_grows_with_the_length_of_a_chain_not_its_square() {
+    // The indent used to grow with the depth, so chains of 2,000 and 4,000
+    // steps wrote about 4 MB and 16 MB: four times as much for twice the steps.
+    let sizes: Vec<usize> = [2_000, 4_000]
+        .into_iter()
+        .map(|steps| {
+            let (text, sources) = broken_chain(steps);
+            let (pipeline, _) = settle(&text, sources).unwrap();
+            let report = report(&text, sources).unwrap();
+            let grouped = render_artifacts_by_target(&pipeline, &report);
+            assert!(grouped.len() < 120 * steps, "{} bytes", grouped.len());
+            grouped.len()
+        })
+        .collect();
+    assert!(sizes[1] < 3 * sizes[0], "{sizes:?}");
+}

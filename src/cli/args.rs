@@ -208,7 +208,7 @@ impl Flag {
             }
             (Self::Partial, _) => "plan complete jobs and record artifacts that cannot be produced",
             (Self::ByTarget, _) => {
-                "group the incomplete artifacts by final target, with the incomplete artifacts each waits on nested under it, each written once, with a pointer line where another job waits on it, and list the complete artifacts by count only"
+                "group the incomplete artifacts by final target, with the incomplete artifacts each waits on nested under it, each written once, with a pointer line where another job waits on it, indented to at most 20 levels, and list the complete artifacts by count only"
             }
             (Self::Unmatched, _) => {
                 "list files matching no source rule instead of writing a .spitout"
