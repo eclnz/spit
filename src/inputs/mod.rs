@@ -1,6 +1,6 @@
 //! The input stage: settle which contexts and sources a dataset holds.
 //!
-//! It reads a `.spitin` recipe of `discover`, `exclude`, `drop`, `require` and source
+//! It reads a `.spitin` recipe of `discover`, `exclude`, `require` and source
 //! path rules, and the pipeline's source declarations. It scans a root or
 //! takes records already written, and returns a plain inventory with what it
 //! removed and what the `require` rules find missing. Resolving jobs needs
@@ -147,7 +147,7 @@ fn header_lines(text: &str) -> Result<(RecipeHeader, String), ParseError> {
 /// Why a line belongs in the pipeline rather than the recipe: what each
 /// file holds.
 const PIPELINE_ONLY: &str = ", which every dataset shares; a .spitin binds it to one dataset with \
-     its `root`, source paths, and `discover`, `exclude`, `drop` and `require` rules";
+     its `root`, source paths, and `discover`, `exclude` and `require` rules";
 
 /// Whether a line that starts with no keyword is a step, `out = f(in)`,
 /// rather than a record, whose `[` comes before any `=`.
@@ -302,7 +302,7 @@ impl InputSpec {
     }
 
     /// Run the input stage: find the contexts and source files a dataset
-    /// holds, apply the `exclude` and `drop` rules, check the `require` rules, and give
+    /// holds, apply the `exclude` rules, check the `require` rules, and give
     /// each source record its file's path.
     ///
     /// The stage reads `pipeline` only for its source products and leaves it
@@ -599,7 +599,7 @@ pub enum InputError {
     InventoryPathInBoth { product: String },
     /// An `exclude` rule matches nothing in the dataset.
     UnmatchedExclusion(UnmatchedExclusion),
-    /// `drop` rules remove every group of a grouping.
+    /// conditional `exclude` rules remove every group of a grouping.
     EveryGroupDropped(EveryGroupDropped),
 }
 
@@ -680,7 +680,7 @@ pub enum InputSource<'a> {
 /// What the input stage settled about a dataset.
 #[derive(Debug)]
 pub struct ResolvedInputs {
-    /// The contexts and sources that remain after `exclude` and `drop` rules, with the named
+    /// The contexts and sources that remain after `exclude` rules, with the named
     /// discovery contexts kept for the `.spitout`.
     pub inventory: SourceInventory,
     /// Each file left out because a value in its path cannot be read, and

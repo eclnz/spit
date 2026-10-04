@@ -449,9 +449,9 @@ path raw_photo: site-{site}/visit-{visit}/photos/shot-{shot}.raw
 
 A recipe's default `path:` also places the main source. For `path: data/{site}/{visit}/{shot}/{@product}`, the files are `data/a/1/3/raw_photo.raw` and `data/a/1/3/raw_photo.json`. The `.spitout` records the main source's path under `source_paths:`; the companion's path is derived from it. When importing definitions, import the main source to bring all its companions. With an alias, `path text::raw_photo:` names the imported main source.
 
-When `spit inputs` scans a dataset, or a command reads records from a recipe or `.spitout`, it warns about each identity that holds some of these sources and lacks others, as `warning: raw_photo[site=A,visit=2,shot=3] has .raw and .gpx but no .json`. Warnings follow source declaration order, then value order. A file an `exclude` or `drop` rule removes is not counted as missing, nor is one listed under `.spitout`'s `removed:` section.
+When `spit inputs` scans a dataset, or a command reads records from a recipe or `.spitout`, it warns about each identity that holds some of these sources and lacks others, as `warning: raw_photo[site=A,visit=2,shot=3] has .raw and .gpx but no .json`. Warnings follow source declaration order, then value order. A file a named or conditional `exclude` rule removes is not counted as missing, nor is one listed under `.spitout`'s `removed:` section.
 
-A missing companion is a warning because it matters only to a step that reads it. If `brain = strip(anat)` reads only the image, it can still plan every subject; a step reading `anat_meta` fails for a subject missing its JSON file. SPIT never runs a job with an input left out. `dag --partial` plans the remaining jobs and lists the omitted ones with their reasons. A recipe may instead drop a whole subject, as `drop [sub] where anat_meta count=0`.
+A missing companion is a warning because it matters only to a step that reads it. If `brain = strip(anat)` reads only the image, it can still plan every subject; a step reading `anat_meta` fails for a subject missing its JSON file. SPIT never runs a job with an input left out. `dag --partial` plans the remaining jobs and lists the omitted ones with their reasons. A recipe may instead remove a whole subject with `exclude [sub] where anat_meta count=0`.
 
 ## Recipes
 
@@ -463,12 +463,12 @@ root .
 
 discover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}
 exclude image[sub=04,ses=2]    # scanner fault
-drop [sub] where sessions count<2
+exclude [sub] where sessions count<2
 require [sub, ses] where image count=1
 path image: data/sub-{sub}/ses-{ses}/image.nii.gz
 ```
 
-A recipe may contain `discover`, `exclude`, `drop` and `require` rules, `path product:` rules for source products, a default `path:` rule for its sources, and `sources:`/`contexts:` records. It cannot declare sources, operations, steps, commands, stages, imports, or `ext:`; the pipeline still declares each logical `source` with its dimensions and optional type. Rules in a pipeline are an error, and so are records.
+A recipe may contain `discover`, `exclude` and `require` rules, `path product:` rules for source products, a default `path:` rule for its sources, and `sources:`/`contexts:` records. It cannot declare sources, operations, steps, commands, stages, imports, or `ext:`; the pipeline still declares each logical `source` with its dimensions and optional type. Rules in a pipeline are an error, and so are records.
 
 A recipe's `path:` line is the default for every source with no rule of its own, in the pipeline or the recipe. Where a dataset keeps its inputs is the dataset's to say, so the pipeline's `path:` can say where outputs go, by stage if it likes, and the recipe says where sources are:
 
@@ -497,20 +497,20 @@ The folder is relative to the recipe's folder, like the `pipeline` line, and may
 
 `spit check recipe.spitin` checks the rules against the pipeline without reading any data: each rule must name a source or discovery with the dimensions it counts, every source must have a path rule, by the pipeline, the recipe or a default, since the scan finds each source by its rule, and each source path the recipe gives, by its own rule or its default, must pass the [path checks](#paths), such as telling apart the sources a default covers. `spit inputs recipe.spitin` scans the root, applies the rules, and prints the `.spitout`. A recipe that writes its own `sources:` records is not scanned. Its `root` line only says where the dataset is: it does not make the recipe's records a scan, and their files must still exist under it. `spit dag recipe.spitin` runs the same step in memory before resolving jobs, over the pipeline the recipe's `pipeline` line names. A recipe is given alone; the pipeline is not named a second time on the command line.
 
-Three rules leave data out, each for a different reason:
+Two forms of `exclude` leave data out; `require` checks what remains:
 
 | To | Write | For example |
 | --- | --- | --- |
 | Remove named artifacts or groups, such as a corrupted run | `exclude` | `exclude bold[sub=02,ses=02,run=3]  # corrupted` |
-| Remove every group that fails a criterion, as the data changes | `drop` | `drop [sub] where sessions count<2` |
+| Remove every group that meets a condition, as the data changes | `exclude` | `exclude [sub] where sessions count<2` |
 | Plan what can be completed despite missing inputs | `dag --partial` | `spit dag dataset.spitin --partial -o plan.spitdag` |
 | Stop, when the data is incomplete | `require` | `require [sub, ses] where t1w count=1` |
 
-They apply in that order, however they are written: first every `exclude`, then every `drop`, each judged against what the exclusions leave, then every `require`, checked against what the drops leave. What `exclude` and `drop` remove is reported on stderr as notes and recorded in the `.spitout`.
+Named exclusions apply first, even when written after conditional exclusions. Every conditional exclusion then sees the same retained inventory, and all matching groups are removed together. `require` checks what remains. Each removal is reported on stderr and recorded in the `.spitout`.
 
-`drop` and `require` are written the same way: the groups, then `where`, then the source or discovery rule to count and a condition. A `drop` removes each group that meets its condition; a `require` stops the run unless every group meets its own. A `require` in the older order, source first and the groups after `per`, as in `require t1w count=1 per [sub, ses]`, is an error that gives the rule rewritten.
+Conditional `exclude` and `require` name the groups first, then `where`, then the source or discovery rule and a condition. A conditional exclusion removes each group that meets its condition; `require` stops the run unless every group meets its own. A `require` in the older order, source first and the groups after `per`, as in `require t1w count=1 per [sub, ses]`, is an error that gives the rule rewritten. An old `drop` rule is rejected with an error that shows its `exclude` replacement.
 
-Rules that count form their groups from every artifact and discovered context in the dataset, whichever source or discovery found it. `drop [store] where pricing count=0` groups by every store any source or discovery has, so a store with sales but no price list is a group with none: its count is 0.
+Rules that count form their groups from every artifact and discovered context in the dataset, whichever source or discovery found it. `exclude [store] where pricing count=0` groups by every store any source or discovery has, so a store with sales but no price list is a group with none: its count is 0.
 
 ### Which file a line belongs in
 
@@ -522,12 +522,12 @@ A `.spit` pipeline is the reusable graph: what work to do and where its results 
 | `path product:` for a product a step makes | yes | no |
 | `path product:` for a source that is not declared `beside` another | either one, not both | either one, not both |
 | `path:`, a default | covers outputs, and sources nothing else covers | covers sources only |
-| `pipeline`, `root`, `discover`, `exclude`, `drop`, `require`, `sources:`, `contexts:` | no | yes |
+| `pipeline`, `root`, `discover`, `exclude`, `require`, `sources:`, `contexts:` | no | yes |
 
 Put a source's own rule in the pipeline when every dataset for that pipeline shares the layout, and in the recipe when the layout belongs to one dataset. A line in the wrong file is an error that says which file it belongs in, at its line:
 
 ```text
-error: line 3, column 1: a step belongs in the .spit pipeline, which every dataset shares; a .spitin binds it to one dataset with its `root`, source paths, and `discover`, `exclude`, `drop` and `require` rules
+error: line 3, column 1: a step belongs in the .spit pipeline, which every dataset shares; a .spitin binds it to one dataset with its `root`, source paths, and `discover`, `exclude` and `require` rules
 error: line 3, column 13: `image` has path rules in both .spit and .spitin; keep the pipeline's if every dataset has this layout, or the recipe's if only this one does
 ```
 
@@ -573,19 +573,19 @@ Constraints, written in a recipe, check each observed group, and fail the run if
 require [subject, visit] where image has run=1,2
 ```
 
-A `require` rule is checked after every `drop` rule, against the groups they leave. A rule whose grouping finds no group at all, because nothing in the dataset has those dimensions or a `drop` removed every one, is an error: a check of nothing is not a pass.
+A `require` rule is checked after conditional exclusions, against the groups they leave. A rule whose grouping finds no group at all, because nothing in the dataset has those dimensions or an exclusion removed every one, is an error: a check of nothing is not a pass.
 
-### Drop groups that fail a criterion
+### Exclude groups that meet a condition
 
-The [cohort walkthrough](examples.md#cohort-discovery-exclusion-and-grouped-removal) uses `drop` to remove a subject with too few sessions and `exclude` to remove one damaged run.
+The [cohort walkthrough](examples.md#cohort-discovery-exclusion-and-grouped-removal) uses conditional `exclude` to remove a subject with too few sessions and named `exclude` to remove one damaged run.
 
-`drop` removes every group that meets its condition, and reads the way it acts: the groups, then `where`, then what removes one.
+Conditional `exclude` removes every group that meets its condition: the groups, then `where`, then what removes one.
 
 ```text
-drop [sub] where sessions count<2
-drop [sub, ses] where t1w count=0
-drop [sub, ses] where bold missing run=1,2
-drop [sub, ses] where bold has run=3
+exclude [sub] where sessions count<2
+exclude [sub, ses] where t1w count=0
+exclude [sub, ses] where bold missing run=1,2
+exclude [sub, ses] where bold has run=3
 ```
 
 After `where` comes the source or discovery rule to count, then one condition:
@@ -594,11 +594,11 @@ After `where` comes the source or discovery rule to count, then one condition:
 - **`missing` values:** `missing run=1,2` removes each group without a run 1 or without a run 2.
 - **`has` values:** `has run=3` removes each group with a run 3.
 
-Removing a group removes every artifact and discovered context within it, of every source. An artifact without all the group's dimensions, such as a subject's reference when only its sessions are dropped, stays; if no job then uses it, `spit artifacts` lists it as unused. Each `drop` rule is one condition, and a group is removed when any rule's condition holds. Every rule is judged against the same inventory, so writing them in another order changes nothing. A `drop` rule that would remove every group of its grouping is an error, since nothing would be left to plan.
+Removing a group removes every artifact and discovered context within it, of every source. An artifact without all the group's dimensions, such as a subject's reference when only its sessions are removed, stays; if no job then uses it, `spit artifacts` lists it as unused. Each conditional `exclude` rule has one condition, and a group is removed when any rule's condition holds. Every rule is judged against the same inventory, so writing them in another order changes nothing. A conditional `exclude` rule that would remove every group of its grouping is an error, since nothing would be left to plan.
 
-A file a discovered context expects but lacks counts as absent, so `drop [sub, ses] where t1w count=0` removes a session whose T1w is missing, rather than failing on the missing file. Each removed group is reported on stderr, `note: dropped [sub=5] by \`drop [sub] where sessions count<2\` (line 3); found 1`, and recorded in the `.spitout`.
+A file a discovered context expects but lacks counts as absent, so `exclude [sub, ses] where t1w count=0` removes a session whose T1w is missing, rather than failing on the missing file. Each removed group is reported on stderr, `note: excluded [sub=5] by \`exclude [sub] where sessions count<2\` (line 3); found 1`, and recorded in the `.spitout`.
 
-A `drop` rule's values name a dimension within each group, not one of its groups: `drop [store] where sales missing store=s07` is an error, since each group has one store. To remove named groups, write `exclude [store=s07]`.
+A conditional `exclude` rule's values name a dimension within each group, not one of its groups: `exclude [store] where sales missing store=s07` is an error, since each group has one store. To remove named groups, write `exclude [store=s07]`.
 
 ### Exclude named artifacts
 
@@ -638,7 +638,7 @@ exclude [store=s07]            # price list filed as S07; renamed next week
 exclude pricing[store=S07]     # the same list, under the name it was filed as
 ```
 
-Exclusions apply before anything else in the recipe. An excluded discovered context expects no files, an excluded file needs to exist nowhere, and a file excluded by name may lie outside every discovered context, such as a misnamed copy. `drop` and `require` rules then see what the exclusions leave.
+Named exclusions apply before scanning and missing-file validation. An excluded discovered context expects no files, an excluded file needs to exist nowhere, and a file excluded by name may lie outside every discovered context, such as a misnamed copy. Conditional exclusions then see what named exclusions leave, and `require` checks the final inventory.
 
 A placeholder in a source rule matches any text within one folder or file name, and SPIT cannot narrow it to a pattern such as a date: `logs/{server}/{date}.log` reads `logs/web1/notes.log` as `date=notes`. Check the count in `note: found N source artifacts`, and leave out a file whose value does not belong with [`exclude`](#exclude-named-artifacts) or a rule that names more of its path. Files whose whole paths match no source path rule are ignored while scanning. `spit inputs` counts them in a note, naming them when there are at most three and otherwise counting them by extension, leaving out SPIT's own `.spit`, `.spitin`, `.spitout` and `.spitdag` files and any file at a path the pipeline gives one of its outputs, or inside an output folder, such as what an earlier run wrote under the root; `spit inputs dataset.spitin --unmatched` lists their paths relative to the dataset root instead of writing a `.spitout`, even if a `require` rule fails. When a `require` count fails after the scan found no files for its source, `inputs` and `dag` name the path rule used and show an unmatched file whose path contains the source name, when there is one. A recipe's `path:` is a default for sources; use `path source:` for one source. Required source paths must match the spelling found by the scan: `pricing/S07.json` does not satisfy `pricing/s07.json`, even on a case-insensitive filesystem. A file with a near miss in an identity value, such as `store=S07` where a job needs `store=s07`, may still match a source rule: it is then a source artifact, and `dag` and `artifacts` warn when it is unused and point to it at the failed join.
 
@@ -696,7 +696,7 @@ root ../data
 
 The folder is relative to the `.spitout`'s own folder, and may be absolute. A printed `.spitout` records no root, since where it will be kept is unknown. `dag` and `artifacts` use it as the root, so they check the source files and run commands from it. The line comes before every section, once. A `.spitout` without one, printed or written by hand, has no root, so `dag` checks no source files; give it a `root` line, or run `dag` on the recipe.
 
-`spit inputs` also writes what the recipe's `exclude` and `drop` rules removed, each with its rule, where the rule is, how many a counting rule found, and the reason:
+`spit inputs` also writes what the recipe's `exclude` rules removed, each with its rule, where the rule is, how many a counting rule found, and the reason:
 
 ```text
 removed:
@@ -705,7 +705,7 @@ removed:
         at: line 4
         reason: corrupted: motion spike at volume 140
     [sub=07]
-        rule: drop [sub] where sessions count<2
+        rule: exclude [sub] where sessions count<2
         at: line 6
         found: 1
 ```

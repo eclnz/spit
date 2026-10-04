@@ -48,7 +48,7 @@ require [sub, ses] where reference count=1
 ";
 /// A `drop` rule that removes what the gaps dataset lacks.
 const DROP: &str = "\
-drop [sub, ses] where image count<2
+exclude [sub, ses] where image count<2
 require [sub, ses] where reference count=1
 ";
 

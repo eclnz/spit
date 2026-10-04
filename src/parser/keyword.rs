@@ -16,7 +16,7 @@ pub(crate) enum Keyword {
     /// `check:`, the checks every output in a file or stage runs.
     Checks,
     Require,
-    /// `skip`, which `drop` replaced; kept to say so.
+    /// `skip` and `drop`, kept to give migration errors.
     Skip,
     Drop,
     Exclude,
@@ -145,7 +145,7 @@ pub(crate) fn removed_section(line: &str) -> Option<&'static str> {
         "operations:" => "write each operation as `operation name(port: Type) -> Type`",
         "pipeline:" => "write each step as `output = operation(inputs)`",
         "commands:" => "write each command as `command operation: program {input} {@output}`",
-        "constraints:" => "write each rule on its own line, as `require ...` or `drop ...`",
+        "constraints:" => "write each rule on its own line, as `require ...` or `exclude ...`",
         _ => return None,
     })
 }

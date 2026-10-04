@@ -84,7 +84,7 @@ impl fmt::Display for EveryGroupDropped {
         };
         write!(
             f,
-            "drop rules removed {groups} [{}] group{}, leaving nothing to plan: {}",
+            "conditional exclude rules removed {groups} [{}] group{}, leaving nothing to plan: {}",
             self.group_by.join(", "),
             if self.groups == 1 { "" } else { "s" },
             self.rules.join(", ")

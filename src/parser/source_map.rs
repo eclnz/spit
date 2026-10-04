@@ -225,7 +225,7 @@ pub(super) fn rule_place(original: &str, number: usize, rule: &CoverageRule) -> 
     let content = &original[whole.clone()];
     let after_keyword =
         whole.end - Keyword::split(content).map_or(content.len(), |(_, rest)| rest.len());
-    // `drop` and `require` both write their groups before their source.
+    // conditional `exclude` and `require` both write their groups before their source.
     let open = original[after_keyword..whole.end]
         .find('[')
         .map(|offset| after_keyword + offset);

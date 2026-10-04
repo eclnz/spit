@@ -249,7 +249,7 @@ pub fn diagnose_checked_with_inventory(
     let rules = context.recipe.map_or(&no_rules, |recipe| &recipe.rules);
     let inventory = as_read_back(&settled.inventory, &document.pipeline, rules)?;
     // Checking the settled records again finds what settling found, since
-    // only the `drop` rules change records and they ran while settling.
+    // only the conditional `exclude` rules change records and they ran while settling.
     let gaps = Some(settled.gaps.as_slice());
     // Only errors are placed in the records' text.
     let mut diagnostics = check_document(document, text, None).ok()?;
@@ -508,7 +508,7 @@ fn check_document(
 /// `settled` holds what settling `supplied` with the same rules found:
 /// checking it again would find the same, and change nothing. Keep in step
 /// with `check_inventory`: this holds only while checking changes no
-/// records, which `drop` rules do only while the inventory is settled.
+/// records, which conditional `exclude` rules do only while the inventory is settled.
 fn record_diagnostics(
     document: &ParsedDocument,
     supplied: &SourceInventory,

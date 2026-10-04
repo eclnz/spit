@@ -355,9 +355,9 @@ fn relative_to(path: &Path, base: &Path) -> Option<PathBuf> {
     Some(relative)
 }
 
-/// What an `exclude` or `drop` rule removed, as a note says it:
-/// `excluded bold[sub=02,run=3] (line 4): corrupted`, or `dropped [sub=03]
-/// by \`drop [sub] where sessions count<2\` (line 6); found 1`.
+/// What a named or conditional `exclude` rule removed, as a note says it:
+/// `excluded bold[sub=02,run=3] (line 4): corrupted`, or `excluded [sub=03]
+/// by \`exclude [sub] where sessions count<2\` (line 6); found 1`.
 fn removal_note(removal: &Removal, orders: &DimensionOrders<'_>) -> String {
     // An artifact's dimensions in its product's order; a group's in the
     // order the pipeline first declares them, as the .spitout writes it.
@@ -367,7 +367,7 @@ fn removal_note(removal: &Removal, orders: &DimensionOrders<'_>) -> String {
     let mut note = if removal.is_exclusion() {
         format!("excluded {identity} ({origin})")
     } else {
-        format!("dropped {identity} by `{}` ({origin})", removal.rule)
+        format!("excluded {identity} by `{}` ({origin})", removal.rule)
     };
     if let Some(found) = removal.found {
         note.push_str(&format!("; found {found}"));
