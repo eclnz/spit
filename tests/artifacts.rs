@@ -464,3 +464,101 @@ summary = summarise(day)
         "{grouped}"
     );
 }
+
+/// A step joining two branches that both read a product whose second input
+/// is missing.
+const DIAMOND: &str = "\
+source s [k]
+source t [k]
+operation mk(s: S, t: T) -> A
+operation left(a: A) -> B
+operation right(a: A) -> C
+operation join(b: B, c: C) -> D
+a = mk(s, t)
+bb = left(a)
+cc = right(a)
+dd = join(bb, cc)
+";
+
+#[test]
+fn by_target_names_an_artifact_two_branches_wait_on_where_it_is_shown() {
+    let sources = "sources:\n    s[k=1]\n";
+    let (pipeline, _) = settle(DIAMOND, sources).unwrap();
+    let report = report(DIAMOND, sources).unwrap();
+    assert_eq!(
+        render_artifacts_by_target(&pipeline, &report),
+        "\
+Complete artifacts: 1
+
+Final targets that cannot be made: 1 (incomplete artifacts: 4)
+  dd[k=1]  (join)
+    bb[k=1]  (left)
+      a[k=1]  (mk)
+        - no `t` artifact for input `t` of `mk` at [k=1]
+    cc[k=1]  (right)
+      - input `a` needs a[k=1], shown above
+"
+    );
+}
+
+#[test]
+fn by_target_names_an_artifact_a_job_and_the_job_it_waits_on_both_need() {
+    let text = "\
+source s [k]
+source t [k]
+operation mk(s: S, t: T) -> A
+operation fold(a: A, again: A) -> B
+operation join(b: B, c: A) -> D
+c = mk(s, t)
+b = fold(c, c)
+d = join(b, c)
+";
+    let sources = "sources:\n    s[k=1]\n";
+    let (pipeline, _) = settle(text, sources).unwrap();
+    let report = report(text, sources).unwrap();
+    assert_eq!(
+        render_artifacts_by_target(&pipeline, &report),
+        "\
+Complete artifacts: 1
+
+Final targets that cannot be made: 1 (incomplete artifacts: 3)
+  d[k=1]  (join)
+    b[k=1]  (fold)
+      c[k=1]  (mk)
+        - no `t` artifact for input `t` of `mk` at [k=1]
+      - input `again` needs c[k=1], shown above
+    - input `c` needs c[k=1], shown above
+"
+    );
+}
+
+#[test]
+fn by_target_writes_an_upstream_gap_once_for_all_the_targets_that_share_it() {
+    let text = "\
+source s [k]
+source t
+source g
+operation make(t: T, g: G) -> Shared
+operation use(s: S, shared: Shared) -> U
+gg = make(t, g)
+uu = use(s, gg)
+";
+    let sources = "sources:\n    s[k=1]\n    s[k=2]\n    s[k=3]\n    t\n";
+    let (pipeline, _) = settle(text, sources).unwrap();
+    let report = report(text, sources).unwrap();
+    assert_eq!(
+        render_artifacts_by_target(&pipeline, &report),
+        "\
+Complete artifacts: 4
+
+Final targets that cannot be made: 3 (incomplete artifacts: 4)
+  uu[k=1]  (use)
+    gg : Shared  (make)
+      - no `g` artifact for input `g` of `make` at []
+  uu[k=2]  (use)
+    - input `shared` needs gg, shown under uu[k=1]
+  uu[k=3]  (use)
+    - input `shared` needs gg, shown under uu[k=1]
+"
+    );
+}
