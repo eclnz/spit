@@ -72,17 +72,17 @@ fn messages_name_a_library_from_the_pipelines_folder() {
     dir.write("libs/lib.spit", "use d from inner/deep.spit\n");
     let main = dir.write("main.spit", "use d from libs/lib.spit\n");
     let error = support::parse_fixture_at(&fs::read_to_string(&main).unwrap(), &main).unwrap_err();
-    let message = error.message();
+    let message = error.to_string();
     assert!(
         message.contains("import cycle through `main.spit`"),
         "{message}"
     );
-    assert!(message.contains("`libs/lib.spit`"), "{message}");
+    assert!(message.contains("`libs/inner/deep.spit`"), "{message}");
     assert!(!message.contains(dir.path().to_str().unwrap()), "{message}");
 
     dir.write("libs/lib.spit", "use d from nope.spit\n");
     let error = support::parse_fixture_at(&fs::read_to_string(&main).unwrap(), &main).unwrap_err();
-    let message = error.message();
+    let message = error.to_string();
     assert!(message.contains("`libs/nope.spit`"), "{message}");
     assert!(!message.contains(dir.path().to_str().unwrap()), "{message}");
 }
