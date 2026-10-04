@@ -130,12 +130,17 @@ impl ParseError {
 /// turns them into a [`Pipeline`]. Each keeps where its parts sit.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct Syntax {
-    /// Every statement before `error`, or in the whole text without one.
+    /// Every statement read, up to where parsing stopped.
     pub(crate) statements: Vec<Statement>,
-    /// The first line that does not parse. Parsing stops there, and lowering
-    /// reports it only when no statement before it fails, so errors are
-    /// found in line order.
-    pub(crate) error: Option<ParseError>,
+    /// Each line that does not parse, with how many statements were read
+    /// before it, so that lowering can report errors in the order that
+    /// blanking the lines one at a time would. A line that fails leaves the
+    /// parse as it was, as if the line were blank, and reading goes on; it
+    /// stops at an error after which a blank line would read differently.
+    /// Keep in step with `lower` in `src/lower/mod.rs`, which orders them
+    /// among the statements' own errors, and with `recover_document` in
+    /// `src/diagnostics/recovery.rs`, which blanks the lines they name.
+    pub(crate) errors: Vec<(usize, ParseError)>,
 }
 
 #[derive(Clone, Debug)]
@@ -143,6 +148,12 @@ pub(crate) struct Statement {
     /// The statement's line content, for errors about it as a whole.
     pub(crate) place: Place,
     pub(crate) kind: StatementKind,
+    /// Reading the statement's line changed how later lines read, beyond
+    /// adding the statement: it closed a stage, fixed the indentation of
+    /// a stage's lines, or ended a body that a later line is indented
+    /// beneath. A blank line would not, so a failing statement that does
+    /// this cannot be passed over as if its line were blank.
+    pub(crate) stateful: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -292,6 +303,7 @@ impl Syntax {
         self.statements.push(Statement {
             place: Place::new(number, content_columns(original)),
             kind,
+            stateful: false,
         });
     }
 }

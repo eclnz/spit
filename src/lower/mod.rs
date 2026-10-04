@@ -285,41 +285,92 @@ impl PipelineBuilder {
     }
 }
 
+/// A statement that did not lower. Keep in step with `parse_flow` in
+/// `src/parser/flow.rs`, whose lines change what later lines mean only once
+/// they succeed: a statement that may be passed over as a blank line is one
+/// that did not change the builder and is not `stateful`.
+pub(crate) struct Failure {
+    /// Boxed, so that `Result` stays small where a statement succeeds.
+    pub(crate) error: Box<ParseError>,
+    /// It left the builder as it was before the statement, as a blank line
+    /// would, and its error is on the statement's own line.
+    pub(crate) clean: bool,
+}
+
+impl Failure {
+    pub(crate) fn clean(error: ParseError) -> Self {
+        Self {
+            error: Box::new(error),
+            clean: true,
+        }
+    }
+}
+
+/// An error from a statement that may have changed the builder before it
+/// failed, unless it says it did not.
+impl From<ParseError> for Failure {
+    fn from(error: ParseError) -> Self {
+        Self {
+            error: Box::new(error),
+            clean: false,
+        }
+    }
+}
+
 /// Lower each statement in order, with `imports` holding the definitions
-/// each `use` line brings in, by line. The first error by line wins: one in
-/// a statement, or else the syntax error parsing stopped at.
+/// each `use` line brings in, by line. The errors are those that blanking
+/// the line of the first, and then of the next, would find, one after the
+/// other: the syntax errors parsing found, and the statements that fail,
+/// in the order they were read. Lowering goes on past a statement that
+/// failed without changing the builder, and stops at one that may have, as
+/// blanking its line would not leave the later statements reading the same.
 pub(crate) fn lower(
     syntax: &Syntax,
     imports: &BTreeMap<usize, Pipeline>,
     kind: Kind,
-) -> Result<PipelineBuilder, ParseError> {
+) -> Result<PipelineBuilder, Vec<ParseError>> {
     let mut builder = PipelineBuilder::default();
-    for statement in &syntax.statements {
+    let mut errors = Vec::new();
+    let mut parsing = syntax.errors.iter().peekable();
+    for (index, statement) in syntax.statements.iter().enumerate() {
+        while let Some((_, error)) = parsing.next_if(|(read, _)| *read <= index) {
+            errors.push(error.clone());
+        }
         let rule = matches!(
             statement.kind,
             StatementKind::Discover(_) | StatementKind::Constraint(..) | StatementKind::Exclude(..)
         );
-        if rule && kind == Kind::Pipeline {
-            return Err(ParseError::new(
+        let lowered = if rule && kind == Kind::Pipeline {
+            Err(Failure::clean(ParseError::new(
                 statement.place.line,
                 "`discover`, `require` and `exclude` rules belong in a .spitin recipe, not a pipeline",
-            )
-            .within(&statement.place));
+            )))
+        } else {
+            lower_statement(&mut builder, imports, statement)
+        };
+        if let Err(failure) = lowered {
+            let error = failure.error.within(&statement.place);
+            let goes_on =
+                failure.clean && !statement.stateful && error.line() == statement.place.line;
+            errors.push(error);
+            if !goes_on {
+                return Err(errors);
+            }
         }
-        lower_statement(&mut builder, imports, statement)
-            .map_err(|error| error.within(&statement.place))?;
     }
-    if let Some(error) = &syntax.error {
-        return Err(error.clone());
+    errors.extend(parsing.map(|(_, error)| error.clone()));
+    if !errors.is_empty() {
+        return Err(errors);
     }
-    check_bodies_have_no_commands(&builder)?;
-    check_source_beside_paths(&builder)?;
+    check_bodies_have_no_commands(&builder).map_err(|error| vec![error])?;
+    check_source_beside_paths(&builder).map_err(|error| vec![error])?;
     order_dimensions(
         &mut builder.pipeline.products,
         &builder.outputs,
         builder.dimension_order.as_ref(),
         &builder.lines,
-    )?;
+    )
+    .map_err(|error| vec![error])?;
     Ok(builder)
 }
 
@@ -376,7 +427,7 @@ fn lower_statement(
     builder: &mut PipelineBuilder,
     imports: &BTreeMap<usize, Pipeline>,
     statement: &Statement,
-) -> Result<(), ParseError> {
+) -> Result<(), Failure> {
     match &statement.kind {
         StatementKind::Import => apply_import(builder, imports, &statement.place)?,
         StatementKind::Stage { name, place } => builder.add_stage(name, place.clone()),
@@ -389,20 +440,20 @@ fn lower_statement(
                     .get(sibling)
                     .and_then(|&id| builder.pipeline.products.get(id.index()))
                     .ok_or_else(|| {
-                        ParseError::new(
+                        Failure::clean(ParseError::new(
                             place.line,
                             format!("source `{}` is beside unknown source `{sibling}`; declare `{sibling}` first", product.name),
-                        )
+                        ))
                     })?;
                 if anchor.beside.is_some()
                     || anchor.folder
                     || anchor.extension.is_none()
                     || builder.outputs.contains_key(sibling)
                 {
-                    return Err(ParseError::new(
+                    return Err(Failure::clean(ParseError::new(
                         place.line,
                         format!("source `{}` must be beside a file source with an extension, not `{sibling}`", product.name),
-                    ));
+                    )));
                 }
                 product.dimensions.clone_from(&anchor.dimensions);
                 if let Some(&number) = builder.sidecar_group_numbers.get(sibling) {
@@ -430,10 +481,10 @@ fn lower_statement(
         }
         StatementKind::Discover(discovery) => {
             if builder.inputs.discovery(&discovery.name).is_some() {
-                return Err(ParseError::new(
+                return Err(Failure::clean(ParseError::new(
                     statement.place.line,
                     format!("duplicate discovery `{}`", discovery.name),
-                ));
+                )));
             }
             builder.inputs.discoveries.push(discovery.clone());
         }
@@ -441,7 +492,15 @@ fn lower_statement(
             if !operation.steps.is_empty() {
                 builder.check_body(operation, place)?;
             }
-            builder.add_operation(operation.clone(), place.clone(), stage.as_deref())?;
+            // Blanking the header of an operation with a body would leave
+            // its steps to read as lines of their own.
+            let clean = operation.steps.is_empty();
+            builder
+                .add_operation(operation.clone(), place.clone(), stage.as_deref())
+                .map_err(|error| Failure {
+                    error: Box::new(error),
+                    clean,
+                })?;
         }
         StatementKind::Constraint(constraint, rule) => {
             builder.add_constraint(constraint.clone(), rule.clone());
@@ -469,10 +528,10 @@ fn lower_statement(
         }
         StatementKind::Dimensions(order) => {
             if builder.dimension_order.is_some() {
-                return Err(ParseError::new(
+                return Err(Failure::clean(ParseError::new(
                     statement.place.line,
                     "a pipeline has one `dimensions` line",
-                ));
+                )));
             }
             builder.dimension_order = Some((order.clone(), statement.place.clone()));
         }
@@ -547,32 +606,56 @@ pub(crate) fn parse_document_with_imports(
     imports: &BTreeMap<usize, Pipeline>,
     kind: Kind,
 ) -> Result<ParsedDocument, ParseError> {
+    parse_document_recovering(text, imports, kind).map_err(|errors| {
+        errors
+            .into_iter()
+            .next()
+            .expect("a document that fails has an error")
+    })
+}
+
+/// As [`parse_document_with_imports`], giving every error that blanking
+/// each line the first names, one after the other, would find: the first is
+/// the error the other gives, and each of the rest comes only where blanking
+/// the lines of those before it would not change what it is.
+pub(crate) fn parse_document_recovering(
+    text: &str,
+    imports: &BTreeMap<usize, Pipeline>,
+    kind: Kind,
+) -> Result<ParsedDocument, Vec<ParseError>> {
     let document = split_document(text);
     let lowered = lower(&parse_syntax(&document.pipeline), imports, kind);
     let inventory = match (kind, document.inventory_line) {
         (_, None) => None,
-        (Kind::Recipe, Some(_)) => Some(parse_source_inventory(&document.inventory)?),
+        (Kind::Recipe, Some(_)) => {
+            Some(parse_source_inventory(&document.inventory).map_err(|error| vec![error])?)
+        }
         // An error on an earlier line is the first.
         (Kind::Pipeline, Some(line)) => {
-            let earlier = lowered
-                .as_ref()
-                .err()
-                .is_some_and(|error| error.line() < line);
-            if !earlier {
-                let records = document
-                    .inventory
-                    .lines()
-                    .enumerate()
-                    .filter(|(_, text)| !text.trim().is_empty())
-                    .map(|(index, _)| index + 1)
-                    .collect();
-                return Err(ParseError::new(
+            let mut errors = lowered.as_ref().err().cloned().unwrap_or_default();
+            let earlier = errors
+                .iter()
+                .take_while(|error| error.line() < line)
+                .count();
+            if earlier == errors.len() && !errors.is_empty() {
+                return Err(errors);
+            }
+            errors.truncate(earlier);
+            let records = document
+                .inventory
+                .lines()
+                .enumerate()
+                .filter(|(_, text)| !text.trim().is_empty())
+                .map(|(index, _)| index + 1)
+                .collect();
+            errors.push(
+                ParseError::new(
                     line,
                     "`sources:` and `contexts:` records belong in a .spitout, not a pipeline",
                 )
-                .with_kind(ParseErrorKind::MisplacedRecords { lines: records }));
-            }
-            None
+                .with_kind(ParseErrorKind::MisplacedRecords { lines: records }),
+            );
+            return Err(errors);
         }
     };
     let builder = lowered?;
