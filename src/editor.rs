@@ -10,7 +10,7 @@ use crate::compile::{collect_pipeline, CompiledStep};
 use crate::diagnostics::{
     diagnostics_json, recover_document, shown_paths_json, Diagnostic, ShownPath,
 };
-use crate::imports::parse_located_document;
+use crate::imports::parse_located_document_recovering;
 use crate::json::Json;
 use crate::model::{
     Cardinality, CheckDef, CheckUse, CommandRole, Invocation, OperationDef, OutputPort, PathOrigin,
@@ -61,7 +61,7 @@ pub fn pipeline_hovers(text: &str, path: &Path) -> Vec<Hover> {
     let bom_column = usize::from(text.starts_with('\u{feff}'));
     let text = without_bom(text);
     let (document, _) = recover_document(text, |text| {
-        parse_located_document(text, path, Kind::Pipeline)
+        parse_located_document_recovering(text, path, Kind::Pipeline)
     });
     let Some(document) = document else {
         return Vec::new();

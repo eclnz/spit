@@ -15,7 +15,7 @@ use crate::model::{
 use crate::parser::{FlowStep, ParseError, Step};
 use crate::types::TypeExpr;
 
-use super::PipelineBuilder;
+use super::{Failure, PipelineBuilder};
 
 /// A step still to be added: the one written in the pipeline, or one a
 /// call to an operation with a body made.
@@ -29,14 +29,22 @@ impl PipelineBuilder {
     /// a body adds the body's steps in its place, in order, and a call in
     /// a body is expanded in turn; a worklist, not recursion, so a deep
     /// nesting of bodies cannot overflow the stack.
-    pub(super) fn add_flow_step(&mut self, flow: &FlowStep) -> Result<(), ParseError> {
-        self.reject_intermediates(flow)?;
+    pub(super) fn add_flow_step(&mut self, flow: &FlowStep) -> Result<(), Failure> {
+        self.reject_intermediates(flow).map_err(Failure::clean)?;
         let mut pending = vec![Pending {
             invocation: flow.invocation.clone(),
             outputs: flow.outputs.clone(),
         }];
+        // Until a call to an operation with a body has changed the builder,
+        // a step that fails leaves it as it was.
+        let mut untouched = true;
         while let Some(next) = pending.pop() {
-            let operation = self.called(&next.invocation, &flow.step)?;
+            let operation = self
+                .called(&next.invocation, &flow.step)
+                .map_err(|error| Failure {
+                    error,
+                    clean: untouched,
+                })?;
             if self.pipeline.operations[operation].steps.is_empty() {
                 self.add_step(
                     next.invocation,
@@ -58,7 +66,12 @@ impl PipelineBuilder {
                 calls,
                 &mut self.intermediates,
                 &self.lines.imported,
-            )?;
+            )
+            .map_err(|(error, early)| Failure {
+                error,
+                clean: untouched && early,
+            })?;
+            untouched = false;
             pending.extend(steps.into_iter().rev());
         }
         Ok(())
@@ -185,7 +198,8 @@ impl PipelineBuilder {
 }
 
 /// Replace `call` of `operation` by the body's steps over the caller's
-/// products, recording the call. `step` is where the call written in
+/// products, recording the call. An error comes with whether it came before
+/// the call was recorded. `step` is where the call written in
 /// the pipeline is, which the steps a nested call makes share.
 fn expand(
     call: Pending,
@@ -194,7 +208,7 @@ fn expand(
     calls: &mut Vec<Call>,
     intermediates: &mut FxHashMap<String, CallId>,
     imported: &BTreeSet<String>,
-) -> Result<Vec<Pending>, ParseError> {
+) -> Result<Vec<Pending>, (ParseError, bool)> {
     let Pending {
         invocation: caller,
         outputs: written,
@@ -213,17 +227,15 @@ fn expand(
         .within(&place)
     };
     if caller.inputs.len() != operation.inputs.len() {
-        return Err(mismatch(
-            "inputs",
-            operation.inputs.len(),
-            caller.inputs.len(),
+        return Err((
+            mismatch("inputs", operation.inputs.len(), caller.inputs.len()),
+            true,
         ));
     }
     if caller.outputs.len() != operation.outputs.len() {
-        return Err(mismatch(
-            "outputs",
-            operation.outputs.len(),
-            caller.outputs.len(),
+        return Err((
+            mismatch("outputs", operation.outputs.len(), caller.outputs.len()),
+            true,
         ));
     }
     let instance = caller.output_product().to_owned();
@@ -236,13 +248,16 @@ fn expand(
         .filter(|name| name.starts_with(&prefix))
     {
         let place = at();
-        return Err(ParseError::new(
-            place.line,
-            format!(
-                "this call files the products it makes for itself under `{prefix}`, as an import does `{taken}`; rename the call's first output or the import's alias"
-            ),
-        )
-        .within(&place));
+        return Err((
+            ParseError::new(
+                place.line,
+                format!(
+                    "this call files the products it makes for itself under `{prefix}`, as an import does `{taken}`; rename the call's first output or the import's alias"
+                ),
+            )
+            .within(&place),
+            true,
+        ));
     }
     let id = CallId::at(calls.len());
     calls.push(Call {
@@ -299,7 +314,7 @@ fn expand(
             inputs.push(match port {
                 Some(port) => merge(&caller.inputs[port], binding).map_err(|problem| {
                     let place = at();
-                    ParseError::new(place.line, problem).within(&place)
+                    (ParseError::new(place.line, problem).within(&place), false)
                 })?,
                 None => InputBinding {
                     product: rename(&binding.product),

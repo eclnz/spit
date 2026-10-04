@@ -63,7 +63,7 @@ impl OpenBody {
     ) -> Result<(), ParseError> {
         let name = &self.operation.name;
         match self.body {
-            None => self.body = Some(indent),
+            None => {}
             Some(body) if body == indent => {}
             Some(_) => {
                 return Err(ParseError::new(
@@ -82,12 +82,19 @@ impl OpenBody {
         }
         let (invocation, outputs) = parse_flow_step(line, number)?;
         let place = step_place(original, number, &invocation).call();
+        // A step that fails leaves the body as it was, as a blank line would.
+        self.body = Some(indent);
         self.operation.steps.push(BodyStep {
             invocation,
             outputs,
             place,
         });
         Ok(())
+    }
+
+    /// The indentation of the header.
+    pub(super) fn header_indent(&self) -> usize {
+        self.header
     }
 
     /// The header line, for locating an error in it.
