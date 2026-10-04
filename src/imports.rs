@@ -7,7 +7,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::blob::git_blob_id;
-use crate::lower::{parse_document_with_imports, ParsedDocument, PipelineBuilder};
+use crate::lower::{parse_document_recovering, ParsedDocument, PipelineBuilder};
 use crate::model::{
     CheckDef, CheckUse, CommandDef, CommandRole, OperationDef, Pipeline, PipelineIndex, ProductDef,
     SidecarGroup, SourceFile,
@@ -557,6 +557,22 @@ pub(crate) fn parse_located_document(
     path: &Path,
     kind: Kind,
 ) -> Result<ParsedDocument, ParseError> {
+    parse_located_document_recovering(text, path, kind).map_err(|errors| {
+        errors
+            .into_iter()
+            .next()
+            .expect("a document that fails has an error")
+    })
+}
+
+/// As [`parse_located_document`], with every error that blanking each line
+/// the first names, one after the other, would find; see
+/// [`parse_document_recovering`].
+pub(crate) fn parse_located_document_recovering(
+    text: &str,
+    path: &Path,
+    kind: Kind,
+) -> Result<ParsedDocument, Vec<ParseError>> {
     let root = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
     parse_document_at_inner(text, &root, &mut vec![root.clone()], kind)
 }
@@ -569,7 +585,7 @@ fn parse_document_at_inner(
     path: &Path,
     stack: &mut Vec<PathBuf>,
     kind: Kind,
-) -> Result<ParsedDocument, ParseError> {
+) -> Result<ParsedDocument, Vec<ParseError>> {
     let text = without_bom(raw);
     let mut files = vec![SourceFile {
         path: path
@@ -582,6 +598,24 @@ fn parse_document_at_inner(
     }];
     let mut imports = BTreeMap::new();
     let mut file_texts = BTreeMap::new();
+    read_imports(text, path, stack, &mut files, &mut imports, &mut file_texts)
+        .map_err(|error| vec![error])?;
+    let mut document = parse_document_recovering(text, &imports, kind)?;
+    document.pipeline.files = files;
+    document.lines.file_texts = file_texts;
+    Ok(document)
+}
+
+/// Read each file `text`, the file at `path`, imports, adding the files it
+/// brings to `files` and `file_texts`, and what it selects to `imports`.
+fn read_imports(
+    text: &str,
+    path: &Path,
+    stack: &mut Vec<PathBuf>,
+    files: &mut Vec<SourceFile>,
+    imports: &mut BTreeMap<usize, Pipeline>,
+    file_texts: &mut BTreeMap<String, String>,
+) -> Result<(), ParseError> {
     for (index, original) in text.lines().enumerate() {
         let line = strip_comment(original).trim();
         if Keyword::of(line) != Some(Keyword::Use) {
@@ -620,7 +654,8 @@ fn parse_document_at_inner(
         })?;
         stack.push(canonical.clone());
         let module = parse_document_at_inner(&imported_text, &canonical, stack, Kind::Pipeline)
-            .map_err(|error| {
+            .map_err(|errors| {
+                let error = &errors[0];
                 ParseError::new(
                     number,
                     format!(
@@ -656,8 +691,5 @@ fn parse_document_at_inner(
         }
         imports.insert(number, select_import(&module.pipeline, &spec, number)?);
     }
-    let mut document = parse_document_with_imports(text, &imports, kind)?;
-    document.pipeline.files = files;
-    document.lines.file_texts = file_texts;
-    Ok(document)
+    Ok(())
 }

@@ -14,12 +14,12 @@ use std::path::{Path, PathBuf};
 
 use crate::command::collect_commands;
 use crate::compile::collect_pipeline;
-use crate::imports::parse_located_document;
+use crate::imports::parse_located_document_recovering;
 use crate::inputs::{
     check_inventory, collect_exclusion_errors, collect_rule_errors, with_source_paths, InputCheck,
     InputError, InputSpec, ResolvedInputs,
 };
-use crate::lower::{parse_document_with_imports, ParsedDocument};
+use crate::lower::{parse_document_recovering, ParsedDocument};
 use crate::model::{ArtifactReport, CoverageGap, InputRules, PipelineIndex, SourceInventory};
 use crate::parser::{as_read_back, glued_comment, without_bom, Kind, Rule, SourceMap};
 use crate::paths::{collect_paths, shown_path, PathTemplate};
@@ -59,10 +59,10 @@ impl<'a> Context<'a> {
 
     /// Parse a pipeline in this context: with its imports resolved from its
     /// path, and its recipe checked and applied.
-    fn parse(&self, text: &str) -> Result<Parsed, ParseError> {
+    fn parse(&self, text: &str) -> Result<Parsed, Vec<ParseError>> {
         let mut document = match self.path {
-            Some(path) => parse_located_document(text, path, Kind::Pipeline)?,
-            None => parse_document_with_imports(text, &BTreeMap::new(), Kind::Pipeline)?,
+            Some(path) => parse_located_document_recovering(text, path, Kind::Pipeline)?,
+            None => parse_document_recovering(text, &BTreeMap::new(), Kind::Pipeline)?,
         };
         let Some(recipe) = self.recipe else {
             return Ok(Parsed {
@@ -72,7 +72,7 @@ impl<'a> Context<'a> {
         };
         recipe
             .check(&document.pipeline)
-            .map_err(|error| ParseError::new(1, error.to_string()))?;
+            .map_err(|error| vec![ParseError::new(1, error.to_string())])?;
         let as_written = document.pipeline.clone();
         recipe.apply_paths(&mut document.pipeline);
         document.inputs = recipe.rules.clone();
@@ -188,7 +188,9 @@ pub fn diagnose_checked_with_records(
     let (text, records) = (without_bom(text), without_bom(records));
     let parsed = (
         recover_parse_errors(text, |text| context.parse(text)),
-        recover_parse_errors(records, parse_source_inventory),
+        recover_parse_errors(records, |records| {
+            parse_source_inventory(records).map_err(|error| vec![error])
+        }),
     );
     let (parsed, inventory) = match parsed {
         (Ok(parsed), Ok(inventory)) => (parsed, inventory),
