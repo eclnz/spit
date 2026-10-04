@@ -166,6 +166,10 @@ pub struct OperationDef {
     /// in place of a command; empty for one a command carries out. A call
     /// to it becomes these steps, each with its own jobs.
     pub steps: Vec<BodyStep>,
+    /// The file an imported operation is declared in, relative to the
+    /// pipeline's folder, with `/` between folders; `None` for one the
+    /// pipeline declares.
+    pub file: Option<String>,
 }
 
 /// A step in an operation's body, as written: the call it makes over the
@@ -217,6 +221,7 @@ impl OperationDef {
             shape_rule,
             minimum_collection: None,
             steps: Vec::new(),
+            file: None,
         }
     }
 
@@ -323,6 +328,17 @@ pub struct Invocation {
     /// the step of the body it is; `None` for a step written in the
     /// pipeline.
     pub origin: Option<StepOrigin>,
+    /// Checks the step runs beyond its operation's: those an operation with
+    /// a body attaches to the inputs and outputs the step reads and makes.
+    pub checks: Vec<(Port, CheckUse)>,
+}
+
+/// One of a step's ports, by its position among the operation's inputs or
+/// outputs.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Port {
+    Input(usize),
+    Output(usize),
 }
 
 /// Where a step a call made comes from: the call, and where its step is
@@ -384,6 +400,7 @@ impl Invocation {
             outputs: outputs.into_iter().map(Into::into).collect(),
             stage: None,
             origin: None,
+            checks: Vec::new(),
         }
     }
 

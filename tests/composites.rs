@@ -256,3 +256,119 @@ fn an_operation_with_a_body_needs_no_command_and_its_call_uses_it() {
         .collect();
     assert!(warnings.is_empty(), "{warnings:?}");
 }
+
+/// A library that imports another, with an operation whose body calls an
+/// operation of each, and checks on its ports and outputs.
+fn library(tree: &support::Tree) {
+    tree.write(
+        "libs/sub/count.spit",
+        "operation count(x: Lines) -> Count\ncommand count: wc {x} {@output}\n",
+    );
+    tree.write(
+        "libs/lib.spit",
+        "\
+use sub/count.spit as C
+check nonempty: test -s {@path}
+check lines(n): count_lines {@path} {n}
+operation clean(x: Lines, t: Table) -> Lines @ check(nonempty)
+command clean: clean {x} {t} {@output}
+operation merge(xs: many Lines) -> Lines
+command merge: merge {xs} {@output}
+
+operation tidy(r: Lines @ check(lines(1)), t: Table) -> (o: Lines @ check(nonempty)):
+    o = clean(r, t)
+
+operation summarise(reads: Lines @ check(lines(2)), table: Table) -> (merged: Lines @ check(lines(9)), total: Count):
+    cleaned = tidy(reads, table)
+    merged = merge(cleaned @ vary(lane))
+    total = C::count(merged)
+",
+    );
+}
+
+#[test]
+fn an_imported_operation_brings_the_operations_its_body_calls() {
+    let tree = support::Tree::new("composite-import", &[]);
+    library(&tree);
+    let text = "\
+use summarise from libs/lib.spit as L
+source raw : Lines [group, lane]
+source cal : Table [group, revision]
+m, t = L::summarise(raw, cal @ where(revision=2))
+";
+    let main = tree.write("main.spit", text);
+    let (pipeline, _) = support::parse_fixture_at(text, &main).unwrap();
+    let operations: Vec<_> = pipeline
+        .operations
+        .iter()
+        .map(|operation| (operation.name.as_str(), operation.file.as_deref()))
+        .collect();
+    assert_eq!(
+        operations,
+        [
+            ("L::summarise", Some("libs/lib.spit")),
+            // What its body calls, in the order the library declares it.
+            ("L::C::count", Some("libs/sub/count.spit")),
+            ("L::clean", Some("libs/lib.spit")),
+            ("L::merge", Some("libs/lib.spit")),
+            ("L::tidy", Some("libs/lib.spit")),
+        ]
+    );
+    let steps: Vec<_> = pipeline
+        .invocations
+        .iter()
+        .map(|step| step.operation.as_str())
+        .collect();
+    assert_eq!(steps, ["L::clean", "L::merge", "L::C::count"]);
+}
+
+#[test]
+fn checks_on_a_bodys_ports_and_outputs_run_on_the_steps_that_read_and_make_them() {
+    let tree = support::Tree::new("composite-checks", &[]);
+    library(&tree);
+    let text = format!(
+        "\
+use summarise from libs/lib.spit as L
+path: out/{{@product}}/{{@entities}}.txt
+source raw : Lines [group, lane]
+path raw: in/{{group}}/r{{lane}}.txt
+source cal : Table [group, revision]
+path cal: cal/{{group}}-r{{revision}}.txt
+m, t = L::summarise(raw, cal @ where(revision=2))
+{RECORDS}"
+    );
+    let main = tree.write("main.spit", &text);
+    let (pipeline, records) = support::parse_fixture_at(&text, &main).unwrap();
+    let dag = resolve(&pipeline, &records.unwrap()).unwrap();
+    let bound = spit::bind_dag(&pipeline, &dag).unwrap();
+    let commands = spit::render_bound_dag(
+        &bound,
+        spit::View {
+            commands: true,
+            ..spit::View::default()
+        },
+    );
+    let job = |number: &str| {
+        let start = commands.find(&format!("Job {number} ")).unwrap();
+        let end = commands[start..]
+            .find("\n\n")
+            .map_or(commands.len(), |end| start + end);
+        commands[start..end].to_owned()
+    };
+    // Both bodies' input checks run before `clean`, and its own `nonempty`
+    // and the inner body's, the same check, run once after it.
+    assert_eq!(
+        job("1"),
+        "Job 1  L::clean\n  \
+         check:  count_lines in/a/r1.txt 1\n  \
+         check:  count_lines in/a/r1.txt 2\n  \
+         run:    clean in/a/r1.txt cal/a-r2.txt out/m.cleaned/group=a__lane=1.txt\n  \
+         check:  test -s out/m.cleaned/group=a__lane=1.txt"
+    );
+    // The outer body's output check runs after the step that makes it.
+    assert!(
+        job("5").ends_with("  check:  count_lines out/m/group=a.txt 9"),
+        "{}",
+        job("5")
+    );
+}
