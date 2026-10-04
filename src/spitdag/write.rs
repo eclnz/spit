@@ -296,12 +296,11 @@ fn write_command(out: &mut String, dag: &BoundDag, command: &[Argument]) {
                 out.push('}');
             }
             ArgPart::Dir(artifact) | ArgPart::Stem { artifact, .. } => {
-                let key = if matches!(part, ArgPart::Dir(_)) {
-                    "dir"
+                out.push_str(if matches!(part, ArgPart::Dir(_)) {
+                    "{\"dir\":"
                 } else {
-                    "stem"
-                };
-                out.push_str(&format!("{{\"{key}\":"));
+                    "{\"stem\":"
+                });
                 write_string(out, part.text(dag));
                 out.push_str(",\"of\":");
                 write_string(out, dag.path(*artifact));

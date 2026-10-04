@@ -371,10 +371,10 @@ fn expand(
                         (Ok(Facet::Dir), _) => ArgPart::Dir(artifact),
                         (Ok(Facet::Stem), Some(Slot::Output(index))) => ArgPart::Stem {
                             artifact,
-                            extension: operation.outputs[index]
+                            extension_len: operation.outputs[index]
                                 .extension
-                                .clone()
-                                .unwrap_or_default(),
+                                .as_deref()
+                                .map_or(0, str::len),
                         },
                         _ => path(&artifact)?,
                     });
