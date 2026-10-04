@@ -67,8 +67,8 @@ SPIT itself runs nothing. A backend runs the `.spitdag`: [spit-bash](https://git
 
 ```text
 spit check <pipeline.spit | recipe.spitin | inputs.spitout> [--path-rules] [--calls] [--json] [--stdin] [--hovers]
-spit inputs <recipe.spitin> [--unmatched | --suggest | -o <file>]
-spit inputs <pipeline.spit> --root <directory> [--unmatched | --suggest | -o <file>]
+spit inputs <recipe.spitin> [--unmatched | -o <file>]
+spit inputs <pipeline.spit> --root <directory> [--unmatched | -o <file>]
 spit dag <recipe.spitin> [--paths | --jobs] [--commands] [--counts] [--partial] [--json | -o <file>]
 spit dag <pipeline.spit> <inputs.spitout | -> [--paths | --jobs] [--commands] [--counts] [--partial] [--json | -o <file>]
 spit dag <pipeline.spit> --root <directory> [--paths | --jobs] [--commands] [--counts] [--partial] [--json | -o <file>]
@@ -93,7 +93,6 @@ Files come first; options follow them. `spit help` lists the commands, and `spit
 | `--path-rules` | With `check`, list the path rule each product uses (its own, a stage's or the pipeline's default, the recipe's, or for an output the built-in `out/{@product}/{@entities}`), with any [extension](docs/language-reference.md#extensions) added to it and where that is declared. |
 | `--calls` | With `check` on a pipeline, list each call to an [operation carried out by steps](docs/language-reference.md#operations-carried-out-by-steps) before the final `Pipeline valid.`, with the steps it expands to and no data read: the call as written, its line and stage, the operation's file and the first seven characters of that file's git blob id, then each step with the line of the library's body that writes it. A call in a body is shown under its caller, with its own steps beneath it. With `--json`, print `{"diagnostics":[...],"calls":[...]}` instead of the usual `check --json` output: one entry per call, in the order the pipeline's calls are made, with `id`, `parent` (the `id` of the call it is nested in, or `null`), `operation`, `outputs`, `inputs`, `line`, `stage`, `file`, `blob` and `steps`, each step with its `line`, `operation`, `outputs` and `inputs`; `calls` is left out when the pipeline has errors. It cannot combine with `--path-rules` or `--hovers`, and a recipe or `.spitout` has no calls to list. |
 | `--unmatched` | With `inputs`, list files under the dataset root that match no source path rule, one per line, leaving out files at the pipeline's output paths, instead of writing a `.spitout`. |
-| `--suggest` | With `inputs`, print `source` and `path` lines for the files under the dataset root that match no source path rule, instead of writing a `.spitout`; see [Start from the files](#start-from-the-files). |
 | `--paths` | With `dag`, print the file under every artifact. |
 | `--counts` | With `dag`, print how many jobs each step resolves instead of the jobs: one row per step, as `cleaned = clean`, with its stage when the pipeline has stages, then the total. A step that resolves no jobs shows `0`, so an empty step or an unexpected expansion stands out before the plan is run. The steps a call to an [operation carried out by steps](docs/language-reference.md#operations-carried-out-by-steps) makes are indented under the call, with the call's jobs in all. With `--commands` or `--paths`, print the counts before the jobs. With `-o`, print the counts and write the `.spitdag` too. It cannot be combined with `--json`, which prints the `.spitdag` itself. |
 | `--commands` | With `dag`, print each job's checks, `verify` and command lines with their paths filled in, quoted as a shell reads them, so a line can be pasted into a shell run from the dataset folder. A job a call to an operation carried out by steps made starts with a `from:` line naming the call and the body's step. This is what plain `dag` prints. With `--paths`, print them under each job's artifacts. With `-o`, print the commands and write the `.spitdag` too, so the plan checked is the plan saved. |
@@ -268,41 +267,16 @@ This creates two sort jobs for `alpha`, one for `beta`, and one merge job for ea
 
 ### Start from the files
 
-When the data already exists, `spit inputs --suggest` writes the source path rules from it. It groups the files no rule matches by shape, leaving out files at the pipeline's own output paths, makes the parts that differ between a group's files its dimensions, and prints lines to paste in. A dimension takes its name from the key before it, as `sub` in `sub-01` or `wave` in `wave3`. A key with a number, as `ses-1`, stays a dimension even when every file has the same one, and a key with a word, as `task-rest`, stays as text. Given a pipeline whose `bold` source has no rule yet:
-
-```sh
-spit inputs analysis.spit --root data --suggest
-```
+When data already exists, decide which files each source represents and write its dimensions and path rule. For files such as `sub-01/ses-1/func/sub-01_ses-1_task-rest_run-1_bold.nii.gz`, a pipeline can declare:
 
 ```text
-# 3 files, such as sub-01/ses-1/func/sub-01_ses-1_task-rest_run-1_bold.nii.gz
-# sub: 01, 02; ses: 1; run: 1, 2
-# for `bold`, which the pipeline declares
-path bold: sub-{sub}/ses-{ses}/func/sub-{sub}_ses-{ses}_task-rest_run-{run}_bold.nii.gz
-
-# 4 files, such as sub-01/ses-1/anat/sub-01_ses-1_T1w.json
-# sub: 01, 02; ses: 1
-source t1w_json .json [sub, ses]
-source t1w_nii_gz .nii.gz beside t1w_json
-path t1w_json: sub-{sub}/ses-{ses}/anat/sub-{sub}_ses-{ses}_T1w.json
-
-# 1 file like no other, each a source with no dimensions if a step reads it:
-#   participants.tsv
+source bold .nii.gz [sub, ses, run]
+path bold: sub-{sub}/ses-{ses}/func/sub-{sub}_ses-{ses}_task-rest_run-{run}_bold
 ```
 
-Each group's second line gives the values each dimension holds, the first two and the last when there are more than five, so a value that does not belong shows before the rule is pasted. A group that a source the pipeline declares without a rule fits, by its name or its dimensions, gets only its `path` line. Files that share a stem and differ by extension, as an image and its JSON, become a source and a companion declared [`beside`](docs/language-reference.md#sidecar-files) it. A dimension no word names takes the word before it and a `_`, as `field` in `field_001`; else it is called `date` when every value is a date such as `2024-01-15`, `year` when every value is a year, and `dim1`, `dim2` and so on otherwise, with a note to rename it. A dimension whose values are all dates or all years is written with that [shape](docs/language-reference.md#shapes-on-a-source-placeholder), as `{date:date}`, so a stray file such as `notes.log` is not read as a date. A plain top folder, as `baseline/` beside `raw/`, keeps its files apart, while `site_north/` and `site_south/` are one folder with a `site` dimension. A group of the same suffix as a larger one is named for a word of its own, as `bold_nback` beside `bold`.
+The declared extension completes the rule. A recipe names the dataset folder with `root data`; if that layout belongs to only one dataset, put `path bold:` in its recipe instead. Use [`beside`](docs/language-reference.md#sidecar-files) to declare companion files that share a source's stem.
 
-Real folders have strays, and a suggestion does not bend its rule to fit them. When nearly every file of a group shares its keys, as `Subject01/Visit1/` and `Subject02/Visit2/` beside one `subject04/visit1/`, the stray files are left out of the rule rather than turning every word into a `dim`. A file that a suggested rule nearly matches, such as a `.bak` copy, a `_repeat` scan or one with an extra `acq-` entity, is listed with the rule and where the two part:
-
-```text
-# 2 files a rule above nearly matches but will not read; rename them, or give them a rule of their own:
-#   Subject01/Visit1/T1_2024-01-15.nii.bak
-#     `t1`: after `Subject01/Visit1/T1_2024-01-15.nii`, the file has `.bak` where the rule ends
-#   Subject10/Visit1/T1_2024-02-11_repeat.nii
-#     `t1`: after `Subject10/Visit1/T1_2024-02-11`, the file has `_repeat.nii` where the rule has `.nii`
-```
-
-Files that share their shape with no other, such as `participants.tsv` or `README`, are listed last; a rule made only of dimensions, such as `{dim1}`, would read every file and folder beside them, so none is suggested. Given a recipe, `spit inputs cohort.spitin --suggest` prints the `path` lines for the recipe, and the `source` lines, as comments, for the pipeline the recipe names. Every rule is checked against its files before it is printed, and nothing is written: read the lines, rename what needs it, and paste them in.
+Check the declarations with `spit check dataset.spitin --path-rules`, then run `spit inputs dataset.spitin --unmatched` to see files no source rule reads. Adjust the rules if any of those files are sources, then write the inventory with `spit inputs dataset.spitin -o dataset.spitout`.
 
 ## Where files live
 
