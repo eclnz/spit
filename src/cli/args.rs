@@ -29,8 +29,8 @@ struct CommandSpec {
 impl Command {
     fn spec(self) -> CommandSpec {
         use Flag::{
-            ByTarget, Commands, Counts, Hovers, Jobs, Json, Output, Partial, PathRules, Paths,
-            Root, Stdin, Suggest, Unmatched,
+            ByTarget, Calls, Commands, Counts, Hovers, Jobs, Json, Output, Partial, PathRules,
+            Paths, Root, Stdin, Suggest, Unmatched,
         };
         match self {
             Self::Check => CommandSpec {
@@ -38,7 +38,7 @@ impl Command {
                 files: "<pipeline.spit | recipe.spitin | inputs.spitout>",
                 summary: "step 1: compile a pipeline, check a recipe against its pipeline, or check a .spitout's syntax; reads no data",
                 example: "spit check analysis.spit\n  spit check dataset.spitin",
-                flags: &[PathRules, Json, Stdin, Hovers],
+                flags: &[PathRules, Calls, Json, Stdin, Hovers],
             },
             Self::Inputs => CommandSpec {
                 name: "inputs",
@@ -126,9 +126,10 @@ pub(crate) enum Flag {
     Json,
     Stdin,
     Hovers,
+    Calls,
 }
 
-const FLAGS: [Flag; 14] = [
+const FLAGS: [Flag; 15] = [
     Flag::Root,
     Flag::Output,
     Flag::Paths,
@@ -143,10 +144,13 @@ const FLAGS: [Flag; 14] = [
     Flag::Json,
     Flag::Stdin,
     Flag::Hovers,
+    Flag::Calls,
 ];
 
 /// Pairs of flags that cannot be used together.
-const CONFLICTS: [(Flag, Flag); 13] = [
+const CONFLICTS: [(Flag, Flag); 15] = [
+    (Flag::Calls, Flag::PathRules),
+    (Flag::Calls, Flag::Hovers),
     (Flag::Json, Flag::Paths),
     (Flag::Json, Flag::Output),
     (Flag::Paths, Flag::Output),
@@ -179,6 +183,7 @@ impl Flag {
             Self::Json => "--json",
             Self::Stdin => "--stdin",
             Self::Hovers => "--hovers",
+            Self::Calls => "--calls",
         }
     }
 
@@ -221,6 +226,9 @@ impl Flag {
             (Self::Json, _) => "print the .spitdag",
             (Self::Stdin, _) => {
                 "read the file's text from standard input; the file names its location"
+            }
+            (Self::Calls, _) => {
+                "list each call to an operation carried out by steps, with the steps it expands to"
             }
             (Self::Hovers, _) => {
                 "include hovers with --json: SPIT's own words, and a pipeline's operations and products"

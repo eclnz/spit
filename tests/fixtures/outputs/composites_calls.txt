@@ -1,0 +1,49 @@
+$ spit check act.spit --calls
+exit: 0
+--- stdout
+corrected_dwi, session_b0 = mrx::clean_dwi_session(…)  line 21  [preprocess]
+  mrx::clean_dwi_session  mrtrix_dwi.spit  blob fdd0cd2
+  line 38  corrected_dwi::imported = mrx::import_dwi(raw_dwi, dwi_bvec, dwi_bval, dwi_json)
+  line 39  corrected_dwi::reverse_mif = mrx::import_reverse_b0(reverse_b0, reverse_b0_json)
+  line 40  corrected_dwi::denoised = mrx::denoise(corrected_dwi::imported)
+  line 41  corrected_dwi::degibbsed = mrx::remove_gibbs(corrected_dwi::denoised)
+  line 42  corrected_dwi::session = mrx::concatenate_runs(corrected_dwi::degibbsed)
+  line 43  corrected_dwi::forward_series = mrx::extract_b0(corrected_dwi::session)
+  line 44  corrected_dwi::forward = mrx::mean_b0(corrected_dwi::forward_series)
+  line 45  corrected_dwi::pe_pair = mrx::combine_pe_pair(corrected_dwi::forward, corrected_dwi::reverse_mif)
+  line 46  corrected_dwi::preprocessed = mrx::preprocess_dwi(corrected_dwi::session, corrected_dwi::pe_pair)
+  line 47  corrected_dwi = mrx::bias_correct(corrected_dwi::preprocessed)
+  line 48  corrected_dwi::b0_series = mrx::extract_b0(corrected_dwi)
+  line 49  session_b0 = mrx::mean_b0(corrected_dwi::b0_series)
+t1w_dwi, t1_to_dwi = mrx::register_to_dwi(…)  line 24  [anatomy]
+  mrx::register_to_dwi  mrtrix_dwi.spit  blob fdd0cd2
+  line 65  t1w_dwi::b0_nifti = mrx::export_nifti(session_b0)
+  line 66  t1w_dwi::flirt_matrix = mrx::flirt_register(t1w, t1w_dwi::b0_nifti)
+  line 67  t1_to_dwi = mrx::convert_flirt(t1w_dwi::flirt_matrix, t1w, t1w_dwi::b0_nifti)
+  line 68  t1w_dwi = mrx::mrtransform(t1w, t1_to_dwi, session_b0)
+Pipeline valid.
+--- stderr
+$ spit check somatic.spit --calls
+exit: 0
+--- stdout
+normal_bam, normal_gvcf = gl::align_sample(…)  line 15
+  gl::align_sample  germline.spit  blob bb00cd9
+  line 27  normal_bam::aligned = gl::bwa_align(reference, normal_r1, normal_r2)
+  line 28  normal_bam::sorted = gl::sort_reads(normal_bam::aligned)
+  line 29  normal_bam::merged = gl::merge_lanes(normal_bam::sorted)
+  line 30  normal_bam, normal_bam::index, normal_bam::metrics = gl::mark_duplicates(normal_bam::merged)
+  line 31  normal_gvcf = gl::call_gvcf(reference, normal_bam, normal_bam::index)
+tumour_bam, tumour_gvcf = gl::align_sample(…)  line 16
+  gl::align_sample  germline.spit  blob bb00cd9
+  line 27  tumour_bam::aligned = gl::bwa_align(reference, tumour_r1, tumour_r2)
+  line 28  tumour_bam::sorted = gl::sort_reads(tumour_bam::aligned)
+  line 29  tumour_bam::merged = gl::merge_lanes(tumour_bam::sorted)
+  line 30  tumour_bam, tumour_bam::index, tumour_bam::metrics = gl::mark_duplicates(tumour_bam::merged)
+  line 31  tumour_gvcf = gl::call_gvcf(reference, tumour_bam, tumour_bam::index)
+Pipeline valid.
+--- stderr
+$ spit check act.spitin --calls
+exit: 1
+--- stdout
+--- stderr
+error: --calls lists a pipeline's calls; give a .spit pipeline

@@ -653,3 +653,36 @@ fn a_call_is_not_named_as_an_import_is() {
         ["20: this call files the products it makes for itself under `m::`, as an import does `m::cleaned`; rename the call's first output or the import's alias"]
     );
 }
+
+#[test]
+fn calls_list_each_written_call_with_its_steps_and_the_calls_in_them() {
+    let tree = support::Tree::new("composite-calls", &[]);
+    library(&tree);
+    let text = "\
+use summarise from libs/lib.spit as L
+source raw : Lines [group, lane]
+source cal : Table [group, revision]
+
+stage report:
+    m, t = L::summarise(raw, cal @ where(revision=2))
+";
+    let main = tree.write("main.spit", text);
+    let (pipeline, _) = support::parse_fixture_at(text, &main).unwrap();
+    let blob = &pipeline.files[1].blob[..7];
+    assert_eq!(
+        spit::render_calls(&pipeline),
+        format!(
+            "\
+m, t = L::summarise(…)  line 6  [report]
+  L::summarise  libs/lib.spit  blob {blob}
+  line 13  m::cleaned = L::tidy(raw, cal)
+    line 10  m::cleaned = L::clean(raw, cal)
+  line 14  m = L::merge(m::cleaned)
+  line 15  t = L::C::count(m)
+"
+        )
+    );
+    // Nothing is listed for a pipeline with no calls.
+    let (plain, _) = support::parse_fixture(&format!("{BASE}\n")).unwrap();
+    assert_eq!(spit::render_calls(&plain), "");
+}
