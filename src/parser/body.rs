@@ -113,7 +113,8 @@ impl OpenBody {
     pub(super) fn close(self, syntax: &mut Syntax, ending: Option<&str>) -> Result<(), ParseError> {
         let ended = content_columns(ending.unwrap_or(&self.text));
         if self.operation.steps.is_empty() {
-            return Err(empty_body(&self.operation.name, self.number).within(&Place::new(self.number, ended)));
+            return Err(empty_body(&self.operation.name, self.number)
+                .within(&Place::new(self.number, ended)));
         }
         syntax.push(
             &self.text,
