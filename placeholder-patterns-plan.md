@@ -1,6 +1,14 @@
 # Plan: narrow a source placeholder to a shape (issue #61)
 
-Status: design only, nothing built. This file is deleted in the last commit
+Status: built, except the editor extension (see below). Decisions taken by
+the maintainer: shapes `digits`, `year` and `date` only; `{name:shape}`; shapes
+also in `discover` patterns; `--suggest` writes them; two adjacent shapes of any
+length are rejected; no precedence between a shaped and a general rule; a shape
+in a pipeline or stage `path:` default or on an output is an error; `date`
+checks real days, and `--suggest` shares that check. Steps 1 to 7 and 9 landed
+in `a6841b0` (one commit, since `Piece` and the suggester change with the
+template); the built-in shape words in `8556d62`. Step 8 is for the
+`spit-vscode` repository. This file is deleted in the last commit
 before the work merges, as `AGENTS.md` says.
 
 ## The problem, reproduced
@@ -254,7 +262,7 @@ Each step is one commit with its docs; tests go in a new
 9. **Usability.** Use `{date:date}` in the `s1-logs` key and run
    `usability/harness/rebuild_keys.sh`; expect `ok` for every key.
 
-## Decisions for the maintainer
+## Decisions for the maintainer (all taken as in the status above)
 
 1. Shape set for v1: `digits`, `year`, `date` only, or also `letters`/`alnum`?
 2. Syntax `{name:shape}`, or a different separator?
@@ -266,3 +274,16 @@ Each step is one commit with its docs; tests go in a new
 7. Is a shape in a pipeline-level `path:` default an error (recommended) or
    ignored for outputs?
 8. Should `date` check real calendar days, which makes `--suggest` stricter too?
+
+## Step status
+
+1. Shape and template: done, `a6841b0`.
+2. Matching: done, `a6841b0`.
+3. Diagnostics: done, `a6841b0`.
+4. Where shapes are allowed: done, `a6841b0`.
+5. `--suggest`: done, `a6841b0`.
+6. Docs: done, `a6841b0`; shape words in `src/builtins.rs`, `8556d62`.
+7. Benchmark: passed, in the message of `a6841b0`.
+8. Editor and runner: not done here; spit-bash needs nothing.
+9. Usability: `rebuild_keys.sh` is `ok` for every key; the `s1-logs` key still
+   writes `{date}`, and is left as it is, since the scenario is a record.
