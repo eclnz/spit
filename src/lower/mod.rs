@@ -285,9 +285,13 @@ impl PipelineBuilder {
     }
 }
 
-/// A statement that did not lower.
+/// A statement that did not lower. Keep in step with `parse_flow` in
+/// `src/parser/flow.rs`, whose lines change what later lines mean only once
+/// they succeed: a statement that may be passed over as a blank line is one
+/// that did not change the builder and is not `stateful`.
 pub(crate) struct Failure {
-    pub(crate) error: ParseError,
+    /// Boxed, so that `Result` stays small where a statement succeeds.
+    pub(crate) error: Box<ParseError>,
     /// It left the builder as it was before the statement, as a blank line
     /// would, and its error is on the statement's own line.
     pub(crate) clean: bool,
@@ -295,7 +299,10 @@ pub(crate) struct Failure {
 
 impl Failure {
     pub(crate) fn clean(error: ParseError) -> Self {
-        Self { error, clean: true }
+        Self {
+            error: Box::new(error),
+            clean: true,
+        }
     }
 }
 
@@ -304,7 +311,7 @@ impl Failure {
 impl From<ParseError> for Failure {
     fn from(error: ParseError) -> Self {
         Self {
-            error,
+            error: Box::new(error),
             clean: false,
         }
     }
@@ -490,7 +497,10 @@ fn lower_statement(
             let clean = operation.steps.is_empty();
             builder
                 .add_operation(operation.clone(), place.clone(), stage.as_deref())
-                .map_err(|error| Failure { error, clean })?;
+                .map_err(|error| Failure {
+                    error: Box::new(error),
+                    clean,
+                })?;
         }
         StatementKind::Constraint(constraint, rule) => {
             builder.add_constraint(constraint.clone(), rule.clone());

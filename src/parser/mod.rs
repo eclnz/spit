@@ -137,6 +137,9 @@ pub(crate) struct Syntax {
     /// blanking the lines one at a time would. A line that fails leaves the
     /// parse as it was, as if the line were blank, and reading goes on; it
     /// stops at an error after which a blank line would read differently.
+    /// Keep in step with `lower` in `src/lower/mod.rs`, which orders them
+    /// among the statements' own errors, and with `recover_document` in
+    /// `src/diagnostics/recovery.rs`, which blanks the lines they name.
     pub(crate) errors: Vec<(usize, ParseError)>,
 }
 
