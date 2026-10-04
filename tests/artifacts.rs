@@ -464,3 +464,153 @@ summary = summarise(day)
         "{grouped}"
     );
 }
+
+/// A step joining two branches that both read a product whose second input
+/// is missing.
+const DIAMOND: &str = "\
+source s [k]
+source t [k]
+operation mk(s: S, t: T) -> A
+operation left(a: A) -> B
+operation right(a: A) -> C
+operation join(b: B, c: C) -> D
+a = mk(s, t)
+bb = left(a)
+cc = right(a)
+dd = join(bb, cc)
+";
+
+#[test]
+fn by_target_names_an_artifact_two_branches_wait_on_where_it_is_shown() {
+    let sources = "sources:\n    s[k=1]\n";
+    let (pipeline, _) = settle(DIAMOND, sources).unwrap();
+    let report = report(DIAMOND, sources).unwrap();
+    assert_eq!(
+        render_artifacts_by_target(&pipeline, &report),
+        "\
+Complete artifacts: 1
+
+Final targets that cannot be made: 1 (incomplete artifacts: 4)
+  dd[k=1]  (join)
+    bb[k=1]  (left)
+      a[k=1]  (mk)
+        - no `t` artifact for input `t` of `mk` at [k=1]
+    cc[k=1]  (right)
+      - input `a` needs a[k=1], shown above
+"
+    );
+}
+
+#[test]
+fn by_target_names_an_artifact_a_job_and_the_job_it_waits_on_both_need() {
+    let text = "\
+source s [k]
+source t [k]
+operation mk(s: S, t: T) -> A
+operation fold(a: A, again: A) -> B
+operation join(b: B, c: A) -> D
+c = mk(s, t)
+b = fold(c, c)
+d = join(b, c)
+";
+    let sources = "sources:\n    s[k=1]\n";
+    let (pipeline, _) = settle(text, sources).unwrap();
+    let report = report(text, sources).unwrap();
+    assert_eq!(
+        render_artifacts_by_target(&pipeline, &report),
+        "\
+Complete artifacts: 1
+
+Final targets that cannot be made: 1 (incomplete artifacts: 3)
+  d[k=1]  (join)
+    b[k=1]  (fold)
+      c[k=1]  (mk)
+        - no `t` artifact for input `t` of `mk` at [k=1]
+      - input `again` needs c[k=1], shown above
+    - input `c` needs c[k=1], shown above
+"
+    );
+}
+
+#[test]
+fn by_target_writes_an_upstream_gap_once_for_all_the_targets_that_share_it() {
+    let text = "\
+source s [k]
+source t
+source g
+operation make(t: T, g: G) -> Shared
+operation use(s: S, shared: Shared) -> U
+gg = make(t, g)
+uu = use(s, gg)
+";
+    let sources = "sources:\n    s[k=1]\n    s[k=2]\n    s[k=3]\n    t\n";
+    let (pipeline, _) = settle(text, sources).unwrap();
+    let report = report(text, sources).unwrap();
+    assert_eq!(
+        render_artifacts_by_target(&pipeline, &report),
+        "\
+Complete artifacts: 4
+
+Final targets that cannot be made: 3 (incomplete artifacts: 4)
+  uu[k=1]  (use)
+    gg : Shared  (make)
+      - no `g` artifact for input `g` of `make` at []
+  uu[k=2]  (use)
+    - input `shared` needs gg, shown under uu[k=1]
+  uu[k=3]  (use)
+    - input `shared` needs gg, shown under uu[k=1]
+"
+    );
+}
+
+/// A chain of `steps` steps whose first reads a source that is missing, so
+/// that every step is incomplete and the last is the only final target.
+fn broken_chain(steps: usize) -> (String, &'static str) {
+    let mut text = String::from(
+        "source p0 [sub]\nsource miss [sub]\noperation first(a: T, b: T) -> T\noperation step(input: T) -> T\np1 = first(p0, miss)\n",
+    );
+    for index in 2..=steps {
+        text += &format!("p{index} = step(p{})\n", index - 1);
+    }
+    (text, "sources:\n    p0[sub=1]\n")
+}
+
+#[test]
+fn by_target_stops_indenting_past_twenty_levels() {
+    let (text, sources) = broken_chain(24);
+    let (pipeline, _) = settle(&text, sources).unwrap();
+    let report = report(&text, sources).unwrap();
+    let grouped = render_artifacts_by_target(&pipeline, &report);
+    let indents: Vec<usize> = grouped
+        .lines()
+        .skip(3)
+        .map(|line| line.len() - line.trim_start().len())
+        .collect();
+    // p24 is the target at the first indent; each step waits on the one
+    // before, with the reason of p1 under it.
+    assert_eq!(indents.len(), 25, "{grouped}");
+    assert_eq!(indents[0], 2);
+    assert_eq!(indents[19], 40);
+    assert!(
+        indents[20..].iter().all(|&indent| indent == 40),
+        "{indents:?}"
+    );
+}
+
+#[test]
+fn by_target_output_grows_with_the_length_of_a_chain_not_its_square() {
+    // The indent used to grow with the depth, so chains of 2,000 and 4,000
+    // steps wrote about 4 MB and 16 MB: four times as much for twice the steps.
+    let sizes: Vec<usize> = [2_000, 4_000]
+        .into_iter()
+        .map(|steps| {
+            let (text, sources) = broken_chain(steps);
+            let (pipeline, _) = settle(&text, sources).unwrap();
+            let report = report(&text, sources).unwrap();
+            let grouped = render_artifacts_by_target(&pipeline, &report);
+            assert!(grouped.len() < 120 * steps, "{} bytes", grouped.len());
+            grouped.len()
+        })
+        .collect();
+    assert!(sizes[1] < 3 * sizes[0], "{sizes:?}");
+}
