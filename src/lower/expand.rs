@@ -7,7 +7,8 @@
 use std::collections::BTreeSet;
 
 use crate::model::{
-    Call, CallId, InputBinding, Invocation, OperationDef, StepOrigin, StepOutput, DEFAULT_OUTPUT,
+    Call, CallId, CheckUse, InputBinding, Invocation, OperationDef, Port, StepOrigin, StepOutput,
+    DEFAULT_OUTPUT,
 };
 use crate::parser::{FlowStep, ParseError, Step};
 use crate::types::TypeExpr;
@@ -122,14 +123,37 @@ impl PipelineBuilder {
             Some(index) => caller.outputs[index].clone(),
             None => format!("{instance}::{product}"),
         };
+        // The checks on each of the operation's ports: its own, and those
+        // the body this call is in gave the call, if any.
+        let port_checks = |port: Port| -> Vec<CheckUse> {
+            let declared = match port {
+                Port::Input(index) => &operation.inputs[index].checks,
+                Port::Output(index) => &operation.outputs[index].checks,
+            };
+            let given = caller
+                .checks
+                .iter()
+                .filter(|(at, _)| *at == port)
+                .map(|(_, check)| check);
+            declared.iter().chain(given).cloned().collect()
+        };
         let mut steps = Vec::with_capacity(operation.steps.len());
         for body in &operation.steps {
+            // A step that reads a port, or makes an output, runs its checks.
+            let mut checks = Vec::new();
             let mut inputs = Vec::with_capacity(body.invocation.inputs.len());
-            for binding in &body.invocation.inputs {
+            for (position, binding) in body.invocation.inputs.iter().enumerate() {
                 let port = operation
                     .inputs
                     .iter()
                     .position(|port| port.name == binding.product);
+                if let Some(port) = port {
+                    checks.extend(
+                        port_checks(Port::Input(port))
+                            .into_iter()
+                            .map(|check| (Port::Input(position), check)),
+                    );
+                }
                 inputs.push(match port {
                     Some(port) => merge(&caller.inputs[port], binding).map_err(|problem| {
                         let place = at();
@@ -170,6 +194,19 @@ impl PipelineBuilder {
                     }
                 })
                 .collect();
+            for (position, output) in body.invocation.outputs.iter().enumerate() {
+                if let Some(port) = operation
+                    .outputs
+                    .iter()
+                    .position(|port| port.name == *output)
+                {
+                    checks.extend(
+                        port_checks(Port::Output(port))
+                            .into_iter()
+                            .map(|check| (Port::Output(position), check)),
+                    );
+                }
+            }
             for output in &body.outputs {
                 if !operation
                     .outputs
@@ -195,6 +232,7 @@ impl PipelineBuilder {
                         call: id,
                         step: body.place.clone(),
                     }),
+                    checks,
                 },
                 outputs,
             });

@@ -162,6 +162,8 @@ The body reads the operation's inputs, by their port names, and the products its
 
 A selector the caller gives an input holds wherever the body reads it, beside the body's own: above, every `clean` job reads revision 2, and `merge` collects each group's lanes. A call in a stage puts every step it makes in that stage. A body may call another operation with a body, which is expanded in turn; every operation a body calls is declared before it. An output written with a type, as `total: Count`, gives the caller's product that type, and SPIT checks it against the step that makes it. An error in a step the call makes, such as a type the step does not accept, is reported at the call.
 
+A check on an input or output of such an operation, as `reads: Lines @ check(lines(2))`, runs on every step that reads that input or makes that output, beside the checks of the step's own operation; the same check on one artifact runs once. Imported, it brings the operations its steps call, and their commands and checks, under the same prefix, so `use summarise from lib.spit as L` brings `L::clean` too.
+
 An operation with a body names its outputs, as `-> (result: Type)`, since its steps assign them by name. An output takes its extension, folder and place from the step that writes it, so the header gives only its name and type. Such an operation takes no `command` or `verify` line; its steps' operations have their own.
 
 ## Checks
@@ -240,7 +242,7 @@ A step outside every stage stays valid.
 
 ## Reuse definitions
 
-Import operations, source families, [`sidecars` groups](#sidecar-files) and [checks](#checks) from another `.spit` file. The path is relative to the file containing the `use` line. An operation brings its `command`; a source brings its path rule; either brings the checks it attaches. A `sidecars` group comes whole, with its members as sources and its stem if it gives one, so a recipe names it as `text::photo` and a binding that has some of its members is reported as where the group is written. A member cannot be imported alone: name its group. Imports do not bring pipeline steps.
+Import operations, source families, [`sidecars` groups](#sidecar-files) and [checks](#checks) from another `.spit` file. The path is relative to the file containing the `use` line. An operation brings its `command`; a source brings its path rule; either brings the checks it attaches. A `sidecars` group comes whole, with its members as sources and its stem if it gives one, so a recipe names it as `text::photo` and a binding that has some of its members is reported as where the group is written. A member cannot be imported alone: name its group. An [operation carried out by steps](#operations-carried-out-by-steps) brings the operations its steps call. Imports do not bring pipeline steps.
 
 ```text
 use text.spit as text
