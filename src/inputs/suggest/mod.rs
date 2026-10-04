@@ -37,7 +37,7 @@ pub struct Suggestions {
 /// A file a suggested rule nearly matches, and where the two part.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NearlyMatched {
-    /// The source, or the `sidecars` member, whose rule it is.
+    /// The source, or companion source, whose rule it is.
     pub source: String,
     /// The rule, with its extension.
     pub rule: String,
@@ -63,7 +63,7 @@ pub struct SuggestedSource {
     /// How many files the rule matches beyond its own group's.
     pub overlaps: usize,
     /// For files that share a stem and differ by extension, as an image and
-    /// its JSON, the `sidecars` members: each one's name and extension.
+    /// its JSON, the companion sources: each one's name and extension.
     /// `rule` is then the stem, and `name` the group's. Empty for a source.
     pub members: Vec<(String, String)>,
     /// The values each dimension holds in the files, in the order of

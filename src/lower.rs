@@ -32,11 +32,12 @@ pub(crate) struct PipelineBuilder {
     dimension_order: Option<(Vec<String>, Place)>,
     /// Each product a step makes, and whether the step wrote its dimensions.
     outputs: BTreeMap<String, Output>,
-    /// Where each `sidecars` header is.
-    sidecar_places: BTreeMap<String, Place>,
     /// Each product's place in `pipeline.products`, the first of a name, so
     /// that a step finds its inputs without searching every product.
     product_numbers: FxHashMap<String, usize>,
+    /// Each main source with companions, found once when the first
+    /// companion is declared. Keep in step with `add_sidecar_group`.
+    sidecar_group_numbers: FxHashMap<String, usize>,
     /// The position in `pipeline.operations` of each operation by name, the
     /// first of a name, so a step finds what it calls without searching
     /// every operation. Keep in step with `add_operation`, the only place
@@ -88,9 +89,11 @@ impl PipelineBuilder {
         Ok(())
     }
 
-    /// Add a `sidecars` group declared, or imported, at `place`.
-    pub(crate) fn add_sidecar_group(&mut self, group: SidecarGroup, place: Place) {
-        self.sidecar_places.insert(group.name.clone(), place);
+    /// Keep the members of one source's `beside` declarations together for
+    /// missing-companion reporting and imports.
+    pub(crate) fn add_sidecar_group(&mut self, group: SidecarGroup) {
+        self.sidecar_group_numbers
+            .insert(group.name.clone(), self.pipeline.sidecar_groups.len());
         self.pipeline.sidecar_groups.push(group);
     }
 
@@ -272,7 +275,7 @@ pub(crate) fn lower(
     if let Some(error) = &syntax.error {
         return Err(error.clone());
     }
-    check_sidecar_paths(&builder)?;
+    check_source_beside_paths(&builder)?;
     order_dimensions(
         &mut builder.pipeline.products,
         &builder.outputs,
@@ -282,48 +285,19 @@ pub(crate) fn lower(
     Ok(builder)
 }
 
-/// A `sidecars` group's name is its own, and the group gives its members'
-/// paths: by the `path:` line in its block, or else by the recipe. So no
-/// product shares its name, and no `path` line outside the block names the
-/// group or a member.
-fn check_sidecar_paths(builder: &PipelineBuilder) -> Result<(), ParseError> {
-    let PipelineBuilder {
-        pipeline,
-        lines,
-        sidecar_places,
-        ..
-    } = builder;
-    for group in &pipeline.sidecar_groups {
-        let name = &group.name;
-        if pipeline
-            .products
-            .iter()
-            .any(|product| product.name == *name)
-        {
-            let place = &sidecar_places[name];
+/// A source written beside another takes the other's path, so it has no
+/// independent path rule in the pipeline.
+fn check_source_beside_paths(builder: &PipelineBuilder) -> Result<(), ParseError> {
+    for product in &builder.pipeline.products {
+        let Some(beside) = &product.beside else {
+            continue;
+        };
+        if let Some(place) = builder.lines.paths.get(&product.name) {
             return Err(ParseError::new(
                 place.line,
-                format!("sidecars group `{name}` shares its name with a product; rename one, since `path {name}:` in a recipe must name one thing"),
+                format!("source `{}` is beside `{}`, so its path follows that source; remove its path rule", product.name, beside.sibling),
             )
             .within(place));
-        }
-        if let Some(place) = lines.paths.get(name) {
-            return Err(ParseError::new(
-                place.line,
-                format!("sidecars group `{name}` gives its stem on an indented `path:` line in its block"),
-            )
-            .within(place));
-        }
-        if group.stem.is_none() {
-            for (member, _) in &group.members {
-                if let Some(place) = lines.paths.get(member) {
-                    return Err(ParseError::new(
-                        place.line,
-                        format!("source `{member}` takes its path from sidecars group `{name}`; give the group's stem on an indented `path:` line in its block"),
-                    )
-                    .within(place));
-                }
-            }
         }
     }
     Ok(())
@@ -338,7 +312,52 @@ fn lower_statement(
         StatementKind::Import => apply_import(builder, imports, &statement.place)?,
         StatementKind::Stage { name, place } => builder.add_stage(name, place.clone()),
         StatementKind::Product(product, place) => {
-            builder.add_product(product.clone(), place.clone());
+            let mut product = product.clone();
+            if let Some(beside) = &product.beside {
+                let sibling = &beside.sibling;
+                let anchor = builder
+                    .product_numbers
+                    .get(sibling)
+                    .and_then(|&index| builder.pipeline.products.get(index))
+                    .ok_or_else(|| {
+                        ParseError::new(
+                            place.line,
+                            format!("source `{}` is beside unknown source `{sibling}`; declare `{sibling}` first", product.name),
+                        )
+                    })?;
+                if anchor.beside.is_some()
+                    || anchor.folder
+                    || anchor.extension.is_none()
+                    || builder.outputs.contains_key(sibling)
+                {
+                    return Err(ParseError::new(
+                        place.line,
+                        format!("source `{}` must be beside a file source with an extension, not `{sibling}`", product.name),
+                    ));
+                }
+                product.dimensions.clone_from(&anchor.dimensions);
+                if let Some(&number) = builder.sidecar_group_numbers.get(sibling) {
+                    let group = builder
+                        .pipeline
+                        .sidecar_groups
+                        .get_mut(number)
+                        .expect("a companion group index is recorded when the group is added");
+                    group
+                        .members
+                        .push((product.name.clone(), beside.suffix.clone()));
+                } else {
+                    let extension = anchor.extension.as_ref().expect("checked above");
+                    builder.add_sidecar_group(SidecarGroup {
+                        name: sibling.clone(),
+                        dimensions: anchor.dimensions.clone(),
+                        members: vec![
+                            (sibling.clone(), extension.clone()),
+                            (product.name.clone(), beside.suffix.clone()),
+                        ],
+                    });
+                }
+            }
+            builder.add_product(product, place.clone());
         }
         StatementKind::Discover(discovery) => {
             if builder.inputs.discovery(&discovery.name).is_some() {
@@ -386,20 +405,6 @@ fn lower_statement(
             builder.dimension_order = Some((order.clone(), statement.place.clone()));
         }
         StatementKind::Path(rule) => builder.add_path(rule, statement.place.line)?,
-        StatementKind::SidecarGroup(group) => {
-            if builder
-                .pipeline
-                .sidecar_groups
-                .iter()
-                .any(|existing| existing.name == group.name)
-            {
-                return Err(ParseError::new(
-                    statement.place.line,
-                    format!("duplicate sidecars group `{}`", group.name),
-                ));
-            }
-            builder.add_sidecar_group(group.clone(), statement.place.clone());
-        }
         StatementKind::Extension { stage, extension } => {
             builder.add_extension(stage.as_deref(), extension, statement.place.line)?;
         }

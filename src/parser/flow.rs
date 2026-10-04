@@ -2,8 +2,7 @@
 //! `outputs = operation(inputs)`, and stages whose lines are indented
 //! beneath a `stage name:` header.
 
-use crate::model::{CommandRole, Invocation, SidecarGroup};
-use crate::span::Place;
+use crate::model::{CommandRole, Invocation};
 
 use super::declarations::{
     parse_dimension_order, parse_discover, parse_invocation_parts, parse_path, parse_product,
@@ -11,212 +10,18 @@ use super::declarations::{
 use super::keyword::{removed_section, Keyword};
 use super::lexical::{comma_items, extension, identifier, strip_comment};
 use super::source_map::{name_place, step_place};
-use super::{
-    FlowOutput, FlowStep, ParseError, PathRule, StatementKind, Syntax, SHELL_SOURCE_REMOVED,
-};
+use super::{FlowOutput, FlowStep, ParseError, StatementKind, Syntax, SHELL_SOURCE_REMOVED};
 
 pub(super) fn parse_flow(text: &str) -> Syntax {
     let mut syntax = Syntax::default();
     let mut stages = OpenStages::default();
-    let mut group = None;
     for (index, original) in text.lines().enumerate() {
-        if let Err(error) = flow_line(&mut syntax, &mut stages, &mut group, original, index + 1) {
+        if let Err(error) = flow_line(&mut syntax, &mut stages, original, index + 1) {
             syntax.error = Some(error.locate(original));
             return syntax;
         }
     }
-    if let Some(group) = group {
-        let header = group.header.clone();
-        if let Err(error) = group.close(&mut syntax) {
-            syntax.error = Some(error.locate(&header));
-        }
-    }
     syntax
-}
-
-/// An open `sidecars` block: its header, and the members read so far.
-struct OpenGroup {
-    group: SidecarGroup,
-    /// The header line.
-    header: String,
-    number: usize,
-    /// The `path:` line that gives the group's stem, when the block has
-    /// one, and its text.
-    stem: Option<Stem>,
-}
-
-/// Where a `sidecars` block's `path:` line is, and its text; the group
-/// holds the stem it gives.
-struct Stem {
-    place: Place,
-    line: String,
-}
-
-impl OpenGroup {
-    /// Open a block for `sidecars name [dimensions]:`.
-    fn open(original: &str, declaration: &str, number: usize) -> Result<Self, ParseError> {
-        let expected = "expected `sidecars name [dimensions]:`, with each member indented beneath it as `source name : Type .ext`";
-        let (head, rest) = declaration
-            .split_once(':')
-            .ok_or_else(|| ParseError::new(number, expected))?;
-        if !rest.trim().is_empty() {
-            return Err(ParseError::new(
-                number,
-                "a `sidecars` header ends at its `:`; write the group's path stem on an indented `path:` line beneath it, or leave it to the recipe",
-            )
-            .at_token(rest.trim()));
-        }
-        let (name, dimensions) = match head.split_once('[') {
-            Some((name, dimensions)) => {
-                let dimensions = dimensions.trim().strip_suffix(']').ok_or_else(|| {
-                    ParseError::new(number, "expected closing `]` after the group's dimensions")
-                })?;
-                let dimensions = comma_items(dimensions, number)?
-                    .into_iter()
-                    .map(|dimension| identifier(dimension, number, "dimension").map(str::to_owned))
-                    .collect::<Result<Vec<_>, _>>()?;
-                (name, dimensions)
-            }
-            None => (head, Vec::new()),
-        };
-        let name = identifier(name.trim(), number, "sidecars group name")?;
-        Ok(Self {
-            group: SidecarGroup {
-                name: name.to_owned(),
-                dimensions,
-                members: Vec::new(),
-                stem: None,
-            },
-            header: original.to_owned(),
-            number,
-            stem: None,
-        })
-    }
-
-    /// Read a line of the block: its `path:` stem, before any member, or a
-    /// member.
-    fn line(
-        &mut self,
-        syntax: &mut Syntax,
-        original: &str,
-        line: &str,
-        number: usize,
-    ) -> Result<(), ParseError> {
-        if let Some((Keyword::Path, _)) = Keyword::split(line) {
-            return self.path(original, line, number);
-        }
-        self.member(syntax, original, line, number)
-    }
-
-    /// Read `path: stem`, the path every member's file starts with.
-    fn path(&mut self, original: &str, line: &str, number: usize) -> Result<(), ParseError> {
-        let group = &self.group.name;
-        if !line.starts_with("path:") {
-            return Err(ParseError::new(
-                number,
-                format!(
-                    "sidecars group `{group}` gives its stem as `path: stem`, with no product name"
-                ),
-            ));
-        }
-        if self.stem.is_some() {
-            return Err(ParseError::new(
-                number,
-                format!("sidecars group `{group}` has one `path:` line"),
-            ));
-        }
-        if !self.group.members.is_empty() {
-            return Err(ParseError::new(
-                number,
-                format!("the `path:` line of sidecars group `{group}` comes before its sources"),
-            ));
-        }
-        let rule = parse_path(None, original, line, number)?;
-        self.group.stem = Some(rule.template);
-        self.stem = Some(Stem {
-            place: rule.place,
-            line: original.to_owned(),
-        });
-        Ok(())
-    }
-
-    /// Add a member, `source name : Type .ext`: a source with the group's
-    /// dimensions, whose path, when the block gives a stem, is the stem and
-    /// its extension.
-    fn member(
-        &mut self,
-        syntax: &mut Syntax,
-        original: &str,
-        line: &str,
-        number: usize,
-    ) -> Result<(), ParseError> {
-        let group = &self.group.name;
-        let Some((Keyword::Source, declaration)) = Keyword::split(line) else {
-            return Err(ParseError::new(
-                number,
-                format!("sidecars group `{group}` holds only its `path:` stem and its sources, each written `source name : Type .ext`"),
-            ));
-        };
-        if let Some(bracket) = declaration.find('[') {
-            return Err(ParseError::new(
-                number,
-                format!("a source in sidecars group `{group}` takes the group's dimensions; remove its own"),
-            )
-            .at_token(&declaration[bracket..]));
-        }
-        let StatementKind::Product(mut product, place) =
-            StatementKind::product(original, declaration.trim(), number)?
-        else {
-            unreachable!("a source line declares a product");
-        };
-        let Some(extension) = product.extension.clone() else {
-            return Err(ParseError::new(
-                number,
-                format!("a source in sidecars group `{group}` names the extension its file adds to the stem, as in `source gps : GpsTrack .gpx`"),
-            ));
-        };
-        if product.folder {
-            return Err(ParseError::new(
-                number,
-                format!("a source in sidecars group `{group}` is a file beside the others, not a folder; drop the `/`"),
-            ));
-        }
-        product.dimensions.clone_from(&self.group.dimensions);
-        self.group.members.push((product.name.clone(), extension));
-        syntax.push(original, number, StatementKind::Product(product, place));
-        Ok(())
-    }
-
-    /// End the block, recording the group once its members are read.
-    fn close(self, syntax: &mut Syntax) -> Result<(), ParseError> {
-        if self.group.members.is_empty() {
-            return Err(ParseError::new(
-                self.number,
-                format!(
-                    "sidecars group `{}` has no sources; indent each beneath its header as `source name : Type .ext`",
-                    self.group.name
-                ),
-            ));
-        }
-        if let (Some(stem), Some(template)) = (&self.stem, &self.group.stem) {
-            // Each member's path is the group's stem and its extension.
-            for (member, template) in self.group.member_paths(template) {
-                let rule = PathRule {
-                    product: Some(member.to_owned()),
-                    stage: None,
-                    template,
-                    place: stem.place.clone(),
-                };
-                syntax.push(&stem.line, stem.place.line, StatementKind::Path(rule));
-            }
-        }
-        syntax.push(
-            &self.header,
-            self.number,
-            StatementKind::SidecarGroup(self.group),
-        );
-        Ok(())
-    }
 }
 
 /// The stages open at a line of the flow form, outermost first.
@@ -311,22 +116,12 @@ fn open_stage(
 fn flow_line(
     syntax: &mut Syntax,
     stages: &mut OpenStages,
-    group: &mut Option<OpenGroup>,
     original: &str,
     number: usize,
 ) -> Result<(), ParseError> {
     let line = strip_comment(original).trim();
     if line.is_empty() {
         return Ok(());
-    }
-    // An indented line belongs to an open `sidecars` block; the next that
-    // is not ends it.
-    let indented = original.starts_with(char::is_whitespace);
-    if let Some(open) = group.as_mut() {
-        if indented {
-            return open.line(syntax, original, line, number);
-        }
-        group.take().expect("a group is open").close(syntax)?;
     }
     if let Some(instead) = removed_section(line) {
         return Err(ParseError::new(
@@ -349,16 +144,11 @@ fn flow_line(
         Some((Keyword::Stage, declaration)) => {
             return open_stage(syntax, stages, original, declaration, indent, number);
         }
-        Some((Keyword::Sidecars, declaration)) => {
-            top_level_only("`sidecars`, which declares inputs,")?;
-            if indent > 0 {
-                return Err(ParseError::new(
-                    number,
-                    "a `sidecars` header starts at the beginning of its line",
-                ));
-            }
-            *group = Some(OpenGroup::open(original, declaration, number)?);
-            return Ok(());
+        Some((Keyword::Sidecars, _)) => {
+            return Err(ParseError::new(
+                number,
+                "`sidecars` is replaced by `source name : Type .ext beside sibling`; give the sibling source the path and dimensions",
+            ));
         }
         Some((Keyword::Use, _)) => {
             top_level_only("`use`")?;
@@ -444,7 +234,7 @@ fn flow_statement(
             number,
             format!(
                 "`{word}` does not start a statement; {hint}a pipeline line starts with \
-                 source, sidecars, dimensions, operation, command, verify, check, path, ext, stage or use, or is a step \
+                 source, dimensions, operation, command, verify, check, path, ext, stage or use, or is a step \
                  `output = operation(inputs)`, and a recipe line starts with pipeline, \
                  root, discover, require, drop, exclude or path"
             ),
@@ -519,9 +309,8 @@ fn parse_flow_output(left: &str, number: usize) -> Result<FlowOutput, ParseError
 }
 
 /// The words a statement can start with, for suggesting one.
-const STATEMENT_WORDS: [&str; 16] = [
+const STATEMENT_WORDS: [&str; 15] = [
     "source",
-    "sidecars",
     "dimensions",
     "operation",
     "command",

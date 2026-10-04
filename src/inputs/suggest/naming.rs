@@ -1,5 +1,5 @@
 //! Names for suggested sources: a declared source a group fits, else a
-//! word from its files, and `sidecars` for groups that share a stem.
+//! word from its files, and companion sources for groups that share a stem.
 
 use std::collections::BTreeSet;
 
@@ -11,7 +11,7 @@ use crate::model::ProductDef;
 /// Name each draft's source: a declared source it fits, else a word from
 /// its file names, unique among the pipeline's products and each other.
 /// Drafts no declared source takes that share a stem and dimensions, as an
-/// image and its JSON do, become one `sidecars` group. Also returns the
+/// image and its JSON do, become a main source and companions. Also returns the
 /// declared sources no draft fits.
 pub(super) fn name_sources(
     drafts: Vec<Draft>,
@@ -69,7 +69,7 @@ pub(super) fn name_sources(
     let mut used: BTreeSet<String> = taken.iter().map(|name| (*name).to_owned()).collect();
     used.extend(declared.iter().map(|product| product.name.clone()));
     // Drafts by stem and dimensions, in the order they came, so that a
-    // group of sidecars is suggested where its first member would be.
+    // group of companion sources is suggested where its first member would be.
     let mut groups: Vec<Vec<(Draft, String, Option<&ProductDef>)>> = Vec::new();
     for entry in chosen {
         let together = groups.iter_mut().find(|group| {
@@ -154,7 +154,7 @@ pub(super) fn name_sources(
 /// as `bold_nback` beside `bold` for files with `task-nback` where the
 /// earlier ones have `task-rest`: the last word that stays the same in its
 /// names, then in its folders, that no earlier draft of that name has. A
-/// draft with no such word keeps the name, as the members of a `sidecars`
+/// draft with no such word keeps the name, as the members of a companion
 /// group do, and a number or its extension tells it apart later.
 fn distinguish(chosen: &mut [(Draft, String, Option<&ProductDef>)]) {
     for index in 1..chosen.len() {

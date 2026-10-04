@@ -4,7 +4,7 @@
 
 use std::collections::BTreeMap;
 
-use crate::model::{DirectoryDiscovery, InputBinding, Invocation, ProductDef};
+use crate::model::{Beside, DirectoryDiscovery, InputBinding, Invocation, ProductDef};
 use crate::paths::{validate_discovery_rule, PathTemplate};
 use crate::types::{parse_type_expr, TypeExpr, TypeParseError};
 
@@ -201,6 +201,17 @@ pub(super) fn parse_dimension_order(text: &str, number: usize) -> Result<Vec<Str
 pub(super) fn parse_product(line: &str, number: usize) -> Result<ProductDef, ParseError> {
     let (line, clauses) = split_clauses(line, "expected `@ check(...)` after a source", number)?;
     let checks = only_checks(&clauses, "a source", number)?;
+    let (line, beside) = match line.rsplit_once(" beside ") {
+        Some((item, sibling)) => {
+            if item.trim_end().ends_with(']') {
+                return Err(ParseError::new(number, "a source written `beside` another inherits its dimensions; remove its [dimensions]"));
+            }
+            let (item, suffix) = super::operation::beside_suffix(item.trim(), number, "source")?;
+            let sibling = identifier(sibling.trim(), number, "source beside name")?;
+            (item, Some((sibling, suffix)))
+        }
+        None => (line, None),
+    };
     let (declaration, dimensions) = match line.split_once('[') {
         Some((declaration, dimensions)) => (declaration, Some(dimensions)),
         None => (line, None),
@@ -252,6 +263,19 @@ pub(super) fn parse_product(line: &str, number: usize) -> Result<ProductDef, Par
     product.extension = extension.map(str::to_owned);
     product.folder = folder;
     product.checks = checks;
+    if let Some((sibling, suffix)) = beside {
+        if product.folder || !product.dimensions.is_empty() || product.extension.is_some() {
+            return Err(ParseError::new(
+                number,
+                "a source written `beside` another inherits its dimensions and names only a suffix, as in `source meta : Json .json beside image`",
+            ));
+        }
+        product.extension = suffix.find('.').map(|dot| suffix[dot..].to_owned());
+        product.beside = Some(Beside {
+            sibling: sibling.to_owned(),
+            suffix,
+        });
+    }
     Ok(product)
 }
 
