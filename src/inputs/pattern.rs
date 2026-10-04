@@ -293,6 +293,8 @@ fn value_ends(
 /// Keep in step with `encode_component` in `paths/components.rs`: if a value
 /// could hold a character this denies, `forced_end` would bind it too short
 /// and discovery would miss files.
+/// Keep in step with `Shape::matches` in `paths/shape.rs`: no shape may
+/// accept a character this denies.
 fn is_value_character(character: char) -> bool {
     character.is_ascii_alphanumeric() || character == '-' || character == '%'
 }
