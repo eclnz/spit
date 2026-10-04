@@ -60,6 +60,33 @@ fn import_errors_point_to_the_use_line() {
     assert!(error.message().contains("import cycle"));
 }
 
+/// A message names a library by its path from the pipeline's folder, however
+/// deep the import, and never by where the checkout is.
+#[test]
+fn messages_name_a_library_from_the_pipelines_folder() {
+    let dir = Tree::new("imports", &[]);
+    dir.write(
+        "libs/inner/deep.spit",
+        "operation d(input)\nuse x from ../../main.spit\n",
+    );
+    dir.write("libs/lib.spit", "use d from inner/deep.spit\n");
+    let main = dir.write("main.spit", "use d from libs/lib.spit\n");
+    let error = support::parse_fixture_at(&fs::read_to_string(&main).unwrap(), &main).unwrap_err();
+    let message = error.message();
+    assert!(
+        message.contains("import cycle through `main.spit`"),
+        "{message}"
+    );
+    assert!(message.contains("`libs/lib.spit`"), "{message}");
+    assert!(!message.contains(dir.path().to_str().unwrap()), "{message}");
+
+    dir.write("libs/lib.spit", "use d from nope.spit\n");
+    let error = support::parse_fixture_at(&fs::read_to_string(&main).unwrap(), &main).unwrap_err();
+    let message = error.message();
+    assert!(message.contains("`libs/nope.spit`"), "{message}");
+    assert!(!message.contains(dir.path().to_str().unwrap()), "{message}");
+}
+
 #[test]
 fn diagnostics_resolve_imports_using_pipeline_location() {
     let dir = Tree::new("imports", &[]);
