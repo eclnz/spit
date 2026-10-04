@@ -32,6 +32,12 @@ fn report(text: &str, inventory: &str) -> Result<ArtifactReport, ResolveError> {
     Ok(report)
 }
 
+/// The report of `text` over `inventory`, as `spit artifacts` prints it.
+fn rendered(text: &str, inventory: &str, report: &ArtifactReport) -> String {
+    let (pipeline, _) = settle(text, inventory).unwrap();
+    render_artifacts(&pipeline, report)
+}
+
 /// The error `spit dag` stops at: a missing requirement, else a job.
 fn first_error(text: &str, inventory: &str) -> ResolveError {
     let (pipeline, settled) = match settle(text, inventory) {
@@ -132,7 +138,7 @@ fn partial_keeps_an_aggregate_incomplete_when_no_member_is_complete() {
 fn a_numeric_near_miss_points_to_the_existing_artifact() {
     let sources = ALIGN_SOURCES.replace("calibration[subject=01]", "calibration[subject=001]");
     let report = report(ALIGN, &sources).unwrap();
-    let rendered = render_artifacts(&report);
+    let rendered = rendered(ALIGN, &sources, &report);
     assert!(
         rendered.contains(
             "calibration[subject=001] exists; its `subject` differs only in leading zeros"
@@ -243,7 +249,7 @@ sources:
     ));
     assert_eq!(first_error(text, sources), report.coverage[0].error);
 
-    let rendered = render_artifacts(&report);
+    let rendered = rendered(text, sources, &report);
     assert!(rendered.contains("  scan[subject=01,run=1]  (source)\n"));
     assert!(!rendered.contains("  scan[subject=02,run=1]  (source)\n"));
     assert!(rendered.contains(
@@ -296,7 +302,7 @@ sources:
         spit::unused_sources_summary(&report).unwrap(),
         "2 source artifacts are used by no job: cal[station=north,revision=1], price[store=S07]"
     );
-    let rendered = render_artifacts(&report);
+    let rendered = rendered(text, sources, &report);
     assert!(
         rendered
             .contains("\nUnused sources: 2\n  cal[station=north,revision=1]\n  price[store=S07]\n"),
@@ -319,7 +325,7 @@ sources:
 
 #[test]
 fn render_lists_complete_then_incomplete_artifacts() {
-    let rendered = render_artifacts(&report(ALIGN, ALIGN_SOURCES).unwrap());
+    let rendered = rendered(ALIGN, ALIGN_SOURCES, &report(ALIGN, ALIGN_SOURCES).unwrap());
     assert_eq!(
         rendered,
         "\

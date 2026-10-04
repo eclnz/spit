@@ -43,6 +43,9 @@ pub(crate) struct SourceMap {
     pub(crate) stage_paths: BTreeMap<String, Place>,
     /// Products and operations brought in by `use` lines.
     pub(crate) imported: BTreeSet<String>,
+    /// The text of each file an import read, by its path as
+    /// `Pipeline::files` gives it, for messages that point into it.
+    pub(crate) file_texts: BTreeMap<String, String>,
 }
 
 /// Where the parts of one step sit on its line.

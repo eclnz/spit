@@ -376,6 +376,8 @@ pub struct Call {
     /// The products the call assigns, as it writes them; the first is
     /// `instance`.
     pub outputs: Vec<String>,
+    /// The products the call reads, one per input, as it writes them.
+    pub inputs: Vec<String>,
     /// The call whose body holds this one, for a call in a body.
     pub parent: Option<CallId>,
     /// Where the call is written: in the pipeline, or in the body of the

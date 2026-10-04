@@ -243,6 +243,7 @@ impl Resolution {
                     .map(|&id| self.dag.artifacts.get(id).to_instance())
                     .collect(),
                 gaps: expansion.gaps,
+                call: invocation.origin.as_ref().map(|origin| origin.call),
             });
         }
         Ok(())

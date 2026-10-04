@@ -112,6 +112,11 @@ impl PipelineBuilder {
             operation: name.clone(),
             instance: instance.clone(),
             outputs: caller.outputs.clone(),
+            inputs: caller
+                .inputs
+                .iter()
+                .map(|binding| binding.product.clone())
+                .collect(),
             parent: caller.origin.as_ref().map(|origin| origin.call),
             place: at(),
         });

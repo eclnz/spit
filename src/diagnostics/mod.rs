@@ -30,7 +30,7 @@ use crate::{
     ResolveError,
 };
 
-use places::{error_location, subject_place};
+use places::{error_location, error_step, in_call, subject_place};
 use recovery::recover_parse_errors;
 use warnings::{case_warnings, empty_step_warnings, label_warnings, near_miss_warnings, warnings};
 
@@ -341,6 +341,13 @@ pub fn diagnose_recipe(text: &str, path: &Path) -> Vec<Diagnostic> {
                 .map(|mut diagnostic| {
                     diagnostic.file = Some(shown.clone());
                     diagnostic.external_text = Some(pipeline_text.clone());
+                    // A library's path is from the pipeline's folder.
+                    let folder = pipeline_path.parent().unwrap_or_else(|| Path::new(""));
+                    for related in &mut diagnostic.related {
+                        if let Some(file) = &mut related.file {
+                            *file = folder.join(&*file).display().to_string();
+                        }
+                    }
                     diagnostic
                 })
                 .collect();
@@ -567,7 +574,12 @@ fn record_diagnostics(
                 "\n  {} more artifacts cannot be produced; run `spit artifacts` to list them, or `spit dag --partial` to plan the rest",
                 remaining.saturating_sub(1)
             ));
-            diagnostics.push(Diagnostic::error(source, place, message));
+            diagnostics.push(within_call(
+                Diagnostic::error(source, place, message),
+                pipeline,
+                lines,
+                error_step(&error),
+            ));
             return Err(error);
         }
         diagnostics.extend(case_warnings(pipeline, lines, &report.dag));
@@ -578,7 +590,12 @@ fn record_diagnostics(
         Err(error) => {
             if !diagnostics.iter().any(Diagnostic::is_error) {
                 let (source, place) = error_location(pipeline, lines, &error, records, true);
-                diagnostics.push(Diagnostic::error(source, place, error.to_string()));
+                diagnostics.push(within_call(
+                    Diagnostic::error(source, place, error.to_string()),
+                    pipeline,
+                    lines,
+                    error_step(&error),
+                ));
             }
             Err(diagnostics)
         }
@@ -681,7 +698,19 @@ fn pipeline_diagnostics(
         .map(|(subject, error)| {
             let place = subject_place(pipeline, lines, subject, error)
                 .or_else(|| error_location(pipeline, lines, error, inventory_text, false).1);
-            Diagnostic::error(DiagnosticSource::Pipeline, place, error.to_string())
+            let step = match subject {
+                DefinitionSubject::Invocation(output) => Some((
+                    output.as_str(),
+                    error_step(error).and_then(|(_, port)| port),
+                )),
+                _ => error_step(error),
+            };
+            within_call(
+                Diagnostic::error(DiagnosticSource::Pipeline, place, error.to_string()),
+                pipeline,
+                lines,
+                step,
+            )
         })
         .collect();
     let source = DiagnosticSource::Pipeline;
@@ -699,6 +728,26 @@ fn pipeline_diagnostics(
     );
     diagnostics.extend(warnings(pipeline, lines, &checked.poisoned));
     diagnostics
+}
+
+/// `diagnostic`, about the step making a product at a port, reported at the
+/// call written in the text when a call to an operation carried out by
+/// steps made that step; see [`in_call`].
+fn within_call(
+    mut diagnostic: Diagnostic,
+    pipeline: &Pipeline,
+    lines: &SourceMap,
+    step: Option<(&str, Option<&str>)>,
+) -> Diagnostic {
+    let Some(call) = step.and_then(|(output, port)| in_call(pipeline, lines, output, port)) else {
+        return diagnostic;
+    };
+    diagnostic.source = DiagnosticSource::Pipeline;
+    diagnostic.line = Some(call.place.line);
+    diagnostic.columns = Some(call.place.columns);
+    diagnostic.message.insert_str(0, &call.prefix);
+    diagnostic.related = call.related;
+    diagnostic
 }
 
 /// Order by source and line, keep only the first error on each line, and

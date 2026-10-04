@@ -160,7 +160,15 @@ first, first_total = summarise(raw, calibration @ where(revision=2))
 
 The body reads the operation's inputs, by their port names, and the products its earlier steps make, and it makes each named output once. Its outputs are the products the caller names: here `first` and `first_total`. A product the body makes for itself is filed under the call's first output, so `cleaned` is `first::cleaned`, written `first.cleaned` in a path, and a second call of `summarise` files its own apart. Only the outputs are the caller's to read: a step that reads `first::cleaned` is an error that says to make it an output.
 
-A selector the caller gives an input holds wherever the body reads it, beside the body's own: above, every `clean` job reads revision 2, and `merge` collects each group's lanes. A call in a stage puts every step it makes in that stage. A body may call another operation with a body, which is expanded in turn; every operation a body calls is declared before it. An output written with a type, as `total: Count`, gives the caller's product that type, and SPIT checks it against the step that makes it. An error in a step the call makes, such as a type the step does not accept, is reported at the call.
+A selector the caller gives an input holds wherever the body reads it, beside the body's own: above, every `clean` job reads revision 2, and `merge` collects each group's lanes. A call in a stage puts every step it makes in that stage. A body may call another operation with a body, which is expanded in turn; every operation a body calls is declared before it. An output written with a type, as `total: Count`, gives the caller's product that type, and SPIT checks it against the step that makes it. An error in a step the call makes, such as a type the step does not accept or an input the data lacks, is reported at the call, named before the message. It points at the argument the caller gave when the failing input reads one of the operation's inputs, at the product the caller names when it is one of the outputs, and at the whole call otherwise. Below it, a `-->` line gives each call it is nested in and the body's step, with their file and line:
+
+```text
+error: line 4, column 21: in `m, t = L::summarise(...)`: type mismatch at `L::clean.x`: product `cal` is Table, expected Lines
+  --> libs/lib.spit: line 13, column 15: the call of `L::tidy` in the body of `L::summarise`
+  --> libs/lib.spit: line 10, column 9: the step in the body of `L::tidy`
+```
+
+`spit check --json` gives the same places as the diagnostic's `related` list. `spit artifacts` names the call beside each artifact a call's step cannot make, as ``(L::clean, in `m, t = L::summarise(...)` on line 8)``, and the reasons in a partial `.spitdag`'s `left_out` start with it.
 
 A check on an input or output of such an operation, as `reads: Lines @ check(lines(2))`, runs on every step that reads that input or makes that output, beside the checks of the step's own operation; the same check on one artifact runs once. Imported, it brings the operations its steps call, and their commands and checks, under the same prefix, so `use summarise from lib.spit as L` brings `L::clean` too.
 
