@@ -360,6 +360,7 @@ m, t = L::summarise(raw, cal @ where(revision=2))
     assert_eq!(
         job("1"),
         "Job 1  L::clean\n  \
+         from:   m = L::summarise (main.spit line 7), m::cleaned = L::tidy (libs/lib.spit line 13), libs/lib.spit line 10\n  \
          check:  count_lines in/a/r1.txt 1\n  \
          check:  count_lines in/a/r1.txt 2\n  \
          run:    clean in/a/r1.txt cal/a-r2.txt out/m.cleaned/group=a__lane=1.txt\n  \
@@ -447,4 +448,67 @@ m, t = L::summarise(raw, cal @ where(revision=2))
         })
         .collect();
     assert_eq!(origins, [Some((1, 10)), Some((0, 14)), Some((0, 15))]);
+}
+
+#[test]
+fn counts_list_a_calls_steps_under_it_and_commands_say_where_a_job_comes_from() {
+    let text = format!(
+        "{BASE}
+operation tidy(reads: Lines, table: Table) -> (tidied: Lines):
+    tidied = clean(reads, table)
+
+operation summarise(reads: Lines, table: Table) -> (merged: Lines):
+    cleaned = tidy(reads, table)
+    merged = merge(cleaned @ vary(lane))
+
+a = summarise(raw, cal @ where(revision=1))
+b = summarise(raw, cal @ where(revision=2))
+all = merge(a @ vary(group))
+{RECORDS}"
+    );
+    let (pipeline, records) = support::parse_fixture(&text).unwrap();
+    let dag = resolve(&pipeline, &records.unwrap()).unwrap();
+    assert_eq!(
+        spit::render_step_counts(&pipeline, &dag),
+        "\
+jobs  step
+      a = summarise
+        a::cleaned = tidy
+   4      a::cleaned = clean
+   4      in this call
+   2    a = merge
+   6    in this call
+      b = summarise
+        b::cleaned = tidy
+   4      b::cleaned = clean
+   4      in this call
+   2    b = merge
+   6    in this call
+   1  all = merge
+  13  total
+"
+    );
+    let bound = spit::bind_dag(&pipeline, &dag).unwrap();
+    let commands = spit::render_bound_dag(
+        &bound,
+        spit::View {
+            commands: true,
+            ..spit::View::default()
+        },
+    );
+    // Read from no file, so each place is a line alone.
+    assert!(
+        commands.starts_with(
+            "Job 1  clean\n  \
+             from:   a = summarise (line 21), a::cleaned = tidy (line 18), line 15\n  \
+             run:    clean in/a/r1.txt cal/a-r1.txt out/a.cleaned/group=a__lane=1.txt\n"
+        ),
+        "{commands}"
+    );
+    assert!(
+        commands.ends_with(
+            "Job 13  merge\n  run:    merge out/a/group=a.txt out/a/group=b.txt out/all/global.txt\n"
+        ),
+        "{commands}"
+    );
 }
