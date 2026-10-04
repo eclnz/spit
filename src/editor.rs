@@ -13,8 +13,8 @@ use crate::diagnostics::{
 use crate::imports::parse_located_document;
 use crate::json::Json;
 use crate::model::{
-    Cardinality, CheckDef, CheckUse, CommandRole, OperationDef, OutputPort, PathOrigin, Pipeline,
-    PipelineIndex, ProductDef, DEFAULT_OUTPUT,
+    Cardinality, CheckDef, CheckUse, CommandRole, Invocation, OperationDef, OutputPort, PathOrigin,
+    Pipeline, PipelineIndex, ProductDef, DEFAULT_OUTPUT,
 };
 use crate::parser::{without_bom, Kind};
 use crate::paths::shown_path;
@@ -171,6 +171,11 @@ pub fn pipeline_hovers(text: &str, path: &Path) -> Vec<Hover> {
         }
     }
     for invocation in &pipeline.invocations {
+        // A step a call made is written as the call; the call's own hovers
+        // follow.
+        if invocation.origin.is_some() {
+            continue;
+        }
         let Some(location) = document.lines.invocations.get(invocation.output_product()) else {
             continue;
         };
@@ -216,6 +221,52 @@ pub fn pipeline_hovers(text: &str, path: &Path) -> Vec<Hover> {
                         port.name,
                         invocation.operation,
                         cardinality(port.cardinality)
+                    ));
+                }
+                add(place, HoverKind::Product, name, signature, details);
+            }
+        }
+    }
+    // The steps each written call expands to, grouped once.
+    let mut expanded: Vec<Vec<String>> = vec![Vec::new(); pipeline.calls.len()];
+    for step in &pipeline.invocations {
+        if let Some(origin) = &step.origin {
+            expanded[pipeline.written_call_id(origin.call).index()].push(written_step(step));
+        }
+    }
+    for (call, steps) in pipeline.calls.iter().zip(&expanded) {
+        if call.parent.is_some() {
+            continue;
+        }
+        let Some(location) = call
+            .outputs
+            .first()
+            .and_then(|output| document.lines.invocations.get(output))
+        else {
+            continue;
+        };
+        if let Some((signature, mut details)) = operation_info(&call.operation) {
+            details.push(format!("This call expands to: {}", steps.join("; ")));
+            add(
+                location.operation(),
+                HoverKind::Operation,
+                &call.operation,
+                signature,
+                details,
+            );
+        }
+        let ports = operations
+            .get(call.operation.as_str())
+            .map(|operation| &operation.inputs);
+        for (index, name) in call.inputs.iter().enumerate() {
+            if let (Some(mut place), Some((signature, mut details))) =
+                (location.input(index), product_info(name))
+            {
+                place.columns.end = place.columns.start + name.len();
+                if let Some(port) = ports.and_then(|ports| ports.get(index)) {
+                    details.push(format!(
+                        "Supplies input {} of {}.",
+                        port.name, call.operation
                     ));
                 }
                 add(place, HoverKind::Product, name, signature, details);
@@ -370,6 +421,18 @@ fn output_signature(port: &OutputPort, named: bool) -> String {
 
 fn operation_details(pipeline: &Pipeline, operation: &OperationDef) -> Vec<String> {
     let mut details = Vec::new();
+    if !operation.steps.is_empty() {
+        let steps: Vec<String> = operation
+            .steps
+            .iter()
+            .map(|step| written_step(&step.invocation))
+            .collect();
+        details.push(format!(
+            "Carried out by the steps in its body: {}",
+            steps.join("; ")
+        ));
+        return details;
+    }
     if operation
         .inputs
         .iter()
@@ -449,24 +512,55 @@ fn call_details(
     details
 }
 
-/// Each product's readers, as `averaged = average(…)`, in step order.
+/// Each product's readers, as `averaged = average(…)`, in step order. A
+/// product a call reads is read by the call, as it is written.
 fn consumers(pipeline: &Pipeline) -> BTreeMap<&str, Vec<String>> {
     let mut consumers: BTreeMap<&str, Vec<String>> = BTreeMap::new();
-    for call in &pipeline.invocations {
-        let read: BTreeSet<&str> = call
+    for step in &pipeline.invocations {
+        let written = step
+            .origin
+            .as_ref()
+            .map(|origin| pipeline.written_call(origin.call))
+            .filter(|call| {
+                step.inputs
+                    .iter()
+                    .any(|input| call.inputs.contains(&input.product))
+            });
+        let read: BTreeSet<&str> = step
             .inputs
             .iter()
             .map(|input| input.product_name())
             .collect();
         for product in read {
-            consumers.entry(product).or_default().push(format!(
-                "{} = {}(…)",
-                call.outputs.join(", "),
-                call.operation
-            ));
+            let reader = match written {
+                Some(call) if call.inputs.iter().any(|input| input == product) => {
+                    format!("{} = {}(…)", call.outputs.join(", "), call.operation)
+                }
+                _ => format!("{} = {}(…)", step.outputs.join(", "), step.operation),
+            };
+            let readers = consumers.entry(product).or_default();
+            // A call's steps that read one product are one reader.
+            if readers.last() != Some(&reader) {
+                readers.push(reader);
+            }
         }
     }
     consumers
+}
+
+/// A step as written, as `cleaned = clean(reads, table)`.
+fn written_step(invocation: &Invocation) -> String {
+    format!(
+        "{} = {}({})",
+        invocation.outputs.join(", "),
+        invocation.operation,
+        invocation
+            .inputs
+            .iter()
+            .map(|input| input.product_name())
+            .collect::<Vec<_>>()
+            .join(", ")
+    )
 }
 
 fn product_details(
@@ -476,17 +570,26 @@ fn product_details(
     consumers: &[String],
 ) -> Vec<String> {
     let producer = index.producer(&product.name).map(|(call, _)| call);
-    let mut details = vec![match producer {
-        Some(call) => format!(
-            "Derived product. Produced by {}({}).",
+    let written = producer
+        .and_then(|step| step.origin.as_ref())
+        .map(|origin| index.pipeline.written_call(origin.call));
+    let mut details = vec![match (producer, written) {
+        (Some(step), Some(call)) => format!(
+            "Derived product. Produced by {}({}), by its step {}.",
             call.operation,
-            call.inputs
+            call.inputs.join(", "),
+            written_step(step)
+        ),
+        (Some(step), None) => format!(
+            "Derived product. Produced by {}({}).",
+            step.operation,
+            step.inputs
                 .iter()
                 .map(|input| input.product_name())
                 .collect::<Vec<_>>()
                 .join(", ")
         ),
-        None => "Source product: a family of input artifacts.".to_owned(),
+        (None, _) => "Source product: a family of input artifacts.".to_owned(),
     }];
     if producer.is_some() {
         details.push(format!(

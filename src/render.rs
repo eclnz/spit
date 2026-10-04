@@ -5,9 +5,10 @@ use std::fmt::{self, Write as _};
 
 use crate::command::shell_word;
 use crate::model::{
-    identity, push_identity, Artifact, ArtifactReport, EntityBinding, Gap, JobId, ResolvedDag,
+    identity, push_identity, Artifact, ArtifactReport, Call, CallId, EntityBinding, Gap, JobId,
+    Pipeline, ResolvedDag,
 };
-use crate::spitdag::{Argument, BoundDag, BoundJob, When};
+use crate::spitdag::{Argument, BoundDag, BoundJob, StepCall, When};
 use crate::types::TypeExpr;
 
 /// The jobs as text, without ports or paths. Each job is written straight
@@ -65,28 +66,103 @@ pub fn render_dag(dag: &ResolvedDag) -> String {
 ///    4  total
 /// ```
 ///
-/// A step that resolves no jobs keeps its row, so an empty step shows.
-pub fn render_step_counts(dag: &ResolvedDag) -> String {
+/// A step that resolves no jobs keeps its row, so an empty step shows. The
+/// steps a call to an operation carried out by steps made are indented
+/// under the call, and followed by the call's jobs in all:
+///
+/// ```text
+/// jobs  step                   stage
+///       m, t = summarise       report
+///    4    m::cleaned = clean   report
+///    2    m = merge            report
+///    2    t = count            report
+///    8    in this call
+///    8  total
+/// ```
+pub fn render_step_counts(pipeline: &Pipeline, dag: &ResolvedDag) -> String {
     let mut jobs = vec![0_usize; dag.steps.len()];
     for job in &dag.jobs {
         jobs[job.step.index()] += 1;
     }
-    let steps: Vec<String> = dag
+    // The calls each step is nested in, outermost first, and each call's
+    // jobs in all.
+    let chains: Vec<Vec<CallId>> = dag
         .steps
         .iter()
-        .map(|step| format!("{} = {}", step.outputs.join(", "), step.operation))
+        .map(|step| {
+            let mut chain: Vec<CallId> =
+                std::iter::successors(step.origin.as_ref().map(|origin| origin.call), |call| {
+                    pipeline.calls[call.index()].parent
+                })
+                .collect();
+            chain.reverse();
+            chain
+        })
         .collect();
-    let total = dag.jobs.len().to_string();
-    let count_width = total.len().max("jobs".len());
-    let step_width = steps
-        .iter()
-        .map(String::len)
-        .max()
-        .unwrap_or(0)
-        .max("step".len());
+    let mut in_call = vec![0_usize; pipeline.calls.len()];
+    for (chain, count) in chains.iter().zip(&jobs) {
+        for call in chain {
+            in_call[call.index()] += count;
+        }
+    }
+    // Each row: its count, its step indented under its calls, its stage.
+    let mut rows: Vec<(String, String, &str)> = vec![("jobs".into(), "step".into(), "stage")];
+    let mut open: &[CallId] = &[];
+    for (((step, chain), count), stage) in dag.steps.iter().zip(&chains).zip(&jobs).zip(
+        dag.steps
+            .iter()
+            .map(|step| step.stage.as_deref().unwrap_or("")),
+    ) {
+        let shared = open
+            .iter()
+            .zip(chain)
+            .take_while(|(left, right)| left == right)
+            .count();
+        for (depth, call) in open.iter().enumerate().skip(shared).rev() {
+            rows.push((
+                in_call[call.index()].to_string(),
+                format!("{}in this call", "  ".repeat(depth + 1)),
+                "",
+            ));
+        }
+        for (depth, call) in chain.iter().enumerate().skip(shared) {
+            let call = &pipeline.calls[call.index()];
+            rows.push((
+                String::new(),
+                format!(
+                    "{}{} = {}",
+                    "  ".repeat(depth),
+                    call.outputs.join(", "),
+                    call.operation
+                ),
+                stage,
+            ));
+        }
+        rows.push((
+            count.to_string(),
+            format!(
+                "{}{} = {}",
+                "  ".repeat(chain.len()),
+                step.outputs.join(", "),
+                step.operation
+            ),
+            stage,
+        ));
+        open = chain;
+    }
+    for (depth, call) in open.iter().enumerate().rev() {
+        rows.push((
+            in_call[call.index()].to_string(),
+            format!("{}in this call", "  ".repeat(depth + 1)),
+            "",
+        ));
+    }
+    rows.push((dag.jobs.len().to_string(), "total".into(), ""));
+    let count_width = rows.iter().map(|row| row.0.len()).max().unwrap_or(0);
+    let step_width = rows.iter().map(|row| row.1.len()).max().unwrap_or(0);
     let staged = dag.steps.iter().any(|step| step.stage.is_some());
     let mut text = String::new();
-    let mut row = |count: &str, step: &str, stage: &str| {
+    for (count, step, stage) in &rows {
         let line = if staged {
             format!("{count:>count_width$}  {step:<step_width$}  {stage}")
         } else {
@@ -94,16 +170,7 @@ pub fn render_step_counts(dag: &ResolvedDag) -> String {
         };
         text.push_str(line.trim_end());
         text.push('\n');
-    };
-    row("jobs", "step", "stage");
-    for ((step, name), count) in dag.steps.iter().zip(&steps).zip(&jobs) {
-        row(
-            &count.to_string(),
-            name,
-            step.stage.as_deref().unwrap_or(""),
-        );
     }
-    row(&total, "total", "");
     text
 }
 
@@ -189,9 +256,15 @@ fn render_commands(dag: &BoundDag) -> String {
 }
 
 /// A job's commands in the order a backend runs them: its input checks,
-/// `verify` lines, `run` line, then its output checks.
+/// `verify` lines, `run` line, then its output checks. A job a call made
+/// first says where it comes from.
 fn push_command_lines(text: &mut String, dag: &BoundDag, job: &BoundJob) {
     let step = dag.step(job);
+    if let Some(origin) = &step.origin {
+        text.push_str("  from:   ");
+        push_origin(text, dag, origin);
+        text.push('\n');
+    }
     let checks = |text: &mut String, when: When| {
         for check in job
             .checks
@@ -218,6 +291,40 @@ fn push_command_lines(text: &mut String, dag: &BoundDag, job: &BoundJob) {
     checks(text, When::After);
 }
 
+/// Each call a step is nested in, outermost first, then the body's line
+/// that made it:
+///
+/// ```text
+/// m = L::summarise (main.spit line 8), m::cleaned = L::tidy (libs/lib.spit line 13), libs/lib.spit line 10
+/// ```
+fn push_origin(text: &mut String, dag: &BoundDag, origin: &StepCall) {
+    let place = |file: Option<usize>, line: usize| match file {
+        Some(file) => format!("{} line {line}", dag.pipeline_files[file].path),
+        None => format!("line {line}"),
+    };
+    let mut chain = vec![&dag.calls[origin.call]];
+    while let Some(parent) = chain.last().and_then(|call| call.parent) {
+        chain.push(&dag.calls[parent]);
+    }
+    for call in chain.iter().rev() {
+        write!(
+            text,
+            "{} = {} ({}), ",
+            call.instance,
+            call.operation,
+            place(call.at_file, call.at_line)
+        )
+        .expect("writing to a String");
+    }
+    text.push_str(&place(chain[0].file, origin.line));
+}
+
+/// A call to an operation carried out by steps as written, its arguments
+/// left out: `m, t = summarise(...)`.
+pub fn render_call(call: &Call) -> String {
+    format!("{} = {}(...)", call.outputs.join(", "), call.operation)
+}
+
 /// A command's arguments, each with its paths filled in and quoted as a
 /// shell reads it, separated by spaces.
 fn push_command(text: &mut String, dag: &BoundDag, command: &[Argument]) {
@@ -235,8 +342,8 @@ fn push_command(text: &mut String, dag: &BoundDag, command: &[Argument]) {
 }
 
 /// What can be made from a DAG's sources, what cannot, and why.
-pub fn render_artifacts(report: &ArtifactReport) -> String {
-    Report(report).to_string()
+pub fn render_artifacts(pipeline: &Pipeline, report: &ArtifactReport) -> String {
+    Report { pipeline, report }.to_string()
 }
 
 /// How many sources no job reads, and which: each by its identity when
@@ -352,11 +459,16 @@ impl JobWriter {
     }
 }
 
-struct Report<'a>(&'a ArtifactReport);
+/// A report, and the pipeline it was resolved from, which names the calls
+/// its incomplete jobs came from.
+struct Report<'a> {
+    pipeline: &'a Pipeline,
+    report: &'a ArtifactReport,
+}
 
 impl fmt::Display for Report<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let report = self.0;
+        let report = self.report;
         let dag = &report.dag;
         let held_back: BTreeSet<_> = report
             .coverage
@@ -397,15 +509,24 @@ impl Report<'_> {
         f: &mut fmt::Formatter<'_>,
         held_back: &BTreeSet<(&str, &EntityBinding)>,
     ) -> fmt::Result {
-        let dag = &self.0.dag;
-        let incomplete = &self.0.incomplete;
+        let dag = &self.report.dag;
+        let incomplete = &self.report.incomplete;
         let count: usize = incomplete.iter().map(|job| job.outputs.len()).sum();
         writeln!(f, "\nIncomplete artifacts: {count}")?;
         for job in incomplete {
             let stage = in_stage(job.stage.as_deref());
             for artifact in &job.outputs {
                 let artifact = typed_artifact(dag, artifact.view());
-                writeln!(f, "  {artifact}  ({}{stage})", job.operation)?;
+                write!(f, "  {artifact}  ({}{stage}", job.operation)?;
+                if let Some(call) = job.call.map(|call| self.pipeline.written_call(call)) {
+                    write!(
+                        f,
+                        ", in `{}` on line {}",
+                        render_call(call),
+                        call.place.line
+                    )?;
+                }
+                writeln!(f, ")")?;
             }
             for gap in &job.gaps {
                 match gap {
@@ -428,11 +549,11 @@ impl Report<'_> {
 
     /// The sources no job reads, when there are any.
     fn write_unused(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let unused = self.0.unused_sources();
+        let unused = self.report.unused_sources();
         if unused.is_empty() {
             return Ok(());
         }
-        let dag = &self.0.dag;
+        let dag = &self.report.dag;
         writeln!(f, "\nUnused sources: {}", unused.len())?;
         for source in unused {
             writeln!(f, "  {}", typed_artifact(dag, dag.artifact(source)))?;
@@ -442,7 +563,7 @@ impl Report<'_> {
 
     /// Each missing requirement, and the sources it holds back.
     fn write_coverage(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let coverage = &self.0.coverage;
+        let coverage = &self.report.coverage;
         if coverage.is_empty() {
             return Ok(());
         }
@@ -453,7 +574,7 @@ impl Report<'_> {
                 let sources: Vec<_> = gap
                     .sources
                     .iter()
-                    .map(|source| render_artifact(&self.0.dag, source.view()))
+                    .map(|source| render_artifact(&self.report.dag, source.view()))
                     .collect();
                 writeln!(f, "    holds back: {}", sources.join(", "))?;
             }

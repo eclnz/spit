@@ -8,7 +8,7 @@
 use std::collections::BTreeMap;
 
 use crate::command::CommandError;
-use crate::model::{CheckDef, CheckUse, Invocation, OperationDef, Pipeline, PipelineIndex};
+use crate::model::{CheckDef, CheckUse, Invocation, OperationDef, Pipeline, PipelineIndex, Port};
 use crate::parser::SourceMap;
 use crate::span::Place;
 use crate::template::Part;
@@ -189,6 +189,14 @@ pub(crate) fn step_checks<'p>(
             .find(|check| check.name == name)
             .expect("collect_checks makes sure every check use names a check")
     };
+    // What the step adds to its operation's checks, on one port.
+    let added = |at: Port| {
+        invocation
+            .map_or(&[][..], |invocation| invocation.checks.as_slice())
+            .iter()
+            .filter(move |(port, _)| *port == at)
+            .map(|(_, check)| check)
+    };
     let mut checks = Vec::new();
     for (port, input) in operation.inputs.iter().enumerate() {
         let product = invocation.and_then(|invocation| invocation.inputs.get(port));
@@ -198,7 +206,12 @@ pub(crate) fn step_checks<'p>(
             .map_or(&[][..], |product| product.checks.as_slice());
         let produced = product.and_then(|name| producer_checks(index, name));
         let mut seen: Vec<&CheckUse> = Vec::new();
-        for used in input.checks.iter().chain(source) {
+        for used in input
+            .checks
+            .iter()
+            .chain(added(Port::Input(port)))
+            .chain(source)
+        {
             if seen.contains(&used) {
                 continue;
             }
@@ -209,12 +222,19 @@ pub(crate) fn step_checks<'p>(
                 check: find(&used.check),
                 arguments: &used.arguments,
                 written: used.to_string(),
-                covered: produced.is_some_and(|checks| checks.contains(used)),
+                covered: produced
+                    .as_ref()
+                    .is_some_and(|checks| checks.contains(&used)),
             });
         }
     }
     for (port, output) in operation.outputs.iter().enumerate() {
-        for used in &output.checks {
+        let mut seen: Vec<&CheckUse> = Vec::new();
+        for used in output.checks.iter().chain(added(Port::Output(port))) {
+            if seen.contains(&used) {
+                continue;
+            }
+            seen.push(used);
             checks.push(StepCheck {
                 when: When::After,
                 port,
@@ -228,9 +248,23 @@ pub(crate) fn step_checks<'p>(
     checks
 }
 
-/// The checks the step that makes `product` runs on it after its command.
-fn producer_checks<'p>(index: &PipelineIndex<'p>, product: &str) -> Option<&'p [CheckUse]> {
+/// The checks the step that makes `product` runs on it after its command:
+/// its operation's on that output, and those the step adds.
+fn producer_checks<'p>(index: &PipelineIndex<'p>, product: &str) -> Option<Vec<&'p CheckUse>> {
     let (invocation, port) = index.producer(product)?;
     let operation = index.operation(&invocation.operation)?;
-    Some(&operation.outputs.get(port)?.checks)
+    let added = invocation
+        .checks
+        .iter()
+        .filter(|(at, _)| *at == Port::Output(port))
+        .map(|(_, check)| check);
+    Some(
+        operation
+            .outputs
+            .get(port)?
+            .checks
+            .iter()
+            .chain(added)
+            .collect(),
+    )
 }

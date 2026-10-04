@@ -1,0 +1,24 @@
+# The ACT example's preprocessing and registration, as two calls to
+# operations a library carries out by steps. `spit dag act.spitin --counts`
+# lists each call's steps under it; `--commands` starts each job with the
+# call and library line it came from.
+use clean_dwi_session, register_to_dwi from mrtrix_dwi.spit as mrx
+
+path: derivatives/{@stage}/{@product}/{@entities}
+ext: .mif
+
+source raw_dwi : MRI<DWI,Acquired> .nii.gz [sub, ses, run]
+source dwi_bvec : GradientDirections .bvec beside raw_dwi
+source dwi_bval : GradientAmplitudes .bval beside raw_dwi
+source dwi_json : AcquisitionMetadata .json beside raw_dwi
+
+source reverse_b0 : MRI<B0,Acquired> .nii.gz [sub, ses]
+source reverse_b0_json : AcquisitionMetadata .json beside reverse_b0
+
+source t1w : MRI<T1w,Anatomical> [sub, ses]
+
+stage preprocess:
+    corrected_dwi, session_b0 = mrx::clean_dwi_session(raw_dwi, dwi_bvec, dwi_bval, dwi_json, reverse_b0, reverse_b0_json)
+
+stage anatomy:
+    t1w_dwi, t1_to_dwi = mrx::register_to_dwi(t1w, session_b0)

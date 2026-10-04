@@ -138,6 +138,56 @@ The first word of a command must be an executable available on `PATH` (or an exe
 command process: process_tool {image} {@output}
 ```
 
+### Operations carried out by steps
+
+An operation may be carried out by steps instead of a command: its header ends in `:`, and its steps are indented beneath it. A call to it looks like any other call, and becomes the body's steps over the caller's products, each with its own jobs:
+
+```text
+operation clean(x: Lines, t: Table) -> Lines
+command clean: clean {x} {t} {@output}
+operation merge(xs: many Lines) -> Lines
+command merge: merge {xs} {@output}
+operation count(x: Lines) -> Count
+command count: wc {x} {@output}
+
+operation summarise(reads: Lines, table: Table) -> (merged: Lines, total: Count):
+    cleaned = clean(reads, table)
+    merged = merge(cleaned @ vary(lane))
+    total = count(merged)
+
+first, first_total = summarise(raw, calibration @ where(revision=2))
+```
+
+The body reads the operation's inputs, by their port names, and the products its earlier steps make, and it makes each named output once. Its outputs are the products the caller names: here `first` and `first_total`. A product the body makes for itself is filed under the call's first output, so `cleaned` is `first::cleaned`, written `first.cleaned` in a path, and a second call of `summarise` files its own apart. So a call's first output cannot also be an import's alias: `use parts.spit as first` with the call above is an error at the call. Only the outputs are the caller's to read: a step that reads `first::cleaned` is an error that says to make it an output.
+
+A selector the caller gives an input holds wherever the body reads it, beside the body's own: above, every `clean` job reads revision 2, and `merge` collects each group's lanes. A call in a stage puts every step it makes in that stage. A body may call another operation with a body, which is expanded in turn; every operation a body calls is declared before it. An output written with a type, as `total: Count`, gives the caller's product that type, and SPIT checks it against the step that makes it. An error in a step the call makes, such as a type the step does not accept or an input the data lacks, is reported at the call, named before the message. It points at the argument the caller gave when the failing input reads one of the operation's inputs, at the product the caller names when it is one of the outputs, and at the whole call otherwise. Below it, a `-->` line gives each call it is nested in and the body's step, with their file and line:
+
+```text
+error: line 4, column 21: in `m, t = L::summarise(...)`: type mismatch at `L::clean.x`: product `cal` is Table, expected Lines
+  --> libs/lib.spit: line 13, column 15: the call of `L::tidy` in the body of `L::summarise`
+  --> libs/lib.spit: line 10, column 9: the step in the body of `L::tidy`
+```
+
+`spit check --json` gives the same places as the diagnostic's `related` list. `spit artifacts` names the call beside each artifact a call's step cannot make, as ``(L::clean, in `m, t = L::summarise(...)` on line 8)``, and the reasons in a partial `.spitdag`'s `left_out` start with it.
+
+A check on an input or output of such an operation, as `reads: Lines @ check(lines(2))`, runs on every step that reads that input or makes that output, beside the checks of the step's own operation; the same check on one artifact runs once. Imported, it brings the operations its steps call, and their commands and checks, under the same prefix, so `use summarise from lib.spit as L` brings `L::clean` too.
+
+`spit dag --counts` lists a call's steps under it, with the call's jobs in all, so `summarise` over two groups of two lanes shows:
+
+```text
+jobs  step
+      first, first_total = summarise
+   4    first::cleaned = clean
+   2    first = merge
+   2    first_total = count
+   8    in this call
+   8  total
+```
+
+`spit dag --commands` starts each job a call made with a `from:` line: each call the job is nested in, outermost first, as `first = summarise (pipeline.spit line 19)`, then the file and line of the body's step that made it. The `.spitdag` holds the same, under each job's [`origin`](spitdag.md#where-jobs-come-from).
+
+An operation with a body names its outputs, as `-> (result: Type)`, since its steps assign them by name. An output takes its extension, folder and place from the step that writes it, so the header gives only its name and type. Such an operation takes no `command` or `verify` line; its steps' operations have their own.
+
 ## Checks
 
 A `check` tests one artifact once its file exists, with the tools that understand it. Declare it once, then attach it with `@ check(...)` where it applies:
@@ -214,7 +264,7 @@ A step outside every stage stays valid.
 
 ## Reuse definitions
 
-Import operations, source families and [checks](#checks) from another `.spit` file. The path is relative to the file containing the `use` line. An operation brings its `command`; a source brings its path rule; either brings the checks it attaches. A source with companions declared [`beside`](#sidecar-files) it brings those companions with it. A companion cannot be imported alone: import its main source. A recipe names an imported main source as `text::raw_photo` when the import uses `as text`. Imports do not bring pipeline steps.
+Import operations, source families and [checks](#checks) from another `.spit` file. The path is relative to the file containing the `use` line. An operation brings its `command`; a source brings its path rule; either brings the checks it attaches. A source with companions declared [`beside`](#sidecar-files) it brings those companions with it. A companion cannot be imported alone: import its main source. A recipe names an imported main source as `text::raw_photo` when the import uses `as text`. An [operation carried out by steps](#operations-carried-out-by-steps) brings the operations its steps call. Imports do not bring pipeline steps.
 
 ```text
 use text.spit as text

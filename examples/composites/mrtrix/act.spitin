@@ -1,0 +1,12 @@
+pipeline act.spit
+
+# The ACT example's mock data, in BIDS layout.
+root ../../commands/mrtrix3_act/mrtrix3_mock_data
+
+path t1w: sub-{sub}/ses-{ses}/anat/sub-{sub}_ses-{ses}_T1w.nii.gz
+path raw_dwi: sub-{sub}/ses-{ses}/dwi/sub-{sub}_ses-{ses}_run-{run}_dwi.nii.gz
+path reverse_b0: sub-{sub}/ses-{ses}/fmap/sub-{sub}_ses-{ses}_dir-PA_epi.nii.gz
+
+require [sub, ses] where raw_dwi count>=2
+require [sub, ses] where reverse_b0 count=1
+require [sub, ses] where t1w count=1

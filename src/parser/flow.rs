@@ -4,24 +4,39 @@
 
 use crate::model::{CommandRole, Invocation};
 
+use super::body::OpenBody;
 use super::declarations::{
     parse_dimension_order, parse_discover, parse_invocation_parts, parse_path, parse_product,
 };
 use super::keyword::{removed_section, Keyword};
 use super::lexical::{comma_items, extension, identifier, strip_comment};
 use super::source_map::{name_place, step_place};
-use super::{FlowOutput, FlowStep, ParseError, StatementKind, Syntax, SHELL_SOURCE_REMOVED};
+use super::{FlowStep, ParseError, StatementKind, StepOutput, Syntax, SHELL_SOURCE_REMOVED};
 
 pub(super) fn parse_flow(text: &str) -> Syntax {
     let mut syntax = Syntax::default();
-    let mut stages = OpenStages::default();
+    let mut open = Open::default();
     for (index, original) in text.lines().enumerate() {
-        if let Err(error) = flow_line(&mut syntax, &mut stages, original, index + 1) {
+        if let Err(error) = flow_line(&mut syntax, &mut open, original, index + 1) {
             syntax.error = Some(error.locate(original));
             return syntax;
         }
     }
+    if let Some(body) = open.body {
+        let header = body.header().to_owned();
+        if let Err(error) = body.close(&mut syntax) {
+            syntax.error = Some(error.locate(&header));
+        }
+    }
     syntax
+}
+
+/// The blocks open at a line of the flow form: its stages, and an
+/// operation's body.
+#[derive(Default)]
+struct Open {
+    stages: OpenStages,
+    body: Option<OpenBody>,
 }
 
 /// The stages open at a line of the flow form, outermost first.
@@ -115,7 +130,7 @@ fn open_stage(
 
 fn flow_line(
     syntax: &mut Syntax,
-    stages: &mut OpenStages,
+    open: &mut Open,
     original: &str,
     number: usize,
 ) -> Result<(), ParseError> {
@@ -123,13 +138,22 @@ fn flow_line(
     if line.is_empty() {
         return Ok(());
     }
+    let Open { stages, body } = open;
+    let indent = original.len() - original.trim_start().len();
+    // A line indented beneath an operation's header is a step of its body;
+    // the next that is not ends it.
+    if let Some(open) = body.as_mut() {
+        if open.holds(indent) {
+            return open.line(original, line, number, indent);
+        }
+        body.take().expect("a body is open").close(syntax)?;
+    }
     if let Some(instead) = removed_section(line) {
         return Err(ParseError::new(
             number,
             format!("SPIT no longer reads `{line}` sections; {instead}"),
         ));
     }
-    let indent = original.len() - original.trim_start().len();
     stages.enter(indent, number)?;
     let stage = stages.current().map(str::to_owned);
     let top_level_only = |what: &str| {
@@ -167,7 +191,23 @@ fn flow_line(
             StatementKind::Discover(parse_discover(declaration.trim(), number)?)
         }
         Some((Keyword::Operation, declaration)) => {
-            StatementKind::operation(original, declaration.trim(), number, stage.clone())?
+            let kind = StatementKind::operation(original, declaration, number, stage.clone())?;
+            // A header ending in `:` opens the body of steps that carry the
+            // operation out.
+            if let (Some(_), StatementKind::Operation(operation, place, stage)) =
+                (declaration.trim().strip_suffix(':'), &kind)
+            {
+                *body = Some(OpenBody::open(
+                    operation.clone(),
+                    place.clone(),
+                    stage.clone(),
+                    original,
+                    number,
+                    indent,
+                ));
+                return Ok(());
+            }
+            kind
         }
         Some((keyword @ (Keyword::Require | Keyword::Skip | Keyword::Drop), _)) => {
             top_level_only(if keyword == Keyword::Require {
@@ -265,7 +305,10 @@ fn flow_statement(
 
 /// Parse `outputs = operation(inputs)`, where each output may declare its
 /// product's type and dimensions.
-fn parse_flow_step(line: &str, number: usize) -> Result<(Invocation, Vec<FlowOutput>), ParseError> {
+pub(super) fn parse_flow_step(
+    line: &str,
+    number: usize,
+) -> Result<(Invocation, Vec<StepOutput>), ParseError> {
     let (left, call) = line
         .split_once('=')
         .ok_or_else(|| ParseError::new(number, "expected flow step: output = operation(inputs)"))?;
@@ -284,7 +327,7 @@ fn parse_flow_step(line: &str, number: usize) -> Result<(Invocation, Vec<FlowOut
     Ok((invocation, outputs))
 }
 
-fn parse_flow_output(left: &str, number: usize) -> Result<FlowOutput, ParseError> {
+fn parse_flow_output(left: &str, number: usize) -> Result<StepOutput, ParseError> {
     if left.contains(':') {
         let product = parse_product(left, number)?;
         if !product.checks.is_empty() {
@@ -294,13 +337,13 @@ fn parse_flow_output(left: &str, number: usize) -> Result<FlowOutput, ParseError
             )
             .at_token(left));
         }
-        Ok(FlowOutput {
+        Ok(StepOutput {
             name: product.name,
             artifact_type: Some(product.artifact_type),
             dimensions: Some(product.dimensions),
         })
     } else {
-        Ok(FlowOutput {
+        Ok(StepOutput {
             name: identifier(left, number, "output product")?.to_owned(),
             artifact_type: None,
             dimensions: None,
