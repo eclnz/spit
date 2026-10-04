@@ -1,10 +1,10 @@
 pipeline mrtrix3_act.spit
 root mrtrix3_mock_data
 
-# Where this dataset keeps each source, in BIDS layout. A sidecars group
-# takes one stem, which each member completes with its extension.
-path dwi: sub-{sub}/ses-{ses}/dwi/sub-{sub}_ses-{ses}_run-{run}_dwi
-path reverse_b0_files: sub-{sub}/ses-{ses}/fmap/sub-{sub}_ses-{ses}_dir-PA_epi
+# Where this dataset keeps each main source, in BIDS layout. Companion
+# sources follow the NIfTI source path with their own suffix.
+path raw_dwi: sub-{sub}/ses-{ses}/dwi/sub-{sub}_ses-{ses}_run-{run}_dwi.nii.gz
+path reverse_b0: sub-{sub}/ses-{ses}/fmap/sub-{sub}_ses-{ses}_dir-PA_epi.nii.gz
 path t1w: sub-{sub}/ses-{ses}/anat/sub-{sub}_ses-{ses}_T1w.nii.gz
 path source_lut: config/source_lut.txt
 path target_lut: config/target_lut.txt

@@ -30,7 +30,6 @@ pub enum Word {
     UseAs,
     UseFrom,
     Dimensions,
-    Sidecars,
     Many,
     Beside,
     Vary,
@@ -89,7 +88,7 @@ impl Word {
 }
 
 /// Every word's documentation, in the order of [`Word`].
-pub static DOCS: [Doc; 47] = [
+pub static DOCS: [Doc; 46] = [
     Doc {
         name: "source",
         kind: "keyword",
@@ -168,13 +167,6 @@ pub static DOCS: [Doc; 47] = [
         summary: "Declares the pipeline's dimension order, once at the top level, for a product holding two dimensions that no source orders. It names every dimension once, and each source lists its dimensions in that order. The order sorts a `many` input's artifacts and writes `{@entities}`.",
     },
     Doc {
-        name: "sidecars",
-        kind: "keyword",
-        anchor: "sidecar-files",
-        example: "sidecars photo [site, shot]:\n    path: site-{site}/shot-{shot}\n    source raw_photo : Image .raw\n    source photo_json .json",
-        summary: "Declares sources whose files share dimensions and a path stem, and differ only by extension. Each indented member is an ordinary source whose path is the stem and its extension. The block's `path:` line gives the stem, or a recipe gives it as `path name:`. `spit inputs` warns where it finds some of a group's files and not the others.",
-    },
-    Doc {
         name: "many",
         kind: "keyword",
         anchor: "operations-and-commands",
@@ -184,9 +176,9 @@ pub static DOCS: [Doc; 47] = [
     Doc {
         name: "beside",
         kind: "keyword",
-        anchor: "files-a-tool-writes-beside-another",
-        example: "operation strip(t1: Image) -> (brain: Image .nii.gz, mask: Image \"_mask.nii.gz\" beside brain)",
-        summary: "An output the tool writes next to another without being told where. Its path is its sibling's, without the sibling's extension, then the suffix: beside `sub-01_brain.nii.gz`, `mask` is `sub-01_brain_mask.nii.gz`. It may be left out of the command, and has no path rule of its own.",
+        anchor: "sidecar-files",
+        example: "source image .nii.gz [sub]\nsource metadata .json beside image\noperation strip(t1: Image) -> (brain: Image .nii.gz, mask: Image \"_mask.nii.gz\" beside brain)",
+        summary: "A source or output whose file shares another file's stem. The suffix replaces the other file's extension: beside `sub-01_brain.nii.gz`, a `.json` companion is `sub-01_brain.json`. A source inherits the other's dimensions and path; an output is written by the same job and may be omitted from its command.",
     },
     Doc {
         name: "vary",
@@ -508,7 +500,7 @@ fn statement(line: &str) -> Option<(Word, usize)> {
             Keyword::Ext => Word::Ext,
             Keyword::Stage => Word::Stage,
             Keyword::Dimensions => Word::Dimensions,
-            Keyword::Sidecars => Word::Sidecars,
+            Keyword::Sidecars => return None,
             Keyword::Skip | Keyword::ShellSource => return None,
         };
         let length = if word == Word::Ext {
@@ -592,6 +584,9 @@ fn rule_word(code: &str, range: Range<usize>, statement: Option<Word>) -> Option
     match (statement?, text) {
         (Word::Operation, "many") if before.ends_with(':') => Some(Word::Many),
         (Word::Operation, "beside") if before.contains("->") => Some(Word::Beside),
+        (Word::Source, "beside") if before.split_whitespace().count() > 1 && spaced => {
+            Some(Word::Beside)
+        }
         (Word::Use, "as") if spaced => Some(Word::UseAs),
         (Word::Use, "from") if spaced => Some(Word::UseFrom),
         (Word::Discover, "from") if after.starts_with("dirs ") => Some(Word::DiscoverFrom),

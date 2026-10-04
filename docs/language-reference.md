@@ -214,7 +214,7 @@ A step outside every stage stays valid.
 
 ## Reuse definitions
 
-Import operations, source families, [`sidecars` groups](#sidecar-files) and [checks](#checks) from another `.spit` file. The path is relative to the file containing the `use` line. An operation brings its `command`; a source brings its path rule; either brings the checks it attaches. A `sidecars` group comes whole, with its members as sources and its stem if it gives one, so a recipe names it as `text::photo` and a binding that has some of its members is reported as where the group is written. A member cannot be imported alone: name its group. Imports do not bring pipeline steps.
+Import operations, source families and [checks](#checks) from another `.spit` file. The path is relative to the file containing the `use` line. An operation brings its `command`; a source brings its path rule; either brings the checks it attaches. A source with companions declared [`beside`](#sidecar-files) it brings those companions with it. A companion cannot be imported alone: import its main source. A recipe names an imported main source as `text::raw_photo` when the import uses `as text`. Imports do not bring pipeline steps.
 
 ```text
 use text.spit as text
@@ -254,7 +254,7 @@ path: derivatives/sub-{sub}[/ses-{ses}][/{@stage}]/{@labels}_{@product}
 ext: .nii.gz
 ```
 
-For `long[sub=01]` outside every stage, that becomes `derivatives/sub-01/sub-01_long.nii.gz`; for `mc[sub=01,ses=01,run=2]` in `func`, it becomes `derivatives/sub-01/ses-01/func/sub-01_ses-01_run-2_mc.nii.gz`. A product with no dimensions can use `[{@labels}_]{@product}`. Groups work in every path rule: a default, a stage's default, a product's own rule, a source's rule in a pipeline or recipe, and a `sidecars` stem, though not in a `discover` pattern, where every directory has each dimension. A group is decided per product, before any data is read, so each product has one plain template. Groups cannot nest and must contain a placeholder that could be absent; `[[` and `]]` write literal brackets. `spit check --path-rules` and `check --json` show each product's resolved template before any data is read.
+For `long[sub=01]` outside every stage, that becomes `derivatives/sub-01/sub-01_long.nii.gz`; for `mc[sub=01,ses=01,run=2]` in `func`, it becomes `derivatives/sub-01/ses-01/func/sub-01_ses-01_run-2_mc.nii.gz`. A product with no dimensions can use `[{@labels}_]{@product}`. Groups work in every path rule: a default, a stage's default, a product's own rule, a source's rule in a pipeline or recipe, and the path of a source with companions, though not in a `discover` pattern, where every directory has each dimension. A group is decided per product, before any data is read, so each product has one plain template. Groups cannot nest and must contain a placeholder that could be absent; `[[` and `]]` write literal brackets. `spit check --path-rules` and `check --json` show each product's resolved template before any data is read.
 
 Path rules are checked when the pipeline is loaded, even for products with no resolved jobs. SPIT rejects unbalanced braces, a dimension the product does not declare outside an optional group, a dimension no product declares even inside a group, a rule that omits one of the product's dimensions (use `{@entities}`, `{@labels}`, or name each one), two products whose rules give the same path for the same entities, such as a default rule without `{@product}`, and a rule that puts files inside another product's file path, such as `in/{id}.txt/out.txt` beside `in/{id}.txt`, or inside a [folder](#folders) a job writes. A path must be relative, name a file rather than end in `/`, and contain no empty, `.`, or `..` directory. A source no rule covers is reported by `spit check` on a recipe and by `dag`, and collisions between resolved artifact paths once jobs are bound. SPIT warns when two artifacts' paths differ only in letter case, such as `id=A` and `id=a`: where case is ignored, as by default on macOS and Windows, they are one file.
 
@@ -347,45 +347,38 @@ command recon: recon-all -i {t1} -sd {subject.dir} -s {subject.stem}
 
 For `subject[sub=01]`, at `out/subject/sub=01`, this passes `-sd out/subject -s sub=01`. `spit dag --paths` shows a folder's path with a `/` after it, `spit check --path-rules` names it `(source folder)` or `(output folder)`, and the `.spitdag` gives each artifact a [`kind`](spitdag.md#artifact).
 
-A job owns the folder it writes, so nothing else may be written in it or read from it: a path rule that puts another product's files inside a folder a job writes is an error, as is one that puts an output inside a source folder. A source may sit in a source folder, such as `dicom/sub={sub}/info.json` beside the `dicom` folder above, since no job writes either. A folder is not written [`beside`](#files-a-tool-writes-beside-another) another output, nor has an output beside it, and a member of a [`sidecars`](#sidecar-files) group is a file.
+A job owns the folder it writes, so nothing else may be written in it or read from it: a path rule that puts another product's files inside a folder a job writes is an error, as is one that puts an output inside a source folder. A source may sit in a source folder, such as `dicom/sub={sub}/info.json` beside the `dicom` folder above, since no job writes either. A folder is not written [`beside`](#files-a-tool-writes-beside-another) another output, nor has an output beside it, and a source declared [`beside`](#sidecar-files) another is a file.
 
 ### Sidecar files
 
-Files that travel together, such as an image and its JSON metadata, often share a name and differ only by extension. A `sidecars` block declares such sources once, with the dimensions they share, and an indented `path:` line gives the path stem they share:
+Files that travel together often share a name and differ by extension. Declare the main file as a source, then declare each companion `beside` it:
 
-```text
-sidecars photo [site, visit, shot]:
-    path: site-{site}/visit-{visit}/photos/shot-{shot}
-    source raw_photo : Image<Photo,Captured> .raw
-    source photo_gps : GpsTrack .gpx
-    source photo_json : CaptureMetadata .json
+```spit
+source raw_photo : Image<Photo,Captured> .raw [site, visit, shot]
+path raw_photo: site-{site}/visit-{visit}/photos/shot-{shot}.raw
+source photo_gps : GpsTrack .gpx beside raw_photo
+source photo_json : CaptureMetadata .json beside raw_photo
 ```
 
-Each member is an ordinary source with the group's dimensions, whose path is the stem and its extension, as `site-{site}/visit-{visit}/photos/shot-{shot}.gpx`; steps read it by name, as any other source. Write each member indented beneath the header as a source that declares its extension, `source name : Type .ext`, or `source name .ext` untyped. The `path:` line comes before the members, once, and the next line that is not indented ends the block. A group with no dimensions names one set of files, as `sidecars config:` with `path: config/settings`.
+The companion is an ordinary source that a step reads by name. It inherits `raw_photo`'s dimensions and path stem: `photo_gps` above reads `site-{site}/visit-{visit}/photos/shot-{shot}.gpx`. Declare the main source first. It must be a file with an extension; a companion cannot itself be the main source of another companion. A companion has no dimensions or path rule of its own. An extension such as `.json` replaces the main file's extension; a quoted suffix such as `"_mask.nii.gz"` is appended to its stem.
 
-Without a `path:` line, the stem is the dataset's to give: a [recipe](#recipes) names the group as it would a source, and its members take the stem and their extensions as before:
+The path can come from a [recipe](#recipes) when the layout varies by dataset. Name the main source and give its complete file path, including its extension:
 
-```text
+```spit
 # survey.spit
-sidecars photo [site, visit, shot]:
-    source raw_photo : Image<Photo,Captured> .raw
-    source photo_json : CaptureMetadata .json
+source raw_photo : Image<Photo,Captured> .raw [site, visit, shot]
+source photo_json : CaptureMetadata .json beside raw_photo
 
 # dataset.spitin
 pipeline survey.spit
-path photo: site-{site}/visit-{visit}/photos/shot-{shot}
+path raw_photo: site-{site}/visit-{visit}/photos/shot-{shot}.raw
 ```
 
-A recipe's default `path:` covers a group with no stem as one product named for the group, so `path: data/{site}/{visit}/{shot}/{@product}` finds `data/a/1/3/photo.raw` and `data/a/1/3/photo.json`. The `.spitout` writes each member's rule under `source_paths:`.
+A recipe's default `path:` also places the main source. For `path: data/{site}/{visit}/{shot}/{@product}`, the files are `data/a/1/3/raw_photo.raw` and `data/a/1/3/raw_photo.json`. The `.spitout` records the main source's path under `source_paths:`; the companion's path is derived from it. When importing definitions, import the main source to bring all its companions. With an alias, `path text::raw_photo:` names the imported main source.
 
-A block belongs at the top level of a pipeline. Its members take no dimensions or path rules of their own, in the pipeline or the recipe, and no product may share the group's name, since `path photo:` names one thing. A group's stem is written in its block or in the recipe, not both; a `path photo:` line in the pipeline is an error that points to the block.
+When `spit inputs` scans a dataset, or a command reads records from a recipe or `.spitout`, it warns about each identity that holds some of these sources and lacks others, as `warning: raw_photo[site=A,visit=2,shot=3] has .raw and .gpx but no .json`. Warnings follow source declaration order, then value order. A file an `exclude` or `drop` rule removes is not counted as missing, nor is one listed under `.spitout`'s `removed:` section.
 
-When `spit inputs` scans a dataset, or a command reads records from a recipe or a `.spitout`, it warns about each place that holds some of a group's sources and not the others, as `warning: photo[site=A,visit=2,shot=3] has .raw and .gpx but no .json`, before a step fails to find the missing one. The warnings come group by group, and within a group in value order, so `shot=2` comes before `shot=10`. A file an `exclude` or `drop` rule removes is not counted as missing, nor is one a `.spitout`'s `removed:` section lists.
-
-A missing member is a warning because it matters only to a step that reads it. With `sidecars t1w [sub]` holding `anat .nii.gz` and `anat_meta .json`, and no `sub-02_T1w.json`, `brain = strip(anat)` plans every subject, while plain `dag` stops at `times = readout(anat, anat_meta)`: ``no `anat_meta` artifact for input `meta` of `readout` at [sub=02]``. SPIT never runs a job with an input left out. To plan the rest, either:
-
-- run `dag --partial`, which keeps `brain[sub=02]` and lists `times[sub=02]` with its reason under the `.spitdag`'s `left_out`; or
-- remove the subject in the recipe, with a reason, as `drop [sub] where anat_meta count=0  # no BIDS sidecar`, which removes all of `sub=02`'s inputs, `brain` included.
+A missing companion is a warning because it matters only to a step that reads it. If `brain = strip(anat)` reads only the image, it can still plan every subject; a step reading `anat_meta` fails for a subject missing its JSON file. SPIT never runs a job with an input left out. `dag --partial` plans the remaining jobs and lists the omitted ones with their reasons. A recipe may instead drop a whole subject, as `drop [sub] where anat_meta count=0`.
 
 ## Recipes
 
@@ -402,7 +395,7 @@ require [sub, ses] where image count=1
 path image: data/sub-{sub}/ses-{ses}/image.nii.gz
 ```
 
-A recipe may contain `discover`, `exclude`, `drop` and `require` rules, `path product:` rules for source products and for [`sidecars` groups](#sidecar-files) whose block gives no stem, a default `path:` rule for its sources, and `sources:`/`contexts:` records. It cannot declare sources, `sidecars` groups, operations, steps, commands, stages, imports, or `ext:`; the pipeline still declares each logical `source` with its dimensions and optional type. Rules in a pipeline are an error, and so are records.
+A recipe may contain `discover`, `exclude`, `drop` and `require` rules, `path product:` rules for source products, a default `path:` rule for its sources, and `sources:`/`contexts:` records. It cannot declare sources, operations, steps, commands, stages, imports, or `ext:`; the pipeline still declares each logical `source` with its dimensions and optional type. Rules in a pipeline are an error, and so are records.
 
 A recipe's `path:` line is the default for every source with no rule of its own, in the pipeline or the recipe. Where a dataset keeps its inputs is the dataset's to say, so the pipeline's `path:` can say where outputs go, by stage if it likes, and the recipe says where sources are:
 
@@ -452,9 +445,9 @@ A `.spit` pipeline is the reusable graph: what work to do and where its results 
 
 | Line | Pipeline | Recipe |
 | --- | --- | --- |
-| `source`, `sidecars`, `dimensions`, `operation`, `command`, `verify`, steps, `stage`, `use`, `ext:` | yes | no |
+| `source`, `dimensions`, `operation`, `command`, `verify`, steps, `stage`, `use`, `ext:` | yes | no |
 | `path product:` for a product a step makes | yes | no |
-| `path product:` for a source or a `sidecars` group | either one, not both | either one, not both |
+| `path product:` for a source that is not declared `beside` another | either one, not both | either one, not both |
 | `path:`, a default | covers outputs, and sources nothing else covers | covers sources only |
 | `pipeline`, `root`, `discover`, `exclude`, `drop`, `require`, `sources:`, `contexts:` | no | yes |
 

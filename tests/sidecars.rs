@@ -1,31 +1,27 @@
-//! A `sidecars` block declares sources that share dimensions and a path
-//! stem and differ only by extension, as a photo and its GPS track. The
-//! stem is the block's `path:` line, or else the recipe's `path name:`.
+//! A source declared beside a file source follows its path and dimensions.
+//! Companions remain ordinary sources; discovery reports incomplete sets.
 
 mod support;
 
 use std::process::Command;
 
-use spit::{parse_pipeline, PathTemplate, SidecarGroup};
+use spit::parse_pipeline;
 use support::{text, Tree};
 
 const PHOTOS: &str = "\
-sidecars photo [site, shot]:
-    path: site-{site}/shot-{shot}
-    source raw : Image .raw
-    source gps : Track .gpx  # the pose
-    source meta .json
+source raw : Image .raw [site, shot]
+path raw: site-{site}/shot-{shot}.raw
+source gps : Track .gpx beside raw  # the pose
+source meta .json beside raw
 operation load(image: Image, gps: Track, meta) -> Image
 command load: load {image} {gps} {meta} {@output}
 loaded = load(raw, gps, meta)
 ";
 
-/// `PHOTOS` with no stem, for a recipe to give one.
 const UNPLACED: &str = "\
-sidecars photo [site, shot]:
-    source raw : Image .raw
-    source gps : Track .gpx
-    source meta .json
+source raw : Image .raw [site, shot]
+source gps : Track .gpx beside raw
+source meta .json beside raw
 operation load(image: Image, gps: Track, meta) -> Image
 command load: load {image} {gps} {meta} {@output}
 loaded = load(raw, gps, meta)
@@ -53,7 +49,7 @@ fn spit(args: &[&str]) -> (bool, String, String) {
 }
 
 #[test]
-fn members_are_sources_with_the_groups_dimensions_and_stem() {
+fn companions_inherit_dimensions_and_follow_the_anchor_path() {
     let pipeline = parse_pipeline(PHOTOS).unwrap();
     for (member, extension) in [("raw", ".raw"), ("gps", ".gpx"), ("meta", ".json")] {
         let product = pipeline
@@ -64,159 +60,70 @@ fn members_are_sources_with_the_groups_dimensions_and_stem() {
         assert_eq!(product.dimensions, ["site", "shot"]);
         assert!(pipeline.is_source(member));
         assert_eq!(
-            pipeline.product_paths[member],
-            format!("site-{{site}}/shot-{{shot}}{extension}").as_str()
+            pipeline.path_template_for(member).unwrap().to_string(),
+            format!("site-{{site}}/shot-{{shot}}{extension}")
         );
     }
-    assert_eq!(
-        pipeline.sidecar_groups,
-        [SidecarGroup {
-            name: "photo".to_owned(),
-            dimensions: vec!["site".to_owned(), "shot".to_owned()],
-            members: vec![
-                ("raw".to_owned(), ".raw".to_owned()),
-                ("gps".to_owned(), ".gpx".to_owned()),
-                ("meta".to_owned(), ".json".to_owned()),
-            ],
-            stem: Some(PathTemplate::parse("site-{site}/shot-{shot}").unwrap()),
-        }]
-    );
+    assert_eq!(pipeline.sidecar_groups[0].name, "raw");
+    assert_eq!(pipeline.sidecar_groups[0].members.len(), 3);
 }
 
 #[test]
-fn a_group_without_a_stem_leaves_its_members_to_the_recipe() {
-    let pipeline = parse_pipeline(UNPLACED).unwrap();
-    assert_eq!(pipeline.sidecar_groups[0].stem, None);
-    for member in ["raw", "gps", "meta"] {
-        assert!(!pipeline.product_paths.contains_key(member));
-    }
-}
-
-#[test]
-fn a_group_ends_at_the_first_line_not_indented_beneath_it() {
+fn a_quoted_companion_suffix_is_appended_to_the_main_stem() {
     let pipeline = parse_pipeline(
-        "sidecars config:\n    path: config/settings\n    source settings .toml\n    source schema .json\n\nsource other [id]\n",
+        "source image .nii.gz [sub]\npath image: sub-{sub}_T1w.nii.gz\nsource mask \"_mask.nii.gz\" beside image\n",
     )
     .unwrap();
-    // A group may have no dimensions, for one set of files.
-    assert_eq!(pipeline.product_paths["schema"], "config/settings.json");
-    assert!(!pipeline.product_paths.contains_key("other"));
-}
-
-#[test]
-fn a_groups_lines_are_checked() {
-    for (text, message) in [
-        (
-            "sidecars photo [id]:\n    source raw : Image [id] .raw\n",
-            "takes the group's dimensions; remove its own",
-        ),
-        (
-            "sidecars photo [id]:\n    source raw : Image\n",
-            "names the extension its file adds to the stem",
-        ),
-        (
-            "sidecars photo [id]:\n    operation f(x)\n",
-            "holds only its `path:` stem and its sources",
-        ),
-        ("sidecars photo [id]:\nsource raw [id]\n", "has no sources"),
-        ("sidecars photo [id]:\n    path: p/{id}\n", "has no sources"),
-        ("sidecars photo [id]\n", "expected `sidecars name [dimensions]:`"),
-        (
-            "sidecars photo [id]: p/{id}\n    source raw .raw\n",
-            "a `sidecars` header ends at its `:`",
-        ),
-        ("sidecars photo [id]:\n    path: p/{id\n    source raw .raw\n", "unclosed `{`"),
-        (
-            "sidecars photo [id]:\n    source raw .raw\n    path: p/{id}\n",
-            "comes before its sources",
-        ),
-        (
-            "sidecars photo [id]:\n    path: p/{id}\n    path: q/{id}\n    source raw .raw\n",
-            "has one `path:` line",
-        ),
-        (
-            "sidecars photo [id]:\n    path raw: p/{id}\n    source raw .raw\n",
-            "gives its stem as `path: stem`",
-        ),
-        (
-            "sidecars photo [id]:\n    path p/{id}\n    source raw .raw\n",
-            "gives its stem as `path: stem`",
-        ),
-        (
-            "stage s:\n    sidecars photo [id]:\n",
-            "belongs at the top level",
-        ),
-        (
-            "sidecars photo [id]:\n    source raw .raw\nsidecars photo [id]:\n    source gps .gpx\n",
-            "duplicate sidecars group `photo`",
-        ),
-        (
-            "sidecars photo [id]:\n    path: p/{id}\n    source raw .raw\npath raw: elsewhere/{id}.raw\n",
-            "duplicate path template for product `raw`",
-        ),
-        (
-            "sidecars photo [id]:\n    source raw .raw\npath raw: elsewhere/{id}.raw\n",
-            "source `raw` takes its path from sidecars group `photo`",
-        ),
-        (
-            "sidecars photo [id]:\n    source raw .raw\npath photo: p/{id}\n",
-            "gives its stem on an indented `path:` line in its block",
-        ),
-        (
-            "sidecars photo [id]:\n    source raw .raw\nsource photo [id]\n",
-            "shares its name with a product",
-        ),
-        (
-            "sidecars photo [id]:\n    source raw .raw\noperation f(x) -> Y\nphoto = f(raw)\n",
-            "shares its name with a product",
-        ),
-        (
-            "sidecars photo [id]:\n    path: p/{id}\n    source raw .raw\n    source copy .raw\n",
-            "bind to the same path",
-        ),
-    ] {
-        let found = spit::diagnose(text, None);
-        assert!(
-            found.iter().any(|diagnostic| diagnostic.is_error()
-                && diagnostic.message.to_lowercase().contains(message)),
-            "{text}: {found:?}"
-        );
-    }
-    // A product may still be called `sidecars`.
-    let step = parse_pipeline("source raw [id]\noperation f(x)\nsidecars = f(raw)\n").unwrap();
-    assert!(step
-        .products
-        .iter()
-        .any(|product| product.name == "sidecars"));
-}
-
-#[test]
-fn a_recipe_cannot_declare_a_group() {
-    let error =
-        spit::parse_input_spec("pipeline a.spit\nroot .\nsidecars photo [id]:\n").unwrap_err();
-    assert!(
-        error.to_string().contains("belongs in the .spit pipeline"),
-        "{error}"
+    assert_eq!(
+        pipeline.path_template_for("mask").unwrap().to_string(),
+        "sub-{sub}_T1w_mask.nii.gz"
     );
 }
 
 #[test]
-fn a_recipe_gives_a_groups_stem() {
-    let tree = Tree::new("sidecars-recipe-stem", &FILES);
+fn source_beside_requires_a_prior_file_anchor_and_its_own_suffix() {
+    for (source, message) in [
+        ("source meta .json beside raw", "unknown source `raw`"),
+        (
+            "source raw .raw
+source meta beside raw",
+            "names what its file name ends with",
+        ),
+        (
+            "source raw /
+source meta .json beside raw",
+            "file source with an extension",
+        ),
+        (
+            "source raw .raw
+source meta .json [id] beside raw",
+            "inherits its dimensions",
+        ),
+        (
+            "source raw .raw
+source meta .json beside raw
+path meta: m.json",
+            "path follows that source",
+        ),
+    ] {
+        let error = parse_pipeline(&format!("{source}\n")).unwrap_err();
+        assert!(error.to_string().contains(message), "{source}: {error}");
+    }
+}
+
+#[test]
+fn a_recipe_gives_the_anchor_path() {
+    let tree = Tree::new("sidecars-recipe-path", &FILES);
     tree.write("pipeline.spit", UNPLACED);
     let recipe = tree.write(
         "dataset.spitin",
-        "pipeline pipeline.spit\nroot .\npath photo: site-{site}/shot-{shot}\n",
+        "pipeline pipeline.spit\nroot .\npath raw: site-{site}/shot-{shot}.raw\n",
     );
     let recipe = recipe.to_str().unwrap();
     let (ok, out, err) = spit(&["inputs", recipe]);
     assert!(ok, "{err}");
-    // The `.spitout` writes each member's rule, for a DAG read without the
-    // recipe.
     assert!(
-        out.contains(
-            "source_paths:\n    gps: site-{site}/shot-{shot}.gpx\n    meta: site-{site}/shot-{shot}.json\n    raw: site-{site}/shot-{shot}.raw\n"
-        ),
+        out.contains("source_paths:\n    raw: site-{site}/shot-{shot}.raw\n"),
         "{out}"
     );
     assert!(out.contains("    raw[site=a,shot=2]\n"), "{out}");
@@ -226,13 +133,13 @@ fn a_recipe_gives_a_groups_stem() {
 }
 
 #[test]
-fn a_recipes_default_gives_a_group_one_stem_named_for_it() {
+fn a_recipe_default_places_each_companion_at_the_anchor_name() {
     let tree = Tree::new(
         "sidecars-recipe-default",
         &[
-            "site-a/shot-1/photo.raw",
-            "site-a/shot-1/photo.gpx",
-            "site-a/shot-1/photo.json",
+            "site-a/shot-1/raw.raw",
+            "site-a/shot-1/raw.gpx",
+            "site-a/shot-1/raw.json",
         ],
     );
     tree.write("pipeline.spit", UNPLACED);
@@ -243,38 +150,25 @@ fn a_recipes_default_gives_a_group_one_stem_named_for_it() {
     let (ok, out, err) = spit(&["inputs", recipe.to_str().unwrap()]);
     assert!(ok, "{err}");
     assert!(
-        out.contains("    raw: site-{site}/shot-{shot}/photo.raw\n"),
+        out.contains("    raw: site-{site}/shot-{shot}/{@product}\n"),
         "{out}"
     );
-    assert!(
-        out.contains("    gps: site-{site}/shot-{shot}/photo.gpx\n"),
-        "{out}"
-    );
+    // Companions derive from that source path and need no independent rule.
+    assert!(!out.contains("    gps: site-"), "{out}");
+    assert!(out.contains("    gps[site=a,shot=1]\n"), "{out}");
 }
 
 #[test]
-fn a_recipes_group_path_is_checked() {
+fn a_recipe_cannot_override_a_companion_path() {
     for (pipeline, recipe, message) in [
         (
             PHOTOS,
-            "path photo: elsewhere/{site}/{shot}\n",
-            "`photo` has path rules in both .spit and .spitin",
+            "path raw: elsewhere/{site}/{shot}.raw\n",
+            "path rules in both",
         ),
-        (
-            UNPLACED,
-            "path raw: site-{site}/shot-{shot}.raw\n",
-            "source `raw` takes its path from sidecars group `photo`; write `path photo:`",
-        ),
-        (
-            UNPLACED,
-            "path loaded: x/{site}/{shot}\n",
-            "`loaded` is made by a step, so its path belongs in the .spit pipeline",
-        ),
-        (
-            UNPLACED,
-            "path missing: x/{site}/{shot}\n",
-            "must name a source product or sidecars group",
-        ),
+        (UNPLACED, "path gps: x.gpx\n", "beside `raw`"),
+        (UNPLACED, "path loaded: x\n", "made by a step"),
+        (UNPLACED, "path missing: x\n", "must name a source product"),
     ] {
         let tree = Tree::new("sidecars-recipe-errors", &[]);
         tree.write("pipeline.spit", pipeline);
@@ -285,9 +179,24 @@ fn a_recipes_group_path_is_checked() {
         let (ok, out, err) = spit(&["check", recipe.to_str().unwrap()]);
         assert!(!ok, "{recipe:?}: {out}");
         assert!(err.contains(message), "{message}: {err}");
-        // Each is reported at the recipe's `path` line.
-        assert!(err.contains("error: line 3, "), "{err}");
     }
+}
+
+#[test]
+fn a_spitout_cannot_override_a_companion_path() {
+    let tree = Tree::new("beside-inventory-path", &[]);
+    let pipeline = tree.write("pipeline.spit", UNPLACED);
+    let inputs = tree.write(
+        "inputs.spitout",
+        "source_paths:\n    raw: site-{site}/shot-{shot}.raw\n    gps: elsewhere/{site}/{shot}.gpx\n",
+    );
+    let (ok, _, err) = spit(&[
+        "artifacts",
+        pipeline.to_str().unwrap(),
+        inputs.to_str().unwrap(),
+    ]);
+    assert!(!ok);
+    assert!(err.contains("source `gps` is beside `raw`"), "{err}");
 }
 
 #[test]
@@ -319,7 +228,7 @@ fn discovery_names_a_group_missing_a_file() {
     let notes = text(&output.stderr);
     assert!(output.status.success(), "{notes}");
     assert!(
-        notes.contains("warning: photo[site=a,shot=2] has .raw and .gpx but no .json\n"),
+        notes.contains("warning: raw[site=a,shot=2] has .raw and .gpx but no .json\n"),
         "{notes}"
     );
     assert_eq!(notes.matches("warning:").count(), 1, "{notes}");
@@ -361,9 +270,9 @@ fn discovery_names_incomplete_groups_in_value_order() {
     assert_eq!(
         warnings,
         [
-            "warning: photo[site=a,shot=3] has .raw but no .gpx",
-            "warning: photo[site=b,shot=2] has .raw and .json but no .gpx",
-            "warning: photo[site=b,shot=10] has .raw and .gpx but no .json",
+            "warning: raw[site=a,shot=3] has .raw but no .gpx",
+            "warning: raw[site=b,shot=2] has .raw and .json but no .gpx",
+            "warning: raw[site=b,shot=10] has .raw and .gpx but no .json",
         ],
         "{notes}"
     );
@@ -390,7 +299,7 @@ fn records_name_a_group_missing_a_file() {
     let (ok, _, err) = spit(&["inputs", recipe.to_str().unwrap()]);
     assert!(ok, "{err}");
     assert!(
-        err.contains("warning: photo[site=a,shot=2] has .raw and .gpx but no .json\n"),
+        err.contains("warning: raw[site=a,shot=2] has .raw and .gpx but no .json\n"),
         "{err}"
     );
 
@@ -404,7 +313,7 @@ fn records_name_a_group_missing_a_file() {
     ]);
     assert!(ok, "{err}");
     assert_eq!(
-        err.matches("warning: photo[site=a,shot=2] has .raw and .gpx but no .json\n")
+        err.matches("warning: raw[site=a,shot=2] has .raw and .gpx but no .json\n")
             .count(),
         1,
         "{err}"
@@ -434,11 +343,10 @@ fn records_count_what_an_earlier_run_removed() {
 /// reads every member.
 const TWO_STEPS: &str = "\
 path: out/{@product}/site-{site}_shot-{shot}
-sidecars photo [site, shot]:
-    path: site-{site}/shot-{shot}
-    source raw : Image .raw
-    source gps : Track .gpx
-    source meta .json
+source raw : Image .raw [site, shot]
+path raw: site-{site}/shot-{shot}.raw
+source gps : Track .gpx beside raw
+source meta .json beside raw
 operation load(image: Image, gps: Track, meta) -> Image
 command load: load {image} {gps} {meta} {@output}
 operation thumb(image: Image) -> Image
@@ -460,7 +368,7 @@ fn a_missing_member_fails_only_the_steps_that_read_it() {
     let (ok, _, err) = spit(&["dag", recipe]);
     assert!(!ok);
     assert!(
-        err.contains("warning: photo[site=a,shot=2] has .raw and .gpx but no .json\n"),
+        err.contains("warning: raw[site=a,shot=2] has .raw and .gpx but no .json\n"),
         "{err}"
     );
     assert!(
