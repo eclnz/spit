@@ -202,7 +202,7 @@ pub(crate) fn dag(args: &CliArgs) -> Result<(), Box<dyn Error>> {
         None => bind_dag(&prepared.pipeline, dag),
     };
     if args.has(Flag::Counts) {
-        print!("{}", render_step_counts(dag));
+        print!("{}", render_step_counts(&prepared.pipeline, dag));
     }
     let view = View {
         paths: args.has(Flag::Paths),

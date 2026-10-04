@@ -6,7 +6,7 @@ use std::fmt;
 
 use crate::error::ResolveError;
 
-use super::{Artifact, ArtifactId, ArtifactInstance, Artifacts, SourceInventory};
+use super::{Artifact, ArtifactId, ArtifactInstance, Artifacts, SourceInventory, StepOrigin};
 
 /// A job's number in its DAG, counted from 1 in the order the resolver
 /// makes jobs, as reports and the `.spitdag` show it. Unlike an
@@ -56,6 +56,8 @@ pub struct DagStep {
     pub outputs: Vec<String>,
     /// The stage whose block holds the step, as `outer/inner`, if any.
     pub stage: Option<String>,
+    /// For a step a call made, the call and the step of the body it is.
+    pub origin: Option<StepOrigin>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
