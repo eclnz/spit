@@ -10,6 +10,7 @@ use crate::span::Located;
 use crate::template::{parse_template, Part};
 
 use super::components::encode_component;
+use super::shape::{shape_names, Shape};
 
 crate::span::message_error!(
     /// What is wrong with a path rule, or with the paths it gives artifacts.
@@ -31,8 +32,11 @@ pub(crate) enum PathPlaceholder {
     /// `{@labels}`: every dimension as `dim-value`, joined by `_`, as BIDS
     /// names them. A product's template has it written out.
     Labels,
-    /// Any other name: a dimension the product declares.
-    Dimension(String),
+    /// Any other name: a dimension the product declares, with the shape
+    /// its values must have when a source's files are found, as in
+    /// `{date:date}`. A shape narrows what a rule matches and changes no
+    /// path it writes.
+    Dimension(String, Option<Shape>),
 }
 
 impl PathPlaceholder {
@@ -51,12 +55,29 @@ impl PathPlaceholder {
     /// dimension, which takes no `@`.
     fn parse(name: String) -> Result<Self, String> {
         match name.strip_prefix('@') {
+            Some(built_in) if built_in.contains(':') => Err(format!(
+                "`{{{name}}}`: a built-in placeholder takes no shape; write the dimension, as `sub-{{sub:digits}}`"
+            )),
             Some(built_in) => Self::built_in(built_in).ok_or_else(|| {
                 format!(
                     "unknown built-in placeholder `{{{name}}}`; path templates have `{{@product}}`, `{{@entities}}`, `{{@labels}}` and `{{@stage}}`"
                 )
             }),
-            None => Ok(Self::Dimension(name)),
+            None => match name.split_once(':') {
+                None => Ok(Self::Dimension(name, None)),
+                Some((dimension, shape)) => {
+                    let shape = Shape::from_name(shape).ok_or_else(|| {
+                        format!(
+                            "unknown shape `{shape}` in `{{{name}}}`; the shapes are {}",
+                            shape_names()
+                        )
+                    })?;
+                    if dimension.is_empty() {
+                        return Err(format!("`{{{name}}}` has a shape but no dimension"));
+                    }
+                    Ok(Self::Dimension(dimension.to_owned(), Some(shape)))
+                }
+            },
         }
     }
 
@@ -68,7 +89,7 @@ impl PathPlaceholder {
             Self::Entities => "every dimension as `dimension=value`",
             Self::Stage => "the stage that makes it",
             Self::Labels => "every dimension as `dimension-value`",
-            Self::Dimension(_) => return None,
+            Self::Dimension(..) => return None,
         };
         Some(format!("; write `{{@{name}}}` for {meaning}"))
     }
@@ -80,7 +101,7 @@ impl PathPlaceholder {
             Self::Entities => "@entities",
             Self::Stage => "@stage",
             Self::Labels => "@labels",
-            Self::Dimension(name) => name,
+            Self::Dimension(name, _) => name,
         }
     }
 }
@@ -88,7 +109,10 @@ impl PathPlaceholder {
 /// Reads as the placeholder is written, such as `{@stage}`.
 impl fmt::Display for PathPlaceholder {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{{{}}}", self.name())
+        match self {
+            Self::Dimension(name, Some(shape)) => write!(f, "{{{name}:{shape}}}"),
+            _ => write!(f, "{{{}}}", self.name()),
+        }
     }
 }
 
@@ -118,7 +142,7 @@ impl Holder<'_> {
             PathPlaceholder::Product | PathPlaceholder::Entities => true,
             PathPlaceholder::Stage => self.in_stage,
             PathPlaceholder::Labels => !self.dimensions.is_empty(),
-            PathPlaceholder::Dimension(name) => self.dimensions.contains(name),
+            PathPlaceholder::Dimension(name, _) => self.dimensions.contains(name),
         }
     }
 
@@ -164,6 +188,7 @@ impl PathTemplate {
     pub fn parse(text: impl Into<String>) -> Result<Self, PathError> {
         let text = text.into();
         let parts = parse_parts(&text).map_err(error)?;
+        check_shapes(&parts, &text).map_err(error)?;
         Ok(Self { text, parts })
     }
 
@@ -223,6 +248,25 @@ impl PathTemplate {
             .contains(&PathPart::Placeholder(PathPlaceholder::Stage))
     }
 
+    /// Each placeholder with a shape, as `{date:date}`, and the dimension it
+    /// shapes, groups included.
+    pub(crate) fn shaped(&self) -> Vec<(&str, Shape)> {
+        fn collect<'a>(parts: &'a [PathPart], found: &mut Vec<(&'a str, Shape)>) {
+            for part in parts {
+                match part {
+                    PathPart::Placeholder(PathPlaceholder::Dimension(name, Some(shape))) => {
+                        found.push((name, *shape));
+                    }
+                    PathPart::Group(group) => collect(group, found),
+                    _ => {}
+                }
+            }
+        }
+        let mut found = Vec::new();
+        collect(&self.parts, &mut found);
+        found
+    }
+
     /// Each dimension a `[...]` group names.
     pub(crate) fn group_dimensions(&self) -> impl Iterator<Item = &str> {
         self.parts
@@ -233,7 +277,7 @@ impl PathTemplate {
             })
             .flatten()
             .filter_map(|part| match part {
-                PathPart::Placeholder(PathPlaceholder::Dimension(name)) => Some(name.as_str()),
+                PathPart::Placeholder(PathPlaceholder::Dimension(name, _)) => Some(name.as_str()),
                 _ => None,
             })
     }
@@ -379,7 +423,7 @@ fn parse_parts(text: &str) -> Result<Vec<PathPart>, String> {
                     matches!(
                         part,
                         PathPart::Placeholder(
-                            PathPlaceholder::Dimension(_)
+                            PathPlaceholder::Dimension(..)
                                 | PathPlaceholder::Stage
                                 | PathPlaceholder::Labels
                         )
@@ -405,6 +449,55 @@ fn parse_parts(text: &str) -> Result<Vec<PathPart>, String> {
         parts.push(PathPart::Literal(String::new()));
     }
     Ok(parts)
+}
+
+/// Fail when a dimension has two shapes, or when two placeholders with
+/// nothing between them both take a shape of any length, as `{a:digits}{b:digits}`
+/// does: where one ends and the other starts is not written down.
+fn check_shapes(parts: &[PathPart], text: &str) -> Result<(), String> {
+    fn flat<'a>(parts: &'a [PathPart], out: &mut Vec<&'a PathPart>) {
+        for part in parts {
+            match part {
+                PathPart::Group(group) => flat(group, out),
+                part => out.push(part),
+            }
+        }
+    }
+    let mut all = Vec::new();
+    flat(parts, &mut all);
+    let mut shapes: Vec<(&str, Shape)> = Vec::new();
+    for part in &all {
+        if let PathPart::Placeholder(PathPlaceholder::Dimension(name, Some(shape))) = part {
+            match shapes.iter().find(|(seen, _)| seen == name) {
+                Some((_, other)) if other != shape => {
+                    return Err(format!(
+                        "`{name}` has two shapes, `{other}` and `{shape}`, in `{text}`; give it one"
+                    ));
+                }
+                Some(_) => {}
+                None => shapes.push((name, *shape)),
+            }
+        }
+    }
+    let open = |part: &&PathPart| {
+        matches!(
+            part,
+            PathPart::Placeholder(PathPlaceholder::Dimension(_, Some(shape)))
+                if shape.fixed_length().is_none()
+        )
+    };
+    for pair in all.windows(2) {
+        if open(&pair[0]) && open(&pair[1]) {
+            let (PathPart::Placeholder(left), PathPart::Placeholder(right)) = (pair[0], pair[1])
+            else {
+                continue;
+            };
+            return Err(format!(
+                "`{left}{right}` in `{text}` has no text between two shapes of any length; put a `-` or `_` between them"
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// Add the text and placeholders of `segment`, text between brackets.
@@ -444,6 +537,7 @@ fn push_resolved(parts: &mut Vec<PathPart>, part: &PathPart, holder: Holder<'_>)
                 push_literal(parts, &format!("{}-", encode_component(dimension)));
                 parts.push(PathPart::Placeholder(PathPlaceholder::Dimension(
                     dimension.clone(),
+                    None,
                 )));
             }
         }

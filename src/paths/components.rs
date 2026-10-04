@@ -113,7 +113,7 @@ pub(crate) fn validate_discovery_rule(rule: &DirectoryDiscovery) -> Result<(), P
                     rule.name
                 )));
             }
-            PathPart::Placeholder(PathPlaceholder::Dimension(name))
+            PathPart::Placeholder(PathPlaceholder::Dimension(name, _))
                 if dimensions.contains(name) =>
             {
                 used.insert(name);
