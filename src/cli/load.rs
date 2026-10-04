@@ -8,10 +8,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use spit::{
-    diagnose_checked, diagnose_checked_with_inventory, diagnose_checked_with_records,
-    parse_input_spec_at, render_source_inventory, ArtifactReport, Checked, Context,
-    DimensionOrders, FileNames, InputSource, InputSpec, Pipeline, Removal, ResolveError,
-    ResolvedInputs,
+    case_variants, diagnose_checked, diagnose_checked_with_inventory,
+    diagnose_checked_with_records, parse_input_spec_at, render_source_inventory, ArtifactReport,
+    CaseVariants, Checked, Context, DimensionOrders, FileNames, InputSource, InputSpec, Pipeline,
+    Removal, ResolveError, ResolvedInputs,
 };
 
 use super::args::{CliArgs, Command, Flag};
@@ -171,6 +171,9 @@ pub(crate) fn settle(loaded: &Loaded) -> Result<(ResolvedInputs, PathBuf), Box<d
     for removal in &resolved.inventory.removed {
         eprintln!("note: {}", removal_note(removal, &orders));
     }
+    for note in case_variant_notes(&case_variants(&resolved.inventory)) {
+        eprintln!("note: {note}");
+    }
     if let Some(root) = &resolved.root {
         let contexts = if recipe.rules.discoveries.is_empty() {
             String::new()
@@ -184,6 +187,54 @@ pub(crate) fn settle(loaded: &Loaded) -> Result<(ResolvedInputs, PathBuf), Box<d
         );
     }
     Ok((resolved, root))
+}
+
+/// One note for each dimension with values that differ only in letter case,
+/// as ``store has values that differ only in letter case: `S07` in pricing,
+/// `s07` in sales``, so the sources of one thing under two spellings are
+/// seen together. At most three sets of a dimension are named.
+fn case_variant_notes(sets: &[CaseVariants]) -> Vec<String> {
+    const SHOWN: usize = 3;
+    let mut notes = Vec::new();
+    let mut start = 0;
+    while start < sets.len() {
+        let dimension = &sets[start].dimension;
+        let end = start
+            + sets[start..]
+                .iter()
+                .take_while(|set| set.dimension == *dimension)
+                .count();
+        let named: Vec<String> = sets[start..end]
+            .iter()
+            .take(SHOWN)
+            .map(|set| {
+                let spellings: Vec<String> = set
+                    .spellings
+                    .iter()
+                    .map(|spelling| {
+                        if spelling.products.is_empty() {
+                            format!("`{}` (excluded)", spelling.value)
+                        } else {
+                            format!("`{}` in {}", spelling.value, spelling.products.join(", "))
+                        }
+                    })
+                    .collect();
+                spellings.join(", ")
+            })
+            .collect();
+        let more = (end - start).saturating_sub(SHOWN);
+        let more = if more > 0 {
+            format!("; and {more} more")
+        } else {
+            String::new()
+        };
+        notes.push(format!(
+            "`{dimension}` has values that differ only in letter case, which are different values to SPIT: {}{more}",
+            named.join("; ")
+        ));
+        start = end;
+    }
+    notes
 }
 
 /// How many files the scan left out, and which: each of them when there
