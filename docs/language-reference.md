@@ -625,7 +625,14 @@ Because values are compared as written, a group removed under one spelling keeps
 exclude [store=s07]            # price list filed as S07; renamed next week
 ```
 
-`dag` then plans the other stores, and notes that the misnamed file is left over:
+`inputs`, `dag` and `artifacts` list the spellings together, so the two are seen as one store filed twice. The note names each spelling with the sources that have it, and `(excluded)` for one a rule removed:
+
+```text
+note: excluded [store=s07] (line 3)
+note: `store` has values that differ only in letter case, which are different values to SPIT: `S07` in pricing, `s07` (excluded)
+```
+
+The note comes up before any rule too, as ``... `S07` in pricing, `s07` in sales``. It names at most three sets for a dimension, then counts the rest. `dag` then plans the other stores, and notes that the misnamed file is left over:
 
 ```text
 note: 1 source artifact is used by no job: pricing[store=S07]; `spit artifacts` lists them
