@@ -10,7 +10,10 @@ use crate::model::{
 };
 use crate::spitdag::{Argument, BoundDag, BoundJob, StepCall, When};
 use crate::types::TypeExpr;
+pub use calls::render_calls;
+pub(crate) use calls::written_step;
 
+mod calls;
 mod targets;
 
 /// The jobs as text, without ports or paths. Each job is written straight

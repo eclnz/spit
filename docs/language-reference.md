@@ -172,6 +172,17 @@ error: line 4, column 21: in `m, t = L::summarise(...)`: type mismatch at `L::cl
 
 A check on an input or output of such an operation, as `reads: Lines @ check(lines(2))`, runs on every step that reads that input or makes that output, beside the checks of the step's own operation; the same check on one artifact runs once. Imported, it brings the operations its steps call, and their commands and checks, under the same prefix, so `use summarise from lib.spit as L` brings `L::clean` too.
 
+`spit check pipeline.spit --calls` lists each call's steps before any data is read. It shows the call, its line and stage, the file that declares the operation with its file's blob id, then each step with the line of the body that writes it; a call in a body is shown under its caller:
+
+```text
+m, t = L::summarise(…)  line 6  [report]
+  L::summarise  libs/lib.spit  blob 3b18e5c
+  line 13  m::cleaned = L::tidy(raw, cal)
+    line 10  m::cleaned = L::clean(raw, cal)
+  line 14  m = L::merge(m::cleaned)
+  line 15  t = L::C::count(m)
+```
+
 `spit dag --counts` lists a call's steps under it, with the call's jobs in all, so `summarise` over two groups of two lanes shows:
 
 ```text

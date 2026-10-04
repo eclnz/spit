@@ -7,10 +7,10 @@ use std::path::Path;
 use spit::{
     bind_dag, bind_dag_with, diagnose_checked, diagnose_inputs, diagnose_recipe, inspect_paths,
     parse_input_spec_at, render_artifacts, render_artifacts_by_target, render_bound_dag,
-    render_call, render_check_json, render_dag, render_diagnostics_json, render_editor_json,
-    render_source_inventory, render_step_counts, render_words_json, resolve_artifacts_partial,
-    unused_sources_summary, validate_bound_source_files, validate_source_files, BoundDag,
-    BoundPaths, Context, FileNames, Gap, LeftOut, View,
+    render_call, render_calls, render_check_json, render_dag, render_diagnostics_json,
+    render_editor_json, render_source_inventory, render_step_counts, render_words_json,
+    resolve_artifacts_partial, unused_sources_summary, validate_bound_source_files,
+    validate_source_files, BoundDag, BoundPaths, Context, FileNames, Gap, LeftOut, View,
 };
 
 use super::args::{CliArgs, Flag};
@@ -31,6 +31,9 @@ pub(crate) fn check(args: &CliArgs) -> Result<(), Box<dyn Error>> {
     } else {
         read_file(file)?
     };
+    if args.has(Flag::Calls) && (is_inputs(file) || is_recipe(file)) {
+        return Err("--calls lists a pipeline's calls; give a .spit pipeline".into());
+    }
     if is_inputs(file) {
         if args.has(Flag::PathRules) {
             return Err(
@@ -121,6 +124,9 @@ pub(crate) fn check(args: &CliArgs) -> Result<(), Box<dyn Error>> {
     )?;
     if args.has(Flag::PathRules) {
         println!("{}", inspect_paths(&checked.pipeline)?);
+    }
+    if args.has(Flag::Calls) {
+        print!("{}", render_calls(&checked.pipeline));
     }
     println!("Pipeline valid.");
     Ok(())
