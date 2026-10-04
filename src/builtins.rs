@@ -101,7 +101,7 @@ pub static DOCS: [Doc; 46] = [
         kind: "keyword",
         anchor: "operations-and-commands",
         example: "operation process(image: Image) -> Image\noperation estimate(dwi: DWI) -> (wm: Response, gm: Response)",
-        summary: "Declares a step's input ports and outputs, before its first use. A port is `name`, `name: Type`, `name: many` or `name: many Type`. A call fills the ports in order, and SPIT checks each product's type against its port. Several outputs are each named, and an output's type may be followed by the extension the tool gives its file, as in `-> Transform .mat`.",
+        summary: "Declares a step's input ports and outputs, before its first use. A port is `name`, `name: Type`, `name: many` or `name: many Type`. A call fills the ports in order, and SPIT checks each product's type against its port. Several outputs are each named, and an output's type may be followed by the extension the tool gives its file, as in `-> Transform .mat`. A header ending in `:` is followed by indented steps that carry the operation out in place of a command.",
     },
     Doc {
         name: "command",

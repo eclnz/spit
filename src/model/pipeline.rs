@@ -9,9 +9,9 @@ use crate::error::{DefinitionSubject, ResolveError};
 use crate::paths::{Holder, PathTemplate};
 
 use super::{
-    stage_and_parents, ArtifactInstance, CheckDef, CommandDef, EntityBinding, ExtensionSource,
-    Invocation, OperationDef, OutputPort, ProductDef, Removal, SidecarGroup, SourceInventory,
-    SourceRecord, StageDef,
+    stage_and_parents, ArtifactInstance, Call, CallId, CheckDef, CommandDef, EntityBinding,
+    ExtensionSource, Invocation, OperationDef, OutputPort, ProductDef, Removal, SidecarGroup,
+    SourceInventory, SourceRecord, StageDef,
 };
 
 /// The logical pipeline: what to make from which sources. It says nothing
@@ -33,6 +33,60 @@ pub struct Pipeline {
     pub stages: Vec<StageDef>,
     /// Source families joined by `beside`, for reporting missing companions.
     pub sidecar_groups: Vec<SidecarGroup>,
+    /// Each call to an operation with a body, which `invocations` holds as
+    /// the body's steps; a step's [`Invocation::origin`] names its call.
+    pub calls: Vec<Call>,
+    /// The files the pipeline was read from: its own first, then each file
+    /// an import read, once. Empty for a pipeline parsed without a path.
+    pub files: Vec<SourceFile>,
+}
+
+/// A file a pipeline was read from.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct SourceFile {
+    /// Relative to the pipeline's folder, with `/` between folders; the
+    /// pipeline's own file is its name.
+    pub path: String,
+    /// Its git blob id, as `git hash-object` prints it.
+    pub blob: String,
+}
+
+impl Pipeline {
+    /// The call written in the pipeline that `call` was made by: `call`
+    /// itself, or the outermost of the calls it is nested in.
+    pub fn written_call(&self, call: CallId) -> &Call {
+        &self.calls[self.written_call_id(call).index()]
+    }
+
+    /// The id of [`Pipeline::written_call`].
+    pub fn written_call_id(&self, mut call: CallId) -> CallId {
+        while let Some(parent) = self.calls[call.index()].parent {
+            call = parent;
+        }
+        call
+    }
+
+    /// The position in [`Pipeline::files`] of the file declaring each
+    /// operation, by name, when the pipeline was read from files: the
+    /// operation's `file`, or else the pipeline's own, the first.
+    pub fn operation_files(&self) -> FxHashMap<&str, Option<usize>> {
+        let at: FxHashMap<&str, usize> = self
+            .files
+            .iter()
+            .enumerate()
+            .map(|(index, file)| (file.path.as_str(), index))
+            .collect();
+        self.operations
+            .iter()
+            .map(|operation| {
+                let file = match &operation.file {
+                    Some(file) => at.get(file.as_str()).copied(),
+                    None => (!self.files.is_empty()).then_some(0),
+                };
+                (operation.name.as_str(), file)
+            })
+            .collect()
+    }
 }
 
 impl Pipeline {

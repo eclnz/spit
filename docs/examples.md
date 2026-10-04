@@ -237,6 +237,54 @@ sources:
 
 Run `spit dag stages.spit stages.spitout --paths` to see seven jobs: three `sort_lines`, two `merge`, and two `tally_lines`. The sorted and merged outputs use the `preprocess/` path default; the tallies use the `analysis` stage's `results/` override. `spit dag stages.spit stages.spitout -o stages.spitdag` records each job's stage for a backend.
 
+## Reusable steps: diffusion preprocessing and variant calling
+
+An operation can be carried out by steps instead of a command: its header ends in `:`, and its steps are indented beneath it (see the [language reference](language-reference.md#operations-carried-out-by-steps)). A library declares such an operation once, and a pipeline imports it and calls it like any other. Two examples under [`examples/composites/`](../examples/composites) show it.
+
+[`mrtrix_dwi.spit`](../examples/composites/mrtrix/mrtrix_dwi.spit) declares the MRtrix3 operations of the ACT example's preprocessing, and two operations carried out by them: `clean_dwi_session`, from a session's DWI runs and reverse phase-encoded b=0 to its corrected series and mean b=0, and `register_to_dwi`, which moves an anatomical image onto that b=0. [`act.spit`](../examples/composites/mrtrix/act.spit) calls each once:
+
+```text
+use clean_dwi_session, register_to_dwi from mrtrix_dwi.spit as mrx
+
+stage preprocess:
+    corrected_dwi, session_b0 = mrx::clean_dwi_session(raw_dwi, dwi_bvec, dwi_bval, dwi_json, reverse_b0, reverse_b0_json)
+
+stage anatomy:
+    t1w_dwi, t1_to_dwi = mrx::register_to_dwi(t1w, session_b0)
+```
+
+Over the ACT example's mock data, the session call makes the 48 jobs the hand-written `preprocess` stage makes, the same number of each operation. `spit dag examples/composites/mrtrix/act.spitin --counts` lists them under the call:
+
+```text
+jobs  step                                                   stage
+      corrected_dwi, session_b0 = mrx::clean_dwi_session     preprocess
+   7    corrected_dwi::imported = mrx::import_dwi            preprocess
+   3    corrected_dwi::reverse_mif = mrx::import_reverse_b0  preprocess
+   7    corrected_dwi::denoised = mrx::denoise               preprocess
+```
+
+The products the body makes for itself are filed under the call's first output, as `corrected_dwi::imported`, written `corrected_dwi.imported` in a path. `--commands` starts each job with the call and the library line it came from:
+
+```text
+Job 49  mrx::export_nifti  [anatomy]
+  from:   t1w_dwi = mrx::register_to_dwi (act.spit line 24), mrtrix_dwi.spit line 65
+  run:    mrconvert derivatives/preprocess/session_b0/sub=01__ses=01.mif derivatives/anatomy/t1w_dwi.b0_nifti/sub=01__ses=01.nii.gz
+```
+
+An error in a step the call makes is reported at the call, with the library line beneath it. Without the reverse b=0 of `sub-02`'s first session, `spit dag` stops at the call:
+
+```text
+error: line 21, column 33: in `corrected_dwi, session_b0 = mrx::clean_dwi_session(...)`: no `corrected_dwi::reverse_mif` artifact for input `reverse` of `mrx::combine_pe_pair` at [ses=01,sub=02]
+  --> mrtrix_dwi.spit: line 45, column 15: the step in the body of `mrx::clean_dwi_session`
+```
+
+[`germline.spit`](../examples/composites/germline/germline.spit) aligns one sample's lanes with BWA, sorts and merges them with samtools, marks duplicates with GATK, which writes the BAM's index beside it, and calls a GVCF. [`somatic.spit`](../examples/composites/germline/somatic.spit) calls it for a tumour and its matched normal, 7 jobs each. The two calls have the same steps but file their products apart, as `normal_bam.aligned` and `tumour_bam.aligned`. The check `align_sample` puts on its `bam` output runs beside the one `mark_duplicates` puts on its own, on the job that makes the BAM:
+
+```text
+  check:  test -s out/normal_bam/patient=P01.bam
+  check:  samtools quickcheck out/normal_bam/patient=P01.bam
+```
+
 ## Inspect a dataset and its plan
 
 Use `spit inputs cohort.spitin` to see discovered source identities and removals before planning. If a dataset has files outside every source path rule, `spit inputs cohort.spitin --unmatched` lists those paths; it does not write an inventory. A file can match a source rule yet remain unused by every job. For example, the sensors inventory contains `calibration[station=north,revision=1]`, which is valid but unselected because the call uses `where(revision=2)`. `spit artifacts sensors.spit sensors.spitout` lists unused sources separately from missing joins.
@@ -265,6 +313,8 @@ Each pipeline below, under [`examples/`](../examples), checks cleanly and sits b
 | [Nested stages](../examples/stages/nested.spit) | Stages within a stage | `cargo run -- dag examples/stages/nested.spit examples/stages/nested.spitout` | 9 |
 | [Field survey](../examples/commands/field_survey/field_survey.spit) | Source files declared `beside` their image, calibration, alignment between spaces, and commands | `cargo run -- dag examples/commands/field_survey/field_survey.spit examples/commands/field_survey/field_survey.spitout` | 93 |
 | [MRtrix3 ACT](../examples/commands/mrtrix3_act/mrtrix3_act.spit) | A diffusion MRI pipeline in nested stages, from BIDS import to connectome | `cargo run -- dag examples/commands/mrtrix3_act/mrtrix3_act.spit examples/commands/mrtrix3_act/mrtrix3_act.spitout` | 93 |
+| [Diffusion preprocessing by steps](../examples/composites/mrtrix/act.spit) | Two calls to operations a library carries out by steps | `cargo run -- dag examples/composites/mrtrix/act.spitin` | 60 |
+| [Variant calling by steps](../examples/composites/germline/somatic.spit) | One operation carried out by steps, called for a tumour and its normal | `cargo run -- dag examples/composites/germline/somatic.spitin` | 14 |
 
 The pattern examples each include a `.spitin` recipe and a `.spitout` inventory. The cohort recipe also has small placeholder source files, so its discovery, exclusion, and drop rules can be run directly. The `command_demo.spitin` recipe expects real shard files beside it; use its supplied `.spitout` to inspect the example jobs without creating a dataset.
 

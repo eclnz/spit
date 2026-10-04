@@ -62,6 +62,7 @@ fn main() -> ExitCode {
                 message: error.to_string(),
                 file: None,
                 external_text: None,
+                related: Vec::new(),
             };
             print!("{}", render_diagnostics_json(&[diagnostic], "", None));
             ExitCode::SUCCESS

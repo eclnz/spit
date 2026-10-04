@@ -1,0 +1,12 @@
+pipeline somatic.spit
+
+root fastq
+
+path reference: reference/genome.fa
+path normal_r1: {patient}/normal_L{lane}_R1.fastq.gz
+path normal_r2: {patient}/normal_L{lane}_R2.fastq.gz
+path tumour_r1: {patient}/tumour_L{lane}_R1.fastq.gz
+path tumour_r2: {patient}/tumour_L{lane}_R2.fastq.gz
+
+require [patient] where normal_r1 count>=1
+require [patient] where tumour_r1 count>=1

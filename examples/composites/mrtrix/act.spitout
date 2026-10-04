@@ -1,0 +1,45 @@
+root ../../commands/mrtrix3_act/mrtrix3_mock_data
+
+source_paths:
+    raw_dwi: sub-{sub}/ses-{ses}/dwi/sub-{sub}_ses-{ses}_run-{run}_dwi.nii.gz
+    reverse_b0: sub-{sub}/ses-{ses}/fmap/sub-{sub}_ses-{ses}_dir-PA_epi.nii.gz
+    t1w: sub-{sub}/ses-{ses}/anat/sub-{sub}_ses-{ses}_T1w.nii.gz
+
+sources:
+    raw_dwi[sub=01,ses=01,run=01]
+    raw_dwi[sub=01,ses=01,run=02]
+    raw_dwi[sub=01,ses=02,run=01]
+    raw_dwi[sub=01,ses=02,run=02]
+    raw_dwi[sub=02,ses=01,run=01]
+    raw_dwi[sub=02,ses=01,run=02]
+    raw_dwi[sub=02,ses=01,run=03]
+    dwi_bvec[sub=01,ses=01,run=01]
+    dwi_bvec[sub=01,ses=01,run=02]
+    dwi_bvec[sub=01,ses=02,run=01]
+    dwi_bvec[sub=01,ses=02,run=02]
+    dwi_bvec[sub=02,ses=01,run=01]
+    dwi_bvec[sub=02,ses=01,run=02]
+    dwi_bvec[sub=02,ses=01,run=03]
+    dwi_bval[sub=01,ses=01,run=01]
+    dwi_bval[sub=01,ses=01,run=02]
+    dwi_bval[sub=01,ses=02,run=01]
+    dwi_bval[sub=01,ses=02,run=02]
+    dwi_bval[sub=02,ses=01,run=01]
+    dwi_bval[sub=02,ses=01,run=02]
+    dwi_bval[sub=02,ses=01,run=03]
+    dwi_json[sub=01,ses=01,run=01]
+    dwi_json[sub=01,ses=01,run=02]
+    dwi_json[sub=01,ses=02,run=01]
+    dwi_json[sub=01,ses=02,run=02]
+    dwi_json[sub=02,ses=01,run=01]
+    dwi_json[sub=02,ses=01,run=02]
+    dwi_json[sub=02,ses=01,run=03]
+    reverse_b0[sub=01,ses=01]
+    reverse_b0[sub=01,ses=02]
+    reverse_b0[sub=02,ses=01]
+    reverse_b0_json[sub=01,ses=01]
+    reverse_b0_json[sub=01,ses=02]
+    reverse_b0_json[sub=02,ses=01]
+    t1w[sub=01,ses=01]
+    t1w[sub=01,ses=02]
+    t1w[sub=02,ses=01]

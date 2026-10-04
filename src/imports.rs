@@ -6,10 +6,11 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crate::blob::git_blob_id;
 use crate::lower::{parse_document_with_imports, ParsedDocument, PipelineBuilder};
 use crate::model::{
     CheckDef, CheckUse, CommandDef, CommandRole, OperationDef, Pipeline, PipelineIndex, ProductDef,
-    SidecarGroup,
+    SidecarGroup, SourceFile,
 };
 use crate::parser::{parse_use, strip_comment, without_bom, Keyword, Kind, ParseError, UseSpec};
 use crate::span::Place;
@@ -260,12 +261,7 @@ fn select_import(module: &Pipeline, spec: &UseSpec, line: usize) -> Result<Pipel
             .map_or_else(|| name.to_owned(), |alias| format!("{alias}::{name}"));
         let alias = spec.alias.as_deref();
         if let Some(operation) = operation {
-            import_operation(&mut selected, &module, operation, &qualified, line)?;
-            let checks = operation.inputs.iter().map(|port| &port.checks);
-            let checks = checks.chain(operation.outputs.iter().map(|port| &port.checks));
-            for used in checks.flatten() {
-                import_check(&mut selected, &module, &used.check, alias);
-            }
+            import_operation(&mut selected, &module, operation, spec, line)?;
         }
         if let Some(source) = source.filter(|_| group.is_none()) {
             import_source(&mut selected, &module, source, &qualified, alias, line)?;
@@ -280,8 +276,65 @@ fn select_import(module: &Pipeline, spec: &UseSpec, line: usize) -> Result<Pipel
             import_check(&mut selected, &module, name, alias);
         }
     }
+    import_called(&mut selected, &module, spec, line)?;
     qualify_checks(&mut selected.pipeline, spec.alias.as_deref());
     Ok(selected.pipeline)
+}
+
+/// Bring in every operation the bodies of the selected operations call,
+/// and those their bodies call in turn, under the same alias: a body's
+/// steps call what its own file declares.
+fn import_called(
+    selected: &mut Selection,
+    module: &Module<'_>,
+    spec: &UseSpec,
+    line: usize,
+) -> Result<(), ParseError> {
+    // The selected operations' bodies, as their own file writes them.
+    let alias = spec.alias.as_deref();
+    let local = |qualified: &str| match alias {
+        Some(alias) => qualified
+            .strip_prefix(alias)
+            .and_then(|rest| rest.strip_prefix("::"))
+            .unwrap_or(qualified)
+            .to_owned(),
+        None => qualified.to_owned(),
+    };
+    let mut pending: Vec<&str> = selected
+        .pipeline
+        .operations
+        .iter()
+        .filter_map(|operation| module.operations.get(local(&operation.name).as_str()))
+        .filter_map(|operations| operations.first())
+        .flat_map(|operation| &operation.steps)
+        .map(|step| step.invocation.operation.as_str())
+        .collect();
+    // Every operation the bodies call, in turn, by its own file's name.
+    let mut called = FxHashSet::default();
+    while let Some(name) = pending.pop() {
+        if !called.insert(name) {
+            continue;
+        }
+        let operation = module
+            .operations
+            .get(name)
+            .and_then(|operations| operations.first().copied())
+            .expect("a body calls only operations its file declares before it");
+        pending.extend(
+            operation
+                .steps
+                .iter()
+                .map(|step| step.invocation.operation.as_str()),
+        );
+    }
+    // Brought in the order their file declares them.
+    for operation in &module.index.pipeline.operations {
+        let name = qualified_check(&operation.name, alias);
+        if called.contains(operation.name.as_str()) && !selected.operations.contains(&name) {
+            import_operation(selected, module, operation, spec, line)?;
+        }
+    }
+    Ok(())
 }
 
 /// Bring in `module`'s check `name`, once however many imports use it.
@@ -358,15 +411,19 @@ fn reusable_names<'m>(index: &PipelineIndex<'m>) -> Vec<&'m str> {
         .collect()
 }
 
-/// Import an operation as `qualified`, with its commands.
+/// Import an operation under `spec`'s alias, with its commands, the checks
+/// its ports attach, and the file it is declared in. The steps of its body,
+/// if it has one, call operations under the same alias.
 fn import_operation(
     selected: &mut Selection,
     module: &Module<'_>,
     operation: &OperationDef,
-    qualified: &str,
+    spec: &UseSpec,
     line: usize,
 ) -> Result<(), ParseError> {
     let name = &operation.name;
+    let alias = spec.alias.as_deref();
+    let qualified = &qualified_check(name, alias);
     let commands = module
         .commands
         .get(name.as_str())
@@ -385,8 +442,14 @@ fn import_operation(
     if !selected.operations.insert(qualified.to_owned()) {
         return Err(ParseError::new(line, format!("duplicate import `{name}`")));
     }
+    let mut steps = operation.steps.clone();
+    for step in &mut steps {
+        step.invocation.operation = qualified_check(&step.invocation.operation, alias);
+    }
     selected.pipeline.operations.push(OperationDef {
         name: qualified.to_owned(),
+        steps,
+        file: Some(imported_file(operation.file.as_deref(), &spec.path)),
         ..operation.clone()
     });
     selected
@@ -396,7 +459,26 @@ fn import_operation(
             operation: qualified.to_owned(),
             ..(*command).clone()
         }));
+    let checks = operation.inputs.iter().map(|port| &port.checks);
+    let checks = checks.chain(operation.outputs.iter().map(|port| &port.checks));
+    for used in checks.flatten() {
+        import_check(selected, module, &used.check, alias);
+    }
     Ok(())
+}
+
+/// The file an operation is declared in, relative to the file that imports
+/// it through `use path`: `path` itself, or, for one `path` imports in
+/// turn, that file relative to `path`'s folder.
+fn imported_file(declared_in: Option<&str>, path: &str) -> String {
+    let path = path.replace('\\', "/");
+    let Some(declared_in) = declared_in else {
+        return path;
+    };
+    match path.rsplit_once('/') {
+        Some((folder, _)) => format!("{folder}/{declared_in}"),
+        None => declared_in.to_owned(),
+    }
 }
 
 /// Import a source as `qualified`, with its path rule.
@@ -476,16 +558,30 @@ pub(crate) fn parse_located_document(
     kind: Kind,
 ) -> Result<ParsedDocument, ParseError> {
     let root = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
-    parse_document_at_inner(without_bom(text), &root, &mut vec![root.clone()], kind)
+    parse_document_at_inner(text, &root, &mut vec![root.clone()], kind)
 }
 
+/// Parse `text`, the file at `path` as read, with its imports. The parsed
+/// pipeline lists the file first among its files, then each file an
+/// import read, relative to `path`'s folder.
 fn parse_document_at_inner(
-    text: &str,
+    raw: &str,
     path: &Path,
     stack: &mut Vec<PathBuf>,
     kind: Kind,
 ) -> Result<ParsedDocument, ParseError> {
+    let text = without_bom(raw);
+    let mut files = vec![SourceFile {
+        path: path
+            .file_name()
+            .map_or_else(String::new, |name| name.to_string_lossy().into_owned()),
+        // The file as git holds it: the text given may be rebuilt from its
+        // lines, as error recovery does, without its last newline.
+        blob: fs::read(path)
+            .map_or_else(|_| git_blob_id(raw.as_bytes()), |bytes| git_blob_id(&bytes)),
+    }];
     let mut imports = BTreeMap::new();
+    let mut file_texts = BTreeMap::new();
     for (index, original) in text.lines().enumerate() {
         let line = strip_comment(original).trim();
         if Keyword::of(line) != Some(Keyword::Use) {
@@ -522,9 +618,8 @@ fn parse_document_at_inner(
                 format!("cannot read import `{}`: {error}", canonical.display()),
             )
         })?;
-        let imported_text = without_bom(&imported_text);
         stack.push(canonical.clone());
-        let module = parse_document_at_inner(imported_text, &canonical, stack, Kind::Pipeline)
+        let module = parse_document_at_inner(&imported_text, &canonical, stack, Kind::Pipeline)
             .map_err(|error| {
                 ParseError::new(
                     number,
@@ -537,7 +632,32 @@ fn parse_document_at_inner(
                 )
             });
         stack.pop();
-        imports.insert(number, select_import(&module?.pipeline, &spec, number)?);
+        let module = module?;
+        let folder = spec.path.replace('\\', "/");
+        let folder = folder.rsplit_once('/').map(|(folder, _)| folder);
+        let rebased = |path: &str| match folder {
+            Some(folder) => format!("{folder}/{path}"),
+            None => path.to_owned(),
+        };
+        if let Some(own) = module.pipeline.files.first() {
+            file_texts.insert(rebased(&own.path), without_bom(&imported_text).to_owned());
+        }
+        for (path, text) in &module.lines.file_texts {
+            file_texts.insert(rebased(path), text.clone());
+        }
+        for file in &module.pipeline.files {
+            let path = rebased(&file.path);
+            if !files.iter().any(|known: &SourceFile| known.path == path) {
+                files.push(SourceFile {
+                    path,
+                    blob: file.blob.clone(),
+                });
+            }
+        }
+        imports.insert(number, select_import(&module.pipeline, &spec, number)?);
     }
-    parse_document_with_imports(text, &imports, kind)
+    let mut document = parse_document_with_imports(text, &imports, kind)?;
+    document.pipeline.files = files;
+    document.lines.file_texts = file_texts;
+    Ok(document)
 }

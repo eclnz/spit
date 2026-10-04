@@ -7,15 +7,17 @@ use std::collections::BTreeMap;
 
 use rustc_hash::FxHashMap;
 
+mod expand;
+
 use crate::imports::apply_import;
 use crate::model::{
-    Cardinality, CheckDef, CommandDef, CoverageRule, Exclusion, InputBinding, InputRules,
-    Invocation, OperationDef, Pipeline, ProductDef, ProductId, SidecarGroup, SourceInventory,
-    StageDef,
+    CallId, Cardinality, CheckDef, CommandDef, CommandRole, CoverageRule, Exclusion, InputBinding,
+    InputRules, Invocation, OperationDef, Pipeline, ProductDef, ProductId, SidecarGroup,
+    SourceInventory, StageDef, StepOutput,
 };
 use crate::order::{order_dimensions, Output};
 use crate::parser::{
-    parse_source_inventory, parse_syntax, split_document, without_bom, ExcludeLine, FlowStep, Kind,
+    parse_source_inventory, parse_syntax, split_document, without_bom, ExcludeLine, Kind,
     ParseError, ParseErrorKind, PathRule, Rule, SourceMap, Statement, StatementKind, Step, Syntax,
 };
 use crate::shape::{step_context, step_driver, BoundInput};
@@ -44,6 +46,9 @@ pub(crate) struct PipelineBuilder {
     /// every operation. Keep in step with `add_operation`, the only place
     /// that adds one.
     operation_at: FxHashMap<String, usize>,
+    /// Each product a call made for itself, with the call and the operation
+    /// it calls, which steps written in the pipeline may not read.
+    intermediates: FxHashMap<String, CallId>,
 }
 
 impl PipelineBuilder {
@@ -198,36 +203,25 @@ impl PipelineBuilder {
         Ok(())
     }
 
-    /// Add a flow step and the products it declares, inferring the
-    /// dimensions of those declared without them.
-    fn add_flow_step(&mut self, flow: &FlowStep) -> Result<(), ParseError> {
-        let FlowStep {
-            invocation,
-            outputs,
-            step,
-        } = flow;
-        let name = &invocation.operation;
-        let operation = self
-            .operation_at
-            .get(name)
-            .map(|&index| &self.pipeline.operations[index])
-            .ok_or_else(|| {
-                let place = step.operation();
-                ParseError::new(
-                    place.line,
-                    format!("operation `{name}` must be declared before its first flow step"),
-                )
-                .within(&place)
-                .with_kind(ParseErrorKind::UndeclaredOperation { name: name.clone() })
-            })?;
-        let invocation = invocation.clone();
+    /// Add one step and the products it declares, inferring the dimensions
+    /// of those declared without them. The operation it calls is declared,
+    /// and is carried out by a command. `step` is where the step written in
+    /// the pipeline is, naming `written`: for a step a call made, the call.
+    fn add_step(
+        &mut self,
+        invocation: Invocation,
+        outputs: &[StepOutput],
+        step: &Step,
+        written: &[String],
+    ) {
+        let operation = &self.pipeline.operations[self.operation_at[&invocation.operation]];
         let dimensions = inferred_dimensions(
             &invocation,
             operation,
             &self.pipeline.products,
             &self.product_ids,
         );
-        for (index, output) in outputs.iter().enumerate() {
+        for output in outputs {
             let declared = if output.dimensions.is_some() {
                 Output::Annotated
             } else {
@@ -242,10 +236,14 @@ impl PipelineBuilder {
                     .clone()
                     .unwrap_or_else(|| dimensions.clone()),
             );
-            self.add_product(product, step.output_at(index));
+            // A product the call made for itself is placed at the call.
+            let place = written
+                .iter()
+                .position(|name| *name == output.name)
+                .map_or_else(|| step.call(), |index| step.output_at(index));
+            self.add_product(product, place);
         }
         self.add_invocation(invocation, step);
-        Ok(())
     }
 }
 
@@ -276,6 +274,7 @@ pub(crate) fn lower(
     if let Some(error) = &syntax.error {
         return Err(error.clone());
     }
+    check_bodies_have_no_commands(&builder)?;
     check_source_beside_paths(&builder)?;
     order_dimensions(
         &mut builder.pipeline.products,
@@ -284,6 +283,37 @@ pub(crate) fn lower(
         &builder.lines,
     )?;
     Ok(builder)
+}
+
+/// An operation with a body is carried out by its steps, so it takes no
+/// `command` or `verify` line of its own.
+fn check_bodies_have_no_commands(builder: &PipelineBuilder) -> Result<(), ParseError> {
+    let PipelineBuilder {
+        pipeline,
+        lines,
+        operation_at,
+        ..
+    } = builder;
+    for (command, place) in pipeline.commands.iter().zip(&lines.commands) {
+        let Some(&operation) = operation_at.get(&command.operation) else {
+            continue;
+        };
+        if !pipeline.operations[operation].steps.is_empty() {
+            return Err(ParseError::new(
+                place.line,
+                format!(
+                    "operation `{}` is carried out by the steps in its body, so it takes no `{}` line; give each step's operation its own",
+                    command.operation,
+                    match command.role {
+                        CommandRole::Run => "command",
+                        CommandRole::Verify => "verify",
+                    }
+                ),
+            )
+            .within(place));
+        }
+    }
+    Ok(())
 }
 
 /// A source written beside another takes the other's path, so it has no
@@ -370,6 +400,9 @@ fn lower_statement(
             builder.inputs.discoveries.push(discovery.clone());
         }
         StatementKind::Operation(operation, place, stage) => {
+            if !operation.steps.is_empty() {
+                builder.check_body(operation, place)?;
+            }
             builder.add_operation(operation.clone(), place.clone(), stage.as_deref())?;
         }
         StatementKind::Constraint(constraint, rule) => {

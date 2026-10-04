@@ -127,6 +127,7 @@ fn resolve_artifacts_with_partial(
             operation: step.operation.name.clone(),
             outputs: step.invocation.outputs.clone(),
             stage: step.invocation.stage.clone(),
+            origin: step.invocation.origin.clone(),
         });
         let outputs: Vec<u32> = step
             .outputs
@@ -242,6 +243,7 @@ impl Resolution {
                     .map(|&id| self.dag.artifacts.get(id).to_instance())
                     .collect(),
                 gaps: expansion.gaps,
+                call: invocation.origin.as_ref().map(|origin| origin.call),
             });
         }
         Ok(())

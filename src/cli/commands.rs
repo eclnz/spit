@@ -6,9 +6,9 @@ use std::path::Path;
 
 use spit::{
     bind_dag, bind_dag_with, diagnose_checked, diagnose_inputs, diagnose_recipe, inspect_paths,
-    parse_input_spec_at, render_artifacts, render_bound_dag, render_check_json, render_dag,
-    render_diagnostics_json, render_editor_json, render_source_inventory, render_step_counts,
-    render_words_json, resolve_artifacts_partial, unused_sources_summary,
+    parse_input_spec_at, render_artifacts, render_bound_dag, render_call, render_check_json,
+    render_dag, render_diagnostics_json, render_editor_json, render_source_inventory,
+    render_step_counts, render_words_json, resolve_artifacts_partial, unused_sources_summary,
     validate_bound_source_files, validate_source_files, BoundDag, BoundPaths, Context, FileNames,
     Gap, LeftOut, View,
 };
@@ -202,7 +202,7 @@ pub(crate) fn dag(args: &CliArgs) -> Result<(), Box<dyn Error>> {
         None => bind_dag(&prepared.pipeline, dag),
     };
     if args.has(Flag::Counts) {
-        print!("{}", render_step_counts(dag));
+        print!("{}", render_step_counts(&prepared.pipeline, dag));
     }
     let view = View {
         paths: args.has(Flag::Paths),
@@ -233,15 +233,22 @@ pub(crate) fn dag(args: &CliArgs) -> Result<(), Box<dyn Error>> {
             .incomplete
             .iter()
             .flat_map(|job| {
-                job.outputs.iter().map(|artifact| LeftOut {
+                let call = job.call.map(|call| prepared.pipeline.written_call(call));
+                job.outputs.iter().map(move |artifact| LeftOut {
                     artifact: artifact.clone(),
                     reasons: job
                         .gaps
                         .iter()
-                        .map(|gap| match gap {
-                            Gap::Unmatched(error) => error.to_string(),
-                            Gap::Blocked { port, artifact } => {
-                                format!("input `{port}` needs {artifact}, which cannot be produced")
+                        .map(|gap| {
+                            let reason = match gap {
+                                Gap::Unmatched(error) => error.to_string(),
+                                Gap::Blocked { port, artifact } => format!(
+                                    "input `{port}` needs {artifact}, which cannot be produced"
+                                ),
+                            };
+                            match call {
+                                Some(call) => format!("in `{}`: {reason}", render_call(call)),
+                                None => reason,
                             }
                         })
                         .collect(),
@@ -285,6 +292,6 @@ pub(crate) fn artifacts(args: &CliArgs) -> Result<(), Box<dyn Error>> {
     if let Some(root) = &prepared.root {
         validate_source_files(&prepared.pipeline, &report.dag, root)?;
     }
-    print!("{}", render_artifacts(&report));
+    print!("{}", render_artifacts(&prepared.pipeline, &report));
     Ok(())
 }
