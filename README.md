@@ -398,6 +398,8 @@ Paths are written once where they can be. SPIT's own path placeholders take `@`,
 | [Stages](examples/stages/stages.spit) | Preprocessing and analysis stages, a stage's own path default, and `{@stage}` paths |
 | [Nested stages](examples/stages/nested.spit) | Stages within a stage, beside a step in the outer stage itself |
 | [Imports](examples/imports/imported.spit) | Reuse source and operation definitions with `text::` names |
+| [Diffusion preprocessing by steps](examples/composites/mrtrix/act.spit) | The ACT example's preprocessing and registration as two calls to operations a library carries out by steps |
+| [Variant calling by steps](examples/composites/germline/somatic.spit) | One operation carried out by steps, called for a tumour and its normal, with checks that add up |
 | [Compiler stress pipelines](examples/stress/README.md) | Deep type inference, deliberate type errors, uneven joins, and large multilevel DAGs |
 
 Run `cargo test --test source_files` to see the field survey example checked against a temporary tree of empty source files: it resolves when every file is present, and reports a missing file, a photo without its sidecar, and a source path that is a directory. The MRtrix example imports each DWI's `.bvec`, `.bval`, and JSON metadata into a `.mif` before processing.

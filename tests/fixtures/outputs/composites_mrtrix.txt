@@ -1,0 +1,280 @@
+$ spit dag act.spitin --counts
+exit: 0
+--- stdout
+jobs  step                                                   stage
+      corrected_dwi, session_b0 = mrx::clean_dwi_session     preprocess
+   7    corrected_dwi::imported = mrx::import_dwi            preprocess
+   3    corrected_dwi::reverse_mif = mrx::import_reverse_b0  preprocess
+   7    corrected_dwi::denoised = mrx::denoise               preprocess
+   7    corrected_dwi::degibbsed = mrx::remove_gibbs         preprocess
+   3    corrected_dwi::session = mrx::concatenate_runs       preprocess
+   3    corrected_dwi::forward_series = mrx::extract_b0      preprocess
+   3    corrected_dwi::forward = mrx::mean_b0                preprocess
+   3    corrected_dwi::pe_pair = mrx::combine_pe_pair        preprocess
+   3    corrected_dwi::preprocessed = mrx::preprocess_dwi    preprocess
+   3    corrected_dwi = mrx::bias_correct                    preprocess
+   3    corrected_dwi::b0_series = mrx::extract_b0           preprocess
+   3    session_b0 = mrx::mean_b0                            preprocess
+  48    in this call
+      t1w_dwi, t1_to_dwi = mrx::register_to_dwi              anatomy
+   3    t1w_dwi::b0_nifti = mrx::export_nifti                anatomy
+   3    t1w_dwi::flirt_matrix = mrx::flirt_register          anatomy
+   3    t1_to_dwi = mrx::convert_flirt                       anatomy
+   3    t1w_dwi = mrx::mrtransform                           anatomy
+  12    in this call
+  60  total
+--- stderr
+note: 2 files under `../../commands/mrtrix3_act/mrtrix3_mock_data` match no source rule and are not read: `config/source_lut.txt` and `config/target_lut.txt`; `spit inputs act.spitin --unmatched` lists them
+note: found 37 source artifacts under `../../commands/mrtrix3_act/mrtrix3_mock_data`
+note: ran `spit inputs act.spitin` in memory
+note: 37 source files verified.
+note: 60 jobs resolved: 48 in preprocess, 12 in anatomy.
+$ spit dag act.spitin --commands
+exit: 0
+--- stdout
+Job 1  mrx::import_dwi  [preprocess]
+  from:   corrected_dwi = mrx::clean_dwi_session (act.spit line 21), mrtrix_dwi.spit line 38
+  run:    mrconvert sub-01/ses-01/dwi/sub-01_ses-01_run-01_dwi.nii.gz derivatives/preprocess/corrected_dwi.imported/sub=01__ses=01__run=01.mif -fslgrad sub-01/ses-01/dwi/sub-01_ses-01_run-01_dwi.bvec sub-01/ses-01/dwi/sub-01_ses-01_run-01_dwi.bval -json_import sub-01/ses-01/dwi/sub-01_ses-01_run-01_dwi.json
+
+Job 2  mrx::import_dwi  [preprocess]
+  from:   corrected_dwi = mrx::clean_dwi_session (act.spit line 21), mrtrix_dwi.spit line 38
+  run:    mrconvert sub-01/ses-01/dwi/sub-01_ses-01_run-02_dwi.nii.gz derivatives/preprocess/corrected_dwi.imported/sub=01__ses=01__run=02.mif -fslgrad sub-01/ses-01/dwi/sub-01_ses-01_run-02_dwi.bvec sub-01/ses-01/dwi/sub-01_ses-01_run-02_dwi.bval -json_import sub-01/ses-01/dwi/sub-01_ses-01_run-02_dwi.json
+
+Job 3  mrx::import_dwi  [preprocess]
+  from:   corrected_dwi = mrx::clean_dwi_session (act.spit line 21), mrtrix_dwi.spit line 38
+  run:    mrconvert sub-01/ses-02/dwi/sub-01_ses-02_run-01_dwi.nii.gz derivatives/preprocess/corrected_dwi.imported/sub=01__ses=02__run=01.mif -fslgrad sub-01/ses-02/dwi/sub-01_ses-02_run-01_dwi.bvec sub-01/ses-02/dwi/sub-01_ses-02_run-01_dwi.bval -json_import sub-01/ses-02/dwi/sub-01_ses-02_run-01_dwi.json
+
+Job 4  mrx::import_dwi  [preprocess]
+  from:   corrected_dwi = mrx::clean_dwi_session (act.spit line 21), mrtrix_dwi.spit line 38
+  run:    mrconvert sub-01/ses-02/dwi/sub-01_ses-02_run-02_dwi.nii.gz derivatives/preprocess/corrected_dwi.imported/sub=01__ses=02__run=02.mif -fslgrad sub-01/ses-02/dwi/sub-01_ses-02_run-02_dwi.bvec sub-01/ses-02/dwi/sub-01_ses-02_run-02_dwi.bval -json_import sub-01/ses-02/dwi/sub-01_ses-02_run-02_dwi.json
+
+Job 5  mrx::import_dwi  [preprocess]
+  from:   corrected_dwi = mrx::clean_dwi_session (act.spit line 21), mrtrix_dwi.spit line 38
+  run:    mrconvert sub-02/ses-01/dwi/sub-02_ses-01_run-01_dwi.nii.gz derivatives/preprocess/corrected_dwi.imported/sub=02__ses=01__run=01.mif -fslgrad sub-02/ses-01/dwi/sub-02_ses-01_run-01_dwi.bvec sub-02/ses-01/dwi/sub-02_ses-01_run-01_dwi.bval -json_import sub-02/ses-01/dwi/sub-02_ses-01_run-01_dwi.json
+
+Job 6  mrx::import_dwi  [preprocess]
+  from:   corrected_dwi = mrx::clean_dwi_session (act.spit line 21), mrtrix_dwi.spit line 38
+  run:    mrconvert sub-02/ses-01/dwi/sub-02_ses-01_run-02_dwi.nii.gz derivatives/preprocess/corrected_dwi.imported/sub=02__ses=01__run=02.mif -fslgrad sub-02/ses-01/dwi/sub-02_ses-01_run-02_dwi.bvec sub-02/ses-01/dwi/sub-02_ses-01_run-02_dwi.bval -json_import sub-02/ses-01/dwi/sub-02_ses-01_run-02_dwi.json
+
+Job 7  mrx::import_dwi  [preprocess]
+  from:   corrected_dwi = mrx::clean_dwi_session (act.spit line 21), mrtrix_dwi.spit line 38
+  run:    mrconvert sub-02/ses-01/dwi/sub-02_ses-01_run-03_dwi.nii.gz derivatives/preprocess/corrected_dwi.imported/sub=02__ses=01__run=03.mif -fslgrad sub-02/ses-01/dwi/sub-02_ses-01_run-03_dwi.bvec sub-02/ses-01/dwi/sub-02_ses-01_run-03_dwi.bval -json_import sub-02/ses-01/dwi/sub-02_ses-01_run-03_dwi.json
+
+Job 8  mrx::import_reverse_b0  [preprocess]
+  from:   corrected_dwi = mrx::clean_dwi_session (act.spit line 21), mrtrix_dwi.spit line 39
+  run:    mrconvert sub-01/ses-01/fmap/sub-01_ses-01_dir-PA_epi.nii.gz derivatives/preprocess/corrected_dwi.reverse_mif/sub=01__ses=01.mif -json_import sub-01/ses-01/fmap/sub-01_ses-01_dir-PA_epi.json
+
+Job 9  mrx::import_reverse_b0  [preprocess]
+  from:   corrected_dwi = mrx::clean_dwi_session (act.spit line 21), mrtrix_dwi.spit line 39
+  run:    mrconvert sub-01/ses-02/fmap/sub-01_ses-02_dir-PA_epi.nii.gz derivatives/preprocess/corrected_dwi.reverse_mif/sub=01__ses=02.mif -json_import sub-01/ses-02/fmap/sub-01_ses-02_dir-PA_epi.json
+
+Job 10  mrx::import_reverse_b0  [preprocess]
+  from:   corrected_dwi = mrx::clean_dwi_session (act.spit line 21), mrtrix_dwi.spit line 39
+  run:    mrconvert sub-02/ses-01/fmap/sub-02_ses-01_dir-PA_epi.nii.gz derivatives/preprocess/corrected_dwi.reverse_mif/sub=02__ses=01.mif -json_import sub-02/ses-01/fmap/sub-02_ses-01_dir-PA_epi.json
+
+Job 11  mrx::denoise  [preprocess]
+  from:   corrected_dwi = mrx::clean_dwi_session (act.spit line 21), mrtrix_dwi.spit line 40
+  run:    dwidenoise derivatives/preprocess/corrected_dwi.imported/sub=01__ses=01__run=01.mif derivatives/preprocess/corrected_dwi.denoised/sub=01__ses=01__run=01.mif
+
+Job 12  mrx::denoise  [preprocess]
+  from:   corrected_dwi = mrx::clean_dwi_session (act.spit line 21), mrtrix_dwi.spit line 40
+  run:    dwidenoise derivatives/preprocess/corrected_dwi.imported/sub=01__ses=01__run=02.mif derivatives/preprocess/corrected_dwi.denoised/sub=01__ses=01__run=02.mif
+
+Job 13  mrx::denoise  [preprocess]
+  from:   corrected_dwi = mrx::clean_dwi_session (act.spit line 21), mrtrix_dwi.spit line 40
+  run:    dwidenoise derivatives/preprocess/corrected_dwi.imported/sub=01__ses=02__run=01.mif derivatives/preprocess/corrected_dwi.denoised/sub=01__ses=02__run=01.mif
+
+Job 14  mrx::denoise  [preprocess]
+  from:   corrected_dwi = mrx::clean_dwi_session (act.spit line 21), mrtrix_dwi.spit line 40
+  run:    dwidenoise derivatives/preprocess/corrected_dwi.imported/sub=01__ses=02__run=02.mif derivatives/preprocess/corrected_dwi.denoised/sub=01__ses=02__run=02.mif
+
+Job 15  mrx::denoise  [preprocess]
+  from:   corrected_dwi = mrx::clean_dwi_session (act.spit line 21), mrtrix_dwi.spit line 40
+  run:    dwidenoise derivatives/preprocess/corrected_dwi.imported/sub=02__ses=01__run=01.mif derivatives/preprocess/corrected_dwi.denoised/sub=02__ses=01__run=01.mif
+
+Job 16  mrx::denoise  [preprocess]
+  from:   corrected_dwi = mrx::clean_dwi_session (act.spit line 21), mrtrix_dwi.spit line 40
+  run:    dwidenoise derivatives/preprocess/corrected_dwi.imported/sub=02__ses=01__run=02.mif derivatives/preprocess/corrected_dwi.denoised/sub=02__ses=01__run=02.mif
+
+Job 17  mrx::denoise  [preprocess]
+  from:   corrected_dwi = mrx::clean_dwi_session (act.spit line 21), mrtrix_dwi.spit line 40
+  run:    dwidenoise derivatives/preprocess/corrected_dwi.imported/sub=02__ses=01__run=03.mif derivatives/preprocess/corrected_dwi.denoised/sub=02__ses=01__run=03.mif
+
+Job 18  mrx::remove_gibbs  [preprocess]
+  from:   corrected_dwi = mrx::clean_dwi_session (act.spit line 21), mrtrix_dwi.spit line 41
+  run:    mrdegibbs derivatives/preprocess/corrected_dwi.denoised/sub=01__ses=01__run=01.mif derivatives/preprocess/corrected_dwi.degibbsed/sub=01__ses=01__run=01.mif
+
+Job 19  mrx::remove_gibbs  [preprocess]
+  from:   corrected_dwi = mrx::clean_dwi_session (act.spit line 21), mrtrix_dwi.spit line 41
+  run:    mrdegibbs derivatives/preprocess/corrected_dwi.denoised/sub=01__ses=01__run=02.mif derivatives/preprocess/corrected_dwi.degibbsed/sub=01__ses=01__run=02.mif
+
+Job 20  mrx::remove_gibbs  [preprocess]
+  from:   corrected_dwi = mrx::clean_dwi_session (act.spit line 21), mrtrix_dwi.spit line 41
+  run:    mrdegibbs derivatives/preprocess/corrected_dwi.denoised/sub=01__ses=02__run=01.mif derivatives/preprocess/corrected_dwi.degibbsed/sub=01__ses=02__run=01.mif
+
+Job 21  mrx::remove_gibbs  [preprocess]
+  from:   corrected_dwi = mrx::clean_dwi_session (act.spit line 21), mrtrix_dwi.spit line 41
+  run:    mrdegibbs derivatives/preprocess/corrected_dwi.denoised/sub=01__ses=02__run=02.mif derivatives/preprocess/corrected_dwi.degibbsed/sub=01__ses=02__run=02.mif
+
+Job 22  mrx::remove_gibbs  [preprocess]
+  from:   corrected_dwi = mrx::clean_dwi_session (act.spit line 21), mrtrix_dwi.spit line 41
+  run:    mrdegibbs derivatives/preprocess/corrected_dwi.denoised/sub=02__ses=01__run=01.mif derivatives/preprocess/corrected_dwi.degibbsed/sub=02__ses=01__run=01.mif
+
+Job 23  mrx::remove_gibbs  [preprocess]
+  from:   corrected_dwi = mrx::clean_dwi_session (act.spit line 21), mrtrix_dwi.spit line 41
+  run:    mrdegibbs derivatives/preprocess/corrected_dwi.denoised/sub=02__ses=01__run=02.mif derivatives/preprocess/corrected_dwi.degibbsed/sub=02__ses=01__run=02.mif
+
+Job 24  mrx::remove_gibbs  [preprocess]
+  from:   corrected_dwi = mrx::clean_dwi_session (act.spit line 21), mrtrix_dwi.spit line 41
+  run:    mrdegibbs derivatives/preprocess/corrected_dwi.denoised/sub=02__ses=01__run=03.mif derivatives/preprocess/corrected_dwi.degibbsed/sub=02__ses=01__run=03.mif
+
+Job 25  mrx::concatenate_runs  [preprocess]
+  from:   corrected_dwi = mrx::clean_dwi_session (act.spit line 21), mrtrix_dwi.spit line 42
+  run:    dwicat derivatives/preprocess/corrected_dwi.degibbsed/sub=01__ses=01__run=01.mif derivatives/preprocess/corrected_dwi.degibbsed/sub=01__ses=01__run=02.mif derivatives/preprocess/corrected_dwi.session/sub=01__ses=01.mif
+
+Job 26  mrx::concatenate_runs  [preprocess]
+  from:   corrected_dwi = mrx::clean_dwi_session (act.spit line 21), mrtrix_dwi.spit line 42
+  run:    dwicat derivatives/preprocess/corrected_dwi.degibbsed/sub=01__ses=02__run=01.mif derivatives/preprocess/corrected_dwi.degibbsed/sub=01__ses=02__run=02.mif derivatives/preprocess/corrected_dwi.session/sub=01__ses=02.mif
+
+Job 27  mrx::concatenate_runs  [preprocess]
+  from:   corrected_dwi = mrx::clean_dwi_session (act.spit line 21), mrtrix_dwi.spit line 42
+  run:    dwicat derivatives/preprocess/corrected_dwi.degibbsed/sub=02__ses=01__run=01.mif derivatives/preprocess/corrected_dwi.degibbsed/sub=02__ses=01__run=02.mif derivatives/preprocess/corrected_dwi.degibbsed/sub=02__ses=01__run=03.mif derivatives/preprocess/corrected_dwi.session/sub=02__ses=01.mif
+
+Job 28  mrx::extract_b0  [preprocess]
+  from:   corrected_dwi = mrx::clean_dwi_session (act.spit line 21), mrtrix_dwi.spit line 43
+  run:    dwiextract derivatives/preprocess/corrected_dwi.session/sub=01__ses=01.mif derivatives/preprocess/corrected_dwi.forward_series/sub=01__ses=01.mif -bzero
+
+Job 29  mrx::extract_b0  [preprocess]
+  from:   corrected_dwi = mrx::clean_dwi_session (act.spit line 21), mrtrix_dwi.spit line 43
+  run:    dwiextract derivatives/preprocess/corrected_dwi.session/sub=01__ses=02.mif derivatives/preprocess/corrected_dwi.forward_series/sub=01__ses=02.mif -bzero
+
+Job 30  mrx::extract_b0  [preprocess]
+  from:   corrected_dwi = mrx::clean_dwi_session (act.spit line 21), mrtrix_dwi.spit line 43
+  run:    dwiextract derivatives/preprocess/corrected_dwi.session/sub=02__ses=01.mif derivatives/preprocess/corrected_dwi.forward_series/sub=02__ses=01.mif -bzero
+
+Job 31  mrx::mean_b0  [preprocess]
+  from:   corrected_dwi = mrx::clean_dwi_session (act.spit line 21), mrtrix_dwi.spit line 44
+  run:    mrmath derivatives/preprocess/corrected_dwi.forward_series/sub=01__ses=01.mif mean derivatives/preprocess/corrected_dwi.forward/sub=01__ses=01.mif -axis 3
+
+Job 32  mrx::mean_b0  [preprocess]
+  from:   corrected_dwi = mrx::clean_dwi_session (act.spit line 21), mrtrix_dwi.spit line 44
+  run:    mrmath derivatives/preprocess/corrected_dwi.forward_series/sub=01__ses=02.mif mean derivatives/preprocess/corrected_dwi.forward/sub=01__ses=02.mif -axis 3
+
+Job 33  mrx::mean_b0  [preprocess]
+  from:   corrected_dwi = mrx::clean_dwi_session (act.spit line 21), mrtrix_dwi.spit line 44
+  run:    mrmath derivatives/preprocess/corrected_dwi.forward_series/sub=02__ses=01.mif mean derivatives/preprocess/corrected_dwi.forward/sub=02__ses=01.mif -axis 3
+
+Job 34  mrx::combine_pe_pair  [preprocess]
+  from:   corrected_dwi = mrx::clean_dwi_session (act.spit line 21), mrtrix_dwi.spit line 45
+  run:    mrcat derivatives/preprocess/corrected_dwi.forward/sub=01__ses=01.mif derivatives/preprocess/corrected_dwi.reverse_mif/sub=01__ses=01.mif derivatives/preprocess/corrected_dwi.pe_pair/sub=01__ses=01.mif -axis 3
+
+Job 35  mrx::combine_pe_pair  [preprocess]
+  from:   corrected_dwi = mrx::clean_dwi_session (act.spit line 21), mrtrix_dwi.spit line 45
+  run:    mrcat derivatives/preprocess/corrected_dwi.forward/sub=01__ses=02.mif derivatives/preprocess/corrected_dwi.reverse_mif/sub=01__ses=02.mif derivatives/preprocess/corrected_dwi.pe_pair/sub=01__ses=02.mif -axis 3
+
+Job 36  mrx::combine_pe_pair  [preprocess]
+  from:   corrected_dwi = mrx::clean_dwi_session (act.spit line 21), mrtrix_dwi.spit line 45
+  run:    mrcat derivatives/preprocess/corrected_dwi.forward/sub=02__ses=01.mif derivatives/preprocess/corrected_dwi.reverse_mif/sub=02__ses=01.mif derivatives/preprocess/corrected_dwi.pe_pair/sub=02__ses=01.mif -axis 3
+
+Job 37  mrx::preprocess_dwi  [preprocess]
+  from:   corrected_dwi = mrx::clean_dwi_session (act.spit line 21), mrtrix_dwi.spit line 46
+  run:    dwifslpreproc derivatives/preprocess/corrected_dwi.session/sub=01__ses=01.mif derivatives/preprocess/corrected_dwi.preprocessed/sub=01__ses=01.mif -rpe_header -se_epi derivatives/preprocess/corrected_dwi.pe_pair/sub=01__ses=01.mif -align_seepi
+
+Job 38  mrx::preprocess_dwi  [preprocess]
+  from:   corrected_dwi = mrx::clean_dwi_session (act.spit line 21), mrtrix_dwi.spit line 46
+  run:    dwifslpreproc derivatives/preprocess/corrected_dwi.session/sub=01__ses=02.mif derivatives/preprocess/corrected_dwi.preprocessed/sub=01__ses=02.mif -rpe_header -se_epi derivatives/preprocess/corrected_dwi.pe_pair/sub=01__ses=02.mif -align_seepi
+
+Job 39  mrx::preprocess_dwi  [preprocess]
+  from:   corrected_dwi = mrx::clean_dwi_session (act.spit line 21), mrtrix_dwi.spit line 46
+  run:    dwifslpreproc derivatives/preprocess/corrected_dwi.session/sub=02__ses=01.mif derivatives/preprocess/corrected_dwi.preprocessed/sub=02__ses=01.mif -rpe_header -se_epi derivatives/preprocess/corrected_dwi.pe_pair/sub=02__ses=01.mif -align_seepi
+
+Job 40  mrx::bias_correct  [preprocess]
+  from:   corrected_dwi = mrx::clean_dwi_session (act.spit line 21), mrtrix_dwi.spit line 47
+  run:    dwibiascorrect fsl derivatives/preprocess/corrected_dwi.preprocessed/sub=01__ses=01.mif derivatives/preprocess/corrected_dwi/sub=01__ses=01.mif
+
+Job 41  mrx::bias_correct  [preprocess]
+  from:   corrected_dwi = mrx::clean_dwi_session (act.spit line 21), mrtrix_dwi.spit line 47
+  run:    dwibiascorrect fsl derivatives/preprocess/corrected_dwi.preprocessed/sub=01__ses=02.mif derivatives/preprocess/corrected_dwi/sub=01__ses=02.mif
+
+Job 42  mrx::bias_correct  [preprocess]
+  from:   corrected_dwi = mrx::clean_dwi_session (act.spit line 21), mrtrix_dwi.spit line 47
+  run:    dwibiascorrect fsl derivatives/preprocess/corrected_dwi.preprocessed/sub=02__ses=01.mif derivatives/preprocess/corrected_dwi/sub=02__ses=01.mif
+
+Job 43  mrx::extract_b0  [preprocess]
+  from:   corrected_dwi = mrx::clean_dwi_session (act.spit line 21), mrtrix_dwi.spit line 48
+  run:    dwiextract derivatives/preprocess/corrected_dwi/sub=01__ses=01.mif derivatives/preprocess/corrected_dwi.b0_series/sub=01__ses=01.mif -bzero
+
+Job 44  mrx::extract_b0  [preprocess]
+  from:   corrected_dwi = mrx::clean_dwi_session (act.spit line 21), mrtrix_dwi.spit line 48
+  run:    dwiextract derivatives/preprocess/corrected_dwi/sub=01__ses=02.mif derivatives/preprocess/corrected_dwi.b0_series/sub=01__ses=02.mif -bzero
+
+Job 45  mrx::extract_b0  [preprocess]
+  from:   corrected_dwi = mrx::clean_dwi_session (act.spit line 21), mrtrix_dwi.spit line 48
+  run:    dwiextract derivatives/preprocess/corrected_dwi/sub=02__ses=01.mif derivatives/preprocess/corrected_dwi.b0_series/sub=02__ses=01.mif -bzero
+
+Job 46  mrx::mean_b0  [preprocess]
+  from:   corrected_dwi = mrx::clean_dwi_session (act.spit line 21), mrtrix_dwi.spit line 49
+  run:    mrmath derivatives/preprocess/corrected_dwi.b0_series/sub=01__ses=01.mif mean derivatives/preprocess/session_b0/sub=01__ses=01.mif -axis 3
+
+Job 47  mrx::mean_b0  [preprocess]
+  from:   corrected_dwi = mrx::clean_dwi_session (act.spit line 21), mrtrix_dwi.spit line 49
+  run:    mrmath derivatives/preprocess/corrected_dwi.b0_series/sub=01__ses=02.mif mean derivatives/preprocess/session_b0/sub=01__ses=02.mif -axis 3
+
+Job 48  mrx::mean_b0  [preprocess]
+  from:   corrected_dwi = mrx::clean_dwi_session (act.spit line 21), mrtrix_dwi.spit line 49
+  run:    mrmath derivatives/preprocess/corrected_dwi.b0_series/sub=02__ses=01.mif mean derivatives/preprocess/session_b0/sub=02__ses=01.mif -axis 3
+
+Job 49  mrx::export_nifti  [anatomy]
+  from:   t1w_dwi = mrx::register_to_dwi (act.spit line 24), mrtrix_dwi.spit line 65
+  run:    mrconvert derivatives/preprocess/session_b0/sub=01__ses=01.mif derivatives/anatomy/t1w_dwi.b0_nifti/sub=01__ses=01.nii.gz
+
+Job 50  mrx::export_nifti  [anatomy]
+  from:   t1w_dwi = mrx::register_to_dwi (act.spit line 24), mrtrix_dwi.spit line 65
+  run:    mrconvert derivatives/preprocess/session_b0/sub=01__ses=02.mif derivatives/anatomy/t1w_dwi.b0_nifti/sub=01__ses=02.nii.gz
+
+Job 51  mrx::export_nifti  [anatomy]
+  from:   t1w_dwi = mrx::register_to_dwi (act.spit line 24), mrtrix_dwi.spit line 65
+  run:    mrconvert derivatives/preprocess/session_b0/sub=02__ses=01.mif derivatives/anatomy/t1w_dwi.b0_nifti/sub=02__ses=01.nii.gz
+
+Job 52  mrx::flirt_register  [anatomy]
+  from:   t1w_dwi = mrx::register_to_dwi (act.spit line 24), mrtrix_dwi.spit line 66
+  run:    flirt -in sub-01/ses-01/anat/sub-01_ses-01_T1w.nii.gz -ref derivatives/anatomy/t1w_dwi.b0_nifti/sub=01__ses=01.nii.gz -omat derivatives/anatomy/t1w_dwi.flirt_matrix/sub=01__ses=01.mat -dof 6 -cost corratio
+
+Job 53  mrx::flirt_register  [anatomy]
+  from:   t1w_dwi = mrx::register_to_dwi (act.spit line 24), mrtrix_dwi.spit line 66
+  run:    flirt -in sub-01/ses-02/anat/sub-01_ses-02_T1w.nii.gz -ref derivatives/anatomy/t1w_dwi.b0_nifti/sub=01__ses=02.nii.gz -omat derivatives/anatomy/t1w_dwi.flirt_matrix/sub=01__ses=02.mat -dof 6 -cost corratio
+
+Job 54  mrx::flirt_register  [anatomy]
+  from:   t1w_dwi = mrx::register_to_dwi (act.spit line 24), mrtrix_dwi.spit line 66
+  run:    flirt -in sub-02/ses-01/anat/sub-02_ses-01_T1w.nii.gz -ref derivatives/anatomy/t1w_dwi.b0_nifti/sub=02__ses=01.nii.gz -omat derivatives/anatomy/t1w_dwi.flirt_matrix/sub=02__ses=01.mat -dof 6 -cost corratio
+
+Job 55  mrx::convert_flirt  [anatomy]
+  from:   t1w_dwi = mrx::register_to_dwi (act.spit line 24), mrtrix_dwi.spit line 67
+  run:    transformconvert derivatives/anatomy/t1w_dwi.flirt_matrix/sub=01__ses=01.mat sub-01/ses-01/anat/sub-01_ses-01_T1w.nii.gz derivatives/anatomy/t1w_dwi.b0_nifti/sub=01__ses=01.nii.gz flirt_import derivatives/anatomy/t1_to_dwi/sub=01__ses=01.txt
+
+Job 56  mrx::convert_flirt  [anatomy]
+  from:   t1w_dwi = mrx::register_to_dwi (act.spit line 24), mrtrix_dwi.spit line 67
+  run:    transformconvert derivatives/anatomy/t1w_dwi.flirt_matrix/sub=01__ses=02.mat sub-01/ses-02/anat/sub-01_ses-02_T1w.nii.gz derivatives/anatomy/t1w_dwi.b0_nifti/sub=01__ses=02.nii.gz flirt_import derivatives/anatomy/t1_to_dwi/sub=01__ses=02.txt
+
+Job 57  mrx::convert_flirt  [anatomy]
+  from:   t1w_dwi = mrx::register_to_dwi (act.spit line 24), mrtrix_dwi.spit line 67
+  run:    transformconvert derivatives/anatomy/t1w_dwi.flirt_matrix/sub=02__ses=01.mat sub-02/ses-01/anat/sub-02_ses-01_T1w.nii.gz derivatives/anatomy/t1w_dwi.b0_nifti/sub=02__ses=01.nii.gz flirt_import derivatives/anatomy/t1_to_dwi/sub=02__ses=01.txt
+
+Job 58  mrx::mrtransform  [anatomy]
+  from:   t1w_dwi = mrx::register_to_dwi (act.spit line 24), mrtrix_dwi.spit line 68
+  run:    mrtransform sub-01/ses-01/anat/sub-01_ses-01_T1w.nii.gz derivatives/anatomy/t1w_dwi/sub=01__ses=01.mif -linear derivatives/anatomy/t1_to_dwi/sub=01__ses=01.txt -template derivatives/preprocess/session_b0/sub=01__ses=01.mif -interp linear
+
+Job 59  mrx::mrtransform  [anatomy]
+  from:   t1w_dwi = mrx::register_to_dwi (act.spit line 24), mrtrix_dwi.spit line 68
+  run:    mrtransform sub-01/ses-02/anat/sub-01_ses-02_T1w.nii.gz derivatives/anatomy/t1w_dwi/sub=01__ses=02.mif -linear derivatives/anatomy/t1_to_dwi/sub=01__ses=02.txt -template derivatives/preprocess/session_b0/sub=01__ses=02.mif -interp linear
+
+Job 60  mrx::mrtransform  [anatomy]
+  from:   t1w_dwi = mrx::register_to_dwi (act.spit line 24), mrtrix_dwi.spit line 68
+  run:    mrtransform sub-02/ses-01/anat/sub-02_ses-01_T1w.nii.gz derivatives/anatomy/t1w_dwi/sub=02__ses=01.mif -linear derivatives/anatomy/t1_to_dwi/sub=02__ses=01.txt -template derivatives/preprocess/session_b0/sub=02__ses=01.mif -interp linear
+--- stderr
+note: 2 files under `../../commands/mrtrix3_act/mrtrix3_mock_data` match no source rule and are not read: `config/source_lut.txt` and `config/target_lut.txt`; `spit inputs act.spitin --unmatched` lists them
+note: found 37 source artifacts under `../../commands/mrtrix3_act/mrtrix3_mock_data`
+note: ran `spit inputs act.spitin` in memory
+note: 37 source files verified.
+note: 60 jobs resolved: 48 in preprocess, 12 in anatomy.
+note: commands run from `../../commands/mrtrix3_act/mrtrix3_mock_data`
