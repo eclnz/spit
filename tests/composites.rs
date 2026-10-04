@@ -595,3 +595,43 @@ fn what_cannot_be_made_names_the_call_it_comes_from() {
         "{rendered}"
     );
 }
+
+#[test]
+fn hovers_on_a_call_describe_the_call_and_the_steps_it_expands_to() {
+    let text = "\
+source raw : Lines [group, lane]
+source cal : Table [group, revision]
+operation clean(x: Lines, t: Table) -> Lines
+command clean: clean {x} {t} {@output}
+operation flip(t: Table, x: Lines) -> (y: Lines):
+    y = clean(x, t)
+out = flip(cal @ where(revision=1), raw)
+";
+    let hovers = spit::pipeline_hovers(text, std::path::Path::new("flip.spit"));
+    let at = |line: usize, name: &str| {
+        hovers
+            .iter()
+            .filter(|hover| hover.line == line && hover.name == name)
+            .map(|hover| hover.details.clone())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        at(5, "flip"),
+        [["Carried out by the steps in its body: y = clean(x, t)"]]
+    );
+    assert_eq!(
+        at(7, "flip"),
+        [[
+            "Carried out by the steps in its body: y = clean(x, t)",
+            "This call expands to: out = clean(raw, cal)"
+        ]]
+    );
+    // Each argument supplies the call's input, in the call's order.
+    assert!(at(7, "cal")[0].ends_with(&["Supplies input t of flip.".to_owned()]));
+    assert!(at(7, "raw")[0].ends_with(&["Supplies input x of flip.".to_owned()]));
+    assert!(at(1, "raw")[0].contains(&"Used by: out = flip(…)".to_owned()));
+    assert_eq!(
+        at(7, "out")[0][0],
+        "Derived product. Produced by flip(cal, raw), by its step out = clean(raw, cal)."
+    );
+}

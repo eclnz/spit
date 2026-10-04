@@ -55,9 +55,13 @@ impl Pipeline {
     /// The call written in the pipeline that `call` was made by: `call`
     /// itself, or the outermost of the calls it is nested in.
     pub fn written_call(&self, call: CallId) -> &Call {
-        let mut call = &self.calls[call.index()];
-        while let Some(parent) = call.parent {
-            call = &self.calls[parent.index()];
+        &self.calls[self.written_call_id(call).index()]
+    }
+
+    /// The id of [`Pipeline::written_call`].
+    pub fn written_call_id(&self, mut call: CallId) -> CallId {
+        while let Some(parent) = self.calls[call.index()].parent {
+            call = parent;
         }
         call
     }
