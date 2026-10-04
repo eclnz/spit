@@ -279,3 +279,45 @@ fn records_in_a_pipeline_are_one_error_however_many_lines() {
     assert!(found[0].1.contains("belong in a .spitout"), "{found:?}");
     assert_eq!(found[1].0, Some(7));
 }
+
+/// Recovery reads on past each bad line as if it were blank. A blank line
+/// would not end the body of an operation, so a line indented beneath the
+/// body's header still belongs to it, however many lines before it fail.
+#[test]
+fn blanking_a_line_that_ends_a_body_leaves_it_open_for_the_lines_after() {
+    let text = "source raw : Image [sub]\noperation step(x: Image) -> Image\noperation body(x: Image) -> (r: Image):\n  r = step(x)\nexclude [sub=1]\nfrob 1\nexclude [sub=1]\n  - raw: x\nstage s:\n  a = step(raw)\nstray line\n  b = step(raw)\n";
+    let issues = errors(diagnose(text, None));
+    let found: Vec<_> = issues
+        .iter()
+        .map(|issue| (issue.line, issue.message.as_str()))
+        .collect();
+    assert_eq!(
+        found.iter().map(|(line, _)| *line).collect::<Vec<_>>(),
+        [Some(5), Some(6), Some(7), Some(8), Some(11)],
+        "{found:?}"
+    );
+    assert!(found[3].1.contains("holds only steps"), "{found:?}");
+}
+
+#[test]
+fn calls_to_an_operation_that_failed_to_declare_repeat_its_error() {
+    let mut text = String::from("source raw : T [sub]\noperation step(input: T -> T\n");
+    for index in 0..50 {
+        text += &format!("p{index} = step(raw)\n");
+    }
+    let issues = errors(diagnose(&text, None));
+    assert_eq!(issues.len(), 1, "{issues:?}");
+    assert_eq!(issues[0].line, Some(2));
+}
+
+#[test]
+fn each_call_to_a_misspelled_operation_is_an_error_of_its_own() {
+    let mut text = String::from("source raw : T [sub]\noperation step(input: T) -> T\n");
+    for index in 0..50 {
+        text += &format!("p{index} = stpe(raw @ vary(sub))\np{index}b = step(raw @ bogus(sub))\n");
+    }
+    let issues = errors(diagnose(&text, None));
+    let lines: Vec<_> = issues.iter().map(|issue| issue.line).collect();
+    let expected: Vec<_> = (3..103).map(Some).collect();
+    assert_eq!(lines, expected);
+}
