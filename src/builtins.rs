@@ -44,8 +44,7 @@ pub enum Word {
     Require,
     RequireWhere,
     Count,
-    Drop,
-    DropWhere,
+    ExcludeWhere,
     Missing,
     Has,
     RequireHas,
@@ -88,7 +87,7 @@ impl Word {
 }
 
 /// Every word's documentation, in the order of [`Word`].
-pub static DOCS: [Doc; 46] = [
+pub static DOCS: [Doc; 45] = [
     Doc {
         name: "source",
         kind: "keyword",
@@ -234,7 +233,7 @@ pub static DOCS: [Doc; 46] = [
         kind: "keyword",
         anchor: "discover-contexts-from-directories",
         example: "discover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}",
-        summary: "Finds a dataset's contexts from its directories: each matching directory, even an empty one, gives one binding, and only those found on disk are used. `sessions` names the rule, which `require` and `drop` can count. A source whose dimensions fit within the rule's expects a file for each binding.",
+        summary: "Finds a dataset's contexts from its directories: each matching directory, even an empty one, gives one binding, and only those found on disk are used. `sessions` names the rule, which `require` and conditional `exclude` can count. A source whose dimensions fit within the rule's expects a file for each binding.",
     },
     Doc {
         name: "discover-from",
@@ -248,7 +247,7 @@ pub static DOCS: [Doc; 46] = [
         kind: "keyword",
         anchor: "constraints",
         example: "require [subject, visit] where image count>=2\nrequire [subject, visit] where image has run=1,2",
-        summary: "Stops the run if any group fails, checked against what `exclude` and `drop` leave. A rule counts artifacts or requires particular values in each group. A rule that finds no group at all is an error.",
+        summary: "Stops the run if any group fails, checked against what named and conditional `exclude` leave. A rule counts artifacts or requires particular values in each group. A rule that finds no group at all is an error.",
     },
     Doc {
         name: "require-where",
@@ -261,35 +260,28 @@ pub static DOCS: [Doc; 46] = [
         name: "count",
         kind: "keyword",
         anchor: "constraints",
-        example: "require [subject, visit] where image count>=2\ndrop [sub] where sessions count<2",
+        example: "require [subject, visit] where image count>=2\nexclude [sub] where sessions count<2",
         summary: "How many artifacts of a source, or contexts of a discovery, each group holds, compared with `=`, `!=`, `>=`, `<=`, `>` or `<`.",
     },
     Doc {
-        name: "drop",
+        name: "exclude-where",
         kind: "keyword",
-        anchor: "drop-groups-that-fail-a-criterion",
-        example: "drop [sub] where sessions count<2\ndrop [sub, ses] where bold missing run=1,2",
-        summary: "Removes every group that meets its condition, with every artifact and discovered context in it. Judged after every `exclude` and before every `require`, whatever order the rules are written in. A rule that would remove every group is an error. Each removed group is reported and recorded in the `.spitout`.",
-    },
-    Doc {
-        name: "drop-where",
-        kind: "keyword",
-        anchor: "drop-groups-that-fail-a-criterion",
-        example: "drop [sub, ses] where t1w count=0",
-        summary: "Introduces a `drop` rule's condition: the source or discovery rule to count, then a `count`, `missing` values or `has` values.",
+        anchor: "exclude-groups-that-meet-a-condition",
+        example: "exclude [sub, ses] where t1w count=0",
+        summary: "Introduces a conditional `exclude` rule's condition: the source or discovery rule to count, then a `count`, `missing` values or `has` values.",
     },
     Doc {
         name: "missing",
         kind: "keyword",
-        anchor: "drop-groups-that-fail-a-criterion",
-        example: "drop [sub, ses] where bold missing run=1,2",
+        anchor: "exclude-groups-that-meet-a-condition",
+        example: "exclude [sub, ses] where bold missing run=1,2",
         summary: "Removes each group without one of the values: here, a session without a run 1 or without a run 2.",
     },
     Doc {
         name: "has",
         kind: "keyword",
-        anchor: "drop-groups-that-fail-a-criterion",
-        example: "drop [sub, ses] where bold has run=3",
+        anchor: "exclude-groups-that-meet-a-condition",
+        example: "exclude [sub, ses] where bold has run=3",
         summary: "Removes each group with one of the values: here, a session with a run 3.",
     },
     Doc {
@@ -303,8 +295,8 @@ pub static DOCS: [Doc; 46] = [
         name: "exclude",
         kind: "keyword",
         anchor: "exclude-named-artifacts",
-        example: "exclude bold[sub=02,ses=02,run=3]    # corrupted\nexclude [sub=07]                     # withdrew consent",
-        summary: "Removes artifacts by name, while their files stay where they are. A source with all its dimensions names one artifact; values alone name a group of every source; a source with some dimensions names part of that source. A comment on the line is kept as the reason. Applies before every other rule, and an exclude that matches nothing is an error.",
+        example: "exclude bold[sub=02,ses=02,run=3]    # corrupted\nexclude [sub] where sessions count<2",
+        summary: "Removes named artifacts or groups and groups meeting a condition. Named exclusions apply before scanning; conditional exclusions run against the observed inventory before `require`. An exclude that names nothing or removes every group is an error.",
     },
     Doc {
         name: "exclude-from",
@@ -387,8 +379,8 @@ pub static DOCS: [Doc; 46] = [
         name: "removed:",
         kind: "header",
         anchor: "inputs",
-        example: "removed:\n    [sub=07]\n        rule: drop [sub] where sessions count<2\n        at: line 6\n        found: 1",
-        summary: "What the recipe's `exclude` and `drop` rules removed, each with its rule, line, count found and reason. A record, not a rule: the records above already leave these out, and `dag` copies it into the `.spitdag`.",
+        example: "removed:\n    [sub=07]\n        rule: exclude [sub] where sessions count<2\n        at: line 6\n        found: 1",
+        summary: "What the recipe's `exclude` rules removed, each with its rule, line, count found and reason. A record, not a rule: the records above already leave these out, and `dag` copies it into the `.spitdag`.",
     },
     Doc {
         name: "check",
@@ -494,7 +486,7 @@ fn statement(line: &str) -> Option<(Word, usize)> {
             Keyword::Verify => Word::Verify,
             Keyword::Check => Word::Check,
             Keyword::Require => Word::Require,
-            Keyword::Drop => Word::Drop,
+            Keyword::Drop => return None,
             Keyword::Exclude => Word::Exclude,
             Keyword::Path => Word::Path,
             Keyword::Ext => Word::Ext,
@@ -594,14 +586,14 @@ fn rule_word(code: &str, range: Range<usize>, statement: Option<Word>) -> Option
         (Word::Exclude, "from") if spaced && before.trim_start() == "exclude" => {
             Some(Word::ExcludeFrom)
         }
-        (Word::Require | Word::Drop, "count") if after.starts_with(['=', '!', '>', '<']) => {
+        (Word::Require | Word::Exclude, "count") if after.starts_with(['=', '!', '>', '<']) => {
             Some(Word::Count)
         }
         (Word::Require, "where") if before.ends_with(']') => Some(Word::RequireWhere),
         (Word::Require, "has") if before.contains(" where ") => Some(Word::RequireHas),
-        (Word::Drop, "where") if before.ends_with(']') => Some(Word::DropWhere),
-        (Word::Drop, "missing") if before.contains(" where ") => Some(Word::Missing),
-        (Word::Drop, "has") if before.contains(" where ") => Some(Word::Has),
+        (Word::Exclude, "where") if before.ends_with(']') => Some(Word::ExcludeWhere),
+        (Word::Exclude, "missing") if before.contains(" where ") => Some(Word::Missing),
+        (Word::Exclude, "has") if before.contains(" where ") => Some(Word::Has),
         _ => None,
     }
 }

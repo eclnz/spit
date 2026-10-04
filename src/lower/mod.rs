@@ -264,7 +264,7 @@ pub(crate) fn lower(
         if rule && kind == Kind::Pipeline {
             return Err(ParseError::new(
                 statement.place.line,
-                "`discover`, `require`, `drop` and `exclude` rules belong in a .spitin recipe, not a pipeline",
+                "`discover`, `require` and `exclude` rules belong in a .spitin recipe, not a pipeline",
             )
             .within(&statement.place));
         }

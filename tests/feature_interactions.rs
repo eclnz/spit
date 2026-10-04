@@ -125,7 +125,7 @@ fn a_scan_and_its_records_settle_to_the_same_plan() {
          path: out/{@product}/{@entities}\naligned = align(bold, t1w)\n",
     );
     let rules = "exclude bold[sub=2,ses=1,run=2]   # bad\n\
-                 drop [sub] where t1w count<1\n\
+                 exclude [sub] where t1w count<1\n\
                  require [sub, ses] where bold count>=1\n";
     let header = "pipeline p.spit\nroot d\n";
     let base = tree.write("base.spitin", header);
@@ -160,7 +160,7 @@ fn a_scan_and_its_records_settle_to_the_same_plan() {
     assert!(
         scan_notes
             .iter()
-            .any(|note| note.contains("dropped [sub=3]")),
+            .any(|note| note.contains("excluded [sub=3]")),
         "{scan_notes:?}"
     );
     assert!(scan_notes

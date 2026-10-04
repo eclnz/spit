@@ -34,13 +34,13 @@ pub struct Discovery {
     pub missed: Vec<MissedSource>,
     /// Each skipped file and why.
     pub skipped: Vec<String>,
-    /// What each `exclude` rule removed, then each group a `drop` rule
+    /// What each `exclude` rule removed, then each group a conditional `exclude` rule
     /// removed.
     pub removed: Vec<Removal>,
     /// The first `exclude` rule that matched nothing, which the input stage
     /// reports as an error.
     pub unmatched: Option<UnmatchedExclusion>,
-    /// `drop` rules that removed every group of a grouping, which the input
+    /// conditional `exclude` rules that removed every group of a grouping, which the input
     /// stage reports as an error.
     pub emptied: Option<EveryGroupDropped>,
 }
@@ -196,7 +196,7 @@ pub(super) fn discover(
         &mut excluder,
         &mut discovery,
     )?;
-    // Every `drop` rule is judged once, against what was found: a file a
+    // Every conditional `exclude` rule is judged once, against what was found: a file a
     // context expects but lacks counts as absent, so a rule can remove the
     // context rather than fail on the missing file below.
     let dropped = match apply_drops(rules, &mut discovery.inventory) {
@@ -507,7 +507,7 @@ fn source_record(
 }
 
 /// Require the file or folder of every source binding a discovery rule expects,
-/// except in groups a `drop` rule removed. An excluded binding needs no file;
+/// except in groups a conditional `exclude` rule removed. An excluded binding needs no file;
 /// when it has none, its exclusion is recorded here, since no file was found
 /// to record it by.
 fn require_source_files(

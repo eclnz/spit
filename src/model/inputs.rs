@@ -11,12 +11,12 @@ use crate::paths::PathTemplate;
 use super::{owned_strings, DirectoryDiscovery, EntityBinding, Pipeline, PipelineIndex};
 
 /// How a dataset's sources are found and filtered: directory discovery,
-/// `exclude`, `drop` and `require` rules, and where source files live. The input stage
+/// `exclude` and `require` rules, and where source files live. The input stage
 /// reads these; job resolution never does.
 #[derive(Clone, Debug, Default)]
 pub struct InputRules {
     pub discoveries: Vec<DirectoryDiscovery>,
-    /// `require` and `drop` rules, in declaration order.
+    /// `require` and conditional `exclude` rules, in declaration order.
     pub constraints: Vec<CoverageRule>,
     /// `exclude` rules, in declaration order, with each row of a file an
     /// `exclude from` line names in its place once the file is read.
@@ -162,14 +162,14 @@ impl fmt::Display for Exclusion {
 pub struct Removal {
     pub product: Option<String>,
     pub entities: EntityBinding,
-    /// The rule, as `exclude bold[run=3]` or `drop [sub] where sessions
+    /// The rule, as `exclude bold[run=3]` or `exclude [sub] where sessions
     /// count<2`.
     pub rule: String,
     /// Where the rule is written, when known: `line 4` of the recipe, or a
     /// line of a file.
     pub origin: Option<String>,
     pub reason: Option<String>,
-    /// For a group a `drop` rule counted: how many it found.
+    /// For a group a conditional `exclude` rule counted: how many it found.
     pub found: Option<usize>,
 }
 
@@ -197,9 +197,9 @@ impl Removal {
         text
     }
 
-    /// Whether an `exclude` rule made it, rather than a `drop` rule.
+    /// Whether a named `exclude` rule made it, rather than a conditional one.
     pub fn is_exclusion(&self) -> bool {
-        self.rule.starts_with("exclude")
+        self.rule.starts_with("exclude ") && !self.rule.contains("] where ")
     }
 }
 
@@ -330,12 +330,12 @@ impl fmt::Display for CountRequirement {
     }
 }
 
-/// A `require` or `drop` rule over the groups of a dataset that `group_by`
+/// A `require` or conditional `exclude` rule over the groups of a dataset that `group_by`
 /// forms, counting the artifacts of a source, or the contexts of a
 /// discovery rule, in each: `product`.
 ///
 /// A `require` rule fails a group unless its count holds and it has every
-/// value in `values`. A `drop` rule removes a group when its count holds,
+/// value in `values`. A conditional `exclude` rule removes a group when its count holds,
 /// when it lacks a value in `values`, or when it has a value in `has`; it
 /// names one of the three.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -354,7 +354,7 @@ pub struct CoverageRule {
     pub line: Option<usize>,
 }
 
-/// Reads as written: `drop [sub] where sessions count<2`, or `require
+/// Reads as written: `exclude [sub] where sessions count<2`, or `require
 /// [sub] where image has run=1,2`.
 impl fmt::Display for CoverageRule {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -384,7 +384,7 @@ impl fmt::Display for CoverageRule {
             CoverageAction::Drop => {
                 write!(
                     f,
-                    "drop [{}] where {}",
+                    "exclude [{}] where {}",
                     self.group_by.join(", "),
                     self.product
                 )?;
@@ -428,7 +428,7 @@ impl CoverageRule {
     }
 
     /// Whether a group whose members have `bindings` passes a `require`
-    /// rule, or is removed by a `drop` rule.
+    /// rule, or is removed by a conditional `exclude` rule.
     pub fn holds_for(&self, bindings: &[&EntityBinding]) -> bool {
         let lacks = |values: &BTreeMap<String, Vec<String>>| {
             values.iter().any(|(dimension, listed)| {

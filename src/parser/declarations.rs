@@ -1,6 +1,6 @@
 //! Declarations shared by both forms: products, operations and their ports,
 //! input bindings, commands, path rules and imports. A recipe's `require`
-//! and `drop` rules are in `rules.rs`.
+//! and conditional `exclude` rules are in `rules.rs`.
 
 use std::collections::BTreeMap;
 
