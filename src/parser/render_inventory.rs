@@ -70,7 +70,7 @@ pub(crate) fn as_read_back(
 }
 
 /// The source path rules a `.spitout` writes: the inventory's and the
-/// recipe's, a `sidecars` group's written out for each member.
+/// recipe's. Companions derive their paths from their main source.
 fn written_source_paths(
     inventory: &SourceInventory,
     pipeline: &Pipeline,

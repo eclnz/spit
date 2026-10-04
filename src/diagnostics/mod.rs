@@ -462,15 +462,9 @@ fn recipe_path_errors(
         return Vec::new();
     }
     let merged = with_source_paths(pipeline, &source_paths);
-    // A member of a `sidecars` group has its group's rule, and a source
-    // without a rule of its own in the recipe has its default.
-    let members = pipeline.sidecar_members();
     let mut places = SourceMap::default();
     for name in source_paths.keys() {
-        let named = members
-            .get(name.as_str())
-            .map_or(name.as_str(), |group| group.name.as_str());
-        if let Some(place) = lines.paths.get(named).or(lines.default_path.as_ref()) {
+        if let Some(place) = lines.paths.get(name).or(lines.default_path.as_ref()) {
             places.paths.insert(name.clone(), place.clone());
         }
     }

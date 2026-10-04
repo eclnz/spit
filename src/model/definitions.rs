@@ -1,5 +1,5 @@
 //! What a pipeline declares: products, operations and their ports, the
-//! steps that call them, commands, sidecars and stages.
+//! steps that call them, commands, companion sources and stages.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -23,6 +23,9 @@ pub struct ProductDef {
     /// `source dicom : Dicom / [sub]`; `false` for an output, whose
     /// operation says.
     pub folder: bool,
+    /// A source whose file shares another source's stem and dimensions.
+    /// Its suffix replaces that source's extension.
+    pub beside: Option<Beside>,
     /// The checks a source's artifacts must pass before a job reads them, as
     /// in `source t1w : Image [sub] @ check(ndim(3))`; none for an output.
     pub checks: Vec<CheckUse>,
@@ -40,6 +43,7 @@ impl ProductDef {
             dimensions: owned_strings(dimensions),
             extension: None,
             folder: false,
+            beside: None,
             checks: Vec::new(),
         }
     }
@@ -114,7 +118,7 @@ pub struct OutputPort {
 /// without its extension, then `suffix`: `.json`, or `_mask.nii.gz`.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Beside {
-    pub port: String,
+    pub sibling: String,
     pub suffix: String,
 }
 
@@ -137,7 +141,7 @@ impl OutputPort {
         let suffix = suffix.into();
         self.extension = suffix.find('.').map(|dot| suffix[dot..].to_owned());
         self.beside = Some(Beside {
-            port: port.into(),
+            sibling: port.into(),
             suffix,
         });
         self
@@ -485,30 +489,14 @@ impl fmt::Display for CheckUse {
     }
 }
 
-/// Sources declared together in a `sidecars` block: they share dimensions
-/// and a path stem, and differ by extension, as a photo and its GPS track.
+/// A source and the companions declared beside it. Discovery uses this
+/// grouping to report an incomplete set at a shared identity.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SidecarGroup {
     pub name: String,
     pub dimensions: Vec<String>,
     /// Each member source with its extension, in declaration order.
     pub members: Vec<(String, String)>,
-    /// The stem the block's `path:` line gives, if it has one; otherwise a
-    /// recipe gives it, as `path name: stem`.
-    pub stem: Option<PathTemplate>,
-}
-
-impl SidecarGroup {
-    /// The path rule each member takes from `stem`: the stem and the
-    /// member's extension.
-    pub fn member_paths<'a>(
-        &'a self,
-        stem: &'a PathTemplate,
-    ) -> impl Iterator<Item = (&'a str, PathTemplate)> + 'a {
-        self.members
-            .iter()
-            .map(move |(member, extension)| (member.as_str(), stem.with_extension(extension)))
-    }
 }
 
 /// Where the extension a product's file must have is declared.

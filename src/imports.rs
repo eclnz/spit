@@ -66,7 +66,7 @@ pub(crate) fn apply_import(
         }
     }
     for group in &imported.sidecar_groups {
-        builder.add_sidecar_group(group.clone(), place.clone());
+        builder.add_sidecar_group(group.clone());
     }
     for product in &imported.products {
         builder.add_product(product.clone(), place.clone());
@@ -118,7 +118,7 @@ fn defined(pipeline: &Pipeline) -> [(&'static str, Vec<&str>); 5] {
             pipeline.product_paths.keys().map(String::as_str).collect(),
         ),
         (
-            "sidecars group",
+            "source companions",
             pipeline
                 .sidecar_groups
                 .iter()
@@ -136,9 +136,9 @@ struct Module<'m> {
     operations: FxHashMap<&'m str, Vec<&'m OperationDef>>,
     /// Every source of a name.
     sources: FxHashMap<&'m str, Vec<&'m ProductDef>>,
-    /// Each `sidecars` group by name.
+    /// Each main source with companions, by name.
     groups: FxHashMap<&'m str, &'m SidecarGroup>,
-    /// Each member of a `sidecars` group, with its group.
+    /// Each source in a companion group, with that group.
     members: FxHashMap<&'m str, &'m SidecarGroup>,
     /// The first check of a name.
     checks: FxHashMap<&'m str, &'m CheckDef>,
@@ -218,12 +218,13 @@ fn select_import(module: &Pipeline, spec: &UseSpec, line: usize) -> Result<Pipel
         ));
     }
     for name in names {
-        // A member comes with its group, and is no source of its own.
-        if let Some(group) = module.members.get(name) {
+        // A companion needs the anchor whose path it follows. Import that
+        // source to bring the whole group.
+        if let Some(group) = module.members.get(name).filter(|group| group.name != name) {
             return Err(ParseError::new(
                 line,
                 format!(
-                    "`{name}` is a member of sidecars group `{}`; import the group, `{}`, to bring its members",
+                    "source `{name}` is beside `{}`; import `{}` to bring its companions",
                     group.name, group.name
                 ),
             ));
@@ -243,7 +244,7 @@ fn select_import(module: &Pipeline, spec: &UseSpec, line: usize) -> Result<Pipel
             return Err(ParseError::new(
                 line,
                 format!(
-                    "`{name}` is not a source, operation, sidecars group or check in `{}`",
+                    "`{name}` is not a source, operation or check in `{}`",
                     spec.path
                 ),
             ));
@@ -262,8 +263,8 @@ fn select_import(module: &Pipeline, spec: &UseSpec, line: usize) -> Result<Pipel
         if let Some(operation) = operation {
             import_operation(&mut selected, &module, operation, spec, line)?;
         }
-        if let Some(source) = source {
-            import_source(&mut selected, &module, source, &qualified, line)?;
+        if let Some(source) = source.filter(|_| group.is_none()) {
+            import_source(&mut selected, &module, source, &qualified, alias, line)?;
             for used in &source.checks {
                 import_check(&mut selected, &module, &used.check, alias);
             }
@@ -486,6 +487,7 @@ fn import_source(
     module: &Module<'_>,
     source: &ProductDef,
     qualified: &str,
+    alias: Option<&str>,
     line: usize,
 ) -> Result<(), ParseError> {
     let name = &source.name;
@@ -494,22 +496,26 @@ fn import_source(
     }
     selected.pipeline.products.push(ProductDef {
         name: qualified.to_owned(),
+        beside: source.beside.as_ref().map(|beside| crate::model::Beside {
+            sibling: qualified_check(&beside.sibling, alias),
+            suffix: beside.suffix.clone(),
+        }),
         ..source.clone()
     });
     // With the extension its own file's `ext:` gives it, if any.
-    if let Some(path) = module.index.path_template_for(name) {
-        selected
-            .pipeline
-            .product_paths
-            .insert(qualified.to_owned(), path.with_product(name));
+    if source.beside.is_none() {
+        if let Some(path) = module.index.path_template_for(name) {
+            selected
+                .pipeline
+                .product_paths
+                .insert(qualified.to_owned(), path.with_product(name));
+        }
     }
     Ok(())
 }
 
-/// Import a `sidecars` group as `alias::name`, whole: its members become the
-/// sources `alias::member`, each with its path and checks, as when imported
-/// on its own, so the group's diagnostics and a recipe's stem for it work as
-/// they do in the file the group is written in.
+/// Import a main source and its companions together. The main source keeps
+/// its path and each companion follows it under the import alias.
 fn import_group(
     selected: &mut Selection,
     module: &Module<'_>,
@@ -524,8 +530,8 @@ fn import_group(
             .sources
             .get(member.as_str())
             .and_then(|sources| sources.first().copied())
-            .expect("a sidecars group's members are declared as sources");
-        import_source(selected, module, source, &qualify(member), line)?;
+            .expect("companion group members are declared as sources");
+        import_source(selected, module, source, &qualify(member), alias, line)?;
         for used in &source.checks {
             import_check(selected, module, &used.check, alias);
         }
@@ -535,7 +541,6 @@ fn import_group(
         name: qualify(&group.name),
         dimensions: group.dimensions.clone(),
         members,
-        stem: group.stem.clone(),
     });
     Ok(())
 }

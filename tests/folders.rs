@@ -307,7 +307,7 @@ fn a_folder_is_never_beside_another_output_nor_a_sidecar() {
         ["an output written beside another is a file, not a folder; drop the `/`"]
     );
     assert_eq!(
-        errors("sidecars p [s]:\n    source a .raw/\n    source b .json\n"),
-        ["a source in sidecars group `p` is a file beside the others, not a folder; drop the `/`"]
+        errors("source a .raw [s]\nsource b .json/ beside a\n"),
+        ["a source written beside another is a file, not a folder; drop the `/`"]
     );
 }
