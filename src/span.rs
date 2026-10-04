@@ -203,6 +203,27 @@ pub(crate) fn find_word(line: &str, from: usize, word: &str) -> Option<Range<usi
     None
 }
 
+/// The lines of one text, collected once so that a line is found by its
+/// number in one step, not by counting from the top. They are what
+/// `str::lines` gives, so a final empty line and a trailing `\r` are as
+/// `lines` treats them.
+pub(crate) struct Lines<'a>(Vec<&'a str>);
+
+impl<'a> Lines<'a> {
+    pub(crate) fn new(text: &'a str) -> Self {
+        Self(text.lines().collect())
+    }
+
+    pub(crate) fn iter(&self) -> impl Iterator<Item = &'a str> + '_ {
+        self.0.iter().copied()
+    }
+
+    /// The line numbered `line`, from 1.
+    pub(crate) fn get(&self, line: usize) -> Option<&'a str> {
+        self.0.get(line.checked_sub(1)?).copied()
+    }
+}
+
 /// The UTF-16 code unit range of a byte range in `line`, as editors count.
 pub(crate) fn utf16_columns(line: &str, columns: &Range<usize>) -> Range<usize> {
     let units = |end: usize| {

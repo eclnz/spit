@@ -35,7 +35,7 @@ pub use diagnostics::{
     diagnose, diagnose_checked, diagnose_checked_with_inventory, diagnose_checked_with_records,
     diagnose_in, diagnose_inputs, diagnose_recipe, diagnose_recipe_against, render_check_json,
     render_diagnostics_json, Checked, Context, Diagnosis, Diagnostic, DiagnosticSource, FileNames,
-    Records, Related, Severity, ShownPath,
+    Records, Related, Severity, ShownPath, SourceLines,
 };
 pub use editor::{pipeline_hovers, render_editor_json, render_words_json, Hover, HoverKind};
 pub use error::{DefinitionSubject, NearMiss, PortSite, ResolveError, TypeConflict};
