@@ -116,12 +116,15 @@ impl PipelineBuilder {
     /// Check the body of `operation`, declared at `place`, before it is
     /// added: its outputs are named, its steps call operations declared
     /// before it, read only its ports and the products of earlier steps,
-    /// and between them assign each output once.
+    /// and between them assign each output once. An error in the header is
+    /// the one error. An error in a step is that of the step, which the
+    /// check then leaves out, as blanking its line would, and goes on to the
+    /// steps after it.
     pub(super) fn check_body(
         &self,
         operation: &OperationDef,
         place: &crate::span::Place,
-    ) -> Result<(), ParseError> {
+    ) -> Result<BodyCheck, ParseError> {
         let name = &operation.name;
         let fail = |place: &crate::span::Place, message: String| {
             ParseError::new(place.line, message).within(place)
@@ -150,51 +153,79 @@ impl PipelineBuilder {
             .iter()
             .map(|port| port.name.as_str())
             .collect();
-        for body in &operation.steps {
+        let mut failed = Vec::new();
+        for (position, body) in operation.steps.iter().enumerate() {
             let called = &body.invocation.operation;
             if !self.operation_at.contains_key(called) {
-                return Err(fail(
-                    &body.place,
-                    format!("operation `{called}` must be declared before `{name}`, whose body calls it"),
+                failed.push((
+                    position,
+                    fail(
+                        &body.place,
+                        format!("operation `{called}` must be declared before `{name}`, whose body calls it"),
+                    ),
                 ));
+                continue;
             }
-            for binding in &body.invocation.inputs {
-                if !known.contains(binding.product.as_str()) {
-                    return Err(fail(
+            if let Some(binding) = body
+                .invocation
+                .inputs
+                .iter()
+                .find(|binding| !known.contains(binding.product.as_str()))
+            {
+                failed.push((
+                    position,
+                    fail(
                         &body.place,
                         format!(
                             "the body of `{name}` reads `{}`, which is neither one of its inputs nor made by an earlier step of it",
                             binding.product
                         ),
-                    ));
-                }
+                    ),
+                ));
+                continue;
             }
-            for output in &body.invocation.outputs {
-                if !known.insert(output) {
-                    return Err(fail(
+            let outputs = &body.invocation.outputs;
+            if let Some(repeated) = outputs.iter().position(|output| !known.insert(output)) {
+                // The step is left out, and so are the outputs it made
+                // before the one that repeats.
+                for output in &outputs[..repeated] {
+                    known.remove(output.as_str());
+                }
+                failed.push((
+                    position,
+                    fail(
                         &body.place,
                         format!(
-                            "the body of `{name}` already has `{output}`; name each product once"
+                            "the body of `{name}` already has `{}`; name each product once",
+                            outputs[repeated]
                         ),
-                    ));
-                }
+                    ),
+                ));
             }
         }
-        if let Some(port) = operation
+        let unmade = operation
             .outputs
             .iter()
             .find(|port| !known.contains(port.name.as_str()))
-        {
-            return Err(fail(
-                place,
-                format!(
-                    "no step in the body of `{name}` makes its output `{}`",
-                    port.name
-                ),
-            ));
-        }
-        Ok(())
+            .map(|port| {
+                fail(
+                    place,
+                    format!(
+                        "no step in the body of `{name}` makes its output `{}`",
+                        port.name
+                    ),
+                )
+            });
+        Ok(BodyCheck { failed, unmade })
     }
+}
+
+/// What checking the steps of an operation's body found.
+pub(super) struct BodyCheck {
+    /// The steps that fail, by position, each with its error, in order.
+    pub(super) failed: Vec<(usize, ParseError)>,
+    /// An output of the operation that no step left in the body makes.
+    pub(super) unmade: Option<ParseError>,
 }
 
 /// Replace `call` of `operation` by the body's steps over the caller's

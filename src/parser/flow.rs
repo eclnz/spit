@@ -77,7 +77,7 @@ pub(super) fn parse_flow(text: &str) -> Syntax {
     }
     if let Some(body) = open.body {
         let header = body.header().to_owned();
-        if let Err(error) = body.close(&mut syntax) {
+        if let Err(error) = body.close(&mut syntax, None) {
             let at = syntax.statements.len();
             syntax.errors.push((at, error.locate(&header)));
         }
@@ -263,7 +263,7 @@ fn flow_line(
         }
         let ended = body.take().expect("a body is open");
         ended_body = Some(ended.header_indent());
-        ended.close(syntax).map_err(|error| Failed {
+        ended.close(syntax, Some(original)).map_err(|error| Failed {
             error: Box::new(error),
             stop: true,
             ended_body: None,
@@ -343,7 +343,7 @@ fn flow_rest(
             let kind = StatementKind::operation(original, declaration, number, stage.clone())?;
             // A header ending in `:` opens the body of steps that carry the
             // operation out.
-            if let (Some(_), StatementKind::Operation(operation, place, stage)) =
+            if let (Some(_), StatementKind::Operation(operation, place, stage, _)) =
                 (declaration.trim().strip_suffix(':'), &kind)
             {
                 stages.enter(keep, indent);
@@ -354,6 +354,7 @@ fn flow_rest(
                     original,
                     number,
                     indent,
+                    moved,
                 ));
                 return Ok(moved);
             }
