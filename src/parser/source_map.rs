@@ -39,6 +39,10 @@ pub(crate) struct SourceMap {
     pub(crate) default_path: Option<Place>,
     /// Each stage's name in its `stage` header.
     pub(crate) stages: BTreeMap<String, Place>,
+    /// The `check:` list outside every stage.
+    pub(crate) default_checks: Option<Place>,
+    /// The `check:` lists inside stages, keyed by stage.
+    pub(crate) stage_checks: BTreeMap<String, Place>,
     /// Templates of the `path:` rules inside stages, keyed by stage.
     pub(crate) stage_paths: BTreeMap<String, Place>,
     /// Products and operations brought in by `use` lines.

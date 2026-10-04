@@ -11,9 +11,9 @@ mod expand;
 
 use crate::imports::apply_import;
 use crate::model::{
-    CallId, Cardinality, CheckDef, CommandDef, CommandRole, CoverageRule, Exclusion, InputBinding,
-    InputRules, Invocation, OperationDef, Pipeline, ProductDef, ProductId, SidecarGroup,
-    SourceInventory, StageDef, StepOutput,
+    CallId, Cardinality, CheckDef, CommandDef, CommandRole, CoverageRule, DefaultChecks, Exclusion,
+    InputBinding, InputRules, Invocation, OperationDef, Pipeline, ProductDef, ProductId,
+    SidecarGroup, SourceInventory, StageDef, StepOutput,
 };
 use crate::order::{order_dimensions, Output};
 use crate::parser::{
@@ -200,6 +200,44 @@ impl PipelineBuilder {
         if slot.replace(extension.to_owned()).is_some() {
             return Err(ParseError::new(line, format!("duplicate `ext:`{whose}")));
         }
+        Ok(())
+    }
+
+    fn add_default_checks(
+        &mut self,
+        stage: Option<&str>,
+        checks: &DefaultChecks,
+        place: &Place,
+    ) -> Result<(), ParseError> {
+        let Self {
+            pipeline, lines, ..
+        } = self;
+        let (slot, placed, whose) = match stage {
+            Some(stage) => (
+                &mut pipeline
+                    .stages
+                    .iter_mut()
+                    .find(|definition| definition.name == stage)
+                    .expect("a stage is declared before its lines")
+                    .checks,
+                lines.stage_checks.entry(stage.to_owned()).or_default(),
+                format!(" for stage `{stage}`"),
+            ),
+            None => (
+                &mut pipeline.default_checks,
+                lines.default_checks.get_or_insert_with(Place::default),
+                String::new(),
+            ),
+        };
+        if *slot != DefaultChecks::default() {
+            return Err(ParseError::new(
+                place.line,
+                format!("duplicate `check:` list{whose}; write the checks in one line"),
+            )
+            .within(place));
+        }
+        *slot = checks.clone();
+        *placed = place.clone();
         Ok(())
     }
 
@@ -439,6 +477,11 @@ fn lower_statement(
             builder.dimension_order = Some((order.clone(), statement.place.clone()));
         }
         StatementKind::Path(rule) => builder.add_path(rule, statement.place.line)?,
+        StatementKind::DefaultChecks {
+            stage,
+            checks,
+            place,
+        } => builder.add_default_checks(stage.as_deref(), checks, place)?,
         StatementKind::Extension { stage, extension } => {
             builder.add_extension(stage.as_deref(), extension, statement.place.line)?;
         }

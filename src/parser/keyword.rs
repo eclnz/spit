@@ -13,6 +13,8 @@ pub(crate) enum Keyword {
     Verify,
     /// `check name(params): command`, a test of one artifact.
     Check,
+    /// `check:`, the checks every output in a file or stage runs.
+    Checks,
     Require,
     /// `skip`, which `drop` replaced; kept to say so.
     Skip,
@@ -65,6 +67,11 @@ impl Keyword {
         if let Some(rest) = line.strip_prefix("ext:") {
             return (!line.contains('=')).then_some((Self::Ext, rest));
         }
+        // A step may make a product named `check`: `check: Report = f(x)`.
+        // An `=` inside parentheses is a check's argument, not a step.
+        if let Some(rest) = line.strip_prefix("check:") {
+            return (!has_top_level_equals(rest)).then_some((Self::Checks, rest));
+        }
         let (word, rest) = line.split_once(' ')?;
         let (keyword, _) = WORDS.iter().find(|(_, name)| *name == word)?;
         if matches!(keyword, Self::Stage | Self::Dimensions | Self::Sidecars) && line.contains('=')
@@ -87,6 +94,20 @@ impl Keyword {
     pub(crate) fn of(line: &str) -> Option<Self> {
         Self::split(line).map(|(keyword, _)| keyword)
     }
+}
+
+/// Whether `text` has an `=` outside parentheses.
+fn has_top_level_equals(text: &str) -> bool {
+    let mut depth = 0usize;
+    text.chars().any(|c| {
+        match c {
+            '(' => depth += 1,
+            ')' => depth = depth.saturating_sub(1),
+            '=' if depth == 0 => return true,
+            _ => {}
+        }
+        false
+    })
 }
 
 /// A line that opens a `.spitout`'s records.
