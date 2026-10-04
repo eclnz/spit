@@ -162,10 +162,12 @@ pub enum ArgPart {
     /// The folder of an artifact's file, as `{image.dir}` gives it.
     Dir(ArtifactId),
     /// An artifact's file name without its extension, as `{image.stem}`
-    /// gives it for a tool that adds the extension itself.
+    /// gives it for a tool that adds the extension itself. `extension_len`
+    /// is the byte length of the output port's extension, which the artifact's
+    /// path ends with, so no job holds a copy of the extension's text.
     Stem {
         artifact: ArtifactId,
-        extension: String,
+        extension_len: usize,
     },
 }
 
@@ -178,8 +180,8 @@ impl ArgPart {
             Self::Dir(artifact) => folder_of(dag.path(*artifact)),
             Self::Stem {
                 artifact,
-                extension,
-            } => stem_of(dag.path(*artifact), extension),
+                extension_len,
+            } => stem_of(dag.path(*artifact), *extension_len),
         }
     }
 }
@@ -189,10 +191,14 @@ fn folder_of(path: &str) -> &str {
     path.rsplit_once('/').map_or(".", |(folder, _)| folder)
 }
 
-/// The file name of `path` without `extension`.
-fn stem_of<'a>(path: &'a str, extension: &str) -> &'a str {
+/// The file name of `path` without its last `extension_len` bytes, which are
+/// the extension its output port declares.
+fn stem_of(path: &str, extension_len: usize) -> &str {
     let name = path.rsplit_once('/').map_or(path, |(_, name)| name);
-    name.strip_suffix(extension).unwrap_or(name)
+    name.len()
+        .checked_sub(extension_len)
+        .and_then(|end| name.get(..end))
+        .unwrap_or(name)
 }
 
 impl<'a> BoundArtifact<'a> {
