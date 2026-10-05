@@ -54,6 +54,23 @@ sources:
 
 Run `spit dag sweep.spit sweep.spitout --commands` to see 17 jobs: six `train`, six `evaluate`, four `summarise`, and one `leaderboard`. For `config=deep`, there are two training jobs, one per model, both with seed 1. The final `leaderboard` command receives summaries in this order: `large/deep`, `large/fast`, `small/deep`, `small/fast`. Run `spit dag sweep.spit sweep.spitout -o sweep.spitdag` to save the plan. The input paths in this inventory are illustrative; add the named files under the paths declared above if you want SPIT to verify their existence with `--root`.
 
+At the family level, the expansion is:
+
+```mermaid
+flowchart LR
+    model["model [model]"] --> train["train<br/>6 jobs"]
+    config["config [config]"] --> train
+    seed["seed [config, seed]"] --> train
+    train --> trained["trained [model, config, seed]"]
+    trained --> evaluate["evaluate<br/>6 jobs"]
+    testset["testset"] --> evaluate
+    evaluate --> metrics["metrics [model, config, seed]"]
+    metrics -->|"vary(seed)"| summarise["summarise<br/>4 jobs"]
+    summarise --> summary["summary [model, config]"]
+    summary -->|"vary(model, config)"| leaderboard["leaderboard<br/>1 job"]
+    leaderboard --> board["board"]
+```
+
 ## Cohort: discovery, exclusion, and grouped removal
 
 This recipe discovers session folders, removes a subject with fewer than two sessions, and excludes one damaged run while leaving its file in place. Each retained BOLD run gets motion correction and coregistration. A `many Bold` input collects runs per session; another collects session averages per subject. One default path gives all five derived products BIDS-style names: optional groups omit the session or stage where a product has none, and `{@labels}` writes the dimensions each product has.
@@ -236,6 +253,24 @@ sources:
 ```
 
 Run `spit dag stages.spit stages.spitout --paths` to see seven jobs: three `sort_lines`, two `merge`, and two `tally_lines`. The sorted and merged outputs use the `preprocess/` path default; the tallies use the `analysis` stage's `results/` override. `spit dag stages.spit stages.spitout -o stages.spitdag` records each job's stage for a backend.
+
+```mermaid
+flowchart LR
+    shard["shard [group, part]"]
+
+    subgraph preprocess
+        sort["sort_lines"]
+        merge["merge<br/>vary(part)"]
+    end
+
+    subgraph analysis
+        tally["tally_lines"]
+    end
+
+    shard --> sort --> merge --> tally
+```
+
+The stage boundary groups steps and controls path scope; it does not interrupt dependencies between products.
 
 ## Inspect a dataset and its plan
 
