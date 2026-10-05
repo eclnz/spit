@@ -52,6 +52,24 @@ fn worked_patterns_resolve_to_the_documented_jobs() {
 }
 
 #[test]
+fn mrtrix3_act_inventory_resolves_to_the_documented_jobs() {
+    let base = PathBuf::from("examples/commands/mrtrix3_act/mrtrix3_act");
+    let path = base.with_extension("spit");
+    let text = fs::read_to_string(&path).unwrap();
+    let records = fs::read_to_string(base.with_extension("spitout")).unwrap();
+    let found: Vec<_> = diagnose_in(&text, Some(&records), Context::at(&path))
+        .iter()
+        .map(ToString::to_string)
+        .collect();
+    assert!(found.is_empty(), "{found:?}");
+
+    let pipeline = parse_pipeline(&text).unwrap();
+    let inventory = parse_source_inventory(&records).unwrap();
+    let dag = resolve(&pipeline, &inventory).unwrap();
+    assert_eq!(dag.jobs.len(), 93);
+}
+
+#[test]
 fn examples_have_no_diagnostics() {
     let pipelines = example_pipelines();
     assert!(pipelines.len() >= 10, "{pipelines:?}");

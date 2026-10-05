@@ -3,60 +3,30 @@
 # This fixture represents an acquisition with two or more compatible forward
 # DWI runs per session and a reverse b=0 for the chosen -rpe_header workflow.
 # Shared lookup tables are global logical artifacts with no entity dimensions.
-# Its recipes give each source's path, written here once per source.
+# Main sources have path rules here; sidecars take their path from the main source.
 source_paths:
-    dwi_bval: sub-{sub}/ses-{ses}/dwi/sub-{sub}_ses-{ses}_run-{run}_dwi.bval
-    dwi_bvec: sub-{sub}/ses-{ses}/dwi/sub-{sub}_ses-{ses}_run-{run}_dwi.bvec
-    dwi_json: sub-{sub}/ses-{ses}/dwi/sub-{sub}_ses-{ses}_run-{run}_dwi.json
     raw_dwi: sub-{sub}/ses-{ses}/dwi/sub-{sub}_ses-{ses}_run-{run}_dwi.nii.gz
     reverse_b0: sub-{sub}/ses-{ses}/fmap/sub-{sub}_ses-{ses}_dir-PA_epi.nii.gz
-    reverse_b0_json: sub-{sub}/ses-{ses}/fmap/sub-{sub}_ses-{ses}_dir-PA_epi.json
     source_lut: config/source_lut.txt
     t1w: sub-{sub}/ses-{ses}/anat/sub-{sub}_ses-{ses}_T1w.nii.gz
     target_lut: config/target_lut.txt
 
-contexts:
-    [sub=01,ses=01]
-    [sub=01,ses=02]
-    [sub=02,ses=01]
-
 sources:
-    raw_dwi[sub=01,ses=01,run=01]
-    raw_dwi[sub=01,ses=01,run=02]
-    raw_dwi[sub=01,ses=02,run=01]
-    raw_dwi[sub=01,ses=02,run=02]
-    raw_dwi[sub=02,ses=01,run=01]
-    raw_dwi[sub=02,ses=01,run=02]
-    raw_dwi[sub=02,ses=01,run=03]
-    dwi_bvec[sub=01,ses=01,run=01]
-    dwi_bvec[sub=01,ses=01,run=02]
-    dwi_bvec[sub=01,ses=02,run=01]
-    dwi_bvec[sub=01,ses=02,run=02]
-    dwi_bvec[sub=02,ses=01,run=01]
-    dwi_bvec[sub=02,ses=01,run=02]
-    dwi_bvec[sub=02,ses=01,run=03]
-    dwi_bval[sub=01,ses=01,run=01]
-    dwi_bval[sub=01,ses=01,run=02]
-    dwi_bval[sub=01,ses=02,run=01]
-    dwi_bval[sub=01,ses=02,run=02]
-    dwi_bval[sub=02,ses=01,run=01]
-    dwi_bval[sub=02,ses=01,run=02]
-    dwi_bval[sub=02,ses=01,run=03]
-    dwi_json[sub=01,ses=01,run=01]
-    dwi_json[sub=01,ses=01,run=02]
-    dwi_json[sub=01,ses=02,run=01]
-    dwi_json[sub=01,ses=02,run=02]
-    dwi_json[sub=02,ses=01,run=01]
-    dwi_json[sub=02,ses=01,run=02]
-    dwi_json[sub=02,ses=01,run=03]
-    reverse_b0[sub=01,ses=01]
-    reverse_b0[sub=01,ses=02]
-    reverse_b0[sub=02,ses=01]
-    reverse_b0_json[sub=01,ses=01]
-    reverse_b0_json[sub=01,ses=02]
-    reverse_b0_json[sub=02,ses=01]
-    t1w[sub=01,ses=01]
-    t1w[sub=01,ses=02]
-    t1w[sub=02,ses=01]
-    source_lut[]
-    target_lut[]
+    source_lut
+    target_lut
+
+contexts sessions:
+    [sub=01,ses=01]:
+        reverse_b0, reverse_b0_json, t1w
+        [run=01,02]:
+            raw_dwi, dwi_bvec, dwi_bval, dwi_json
+
+    [sub=01,ses=02]:
+        reverse_b0, reverse_b0_json, t1w
+        [run=01,02]:
+            raw_dwi, dwi_bvec, dwi_bval, dwi_json
+
+    [sub=02,ses=01]:
+        reverse_b0, reverse_b0_json, t1w
+        [run=01,02,03]:
+            raw_dwi, dwi_bvec, dwi_bval, dwi_json
