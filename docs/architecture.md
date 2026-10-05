@@ -6,23 +6,20 @@ The pipeline definition is a reusable graph template. It names product families 
 
 SPIT runs in three steps. Each has its own modules and its own command, and each passes a file to the next:
 
-```text
-                 ┌─────────────────────────────┐
-  .spit ────────►│ 1. COMPILE PIPELINE         │──► checked pipeline
-                 │    spit check               │
-                 └─────────────────────────────┘
-                        │ source declarations
-                        ▼
-  .spitin ─────►┌─────────────────────────────┐
-  data/ ───────►│ 2. BUILD INPUTS             │──► .spitout
-                │    spit inputs              │
-                └─────────────────────────────┘
-                        │
-                        ▼
-  pipeline ─────────►┌─────────────────────────────┐
-  .spitout ─────────►│ 3. RESOLVE JOBS             │──► .spitdag, artifacts report
-                     │    spit dag, spit artifacts │
-                     └─────────────────────────────┘
+```mermaid
+flowchart LR
+    pipeline[".spit pipeline"] --> compile["1. Compile pipeline<br/><code>spit check</code>"]
+    compile --> checked["Checked pipeline"]
+
+    recipe[".spitin recipe"] --> inputs["2. Build inputs<br/><code>spit inputs</code>"]
+    data["Dataset files"] --> inputs
+    checked --> inputs
+    inputs --> inventory[".spitout<br/>settled source inventory"]
+
+    checked --> resolve["3. Resolve jobs<br/><code>spit dag</code> / <code>spit artifacts</code>"]
+    inventory --> resolve
+    resolve --> dag[".spitdag<br/>bound runnable plan"]
+    resolve --> report["Artifact report"]
 ```
 
 1. **Compile** (`src/compile`, `src/paths/rules.rs`) checks everything the pipeline text determines: declarations, stages, each step's shape and inferred types, cycles, and path rules. It needs no inputs.
@@ -32,6 +29,34 @@ SPIT runs in three steps. Each has its own modules and its own command, and each
 A backend would turn a `.spitdag` into something that runs, reading nothing else: no pipeline, path rule or command template. SPIT has none at present.
 
 Shared code (the model, parser, lowering, path templates, and the `BoundDag` in `src/spitdag`) belongs to no step. Step 2 and step 3 each build on step 1, and neither uses the other. `src/diagnostics` and the command line, `src/main.rs` and `src/cli`, run the steps in order; the command line belongs to the binary and uses only what `lib.rs` exports. `tests/architecture.rs` checks direct module references for forbidden step dependencies. Every module is private: the library's API is what `lib.rs` re-exports.
+
+The dependency boundary is deliberately one-way:
+
+```mermaid
+flowchart TD
+    CLI["CLI<br/><code>src/main.rs</code>, <code>src/cli</code>"] --> API["Public library API<br/><code>lib.rs</code>"]
+
+    API --> Compile["Compile<br/><code>src/compile</code>"]
+    API --> Inputs["Input resolution<br/><code>src/inputs</code>"]
+    API --> Resolve["Job resolution<br/><code>src/resolver</code>"]
+    API --> Bind["Path + command binding<br/><code>src/paths/bind.rs</code>, <code>src/render.rs</code>"]
+
+    Shared["Shared model / parser / lowering / paths / spitdag"] --> Compile
+    Shared --> Inputs
+    Shared --> Resolve
+    Shared --> Bind
+
+    Compile --> Inputs
+    Compile --> Resolve
+    Resolve --> Bind
+
+    Inputs -. "SourceInventory only" .-> Resolve
+
+    Backend["Future backend"] --> SpitDag[".spitdag"]
+    Bind --> SpitDag
+```
+
+The dotted edge is a data handoff, not a module dependency: the input stage produces a `SourceInventory`; the resolver consumes that structure without depending on how the inputs were discovered or filtered.
 
 The parser reads a document as one of two kinds. A pipeline may hold no `discover`, `exclude`, `drop` or `require` rule and no `sources:` or `contexts:` record, and `parse_pipeline` returns it as a `Pipeline`. A recipe holds rules, source paths and records, and `parse_input_spec` returns it as an `InputSpec`. `Pipeline` holds no input rules.
 
@@ -61,10 +86,16 @@ An operation's logical signature defines its input ports, its outputs, and its s
 
 The compilation flow is:
 
-```text
-pipeline text + .spitout -> logical resolution and validation -> concrete DAG
-concrete DAG + path templates -> bound artifact paths
-bound paths + operation commands -> argument expansion -> .spitdag
+```mermaid
+flowchart LR
+    source["Pipeline text + .spitout"] --> logical["Logical resolution<br/>shape, cardinality, types"]
+    logical --> resolved["ResolvedDag<br/>logical jobs + artifacts"]
+    templates["Path templates"] --> bind["Bind artifact paths"]
+    resolved --> bind
+    bind --> bound["BoundDag<br/>jobs + concrete paths"]
+    commands["Operation command templates"] --> expand["Expand command arguments"]
+    bound --> expand
+    expand --> output[".spitdag"]
 ```
 
 `spit check pipeline.spit --path-rules` reports whether each declared product uses an explicit rule, a default rule, the built-in default, or no rule, and the extension added to it: an operation's output extension or a source's declared one, else `ext:` for a default rule. `Pipeline::path_template_for` gives every step the same completed template: the rule with its `[...]` groups kept or dropped and `{@labels}` written out for that product's dimensions and stage, then its extension added. Binding, discovery and the extension checks see that one plain template, and the path checks report a rule ending in another extension, a dimension outside a group that the product lacks, and a group naming a dimension no product has. For a pipeline that checks clean, `check --json` also lists each product whose path no rule writes in full, with the line that declares it, which the editor shows beside it. A source with no rule may receive one from a recipe: its own `path source:` rule, else its `path:` default. A pipeline default that needs `{@stage}` outside a group is no source's rule, since `PipelineIndex::path_rule_for` gives it only to products a stage could make. `InputRules` keeps the recipe as written, its default in `source_default`; nothing settles it in place. `InputRules::defaulted_sources` derives the sources the default covers, and `InputRules::source_paths_for` the rule the recipe gives each source, borrowed when the default covers none, so discovery and the path checks see only per-source rules. `InputSpec::resolve` merges those into the inventory, so the settled inventory carries every source rule, and the `.spitout` writer reads them from it. `spit check recipe.spitin --path-rules` lists the combined rules and marks those supplied by the recipe, and those from its default. Path templates are validated at compile time even for product families with no resolved jobs, and `dag` checks collisions among concrete paths. A default rule can cover many families. An output no rule covers takes the built-in `out/{@product}/{@entities}`, which `PipelineIndex::path_rule_for` gives only to outputs, so a source never takes it: a source needs a rule from the pipeline, the recipe or the `.spitout`. `spit check recipe.spitin` fails a recipe without records that leaves a source uncovered, as a scan would, and binding a DAG fails a source with records but no rule, rather than look for its files under `out/`. A recipe's source rule is carried once in the `.spitout` for standalone resolution.
