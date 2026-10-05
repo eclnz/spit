@@ -42,6 +42,21 @@ Live validation in VS Code is maintained in the separate `spit-vscode` repositor
 
 SPIT runs in three steps. Each is one command, and each reads the files the previous step wrote:
 
+```mermaid
+flowchart LR
+    spit[".spit<br/>pipeline"] --> check["1. check"]
+    check --> compiled["validated pipeline"]
+
+    spitin[".spitin<br/>dataset recipe"] --> inputs["2. inputs"]
+    data["dataset files"] --> inputs
+    compiled --> inputs
+    inputs --> spitout[".spitout<br/>settled inputs"]
+
+    compiled --> dag["3. dag / artifacts"]
+    spitout --> dag
+    dag --> spitdag[".spitdag<br/>resolved execution plan"]
+```
+
 | Step | Command | Reads | Writes |
 | --- | --- | --- | --- |
 | 1. Compile | `spit check` | a `.spit` pipeline, or a `.spitin` recipe | nothing: it reports errors and warnings |
@@ -324,13 +339,16 @@ Run `cargo test --test source_files` to see the field survey example checked aga
 
 ## How SPIT works
 
-```text
-.spit ──► 1. check ──► compiled pipeline
-                            │
-.spitin + data ──► 2. inputs ──► .spitout
-                            │        │
-                            ▼        ▼
-                        3. dag ──► .spitdag
+```mermaid
+flowchart LR
+    Pipeline["Pipeline definition<br/>.spit"] --> Compile["Compile + validate"]
+    Inventory["Settled dataset inputs<br/>.spitout"] --> Resolve["Resolve logical jobs"]
+    Compile --> Resolve
+    Resolve --> Bind["Bind paths + expand commands"]
+    Bind --> Plan[".spitdag"]
+
+    Plan --> Backend["Execution backend"]
+    Verify["verify commands"] -. "runtime checks" .-> Backend
 ```
 
 The pipeline supplies operations and rules; the `.spitout` supplies artifact identities and their files. Resolution checks dimensions, matching, cardinality, and any known types, then binds each artifact to its file and expands each command into its arguments. Step 2 and step 3 each build on step 1 and never on each other, and a backend would read only the `.spitdag`. SPIT does not inspect file contents or command-specific metadata itself; `verify` commands run those checks with your own tools.
