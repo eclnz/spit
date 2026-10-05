@@ -1,3 +1,12 @@
+root .
+
+source_paths:
+    raw_dwi: sub-{sub}/ses-{ses}/dwi/sub-{sub}_ses-{ses}_run-{run}_dwi.nii.gz
+    reverse_b0: sub-{sub}/ses-{ses}/fmap/sub-{sub}_ses-{ses}_dir-PA_epi.nii.gz
+    source_lut: config/source_lut.txt
+    t1w: sub-{sub}/ses-{ses}/anat/sub-{sub}_ses-{ses}_T1w.nii.gz
+    target_lut: config/target_lut.txt
+
 sources:
     source_lut
     target_lut

@@ -2,6 +2,7 @@
 
 use std::fs;
 use std::path::PathBuf;
+use std::process::Command;
 
 use spit::{diagnose_in, parse_pipeline, parse_source_inventory, resolve, Context};
 
@@ -56,7 +57,9 @@ fn mrtrix3_act_inventory_resolves_to_the_documented_jobs() {
     let base = PathBuf::from("examples/commands/mrtrix3_act/mrtrix3_act");
     let path = base.with_extension("spit");
     let text = fs::read_to_string(&path).unwrap();
-    let records = fs::read_to_string(base.with_extension("spitout")).unwrap();
+    let records =
+        fs::read_to_string("examples/commands/mrtrix3_act/mrtrix3_mock_data/inputs.spitout")
+            .unwrap();
     let found: Vec<_> = diagnose_in(&text, Some(&records), Context::at(&path))
         .iter()
         .map(ToString::to_string)
@@ -67,6 +70,17 @@ fn mrtrix3_act_inventory_resolves_to_the_documented_jobs() {
     let inventory = parse_source_inventory(&records).unwrap();
     let dag = resolve(&pipeline, &inventory).unwrap();
     assert_eq!(dag.jobs.len(), 93);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_spit"))
+        .args([
+            "inputs",
+            "examples/commands/mrtrix3_act/mrtrix3_act_discover.spitin",
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{:?}", output.stderr);
+    let saved = records.strip_prefix("root .\n\n").unwrap();
+    assert_eq!(String::from_utf8(output.stdout).unwrap(), saved);
 }
 
 #[test]

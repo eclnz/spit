@@ -478,7 +478,7 @@ fn every_job_follows_the_jobs_it_depends_on() {
         (NESTED, NESTED_SOURCES),
         (
             "examples/commands/mrtrix3_act/mrtrix3_act.spit",
-            "examples/commands/mrtrix3_act/mrtrix3_act.spitout",
+            "examples/commands/mrtrix3_act/mrtrix3_mock_data/inputs.spitout",
         ),
     ] {
         let text = fs::read_to_string(pipeline).unwrap() + &records(sources);
