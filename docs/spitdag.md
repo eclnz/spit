@@ -2,6 +2,25 @@
 
 A `.spitdag` is what `spit dag -o` writes and `spit dag --json` prints: every job a pipeline resolves to over one dataset, each with its files and its commands. A backend that runs the jobs reads nothing else: no pipeline, path rule or command template. This page describes version 5, the version `src/spitdag` writes. See the [README](../README.md) for how a `.spitdag` is made, and `spit dag --commands` for a readable view of the same commands.
 
+```mermaid
+flowchart LR
+    plan[".spitdag"] --> preflight["Backend preflight"]
+    preflight --> executables["Check executables"]
+    preflight --> sources["Check external inputs"]
+
+    executables --> ready["Runnable plan"]
+    sources --> ready
+    ready --> job1["Job 1"]
+    job1 --> job2["Dependent job"]
+    job1 --> independent["Independent job"]
+    job2 --> targets["Targets"]
+    independent --> targets
+
+    job1 -. "verify before command" .-> verify["verify commands"]
+```
+
+The file is intentionally a backend boundary: all logical matching, typing, path binding, and command-template expansion have already happened before this document exists.
+
 ## Document
 
 A `.spitdag` is one JSON object, followed by a newline:
@@ -130,6 +149,16 @@ Run each argument as one word, exactly as given: no shell is involved, so nothin
 ### Running `verify`
 
 A backend runs a job's `verify` commands, in order, before its `command`. If one fails, the job does not run, and neither does any job that depends on it, directly or through others.
+
+```mermaid
+flowchart LR
+    deps["Dependencies complete"] --> verify["Run verify commands"]
+    verify -->|"all pass"| command["Run command"]
+    verify -->|"one fails"| failed["Mark job failed"]
+    command -->|"success"| outputs["Outputs available"]
+    failed --> blocked["Block dependents"]
+    outputs --> dependents["Unlock dependents"]
+```
 
 ## Folders
 
