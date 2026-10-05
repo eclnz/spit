@@ -4,25 +4,21 @@ The pipeline definition is a reusable graph template. It names product families 
 
 ## Three steps
 
-SPIT runs in three steps. Each has its own modules and its own command, and each passes a file to the next:
+SPIT runs in three steps. Each has its own modules and command. Compilation checks the reusable pipeline; the input step writes a dataset inventory; resolution combines both:
 
-```text
-                 ┌─────────────────────────────┐
-  .spit ────────►│ 1. COMPILE PIPELINE         │──► checked pipeline
-                 │    spit check               │
-                 └─────────────────────────────┘
-                        │ source declarations
-                        ▼
-  .spitin ─────►┌─────────────────────────────┐
-  data/ ───────►│ 2. BUILD INPUTS             │──► .spitout
-                │    spit inputs              │
-                └─────────────────────────────┘
-                        │
-                        ▼
-  pipeline ─────────►┌─────────────────────────────┐
-  .spitout ─────────►│ 3. RESOLVE JOBS             │──► .spitdag, artifacts report
-                     │    spit dag, spit artifacts │
-                     └─────────────────────────────┘
+```mermaid
+flowchart LR
+    pipeline[".spit pipeline"] --> check["1. Compile<br/>spit check"]
+    check --> compiled["Checked Pipeline<br/>in memory"]
+    compiled -->|source declarations and path rules| inputs["2. Build inputs<br/>spit inputs"]
+    recipe[".spitin recipe"] --> inputs
+    data["Dataset folder"] --> inputs
+    inputs --> inventory["SourceInventory<br/>.spitout"]
+    compiled --> resolve["3. Resolve jobs"]
+    inventory --> resolve
+    resolve -->|spit dag| dag["BoundDag<br/>.spitdag"]
+    resolve -->|spit artifacts| report["Artifact report"]
+    dag --> backend["Backend<br/>spit-bash"]
 ```
 
 1. **Compile** (`src/compile`, `src/paths/rules.rs`) checks everything the pipeline text determines: declarations, stages, each step's shape and inferred types, cycles, and path rules. It needs no inputs.
@@ -61,16 +57,30 @@ The resolved DAG has logical identities, plus the file of each source whose reco
 
 A DAG keeps each artifact once, in its `Artifacts` table, and jobs refer to artifacts by `ArtifactId`: a dataset has far more job inputs than artifacts. Every artifact of a product has the product's type, so the table keeps a product's name and type once, and each artifact is its product's number and its entities. What belongs to each artifact, such as a source's file or a bound path, is a column indexed by id. The `BoundDag` keeps the same table, with each artifact's path, and a command names a file by its artifact. What every job of one step shares is kept once too: `ResolvedDag::steps` holds each step's operation and stage, and a job names its step by `StepId`. `BoundDag::steps` adds each step's port names, so a bound job's inputs and outputs are artifact ids in its step's port order, and binding finds each step's operation and commands once rather than for every job. Whether an artifact is a file or a folder belongs to its product, as its type does: a source's declaration or an output's port says so, `PipelineIndex::is_folder` reads it, and the `BoundDag` keeps it once per product.
 
+```mermaid
+flowchart LR
+    product["Products table<br/>name and type"] -->|product number| artifact["Artifacts table<br/>product number + entities"]
+    artifact -->|ArtifactId| job["Jobs<br/>input and output artifact ids"]
+    step["Steps table<br/>operation, stage, port names"] -->|StepId| job
+    path["Bound paths<br/>column indexed by ArtifactId"] --> artifact
+    kind["File or folder<br/>column indexed by product number"] --> product
+```
+
 ## Command definitions and the bound DAG
 
 An operation's logical signature defines its input ports, its outputs, and its shape and cardinality rules. An operation with several outputs names them, as in `-> (wm: Response, csf: Response)`; one job writes them all, each output binds to its own product and path, and downstream consumers of any of them depend on that job. A single unnamed output is the port `output`. Its executable implementation is a separate `command` declaration keyed by operation name. For example, `operation register(moving: MRI<M,S>, reference: MRI<N,T>) -> Transform<S,T>` and `command register: flirt -in {moving} -ref {reference} -omat {@output}` give each argument an explicit source and position. An aggregate's call names the dimensions it collects with `@ vary(run)`, so one operation can collect runs in one step and sessions in another; the resolver checks them against the output family's dimensions. SPIT does not infer a command-line interface from the logical signature.
 
-The compilation flow is:
+Resolution and binding turn those declarations into the backend's input:
 
-```text
-pipeline text + .spitout -> logical resolution and validation -> concrete DAG
-concrete DAG + path templates -> bound artifact paths
-bound paths + operation commands -> argument expansion -> .spitdag
+```mermaid
+flowchart LR
+    pipeline["Pipeline"] --> resolve["Resolve and validate"]
+    inventory["SourceInventory<br/>.spitout"] --> resolve
+    resolve --> logical["ResolvedDag<br/>logical artifacts and jobs"]
+    logical --> bind["bind_dag"]
+    pipeline -->|path templates and command definitions| bind
+    bind --> bound["BoundDag<br/>paths and expanded arguments"]
+    bound --> spitdag[".spitdag"]
 ```
 
 `spit check pipeline.spit --path-rules` reports whether each declared product uses an explicit rule, a default rule, the built-in default, or no rule, and the extension added to it: an operation's output extension or a source's declared one, else `ext:` for a default rule. `Pipeline::path_template_for` gives every step the same completed template: the rule with its `[...]` groups kept or dropped and `{@labels}` written out for that product's dimensions and stage, then its extension added. Binding, discovery and the extension checks see that one plain template, and the path checks report a rule ending in another extension, a dimension outside a group that the product lacks, and a group naming a dimension no product has. For a pipeline that checks clean, `check --json` also lists each product whose path no rule writes in full, with the line that declares it, which the editor shows beside it. A source with no rule may receive one from a recipe: its own `path source:` rule, else its `path:` default. A pipeline default that needs `{@stage}` outside a group is no source's rule, since `PipelineIndex::path_rule_for` gives it only to products a stage could make. `InputRules` keeps the recipe as written, its default in `source_default`; nothing settles it in place. `InputRules::defaulted_sources` derives the sources the default covers, and `InputRules::source_paths_for` the rule the recipe gives each source, borrowed when the default covers none, so discovery and the path checks see only per-source rules. `InputSpec::resolve` merges those into the inventory, so the settled inventory carries every source rule, and the `.spitout` writer reads them from it. `spit check recipe.spitin --path-rules` lists the combined rules and marks those supplied by the recipe, and those from its default. Path templates are validated at compile time even for product families with no resolved jobs, and `dag` checks collisions among concrete paths. A default rule can cover many families. An output no rule covers takes the built-in `out/{@product}/{@entities}`, which `PipelineIndex::path_rule_for` gives only to outputs, so a source never takes it: a source needs a rule from the pipeline, the recipe or the `.spitout`. `spit check recipe.spitin` fails a recipe without records that leaves a source uncovered, as a scan would, and binding a DAG fails a source with records but no rule, rather than look for its files under `out/`. A recipe's source rule is carried once in the `.spitout` for standalone resolution.
