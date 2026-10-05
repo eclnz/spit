@@ -272,10 +272,13 @@ fn operation_warnings(
     skip: &BTreeSet<String>,
     library: bool,
 ) -> Vec<Diagnostic> {
+    // A call to an operation with a body leaves the body's steps, so the
+    // call itself is in `calls`.
     let used: BTreeSet<_> = pipeline
         .invocations
         .iter()
         .map(|invocation| invocation.operation.as_str())
+        .chain(pipeline.calls.iter().map(|call| call.operation.as_str()))
         .collect();
     let commands: BTreeSet<_> = pipeline
         .commands
@@ -298,7 +301,10 @@ fn operation_warnings(
                     format!("operation `{name}` is declared but never used"),
                 ));
             }
-        } else if !pipeline.commands.is_empty() && !commands.contains(name) {
+        } else if !pipeline.commands.is_empty()
+            && !commands.contains(name)
+            && operation.steps.is_empty()
+        {
             // Only once commands are in use: a pipeline may be written for its DAG alone.
             warnings.push(warning(
                 place.clone(),

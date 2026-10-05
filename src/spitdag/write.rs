@@ -66,6 +66,30 @@ pub(crate) fn write_document(
             item.finish();
         });
     });
+    document.field("pipeline_files", |out| {
+        write_array(out, &dag.pipeline_files, |out, file| {
+            let mut item = ObjectWriter::start(out);
+            item.string("path", &file.path);
+            item.string("blob", &file.blob);
+            item.finish();
+        });
+    });
+    document.field("calls", |out| {
+        write_array(out, &dag.calls, |out, call| {
+            let mut item = ObjectWriter::start(out);
+            item.string("operation", &call.operation);
+            item.string("instance", &call.instance);
+            item.field("parent", |out| write_optional_number(out, call.parent));
+            item.field("file", |out| write_optional_number(out, call.file));
+            item.field("at", |out| {
+                let mut at = ObjectWriter::start(out);
+                at.field("file", |out| write_optional_number(out, call.at_file));
+                at.field("line", |out| write_number(out, call.at_line));
+                at.finish();
+            });
+            item.finish();
+        });
+    });
     let mut work = String::new();
     document.field("jobs", |out| {
         write_array(out, &dag.jobs, |out, job| {
@@ -172,6 +196,17 @@ fn write_job(
             write_string,
         );
     });
+    // Where a job comes from is not its work, so the fingerprint leaves it
+    // out, as it does the stage.
+    object.field("origin", |out| match &step.origin {
+        Some(origin) => {
+            let mut item = ObjectWriter::start(out);
+            item.field("call", |out| write_number(out, origin.call));
+            item.field("line", |out| write_number(out, origin.line));
+            item.finish();
+        }
+        None => out.push_str("null"),
+    });
     object.field("fingerprint", |out| {
         out.push('"');
         write_hex(out, fingerprint(work));
@@ -261,12 +296,11 @@ fn write_command(out: &mut String, dag: &BoundDag, command: &[Argument]) {
                 out.push('}');
             }
             ArgPart::Dir(artifact) | ArgPart::Stem { artifact, .. } => {
-                let key = if matches!(part, ArgPart::Dir(_)) {
-                    "dir"
+                out.push_str(if matches!(part, ArgPart::Dir(_)) {
+                    "{\"dir\":"
                 } else {
-                    "stem"
-                };
-                out.push_str(&format!("{{\"{key}\":"));
+                    "{\"stem\":"
+                });
                 write_string(out, part.text(dag));
                 out.push_str(",\"of\":");
                 write_string(out, dag.path(*artifact));
@@ -358,11 +392,20 @@ fn write_type(out: &mut String, artifact_type: &TypeExpr) {
     }
 }
 
+/// `value`, or `null` without one.
+fn write_optional_number(out: &mut String, value: Option<usize>) {
+    match value {
+        Some(value) => write_number(out, value),
+        None => out.push_str("null"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::SourceFile;
     use crate::model::{Artifacts, EntityBinding, StepId};
-    use crate::spitdag::BoundStep;
+    use crate::spitdag::{BoundCall, BoundStep, StepCall};
 
     /// A step calling `operation` in `stage`, with ports named `inputs` and
     /// `outputs`.
@@ -374,6 +417,7 @@ mod tests {
             inputs: names(inputs),
             outputs: names(outputs),
             checks: vec![],
+            origin: None,
         }
     }
 
@@ -445,7 +489,7 @@ mod tests {
         dag.root = Some("/data/study".into());
         let text = dag.to_json();
         assert!(text.starts_with(&format!(
-            "{{\"version\":6,\"generator\":{{\"name\":\"spit\",\"version\":\"{}\"}},\
+            "{{\"version\":7,\"generator\":{{\"name\":\"spit\",\"version\":\"{}\"}},\
 \"root\":\"/data/study\",\"external_inputs\":[{{\"product\":\"raw\"",
             env!("CARGO_PKG_VERSION")
         )));
@@ -456,7 +500,7 @@ mod tests {
         assert!(text.contains("\"command\":null"), "{text}");
         // A verify command that starts with a path names no program.
         assert!(
-            text.contains("\"executables\":[\"tool\"],\"removed\":[],\"left_out\":[],\"jobs\""),
+            text.contains("\"executables\":[\"tool\"],\"removed\":[],\"left_out\":[],\"pipeline_files\":[],\"calls\":[],\"jobs\""),
             "{text}"
         );
         assert!(
@@ -489,7 +533,7 @@ mod tests {
             Removal {
                 product: None,
                 entities: EntityBinding::from_pairs([("sub", "03")]),
-                rule: "drop [sub] where sessions count<2".into(),
+                rule: "exclude [sub] where sessions count<2".into(),
                 origin: None,
                 reason: None,
                 found: Some(1),
@@ -500,7 +544,7 @@ mod tests {
             text.contains(
                 "\"removed\":[{\"product\":\"bold\",\"entities\":{\"run\":\"3\",\"sub\":\"02\"},\
 \"rule\":\"exclude bold[run=3,sub=02]\",\"origin\":\"line 4\",\"reason\":\"motion \\\"spike\\\"\",\
-\"found\":null},{\"product\":null,\"entities\":{\"sub\":\"03\"},\"rule\":\"drop [sub] where sessions count<2\",\
+\"found\":null},{\"product\":null,\"entities\":{\"sub\":\"03\"},\"rule\":\"exclude [sub] where sessions count<2\",\
 \"origin\":null,\"reason\":null,\"found\":1}]"
             ),
             "{text}"
@@ -592,5 +636,63 @@ mod tests {
         };
         assert_eq!(fnv(""), "cbf29ce484222325");
         assert_eq!(fnv("a"), "af63dc4c8601ec8c");
+    }
+
+    #[test]
+    fn files_calls_and_origins_are_written_but_not_fingerprinted() {
+        let job = |[raw, clean, _]: [ArtifactId; 3]| BoundJob {
+            id: JobId::new(1),
+            step: StepId::new(0),
+            inputs: vec![vec![raw]],
+            outputs: vec![clean],
+            depends_on: vec![],
+            command: Some(vec![vec![ArgPart::Text("tool".into())]]),
+            verify: vec![],
+            checks: vec![],
+        };
+        let plain = bound(vec![step("clean", None, &["raw"], &["output"])], |ids| {
+            vec![job(ids)]
+        });
+        let mut called = step("clean", None, &["raw"], &["output"]);
+        called.origin = Some(StepCall { call: 0, line: 4 });
+        let mut dag = bound(vec![called], |ids| vec![job(ids)]);
+        dag.pipeline_files = vec![
+            SourceFile {
+                path: "main.spit".into(),
+                blob: "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391".into(),
+            },
+            SourceFile {
+                path: "lib/prep.spit".into(),
+                blob: "ce013625030ba8dba906f756967f9e9ca394464a".into(),
+            },
+        ];
+        dag.calls = vec![BoundCall {
+            operation: "P::prep".into(),
+            instance: "ready".into(),
+            parent: None,
+            file: Some(1),
+            at_file: Some(0),
+            at_line: 9,
+        }];
+        let text = dag.to_json();
+        assert!(
+            text.contains(
+                "\"pipeline_files\":[{\"path\":\"main.spit\",\"blob\":\"e69de29bb2d1d6434b8b29ae775ad8c2e48c5391\"},\
+{\"path\":\"lib/prep.spit\",\"blob\":\"ce013625030ba8dba906f756967f9e9ca394464a\"}],\
+\"calls\":[{\"operation\":\"P::prep\",\"instance\":\"ready\",\"parent\":null,\"file\":1,\
+\"at\":{\"file\":0,\"line\":9}}],\"jobs\""
+            ),
+            "{text}"
+        );
+        assert!(
+            text.contains("\"origin\":{\"call\":0,\"line\":4},\"fingerprint\""),
+            "{text}"
+        );
+        let print = |text: &str| {
+            let start = text.find("\"fingerprint\":\"").unwrap() + 15;
+            text[start..start + 16].to_owned()
+        };
+        assert!(plain.to_json().contains("\"origin\":null"));
+        assert_eq!(print(&plain.to_json()), print(&text));
     }
 }

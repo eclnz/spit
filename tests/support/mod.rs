@@ -183,3 +183,31 @@ pub fn spit(args: &[&str]) -> Output {
         .output()
         .unwrap()
 }
+
+/// Compare `actual` with the fixture `name`, or write it with `SPIT_BLESS`.
+pub fn check_output(name: &str, actual: &str) {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/outputs")
+        .join(format!("{name}.txt"));
+    if std::env::var_os("SPIT_BLESS").is_some() {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, actual).unwrap();
+        return;
+    }
+    let expected = std::fs::read_to_string(&path)
+        .unwrap_or_else(|_| panic!("no fixture {}; run with SPIT_BLESS=1", path.display()));
+    if actual != expected {
+        let line = expected
+            .lines()
+            .zip(actual.lines())
+            .position(|(expected, actual)| expected != actual)
+            .unwrap_or_else(|| expected.lines().count().min(actual.lines().count()));
+        panic!(
+            "{name} differs from {} at line {}:\nexpected: {:?}\nactual:   {:?}",
+            path.display(),
+            line + 1,
+            expected.lines().nth(line),
+            actual.lines().nth(line),
+        );
+    }
+}

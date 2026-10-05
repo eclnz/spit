@@ -93,7 +93,7 @@ fn the_plan_marks_each_folder() {
 
     let json = run(&tree, &["dag", "--json"]);
     let json = text(&json.stdout);
-    assert!(json.starts_with("{\"version\":6,"), "{json}");
+    assert!(json.starts_with("{\"version\":7,"), "{json}");
     assert!(
         json.contains("\"path\":\"dicom/sub=01\",\"kind\":\"folder\"}"),
         "{json}"
@@ -307,7 +307,7 @@ fn a_folder_is_never_beside_another_output_nor_a_sidecar() {
         ["an output written beside another is a file, not a folder; drop the `/`"]
     );
     assert_eq!(
-        errors("sidecars p [s]:\n    source a .raw/\n    source b .json\n"),
-        ["a source in sidecars group `p` is a file beside the others, not a folder; drop the `/`"]
+        errors("source a .raw [s]\nsource b .json/ beside a\n"),
+        ["a source written beside another is a file, not a folder; drop the `/`"]
     );
 }

@@ -39,6 +39,25 @@ operation denoise(input: Image) -> Image .nii.gz @ check(nonempty)
 
 SPIT records these commands in the DAG; the runner performs them. A failed check or verify fails the job. Checks can take declared parameters, such as `check ndim(n): check_ndim {@path} {n}` and `@ check(ndim(3))`. See [checks](../language-reference.md#checks) for attachment points and execution order.
 
+For checks shared by every output in a file or stage, write `check: nonempty, ndim(3)` once. A nested stage can remove an inherited check with `check: !nonempty`; an output can do the same with `@ check(!nonempty)`. See [default checks](../language-reference.md#default-checks).
+
+## Carry out an operation with steps
+
+An operation can have an indented body in place of a `command`. Its outputs are named because the body assigns each one:
+
+```spit
+operation clean(input: Lines) -> Lines
+command clean: clean_tool {input} {@output}
+
+operation twice(input: Lines) -> (result: Lines):
+    first = clean(input)
+    result = clean(first)
+
+cleaned = twice(raw)
+```
+
+The call expands to the body's steps, and a body may call another operation with a body. The body can be imported as one operation with the operations its steps need. `spit check pipeline.spit --calls` lists the expansion before reading a dataset. See [operations carried out by steps](../language-reference.md#operations-carried-out-by-steps).
+
 ## Organize steps with stages
 
 ```spit
@@ -59,4 +78,4 @@ use text.spit as text
 sorted = text::sort_lines(text::shard)
 ```
 
-`use` imports definitions from a file relative to the importing file. An operation brings its commands and attached checks; a source brings its path rule and attached checks. Steps are not imported. See [reuse definitions](../language-reference.md#reuse-definitions) for selection, prefixes and conflicts.
+`use` imports definitions from a file relative to the importing file. An operation brings its command or body and attached checks; a source brings its path rule and attached checks. Top-level steps are not imported. See [reuse definitions](../language-reference.md#reuse-definitions) for selection, prefixes and conflicts.

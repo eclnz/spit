@@ -78,3 +78,21 @@ fn damaged_records_never_panic() {
     });
     assert!(failures.is_empty(), "panicked on: {failures:#?}");
 }
+
+#[test]
+fn damaged_types_never_panic() {
+    let pipeline = fs::read_to_string("examples/composites/mrtrix/mrtrix_dwi.spit").unwrap();
+    let failures: Vec<String> = pipeline
+        .lines()
+        .filter(|line| line.starts_with("operation "))
+        .flat_map(mutations)
+        .filter(|mutated| {
+            panic::catch_unwind(AssertUnwindSafe(|| {
+                let _ = diagnose(mutated, None);
+            }))
+            .is_err()
+        })
+        .take(5)
+        .collect();
+    assert!(failures.is_empty(), "panicked on: {failures:#?}");
+}

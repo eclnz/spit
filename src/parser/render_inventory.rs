@@ -6,7 +6,9 @@ use std::fmt;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::model::{EntityBinding, InputRules, Pipeline, SourceInventory, SourceRecord};
+use crate::model::{
+    DimensionOrders, EntityBinding, InputRules, Pipeline, SourceInventory, SourceRecord,
+};
 use crate::paths::PathTemplate;
 
 /// Write an inventory in the text form [`parse_source_inventory`] reads,
@@ -68,7 +70,7 @@ pub(crate) fn as_read_back(
 }
 
 /// The source path rules a `.spitout` writes: the inventory's and the
-/// recipe's, a `sidecars` group's written out for each member.
+/// recipe's. Companions derive their paths from their main source.
 fn written_source_paths(
     inventory: &SourceInventory,
     pipeline: &Pipeline,
@@ -171,28 +173,15 @@ impl InventoryText<'_> {
         if removed.is_empty() {
             return Ok(());
         }
-        let order = self.pipeline_order();
-        let order: Vec<_> = order.iter().map(String::as_str).collect();
+        let orders = DimensionOrders::new(self.pipeline);
         writeln!(f, "\nremoved:")?;
         for removal in removed {
-            let declared: Vec<&str> = removal
-                .product
-                .as_deref()
-                .and_then(|name| {
-                    self.pipeline
-                        .products
-                        .iter()
-                        .find(|product| product.name == name)
-                })
-                .map_or_else(
-                    || order.clone(),
-                    |product| product.dimensions.iter().map(String::as_str).collect(),
-                );
+            let declared = orders.of(removal);
             let product = removal.product.as_deref().unwrap_or_default();
             writeln!(
                 f,
                 "    {product}[{}]",
-                in_order(&removal.entities, &declared)
+                in_order(&removal.entities, declared)
             )?;
             writeln!(f, "        rule: {}", removal.rule)?;
             if let Some(origin) = &removal.origin {
@@ -206,23 +195,6 @@ impl InventoryText<'_> {
             }
         }
         Ok(())
-    }
-
-    /// The pipeline's dimensions, each once, in the order its products
-    /// declare them.
-    fn pipeline_order(&self) -> Vec<String> {
-        let mut order: Vec<String> = Vec::new();
-        for dimension in self
-            .pipeline
-            .products
-            .iter()
-            .flat_map(|product| &product.dimensions)
-        {
-            if !order.contains(dimension) {
-                order.push(dimension.clone());
-            }
-        }
-        order
     }
 
     /// Split the records into those written under their discovered context
@@ -287,7 +259,7 @@ impl InventoryText<'_> {
         first: &[String],
     ) -> fmt::Result {
         let mut order = first.to_vec();
-        for dimension in self.pipeline_order() {
+        for dimension in self.pipeline.dimension_order() {
             if !order.contains(&dimension) {
                 order.push(dimension);
             }
@@ -322,7 +294,7 @@ impl InventoryText<'_> {
         if let Some(names) = groups.get(&EntityBinding::default()) {
             writeln!(f, "        {}", sorted_names(names))?;
         }
-        let pipeline_order = self.pipeline_order();
+        let pipeline_order = self.pipeline.dimension_order();
         let mut remaining: Vec<_> = groups
             .iter()
             .filter(|(binding, _)| !binding.is_empty())
@@ -351,12 +323,12 @@ impl InventoryText<'_> {
 
 /// `binding` as `dim=value,...`, in the order of `declared`, then any
 /// dimension it does not name.
-fn in_order(binding: &EntityBinding, declared: &[&str]) -> String {
+fn in_order(binding: &EntityBinding, declared: &[impl AsRef<str>]) -> String {
     let mut values: Vec<_> = binding.iter().collect();
     values.sort_by_key(|(dimension, _)| {
         declared
             .iter()
-            .position(|declared| declared == dimension)
+            .position(|declared| declared.as_ref() == *dimension)
             .unwrap_or(usize::MAX)
     });
     values

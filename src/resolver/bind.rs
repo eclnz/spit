@@ -1,19 +1,20 @@
 //! Bind a resolved DAG for a backend: give each artifact its path and expand
 //! each job's commands into arguments, so the result needs no pipeline.
 
-use std::collections::BTreeMap;
-
 use std::fmt;
+
+use rustc_hash::FxHashMap;
 
 use crate::check::{step_checks, StepCheck, When, CHECKED_PATH};
 use crate::command::{facet, slot, validate_commands, CommandError, Facet, Slot};
 use crate::model::{
-    ArtifactId, Cardinality, CommandDef, CommandRole, DagStep, Job, OperationDef, Pipeline,
+    ArtifactId, CallId, Cardinality, CommandDef, CommandRole, DagStep, Job, OperationDef, Pipeline,
     PipelineIndex, ResolvedDag,
 };
 use crate::paths::{bound_paths, check_rules, BoundPaths, PathError};
 use crate::spitdag::{
-    ArgPart, Argument, BoundCheck, BoundDag, BoundJob, BoundStep, StepCheck as BoundStepCheck,
+    ArgPart, Argument, BoundCall, BoundCheck, BoundDag, BoundJob, BoundStep, StepCall,
+    StepCheck as BoundStepCheck,
 };
 use crate::template::Part;
 
@@ -54,15 +55,20 @@ fn bind_jobs(
     dag: &ResolvedDag,
     paths: Vec<Option<String>>,
 ) -> Result<BoundDag, BindError> {
-    let operations: BTreeMap<&str, &OperationDef> = pipeline
-        .operations
-        .iter()
-        .map(|operation| (operation.name.as_str(), operation))
-        .collect();
+    // Found once, since each step asks for its operation, commands and
+    // producers.
+    let index = PipelineIndex::new(pipeline);
+    let mut commands: FxHashMap<&str, Vec<&CommandDef>> = FxHashMap::default();
+    for command in &pipeline.commands {
+        commands
+            .entry(command.operation.as_str())
+            .or_default()
+            .push(command);
+    }
     let steps = dag
         .steps
         .iter()
-        .map(|step| StepCommands::new(pipeline, &operations, step))
+        .map(|step| StepCommands::new(&index, &commands, step))
         .collect::<Result<Vec<_>, _>>()?;
     let mut produced = vec![false; dag.artifacts.len()];
     for &output in dag.jobs.iter().flat_map(|job| &job.outputs) {
@@ -83,21 +89,46 @@ fn bind_jobs(
                 .unwrap_or_default()
         })
         .collect();
-    let index = PipelineIndex::new(pipeline);
     let folders = dag
         .artifacts
         .products()
         .map(|(product, _)| index.is_folder(product))
         .collect();
     let paths = paths.into_iter().map(Option::unwrap_or_default).collect();
-    Ok(BoundDag::new(
+    let mut bound = BoundDag::new(
         dag.artifacts.clone(),
         paths,
         dimensions,
         folders,
         steps.iter().map(StepCommands::bound).collect(),
         jobs,
-    ))
+    );
+    bound.pipeline_files.clone_from(&pipeline.files);
+    // Each operation's file, found once, then each call's looked up.
+    let declared_in = pipeline.operation_files();
+    let files: Vec<Option<usize>> = pipeline
+        .calls
+        .iter()
+        .map(|call| declared_in.get(call.operation.as_str()).copied().flatten())
+        .collect();
+    bound.calls = pipeline
+        .calls
+        .iter()
+        .zip(&files)
+        .map(|(call, &file)| BoundCall {
+            operation: call.operation.clone(),
+            instance: call.outputs[0].clone(),
+            parent: call.parent.map(CallId::index),
+            file,
+            // A call in a body is written in the file declaring the body.
+            at_file: match call.parent {
+                Some(parent) => files[parent.index()],
+                None => (!pipeline.files.is_empty()).then_some(0),
+            },
+            at_line: call.place.line,
+        })
+        .collect();
+    Ok(bound)
 }
 
 /// A step's operation and commands, found once for all of its jobs.
@@ -115,35 +146,36 @@ struct StepCommands<'p> {
 
 impl<'p> StepCommands<'p> {
     fn new(
-        pipeline: &'p Pipeline,
-        operations: &BTreeMap<&str, &'p OperationDef>,
+        index: &PipelineIndex<'p>,
+        commands: &FxHashMap<&str, Vec<&'p CommandDef>>,
         step: &'p DagStep,
     ) -> Result<Self, BindError> {
-        let operation = operations
-            .get(step.operation.as_str())
-            .copied()
-            .ok_or_else(|| {
-                BindError::Dag(format!(
-                    "unknown operation `{}` in resolved DAG",
-                    step.operation
-                ))
-            })?;
+        let operation = index.operation(&step.operation).ok_or_else(|| {
+            BindError::Dag(format!(
+                "unknown operation `{}` in resolved DAG",
+                step.operation
+            ))
+        })?;
         let commands = |role: CommandRole| {
-            pipeline
-                .commands
-                .iter()
-                .filter(move |command| command.operation == step.operation && command.role == role)
+            commands
+                .get(step.operation.as_str())
+                .into_iter()
+                .flatten()
+                .copied()
+                .filter(move |command| command.role == role)
         };
-        let invocation = pipeline
-            .invocations
-            .iter()
-            .find(|invocation| invocation.outputs == step.outputs);
+        // The step's invocation is the one that makes its first output.
+        let invocation = step
+            .outputs
+            .first()
+            .and_then(|output| index.producer(output))
+            .map(|(invocation, _)| invocation);
         Ok(Self {
             step,
             operation,
             run: commands(CommandRole::Run).next(),
             verify: commands(CommandRole::Verify).collect(),
-            checks: step_checks(pipeline, operation, invocation),
+            checks: step_checks(index, operation, invocation),
         })
     }
 
@@ -164,6 +196,10 @@ impl<'p> StepCommands<'p> {
                 .iter()
                 .map(|port| port.name.clone())
                 .collect(),
+            origin: self.step.origin.as_ref().map(|origin| StepCall {
+                call: origin.call.index(),
+                line: origin.step.line,
+            }),
             checks: self
                 .checks
                 .iter()
@@ -335,10 +371,10 @@ fn expand(
                         (Ok(Facet::Dir), _) => ArgPart::Dir(artifact),
                         (Ok(Facet::Stem), Some(Slot::Output(index))) => ArgPart::Stem {
                             artifact,
-                            extension: operation.outputs[index]
+                            extension_len: operation.outputs[index]
                                 .extension
-                                .clone()
-                                .unwrap_or_default(),
+                                .as_deref()
+                                .map_or(0, str::len),
                         },
                         _ => path(&artifact)?,
                     });

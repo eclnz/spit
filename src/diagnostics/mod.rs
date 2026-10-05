@@ -11,26 +11,27 @@ pub(crate) use recovery::recover_document;
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use crate::command::collect_commands;
 use crate::compile::collect_pipeline;
-use crate::imports::parse_located_document;
+use crate::imports::parse_located_document_recovering;
 use crate::inputs::{
     check_inventory, collect_exclusion_errors, collect_rule_errors, with_source_paths, InputCheck,
     InputError, InputSpec, ResolvedInputs,
 };
-use crate::lower::{parse_document_with_imports, ParsedDocument};
+use crate::lower::{parse_document_recovering, ParsedDocument};
 use crate::model::{ArtifactReport, CoverageGap, InputRules, PipelineIndex, SourceInventory};
 use crate::parser::{as_read_back, glued_comment, without_bom, Kind, Rule, SourceMap};
 use crate::paths::{collect_paths, shown_path, PathTemplate};
 use crate::resolver::first_failure;
-use crate::span::{content_columns, Place};
+use crate::span::{content_columns, Lines, Place};
 use crate::{
     parse_source_inventory, resolve_artifacts_excluding, DefinitionSubject, ParseError, Pipeline,
     ResolveError,
 };
 
-use places::{error_location, subject_place};
+use places::{error_location, error_step, in_call, subject_place};
 use recovery::recover_parse_errors;
 use warnings::{case_warnings, empty_step_warnings, label_warnings, near_miss_warnings, warnings};
 
@@ -59,10 +60,10 @@ impl<'a> Context<'a> {
 
     /// Parse a pipeline in this context: with its imports resolved from its
     /// path, and its recipe checked and applied.
-    fn parse(&self, text: &str) -> Result<Parsed, ParseError> {
+    fn parse(&self, text: &str) -> Result<Parsed, Vec<ParseError>> {
         let mut document = match self.path {
-            Some(path) => parse_located_document(text, path, Kind::Pipeline)?,
-            None => parse_document_with_imports(text, &BTreeMap::new(), Kind::Pipeline)?,
+            Some(path) => parse_located_document_recovering(text, path, Kind::Pipeline)?,
+            None => parse_document_recovering(text, &BTreeMap::new(), Kind::Pipeline)?,
         };
         let Some(recipe) = self.recipe else {
             return Ok(Parsed {
@@ -72,7 +73,7 @@ impl<'a> Context<'a> {
         };
         recipe
             .check(&document.pipeline)
-            .map_err(|error| ParseError::new(1, error.to_string()))?;
+            .map_err(|error| vec![ParseError::new(1, error.to_string())])?;
         let as_written = document.pipeline.clone();
         recipe.apply_paths(&mut document.pipeline);
         document.inputs = recipe.rules.clone();
@@ -107,18 +108,20 @@ impl Parsed {
 /// rule at all show the built-in default they are given.
 fn shown_paths(pipeline: &Pipeline, lines: &SourceMap) -> Vec<ShownPath> {
     let index = PipelineIndex::new(pipeline);
+    let templates = index.path_templates();
     let mut shown: Vec<_> = pipeline
         .products
         .iter()
-        .filter(|product| !lines.imported.contains(&product.name))
-        .filter(|product| {
+        .zip(&templates)
+        .filter(|(product, _)| !lines.imported.contains(&product.name))
+        .filter(|(product, _)| {
             !pipeline.product_paths.contains_key(&product.name)
                 || index.added_extension(&product.name).is_some()
                 || index
                     .path_rule_for(&product.name)
                     .is_some_and(PathTemplate::varies)
         })
-        .filter_map(|product| {
+        .filter_map(|(product, template)| {
             let line = match lines.invocations.get(&product.name) {
                 Some(step) => step.line,
                 // A source with a default rule is shown on its declaration.
@@ -127,7 +130,7 @@ fn shown_paths(pipeline: &Pipeline, lines: &SourceMap) -> Vec<ShownPath> {
             Some(ShownPath {
                 product: product.name.clone(),
                 line,
-                path: shown_path(&index, &product.name)?,
+                path: shown_path(&index, &product.name, template.as_deref()?),
             })
         })
         .collect();
@@ -186,7 +189,9 @@ pub fn diagnose_checked_with_records(
     let (text, records) = (without_bom(text), without_bom(records));
     let parsed = (
         recover_parse_errors(text, |text| context.parse(text)),
-        recover_parse_errors(records, parse_source_inventory),
+        recover_parse_errors(records, |records| {
+            parse_source_inventory(records).map_err(|error| vec![error])
+        }),
     );
     let (parsed, inventory) = match parsed {
         (Ok(parsed), Ok(inventory)) => (parsed, inventory),
@@ -247,7 +252,7 @@ pub fn diagnose_checked_with_inventory(
     let rules = context.recipe.map_or(&no_rules, |recipe| &recipe.rules);
     let inventory = as_read_back(&settled.inventory, &document.pipeline, rules)?;
     // Checking the settled records again finds what settling found, since
-    // only the `drop` rules change records and they ran while settling.
+    // only the conditional `exclude` rules change records and they ran while settling.
     let gaps = Some(settled.gaps.as_slice());
     // Only errors are placed in the records' text.
     let mut diagnostics = check_document(document, text, None).ok()?;
@@ -323,7 +328,7 @@ pub fn diagnose_recipe(text: &str, path: &Path) -> Vec<Diagnostic> {
                 ..InputRules::default()
             };
             diagnostics.extend(
-                collect_exclusion_errors(&checked.pipeline, &rows)
+                collect_exclusion_errors(&PipelineIndex::new(&checked.pipeline), &rows)
                     .into_iter()
                     .map(|(_, problem)| error(problem.to_string())),
             );
@@ -333,12 +338,26 @@ pub fn diagnose_recipe(text: &str, path: &Path) -> Vec<Diagnostic> {
             diagnostics
         }
         Err(diagnostics) => {
+            let external: Arc<str> = Arc::from(pipeline_text.as_str());
             let pipeline_errors = diagnostics
                 .into_iter()
                 .filter(Diagnostic::is_error)
                 .map(|mut diagnostic| {
-                    diagnostic.file = Some(shown.clone());
-                    diagnostic.external_text = Some(pipeline_text.clone());
+                    // A library's path is from the pipeline's folder.
+                    let folder = pipeline_path.parent().unwrap_or_else(|| Path::new(""));
+                    match &mut diagnostic.file {
+                        // An error in a library keeps its own file and text.
+                        Some(file) => *file = folder.join(&*file).display().to_string(),
+                        None => {
+                            diagnostic.file = Some(shown.clone());
+                            diagnostic.external_text = Some(Arc::clone(&external));
+                        }
+                    }
+                    for related in &mut diagnostic.related {
+                        if let Some(file) = &mut related.file {
+                            *file = folder.join(&*file).display().to_string();
+                        }
+                    }
                     diagnostic
                 })
                 .collect();
@@ -453,15 +472,9 @@ fn recipe_path_errors(
         return Vec::new();
     }
     let merged = with_source_paths(pipeline, &source_paths);
-    // A member of a `sidecars` group has its group's rule, and a source
-    // without a rule of its own in the recipe has its default.
-    let members = pipeline.sidecar_members();
     let mut places = SourceMap::default();
     for name in source_paths.keys() {
-        let named = members
-            .get(name.as_str())
-            .map_or(name.as_str(), |group| group.name.as_str());
-        if let Some(place) = lines.paths.get(named).or(lines.default_path.as_ref()) {
+        if let Some(place) = lines.paths.get(name).or(lines.default_path.as_ref()) {
             places.paths.insert(name.clone(), place.clone());
         }
     }
@@ -505,7 +518,7 @@ fn check_document(
 /// `settled` holds what settling `supplied` with the same rules found:
 /// checking it again would find the same, and change nothing. Keep in step
 /// with `check_inventory`: this holds only while checking changes no
-/// records, which `drop` rules do only while the inventory is settled.
+/// records, which conditional `exclude` rules do only while the inventory is settled.
 fn record_diagnostics(
     document: &ParsedDocument,
     supplied: &SourceInventory,
@@ -565,7 +578,12 @@ fn record_diagnostics(
                 "\n  {} more artifacts cannot be produced; run `spit artifacts` to list them, or `spit dag --partial` to plan the rest",
                 remaining.saturating_sub(1)
             ));
-            diagnostics.push(Diagnostic::error(source, place, message));
+            diagnostics.push(within_call(
+                Diagnostic::error(source, place, message),
+                pipeline,
+                lines,
+                error_step(&error),
+            ));
             return Err(error);
         }
         diagnostics.extend(case_warnings(pipeline, lines, &report.dag));
@@ -576,7 +594,12 @@ fn record_diagnostics(
         Err(error) => {
             if !diagnostics.iter().any(Diagnostic::is_error) {
                 let (source, place) = error_location(pipeline, lines, &error, records, true);
-                diagnostics.push(Diagnostic::error(source, place, error.to_string()));
+                diagnostics.push(within_call(
+                    Diagnostic::error(source, place, error.to_string()),
+                    pipeline,
+                    lines,
+                    error_step(&error),
+                ));
             }
             Err(diagnostics)
         }
@@ -608,13 +631,15 @@ fn finish(
     text: &str,
     source_text: Option<&str>,
 ) -> Vec<Diagnostic> {
+    let pipeline_lines = Lines::new(text);
+    let inventory_lines = source_text.map(Lines::new);
     let texts = [
-        (DiagnosticSource::Pipeline, Some(text)),
-        (DiagnosticSource::Inventory, source_text),
+        (DiagnosticSource::Pipeline, Some(&pipeline_lines)),
+        (DiagnosticSource::Inventory, inventory_lines.as_ref()),
     ];
-    for (source, text) in texts {
-        let Some(text) = text else { continue };
-        for (index, line) in text.lines().enumerate() {
+    for (source, lines) in texts {
+        let Some(lines) = lines else { continue };
+        for (index, line) in lines.iter().enumerate() {
             let Some(columns) = glued_comment(line) else {
                 continue;
             };
@@ -628,6 +653,7 @@ fn finish(
                 .filter(|diagnostic| {
                     diagnostic.is_error()
                         && diagnostic.source == source
+                        && diagnostic.file.is_none()
                         && diagnostic.line == number
                 })
                 .collect();
@@ -650,13 +676,13 @@ fn finish(
         if diagnostic.columns.is_some() {
             continue;
         }
-        let text = match diagnostic.source {
-            DiagnosticSource::Inventory => source_text.unwrap_or(text),
-            DiagnosticSource::Pipeline => text,
+        let lines = match diagnostic.source {
+            DiagnosticSource::Inventory => inventory_lines.as_ref().unwrap_or(&pipeline_lines),
+            DiagnosticSource::Pipeline => &pipeline_lines,
         };
         diagnostic.columns = diagnostic
             .line
-            .and_then(|line| text.lines().nth(line.checked_sub(1)?))
+            .and_then(|line| lines.get(line))
             .map(content_columns);
     }
     order(diagnostics)
@@ -679,7 +705,19 @@ fn pipeline_diagnostics(
         .map(|(subject, error)| {
             let place = subject_place(pipeline, lines, subject, error)
                 .or_else(|| error_location(pipeline, lines, error, inventory_text, false).1);
-            Diagnostic::error(DiagnosticSource::Pipeline, place, error.to_string())
+            let step = match subject {
+                DefinitionSubject::Invocation(output) => Some((
+                    output.as_str(),
+                    error_step(error).and_then(|(_, port)| port),
+                )),
+                _ => error_step(error),
+            };
+            within_call(
+                Diagnostic::error(DiagnosticSource::Pipeline, place, error.to_string()),
+                pipeline,
+                lines,
+                step,
+            )
         })
         .collect();
     let source = DiagnosticSource::Pipeline;
@@ -699,30 +737,58 @@ fn pipeline_diagnostics(
     diagnostics
 }
 
+/// `diagnostic`, about the step making a product at a port, reported at the
+/// call written in the text when a call to an operation carried out by
+/// steps made that step; see [`in_call`].
+fn within_call(
+    mut diagnostic: Diagnostic,
+    pipeline: &Pipeline,
+    lines: &SourceMap,
+    step: Option<(&str, Option<&str>)>,
+) -> Diagnostic {
+    let Some(call) = step.and_then(|(output, port)| in_call(pipeline, lines, output, port)) else {
+        return diagnostic;
+    };
+    diagnostic.source = DiagnosticSource::Pipeline;
+    diagnostic.line = Some(call.place.line);
+    diagnostic.columns = Some(call.place.columns);
+    diagnostic.message.insert_str(0, &call.prefix);
+    diagnostic.related = call.related;
+    diagnostic
+}
+
 /// Order by source and line, keep only the first error on each line, and
 /// drop warnings on a line that already has an error.
 fn order(mut diagnostics: Vec<Diagnostic>) -> Vec<Diagnostic> {
-    let key = |diagnostic: &Diagnostic| {
+    // Those in the text diagnosed first, then each other file's.
+    fn key(diagnostic: &Diagnostic) -> impl Ord + '_ {
         (
             diagnostic.source == DiagnosticSource::Inventory,
+            diagnostic.file.as_deref(),
             diagnostic.line.is_none(),
             diagnostic.line,
+            diagnostic.severity,
         )
-    };
-    diagnostics.sort_by_key(|diagnostic| (key(diagnostic), diagnostic.severity));
+    }
+    diagnostics.sort_by(|a, b| key(a).cmp(&key(b)));
     let mut errored = BTreeSet::new();
-    diagnostics.retain(|diagnostic| {
-        let Some(line) = diagnostic.line else {
-            return true;
-        };
-        let place = (diagnostic.source, line);
-        if errored.contains(&place) {
-            return false;
-        }
-        if diagnostic.is_error() {
-            errored.insert(place);
-        }
-        true
-    });
+    let keep: Vec<bool> = diagnostics
+        .iter()
+        .map(|diagnostic| {
+            let Some(line) = diagnostic.line else {
+                return true;
+            };
+            let place = (diagnostic.source, diagnostic.file.as_deref(), line);
+            if errored.contains(&place) {
+                return false;
+            }
+            if diagnostic.is_error() {
+                errored.insert(place);
+            }
+            true
+        })
+        .collect();
+    let mut keep = keep.into_iter();
+    diagnostics.retain(|_| keep.next().unwrap_or(true));
     diagnostics
 }

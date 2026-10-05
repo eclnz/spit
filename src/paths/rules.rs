@@ -4,10 +4,14 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
+use rustc_hash::FxHashSet;
+
 use crate::model::{
-    ArtifactInstance, EntityBinding, ExtensionSource, Pipeline, PipelineIndex, ProductDef,
+    ArtifactInstance, EntityBinding, ExtensionSource, PathOrigin, Pipeline, PipelineIndex,
+    ProductDef,
 };
 use crate::parser::SourceMap;
+use crate::span::Place;
 
 use super::components::enclosing_path;
 use super::product::{bind_path, shown_path};
@@ -42,8 +46,13 @@ pub enum PathRule {
 impl PathRule {
     /// The rule `product` takes: its own, else its stage's default, else
     /// the pipeline's default, each with any extension added to it.
-    fn for_product(index: &PipelineIndex<'_>, product: &str) -> Self {
-        let Some(template) = index.path_template_for(product) else {
+    /// `template` is its path template, from [`PipelineIndex::path_templates`].
+    fn for_product(
+        index: &PipelineIndex<'_>,
+        product: &str,
+        template: Option<&PathTemplate>,
+    ) -> Self {
+        let Some(template) = template else {
             return Self::Missing;
         };
         let beside = index.beside(product);
@@ -52,26 +61,22 @@ impl PathRule {
             .path_rule_for(rule_product)
             .is_some_and(PathTemplate::varies)
         {
-            shown_path(index, product).unwrap_or_else(|| template.to_string())
+            shown_path(index, product, template)
         } else {
             template.to_string()
         };
-        if let Some((sibling, _, _)) = beside {
-            Self::Beside {
+        match (beside, index.path_origin(product)) {
+            (Some((sibling, _, _)), _) => Self::Beside {
                 sibling: sibling.to_owned(),
                 template,
-            }
-        } else if index.pipeline.product_paths.contains_key(product) {
-            Self::Explicit(template)
-        } else if let Some((stage, _)) = index.stage_path_rule(product) {
-            Self::Stage {
+            },
+            (None, Some((PathOrigin::Explicit, _))) => Self::Explicit(template),
+            (None, Some((PathOrigin::Stage(stage), _))) => Self::Stage {
                 stage: stage.to_owned(),
                 template,
-            }
-        } else if index.pipeline.path_template.is_none() {
-            Self::BuiltIn(template)
-        } else {
-            Self::Default(template)
+            },
+            (None, Some((PathOrigin::BuiltIn, _))) => Self::BuiltIn(template),
+            (None, Some((PathOrigin::Default, _)) | None) => Self::Default(template),
         }
     }
 }
@@ -270,13 +275,18 @@ pub(crate) fn collect_paths(
         .iter()
         .flat_map(|invocation| invocation.outputs.iter().map(String::as_str))
         .collect();
+    shape_errors(pipeline, lines, skip, &outputs, &mut errors);
     let mut entries = Vec::new();
     let mut samples: BTreeMap<String, &str> = BTreeMap::new();
     // One default rule can disagree with many products' extensions; each
     // disagreement is said once.
-    let mut disagreements = BTreeSet::new();
-    for product in &pipeline.products {
-        let rule = PathRule::for_product(&index, &product.name);
+    let mut disagreements = FxHashSet::default();
+    // Each product's template is built once, for its rule, its shown path
+    // and its checks.
+    let templates = index.path_templates();
+    for (id, product) in pipeline.products.iter().enumerate() {
+        let template = templates[id].as_deref();
+        let rule = PathRule::for_product(&index, &product.name, template);
         if rule != PathRule::Missing && !skip.contains(&product.name) {
             let line = lines.path_rule(&index, &product.name);
             if let Some((sibling, _, _)) = index.beside(&product.name) {
@@ -291,11 +301,25 @@ pub(crate) fn collect_paths(
                 }
             }
             if let Some(problem) = extension_disagreement(&index, &product.name) {
-                if disagreements.insert(problem.clone()) {
-                    errors.push(error(problem).at(line.clone()));
+                if problem
+                    .said_once
+                    .is_none_or(|said| disagreements.insert(said))
+                {
+                    errors.push(error(problem.message).at(line.clone()));
                 }
             }
-            match validate_path_template(&index, product) {
+            // `parse` checked the rule as written; a dropped group can leave
+            // two open shapes touching in this product's path.
+            if let Some(Err(message)) = template.map(PathTemplate::check_open_shapes) {
+                errors.push(
+                    error(format!(
+                        "in the path rule for `{}`, once the groups its dimensions lack are dropped: {message}",
+                        product.name
+                    ))
+                    .at(line.clone()),
+                );
+            }
+            match validate_path_template(&index, product, template) {
                 Err(e) => errors.push(e.at(line)),
                 // A repeated product name is reported by the resolver as a duplicate.
                 Ok(sample) => {
@@ -303,9 +327,20 @@ pub(crate) fn collect_paths(
                         .insert(sample.clone(), &product.name)
                         .filter(|other| *other != product.name)
                     {
+                        // A `beside` output has no rule to change, so the way out
+                        // is its sibling's rule, or the other product's.
+                        let fix = match (index.beside(&product.name), index.beside(other)) {
+                            (Some((sibling, _, _)), _) => beside_fix(&product.name, sibling, other),
+                            (None, Some((sibling, _, _))) => {
+                                beside_fix(other, sibling, &product.name)
+                            }
+                            (None, None) => {
+                                "include `{@product}` or distinguish their path rules".to_owned()
+                            }
+                        };
                         errors.push(
                             error(format!(
-                                "products `{other}` and `{}` bind to the same path `{sample}` for the same entities; include `{{@product}}` or distinguish their path rules",
+                                "products `{other}` and `{}` bind to the same path `{sample}` for the same entities; {fix}",
                                 product.name
                             ))
                             .at(line),
@@ -353,9 +388,29 @@ pub(crate) fn collect_paths(
 const EXTENSION_START: &str =
     "; SPIT reads the extension from the first `.` after the last placeholder, so keep `.` out of the name before it";
 
+/// What to change when `beside`, written beside `sibling`, has the path of
+/// `other`: it has no rule of its own, so change `other`'s or `sibling`'s.
+fn beside_fix(beside: &str, sibling: &str, other: &str) -> String {
+    format!("`{beside}` follows `{sibling}`'s path, so change the path rule of `{other}` or of `{sibling}`")
+}
+
+/// A path rule that ends with an extension other than the one its file must
+/// have.
+struct Disagreement<'p> {
+    message: String,
+    /// What a default rule's message is about, since one default can
+    /// disagree with many products and is said once: the stage whose default
+    /// it is, the extension it ends with, the one it should, and where that
+    /// is declared. `None` for a product's own rule, which is said for each.
+    said_once: Option<(Option<&'p str>, &'p str, &'p str, ExtensionSource)>,
+}
+
 /// Why `product`'s path rule ends with an extension other than the one its
 /// file must have, if it does. A rule that ends with none is given it.
-fn extension_disagreement(index: &PipelineIndex<'_>, product: &str) -> Option<String> {
+fn extension_disagreement<'p>(
+    index: &PipelineIndex<'p>,
+    product: &str,
+) -> Option<Disagreement<'p>> {
     let (expected, source) = index.expected_extension(product)?;
     let rule = index.path_rule_for(product)?;
     // A `.` earlier in the file name is not part of its extension.
@@ -368,16 +423,21 @@ fn extension_disagreement(index: &PipelineIndex<'_>, product: &str) -> Option<St
         ExtensionSource::Source(_) => "declares",
         _ => "writes",
     };
-    if index.pipeline.product_paths.contains_key(product) {
-        return Some(format!(
-            "path `{product}` ends in `{written}`, but {source} {verb} `{expected}`; drop the extension or use `{expected}`{EXTENSION_START}"
-        ));
+    let origin = index.path_origin(product).map(|(origin, _)| origin);
+    if origin == Some(PathOrigin::Explicit) {
+        return Some(Disagreement {
+            message: format!(
+                "path `{product}` ends in `{written}`, but {source} {verb} `{expected}`; drop the extension or use `{expected}`{EXTENSION_START}"
+            ),
+            said_once: None,
+        });
     }
-    let default = match index.stage_path_rule(product) {
-        Some((stage, _)) => format!("stage `{stage}`'s default path"),
-        None => "the default path".to_owned(),
+    let (stage, default) = match origin {
+        Some(PathOrigin::Stage(stage)) => (Some(stage), format!("stage `{stage}`'s default path")),
+        _ => (None, "the default path".to_owned()),
     };
-    Some(match source {
+    let said_once = Some((stage, written, expected, source.clone()));
+    let message = match source {
         ExtensionSource::Operation(_) => format!(
             "{default} ends in `{written}`, but {source} writes `{expected}`; write {default} without an extension, and give the outputs that use it `ext: {written}`"
         ),
@@ -387,7 +447,8 @@ fn extension_disagreement(index: &PipelineIndex<'_>, product: &str) -> Option<St
         ExtensionSource::Stage(_) | ExtensionSource::Default => format!(
             "{default} ends in `{written}`, but {source} sets `{expected}`; write the extension once, with `ext:`"
         ),
-    })
+    };
+    Some(Disagreement { message, said_once })
 }
 
 /// Bind a product's path rule to placeholder entities, rejecting rules that
@@ -395,9 +456,9 @@ fn extension_disagreement(index: &PipelineIndex<'_>, product: &str) -> Option<St
 fn validate_path_template(
     index: &PipelineIndex<'_>,
     product: &ProductDef,
+    template: Option<&PathTemplate>,
 ) -> Result<String, PathError> {
-    let template = index
-        .path_template_for(&product.name)
+    let template = template
         .ok_or_else(|| error(format!("no path template for product `{}`", product.name)))?;
     let placeholders: BTreeSet<_> = template
         .parts()
@@ -409,7 +470,9 @@ fn validate_path_template(
         .collect();
     if !placeholders.contains(&PathPlaceholder::Entities) {
         if let Some(dimension) = product.dimensions.iter().find(|dimension| {
-            !placeholders.contains(&PathPlaceholder::Dimension((*dimension).clone()))
+            !placeholders.iter().any(
+                |placeholder| matches!(placeholder, PathPlaceholder::Dimension(name, _) if name == *dimension),
+            )
         }) {
             return Err(error(format!(
                 "path template for `{}` omits dimension `{dimension}`; artifacts differing only in `{dimension}` would share a path",
@@ -425,7 +488,55 @@ fn validate_path_template(
         .map(|dimension| (dimension.clone(), dimension.clone()))
         .collect();
     let artifact = ArtifactInstance::new(&product.name, product.artifact_type.clone(), entities);
-    bind_path(index, &product.dimensions, artifact.view(), || {
-        format!("path rule for `{}`", product.name)
-    })
+    bind_path(
+        index,
+        template,
+        &product.dimensions,
+        artifact.view(),
+        || format!("path rule for `{}`", product.name),
+    )
+}
+
+/// A shape narrows the files a source's rule finds, so it has no place in a
+/// rule that also writes paths: an output's own rule, or a `path:` default
+/// for a pipeline or a stage, which outputs take. Each is an error, since a
+/// check that never ran would pass.
+fn shape_errors(
+    pipeline: &Pipeline,
+    lines: &SourceMap,
+    skip: &BTreeSet<String>,
+    outputs: &BTreeSet<&str>,
+    errors: &mut Vec<PathError>,
+) {
+    let mut report = |template: &PathTemplate, line: Option<Place>, owner: String| {
+        for (dimension, shape) in template.shaped() {
+            let placeholder = format!("{{{dimension}:{shape}}}");
+            errors.push(
+                error(format!(
+                    "`{placeholder}` has a shape, but shapes narrow a source's path rule only; {owner}"
+                ))
+                .at(line.clone())
+                .focus(placeholder),
+            );
+        }
+    };
+    if let Some(template) = &pipeline.path_template {
+        let owner = "`path:` is the default for outputs too; write the shape in a `path` rule for each source, as `path <source>: ...`".to_owned();
+        report(template, lines.default_path.clone(), owner);
+    }
+    for stage in &pipeline.stages {
+        if let Some(template) = &stage.path_template {
+            let owner = format!(
+                "stage `{}`'s `path:` is the default for its products; write the shape in a `path` rule for each source, as `path <source>: ...`",
+                stage.name
+            );
+            report(template, lines.stage_paths.get(&stage.name).cloned(), owner);
+        }
+    }
+    for (product, template) in &pipeline.product_paths {
+        if !skip.contains(product) && outputs.contains(product.as_str()) {
+            let owner = format!("`{product}` is made by a step");
+            report(template, lines.paths.get(product).cloned(), owner);
+        }
+    }
 }

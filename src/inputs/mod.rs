@@ -1,6 +1,6 @@
 //! The input stage: settle which contexts and sources a dataset holds.
 //!
-//! It reads a `.spitin` recipe of `discover`, `exclude`, `drop`, `require` and source
+//! It reads a `.spitin` recipe of `discover`, `exclude`, `require` and source
 //! path rules, and the pipeline's source declarations. It scans a root or
 //! takes records already written, and returns a plain inventory with what it
 //! removed and what the `require` rules find missing. Resolving jobs needs
@@ -11,6 +11,7 @@ mod discover;
 mod exclusions;
 mod pattern;
 mod suggest;
+mod variants;
 
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
@@ -43,6 +44,7 @@ pub use self::exclusions::UnmatchedExclusion;
 use self::exclusions::{read_exclusion_files, Excluder};
 pub use self::pattern::{MissedSource, NearestFile};
 pub use self::suggest::{NearlyMatched, SuggestedSource, Suggestions};
+pub use self::variants::{case_variants, CaseVariants, Spelling};
 
 /// A recipe's rules and any inventory records written with them.
 #[derive(Clone, Debug, Default)]
@@ -147,7 +149,7 @@ fn header_lines(text: &str) -> Result<(RecipeHeader, String), ParseError> {
 /// Why a line belongs in the pipeline rather than the recipe: what each
 /// file holds.
 const PIPELINE_ONLY: &str = ", which every dataset shares; a .spitin binds it to one dataset with \
-     its `root`, source paths, and `discover`, `exclude`, `drop` and `require` rules";
+     its `root`, source paths, and `discover`, `exclude` and `require` rules";
 
 /// Whether a line that starts with no keyword is a step, `out = f(in)`,
 /// rather than a record, whose `[` comes before any `=`.
@@ -169,6 +171,7 @@ fn check_input_lines(text: &str) -> Result<(), ParseError> {
                     | Keyword::Command
                     | Keyword::Verify
                     | Keyword::Check
+                    | Keyword::Checks
                     | Keyword::Stage
                     | Keyword::Dimensions
                     | Keyword::Sidecars
@@ -251,27 +254,20 @@ impl InputSpec {
     /// Check the recipe against the pipeline's source declarations, without
     /// reading any file or record.
     pub fn check(&self, pipeline: &Pipeline) -> Result<(), InputError> {
-        let members = pipeline.sidecar_members();
+        let index = PipelineIndex::new(pipeline);
         for name in self.rules.source_paths.keys() {
             let product = name.clone();
-            if let Some(group) = pipeline.sidecar_group(name) {
-                if group.stem.is_some() {
-                    return Err(InputError::PathInBoth { product });
-                }
-                continue;
-            }
-            if !pipeline.is_source(name) {
-                if pipeline
-                    .products
-                    .iter()
-                    .any(|declared| declared.name == *name)
-                {
+            if !index.is_source(name) {
+                if index.product(name).is_some() {
                     return Err(InputError::OutputPath { product });
                 }
                 return Err(InputError::NotASource { product });
             }
-            if let Some(group) = members.get(name.as_str()) {
-                let group = group.name.clone();
+            if let Some(group) = index
+                .product(name)
+                .and_then(|source| source.beside.as_ref())
+            {
+                let group = group.sibling.clone();
                 return Err(InputError::MemberPath { product, group });
             }
             if pipeline.product_paths.contains_key(name) {
@@ -298,20 +294,17 @@ impl InputSpec {
     /// finds every source by its rule, so it cannot find this one.
     pub fn source_without_path(&self, pipeline: &Pipeline) -> Option<String> {
         let source_paths = self.rules.source_paths_for(pipeline);
-        let index = PipelineIndex::new(pipeline);
+        let located = with_source_paths(pipeline, &source_paths);
+        let index = PipelineIndex::new(&located);
         pipeline
             .products
             .iter()
-            .find(|product| {
-                index.is_source(&product.name)
-                    && !source_paths.contains_key(&product.name)
-                    && !index.has_path(&product.name)
-            })
+            .find(|product| index.is_source(&product.name) && !index.has_path(&product.name))
             .map(|product| product.name.clone())
     }
 
     /// Run the input stage: find the contexts and source files a dataset
-    /// holds, apply the `exclude` and `drop` rules, check the `require` rules, and give
+    /// holds, apply the `exclude` rules, check the `require` rules, and give
     /// each source record its file's path.
     ///
     /// The stage reads `pipeline` only for its source products and leaves it
@@ -451,6 +444,15 @@ fn merge_source_paths(
         if !index.is_source(name) {
             return Err(InputError::UnknownSourcePath { product });
         }
+        if let Some(beside) = index
+            .product(name)
+            .and_then(|source| source.beside.as_ref())
+        {
+            return Err(InputError::MemberPath {
+                product,
+                group: beside.sibling.clone(),
+            });
+        }
         if pipeline.product_paths.contains_key(name) {
             return Err(InputError::InventoryPathInBoth { product });
         }
@@ -458,7 +460,7 @@ fn merge_source_paths(
     Ok(())
 }
 
-/// Each binding where some of a `sidecars` group's sources were found and
+/// Each binding where some of a main source's companions were found and
 /// others were neither found nor removed, by `removed` or a removal
 /// `inventory` already records from an earlier run, said as
 /// `photo[site=A,visit=2,shot=3] has .raw and .gpx but no .imu`, by group
@@ -583,11 +585,10 @@ pub enum InputError {
     /// The recipe sets a path for a product a step makes, whose path is
     /// the pipeline's to give.
     OutputPath { product: String },
-    /// A source or `sidecars` group has a path rule in both the pipeline
+    /// A source has a path rule in both the pipeline
     /// and the recipe.
     PathInBoth { product: String },
-    /// The recipe sets a path for a member of a `sidecars` group, which
-    /// takes the group's.
+    /// The recipe sets a path for a companion, which follows its main source.
     MemberPath { product: String, group: String },
     /// A scan finds every source's files, and this one has no path rule to
     /// find them by.
@@ -600,7 +601,7 @@ pub enum InputError {
     InventoryPathInBoth { product: String },
     /// An `exclude` rule matches nothing in the dataset.
     UnmatchedExclusion(UnmatchedExclusion),
-    /// `drop` rules remove every group of a grouping.
+    /// conditional `exclude` rules remove every group of a grouping.
     EveryGroupDropped(EveryGroupDropped),
 }
 
@@ -623,7 +624,7 @@ impl fmt::Display for InputError {
             Self::Path(error) => error.fmt(f),
             Self::NotASource { product } => write!(
                 f,
-                "input path `{product}` must name a source product or sidecars group in the pipeline"
+                "input path `{product}` must name a source product in the pipeline"
             ),
             Self::OutputPath { product } => write!(
                 f,
@@ -635,7 +636,7 @@ impl fmt::Display for InputError {
             ),
             Self::MemberPath { product, group } => write!(
                 f,
-                "source `{product}` takes its path from sidecars group `{group}`; write `path {group}:` with the group's stem"
+                "source `{product}` is beside `{group}` and takes its path from it; write `path {group}:` instead"
             ),
             Self::NoSourcePath { product } => write!(
                 f,
@@ -681,7 +682,7 @@ pub enum InputSource<'a> {
 /// What the input stage settled about a dataset.
 #[derive(Debug)]
 pub struct ResolvedInputs {
-    /// The contexts and sources that remain after `exclude` and `drop` rules, with the named
+    /// The contexts and sources that remain after `exclude` rules, with the named
     /// discovery contexts kept for the `.spitout`.
     pub inventory: SourceInventory,
     /// Each file left out because a value in its path cannot be read, and
@@ -691,7 +692,7 @@ pub struct ResolvedInputs {
     pub unmatched_files: Vec<String>,
     /// Each source whose path rule matched no file under a scanned root.
     pub missed_sources: Vec<MissedSource>,
-    /// Each place the scan or records hold some of a `sidecars` group's
+    /// Each place the scan or records hold some of a companion group's
     /// sources and not the others, as `photo[site=A,shot=3] has .raw and
     /// .gpx but no .imu`.
     pub incomplete_groups: Vec<String>,

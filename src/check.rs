@@ -8,7 +8,10 @@
 use std::collections::BTreeMap;
 
 use crate::command::CommandError;
-use crate::model::{CheckDef, CheckUse, Invocation, OperationDef, Pipeline};
+use crate::model::{
+    stage_and_parents, CheckDef, CheckUse, DefaultChecks, Invocation, OperationDef, Pipeline,
+    PipelineIndex, Port,
+};
 use crate::parser::SourceMap;
 use crate::span::Place;
 use crate::template::Part;
@@ -79,12 +82,35 @@ pub(crate) fn collect_checks(
         }
         for port in &operation.outputs {
             uses(&port.checks, place.clone());
+            uses(&port.exempt, place.clone());
         }
+    }
+    uses_default(
+        &mut uses,
+        &pipeline.default_checks,
+        lines.default_checks.clone(),
+    );
+    for stage in &pipeline.stages {
+        uses_default(
+            &mut uses,
+            &stage.checks,
+            lines.stage_checks.get(&stage.name).cloned(),
+        );
     }
     for product in &pipeline.products {
         uses(&product.checks, lines.products.get(&product.name).cloned());
     }
     errors
+}
+
+/// Check the uses of one `check:` list, those it adds and those it drops.
+fn uses_default(
+    uses: &mut impl FnMut(&[CheckUse], Option<Place>),
+    defaults: &DefaultChecks,
+    place: Option<Place>,
+) {
+    uses(&defaults.checks, place.clone());
+    uses(&defaults.exempt, place);
 }
 
 fn count(number: usize, noun: &str) -> String {
@@ -174,10 +200,11 @@ pub(crate) struct StepCheck<'p> {
 /// input runs its port's checks and its source's. Every check use names a
 /// declared check, which [`collect_checks`] makes sure of.
 pub(crate) fn step_checks<'p>(
-    pipeline: &'p Pipeline,
+    index: &PipelineIndex<'p>,
     operation: &'p OperationDef,
     invocation: Option<&'p Invocation>,
 ) -> Vec<StepCheck<'p>> {
+    let pipeline = index.pipeline;
     if pipeline.checks.is_empty() {
         return Vec::new();
     }
@@ -188,16 +215,29 @@ pub(crate) fn step_checks<'p>(
             .find(|check| check.name == name)
             .expect("collect_checks makes sure every check use names a check")
     };
+    // What the step adds to its operation's checks, on one port.
+    let added = |at: Port| {
+        invocation
+            .map_or(&[][..], |invocation| invocation.checks.as_slice())
+            .iter()
+            .filter(move |(port, _)| *port == at)
+            .map(|(_, check)| check)
+    };
     let mut checks = Vec::new();
     for (port, input) in operation.inputs.iter().enumerate() {
         let product = invocation.and_then(|invocation| invocation.inputs.get(port));
         let product = product.map(|binding| binding.product_name());
         let source = product
-            .and_then(|name| pipeline.products.iter().find(|p| p.name == name))
+            .and_then(|name| index.product(name))
             .map_or(&[][..], |product| product.checks.as_slice());
-        let produced = product.and_then(|name| producer_checks(pipeline, name));
+        let produced = product.and_then(|name| producer_checks(index, name));
         let mut seen: Vec<&CheckUse> = Vec::new();
-        for used in input.checks.iter().chain(source) {
+        for used in input
+            .checks
+            .iter()
+            .chain(added(Port::Input(port)))
+            .chain(source)
+        {
             if seen.contains(&used) {
                 continue;
             }
@@ -208,12 +248,19 @@ pub(crate) fn step_checks<'p>(
                 check: find(&used.check),
                 arguments: &used.arguments,
                 written: used.to_string(),
-                covered: produced.is_some_and(|checks| checks.contains(used)),
+                covered: produced
+                    .as_ref()
+                    .is_some_and(|checks| checks.contains(&used)),
             });
         }
     }
-    for (port, output) in operation.outputs.iter().enumerate() {
-        for used in &output.checks {
+    for port in 0..operation.outputs.len() {
+        let mut seen: Vec<&CheckUse> = Vec::new();
+        for used in output_checks(pipeline, operation, invocation, port) {
+            if seen.contains(&used) {
+                continue;
+            }
+            seen.push(used);
             checks.push(StepCheck {
                 when: When::After,
                 port,
@@ -228,18 +275,55 @@ pub(crate) fn step_checks<'p>(
 }
 
 /// The checks the step that makes `product` runs on it after its command.
-fn producer_checks<'p>(pipeline: &'p Pipeline, product: &str) -> Option<&'p [CheckUse]> {
-    let invocation = pipeline
-        .invocations
+fn producer_checks<'p>(index: &PipelineIndex<'p>, product: &str) -> Option<Vec<&'p CheckUse>> {
+    let (invocation, port) = index.producer(product)?;
+    let operation = index.operation(&invocation.operation)?;
+    Some(output_checks(
+        index.pipeline,
+        operation,
+        Some(invocation),
+        port,
+    ))
+}
+
+/// The checks the step of `invocation` runs on its output `port` after the
+/// command, in order: the defaults of its file and stages, then the
+/// operation's own, then those the step adds. The defaults are those of
+/// the file, then each stage around the call from the outermost in, each
+/// list adding to the ones before it and dropping the checks it names with
+/// `!`; the output's own `!` drops more, for that output alone.
+fn output_checks<'p>(
+    pipeline: &'p Pipeline,
+    operation: &'p OperationDef,
+    invocation: Option<&'p Invocation>,
+    port: usize,
+) -> Vec<&'p CheckUse> {
+    let output = &operation.outputs[port];
+    let mut checks: Vec<&CheckUse> = Vec::new();
+    let mut apply = |defaults: &'p DefaultChecks| {
+        for used in &defaults.checks {
+            if !checks.contains(&used) {
+                checks.push(used);
+            }
+        }
+        checks.retain(|used| !defaults.exempt.contains(used));
+    };
+    apply(&pipeline.default_checks);
+    if let Some(stage) = invocation.and_then(|invocation| invocation.stage.as_deref()) {
+        let mut around: Vec<&str> = stage_and_parents(stage).collect();
+        around.reverse();
+        for name in around {
+            if let Some(definition) = pipeline.stages.iter().find(|stage| stage.name == name) {
+                apply(&definition.checks);
+            }
+        }
+    }
+    checks.retain(|used| !output.exempt.contains(used));
+    let added = invocation
+        .map_or(&[][..], |invocation| invocation.checks.as_slice())
         .iter()
-        .find(|invocation| invocation.outputs.iter().any(|output| output == product))?;
-    let port = invocation
-        .outputs
-        .iter()
-        .position(|output| output == product)?;
-    let operation = pipeline
-        .operations
-        .iter()
-        .find(|operation| operation.name == invocation.operation)?;
-    Some(&operation.outputs.get(port)?.checks)
+        .filter(|(at, _)| *at == Port::Output(port))
+        .map(|(_, check)| check);
+    checks.extend(output.checks.iter().chain(added));
+    checks
 }

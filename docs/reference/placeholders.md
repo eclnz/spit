@@ -14,6 +14,18 @@ A placeholder is filled when SPIT binds a product to a path or a job to a comman
 
 For example, `path: out/{@product}/{@entities}` writes separate products and identities beneath `out/`. In path rules, `[text]` keeps that text only if its placeholders have values for the product, as in `sub-{sub}[/ses-{ses}]`. An ungrouped `{@stage}` is an error for a product outside a stage. See [paths](../language-reference.md#paths) for optional groups, escaping, and path validation.
 
+## Built-in source shapes
+
+A dimension placeholder in a source path or a `discover ... from dirs` pattern can restrict the value it reads. The set of shapes is closed:
+
+| Shape | Example | Values read |
+| --- | --- | --- |
+| `digits` | `{run:digits}` | One or more digits, including leading zeros. |
+| `year` | `{year:year}` | Four digits, from 1900 to 2099. |
+| `date` | `{date:date}` | A real `YYYY-MM-DD` day in that year range. |
+
+Shapes cannot be used in a path rule that writes an output. See [shapes on a source placeholder](../language-reference.md#shapes-on-a-source-placeholder).
+
 ## Command placeholders
 
 | Placeholder | Used in | Meaning |

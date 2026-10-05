@@ -1,0 +1,19 @@
+root fastq
+
+source_paths:
+    normal_r1: {patient}/normal_L{lane}_R1.fastq.gz
+    normal_r2: {patient}/normal_L{lane}_R2.fastq.gz
+    reference: reference/genome.fa
+    tumour_r1: {patient}/tumour_L{lane}_R1.fastq.gz
+    tumour_r2: {patient}/tumour_L{lane}_R2.fastq.gz
+
+sources:
+    reference
+    normal_r1[patient=P01,lane=1]
+    normal_r1[patient=P01,lane=2]
+    normal_r2[patient=P01,lane=1]
+    normal_r2[patient=P01,lane=2]
+    tumour_r1[patient=P01,lane=1]
+    tumour_r1[patient=P01,lane=2]
+    tumour_r2[patient=P01,lane=1]
+    tumour_r2[patient=P01,lane=2]

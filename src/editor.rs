@@ -10,14 +10,15 @@ use crate::compile::{collect_pipeline, CompiledStep};
 use crate::diagnostics::{
     diagnostics_json, recover_document, shown_paths_json, Diagnostic, ShownPath,
 };
-use crate::imports::parse_located_document;
+use crate::imports::parse_located_document_recovering;
 use crate::json::Json;
 use crate::model::{
-    Cardinality, CheckDef, CheckUse, CommandRole, OperationDef, OutputPort, Pipeline,
+    Cardinality, CheckDef, CheckUse, CommandRole, OperationDef, OutputPort, PathOrigin, Pipeline,
     PipelineIndex, ProductDef, DEFAULT_OUTPUT,
 };
 use crate::parser::{without_bom, Kind};
 use crate::paths::shown_path;
+use crate::render::written_step;
 use crate::span::{find_word, utf16_columns, Place};
 use crate::types::TypeExpr;
 
@@ -61,7 +62,7 @@ pub fn pipeline_hovers(text: &str, path: &Path) -> Vec<Hover> {
     let bom_column = usize::from(text.starts_with('\u{feff}'));
     let text = without_bom(text);
     let (document, _) = recover_document(text, |text| {
-        parse_located_document(text, path, Kind::Pipeline)
+        parse_located_document_recovering(text, path, Kind::Pipeline)
     });
     let Some(document) = document else {
         return Vec::new();
@@ -171,6 +172,11 @@ pub fn pipeline_hovers(text: &str, path: &Path) -> Vec<Hover> {
         }
     }
     for invocation in &pipeline.invocations {
+        // A step a call made is written as the call; the call's own hovers
+        // follow.
+        if invocation.origin.is_some() {
+            continue;
+        }
         let Some(location) = document.lines.invocations.get(invocation.output_product()) else {
             continue;
         };
@@ -216,6 +222,52 @@ pub fn pipeline_hovers(text: &str, path: &Path) -> Vec<Hover> {
                         port.name,
                         invocation.operation,
                         cardinality(port.cardinality)
+                    ));
+                }
+                add(place, HoverKind::Product, name, signature, details);
+            }
+        }
+    }
+    // The steps each written call expands to, grouped once.
+    let mut expanded: Vec<Vec<String>> = vec![Vec::new(); pipeline.calls.len()];
+    for step in &pipeline.invocations {
+        if let Some(origin) = &step.origin {
+            expanded[pipeline.written_call_id(origin.call).index()].push(written_step(step));
+        }
+    }
+    for (call, steps) in pipeline.calls.iter().zip(&expanded) {
+        if call.parent.is_some() {
+            continue;
+        }
+        let Some(location) = call
+            .outputs
+            .first()
+            .and_then(|output| document.lines.invocations.get(output))
+        else {
+            continue;
+        };
+        if let Some((signature, mut details)) = operation_info(&call.operation) {
+            details.push(format!("This call expands to: {}", steps.join("; ")));
+            add(
+                location.operation(),
+                HoverKind::Operation,
+                &call.operation,
+                signature,
+                details,
+            );
+        }
+        let ports = operations
+            .get(call.operation.as_str())
+            .map(|operation| &operation.inputs);
+        for (index, name) in call.inputs.iter().enumerate() {
+            if let (Some(mut place), Some((signature, mut details))) =
+                (location.input(index), product_info(name))
+            {
+                place.columns.end = place.columns.start + name.len();
+                if let Some(port) = ports.and_then(|ports| ports.get(index)) {
+                    details.push(format!(
+                        "Supplies input {} of {}.",
+                        port.name, call.operation
                     ));
                 }
                 add(place, HoverKind::Product, name, signature, details);
@@ -357,9 +409,9 @@ fn output_signature(port: &OutputPort, named: bool) -> String {
     };
     if let Some(beside) = &port.beside {
         if beside.suffix.starts_with('.') {
-            let _ = write!(result, " {} beside {}", beside.suffix, beside.port);
+            let _ = write!(result, " {} beside {}", beside.suffix, beside.sibling);
         } else {
-            let _ = write!(result, " \"{}\" beside {}", beside.suffix, beside.port);
+            let _ = write!(result, " \"{}\" beside {}", beside.suffix, beside.sibling);
         }
     } else {
         result.push_str(&ending(port.extension.as_deref(), port.folder));
@@ -370,6 +422,18 @@ fn output_signature(port: &OutputPort, named: bool) -> String {
 
 fn operation_details(pipeline: &Pipeline, operation: &OperationDef) -> Vec<String> {
     let mut details = Vec::new();
+    if !operation.steps.is_empty() {
+        let steps: Vec<String> = operation
+            .steps
+            .iter()
+            .map(|step| written_step(&step.invocation))
+            .collect();
+        details.push(format!(
+            "Carried out by the steps in its body: {}",
+            steps.join("; ")
+        ));
+        return details;
+    }
     if operation
         .inputs
         .iter()
@@ -449,45 +513,70 @@ fn call_details(
     details
 }
 
-/// Each product's readers, as `averaged = average(…)`, in step order.
+/// Each product's readers, as `averaged = average(…)`, in step order. A
+/// product a call reads is read by the call, as it is written.
 fn consumers(pipeline: &Pipeline) -> BTreeMap<&str, Vec<String>> {
     let mut consumers: BTreeMap<&str, Vec<String>> = BTreeMap::new();
-    for call in &pipeline.invocations {
-        let read: BTreeSet<&str> = call
+    for step in &pipeline.invocations {
+        let written = step
+            .origin
+            .as_ref()
+            .map(|origin| pipeline.written_call(origin.call))
+            .filter(|call| {
+                step.inputs
+                    .iter()
+                    .any(|input| call.inputs.contains(&input.product))
+            });
+        let read: BTreeSet<&str> = step
             .inputs
             .iter()
             .map(|input| input.product_name())
             .collect();
         for product in read {
-            consumers.entry(product).or_default().push(format!(
-                "{} = {}(…)",
-                call.outputs.join(", "),
-                call.operation
-            ));
+            let reader = match written {
+                Some(call) if call.inputs.iter().any(|input| input == product) => {
+                    format!("{} = {}(…)", call.outputs.join(", "), call.operation)
+                }
+                _ => format!("{} = {}(…)", step.outputs.join(", "), step.operation),
+            };
+            let readers = consumers.entry(product).or_default();
+            // A call's steps that read one product are one reader.
+            if readers.last() != Some(&reader) {
+                readers.push(reader);
+            }
         }
     }
     consumers
 }
 
+/// A step as written, as `cleaned = clean(reads, table)`.
 fn product_details(
     index: &PipelineIndex<'_>,
     product: &ProductDef,
     inferred: bool,
     consumers: &[String],
 ) -> Vec<String> {
-    let pipeline = index.pipeline;
     let producer = index.producer(&product.name).map(|(call, _)| call);
-    let mut details = vec![match producer {
-        Some(call) => format!(
-            "Derived product. Produced by {}({}).",
+    let written = producer
+        .and_then(|step| step.origin.as_ref())
+        .map(|origin| index.pipeline.written_call(origin.call));
+    let mut details = vec![match (producer, written) {
+        (Some(step), Some(call)) => format!(
+            "Derived product. Produced by {}({}), by its step {}.",
             call.operation,
-            call.inputs
+            call.inputs.join(", "),
+            written_step(step)
+        ),
+        (Some(step), None) => format!(
+            "Derived product. Produced by {}({}).",
+            step.operation,
+            step.inputs
                 .iter()
                 .map(|input| input.product_name())
                 .collect::<Vec<_>>()
                 .join(", ")
         ),
-        None => "Source product: a family of input artifacts.".to_owned(),
+        (None, _) => "Source product: a family of input artifacts.".to_owned(),
     }];
     if producer.is_some() {
         details.push(format!(
@@ -507,43 +596,35 @@ fn product_details(
         details.push(format!("Stage: {stage}"));
     }
     let resolved_path = || {
-        shown_path(index, &product.name).or_else(|| {
-            index
-                .path_template_for(&product.name)
-                .map(|template| template.to_string())
-        })
+        index
+            .path_template_for(&product.name)
+            .map(|template| shown_path(index, &product.name, &template))
     };
-    if let Some((sibling, _, _)) = index.beside(&product.name) {
-        details.push(format!(
-            "Path template: {} (beside {sibling}).",
-            resolved_path().unwrap_or_default()
-        ));
-    } else if pipeline.product_paths.contains_key(&product.name) {
-        details.push(format!(
-            "Path template: {} (explicit product rule).",
-            resolved_path().unwrap_or_default()
-        ));
-    } else if let Some((stage, _)) = index.stage_path_rule(&product.name) {
-        details.push(format!(
-            "Path template: {} (inherited from stage {stage}).",
-            resolved_path().unwrap_or_default()
-        ));
-    } else if producer.is_some() && pipeline.path_template.is_none() {
-        details.push(format!(
-            "Path template: {} (built-in output default).",
-            resolved_path().unwrap_or_default()
-        ));
-    } else if index.has_path(&product.name) {
-        // A default that needs `{@stage}` is no source's rule.
-        details.push(format!(
-            "Path template: {} (pipeline default).",
-            resolved_path().unwrap_or_default()
-        ));
-    } else {
-        details.push(
-            "No pipeline path rule; a recipe or inventory must supply the source path.".to_owned(),
-        );
-    }
+    let path = resolved_path().unwrap_or_default();
+    details.push(
+        match (
+            index.beside(&product.name),
+            index.path_origin(&product.name),
+        ) {
+            (Some((sibling, _, _)), _) => format!("Path template: {path} (beside {sibling})."),
+            (None, Some((PathOrigin::Explicit, _))) => {
+                format!("Path template: {path} (explicit product rule).")
+            }
+            (None, Some((PathOrigin::Stage(stage), _))) => {
+                format!("Path template: {path} (inherited from stage {stage}).")
+            }
+            (None, Some((PathOrigin::BuiltIn, _))) => {
+                format!("Path template: {path} (built-in output default).")
+            }
+            (None, Some((PathOrigin::Default, _))) => {
+                format!("Path template: {path} (pipeline default).")
+            }
+            (None, None) => {
+                "No pipeline path rule; a recipe or inventory must supply the source path."
+                    .to_owned()
+            }
+        },
+    );
     details
 }
 

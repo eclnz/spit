@@ -78,7 +78,7 @@ Job 3  merge
 #[test]
 fn the_spitdag_names_each_check_its_port_and_its_artifact() {
     let json = dag(&format!("{CHECKS}{LINES}"), &["--json"]);
-    assert!(json.starts_with("{\"version\":6,"), "{json}");
+    assert!(json.starts_with("{\"version\":7,"), "{json}");
     assert!(json.contains("\"executables\":[\"cat\",\"check_lines\",\"sort\",\"test\"]"));
     assert!(json.contains(
         "\"checks\":[{\"when\":\"before\",\"check\":\"lines(1)\",\"port\":\"text\",\"path\":\"in/1.txt\",\
@@ -120,8 +120,16 @@ merged = merge(cleaned @ vary(id))
         json.replace("\"check_lines\",", "")
             .replace(",\"test\"", "")
     };
-    // The roots are two temporary folders.
-    let after_root = |json: &str| json[json.find("\"external_inputs\"").unwrap()..].to_owned();
+    // The roots are two temporary folders, and the pipelines' files differ.
+    let after_root = |json: &str| {
+        let files = json.find(",\"pipeline_files\":").unwrap();
+        let calls = json.find(",\"calls\":").unwrap();
+        format!(
+            "{}{}",
+            &json[json.find("\"external_inputs\"").unwrap()..files],
+            &json[calls..]
+        )
+    };
     assert_eq!(
         after_root(&without_checks(&checked)),
         after_root(&unchecked)

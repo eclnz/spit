@@ -56,15 +56,16 @@ operation recon(dicom: Dicom) -> FsSubject /
 
 The path rule names the folder without a trailing slash. SPIT checks folder sources as folders and prevents a job's output folder from overlapping other products' paths. See [folders](../language-reference.md#folders).
 
-Use `sidecars` for *source* files with one stem and several extensions:
+Declare a main source, then declare each companion `beside` it when source files share a stem:
 
 ```spit
-sidecars photo [site, shot]:
-    path: photos/{site}/{shot}
-    source raw : Image .raw
-    source meta : Json .json
+source raw : Image .raw [site, shot]
+source meta : Json .json beside raw
+path raw: photos/{site}/{shot}.raw
 ```
 
-The members are read by their names (`raw`, `meta`). If some members are missing for an identity, SPIT warns. The group can omit its `path:` and let a recipe provide `path photo: ...`. A group is distinct from a `beside` output, which a tool writes. See [sidecar files](../language-reference.md#sidecar-files).
+The companion inherits the main source's dimensions and path stem; a recipe can instead provide `path raw: ...` for the main source. If a companion is missing for an identity, SPIT warns. An output declared `beside` another output is written by the same job. See [sidecar files](../language-reference.md#sidecar-files).
+
+A source path placeholder can restrict the values it reads: `{run:digits}`, `{year:year}`, and `{date:date}` accept digits, four-digit years from 1900 to 2099, and real `YYYY-MM-DD` dates respectively. Shapes belong only on paths that read sources or discover directories. See [shapes on a source placeholder](../language-reference.md#shapes-on-a-source-placeholder).
 
 Next: [Recipes and input inventories](recipes.md) for dataset-specific source paths.

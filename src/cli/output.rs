@@ -5,7 +5,9 @@ use std::fs;
 use std::io::{self, Read};
 use std::path::Path;
 
-use spit::{stage_within, BoundDag, Diagnosis, Diagnostic, FileNames, Pipeline, ResolvedDag};
+use spit::{
+    stage_within, BoundDag, Diagnosis, Diagnostic, FileNames, Pipeline, ResolvedDag, SourceLines,
+};
 
 use super::args::{CliArgs, Flag};
 
@@ -118,8 +120,9 @@ pub(crate) fn report(
     inventory_text: Option<&str>,
     names: FileNames<'_>,
 ) -> Result<(), Reported> {
+    let lines = SourceLines::new(diagnostics, text, inventory_text);
     for diagnostic in diagnostics {
-        eprintln!("{}", diagnostic.display_named(text, inventory_text, names));
+        eprintln!("{}", diagnostic.display_with(&lines, names));
     }
     if diagnostics.iter().any(Diagnostic::is_error) {
         return Err(Reported);

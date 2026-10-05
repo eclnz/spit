@@ -56,10 +56,9 @@ path bold: sub-{sub}/ses-{ses}/func/sub-{sub}_ses-{ses}_task-rest_run-{run}_bold
 
 # 4 files, such as sub-01/ses-1/anat/sub-01_ses-1_T1w.json
 # sub: 01, 02; ses: 1
-sidecars t1w [sub, ses]:
-    path: sub-{sub}/ses-{ses}/anat/sub-{sub}_ses-{ses}_T1w
-    source t1w_json .json
-    source t1w_nii_gz .nii.gz
+source t1w_json .json [sub, ses]
+source t1w_nii_gz .nii.gz beside t1w_json
+path t1w_json: sub-{sub}/ses-{ses}/anat/sub-{sub}_ses-{ses}_T1w.json
 
 # 1 file like no other, each a source with no dimensions if a step reads it:
 #   participants.tsv
@@ -81,10 +80,9 @@ fn a_recipe_gets_its_path_rules_and_its_pipeline_the_source_lines() {
     assert!(
         out.contains(
             "# in a.spit:\n\
-             #   sidecars t1w [sub, ses]:\n\
-             #       source t1w_json .json\n\
-             #       source t1w_nii_gz .nii.gz\n\
-             path t1w: sub-{sub}/ses-{ses}/anat/sub-{sub}_ses-{ses}_T1w\n"
+             #   source t1w_json .json [sub, ses]\n\
+             #   source t1w_nii_gz .nii.gz beside t1w_json\n\
+             path t1w_json: sub-{sub}/ses-{ses}/anat/sub-{sub}_ses-{ses}_T1w.json\n"
         ),
         "{out}"
     );
@@ -155,10 +153,13 @@ fn a_plain_top_folder_keeps_its_files_apart() {
     tree.write("empty.spit", "");
     let out = suggested(&tree, &["inputs", "empty.spit", "--root", ".", "--suggest"]);
     assert!(
-        out.contains("path baseline: baseline/{dim1}/{date}.csv"),
+        out.contains("path baseline: baseline/{dim1}/{date:date}.csv"),
         "{out}"
     );
-    assert!(out.contains("path raw: raw/{dim1}/{date}.csv"), "{out}");
+    assert!(
+        out.contains("path raw: raw/{dim1}/{date:date}.csv"),
+        "{out}"
+    );
 }
 
 #[test]
@@ -241,7 +242,7 @@ fn a_stray_folder_loses_only_its_own_files() {
     let out = suggested(&tree, &["inputs", "empty.spit", "--root", ".", "--suggest"]);
     // `subject04` alone would otherwise turn every word into `dim1`, `dim2`.
     assert!(
-        out.contains("source t1 [subject, visit, date]\npath t1: Subject{subject}/Visit{visit}/T1_{date}.nii\n"),
+        out.contains("source t1 [subject, visit, date]\npath t1: Subject{subject}/Visit{visit}/T1_{date:date}.nii\n"),
         "{out}"
     );
     assert!(
@@ -300,7 +301,7 @@ fn dates_years_and_a_word_before_name_dimensions() {
     // `site_north` and `site_south` are one folder, and the source is not
     // named for its `site` dimension.
     assert!(
-        out.contains("source csv [site, year, logger, date]\npath csv: site_{site}/{year}/logger{logger}/{date}.csv\n"),
+        out.contains("source csv [site, year, logger, date]\npath csv: site_{site}/{year:year}/logger{logger}/{date:date}.csv\n"),
         "{out}"
     );
     assert!(

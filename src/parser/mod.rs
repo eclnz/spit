@@ -1,5 +1,6 @@
 //! Parse flow-style pipelines and separate source inventories.
 
+mod body;
 mod check;
 mod command;
 mod declarations;
@@ -9,20 +10,22 @@ mod keyword;
 mod lexical;
 mod operation;
 mod render_inventory;
+mod rules;
 mod source_map;
 
 use std::fmt;
+use std::ops::Range;
 
 use crate::model::{
-    CheckDef, CommandDef, CommandRole, CoverageRule, DirectoryDiscovery, Invocation, OperationDef,
-    ProductDef, SidecarGroup,
+    CheckDef, CommandDef, CommandRole, CoverageRule, DefaultChecks, DirectoryDiscovery, Invocation,
+    OperationDef, ProductDef, StepOutput,
 };
 use crate::paths::PathTemplate;
 use crate::span::{address_of, columns_at, content_columns, Focus, Located, Place};
-use crate::types::TypeExpr;
 
 use self::flow::parse_flow;
 
+pub(crate) use self::body::empty_body;
 pub(crate) use self::declarations::{parse_use, ExcludeLine, UseSpec};
 pub use self::inventory::parse_source_inventory;
 pub(crate) use self::inventory::{source_record_lines, split_document};
@@ -64,6 +67,8 @@ pub enum ParseErrorKind {
     MisplacedRecords {
         lines: Vec<usize>,
     },
+    /// An operation's header opens a body, but no step follows it.
+    EmptyBody,
 }
 
 impl ParseError {
@@ -115,6 +120,10 @@ impl ParseError {
         if self.location.columns.is_none() {
             let token = match self.location.focus.take() {
                 Some(Focus::Address(address)) => columns_at(line, &address),
+                Some(other @ Focus::Imported(_)) => {
+                    self.location.focus = Some(other);
+                    None
+                }
                 _ => None,
             };
             self.location.columns = Some(token.unwrap_or_else(|| content_columns(line)));
@@ -127,12 +136,17 @@ impl ParseError {
 /// turns them into a [`Pipeline`]. Each keeps where its parts sit.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct Syntax {
-    /// Every statement before `error`, or in the whole text without one.
+    /// Every statement read, up to where parsing stopped.
     pub(crate) statements: Vec<Statement>,
-    /// The first line that does not parse. Parsing stops there, and lowering
-    /// reports it only when no statement before it fails, so errors are
-    /// found in line order.
-    pub(crate) error: Option<ParseError>,
+    /// Each line that does not parse, with how many statements were read
+    /// before it, so that lowering can report errors in the order that
+    /// blanking the lines one at a time would. A line that fails leaves the
+    /// parse as it was, as if the line were blank, and reading goes on; it
+    /// stops at an error after which a blank line would read differently.
+    /// Keep in step with `lower` in `src/lower/mod.rs`, which orders them
+    /// among the statements' own errors, and with `recover_document` in
+    /// `src/diagnostics/recovery.rs`, which blanks the lines they name.
+    pub(crate) errors: Vec<(usize, ParseError)>,
 }
 
 #[derive(Clone, Debug)]
@@ -140,6 +154,17 @@ pub(crate) struct Statement {
     /// The statement's line content, for errors about it as a whole.
     pub(crate) place: Place,
     pub(crate) kind: StatementKind,
+    /// Reading the statement's line changed how a later line reads, beyond
+    /// adding the statement: it closed a stage that the later line is
+    /// indented beneath, fixed the indentation of a stage's lines that
+    /// the later line does not share, or ended a body that the later line
+    /// is indented beneath. A blank line would not, so a failing statement
+    /// that did this cannot be passed over as if its line were blank. The
+    /// parser marks it when it reads the later line (`parse_flow` and
+    /// `flow_rest` in `src/parser/flow.rs`), and for the header of an
+    /// operation with a body, which blanking would leave to its steps, when
+    /// it closes or fixes a stage at all.
+    pub(crate) stateful: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -156,7 +181,11 @@ pub(crate) enum StatementKind {
     Discover(DirectoryDiscovery),
     /// An `operation` declaration, where its name sits, and the stage its
     /// line is in, if any. The operation is global either way.
-    Operation(OperationDef, Place, Option<String>),
+    /// A body that holds no step is an error where the body ends: on the
+    /// line that ends it, or the header's when the text does, whose columns
+    /// are the last field. Keep in step with `empty_body` in
+    /// `src/parser/body.rs`.
+    Operation(OperationDef, Place, Option<String>, Range<usize>),
     Constraint(CoverageRule, Rule),
     /// An `exclude` rule, its reason from the line's comment, and where
     /// what it names sits.
@@ -167,14 +196,19 @@ pub(crate) enum StatementKind {
     /// A `dimensions [...]` line: the pipeline's dimension order.
     Dimensions(Vec<String>),
     Path(PathRule),
-    /// A `sidecars` block, once its members, each an ordinary `Product`
-    /// with its `Path`, are read.
-    SidecarGroup(SidecarGroup),
     /// An `ext:` line: the default extension of `stage`, or, outside every
     /// stage, of the whole pipeline.
     Extension {
         stage: Option<String>,
         extension: String,
+    },
+    /// A `check:` line: the checks of every output in `stage` or, outside
+    /// every stage, in the whole file.
+    DefaultChecks {
+        stage: Option<String>,
+        checks: DefaultChecks,
+        /// Where the list sits.
+        place: Place,
     },
     /// A flow step, which declares its output products.
     FlowStep(FlowStep),
@@ -197,15 +231,8 @@ pub(crate) struct PathRule {
 #[derive(Clone, Debug)]
 pub(crate) struct FlowStep {
     pub(crate) invocation: Invocation,
-    pub(crate) outputs: Vec<FlowOutput>,
+    pub(crate) outputs: Vec<StepOutput>,
     pub(crate) step: Step,
-}
-
-#[derive(Clone, Debug)]
-pub(crate) struct FlowOutput {
-    pub(crate) name: String,
-    pub(crate) artifact_type: Option<TypeExpr>,
-    pub(crate) dimensions: Option<Vec<String>>,
 }
 
 /// What a document may hold. A pipeline holds neither input rules nor
@@ -237,14 +264,26 @@ impl StatementKind {
         number: usize,
         stage: Option<String>,
     ) -> Result<Self, ParseError> {
-        let operation = operation::parse_operation(declaration, number)?;
-        let place = source_map::name_place(original, number, declaration, &operation.name);
-        Ok(Self::Operation(operation, place, stage))
+        // A header ending in `:` opens a body of steps; the `:` is no part
+        // of the signature.
+        let declaration = declaration.trim();
+        let signature = declaration
+            .strip_suffix(':')
+            .unwrap_or(declaration)
+            .trim_end();
+        let operation = operation::parse_operation(signature, number)?;
+        let place = source_map::name_place(original, number, signature, &operation.name);
+        Ok(Self::Operation(
+            operation,
+            place.clone(),
+            stage,
+            place.columns,
+        ))
     }
 
-    /// A `require` or `drop` rule, the whole content `line` of `original`.
+    /// A `require` or conditional `exclude` rule, the whole content `line` of `original`.
     fn constraint(original: &str, line: &str, number: usize) -> Result<Self, ParseError> {
-        let rule = declarations::parse_coverage_rule(line, number)?;
+        let rule = rules::parse_coverage_rule(line, number)?;
         let place = source_map::rule_place(original, number, &rule);
         Ok(Self::Constraint(rule, place))
     }
@@ -284,6 +323,7 @@ impl Syntax {
         self.statements.push(Statement {
             place: Place::new(number, content_columns(original)),
             kind,
+            stateful: false,
         });
     }
 }

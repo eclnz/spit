@@ -7,7 +7,7 @@ Use these pages to look up a particular piece of syntax without following a walk
 | [Keywords and records](keywords.md) | Every statement keyword in `.spit` and `.spitin`, plus `.spitout` section headers |
 | [Operations and calls](operations.md) | Operation signatures, ports, outputs, commands, checks, and step assignments |
 | [Selectors and clauses](selectors.md) | `where`, `same`, `vary`, `each`, `min`, `check`, `beside`, and recipe conditions |
-| [Placeholders](placeholders.md) | Path, command, and check placeholders |
+| [Placeholders](placeholders.md) | Path, command, and check placeholders, plus built-in source shapes |
 
 **Operation names are user-defined.** SPIT has no built-in `sort`, `align`, or `train` operation to enumerate. An `operation` declaration defines its ports and outputs; a `command` defines the program it will run; a step calls it. The [operations page](operations.md) lists every form those declarations and calls can take.
 

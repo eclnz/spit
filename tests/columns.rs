@@ -113,10 +113,10 @@ cleaned = clean(raw)
 
 #[test]
 fn rule_and_inventory_errors_point_at_the_rule_and_record() {
-    let text = "source raw [site, run]\nrequire raw count>=2 per [site]\n";
+    let text = "source raw [site, run]\nrequire [site] where raw count>=2\n";
     assert_eq!(
         pointed(text, Some("sources:\n  raw[site=A,run=1]\n")),
-        ["error 2: require raw count>=2 per [site]"]
+        ["error 2: require [site] where raw count>=2"]
     );
     assert_eq!(
         pointed(
@@ -134,7 +134,7 @@ source raw : Table [id
 operation copy(input: Table -> Table
 operation tag(table: Table) Label
 result = copy(raw
-require raw count>=1 per [id
+require [id where raw count>=1
 ";
     assert_eq!(
         pointed(text, None),
@@ -143,7 +143,7 @@ require raw count>=1 per [id
             "error 2: (input: Table",
             "error 3: Label",
             "error 4: (raw",
-            "error 5: [id",
+            "error 5: [id where raw count>=1",
         ]
     );
 }
@@ -182,9 +182,9 @@ fn recipe_rule_errors_point_at_the_product_or_the_grouped_dimensions() {
     .unwrap();
     let recipe = "\
 pipeline analysis.spit
-require rwa count>=1 per [id]
-require raw count>=1 per [shard]
-require cleaned count=1 per [id]
+require [id] where rwa count>=1
+require [shard] where raw count>=1
+require [id] where cleaned count=1
 ";
     let pointed: Vec<_> = spit::diagnose_recipe_against(recipe, &pipeline)
         .iter()
@@ -286,4 +286,29 @@ operation clean(table: Table) -> Table
 result = clean(other)
 ";
     assert_eq!(pointed(text, None), ["warning 1: raw", "error 4: other"]);
+}
+
+/// A line is found as `str::lines` finds it: `\r\n` and `\n` end a line, a
+/// final line needs no newline, and a line past the end has no column.
+#[test]
+fn lines_are_found_as_str_lines_finds_them() {
+    let lf = "source raw [id]\noperation copy(input)\nx = copy(résumé)\n";
+    for text in [
+        lf.to_owned(),
+        lf.replace('\n', "\r\n"),
+        lf.trim_end().to_owned(),
+        lf.replace('\n', "\r\n").trim_end().to_owned(),
+    ] {
+        let diagnostics = diagnose(&text, None);
+        assert_eq!(diagnostics.len(), 1);
+        let shown = diagnostics[0].display_in(&text, None).to_string();
+        assert!(shown.starts_with("error: line 3, column 10: "), "{shown}");
+        assert_eq!(diagnostics[0].utf16_columns(&text, None), Some(9..15));
+        let lines = spit::SourceLines::new(&diagnostics, &text, None);
+        assert_eq!(diagnostics[0].utf16_columns_in(&lines), Some(9..15));
+    }
+    // Asked about a text that does not reach the line, there is no column.
+    let diagnostics = diagnose(lf, None);
+    assert_eq!(diagnostics[0].utf16_columns("", None), None);
+    assert_eq!(diagnostics[0].utf16_columns("one\ntwo", None), None);
 }
