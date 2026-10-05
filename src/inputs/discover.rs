@@ -5,12 +5,12 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::coverage::{apply_drops, DropIndex, EveryGroupDropped};
 use super::exclusions::{Excluder, UnmatchedExclusion};
 use super::pattern::{
-    match_pattern, missed_source, path_pattern, MissedSource, OutputPaths, Piece,
+    inherit_shapes, match_pattern, missed_source, path_pattern, MissedSource, OutputPaths, Piece,
 };
 use crate::model::{
     ArtifactInstance, DirectoryDiscovery, EntityBinding, InputRules, Pipeline, PipelineIndex,
@@ -18,7 +18,7 @@ use crate::model::{
 };
 use crate::paths::{
     decode_component, encode_component, error, inspect_paths, require_directory,
-    validate_discovery_rule, PathBinder, PathError, PathPart, PathPlaceholder, PathTemplate,
+    validate_discovery_rule, PathBinder, PathError, PathPart, PathPlaceholder, PathTemplate, Shape,
 };
 
 /// The source files found under a root, what the recipe's rules removed,
@@ -34,13 +34,13 @@ pub struct Discovery {
     pub missed: Vec<MissedSource>,
     /// Each skipped file and why.
     pub skipped: Vec<String>,
-    /// What each `exclude` rule removed, then each group a `drop` rule
+    /// What each `exclude` rule removed, then each group a conditional `exclude` rule
     /// removed.
     pub removed: Vec<Removal>,
     /// The first `exclude` rule that matched nothing, which the input stage
     /// reports as an error.
     pub unmatched: Option<UnmatchedExclusion>,
-    /// `drop` rules that removed every group of a grouping, which the input
+    /// conditional `exclude` rules that removed every group of a grouping, which the input
     /// stage reports as an error.
     pub emptied: Option<EveryGroupDropped>,
 }
@@ -196,7 +196,7 @@ pub(super) fn discover(
         &mut excluder,
         &mut discovery,
     )?;
-    // Every `drop` rule is judged once, against what was found: a file a
+    // Every conditional `exclude` rule is judged once, against what was found: a file a
     // context expects but lacks counts as absent, so a rule can remove the
     // context rather than fail on the missing file below.
     let dropped = match apply_drops(rules, &mut discovery.inventory) {
@@ -304,14 +304,14 @@ struct DiscoveryPattern<'a> {
 impl<'a> DiscoveryPattern<'a> {
     fn new(rule: &'a DirectoryDiscovery) -> Result<Self, PathError> {
         validate_discovery_rule(rule)?;
-        let pieces = rule
+        let mut pieces: Vec<Piece> = rule
             .template
             .parts()
             .iter()
             .map(|part| match part {
                 PathPart::Literal(value) => Ok(Piece::Literal(value.clone())),
-                PathPart::Placeholder(PathPlaceholder::Dimension(name)) => {
-                    Ok(Piece::Value(name.clone()))
+                PathPart::Placeholder(PathPlaceholder::Dimension(name, shape)) => {
+                    Ok(Piece::Value(name.clone(), *shape))
                 }
                 PathPart::Placeholder(placeholder) => Err(error(format!(
                     "discovery `{}` uses undeclared or reserved placeholder `{placeholder}`",
@@ -320,6 +320,7 @@ impl<'a> DiscoveryPattern<'a> {
                 PathPart::Group(_) => unreachable!("a discovery pattern has no group"),
             })
             .collect::<Result<_, _>>()?;
+        inherit_shapes(&mut pieces);
         Ok(Self { rule, pieces })
     }
 
@@ -507,7 +508,7 @@ fn source_record(
 }
 
 /// Require the file or folder of every source binding a discovery rule expects,
-/// except in groups a `drop` rule removed. An excluded binding needs no file;
+/// except in groups a conditional `exclude` rule removed. An excluded binding needs no file;
 /// when it has none, its exclusion is recorded here, since no file was found
 /// to record it by.
 fn require_source_files(
@@ -533,20 +534,17 @@ fn require_source_files(
                 format!("source `{artifact}`")
             })?;
             let full = root.join(&relative);
-            // `is_file` alone accepts `s07.json` when only `S07.json` is
-            // present on a case-insensitive filesystem. The listing keeps
-            // each directory entry's actual spelling.
+            // The listing keeps each directory entry's actual spelling, which
+            // `is_file` alone would not on a case-insensitive filesystem
+            // (`s07.json` when only `S07.json` is present). It also holds
+            // only files and folders, symbolic links followed, so a hit needs
+            // no `stat`. Keep in step with `Listing::walk`.
             let (listed, kind) = if product.folder {
                 (&listing.directories, "folder")
             } else {
                 (&listing.files, "file")
             };
-            let present = listed.binary_search(&relative).is_ok()
-                && if product.folder {
-                    full.is_dir()
-                } else {
-                    full.is_file()
-                };
+            let present = listed.binary_search(&relative).is_ok();
             if excluded {
                 if !present {
                     excluder.artifact(&product.name, binding);
@@ -655,6 +653,9 @@ impl Listing {
     /// listing gives each entry's type, and only a link changes where an
     /// entry is, so only a link is looked up and resolved; a directory
     /// inside is its directory's canonical path and its name.
+    ///
+    /// Keep in step with `require_source_files`, which trusts that every
+    /// entry here is a file or a directory and does not `stat` it again.
     fn walk(
         &mut self,
         directory: &Path,
@@ -709,7 +710,37 @@ pub(crate) fn locate_sources(
     inventory: &mut SourceInventory,
 ) -> Result<(), PathError> {
     let mut binder = PathBinder::new(pipeline);
+    // The shapes each source's rule gives its dimensions, found once.
+    let mut shapes: FxHashMap<String, Vec<(String, Shape)>> = FxHashMap::default();
     for record in &mut inventory.artifacts {
+        if !shapes.contains_key(&record.product) {
+            let found = binder
+                .index()
+                .path_template_for(&record.product)
+                .map(|template| {
+                    template
+                        .shaped()
+                        .into_iter()
+                        .map(|(dimension, shape)| (dimension.to_owned(), shape))
+                        .collect()
+                })
+                .unwrap_or_default();
+            shapes.insert(record.product.clone(), found);
+        }
+        if let Some((dimension, shape)) =
+            shapes[&record.product].iter().find(|(dimension, shape)| {
+                record
+                    .entities
+                    .get(dimension)
+                    .is_some_and(|value| !shape.matches(value))
+            })
+        {
+            let value = record.entities.get(dimension).unwrap_or_default();
+            return Err(error(format!(
+                "source `{}` has `{dimension}={value}`, which is not a `{shape}`, as its path rule gives `{{{dimension}:{shape}}}`; its file would not be read",
+                record.product
+            )));
+        }
         if !binder.index().has_path(&record.product) {
             if record.path.is_some() {
                 return Err(error(format!(

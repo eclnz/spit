@@ -4,7 +4,7 @@
 use crate::model::{Cardinality, InputPort, OperationDef, OutputPort, ShapeRule, DEFAULT_OUTPUT};
 use crate::types::{parse_type_expr, TypeExpr};
 
-use super::check::{only_checks, split_clauses, Clause};
+use super::check::{only_checks, output_checks, split_clauses, Clause};
 use super::declarations::type_error;
 use super::lexical::{call_parts, comma_items, identifier, split_ending};
 use super::ParseError;
@@ -416,7 +416,7 @@ fn parse_outputs(
         let (checks, clauses): (Vec<_>, Vec<_>) = clauses
             .into_iter()
             .partition(|clause| clause.keyword == "check");
-        let checks = only_checks(&checks, "an output", number)?;
+        let (checks, exempt) = output_checks(&checks, "an output", number)?;
         if let Some((_, port)) = text.rsplit_once(" beside ") {
             return Err(ParseError::new(
                 number,
@@ -436,6 +436,7 @@ fn parse_outputs(
             folder,
         );
         port.checks = checks;
+        port.exempt = exempt;
         return Ok((vec![port], clauses));
     };
     let closing =
@@ -455,10 +456,10 @@ fn parse_outputs(
         .into_iter()
         .map(|item| {
             let (item, clauses) = split_clauses(item, AFTER_OUTPUT, number)?;
-            let checks = only_checks(&clauses, "an output", number)?;
+            let (checks, exempt) = output_checks(&clauses, "an output", number)?;
             let (item, beside) = match item.rsplit_once(" beside ") {
                 Some((item, sibling)) => {
-                    let (item, suffix) = beside_suffix(item.trim(), number)?;
+                    let (item, suffix) = beside_suffix(item.trim(), number, "output")?;
                     (
                         item,
                         Some((identifier(sibling.trim(), number, "output port")?, suffix)),
@@ -487,6 +488,7 @@ fn parse_outputs(
             }
             let mut port = OutputPort::new(name, output_type);
             port.checks = checks;
+            port.exempt = exempt;
             Ok(match beside {
                 Some((sibling, suffix)) => port.beside(sibling, suffix),
                 None => with_ending(port, extension, folder),
@@ -495,8 +497,11 @@ fn parse_outputs(
         .collect::<Result<Vec<_>, ParseError>>()?;
     for port in &ports {
         let Some(beside) = &port.beside else { continue };
-        let (name, sibling) = (&port.name, &beside.port);
+        let (name, sibling) = (&port.name, &beside.sibling);
         let problem = match ports.iter().find(|other| &other.name == sibling) {
+            Some(_) if name == sibling => format!(
+                "`{name}` is written beside itself; name another output of this operation, whose file it follows"
+            ),
             None => format!("`{name}` is written beside `{sibling}`, which is not an output of this operation"),
             Some(other) if other.folder => format!(
                 "`{name}` is written beside `{sibling}`, which is a folder, and only a file has files beside it; drop `beside {sibling}` and give the tool `{{{name}}}`"
@@ -514,10 +519,15 @@ fn parse_outputs(
     Ok((ports, clauses))
 }
 
-/// An output written beside another: its text before the suffix, and the
+/// A file written beside another: its text before the suffix, and the
 /// suffix its file name ends with, an extension such as `.json` or quoted
 /// text such as `"_mask.nii.gz"`.
-fn beside_suffix(item: &str, number: usize) -> Result<(&str, String), ParseError> {
+pub(super) fn beside_suffix<'a>(
+    item: &'a str,
+    number: usize,
+    role: &str,
+) -> Result<(&'a str, String), ParseError> {
+    let article = if role == "output" { "an" } else { "a" };
     if let Some(quoted) = item.strip_suffix('"') {
         let open = quoted.rfind('"').ok_or_else(|| {
             ParseError::new(number, "expected the opening `\"` of the suffix").at_token(item)
@@ -539,13 +549,13 @@ fn beside_suffix(item: &str, number: usize) -> Result<(&str, String), ParseError
     match split_ending(item, number)? {
         (item, _, true) => Err(ParseError::new(
             number,
-            "an output written beside another is a file, not a folder; drop the `/`",
+            format!("{article} {role} written beside another is a file, not a folder; drop the `/`"),
         )
         .at_token(item)),
         (item, Some(extension), false) => Ok((item, extension.to_owned())),
         (item, None, false) => Err(ParseError::new(
             number,
-            format!("an output written beside another names what its file name ends with, as in `{item} .json beside image` or `{item} \"_mask.nii.gz\" beside image`"),
+            format!("{article} {role} written beside another names what its file name ends with, as in `{item} .json beside image` or `{item} \"_mask.nii.gz\" beside image`"),
         )
         .at_token(item)),
     }

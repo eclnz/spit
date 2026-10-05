@@ -16,7 +16,7 @@ path image: raw/sub-{sub}/image.nii.gz
 path: raw/{@product}/{@entities}
 ```
 
-A recipe's `path image:` names a source; its `path:` is a default for sources. A pipeline's `path:` is primarily for outputs and covers sources only when they have no more specific rule and the default fits them. A source's own rule belongs in either the pipeline or the recipe, not both. A recipe can also give the stem of a `sidecars` group without a pipeline stem. See [which file a line belongs in](../language-reference.md#which-file-a-line-belongs-in).
+A recipe's `path image:` names a source; its `path:` is a default for sources. A pipeline's `path:` is primarily for outputs and covers sources only when they have no more specific rule and the default fits them. A source's own rule belongs in either the pipeline or the recipe, not both. A recipe can also give the complete path of a main source whose companions are declared `beside` it. See [which file a line belongs in](../language-reference.md#which-file-a-line-belongs-in).
 
 ## Discover observed contexts
 
@@ -30,11 +30,11 @@ Each matching directory contributes an observed `[sub=...,ses=...]` context, inc
 
 ```spit
 exclude bold[sub=02,ses=01,run=3]  # corrupted scan
-drop [sub] where sessions count<2
-require t1w count=1 per [sub, ses]
+exclude [sub] where sessions count<2
+require [sub, ses] where t1w count=1
 ```
 
-`exclude` names artifacts or groups to remove while their files remain on disk. `drop` removes each group meeting a condition, such as too few sessions. `require` fails when a retained group lacks the required count or values. They apply in that order, regardless of line order. `exclude from qc/excluded.csv` can read a list of exclusions. The [recipe reference](../language-reference.md#recipes) and its [constraints](../language-reference.md#constraints), [drop](../language-reference.md#drop-groups-that-fail-a-criterion), and [exclude](../language-reference.md#exclude-named-artifacts) sections give the full syntax and failure rules.
+`exclude` removes named artifacts or groups, or every group meeting a condition, while their files remain on disk. `require` fails when a retained group lacks the required count or values. Named exclusions apply first, then conditional exclusions, then requirements, regardless of line order. `exclude from qc/excluded.csv` can read a list of exclusions. The [recipe reference](../language-reference.md#recipes), [conditional exclusion](../language-reference.md#exclude-groups-that-meet-a-condition), and [constraints](../language-reference.md#constraints) sections give the full syntax and failure rules.
 
 ## Use or write a `.spitout`
 

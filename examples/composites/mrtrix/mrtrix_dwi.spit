@@ -1,0 +1,68 @@
+# Diffusion preprocessing and registration with MRtrix3 and FSL, as
+# operations carried out by steps. A pipeline imports the two it calls,
+# `clean_dwi_session` and `register_to_dwi`, which bring every operation
+# their steps use. Importing them adds no jobs; each call does.
+
+# Import gradients and phase-encoding metadata with their matching NIfTI.
+operation import_dwi(image: MRI<DWI,$Space>, bvec: GradientDirections, bval: GradientAmplitudes, metadata: AcquisitionMetadata) -> MRI<DWI,$Space>
+command import_dwi: mrconvert {image} {@output} -fslgrad {bvec} {bval} -json_import {metadata}
+operation import_reverse_b0(image: MRI<B0,Acquired>, metadata: AcquisitionMetadata) -> MRI<B0,Acquired>
+command import_reverse_b0: mrconvert {image} {@output} -json_import {metadata}
+
+operation denoise(mri: MRI<DWI,S>) -> MRI<DWI,S>
+command denoise: dwidenoise {mri} {@output}
+operation remove_gibbs(mri: MRI<DWI,S>) -> MRI<DWI,S>
+command remove_gibbs: mrdegibbs {mri} {@output}
+operation concatenate_runs(runs: many MRI<DWI,S>) -> MRI<DWI,S>
+command concatenate_runs: dwicat {runs} {@output}
+
+operation extract_b0(mri: MRI<DWI,S>) -> MRI<B0Series,S>
+command extract_b0: dwiextract {mri} {@output} -bzero
+operation mean_b0(mri: MRI<B0Series,S>) -> MRI<B0,S>
+command mean_b0: mrmath {mri} mean {@output} -axis 3
+operation combine_pe_pair(forward: MRI<B0,S>, reverse: MRI<B0,S>) -> MRI<B0Pair,S>
+command combine_pe_pair: mrcat {forward} {reverse} {@output} -axis 3
+
+# -rpe_header uses the phase-encoding metadata; the paired b=0 headers must
+# be valid.
+operation preprocess_dwi(dwi: MRI<DWI,Acquired>, pe_pair: MRI<B0Pair,Acquired>) -> MRI<DWI,Diffusion>
+command preprocess_dwi: dwifslpreproc {dwi} {@output} -rpe_header -se_epi {pe_pair} -align_seepi
+operation bias_correct(mri: MRI<DWI,S>) -> MRI<DWI,S>
+command bias_correct: dwibiascorrect fsl {mri} {@output}
+
+# One session's runs, each with its sidecars, and its reverse phase-encoded
+# b=0: imported, denoised, combined, and corrected for motion, distortion
+# and bias, with the mean b=0 of the corrected series as a registration
+# target.
+operation clean_dwi_session(dwi: MRI<DWI,Acquired>, bvec: GradientDirections, bval: GradientAmplitudes, metadata: AcquisitionMetadata, reverse: MRI<B0,Acquired>, reverse_metadata: AcquisitionMetadata) -> (corrected: MRI<DWI,Diffusion>, b0: MRI<B0,Diffusion>):
+    imported = import_dwi(dwi, bvec, bval, metadata)
+    reverse_mif = import_reverse_b0(reverse, reverse_metadata)
+    denoised = denoise(imported)
+    degibbsed = remove_gibbs(denoised)
+    session = concatenate_runs(degibbsed @ vary(run))
+    forward_series = extract_b0(session)
+    forward = mean_b0(forward_series)
+    pe_pair = combine_pe_pair(forward, reverse_mif)
+    preprocessed = preprocess_dwi(session, pe_pair)
+    corrected = bias_correct(preprocessed)
+    b0_series = extract_b0(corrected)
+    b0 = mean_b0(b0_series)
+
+# FLIRT handles the contrast between the moving image and the b=0. Its
+# matrix is converted to MRtrix coordinates with the same two images.
+operation export_nifti(mri: MRI<K,S>) -> MRI<K,S> .nii.gz
+command export_nifti: mrconvert {mri} {@output}
+operation flirt_register(moving: MRI<M,S>, reference: MRI<N,T>) -> FSLTransform<S,T> .mat
+command flirt_register: flirt -in {moving} -ref {reference} -omat {@output} -dof 6 -cost corratio
+operation convert_flirt(matrix: FSLTransform<S,T>, moving: MRI<M,S>, reference: MRI<N,T>) -> Transform<S,T> .txt
+command convert_flirt: transformconvert {matrix} {moving} {reference} flirt_import {@output}
+operation mrtransform(moving: MRI<K,S>, transform: Transform<S,T>, reference: MRI<N,T>) -> MRI<K,T>
+command mrtransform: mrtransform {moving} {@output} -linear {transform} -template {reference} -interp linear
+
+# An anatomical image moved onto a session's b=0, and the transform that
+# moves it, for other images of the same space to follow.
+operation register_to_dwi(moving: MRI<T1w,Anatomical>, b0: MRI<B0,Diffusion>) -> (moved: MRI<T1w,Diffusion>, transform: Transform<Anatomical,Diffusion>):
+    b0_nifti = export_nifti(b0)
+    flirt_matrix = flirt_register(moving, b0_nifti)
+    transform = convert_flirt(flirt_matrix, moving, b0_nifti)
+    moved = mrtransform(moving, transform, b0)

@@ -602,3 +602,119 @@ note: ran `spit inputs strict.spitin` in memory
 note: 21 source files verified.
 note: 36 jobs resolved: 24 in prep, 12 outside stages.
 note: commands run from `.`
+$ spit dag strict.spitin
+exit: 0
+--- stdout
+Job 1  clean  [prep]
+  run:    denoise sub-01/ses-1/anat/sub-01_ses-1_run-1_T1w.nii --mask sub-01/mask.nii -o derivatives/cleaned/sub=01__ses=1__run=1.txt
+
+Job 2  clean  [prep]
+  run:    denoise sub-01/ses-1/anat/sub-01_ses-1_run-2_T1w.nii --mask sub-01/mask.nii -o derivatives/cleaned/sub=01__ses=1__run=2.txt
+
+Job 3  clean  [prep]
+  run:    denoise sub-01/ses-2/anat/sub-01_ses-2_run-1_T1w.nii --mask sub-01/mask.nii -o derivatives/cleaned/sub=01__ses=2__run=1.txt
+
+Job 4  clean  [prep]
+  run:    denoise sub-01/ses-2/anat/sub-01_ses-2_run-2_T1w.nii --mask sub-01/mask.nii -o derivatives/cleaned/sub=01__ses=2__run=2.txt
+
+Job 5  clean  [prep]
+  run:    denoise sub-02/ses-1/anat/sub-02_ses-1_run-1_T1w.nii --mask sub-02/mask.nii -o derivatives/cleaned/sub=02__ses=1__run=1.txt
+
+Job 6  clean  [prep]
+  run:    denoise sub-02/ses-1/anat/sub-02_ses-1_run-2_T1w.nii --mask sub-02/mask.nii -o derivatives/cleaned/sub=02__ses=1__run=2.txt
+
+Job 7  clean  [prep]
+  run:    denoise sub-02/ses-2/anat/sub-02_ses-2_run-1_T1w.nii --mask sub-02/mask.nii -o derivatives/cleaned/sub=02__ses=2__run=1.txt
+
+Job 8  clean  [prep]
+  run:    denoise sub-02/ses-2/anat/sub-02_ses-2_run-2_T1w.nii --mask sub-02/mask.nii -o derivatives/cleaned/sub=02__ses=2__run=2.txt
+
+Job 9  clean  [prep]
+  run:    denoise sub-03/ses-1/anat/sub-03_ses-1_run-1_T1w.nii --mask sub-03/mask.nii -o derivatives/cleaned/sub=03__ses=1__run=1.txt
+
+Job 10  clean  [prep]
+  run:    denoise sub-03/ses-1/anat/sub-03_ses-1_run-2_T1w.nii --mask sub-03/mask.nii -o derivatives/cleaned/sub=03__ses=1__run=2.txt
+
+Job 11  clean  [prep]
+  run:    denoise sub-03/ses-2/anat/sub-03_ses-2_run-1_T1w.nii --mask sub-03/mask.nii -o derivatives/cleaned/sub=03__ses=2__run=1.txt
+
+Job 12  clean  [prep]
+  run:    denoise sub-03/ses-2/anat/sub-03_ses-2_run-2_T1w.nii --mask sub-03/mask.nii -o derivatives/cleaned/sub=03__ses=2__run=2.txt
+
+Job 13  align  [prep]
+  run:    register derivatives/cleaned/sub=01__ses=1__run=1.txt sub-01/ses-1/reference.nii derivatives/aligned/sub=01__ses=1__run=1.txt
+
+Job 14  align  [prep]
+  run:    register derivatives/cleaned/sub=01__ses=1__run=2.txt sub-01/ses-1/reference.nii derivatives/aligned/sub=01__ses=1__run=2.txt
+
+Job 15  align  [prep]
+  run:    register derivatives/cleaned/sub=01__ses=2__run=1.txt sub-01/ses-2/reference.nii derivatives/aligned/sub=01__ses=2__run=1.txt
+
+Job 16  align  [prep]
+  run:    register derivatives/cleaned/sub=01__ses=2__run=2.txt sub-01/ses-2/reference.nii derivatives/aligned/sub=01__ses=2__run=2.txt
+
+Job 17  align  [prep]
+  run:    register derivatives/cleaned/sub=02__ses=1__run=1.txt sub-02/ses-1/reference.nii derivatives/aligned/sub=02__ses=1__run=1.txt
+
+Job 18  align  [prep]
+  run:    register derivatives/cleaned/sub=02__ses=1__run=2.txt sub-02/ses-1/reference.nii derivatives/aligned/sub=02__ses=1__run=2.txt
+
+Job 19  align  [prep]
+  run:    register derivatives/cleaned/sub=02__ses=2__run=1.txt sub-02/ses-2/reference.nii derivatives/aligned/sub=02__ses=2__run=1.txt
+
+Job 20  align  [prep]
+  run:    register derivatives/cleaned/sub=02__ses=2__run=2.txt sub-02/ses-2/reference.nii derivatives/aligned/sub=02__ses=2__run=2.txt
+
+Job 21  align  [prep]
+  run:    register derivatives/cleaned/sub=03__ses=1__run=1.txt sub-03/ses-1/reference.nii derivatives/aligned/sub=03__ses=1__run=1.txt
+
+Job 22  align  [prep]
+  run:    register derivatives/cleaned/sub=03__ses=1__run=2.txt sub-03/ses-1/reference.nii derivatives/aligned/sub=03__ses=1__run=2.txt
+
+Job 23  align  [prep]
+  run:    register derivatives/cleaned/sub=03__ses=2__run=1.txt sub-03/ses-2/reference.nii derivatives/aligned/sub=03__ses=2__run=1.txt
+
+Job 24  align  [prep]
+  run:    register derivatives/cleaned/sub=03__ses=2__run=2.txt sub-03/ses-2/reference.nii derivatives/aligned/sub=03__ses=2__run=2.txt
+
+Job 25  average
+  run:    mean derivatives/aligned/sub=01__ses=1__run=1.txt derivatives/aligned/sub=01__ses=1__run=2.txt -o derivatives/averaged/sub=01__ses=1.txt
+
+Job 26  average
+  run:    mean derivatives/aligned/sub=01__ses=2__run=1.txt derivatives/aligned/sub=01__ses=2__run=2.txt -o derivatives/averaged/sub=01__ses=2.txt
+
+Job 27  average
+  run:    mean derivatives/aligned/sub=02__ses=1__run=1.txt derivatives/aligned/sub=02__ses=1__run=2.txt -o derivatives/averaged/sub=02__ses=1.txt
+
+Job 28  average
+  run:    mean derivatives/aligned/sub=02__ses=2__run=1.txt derivatives/aligned/sub=02__ses=2__run=2.txt -o derivatives/averaged/sub=02__ses=2.txt
+
+Job 29  average
+  run:    mean derivatives/aligned/sub=03__ses=1__run=1.txt derivatives/aligned/sub=03__ses=1__run=2.txt -o derivatives/averaged/sub=03__ses=1.txt
+
+Job 30  average
+  run:    mean derivatives/aligned/sub=03__ses=2__run=1.txt derivatives/aligned/sub=03__ses=2__run=2.txt -o derivatives/averaged/sub=03__ses=2.txt
+
+Job 31  compare
+  run:    score derivatives/averaged/sub=01__ses=1.txt sub-01/ses-1/reference.nii -o derivatives/score/sub=01__ses=1.txt
+
+Job 32  compare
+  run:    score derivatives/averaged/sub=01__ses=2.txt sub-01/ses-2/reference.nii -o derivatives/score/sub=01__ses=2.txt
+
+Job 33  compare
+  run:    score derivatives/averaged/sub=02__ses=1.txt sub-02/ses-1/reference.nii -o derivatives/score/sub=02__ses=1.txt
+
+Job 34  compare
+  run:    score derivatives/averaged/sub=02__ses=2.txt sub-02/ses-2/reference.nii -o derivatives/score/sub=02__ses=2.txt
+
+Job 35  compare
+  run:    score derivatives/averaged/sub=03__ses=1.txt sub-03/ses-1/reference.nii -o derivatives/score/sub=03__ses=1.txt
+
+Job 36  compare
+  run:    score derivatives/averaged/sub=03__ses=2.txt sub-03/ses-2/reference.nii -o derivatives/score/sub=03__ses=2.txt
+--- stderr
+note: found 21 source artifacts and 6 contexts under `.`
+note: ran `spit inputs strict.spitin` in memory
+note: 21 source files verified.
+note: 36 jobs resolved: 24 in prep, 12 outside stages.
+note: commands run from `.`

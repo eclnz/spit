@@ -1,11 +1,12 @@
 //! What a pipeline declares: products, operations and their ports, the
-//! steps that call them, commands, sidecars and stages.
+//! steps that call them, commands, companion sources and stages.
 
 use std::collections::BTreeMap;
 use std::fmt;
 
 use crate::command::CommandTemplate;
 use crate::paths::PathTemplate;
+use crate::span::Place;
 
 use super::{owned_strings, ArtifactInstance, ArtifactType};
 
@@ -22,6 +23,9 @@ pub struct ProductDef {
     /// `source dicom : Dicom / [sub]`; `false` for an output, whose
     /// operation says.
     pub folder: bool,
+    /// A source whose file shares another source's stem and dimensions.
+    /// Its suffix replaces that source's extension.
+    pub beside: Option<Beside>,
     /// The checks a source's artifacts must pass before a job reads them, as
     /// in `source t1w : Image [sub] @ check(ndim(3))`; none for an output.
     pub checks: Vec<CheckUse>,
@@ -39,6 +43,7 @@ impl ProductDef {
             dimensions: owned_strings(dimensions),
             extension: None,
             folder: false,
+            beside: None,
             checks: Vec::new(),
         }
     }
@@ -107,13 +112,16 @@ pub struct OutputPort {
     /// The checks the artifact must pass after the command writes it, as in
     /// `-> Image @ check(nonempty)`.
     pub checks: Vec<CheckUse>,
+    /// The default checks of the file or stage that this output opts out
+    /// of, as in `-> Image @ check(!nonempty)`.
+    pub exempt: Vec<CheckUse>,
 }
 
 /// An output written beside the named port's file, its name that file's
 /// without its extension, then `suffix`: `.json`, or `_mask.nii.gz`.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Beside {
-    pub port: String,
+    pub sibling: String,
     pub suffix: String,
 }
 
@@ -126,6 +134,7 @@ impl OutputPort {
             folder: false,
             beside: None,
             checks: Vec::new(),
+            exempt: Vec::new(),
         }
     }
 
@@ -136,7 +145,7 @@ impl OutputPort {
         let suffix = suffix.into();
         self.extension = suffix.find('.').map(|dot| suffix[dot..].to_owned());
         self.beside = Some(Beside {
-            port: port.into(),
+            sibling: port.into(),
             suffix,
         });
         self
@@ -161,6 +170,34 @@ pub struct OperationDef {
     pub shape_rule: ShapeRule,
     /// The fewest artifacts the many input accepts in one job.
     pub minimum_collection: Option<usize>,
+    /// The steps that carry the operation out, for one written with a body
+    /// in place of a command; empty for one a command carries out. A call
+    /// to it becomes these steps, each with its own jobs.
+    pub steps: Vec<BodyStep>,
+    /// The file an imported operation is declared in, relative to the
+    /// pipeline's folder, with `/` between folders; `None` for one the
+    /// pipeline declares.
+    pub file: Option<String>,
+}
+
+/// A step in an operation's body, as written: the call it makes over the
+/// operation's ports and the body's own products, and what it says of each
+/// product it makes.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BodyStep {
+    pub invocation: Invocation,
+    pub outputs: Vec<StepOutput>,
+    /// Where the call is written, in the file that declares the operation.
+    pub(crate) place: Place,
+}
+
+/// A product a step makes, with the type and dimensions the step writes for
+/// it, if any; lowering infers the rest.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StepOutput {
+    pub name: String,
+    pub artifact_type: Option<ArtifactType>,
+    pub dimensions: Option<Vec<String>>,
 }
 
 impl OperationDef {
@@ -191,6 +228,8 @@ impl OperationDef {
             outputs,
             shape_rule,
             minimum_collection: None,
+            steps: Vec::new(),
+            file: None,
         }
     }
 
@@ -293,6 +332,62 @@ pub struct Invocation {
     pub outputs: Vec<String>,
     /// The stage whose block holds this step, if any.
     pub stage: Option<String>,
+    /// For a step a call to an operation with a body made, that call and
+    /// the step of the body it is; `None` for a step written in the
+    /// pipeline.
+    pub origin: Option<StepOrigin>,
+    /// Checks the step runs beyond its operation's: those an operation with
+    /// a body attaches to the inputs and outputs the step reads and makes.
+    pub checks: Vec<(Port, CheckUse)>,
+}
+
+/// One of a step's ports, by its position among the operation's inputs or
+/// outputs.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Port {
+    Input(usize),
+    Output(usize),
+}
+
+/// Where a step a call made comes from: the call, and where its step is
+/// written in the body of the operation called.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StepOrigin {
+    pub call: CallId,
+    pub(crate) step: Place,
+}
+
+/// A call's place in [`Pipeline::calls`](super::Pipeline::calls).
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct CallId(u32);
+
+impl CallId {
+    /// The call at `index` in `Pipeline::calls`.
+    pub(crate) fn at(index: usize) -> Self {
+        Self(u32::try_from(index).expect("fewer than 2^32 calls in a pipeline"))
+    }
+
+    pub fn index(self) -> usize {
+        self.0 as usize
+    }
+}
+
+/// A call to an operation with a body, which lowering replaced by the
+/// body's steps.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Call {
+    /// The operation called, as the caller names it.
+    pub operation: String,
+    /// The products the call assigns, as it writes them. The first names
+    /// the call: a product `p` the body makes for itself is `first::p`.
+    pub outputs: Vec<String>,
+    /// The products the call reads, one per input, as it writes them.
+    pub inputs: Vec<String>,
+    /// The call whose body holds this one, for a call in a body.
+    pub parent: Option<CallId>,
+    /// Where the call is written: in the pipeline, or in the body of the
+    /// parent's operation.
+    pub(crate) place: Place,
 }
 
 impl Invocation {
@@ -314,6 +409,8 @@ impl Invocation {
             inputs,
             outputs: outputs.into_iter().map(Into::into).collect(),
             stage: None,
+            origin: None,
+            checks: Vec::new(),
         }
     }
 
@@ -393,34 +490,18 @@ impl fmt::Display for CheckUse {
     }
 }
 
-/// Sources declared together in a `sidecars` block: they share dimensions
-/// and a path stem, and differ by extension, as a photo and its GPS track.
+/// A source and the companions declared beside it. Discovery uses this
+/// grouping to report an incomplete set at a shared identity.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SidecarGroup {
     pub name: String,
     pub dimensions: Vec<String>,
     /// Each member source with its extension, in declaration order.
     pub members: Vec<(String, String)>,
-    /// The stem the block's `path:` line gives, if it has one; otherwise a
-    /// recipe gives it, as `path name: stem`.
-    pub stem: Option<PathTemplate>,
-}
-
-impl SidecarGroup {
-    /// The path rule each member takes from `stem`: the stem and the
-    /// member's extension.
-    pub fn member_paths<'a>(
-        &'a self,
-        stem: &'a PathTemplate,
-    ) -> impl Iterator<Item = (&'a str, PathTemplate)> + 'a {
-        self.members
-            .iter()
-            .map(move |(member, extension)| (member.as_str(), stem.with_extension(extension)))
-    }
 }
 
 /// Where the extension a product's file must have is declared.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum ExtensionSource {
     /// On the output of the named operation.
     Operation(String),
@@ -455,6 +536,17 @@ pub struct StageDef {
     /// The `ext:` default for the same products, in place of the
     /// pipeline's.
     pub extension: Option<String>,
+    /// The `check:` default of this stage's outputs, added to those of the
+    /// stages around it.
+    pub checks: DefaultChecks,
+}
+
+/// A `check:` line: the checks every output of a file or stage runs, and
+/// the checks of the scope around it that its outputs do not.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct DefaultChecks {
+    pub checks: Vec<CheckUse>,
+    pub exempt: Vec<CheckUse>,
 }
 
 /// A directory pattern that discovers concrete entity bindings under a root.
@@ -471,6 +563,7 @@ impl StageDef {
             name: name.into(),
             path_template: None,
             extension: None,
+            checks: DefaultChecks::default(),
         }
     }
 }

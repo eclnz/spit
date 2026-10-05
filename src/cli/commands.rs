@@ -6,9 +6,10 @@ use std::path::Path;
 
 use spit::{
     bind_dag, bind_dag_with, diagnose_checked, diagnose_inputs, diagnose_recipe, inspect_paths,
-    parse_input_spec_at, render_artifacts, render_bound_dag, render_check_json, render_dag,
-    render_diagnostics_json, render_editor_json, render_source_inventory, render_step_counts,
-    render_words_json, resolve_artifacts_partial, unused_sources_summary,
+    parse_input_spec_at, render_artifacts, render_artifacts_by_target, render_bound_dag,
+    render_call, render_calls, render_calls_check_json, render_calls_json, render_check_json,
+    render_dag, render_diagnostics_json, render_editor_json, render_source_inventory,
+    render_step_counts, render_words_json, resolve_artifacts_partial, unused_sources_summary,
     validate_bound_source_files, validate_source_files, BoundDag, BoundPaths, Context, FileNames,
     Gap, LeftOut, View,
 };
@@ -31,6 +32,9 @@ pub(crate) fn check(args: &CliArgs) -> Result<(), Box<dyn Error>> {
     } else {
         read_file(file)?
     };
+    if args.has(Flag::Calls) && (is_inputs(file) || is_recipe(file)) {
+        return Err("--calls lists a pipeline's calls; give a .spit pipeline".into());
+    }
     if is_inputs(file) {
         if args.has(Flag::PathRules) {
             return Err(
@@ -102,7 +106,15 @@ pub(crate) fn check(args: &CliArgs) -> Result<(), Box<dyn Error>> {
             Ok(checked) => (checked.warnings.as_slice(), Some(checked.paths.as_slice())),
             Err(all) => (all.as_slice(), None),
         };
-        let json = if args.has(Flag::Hovers) {
+        let json = if args.has(Flag::Calls) {
+            match &diagnosis {
+                Ok(checked) => {
+                    let calls = render_calls_json(&checked.pipeline);
+                    render_calls_check_json(diagnostics, &text, &calls)
+                }
+                Err(_) => render_diagnostics_json(diagnostics, &text, None),
+            }
+        } else if args.has(Flag::Hovers) {
             render_editor_json(diagnostics, &text, path, paths.unwrap_or_default())
         } else if let Some(paths) = paths {
             render_check_json(diagnostics, &text, paths)
@@ -121,6 +133,9 @@ pub(crate) fn check(args: &CliArgs) -> Result<(), Box<dyn Error>> {
     )?;
     if args.has(Flag::PathRules) {
         println!("{}", inspect_paths(&checked.pipeline)?);
+    }
+    if args.has(Flag::Calls) {
+        print!("{}", render_calls(&checked.pipeline));
     }
     println!("Pipeline valid.");
     Ok(())
@@ -202,17 +217,22 @@ pub(crate) fn dag(args: &CliArgs) -> Result<(), Box<dyn Error>> {
         None => bind_dag(&prepared.pipeline, dag),
     };
     if args.has(Flag::Counts) {
-        print!("{}", render_step_counts(dag));
+        print!("{}", render_step_counts(&prepared.pipeline, dag));
     }
     let view = View {
         paths: args.has(Flag::Paths),
         commands: args.has(Flag::Commands),
     };
     // Print the jobs as `view` shows them, after the counts if there are any.
-    let print_view = |bound: &BoundDag| {
+    let print_view = |bound: &BoundDag, view: View| {
         if view.commands {
             if let Some(root) = &prepared.root {
                 eprintln!("note: commands run from `{}`", root.display());
+            }
+            if bound.jobs.iter().all(|job| job.command.is_none()) && !bound.jobs.is_empty() {
+                eprintln!(
+                    "note: no job has a command; `dag --jobs` lists each job's inputs and outputs"
+                );
             }
         }
         if args.has(Flag::Counts) {
@@ -228,15 +248,22 @@ pub(crate) fn dag(args: &CliArgs) -> Result<(), Box<dyn Error>> {
             .incomplete
             .iter()
             .flat_map(|job| {
-                job.outputs.iter().map(|artifact| LeftOut {
+                let call = job.call.map(|call| prepared.pipeline.written_call(call));
+                job.outputs.iter().map(move |artifact| LeftOut {
                     artifact: artifact.clone(),
                     reasons: job
                         .gaps
                         .iter()
-                        .map(|gap| match gap {
-                            Gap::Unmatched(error) => error.to_string(),
-                            Gap::Blocked { port, artifact } => {
-                                format!("input `{port}` needs {artifact}, which cannot be produced")
+                        .map(|gap| {
+                            let reason = match gap {
+                                Gap::Unmatched(error) => error.to_string(),
+                                Gap::Blocked { port, artifact } => format!(
+                                    "input `{port}` needs {artifact}, which cannot be produced"
+                                ),
+                            };
+                            match call {
+                                Some(call) => format!("in `{}`: {reason}", render_call(call)),
+                                None => reason,
                             }
                         })
                         .collect(),
@@ -252,14 +279,22 @@ pub(crate) fn dag(args: &CliArgs) -> Result<(), Box<dyn Error>> {
         write_spitdag(args, &bound)?;
         // With -o, the .spitdag goes to its file and the commands to stdout.
         if view.commands {
-            print_view(&bound);
+            print_view(&bound, view);
         }
         return Ok(());
     }
-    if view.paths || view.commands {
-        print_view(&bind(paths)?);
-    } else if !args.has(Flag::Counts) {
+    if args.has(Flag::Jobs) {
+        if args.has(Flag::Counts) {
+            println!();
+        }
         print!("{}", render_dag(dag));
+    } else if view.paths || view.commands || !args.has(Flag::Counts) {
+        // Plain `dag` shows the commands, as `--commands` does.
+        let view = View {
+            commands: view.commands || !view.paths,
+            ..view
+        };
+        print_view(&bind(paths)?, view);
     }
     Ok(())
 }
@@ -272,6 +307,11 @@ pub(crate) fn artifacts(args: &CliArgs) -> Result<(), Box<dyn Error>> {
     if let Some(root) = &prepared.root {
         validate_source_files(&prepared.pipeline, &report.dag, root)?;
     }
-    print!("{}", render_artifacts(&report));
+    let text = if args.has(Flag::ByTarget) {
+        render_artifacts_by_target(&prepared.pipeline, &report)
+    } else {
+        render_artifacts(&prepared.pipeline, &report)
+    };
+    print!("{text}");
     Ok(())
 }

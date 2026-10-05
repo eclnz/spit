@@ -138,6 +138,69 @@ The first word of a command must be an executable available on `PATH` (or an exe
 command process: process_tool {image} {@output}
 ```
 
+### Operations carried out by steps
+
+An operation may be carried out by steps instead of a command: its header ends in `:`, and its steps are indented beneath it. A call to it looks like any other call, and becomes the body's steps over the caller's products, each with its own jobs:
+
+```text
+operation clean(x: Lines, t: Table) -> Lines
+command clean: clean {x} {t} {@output}
+operation merge(xs: many Lines) -> Lines
+command merge: merge {xs} {@output}
+operation count(x: Lines) -> Count
+command count: wc {x} {@output}
+
+operation summarise(reads: Lines, table: Table) -> (merged: Lines, total: Count):
+    cleaned = clean(reads, table)
+    merged = merge(cleaned @ vary(lane))
+    total = count(merged)
+
+first, first_total = summarise(raw, calibration @ where(revision=2))
+```
+
+The body reads the operation's inputs, by their port names, and the products its earlier steps make, and it makes each named output once. Its outputs are the products the caller names: here `first` and `first_total`. A product the body makes for itself is filed under the call's first output, so `cleaned` is `first::cleaned`, written `first.cleaned` in a path, and a second call of `summarise` files its own apart. So a call's first output cannot also be an import's alias: `use parts.spit as first` with the call above is an error at the call. Only the outputs are the caller's to read: a step that reads `first::cleaned` is an error that says to make it an output.
+
+A selector the caller gives an input holds wherever the body reads it, beside the body's own: above, every `clean` job reads revision 2, and `merge` collects each group's lanes. A call in a stage puts every step it makes in that stage. A body may call another operation with a body, which is expanded in turn; every operation a body calls is declared before it. An output written with a type, as `total: Count`, gives the caller's product that type, and SPIT checks it against the step that makes it. An error in a step the call makes, such as a type the step does not accept or an input the data lacks, is reported at the call, named before the message. It points at the argument the caller gave when the failing input reads one of the operation's inputs, at the product the caller names when it is one of the outputs, and at the whole call otherwise. Below it, a `-->` line gives each call it is nested in and the body's step, with their file and line:
+
+```text
+error: line 4, column 21: in `m, t = L::summarise(...)`: type mismatch at `L::clean.x`: product `cal` is Table, expected Lines
+  --> libs/lib.spit: line 13, column 15: the call of `L::tidy` in the body of `L::summarise`
+  --> libs/lib.spit: line 10, column 9: the step in the body of `L::tidy`
+```
+
+`spit check --json` gives the same places as the diagnostic's `related` list. `spit artifacts` names the call beside each artifact a call's step cannot make, as ``(L::clean, in `m, t = L::summarise(...)` on line 8)``, and the reasons in a partial `.spitdag`'s `left_out` start with it.
+
+A check on an input or output of such an operation, as `reads: Lines @ check(lines(2))`, runs on every step that reads that input or makes that output, beside the checks of the step's own operation; the same check on one artifact runs once. Imported, it brings the operations its steps call, and their commands and checks, under the same prefix, so `use summarise from lib.spit as L` brings `L::clean` too.
+
+`spit check pipeline.spit --calls` lists each call's steps before any data is read. It shows the call, its line and stage, the file that declares the operation with its file's blob id, then each step with the line of the body that writes it; a call in a body is shown under its caller:
+
+```text
+m, t = L::summarise(…)  line 6  [report]
+  L::summarise  libs/lib.spit  blob 3b18e5c
+  line 13  m::cleaned = L::tidy(raw, cal)
+    line 10  m::cleaned = L::clean(raw, cal)
+  line 14  m = L::merge(m::cleaned)
+  line 15  t = L::C::count(m)
+```
+
+With `--json` the same calls are the `calls` array of `{"diagnostics":[...],"calls":[...]}`, one object per call with its `steps`, a nested call having its caller's `id` as `parent`.
+
+`spit dag --counts` lists a call's steps under it, with the call's jobs in all, so `summarise` over two groups of two lanes shows:
+
+```text
+jobs  step
+      first, first_total = summarise
+   4    first::cleaned = clean
+   2    first = merge
+   2    first_total = count
+   8    in this call
+   8  total
+```
+
+`spit dag --commands` starts each job a call made with a `from:` line: each call the job is nested in, outermost first, as `first = summarise (pipeline.spit line 19)`, then the file and line of the body's step that made it. The `.spitdag` holds the same, under each job's [`origin`](spitdag.md#where-jobs-come-from).
+
+An operation with a body names its outputs, as `-> (result: Type)`, since its steps assign them by name. An output takes its extension, folder and place from the step that writes it, so the header gives only its name and type. Such an operation takes no `command` or `verify` line; its steps' operations have their own.
+
 ## Checks
 
 A `check` tests one artifact once its file exists, with the tools that understand it. Declare it once, then attach it with `@ check(...)` where it applies:
@@ -159,6 +222,29 @@ operation split(table: Table) -> (left: Table @ check(nonempty), right: Table)
 SPIT does not run checks. It writes each job's checks into the `.spitdag`, bound to the artifacts they test (see [checks](spitdag.md#checks)), and a backend runs them. A failed check fails the job, even when its command succeeded, and the jobs that depend on it do not run. When the job that writes an artifact checks it after its command, a job in the same plan that reads it does not run the same check again. `spit dag --commands` shows each job's checks as `check:` lines, in the order they run.
 
 Checks are global, as operations are. `use` brings in the checks of the operations and sources it imports, and `use ndim from checks.spit` imports a check by name. With `as`, an imported check takes the prefix too, as in `@ check(img::ndim(3))`; see [reuse](#reuse-definitions).
+
+### Default checks
+
+When every output in a file or stage needs the same check, write one `check:` line instead of repeating `@ check(...)` on each output, as `path:` and `ext:` set a default for the products they cover:
+
+```text
+check nonempty: test -s {@path}
+check ndim(n): check_ndim {@path} {n}
+
+check: nonempty
+
+stage preprocess:
+    check: ndim(3)
+    cleaned = denoise(raw)
+```
+
+A `check:` line outside every stage lists the checks run on every output of every step in it, stages included; one inside a stage lists them for the steps of that stage and the stages nested in it. A step takes the defaults of its own stage, not of the stage where its operation was declared, so a global operation called in two stages is checked by each stage's list. A default applies to every output of the step, each artifact of a named multi-output operation included. It never applies to an input port or a source: those keep the checks written at their `@ check(...)`.
+
+Lists add up. A step's outputs run the file's checks, then those of each stage around the step from the outermost in, in the order written, and then the checks the operation's own output names. Where one check would run twice on an artifact, it runs once, at its first place. In the example above, `cleaned` runs `nonempty`, then `ndim(3)`.
+
+To run less than a wider list sets, write `!` before the check. In a stage, `check: !nonempty` drops the file's `nonempty` for that stage's outputs and the stages in it, and a stage inside it may add it back. On an operation's output, `-> (empty_ok: Table @ check(!nonempty), rows: Table)` drops it for that output alone, wherever the operation is called. `!` names a check as written, `ndim(3)` included, and an output's own `@ check(nonempty)` is never dropped by it.
+
+A file or a stage has one `check:` line. Its checks and the ones it drops must be declared checks, with the right number of arguments. A product may still be named `check`: `check = clean(raw)` and `check : Table [id] = clean(raw)` are steps, since a `check:` line has a list and no `=` outside parentheses. The `.spitdag` has no new fields: each default becomes a check on the artifact, after the job's command, beside the others, and `spit dag --commands` lists it as a `check:` line.
 
 ## Stages
 
@@ -214,7 +300,7 @@ A step outside every stage stays valid.
 
 ## Reuse definitions
 
-Import operations, source families and [checks](#checks) from another `.spit` file. The path is relative to the file containing the `use` line. An operation brings its `command`; a source brings its path rule; either brings the checks it attaches. Imports do not bring pipeline steps.
+Import operations, source families and [checks](#checks) from another `.spit` file. The path is relative to the file containing the `use` line. An operation brings its `command`; a source brings its path rule; either brings the checks it attaches. A source with companions declared [`beside`](#sidecar-files) it brings those companions with it. A companion cannot be imported alone: import its main source. A recipe names an imported main source as `text::raw_photo` when the import uses `as text`. An [operation carried out by steps](#operations-carried-out-by-steps) brings the operations its steps call. Imports do not bring pipeline steps.
 
 ```text
 use text.spit as text
@@ -222,7 +308,14 @@ use text.spit as text
 sorted = text::sort_lines(text::shard)
 ```
 
-`as text` gives every imported name a prefix. Without it, `use text.spit` brings the names into the current scope. To import only a few definitions, use `use shard, sort_lines from text.spit as text`. A source imported as `text::shard` also uses that name in a recipe and a `.spitout`. SPIT reports missing names, import cycles, and name collisions.
+`as text` gives every imported name a prefix. Without it, `use text.spit` brings the names into the current scope. To import only a few definitions, use `use shard, sort_lines from text.spit as text`. A source imported as `text::shard` also uses that name in a recipe and a `.spitout`. SPIT reports missing names, import cycles, and name collisions. A message names a library by its path from the pipeline's folder, such as `libs/text.spit`, wherever the checkout is. An error in a library's own text is reported in the library, at its own line, and the `use` line that reads it follows as a related place:
+
+```text
+error: libs/text.spit: line 4, column 15: the body of `wrap` reads `nope`, which is neither one of its inputs nor made by an earlier step of it
+  --> pipeline.spit: line 1, column 1: imported here
+```
+
+A library that imports a broken library lists each `use` line, nearest the error first. `spit check --json` gives the same: the diagnostic's `file` is `libs/text.spit`, and its `related` list holds each `use` line with its `file`.
 
 ## Paths
 
@@ -254,7 +347,7 @@ path: derivatives/sub-{sub}[/ses-{ses}][/{@stage}]/{@labels}_{@product}
 ext: .nii.gz
 ```
 
-For `long[sub=01]` outside every stage, that becomes `derivatives/sub-01/sub-01_long.nii.gz`; for `mc[sub=01,ses=01,run=2]` in `func`, it becomes `derivatives/sub-01/ses-01/func/sub-01_ses-01_run-2_mc.nii.gz`. A product with no dimensions can use `[{@labels}_]{@product}`. Groups work in every path rule: a default, a stage's default, a product's own rule, a source's rule in a pipeline or recipe, and a `sidecars` stem, though not in a `discover` pattern, where every directory has each dimension. A group is decided per product, before any data is read, so each product has one plain template. Groups cannot nest and must contain a placeholder that could be absent; `[[` and `]]` write literal brackets. `spit check --path-rules` and `check --json` show each product's resolved template before any data is read.
+For `long[sub=01]` outside every stage, that becomes `derivatives/sub-01/sub-01_long.nii.gz`; for `mc[sub=01,ses=01,run=2]` in `func`, it becomes `derivatives/sub-01/ses-01/func/sub-01_ses-01_run-2_mc.nii.gz`. A product with no dimensions can use `[{@labels}_]{@product}`. Groups work in every path rule: a default, a stage's default, a product's own rule, a source's rule in a pipeline or recipe, and the path of a source with companions, though not in a `discover` pattern, where every directory has each dimension. A group is decided per product, before any data is read, so each product has one plain template. Groups cannot nest and must contain a placeholder that could be absent; `[[` and `]]` write literal brackets. `spit check --path-rules` and `check --json` show each product's resolved template before any data is read.
 
 Path rules are checked when the pipeline is loaded, even for products with no resolved jobs. SPIT rejects unbalanced braces, a dimension the product does not declare outside an optional group, a dimension no product declares even inside a group, a rule that omits one of the product's dimensions (use `{@entities}`, `{@labels}`, or name each one), two products whose rules give the same path for the same entities, such as a default rule without `{@product}`, and a rule that puts files inside another product's file path, such as `in/{id}.txt/out.txt` beside `in/{id}.txt`, or inside a [folder](#folders) a job writes. A path must be relative, name a file rather than end in `/`, and contain no empty, `.`, or `..` directory. A source no rule covers is reported by `spit check` on a recipe and by `dag`, and collisions between resolved artifact paths once jobs are bound. SPIT warns when two artifacts' paths differ only in letter case, such as `id=A` and `id=a`: where case is ignored, as by default on macOS and Windows, they are one file.
 
@@ -307,6 +400,33 @@ Extensions are optional. An operation whose tool picks the format from the outpu
 
 Path rules also find sources. With `root data`, `spit inputs recipe.spitin` lists each file under `data` whose path matches a source's rule, in the pipeline or the recipe, reading entity values from its placeholders. A rule matches a file's whole path, so `responses/{region}/wave{wave}.csv` does not match `wave3.csv.bak` or `wave3.csv.1`, and files that match no rule are left out. When a source's rule matches no file, the scan warns and names the unmatched file nearest the rule, with the text where the file and the rule part; see [Find incomplete artifacts](guide/inspection.md). To write the rules for data that already exists, `spit inputs --suggest` prints a rule for each group of files no rule matches; see [Start from the files](https://github.com/eclnz/spit/blob/dev/README.md#start-from-the-files). Links to files and directories are followed. A value is read only as SPIT writes it, so a file such as `in/%41.txt`, whose value SPIT would write `A`, is skipped with a warning rather than listed under a path no job would use.
 
+### Shapes on a source placeholder
+
+A placeholder in a source rule matches any text within one folder or file name, so `logs/{server}/{date}.log` reads `logs/web1/notes.log` as `date=notes`. A shape after a `:` narrows it:
+
+```text
+path log: logs/{server}/{date:date}.log
+path run: raw/sub-{sub:digits}_run-{run:digits}.csv
+```
+
+| Shape | Matches | Example |
+| --- | --- | --- |
+| `digits` | one or more digits; leading zeros stay in the value | `07`, `120` |
+| `year` | four digits, from 1900 to 2099 | `2026` |
+| `date` | `YYYY-MM-DD`, a real day in a year from 1900 to 2099 | `2026-09-01` |
+
+With `{date:date}`, `logs/web1/notes.log`, `2026-9-1.log`, `20260901.log`, `2026-09-01-final.log` and `2026-02-30.log` match no rule, so they are not source artifacts. They are counted with the other files no rule matches, and `spit inputs --unmatched` lists them. When a source then matches no file, the warning names the nearest one: `after `logs/web1/`, the file has `notes.log` where the rule has `{date:date}.log``. The set of shapes is closed; it is not a pattern language.
+
+Where a shape may be written:
+
+- In a source's `path` rule, in the pipeline or a recipe's `path <source>:` line or a recipe's `path:` line, and in a `.spitout`'s `source_paths:`. A recipe's `path:` is a default for sources only.
+- In a `discover ... from dirs` pattern, as `discover days: [day] from dirs data/{day:date}`.
+- Not in an output's rule, nor in a pipeline or stage `path:` default, which outputs take: a shape only narrows what is read, so on a rule that writes it would check nothing, and SPIT says so. A source whose rule is a pipeline default writes its shape in a rule of its own, `path <source>: ...`, or in a recipe's `path:` default, instead. `{@entities}` and `{@labels}` take no shape either; write `sub-{sub:digits}`.
+
+A shape reads the text of a value, which holds letters, digits and `-` only, so no shape contains `.`, `_` or `/`: `2026_09_02.log` matches no `{date}` at all, and a `.` after a placeholder still starts the extension. A dimension written twice, as `{id:digits}/{id}`, has its shape in both places; give it one shape only. Two placeholders with nothing between them may not both take a shape of any length, as `{a:digits}{b:digits}` does, since where one ends is not written; `{year:year}{n:digits}` is fine, because a year is four digits, and `{date:date}-{run:digits}` has its `-`. The check also runs on each product's path once the `[...]` groups its dimensions lack are dropped: `in/{a:digits}[-{c}]{b:digits}.txt` is fine for a product with `c`, but for one without it is `in/{a:digits}{b:digits}.txt`, and SPIT rejects it, naming the product. A shaped placeholder beside an unshaped one, `{a:digits}{b}`, is allowed and splits the way unshaped neighbours do, shortest first: `123.txt` reads `a=1`, `b=23`. A file that both a shaped rule and a general rule match, such as `{date:date}.log` and `{name}.log`, is still an error naming both sources; SPIT has no precedence between rules, so shape both or name more of the path. Shaping does not tell two sources' paths apart where they are compiled: `source a [d]`, `source b [d]` with `path a: in/{d:date}.log` and `path b: in/{d:digits}.log` is rejected, since both bind `in/d.log` for the same entities. Name the two sources' dimensions differently, as `[d]` and `[n]`, as well as shaping them. A record in a `.spitout` or an `inputs` file whose value fails its rule's shape is an error, since discovery would not read its file.
+
+`spit inputs --suggest` writes `{date:date}` and `{year:year}` for dimensions whose values are all dates or all years.
+
 ### Files a tool writes beside another
 
 Some tools write a second file beside the one they are told to write, such as the `.json` that dcm2niix writes next to its image, or the mask FSL's `bet -m` names after its brain image. Declare such an output `beside` the output it follows, with what its file name ends with in place of that output's extension:
@@ -347,45 +467,38 @@ command recon: recon-all -i {t1} -sd {subject.dir} -s {subject.stem}
 
 For `subject[sub=01]`, at `out/subject/sub=01`, this passes `-sd out/subject -s sub=01`. `spit dag --paths` shows a folder's path with a `/` after it, `spit check --path-rules` names it `(source folder)` or `(output folder)`, and the `.spitdag` gives each artifact a [`kind`](spitdag.md#artifact).
 
-A job owns the folder it writes, so nothing else may be written in it or read from it: a path rule that puts another product's files inside a folder a job writes is an error, as is one that puts an output inside a source folder. A source may sit in a source folder, such as `dicom/sub={sub}/info.json` beside the `dicom` folder above, since no job writes either. A folder is not written [`beside`](#files-a-tool-writes-beside-another) another output, nor has an output beside it, and a member of a [`sidecars`](#sidecar-files) group is a file.
+A job owns the folder it writes, so nothing else may be written in it or read from it: a path rule that puts another product's files inside a folder a job writes is an error, as is one that puts an output inside a source folder. A source may sit in a source folder, such as `dicom/sub={sub}/info.json` beside the `dicom` folder above, since no job writes either. A folder is not written [`beside`](#files-a-tool-writes-beside-another) another output, nor has an output beside it, and a source declared [`beside`](#sidecar-files) another is a file.
 
 ### Sidecar files
 
-Files that travel together, such as an image and its JSON metadata, often share a name and differ only by extension. A `sidecars` block declares such sources once, with the dimensions they share, and an indented `path:` line gives the path stem they share:
+Files that travel together often share a name and differ by extension. Declare the main file as a source, then declare each companion `beside` it:
 
-```text
-sidecars photo [site, visit, shot]:
-    path: site-{site}/visit-{visit}/photos/shot-{shot}
-    source raw_photo : Image<Photo,Captured> .raw
-    source photo_gps : GpsTrack .gpx
-    source photo_json : CaptureMetadata .json
+```spit
+source raw_photo : Image<Photo,Captured> .raw [site, visit, shot]
+path raw_photo: site-{site}/visit-{visit}/photos/shot-{shot}.raw
+source photo_gps : GpsTrack .gpx beside raw_photo
+source photo_json : CaptureMetadata .json beside raw_photo
 ```
 
-Each member is an ordinary source with the group's dimensions, whose path is the stem and its extension, as `site-{site}/visit-{visit}/photos/shot-{shot}.gpx`; steps read it by name, as any other source. Write each member indented beneath the header as a source that declares its extension, `source name : Type .ext`, or `source name .ext` untyped. The `path:` line comes before the members, once, and the next line that is not indented ends the block. A group with no dimensions names one set of files, as `sidecars config:` with `path: config/settings`.
+The companion is an ordinary source that a step reads by name. It inherits `raw_photo`'s dimensions and path stem: `photo_gps` above reads `site-{site}/visit-{visit}/photos/shot-{shot}.gpx`. Declare the main source first. It must be a file with an extension; a companion cannot itself be the main source of another companion. A companion has no dimensions or path rule of its own. An extension such as `.json` replaces the main file's extension; a quoted suffix such as `"_mask.nii.gz"` is appended to its stem.
 
-Without a `path:` line, the stem is the dataset's to give: a [recipe](#recipes) names the group as it would a source, and its members take the stem and their extensions as before:
+The path can come from a [recipe](#recipes) when the layout varies by dataset. Name the main source and give its complete file path, including its extension:
 
-```text
+```spit
 # survey.spit
-sidecars photo [site, visit, shot]:
-    source raw_photo : Image<Photo,Captured> .raw
-    source photo_json : CaptureMetadata .json
+source raw_photo : Image<Photo,Captured> .raw [site, visit, shot]
+source photo_json : CaptureMetadata .json beside raw_photo
 
 # dataset.spitin
 pipeline survey.spit
-path photo: site-{site}/visit-{visit}/photos/shot-{shot}
+path raw_photo: site-{site}/visit-{visit}/photos/shot-{shot}.raw
 ```
 
-A recipe's default `path:` covers a group with no stem as one product named for the group, so `path: data/{site}/{visit}/{shot}/{@product}` finds `data/a/1/3/photo.raw` and `data/a/1/3/photo.json`. The `.spitout` writes each member's rule under `source_paths:`.
+A recipe's default `path:` also places the main source. For `path: data/{site}/{visit}/{shot}/{@product}`, the files are `data/a/1/3/raw_photo.raw` and `data/a/1/3/raw_photo.json`. The `.spitout` records the main source's path under `source_paths:`; the companion's path is derived from it. When importing definitions, import the main source to bring all its companions. With an alias, `path text::raw_photo:` names the imported main source.
 
-A block belongs at the top level of a pipeline. Its members take no dimensions or path rules of their own, in the pipeline or the recipe, and no product may share the group's name, since `path photo:` names one thing. A group's stem is written in its block or in the recipe, not both; a `path photo:` line in the pipeline is an error that points to the block.
+When `spit inputs` scans a dataset, or a command reads records from a recipe or `.spitout`, it warns about each identity that holds some of these sources and lacks others, as `warning: raw_photo[site=A,visit=2,shot=3] has .raw and .gpx but no .json`. Warnings follow source declaration order, then value order. A file a named or conditional `exclude` rule removes is not counted as missing, nor is one listed under `.spitout`'s `removed:` section.
 
-When `spit inputs` scans a dataset, or a command reads records from a recipe or a `.spitout`, it warns about each place that holds some of a group's sources and not the others, as `warning: photo[site=A,visit=2,shot=3] has .raw and .gpx but no .json`, before a step fails to find the missing one. The warnings come group by group, and within a group in value order, so `shot=2` comes before `shot=10`. A file an `exclude` or `drop` rule removes is not counted as missing, nor is one a `.spitout`'s `removed:` section lists.
-
-A missing member is a warning because it matters only to a step that reads it. With `sidecars t1w [sub]` holding `anat .nii.gz` and `anat_meta .json`, and no `sub-02_T1w.json`, `brain = strip(anat)` plans every subject, while plain `dag` stops at `times = readout(anat, anat_meta)`: ``no `anat_meta` artifact for input `meta` of `readout` at [sub=02]``. SPIT never runs a job with an input left out. To plan the rest, either:
-
-- run `dag --partial`, which keeps `brain[sub=02]` and lists `times[sub=02]` with its reason under the `.spitdag`'s `left_out`; or
-- remove the subject in the recipe, with a reason, as `drop [sub] where anat_meta count=0  # no BIDS sidecar`, which removes all of `sub=02`'s inputs, `brain` included.
+A missing companion is a warning because it matters only to a step that reads it. If `brain = strip(anat)` reads only the image, it can still plan every subject; a step reading `anat_meta` fails for a subject missing its JSON file. SPIT never runs a job with an input left out. `dag --partial` plans the remaining jobs and lists the omitted ones with their reasons. A recipe may instead remove a whole subject with `exclude [sub] where anat_meta count=0`.
 
 ## Recipes
 
@@ -397,12 +510,12 @@ root .
 
 discover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}
 exclude image[sub=04,ses=2]    # scanner fault
-drop [sub] where sessions count<2
-require image count=1 per [sub, ses]
+exclude [sub] where sessions count<2
+require [sub, ses] where image count=1
 path image: data/sub-{sub}/ses-{ses}/image.nii.gz
 ```
 
-A recipe may contain `discover`, `exclude`, `drop` and `require` rules, `path product:` rules for source products and for [`sidecars` groups](#sidecar-files) whose block gives no stem, a default `path:` rule for its sources, and `sources:`/`contexts:` records. It cannot declare sources, `sidecars` groups, operations, steps, commands, stages, imports, or `ext:`; the pipeline still declares each logical `source` with its dimensions and optional type. Rules in a pipeline are an error, and so are records.
+A recipe may contain `discover`, `exclude` and `require` rules, `path product:` rules for source products, a default `path:` rule for its sources, and `sources:`/`contexts:` records. It cannot declare sources, operations, steps, commands, stages, imports, or `ext:`; the pipeline still declares each logical `source` with its dimensions and optional type. Rules in a pipeline are an error, and so are records.
 
 A recipe's `path:` line is the default for every source with no rule of its own, in the pipeline or the recipe. Where a dataset keeps its inputs is the dataset's to say, so the pipeline's `path:` can say where outputs go, by stage if it likes, and the recipe says where sources are:
 
@@ -431,20 +544,20 @@ The folder is relative to the recipe's folder, like the `pipeline` line, and may
 
 `spit check recipe.spitin` checks the rules against the pipeline without reading any data: each rule must name a source or discovery with the dimensions it counts, every source must have a path rule, by the pipeline, the recipe or a default, since the scan finds each source by its rule, and each source path the recipe gives, by its own rule or its default, must pass the [path checks](#paths), such as telling apart the sources a default covers. `spit inputs recipe.spitin` scans the root, applies the rules, and prints the `.spitout`. A recipe that writes its own `sources:` records is not scanned. Its `root` line only says where the dataset is: it does not make the recipe's records a scan, and their files must still exist under it. `spit dag recipe.spitin` runs the same step in memory before resolving jobs, over the pipeline the recipe's `pipeline` line names. A recipe is given alone; the pipeline is not named a second time on the command line.
 
-Three rules leave data out, each for a different reason:
+Two forms of `exclude` leave data out; `require` checks what remains:
 
 | To | Write | For example |
 | --- | --- | --- |
 | Remove named artifacts or groups, such as a corrupted run | `exclude` | `exclude bold[sub=02,ses=02,run=3]  # corrupted` |
-| Remove every group that fails a criterion, as the data changes | `drop` | `drop [sub] where sessions count<2` |
+| Remove every group that meets a condition, as the data changes | `exclude` | `exclude [sub] where sessions count<2` |
 | Plan what can be completed despite missing inputs | `dag --partial` | `spit dag dataset.spitin --partial -o plan.spitdag` |
-| Stop, when the data is incomplete | `require` | `require t1w count=1 per [sub, ses]` |
+| Stop, when the data is incomplete | `require` | `require [sub, ses] where t1w count=1` |
 
-They apply in that order, however they are written: first every `exclude`, then every `drop`, each judged against what the exclusions leave, then every `require`, checked against what the drops leave. What `exclude` and `drop` remove is reported on stderr as notes and recorded in the `.spitout`.
+Named exclusions apply first, even when written after conditional exclusions. Every conditional exclusion then sees the same retained inventory, and all matching groups are removed together. `require` checks what remains. Each removal is reported on stderr and recorded in the `.spitout`.
 
-`drop` and `require` are written in different orders, because their conditions point opposite ways. A `drop` names the groups first and then, after `where`, what removes one; a `require` names the source first and then what every group must have, with the groups after `per`. A rule written in the other's order, such as `require [sub, ses] where t1w count=1`, is an error that gives it in its own order.
+Conditional `exclude` and `require` name the groups first, then `where`, then the source or discovery rule and a condition. A conditional exclusion removes each group that meets its condition; `require` stops the run unless every group meets its own. A `require` in the older order, source first and the groups after `per`, as in `require t1w count=1 per [sub, ses]`, is an error that gives the rule rewritten. An old `drop` rule is rejected with an error that shows its `exclude` replacement.
 
-Rules that count form their groups from every artifact and discovered context in the dataset, whichever source or discovery found it. `drop [store] where pricing count=0` groups by every store any source or discovery has, so a store with sales but no price list is a group with none: its count is 0.
+Rules that count form their groups from every artifact and discovered context in the dataset, whichever source or discovery found it. `exclude [store] where pricing count=0` groups by every store any source or discovery has, so a store with sales but no price list is a group with none: its count is 0.
 
 ### Which file a line belongs in
 
@@ -452,16 +565,16 @@ A `.spit` pipeline is the reusable graph: what work to do and where its results 
 
 | Line | Pipeline | Recipe |
 | --- | --- | --- |
-| `source`, `sidecars`, `dimensions`, `operation`, `command`, `verify`, steps, `stage`, `use`, `ext:` | yes | no |
+| `source`, `dimensions`, `operation`, `command`, `verify`, steps, `stage`, `use`, `ext:` | yes | no |
 | `path product:` for a product a step makes | yes | no |
-| `path product:` for a source or a `sidecars` group | either one, not both | either one, not both |
+| `path product:` for a source that is not declared `beside` another | either one, not both | either one, not both |
 | `path:`, a default | covers outputs, and sources nothing else covers | covers sources only |
-| `pipeline`, `root`, `discover`, `exclude`, `drop`, `require`, `sources:`, `contexts:` | no | yes |
+| `pipeline`, `root`, `discover`, `exclude`, `require`, `sources:`, `contexts:` | no | yes |
 
 Put a source's own rule in the pipeline when every dataset for that pipeline shares the layout, and in the recipe when the layout belongs to one dataset. A line in the wrong file is an error that says which file it belongs in, at its line:
 
 ```text
-error: line 3, column 1: a step belongs in the .spit pipeline, which every dataset shares; a .spitin binds it to one dataset with its `root`, source paths, and `discover`, `exclude`, `drop` and `require` rules
+error: line 3, column 1: a step belongs in the .spit pipeline, which every dataset shares; a .spitin binds it to one dataset with its `root`, source paths, and `discover`, `exclude` and `require` rules
 error: line 3, column 13: `image` has path rules in both .spit and .spitin; keep the pipeline's if every dataset has this layout, or the recipe's if only this one does
 ```
 
@@ -488,8 +601,8 @@ Sources whose dimensions fit within the rule's dimensions expand over the observ
 `require` can target the name of a discovery rule directly:
 
 ```text
-require sessions count>=2 per [sub]
-require sessions ses=1,2 per [sub]
+require [sub] where sessions count>=2
+require [sub] where sessions has ses=1,2
 ```
 
 The first rule needs at least two observed session bindings per subject. The second specifically needs sessions `1` and `2`. These rules count the directories matched by `sessions`, not artifacts from a product called `sessions`. Records keep the rule name as `contexts sessions:` followed by its `[sub=...,ses=...]` records, which `spit inputs` writes.
@@ -497,29 +610,29 @@ The first rule needs at least two observed session bindings per subject. The sec
 ### Constraints
 
 ```text
-require image count>=2 per [subject, visit]
-require reference count=1 per [subject, visit]
+require [subject, visit] where image count>=2
+require [subject, visit] where reference count=1
 ```
 
-Constraints, written in a recipe, check each observed group, and fail the run if any group fails. They do not set a total subject or visit count. The count takes any comparison: `count=1`, `count!=1`, `count>=2`, `count<=2`, `count>2` or `count<2`. A rule can also require particular values in each group, alone or with a count:
+Constraints, written in a recipe, check each observed group, and fail the run if any group fails. They do not set a total subject or visit count. The count takes any comparison: `count=1`, `count!=1`, `count>=2`, `count<=2`, `count>2` or `count<2`. A rule can also require particular values in each group with `has`, alone or after a count, as in `require [subject, visit] where image count>=2 has run=1,2`:
 
 ```text
-require image run=1,2 per [subject, visit]
+require [subject, visit] where image has run=1,2
 ```
 
-A `require` rule is checked after every `drop` rule, against the groups they leave. A rule whose grouping finds no group at all, because nothing in the dataset has those dimensions or a `drop` removed every one, is an error: a check of nothing is not a pass.
+A `require` rule is checked after conditional exclusions, against the groups they leave. A rule whose grouping finds no group at all, because nothing in the dataset has those dimensions or an exclusion removed every one, is an error: a check of nothing is not a pass.
 
-### Drop groups that fail a criterion
+### Exclude groups that meet a condition
 
-The [cohort walkthrough](examples.md#cohort-discovery-exclusion-and-grouped-removal) uses `drop` to remove a subject with too few sessions and `exclude` to remove one damaged run.
+The [cohort walkthrough](examples.md#cohort-discovery-exclusion-and-grouped-removal) uses conditional `exclude` to remove a subject with too few sessions and named `exclude` to remove one damaged run.
 
-`drop` removes every group that meets its condition, and reads the way it acts: the groups, then `where`, then what removes one.
+Conditional `exclude` removes every group that meets its condition: the groups, then `where`, then what removes one.
 
 ```text
-drop [sub] where sessions count<2
-drop [sub, ses] where t1w count=0
-drop [sub, ses] where bold missing run=1,2
-drop [sub, ses] where bold has run=3
+exclude [sub] where sessions count<2
+exclude [sub, ses] where t1w count=0
+exclude [sub, ses] where bold missing run=1,2
+exclude [sub, ses] where bold has run=3
 ```
 
 After `where` comes the source or discovery rule to count, then one condition:
@@ -528,11 +641,11 @@ After `where` comes the source or discovery rule to count, then one condition:
 - **`missing` values:** `missing run=1,2` removes each group without a run 1 or without a run 2.
 - **`has` values:** `has run=3` removes each group with a run 3.
 
-Removing a group removes every artifact and discovered context within it, of every source. An artifact without all the group's dimensions, such as a subject's reference when only its sessions are dropped, stays; if no job then uses it, `spit artifacts` lists it as unused. Each `drop` rule is one condition, and a group is removed when any rule's condition holds. Every rule is judged against the same inventory, so writing them in another order changes nothing. A `drop` rule that would remove every group of its grouping is an error, since nothing would be left to plan.
+Removing a group removes every artifact and discovered context within it, of every source. An artifact without all the group's dimensions, such as a subject's reference when only its sessions are removed, stays; if no job then uses it, `spit artifacts` lists it as unused. Each conditional `exclude` rule has one condition, and a group is removed when any rule's condition holds. Every rule is judged against the same inventory, so writing them in another order changes nothing. A conditional `exclude` rule that would remove every group of its grouping is an error, since nothing would be left to plan.
 
-A file a discovered context expects but lacks counts as absent, so `drop [sub, ses] where t1w count=0` removes a session whose T1w is missing, rather than failing on the missing file. Each removed group is reported on stderr, `note: dropped [sub=5] by \`drop [sub] where sessions count<2\` (line 3); found 1`, and recorded in the `.spitout`.
+A file a discovered context expects but lacks counts as absent, so `exclude [sub, ses] where t1w count=0` removes a session whose T1w is missing, rather than failing on the missing file. Each removed group is reported on stderr, `note: excluded [sub=5] by \`exclude [sub] where sessions count<2\` (line 3); found 1`, and recorded in the `.spitout`.
 
-A `drop` rule's values name a dimension within each group, not one of its groups: `drop [store] where sales missing store=s07` is an error, since each group has one store. To remove named groups, write `exclude [store=s07]`.
+A conditional `exclude` rule's values name a dimension within each group, not one of its groups: `exclude [store] where sales missing store=s07` is an error, since each group has one store. To remove named groups, write `exclude [store=s07]`.
 
 ### Exclude named artifacts
 
@@ -559,7 +672,14 @@ Because values are compared as written, a group removed under one spelling keeps
 exclude [store=s07]            # price list filed as S07; renamed next week
 ```
 
-`dag` then plans the other stores, and notes that the misnamed file is left over:
+Given a `.spitin` recipe, `inputs`, `dag` and `artifacts` list the spellings together as they settle its inputs, so the two are seen as one store filed twice. Only ASCII letters fold, so `é` and `É` are different values with no note; and a `.spitout` given directly to `dag` or `artifacts` has no settling step, so it gets no note. The note names each spelling with the sources that have it, and `(excluded)` for one a rule removed:
+
+```text
+note: excluded [store=s07] (line 3)
+note: `store` has values that differ only in ASCII letter case, which are different values to SPIT: `S07` in pricing, `s07` (excluded)
+```
+
+The note comes up before any rule too, as ``... `S07` in pricing, `s07` in sales``. It names at most three sets for a dimension, then counts the rest. `dag` then plans the other stores, and notes that the misnamed file is left over:
 
 ```text
 note: 1 source artifact is used by no job: pricing[store=S07]; `spit artifacts` lists them
@@ -572,9 +692,9 @@ exclude [store=s07]            # price list filed as S07; renamed next week
 exclude pricing[store=S07]     # the same list, under the name it was filed as
 ```
 
-Exclusions apply before anything else in the recipe. An excluded discovered context expects no files, an excluded file needs to exist nowhere, and a file excluded by name may lie outside every discovered context, such as a misnamed copy. `drop` and `require` rules then see what the exclusions leave.
+Named exclusions apply before scanning and missing-file validation. An excluded discovered context expects no files, an excluded file needs to exist nowhere, and a file excluded by name may lie outside every discovered context, such as a misnamed copy. Conditional exclusions then see what named exclusions leave, and `require` checks the final inventory.
 
-A placeholder in a source rule matches any text within one folder or file name, and SPIT cannot narrow it to a pattern such as a date: `logs/{server}/{date}.log` reads `logs/web1/notes.log` as `date=notes`. Check the count in `note: found N source artifacts`, and leave out a file whose value does not belong with [`exclude`](#exclude-named-artifacts) or a rule that names more of its path. Files whose whole paths match no source path rule are ignored while scanning. `spit inputs` counts them in a note, naming them when there are at most three and otherwise counting them by extension, leaving out SPIT's own `.spit`, `.spitin`, `.spitout` and `.spitdag` files and any file at a path the pipeline gives one of its outputs, or inside an output folder, such as what an earlier run wrote under the root; `spit inputs dataset.spitin --unmatched` lists their paths relative to the dataset root instead of writing a `.spitout`, even if a `require` rule fails. When a `require` count fails after the scan found no files for its source, `inputs` and `dag` name the path rule used and show an unmatched file whose path contains the source name, when there is one. A recipe's `path:` is a default for sources; use `path source:` for one source. Required source paths must match the spelling found by the scan: `pricing/S07.json` does not satisfy `pricing/s07.json`, even on a case-insensitive filesystem. A file with a near miss in an identity value, such as `store=S07` where a job needs `store=s07`, may still match a source rule: it is then a source artifact, and `dag` and `artifacts` warn when it is unused and point to it at the failed join.
+A placeholder in a source rule matches any text within one folder or file name unless it takes a [shape](#shapes-on-a-source-placeholder), as `{date:date}`. Without one, `logs/{server}/{date}.log` reads `logs/web1/notes.log` as `date=notes`: check the count in `note: found N source artifacts`, and leave out a file whose value does not belong with [`exclude`](#exclude-named-artifacts), a shape, or a rule that names more of its path. Files whose whole paths match no source path rule are ignored while scanning. `spit inputs` counts them in a note, naming them when there are at most three and otherwise counting them by extension, leaving out SPIT's own `.spit`, `.spitin`, `.spitout` and `.spitdag` files and any file at a path the pipeline gives one of its outputs, or inside an output folder, such as what an earlier run wrote under the root; `spit inputs dataset.spitin --unmatched` lists their paths relative to the dataset root instead of writing a `.spitout`, even if a `require` rule fails. When a `require` count fails after the scan found no files for its source, `inputs` and `dag` name the path rule used and show an unmatched file whose path contains the source name, when there is one. A recipe's `path:` is a default for sources; use `path <source>:` for one source. Required source paths must match the spelling found by the scan: `pricing/S07.json` does not satisfy `pricing/s07.json`, even on a case-insensitive filesystem. A file with a near miss in an identity value, such as `store=S07` where a job needs `store=s07`, may still match a source rule: it is then a source artifact, and `dag` and `artifacts` warn when it is unused and point to it at the failed join.
 
 Rules can also come from a CSV file, relative to the recipe's folder, such as a lab's list of scans that failed quality control:
 
@@ -630,7 +750,7 @@ root ../data
 
 The folder is relative to the `.spitout`'s own folder, and may be absolute. A printed `.spitout` records no root, since where it will be kept is unknown. `dag` and `artifacts` use it as the root, so they check the source files and run commands from it. The line comes before every section, once. A `.spitout` without one, printed or written by hand, has no root, so `dag` checks no source files; give it a `root` line, or run `dag` on the recipe.
 
-`spit inputs` also writes what the recipe's `exclude` and `drop` rules removed, each with its rule, where the rule is, how many a counting rule found, and the reason:
+`spit inputs` also writes what the recipe's `exclude` rules removed, each with its rule, where the rule is, how many a counting rule found, and the reason:
 
 ```text
 removed:
@@ -639,7 +759,7 @@ removed:
         at: line 4
         reason: corrupted: motion spike at volume 140
     [sub=07]
-        rule: drop [sub] where sessions count<2
+        rule: exclude [sub] where sessions count<2
         at: line 6
         found: 1
 ```

@@ -176,6 +176,8 @@ impl fmt::Display for ResolveError {
                 near,
             } => {
                 write!(f, "no `{product}` artifact for input `{port}` of `{operation}` at [{context}]")?;
+                // Keep in step with `Report::write_gap` in `src/render.rs`, which
+                // re-indents these 4-space continuation lines.
                 if let Some(near) = near {
                     write!(f, "\n    {} exists; its `{}` differs only in {}", near.artifact, near.dimension, near.reason)?;
                 }

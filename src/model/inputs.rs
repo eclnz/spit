@@ -11,12 +11,12 @@ use crate::paths::PathTemplate;
 use super::{owned_strings, DirectoryDiscovery, EntityBinding, Pipeline, PipelineIndex};
 
 /// How a dataset's sources are found and filtered: directory discovery,
-/// `exclude`, `drop` and `require` rules, and where source files live. The input stage
+/// `exclude` and `require` rules, and where source files live. The input stage
 /// reads these; job resolution never does.
 #[derive(Clone, Debug, Default)]
 pub struct InputRules {
     pub discoveries: Vec<DirectoryDiscovery>,
-    /// `require` and `drop` rules, in declaration order.
+    /// `require` and conditional `exclude` rules, in declaration order.
     pub constraints: Vec<CoverageRule>,
     /// `exclude` rules, in declaration order, with each row of a file an
     /// `exclude from` line names in its place once the file is read.
@@ -42,65 +42,36 @@ impl InputRules {
             && self.source_default.is_none()
     }
 
-    /// The sources of `pipeline` that the recipe's default `path:` covers:
-    /// those with no rule in the pipeline or the recipe, a member of a
-    /// `sidecars` group taking its group's. None without a default.
+    /// Sources with no rule in the pipeline or recipe, except those whose
+    /// paths follow another source through `beside`.
     pub fn defaulted_sources<'p>(&self, pipeline: &'p Pipeline) -> Vec<&'p str> {
         if self.source_default.is_none() {
             return Vec::new();
         }
         let index = PipelineIndex::new(pipeline);
-        let members = pipeline.sidecar_members();
         pipeline
             .products
             .iter()
-            .map(|product| product.name.as_str())
-            .filter(|name| {
-                index.is_source(name)
-                    && !pipeline.product_paths.contains_key(*name)
-                    && !self.source_paths.contains_key(*name)
-                    && members
-                        .get(name)
-                        .is_none_or(|group| !self.source_paths.contains_key(&group.name))
+            .filter(|product| {
+                index.is_source(&product.name)
+                    && product.beside.is_none()
+                    && !pipeline.product_paths.contains_key(&product.name)
+                    && !self.source_paths.contains_key(&product.name)
             })
+            .map(|product| product.name.as_str())
             .collect()
     }
 
-    /// The path rule the recipe gives each source of `pipeline` by a
-    /// `path` line: its own, or its `sidecars` group's stem and its
-    /// extension. Borrowed when the recipe names no group.
+    /// The source paths the recipe names. A source written beside another
+    /// takes that source's rule instead of having one of its own.
     pub fn named_source_paths(
         &self,
-        pipeline: &Pipeline,
+        _pipeline: &Pipeline,
     ) -> Cow<'_, BTreeMap<String, PathTemplate>> {
-        if !self
-            .source_paths
-            .keys()
-            .any(|name| pipeline.sidecar_group(name).is_some())
-        {
-            return Cow::Borrowed(&self.source_paths);
-        }
-        let mut paths = BTreeMap::new();
-        for (name, template) in &self.source_paths {
-            match pipeline.sidecar_group(name) {
-                Some(group) => paths.extend(
-                    group
-                        .member_paths(template)
-                        .map(|(member, path)| (member.to_owned(), path)),
-                ),
-                None => {
-                    paths.insert(name.clone(), template.clone());
-                }
-            }
-        }
-        Cow::Owned(paths)
+        Cow::Borrowed(&self.source_paths)
     }
 
-    /// The path rule the recipe gives each source of `pipeline`: its
-    /// [`InputRules::named_source_paths`], else its default for each of
-    /// [`InputRules::defaulted_sources`]. A member of a `sidecars` group
-    /// takes the default with `{@product}` as the group's name, so the
-    /// members still share one stem.
+    /// The recipe's named paths, plus its default for sources that need one.
     pub fn source_paths_for(&self, pipeline: &Pipeline) -> Cow<'_, BTreeMap<String, PathTemplate>> {
         let named = self.named_source_paths(pipeline);
         let defaulted = self.defaulted_sources(pipeline);
@@ -111,28 +82,9 @@ impl InputRules {
         else {
             return named;
         };
-        let members = pipeline.sidecar_members();
         let mut paths = named.into_owned();
-        // A group's members are defaulted together, since none has a rule
-        // of its own.
-        let mut groups = BTreeMap::new();
         for name in defaulted {
-            match members.get(name) {
-                Some(group) => {
-                    groups.insert(group.name.as_str(), *group);
-                }
-                None => {
-                    paths.insert(name.to_owned(), default.clone());
-                }
-            }
-        }
-        for (name, group) in groups {
-            let stem = default.with_product(name);
-            paths.extend(
-                group
-                    .member_paths(&stem)
-                    .map(|(member, path)| (member.to_owned(), path)),
-            );
+            paths.insert(name.to_owned(), default.clone());
         }
         Cow::Owned(paths)
     }
@@ -210,14 +162,14 @@ impl fmt::Display for Exclusion {
 pub struct Removal {
     pub product: Option<String>,
     pub entities: EntityBinding,
-    /// The rule, as `exclude bold[run=3]` or `drop [sub] where sessions
+    /// The rule, as `exclude bold[run=3]` or `exclude [sub] where sessions
     /// count<2`.
     pub rule: String,
     /// Where the rule is written, when known: `line 4` of the recipe, or a
     /// line of a file.
     pub origin: Option<String>,
     pub reason: Option<String>,
-    /// For a group a `drop` rule counted: how many it found.
+    /// For a group a conditional `exclude` rule counted: how many it found.
     pub found: Option<usize>,
 }
 
@@ -245,9 +197,9 @@ impl Removal {
         text
     }
 
-    /// Whether an `exclude` rule made it, rather than a `drop` rule.
+    /// Whether a named `exclude` rule made it, rather than a conditional one.
     pub fn is_exclusion(&self) -> bool {
-        self.rule.starts_with("exclude")
+        self.rule.starts_with("exclude ") && !self.rule.contains("] where ")
     }
 }
 
@@ -378,12 +330,12 @@ impl fmt::Display for CountRequirement {
     }
 }
 
-/// A `require` or `drop` rule over the groups of a dataset that `group_by`
+/// A `require` or conditional `exclude` rule over the groups of a dataset that `group_by`
 /// forms, counting the artifacts of a source, or the contexts of a
 /// discovery rule, in each: `product`.
 ///
 /// A `require` rule fails a group unless its count holds and it has every
-/// value in `values`. A `drop` rule removes a group when its count holds,
+/// value in `values`. A conditional `exclude` rule removes a group when its count holds,
 /// when it lacks a value in `values`, or when it has a value in `has`; it
 /// names one of the three.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -402,8 +354,8 @@ pub struct CoverageRule {
     pub line: Option<usize>,
 }
 
-/// Reads as written: `drop [sub] where sessions count<2`, or `require
-/// image run=1,2 per [sub]`.
+/// Reads as written: `exclude [sub] where sessions count<2`, or `require
+/// [sub] where image has run=1,2`.
 impl fmt::Display for CoverageRule {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let clause = |values: &BTreeMap<String, Vec<String>>| {
@@ -415,19 +367,24 @@ impl fmt::Display for CoverageRule {
         };
         match self.action {
             CoverageAction::Require => {
-                write!(f, "require {}", self.product)?;
+                write!(
+                    f,
+                    "require [{}] where {}",
+                    self.group_by.join(", "),
+                    self.product
+                )?;
                 if let Some(count) = self.count {
                     write!(f, " {}", count.as_written())?;
                 }
                 if !self.values.is_empty() {
-                    write!(f, " {}", clause(&self.values))?;
+                    write!(f, " has {}", clause(&self.values))?;
                 }
-                write!(f, " per [{}]", self.group_by.join(", "))
+                Ok(())
             }
             CoverageAction::Drop => {
                 write!(
                     f,
-                    "drop [{}] where {}",
+                    "exclude [{}] where {}",
                     self.group_by.join(", "),
                     self.product
                 )?;
@@ -471,7 +428,7 @@ impl CoverageRule {
     }
 
     /// Whether a group whose members have `bindings` passes a `require`
-    /// rule, or is removed by a `drop` rule.
+    /// rule, or is removed by a conditional `exclude` rule.
     pub fn holds_for(&self, bindings: &[&EntityBinding]) -> bool {
         let lacks = |values: &BTreeMap<String, Vec<String>>| {
             values.iter().any(|(dimension, listed)| {

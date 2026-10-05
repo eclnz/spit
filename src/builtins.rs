@@ -30,7 +30,6 @@ pub enum Word {
     UseAs,
     UseFrom,
     Dimensions,
-    Sidecars,
     Many,
     Beside,
     Vary,
@@ -43,12 +42,12 @@ pub enum Word {
     Discover,
     DiscoverFrom,
     Require,
-    Per,
+    RequireWhere,
     Count,
-    Drop,
-    DropWhere,
+    ExcludeWhere,
     Missing,
     Has,
+    RequireHas,
     Exclude,
     ExcludeFrom,
     Product,
@@ -65,13 +64,16 @@ pub enum Word {
     Check,
     CheckClause,
     PathPlaceholder,
+    ShapeDigits,
+    ShapeYear,
+    ShapeDate,
 }
 
 /// What a word's hover says.
 pub struct Doc {
     /// The word's name in `check --json`, unique among words.
     pub name: &'static str,
-    /// `keyword`, `selector`, `placeholder` or `header`.
+    /// `keyword`, `selector`, `placeholder`, `shape` or `header`.
     pub kind: &'static str,
     /// The section of the language reference it summarises.
     pub anchor: &'static str,
@@ -88,7 +90,7 @@ impl Word {
 }
 
 /// Every word's documentation, in the order of [`Word`].
-pub static DOCS: [Doc; 46] = [
+pub static DOCS: [Doc; 48] = [
     Doc {
         name: "source",
         kind: "keyword",
@@ -101,7 +103,7 @@ pub static DOCS: [Doc; 46] = [
         kind: "keyword",
         anchor: "operations-and-commands",
         example: "operation process(image: Image) -> Image\noperation estimate(dwi: DWI) -> (wm: Response, gm: Response)",
-        summary: "Declares a step's input ports and outputs, before its first use. A port is `name`, `name: Type`, `name: many` or `name: many Type`. A call fills the ports in order, and SPIT checks each product's type against its port. Several outputs are each named, and an output's type may be followed by the extension the tool gives its file, as in `-> Transform .mat`.",
+        summary: "Declares a step's input ports and outputs, before its first use. A port is `name`, `name: Type`, `name: many` or `name: many Type`. A call fills the ports in order, and SPIT checks each product's type against its port. Several outputs are each named, and an output's type may be followed by the extension the tool gives its file, as in `-> Transform .mat`. A header ending in `:` is followed by indented steps that carry the operation out in place of a command.",
     },
     Doc {
         name: "command",
@@ -167,13 +169,6 @@ pub static DOCS: [Doc; 46] = [
         summary: "Declares the pipeline's dimension order, once at the top level, for a product holding two dimensions that no source orders. It names every dimension once, and each source lists its dimensions in that order. The order sorts a `many` input's artifacts and writes `{@entities}`.",
     },
     Doc {
-        name: "sidecars",
-        kind: "keyword",
-        anchor: "sidecar-files",
-        example: "sidecars photo [site, shot]:\n    path: site-{site}/shot-{shot}\n    source raw_photo : Image .raw\n    source photo_json .json",
-        summary: "Declares sources whose files share dimensions and a path stem, and differ only by extension. Each indented member is an ordinary source whose path is the stem and its extension. The block's `path:` line gives the stem, or a recipe gives it as `path name:`. `spit inputs` warns where it finds some of a group's files and not the others.",
-    },
-    Doc {
         name: "many",
         kind: "keyword",
         anchor: "operations-and-commands",
@@ -183,9 +178,9 @@ pub static DOCS: [Doc; 46] = [
     Doc {
         name: "beside",
         kind: "keyword",
-        anchor: "files-a-tool-writes-beside-another",
-        example: "operation strip(t1: Image) -> (brain: Image .nii.gz, mask: Image \"_mask.nii.gz\" beside brain)",
-        summary: "An output the tool writes next to another without being told where. Its path is its sibling's, without the sibling's extension, then the suffix: beside `sub-01_brain.nii.gz`, `mask` is `sub-01_brain_mask.nii.gz`. It may be left out of the command, and has no path rule of its own.",
+        anchor: "sidecar-files",
+        example: "source image .nii.gz [sub]\nsource metadata .json beside image\noperation strip(t1: Image) -> (brain: Image .nii.gz, mask: Image \"_mask.nii.gz\" beside brain)",
+        summary: "A source or output whose file shares another file's stem. The suffix replaces the other file's extension: beside `sub-01_brain.nii.gz`, a `.json` companion is `sub-01_brain.json`. A source inherits the other's dimensions and path; an output is written by the same job and may be omitted from its command.",
     },
     Doc {
         name: "vary",
@@ -241,7 +236,7 @@ pub static DOCS: [Doc; 46] = [
         kind: "keyword",
         anchor: "discover-contexts-from-directories",
         example: "discover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}",
-        summary: "Finds a dataset's contexts from its directories: each matching directory, even an empty one, gives one binding, and only those found on disk are used. `sessions` names the rule, which `require` and `drop` can count. A source whose dimensions fit within the rule's expects a file for each binding.",
+        summary: "Finds a dataset's contexts from its directories: each matching directory, even an empty one, gives one binding, and only those found on disk are used. `sessions` names the rule, which `require` and conditional `exclude` can count. A source whose dimensions fit within the rule's expects a file for each binding.",
     },
     Doc {
         name: "discover-from",
@@ -254,57 +249,57 @@ pub static DOCS: [Doc; 46] = [
         name: "require",
         kind: "keyword",
         anchor: "constraints",
-        example: "require image count>=2 per [subject, visit]\nrequire image run=1,2 per [subject, visit]",
-        summary: "Stops the run if any group fails, checked against what `exclude` and `drop` leave. A rule counts artifacts or requires particular values in each group. A rule that finds no group at all is an error.",
+        example: "require [subject, visit] where image count>=2\nrequire [subject, visit] where image has run=1,2",
+        summary: "Stops the run if any group fails, checked against what named and conditional `exclude` leave. A rule counts artifacts or requires particular values in each group. A rule that finds no group at all is an error.",
     },
     Doc {
-        name: "per",
+        name: "require-where",
         kind: "keyword",
         anchor: "constraints",
-        example: "require image count=1 per [subject, visit]",
-        summary: "The dimensions a `require` rule groups by. Each group is checked on its own.",
+        example: "require [subject, visit] where image count=1",
+        summary: "Introduces a `require` rule's condition, after the groups it checks: the source or discovery rule to count, then a `count`, `has` values, or both. Each group is checked on its own.",
     },
     Doc {
         name: "count",
         kind: "keyword",
         anchor: "constraints",
-        example: "require image count>=2 per [subject, visit]\ndrop [sub] where sessions count<2",
+        example: "require [subject, visit] where image count>=2\nexclude [sub] where sessions count<2",
         summary: "How many artifacts of a source, or contexts of a discovery, each group holds, compared with `=`, `!=`, `>=`, `<=`, `>` or `<`.",
     },
     Doc {
-        name: "drop",
+        name: "exclude-where",
         kind: "keyword",
-        anchor: "drop-groups-that-fail-a-criterion",
-        example: "drop [sub] where sessions count<2\ndrop [sub, ses] where bold missing run=1,2",
-        summary: "Removes every group that meets its condition, with every artifact and discovered context in it. Judged after every `exclude` and before every `require`, whatever order the rules are written in. A rule that would remove every group is an error. Each removed group is reported and recorded in the `.spitout`.",
-    },
-    Doc {
-        name: "drop-where",
-        kind: "keyword",
-        anchor: "drop-groups-that-fail-a-criterion",
-        example: "drop [sub, ses] where t1w count=0",
-        summary: "Introduces a `drop` rule's condition: the source or discovery rule to count, then a `count`, `missing` values or `has` values.",
+        anchor: "exclude-groups-that-meet-a-condition",
+        example: "exclude [sub, ses] where t1w count=0",
+        summary: "Introduces a conditional `exclude` rule's condition: the source or discovery rule to count, then a `count`, `missing` values or `has` values.",
     },
     Doc {
         name: "missing",
         kind: "keyword",
-        anchor: "drop-groups-that-fail-a-criterion",
-        example: "drop [sub, ses] where bold missing run=1,2",
+        anchor: "exclude-groups-that-meet-a-condition",
+        example: "exclude [sub, ses] where bold missing run=1,2",
         summary: "Removes each group without one of the values: here, a session without a run 1 or without a run 2.",
     },
     Doc {
         name: "has",
         kind: "keyword",
-        anchor: "drop-groups-that-fail-a-criterion",
-        example: "drop [sub, ses] where bold has run=3",
+        anchor: "exclude-groups-that-meet-a-condition",
+        example: "exclude [sub, ses] where bold has run=3",
         summary: "Removes each group with one of the values: here, a session with a run 3.",
+    },
+    Doc {
+        name: "require-has",
+        kind: "keyword",
+        anchor: "constraints",
+        example: "require [subject, visit] where image has run=1,2",
+        summary: "Requires each group to hold every one of the values: here, a run 1 and a run 2 in each visit.",
     },
     Doc {
         name: "exclude",
         kind: "keyword",
         anchor: "exclude-named-artifacts",
-        example: "exclude bold[sub=02,ses=02,run=3]    # corrupted\nexclude [sub=07]                     # withdrew consent",
-        summary: "Removes artifacts by name, while their files stay where they are. A source with all its dimensions names one artifact; values alone name a group of every source; a source with some dimensions names part of that source. A comment on the line is kept as the reason. Applies before every other rule, and an exclude that matches nothing is an error.",
+        example: "exclude bold[sub=02,ses=02,run=3]    # corrupted\nexclude [sub] where sessions count<2",
+        summary: "Removes named artifacts or groups and groups meeting a condition. Named exclusions apply before scanning; conditional exclusions run against the observed inventory before `require`. An exclude that names nothing or removes every group is an error.",
     },
     Doc {
         name: "exclude-from",
@@ -387,15 +382,15 @@ pub static DOCS: [Doc; 46] = [
         name: "removed:",
         kind: "header",
         anchor: "inputs",
-        example: "removed:\n    [sub=07]\n        rule: drop [sub] where sessions count<2\n        at: line 6\n        found: 1",
-        summary: "What the recipe's `exclude` and `drop` rules removed, each with its rule, line, count found and reason. A record, not a rule: the records above already leave these out, and `dag` copies it into the `.spitdag`.",
+        example: "removed:\n    [sub=07]\n        rule: exclude [sub] where sessions count<2\n        at: line 6\n        found: 1",
+        summary: "What the recipe's `exclude` rules removed, each with its rule, line, count found and reason. A record, not a rule: the records above already leave these out, and `dag` copies it into the `.spitdag`.",
     },
     Doc {
         name: "check",
         kind: "keyword",
         anchor: "checks",
-        example: "check ndim(n): check_ndim {@path} {n}\ncheck nonempty: test -s {@path}",
-        summary: "Declares a test of one artifact, run by a backend: `{@path}` is the artifact, and each `{param}` the text an `@ check(...)` gives it. A nonzero exit fails the job, even when its command succeeded. SPIT does not run it.",
+        example: "check ndim(n): check_ndim {@path} {n}\ncheck nonempty: test -s {@path}\ncheck: nonempty",
+        summary: "Declares a test of one artifact, run by a backend: `{@path}` is the artifact, and each `{param}` the text an `@ check(...)` gives it. A nonzero exit fails the job, even when its command succeeded. SPIT does not run it. A bare `check:` line lists the checks every output in the file, or in the stage it is written in, runs; `!name` drops one a wider scope sets.",
     },
     Doc {
         name: "check-clause",
@@ -410,6 +405,27 @@ pub static DOCS: [Doc; 46] = [
         anchor: "checks",
         example: "check nonempty: test -s {@path}",
         summary: "In a `check`, the path of the artifact being checked. A check's command must use it.",
+    },
+    Doc {
+        name: "digits",
+        kind: "shape",
+        anchor: "shapes-on-a-source-placeholder",
+        example: "path run: raw/run-{run:digits}.csv",
+        summary: "A shape for a placeholder in a source's path rule: one or more digits, as `07` or `120`. A file whose name has anything else there is not read as that source. Leading zeros are kept in the value.",
+    },
+    Doc {
+        name: "year",
+        kind: "shape",
+        anchor: "shapes-on-a-source-placeholder",
+        example: "path report: reports/{year:year}/summary.csv",
+        summary: "A shape for a placeholder in a source's path rule: four digits, from 1900 to 2099, as `2026`.",
+    },
+    Doc {
+        name: "date",
+        kind: "shape",
+        anchor: "shapes-on-a-source-placeholder",
+        example: "path log: logs/{server}/{date:date}.log",
+        summary: "A shape for a placeholder in a source's path rule: a date written `YYYY-MM-DD`, a real day in a year from 1900 to 2099, as `2026-09-01`. `2026-13-01` and `2026-9-1` are not read.",
     },
 ];
 
@@ -492,15 +508,15 @@ fn statement(line: &str) -> Option<(Word, usize)> {
             Keyword::Operation => Word::Operation,
             Keyword::Command => Word::Command,
             Keyword::Verify => Word::Verify,
-            Keyword::Check => Word::Check,
+            Keyword::Check | Keyword::Checks => Word::Check,
             Keyword::Require => Word::Require,
-            Keyword::Drop => Word::Drop,
+            Keyword::Drop => return None,
             Keyword::Exclude => Word::Exclude,
             Keyword::Path => Word::Path,
             Keyword::Ext => Word::Ext,
             Keyword::Stage => Word::Stage,
             Keyword::Dimensions => Word::Dimensions,
-            Keyword::Sidecars => Word::Sidecars,
+            Keyword::Sidecars => return None,
             Keyword::Skip | Keyword::ShellSource => return None,
         };
         let length = if word == Word::Ext {
@@ -584,6 +600,9 @@ fn rule_word(code: &str, range: Range<usize>, statement: Option<Word>) -> Option
     match (statement?, text) {
         (Word::Operation, "many") if before.ends_with(':') => Some(Word::Many),
         (Word::Operation, "beside") if before.contains("->") => Some(Word::Beside),
+        (Word::Source, "beside") if before.split_whitespace().count() > 1 && spaced => {
+            Some(Word::Beside)
+        }
         (Word::Use, "as") if spaced => Some(Word::UseAs),
         (Word::Use, "from") if spaced => Some(Word::UseFrom),
         (Word::Discover, "from") if after.starts_with("dirs ") => Some(Word::DiscoverFrom),
@@ -591,13 +610,14 @@ fn rule_word(code: &str, range: Range<usize>, statement: Option<Word>) -> Option
         (Word::Exclude, "from") if spaced && before.trim_start() == "exclude" => {
             Some(Word::ExcludeFrom)
         }
-        (Word::Require | Word::Drop, "count") if after.starts_with(['=', '!', '>', '<']) => {
+        (Word::Require | Word::Exclude, "count") if after.starts_with(['=', '!', '>', '<']) => {
             Some(Word::Count)
         }
-        (Word::Require, "per") if after.starts_with('[') => Some(Word::Per),
-        (Word::Drop, "where") if before.ends_with(']') => Some(Word::DropWhere),
-        (Word::Drop, "missing") if before.contains(" where ") => Some(Word::Missing),
-        (Word::Drop, "has") if before.contains(" where ") => Some(Word::Has),
+        (Word::Require, "where") if before.ends_with(']') => Some(Word::RequireWhere),
+        (Word::Require, "has") if before.contains(" where ") => Some(Word::RequireHas),
+        (Word::Exclude, "where") if before.ends_with(']') => Some(Word::ExcludeWhere),
+        (Word::Exclude, "missing") if before.contains(" where ") => Some(Word::Missing),
+        (Word::Exclude, "has") if before.contains(" where ") => Some(Word::Has),
         _ => None,
     }
 }
@@ -643,6 +663,19 @@ fn placeholders(code: &str, statement: Option<Word>, found: &mut Vec<(Range<usiz
         };
         if let Some(word) = word {
             found.push((start..end, word));
+        } else if !in_command && !in_check {
+            // A shape after the `:` of a dimension, as in `{date:date}`.
+            if let Some((dimension, shape)) = name.split_once(':') {
+                let word = match shape {
+                    "digits" => Some(Word::ShapeDigits),
+                    "year" => Some(Word::ShapeYear),
+                    "date" => Some(Word::ShapeDate),
+                    _ => None,
+                };
+                if let (Some(word), false) = (word, dimension.starts_with('@')) {
+                    found.push((end - shape.len()..end, word));
+                }
+            }
         } else if in_command {
             for (suffix, word) in [(".dir", Word::Dir), (".stem", Word::Stem)] {
                 if name.len() > suffix.len() && name.ends_with(suffix) {

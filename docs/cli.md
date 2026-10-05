@@ -26,18 +26,20 @@ Use `-` in place of a `.spitout` to read it from standard input. A recipe and a 
 | Flag | With | Effect |
 | --- | --- | --- |
 | `--path-rules` | `check` | List each product's effective path rule and its source. |
+| `--calls` | `check` on a `.spit` | List calls to operations carried out by steps and their expanded steps; with `--json`, include a `calls` array. |
 | `--unmatched` | `inputs` | List dataset files no source path rule reads. |
 | `--suggest` | `inputs` | Suggest source declarations and rules from files under the root. |
 | `--counts` | `dag` | Print a job count for every step and a total. |
 | `--paths` | `dag` | Print artifact paths in the plan. |
 | `--commands` | `dag` | Print the commands the runner would execute. |
 | `--partial` | `dag` | Keep jobs with complete inputs and record left-out outputs. |
+| `--by-target` | `artifacts` | Group incomplete artifacts under the final targets they prevent. |
 | `-o <file>` | `inputs`, `dag` | Save a `.spitout` or `.spitdag`, respectively. |
 | `--json` | `check`, `dag` | Print structured diagnostics or the DAG. |
 | `--stdin` | `check` | Read the file text from standard input, retaining its path for relative references. |
 | `--hovers` | `check --json` | Include editor hovers and documentation for language words. |
 
-`--counts` can precede either job view. `--paths` and `--commands` can print together. With `-o`, `--counts` and `--commands` also print while the DAG is saved; `--paths` conflicts with `-o`. `--json` is a separate output form. For diagnostics fields, consult `spit help check` and the [README's option table](https://github.com/eclnz/spit/blob/dev/README.md#cli-commands-and-options).
+`--counts` can precede either job view. `--paths` and `--commands` can print together. With `-o`, `--counts` and `--commands` also print while the DAG is saved; `--paths` conflicts with `-o`. `--json` is a separate output form. `check --calls` cannot combine with `--path-rules` or `--hovers`. For diagnostics fields, consult `spit help check` and the [README's option table](https://github.com/eclnz/spit/blob/dev/README.md#cli-commands-and-options).
 
 ## A practical sequence
 

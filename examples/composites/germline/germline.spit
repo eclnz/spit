@@ -1,0 +1,31 @@
+# Germline variant calling for one sample with BWA, samtools and GATK, as
+# an operation carried out by steps: each lane is aligned and sorted, the
+# lanes are merged, duplicates are marked, and GATK calls a GVCF. A pipeline
+# imports `align_sample` and calls it once per sample; each call files its
+# own products under its first output, so two calls never share a file.
+
+check nonempty: test -s {@path}
+check bam_ok: samtools quickcheck {@path}
+
+operation bwa_align(reference: Fasta, r1: Fastq, r2: Fastq) -> Sam .sam
+command bwa_align: bwa mem -o {@output} {reference} {r1} {r2}
+operation sort_reads(sam: Sam) -> Bam .bam @ check(bam_ok)
+command sort_reads: samtools sort -o {@output} {sam}
+operation merge_lanes(lanes: many Bam) -> Bam .bam
+command merge_lanes: samtools merge -o {@output} {lanes}
+
+# GATK writes the index beside the BAM, where the caller looks for it.
+operation mark_duplicates(bam: Bam) -> (marked: Bam .bam @ check(nonempty), index: BamIndex .bai beside marked, metrics: DuplicationMetrics .txt)
+command mark_duplicates: gatk MarkDuplicates -I {bam} -O {marked} -M {metrics} --CREATE_INDEX true
+operation call_gvcf(reference: Fasta, bam: Bam, index: BamIndex) -> Gvcf .g.vcf.gz
+command call_gvcf: gatk HaplotypeCaller -R {reference} -I {bam} -O {@output} -ERC GVCF
+
+# One sample's paired reads, a pair per lane, aligned against `reference`.
+# The BAM is checked as a BAM once duplicates are marked, beside the
+# non-empty check `mark_duplicates` makes itself.
+operation align_sample(reference: Fasta, r1: Fastq, r2: Fastq) -> (bam: Bam @ check(bam_ok), gvcf: Gvcf @ check(nonempty)):
+    aligned = bwa_align(reference, r1, r2)
+    sorted = sort_reads(aligned)
+    merged = merge_lanes(sorted @ vary(lane))
+    bam, index, metrics = mark_duplicates(merged)
+    gvcf = call_gvcf(reference, bam, index)

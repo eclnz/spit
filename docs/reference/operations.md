@@ -12,6 +12,17 @@ operation split(series: Series) -> (low: Series .csv, high: Series .csv)
 
 An operation must be declared before its first call. The name after `operation` is global, including when the declaration is inside a stage. Inputs go in parentheses and calls fill them in that order. A single output can be unnamed after `->`; several outputs are enclosed in parentheses and each has a port name. Types and output extensions may be omitted. `operation copy(input)` is an untyped single-output form.
 
+## Carry out an operation with steps
+
+End an operation's header with `:` and indent steps beneath it to carry it out without a `command` line. Name all its outputs so the body can assign them:
+
+```spit
+operation tidy(input: Lines) -> (result: Lines):
+    result = clean(input)
+```
+
+A call expands into the body's steps; a body may call another operation with a body. The operation's declared checks attach where its body reads an input or makes an output. Its output path and extension come from the step that makes it. `spit check pipeline.spit --calls` lists the expansion. See [operations carried out by steps](../language-reference.md#operations-carried-out-by-steps).
+
 ## Input and output forms
 
 | Form | Example | Effect |

@@ -1,5 +1,5 @@
 pipeline selectors.spit
 root selectors_data
 
-require reading day=1,2 per [station]
-require policy count=1 per [station]
+require [station] where reading has day=1,2
+require [station] where policy count=1

@@ -3,6 +3,7 @@
 
 use std::fmt;
 use std::ops::Range;
+use std::sync::Arc;
 
 /// A line and a byte range within it.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -27,6 +28,29 @@ pub struct Location {
     pub(crate) focus: Option<Focus>,
 }
 
+/// An error in an imported file's own text: which file, and where in it,
+/// and the `use` lines that read it, nearest the file first.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct Imported {
+    /// The file's path from the folder of the pipeline being checked.
+    pub(crate) file: String,
+    /// The error's line and columns in that file.
+    pub(crate) place: Place,
+    /// That file's text, to count columns in characters or UTF-16 code units.
+    pub(crate) text: Arc<str>,
+    pub(crate) uses: Vec<UseLine>,
+}
+
+/// A `use` line that reads an imported file.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct UseLine {
+    /// The file the line is in, from the pipeline's folder; `None` while it
+    /// is the file being read, until the pipeline's own name is known.
+    pub(crate) file: Option<String>,
+    pub(crate) place: Place,
+    pub(crate) text: String,
+}
+
 /// The part of a line an error is about, before its columns are known.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum Focus {
@@ -36,9 +60,34 @@ pub(crate) enum Focus {
     /// A slice of the line being parsed, by its [`address_of`], resolved to
     /// columns with [`columns_at`] once the parser is back at the line.
     Address(Range<usize>),
+    /// The error is in a file the text imports: the line and columns of the
+    /// error are those of the `use` line that reads it, and this says where
+    /// it is in that file. Kept here, not in a field of its own, so that an
+    /// error stays small on the path that succeeds.
+    Imported(Box<Imported>),
 }
 
 impl Location {
+    /// Where the error is in the imported file that has it, when it is in one.
+    pub(crate) fn imported(&self) -> Option<&Imported> {
+        match &self.focus {
+            Some(Focus::Imported(imported)) => Some(imported),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn imported_mut(&mut self) -> Option<&mut Imported> {
+        match &mut self.focus {
+            Some(Focus::Imported(imported)) => Some(imported),
+            _ => None,
+        }
+    }
+
+    /// Mark the error as in an imported file.
+    pub(crate) fn set_imported(&mut self, imported: Imported) {
+        self.focus = Some(Focus::Imported(Box::new(imported)));
+    }
+
     /// The line and columns, narrowed to the focus when `text` contains it:
     /// first inside the columns, then as a word elsewhere on the line, such
     /// as the operation a command is declared for.
@@ -133,11 +182,20 @@ macro_rules! message_error {
 }
 pub(crate) use message_error;
 
-/// Reads as `line 3: message`, or just the message without a line.
+/// Reads as `line 3: message`, or just the message without a line. An error
+/// in an imported file reads as `line 1: in `libs/lib.spit` at line 4:
+/// message`, with the line of the `use` line first.
 impl<E: fmt::Display> fmt::Display for Located<E> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if let Some(line) = self.location.line {
             write!(f, "line {line}: ")?;
+        }
+        if let Some(imported) = self.location.imported() {
+            write!(
+                f,
+                "in `{}` at line {}: ",
+                imported.file, imported.place.line
+            )?;
         }
         self.error.fmt(f)
     }
@@ -201,6 +259,27 @@ pub(crate) fn find_word(line: &str, from: usize, word: &str) -> Option<Range<usi
         start = begin + word.len();
     }
     None
+}
+
+/// The lines of one text, collected once so that a line is found by its
+/// number in one step, not by counting from the top. They are what
+/// `str::lines` gives, so a final empty line and a trailing `\r` are as
+/// `lines` treats them.
+pub(crate) struct Lines<'a>(Vec<&'a str>);
+
+impl<'a> Lines<'a> {
+    pub(crate) fn new(text: &'a str) -> Self {
+        Self(text.lines().collect())
+    }
+
+    pub(crate) fn iter(&self) -> impl Iterator<Item = &'a str> + '_ {
+        self.0.iter().copied()
+    }
+
+    /// The line numbered `line`, from 1.
+    pub(crate) fn get(&self, line: usize) -> Option<&'a str> {
+        self.0.get(line.checked_sub(1)?).copied()
+    }
 }
 
 /// The UTF-16 code unit range of a byte range in `line`, as editors count.

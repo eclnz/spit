@@ -5,7 +5,6 @@
 
 mod support;
 
-use std::path::Path;
 use std::process::Command;
 
 use spit::{
@@ -44,13 +43,13 @@ score = compare(averaged, reference)
 const DISCOVER: &str = "discover sessions: [sub, ses] from dirs sub-{sub}/ses-{ses}\n";
 /// A `require` rule that the gaps dataset fails.
 const STRICT: &str = "\
-require image count>=2 per [sub, ses]
-require reference count=1 per [sub, ses]
+require [sub, ses] where image count>=2
+require [sub, ses] where reference count=1
 ";
 /// A `drop` rule that removes what the gaps dataset lacks.
 const DROP: &str = "\
-drop [sub, ses] where image count<2
-require reference count=1 per [sub, ses]
+exclude [sub, ses] where image count<2
+require [sub, ses] where reference count=1
 ";
 
 /// Three subjects with a mask, each with two sessions of a reference and
@@ -106,74 +105,49 @@ fn run(tree: &Tree, args: &[&str]) -> String {
         .replace(&root.display().to_string(), "<root>")
 }
 
-/// Compare `actual` with the fixture `name`, or write it with `SPIT_BLESS`.
-fn check(name: &str, actual: &str) {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/fixtures/outputs")
-        .join(format!("{name}.txt"));
-    if std::env::var_os("SPIT_BLESS").is_some() {
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(&path, actual).unwrap();
-        return;
-    }
-    let expected = std::fs::read_to_string(&path)
-        .unwrap_or_else(|_| panic!("no fixture {}; run with SPIT_BLESS=1", path.display()));
-    if actual != expected {
-        let line = expected
-            .lines()
-            .zip(actual.lines())
-            .position(|(expected, actual)| expected != actual)
-            .unwrap_or_else(|| expected.lines().count().min(actual.lines().count()));
-        panic!(
-            "{name} differs from {} at line {}:\nexpected: {:?}\nactual:   {:?}",
-            path.display(),
-            line + 1,
-            expected.lines().nth(line),
-            actual.lines().nth(line),
-        );
-    }
-}
-
 #[test]
 fn a_complete_dataset_prints_as_before() {
     let tree = dataset(false);
     let runs: [&[&str]; 5] = [
         &["inputs", "strict.spitin", "-o", "complete.spitout"],
-        &["dag", "strict.spitin"],
+        &["dag", "strict.spitin", "--jobs"],
         &["dag", "strict.spitin", "--json"],
         &["dag", "strict.spitin", "--paths"],
         &["artifacts", "strict.spitin"],
     ];
     let mut text: String = runs.iter().map(|args| run(&tree, args)).collect();
     text.push_str(&std::fs::read_to_string(tree.path().join("complete.spitout")).unwrap());
-    check("complete", &text);
+    support::check_output("complete", &text);
     let spitout: [&[&str]; 2] = [
-        &["dag", "pipeline.spit", "complete.spitout"],
+        &["dag", "pipeline.spit", "complete.spitout", "--jobs"],
         &["artifacts", "pipeline.spit", "complete.spitout"],
     ];
     let text: String = spitout.iter().map(|args| run(&tree, args)).collect();
-    check("complete_spitout", &text);
+    support::check_output("complete_spitout", &text);
 }
 
 #[test]
 fn command_lines_print_as_before() {
     let tree = dataset(false);
-    let runs: [&[&str]; 2] = [
+    let runs: [&[&str]; 3] = [
         &["dag", "strict.spitin", "--commands"],
         &["dag", "strict.spitin", "--commands", "--paths"],
+        // Plain `dag` prints the commands, as `--commands` does.
+        &["dag", "strict.spitin"],
     ];
     let text: String = runs.iter().map(|args| run(&tree, args)).collect();
-    check("commands", &text);
+    support::check_output("commands", &text);
 }
 
 #[test]
 fn a_dataset_with_gaps_prints_as_before() {
     let tree = dataset(true);
-    let runs: [&[&str]; 5] = [
+    let runs: [&[&str]; 6] = [
         &["dag", "strict.spitin"],
         &["artifacts", "strict.spitin"],
+        &["artifacts", "strict.spitin", "--by-target"],
         &["inputs", "drop.spitin", "-o", "drop.spitout"],
-        &["dag", "drop.spitin"],
+        &["dag", "drop.spitin", "--jobs"],
         &["artifacts", "drop.spitin"],
     ];
     let mut text = String::new();
@@ -183,7 +157,7 @@ fn a_dataset_with_gaps_prints_as_before() {
             text.push_str(&std::fs::read_to_string(tree.path().join("drop.spitout")).unwrap());
         }
     }
-    check("gaps", &text);
+    support::check_output("gaps", &text);
 }
 
 /// Diagnosing settled records in memory must give what writing them as a
@@ -238,8 +212,8 @@ fn recipes_diagnosed_in_memory_match_their_text() {
             "{case}"
         );
         assert_eq!(
-            render_artifacts(&records.report),
-            render_artifacts(&text_records.report),
+            render_artifacts(&checked.pipeline, &records.report),
+            render_artifacts(&text_checked.pipeline, &text_records.report),
             "{case}"
         );
         assert_eq!(

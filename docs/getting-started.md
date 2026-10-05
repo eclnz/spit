@@ -57,6 +57,6 @@ pipeline analysis.spit
 root data
 ```
 
-Run `spit inputs dataset.spitin` to see the source artifacts SPIT finds, then `spit dag dataset.spitin --counts --commands` to inspect the jobs. If source paths already live in the pipeline and no recipe rules are needed, use `spit dag analysis.spit --root data` instead. Read [recipes and input inventories](guide/recipes.md) before adding `discover`, `exclude`, `drop`, or `require` rules.
+Run `spit inputs dataset.spitin` to see the source artifacts SPIT finds, then `spit dag dataset.spitin --counts --commands` to inspect the jobs. If source paths already live in the pipeline and no recipe rules are needed, use `spit dag analysis.spit --root data` instead. Read [recipes and input inventories](guide/recipes.md) before adding `discover`, `exclude`, or `require` rules.
 
 Next: [How SPIT thinks about data](guide/concepts.md) and [matching and collections](guide/matching.md).

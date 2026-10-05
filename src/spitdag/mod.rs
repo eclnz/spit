@@ -10,7 +10,7 @@ use std::io;
 
 use crate::model::{
     identity, natural_cmp, ArtifactId, ArtifactInstance, Artifacts, EntityBinding, JobId, Removal,
-    StepId,
+    SourceFile, StepId,
 };
 use crate::types::TypeExpr;
 
@@ -19,7 +19,7 @@ pub use crate::check::When;
 use self::write::{write_document, PIECE};
 
 /// The schema version a `.spitdag` is written with.
-pub const SPITDAG_VERSION: usize = 6;
+pub const SPITDAG_VERSION: usize = 7;
 
 /// A resolved DAG with its paths bound and its commands expanded. Its
 /// artifacts are the resolved DAG's, each kept once with its path; jobs,
@@ -37,6 +37,10 @@ pub struct BoundDag {
     /// Each step of the resolved DAG, with its ports named, which jobs
     /// refer to by [`StepId`].
     pub steps: Vec<BoundStep>,
+    /// The files the pipeline was read from, with their blob ids.
+    pub pipeline_files: Vec<SourceFile>,
+    /// Each call to an operation with a body, which steps name.
+    pub calls: Vec<BoundCall>,
     artifacts: Artifacts,
     /// Each artifact's file, relative to the dataset root, by id; empty for
     /// an artifact no job uses.
@@ -67,6 +71,32 @@ pub struct BoundStep {
     /// The checks its jobs run, which their [`BoundCheck`]s refer to by
     /// index.
     pub checks: Vec<StepCheck>,
+    /// For a step a call made, the call and the line of the body's step.
+    pub origin: Option<StepCall>,
+}
+
+/// The call a step comes from, and the line of the step in the body of the
+/// operation called, in the file that declares it.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct StepCall {
+    /// The call's position in [`BoundDag::calls`].
+    pub call: usize,
+    pub line: usize,
+}
+
+/// A call to an operation with a body, which the DAG holds as its steps.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BoundCall {
+    pub operation: String,
+    /// The name the call's own products are filed under.
+    pub instance: String,
+    /// The call whose body holds this one, by position.
+    pub parent: Option<usize>,
+    /// The file declaring the operation called, in [`BoundDag::pipeline_files`].
+    pub file: Option<usize>,
+    /// Where the call is written: a file in [`BoundDag::pipeline_files`], and a line.
+    pub at_file: Option<usize>,
+    pub at_line: usize,
 }
 
 /// A check every job of a step runs on the artifacts of one port.
@@ -132,10 +162,12 @@ pub enum ArgPart {
     /// The folder of an artifact's file, as `{image.dir}` gives it.
     Dir(ArtifactId),
     /// An artifact's file name without its extension, as `{image.stem}`
-    /// gives it for a tool that adds the extension itself.
+    /// gives it for a tool that adds the extension itself. `extension_len`
+    /// is the byte length of the output port's extension, which the artifact's
+    /// path ends with, so no job holds a copy of the extension's text.
     Stem {
         artifact: ArtifactId,
-        extension: String,
+        extension_len: usize,
     },
 }
 
@@ -148,8 +180,8 @@ impl ArgPart {
             Self::Dir(artifact) => folder_of(dag.path(*artifact)),
             Self::Stem {
                 artifact,
-                extension,
-            } => stem_of(dag.path(*artifact), extension),
+                extension_len,
+            } => stem_of(dag.path(*artifact), *extension_len),
         }
     }
 }
@@ -159,10 +191,14 @@ fn folder_of(path: &str) -> &str {
     path.rsplit_once('/').map_or(".", |(folder, _)| folder)
 }
 
-/// The file name of `path` without `extension`.
-fn stem_of<'a>(path: &'a str, extension: &str) -> &'a str {
+/// The file name of `path` without its last `extension_len` bytes, which are
+/// the extension its output port declares.
+fn stem_of(path: &str, extension_len: usize) -> &str {
     let name = path.rsplit_once('/').map_or(path, |(_, name)| name);
-    name.strip_suffix(extension).unwrap_or(name)
+    name.len()
+        .checked_sub(extension_len)
+        .and_then(|end| name.get(..end))
+        .unwrap_or(name)
 }
 
 impl<'a> BoundArtifact<'a> {
@@ -205,6 +241,8 @@ impl BoundDag {
             left_out: Vec::new(),
             jobs,
             steps,
+            pipeline_files: Vec::new(),
+            calls: Vec::new(),
             artifacts,
             paths,
             dimensions,

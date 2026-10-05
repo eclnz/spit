@@ -58,9 +58,41 @@ fn dag_resolves_a_pipeline_over_a_spitout() {
         "dag",
         "examples/types/typed.spit",
         "examples/types/typed.spitout",
+        "--jobs",
     ]);
     assert!(output.status.success(), "{}", stderr(&output));
     assert!(stdout(&output).starts_with("Job 1\n"));
+}
+
+#[test]
+fn plain_dag_prints_the_commands_and_jobs_lists_the_artifacts() {
+    let recipe = "examples/commands/command_demo/command_demo.spitin";
+    let plain = spit(&["dag", recipe]);
+    let commands = spit(&["dag", recipe, "--commands"]);
+    assert!(plain.status.success(), "{}", stderr(&plain));
+    assert_eq!(stdout(&plain), stdout(&commands));
+    assert!(stdout(&plain).starts_with("Job 1  sort_lines\n  run:    sort"));
+
+    let jobs = spit(&["dag", recipe, "--jobs"]);
+    assert!(stdout(&jobs).starts_with("Job 1\n  operation: sort_lines\n  inputs:\n"));
+    for other in ["--commands", "--paths", "--json"] {
+        let conflict = spit(&["dag", recipe, "--jobs", other]);
+        assert!(
+            stderr(&conflict).starts_with(&format!("error: --jobs cannot be used with {other}\n"))
+                || stderr(&conflict)
+                    .starts_with(&format!("error: {other} cannot be used with --jobs\n")),
+            "{other}: {}",
+            stderr(&conflict)
+        );
+    }
+
+    // A pipeline without commands points to the listing.
+    let bare = spit(&["dag", "examples/basic/basic.spitin"]);
+    assert!(bare.status.success(), "{}", stderr(&bare));
+    assert!(stderr(&bare).contains(
+        "note: no job has a command; `dag --jobs` lists each job's inputs and outputs\n"
+    ));
+    assert!(!stderr(&plain).contains("no job has a command"));
 }
 
 #[test]
@@ -167,6 +199,28 @@ fn partial_dag_plans_the_complete_stores_and_records_the_rest() {
     assert!(json.contains("\"operation\":\"chain_summary\""));
     assert!(json.contains("\"identity\":\"report[store=s03]\""));
     assert!(json.contains("\"input `prices` needs") || json.contains("no `pricing` artifact"));
+}
+
+#[test]
+fn artifacts_by_target_groups_the_weekly_stores_under_their_final_target() {
+    let recipe = format!(
+        "{}/tests/fixtures/weekly_stores/weekly.spitin",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let grouped = spit(&["artifacts", &recipe, "--by-target"]);
+    assert!(grouped.status.success(), "{}", stderr(&grouped));
+    let text = stdout(&grouped);
+    assert!(text.starts_with("Complete artifacts: 50\n\nFinal targets that cannot be made: 1 (incomplete artifacts: 10)\n  summary : Report  (chain_summary)\n    report[store=s03]"));
+    // A reason's second line lines up under its first.
+    assert!(text.contains(
+        "\n        pricing[store=S07] exists; its `store` differs only in letter case\n"
+    ));
+    assert!(!text.contains("(job "));
+    assert!(text.contains("\nUnused sources: 1\n"));
+
+    let plain = spit(&["artifacts", &recipe]);
+    assert!(stdout(&plain).contains("Incomplete artifacts: 10\n"));
+    assert!(stdout(&plain).contains("(job "));
 }
 
 #[test]
@@ -284,7 +338,7 @@ fn check_json_reads_the_pipeline_file_and_dag_json_emits_the_spitdag() {
     let dag = run();
     assert!(dag.status.success(), "{}", stderr(&dag));
     let graph = stdout(&dag);
-    assert!(graph.starts_with("{\"version\":6,\"generator\":{\"name\":\"spit\",\"version\":\""));
+    assert!(graph.starts_with("{\"version\":7,\"generator\":{\"name\":\"spit\",\"version\":\""));
     // The `.spitout`'s root, relative to its folder, is recorded in full.
     assert!(
         graph.contains("/examples/commands/command_demo/command_demo_data\",\"external_inputs\":["),
@@ -297,7 +351,7 @@ fn check_json_reads_the_pipeline_file_and_dag_json_emits_the_spitdag() {
     );
     assert_eq!(graph.matches("{\"product\":\"merged\"").count(), 4);
     assert!(
-        graph.contains("\"executables\":[\"sort\"],\"removed\":[],\"left_out\":[],\"jobs\":["),
+        graph.contains("\"executables\":[\"sort\"],\"removed\":[],\"left_out\":[],\"pipeline_files\":[{\"path\":\"command_demo.spit\",\"blob\":\""),
         "{graph}"
     );
     assert!(
@@ -624,15 +678,15 @@ fn drop_rules_that_remove_every_group_stop_each_command() {
     let recipe = tree.write(
         "data.spitin",
         "pipeline analysis.spit\nroot .\ndiscover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}\n\
-         drop [sub] where sessions count<2\nrequire sessions count>=1 per [sub]\n",
+         exclude [sub] where sessions count<2\nrequire [sub] where sessions count>=1\n",
     );
     for command in ["inputs", "dag", "artifacts"] {
         let output = spit(&[command, recipe.to_str().unwrap()]);
         assert!(!output.status.success(), "{command}");
         assert!(
             stderr(&output).contains(
-                "error: drop rules removed all 2 [sub] groups, leaving nothing to plan: \
-                 `drop [sub] where sessions count<2` (line 4)"
+                "error: conditional exclude rules removed all 2 [sub] groups, leaving nothing to plan: \
+                 `exclude [sub] where sessions count<2` (line 4)"
             ),
             "{command}: {}",
             stderr(&output)

@@ -4,7 +4,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Range;
 
-use crate::model::{CoverageAction, CoverageRule, Invocation, PipelineIndex};
+use crate::model::{CoverageRule, Invocation, PathOrigin, PipelineIndex};
 use crate::span::{columns_of, content_columns, find_word, Place};
 
 use super::keyword::Keyword;
@@ -39,10 +39,17 @@ pub(crate) struct SourceMap {
     pub(crate) default_path: Option<Place>,
     /// Each stage's name in its `stage` header.
     pub(crate) stages: BTreeMap<String, Place>,
+    /// The `check:` list outside every stage.
+    pub(crate) default_checks: Option<Place>,
+    /// The `check:` lists inside stages, keyed by stage.
+    pub(crate) stage_checks: BTreeMap<String, Place>,
     /// Templates of the `path:` rules inside stages, keyed by stage.
     pub(crate) stage_paths: BTreeMap<String, Place>,
     /// Products and operations brought in by `use` lines.
     pub(crate) imported: BTreeSet<String>,
+    /// The text of each file an import read, by its path as
+    /// `Pipeline::files` gives it, for messages that point into it.
+    pub(crate) file_texts: BTreeMap<String, String>,
 }
 
 /// Where the parts of one step sit on its line.
@@ -117,12 +124,10 @@ impl SourceMap {
 
     /// The template of the path rule that `product` uses.
     pub(crate) fn path_rule(&self, index: &PipelineIndex<'_>, product: &str) -> Option<Place> {
-        if index.pipeline.product_paths.contains_key(product) {
-            self.paths.get(product).cloned()
-        } else if let Some((stage, _)) = index.stage_path_rule(product) {
-            self.stage_paths.get(stage).cloned()
-        } else {
-            self.default_path.clone()
+        match index.path_origin(product) {
+            Some((PathOrigin::Explicit, _)) => self.paths.get(product).cloned(),
+            Some((PathOrigin::Stage(stage), _)) => self.stage_paths.get(stage).cloned(),
+            _ => self.default_path.clone(),
         }
     }
 }
@@ -220,15 +225,10 @@ pub(super) fn rule_place(original: &str, number: usize, rule: &CoverageRule) -> 
     let content = &original[whole.clone()];
     let after_keyword =
         whole.end - Keyword::split(content).map_or(content.len(), |(_, rest)| rest.len());
-    // A `drop` rule writes its groups before its source; `require`, after.
-    let groups_first = rule.action == CoverageAction::Drop;
-    let open = if groups_first {
-        original[after_keyword..whole.end]
-            .find('[')
-            .map(|offset| after_keyword + offset)
-    } else {
-        None
-    };
+    // conditional `exclude` and `require` both write their groups before their source.
+    let open = original[after_keyword..whole.end]
+        .find('[')
+        .map(|offset| after_keyword + offset);
     let from = match open {
         Some(open) => original[open..whole.end]
             .find(']')
@@ -236,12 +236,7 @@ pub(super) fn rule_place(original: &str, number: usize, rule: &CoverageRule) -> 
         None => after_keyword,
     };
     let product = find_word(original, from, &rule.product).unwrap_or_else(|| whole.clone());
-    let dimensions = match open {
-        Some(open) => open..from,
-        None => original[product.end..whole.end]
-            .find('[')
-            .map_or_else(|| whole.clone(), |offset| product.end + offset..whole.end),
-    };
+    let dimensions = open.map_or_else(|| whole.clone(), |open| open..from);
     Rule {
         line: number,
         whole,
