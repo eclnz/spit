@@ -201,6 +201,10 @@ jobs  step
 
 An operation with a body names its outputs, as `-> (result: Type)`, since its steps assign them by name. An output takes its extension, folder and place from the step that writes it, so the header gives only its name and type. Such an operation takes no `command` or `verify` line; its steps' operations have their own.
 
+### Editor hovers
+
+Operation hovers show the declared input and output types. Long signatures place each port on a separate line. A declaration hover describes its body; a call hover shows only the expansion using the actual product names. Primitive operation hovers retain their matching and command information.
+
 ## Checks
 
 A `check` tests one artifact once its file exists, with the tools that understand it. Declare it once, then attach it with `@ check(...)` where it applies:

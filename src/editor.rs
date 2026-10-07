@@ -246,7 +246,8 @@ pub fn pipeline_hovers(text: &str, path: &Path) -> Vec<Hover> {
         else {
             continue;
         };
-        if let Some((signature, mut details)) = operation_info(&call.operation) {
+        if let Some((signature, _)) = operation_info(&call.operation) {
+            let mut details = Vec::new();
             details.push(format!("This call expands to: {}", steps.join("; ")));
             add(
                 location.operation(),
@@ -383,8 +384,7 @@ fn operation_signature(operation: &OperationDef) -> String {
             text.push_str(&checks_text(&port.checks));
             text
         })
-        .collect::<Vec<_>>()
-        .join(", ");
+        .collect::<Vec<_>>();
     let outputs = if operation.outputs.len() == 1 && operation.outputs[0].name == DEFAULT_OUTPUT {
         output_signature(&operation.outputs[0], false)
     } else {
@@ -398,7 +398,32 @@ fn operation_signature(operation: &OperationDef) -> String {
                 .join(", ")
         )
     };
-    format!("operation {}({inputs}) -> {outputs}", operation.name)
+    let signature = format!(
+        "operation {}({}) -> {outputs}",
+        operation.name,
+        inputs.join(", ")
+    );
+    if signature.len() <= 100 {
+        return signature;
+    }
+    let outputs = if operation.outputs.len() == 1 && operation.outputs[0].name == DEFAULT_OUTPUT {
+        outputs
+    } else {
+        format!(
+            "(\n    {}\n)",
+            operation
+                .outputs
+                .iter()
+                .map(|port| output_signature(port, true))
+                .collect::<Vec<_>>()
+                .join(",\n    ")
+        )
+    };
+    format!(
+        "operation {}(\n    {}\n) -> {outputs}",
+        operation.name,
+        inputs.join(",\n    ")
+    )
 }
 
 fn output_signature(port: &OutputPort, named: bool) -> String {
