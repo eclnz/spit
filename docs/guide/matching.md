@@ -1,4 +1,4 @@
-# Matching and collections
+# Matching
 
 The input with the most dimensions normally drives a step. SPIT makes a job for each observed driving artifact and looks up one artifact for each other ordinary input at the matching dimension values. It reports missing or ambiguous matches instead of silently choosing a file.
 
@@ -11,7 +11,7 @@ operation calibrate(series: Series, policy: Policy) -> Series
 calibrated = calibrate(reading, policy)
 ```
 
-Each `reading[station=...,day=...]` drives a job. That job reads the `policy` for the same station. A source with no dimensions matches every job. The [language reference](../language-reference.md#operations-and-commands) describes the exact matching rules.
+Each `reading[station=...,day=...]` drives a job. That job reads the `policy` for the same station. A source with no dimensions matches every job. The [language reference](../manual/operations.md#operations-and-commands) describes the exact matching rules.
 
 ## Choose and relax a match
 
@@ -43,4 +43,6 @@ forecast = predict(reading, model @ each(scenario))
 
 For each observed station reading, `@ each(scenario)` adds one job per observed scenario model. Its output gains `scenario`. This does not manufacture missing pairs *inside* the driving input: a ragged `[config, seed]` source still drives only its observed pairs. A later `@ vary(scenario)` can collect the forecasts again. When sources do not order `station` and `scenario` together, the `dimensions` line sets their order.
 
-For complete runnable examples, see the [sensor walkthrough](../examples.md#sensors-selectors-verification-and-two-outputs) and [ragged sweep](../examples.md#ragged-sweep-correlated-seeds-and-collection-order). The [reference](../language-reference.md#operations-and-commands) covers selectors, cardinality, output inference, and all restrictions.
+For complete runnable examples, see the [sensor walkthrough](sensors.md) and [ragged sweep](sweep.md). The [reference](../manual/operations.md#operations-and-commands) covers selectors, cardinality, output inference, and all restrictions.
+
+Next: [Paths](paths.md).

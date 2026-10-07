@@ -8,31 +8,59 @@ theme:
   features:
     - navigation.sections
     - navigation.indexes
+    - navigation.footer
     - content.code.copy
     - search.suggest
 markdown_extensions:
   - tables
+  - md_in_html
   - toc:
       permalink: true
 nav:
   - Home: index.md
-  - Getting started: getting-started.md
-  - Language guide:
-      - How SPIT thinks about data: guide/concepts.md
-      - Pipelines and operations: guide/pipelines.md
-      - Types and reusable definitions: guide/types-and-reuse.md
-      - Matching and collections: guide/matching.md
-      - Paths and file kinds: guide/paths.md
-      - Recipes and input inventories: guide/recipes.md
-      - Inspecting and diagnosing plans: guide/inspection.md
-  - Reference:
-      - Language catalog: reference/index.md
-      - Keywords and records: reference/keywords.md
-      - Operations and calls: reference/operations.md
-      - Selectors and clauses: reference/selectors.md
-      - Placeholders: reference/placeholders.md
-      - Complete language reference: language-reference.md
-      - Command line: cli.md
-      - DAG format: spitdag.md
+  - Guide:
+      - File flow: guide/file-flow.md
+      - First pipeline: guide/first-pipeline.md
+      - Pipeline:
+          - Products: guide/products.md
+          - Operations: guide/pipelines.md
+          - Matching: guide/matching.md
+          - Paths: guide/paths.md
+          - Types: guide/types-and-reuse.md
+          - Reuse: guide/reuse.md
+      - Recipe: guide/recipes.md
+      - Input inventory: guide/inventory.md
+      - Runnable DAG:
+          - Handoff: guide/dag.md
+          - Inspection: guide/inspection.md
+      - Walkthroughs:
+          - Sweep: guide/sweep.md
+          - Cohort: guide/cohort.md
+          - Sensors: guide/sensors.md
+          - Stages: guide/stages.md
+          - Reusable steps: guide/reusable-steps.md
+  - User manual:
+      - Syntax index: manual/index.md
+      - Foundations: manual/foundations.md
+      - Pipeline:
+          - Products and stages: manual/pipeline.md
+          - Operations: manual/operations.md
+          - Matching: manual/matching.md
+          - Paths: manual/paths.md
+          - Checks: manual/checks.md
+          - Types: manual/types.md
+          - Imports: manual/reuse.md
+      - Recipe: manual/recipe.md
+      - Input inventory: manual/inventory.md
+      - Runnable DAG: manual/dag.md
+      - Command line: manual/cli.md
   - Examples: examples.md
-  - Architecture: architecture.md
+  - Developer documentation:
+      - Overview: developer/index.md
+      - Compilation: developer/compilation.md
+      - Input settlement: developer/inputs.md
+      - Resolution: developer/resolution.md
+      - Data layout: developer/data-layout.md
+      - Diagnostics: developer/diagnostics.md
+      - Performance: developer/performance.md
+      - Language maintenance: developer/language-maintenance.md

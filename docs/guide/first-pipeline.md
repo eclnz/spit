@@ -1,4 +1,4 @@
-# Getting started
+# First pipeline
 
 This walkthrough uses the checked-in [text processing pipeline](https://github.com/eclnz/spit/blob/dev/examples/commands/command_demo/command_demo.spit). It plans one sort job per input shard and one merge job per group. The commands can be inspected without running `sort`.
 
@@ -29,7 +29,7 @@ command merge: sort -m -u -o {@output} {items}
 merged = merge(sorted @ vary(part))
 ```
 
-`shard[group=alpha,part=01]` is one source artifact. The first step makes a `sorted` artifact for each shard. `@ vary(part)` gathers the sorted shards of each `group` into one `merged` artifact. The complete example also gives outputs a [default path rule](guide/paths.md).
+`shard[group=alpha,part=01]` is one source artifact. The first step makes a `sorted` artifact for each shard. `@ vary(part)` gathers the sorted shards of each `group` into one `merged` artifact. The complete example also gives outputs a [default path rule](paths.md).
 
 ## 3. Check it and inspect a plan
 
@@ -46,7 +46,7 @@ The checked-in `.spitout` lists two `alpha` shards and one `beta` shard. The pla
 cargo run -- dag examples/commands/command_demo/command_demo.spit examples/commands/command_demo/command_demo.spitout -o /tmp/command_demo.spitdag
 ```
 
-The `.spitdag` is the job description a [runner](https://github.com/eclnz/spit-bash) reads. See the [DAG format](spitdag.md) if you are writing a runner.
+The `.spitdag` is the job description a [runner](https://github.com/eclnz/spit-bash) reads. See the [DAG format](../manual/dag.md) if you are writing a runner.
 
 ## 5. Use a real dataset
 
@@ -57,6 +57,6 @@ pipeline analysis.spit
 root data
 ```
 
-Run `spit inputs dataset.spitin` to see the source artifacts SPIT finds, then `spit dag dataset.spitin --counts --commands` to inspect the jobs. If source paths already live in the pipeline and no recipe rules are needed, use `spit dag analysis.spit --root data` instead. Read [recipes and input inventories](guide/recipes.md) before adding `discover`, `exclude`, or `require` rules.
+Run `spit inputs dataset.spitin` to see the source artifacts SPIT finds, then `spit dag dataset.spitin --counts --commands` to inspect the jobs. If source paths already live in the pipeline and no recipe rules are needed, use `spit dag analysis.spit --root data` instead. Read [recipes and input inventories](recipes.md) before adding `discover`, `exclude`, or `require` rules.
 
-Next: [How SPIT thinks about data](guide/concepts.md) and [matching and collections](guide/matching.md).
+Next: [Products](products.md).
