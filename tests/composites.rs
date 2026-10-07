@@ -621,10 +621,7 @@ out = flip(cal @ where(revision=1), raw)
     );
     assert_eq!(
         at(7, "flip"),
-        [[
-            "Carried out by the steps in its body: y = clean(x, t)",
-            "This call expands to: out = clean(raw, cal)"
-        ]]
+        [["This call expands to: out = clean(raw, cal)"]]
     );
     // Each argument supplies the call's input, in the call's order.
     assert!(at(7, "cal")[0].ends_with(&["Supplies input t of flip.".to_owned()]));
@@ -695,4 +692,43 @@ m, t = L::summarise(…)  line 6  [report]
     let (plain, _) = support::parse_fixture(&format!("{BASE}\n")).unwrap();
     assert_eq!(spit::render_calls(&plain), "");
     assert_eq!(spit::render_calls_json(&plain), "[]");
+}
+
+#[test]
+fn long_operation_hover_signatures_put_each_port_on_its_own_line() {
+    let text = "operation prep_registration(image: MRI<$I,$Space,$Grid>) -> (parc: MRI<Parc,$Space,SynthGrid<$Grid>>, resampled: MRI<$I,$Space,SynthGrid<$Grid>>, mask: MRI<Mask,$Space,SynthGrid<$Grid>>)\n";
+    let hovers = spit::pipeline_hovers(text, std::path::Path::new("registration.spit"));
+    let hover = hovers
+        .iter()
+        .find(|hover| hover.name == "prep_registration")
+        .unwrap();
+    assert_eq!(hover.signature, "operation prep_registration(\n    image: MRI<$I,$Space,$Grid>\n) -> (\n    parc: MRI<Parc,$Space,SynthGrid<$Grid>>,\n    resampled: MRI<$I,$Space,SynthGrid<$Grid>>,\n    mask: MRI<Mask,$Space,SynthGrid<$Grid>>\n)");
+    assert!(!hover.details.is_empty());
+}
+
+#[test]
+fn registration_call_hover_shows_only_its_concrete_multi_output_expansion() {
+    let text = "source raw_t1: MRI<T1,Native,Voxel> [subject]
+operation parcellate(image: MRI<$I,$Space,$Grid>) -> (parc: MRI<Parc,$Space,SynthGrid<$Grid>>, resampled: MRI<$I,$Space,SynthGrid<$Grid>>)
+operation brainmask(image: MRI<Parc,$Space,$Grid>) -> MRI<Mask,$Space,$Grid>
+operation prep_registration(image: MRI<$I,$Space,$Grid>) -> (parc: MRI<Parc,$Space,SynthGrid<$Grid>>, resampled: MRI<$I,$Space,SynthGrid<$Grid>>, mask: MRI<Mask,$Space,SynthGrid<$Grid>>):
+    parc, resampled = parcellate(image)
+    mask = brainmask(parc)
+t1_parc, t1_resampled, t1_mask = prep_registration(raw_t1)
+";
+    let hovers = spit::pipeline_hovers(text, std::path::Path::new("registration.spit"));
+    let declaration = hovers
+        .iter()
+        .find(|hover| hover.line == 4 && hover.name == "prep_registration")
+        .unwrap();
+    let call = hovers
+        .iter()
+        .find(|hover| hover.line == 7 && hover.name == "prep_registration")
+        .unwrap();
+    assert_eq!(declaration.details, ["Carried out by the steps in its body: parc, resampled = parcellate(image); mask = brainmask(parc)"]);
+    assert_eq!(call.details, ["This call expands to: t1_parc, t1_resampled = parcellate(raw_t1); t1_mask = brainmask(t1_parc)"]);
+    assert_eq!(call.signature, declaration.signature);
+    assert!(call
+        .signature
+        .contains("\n    resampled: MRI<$I,$Space,SynthGrid<$Grid>>,\n"));
 }
