@@ -1,6 +1,6 @@
-# The `.spitdag` format
+# Runnable DAG
 
-A `.spitdag` is what `spit dag -o` writes and `spit dag --json` prints: every job a pipeline resolves to over one dataset, each with its files and its commands. A backend that runs the jobs reads nothing else: no pipeline, path rule or command template. This page describes version 7, the version `src/spitdag` writes. See [Getting started](getting-started.md) for how a `.spitdag` is made, and `spit dag --commands` for a readable view of the same commands.
+A `.spitdag` is what `spit dag -o` writes and `spit dag --json` prints: every job a pipeline resolves to over one dataset, each with its files and its commands. A backend that runs the jobs reads nothing else: no pipeline, path rule or command template. This page describes version 7, the version `src/spitdag` writes. The file is JSON; `spit dag --commands` provides a human-readable command view.
 
 ## Document
 
@@ -79,7 +79,7 @@ Each output that could not be produced has its identity and the input gaps that 
 {"identity": "report[store=s07]", "reasons": ["input `weeks` needs revenue[store=s07,week=2026-W36], which cannot be produced"]}
 ```
 
-`dag --partial` fills this array while keeping every complete job. Plain `dag` fails if any output would be left out. A reason about a step that a call to an [operation carried out by steps](language-reference.md#operations-carried-out-by-steps) made starts with the call, as ``in `m, t = L::summarise(...)`: ``. The reasons are the same kinds shown by `spit artifacts`: a missing or ambiguous input, a collection below `@ min`, or an input artifact whose job cannot be completed. A `many` input in a partial plan uses only its complete members, so a downstream aggregate may still run.
+`dag --partial` fills this array while keeping every complete job. Plain `dag` fails if any output would be left out. A reason about a step that a call to an [operation carried out by steps](operations.md#operations-carried-out-by-steps) made starts with the call, as ``in `m, t = L::summarise(...)`: ``. The reasons are the same kinds shown by `spit artifacts`: a missing or ambiguous input, a collection below `@ min`, or an input artifact whose job cannot be completed. A `many` input in a partial plan uses only its complete members, so a downstream aggregate may still run.
 
 ## Job
 
@@ -182,7 +182,7 @@ A source folder may hold other sources, but never an output.
 
 ## Where jobs come from
 
-An operation can be carried out by a body of steps rather than a command, and a library can declare it (see [Operations carried out by steps](language-reference.md#operations-carried-out-by-steps)). A call to one becomes the body's steps, so its jobs are ordinary jobs. Three fields say where they came from.
+An operation can be carried out by a body of steps rather than a command, and a library can declare it (see [Operations carried out by steps](operations.md#operations-carried-out-by-steps)). A call to one becomes the body's steps, so its jobs are ordinary jobs. Three fields say where they came from.
 
 `pipeline_files` lists each file the pipeline was read from, once:
 

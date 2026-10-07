@@ -25,7 +25,7 @@ git show <commit>^:<path>                                        # the plan as i
 **What is not a plan.** These stay in the tree:
 
 - The user-facing docs: `README.md` and `docs/`.
-- How the code works now. That belongs in `docs/architecture.md`, so move it there before deleting a plan that explains it.
+- How the code works now. That belongs in `docs/developer/`, so move it there before deleting a plan that explains it.
 - Tools that are still used, such as `usability/harness` and `profiling/`.
 - Records of what happened, such as the usability study's rounds, archived in `usability/rounds.zip`.
 
@@ -41,7 +41,7 @@ SPIT is a compiler, so most of its code is data being turned into other data: te
 
 Some rules are checked, not just written down. `Cargo.toml` forbids `unsafe` and turns on clippy's `disallowed_types`, which `clippy.toml` sets to the standard library's `HashMap` and `HashSet` with their default hasher, and to `Rc`, `RefCell` and `Cell`. `src/lib.rs` and `src/main.rs` deny `unwrap` outside tests, in the library and in the command line. `tests/architecture.rs` checks file length and the boundaries between steps. `cargo clippy` and `cargo test` run these checks, so the checks before every commit cover them.
 
-The five rules under [Performance](docs/architecture.md#performance) come first: one table with columns by id, text interned once, grouping by symbol keys, finding once and then looking up, and doing each piece of work once. The rules below are how the rest of the code keeps to them.
+The five rules under [Performance](docs/developer/performance.md#performance) come first: one table with columns by id, text interned once, grouping by symbol keys, finding once and then looking up, and doing each piece of work once. The rules below are how the rest of the code keeps to them.
 
 **Data and the functions over it**
 
@@ -59,7 +59,7 @@ The five rules under [Performance](docs/architecture.md#performance) come first:
 **Collections and order**
 
 - **Lookups use `FxHashMap` and `FxHashSet`**, from `rustc-hash`. They are the standard `HashMap` and `HashSet` with the Fx hasher in place of the default SipHash, which clippy rejects for two reasons. SipHash resists keys chosen to collide, which SPIT, reading the user's own files, has no need of, and it is slower on the small keys SPIT hashes most: product numbers, symbols, and bindings with their hash kept. And it is seeded at random, so a map's order changes from run to run: if that order ever leaked into output, the output would differ between runs, while with Fx the mistake is the same every run and a stored output catches it.
-- **Output never depends on hash order.** Anything that reaches a file or the terminal is in a `BTreeMap`, a `BTreeSet` or a sorted `Vec`, or is sorted first. Given the same pipeline, inventory, root and version, the output is the same bytes every time (see `docs/architecture.md`).
+- **Output never depends on hash order.** Anything that reaches a file or the terminal is in a `BTreeMap`, a `BTreeSet` or a sorted `Vec`, or is sorted first. Given the same pipeline, inventory, root and version, the output is the same bytes every time (see `docs/developer/`).
 - **Loops and worklists, not recursion, over data the user writes.** A pipeline may hold a chain of 100,000 steps, and recursing once per step overflows the stack (`compile/definitions.rs` has a test for this). Use an explicit stack or queue. Where recursion reads better, as in parsing nested types, cap the depth (`MAX_TYPE_DEPTH` in `src/types.rs`).
 
 **Errors and invariants**
@@ -88,9 +88,9 @@ The five rules under [Performance](docs/architecture.md#performance) come first:
 
 ## The local runner
 
-[spit-bash](https://github.com/eclnz/spit-bash) runs a `.spitdag`'s jobs on one machine. It reads only the DAG, so it must stay in step with `docs/spitdag.md`.
+[spit-bash](https://github.com/eclnz/spit-bash) runs a `.spitdag`'s jobs on one machine. It reads only the DAG, so it must stay in step with `docs/manual/dag.md`.
 
-- **A change to the DAG format needs a change in the runner.** That is any field, argument part, ordering or meaning `docs/spitdag.md` gives, and above all a new `version`. Make the runner's change as part of the same work, with the same branch name in both repositories, and link the pull requests as for the extension. Merge the spit pull request first.
+- **A change to the DAG format needs a change in the runner.** That is any field, argument part, ordering or meaning `docs/manual/dag.md` gives, and above all a new `version`. Make the runner's change as part of the same work, with the same branch name in both repositories, and link the pull requests as for the extension. Merge the spit pull request first.
 - **The runner's CI catches drift.** It builds SPIT from `dev`, where SPIT's work merges, and runs its examples on every push and weekly, so a format change merged without the runner's change shows up there as a failure.
 
 ## Checks before every commit
@@ -127,6 +127,6 @@ usability/harness/rebuild_keys.sh             # expect `ok` for every answer key
 - **Issues.** Bugs, feature requests and work left for later go in the GitHub issue tracker, one issue each, not in a report's or a plan's list of next steps. A report or commit that leaves work undone links its issues.
 - **Commit messages.** The title is a plain sentence, such as "Replace skip with drop, which names the groups it removes". Then prose saying what was wrong and what changed, then the co-author and session trailers.
 - **No model names** in files pushed to the repository.
-- **Guide updates travel with behaviour.** Each commit updates the README, `docs/language-reference.md`, `docs/spitdag.md` or `docs/architecture.md` for what it changes.
+- **Guide updates travel with behaviour.** Each commit updates the README, `docs/manual/`, `docs/manual/dag.md` or `docs/developer/` for what it changes.
 - **Verify before documenting.** Check every claim in the guide against the binary.
 - **New recipe rule keywords** go in `split_rules` in `tests/support/mod.rs` as well, which separates a test's recipe rules from its pipeline by keyword.

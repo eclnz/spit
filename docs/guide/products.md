@@ -1,4 +1,4 @@
-# How SPIT thinks about data
+# Products
 
 SPIT describes *families* of artifacts. A `source` is an existing family; a step makes a new one. An artifact is one member of a family, identified by values for its dimensions.
 
@@ -7,7 +7,7 @@ source image : Image [subject, visit, run]
 source atlas : Image
 ```
 
-`image[subject=A,visit=1,run=2]` is one artifact. `atlas` has no dimensions and is one artifact shared by jobs that read it. Types such as `Image` are optional; the identity is the product name and its dimension values. [Product syntax](../language-reference.md#products-and-dimensions) gives the full rules.
+`image[subject=A,visit=1,run=2]` is one artifact. `atlas` has no dimensions and is one artifact shared by jobs that read it. Types such as `Image` are optional; the identity is the product name and its dimension values. [Product syntax](../manual/pipeline.md#products-and-dimensions) gives the full rules.
 
 ## A pipeline defines families; inputs supply members
 
@@ -46,15 +46,6 @@ operation train(model, seed) -> Weights
 trained = train(model @ each(model), seed)
 ```
 
-Neither source says whether `model` comes before `config`; the `dimensions` line settles that. Conflicting orders in source declarations are an error. The pipeline-wide order controls displayed identities, `{@entities}` in paths, and the order of artifacts passed through a `many` command placeholder. SPIT checks declared output dimensions against the inferred ones. See [dimension order](../language-reference.md#dimension-order).
+Neither source says whether `model` comes before `config`; the `dimensions` line settles that. Conflicting orders in source declarations are an error. The pipeline-wide order controls displayed identities, `{@entities}` in paths, and the order of artifacts passed through a `many` command placeholder. SPIT checks declared output dimensions against the inferred ones. See [dimension order](../manual/pipeline.md#dimension-order).
 
-## Files have distinct roles
-
-| File | Contains | Reads from |
-| --- | --- | --- |
-| `.spit` | Reusable graph and path rules | Other `.spit` files through `use` |
-| `.spitin` | Dataset root, source paths, discovery and removal rules | Its `.spit` pipeline and the dataset |
-| `.spitout` | Settled source identities, paths and removals | No pipeline; pass one to `dag` |
-| `.spitdag` | Concrete artifacts, jobs, commands, dependencies | A runner, without the earlier files |
-
-The [recipes guide](recipes.md) explains when each input form is useful. The [architecture page](../architecture.md) describes the compiler phases if you are changing SPIT itself.
+Next: [Operations](pipelines.md).
