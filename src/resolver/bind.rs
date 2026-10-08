@@ -5,7 +5,7 @@ use std::fmt;
 
 use rustc_hash::FxHashMap;
 
-use crate::check::{step_checks, StepCheck, When, CHECKED_PATH};
+use crate::check::{step_checks, CheckIndex, StepCheck, When, CHECKED_PATH};
 use crate::command::{facet, slot, validate_commands, CommandError, Facet, Slot};
 use crate::model::{
     ArtifactId, CallId, Cardinality, CommandDef, CommandRole, DagStep, Job, OperationDef, Pipeline,
@@ -58,6 +58,7 @@ fn bind_jobs(
     // Found once, since each step asks for its operation, commands and
     // producers.
     let index = PipelineIndex::new(pipeline);
+    let checks = CheckIndex::new(&index);
     let mut commands: FxHashMap<&str, Vec<&CommandDef>> = FxHashMap::default();
     for command in &pipeline.commands {
         commands
@@ -68,7 +69,7 @@ fn bind_jobs(
     let steps = dag
         .steps
         .iter()
-        .map(|step| StepCommands::new(&index, &commands, step))
+        .map(|step| StepCommands::new(&index, &checks, &commands, step))
         .collect::<Result<Vec<_>, _>>()?;
     let mut produced = vec![false; dag.artifacts.len()];
     for &output in dag.jobs.iter().flat_map(|job| &job.outputs) {
@@ -147,6 +148,7 @@ struct StepCommands<'p> {
 impl<'p> StepCommands<'p> {
     fn new(
         index: &PipelineIndex<'p>,
+        checks: &CheckIndex<'p>,
         commands: &FxHashMap<&str, Vec<&'p CommandDef>>,
         step: &'p DagStep,
     ) -> Result<Self, BindError> {
@@ -175,7 +177,7 @@ impl<'p> StepCommands<'p> {
             operation,
             run: commands(CommandRole::Run).next(),
             verify: commands(CommandRole::Verify).collect(),
-            checks: step_checks(index, operation, invocation),
+            checks: step_checks(index, checks, operation, invocation),
         })
     }
 
