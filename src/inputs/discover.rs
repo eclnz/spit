@@ -228,59 +228,6 @@ pub(super) fn discover(
     Ok(discovery)
 }
 
-/// The files under `root` that no source rule of `pipeline` matches, sorted
-/// and leaving out SPIT's own files and those at its output paths, with
-/// the sources that have no rule, whose files they may be. Unlike
-/// [`discover`], a source with no rule is not an error, and no other rule
-/// is applied.
-pub(super) fn unmatched_files<'a>(
-    pipeline: &'a Pipeline,
-    root: &Path,
-) -> Result<(Vec<String>, Vec<&'a ProductDef>), PathError> {
-    require_directory(root)?;
-    let index = PipelineIndex::new(pipeline);
-    let mut patterns = Vec::new();
-    let mut without = Vec::new();
-    for product in sources_of(pipeline) {
-        match index.path_template_for(&product.name) {
-            Some(template) => {
-                patterns.push((product.folder, path_pattern(&template, product, None)?));
-            }
-            None => without.push(product),
-        }
-    }
-    let matches = |folder: bool, path: &str| {
-        patterns.iter().any(|(reads_folders, pieces)| {
-            *reads_folders == folder && match_pattern(pieces, path).is_some()
-        })
-    };
-    let listing = Listing::of(root)?;
-    let outputs = OutputPaths::of(pipeline, &listing.directories);
-    // As in `discover`, a file in a source folder is read with its folder,
-    // and a file a folder source's rule matches is skipped, not missed.
-    let folders: FxHashSet<_> = listing
-        .directories
-        .iter()
-        .filter(|directory| matches(true, directory))
-        .map(String::as_str)
-        .collect();
-    let files = listing
-        .files
-        .iter()
-        .filter(|file| {
-            !is_spit_file(file)
-                && !matches(false, file)
-                && !matches(true, file)
-                && !file
-                    .match_indices('/')
-                    .any(|(end, _)| folders.contains(&file[..end]))
-                && !outputs.hold(file)
-        })
-        .cloned()
-        .collect();
-    Ok((files, without))
-}
-
 /// The source products of `pipeline`: those no step makes, in the order
 /// the pipeline declares them.
 fn sources_of(pipeline: &Pipeline) -> impl Iterator<Item = &ProductDef> {
