@@ -4,12 +4,7 @@ repo_url: https://github.com/eclnz/spit
 repo_name: eclnz/spit
 docs_dir: docs
 theme:
-  name: material
-  features:
-    - navigation.sections
-    - navigation.indexes
-    - content.code.copy
-    - search.suggest
+  name: readthedocs
 markdown_extensions:
   - admonition
   - pymdownx.details
