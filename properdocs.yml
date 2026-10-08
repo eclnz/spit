@@ -1,0 +1,36 @@
+site_name: SPIT documentation
+site_description: The SPIT pipeline language and command line
+repo_url: https://github.com/eclnz/spit
+repo_name: eclnz/spit
+docs_dir: docs
+theme:
+  name: readthedocs
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - tables
+  - toc:
+      permalink: true
+nav:
+  - Home: index.md
+  - Getting started: getting-started.md
+  - Language guide:
+      - Files and flow: guide/concepts.md
+      - Pipelines: guide/pipelines.md
+      - Types: guide/types-and-reuse.md
+      - Matching: guide/matching.md
+      - Paths: guide/paths.md
+      - Recipes: guide/recipes.md
+      - Plans: guide/inspection.md
+      - Runnable DAGs: guide/runnable.md
+  - User manual:
+      - Language: language-reference.md
+      - Command line: cli.md
+      - DAG format: spitdag.md
+  - Examples: examples.md
+  - Architecture:
+      - Overview: architecture.md
+      - Compiler stages: architecture/phases.md
+      - Binding and output: architecture/binding.md
+      - Extending SPIT: architecture/extending.md
+      - Performance: architecture/performance.md
