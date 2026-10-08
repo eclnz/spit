@@ -13,7 +13,7 @@ warning: line 10, column 8: source product `raw_dwi` is never used as an input
 error: line 21, column 56: in `corrected_dwi, session_b0 = mrx::clean_dwi_session(...)`: type mismatch at `mrx::import_dwi.image`: product `t1w` is MRI<T1w,Anatomical>, expected MRI<DWI,$Space>
   --> mrtrix_dwi.spit: line 38, column 16: the step in the body of `mrx::clean_dwi_session`
 $ spit check act.spit --stdin --json
-exit: 0
+exit: 1
 --- stdout
 {"diagnostics":[{"severity":"warning","source":"pipeline","line":10,"column":8,"end_column":15,"message":"source product `raw_dwi` is never used as an input"},{"severity":"error","source":"pipeline","line":21,"column":56,"end_column":59,"message":"in `corrected_dwi, session_b0 = mrx::clean_dwi_session(...)`: type mismatch at `mrx::import_dwi.image`: product `t1w` is MRI<T1w,Anatomical>, expected MRI<DWI,$Space>","related":[{"file":"mrtrix_dwi.spit","line":38,"column":16,"end_column":53,"message":"the step in the body of `mrx::clean_dwi_session`"}]}]}
 --- stderr

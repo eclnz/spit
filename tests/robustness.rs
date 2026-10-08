@@ -183,7 +183,7 @@ fn an_import_must_be_a_regular_file() {
 #[test]
 fn json_mode_always_prints_json() {
     let output = spit(&["check", "x.spit", "--stdin", "--json"], Some(b"\xff"));
-    assert!(output.status.success());
+    assert_eq!(output.status.code(), Some(1));
     assert_eq!(
         text(&output.stdout),
         "{\"diagnostics\":[{\"severity\":\"error\",\"source\":\"pipeline\",\"line\":null,\"column\":null,\"end_column\":null,\"message\":\"cannot read standard input: stream did not contain valid UTF-8\"}]}\n"

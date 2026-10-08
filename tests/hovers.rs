@@ -225,7 +225,7 @@ fn cli_editor_analysis_is_opt_in_and_preserves_error_diagnostics() {
         .write_all(b"source raw [id]\noperation copy(input)\ngood = copy(raw)\nbad syntax\n")
         .unwrap();
     let output = child.wait_with_output().unwrap();
-    assert!(output.status.success());
+    assert_eq!(output.status.code(), Some(1));
     let json = String::from_utf8(output.stdout).unwrap();
     assert!(json.contains("\"severity\":\"error\""));
     assert!(json.contains("\"hovers\":["));
