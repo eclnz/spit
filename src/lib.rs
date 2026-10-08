@@ -63,7 +63,8 @@ pub use paths::{
 };
 pub use render::{
     render_artifacts, render_artifacts_by_target, render_bound_dag, render_call, render_calls,
-    render_calls_json, render_dag, render_step_counts, unused_sources_summary, View,
+    render_calls_json, render_dag, render_pipeline_tree, render_step_counts,
+    unused_sources_summary, View,
 };
 pub use resolver::{
     bind_dag, bind_dag_with, resolve, resolve_artifacts_excluding, resolve_artifacts_partial,

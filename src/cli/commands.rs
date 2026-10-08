@@ -179,6 +179,21 @@ pub(crate) fn inputs(args: &CliArgs) -> Result<(), Box<dyn Error>> {
 
 /// Step 3: resolve the jobs and print them, or write the `.spitdag`.
 pub(crate) fn dag(args: &CliArgs) -> Result<(), Box<dyn Error>> {
+    if args.has(Flag::Tree) {
+        if args.second.is_some() || !super::output::is_pipeline(&args.file) {
+            return Err("--tree needs one .spit pipeline and no dataset inputs".into());
+        }
+        let text = read_file(&args.file)?;
+        let checked = passed(
+            diagnose_checked(&text, Context::at(Path::new(&args.file))),
+            |checked| &checked.warnings,
+            &text,
+            None,
+            FileNames::default(),
+        )?;
+        print!("{}", spit::render_pipeline_tree(&checked.pipeline));
+        return Ok(());
+    }
     let mut prepared = prepare(args)?;
     if args.has(Flag::Partial) {
         prepared.report = resolve_artifacts_partial(
