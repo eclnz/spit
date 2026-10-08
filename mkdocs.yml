@@ -11,6 +11,8 @@ theme:
     - content.code.copy
     - search.suggest
 markdown_extensions:
+  - admonition
+  - pymdownx.details
   - tables
   - toc:
       permalink: true
@@ -18,21 +20,22 @@ nav:
   - Home: index.md
   - Getting started: getting-started.md
   - Language guide:
-      - How SPIT thinks about data: guide/concepts.md
-      - Pipelines and operations: guide/pipelines.md
-      - Types and reusable definitions: guide/types-and-reuse.md
-      - Matching and collections: guide/matching.md
-      - Paths and file kinds: guide/paths.md
-      - Recipes and input inventories: guide/recipes.md
-      - Inspecting and diagnosing plans: guide/inspection.md
-  - Reference:
-      - Language catalog: reference/index.md
-      - Keywords and records: reference/keywords.md
-      - Operations and calls: reference/operations.md
-      - Selectors and clauses: reference/selectors.md
-      - Placeholders: reference/placeholders.md
-      - Complete language reference: language-reference.md
+      - Files and flow: guide/concepts.md
+      - Pipelines: guide/pipelines.md
+      - Types: guide/types-and-reuse.md
+      - Matching: guide/matching.md
+      - Paths: guide/paths.md
+      - Recipes: guide/recipes.md
+      - Plans: guide/inspection.md
+      - Runnable DAGs: guide/runnable.md
+  - User manual:
+      - Language: language-reference.md
       - Command line: cli.md
       - DAG format: spitdag.md
   - Examples: examples.md
-  - Architecture: architecture.md
+  - Architecture:
+      - Overview: architecture.md
+      - Compiler stages: architecture/phases.md
+      - Binding and output: architecture/binding.md
+      - Extending SPIT: architecture/extending.md
+      - Performance: architecture/performance.md
