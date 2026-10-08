@@ -97,6 +97,24 @@ fn many_calls_to_an_operation_that_failed_to_declare_are_left_out_in_reasonable_
     assert!(start.elapsed() < Duration::from_secs(10));
 }
 
+/// A clean lowering failure can end an operation body. Report the other
+/// failures in the original structure together, then reparse the blanked
+/// lines to discover any errors exposed by the changed body boundaries.
+#[test]
+#[ignore = "slow in a debug build; run with --release"]
+fn many_bad_steps_that_end_bodies_are_reported_in_reasonable_time() {
+    let mut text = String::from("source raw : T [sub]\noperation step(input: T) -> T\n");
+    for index in 0..2_000 {
+        text += &format!(
+            "operation body{index}(input: T) -> (out: T):\n    out = step(input)\np{index} = nostep(raw)\n    extra = step(input)\n"
+        );
+    }
+    let start = Instant::now();
+    let issues = diagnose(&text, None);
+    assert_eq!(issues.len(), 2_000);
+    assert!(start.elapsed() < Duration::from_secs(10));
+}
+
 /// The best of a few runs of `work`, which steadies a timing against noise.
 fn best_of(runs: usize, mut work: impl FnMut()) -> Duration {
     (0..runs)
