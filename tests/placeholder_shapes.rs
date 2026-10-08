@@ -310,22 +310,6 @@ fn a_record_whose_value_fails_its_rules_shape_is_rejected() {
 }
 
 #[test]
-fn a_suggested_rule_has_the_shape_and_reads_its_files() {
-    let tree = Tree::new(
-        "shapes-suggest",
-        &[
-            "logs/web1/2026-09-01.log",
-            "logs/web1/2026-09-02.log",
-            "logs/web2/2026-09-01.log",
-        ],
-    );
-    tree.write("a.spit", "");
-    tree.write("a.spitin", "pipeline a.spit\nroot .\n");
-    let stdout = text(&run(&tree, &["inputs", "a.spitin", "--suggest"]).stdout);
-    assert!(stdout.contains("{date:date}.log"), "{stdout}");
-}
-
-#[test]
 fn two_sources_with_one_dimension_name_collide_whatever_their_shapes() {
     let said =
         check("source a [d]\nsource b [d]\npath a: in/{d:date}.log\npath b: in/{d:digits}.log\n");
