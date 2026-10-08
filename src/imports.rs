@@ -16,7 +16,8 @@ use crate::model::{
 };
 use crate::parser::{parse_use, strip_comment, without_bom, Keyword, Kind, ParseError, UseSpec};
 use crate::span::Place;
-use located::{in_import, named_in, rebase, relative_path, ImportedAt};
+pub(crate) use located::relative_path;
+use located::{in_import, named_in, rebase, ImportedAt};
 
 /// Merge what the `use` line at `place` imports into `builder`. An import
 /// that fails for what it brings in, before it has changed anything, leaves
