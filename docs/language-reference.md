@@ -1,6 +1,6 @@
 # Language reference
 
-This is the full syntax reference for `.spit` pipelines, `.spitin` recipes, and `.spitout` inputs. For a quick lookup by keyword or construct, use the [language catalog](reference/index.md). Start with the [guided introduction](index.md) or [getting started](getting-started.md) if you are new to SPIT; the [architecture](architecture.md) page describes the internal model.
+This manual defines valid `.spit` pipelines, `.spitin` recipes, and `.spitout` inventories. Each section specifies a language component and its interactions. The [command line](cli.md) and [DAG format](spitdag.md) have their own manuals.
 
 A `#` that starts a word begins a comment, as in Bash. A `#` inside a word or in quotes is kept, so `--color=#fff` and `'#run'` are ordinary arguments.
 
@@ -44,7 +44,7 @@ When a product holds two dimensions that no source orders, declare the order onc
 dimensions [model, config, seed]
 ```
 
-This happens when `@ each` broadcasts a dimension that no source shares with the driving input's: in the [ragged sweep](examples.md#ragged-sweep-correlated-seeds-and-collection-order), `trained` holds `model` and `config`, and without the line `spit check` stops there and suggests one. A `dimensions` line names every dimension in the pipeline once, and each source must list its dimensions in that order. A step's output written with its dimensions, as in `summary : Summary [model, config] = ...`, must list them in the pipeline's order; the annotation checks the order, it does not set it.
+This happens when `@ each` broadcasts a dimension that no source shares with the driving input's: in the ragged sweep, `trained` holds `model` and `config`, and without the line `spit check` stops there and suggests one. A `dimensions` line names every dimension in the pipeline once, and each source must list its dimensions in that order. A step's output written with its dimensions, as in `summary : Summary [model, config] = ...`, must list them in the pipeline's order; the annotation checks the order, it does not set it.
 
 ## Operations and commands
 
@@ -63,7 +63,7 @@ operation summarise(days: many Series @ min(2), policy: Policy) -> Summary
 summary = summarise(reading @ vary(day), policy)
 ```
 
-`@ min(2)` on the `many` input rejects a group with fewer than two artifacts; untyped, it is `days: many @ min(2)`. It goes beside the input it counts, not after the outputs: `-> Summary @ min(2)` is an error that gives the line rewritten. The [sensors walkthrough](examples.md#sensors-selectors-verification-and-two-outputs) combines a `many` input, two outputs, and `verify` in a complete plan.
+`@ min(2)` on the `many` input rejects a group with fewer than two artifacts; untyped, it is `days: many @ min(2)`. It goes beside the input it counts, not after the outputs: `-> Summary @ min(2)` is an error that gives the line rewritten. The sensors walkthrough combines a `many` input, two outputs, and `verify` in a complete plan.
 
 One aggregate can remove several dimensions at once. List them in one `@ vary(...)`; their order within the clause does not change the collection order. With `summary [model, config]`, this makes one leaderboard over all model and config combinations, ordered first by model and then by config:
 
@@ -72,9 +72,9 @@ operation leaderboard(summaries: many Summary) -> Table
 board = leaderboard(summary @ vary(model, config))
 ```
 
-`@ min(n)` counts the whole collection, across both dimensions. A call that writes two `@ vary` clauses is an error; put both dimensions in one clause. The collection order follows the pipeline's [dimension order](#dimension-order), even if `@ vary` lists those dimensions in another order. The [ragged sweep walkthrough](examples.md#ragged-sweep-correlated-seeds-and-collection-order) declares `dimensions [model, config, seed]` and gets a model-first collection.
+`@ min(n)` counts the whole collection, across both dimensions. A call that writes two `@ vary` clauses is an error; put both dimensions in one clause. The collection order follows the pipeline's [dimension order](#dimension-order), even if `@ vary` lists those dimensions in another order. The ragged sweep example declares `dimensions [model, config, seed]` and gets a model-first collection.
 
-Selectors narrow what an input matches. The [sensors walkthrough](examples.md#sensors-selectors-verification-and-two-outputs) shows `where` and `same` with a complete inventory:
+Selectors narrow what an input matches. The sensors walkthrough shows `where` and `same` with a complete inventory:
 
 ```text
 calibrated = calibrate(reading, calibration @ where(revision=2))
@@ -94,7 +94,7 @@ source parameters : Parameters [scenario]
 forecast = predict(reading, model @ each(scenario), parameters)
 ```
 
-With two stations and two scenarios, this makes four `forecast[station=...,scenario=...]` jobs. The values come from the artifacts of the broadcast input, so adding a scenario to the inputs adds its jobs. Other inputs are matched on the new dimension as usual; here `parameters` supplies the settings for each scenario. Only one input may broadcast a given dimension, and the driving input must not already have it. No source holds both `station` and `scenario`, so the `dimensions` line orders them, and `forecast` has dimensions `[station, scenario]`. `each` pairs with `vary`, so a sweep can be collected again. It crosses only the broadcast input's observed values with each driving artifact; values held by other inputs stay correlated through matching. The [ragged sweep walkthrough](examples.md#ragged-sweep-correlated-seeds-and-collection-order) shows models crossed with observed config/seed pairs without inventing a missing seed:
+With two stations and two scenarios, this makes four `forecast[station=...,scenario=...]` jobs. The values come from the artifacts of the broadcast input, so adding a scenario to the inputs adds its jobs. Other inputs are matched on the new dimension as usual; here `parameters` supplies the settings for each scenario. Only one input may broadcast a given dimension, and the driving input must not already have it. No source holds both `station` and `scenario`, so the `dimensions` line orders them, and `forecast` has dimensions `[station, scenario]`. `each` pairs with `vary`, so a sweep can be collected again. It crosses only the broadcast input's observed values with each driving artifact; values held by other inputs stay correlated through matching. The ragged sweep example shows models crossed with observed config/seed pairs without inventing a missing seed:
 
 ```text
 trial = simulate(reading, seed @ each(rep))
@@ -340,7 +340,7 @@ A template fills these placeholders from the artifact it names, here `aligned[su
 
 SPIT's own placeholders take `@`, and a dimension takes none, so a dimension may be called `product` or `stage`. `{product}` with no such dimension is an error that says to write `{@product}`. Values keep letters, digits, and `-`; any other byte is written as `%` and two hex digits, so a value never adds a directory. `{@labels}` uses the dimension names as keys; use explicit text such as `sub-{subject}` when a dataset calls a dimension by another name. SPIT warns if a value written through `{@labels}` contains `-`, because a BIDS reader cannot recover that value from the file name.
 
-A path may put text in `[...]` when only some products have it. SPIT keeps the group if every placeholder in it has a value for the product, or drops the whole group if a dimension is absent, `{@stage}` has no stage, or `{@labels}` has no dimensions. For example, the [cohort pipeline](examples.md#cohort-discovery-exclusion-and-grouped-removal) uses one default for run images, session averages, and subject averages:
+A path may put text in `[...]` when only some products have it. SPIT keeps the group if every placeholder in it has a value for the product, or drops the whole group if a dimension is absent, `{@stage}` has no stage, or `{@labels}` has no dimensions. For example, the cohort pipeline uses one default for run images, session averages, and subject averages:
 
 ```text
 path: derivatives/sub-{sub}[/ses-{ses}][/{@stage}]/{@labels}_{@product}
@@ -398,7 +398,7 @@ Extensions are optional. An operation whose tool picks the format from the outpu
   matrix (output): default derivatives/{@product}/{@entities}.mat, `.mat` from operation `align`
 ```
 
-Path rules also find sources. With `root data`, `spit inputs recipe.spitin` lists each file under `data` whose path matches a source's rule, in the pipeline or the recipe, reading entity values from its placeholders. A rule matches a file's whole path, so `responses/{region}/wave{wave}.csv` does not match `wave3.csv.bak` or `wave3.csv.1`, and files that match no rule are left out. When a source's rule matches no file, the scan warns and names the unmatched file nearest the rule, with the text where the file and the rule part; see [Find incomplete artifacts](guide/inspection.md). To write the rules for data that already exists, `spit inputs --suggest` prints a rule for each group of files no rule matches; see [Start from the files](https://github.com/eclnz/spit/blob/dev/README.md#start-from-the-files). Links to files and directories are followed. A value is read only as SPIT writes it, so a file such as `in/%41.txt`, whose value SPIT would write `A`, is skipped with a warning rather than listed under a path no job would use.
+Path rules also find sources. With `root data`, `spit inputs recipe.spitin` lists each file under `data` whose path matches a source's rule, in the pipeline or the recipe, reading entity values from its placeholders. A rule matches a file's whole path, so `responses/{region}/wave{wave}.csv` does not match `wave3.csv.bak` or `wave3.csv.1`, and files that match no rule are left out. When a source's rule matches no file, the scan warns and names the unmatched file nearest the rule, with the text where the file and the rule part; see the `spit artifacts` command. Use `spit inputs --unmatched` to list files outside all source rules, then add rules for the files the pipeline should read. Links to files and directories are followed. A value is read only as SPIT writes it, so a file such as `in/%41.txt`, whose value SPIT would write `A`, is skipped with a warning rather than listed under a path no job would use.
 
 ### Shapes on a source placeholder
 
@@ -622,7 +622,7 @@ A `require` rule is checked after conditional exclusions, against the groups the
 
 ### Exclude groups that meet a condition
 
-The [cohort walkthrough](examples.md#cohort-discovery-exclusion-and-grouped-removal) uses conditional `exclude` to remove a subject with too few sessions and named `exclude` to remove one damaged run.
+The cohort walkthrough uses conditional `exclude` to remove a subject with too few sessions and named `exclude` to remove one damaged run.
 
 Conditional `exclude` removes every group that meets its condition: the groups, then `where`, then what removes one.
 

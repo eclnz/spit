@@ -35,7 +35,7 @@ Commands and output paths are fixed by each brief, so a correct plan is unique u
 
 ## Setup
 
-- **What each agent had.** A sandbox holding the dataset, the brief, a guide (the README's user-facing sections followed by the [language reference](../docs/language-reference.md), built by [`build_guide.py`](harness/build_guide.py)), a report questionnaire, and `bin/spit`.
+- **What each agent had.** A sandbox holding the dataset, the brief, a guide (the [guide](../docs/guide/concepts.md) followed by the [language manual](../docs/language-reference.md), built by [`build_guide.py`](harness/build_guide.py)), a report questionnaire, and `bin/spit`.
 - **The wrapper.** `bin/spit` is a [wrapper](harness/shim.sh) that logs each call's arguments, output and exit code, with a snapshot of every `.spit`/`.spitin`/`.spitout` file at that moment.
 - **Isolation.** Agents were told to stay inside their sandbox. Each transcript was audited afterwards for any access to the repository, the answer keys, another sandbox, or the web. None was found.
 - **Models and runs.** Each scenario ran twice, each time in a fresh agent: once on a larger model (runs tagged `a`) and once on a smaller, faster one (runs tagged `b`), the latter standing in for a less capable reader. The s2 follow-up was sent to the same two agents after they finished, so they kept their earlier context, as a real user would.
