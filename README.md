@@ -364,9 +364,7 @@ To make a plan for the work that can run now, use `spit dag dataset.spitin --par
 
 ## Language reference
 
-Beyond the basics above, `.spit` files support typed products, multi-output operations, `many`/aggregation inputs with selectors (`where`, `same`, `vary`, `each`), symbolic type variables, stages, path placeholders, and `use` imports for sharing definitions across files; `.spitin` recipes add a dataset `root`, directory discovery, and named or conditional `exclude` rules, plus `require` checks.
-
-Paths are written once where they can be. SPIT's own path placeholders take `@`, as `{@product}`, `{@entities}`, `{@stage}` and `{@labels}`, so a bare `{sub}` is always a dimension. An operation names the extension each output's file has, as `-> Transform .mat`, and `ext:` sets one for the rest, so a default path is written without one. A recipe's `path:` is the default for sources, so where a dataset keeps its inputs stays with the dataset, and the pipeline's default can place outputs by stage. A source declares its files' extension as an operation declares its outputs', `source events .tsv [sub]`, so one default covers sources of different formats. A file that shares another file's stem is declared `beside` it. For sources, the companion inherits the main source's dimensions and path; for outputs, the same job writes both files. A recipe can give the main source's path for one dataset. A command can take an output's folder and name, `{image.dir}` and `{image.stem}`, for a tool that adds the extension itself. A `/` after a type makes a product's artifacts folders, as `source dicom : Dicom / [sub]` or `-> (subject: FsSubject /)`, for a tool that reads or writes a folder of files. A path can use `{@labels}` for BIDS-style dimension labels and `[...]` for a segment only some products have; the [cohort walkthrough](docs/examples.md#cohort-discovery-exclusion-and-grouped-removal) shows one default path for run, session, and subject outputs. See the [full language reference](docs/language-reference.md) for syntax and rules for each of these.
+The [language reference](docs/language-reference.md) covers types, operation forms, selectors, stages, imports, recipes, and path rules. For a worked default path with optional segments and dimension labels, see the [cohort walkthrough](docs/examples.md#cohort-discovery-exclusion-and-grouped-removal).
 
 ## More examples
 
@@ -393,16 +391,7 @@ Run `cargo test --test source_files` to see the field survey example checked aga
 
 ## How SPIT works
 
-```text
-.spit ──► 1. check ──► compiled pipeline
-                            │
-.spitin + data ──► 2. inputs ──► .spitout
-                            │        │
-                            ▼        ▼
-                        3. dag ──► .spitdag
-```
-
-The pipeline supplies operations and rules; the `.spitout` supplies artifact identities and their files. Resolution checks dimensions, matching, cardinality, and any known types, then binds each artifact to its file and expands each command into its arguments. Step 2 and step 3 each build on step 1 and never on each other, and a backend reads only the `.spitdag`. SPIT does not inspect file contents or command-specific metadata itself; `verify` commands and `check`s run those checks with your own tools.
+The [architecture guide](docs/architecture.md#three-steps) traces the three steps, their data, and the boundaries between them. SPIT checks the pipeline and resolves jobs, while `verify` commands and `check`s use your tools to inspect file contents.
 
 ## Documentation
 
