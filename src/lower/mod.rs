@@ -338,9 +338,12 @@ pub(crate) fn lower(
     let mut builder = PipelineBuilder::default();
     let mut errors = Vec::new();
     let mut parsing = syntax.errors.iter().peekable();
+    let mut defer_parse_errors = false;
     for (index, statement) in syntax.statements.iter().enumerate() {
         while let Some((_, error)) = parsing.next_if(|(read, _)| *read <= index) {
-            errors.push(error.clone());
+            if !defer_parse_errors {
+                errors.push(error.clone());
+            }
         }
         let rule = matches!(
             statement.kind,
@@ -356,15 +359,24 @@ pub(crate) fn lower(
         };
         if let Err(failure) = lowered {
             let error = failure.error.within(&statement.place);
-            let goes_on =
-                failure.clean && !statement.stateful && error.line() == statement.place.line;
+            // Diagnose later statements in the original parse even when
+            // blanking this line would change their parse. Recovery will
+            // blank the reported lines and parse that interpretation next.
+            let goes_on = failure.clean && error.line() == statement.place.line;
+            if goes_on && statement.stateful {
+                // These syntax errors may disappear when recovery blanks the
+                // failed line. Read them on the next pass instead.
+                defer_parse_errors = true;
+            }
             errors.push(error);
             if !goes_on {
                 return Err(errors);
             }
         }
     }
-    errors.extend(parsing.map(|(_, error)| error.clone()));
+    if !defer_parse_errors {
+        errors.extend(parsing.map(|(_, error)| error.clone()));
+    }
     if !errors.is_empty() {
         return Err(errors);
     }
