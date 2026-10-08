@@ -21,7 +21,7 @@ fn check_json(pipeline: &[u8]) -> Output {
 #[test]
 fn cli_accepts_stdin_and_returns_json() {
     let output = check_json(b"source raw [id]\nthis is invalid\n");
-    assert!(output.status.success());
+    assert_eq!(output.status.code(), Some(1));
     let json = String::from_utf8(output.stdout).unwrap();
     assert!(json.contains("\"source\":\"pipeline\""));
     assert!(json.contains("\"line\":2"));
@@ -34,7 +34,7 @@ fn cli_accepts_stdin_and_returns_json() {
 #[test]
 fn cli_reports_semantic_error_line_in_json() {
     let output = check_json(b"source raw : A<Native> [id]\noperation first(a: A<X>) -> B<X>\nmiddle = first(raw)\noperation second(b: B<Standard>) -> C\nfinal = second(middle)\n",);
-    assert!(output.status.success());
+    assert_eq!(output.status.code(), Some(1));
     let json = String::from_utf8(output.stdout).unwrap();
     assert!(json.contains("\"line\":5"), "{json}");
     assert!(json.contains("B<Native>"), "{json}");
@@ -45,7 +45,7 @@ fn cli_json_includes_each_severity_and_its_columns() {
     let output = check_json(
         b"source raw [id]\nsource spare [id]\noperation copy(input)\nresult = copy(rwa)\n",
     );
-    assert!(output.status.success());
+    assert_eq!(output.status.code(), Some(1));
     assert_eq!(
         String::from_utf8(output.stdout).unwrap(),
         "{\"diagnostics\":[\
@@ -59,6 +59,7 @@ fn cli_json_includes_each_severity_and_its_columns() {
 fn cli_json_columns_count_utf16_code_units() {
     let output =
         check_json("source raw [id]\noperation copy(input)\nx = copy(résumé)\n".as_bytes());
+    assert_eq!(output.status.code(), Some(1));
     let json = String::from_utf8(output.stdout).unwrap();
     // `é` is two bytes but one UTF-16 code unit, so `résumé` spans 10..16.
     assert!(
@@ -79,7 +80,7 @@ fn recipe_json_places_pipeline_errors_in_the_pipeline_file() {
         .args(["check", recipe.to_str().unwrap(), "--json"])
         .output()
         .unwrap();
-    assert!(output.status.success());
+    assert_eq!(output.status.code(), Some(1));
     let json = String::from_utf8(output.stdout).unwrap();
     assert!(
         json.contains(&format!("\"file\":\"{}\"", pipeline.display())),

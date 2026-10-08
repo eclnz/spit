@@ -10,16 +10,25 @@ use spit::{
     render_call, render_calls, render_calls_check_json, render_calls_json, render_check_json,
     render_dag, render_diagnostics_json, render_editor_json, render_source_inventory,
     render_step_counts, render_words_json, resolve_artifacts_partial, unused_sources_summary,
-    validate_bound_source_files, validate_source_files, BoundDag, BoundPaths, Context, FileNames,
-    Gap, LeftOut, View,
+    validate_bound_source_files, validate_source_files, BoundDag, BoundPaths, Context, Diagnostic,
+    FileNames, Gap, LeftOut, View,
 };
 
 use super::args::{CliArgs, Flag};
 use super::load::{load_inputs, prepare, recorded_root, require_complete, settle};
 use super::output::{
     is_inputs, is_recipe, job_count, passed, read_file, read_stdin, report, write_output,
-    write_spitdag,
+    write_spitdag, Reported,
 };
+
+fn print_check_json(json: &str, diagnostics: &[Diagnostic]) -> Result<(), Box<dyn Error>> {
+    print!("{json}");
+    if diagnostics.iter().any(Diagnostic::is_error) {
+        Err(Box::new(Reported))
+    } else {
+        Ok(())
+    }
+}
 
 /// Step 1: compile a pipeline, or check a recipe against the pipeline it
 /// names. Reads no data.
@@ -47,8 +56,7 @@ pub(crate) fn check(args: &CliArgs) -> Result<(), Box<dyn Error>> {
             } else {
                 render_diagnostics_json(&diagnostics, &text, Some(&text))
             };
-            print!("{json}");
-            return Ok(());
+            return print_check_json(&json, &diagnostics);
         }
         report(&diagnostics, &text, Some(&text), FileNames::default())?;
         println!("Inputs valid.");
@@ -62,8 +70,7 @@ pub(crate) fn check(args: &CliArgs) -> Result<(), Box<dyn Error>> {
             } else {
                 render_diagnostics_json(&diagnostics, &text, None)
             };
-            print!("{json}");
-            return Ok(());
+            return print_check_json(&json, &diagnostics);
         }
         report(&diagnostics, &text, None, FileNames::default())?;
         if args.has(Flag::PathRules) {
@@ -120,8 +127,7 @@ pub(crate) fn check(args: &CliArgs) -> Result<(), Box<dyn Error>> {
         } else {
             render_diagnostics_json(diagnostics, &text, None)
         };
-        print!("{json}");
-        return Ok(());
+        return print_check_json(&json, diagnostics);
     }
     let checked = passed(
         diagnosis,

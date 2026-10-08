@@ -40,6 +40,8 @@ Use `-` in place of a `.spitout` to read it from standard input. A recipe and a 
 
 `--counts` can precede either job view. `--paths` and `--commands` can print together. With `-o`, `--counts` and `--commands` also print while the DAG is saved; `--paths` conflicts with `-o`. `--json` is a separate output form. `check --calls` cannot combine with `--path-rules` or `--hovers`. For diagnostics fields, consult `spit help check`.
 
+`check --json` writes diagnostics to standard output and exits 1 if any are errors. Warnings alone exit 0.
+
 ## A practical sequence
 
 ```sh

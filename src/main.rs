@@ -52,7 +52,8 @@ fn main() -> ExitCode {
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
-        // Editors expect JSON even when the check cannot run.
+        Err(error) if error.is::<Reported>() => ExitCode::FAILURE,
+        // Keep the JSON diagnostic on stdout for editor clients.
         Err(error) if diagnostics_json => {
             let diagnostic = Diagnostic {
                 severity: Severity::Error,
@@ -65,7 +66,7 @@ fn main() -> ExitCode {
                 related: Vec::new(),
             };
             print!("{}", render_diagnostics_json(&[diagnostic], "", None));
-            ExitCode::SUCCESS
+            ExitCode::FAILURE
         }
         Err(error) => {
             if !error.is::<Reported>() {

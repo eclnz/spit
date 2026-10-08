@@ -195,7 +195,7 @@ fn a_recipe_and_a_spitout_have_words_too() {
         &["--json", "--stdin", "--hovers"],
         "require [id] where raw count>=1\n",
     );
-    assert!(ok);
+    assert!(!ok);
     assert!(json.contains("name the pipeline"), "{json}");
     assert!(json.contains(r#""word":"require""#));
     assert!(json.contains(r#""word":"require-where""#));
@@ -224,7 +224,7 @@ fn a_recipe_and_a_spitout_have_words_too() {
         &["--json", "--stdin"],
         "sources:\n    raw[id=1\n",
     );
-    assert!(ok);
+    assert!(!ok);
     assert!(
         json.contains(r#""source":"inventory","line":2,"column":9"#),
         "{json}"
