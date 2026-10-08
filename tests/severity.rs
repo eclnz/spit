@@ -79,7 +79,6 @@ fn agree(file: &Path) -> Vec<String> {
     };
     let plain = run(&["check", name]);
     let json = run(&["check", name, "--json", "--hovers"]);
-    assert!(json.status.success(), "{}", file.display());
     let printed = printed_diagnostics(&text(&plain.stderr));
     let given = json_diagnostics(&text(&json.stdout));
     assert_eq!(
@@ -101,6 +100,12 @@ fn agree(file: &Path) -> Vec<String> {
         plain.status.success(),
         !errors,
         "{}: {printed:?}",
+        file.display()
+    );
+    assert_eq!(
+        json.status.success(),
+        !errors,
+        "{}: {given:?}",
         file.display()
     );
     given.into_iter().map(|(severity, _)| severity).collect()
