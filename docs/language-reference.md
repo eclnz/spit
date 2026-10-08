@@ -315,7 +315,7 @@ error: libs/text.spit: line 4, column 15: the body of `wrap` reads `nope`, which
   --> pipeline.spit: line 1, column 1: imported here
 ```
 
-A library that imports a broken library lists each `use` line, nearest the error first. `spit check --json` gives the same: the diagnostic's `file` is `libs/text.spit`, and its `related` list holds each `use` line with its `file`.
+A library that imports a broken library lists each `use` line, nearest the error first. `spit check --json` gives the same: the diagnostic's `file` is `libs/text.spit`, and its `related` list holds each `use` line with its `file`. When checking a recipe, these paths are relative to the recipe's folder.
 
 ## Paths
 

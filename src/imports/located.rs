@@ -96,7 +96,7 @@ pub(super) fn named_in(mut error: ParseError, file: &str) -> ParseError {
 /// `target` as a path from the folder `base`, written with `/` and `..`, so
 /// that a message names a file the same wherever the checkout is. Both are
 /// absolute, or both are not.
-pub(super) fn relative_path(base: &Path, target: &Path) -> String {
+pub(crate) fn relative_path(base: &Path, target: &Path) -> String {
     fn normal(path: &Path) -> Vec<Component<'_>> {
         let mut parts: Vec<Component<'_>> = Vec::new();
         for part in path.components() {
