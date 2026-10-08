@@ -1,27 +1,49 @@
 #!/usr/bin/env python3
-"""Build the guide a trial agent reads: the README's user-facing sections, then
-the language reference, with `cargo run -- ` written as `spit ` and local links
-adjusted for the trial root.
+"""Build a trial guide from the site's learning pages and language manual.
 
 usage: build_guide.py <output file>
 """
 import os
+import posixpath
 import re
 import sys
+from pathlib import Path
 
-REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+repo = Path(__file__).resolve().parents[2]
+readme = (repo / "README.md").read_text()
+intro = re.sub(r"<img[^>]*>\n\n", "", readme.split("## Try it", 1)[0])
+chapters = [
+    "docs/guide/concepts.md",
+    "docs/guide/pipelines.md",
+    "docs/guide/types-and-reuse.md",
+    "docs/guide/matching.md",
+    "docs/guide/paths.md",
+    "docs/guide/recipes.md",
+    "docs/guide/inspection.md",
+    "docs/guide/runnable.md",
+    "docs/language-reference.md",
+]
 
-readme = open(os.path.join(REPO, "README.md")).read()
-reference = open(os.path.join(REPO, "docs", "language-reference.md")).read()
 
-intro = re.sub(r"<img[^>]*>\n\n", "", readme[: readme.index("## Contents")])
-body = readme[readme.index("## The three steps") : readme.index("## Language reference")]
-how = readme[readme.index("## How SPIT works") : readme.index("## Documentation")]
-reference = reference[reference.index("\n", reference.index("This is the full syntax")) + 1 :]
-# The reference's links are relative to docs/, and the guide sits at the trial
-# root beside README.md, examples/ and docs/.
-reference = re.sub(r"\]\((?![#/]|\w+://)(?=[\w.-]+\.md)", "](docs/", reference)
-reference = re.sub(r"\]\(\.\./", "](", reference)
+def trial_link(match, chapter):
+    label, target = match.groups()
+    if target.startswith(("https://", "http://", "mailto:")):
+        return match.group(0)
+    if target.startswith("#"):
+        target = chapter + target
+    else:
+        target = posixpath.normpath(posixpath.join(posixpath.dirname(chapter), target))
+    return f"][{label}]({target})".replace("][", "[")
 
-guide = intro + body + how + "\n# Language reference\n" + reference
-open(sys.argv[1], "w").write(guide.replace("cargo run -- ", "spit "))
+
+parts = [intro]
+for chapter in chapters:
+    content = (repo / chapter).read_text()
+    content = re.sub(
+        r"\[([^]]+)\]\(([^)]+)\)",
+        lambda match: trial_link(match, chapter),
+        content,
+    )
+    parts.append(content)
+
+Path(sys.argv[1]).write_text("\n".join(parts).replace("cargo run -- ", "spit "))

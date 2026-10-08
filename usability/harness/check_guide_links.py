@@ -8,7 +8,7 @@ from urllib.parse import unquote
 
 
 root = Path(sys.argv[1]).resolve()
-documents = [root / "GUIDE.md", root / "README.md", *sorted((root / "docs").glob("*.md"))]
+documents = [root / "GUIDE.md", root / "README.md", *sorted((root / "docs").rglob("*.md"))]
 errors = []
 # Developer docs that a trial leaves out on purpose.
 LEFT_OUT = [root / "profiling"]

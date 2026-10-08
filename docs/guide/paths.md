@@ -1,4 +1,4 @@
-# Paths and file kinds
+# Paths
 
 A path rule turns an artifact identity into a path relative to the dataset root. A pipeline can set a default, and a particular product can override it:
 
@@ -23,7 +23,7 @@ Here the `image` source has its own path; derived products take the default. An 
 
 SPIT's placeholders start with `@`; a plain name is a dimension. `[text]` makes a path segment optional when its placeholders have no value for that product. For example, `sub-{sub}[/ses-{ses}][/{@stage}]/{@labels}_{@product}` can cover both session and subject outputs. Every resolved product still gets one concrete template. The [path reference](../language-reference.md#paths) covers literal braces, validation, collision checks, and how path values are escaped.
 
-## Extensions and output names
+## Extensions
 
 An operation can declare the extension its output file has; `ext:` supplies a default when the operation does not. Sources can declare their extensions too. A default rule can therefore omit the suffix:
 
@@ -45,7 +45,7 @@ command convert: dcm2niix -o {image.dir} -f {image.stem} {dicom}
 
 `{image.dir}` and `{image.stem}` give a tool the destination folder and the name without its extension. Both count as using the output. A `beside` output has no independent path rule. See [files a tool writes beside another](../language-reference.md#files-a-tool-writes-beside-another).
 
-## Folder artifacts and sidecar sources
+## Folders and companions
 
 Add `/` after a product's type or extension for an artifact that is a folder:
 
@@ -68,4 +68,4 @@ The companion inherits the main source's dimensions and path stem; a recipe can 
 
 A source path placeholder can restrict the values it reads: `{run:digits}`, `{year:year}`, and `{date:date}` accept digits, four-digit years from 1900 to 2099, and real `YYYY-MM-DD` dates respectively. Shapes belong only on paths that read sources or discover directories. See [shapes on a source placeholder](../language-reference.md#shapes-on-a-source-placeholder).
 
-Next: [Recipes and input inventories](recipes.md) for dataset-specific source paths.
+Next: [Recipes](recipes.md).
