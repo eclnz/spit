@@ -24,7 +24,7 @@ cargo run -- dag examples/commands/command_demo/command_demo.spit examples/comma
 - [Command line manual](docs/cli.md) lists commands and flags; [DAG format](docs/spitdag.md) defines the runner contract.
 - [Examples](docs/examples.md) show complete pipelines; [architecture](docs/architecture.md) describes contributor internals.
 
-Run `python3 -m pip install -r .github/docs-requirements.txt` and `mkdocs serve` to browse the site locally. `mkdocs build --strict` checks its links.
+Run `python3 -m pip install -r .github/docs-requirements.txt` and `properdocs serve` to browse the site locally. `properdocs build --strict` checks its links.
 
 ## Development
 
