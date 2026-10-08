@@ -20,7 +20,6 @@ use super::output::{
     is_inputs, is_recipe, job_count, passed, read_file, read_stdin, report, write_output,
     write_spitdag,
 };
-use super::suggest::suggest;
 
 /// Step 1: compile a pipeline, or check a recipe against the pipeline it
 /// names. Reads no data.
@@ -150,9 +149,6 @@ pub(crate) fn inputs(args: &CliArgs) -> Result<(), Box<dyn Error>> {
         None,
         loaded.names(),
     )?;
-    if args.has(Flag::Suggest) {
-        return suggest(&loaded, &args.file);
-    }
     let (mut settled, root) = settle(&loaded)?;
     if args.has(Flag::Unmatched) {
         for file in &settled.unmatched_files {

@@ -44,8 +44,7 @@ pub use imports::parse_pipeline_at;
 pub use inputs::{
     case_variants, discover_source_files, discover_sources, parse_input_spec, parse_input_spec_at,
     CaseVariants, Discovery, EveryGroupDropped, InputError, InputSource, InputSpec, MissedSource,
-    NearestFile, NearlyMatched, ResolvedInputs, Spelling, SuggestedSource, Suggestions,
-    UnmatchedExclusion,
+    NearestFile, ResolvedInputs, Spelling, UnmatchedExclusion,
 };
 pub use lower::parse_pipeline;
 pub use model::{
