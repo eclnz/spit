@@ -1,6 +1,6 @@
 # Language reference
 
-This is the full syntax reference for `.spit` pipelines, `.spitin` recipes, and `.spitout` inputs. See the [README](../README.md) for a quick start and the [architecture](architecture.md) doc for the internal model.
+This is the full syntax reference for `.spit` pipelines, `.spitin` recipes, and `.spitout` inputs. For a quick lookup by keyword or construct, use the [language catalog](reference/index.md). Start with the [guided introduction](index.md) or [getting started](getting-started.md) if you are new to SPIT; the [architecture](architecture.md) page describes the internal model.
 
 A `#` that starts a word begins a comment, as in Bash. A `#` inside a word or in quotes is kept, so `--color=#fff` and `'#run'` are ordinary arguments.
 
@@ -36,7 +36,7 @@ average : Image [subject, visit] = mean(processed @ vary(run))
 
 A pipeline has one dimension order, and every product lists its dimensions in it. The order decides how a `many` input's artifacts are sorted, so the order of their command arguments, and how `{@entities}` and displayed identities are written.
 
-Each source states the order of its own dimensions: `source bold [sub, ses, run]` puts `sub` before `ses` before `run`. Most pipelines need nothing more. Two sources that order a pair differently are an error.
+Each source states the order of its own dimensions: `source bold [sub, ses, run]` puts `sub` before `ses` before `run`. These declarations establish the pipeline's order wherever they relate its dimensions. Two sources that order a pair differently are an error.
 
 When a product holds two dimensions that no source orders, declare the order once, anywhere at the top level:
 
@@ -248,7 +248,7 @@ A file or a stage has one `check:` line. Its checks and the ones it drops must b
 
 ## Stages
 
-A stage groups the steps of one phase of a pipeline, such as preprocessing or analysis. Write `stage name:` at the start of a line and indent the stage's lines beneath it; the next line that is not indented ends the stage. A stage is one block: a stage name may not be opened twice, so a step that belongs to it goes inside that block, and steps may use products from a later stage. From the [stages example](../examples/stages/stages.spit):
+A stage groups the steps of one phase of a pipeline, such as preprocessing or analysis. Write `stage name:` at the start of a line and indent the stage's lines beneath it; the next line that is not indented ends the stage. A stage is one block: a stage name may not be opened twice, so a step that belongs to it goes inside that block, and steps may use products from a later stage. From the [stages example](https://github.com/eclnz/spit/blob/dev/examples/stages/stages.spit):
 
 ```text
 path: {@stage}/{@product}/{@entities}.txt
@@ -275,7 +275,7 @@ stage analysis:
 
 A stage owns the products its steps assign. Operations and commands stay global, so one declared in a stage can be used anywhere, and product names are not prefixed: `analysis` reads `merged` by name. Declare an operation in the stage that holds its calls, or at the top level: SPIT warns about one called outside the stage it is declared in, and names the innermost stage that holds every call, else the top level. Two operations may not share a name, even in different stages. Sources and `use` lines belong at the top level. A `path:` line inside a stage is the default for that stage's products only; a `path product:` rule still takes precedence. `{@stage}` in a path template is the name of the product's stage. A product made outside every stage, such as a step at the top level, has none, so a default that covers it writes the stage as an [optional group](#paths), `[{@stage}/]`; SPIT's error says so.
 
-Stages nest. A `stage` header inside a stage opens a stage within it, named by its path, such as `preprocess/combine`; a line back at the outer stage's indentation closes it. From the [nested example](../examples/stages/nested.spit):
+Stages nest. A `stage` header inside a stage opens a stage within it, named by its path, such as `preprocess/combine`; a line back at the outer stage's indentation closes it. From the [nested example](https://github.com/eclnz/spit/blob/dev/examples/stages/nested.spit):
 
 ```text
 stage preprocess:
@@ -398,7 +398,7 @@ Extensions are optional. An operation whose tool picks the format from the outpu
   matrix (output): default derivatives/{@product}/{@entities}.mat, `.mat` from operation `align`
 ```
 
-Path rules also find sources. With `root data`, `spit inputs recipe.spitin` lists each file under `data` whose path matches a source's rule, in the pipeline or the recipe, reading entity values from its placeholders. A rule matches a file's whole path, so `responses/{region}/wave{wave}.csv` does not match `wave3.csv.bak` or `wave3.csv.1`, and files that match no rule are left out. When a source's rule matches no file, the scan warns and names the unmatched file nearest the rule, with the text where the file and the rule part; see [Find incomplete artifacts](../README.md#find-incomplete-artifacts). For existing data, declare the source and its path rule explicitly; see [Start from the files](../README.md#start-from-the-files). Links to files and directories are followed. A value is read only as SPIT writes it, so a file such as `in/%41.txt`, whose value SPIT would write `A`, is skipped with a warning rather than listed under a path no job would use.
+Path rules also find sources. With `root data`, `spit inputs recipe.spitin` lists each file under `data` whose path matches a source's rule, in the pipeline or the recipe, reading entity values from its placeholders. A rule matches a file's whole path, so `responses/{region}/wave{wave}.csv` does not match `wave3.csv.bak` or `wave3.csv.1`, and files that match no rule are left out. When a source's rule matches no file, the scan warns and names the unmatched file nearest the rule, with the text where the file and the rule part; see [Find incomplete artifacts](guide/inspection.md). To write the rules for data that already exists, `spit inputs --suggest` prints a rule for each group of files no rule matches; see [Start from the files](https://github.com/eclnz/spit/blob/dev/README.md#start-from-the-files). Links to files and directories are followed. A value is read only as SPIT writes it, so a file such as `in/%41.txt`, whose value SPIT would write `A`, is skipped with a warning rather than listed under a path no job would use.
 
 ### Shapes on a source placeholder
 
