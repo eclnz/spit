@@ -339,12 +339,18 @@ pub fn diagnose_recipe(text: &str, path: &Path) -> Vec<Diagnostic> {
         }
         Err(diagnostics) => {
             let external: Arc<str> = Arc::from(pipeline_text.as_str());
+            let pipeline_file = crate::imports::relative_path(
+                path.parent().unwrap_or_else(|| Path::new("")),
+                &pipeline_path,
+            );
+            let folder = Path::new(&pipeline_file)
+                .parent()
+                .unwrap_or_else(|| Path::new(""));
             let pipeline_errors = diagnostics
                 .into_iter()
                 .filter(Diagnostic::is_error)
                 .map(|mut diagnostic| {
                     // A library's path is from the pipeline's folder.
-                    let folder = pipeline_path.parent().unwrap_or_else(|| Path::new(""));
                     match &mut diagnostic.file {
                         // An error in a library keeps its own file and text.
                         Some(file) => *file = folder.join(&*file).display().to_string(),
