@@ -15,6 +15,7 @@ cargo run -- dag examples/commands/command_demo/command_demo.spit examples/comma
 ```
 
 `spit-bash` can run the saved DAG on one machine. The [VS Code extension](https://github.com/eclnz/spit-vscode) provides live validation.
+For scripts and editors, `spit check --json` prints diagnostics on stdout and exits 1 when any are errors.
 
 ## Documentation
 
