@@ -619,13 +619,12 @@ out = flip(cal @ where(revision=1), raw)
         at(5, "flip"),
         [["Carried out by the steps in its body: y = clean(x, t)"]]
     );
-    assert_eq!(
-        at(7, "flip"),
-        [[
-            "Carried out by the steps in its body: y = clean(x, t)",
-            "This call expands to: out = clean(raw, cal)"
-        ]]
-    );
+    let call = &at(7, "flip")[0];
+    assert!(call.iter().all(|detail| !detail.starts_with("Carried out")));
+    assert!(call.contains(&"t ← cal: Table [group, revision]".to_owned()));
+    assert!(call.contains(&"x ← raw: Lines [group, lane]".to_owned()));
+    assert!(call.contains(&"y → out: Lines [group, lane]".to_owned()));
+    assert!(call.contains(&"This call expands to: out = clean(raw, cal)".to_owned()));
     // Each argument supplies the call's input, in the call's order.
     assert!(at(7, "cal")[0].ends_with(&["Supplies input t of flip.".to_owned()]));
     assert!(at(7, "raw")[0].ends_with(&["Supplies input x of flip.".to_owned()]));

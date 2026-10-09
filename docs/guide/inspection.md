@@ -33,6 +33,10 @@ The DAG records outputs it left out and their reasons. A `many` input uses its c
 
 ## Diagnostics
 
+In the editor, an operation declaration explains its generic signature and body. At a call, the hover shows the actual products and inferred types, with one concrete expansion for an operation implemented by steps. Primitive calls retain their command and verification templates and explain selectors that change matching. Long signatures and signatures with multiple outputs use one port per line; bindings and expansions appear as code blocks.
+
+A product hover shows its inferred type, producer, path and consumers. It only repeats a declared type when that differs from inference, and explicitly says when inference failed. For a product used by many steps, it lists the first eight readers and counts the others.
+
 `spit check pipeline.spit --json --hovers` returns structured diagnostics, path hints, and word and symbol hovers. `--stdin` reads an unsaved buffer while keeping the file path for imports. The [command line reference](../cli.md) lists flags; the [VS Code extension](https://github.com/eclnz/spit-vscode) uses this interface.
 
 Next: [Runnable DAGs](runnable.md).
