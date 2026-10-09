@@ -70,7 +70,9 @@ impl Keyword {
             }
         }
         if let Some(rest) = line.strip_prefix("entities ") {
-            if rest.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_')
+            if rest
+                .trim_start()
+                .starts_with(|c: char| c.is_ascii_alphabetic() || c == '_')
                 && !rest.split(':').next().unwrap_or_default().contains('=')
             {
                 return Some((Self::Entities, rest));

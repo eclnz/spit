@@ -167,7 +167,7 @@ fn imports_keep_library_source_formats_and_use_caller_output_formats() {
 
 #[test]
 fn aliases_can_precede_the_format_and_entities_remains_a_product_name() {
-    let pipeline = parse_pipeline("entities sub: subject\nentities: {key}_{value} separated \"-\"\nsource raw [sub]\noperation copy(x) -> Image\nentities : Image [sub] = copy(raw)\n").unwrap();
+    let pipeline = parse_pipeline("entities   sub: subject\nentities: {key}_{value} separated \"-\"\nsource raw [sub]\noperation copy(x) -> Image\nentities : Image [sub] = copy(raw)\n").unwrap();
     assert_eq!(
         pipeline.path_template_for("entities").unwrap().to_string(),
         "out/{@product}/subject_{sub}"
