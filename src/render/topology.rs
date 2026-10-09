@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use std::fmt::Write;
 
 /// Render a compiled pipeline as a stage overview and local diagrams.
-/// Product names connect panels; each reusable body is drawn once.
+/// Product names connect stages; each reusable body is drawn once.
 /// Dependencies are indexed once and ordered with an iterative worklist.
 pub fn render_pipeline_tree(pipeline: &Pipeline) -> String {
     let mut roots = vec![None; pipeline.calls.len()];
@@ -126,10 +126,10 @@ pub fn render_pipeline_tree(pipeline: &Pipeline) -> String {
     text
 }
 
-struct Step<'p> {
-    name: &'p str,
-    inputs: Vec<&'p str>,
-    outputs: &'p [String],
+pub(super) struct Step<'p> {
+    pub(super) name: &'p str,
+    pub(super) inputs: Vec<&'p str>,
+    pub(super) outputs: &'p [String],
     stage: Option<&'p str>,
 }
 
@@ -227,14 +227,16 @@ fn overview(steps: &[&Step<'_>], text: &mut String) {
         )
         .expect("writing to a String");
     }
-    text.push_str("\nMatching product names connect the panels below.\n\n");
+    text.push_str(
+        "\nMatching product names connect stages below; ╪ marks a crossing, not a join.\n\n",
+    );
 }
 
 fn render_graph(products: &[&str], steps: &[Step<'_>]) -> String {
     let ordered = ordered_steps(steps);
     let mut text = String::new();
     overview(&ordered, &mut text);
-    // Index each exact stage once. No product line crosses panel boundaries.
+    // Index each exact stage once; product rails stay inside its boundary.
     let mut names = Vec::new();
     let mut index = FxHashMap::default();
     let mut groups: Vec<Vec<&Step<'_>>> = Vec::new();
@@ -252,21 +254,14 @@ fn render_graph(products: &[&str], steps: &[Step<'_>]) -> String {
         } else if names.len() > 1 {
             text.push_str("Outside stages\n");
         }
-        let mut start = 0;
-        while start < group.len() {
-            let mut end = start + 1;
-            while end < group.len()
-                && group[end].inputs.len() == 1
-                && group[end - 1].outputs.len() == 1
-                && group[end].inputs[0] == group[end - 1].outputs[0]
-            {
-                end += 1;
-            }
-            panel(&group[start..end], &mut text);
-            if end < group.len() {
-                text.push('\n');
-            }
-            start = end;
+        if group.windows(2).all(|pair| {
+            pair[1].inputs.len() == 1
+                && pair[0].outputs.len() == 1
+                && pair[1].inputs[0] == pair[0].outputs[0]
+        }) {
+            panel(group, &mut text);
+        } else {
+            super::topology_connected::render(group, &mut text);
         }
         text.push('\n');
     }
@@ -316,7 +311,7 @@ fn product_row(names: &[&str], width: usize, text: &mut String) -> Vec<usize> {
     centers
 }
 
-fn write_row(row: &[char], text: &mut String) {
+pub(super) fn write_row(row: &[char], text: &mut String) {
     let end = row.iter().rposition(|&c| c != ' ').map_or(0, |i| i + 1);
     text.extend(row[..end].iter());
     text.push('\n');
@@ -389,7 +384,7 @@ fn panel(steps: &[&Step<'_>], text: &mut String) {
             continue;
         }
         // All output branching occurs after the operation. Each named output
-        // receives its own arrow; future readers refer to that name in a panel.
+        // receives its own arrow before the next operation in this chain.
         let mut at = (width - row_width(&outputs)) / 2;
         let points: Vec<_> = outputs
             .iter()
@@ -510,7 +505,7 @@ mod tests {
     }
 
     #[test]
-    fn shared_products_connect_panels_by_name() {
+    fn shared_products_have_one_connected_rail() {
         let pipeline = Pipeline {
             products: products(&["raw", "a", "b", "c", "x", "y", "out"]),
             invocations: vec![
@@ -538,24 +533,11 @@ mod tests {
             ..Pipeline::default()
         };
         let text = render_pipeline_tree(&pipeline);
-        assert!(!text.contains('╪'));
-        assert_eq!(text.matches("[a]").count(), 3);
-        assert_eq!(text.matches("[b]").count(), 2);
+        assert!(text.contains('╪'));
+        assert_eq!(text.matches("[a]").count(), 1);
+        assert_eq!(text.matches("[b]").count(), 1);
         assert!(text.contains("[out]"));
-        let lines: Vec<_> = text.lines().collect();
-        let boxes: Vec<_> = lines
-            .windows(2)
-            .filter(|pair| {
-                pair[1].trim().starts_with('┌')
-                    && pair[1].trim().ends_with('┐')
-                    && !pair[1].contains('┴')
-                    && !pair[1].contains('┼')
-            })
-            .collect();
-        assert_eq!(boxes.len(), 3);
-        for pair in boxes {
-            assert_eq!(pair[0].matches('▼').count(), 2);
-        }
+        assert_eq!(text.matches('▶').count(), 7);
     }
 
     #[test]
@@ -623,7 +605,8 @@ mod tests {
         };
         let text = render_pipeline_tree(&pipeline);
         assert_eq!(text.matches("join").count(), 1);
-        assert!(text.contains("[b]   [c]"));
+        assert_eq!(text.matches("[b]").count(), 1);
+        assert_eq!(text.matches("[c]").count(), 1);
         assert!(text.contains('┘'));
         assert!(!text.contains("see above"));
         assert!(text.contains("[d]"));

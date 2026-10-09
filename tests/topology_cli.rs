@@ -72,9 +72,62 @@ fn mrtrix_examples_render_narrow_stage_panels() {
         assert!(text.contains('▼'));
         assert!(text.contains('┬'));
         assert!(!text.contains("see above"));
-        assert!(!text.contains('╪'));
         assert!(text.contains("Stage:"));
         assert!(text.contains("(preprocess) ──[session_b0]──> (anatomy)"));
         assert!(text.lines().all(|line| line.chars().count() <= 100));
     }
+}
+
+#[test]
+fn combined_tractography_connects_shared_outputs_once() {
+    let tree = Tree::new("topology-connected-tractography", &[]);
+    let source = std::fs::read_to_string("examples/commands/mrtrix3_act/mrtrix3_act.spit").unwrap();
+    let mut inside = false;
+    let mut combined = String::new();
+    for line in source.lines() {
+        if line == "stage tractography:" {
+            inside = true;
+        }
+        if inside && line.starts_with("    stage ") {
+            continue;
+        }
+        combined.push_str(if inside && line.starts_with("        ") {
+            &line[4..]
+        } else {
+            line
+        });
+        combined.push('\n');
+    }
+    tree.write("pipeline.spit", &combined);
+    let run = spit(&[
+        "dag",
+        tree.path().join("pipeline.spit").to_str().unwrap(),
+        "--tree",
+    ]);
+    assert!(
+        run.status.success(),
+        "{}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    let text = String::from_utf8(run.stdout).unwrap();
+    let stage = text.split("Stage: tractography\n").nth(1).unwrap();
+    for product in [
+        "corrected_dwi",
+        "wm_response",
+        "wm_fod",
+        "five_tt",
+        "act_tracks",
+        "sift2_weights",
+        "weighted_connectome",
+    ] {
+        assert_eq!(
+            stage.matches(&format!("[{product}]")).count(),
+            1,
+            "{product}"
+        );
+    }
+    assert_eq!(stage.matches('▶').count(), 13);
+    assert!(stage.contains('╪'));
+    assert!(!stage.trim().contains("\n\n"));
+    assert!(stage.lines().all(|line| line.chars().count() <= 60));
 }
