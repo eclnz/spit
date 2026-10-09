@@ -9,6 +9,7 @@ use super::check::parse_default_checks;
 use super::declarations::{
     parse_dimension_order, parse_discover, parse_invocation_parts, parse_path, parse_product,
 };
+use super::entities::parse_entities;
 use super::keyword::{removed_section, Keyword};
 use super::lexical::{comma_items, extension, identifier, strip_comment};
 use super::source_map::{name_place, step_place, tail_place};
@@ -383,6 +384,10 @@ fn flow_rest(
         Some((Keyword::Dimensions, declaration)) => {
             top_level_only("`dimensions`, which orders the whole pipeline,")?;
             StatementKind::Dimensions(parse_dimension_order(declaration, number)?)
+        }
+        Some((Keyword::Entities, _)) => {
+            top_level_only("`entities`, which formats the whole pipeline's paths,")?;
+            StatementKind::Entities(parse_entities(line, number)?)
         }
         Some((Keyword::Discover, declaration)) => {
             top_level_only("`discover`")?;
