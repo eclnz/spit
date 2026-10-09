@@ -1,4 +1,0 @@
-pipeline text.spit
-root text_data
-
-require [group] where shard count>=1

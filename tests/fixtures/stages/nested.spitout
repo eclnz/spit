@@ -1,0 +1,4 @@
+sources:
+    shard[group=alpha,part=01]
+    shard[group=alpha,part=02]
+    shard[group=beta,part=01]

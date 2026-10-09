@@ -1,5 +1,0 @@
-sources:
-    observation[model=A,run=1]
-    observation[model=A,run=2]
-    observation[model=B,run=1]
-    observation[model=B,run=2]
