@@ -58,8 +58,8 @@ pub use model::{
 };
 pub use parser::{parse_source_inventory, render_source_inventory, ParseError, ParseErrorKind};
 pub use paths::{
-    inspect_paths, validate_bound_source_files, validate_source_files, BoundPaths, PathCoverage,
-    PathCoverageEntry, PathError, PathProblem, PathRule, PathTemplate, VerifiedFiles,
+    inspect_paths, validate_bound_source_files, validate_source_files, BoundPaths, EntitiesFormat,
+    PathCoverage, PathCoverageEntry, PathError, PathProblem, PathRule, PathTemplate, VerifiedFiles,
 };
 pub use render::{
     render_artifacts, render_artifacts_by_target, render_bound_dag, render_call, render_calls,

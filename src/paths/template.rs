@@ -11,6 +11,7 @@ use crate::template::{parse_template, Part};
 
 use super::components::encode_component;
 use super::shape::{shape_names, Shape};
+use super::EntitiesFormat;
 
 crate::span::message_error!(
     /// What is wrong with a path rule, or with the paths it gives artifacts.
@@ -132,6 +133,7 @@ pub(crate) enum PathPart {
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Holder<'a> {
     pub(crate) dimensions: &'a [String],
+    pub(crate) entities_format: Option<&'a EntitiesFormat>,
     pub(crate) in_stage: bool,
 }
 
@@ -139,7 +141,13 @@ impl Holder<'_> {
     /// Whether `placeholder` has a value for the product.
     fn has(self, placeholder: &PathPlaceholder) -> bool {
         match placeholder {
-            PathPlaceholder::Product | PathPlaceholder::Entities => true,
+            PathPlaceholder::Product => true,
+            PathPlaceholder::Entities => {
+                !self.dimensions.is_empty()
+                    || self
+                        .entities_format
+                        .is_none_or(|format| !format.empty.is_empty())
+            }
             PathPlaceholder::Stage => self.in_stage,
             PathPlaceholder::Labels => !self.dimensions.is_empty(),
             PathPlaceholder::Dimension(name, _) => self.dimensions.contains(name),
@@ -214,10 +222,15 @@ impl PathTemplate {
     }
 
     /// This template as `holder`'s product has it: each group kept whole or
-    /// dropped, and `{@labels}` written out as `sub-{sub}_ses-{ses}`. One
-    /// with no group or `{@labels}` is the same for every product.
+    /// dropped, and labels or custom entities written out as dimension
+    /// placeholders. Unconfigured entities retain the built-in binder.
     pub(crate) fn resolve(&self, holder: Holder<'_>) -> Cow<'_, Self> {
-        if !self.varies() {
+        if !self.varies()
+            && (holder.entities_format.is_none()
+                || !self
+                    .parts
+                    .contains(&PathPart::Placeholder(PathPlaceholder::Entities)))
+        {
             return Cow::Borrowed(self);
         }
         let mut parts = Vec::new();
@@ -436,6 +449,7 @@ fn parse_parts(text: &str) -> Result<Vec<PathPart>, String> {
                             PathPlaceholder::Dimension(..)
                                 | PathPlaceholder::Stage
                                 | PathPlaceholder::Labels
+                                | PathPlaceholder::Entities
                         )
                     )
                 }) {
@@ -548,6 +562,28 @@ fn push_literal(parts: &mut Vec<PathPart>, value: &str) {
 fn push_resolved(parts: &mut Vec<PathPart>, part: &PathPart, holder: Holder<'_>) {
     match part {
         PathPart::Literal(value) => push_literal(parts, value),
+        PathPart::Placeholder(PathPlaceholder::Entities) if holder.entities_format.is_some() => {
+            let format = holder
+                .entities_format
+                .expect("custom entities expansion has a format");
+            if holder.dimensions.is_empty() {
+                push_literal(parts, &encode_component(&format.empty));
+            }
+            for (index, dimension) in holder.dimensions.iter().enumerate() {
+                if index > 0 {
+                    push_literal(parts, &format.separator);
+                }
+                push_literal(parts, &format.prefix);
+                let label = format.labels.get(dimension).unwrap_or(dimension);
+                push_literal(parts, &encode_component(label));
+                push_literal(parts, &format.between);
+                parts.push(PathPart::Placeholder(PathPlaceholder::Dimension(
+                    dimension.clone(),
+                    None,
+                )));
+                push_literal(parts, &format.suffix);
+            }
+        }
         PathPart::Placeholder(PathPlaceholder::Labels) if holder.has(&PathPlaceholder::Labels) => {
             for (index, dimension) in holder.dimensions.iter().enumerate() {
                 if index > 0 {
