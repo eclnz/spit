@@ -1,0 +1,4 @@
+pipeline imported.spit
+root text_data
+
+require [group] where text::shard count>=1

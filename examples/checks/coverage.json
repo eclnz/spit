@@ -1,0 +1,538 @@
+{
+  "entries": [
+    {
+      "pipeline": "examples/analytics/analytics.spit",
+      "recipe": "examples/analytics/analytics.spitin",
+      "expect": {
+        "sources": {
+          "campaigns": 3,
+          "customers": 3,
+          "events": 5,
+          "purchases": 3,
+          "subscriptions": 3
+        },
+        "operations": {
+          "aggregate_customer": 3,
+          "aggregate_day": 4,
+          "aggregate_tenant": 2,
+          "clean": 5,
+          "join_campaigns": 5,
+          "join_customers": 5,
+          "join_purchases": 5,
+          "join_subscriptions": 5
+        },
+        "targets": {
+          "tenant_metrics": 2
+        },
+        "dependencies": 32,
+        "removals": 0,
+        "calls": 0
+      }
+    },
+    {
+      "pipeline": "examples/basic/basic.spit",
+      "recipe": "examples/basic/basic.spitin",
+      "expect": {
+        "sources": {
+          "bold": 2,
+          "t1w": 1
+        },
+        "operations": {
+          "denoise": 2,
+          "mean": 1,
+          "register": 2
+        },
+        "targets": {
+          "mean_bold": 1
+        },
+        "dependencies": 4,
+        "removals": 0,
+        "calls": 0
+      }
+    },
+    {
+      "pipeline": "examples/commands/command_demo/command_demo.spit",
+      "recipe": "examples/commands/command_demo/command_demo.spitin",
+      "expect": {
+        "sources": {
+          "shard": 3
+        },
+        "operations": {
+          "merge": 2,
+          "sort_lines": 3
+        },
+        "targets": {
+          "merged": 2
+        },
+        "dependencies": 3,
+        "removals": 0,
+        "calls": 0
+      }
+    },
+    {
+      "pipeline": "examples/commands/field_survey/field_survey.spit",
+      "recipe": "examples/commands/field_survey/field_survey.spitin",
+      "expect": {
+        "sources": {
+          "flat_field": 3,
+          "flat_field_json": 3,
+          "ground_map": 3,
+          "photo_gps": 7,
+          "photo_imu": 7,
+          "photo_json": 7,
+          "raw_photo": 7,
+          "source_classes": 1,
+          "target_classes": 1
+        },
+        "operations": {
+          "balance": 3,
+          "build_yield_table": 3,
+          "classify_map": 3,
+          "convert_alignment": 3,
+          "correct_photo": 3,
+          "cover_boundary": 3,
+          "denoise": 7,
+          "estimate_alignment": 3,
+          "estimate_response": 3,
+          "estimate_vegetation": 3,
+          "export_tiff": 3,
+          "extract_dark": 6,
+          "import_flat": 3,
+          "import_photo": 7,
+          "mean_dark": 6,
+          "pair_calibration": 3,
+          "relabel": 3,
+          "remove_glare": 7,
+          "resample": 6,
+          "resample_labels": 3,
+          "segment_cover": 3,
+          "stack_shots": 3,
+          "trace_rows": 3,
+          "weight_rows": 3
+        },
+        "targets": {
+          "map_photo": 3,
+          "yield_table": 3
+        },
+        "dependencies": 126,
+        "removals": 0,
+        "calls": 0
+      }
+    },
+    {
+      "pipeline": "examples/commands/mrtrix3_act/mrtrix3_act.spit",
+      "recipe": "examples/commands/mrtrix3_act/mrtrix3_act.spitin",
+      "expect": {
+        "sources": {
+          "dwi_bval": 7,
+          "dwi_bvec": 7,
+          "dwi_json": 7,
+          "raw_dwi": 7,
+          "reverse_b0": 3,
+          "reverse_b0_json": 3,
+          "source_lut": 1,
+          "t1w": 3,
+          "target_lut": 1
+        },
+        "operations": {
+          "bias_correct": 3,
+          "build_connectome": 3,
+          "combine_pe_pair": 3,
+          "concatenate_runs": 3,
+          "convert_flirt": 3,
+          "convert_labels": 3,
+          "denoise": 7,
+          "estimate_fods": 3,
+          "estimate_responses": 3,
+          "export_nifti": 3,
+          "extract_b0": 6,
+          "flirt_register": 3,
+          "import_dwi": 7,
+          "import_reverse_b0": 3,
+          "make_5tt": 3,
+          "make_gmwmi": 3,
+          "mean_b0": 6,
+          "mrtransform": 6,
+          "mrtransform_labels": 3,
+          "parcellate_t1": 3,
+          "preprocess_dwi": 3,
+          "remove_gibbs": 7,
+          "track_act": 3,
+          "weight_streamlines": 3
+        },
+        "targets": {
+          "csf_fod": 3,
+          "gm_response": 3,
+          "t1w_dwi": 3,
+          "weighted_connectome": 3
+        },
+        "dependencies": 126,
+        "removals": 0,
+        "calls": 0
+      }
+    },
+    {
+      "pipeline": "examples/composites/germline/somatic.spit",
+      "recipe": "examples/composites/germline/somatic.spitin",
+      "expect": {
+        "sources": {
+          "normal_r1": 2,
+          "normal_r2": 2,
+          "reference": 1,
+          "tumour_r1": 2,
+          "tumour_r2": 2
+        },
+        "operations": {
+          "gl::bwa_align": 4,
+          "gl::call_gvcf": 2,
+          "gl::mark_duplicates": 2,
+          "gl::merge_lanes": 2,
+          "gl::sort_reads": 4
+        },
+        "targets": {
+          "normal_bam::metrics": 1,
+          "normal_gvcf": 1,
+          "tumour_bam::metrics": 1,
+          "tumour_gvcf": 1
+        },
+        "dependencies": 12,
+        "removals": 0,
+        "calls": 2
+      }
+    },
+    {
+      "pipeline": "examples/composites/mrtrix/act.spit",
+      "recipe": "examples/composites/mrtrix/act.spitin",
+      "expect": {
+        "sources": {
+          "dwi_bval": 7,
+          "dwi_bvec": 7,
+          "dwi_json": 7,
+          "raw_dwi": 7,
+          "reverse_b0": 3,
+          "reverse_b0_json": 3,
+          "t1w": 3
+        },
+        "operations": {
+          "mrx::bias_correct": 3,
+          "mrx::combine_pe_pair": 3,
+          "mrx::concatenate_runs": 3,
+          "mrx::convert_flirt": 3,
+          "mrx::denoise": 7,
+          "mrx::export_nifti": 3,
+          "mrx::extract_b0": 6,
+          "mrx::flirt_register": 3,
+          "mrx::import_dwi": 7,
+          "mrx::import_reverse_b0": 3,
+          "mrx::mean_b0": 6,
+          "mrx::mrtransform": 3,
+          "mrx::preprocess_dwi": 3,
+          "mrx::remove_gibbs": 7
+        },
+        "targets": {
+          "t1w_dwi": 3
+        },
+        "dependencies": 66,
+        "removals": 0,
+        "calls": 2
+      }
+    },
+    {
+      "pipeline": "examples/imports/imported.spit",
+      "recipe": "examples/imports/imported.spitin",
+      "expect": {
+        "sources": {
+          "text::shard": 3
+        },
+        "operations": {
+          "merge": 2,
+          "tally_lines": 2,
+          "text::sort_lines": 5
+        },
+        "targets": {
+          "tally": 2
+        },
+        "dependencies": 7,
+        "removals": 0,
+        "calls": 0
+      }
+    },
+    {
+      "pipeline": "examples/patterns/cohort/cohort.spit",
+      "recipe": "examples/patterns/cohort/cohort.spitin",
+      "expect": {
+        "sources": {
+          "bold": 7,
+          "t1w": 4
+        },
+        "operations": {
+          "bet": 4,
+          "longitudinal": 2,
+          "motioncorr": 7,
+          "register": 7,
+          "sessionavg": 4
+        },
+        "targets": {
+          "long": 2
+        },
+        "dependencies": 25,
+        "removals": 2,
+        "calls": 0
+      }
+    },
+    {
+      "pipeline": "examples/patterns/ragged_sweep/ragged_sweep.spit",
+      "recipe": "examples/patterns/ragged_sweep/ragged_sweep.spitin",
+      "expect": {
+        "sources": {
+          "config": 2,
+          "model": 2,
+          "seed": 3,
+          "testset": 1
+        },
+        "operations": {
+          "evaluate": 6,
+          "leaderboard": 1,
+          "summarise": 4,
+          "train": 6
+        },
+        "targets": {
+          "board": 1
+        },
+        "dependencies": 16,
+        "removals": 0,
+        "calls": 0
+      }
+    },
+    {
+      "pipeline": "examples/pipelines/branching.spit",
+      "recipe": "examples/pipelines/branching.spitin",
+      "expect": {
+        "sources": {
+          "policy": 2,
+          "raw": 4
+        },
+        "operations": {
+          "assemble": 3,
+          "audit_group": 3,
+          "clean": 4,
+          "digest_group": 3,
+          "enrich": 4,
+          "validate": 4
+        },
+        "targets": {
+          "report": 3
+        },
+        "dependencies": 22,
+        "removals": 0,
+        "calls": 0
+      }
+    },
+    {
+      "pipeline": "examples/pipelines/complex.spit",
+      "recipe": "examples/pipelines/complex.spitin",
+      "expect": {
+        "sources": {
+          "baseline": 3,
+          "gain": 3,
+          "reading": 6,
+          "target": 2
+        },
+        "operations": {
+          "inspect": 6,
+          "mean": 9,
+          "normalize": 6,
+          "score": 4
+        },
+        "targets": {
+          "checked": 6,
+          "scored": 4,
+          "site_mean": 2
+        },
+        "dependencies": 17,
+        "removals": 0,
+        "calls": 0
+      }
+    },
+    {
+      "pipeline": "examples/pipelines/selectors.spit",
+      "recipe": "examples/pipelines/selectors.spitin",
+      "expect": {
+        "sources": {
+          "calibration": 2,
+          "policy": 2,
+          "reading": 5,
+          "reference": 2
+        },
+        "operations": {
+          "calibrate": 5,
+          "compare": 5,
+          "split_bands": 5,
+          "summarise": 2
+        },
+        "targets": {
+          "high_band": 5,
+          "summary": 2
+        },
+        "dependencies": 15,
+        "removals": 0,
+        "calls": 0
+      }
+    },
+    {
+      "pipeline": "examples/stress/observatory.spit",
+      "recipe": "examples/stress/observatory.spitin",
+      "expect": {
+        "sources": {
+          "calibration": 5,
+          "clock": 3,
+          "model": 4,
+          "policy": 2,
+          "raw": 10,
+          "schema": 1,
+          "target": 3,
+          "window_policy": 5
+        },
+        "operations": {
+          "approve_device": 4,
+          "approve_org": 2,
+          "approve_site": 3,
+          "assess_channel": 7,
+          "calibrate": 10,
+          "compare_window": 6,
+          "decode": 10,
+          "evidence": 9,
+          "feature_segment": 10,
+          "filter_window": 10,
+          "judge_segment": 10,
+          "merge_channel_assessments": 6,
+          "merge_channels": 6,
+          "merge_device_assessments": 3,
+          "merge_devices": 3,
+          "merge_feature": 7,
+          "merge_score": 7,
+          "merge_signal": 7,
+          "merge_site_assessments": 2,
+          "merge_sites": 2,
+          "merge_window_assessments": 4,
+          "merge_windows": 4,
+          "portfolio": 1,
+          "score_segment": 10,
+          "synchronize": 10
+        },
+        "targets": {
+          "approved_device": 4,
+          "approved_site": 3,
+          "global_portfolio": 1,
+          "segment_verdict": 10,
+          "window_verdict": 6
+        },
+        "dependencies": 202,
+        "removals": 0,
+        "calls": 0
+      }
+    },
+    {
+      "pipeline": "examples/stress/type_lab.spit",
+      "recipe": "examples/stress/type_lab.spitin",
+      "expect": {
+        "sources": {
+          "atlas": 1,
+          "camera": 6,
+          "camera_cal": 3,
+          "lidar": 6,
+          "lidar_cal": 3,
+          "opaque": 1,
+          "policy": 2,
+          "reference": 3,
+          "unclassified": 2
+        },
+        "operations": {
+          "adjudicate": 6,
+          "approve": 4,
+          "audit": 4,
+          "build_case": 6,
+          "classify": 1,
+          "collect_quality": 8,
+          "collect_selected": 4,
+          "fuse": 6,
+          "measure": 24,
+          "normalize": 14,
+          "pair": 6,
+          "project": 14,
+          "score": 6,
+          "select": 6,
+          "summarize_captures": 3,
+          "summarize_labs": 1,
+          "summarize_rigs": 2,
+          "verify_projection": 14
+        },
+        "targets": {
+          "classified_opaque": 1,
+          "global_summary": 1,
+          "raw_camera_quality": 6,
+          "raw_lidar_quality": 6,
+          "verified_unclassified": 2
+        },
+        "dependencies": 159,
+        "removals": 0,
+        "calls": 0
+      }
+    },
+    {
+      "pipeline": "examples/types/typed.spit",
+      "recipe": "examples/types/typed.spitin",
+      "expect": {
+        "sources": {
+          "raw": 1,
+          "reference": 1
+        },
+        "operations": {
+          "align": 1,
+          "clean": 1
+        },
+        "targets": {
+          "transform": 1
+        },
+        "dependencies": 1,
+        "removals": 0,
+        "calls": 0
+      }
+    },
+    {
+      "pipeline": "examples/types/untyped.spit",
+      "recipe": "examples/types/untyped.spitin",
+      "expect": {
+        "sources": {
+          "raw": 2
+        },
+        "operations": {
+          "combine": 1,
+          "process": 2
+        },
+        "targets": {
+          "combined": 1
+        },
+        "dependencies": 2,
+        "removals": 0,
+        "calls": 0
+      }
+    }
+  ],
+  "libraries": {
+    "examples/imports/text.spit": [
+      "examples/imports/imported.spit"
+    ],
+    "examples/composites/mrtrix/mrtrix_dwi.spit": [
+      "examples/composites/mrtrix/act.spit"
+    ],
+    "examples/composites/germline/germline.spit": [
+      "examples/composites/germline/somatic.spit"
+    ]
+  },
+  "invalid": {
+    "examples/analytics/analytics_bad_join.spit": {
+      "message": "type conflict at `join.accounts` (product `accounts`): variable `K` was inferred as CustomerKey, but now requires AccountKey"
+    }
+  }
+}
