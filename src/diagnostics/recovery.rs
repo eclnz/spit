@@ -34,6 +34,15 @@ pub(crate) fn recover_document<T>(
     parse: impl Fn(&str) -> Result<T, Vec<ParseError>>,
 ) -> (Option<T>, Vec<ParseError>) {
     let original_lines: Vec<&str> = text.lines().collect();
+    // Keep in step with operation_lines in src/parser/continuation.rs: a
+    // signature is one declaration even when its error names a port line.
+    let mut signatures = vec![None; original_lines.len()];
+    for (start, line) in crate::parser::operation_lines(text) {
+        let end = start + line.lines().count();
+        if end > start + 1 {
+            signatures[start..end].fill(Some((start, end)));
+        }
+    }
     let mut recovered = original_lines.join("\n");
     let mut offset = 0;
     let ranges: Vec<_> = original_lines
@@ -62,6 +71,11 @@ pub(crate) fn recover_document<T>(
                 return (None, errors);
             };
             recovered.replace_range(range.clone(), &" ".repeat(range.len()));
+            if let Some((start, end)) = signatures[error.line() - 1] {
+                for range in &ranges[start..end] {
+                    recovered.replace_range(range.clone(), &" ".repeat(range.len()));
+                }
+            }
             // Misplaced records are one error, however many lines.
             if let ParseErrorKind::MisplacedRecords { lines: records } = error.kind() {
                 for record in records {

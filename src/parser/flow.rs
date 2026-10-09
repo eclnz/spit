@@ -34,7 +34,8 @@ pub(super) fn parse_flow(text: &str) -> Syntax {
     // statements come. A statement that cannot fail ends the watch: it
     // closes the stage whether or not the others are blank.
     let mut closed: Vec<(usize, usize)> = Vec::new();
-    for (index, original) in text.lines().enumerate() {
+    for (index, logical) in super::continuation::operation_lines(text) {
+        let original = logical.as_ref();
         if !closed.is_empty() && !strip_comment(original).trim().is_empty() {
             let indent = original.len() - original.trim_start().len();
             while let Some(&(statement, header)) = closed.last() {
