@@ -202,44 +202,71 @@ Run `spit dag sensors.spit sensors.spitout --commands` to see 17 jobs: five each
 
 The shared entity format writes `derived/calibrated/site_north-day_1.csv`. The `site` label changes path text only: identities and selectors still use `station`. Each shape uses its own dimensions with the same format.
 
-## Stages: preprocessing and analysis
+## Text processing: imports and nested stages
 
-Stages group steps and can set their own output paths. This pipeline sorts three shards, merges the parts in each group, then tallies each merged result. Save as `stages.spit`:
+One text pipeline combines imported definitions, nested preprocessing stages,
+aggregation and an analysis path override. The library owns the shard path and
+the reusable sort operation. Save as `text.spit`:
 
 ```spit
-# Text shards cleaned in one stage and summarised in the next.
-path: {@stage}/{@product}/{@entities}.txt
-
 source shard : Lines [group, part]
 path shard: input/{group}/{part}.txt
 
-stage preprocess:
-    operation sort_lines(input: Lines) -> Lines
-    command sort_lines: sort -u -o {@output} {input}
-    sorted = sort_lines(shard)
+operation sort_lines(input: Lines) -> Lines
+command sort_lines: sort -u -o {@output} {input}
+```
 
-    operation merge(items: many Lines) -> Lines
-    command merge: sort -m -u -o {@output} {items}
-    merged = merge(sorted @ vary(part))
+Save as `imported.spit`:
+
+```spit
+# Imported definitions, nested stages, aggregation and a stage path override.
+use text.spit as text
+
+path: {@stage}/{@product}/{@entities}.txt
+
+stage preprocess:
+    stage clean:
+        sorted = text::sort_lines(text::shard)
+
+    stage combine:
+        operation merge(items: many Lines) -> Lines
+        command merge: sort -m -u -o {@output} {items}
+        merged = merge(sorted @ vary(part))
+
+    resorted = text::sort_lines(merged)
 
 stage analysis:
     path: results/{@product}/{@entities}.txt
-
     operation tally_lines(input: Lines) -> Tally
     command tally_lines: uniq -c {input} {@output}
-    tally = tally_lines(merged)
+    tally = tally_lines(resorted)
 ```
 
-Save as `stages.spitout`:
+Save as `imported.spitin`:
 
-```text
-sources:
-    shard[group=alpha,part=01]
-    shard[group=alpha,part=02]
-    shard[group=beta,part=01]
+```spit
+pipeline imported.spit
+root text_data
+
+require [group] where text::shard count>=1
 ```
 
-Run `spit dag stages.spit stages.spitout --paths` to see seven jobs: three `sort_lines`, two `merge`, and two `tally_lines`. The sorted and merged outputs use the `preprocess/` path default; the tallies use the `analysis` stage's `results/` override. `spit dag stages.spit stages.spitout -o stages.spitdag` records each job's stage for a backend.
+Create two shards in group alpha and one in beta:
+
+```sh
+mkdir -p text_data/input/alpha text_data/input/beta
+touch text_data/input/alpha/01.txt text_data/input/alpha/02.txt text_data/input/beta/01.txt
+spit inputs imported.spitin -o fresh.spitout
+spit dag imported.spit fresh.spitout --paths
+spit dag imported.spitin -o text.spitdag
+```
+
+The plan contains nine jobs: three initial sorts, two merges, two sorts of the
+merged files, and two tallies. Initial sorts use `preprocess/clean/`, merges use
+`preprocess/combine/`, and the sorts written in the outer stage use
+`preprocess/`. Tallies use `results/tally/` through the analysis override.
+The imported source keeps its `text::shard` name; importing the library adds no
+steps of its own.
 
 ## Reusable steps: diffusion preprocessing and variant calling
 
@@ -299,28 +326,23 @@ When `dag` stops because an input is missing or ambiguous, run `spit artifacts` 
 
 ## More example pipelines
 
-Each pipeline below, under [`examples/`](https://github.com/eclnz/spit/tree/dev/examples), checks cleanly and sits beside a `.spitin` recipe and a `.spitout` of its inputs. Recipes may add discovery, named or conditional exclusion, or require rules. Each recipe's `root` line names a folder of empty source files beside it, so `spit dag` on the `.spitin` alone finds the same inputs and jobs as on the `.spit` and `.spitout`, and the `.spitout` records the same root, so `dag` checks those files too. Where the pipeline's own path rules find every source, as in the patterns, the recipe is optional: `cargo run -- dag examples/patterns/model_fit/model_fit.spit --root examples/patterns/model_fit` finds the same jobs. Run the command from the repository root to see its jobs; add `--paths` to see each artifact's file or `-o plan.spitdag` to write them, or run `spit check` on the `.spit` or `.spitin` alone.
+Each pipeline below, under [`examples/`](https://github.com/eclnz/spit/tree/dev/examples), checks cleanly and sits beside a `.spitin` recipe and a `.spitout` of its inputs. Recipes may add discovery, named or conditional exclusion, or require rules. Each recipe's `root` line names a folder of empty source files beside it, so `spit dag` on the `.spitin` alone finds the same inputs and jobs as on the `.spit` and `.spitout`, and the `.spitout` records the same root, so `dag` checks those files too. Where the pipeline's own path rules find every source and no exclusions are needed, the recipe is optional: `cargo run -- dag examples/patterns/ragged_sweep/ragged_sweep.spit --root examples/patterns/ragged_sweep` finds the same jobs. Run the command from the repository root to see its jobs; add `--paths` to see each artifact's file or `-o plan.spitdag` to write them, or run `spit check` on the `.spit` or `.spitin` alone.
 
 | Pipeline | Shows | Command | Jobs |
 | --- | --- | --- | --- |
 | [Branching](https://github.com/eclnz/spit/blob/dev/examples/pipelines/branching.spit) | A shared policy, two branches with their own aggregations, and a recombination | `cargo run -- dag examples/pipelines/branching.spit examples/pipelines/branching.spitout` | 21 |
-| [Observed groups](https://github.com/eclnz/spit/blob/dev/examples/pipelines/rich_shapes.spit) | Several subjects and sessions, a reused reference, and two successive aggregations | `cargo run -- dag examples/pipelines/rich_shapes.spit examples/pipelines/rich_shapes.spitout` | 17 |
 | [Nested aggregation](https://github.com/eclnz/spit/blob/dev/examples/pipelines/complex.spit) | Partial types, irregular groups, and three successive aggregations | `cargo run -- dag examples/pipelines/complex.spit examples/pipelines/complex.spitout` | 25 |
 | [Selectors](https://github.com/eclnz/spit/blob/dev/examples/pipelines/selectors.spit) | `where`, `same`, verification, two outputs, a many input beside a single input, and custom entity formatting | `cargo run -- dag examples/pipelines/selectors.spit examples/pipelines/selectors.spitout` | 17 |
-| [Archive revision](https://github.com/eclnz/spit/blob/dev/examples/patterns/archive_revision/archive_revision.spit) | `where` selects the approved revision before joining calibration | `cargo run -- dag examples/patterns/archive_revision/archive_revision.spit examples/patterns/archive_revision/archive_revision.spitout` | 2 |
-| [Per-group reference](https://github.com/eclnz/spit/blob/dev/examples/patterns/per_group_reference/per_group_reference.spit) | `same(station)` finds one reference per station despite its measurement-date dimension | `cargo run -- dag examples/patterns/per_group_reference/per_group_reference.spit examples/patterns/per_group_reference/per_group_reference.spitout` | 3 |
-| [Model fit](https://github.com/eclnz/spit/blob/dev/examples/patterns/model_fit/model_fit.spit) | One `many` input, two outputs, `@ vary`, `@ min`, and `verify` | `cargo run -- dag examples/patterns/model_fit/model_fit.spit examples/patterns/model_fit/model_fit.spitout` | 2 |
 | [Ragged sweep](https://github.com/eclnz/spit/blob/dev/examples/patterns/ragged_sweep/ragged_sweep.spit) | `each(model)` broadcasts over per-config seeds, then `vary` collects the runs | `cargo run -- dag examples/patterns/ragged_sweep/ragged_sweep.spit examples/patterns/ragged_sweep/ragged_sweep.spitout` | 17 |
 | [Cohort](https://github.com/eclnz/spit/blob/dev/examples/patterns/cohort/cohort.spit) | BIDS sessions, a dropped subject, an excluded run, and one default path with `[...]` groups and `{@labels}` | `cargo run -- dag examples/patterns/cohort/cohort.spitin` | 24 |
 | [Analytics](https://github.com/eclnz/spit/blob/dev/examples/analytics/analytics.spit) | Five keyed joins, then day, customer, and tenant rollups | `cargo run -- dag examples/analytics/analytics.spit examples/analytics/analytics.spitout` | 34 |
-| [Stages](https://github.com/eclnz/spit/blob/dev/examples/stages/stages.spit) | Preprocessing and analysis stages with `{@stage}` paths | `cargo run -- dag examples/stages/stages.spit examples/stages/stages.spitout` | 7 |
-| [Nested stages](https://github.com/eclnz/spit/blob/dev/examples/stages/nested.spit) | Stages within a stage | `cargo run -- dag examples/stages/nested.spit examples/stages/nested.spitout` | 9 |
+| [Text processing](https://github.com/eclnz/spit/blob/dev/examples/imports/imported.spit) | Imports, nested stages, aggregation and a stage path override | `cargo run -- dag examples/imports/imported.spitin` | 9 |
 | [Field survey](https://github.com/eclnz/spit/blob/dev/examples/commands/field_survey/field_survey.spit) | Source files declared `beside` their image, calibration, alignment between spaces, and commands | `cargo run -- dag examples/commands/field_survey/field_survey.spit examples/commands/field_survey/field_survey.spitout` | 93 |
 | [MRtrix3 ACT](https://github.com/eclnz/spit/blob/dev/examples/commands/mrtrix3_act/mrtrix3_act.spit) | A diffusion MRI pipeline in nested stages, from BIDS import to connectome | `cargo run -- dag examples/commands/mrtrix3_act/mrtrix3_act.spit examples/commands/mrtrix3_act/mrtrix3_act.spitout` | 93 |
 | [Diffusion preprocessing by steps](https://github.com/eclnz/spit/blob/dev/examples/composites/mrtrix/act.spit) | Two calls to operations a library carries out by steps | `cargo run -- dag examples/composites/mrtrix/act.spitin` | 60 |
 | [Variant calling by steps](https://github.com/eclnz/spit/blob/dev/examples/composites/germline/somatic.spit) | One operation carried out by steps, called for a tumour and its normal | `cargo run -- dag examples/composites/germline/somatic.spitin` | 14 |
 
-The pattern examples each include a `.spitin` recipe and a `.spitout` inventory. The cohort recipe also has small placeholder source files, so its discovery and both exclusion forms can be run directly. The `command_demo.spitin` recipe expects real shard files beside it; use its supplied `.spitout` to inspect the example jobs without creating a dataset.
+All entry points include placeholder source files and a recipe. The selectors example combines revision selection, per-group references, multiple outputs, verification and collection size checks. Cohort shows observed subjects and sessions with exclusions; nested aggregation follows irregular groups through successive rollups. Text processing combines imports, nested stages, aggregation and path overrides. Small typed, untyped and command examples remain as starting points; the stress pipelines cover larger graphs.
 
 ## Analytics
 
@@ -344,9 +366,53 @@ To try source discovery with empty placeholder files, run:
 
 ```sh
 sh examples/commands/mrtrix3_act/mock_mrtrix3_inputs.sh
-cargo run -- inputs examples/commands/mrtrix3_act/mrtrix3_act_discover.spitin -o examples/commands/mrtrix3_act/mrtrix3_mock_data/inputs.spitout
+cargo run -- inputs examples/commands/mrtrix3_act/mrtrix3_act.spitin -o examples/commands/mrtrix3_act/mrtrix3_mock_data/inputs.spitout
 cargo run -- dag examples/commands/mrtrix3_act/mrtrix3_act.spit examples/commands/mrtrix3_act/mrtrix3_mock_data/inputs.spitout --paths
 cargo run -- dag examples/commands/mrtrix3_act/mrtrix3_act.spit examples/commands/mrtrix3_act/mrtrix3_mock_data/inputs.spitout -o examples/commands/mrtrix3_act/mrtrix3_mock_data/jobs.spitdag
 ```
 
 The script creates the three sessions and seven DWI runs listed in the example inventory. The recipe has no hand-written context or source records: it discovers session directories and scans the files. `inputs.spitout` nests 39 source identities under three session contexts, with no repeated paths because the pipeline declares them. The DAG contains 93 planned jobs. The files are empty, so the generated MRtrix3, FSL, and SynthSeg commands are for inspection only and cannot process this mock dataset.
+
+## Check every example locally
+
+From the repository root, run:
+
+```sh
+cargo build --release && python3 examples/checks/check.py
+```
+
+This needs Rust/Cargo and Python 3.11 or newer, with no Python packages or
+scientific tools. The check uses `target/release/spit`; `--binary PATH` selects
+another freshly built binary. It runs the compiler only.
+
+`examples/checks/coverage.json` classifies every `.spit` and `.spitin` under
+`examples/`: 17 entry-point pipelines with recipes, three imported libraries
+covered through their callers, and the deliberately invalid analytics join.
+An unclassified addition, duplicate classification or stale entry fails the run.
+Each entry point gets an isolated copy of the actual example data, with all
+checked-in `.spitout` inventories excluded. The CLI checks the pipeline and
+recipe, discovers inputs, saves and checks a fresh inventory, resolves the recipe
+directly and through that inventory, and saves a DAG. All three plans must agree;
+only the representation of the dataset root is canonicalized because a saved
+inventory records it relative to its own location.
+
+The checks assert source, operation, dependency and target counts, producer and
+consumer relationships, topological order, source existence, unique outputs and
+bound command arguments. Additional assertions cover selected revisions,
+collection order, exclusions, nested stages, imports, composite origins and
+checks. Temporary negative probes prove detection of bad syntax, requirements,
+missing sources and joins, and incorrect graphs, selections and commands even
+when CLI generation succeeds.
+
+Logs, fresh inventories, DAGs and a failure summary go to
+`target/example-checks/`, in a new directory for each run. Use `--logs PATH`
+with an empty directory to choose the location; retained files are never reused as inputs. CI runs the same command on
+pushes and pull requests and uploads these artifacts, including on failure.
+
+To add an example, supply its actual placeholder data and a discovery recipe,
+classify both files in `coverage.json`, and write reviewed graph expectations.
+A library names its entry-point callers; an invalid pipeline names its exact
+intended diagnostic. Add a concept assertion to `graph.py` when counts and
+producer checks alone would not explain the behavior. Update the catalog and
+run the local command. Existing `.spitout` files are optional inspection aids,
+never the coverage check's source of truth.

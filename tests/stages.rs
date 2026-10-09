@@ -7,8 +7,8 @@ use std::process::Command;
 
 use spit::{diagnose, inspect_paths, parse_pipeline, render_dag, resolve, Diagnostic, PathRule};
 
-const PIPELINE: &str = "examples/stages/stages.spit";
-const SOURCES: &str = "examples/stages/stages.spitout";
+const PIPELINE: &str = "tests/fixtures/stages/stages.spit";
+const SOURCES: &str = "tests/fixtures/stages/stages.spitout";
 
 fn staged() -> String {
     fs::read_to_string(PIPELINE).unwrap() + &records(SOURCES)
@@ -302,8 +302,8 @@ fn check_counts_jobs_per_stage() {
     assert!(stderr.contains("7 jobs resolved: 5 in preprocess, 2 in analysis."));
 }
 
-const NESTED: &str = "examples/stages/nested.spit";
-const NESTED_SOURCES: &str = "examples/stages/nested.spitout";
+const NESTED: &str = "tests/fixtures/stages/nested.spit";
+const NESTED_SOURCES: &str = "tests/fixtures/stages/nested.spitout";
 
 fn nested() -> String {
     fs::read_to_string(NESTED).unwrap() + &records(NESTED_SOURCES)

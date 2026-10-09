@@ -1,4 +1,0 @@
-pipeline stages.spit
-root stages_data
-
-require [group] where shard count>=1

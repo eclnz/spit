@@ -1,6 +1,0 @@
-sources:
-    reading[station=north,day=1]
-    reading[station=north,day=2]
-    reading[station=south,day=1]
-    reference[station=north,measured=2026-09-01]
-    reference[station=south,measured=2026-09-03]
