@@ -7,6 +7,7 @@ use std::collections::BTreeMap;
 
 use rustc_hash::FxHashMap;
 
+mod entities;
 mod expand;
 
 use expand::BodyCheck;
@@ -36,6 +37,7 @@ pub(crate) struct PipelineBuilder {
     pub(crate) lines: SourceMap,
     /// The `dimensions [...]` line, and where it is.
     dimension_order: Option<(Vec<String>, Place)>,
+    entities: entities::EntitiesDeclarations,
     /// Each product a step makes, and whether the step wrote its dimensions.
     outputs: BTreeMap<String, Output>,
     /// Each product's id, the first of a name, so a step finds its inputs
@@ -389,6 +391,10 @@ pub(crate) fn lower(
         &builder.lines,
     )
     .map_err(|error| vec![error])?;
+    builder
+        .entities
+        .validate(&builder.pipeline)
+        .map_err(|error| vec![error])?;
     Ok(builder)
 }
 
@@ -550,6 +556,10 @@ fn lower_statement(
             }
             builder.dimension_order = Some((order.clone(), statement.place.clone()));
         }
+        StatementKind::Entities(declaration) => builder
+            .entities
+            .add(&mut builder.pipeline, declaration, &statement.place)
+            .map_err(Failure::clean)?,
         StatementKind::Path(rule) => builder
             .add_path(rule, statement.place.line)
             .map_err(Failure::clean)?,

@@ -137,6 +137,8 @@ Save as `sensors.spit`:
 # revision, compared with a station reference, split into two bands, and
 # summarised per station under that station's policy.
 
+entities: {key}_{value} separated "-"
+entities station: site
 path: derived/{@product}/{@entities}.csv
 
 source reading : Series [station, day]
@@ -197,6 +199,8 @@ sources:
 ```
 
 Run `spit dag sensors.spit sensors.spitout --commands` to see 17 jobs: five each of `calibrate`, `compare`, and `split_bands`, then two `summarise` jobs. The `verify calibrate` command appears before each calibration command. The north summary takes days 1, 2, then 10; the unused north calibration revision 1 is reported separately. `Series`, `Calibration`, `Policy`, and `Summary` are types in operation signatures, while `reading`, `calibration`, `policy`, and `summary` are product names. Each call argument occupies the corresponding operation port and is type checked there.
+
+The shared entity format writes `derived/calibrated/site_north-day_1.csv`. The `site` label changes path text only: identities and selectors still use `station`. Each shape uses its own dimensions with the same format.
 
 ## Stages: preprocessing and analysis
 
@@ -302,7 +306,7 @@ Each pipeline below, under [`examples/`](https://github.com/eclnz/spit/tree/dev/
 | [Branching](https://github.com/eclnz/spit/blob/dev/examples/pipelines/branching.spit) | A shared policy, two branches with their own aggregations, and a recombination | `cargo run -- dag examples/pipelines/branching.spit examples/pipelines/branching.spitout` | 21 |
 | [Observed groups](https://github.com/eclnz/spit/blob/dev/examples/pipelines/rich_shapes.spit) | Several subjects and sessions, a reused reference, and two successive aggregations | `cargo run -- dag examples/pipelines/rich_shapes.spit examples/pipelines/rich_shapes.spitout` | 17 |
 | [Nested aggregation](https://github.com/eclnz/spit/blob/dev/examples/pipelines/complex.spit) | Partial types, irregular groups, and three successive aggregations | `cargo run -- dag examples/pipelines/complex.spit examples/pipelines/complex.spitout` | 25 |
-| [Selectors](https://github.com/eclnz/spit/blob/dev/examples/pipelines/selectors.spit) | `where`, `same`, a verification, a two-output step, and a many input beside a single input | `cargo run -- dag examples/pipelines/selectors.spit examples/pipelines/selectors.spitout` | 17 |
+| [Selectors](https://github.com/eclnz/spit/blob/dev/examples/pipelines/selectors.spit) | `where`, `same`, verification, two outputs, a many input beside a single input, and custom entity formatting | `cargo run -- dag examples/pipelines/selectors.spit examples/pipelines/selectors.spitout` | 17 |
 | [Archive revision](https://github.com/eclnz/spit/blob/dev/examples/patterns/archive_revision/archive_revision.spit) | `where` selects the approved revision before joining calibration | `cargo run -- dag examples/patterns/archive_revision/archive_revision.spit examples/patterns/archive_revision/archive_revision.spitout` | 2 |
 | [Per-group reference](https://github.com/eclnz/spit/blob/dev/examples/patterns/per_group_reference/per_group_reference.spit) | `same(station)` finds one reference per station despite its measurement-date dimension | `cargo run -- dag examples/patterns/per_group_reference/per_group_reference.spit examples/patterns/per_group_reference/per_group_reference.spitout` | 3 |
 | [Model fit](https://github.com/eclnz/spit/blob/dev/examples/patterns/model_fit/model_fit.spit) | One `many` input, two outputs, `@ vary`, `@ min`, and `verify` | `cargo run -- dag examples/patterns/model_fit/model_fit.spit examples/patterns/model_fit/model_fit.spitout` | 2 |

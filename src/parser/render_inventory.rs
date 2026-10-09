@@ -78,6 +78,12 @@ fn written_source_paths(
 ) -> BTreeMap<String, PathTemplate> {
     let mut source_paths = inventory.source_paths.clone();
     source_paths.extend(rules.named_source_paths(pipeline).into_owned());
+    if pipeline.entities_format.is_some() {
+        let index = crate::model::PipelineIndex::new(pipeline);
+        for (product, template) in &mut source_paths {
+            *template = template.resolve(index.holder(product)).into_owned();
+        }
+    }
     source_paths
 }
 

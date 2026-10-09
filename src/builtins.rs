@@ -67,6 +67,8 @@ pub enum Word {
     ShapeDigits,
     ShapeYear,
     ShapeDate,
+    EntitiesFormat,
+    ConfiguredEntities,
 }
 
 /// What a word's hover says.
@@ -90,7 +92,7 @@ impl Word {
 }
 
 /// Every word's documentation, in the order of [`Word`].
-pub static DOCS: [Doc; 48] = [
+pub static DOCS: [Doc; 50] = [
     Doc {
         name: "source",
         kind: "keyword",
@@ -427,6 +429,20 @@ pub static DOCS: [Doc; 48] = [
         example: "path log: logs/{server}/{date:date}.log",
         summary: "A shape for a placeholder in a source's path rule: a date written `YYYY-MM-DD`, a real day in a year from 1900 to 2099, as `2026-09-01`. `2026-13-01` and `2026-9-1` are not read.",
     },
+    Doc {
+        name: "entities",
+        kind: "keyword",
+        anchor: "entity-formatting",
+        example: "entities: {key}_{value} separated \"-\"\nentities sub: subject",
+        summary: "Defines how `{@entities}` writes each dimension: `{key}` is its label and `{value}` its escaped value. `separated` joins assignments, and `empty` names a product with no dimensions. `entities sub: subject` changes that dimension's path label, while bindings and their order stay the same. The declaration applies to the whole pipeline.",
+    },
+    Doc {
+        name: "@entities:custom",
+        kind: "placeholder",
+        anchor: "entity-formatting",
+        example: "entities: {key}_{value} separated \"-\"\npath: {@product}/{@entities}",
+        summary: "Every dimension using this pipeline's `entities:` template, separator and label aliases, in the pipeline's dimension order. Values and labels are percent escaped. A product with no dimensions uses the declared `empty` text, or `global` when none is declared.",
+    },
 ];
 
 /// One use of a word: its 1-based line and 1-based UTF-16 columns, the end
@@ -443,9 +459,11 @@ pub fn builtin_words(text: &str) -> Vec<WordUse> {
     let bom = usize::from(text.starts_with('\u{feff}'));
     let mut uses = Vec::new();
     let mut found = Vec::new();
+    let mut configured_entities = false;
     for (index, line) in without_bom(text).lines().enumerate() {
         found.clear();
         line_words(line, &mut found);
+        configured_entities |= found.iter().any(|(_, word)| *word == Word::EntitiesFormat);
         found.sort_unstable_by_key(|(bytes, _)| bytes.start);
         let shift = 1 + if index == 0 { bom } else { 0 };
         uses.extend(found.iter().map(|(bytes, word)| {
@@ -456,6 +474,13 @@ pub fn builtin_words(text: &str) -> Vec<WordUse> {
                 word: *word,
             }
         }));
+    }
+    if configured_entities {
+        for word_use in &mut uses {
+            if word_use.word == Word::Entities {
+                word_use.word = Word::ConfiguredEntities;
+            }
+        }
     }
     uses
 }
@@ -516,6 +541,7 @@ fn statement(line: &str) -> Option<(Word, usize)> {
             Keyword::Ext => Word::Ext,
             Keyword::Stage => Word::Stage,
             Keyword::Dimensions => Word::Dimensions,
+            Keyword::Entities => Word::EntitiesFormat,
             Keyword::Sidecars => return None,
             Keyword::Skip | Keyword::ShellSource => return None,
         };
