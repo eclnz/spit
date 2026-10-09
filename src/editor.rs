@@ -2,20 +2,22 @@
 //! validation. No inventory is read and no dataset directories are scanned.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::fmt::Write;
 use std::path::Path;
 
+mod operations;
+mod signatures;
+
+use operations::{call_details, composite_details, operation_details};
+use signatures::{check_signature, operation_signature, product_signature};
+
 use crate::builtins::{builtin_words, words_json};
-use crate::compile::{collect_pipeline, CompiledStep};
+use crate::compile::collect_pipeline;
 use crate::diagnostics::{
     diagnostics_json, recover_document, shown_paths_json, Diagnostic, ShownPath,
 };
 use crate::imports::parse_located_document_recovering;
 use crate::json::Json;
-use crate::model::{
-    Cardinality, CheckDef, CheckUse, CommandRole, OperationDef, OutputPort, PathOrigin, Pipeline,
-    PipelineIndex, ProductDef, DEFAULT_OUTPUT,
-};
+use crate::model::{Cardinality, PathOrigin, Pipeline, PipelineIndex, ProductDef};
 use crate::parser::{without_bom, Kind};
 use crate::paths::shown_path;
 use crate::render::written_step;
@@ -92,8 +94,8 @@ pub fn pipeline_hovers(text: &str, path: &Path) -> Vec<Hover> {
         .iter()
         .map(|o| (o.name.as_str(), o))
         .collect();
-    // Each product's and operation's explanation is the same wherever it is
-    // named, so each is written once, not at every reference.
+    // Write shared product information and operation declarations once.
+    // Calls add their own bindings and types without copying generic bodies.
     let index = PipelineIndex::new(pipeline);
     let consumers = consumers(pipeline);
     let product_infos: BTreeMap<&str, (String, Vec<String>)> = products
@@ -104,7 +106,7 @@ pub fn pipeline_hovers(text: &str, path: &Path) -> Vec<Hover> {
                 .copied()
                 .unwrap_or(&product.artifact_type);
             let used_by = consumers.get(name).map_or(&[][..], Vec::as_slice);
-            let details = product_details(&index, product, inferred.contains_key(name), used_by);
+            let details = product_details(&index, product, inferred.get(name).copied(), used_by);
             (name, (product_signature(product, ty), details))
         })
         .collect();
@@ -181,19 +183,30 @@ pub fn pipeline_hovers(text: &str, path: &Path) -> Vec<Hover> {
             continue;
         };
         let compiled = steps_by_output.get(invocation.output_product()).copied();
-        if let Some((signature, mut details)) = operation_info(&invocation.operation) {
-            if let Some(step) = compiled {
-                details.extend(call_details(step, &products, &inferred));
+        if let Some((signature, declaration)) = operation_infos.get(invocation.operation.as_str()) {
+            let details = if let Some(step) = compiled {
+                let mut details = call_details(step, &products, &inferred);
+                details.extend(
+                    declaration
+                        .iter()
+                        .filter(|detail| {
+                            detail.starts_with("Command: ") || detail.starts_with("Verify: ")
+                        })
+                        .cloned(),
+                );
+                details
             } else {
+                let mut details = declaration.clone();
                 details.push(
                     "This call could not be checked; specialised types are unavailable.".to_owned(),
                 );
-            }
+                details
+            };
             add(
                 location.operation(),
                 HoverKind::Operation,
                 &invocation.operation,
-                signature,
+                signature.clone(),
                 details,
             );
         }
@@ -246,13 +259,15 @@ pub fn pipeline_hovers(text: &str, path: &Path) -> Vec<Hover> {
         else {
             continue;
         };
-        if let Some((signature, mut details)) = operation_info(&call.operation) {
-            details.push(format!("This call expands to: {}", steps.join("; ")));
+        if let Some((signature, _)) = operation_infos.get(call.operation.as_str()) {
+            let operation = operations[call.operation.as_str()];
+            let mut details = composite_details(operation, call, &products, &inferred);
+            details.push(format!("This call expands to: {}", steps.join("\n")));
             add(
                 location.operation(),
                 HoverKind::Operation,
                 &call.operation,
-                signature,
+                signature.clone(),
                 details,
             );
         }
@@ -325,194 +340,6 @@ fn cardinality(value: Cardinality) -> &'static str {
     }
 }
 
-fn product_signature(product: &ProductDef, ty: &TypeExpr) -> String {
-    format!(
-        "{}: {ty}{} [{}]{}",
-        product.name,
-        ending(product.extension.as_deref(), product.folder),
-        product.dimensions.join(", "),
-        checks_text(&product.checks)
-    )
-}
-
-/// ` @ check(a, b(1))` for the checks a port or source attaches, or nothing.
-fn checks_text(checks: &[CheckUse]) -> String {
-    if checks.is_empty() {
-        return String::new();
-    }
-    let checks: Vec<_> = checks.iter().map(ToString::to_string).collect();
-    format!(" @ check({})", checks.join(", "))
-}
-
-fn check_signature(check: &CheckDef) -> String {
-    let parameters = if check.parameters.is_empty() {
-        String::new()
-    } else {
-        format!("({})", check.parameters.join(", "))
-    };
-    format!("check {}{parameters}: {}", check.name, check.template)
-}
-
-/// What follows a type in a declaration: ` .nii.gz`, ` /` for a folder,
-/// ` .zarr/`, or nothing.
-fn ending(extension: Option<&str>, folder: bool) -> String {
-    let slash = if folder { "/" } else { "" };
-    match extension {
-        Some(extension) => format!(" {extension}{slash}"),
-        None if folder => " /".to_owned(),
-        None => String::new(),
-    }
-}
-
-fn operation_signature(operation: &OperationDef) -> String {
-    let inputs = operation
-        .inputs
-        .iter()
-        .map(|port| {
-            let many = port.cardinality == Cardinality::Many;
-            let mut text = format!(
-                "{}: {}{}",
-                port.name,
-                if many { "many " } else { "" },
-                port.artifact_type
-            );
-            // An operation has at most one many input, which its minimum counts.
-            if let (true, Some(minimum)) = (many, operation.minimum_collection) {
-                let _ = write!(text, " @ min({minimum})");
-            }
-            text.push_str(&checks_text(&port.checks));
-            text
-        })
-        .collect::<Vec<_>>()
-        .join(", ");
-    let outputs = if operation.outputs.len() == 1 && operation.outputs[0].name == DEFAULT_OUTPUT {
-        output_signature(&operation.outputs[0], false)
-    } else {
-        format!(
-            "({})",
-            operation
-                .outputs
-                .iter()
-                .map(|port| output_signature(port, true))
-                .collect::<Vec<_>>()
-                .join(", ")
-        )
-    };
-    format!("operation {}({inputs}) -> {outputs}", operation.name)
-}
-
-fn output_signature(port: &OutputPort, named: bool) -> String {
-    let mut result = if named {
-        format!("{}: {}", port.name, port.artifact_type)
-    } else {
-        port.artifact_type.to_string()
-    };
-    if let Some(beside) = &port.beside {
-        if beside.suffix.starts_with('.') {
-            let _ = write!(result, " {} beside {}", beside.suffix, beside.sibling);
-        } else {
-            let _ = write!(result, " \"{}\" beside {}", beside.suffix, beside.sibling);
-        }
-    } else {
-        result.push_str(&ending(port.extension.as_deref(), port.folder));
-    }
-    result.push_str(&checks_text(&port.checks));
-    result
-}
-
-fn operation_details(pipeline: &Pipeline, operation: &OperationDef) -> Vec<String> {
-    let mut details = Vec::new();
-    if !operation.steps.is_empty() {
-        let steps: Vec<String> = operation
-            .steps
-            .iter()
-            .map(|step| written_step(&step.invocation))
-            .collect();
-        details.push(format!(
-            "Carried out by the steps in its body: {}",
-            steps.join("; ")
-        ));
-        return details;
-    }
-    if operation
-        .inputs
-        .iter()
-        .any(|port| port.cardinality == Cardinality::Many)
-    {
-        details.push("Groups a many input into one job per remaining context.".to_owned());
-    } else {
-        details.push(
-            "Single-artifact inputs are matched for each job; outputs preserve the job's dimensions.".to_owned(),
-        );
-    }
-    for command in pipeline
-        .commands
-        .iter()
-        .filter(|command| command.operation == operation.name)
-    {
-        details.push(format!(
-            "{}: {}",
-            match command.role {
-                CommandRole::Run => "Command",
-                CommandRole::Verify => "Verify",
-            },
-            command.template
-        ));
-    }
-    details
-}
-
-fn call_details(
-    step: &CompiledStep<'_>,
-    products: &BTreeMap<&str, &ProductDef>,
-    inferred: &BTreeMap<&str, &TypeExpr>,
-) -> Vec<String> {
-    let mut details = vec!["This call:".to_owned()];
-    for (port, binding) in step.operation.inputs.iter().zip(&step.invocation.inputs) {
-        if let Some(product) = products.get(binding.product_name()) {
-            let ty = inferred
-                .get(product.name.as_str())
-                .copied()
-                .unwrap_or(&product.artifact_type);
-            details.push(format!(
-                "{} ← {} ({} input; expects {})",
-                port.name,
-                product_signature(product, ty),
-                cardinality(port.cardinality),
-                step.substitutions
-                    .substitute(&port.artifact_type)
-                    .erase_variables()
-            ));
-            if !binding.vary.is_empty() {
-                details.push(format!(
-                    "Collects {} across {}.",
-                    port.name,
-                    binding.vary.join(", ")
-                ));
-            }
-        }
-    }
-    for (port, (product, ty)) in step.operation.outputs.iter().zip(&step.outputs) {
-        details.push(format!(
-            "{} → {}",
-            port.name,
-            product_signature(product, ty)
-        ));
-    }
-    if !step.substitutions.0.is_empty() {
-        details.push(format!(
-            "Type bindings: {}",
-            step.substitutions
-                .0
-                .iter()
-                .map(|(name, ty)| format!("{name} = {}", step.substitutions.substitute(ty)))
-                .collect::<Vec<_>>()
-                .join(", ")
-        ));
-    }
-    details
-}
-
 /// Each product's readers, as `averaged = average(…)`, in step order. A
 /// product a call reads is read by the call, as it is written.
 fn consumers(pipeline: &Pipeline) -> BTreeMap<&str, Vec<String>> {
@@ -553,7 +380,7 @@ fn consumers(pipeline: &Pipeline) -> BTreeMap<&str, Vec<String>> {
 fn product_details(
     index: &PipelineIndex<'_>,
     product: &ProductDef,
-    inferred: bool,
+    inferred: Option<&TypeExpr>,
     consumers: &[String],
 ) -> Vec<String> {
     let producer = index.producer(&product.name).map(|(call, _)| call);
@@ -578,19 +405,33 @@ fn product_details(
         ),
         (None, _) => "Source product: a family of input artifacts.".to_owned(),
     }];
-    if producer.is_some() {
+    if producer.is_some() && inferred.is_none() {
+        details.push(
+            "Inference unavailable because this step or a dependency could not be checked."
+                .to_owned(),
+        );
+    }
+    if producer.is_some()
+        && product.artifact_type != TypeExpr::Unknown
+        && inferred.is_some_and(|ty| *ty != product.artifact_type)
+    {
         details.push(format!(
             "Declared type: {}. {}",
-            product.artifact_type,
-            if inferred {
-                "Signature shows the compiler-inferred type."
-            } else {
-                "Inference unavailable because this step or a dependency could not be checked."
-            }
+            product.artifact_type, "Signature shows the compiler-inferred type."
         ));
     }
     if !consumers.is_empty() {
-        details.push(format!("Used by: {}", consumers.join("; ")));
+        const SHOWN_CONSUMERS: usize = 8;
+        details.push(format!(
+            "Used by: {}",
+            consumers[..consumers.len().min(SHOWN_CONSUMERS)].join("; ")
+        ));
+        if consumers.len() > SHOWN_CONSUMERS {
+            details.push(format!(
+                "{} other steps also use this product.",
+                consumers.len() - SHOWN_CONSUMERS
+            ));
+        }
     }
     if let Some(stage) = index.stage_of(&product.name) {
         details.push(format!("Stage: {stage}"));

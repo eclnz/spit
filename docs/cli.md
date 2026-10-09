@@ -56,3 +56,7 @@ spit dag dataset.spitin -o plan.spitdag
 ```
 
 `artifacts` is most useful when expected jobs are missing or `dag` reports an incomplete input. `artifacts` reports incomplete artifacts and their causes.
+
+### Symbol hovers
+
+`check --json --hovers` keeps symbol signatures and details as plain text. Signatures may contain newlines: long operation signatures and multiple outputs are laid out at port boundaries, keeping nested generic types intact. Declaration details explain a generic body; call details show concrete products and types, and only the concrete expansion. Editors can render consecutive port mappings as one code block. The diagnostic and hover ranges are unchanged, using one-based UTF-16 columns with an exclusive end.
