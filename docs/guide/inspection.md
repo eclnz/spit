@@ -10,7 +10,7 @@ spit dag dataset.spitin --counts --commands
 
 `check` reports syntax, type, dimension, command, and path errors. `--path-rules` shows which template each product takes. `inputs --unmatched` lists files that no source rule reads. `dag --counts` shows jobs per step, including steps with zero jobs; `--commands` shows the exact arguments a runner would receive. Once the plan is right, `spit dag dataset.spitin -o plan.spitdag` saves it.
 
-To inspect branches and joins before choosing a dataset, run `spit dag pipeline.spit --tree`. Start with the stage overview, then follow the local diagrams. Lines connect operations within each stage; matching product names connect stage boundaries, and separate input arrows identify joins. Reusable operations have their own component diagrams, so you can follow the main pipeline before inspecting their suboperations. See the [command line reference](../cli.md#input-forms) for the output conventions.
+To inspect branches and joins before choosing a dataset, run `spit dag pipeline.spit --tree`. Start with the stage overview, then follow the local diagrams. Follow each connected band across the page; successive bands reverse direction to keep product lines continuous. Lines connect operations within each stage; matching product names connect stage boundaries, and separate input arrows identify joins. Reusable operations have their own component diagrams, so you can follow the main pipeline before inspecting their suboperations. See the [command line reference](../cli.md#input-forms) for the output conventions.
 
 ## Missing jobs
 
