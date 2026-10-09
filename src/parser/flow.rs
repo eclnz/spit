@@ -9,6 +9,7 @@ use super::check::parse_default_checks;
 use super::declarations::{
     parse_dimension_order, parse_discover, parse_invocation_parts, parse_path, parse_product,
 };
+use super::entities::parse_entities;
 use super::keyword::{removed_section, Keyword};
 use super::lexical::{comma_items, extension, identifier, strip_comment};
 use super::source_map::{name_place, step_place, tail_place};
@@ -361,6 +362,12 @@ fn flow_rest(
     };
     let closed = stages.closes(keep);
     let moved = closed.is_some() || stages.fixes(keep);
+    if line == "root" {
+        return Err(ParseError::new(
+            number,
+            "expected `root <directory>`, such as `root data`",
+        ));
+    }
     let kind = match Keyword::split(line) {
         Some((Keyword::Stage, declaration)) => {
             return open_stage(syntax, stages, keep, original, declaration, indent, number)
@@ -376,6 +383,17 @@ fn flow_rest(
             top_level_only("`use`")?;
             StatementKind::Import
         }
+        Some((Keyword::Root, folder)) => {
+            top_level_only("`root`")?;
+            let folder = folder.trim();
+            if folder.is_empty() {
+                return Err(ParseError::new(
+                    number,
+                    "expected `root <directory>`, such as `root data`",
+                ));
+            }
+            StatementKind::Root(std::path::PathBuf::from(folder))
+        }
         Some((Keyword::Source, declaration)) => {
             top_level_only("`source`, which declares an input,")?;
             StatementKind::product(original, declaration.trim(), number)?
@@ -383,6 +401,10 @@ fn flow_rest(
         Some((Keyword::Dimensions, declaration)) => {
             top_level_only("`dimensions`, which orders the whole pipeline,")?;
             StatementKind::Dimensions(parse_dimension_order(declaration, number)?)
+        }
+        Some((Keyword::Entities, _)) => {
+            top_level_only("`entities`, which formats the whole pipeline's paths,")?;
+            StatementKind::Entities(parse_entities(line, number)?)
         }
         Some((Keyword::Discover, declaration)) => {
             top_level_only("`discover`")?;
@@ -469,10 +491,10 @@ fn flow_rest(
     Ok(closed)
 }
 
-/// Where a pipeline's dataset is said, for a `root` or `pipeline` line
+/// Where a pipeline's dataset is said, for a `pipeline` line
 /// written in a pipeline.
 const RECIPE_HEADER: &str = "which names its pipeline and the dataset folder it is bound to; \
-     a pipeline given alone takes its folder from `--root`";
+     a pipeline given alone names its folder with `root` or takes it from `--root`";
 
 /// A line that starts with no keyword: a step, or a mistake.
 fn flow_statement(
@@ -482,7 +504,7 @@ fn flow_statement(
     stage: Option<&str>,
 ) -> Result<StatementKind, ParseError> {
     if let Some(word) = unknown_keyword(line) {
-        if word == "root" || word == "pipeline" {
+        if word == "pipeline" {
             return Err(ParseError::new(
                 number,
                 format!("`{word}` belongs in a .spitin recipe, {RECIPE_HEADER}"),
@@ -497,7 +519,7 @@ fn flow_statement(
             number,
             format!(
                 "`{word}` does not start a statement; {hint}a pipeline line starts with \
-                 source, dimensions, operation, command, verify, check, path, ext, stage or use, or is a step \
+                 source, dimensions, operation, command, verify, check, path, ext, root, stage or use, or is a step \
                  `output = operation(inputs)`, and a recipe line starts with pipeline, \
                  root, discover, require, exclude or path"
             ),
@@ -575,7 +597,7 @@ fn parse_flow_output(left: &str, number: usize) -> Result<StepOutput, ParseError
 }
 
 /// The words a statement can start with, for suggesting one.
-const STATEMENT_WORDS: [&str; 15] = [
+const STATEMENT_WORDS: [&str; 16] = [
     "source",
     "dimensions",
     "operation",
@@ -587,6 +609,7 @@ const STATEMENT_WORDS: [&str; 15] = [
     "stage",
     "use",
     "pipeline",
+    "root",
     "discover",
     "require",
     "drop",

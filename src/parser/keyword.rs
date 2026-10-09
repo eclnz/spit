@@ -6,6 +6,7 @@
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum Keyword {
     Use,
+    Root,
     Source,
     Discover,
     Operation,
@@ -24,6 +25,7 @@ pub(crate) enum Keyword {
     Path,
     /// `ext:`, the extension a default path is completed with.
     Ext,
+    Entities,
     Stage,
     /// `dimensions [...]`, the order every product's dimensions follow.
     Dimensions,
@@ -33,8 +35,9 @@ pub(crate) enum Keyword {
     ShellSource,
 }
 
-const WORDS: [(Keyword, &str); 14] = [
+const WORDS: [(Keyword, &str); 15] = [
     (Keyword::Use, "use"),
+    (Keyword::Root, "root"),
     (Keyword::Source, "source"),
     (Keyword::Discover, "discover"),
     (Keyword::Operation, "operation"),
@@ -63,6 +66,20 @@ impl Keyword {
                 return Some((Self::Path, rest));
             }
         }
+        if let Some(rest) = line.strip_prefix("entities:") {
+            if rest.contains("{key}") || rest.contains("{value}") || !has_top_level_equals(rest) {
+                return Some((Self::Entities, rest));
+            }
+        }
+        if let Some(rest) = line.strip_prefix("entities ") {
+            if rest
+                .trim_start()
+                .starts_with(|c: char| c.is_ascii_alphabetic() || c == '_')
+                && !rest.split(':').next().unwrap_or_default().contains('=')
+            {
+                return Some((Self::Entities, rest));
+            }
+        }
         // A step may annotate an output named `ext`: `ext: Image = ...`.
         if let Some(rest) = line.strip_prefix("ext:") {
             return (!line.contains('=')).then_some((Self::Ext, rest));
@@ -75,6 +92,14 @@ impl Keyword {
         let (word, rest) = line.split_once(' ')?;
         let (keyword, _) = WORDS.iter().find(|(_, name)| *name == word)?;
         if matches!(keyword, Self::Stage | Self::Dimensions | Self::Sidecars) && line.contains('=')
+        {
+            return None;
+        }
+        // `root = f(x)` and `root : Type = f(x)` are steps, but an
+        // equals sign inside a directory name is ordinary path text.
+        if *keyword == Self::Root
+            && (rest.trim_start().starts_with('=')
+                || (rest.trim_start().starts_with(':') && has_top_level_equals(rest)))
         {
             return None;
         }

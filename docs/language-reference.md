@@ -271,7 +271,7 @@ A file or a stage has one `check:` line. Its checks and the ones it drops must b
 
 ## Stages
 
-A stage groups the steps of one phase of a pipeline, such as preprocessing or analysis. Write `stage name:` at the start of a line and indent the stage's lines beneath it; the next line that is not indented ends the stage. A stage is one block: a stage name may not be opened twice, so a step that belongs to it goes inside that block, and steps may use products from a later stage. From the [stages example](https://github.com/eclnz/spit/blob/dev/examples/stages/stages.spit):
+A stage groups the steps of one phase of a pipeline, such as preprocessing or analysis. Write `stage name:` at the start of a line and indent the stage's lines beneath it; the next line that is not indented ends the stage. A stage is one block: a stage name may not be opened twice, so a step that belongs to it goes inside that block, and steps may use products from a later stage. The [text processing example](https://github.com/eclnz/spit/blob/dev/examples/imports/imported.spit) combines stages with imports; a stage on its own looks like this:
 
 ```text
 path: {@stage}/{@product}/{@entities}.txt
@@ -298,7 +298,7 @@ stage analysis:
 
 A stage owns the products its steps assign. Operations and commands stay global, so one declared in a stage can be used anywhere, and product names are not prefixed: `analysis` reads `merged` by name. Declare an operation in the stage that holds its calls, or at the top level: SPIT warns about one called outside the stage it is declared in, and names the innermost stage that holds every call, else the top level. Two operations may not share a name, even in different stages. Sources and `use` lines belong at the top level. A `path:` line inside a stage is the default for that stage's products only; a `path product:` rule still takes precedence. `{@stage}` in a path template is the name of the product's stage. A product made outside every stage, such as a step at the top level, has none, so a default that covers it writes the stage as an [optional group](#paths), `[{@stage}/]`; SPIT's error says so.
 
-Stages nest. A `stage` header inside a stage opens a stage within it, named by its path, such as `preprocess/combine`; a line back at the outer stage's indentation closes it. From the [nested example](https://github.com/eclnz/spit/blob/dev/examples/stages/nested.spit):
+Stages nest. A `stage` header inside a stage opens a stage within it, named by its path, such as `preprocess/combine`; a line back at the outer stage's indentation closes it. The [text processing example](https://github.com/eclnz/spit/blob/dev/examples/imports/imported.spit) uses the same nested structure:
 
 ```text
 stage preprocess:
@@ -316,7 +316,7 @@ The lines directly in a stage share one indentation. A nested stage without its 
 A stage groups steps and scopes their paths; it does not order them. SPIT orders jobs by the products they read, so a stage needs no `after` clause, and two stages may read from each other: `b` in `first` may read `a` from `second` while `second` reads `c` from `first`. A stage opened again, by a second `stage name:` header at the same level, continues the first block: its steps belong to the same stage. Its `path:` and `ext:` lines are still given once, in either block. `dag` counts the jobs in each outermost stage and names each job's stage, and the `.spitdag` gives each job its stage as a list of names from outermost to innermost:
 
 ```sh
-cargo run -- dag examples/stages/stages.spit examples/stages/stages.spitout
+cargo run -- dag examples/imports/imported.spitin
 ```
 
 A step outside every stage stays valid.
@@ -347,7 +347,7 @@ path: results/{@product}/{@entities}.txt
 path image: input/{subject}/{visit}/{run}.txt
 ```
 
-`path:` sets a default; without one, outputs go to `out/{@product}/{@entities}`, which `spit check --path-rules` lists as `built-in default`. `path image:` overrides it for `image`. Sources never take the built-in path: a source with no rule needs one from a recipe or a `.spitout`'s `source_paths:`. A recipe's `path:` sets the default for sources instead; see [Recipes](#recipes). Each output of a multi-output step has its own product, so its own rule. A `path:` line inside a [stage](#stages) sets the default for that stage's products. Paths are relative to the [dataset root](#recipes): the folder a recipe's `root` line names, else the recipe's folder, or the root a `.spitout` records; `--root` overrides either.
+`path:` sets a default; without one, outputs go to `out/{@product}/{@entities}`, which `spit check --path-rules` lists as `built-in default`. `path image:` overrides it for `image`. Sources never take the built-in path: a source with no rule needs one from a recipe or a `.spitout`'s `source_paths:`. A recipe's `path:` sets the default for sources instead; see [Recipes](#recipes). Each output of a multi-output step has its own product, so its own rule. A `path:` line inside a [stage](#stages) sets the default for that stage's products. Paths are relative to the [dataset root](#recipes): the folder a pipeline or recipe's `root` line names, or the root a `.spitout` records. A pipeline without a root may take `--root`; the flag is relative to the working folder and cannot accompany a recipe or inventory.
 
 A source with no dimensions can use a fixed path, such as `path testset: eval/testset.parquet`.
 
@@ -356,14 +356,14 @@ A template fills these placeholders from the artifact it names, here `aligned[su
 | Placeholder | Expands to | Example |
 | --- | --- | --- |
 | `{@product}` | The product's name; an imported `alias::name` becomes `alias.name` | `aligned` |
-| `{@entities}` | Every dimension as `dim=value`, in the pipeline's dimension order, joined by `__`; `global` for a product with no dimensions | `subject=A__run=2` |
+| `{@entities}` | Every dimension in pipeline order; by default `dim=value` joined by `__`, or `global` without dimensions; configurable with [entity formatting](#entity-formatting) | `subject=A__run=2` |
 | `{@stage}` | The stage whose block holds the step, one directory per level; an error for a product made outside every stage | `preprocess/align` |
 | `{@labels}` | Every dimension as `key-value`, in pipeline dimension order, joined by `_`; no value for a product without dimensions | `subject-A_run-2` |
 | `{subject}`, `{run}`, … | The value of a dimension the product declares | `A`, `2` |
 
 SPIT's own placeholders take `@`, and a dimension takes none, so a dimension may be called `product` or `stage`. `{product}` with no such dimension is an error that says to write `{@product}`. Values keep letters, digits, and `-`; any other byte is written as `%` and two hex digits, so a value never adds a directory. `{@labels}` uses the dimension names as keys; use explicit text such as `sub-{subject}` when a dataset calls a dimension by another name. SPIT warns if a value written through `{@labels}` contains `-`, because a BIDS reader cannot recover that value from the file name.
 
-A path may put text in `[...]` when only some products have it. SPIT keeps the group if every placeholder in it has a value for the product, or drops the whole group if a dimension is absent, `{@stage}` has no stage, or `{@labels}` has no dimensions. For example, the cohort pipeline uses one default for run images, session averages, and subject averages:
+A path may put text in `[...]` when only some products have it. SPIT keeps the group if every placeholder in it has a value for the product, or drops the whole group if a dimension is absent, `{@stage}` has no stage, `{@labels}` has no dimensions, or `{@entities}` has an empty dimensionless spelling. For example, the cohort pipeline uses one default for run images, session averages, and subject averages:
 
 ```text
 path: derivatives/sub-{sub}[/ses-{ses}][/{@stage}]/{@labels}_{@product}
@@ -377,6 +377,24 @@ Path rules are checked when the pipeline is loaded, even for products with no re
 As in Bash, an unquoted `#` starts a comment only at the start of a word, so `--color=#fff` is one argument. A `#` that ends a word, as in `{@output}# note`, stays part of the word; SPIT warns about it, since it reads like a comment. Put a space before `#` to start a comment, or quote the text to keep it.
 
 Place a source path beside its `source` line and a derived path beside its assignment. The default can stay near the top of the file.
+
+### Entity formatting
+
+Define `{@entities}` once for the whole pipeline, so every product shape uses the same spelling:
+
+```spit
+entities: {key}_{value} separated "-"
+entities sub: subject
+path: results/{@product}/{@entities}.txt
+```
+
+The assignment template contains `{key}` then `{value}`, once each. `separated` takes the quoted text between assignments. `entities sub: subject` changes the label of dimension `sub` in paths; its identities still use `sub`, and dimensions keep their [pipeline order](#dimension-order). For `raw[sub=01,ses=02,run=1]`, the rule writes `results/raw/subject_01-ses_02-run_1.txt`; after collecting runs, `session[sub=01,ses=02]` writes `results/session/subject_01-ses_02.txt`. A label declaration may precede the template; extra spaces between `entities` and the dimension are allowed. Labels must be identifiers, name known dimensions, and be unique across the pipeline, including unchanged dimension names.
+
+Without declarations, the existing `key=value__key=value` format and `global` spelling apply. Label declarations alone keep those separators. An optional `empty "all"` after the separator changes the spelling for a product with no dimensions. `empty ""` writes nothing; `[{@entities}_]{@product}` then drops the underscore too for such a product. The empty spelling, keys and values are percent escaped, so `A_B` becomes `A%5FB` and a value cannot add a directory.
+
+Assignment literals and the separator stay within one path component: no whitespace, `/`, `\`, `%`, braces or brackets. They must include punctuation other than `-`, which values may contain, so discovery can separate assignments unambiguously. `{key}_{value} separated "-"` and `{key}-{value} separated "_"` both work. The declaration is pipeline-wide, including stage defaults, the built-in output default, and source rules supplied by recipes or inventories. It belongs at the top level of a `.spit` file; there is one format and at most one label per dimension. `{@labels}` keeps its own fixed spelling and dimension names.
+
+Path hints, discovery and binding expand the same template for each product's dimensions. A saved `.spitout` expands custom entities in the source rules it records, so it retains those source filenames. An imported source with an explicitly configured library format retains it; an unconfigured library source uses the caller's format. Outputs made by imported operations use the caller's format.
 
 ### Extensions
 
@@ -523,7 +541,7 @@ A missing companion is a warning because it matters only to a step that reads it
 
 ## Recipes
 
-A `.spitin` recipe says how to find one dataset's inputs, keeping everything about the data out of the pipeline. A dataset that needs nothing but its folder needs no recipe: `spit dag analysis.spit --root data` scans the folder with the pipeline's own path rules. Its first line names the pipeline it serves, relative to the recipe's folder, and its `root` line the dataset folder:
+A `.spitin` recipe says how to find and select one dataset's inputs. Basic file locations may live in the pipeline: with `root data` and source path rules in `analysis.spit`, `spit inputs analysis.spit` scans the folder and `spit dag analysis.spit` resolves its jobs without a recipe. `root` belongs at the top level, once, and its folder is relative to that pipeline file. A pipeline without a root may instead take `--root data`. A recipe's first line names the pipeline it serves, relative to the recipe's folder, and its `root` line the dataset folder:
 
 ```text
 pipeline analysis.spit
@@ -536,7 +554,7 @@ require [sub, ses] where image count=1
 path image: data/sub-{sub}/ses-{ses}/image.nii.gz
 ```
 
-A recipe may contain `discover`, `exclude` and `require` rules, `path product:` rules for source products, a default `path:` rule for its sources, and `sources:`/`contexts:` records. It cannot declare sources, operations, steps, commands, stages, imports, or `ext:`; the pipeline still declares each logical `source` with its dimensions and optional type. Rules in a pipeline are an error, and so are records.
+A recipe may contain `discover`, `exclude` and `require` rules, `path product:` rules for source products, a default `path:` rule for its sources, and `sources:`/`contexts:` records. It cannot declare sources, operations, steps, commands, stages, imports, `ext:` or `entities`; the pipeline still declares each logical `source` with its dimensions and optional type. Rules in a pipeline are an error, and so are records.
 
 A recipe's `path:` line is the default for every source with no rule of its own, in the pipeline or the recipe. Where a dataset keeps its inputs is the dataset's to say, so the pipeline's `path:` can say where outputs go, by stage if it likes, and the recipe says where sources are:
 
@@ -561,7 +579,7 @@ pipeline analysis.spit
 root data
 ```
 
-The folder is relative to the recipe's folder, like the `pipeline` line, and may use `..` or be absolute; `root .` is the recipe's own folder. The line is required, so a recipe file always says where its data is: a recipe without one is an error, and no command-line option stands in for it. A pipeline has no `root` line. `spit check` warns when the folder is not there.
+The folder is relative to the recipe's folder, like the `pipeline` line, and may use `..` or be absolute; `root .` is the recipe's own folder. A recipe without this line inherits its pipeline's root, still relative to the pipeline's folder. A root must be declared in one of the two files; declaring it in both is an error even when they name the same folder. Likewise, a pipeline root and `--root` cannot be combined. Imports bring definitions and never a library's root. `spit check` warns when the folder is not there.
 
 `spit check recipe.spitin` checks the rules against the pipeline without reading any data: each rule must name a source or discovery with the dimensions it counts, every source must have a path rule, by the pipeline, the recipe or a default, since the scan finds each source by its rule, and each source path the recipe gives, by its own rule or its default, must pass the [path checks](#paths), such as telling apart the sources a default covers. `spit inputs recipe.spitin` scans the root, applies the rules, and prints the `.spitout`. A recipe that writes its own `sources:` records is not scanned. Its `root` line only says where the dataset is: it does not make the recipe's records a scan, and their files must still exist under it. `spit dag recipe.spitin` runs the same step in memory before resolving jobs, over the pipeline the recipe's `pipeline` line names. A recipe is given alone; the pipeline is not named a second time on the command line.
 
@@ -582,7 +600,7 @@ Rules that count form their groups from every artifact and discovered context in
 
 ### Which file a line belongs in
 
-A `.spit` pipeline is the reusable graph: what work to do and where its results go, for any dataset. A `.spitin` recipe binds that pipeline to one dataset: where its folder is, where its sources are when the pipeline does not say, and which of its data to leave out or require. So each line belongs in one file, except a path rule:
+A `.spit` pipeline is the reusable graph: what work to do and where its results go, for any dataset. A `.spitin` recipe binds that pipeline to one dataset: where its folder is, where its sources are when the pipeline does not say, and which of its data to leave out or require. A small pipeline can include its root and source paths. All selection policy stays in a recipe, regardless of how few lines it takes: even a literal `exclude raw[id=bad]` is recipe-only, as are conditional exclusions and external exclusion lists. The boundary is the declaration's meaning, not its length:
 
 | Line | Pipeline | Recipe |
 | --- | --- | --- |
@@ -590,7 +608,9 @@ A `.spit` pipeline is the reusable graph: what work to do and where its results 
 | `path product:` for a product a step makes | yes | no |
 | `path product:` for a source that is not declared `beside` another | either one, not both | either one, not both |
 | `path:`, a default | covers outputs, and sources nothing else covers | covers sources only |
-| `pipeline`, `root`, `discover`, `exclude`, `require`, `sources:`, `contexts:` | no | yes |
+| `root` | either one, not both | either one, not both; otherwise inherits the pipeline root |
+| `pipeline` | no | yes |
+| `discover`, `require`, every `exclude` form, `sources:`, `contexts:` | no | yes |
 
 Put a source's own rule in the pipeline when every dataset for that pipeline shares the layout, and in the recipe when the layout belongs to one dataset. A line in the wrong file is an error that says which file it belongs in, at its line:
 

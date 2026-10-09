@@ -1,4 +1,21 @@
+# Imported definitions, nested stages, aggregation and a stage path override.
 use text.spit as text
 
-path: output/{@product}/{@entities}.txt
-sorted = text::sort_lines(text::shard)
+path: {@stage}/{@product}/{@entities}.txt
+
+stage preprocess:
+    stage clean:
+        sorted = text::sort_lines(text::shard)
+
+    stage combine:
+        operation merge(items: many Lines) -> Lines
+        command merge: sort -m -u -o {@output} {items}
+        merged = merge(sorted @ vary(part))
+
+    resorted = text::sort_lines(merged)
+
+stage analysis:
+    path: results/{@product}/{@entities}.txt
+    operation tally_lines(input: Lines) -> Tally
+    command tally_lines: uniq -c {input} {@output}
+    tally = tally_lines(resorted)

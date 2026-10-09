@@ -67,18 +67,11 @@ pub fn parse_input_spec(text: &str) -> Result<InputSpec, ParseError> {
 }
 
 /// Parse a `.spitin` file at `path`. The pipeline it names and its root are
-/// relative to its folder, and a recipe that names its pipeline must name
-/// its root: a file says where its data is, whoever runs it.
+/// relative to its folder. A missing root may be supplied by the pipeline.
 pub fn parse_input_spec_at(text: &str, path: &Path) -> Result<InputSpec, ParseError> {
     let (header, document) = parse_recipe(text, |text| {
         parse_located_document(text, path, Kind::Recipe)
     })?;
-    if header.pipeline.is_some() && header.root.is_none() {
-        return Err(ParseError::new(
-            1,
-            "a recipe names its dataset root, the folder its paths are relative to, with a line such as `root data`, or `root .` for the recipe's own folder",
-        ));
-    }
     let folder = path.parent().unwrap_or_else(|| Path::new(""));
     let header = RecipeHeader {
         pipeline: header.pipeline.map(|pipeline| folder.join(pipeline)),
@@ -172,6 +165,7 @@ fn check_input_lines(text: &str) -> Result<(), ParseError> {
                     | Keyword::Checks
                     | Keyword::Stage
                     | Keyword::Dimensions
+                    | Keyword::Entities
                     | Keyword::Sidecars
                     | Keyword::Use
             )
@@ -249,9 +243,21 @@ fn finish_spec(
 }
 
 impl InputSpec {
+    /// The recipe's root or the pipeline's, rejecting duplicate declarations.
+    pub fn root_for<'a>(
+        &'a self,
+        pipeline: &'a Pipeline,
+    ) -> Result<Option<&'a (PathBuf, usize)>, InputError> {
+        match (&self.root, &pipeline.root) {
+            (Some(_), Some(_)) => Err(InputError::RootInBoth),
+            (root, inline) => Ok(root.as_ref().or(inline.as_ref())),
+        }
+    }
+
     /// Check the recipe against the pipeline's source declarations, without
     /// reading any file or record.
     pub fn check(&self, pipeline: &Pipeline) -> Result<(), InputError> {
+        self.root_for(pipeline)?;
         let index = PipelineIndex::new(pipeline);
         for name in self.rules.source_paths.keys() {
             let product = name.clone();
@@ -556,6 +562,8 @@ fn listed<'a>(items: impl Iterator<Item = &'a str>) -> String {
 /// Why a recipe cannot be applied to a pipeline, or to a dataset.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum InputError {
+    /// Both the recipe and pipeline declare a dataset root.
+    RootInBoth,
     /// The pipeline does not compile, a rule does not fit it, or the
     /// records break a rule.
     Resolve(ResolveError),
@@ -602,6 +610,7 @@ impl From<PathError> for InputError {
 impl fmt::Display for InputError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::RootInBoth => f.write_str("dataset root is declared in both .spit and .spitin; keep one declaration"),
             Self::Resolve(error) => error.fmt(f),
             Self::Path(error) => error.fmt(f),
             Self::NotASource { product } => write!(
