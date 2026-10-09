@@ -128,6 +128,29 @@ command convert: dcm2niix -z y -b y -o {image.dir} -f {image.stem} {dicom}
 
 For `derivatives/image/sub=01.nii.gz`, this passes `-o derivatives/image -f sub=01`. A file at the dataset root is in folder `.`. Only outputs have `.dir` and `.stem`, and `{@output.dir}` and `{@output.stem}` name the single unnamed output's. A placeholder with any other `.` part is an error.
 
+Operation input and named output lists may span lines while their parentheses are open:
+
+```spit
+operation prep_registration(
+    image: MRI<$I,$Space,$Grid>,
+    reference: MRI<$I,$Space,$Grid>
+) -> (
+    parc: MRI<Parc,$Space,SynthGrid<$Grid>>,
+    resampled: MRI<$I,$Space,SynthGrid<$Grid>>,
+    mask: MRI<Mask,$Space,SynthGrid<$Grid>>
+)
+```
+
+Indent port lines beyond the `operation` line. A closing `)` may align with
+that line or remain indented. Keep `->` and the output list's opening `(` on
+the input list's closing line when both lists span lines. Commas still separate
+ports; do not add a comma after the last port. Blank lines and comments may
+appear within either list. Inside a stage, use the stage's declaration
+indentation for the `operation` line and indent its ports further. For an
+operation carried out by steps, put `:` after the completed signature and
+indent its body beneath the `operation` line. Single-line declarations keep
+the same meaning.
+
 Every input port has a name, and its placeholder is that name. A port is written `name`, `name: Type`, `name: many`, or `name: many Type`; a lowercase word alone, as in `operation copy(image)`, is an untyped port, and type names start with a capital letter. In `source reading : Series [station, day]`, `reading` is the product that identifies artifacts and `Series` is its type: write `operation compare(reading: Series)`, then call it with `compare(reading)`. `{@output}` is the path of a single unnamed output; its `@` marks a SPIT-supplied placeholder, while a named output such as `{wm}` uses the name in the operation declaration. `output` cannot name an input or explicit output port, and the old `{output}` spelling is an error that points to `{@output}`. A command must use every output placeholder, or its `.dir` or `.stem`, except an output written [`beside`](#files-a-tool-writes-beside-another) another; a `verify` command may use inputs only. Command templates give ordered words and arguments, not shell pipelines or redirection, since a backend runs a command without a shell. An unquoted `|`, `>`, `&&`, `;`, `2>&1` or the like is therefore an error; quote it (`'>'`) to pass it to the program as an argument. A command that needs a pipe or a redirection runs a shell itself and passes the paths to it as arguments, so that a path is never read as shell text: `command first: sh -c 'cut -f1 "$1" > "$2"' sh {table} {@output}`. The same holds for `verify` and `check` commands. Words are split and quoted as in Bash, and every argument is passed literally: `$` and backticks are not expanded. As in Bash, text in single quotes is literal, so `awk '{print $1}'` needs no escaping; a placeholder is filled in unquoted text or double quotes. Write `{{` or `}}` for a literal brace elsewhere. Every command is checked when the pipeline is loaded: braces and quotes must balance, placeholders must name the operation's ports, and each output must appear, as above.
 
 Products, operations and dimensions have separate names, so a dimension may share a product's (`model @ each(model)`). A product may also share its operation's name, but `spit check` warns: name the result, as in `coregistered = coreg(mc, brain)`, so the step reads as what it makes.
