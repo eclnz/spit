@@ -451,6 +451,15 @@ fn lower_statement(
 ) -> Result<(), Failure> {
     match &statement.kind {
         StatementKind::Import => apply_import(builder, imports, &statement.place)?,
+        StatementKind::Root(root) => {
+            if builder.pipeline.root.is_some() {
+                return Err(Failure::clean(ParseError::new(
+                    statement.place.line,
+                    "a .spit names its root once",
+                )));
+            }
+            builder.pipeline.root = Some((root.clone(), statement.place.line));
+        }
         StatementKind::Stage { name, place } => builder.add_stage(name, place.clone()),
         StatementKind::Product(product, place) => {
             let mut product = product.clone();

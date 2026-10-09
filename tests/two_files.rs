@@ -105,18 +105,14 @@ fn a_recipe_line_that_belongs_in_the_pipeline_says_so_at_its_line() {
 }
 
 #[test]
-fn a_recipe_line_in_a_pipeline_says_where_it_belongs() {
+fn a_recipe_pipeline_header_in_a_pipeline_says_where_it_belongs() {
     let tree = Tree::new("two-files-pipeline", &[]);
-    for (line, word) in [("root data", "root"), ("pipeline other.spit", "pipeline")] {
-        let pipeline = tree.write("pipeline.spit", &format!("{line}\n{PIPELINE}"));
-        let output = spit(&["check", pipeline.to_str().unwrap()]);
-        assert!(!output.status.success());
-        let errors = text(&output.stderr);
-        assert!(
-            errors.contains(&format!(
-                "error: line 1, column 1: `{word}` belongs in a .spitin recipe, which names its pipeline and the dataset folder it is bound to; a pipeline given alone takes its folder from `--root`"
-            )),
-            "{errors}"
-        );
-    }
+    let pipeline = tree.write("pipeline.spit", &format!("pipeline other.spit\n{PIPELINE}"));
+    let output = spit(&["check", pipeline.to_str().unwrap()]);
+    assert!(!output.status.success());
+    let errors = text(&output.stderr);
+    assert!(
+        errors.contains("error: line 1, column 1: `pipeline` belongs in a .spitin recipe"),
+        "{errors}"
+    );
 }

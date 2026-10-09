@@ -6,6 +6,7 @@
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum Keyword {
     Use,
+    Root,
     Source,
     Discover,
     Operation,
@@ -33,8 +34,9 @@ pub(crate) enum Keyword {
     ShellSource,
 }
 
-const WORDS: [(Keyword, &str); 14] = [
+const WORDS: [(Keyword, &str); 15] = [
     (Keyword::Use, "use"),
+    (Keyword::Root, "root"),
     (Keyword::Source, "source"),
     (Keyword::Discover, "discover"),
     (Keyword::Operation, "operation"),
@@ -75,6 +77,14 @@ impl Keyword {
         let (word, rest) = line.split_once(' ')?;
         let (keyword, _) = WORDS.iter().find(|(_, name)| *name == word)?;
         if matches!(keyword, Self::Stage | Self::Dimensions | Self::Sidecars) && line.contains('=')
+        {
+            return None;
+        }
+        // `root = f(x)` and `root : Type = f(x)` are steps, but an
+        // equals sign inside a directory name is ordinary path text.
+        if *keyword == Self::Root
+            && (rest.trim_start().starts_with('=')
+                || (rest.trim_start().starts_with(':') && has_top_level_equals(rest)))
         {
             return None;
         }
