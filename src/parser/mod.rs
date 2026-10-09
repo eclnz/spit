@@ -5,6 +5,7 @@ mod check;
 mod command;
 mod continuation;
 mod declarations;
+mod entities;
 mod flow;
 mod inventory;
 mod keyword;
@@ -13,6 +14,8 @@ mod operation;
 mod render_inventory;
 mod rules;
 mod source_map;
+
+pub(crate) use entities::EntitiesDeclaration;
 
 use std::fmt;
 use std::ops::Range;
@@ -195,6 +198,8 @@ pub(crate) struct Statement {
 pub(crate) enum StatementKind {
     /// A `use` line; the definitions it brings in are loaded separately.
     Import,
+    /// The pipeline's optional dataset root.
+    Root(std::path::PathBuf),
     /// A `stage name:` header, by the stage's full name.
     Stage {
         name: String,
@@ -219,6 +224,7 @@ pub(crate) enum StatementKind {
     Check(CheckDef, Place),
     /// A `dimensions [...]` line: the pipeline's dimension order.
     Dimensions(Vec<String>),
+    Entities(EntitiesDeclaration),
     Path(PathRule),
     /// An `ext:` line: the default extension of `stage`, or, outside every
     /// stage, of the whole pipeline.

@@ -34,7 +34,9 @@ pub(crate) fn unusable_path(relative: &str) -> Option<&'static str> {
 ///
 /// Keep in step with `is_value_character` in `inputs/pattern.rs`, which
 /// holds that an encoded value has only these characters and `%`:
-/// discovery binds a value without searching when the character after it
+/// Also keep in step with the separator check in `entities.rs`, which
+/// rejects formatting without a boundary outside these value characters.
+/// Discovery binds a value without searching when the character after it
 /// cannot be one of them, so a character added here must be added there.
 pub(crate) fn encode_component(value: &str) -> String {
     let mut encoded = String::with_capacity(value.len());

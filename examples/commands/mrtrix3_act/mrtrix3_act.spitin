@@ -10,6 +10,7 @@ path target_lut: config/target_lut.txt
 path raw_dwi: sub-{sub}/ses-{ses}/dwi/sub-{sub}_ses-{ses}_run-{run}_dwi.nii.gz
 path reverse_b0: sub-{sub}/ses-{ses}/fmap/sub-{sub}_ses-{ses}_dir-PA_epi.nii.gz
 
+discover sessions: [sub, ses] from dirs sub-{sub}/ses-{ses}
 require [sub, ses] where raw_dwi count>=2
 require [sub, ses] where reverse_b0 count=1
 require [sub, ses] where t1w count=1
