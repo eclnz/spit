@@ -19,7 +19,7 @@ spit dag pipeline.spit dataset.spitout
 spit dag pipeline.spit --root data
 ```
 
-`spit dag pipeline.spit --tree` reads the pipeline and its imports only. A compact overview names the products connecting stages. Local diagrams are grouped by stage, with matching product names linking separate panels. Each distinct input has its own arrow into a boxed multi-input operation; single-input operations use parentheses. Simple chains stay connected, and output branches appear after operations. Calls to operations with bodies remain single nodes, followed by one diagram per used body, including nested bodies. Unused sources are listed. This view accepts no dataset or other flags and leaves resolved-job output unchanged.
+`spit dag pipeline.spit --tree` reads the pipeline and its imports only. A compact overview names the products connecting stages. Within each stage, lines connect product producers to their consumers; matching product names link stage boundaries. Each distinct input has its own arrow into a boxed multi-input operation; simple chains use parentheses. Reused products branch along one live line, and `╪` marks a crossing without a join. Output branches appear after operations. Calls to operations with bodies remain single nodes, followed by one diagram per used body, including nested bodies. Unused sources are listed. This view accepts no dataset or other flags and leaves resolved-job output unchanged.
 
 Use `-` in place of a `.spitout` to read it from standard input. A recipe and a `.spitout` can be used to inspect an existing dataset without writing a DAG file.
 

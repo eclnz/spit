@@ -16,6 +16,7 @@ pub use calls::{render_calls, render_calls_json};
 mod calls;
 mod targets;
 mod topology;
+mod topology_connected;
 pub use topology::render_pipeline_tree;
 
 /// The jobs as text, without ports or paths. Each job is written straight
