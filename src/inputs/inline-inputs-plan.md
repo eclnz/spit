@@ -15,10 +15,15 @@ folder and is accepted only when the pipeline has no root. A saved
 inventory keeps its own root and remains independent of inline roots.
 Imports bring definitions, never another file's root.
 
-- [x] Audited baseline `2b6569c`: source paths accepted; root and selection rules rejected.
-- [x] Implementation complete; record its commit after the checks pass.
-- [x] Nine new integration tests cover both workflows, paths, imports and JSON errors.
-- [x] Command demo verified: three source files and five jobs, with either file. Docs updated.
-- [x] Matching editor branch updated; 52 tests pass, one pre-existing skip. PR links pending.
-- [ ] Run all required checks and performance/output comparisons.
-- [ ] Record implementation commits, then delete this plan alone before merge.
+- [x] Audit completed against baseline `2b6569c`; source paths already worked.
+- [x] Parsing, inheritance/conflicts, diagnostics and CLI: `c71ef14`.
+- [x] Nine integration tests for both workflows and JSON/editor diagnostics: `c71ef14`.
+- [x] Binary-verified command demo and permanent guides: `c71ef14`.
+- [x] Editor grammar, docs and tests: spit-vscode `79a818a`.
+- [x] All required checks, strict docs and Messie passed for `c71ef14`.
+- [x] Performance and seven byte-for-byte output comparisons passed for `c71ef14`.
+- [x] Linked compiler PR #127 and editor PR #32 (stacked on editor #30).
+- [ ] Delete this plan in the final commit, with recovery instructions.
+
+No implementation steps are deferred. Merge the compiler before the editor;
+merge editor #30 before retargeting #32 to main.
