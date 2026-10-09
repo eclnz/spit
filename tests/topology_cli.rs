@@ -70,7 +70,7 @@ fn mrtrix_examples_render_connected_diagrams() {
         let text = String::from_utf8(run.stdout).unwrap();
         assert!(text.contains("[raw_dwi]"));
         assert!(text.contains('▼'));
-        assert!(text.contains('┴'));
+        assert!(text.contains('┬'));
         assert!(!text.contains("see above"));
         assert!(text.contains('╪'));
         assert!(text.contains("╪ = crossing, no connection"));
