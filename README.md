@@ -31,6 +31,8 @@ Run `python3 -m pip install -r .github/docs-requirements.txt` and `properdocs se
 
 Run `cargo test` for the Rust suite and `cargo build --release` for the release binary. See [profiling](profiling/README.md) for performance checks.
 
+Every example is checked through fresh input discovery and DAG generation in CI. Run `cargo build --release && python3 examples/checks/check.py` locally; see [example coverage](docs/examples.md#check-every-example-locally) for prerequisites and adding an example.
+
 ## Contributing
 
 Issues and pull requests are welcome. Update the guide or manual when changing documented behavior.

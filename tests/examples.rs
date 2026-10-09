@@ -33,13 +33,7 @@ fn example_pipelines() -> Vec<PathBuf> {
 
 #[test]
 fn worked_patterns_resolve_to_the_documented_jobs() {
-    for (name, jobs) in [
-        ("archive_revision", 2),
-        ("per_group_reference", 3),
-        ("model_fit", 2),
-        ("ragged_sweep", 17),
-        ("cohort", 24),
-    ] {
+    for (name, jobs) in [("ragged_sweep", 17), ("cohort", 24)] {
         let base = PathBuf::from("examples/patterns").join(name).join(name);
         let pipeline =
             parse_pipeline(&fs::read_to_string(base.with_extension("spit")).unwrap()).unwrap();

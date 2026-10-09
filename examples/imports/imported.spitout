@@ -3,3 +3,4 @@ root text_data
 sources:
     text::shard[group=alpha,part=01]
     text::shard[group=alpha,part=02]
+    text::shard[group=beta,part=01]
