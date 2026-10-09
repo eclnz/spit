@@ -17,6 +17,7 @@ The executable is `target/debug/spit`. The commands below use `cargo run --` so 
 The essential lines are:
 
 ```spit
+root command_demo_data
 source shard : Lines [group, part]
 path shard: input/{group}/{part}.txt
 
@@ -35,28 +36,28 @@ merged = merge(sorted @ vary(part))
 
 ```sh
 cargo run -- check examples/commands/command_demo/command_demo.spit --path-rules
-cargo run -- dag examples/commands/command_demo/command_demo.spit examples/commands/command_demo/command_demo.spitout --counts --commands
+cargo run -- dag examples/commands/command_demo/command_demo.spit --counts --commands
 ```
 
-The checked-in `.spitout` lists two `alpha` shards and one `beta` shard. The plan has three sort jobs and two merge jobs. `--counts` shows the number per step; `--commands` shows the filled command arguments before anything runs.
+The inline root and source path find two `alpha` shards and one `beta` shard in the checked-in data folder. The `.spitout` beside the pipeline records the same inputs. The plan has three sort jobs and two merge jobs. `--counts` shows the number per step; `--commands` shows the filled command arguments before anything runs.
 
 ## 4. Save the plan
 
 ```sh
-cargo run -- dag examples/commands/command_demo/command_demo.spit examples/commands/command_demo/command_demo.spitout -o /tmp/command_demo.spitdag
+cargo run -- dag examples/commands/command_demo/command_demo.spit -o /tmp/command_demo.spitdag
 ```
 
 The `.spitdag` is the job description a [runner](https://github.com/eclnz/spit-bash) reads. See the [DAG format](spitdag.md) if you are writing a runner.
 
 ## 5. Use a real dataset
 
-When source files are on disk, give SPIT a dataset root. A recipe makes that root and any dataset rules repeatable:
+For a small pipeline, set `root data` and source path rules in the `.spit`, then run `spit inputs analysis.spit` or `spit dag analysis.spit`. The folder is relative to the pipeline file. Add a recipe when selection or coverage rules are needed:
 
 ```spit
 pipeline analysis.spit
 root data
 ```
 
-Run `spit inputs dataset.spitin` to see the source artifacts SPIT finds, then `spit dag dataset.spitin --counts --commands` to inspect the jobs. If source paths already live in the pipeline and no recipe rules are needed, use `spit dag analysis.spit --root data` instead. Read [recipes and input inventories](guide/recipes.md) before adding `discover`, `exclude`, or `require` rules.
+Run `spit inputs dataset.spitin` to see the source artifacts SPIT finds, then `spit dag dataset.spitin --counts --commands` to inspect the jobs. If the pipeline already declares its root, omit the recipe's `root` line to inherit it. Declaring a root or the same source path in both files is an error. A pipeline with no root may take `--root data`, relative to where the command runs. Read [recipes and input inventories](guide/recipes.md) before adding `discover`, `exclude`, or `require` rules.
 
 Next: [Files and flow](guide/concepts.md).

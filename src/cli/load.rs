@@ -18,7 +18,7 @@ use super::args::{CliArgs, Command, Flag};
 use super::output::{is_pipeline, is_recipe, passed, read_file, read_stdin, report, Reported};
 
 /// A recipe, and the pipeline its `pipeline` line names, checked; or a
-/// pipeline given with `--root`, as a recipe with no rules.
+/// pipeline given alone, using its inline root or `--root`.
 pub(crate) struct Loaded {
     pub(crate) recipe: InputSpec,
     /// The file the recipe's `pipeline` line names.
@@ -45,27 +45,22 @@ impl Loaded {
 }
 
 /// Read what step 2 starts from: a recipe, or a pipeline with the dataset
-/// folder `--root` gives, which only a pipeline given alone takes.
+/// folder its inline root or `--root` gives.
 pub(crate) fn load_inputs(args: &CliArgs) -> Result<Loaded, Box<dyn Error>> {
     let file = &args.file;
-    let command = args.command.name();
     match args.value(Flag::Root) {
         Some(_) if is_recipe(file) => Err(format!(
             "`{file}` names its dataset with its `root` line; `--root` is for a pipeline run without a recipe"
         )
         .into()),
-        Some(root) if is_pipeline(file) => load_pipeline(file, &root),
-        None if is_pipeline(file) => Err(format!(
-            "`spit {command} {file}` needs to know where the data is: add `--root <directory>`, or run a .spitin recipe"
-        )
-        .into()),
+        root if is_pipeline(file) => load_pipeline(file, root.as_deref(), args.command.name()),
         _ => load_recipe(file),
     }
 }
 
 /// Check the pipeline `file`, to scan `root` with its own path rules and
 /// no recipe.
-fn load_pipeline(file: &str, root: &str) -> Result<Loaded, Box<dyn Error>> {
+fn load_pipeline(file: &str, root: Option<&str>, command: &str) -> Result<Loaded, Box<dyn Error>> {
     let pipeline_file = PathBuf::from(file);
     let pipeline_text = read_file(file)?;
     let checked = match diagnose_checked(&pipeline_text, Context::at(&pipeline_file)) {
@@ -75,17 +70,27 @@ fn load_pipeline(file: &str, root: &str) -> Result<Loaded, Box<dyn Error>> {
             return Err(Reported.into());
         }
     };
+    if root.is_some() && checked.pipeline.root.is_some() {
+        return Err(
+            "dataset root is declared in both .spit and `--root`; keep one declaration".into(),
+        );
+    }
+    if root.is_none() && checked.pipeline.root.is_none() {
+        return Err(format!(
+            "`spit {command} {file}` needs to know where the data is: add `--root <directory>`, a `root <directory>` line in the pipeline, or run a .spitin recipe"
+        ).into());
+    }
     Ok(Loaded {
         recipe: InputSpec {
             pipeline: Some(pipeline_file.clone()),
-            root: Some((PathBuf::from(root), 0)),
+            root: root.map(|root| (PathBuf::from(root), 0)),
             ..InputSpec::default()
         },
         pipeline_name: None,
         pipeline_file,
         pipeline_text,
         checked,
-        invocation: format!("{file} --root {root}"),
+        invocation: root.map_or_else(|| file.to_owned(), |root| format!("{file} --root {root}")),
     })
 }
 
@@ -95,7 +100,7 @@ fn load_pipeline(file: &str, root: &str) -> Result<Loaded, Box<dyn Error>> {
 fn load_recipe(file: &str) -> Result<Loaded, Box<dyn Error>> {
     if !is_recipe(file) {
         return Err(format!(
-            "spit inputs reads a .spitin recipe, or a .spit pipeline with `--root`, not `{file}`"
+            "spit inputs reads a .spitin recipe, or a .spit pipeline with a `root` line or `--root`, not `{file}`"
         )
         .into());
     }
@@ -117,6 +122,9 @@ fn load_recipe(file: &str) -> Result<Loaded, Box<dyn Error>> {
             return Err(Reported.into());
         }
     };
+    if recipe.root_for(&checked.pipeline)?.is_none() {
+        return Err(format!("{file}: a recipe names its dataset root with `root <directory>`, or inherits its pipeline's root").into());
+    }
     Ok(Loaded {
         recipe,
         pipeline_name: Some(pipeline_file.display().to_string()),
@@ -127,15 +135,15 @@ fn load_recipe(file: &str) -> Result<Loaded, Box<dyn Error>> {
     })
 }
 
-/// Run step 2: scan the root the recipe's `root` line or `--root` names,
+/// Run step 2: scan the root the pipeline, recipe or `--root` names,
 /// or take the records written in the recipe. Returns what it settled, and
 /// the dataset root.
 pub(crate) fn settle(loaded: &Loaded) -> Result<(ResolvedInputs, PathBuf), Box<dyn Error>> {
     let recipe = &loaded.recipe;
     let (root, _) = recipe
-        .root
-        .clone()
-        .expect("a recipe read from a file names its root, and `--root` gives a pipeline's");
+        .root_for(&loaded.checked.pipeline)?
+        .cloned()
+        .expect("loading checked a root is declared in the pipeline, recipe or command line");
     // Records written in the recipe stand in for a scan. The `root` line
     // still says where their files are.
     let source = match &recipe.inventory {

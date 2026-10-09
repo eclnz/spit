@@ -347,7 +347,7 @@ path: results/{@product}/{@entities}.txt
 path image: input/{subject}/{visit}/{run}.txt
 ```
 
-`path:` sets a default; without one, outputs go to `out/{@product}/{@entities}`, which `spit check --path-rules` lists as `built-in default`. `path image:` overrides it for `image`. Sources never take the built-in path: a source with no rule needs one from a recipe or a `.spitout`'s `source_paths:`. A recipe's `path:` sets the default for sources instead; see [Recipes](#recipes). Each output of a multi-output step has its own product, so its own rule. A `path:` line inside a [stage](#stages) sets the default for that stage's products. Paths are relative to the [dataset root](#recipes): the folder a recipe's `root` line names, else the recipe's folder, or the root a `.spitout` records; `--root` overrides either.
+`path:` sets a default; without one, outputs go to `out/{@product}/{@entities}`, which `spit check --path-rules` lists as `built-in default`. `path image:` overrides it for `image`. Sources never take the built-in path: a source with no rule needs one from a recipe or a `.spitout`'s `source_paths:`. A recipe's `path:` sets the default for sources instead; see [Recipes](#recipes). Each output of a multi-output step has its own product, so its own rule. A `path:` line inside a [stage](#stages) sets the default for that stage's products. Paths are relative to the [dataset root](#recipes): the folder a pipeline or recipe's `root` line names, or the root a `.spitout` records. A pipeline without a root may take `--root`; the flag is relative to the working folder and cannot accompany a recipe or inventory.
 
 A source with no dimensions can use a fixed path, such as `path testset: eval/testset.parquet`.
 
@@ -541,7 +541,7 @@ A missing companion is a warning because it matters only to a step that reads it
 
 ## Recipes
 
-A `.spitin` recipe says how to find one dataset's inputs, keeping everything about the data out of the pipeline. A dataset that needs nothing but its folder needs no recipe: `spit dag analysis.spit --root data` scans the folder with the pipeline's own path rules. Its first line names the pipeline it serves, relative to the recipe's folder, and its `root` line the dataset folder:
+A `.spitin` recipe says how to find and select one dataset's inputs. Basic file locations may live in the pipeline: with `root data` and source path rules in `analysis.spit`, `spit inputs analysis.spit` scans the folder and `spit dag analysis.spit` resolves its jobs without a recipe. `root` belongs at the top level, once, and its folder is relative to that pipeline file. A pipeline without a root may instead take `--root data`. A recipe's first line names the pipeline it serves, relative to the recipe's folder, and its `root` line the dataset folder:
 
 ```text
 pipeline analysis.spit
@@ -579,7 +579,7 @@ pipeline analysis.spit
 root data
 ```
 
-The folder is relative to the recipe's folder, like the `pipeline` line, and may use `..` or be absolute; `root .` is the recipe's own folder. The line is required, so a recipe file always says where its data is: a recipe without one is an error, and no command-line option stands in for it. A pipeline has no `root` line. `spit check` warns when the folder is not there.
+The folder is relative to the recipe's folder, like the `pipeline` line, and may use `..` or be absolute; `root .` is the recipe's own folder. A recipe without this line inherits its pipeline's root, still relative to the pipeline's folder. A root must be declared in one of the two files; declaring it in both is an error even when they name the same folder. Likewise, a pipeline root and `--root` cannot be combined. Imports bring definitions and never a library's root. `spit check` warns when the folder is not there.
 
 `spit check recipe.spitin` checks the rules against the pipeline without reading any data: each rule must name a source or discovery with the dimensions it counts, every source must have a path rule, by the pipeline, the recipe or a default, since the scan finds each source by its rule, and each source path the recipe gives, by its own rule or its default, must pass the [path checks](#paths), such as telling apart the sources a default covers. `spit inputs recipe.spitin` scans the root, applies the rules, and prints the `.spitout`. A recipe that writes its own `sources:` records is not scanned. Its `root` line only says where the dataset is: it does not make the recipe's records a scan, and their files must still exist under it. `spit dag recipe.spitin` runs the same step in memory before resolving jobs, over the pipeline the recipe's `pipeline` line names. A recipe is given alone; the pipeline is not named a second time on the command line.
 
@@ -600,7 +600,7 @@ Rules that count form their groups from every artifact and discovered context in
 
 ### Which file a line belongs in
 
-A `.spit` pipeline is the reusable graph: what work to do and where its results go, for any dataset. A `.spitin` recipe binds that pipeline to one dataset: where its folder is, where its sources are when the pipeline does not say, and which of its data to leave out or require. So each line belongs in one file, except a path rule:
+A `.spit` pipeline is the reusable graph: what work to do and where its results go, for any dataset. A `.spitin` recipe binds that pipeline to one dataset: where its folder is, where its sources are when the pipeline does not say, and which of its data to leave out or require. A small pipeline can include its root and source paths. All selection policy stays in a recipe, regardless of how few lines it takes: even a literal `exclude raw[id=bad]` is recipe-only, as are conditional exclusions and external exclusion lists. The boundary is the declaration's meaning, not its length:
 
 | Line | Pipeline | Recipe |
 | --- | --- | --- |
@@ -608,7 +608,9 @@ A `.spit` pipeline is the reusable graph: what work to do and where its results 
 | `path product:` for a product a step makes | yes | no |
 | `path product:` for a source that is not declared `beside` another | either one, not both | either one, not both |
 | `path:`, a default | covers outputs, and sources nothing else covers | covers sources only |
-| `pipeline`, `root`, `discover`, `exclude`, `require`, `sources:`, `contexts:` | no | yes |
+| `root` | either one, not both | either one, not both; otherwise inherits the pipeline root |
+| `pipeline` | no | yes |
+| `discover`, `require`, every `exclude` form, `sources:`, `contexts:` | no | yes |
 
 Put a source's own rule in the pipeline when every dataset for that pipeline shares the layout, and in the recipe when the layout belongs to one dataset. A line in the wrong file is an error that says which file it belongs in, at its line:
 

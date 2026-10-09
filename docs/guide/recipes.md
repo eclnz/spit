@@ -7,7 +7,7 @@ pipeline analysis.spit
 root data
 ```
 
-Both paths are relative to the recipe's own folder. Run `spit inputs dataset.spitin` to see the settled inputs, or `spit dag dataset.spitin` to resolve jobs directly. When the pipeline already gives every source a path and no dataset rules are needed, `spit dag analysis.spit --root data` works without a recipe.
+Both paths are relative to the recipe's own folder. If the pipeline already declares a root, leave the recipe's out to inherit it; declaring a root in both is an error. Run `spit inputs dataset.spitin` to see the settled inputs, or `spit dag dataset.spitin` to resolve jobs directly. When the pipeline already gives every source a path and no dataset rules are needed, put `root data` in the pipeline and run `spit dag analysis.spit` without a recipe. A pipeline without a root can instead take `--root data`, relative to the working folder. All selection rules, including simple literal exclusions, require a recipe.
 
 ## Source paths
 

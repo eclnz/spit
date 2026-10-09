@@ -231,7 +231,7 @@ pub static DOCS: [Doc; 50] = [
         kind: "keyword",
         anchor: "recipes",
         example: "root data",
-        summary: "The dataset root, the folder paths are relative to. Every recipe names one, relative to the recipe's folder, and `root .` is that folder; in a `.spitout` that `spit inputs -o` writes, it is relative to the `.spitout`'s folder.",
+        summary: "The dataset root, the folder paths are relative to. A pipeline or recipe may name one, relative to that file's folder; a recipe inherits its pipeline's root when it has none. Declaring it in both is an error, and `root .` is the declaring file's folder; in a `.spitout` that `spit inputs -o` writes, it is relative to the `.spitout`'s folder.",
     },
     Doc {
         name: "discover",
@@ -528,6 +528,7 @@ fn statement(line: &str) -> Option<(Word, usize)> {
     if let Some((keyword, _)) = Keyword::split(line) {
         let word = match keyword {
             Keyword::Use => Word::Use,
+            Keyword::Root => Word::Root,
             Keyword::Source => Word::Source,
             Keyword::Discover => Word::Discover,
             Keyword::Operation => Word::Operation,
