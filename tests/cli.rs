@@ -31,7 +31,7 @@ fn help_lists_each_step_and_each_command_explains_itself() {
         let text = stdout(&spit(args));
         assert!(
             text.contains(
-                "usage: spit dag <recipe.spitin> or <pipeline.spit> <inputs.spitout | ->"
+                "usage: spit dag <recipe.spitin> or <pipeline.spit> [inputs.spitout | -]"
             ),
             "{text}"
         );

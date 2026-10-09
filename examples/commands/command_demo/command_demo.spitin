@@ -1,4 +1,3 @@
 pipeline command_demo.spit
-root command_demo_data
 
 require [group] where shard count>=1

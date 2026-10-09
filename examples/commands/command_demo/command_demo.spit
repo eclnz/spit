@@ -1,4 +1,4 @@
-# Each observed group and part produces jobs; no group names appear in this pipeline.
+root command_demo_data  # The checked-in dataset; no recipe is needed to find it.
 source shard : Lines [group, part]
 
 # A general layout for generated products, with a different source layout.

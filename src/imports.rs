@@ -633,6 +633,9 @@ fn parse_document_at_inner(
     )
     .map_err(|error| vec![error])?;
     let mut document = parse_document_recovering(text, &imports, kind)?;
+    if let Some((root, _)) = &mut document.pipeline.root {
+        *root = path.parent().unwrap_or_else(|| Path::new("")).join(&*root);
+    }
     document.pipeline.files = files;
     document.lines.file_texts = file_texts;
     Ok(document)
