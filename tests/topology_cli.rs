@@ -56,7 +56,7 @@ fn reusable_and_nested_operations_have_one_component_diagram() {
 }
 
 #[test]
-fn mrtrix_examples_render_connected_diagrams() {
+fn mrtrix_examples_render_narrow_stage_panels() {
     for file in [
         "examples/commands/mrtrix3_act/mrtrix3_act.spit",
         "examples/composites/mrtrix/act.spit",
@@ -72,7 +72,9 @@ fn mrtrix_examples_render_connected_diagrams() {
         assert!(text.contains('▼'));
         assert!(text.contains('┬'));
         assert!(!text.contains("see above"));
-        assert!(text.contains('╪'));
-        assert!(text.contains("╪ = crossing, no connection"));
+        assert!(!text.contains('╪'));
+        assert!(text.contains("Stage:"));
+        assert!(text.contains("(preprocess) ──[session_b0]──> (anatomy)"));
+        assert!(text.lines().all(|line| line.chars().count() <= 100));
     }
 }

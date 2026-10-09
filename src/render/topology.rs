@@ -2,12 +2,12 @@
 
 use crate::model::Pipeline;
 use rustc_hash::{FxHashMap, FxHashSet};
-use std::collections::BTreeSet;
+use std::collections::BTreeMap;
+use std::fmt::Write;
 
-/// Render a compiled pipeline as downward flows. Products are bracketed,
-/// operations parenthesised, and shared dependencies remain connected rails.
-/// The graph is indexed once and walked without recursion; drawing work grows
-/// with the diagram's printed area rather than duplicating shared subgraphs.
+/// Render a compiled pipeline as a stage overview and local diagrams.
+/// Product names connect panels; each reusable body is drawn once.
+/// Dependencies are indexed once and ordered with an iterative worklist.
 pub fn render_pipeline_tree(pipeline: &Pipeline) -> String {
     let mut roots = vec![None; pipeline.calls.len()];
     let mut path = Vec::new();
@@ -38,7 +38,7 @@ pub fn render_pipeline_tree(pipeline: &Pipeline) -> String {
             let call = &pipeline.calls[root];
             steps.push(Step {
                 name: &call.operation,
-                inputs: call.inputs.iter().map(String::as_str).collect(),
+                inputs: unique_inputs(call.inputs.iter().map(String::as_str)),
                 outputs: &call.outputs,
                 stage: invocation.stage.as_deref(),
             });
@@ -66,7 +66,11 @@ pub fn render_pipeline_tree(pipeline: &Pipeline) -> String {
         .map(|p| p.name.as_str())
         .filter(|name| !produced.contains(name) || visible.contains(name))
         .collect();
-    let mut text = String::from("Pipeline\n");
+    let mut text = if steps.iter().any(|step| step.stage.is_some()) {
+        String::new()
+    } else {
+        String::from("Pipeline\n")
+    };
     text.push_str(&render_graph(&products, &steps));
     // A reusable body is drawn once, even when many calls use it. Nested
     // components are discovered iteratively and retain their own boundaries.
@@ -118,9 +122,7 @@ pub fn render_pipeline_tree(pipeline: &Pipeline) -> String {
         text.push('\n');
         text.push_str(&render_graph(&products, &steps));
     }
-    if text.contains('╪') {
-        text.push_str("\n╪ = crossing, no connection; ┼ = junction.\n");
-    }
+
     text
 }
 
@@ -135,74 +137,42 @@ impl<'p> Step<'p> {
     fn from_invocation(invocation: &'p crate::model::Invocation) -> Self {
         Self {
             name: &invocation.operation,
-            inputs: invocation
-                .inputs
-                .iter()
-                .map(|input| input.product.as_str())
-                .collect(),
+            inputs: unique_inputs(invocation.inputs.iter().map(|input| input.product.as_str())),
             outputs: &invocation.outputs,
             stage: invocation.stage.as_deref(),
         }
     }
 }
 
-fn render_graph(products: &[&str], steps: &[Step<'_>]) -> String {
-    let product_count = products.len();
-    let nodes = product_count + steps.len();
-    let index: FxHashMap<_, _> = products
+fn unique_inputs<'p>(inputs: impl Iterator<Item = &'p str>) -> Vec<&'p str> {
+    let mut seen = FxHashSet::default();
+    inputs.filter(|name| seen.insert(*name)).collect()
+}
+
+/// Order dependencies once, using ids and a worklist, without recursive walks.
+fn ordered_steps<'a, 'p>(steps: &'a [Step<'p>]) -> Vec<&'a Step<'p>> {
+    let producers: FxHashMap<_, _> = steps
         .iter()
         .enumerate()
-        .map(|(id, &name)| (name, id))
+        .flat_map(|(id, step)| step.outputs.iter().map(move |name| (name.as_str(), id)))
         .collect();
-    let mut edges = vec![Vec::new(); nodes];
-    let mut parents = vec![Vec::new(); nodes];
-    for (step, invocation) in steps.iter().enumerate() {
-        let id = product_count + step;
-        for &input in &invocation.inputs {
-            let product = index[input];
-            if edges[product].last() != Some(&id) {
-                edges[product].push(id);
-                parents[id].push(product);
-            }
-        }
-        for output in invocation.outputs {
-            let product = index[output.as_str()];
-            edges[id].push(product);
-            parents[product].push(id);
-        }
-    }
-    let labels: Vec<_> = products
+    let parents: Vec<Vec<usize>> = steps
         .iter()
-        .map(|p| format!("[{p}]"))
-        .chain(steps.iter().map(|s| format!("({})", s.name)))
+        .map(|step| {
+            step.inputs
+                .iter()
+                .filter_map(|input| producers.get(input).copied())
+                .collect()
+        })
         .collect();
-    let width = (labels.iter().map(|s| s.chars().count()).max().unwrap_or(0) + 4) | 1;
-    let mut layout = Layout {
-        columns: Vec::new(),
-        free: BTreeSet::new(),
-        positions: vec![None; nodes],
-        width,
-        remaining: edges.iter().map(Vec::len).collect(),
-        extent: 0,
-        text: String::new(),
-    };
-    let mut seen = vec![false; nodes];
+    let mut seen = vec![false; steps.len()];
     let mut stack = Vec::new();
-    for root in (0..nodes).filter(|&id| edges[id].is_empty()) {
+    let mut ordered = Vec::with_capacity(steps.len());
+    for root in 0..steps.len() {
         stack.push((root, false));
         while let Some((id, finish)) = stack.pop() {
             if finish {
-                if id < product_count {
-                    layout.product(id, &labels[id]);
-                } else {
-                    layout.operation(
-                        id,
-                        &labels[id],
-                        steps[id - product_count].stage,
-                        &parents[id],
-                        &edges[id],
-                    );
-                }
+                ordered.push(&steps[id]);
             } else if !seen[id] {
                 seen[id] = true;
                 stack.push((id, true));
@@ -210,353 +180,250 @@ fn render_graph(products: &[&str], steps: &[Step<'_>]) -> String {
             }
         }
     }
-    layout.text
+    ordered
 }
 
-struct Layout {
-    /// One rail per live product, shared by every operation that reads it.
-    columns: Vec<Option<usize>>,
-    free: BTreeSet<usize>,
-    extent: usize,
-    positions: Vec<Option<usize>>,
-    width: usize,
-    remaining: Vec<usize>,
-    text: String,
+fn overview(steps: &[&Step<'_>], text: &mut String) {
+    let mut groups = Vec::new();
+    let mut index = FxHashMap::default();
+    let mut owners = Vec::new();
+    let mut products = FxHashMap::default();
+    for step in steps {
+        let name = step.stage.map_or("pipeline", |stage| {
+            stage.split('/').next().expect("a stage has a name")
+        });
+        let id = *index.entry(name).or_insert_with(|| {
+            groups.push(name);
+            groups.len() - 1
+        });
+        owners.push(id);
+        for output in step.outputs {
+            products.insert(output.as_str(), id);
+        }
+    }
+    if groups.len() < 2 {
+        return;
+    }
+    let mut edges = BTreeMap::<_, Vec<&str>>::new();
+    let mut seen = FxHashSet::default();
+    for (step, &to) in steps.iter().zip(&owners) {
+        for &input in &step.inputs {
+            if let Some(&from) = products.get(input) {
+                if from != to && seen.insert((from, to, input)) {
+                    edges.entry((from, to)).or_default().push(input);
+                }
+            }
+        }
+    }
+    text.push_str("Pipeline overview\n");
+    writeln!(text, "Stages: {}", groups.join(", ")).expect("writing to a String");
+    for ((from, to), products) in edges {
+        writeln!(
+            text,
+            "({}) ──[{}]──> ({})",
+            groups[from],
+            products.join(", "),
+            groups[to]
+        )
+        .expect("writing to a String");
+    }
+    text.push_str("\nMatching product names connect the panels below.\n\n");
 }
 
-impl Layout {
-    fn allocate(&mut self, node: usize) -> usize {
-        self.allocate_from(node, 0)
+fn render_graph(products: &[&str], steps: &[Step<'_>]) -> String {
+    let ordered = ordered_steps(steps);
+    let mut text = String::new();
+    overview(&ordered, &mut text);
+    // Index each exact stage once. No product line crosses panel boundaries.
+    let mut names = Vec::new();
+    let mut index = FxHashMap::default();
+    let mut groups: Vec<Vec<&Step<'_>>> = Vec::new();
+    for step in ordered {
+        let id = *index.entry(step.stage).or_insert_with(|| {
+            names.push(step.stage);
+            groups.push(Vec::new());
+            groups.len() - 1
+        });
+        groups[id].push(step);
     }
-
-    fn allocate_from(&mut self, node: usize, minimum: usize) -> usize {
-        let column = if let Some(&column) = self.free.range(minimum..).next() {
-            self.free.remove(&column);
-            column
-        } else {
-            self.columns.push(None);
-            self.columns.len() - 1
-        };
-        self.extent = self.extent.max(column + 1);
-        self.columns[column] = Some(node);
-        self.positions[node] = Some(column);
-        column
-    }
-
-    fn row(&self) -> Vec<char> {
-        let extent = self.extent;
-        let mut row = vec![' '; extent * self.width];
-        for (column, node) in self.columns[..extent].iter().enumerate() {
-            if node.is_some() {
-                row[column * self.width + self.width / 2] = '│';
+    for (name, group) in names.iter().zip(&groups) {
+        if let Some(name) = name {
+            writeln!(text, "Stage: {name}").expect("writing to a String");
+        } else if names.len() > 1 {
+            text.push_str("Outside stages\n");
+        }
+        let mut start = 0;
+        while start < group.len() {
+            let mut end = start + 1;
+            while end < group.len()
+                && group[end].inputs.len() == 1
+                && group[end - 1].outputs.len() == 1
+                && group[end].inputs[0] == group[end - 1].outputs[0]
+            {
+                end += 1;
             }
-        }
-        row
-    }
-
-    fn write_row(&mut self, row: &[char]) {
-        let end = row.iter().rposition(|&c| c != ' ').map_or(0, |i| i + 1);
-        self.text.extend(row[..end].iter());
-        self.text.push('\n');
-    }
-
-    fn label(&mut self, column: usize, label: &str, stage: Option<&str>, incoming: bool) {
-        let center = column * self.width + self.width / 2;
-        if incoming {
-            let mut row = self.row();
-            row[center] = '▼';
-            self.write_row(&row);
-        }
-        let mut row = self.row();
-        let start = center - label.chars().count() / 2;
-        for (offset, character) in label.chars().enumerate() {
-            row[start + offset] = character;
-        }
-        if let Some(stage) = stage {
-            let end = row.iter().rposition(|&c| c != ' ').map_or(0, |i| i + 1);
-            row.truncate(end);
-            row.extend(format!("  stage: {stage}").chars());
-        }
-        self.write_row(&row);
-    }
-
-    fn release(&mut self, node: usize) {
-        let column = self.positions[node]
-            .take()
-            .expect("a displayed node has a rail");
-        self.columns[column] = None;
-        self.free.insert(column);
-        self.shrink_extent();
-    }
-
-    fn shrink_extent(&mut self) {
-        while self.extent > 0 && self.columns[self.extent - 1].is_none() {
-            self.extent -= 1;
-        }
-    }
-
-    fn product(&mut self, node: usize, label: &str) {
-        let incoming = self.positions[node].is_some();
-        if !incoming && !self.text.is_empty() {
-            let row = self.row();
-            self.write_row(&row);
-        }
-        let column = self.positions[node].unwrap_or_else(|| self.allocate(node));
-        self.label(column, label, None, incoming);
-        if self.remaining[node] == 0 {
-            self.release(node);
-        }
-    }
-
-    fn operation(
-        &mut self,
-        node: usize,
-        label: &str,
-        stage: Option<&str>,
-        inputs: &[usize],
-        outputs: &[usize],
-    ) {
-        let mut sources = Vec::with_capacity(inputs.len());
-        let mut reusable = None;
-        for &input in inputs {
-            let column = self.positions[input].expect("an operation's inputs were displayed first");
-            self.remaining[input] -= 1;
-            let keep = self.remaining[input] != 0;
-            sources.push((column, keep));
-            if !keep && reusable.is_none_or(|(_, previous)| column < previous) {
-                reusable = Some((input, column));
+            panel(&group[start..end], &mut text);
+            if end < group.len() {
+                text.push('\n');
             }
+            start = end;
         }
-        let boxed = sources.len() > 1;
-        let column = if boxed {
-            self.route_around_box(&sources);
-            let column = sources
+        text.push('\n');
+    }
+    let used: FxHashSet<_> = steps
+        .iter()
+        .flat_map(|s| {
+            s.inputs
                 .iter()
-                .map(|&(i, _)| i)
-                .min()
-                .expect("a multi-input box has inputs");
-            for (&input, &(old_column, keep)) in inputs.iter().zip(&sources) {
-                if !keep {
-                    self.positions[input] = None;
-                }
-                self.columns[old_column] = None;
-                if old_column != column {
-                    self.free.insert(old_column);
-                }
-            }
-            self.columns[column] = Some(node);
-            self.positions[node] = Some(column);
-            column
-        } else if let Some((input, column)) = reusable {
-            self.positions[input] = None;
-            self.positions[node] = Some(column);
-            self.columns[column] = Some(node);
-            column
-        } else {
-            self.allocate(node)
-        };
-        if boxed {
-            self.box_label(column, label, stage, &sources, !outputs.is_empty());
-        } else {
-            if !sources.is_empty() {
-                self.connect(&sources, &[column]);
-            }
-            self.label(column, label, stage, !sources.is_empty());
-        }
-        self.positions[node] = None;
-        self.columns[column] = None;
-        let mut destinations = Vec::with_capacity(outputs.len());
-        for &output in outputs {
-            let destination = if self.columns[column].is_none() {
-                self.columns[column] = Some(output);
-                self.positions[output] = Some(column);
-                column
-            } else {
-                self.allocate(output)
-            };
-            destinations.push(destination);
-        }
-        if !destinations.is_empty() {
-            self.connect(&[(column, false)], &destinations);
-        }
-        if self.columns[column].is_none() {
-            self.free.insert(column);
-        }
-        self.shrink_extent();
-        self.compact();
-    }
-
-    /// Reclaim gaps left by consumed inputs. Without this routing pass, a
-    /// product shared by a long chain of joins would drift right at each box.
-    fn compact(&mut self) {
-        let mut target = 0;
-        for column in 0..self.extent {
-            let Some(node) = self.columns[column] else {
-                continue;
-            };
-            if column != target {
-                self.columns[column] = None;
-                self.columns[target] = Some(node);
-                self.positions[node] = Some(target);
-                self.free.insert(column);
-                self.free.remove(&target);
-                self.connect(&[(column, false)], &[target]);
-                self.shrink_extent();
-            }
-            target += 1;
+                .copied()
+                .chain(s.outputs.iter().map(String::as_str))
+        })
+        .collect();
+    for product in products {
+        if !used.contains(product) {
+            writeln!(text, "Unused source: [{product}]").expect("writing to a String");
         }
     }
-
-    /// Move pass-through lines outside the box. An input needed again
-    /// branches here: one arrow enters the box and its other line continues.
-    fn route_around_box(&mut self, sources: &[(usize, bool)]) {
-        let left = sources
-            .iter()
-            .map(|&(i, _)| i)
-            .min()
-            .expect("a box has inputs");
-        let right = sources
-            .iter()
-            .map(|&(i, _)| i)
-            .max()
-            .expect("a box has inputs");
-        let mut input = vec![None; right - left + 1];
-        for &(column, keep) in sources {
-            input[column - left] = Some(keep);
-        }
-        for column in left..=right {
-            let Some(node) = self.columns[column] else {
-                continue;
-            };
-            let keep = input[column - left];
-            if keep == Some(false) {
-                continue;
-            }
-            let destination = self.allocate_from(node, right + 1);
-            if keep.is_none() {
-                self.columns[column] = None;
-                self.free.insert(column);
-            }
-            self.connect(&[(column, keep.is_some())], &[destination]);
-        }
-    }
-
-    fn box_label(
-        &mut self,
-        column: usize,
-        label: &str,
-        stage: Option<&str>,
-        sources: &[(usize, bool)],
-        output: bool,
-    ) {
-        let left = sources
-            .iter()
-            .map(|&(i, _)| i)
-            .min()
-            .expect("a box has inputs")
-            * self.width
-            + self.width / 2
-            - 2;
-        let right = sources
-            .iter()
-            .map(|&(i, _)| i)
-            .max()
-            .expect("a box has inputs")
-            * self.width
-            + self.width / 2
-            + 2;
-        let mut row = self.row();
-        row.resize(row.len().max(right + 1), ' ');
-        for &(source, _) in sources {
-            row[source * self.width + self.width / 2] = '▼';
-        }
-        self.write_row(&row);
-        let mut row = self.row();
-        row.resize(row.len().max(right + 1), ' ');
-        row[left..=right].fill('─');
-        row[left] = '┌';
-        row[right] = '┐';
-        self.write_row(&row);
-        let mut row = self.row();
-        row.resize(row.len().max(right + 1), ' ');
-        row[left..=right].fill(' ');
-        row[left] = '│';
-        row[right] = '│';
-        let title = label
-            .strip_prefix('(')
-            .and_then(|s| s.strip_suffix(')'))
-            .expect("operation labels are parenthesised");
-        let start = left + (right - left + 1 - title.chars().count()) / 2;
-        for (offset, character) in title.chars().enumerate() {
-            row[start + offset] = character;
-        }
-        if let Some(stage) = stage {
-            let end = row.iter().rposition(|&c| c != ' ').map_or(0, |i| i + 1);
-            row.truncate(end);
-            row.extend(format!("  stage: {stage}").chars());
-        }
-        self.write_row(&row);
-        let mut row = self.row();
-        row.resize(row.len().max(right + 1), ' ');
-        row[left..=right].fill('─');
-        row[left] = '└';
-        row[right] = '┘';
-        if output {
-            row[column * self.width + self.width / 2] = '┬';
-        }
-        self.write_row(&row);
-    }
-
-    fn connect(&mut self, sources: &[(usize, bool)], targets: &[usize]) {
-        let left = sources
-            .iter()
-            .map(|&(i, _)| i)
-            .chain(targets.iter().copied())
-            .min()
-            .expect("a connection has endpoints");
-        let right = sources
-            .iter()
-            .map(|&(i, _)| i)
-            .chain(targets.iter().copied())
-            .max()
-            .expect("a connection has endpoints");
-        let mut row = self.row();
-        row.resize(row.len().max(right * self.width + self.width / 2 + 1), ' ');
-        let left_x = left * self.width + self.width / 2;
-        let right_x = right * self.width + self.width / 2;
-        for cell in &mut row[left_x..=right_x] {
-            *cell = if *cell == '│' { '╪' } else { '─' };
-        }
-        let mut endpoints = vec![(false, false); right - left + 1];
-        for &(column, keep) in sources {
-            endpoints[column - left].0 = true;
-            endpoints[column - left].1 |= keep;
-        }
-        for &column in targets {
-            endpoints[column - left].1 = true;
-        }
-        for (offset, &(up, down)) in endpoints.iter().enumerate() {
-            if up || down {
-                let x = (left + offset) * self.width + self.width / 2;
-                row[x] = junction(up, down, x > left_x, x < right_x);
-            }
-        }
-        self.write_row(&row);
-    }
+    text
 }
 
-fn junction(up: bool, down: bool, left: bool, right: bool) -> char {
-    match (up, down, left, right) {
-        (true, true, true, true) => '┼',
-        (true, true, true, false) => '┤',
-        (true, true, false, true) => '├',
-        (true, false, true, true) => '┴',
-        (false, true, true, true) => '┬',
-        (true, false, true, false) => '┘',
-        (true, false, false, true) => '└',
-        (false, true, true, false) => '┐',
-        (false, true, false, true) => '┌',
-        _ => '│',
+fn row_width(names: &[&str]) -> usize {
+    names
+        .iter()
+        .map(|name| name.chars().count() + 2)
+        .sum::<usize>()
+        + names.len().saturating_sub(1) * 3
+}
+
+fn product_row(names: &[&str], width: usize, text: &mut String) -> Vec<usize> {
+    if names.is_empty() {
+        return Vec::new();
+    }
+    let mut row = vec![' '; width];
+    let mut at = (width - row_width(names)) / 2;
+    let mut centers = Vec::with_capacity(names.len());
+    for name in names {
+        let label = format!("[{name}]");
+        let len = label.chars().count();
+        centers.push(at + len / 2);
+        for character in label.chars() {
+            row[at] = character;
+            at += 1;
+        }
+        at += 3;
+    }
+    write_row(&row, text);
+    centers
+}
+
+fn write_row(row: &[char], text: &mut String) {
+    let end = row.iter().rposition(|&c| c != ' ').map_or(0, |i| i + 1);
+    text.extend(row[..end].iter());
+    text.push('\n');
+}
+
+fn stems(points: &[usize], width: usize, glyph: char, text: &mut String) {
+    let mut row = vec![' '; width];
+    for &point in points {
+        row[point] = glyph;
+    }
+    write_row(&row, text);
+}
+
+fn panel(steps: &[&Step<'_>], text: &mut String) {
+    let width = (steps
+        .iter()
+        .map(|step| {
+            row_width(&step.inputs)
+                .max(row_width(
+                    &step.outputs.iter().map(String::as_str).collect::<Vec<_>>(),
+                ))
+                .max(step.name.chars().count() + 2)
+        })
+        .max()
+        .unwrap_or(0)
+        + 4)
+        | 1;
+    let center = width / 2;
+    let mut inputs = product_row(&steps[0].inputs, width, text);
+    for step in steps {
+        if inputs.len() > 1 {
+            stems(&inputs, width, '│', text);
+            stems(&inputs, width, '▼', text);
+            let mut row = vec!['─'; width];
+            row[0] = '┌';
+            row[width - 1] = '┐';
+            write_row(&row, text);
+            let mut row = vec![' '; width];
+            row[0] = '│';
+            row[width - 1] = '│';
+            let at = (width - step.name.chars().count()) / 2;
+            for (offset, c) in step.name.chars().enumerate() {
+                row[at + offset] = c;
+            }
+            write_row(&row, text);
+            let mut row = vec!['─'; width];
+            row[0] = '└';
+            row[width - 1] = '┘';
+            if !step.outputs.is_empty() {
+                row[center] = '┬';
+            }
+            write_row(&row, text);
+        } else {
+            if !inputs.is_empty() {
+                stems(&[center], width, '│', text);
+                stems(&[center], width, '▼', text);
+            }
+            let label = format!("({})", step.name);
+            writeln!(
+                text,
+                "{}{}",
+                " ".repeat((width - label.chars().count()) / 2),
+                label
+            )
+            .expect("writing to a String");
+        }
+        let outputs: Vec<_> = step.outputs.iter().map(String::as_str).collect();
+        if outputs.is_empty() {
+            inputs.clear();
+            continue;
+        }
+        // All output branching occurs after the operation. Each named output
+        // receives its own arrow; future readers refer to that name in a panel.
+        let mut at = (width - row_width(&outputs)) / 2;
+        let points: Vec<_> = outputs
+            .iter()
+            .map(|name| {
+                let len = name.chars().count() + 2;
+                let point = at + len / 2;
+                at += len + 3;
+                point
+            })
+            .collect();
+        if points.len() > 1 {
+            stems(&[center], width, '│', text);
+            let left = points[0].min(center);
+            let right = points[points.len() - 1].max(center);
+            let mut row = vec![' '; width];
+            row[left..=right].fill('─');
+            row[center] = '┴';
+            for &point in &points {
+                row[point] = if point == center {
+                    '┼'
+                } else if point == left {
+                    '┌'
+                } else if point == right {
+                    '┐'
+                } else {
+                    '┬'
+                };
+            }
+            write_row(&row, text);
+        } else {
+            stems(&points, width, '│', text);
+        }
+        stems(&points, width, '▼', text);
+        inputs = product_row(&outputs, width, text);
     }
 }
 
@@ -571,6 +438,48 @@ mod tests {
             .iter()
             .map(|&name| ProductDef::new(name, TypeExpr::Unknown, [] as [&str; 0]))
             .collect()
+    }
+
+    #[test]
+    fn dependencies_precede_readers_even_when_declared_later() {
+        let pipeline = Pipeline {
+            products: products(&["raw", "a", "b"]),
+            invocations: vec![
+                Invocation::new("second", vec![InputBinding::product("a")], "b"),
+                Invocation::new("first", vec![InputBinding::product("raw")], "a"),
+            ],
+            ..Pipeline::default()
+        };
+        let text = render_pipeline_tree(&pipeline);
+        assert!(text.find("(first)").unwrap() < text.find("(second)").unwrap());
+    }
+
+    #[test]
+    fn stage_overview_keeps_named_dependencies() {
+        let pipeline = Pipeline {
+            products: products(&["raw", "q", "r", "s"]),
+            invocations: vec![
+                Invocation {
+                    stage: Some("prep/import".into()),
+                    ..Invocation::new("first", vec![InputBinding::product("raw")], "q")
+                },
+                Invocation {
+                    stage: Some("analysis".into()),
+                    ..Invocation::new("second", vec![InputBinding::product("q")], "r")
+                },
+                Invocation {
+                    stage: Some("prep/final".into()),
+                    ..Invocation::new("third", vec![InputBinding::product("r")], "s")
+                },
+            ],
+            ..Pipeline::default()
+        };
+        let text = render_pipeline_tree(&pipeline);
+        assert!(text.contains("(prep) ──[q]──> (analysis)"));
+        assert!(text.contains("(analysis) ──[r]──> (prep)"));
+        for stage in ["prep/import", "analysis", "prep/final"] {
+            assert!(text.contains(&format!("Stage: {stage}")));
+        }
     }
 
     #[test]
@@ -601,7 +510,7 @@ mod tests {
     }
 
     #[test]
-    fn shared_and_unrelated_products_bypass_input_boxes() {
+    fn shared_products_connect_panels_by_name() {
         let pipeline = Pipeline {
             products: products(&["raw", "a", "b", "c", "x", "y", "out"]),
             invocations: vec![
@@ -629,14 +538,19 @@ mod tests {
             ..Pipeline::default()
         };
         let text = render_pipeline_tree(&pipeline);
-        assert!(text.contains('╪'));
-        assert_eq!(text.matches("[a]").count(), 1);
-        assert_eq!(text.matches("[b]").count(), 1);
+        assert!(!text.contains('╪'));
+        assert_eq!(text.matches("[a]").count(), 3);
+        assert_eq!(text.matches("[b]").count(), 2);
         assert!(text.contains("[out]"));
         let lines: Vec<_> = text.lines().collect();
         let boxes: Vec<_> = lines
             .windows(2)
-            .filter(|pair| pair[1].contains('┌') && pair[1].contains('┐'))
+            .filter(|pair| {
+                pair[1].trim().starts_with('┌')
+                    && pair[1].trim().ends_with('┐')
+                    && !pair[1].contains('┴')
+                    && !pair[1].contains('┼')
+            })
             .collect();
         assert_eq!(boxes.len(), 3);
         for pair in boxes {
@@ -690,11 +604,11 @@ mod tests {
             ],
             ..Pipeline::default()
         };
-        assert_eq!(render_pipeline_tree(&pipeline), "Pipeline\n  [t1_parcellation]\n          │\n          │               [asl_in_t1]\n          ▼                    ▼\n        ┌────────────────────────┐\n        │    regional_values     │\n        └─┬──────────────────────┘\n          │\n          ▼\n   [regional_asl]\n          │\n          ▼\n  (group_analysis)\n          │\n          ▼\n      [results]\n");
+        assert_eq!(render_pipeline_tree(&pipeline), "Pipeline\n  [t1_parcellation]   [asl_in_t1]\n          │                │\n          ▼                ▼\n┌─────────────────────────────────┐\n│         regional_values         │\n└────────────────┬────────────────┘\n                 │\n                 ▼\n          [regional_asl]\n                 │\n                 ▼\n         (group_analysis)\n                 │\n                 ▼\n             [results]\n\n");
     }
 
     #[test]
-    fn branches_and_joins_stay_connected() {
+    fn branches_and_joins_show_named_products() {
         let pipeline = Pipeline {
             products: products(&["a", "b", "c", "d"]),
             invocations: vec![
@@ -709,7 +623,7 @@ mod tests {
         };
         let text = render_pipeline_tree(&pipeline);
         assert_eq!(text.matches("join").count(), 1);
-        assert!(text.contains('├'));
+        assert!(text.contains("[b]   [c]"));
         assert!(text.contains('┘'));
         assert!(!text.contains("see above"));
         assert!(text.contains("[d]"));
@@ -730,7 +644,8 @@ mod tests {
             ..Pipeline::default()
         };
         let text = render_pipeline_tree(&pipeline);
-        assert!(text.contains("(combine)  stage: prep"));
+        assert!(text.contains("(combine)"));
+        assert!(text.contains("Stage: prep"));
         assert!(!text.contains('─'));
     }
 
@@ -766,7 +681,7 @@ mod tests {
         }
         let text = render_pipeline_tree(&pipeline);
         assert!(text.lines().all(|line| line.chars().count() < 20));
-        assert_eq!(text.lines().count(), 60_002);
+        assert!(text.lines().count() < 70_010);
         assert!(text.contains("[p10000]"));
     }
 }
