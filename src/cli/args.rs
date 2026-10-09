@@ -30,7 +30,7 @@ impl Command {
     fn spec(self) -> CommandSpec {
         use Flag::{
             ByTarget, Calls, Commands, Counts, Hovers, Jobs, Json, Output, Partial, PathRules,
-            Paths, Root, Stdin, Unmatched,
+            Paths, Root, Stdin, Tree, Unmatched,
         };
         match self {
             Self::Check => CommandSpec {
@@ -52,7 +52,7 @@ impl Command {
                 files: "<recipe.spitin> or <pipeline.spit> <inputs.spitout | ->",
                 summary: "step 3: resolve a pipeline's jobs over a dataset's inputs and print their commands; -o writes the .spitdag",
                 example: "spit dag dataset.spitin\n  spit dag dataset.spitin -o analysis.spitdag\n  spit dag analysis.spit dataset.spitout -o analysis.spitdag\n  spit dag dataset.spitin --counts",
-                flags: &[Root, Paths, Commands, Jobs, Counts, Partial, Json, Output],
+                flags: &[Root, Paths, Commands, Jobs, Counts, Partial, Json, Output, Tree],
             },
             Self::Artifacts => CommandSpec {
                 name: "artifacts",
@@ -126,9 +126,10 @@ pub(crate) enum Flag {
     Stdin,
     Hovers,
     Calls,
+    Tree,
 }
 
-const FLAGS: [Flag; 14] = [
+const FLAGS: [Flag; 15] = [
     Flag::Root,
     Flag::Output,
     Flag::Paths,
@@ -143,6 +144,7 @@ const FLAGS: [Flag; 14] = [
     Flag::Stdin,
     Flag::Hovers,
     Flag::Calls,
+    Flag::Tree,
 ];
 
 /// Pairs of flags that cannot be used together.
@@ -179,6 +181,7 @@ impl Flag {
             Self::Stdin => "--stdin",
             Self::Hovers => "--hovers",
             Self::Calls => "--calls",
+            Self::Tree => "--tree",
         }
     }
 
@@ -193,6 +196,7 @@ impl Flag {
 
     fn help(self, command: Command) -> &'static str {
         match (self, command) {
+            (Self::Tree, _) => "show pipeline products and steps without reading a dataset; --ascii is an alias",
             (Self::Root, _) => {
                 "with a .spit pipeline and no recipe, the dataset folder to scan, relative to where spit runs"
             }
@@ -229,6 +233,9 @@ impl Flag {
     }
 
     fn parse(name: &str) -> Option<Self> {
+        if name == "--ascii" {
+            return Some(Self::Tree);
+        }
         if name == "--output" {
             return Some(Self::Output);
         }
@@ -285,6 +292,16 @@ impl Flags {
     fn check_conflicts(&self, command: Command) -> Result<(), String> {
         if self.has(Flag::Hovers) && !self.has(Flag::Json) {
             return Err(misuse("--hovers requires --json", Some(command)));
+        }
+        if self.has(Flag::Tree) {
+            for (flag, _) in &self.0 {
+                if *flag != Flag::Tree {
+                    return Err(misuse(
+                        format_args!("--tree cannot be used with {}", flag.name()),
+                        Some(command),
+                    ));
+                }
+            }
         }
         for (first, second) in CONFLICTS {
             if self.has(first) && self.has(second) {
@@ -379,6 +396,9 @@ fn command_help(f: &mut fmt::Formatter<'_>, command: Command) -> fmt::Result {
         " [options]"
     };
     writeln!(f, "usage: spit {name} {}{options}", command.files())?;
+    if command == Command::Dag {
+        writeln!(f, "       spit dag <pipeline.spit> --tree")?;
+    }
     if let Some(shortcut) = command.shortcut() {
         writeln!(f, "\n{shortcut}")?;
     }

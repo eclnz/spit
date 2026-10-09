@@ -19,6 +19,8 @@ spit dag pipeline.spit dataset.spitout
 spit dag pipeline.spit --root data
 ```
 
+`spit dag pipeline.spit --tree` reads the pipeline and its imports only. A compact overview names the products connecting stages. Within each stage, lines connect product producers to their consumers; matching product names link stage boundaries. Each distinct input has its own arrow into a boxed multi-input operation; simple chains use parentheses. Reused products branch along one live line, and `╪` marks a crossing without a join. Connected diagrams pack operations across a 120-column target and fold back through continuous product lines. Very wide labels or live product frontiers use the compact vertical layout. Output branches appear after operations. Calls to operations with bodies remain single nodes, followed by one diagram per used body, including nested bodies. Unused sources are listed. This view accepts no dataset or other flags and leaves resolved-job output unchanged.
+
 Use `-` in place of a `.spitout` to read it from standard input. A recipe and a `.spitout` can be used to inspect an existing dataset without writing a DAG file.
 
 ## Inspection and output flags
@@ -28,6 +30,7 @@ Use `-` in place of a `.spitout` to read it from standard input. A recipe and a 
 | `--path-rules` | `check` | List each product's effective path rule and its source. |
 | `--calls` | `check` on a `.spit` | List calls to operations carried out by steps and their expanded steps; with `--json`, include a `calls` array. |
 | `--unmatched` | `inputs` | List dataset files no source path rule reads. |
+| `--tree` (`--ascii`) | `dag` on one `.spit` | Show product/step topology without reading dataset inputs. |
 | `--counts` | `dag` | Print a job count for every step and a total. |
 | `--paths` | `dag` | Print artifact paths in the plan. |
 | `--commands` | `dag` | Print the commands the runner would execute. |
