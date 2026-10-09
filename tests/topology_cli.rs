@@ -74,7 +74,7 @@ fn mrtrix_examples_render_narrow_stage_panels() {
         assert!(!text.contains("see above"));
         assert!(text.contains("Stage:"));
         assert!(text.contains("(preprocess) ──[session_b0]──> (anatomy)"));
-        assert!(text.lines().all(|line| line.chars().count() <= 100));
+        assert!(text.lines().all(|line| line.chars().count() <= 120));
     }
 }
 
@@ -126,8 +126,14 @@ fn combined_tractography_connects_shared_outputs_once() {
             "{product}"
         );
     }
-    assert_eq!(stage.matches('▶').count(), 13);
+    assert_eq!(stage.matches('▼').count(), 13);
     assert!(stage.contains('╪'));
+    assert!(stage
+        .lines()
+        .any(|line| line.contains("estimate_responses") && line.contains("estimate_fods")));
+    assert!(stage
+        .lines()
+        .any(|line| line.contains("track_act") && line.contains("weight_streamlines")));
     assert!(!stage.trim().contains("\n\n"));
-    assert!(stage.lines().all(|line| line.chars().count() <= 60));
+    assert!(stage.lines().all(|line| line.chars().count() <= 120));
 }

@@ -3,6 +3,9 @@ use super::topology::{write_row, Step};
 use rustc_hash::FxHashMap;
 use std::collections::BTreeSet;
 
+#[path = "topology_wide.rs"]
+mod wide;
+
 struct Product<'a> {
     name: &'a str,
     remaining: usize,
@@ -77,6 +80,9 @@ pub(super) fn render(steps: &[&Step<'_>], text: &mut String) {
             inputs,
             outputs,
         });
+    }
+    if wide::render(steps, &products, &events, lanes, text) {
+        return;
     }
     let left = lanes * 3 + 2;
     let label_width = products

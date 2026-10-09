@@ -500,7 +500,7 @@ mod tests {
             previous = output;
         }
         let text = render_pipeline_tree(&pipeline);
-        assert!(text.lines().all(|line| line.chars().count() < 45));
+        assert!(text.lines().all(|line| line.chars().count() <= 120));
         assert!(text.contains("[p999]"));
     }
 
@@ -537,7 +537,7 @@ mod tests {
         assert_eq!(text.matches("[a]").count(), 1);
         assert_eq!(text.matches("[b]").count(), 1);
         assert!(text.contains("[out]"));
-        assert_eq!(text.matches('▶').count(), 7);
+        assert_eq!(text.matches('▼').count(), 7);
     }
 
     #[test]
