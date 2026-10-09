@@ -2,8 +2,7 @@
 
 use crate::model::Pipeline;
 use rustc_hash::{FxHashMap, FxHashSet};
-use std::cmp::Reverse;
-use std::collections::BinaryHeap;
+use std::collections::BTreeSet;
 
 /// Render a compiled pipeline as downward flows. Products are bracketed,
 /// operations parenthesised, and shared dependencies remain connected rails.
@@ -180,7 +179,7 @@ fn render_graph(products: &[&str], steps: &[Step<'_>]) -> String {
     let width = (labels.iter().map(|s| s.chars().count()).max().unwrap_or(0) + 4) | 1;
     let mut layout = Layout {
         columns: Vec::new(),
-        free: BinaryHeap::new(),
+        free: BTreeSet::new(),
         positions: vec![None; nodes],
         width,
         remaining: edges.iter().map(Vec::len).collect(),
@@ -217,7 +216,7 @@ fn render_graph(products: &[&str], steps: &[Step<'_>]) -> String {
 struct Layout {
     /// One rail per live product, shared by every operation that reads it.
     columns: Vec<Option<usize>>,
-    free: BinaryHeap<Reverse<usize>>,
+    free: BTreeSet<usize>,
     extent: usize,
     positions: Vec<Option<usize>>,
     width: usize,
@@ -227,10 +226,17 @@ struct Layout {
 
 impl Layout {
     fn allocate(&mut self, node: usize) -> usize {
-        let column = self.free.pop().map(|Reverse(i)| i).unwrap_or_else(|| {
+        self.allocate_from(node, 0)
+    }
+
+    fn allocate_from(&mut self, node: usize, minimum: usize) -> usize {
+        let column = if let Some(&column) = self.free.range(minimum..).next() {
+            self.free.remove(&column);
+            column
+        } else {
             self.columns.push(None);
             self.columns.len() - 1
-        });
+        };
         self.extent = self.extent.max(column + 1);
         self.columns[column] = Some(node);
         self.positions[node] = Some(column);
@@ -279,7 +285,7 @@ impl Layout {
             .take()
             .expect("a displayed node has a rail");
         self.columns[column] = None;
-        self.free.push(Reverse(column));
+        self.free.insert(column);
         self.shrink_extent();
     }
 
@@ -321,8 +327,27 @@ impl Layout {
                 reusable = Some((input, column));
             }
         }
-        // Reuse a finished input's rail for the operation whenever possible.
-        let column = if let Some((input, column)) = reusable {
+        let boxed = sources.len() > 1;
+        let column = if boxed {
+            self.route_around_box(&sources);
+            let column = sources
+                .iter()
+                .map(|&(i, _)| i)
+                .min()
+                .expect("a multi-input box has inputs");
+            for (&input, &(old_column, keep)) in inputs.iter().zip(&sources) {
+                if !keep {
+                    self.positions[input] = None;
+                }
+                self.columns[old_column] = None;
+                if old_column != column {
+                    self.free.insert(old_column);
+                }
+            }
+            self.columns[column] = Some(node);
+            self.positions[node] = Some(column);
+            column
+        } else if let Some((input, column)) = reusable {
             self.positions[input] = None;
             self.positions[node] = Some(column);
             self.columns[column] = Some(node);
@@ -330,15 +355,14 @@ impl Layout {
         } else {
             self.allocate(node)
         };
-        for (&input, &(_, keep)) in inputs.iter().zip(&sources) {
-            if !keep && self.positions[input].is_some() {
-                self.release(input);
+        if boxed {
+            self.box_label(column, label, stage, &sources, !outputs.is_empty());
+        } else {
+            if !sources.is_empty() {
+                self.connect(&sources, &[column]);
             }
+            self.label(column, label, stage, !sources.is_empty());
         }
-        if !sources.is_empty() {
-            self.connect(&sources, &[column]);
-        }
-        self.label(column, label, stage, !sources.is_empty());
         self.positions[node] = None;
         self.columns[column] = None;
         let mut destinations = Vec::with_capacity(outputs.len());
@@ -356,9 +380,131 @@ impl Layout {
             self.connect(&[(column, false)], &destinations);
         }
         if self.columns[column].is_none() {
-            self.free.push(Reverse(column));
-            self.shrink_extent();
+            self.free.insert(column);
         }
+        self.shrink_extent();
+        self.compact();
+    }
+
+    /// Reclaim gaps left by consumed inputs. Without this routing pass, a
+    /// product shared by a long chain of joins would drift right at each box.
+    fn compact(&mut self) {
+        let mut target = 0;
+        for column in 0..self.extent {
+            let Some(node) = self.columns[column] else {
+                continue;
+            };
+            if column != target {
+                self.columns[column] = None;
+                self.columns[target] = Some(node);
+                self.positions[node] = Some(target);
+                self.free.insert(column);
+                self.free.remove(&target);
+                self.connect(&[(column, false)], &[target]);
+                self.shrink_extent();
+            }
+            target += 1;
+        }
+    }
+
+    /// Move pass-through lines outside the box. An input needed again
+    /// branches here: one arrow enters the box and its other line continues.
+    fn route_around_box(&mut self, sources: &[(usize, bool)]) {
+        let left = sources
+            .iter()
+            .map(|&(i, _)| i)
+            .min()
+            .expect("a box has inputs");
+        let right = sources
+            .iter()
+            .map(|&(i, _)| i)
+            .max()
+            .expect("a box has inputs");
+        let mut input = vec![None; right - left + 1];
+        for &(column, keep) in sources {
+            input[column - left] = Some(keep);
+        }
+        for column in left..=right {
+            let Some(node) = self.columns[column] else {
+                continue;
+            };
+            let keep = input[column - left];
+            if keep == Some(false) {
+                continue;
+            }
+            let destination = self.allocate_from(node, right + 1);
+            if keep.is_none() {
+                self.columns[column] = None;
+                self.free.insert(column);
+            }
+            self.connect(&[(column, keep.is_some())], &[destination]);
+        }
+    }
+
+    fn box_label(
+        &mut self,
+        column: usize,
+        label: &str,
+        stage: Option<&str>,
+        sources: &[(usize, bool)],
+        output: bool,
+    ) {
+        let left = sources
+            .iter()
+            .map(|&(i, _)| i)
+            .min()
+            .expect("a box has inputs")
+            * self.width
+            + self.width / 2
+            - 2;
+        let right = sources
+            .iter()
+            .map(|&(i, _)| i)
+            .max()
+            .expect("a box has inputs")
+            * self.width
+            + self.width / 2
+            + 2;
+        let mut row = self.row();
+        row.resize(row.len().max(right + 1), ' ');
+        for &(source, _) in sources {
+            row[source * self.width + self.width / 2] = '▼';
+        }
+        self.write_row(&row);
+        let mut row = self.row();
+        row.resize(row.len().max(right + 1), ' ');
+        row[left..=right].fill('─');
+        row[left] = '┌';
+        row[right] = '┐';
+        self.write_row(&row);
+        let mut row = self.row();
+        row.resize(row.len().max(right + 1), ' ');
+        row[left..=right].fill(' ');
+        row[left] = '│';
+        row[right] = '│';
+        let title = label
+            .strip_prefix('(')
+            .and_then(|s| s.strip_suffix(')'))
+            .expect("operation labels are parenthesised");
+        let start = left + (right - left + 1 - title.chars().count()) / 2;
+        for (offset, character) in title.chars().enumerate() {
+            row[start + offset] = character;
+        }
+        if let Some(stage) = stage {
+            let end = row.iter().rposition(|&c| c != ' ').map_or(0, |i| i + 1);
+            row.truncate(end);
+            row.extend(format!("  stage: {stage}").chars());
+        }
+        self.write_row(&row);
+        let mut row = self.row();
+        row.resize(row.len().max(right + 1), ' ');
+        row[left..=right].fill('─');
+        row[left] = '└';
+        row[right] = '┘';
+        if output {
+            row[column * self.width + self.width / 2] = '┬';
+        }
+        self.write_row(&row);
     }
 
     fn connect(&mut self, sources: &[(usize, bool)], targets: &[usize]) {
@@ -428,6 +574,102 @@ mod tests {
     }
 
     #[test]
+    fn repeated_joins_with_a_shared_product_stay_narrow() {
+        let mut pipeline = Pipeline {
+            products: products(&["raw", "seed"]),
+            ..Pipeline::default()
+        };
+        let mut previous = "seed".to_owned();
+        for id in 0..1000 {
+            let output = format!("p{id}");
+            pipeline
+                .products
+                .push(ProductDef::new(&output, TypeExpr::Unknown, [] as [&str; 0]));
+            pipeline.invocations.push(Invocation::new(
+                "mix",
+                vec![
+                    InputBinding::product("raw"),
+                    InputBinding::product(previous),
+                ],
+                &output,
+            ));
+            previous = output;
+        }
+        let text = render_pipeline_tree(&pipeline);
+        assert!(text.lines().all(|line| line.chars().count() < 45));
+        assert!(text.contains("[p999]"));
+    }
+
+    #[test]
+    fn shared_and_unrelated_products_bypass_input_boxes() {
+        let pipeline = Pipeline {
+            products: products(&["raw", "a", "b", "c", "x", "y", "out"]),
+            invocations: vec![
+                Invocation::with_outputs(
+                    "split",
+                    vec![InputBinding::product("raw")],
+                    ["a", "b", "c"],
+                ),
+                Invocation::new(
+                    "mix",
+                    vec![InputBinding::product("a"), InputBinding::product("c")],
+                    "x",
+                ),
+                Invocation::new(
+                    "mix",
+                    vec![InputBinding::product("a"), InputBinding::product("b")],
+                    "y",
+                ),
+                Invocation::new(
+                    "finish",
+                    vec![InputBinding::product("x"), InputBinding::product("y")],
+                    "out",
+                ),
+            ],
+            ..Pipeline::default()
+        };
+        let text = render_pipeline_tree(&pipeline);
+        assert!(text.contains('╪'));
+        assert_eq!(text.matches("[a]").count(), 1);
+        assert_eq!(text.matches("[b]").count(), 1);
+        assert!(text.contains("[out]"));
+        let lines: Vec<_> = text.lines().collect();
+        let boxes: Vec<_> = lines
+            .windows(2)
+            .filter(|pair| pair[1].contains('┌') && pair[1].contains('┐'))
+            .collect();
+        assert_eq!(boxes.len(), 3);
+        for pair in boxes {
+            assert_eq!(pair[0].matches('▼').count(), 2);
+        }
+    }
+
+    #[test]
+    fn three_inputs_have_three_separate_arrows() {
+        let pipeline = Pipeline {
+            products: products(&["a", "b", "c", "out"]),
+            invocations: vec![Invocation::new(
+                "combine",
+                vec![
+                    InputBinding::product("a"),
+                    InputBinding::product("b"),
+                    InputBinding::product("c"),
+                ],
+                "out",
+            )],
+            ..Pipeline::default()
+        };
+        let text = render_pipeline_tree(&pipeline);
+        let lines: Vec<_> = text.lines().collect();
+        let pair = lines
+            .windows(2)
+            .find(|pair| pair[1].contains('┌'))
+            .expect("one input box");
+        assert_eq!(pair[0].matches('▼').count(), 3);
+        assert!(!pair[0].contains('─'));
+    }
+
+    #[test]
     fn two_inputs_join_into_a_vertical_chain() {
         let pipeline = Pipeline {
             products: products(&["t1_parcellation", "asl_in_t1", "regional_asl", "results"]),
@@ -448,7 +690,7 @@ mod tests {
             ],
             ..Pipeline::default()
         };
-        assert_eq!(render_pipeline_tree(&pipeline), "Pipeline\n  [t1_parcellation]\n          │\n          │               [asl_in_t1]\n          ├────────────────────┘\n          ▼\n  (regional_values)\n          │\n          ▼\n   [regional_asl]\n          │\n          ▼\n  (group_analysis)\n          │\n          ▼\n      [results]\n");
+        assert_eq!(render_pipeline_tree(&pipeline), "Pipeline\n  [t1_parcellation]\n          │\n          │               [asl_in_t1]\n          ▼                    ▼\n        ┌────────────────────────┐\n        │    regional_values     │\n        └─┬──────────────────────┘\n          │\n          ▼\n   [regional_asl]\n          │\n          ▼\n  (group_analysis)\n          │\n          ▼\n      [results]\n");
     }
 
     #[test]
@@ -466,7 +708,7 @@ mod tests {
             ..Pipeline::default()
         };
         let text = render_pipeline_tree(&pipeline);
-        assert_eq!(text.matches("(join)").count(), 1);
+        assert_eq!(text.matches("join").count(), 1);
         assert!(text.contains('├'));
         assert!(text.contains('┘'));
         assert!(!text.contains("see above"));
