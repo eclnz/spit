@@ -24,6 +24,7 @@ pub(crate) enum Keyword {
     Path,
     /// `ext:`, the extension a default path is completed with.
     Ext,
+    Entities,
     Stage,
     /// `dimensions [...]`, the order every product's dimensions follow.
     Dimensions,
@@ -61,6 +62,20 @@ impl Keyword {
         if let Some(rest) = line.strip_prefix("path") {
             if rest.starts_with([' ', ':']) {
                 return Some((Self::Path, rest));
+            }
+        }
+        if let Some(rest) = line.strip_prefix("entities:") {
+            if rest.contains("{key}") || rest.contains("{value}") || !has_top_level_equals(rest) {
+                return Some((Self::Entities, rest));
+            }
+        }
+        if let Some(rest) = line.strip_prefix("entities ") {
+            if rest
+                .trim_start()
+                .starts_with(|c: char| c.is_ascii_alphabetic() || c == '_')
+                && !rest.split(':').next().unwrap_or_default().contains('=')
+            {
+                return Some((Self::Entities, rest));
             }
         }
         // A step may annotate an output named `ext`: `ext: Image = ...`.

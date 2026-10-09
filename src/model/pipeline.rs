@@ -6,7 +6,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::error::{DefinitionSubject, ResolveError};
-use crate::paths::{Holder, PathTemplate};
+use crate::paths::{EntitiesFormat, Holder, PathTemplate};
 
 use super::{
     stage_and_parents, ArtifactInstance, Call, CallId, CheckDef, CommandDef, DefaultChecks,
@@ -27,6 +27,8 @@ pub struct Pipeline {
     /// The `check:` default of every output in the file, outside any stage.
     pub default_checks: DefaultChecks,
     pub path_template: Option<PathTemplate>,
+    /// The file's custom rendering of `{@entities}`; None keeps the built-in format.
+    pub entities_format: Option<EntitiesFormat>,
     /// The `ext:` default: the extension a default path rule is completed
     /// with when the operation declares none.
     pub extension: Option<String>,
@@ -552,6 +554,7 @@ impl<'p> PipelineIndex<'p> {
     /// and whether a stage makes it.
     pub(crate) fn holder(&self, product: &str) -> Holder<'p> {
         Holder {
+            entities_format: self.pipeline.entities_format.as_ref(),
             dimensions: self
                 .product(product)
                 .map_or(&[][..], |declared| declared.dimensions.as_slice()),

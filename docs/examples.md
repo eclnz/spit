@@ -137,6 +137,8 @@ Save as `sensors.spit`:
 # revision, compared with a station reference, split into two bands, and
 # summarised per station under that station's policy.
 
+entities: {key}_{value} separated "-"
+entities station: site
 path: derived/{@product}/{@entities}.csv
 
 source reading : Series [station, day]
@@ -197,6 +199,8 @@ sources:
 ```
 
 Run `spit dag sensors.spit sensors.spitout --commands` to see 17 jobs: five each of `calibrate`, `compare`, and `split_bands`, then two `summarise` jobs. The `verify calibrate` command appears before each calibration command. The north summary takes days 1, 2, then 10; the unused north calibration revision 1 is reported separately. `Series`, `Calibration`, `Policy`, and `Summary` are types in operation signatures, while `reading`, `calibration`, `policy`, and `summary` are product names. Each call argument occupies the corresponding operation port and is type checked there.
+
+The shared entity format writes `derived/calibrated/site_north-day_1.csv`. The `site` label changes path text only: identities and selectors still use `station`. Each shape uses its own dimensions with the same format.
 
 ## Text processing: imports and nested stages
 
@@ -328,7 +332,7 @@ Each pipeline below, under [`examples/`](https://github.com/eclnz/spit/tree/dev/
 | --- | --- | --- | --- |
 | [Branching](https://github.com/eclnz/spit/blob/dev/examples/pipelines/branching.spit) | A shared policy, two branches with their own aggregations, and a recombination | `cargo run -- dag examples/pipelines/branching.spit examples/pipelines/branching.spitout` | 21 |
 | [Nested aggregation](https://github.com/eclnz/spit/blob/dev/examples/pipelines/complex.spit) | Partial types, irregular groups, and three successive aggregations | `cargo run -- dag examples/pipelines/complex.spit examples/pipelines/complex.spitout` | 25 |
-| [Selectors](https://github.com/eclnz/spit/blob/dev/examples/pipelines/selectors.spit) | `where`, `same`, a verification, a two-output step, and a many input beside a single input | `cargo run -- dag examples/pipelines/selectors.spit examples/pipelines/selectors.spitout` | 17 |
+| [Selectors](https://github.com/eclnz/spit/blob/dev/examples/pipelines/selectors.spit) | `where`, `same`, verification, two outputs, a many input beside a single input, and custom entity formatting | `cargo run -- dag examples/pipelines/selectors.spit examples/pipelines/selectors.spitout` | 17 |
 | [Ragged sweep](https://github.com/eclnz/spit/blob/dev/examples/patterns/ragged_sweep/ragged_sweep.spit) | `each(model)` broadcasts over per-config seeds, then `vary` collects the runs | `cargo run -- dag examples/patterns/ragged_sweep/ragged_sweep.spit examples/patterns/ragged_sweep/ragged_sweep.spitout` | 17 |
 | [Cohort](https://github.com/eclnz/spit/blob/dev/examples/patterns/cohort/cohort.spit) | BIDS sessions, a dropped subject, an excluded run, and one default path with `[...]` groups and `{@labels}` | `cargo run -- dag examples/patterns/cohort/cohort.spitin` | 24 |
 | [Analytics](https://github.com/eclnz/spit/blob/dev/examples/analytics/analytics.spit) | Five keyed joins, then day, customer, and tenant rollups | `cargo run -- dag examples/analytics/analytics.spit examples/analytics/analytics.spitout` | 34 |
