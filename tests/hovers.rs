@@ -310,3 +310,133 @@ fn a_source_shows_its_extension_and_no_stage_default() {
         "No pipeline path rule; a recipe or inventory must supply the source path."
     );
 }
+
+const REGISTRATION: &str = "\
+source raw_t1: MRI<T1w,Native,Original> [sub]
+operation parcellate(image: MRI<$I,$Space,$Grid>) -> (parc: MRI<Parc,$Space,SynthGrid<$Grid>>, resampled: MRI<$I,$Space,SynthGrid<$Grid>>)
+operation brainmask(image: MRI<Parc,$Space,$Grid>) -> MRI<Mask,$Space,$Grid>
+operation prep_registration(image: MRI<$I,$Space,$Grid>) -> (parc: MRI<Parc,$Space,SynthGrid<$Grid>>, resampled: MRI<$I,$Space,SynthGrid<$Grid>>, mask: MRI<Mask,$Space,SynthGrid<$Grid>>):
+    parc, resampled = parcellate(image)
+    mask = brainmask(parc)
+t1_parc, t1_resampled, t1_mask = prep_registration(raw_t1)
+command parcellate: tool {image} {parc} {resampled}
+command brainmask: tool {image} {@output}
+";
+
+#[test]
+fn composite_hovers_show_typed_ports_and_one_body_in_the_right_context() {
+    let all = hovers(REGISTRATION);
+    let declaration = at(&all, 4, "prep_registration");
+    assert!(declaration.signature.contains("\n    image: MRI<"));
+    assert!(declaration.signature.contains(") -> (\n    parc: MRI<"));
+    assert!(declaration.signature.contains(",\n    resampled: MRI<"));
+    assert_eq!(declaration.details, ["Carried out by the steps in its body: parc, resampled = parcellate(image)\nmask = brainmask(parc)"]);
+    let call = at(&all, 7, "prep_registration");
+    assert!(call
+        .details
+        .iter()
+        .all(|detail| !detail.starts_with("Carried out")));
+    assert!(call
+        .details
+        .iter()
+        .any(|detail| detail == "image ← raw_t1: MRI<T1w,Native,Original> [sub]"));
+    assert!(
+        call.details
+            .iter()
+            .any(|detail| detail
+                .contains("mask → t1_mask: MRI<Mask,Native,SynthGrid<Original>> [sub]")),
+        "{:?}",
+        call.details
+    );
+    assert_eq!(
+        call.details
+            .iter()
+            .filter(|detail| detail.starts_with("This call expands to:"))
+            .count(),
+        1
+    );
+    assert!(call.details.iter().any(|detail| detail == "This call expands to: t1_parc, t1_resampled = parcellate(raw_t1)\nt1_mask = brainmask(t1_parc)"));
+}
+
+#[test]
+fn primitive_calls_prioritise_bindings_and_keep_execution_information() {
+    let all = hovers("source raw: Text [id]\noperation copy(input: Text) -> Text\ncommand copy: cp {input} {@output}\nverify copy: test -f {input}\nout = copy(raw)\n");
+    let declaration = at(&all, 2, "copy");
+    assert!(declaration.details[0].starts_with("Single-artifact"));
+    let call = at(&all, 5, "copy");
+    assert_eq!(call.signature, "operation copy(input: Text) -> Text");
+    assert_eq!(call.details[0], "This call:");
+    assert!(call
+        .details
+        .contains(&"Command: cp {input} {@output}".to_owned()));
+    assert!(call.details.contains(&"Verify: test -f {input}".to_owned()));
+    assert!(call
+        .details
+        .iter()
+        .all(|detail| !detail.starts_with("Single-artifact")));
+}
+
+#[test]
+fn product_hovers_keep_inference_failures_and_bound_large_reader_lists() {
+    let mut text = "source raw: Text [id]\noperation copy(input: Text) -> Text\n".to_owned();
+    for index in 0..12 {
+        text.push_str(&format!("out{index} = copy(raw)\n"));
+    }
+    text.push_str("broken = copy(missing)\n");
+    let all = hovers(&text);
+    let source = at(&all, 1, "raw");
+    assert!(source
+        .details
+        .contains(&"4 other steps also use this product.".to_owned()));
+    let readers = source
+        .details
+        .iter()
+        .find(|detail| detail.starts_with("Used by:"))
+        .unwrap();
+    assert!(readers.contains("out7 = copy"));
+    assert!(!readers.contains("out8 = copy"));
+    assert!(at(&all, 3, "out0")
+        .details
+        .iter()
+        .all(|detail| !detail.starts_with("Declared type:")));
+    assert!(at(&all, 15, "broken")
+        .details
+        .iter()
+        .any(|detail| detail.starts_with("Inference unavailable")));
+}
+
+#[test]
+fn call_hovers_explain_the_selectors_that_change_matching() {
+    let all = hovers("source raw: Text [sub, run]\nsource reference: Text [run]\noperation copy(input: Text, driver: Text) -> Text\npinned = copy(raw @ where(run=1) @ same(sub), raw)\nbroadcast = copy(raw @ each(sub), reference)\n");
+    let pinned = at(&all, 4, "copy");
+    assert!(pinned.details.contains(&"Pins input to run=1.".to_owned()));
+    assert!(pinned.details.contains(&"Matches input on sub.".to_owned()));
+    assert!(at(&all, 5, "copy")
+        .details
+        .contains(&"Broadcasts input across sub.".to_owned()));
+    let aggregate = hovers("source raw: Text [sub, run]\noperation merge(items: many Text) -> Text\nmerged = merge(raw @ vary(run))\n");
+    let call = at(&aggregate, 3, "merge");
+    assert!(call.details[1].contains("items ←"));
+    assert!(call.details[2].contains("output →"));
+    assert_eq!(call.details[3], "Collects items across run.");
+}
+
+#[test]
+fn a_broken_composite_retains_its_contract_without_claiming_inferred_results() {
+    let text = REGISTRATION.replace("MRI<T1w,Native,Original>", "Text");
+    let all = hovers(&text);
+    let call = at(&all, 7, "prep_registration");
+    assert!(call
+        .details
+        .iter()
+        .any(|detail| detail.contains("could not be fully checked")));
+    assert!(call
+        .details
+        .iter()
+        .all(|detail| !detail.contains("MRI<Mask,Native,SynthGrid<Original>>")));
+    assert!(call
+        .details
+        .iter()
+        .any(|detail| detail.starts_with("This call expands to:")));
+    assert_eq!(at(&all, 4, "prep_registration").details.len(), 1);
+}
