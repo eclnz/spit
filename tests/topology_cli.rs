@@ -1,5 +1,5 @@
 mod support;
-use support::spit;
+use support::{spit, Tree};
 
 #[test]
 fn topology_needs_no_inventory_and_alias_matches() {
@@ -31,4 +31,48 @@ fn topology_needs_no_inventory_and_alias_matches() {
     assert!(!extra.status.success());
     let wrong = spit(&["dag", "unused.spitin", "--tree"]);
     assert!(!wrong.status.success());
+}
+
+#[test]
+fn reusable_and_nested_operations_have_one_component_diagram() {
+    let tree = Tree::new("topology-components", &[]);
+    tree.write("pipe.spit", "source raw : T [sub]\noperation leaf(x: T) -> T\noperation clean(x: T) -> (result: T):\n    mid = leaf(x)\n    result = leaf(mid)\noperation wrapper(x: T) -> (result: T):\n    result = clean(x)\na = wrapper(raw)\nb = wrapper(a)\n");
+    let run = spit(&[
+        "dag",
+        tree.path().join("pipe.spit").to_str().unwrap(),
+        "--tree",
+    ]);
+    assert!(
+        run.status.success(),
+        "{}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    let text = String::from_utf8(run.stdout).unwrap();
+    assert_eq!(text.matches("(wrapper)").count(), 2);
+    assert_eq!(text.matches("Component: wrapper").count(), 1);
+    assert_eq!(text.matches("Component: clean").count(), 1);
+    assert_eq!(text.matches("(leaf)").count(), 2);
+    assert!(!text.contains("a::"));
+}
+
+#[test]
+fn mrtrix_examples_render_connected_diagrams() {
+    for file in [
+        "examples/commands/mrtrix3_act/mrtrix3_act.spit",
+        "examples/composites/mrtrix/act.spit",
+    ] {
+        let run = spit(&["dag", file, "--tree"]);
+        assert!(
+            run.status.success(),
+            "{}",
+            String::from_utf8_lossy(&run.stderr)
+        );
+        let text = String::from_utf8(run.stdout).unwrap();
+        assert!(text.contains("[raw_dwi]"));
+        assert!(text.contains('▼'));
+        assert!(text.contains('┴'));
+        assert!(!text.contains("see above"));
+        assert!(text.contains('╪'));
+        assert!(text.contains("╪ = crossing, no connection"));
+    }
 }
