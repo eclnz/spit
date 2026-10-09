@@ -1,0 +1,3 @@
+pipeline untyped.spit
+root untyped_data
+path: {@product}/{@entities}

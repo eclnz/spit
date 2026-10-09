@@ -1,6 +1,0 @@
-pipeline rich_shapes.spit
-root rich_shapes_data
-path: {@product}/{@entities}
-
-require [sub, ses] where scan count>=1
-require [sub, ses] where ref count=1

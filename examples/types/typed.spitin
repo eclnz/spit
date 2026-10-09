@@ -1,0 +1,3 @@
+pipeline typed.spit
+root typed_data
+path: {@product}/{@entities}

@@ -252,7 +252,6 @@ fn expanded_examples_resolve() {
     for (example, expected_jobs) in [
         ("examples/pipelines/branching", 21),
         ("examples/pipelines/complex", 25),
-        ("examples/pipelines/rich_shapes", 17),
         ("examples/commands/field_survey/field_survey", 93),
         ("examples/analytics/analytics", 34),
     ] {
@@ -391,8 +390,8 @@ fn dag_json_names_every_output_port() {
 fn dag_json_stage_is_an_array_of_names() {
     let output = spit(&[
         "dag",
-        "examples/stages/nested.spit",
-        "examples/stages/nested.spitout",
+        "tests/fixtures/stages/nested.spit",
+        "tests/fixtures/stages/nested.spitout",
         "--json",
     ]);
     assert!(output.status.success(), "{}", stderr(&output));
