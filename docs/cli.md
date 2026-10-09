@@ -11,7 +11,7 @@ SPIT checks a pipeline, settles a dataset's inputs, and resolves jobs. Run `spit
 
 ## Input forms
 
-`check` accepts one `.spit`, `.spitin`, or `.spitout` file. `inputs` accepts a `.spitin` recipe, or a `.spit` pipeline with `--root <directory>`. `dag` and `artifacts` accept a recipe alone, a pipeline with a `.spitout`, or a pipeline with `--root`. A recipe already names its pipeline and dataset root. A `.spitout` does not name its pipeline, so pass the pipeline separately.
+`check` accepts one `.spit`, `.spitin`, or `.spitout` file. `inputs` accepts a `.spitin` recipe, or a `.spit` pipeline with an inline `root` or `--root <directory>`. `dag` and `artifacts` accept those same forms, or a pipeline with a `.spitout`. A recipe names its pipeline and either declares a root or inherits that pipeline's root. Inline roots are relative to their declaring file; `--root` is relative to the working folder and is an error when the pipeline already declares a root. A `.spitout` does not name its pipeline, so pass the pipeline separately.
 
 ```sh
 spit dag dataset.spitin

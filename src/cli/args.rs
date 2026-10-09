@@ -42,21 +42,21 @@ impl Command {
             },
             Self::Inputs => CommandSpec {
                 name: "inputs",
-                files: "<recipe.spitin>",
-                summary: "step 2: find a dataset's sources with a recipe, apply `exclude` and `require`, and write a .spitout",
+                files: "<recipe.spitin | pipeline.spit>",
+                summary: "step 2: find a dataset's sources with a pipeline or recipe, apply `exclude` and `require`, and write a .spitout",
                 example: "spit inputs dataset.spitin -o dataset.spitout\n  spit inputs dataset.spitin --unmatched",
                 flags: &[Root, Output, Unmatched],
             },
             Self::Dag => CommandSpec {
                 name: "dag",
-                files: "<recipe.spitin> or <pipeline.spit> <inputs.spitout | ->",
+                files: "<recipe.spitin> or <pipeline.spit> [inputs.spitout | -]",
                 summary: "step 3: resolve a pipeline's jobs over a dataset's inputs and print their commands; -o writes the .spitdag",
                 example: "spit dag dataset.spitin\n  spit dag dataset.spitin -o analysis.spitdag\n  spit dag analysis.spit dataset.spitout -o analysis.spitdag\n  spit dag dataset.spitin --counts",
                 flags: &[Root, Paths, Commands, Jobs, Counts, Partial, Json, Output, Tree],
             },
             Self::Artifacts => CommandSpec {
                 name: "artifacts",
-                files: "<recipe.spitin> or <pipeline.spit> <inputs.spitout | ->",
+                files: "<recipe.spitin> or <pipeline.spit> [inputs.spitout | -]",
                 summary: "step 3: report what can and cannot be made from a dataset's inputs, and why",
                 example: "spit artifacts dataset.spitin\n  spit artifacts dataset.spitin --by-target\n  spit artifacts analysis.spit dataset.spitout",
                 flags: &[Root, ByTarget],
@@ -198,7 +198,7 @@ impl Flag {
         match (self, command) {
             (Self::Tree, _) => "show pipeline products and steps without reading a dataset; --ascii is an alias",
             (Self::Root, _) => {
-                "with a .spit pipeline and no recipe, the dataset folder to scan, relative to where spit runs"
+                "with a .spit pipeline that has no root line, the dataset folder to scan, relative to where spit runs"
             }
             (Self::Output, Command::Inputs) => "write the .spitout to <file>, not standard output",
             (Self::Output, _) => "write the .spitdag to <file>",
@@ -383,7 +383,7 @@ fn overview(f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "  {:<10} {}", command.name(), command.summary())?;
     }
     f.write_str(
-        "\nfiles:\n  .spit      a pipeline: sources, operations, steps, commands, path rules\n  .spitin    a recipe for a dataset's inputs, naming its pipeline\n  .spitout   a dataset's settled inputs, each source with its file\n  .spitdag   the resolved jobs, each with its files and command\n\nRun `spit help <command>` for its options.\n",
+        "\nfiles:\n  .spit      a pipeline: sources, operations, steps, commands, path rules, optional root\n  .spitin    a recipe for a dataset's inputs, naming its pipeline\n  .spitout   a dataset's settled inputs, each source with its file\n  .spitdag   the resolved jobs, each with its files and command\n\nRun `spit help <command>` for its options.\n",
     )
 }
 

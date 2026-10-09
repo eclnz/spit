@@ -2,6 +2,7 @@
 
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
+use std::path::PathBuf;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -15,9 +16,12 @@ use super::{
 };
 
 /// The logical pipeline: what to make from which sources. It says nothing
-/// about how a dataset's sources are found or filtered; see [`InputRules`].
+/// about how a dataset's sources are filtered; see [`InputRules`].
 #[derive(Clone, Debug, Default)]
 pub struct Pipeline {
+    /// An optional dataset root and its line, relative to the pipeline's
+    /// folder when parsed at a path. Imports never bring in a root.
+    pub root: Option<(PathBuf, usize)>,
     pub products: Vec<ProductDef>,
     pub operations: Vec<OperationDef>,
     pub invocations: Vec<Invocation>,

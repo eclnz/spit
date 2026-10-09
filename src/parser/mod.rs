@@ -198,6 +198,8 @@ pub(crate) struct Statement {
 pub(crate) enum StatementKind {
     /// A `use` line; the definitions it brings in are loaded separately.
     Import,
+    /// The pipeline's optional dataset root.
+    Root(std::path::PathBuf),
     /// A `stage name:` header, by the stage's full name.
     Stage {
         name: String,
