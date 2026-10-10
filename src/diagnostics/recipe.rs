@@ -193,6 +193,10 @@ pub fn diagnose_recipe_against(text: &str, pipeline: &Pipeline) -> Vec<Diagnosti
                 | InputError::OutputPath { product }
                 | InputError::PathInBoth { product }
                 | InputError::MemberPath { product, .. } => lines.paths.get(product).cloned(),
+                InputError::WithOperation { name } | InputError::WithBody { name } => {
+                    lines.with_operations.get(name).cloned()
+                }
+                InputError::WithProduct { name } => lines.with_products.get(name).cloned(),
                 _ => None,
             };
             diagnostics.push(Diagnostic::error(

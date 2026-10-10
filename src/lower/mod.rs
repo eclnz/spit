@@ -55,6 +55,9 @@ pub(crate) struct PipelineBuilder {
     /// Each product a call made for itself, with the call and the operation
     /// it calls, which steps written in the pipeline may not read.
     intermediates: FxHashMap<String, CallId>,
+    /// Whether a recipe is being lowered, whose `with` lines are kept as
+    /// written for the pipeline it names to check.
+    recipe: bool,
 }
 
 impl PipelineBuilder {
@@ -338,7 +341,10 @@ pub(crate) fn lower(
     imports: &BTreeMap<usize, Pipeline>,
     kind: Kind,
 ) -> Result<PipelineBuilder, Vec<ParseError>> {
-    let mut builder = PipelineBuilder::default();
+    let mut builder = PipelineBuilder {
+        recipe: kind == Kind::Recipe,
+        ..PipelineBuilder::default()
+    };
     let mut errors = Vec::new();
     let mut parsing = syntax.errors.iter().peekable();
     let mut defer_parse_errors = false;
@@ -385,7 +391,9 @@ pub(crate) fn lower(
     }
     check_bodies_have_no_commands(&builder).map_err(|error| vec![error])?;
     check_source_beside_paths(&builder).map_err(|error| vec![error])?;
-    builder.check_with_products().map_err(|error| vec![error])?;
+    if !builder.recipe {
+        builder.check_with_products().map_err(|error| vec![error])?;
+    }
     order_dimensions(
         &mut builder.pipeline.products,
         &builder.outputs,

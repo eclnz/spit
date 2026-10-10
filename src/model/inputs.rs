@@ -8,7 +8,9 @@ use std::path::PathBuf;
 
 use crate::paths::PathTemplate;
 
-use super::{owned_strings, DirectoryDiscovery, EntityBinding, Pipeline, PipelineIndex};
+use super::{
+    owned_strings, DirectoryDiscovery, EntityBinding, Pipeline, PipelineIndex, RecipeWith,
+};
 
 /// How a dataset's sources are found and filtered: directory discovery,
 /// `exclude` and `require` rules, and where source files live. The input stage
@@ -30,6 +32,9 @@ pub struct InputRules {
     /// own, in the pipeline or the recipe. It stays as written;
     /// [`InputRules::source_paths_for`] gives each source its rule.
     pub source_default: Option<PathTemplate>,
+    /// The recipe's `with` lines, which set job properties over the
+    /// pipeline's.
+    pub with: RecipeWith,
 }
 
 impl InputRules {
@@ -40,6 +45,7 @@ impl InputRules {
             && self.exclusion_files.is_empty()
             && self.source_paths.is_empty()
             && self.source_default.is_none()
+            && self.with.is_empty()
     }
 
     /// Sources with no rule in the pipeline or recipe, except those whose
