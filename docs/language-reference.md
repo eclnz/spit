@@ -321,6 +321,30 @@ cargo run -- dag examples/imports/imported.spitin
 
 A step outside every stage stays valid.
 
+## Job properties
+
+SPIT does not know what a job needs to run: that belongs to whatever runs it. A `with` line gives jobs properties, `key=value` pairs that SPIT carries into the [`.spitdag`](spitdag.md#props) without reading, so a runner can take `cpus` and `mem` from them and a cluster backend can map them to its own options:
+
+```text
+with: cpus=1 mem=2G
+
+stage preprocess:
+    with: mem=8G
+
+    operation denoise(dwi: DWI) -> DWI
+    command denoise: dwidenoise {dwi} {@output}
+    with operation denoise: cpus=8 time=6h
+
+    clean = denoise(raw)
+    with product clean: mem=16G
+```
+
+`with:` sets properties for every job in the file, or, written in a stage, for every job in that stage and the stages nested in it. `with operation name:` sets them for the jobs of one operation, and `with product name:` for the jobs that make one product. A key is lowercase letters, digits and `_`, starting with a letter. A value is one word, or text in double quotes, as in `queue="long jobs"`.
+
+A job's properties are merged from the widest scope to the narrowest, and the narrower scope wins, one key at a time: the file, then each stage from the outermost in, then the operation, then the product. A scope sets only the keys it names, so the jobs that make `clean` above have `cpus=8` and `time=6h` from the operation and `mem=16G` from the product, while another call of `denoise` in that stage has `mem=8G`. `key=-` takes away a key a wider scope gave, leaving the job without it. A job that no `with` line reaches has no properties.
+
+Each scope's line is given once. `with operation` and `with product` can be written anywhere below the declaration they name, in a stage or not; the operation must be declared before its line, and the product must be made by a step. An operation carried out by a body takes no `with operation`, as it has no job of its own: write `with` for the operations its steps call, which an import brings with the operation. Properties are not part of a job's fingerprint, so changing one reruns nothing.
+
 ## Reuse definitions
 
 Import operations, source families and [checks](#checks) from another `.spit` file. The path is relative to the file containing the `use` line. An operation brings its `command`; a source brings its path rule; either brings the checks it attaches. A source with companions declared [`beside`](#sidecar-files) it brings those companions with it. A companion cannot be imported alone: import its main source. A recipe names an imported main source as `text::raw_photo` when the import uses `as text`. An [operation carried out by steps](#operations-carried-out-by-steps) brings the operations its steps call. Imports do not bring pipeline steps.

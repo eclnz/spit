@@ -10,9 +10,9 @@ use crate::error::{DefinitionSubject, ResolveError};
 use crate::paths::{EntitiesFormat, Holder, PathTemplate};
 
 use super::{
-    stage_and_parents, ArtifactInstance, Call, CallId, CheckDef, CommandDef, DefaultChecks,
-    EntityBinding, ExtensionSource, Invocation, OperationDef, OutputPort, ProductDef, Removal,
-    SidecarGroup, SourceInventory, SourceRecord, StageDef,
+    merge_props, stage_and_parents, ArtifactInstance, Call, CallId, CheckDef, CommandDef,
+    DefaultChecks, EntityBinding, ExtensionSource, Invocation, JobProps, OperationDef, OutputPort,
+    ProductDef, Prop, Removal, SidecarGroup, SourceInventory, SourceRecord, StageDef,
 };
 
 /// The logical pipeline: what to make from which sources. It says nothing
@@ -37,6 +37,10 @@ pub struct Pipeline {
     /// with when the operation declares none.
     pub extension: Option<String>,
     pub product_paths: BTreeMap<String, PathTemplate>,
+    /// The `with:` properties of every job in the file.
+    pub with: Vec<Prop>,
+    /// The `with product` properties of each product's jobs.
+    pub product_with: BTreeMap<String, Vec<Prop>>,
     /// Stages in declaration order.
     pub stages: Vec<StageDef>,
     /// Source families joined by `beside`, for reporting missing companions.
@@ -164,6 +168,39 @@ impl Pipeline {
     /// another is left as written, and reported by the path checks.
     pub fn added_extension(&self, product: &str) -> Option<(&str, ExtensionSource)> {
         PipelineIndex::scan(self).added_extension(product)
+    }
+
+    /// The properties of the jobs of a step in `stage` that calls
+    /// `operation` to make `outputs`: the pipeline's `with:`, then each
+    /// stage's from the outermost in, then the operation's, then the
+    /// products', each narrower scope setting only the keys it names.
+    pub fn job_props(
+        &self,
+        stage: Option<&str>,
+        operation: &OperationDef,
+        outputs: &[String],
+    ) -> JobProps {
+        let stages = stage.into_iter().flat_map(|stage| {
+            let mut around: Vec<&str> = stage_and_parents(stage).collect();
+            around.reverse();
+            around
+        });
+        let stages = stages.filter_map(|name| {
+            self.stages
+                .iter()
+                .find(|definition| definition.name == name)
+                .map(|definition| definition.with.as_slice())
+        });
+        let products = outputs
+            .iter()
+            .filter_map(|output| self.product_with.get(output))
+            .map(Vec::as_slice);
+        merge_props(
+            std::iter::once(self.with.as_slice())
+                .chain(stages)
+                .chain(std::iter::once(operation.with.as_slice()))
+                .chain(products),
+        )
     }
 
     /// The default path rule of the stage that produces `product`, or of the

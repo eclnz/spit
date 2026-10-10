@@ -25,6 +25,7 @@ pub enum Word {
     Verify,
     Path,
     Ext,
+    With,
     Stage,
     Use,
     UseAs,
@@ -92,7 +93,7 @@ impl Word {
 }
 
 /// Every word's documentation, in the order of [`Word`].
-pub static DOCS: [Doc; 50] = [
+pub static DOCS: [Doc; 51] = [
     Doc {
         name: "source",
         kind: "keyword",
@@ -134,6 +135,13 @@ pub static DOCS: [Doc; 50] = [
         anchor: "extensions",
         example: "path: derivatives/{@product}/{@entities}\next: .nii.gz",
         summary: "The extension for operations that declare none, completing a default path rule. Like `path:`, it may be written at the top level or in a stage. A product's own `path product:` rule never takes it.",
+    },
+    Doc {
+        name: "with",
+        kind: "keyword",
+        anchor: "job-properties",
+        example: "with: cpus=1 mem=2G\nwith operation denoise: cpus=8 time=6h\nwith product clean: mem=16G",
+        summary: "Gives jobs properties that a backend reads and SPIT does not: `key=value` pairs, such as `cpus=8`. `with:` sets them for the file, or for a stage when written in one; `with operation name:` for one operation's jobs; `with product name:` for the jobs that make one product. The narrower scope wins key by key: file, then stages from the outermost in, then operation, then product. `key=-` takes a key away. Each job in the `.spitdag` carries its merged `props`.",
     },
     Doc {
         name: "stage",
@@ -540,6 +548,7 @@ fn statement(line: &str) -> Option<(Word, usize)> {
             Keyword::Exclude => Word::Exclude,
             Keyword::Path => Word::Path,
             Keyword::Ext => Word::Ext,
+            Keyword::With => Word::With,
             Keyword::Stage => Word::Stage,
             Keyword::Dimensions => Word::Dimensions,
             Keyword::Entities => Word::EntitiesFormat,

@@ -25,6 +25,9 @@ pub(crate) enum Keyword {
     Path,
     /// `ext:`, the extension a default path is completed with.
     Ext,
+    /// `with:`, `with operation name:` or `with product name:`, the
+    /// properties a backend reads from a job.
+    With,
     Entities,
     Stage,
     /// `dimensions [...]`, the order every product's dimensions follow.
@@ -64,6 +67,12 @@ impl Keyword {
         if let Some(rest) = line.strip_prefix("path") {
             if rest.starts_with([' ', ':']) {
                 return Some((Self::Path, rest));
+            }
+        }
+        // A step may make a product named `with`: `with = f(x)`.
+        if let Some(rest) = line.strip_prefix("with") {
+            if super::with::is_with(rest) {
+                return Some((Self::With, rest));
             }
         }
         if let Some(rest) = line.strip_prefix("entities:") {

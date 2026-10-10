@@ -14,6 +14,7 @@ mod operation;
 mod render_inventory;
 mod rules;
 mod source_map;
+mod with;
 
 pub(crate) use entities::EntitiesDeclaration;
 
@@ -22,7 +23,7 @@ use std::ops::Range;
 
 use crate::model::{
     CheckDef, CommandDef, CommandRole, CoverageRule, DefaultChecks, DirectoryDiscovery, Invocation,
-    OperationDef, ProductDef, StepOutput,
+    OperationDef, ProductDef, Prop, StepOutput,
 };
 use crate::paths::PathTemplate;
 use crate::span::{address_of, columns_at, content_columns, Focus, Located, Place};
@@ -39,6 +40,7 @@ pub(crate) use self::lexical::{glued_comment, strip_comment, without_bom};
 pub(crate) use self::render_inventory::as_read_back;
 pub use self::render_inventory::render_source_inventory;
 pub(crate) use self::source_map::{Rule, SourceMap, Step};
+pub(crate) use self::with::WithTarget;
 
 const SHELL_SOURCE_REMOVED: &str =
     "shell-source is no longer supported; make the command executable available on PATH";
@@ -231,6 +233,13 @@ pub(crate) enum StatementKind {
     Extension {
         stage: Option<String>,
         extension: String,
+    },
+    /// A `with` line: the properties of the jobs of `target`, or, for
+    /// `with:`, of `stage` or, outside every stage, of the whole file.
+    With {
+        target: WithTarget,
+        stage: Option<String>,
+        props: Vec<Prop>,
     },
     /// A `check:` line: the checks of every output in `stage` or, outside
     /// every stage, in the whole file.

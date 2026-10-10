@@ -480,6 +480,14 @@ fn flow_rest(
             return Err(ParseError::new(number, SHELL_SOURCE_REMOVED));
         }
         Some((Keyword::Path, _)) => StatementKind::Path(parse_path(stage, original, line, number)?),
+        Some((Keyword::With, rest)) => {
+            let (target, props) = super::with::parse_with(rest, number)?;
+            StatementKind::With {
+                target,
+                stage,
+                props,
+            }
+        }
         Some((Keyword::Ext, rest)) => StatementKind::Extension {
             stage,
             extension: extension(rest.trim(), number)?.to_owned(),
@@ -597,7 +605,7 @@ fn parse_flow_output(left: &str, number: usize) -> Result<StepOutput, ParseError
 }
 
 /// The words a statement can start with, for suggesting one.
-const STATEMENT_WORDS: [&str; 16] = [
+const STATEMENT_WORDS: [&str; 17] = [
     "source",
     "dimensions",
     "operation",
@@ -606,6 +614,7 @@ const STATEMENT_WORDS: [&str; 16] = [
     "check",
     "path",
     "ext",
+    "with",
     "stage",
     "use",
     "pipeline",

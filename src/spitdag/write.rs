@@ -245,6 +245,15 @@ fn write_job(
             item.finish();
         });
     });
+    // Properties say how a backend runs the job, not what it does, so the
+    // fingerprint leaves them out: a changed `mem` reruns nothing.
+    object.field("props", |out| {
+        let mut item = ObjectWriter::start(out);
+        for (key, value) in &step.props {
+            item.string(key, value);
+        }
+        item.finish();
+    });
     object.finish();
 }
 
@@ -417,6 +426,7 @@ mod tests {
             inputs: names(inputs),
             outputs: names(outputs),
             checks: vec![],
+            props: vec![],
             origin: None,
         }
     }
@@ -489,7 +499,7 @@ mod tests {
         dag.root = Some("/data/study".into());
         let text = dag.to_json();
         assert!(text.starts_with(&format!(
-            "{{\"version\":7,\"generator\":{{\"name\":\"spit\",\"version\":\"{}\"}},\
+            "{{\"version\":8,\"generator\":{{\"name\":\"spit\",\"version\":\"{}\"}},\
 \"root\":\"/data/study\",\"external_inputs\":[{{\"product\":\"raw\"",
             env!("CARGO_PKG_VERSION")
         )));

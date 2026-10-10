@@ -189,6 +189,12 @@ fn check_input_lines(text: &str) -> Result<(), ParseError> {
                 "`ext:` completes the pipeline's default output paths; it belongs in the .spit pipeline",
             ));
         }
+        if Keyword::of(line) == Some(Keyword::With) {
+            return Err(ParseError::new(
+                index + 1,
+                "`with` gives jobs properties; it belongs in the .spit pipeline",
+            ));
+        }
         if matches!(Header::of(line), Some(Header::SourcePaths)) {
             return Err(ParseError::new(
                 index + 1,

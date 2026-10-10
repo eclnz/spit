@@ -9,8 +9,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::io;
 
 use crate::model::{
-    identity, natural_cmp, ArtifactId, ArtifactInstance, Artifacts, EntityBinding, JobId, Removal,
-    SourceFile, StepId,
+    identity, natural_cmp, ArtifactId, ArtifactInstance, Artifacts, EntityBinding, JobId, JobProps,
+    Removal, SourceFile, StepId,
 };
 use crate::types::TypeExpr;
 
@@ -19,7 +19,7 @@ pub use crate::check::When;
 use self::write::{write_document, PIECE};
 
 /// The schema version a `.spitdag` is written with.
-pub const SPITDAG_VERSION: usize = 7;
+pub const SPITDAG_VERSION: usize = 8;
 
 /// A resolved DAG with its paths bound and its commands expanded. Its
 /// artifacts are the resolved DAG's, each kept once with its path; jobs,
@@ -73,6 +73,8 @@ pub struct BoundStep {
     pub checks: Vec<StepCheck>,
     /// For a step a call made, the call and the line of the body's step.
     pub origin: Option<StepCall>,
+    /// The properties its jobs carry, sorted by key.
+    pub props: JobProps,
 }
 
 /// The call a step comes from, and the line of the step in the body of the
