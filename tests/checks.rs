@@ -78,7 +78,7 @@ Job 3  merge
 #[test]
 fn the_spitdag_names_each_check_its_port_and_its_artifact() {
     let json = dag(&format!("{CHECKS}{LINES}"), &["--json"]);
-    assert!(json.starts_with("{\"version\":7,"), "{json}");
+    assert!(json.starts_with("{\"version\":8,"), "{json}");
     assert!(json.contains("\"executables\":[\"cat\",\"check_lines\",\"sort\",\"test\"]"));
     assert!(json.contains(
         "\"checks\":[{\"when\":\"before\",\"check\":\"lines(1)\",\"port\":\"text\",\"path\":\"in/1.txt\",\
@@ -114,7 +114,7 @@ merged = merge(cleaned @ vary(id))
     let without_checks = |json: &str| {
         let mut json = json.to_owned();
         while let Some(start) = json.find(",\"checks\":[{") {
-            let end = json[start..].find("}]}").unwrap() + start + 2;
+            let end = json[start..].find("}],\"props\"").unwrap() + start + 2;
             json.replace_range(start..end, ",\"checks\":[]");
         }
         json.replace("\"check_lines\",", "")

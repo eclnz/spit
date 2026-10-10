@@ -198,6 +198,7 @@ impl<'p> StepCommands<'p> {
                 .iter()
                 .map(|port| port.name.clone())
                 .collect(),
+            props: self.step.props.clone(),
             origin: self.step.origin.as_ref().map(|origin| StepCall {
                 call: origin.call.index(),
                 line: origin.step.line,

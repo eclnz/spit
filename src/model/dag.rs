@@ -7,7 +7,8 @@ use std::fmt;
 use crate::error::ResolveError;
 
 use super::{
-    Artifact, ArtifactId, ArtifactInstance, Artifacts, CallId, SourceInventory, StepOrigin,
+    Artifact, ArtifactId, ArtifactInstance, Artifacts, CallId, JobProps, SourceInventory,
+    StepOrigin,
 };
 
 /// A job's number in its DAG, counted from 1 in the order the resolver
@@ -60,6 +61,8 @@ pub struct DagStep {
     pub stage: Option<String>,
     /// For a step a call made, the call and the step of the body it is.
     pub origin: Option<StepOrigin>,
+    /// The properties of its jobs: see [`Pipeline::job_props`].
+    pub props: JobProps,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

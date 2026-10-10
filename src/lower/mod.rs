@@ -9,6 +9,7 @@ use rustc_hash::FxHashMap;
 
 mod entities;
 mod expand;
+mod with;
 
 use expand::BodyCheck;
 
@@ -384,6 +385,7 @@ pub(crate) fn lower(
     }
     check_bodies_have_no_commands(&builder).map_err(|error| vec![error])?;
     check_source_beside_paths(&builder).map_err(|error| vec![error])?;
+    builder.check_with_products().map_err(|error| vec![error])?;
     order_dimensions(
         &mut builder.pipeline.products,
         &builder.outputs,
@@ -584,6 +586,13 @@ fn lower_statement(
                 .add_extension(stage.as_deref(), extension, statement.place.line)
                 .map_err(Failure::clean)?;
         }
+        StatementKind::With {
+            target,
+            stage,
+            props,
+        } => builder
+            .add_with(target, stage.as_deref(), props, &statement.place)
+            .map_err(Failure::clean)?,
         StatementKind::FlowStep(flow) => builder.add_flow_step(flow)?,
     }
     Ok(())

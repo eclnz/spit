@@ -8,7 +8,7 @@ use crate::command::CommandTemplate;
 use crate::paths::PathTemplate;
 use crate::span::Place;
 
-use super::{owned_strings, ArtifactInstance, ArtifactType};
+use super::{owned_strings, ArtifactInstance, ArtifactType, Prop};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProductDef {
@@ -178,6 +178,9 @@ pub struct OperationDef {
     /// pipeline's folder, with `/` between folders; `None` for one the
     /// pipeline declares.
     pub file: Option<String>,
+    /// The `with operation` line's properties, for every job of the
+    /// operation. An operation with a body takes none.
+    pub with: Vec<Prop>,
 }
 
 /// A step in an operation's body, as written: the call it makes over the
@@ -230,6 +233,7 @@ impl OperationDef {
             minimum_collection: None,
             steps: Vec::new(),
             file: None,
+            with: Vec::new(),
         }
     }
 
@@ -536,6 +540,9 @@ pub struct StageDef {
     /// The `ext:` default for the same products, in place of the
     /// pipeline's.
     pub extension: Option<String>,
+    /// The `with:` properties of this stage's jobs, set over those of the
+    /// stages around it.
+    pub with: Vec<Prop>,
     /// The `check:` default of this stage's outputs, added to those of the
     /// stages around it.
     pub checks: DefaultChecks,
@@ -563,6 +570,7 @@ impl StageDef {
             name: name.into(),
             path_template: None,
             extension: None,
+            with: Vec::new(),
             checks: DefaultChecks::default(),
         }
     }

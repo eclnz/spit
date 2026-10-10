@@ -35,6 +35,8 @@ pub(crate) struct SourceMap {
     pub(crate) checks: Vec<Place>,
     /// Templates of `path product:` rules, keyed by product.
     pub(crate) paths: BTreeMap<String, Place>,
+    /// The line of each `with product` rule, keyed by product.
+    pub(crate) with_products: BTreeMap<String, Place>,
     /// Template of the default `path:` rule.
     pub(crate) default_path: Option<Place>,
     /// Each stage's name in its `stage` header.

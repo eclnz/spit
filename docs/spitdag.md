@@ -1,6 +1,6 @@
 # The `.spitdag` format
 
-A `.spitdag` is what `spit dag -o` writes and `spit dag --json` prints: every job a pipeline resolves to over one dataset, each with its files and its commands. A backend that runs the jobs reads nothing else: no pipeline, path rule or command template. This page describes version 7, the version `src/spitdag` writes. Use `spit dag --commands` for a readable view of the same commands.
+A `.spitdag` is what `spit dag -o` writes and `spit dag --json` prints: every job a pipeline resolves to over one dataset, each with its files and its commands. A backend that runs the jobs reads nothing else: no pipeline, path rule or command template. This page describes version 8, the version `src/spitdag` writes. Use `spit dag --commands` for a readable view of the same commands.
 
 ## Document
 
@@ -8,7 +8,7 @@ A `.spitdag` is one JSON object, followed by a newline:
 
 ```json
 {
-  "version": 7,
+  "version": 8,
   "generator": {"name": "spit", "version": "0.2.2"},
   "root": "/data/study",
   "external_inputs": [ARTIFACT, ...],
@@ -24,7 +24,7 @@ A `.spitdag` is one JSON object, followed by a newline:
 
 | Field | Holds |
 | --- | --- |
-| `version` | The format's version, `7`. A change a reader must know about raises it. Version 6 added each job's [`checks`](#checks). Version 7 added `pipeline_files`, `calls` and each job's `origin`: see [Where jobs come from](#where-jobs-come-from). |
+| `version` | The format's version, `8`. A change a reader must know about raises it. Version 8 added each job's [`props`](#props). Version 6 added each job's [`checks`](#checks). Version 7 added `pipeline_files`, `calls` and each job's `origin`: see [Where jobs come from](#where-jobs-come-from). |
 | `generator` | The program that wrote the file, and its version. |
 | `root` | The absolute dataset folder that every path is relative to, or `null` when it was not known: a `.spitout` that records no root. |
 | `external_inputs` | Every artifact a job reads but no job writes, once each: the sources. Ordered by path in natural order, the order `many` inputs take, so `wave2` comes before `wave10`. |
@@ -96,7 +96,8 @@ Each output that could not be produced has its identity and the input gaps that 
   "dependents": [6],
   "command": [ARGUMENT, ...],
   "verify": [[ARGUMENT, ...], ...],
-  "checks": [CHECK, ...]
+  "checks": [CHECK, ...],
+  "props": {"cpus": "8", "mem": "16G"}
 }
 ```
 
@@ -114,6 +115,7 @@ Each output that could not be produced has its identity and the input gaps that 
 | `command` | The command that writes the outputs, or `null` for an operation with none. |
 | `verify` | The commands that check the inputs before `command` runs, in order; `[]` for none. |
 | `checks` | The checks of single artifacts the job reads and writes, in the order they run: see [Checks](#checks). `[]` for none. |
+| `props` | The properties the pipeline gives the job, for a backend to read: see [Props](#props). `{}` for none. |
 
 ### Commands
 
@@ -168,6 +170,18 @@ The `"before"` checks come first, then the `"after"` checks; within each, by por
 A backend runs a job in this order: the `"before"` checks, the `verify` commands, `command`, the check that every output exists, then the `"after"` checks. If any fails, the job fails, even when `command` exited with status 0, and no job that depends on it runs. Report a failure with the check, the port and the path, as in `check ndim(4) failed on output derivatives/dwi/sub=01.mif`.
 
 Checks are left out of the job's [fingerprint](#fingerprint), which identifies the job's work: a changed check does not make a job's outputs out of date. A backend that records successful jobs records the checks each passed with, such as the JSON of its `checks`. When a job is otherwise current but its checks differ from the record, the backend runs the checks alone on the existing files rather than rerunning `command`. If one fails, the job fails and its record is dropped, so the next run reruns it.
+
+## Props
+
+A job's `props` are the `key=value` pairs the pipeline's [`with` lines](language-reference.md#job-properties) give it, already merged from the widest scope to the narrowest, so a backend reads them as they are:
+
+```json
+"props": {"cpus": "8", "mem": "16G", "time": "6h"}
+```
+
+Every key and value is a string, and keys are sorted. A key a scope took away with `key=-` is not there. SPIT does not say what a key means, so a backend takes the keys it knows, such as `cpus` and `mem`, and ignores the rest; a backend that needs a key and finds none uses its own default.
+
+Props are left out of the [fingerprint](#fingerprint), which identifies the job's work: a job given more memory does the same work, so its outputs are not out of date. A backend that wants to rerun a job after its props change records them itself.
 
 ## Folders
 
