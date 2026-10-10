@@ -141,7 +141,7 @@ pub static DOCS: [Doc; 51] = [
         kind: "keyword",
         anchor: "job-properties",
         example: "with: cpus=1 mem=2G\nwith operation denoise: cpus=8 time=6h\nwith product clean: mem=16G",
-        summary: "Gives jobs properties that a backend reads and SPIT does not: `key=value` pairs, such as `cpus=8`. `with:` sets them for the file, or for a stage when written in one; `with operation name:` for one operation's jobs; `with product name:` for the jobs that make one product. The narrower scope wins key by key: file, then stages from the outermost in, then operation, then product. `key=-` takes a key away. Each job in the `.spitdag` carries its merged `props`.",
+        summary: "Gives jobs properties that a backend reads and SPIT does not: `key=value` pairs, such as `cpus=8`. `with:` sets them for the file, or for a stage when written in one; `with operation name:` for one operation's jobs; `with product name:` for the jobs that make one product. The narrower scope wins key by key: file, then stages from the outermost in, then operation, then product. `key=-` takes a key away. A recipe may hold the same lines, which set properties over the pipeline's for the same scope. Each job in the `.spitdag` carries its merged `props`.",
     },
     Doc {
         name: "stage",

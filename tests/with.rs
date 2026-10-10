@@ -138,12 +138,62 @@ copied = outer(raw)
     );
 }
 
-#[test]
-fn a_recipe_cannot_hold_a_with_line() {
+/// A pipeline with `with` lines at three scopes, and a recipe beside it.
+fn recipe_props(recipe: &str) -> (bool, String) {
     let tree = Tree::new("with_recipe", &["data/in/1.txt"]);
-    tree.write("p.spit", "source raw : Text [id]\npath raw: in/{id}.txt\n");
-    let recipe = tree.write("p.spitin", "pipeline p.spit\nroot data\nwith: cpus=2\n");
-    let output = spit(&["dag", recipe.to_str().unwrap()]);
-    assert!(!output.status.success());
-    assert!(text(&output.stderr).contains("belongs in the .spit pipeline"));
+    tree.write(
+        "p.spit",
+        "with: cpus=1 mem=2G\n\
+         source raw : Text [id]\n\
+         path raw: in/{id}.txt\n\
+         operation copy(input: Text) -> Text .txt\n\
+         command copy: cp {input} {@output}\n\
+         with operation copy: cpus=4\n\
+         copied = copy(raw)\n",
+    );
+    let file = tree.write("p.spitin", &format!("pipeline p.spit\nroot data\n{recipe}"));
+    let output = spit(&["dag", file.to_str().unwrap(), "--json"]);
+    let shown = if output.status.success() {
+        let json = text(&output.stdout);
+        let at = json.find("\"props\":").unwrap() + 8;
+        json[at..=at + json[at..].find('}').unwrap()].to_owned()
+    } else {
+        text(&output.stderr)
+    };
+    (output.status.success(), shown)
+}
+
+#[test]
+fn a_recipe_sets_properties_over_the_same_scope_of_the_pipeline() {
+    // The file's line is overridden for `mem`; the operation's `cpus` is
+    // narrower than the recipe's file line, so it stays.
+    let (ok, props) = recipe_props("with: mem=64G queue=big cpus=16\n");
+    assert!(ok, "{props}");
+    assert_eq!(props, r#"{"cpus":"4","mem":"64G","queue":"big"}"#);
+    // The recipe's own operation line replaces the pipeline's, and `-`
+    // takes a key away; a product line is narrowest of all.
+    let (ok, props) = recipe_props(
+        "with operation copy: cpus=- time=2h\nwith product copied: queue=\"long jobs\"\n",
+    );
+    assert!(ok, "{props}");
+    assert_eq!(props, r#"{"mem":"2G","queue":"long jobs","time":"2h"}"#);
+}
+
+#[test]
+fn a_recipe_with_line_must_name_what_the_pipeline_has() {
+    let (ok, message) = recipe_props("with operation nope: cpus=1\n");
+    assert!(!ok);
+    assert!(
+        message.contains("which the pipeline does not declare"),
+        "{message}"
+    );
+    let (ok, message) = recipe_props("with product raw: cpus=1\n");
+    assert!(!ok);
+    assert!(
+        message.contains("no step of the pipeline makes"),
+        "{message}"
+    );
+    let (ok, message) = recipe_props("with: cpus=1\nwith: cpus=2\n");
+    assert!(!ok);
+    assert!(message.contains("duplicate `with:`"), "{message}");
 }

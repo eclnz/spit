@@ -125,6 +125,7 @@ fn load_recipe(file: &str) -> Result<Loaded, Box<dyn Error>> {
     if recipe.root_for(&checked.pipeline)?.is_none() {
         return Err(format!("{file}: a recipe names its dataset root with `root <directory>`, or inherits its pipeline's root").into());
     }
+    recipe.check(&checked.pipeline)?;
     Ok(Loaded {
         recipe,
         pipeline_name: Some(pipeline_file.display().to_string()),

@@ -79,6 +79,7 @@ impl<'a> Context<'a> {
             .map_err(|error| vec![ParseError::new(1, error.to_string())])?;
         let as_written = document.pipeline.clone();
         recipe.apply_paths(&mut document.pipeline);
+        recipe.apply_with(&mut document.pipeline);
         document.inputs = recipe.rules.clone();
         Ok(Parsed {
             document,

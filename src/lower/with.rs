@@ -17,6 +17,9 @@ impl PipelineBuilder {
         place: &Place,
     ) -> Result<(), ParseError> {
         let line = place.line;
+        if self.recipe {
+            return self.add_recipe_with(target, props, place);
+        }
         let taken = |what: String| ParseError::new(line, format!("duplicate {what}"));
         match target {
             WithTarget::Scope => {
@@ -67,6 +70,41 @@ impl PipelineBuilder {
                     .insert(name.clone(), props.to_vec());
             }
         }
+        Ok(())
+    }
+
+    /// Keep a recipe's `with` line as written. The pipeline it names
+    /// says whether the operation or product exists.
+    fn add_recipe_with(
+        &mut self,
+        target: &WithTarget,
+        props: &[Prop],
+        place: &Place,
+    ) -> Result<(), ParseError> {
+        let with = &mut self.inputs.with;
+        let (slot, whose) = match target {
+            WithTarget::Scope => (&mut with.file, "`with:`".to_owned()),
+            WithTarget::Operation(name) => {
+                self.lines
+                    .with_operations
+                    .insert(name.clone(), place.clone());
+                (
+                    with.operations.entry(name.clone()).or_default(),
+                    format!("`with operation {name}`"),
+                )
+            }
+            WithTarget::Product(name) => {
+                self.lines.with_products.insert(name.clone(), place.clone());
+                (
+                    with.products.entry(name.clone()).or_default(),
+                    format!("`with product {name}`"),
+                )
+            }
+        };
+        if !slot.is_empty() {
+            return Err(ParseError::new(place.line, format!("duplicate {whose}")));
+        }
+        *slot = props.to_vec();
         Ok(())
     }
 

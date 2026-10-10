@@ -25,8 +25,8 @@ use crate::error::ResolveError;
 use crate::imports::parse_located_document;
 use crate::lower::{parse_document_with_imports, ParsedDocument};
 use crate::model::{
-    ArtifactInstance, CoverageAction, CoverageGap, EntityBinding, GroupKey, InputRules, Pipeline,
-    PipelineIndex, Removal, SourceInventory,
+    overlay_props, ArtifactInstance, CoverageAction, CoverageGap, EntityBinding, GroupKey,
+    InputRules, Pipeline, PipelineIndex, Removal, SourceInventory,
 };
 use crate::parser::{strip_comment, without_bom, Header, Keyword, Kind, ParseError, SourceMap};
 use crate::paths::{inspect_paths, PathError, PathTemplate};
@@ -189,12 +189,6 @@ fn check_input_lines(text: &str) -> Result<(), ParseError> {
                 "`ext:` completes the pipeline's default output paths; it belongs in the .spit pipeline",
             ));
         }
-        if Keyword::of(line) == Some(Keyword::With) {
-            return Err(ParseError::new(
-                index + 1,
-                "`with` gives jobs properties; it belongs in the .spit pipeline",
-            ));
-        }
         if matches!(Header::of(line), Some(Header::SourcePaths)) {
             return Err(ParseError::new(
                 index + 1,
@@ -260,6 +254,50 @@ impl InputSpec {
         }
     }
 
+    /// Check that the recipe's `with` lines name an operation the pipeline
+    /// declares, with no body, and a product a step makes.
+    fn check_with(&self, pipeline: &Pipeline) -> Result<(), InputError> {
+        for name in self.rules.with.operations.keys() {
+            match pipeline
+                .operations
+                .iter()
+                .find(|operation| &operation.name == name)
+            {
+                None => return Err(InputError::WithOperation { name: name.clone() }),
+                Some(operation) if !operation.steps.is_empty() => {
+                    return Err(InputError::WithBody { name: name.clone() })
+                }
+                Some(_) => {}
+            }
+        }
+        for name in self.rules.with.products.keys() {
+            if !pipeline
+                .invocations
+                .iter()
+                .any(|step| step.outputs.contains(name))
+            {
+                return Err(InputError::WithProduct { name: name.clone() });
+            }
+        }
+        Ok(())
+    }
+
+    /// Set the recipe's `with` properties over those of the pipeline that
+    /// name the same scope, key by key. Run it once on a pipeline that
+    /// [`InputSpec::check`] accepted, before its jobs are resolved.
+    pub fn apply_with(&self, pipeline: &mut Pipeline) {
+        let with = &self.rules.with;
+        overlay_props(&mut pipeline.with, &with.file);
+        for operation in &mut pipeline.operations {
+            if let Some(over) = with.operations.get(&operation.name) {
+                overlay_props(&mut operation.with, over);
+            }
+        }
+        for (name, over) in &with.products {
+            overlay_props(pipeline.product_with.entry(name.clone()).or_default(), over);
+        }
+    }
+
     /// Check the recipe against the pipeline's source declarations, without
     /// reading any file or record.
     pub fn check(&self, pipeline: &Pipeline) -> Result<(), InputError> {
@@ -284,6 +322,7 @@ impl InputSpec {
                 return Err(InputError::PathInBoth { product });
             }
         }
+        self.check_with(pipeline)?;
         // Directory discovery finds every source's files.
         if !self.rules.discoveries.is_empty() {
             if let Some(product) = self.source_without_path(pipeline) {
@@ -595,6 +634,13 @@ pub enum InputError {
     UnknownSourcePath { product: String },
     /// A source has a path rule in both the pipeline and the `.spitout`.
     InventoryPathInBoth { product: String },
+    /// A recipe's `with operation` names an operation the pipeline does not
+    /// declare.
+    WithOperation { name: String },
+    /// A recipe's `with operation` names an operation carried out by steps.
+    WithBody { name: String },
+    /// A recipe's `with product` names a product no step makes.
+    WithProduct { name: String },
     /// An `exclude` rule matches nothing in the dataset.
     UnmatchedExclusion(UnmatchedExclusion),
     /// conditional `exclude` rules remove every group of a grouping.
@@ -649,6 +695,18 @@ impl fmt::Display for InputError {
             Self::InventoryPathInBoth { product } => write!(
                 f,
                 "source `{product}` has path rules in both .spit and .spitout"
+            ),
+            Self::WithOperation { name } => write!(
+                f,
+                "`with operation` names `{name}`, which the pipeline does not declare"
+            ),
+            Self::WithBody { name } => write!(
+                f,
+                "operation `{name}` is carried out by the steps in its body; put `with` on the operations those steps call"
+            ),
+            Self::WithProduct { name } => write!(
+                f,
+                "`with product` names `{name}`, which no step of the pipeline makes; a source has no job to give properties to"
             ),
             Self::EveryGroupDropped(emptied) => emptied.fmt(f),
             Self::UnmatchedExclusion(unmatched) => {

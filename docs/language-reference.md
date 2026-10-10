@@ -343,6 +343,8 @@ stage preprocess:
 
 A job's properties are merged from the widest scope to the narrowest, and the narrower scope wins, one key at a time: the file, then each stage from the outermost in, then the operation, then the product. A scope sets only the keys it names, so the jobs that make `clean` above have `cpus=8` and `time=6h` from the operation and `mem=16G` from the product, while another call of `denoise` in that stage has `mem=8G`. `key=-` takes away a key a wider scope gave, leaving the job without it. A job that no `with` line reaches has no properties.
 
+A recipe may hold `with:`, `with operation name:` and `with product name:` lines too, which is where properties that belong to one machine or dataset go, such as the memory a cluster allows. A recipe's line sets properties over the pipeline's line for the same scope, key by key, and `key=-` takes the pipeline's key away. It does not outrank the pipeline's narrower lines: a recipe's `with: mem=64G` replaces the pipeline's `with:` value of `mem`, but a pipeline's `with operation` line for `mem` still wins for that operation, so name the operation in the recipe to change it. The recipe's operation must be one the pipeline declares, without a body, and its product one a step makes; `spit check` reports any other at the recipe's line. A recipe has no stages, so it cannot set a stage's properties; name the operations or products in the stage.
+
 Each scope's line is given once. `with operation` and `with product` can be written anywhere below the declaration they name, in a stage or not; the operation must be declared before its line, and the product must be made by a step. An operation carried out by a body takes no `with operation`, as it has no job of its own: write `with` for the operations its steps call, which an import brings with the operation. Properties are not part of a job's fingerprint, so changing one reruns nothing.
 
 ## Reuse definitions
@@ -634,6 +636,7 @@ A `.spit` pipeline is the reusable graph: what work to do and where its results 
 | `path:`, a default | covers outputs, and sources nothing else covers | covers sources only |
 | `root` | either one, not both | either one, not both; otherwise inherits the pipeline root |
 | `pipeline` | no | yes |
+| `with:`, `with operation`, `with product` | yes | yes, over the pipeline's: see [Job properties](#job-properties) |
 | `discover`, `require`, every `exclude` form, `sources:`, `contexts:` | no | yes |
 
 Put a source's own rule in the pipeline when every dataset for that pipeline shares the layout, and in the recipe when the layout belongs to one dataset. A line in the wrong file is an error that says which file it belongs in, at its line:
