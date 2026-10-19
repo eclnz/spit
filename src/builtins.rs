@@ -9,7 +9,7 @@
 use std::ops::Range;
 
 use crate::json::Json;
-use crate::parser::{strip_comment, without_bom, Header, Keyword};
+use crate::parser::{without_bom, Header, Keyword, Layout, Line};
 use crate::span::utf16_columns;
 
 /// The language reference the entries summarise; each links to a section.
@@ -460,9 +460,10 @@ pub fn builtin_words(text: &str) -> Vec<WordUse> {
     let mut uses = Vec::new();
     let mut found = Vec::new();
     let mut configured_entities = false;
-    for (index, line) in without_bom(text).lines().enumerate() {
+    for (index, read) in Layout::new(without_bom(text)).lines.iter().enumerate() {
+        let line = read.text;
         found.clear();
-        line_words(line, &mut found);
+        line_words(read, &mut found);
         configured_entities |= found.iter().any(|(_, word)| *word == Word::EntitiesFormat);
         found.sort_unstable_by_key(|(bytes, _)| bytes.start);
         let shift = 1 + if index == 0 { bom } else { 0 };
@@ -522,10 +523,10 @@ pub(crate) fn words_json(uses: &[WordUse]) -> [(&'static str, Json<'static>); 2]
     [("words", occurrences), ("word_docs", docs)]
 }
 
-/// The statement a trimmed line starts with, as SPIT's parser classifies it,
+/// The statement `line` starts with, as SPIT's parser classifies it,
 /// and the length of its keyword.
-fn statement(line: &str) -> Option<(Word, usize)> {
-    if let Some((keyword, _)) = Keyword::split(line) {
+fn statement(line: &Line) -> Option<(Word, usize)> {
+    if let Some(keyword) = line.keyword() {
         let word = match keyword {
             Keyword::Use => Word::Use,
             Keyword::Root => Word::Root,
@@ -556,16 +557,15 @@ fn statement(line: &str) -> Option<(Word, usize)> {
     // A recipe's or `.spitout`'s header lines, as `inputs` reads them.
     [(Word::Pipeline, "pipeline "), (Word::Root, "root ")]
         .into_iter()
-        .find(|(_, prefix)| line.starts_with(prefix) && !line.contains('='))
+        .find(|(_, prefix)| line.code.starts_with(prefix) && !line.code.contains('='))
         .map(|(word, prefix)| (word, prefix.len() - 1))
 }
 
 /// Each word `line` uses, by byte range.
-fn line_words(line: &str, found: &mut Vec<(Range<usize>, Word)>) {
-    let code = strip_comment(line);
-    let indent = code.len() - code.trim_start().len();
-    let trimmed = code.trim();
-    if let Some(header) = Header::of(trimmed) {
+fn line_words(line: &Line, found: &mut Vec<(Range<usize>, Word)>) {
+    let code = line.uncommented;
+    let indent = line.indent;
+    if let Some(header) = line.header() {
         let (word, length) = match header {
             Header::Sources => (Word::Sources, "sources".len()),
             Header::SourcePaths => (Word::SourcePaths, "source_paths".len()),
@@ -575,7 +575,7 @@ fn line_words(line: &str, found: &mut Vec<(Range<usize>, Word)>) {
         found.push((indent..indent + length, word));
         return;
     }
-    let statement = statement(trimmed);
+    let statement = statement(line);
     let kind = statement.map(|(word, _)| word);
     if let Some((word, length)) = statement {
         found.push((indent..indent + length, word));

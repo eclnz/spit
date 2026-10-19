@@ -14,7 +14,7 @@ use crate::model::{
     CheckDef, CheckUse, CommandDef, CommandRole, OperationDef, Pipeline, PipelineIndex, ProductDef,
     SidecarGroup, SourceFile,
 };
-use crate::parser::{parse_use, strip_comment, without_bom, Keyword, Kind, ParseError, UseSpec};
+use crate::parser::{parse_use, without_bom, Keyword, Kind, Layout, ParseError, UseSpec};
 use crate::span::Place;
 pub(crate) use located::relative_path;
 use located::{in_import, named_in, rebase, ImportedAt};
@@ -652,13 +652,11 @@ fn read_imports(
     imports: &mut BTreeMap<usize, Pipeline>,
     file_texts: &mut BTreeMap<String, String>,
 ) -> Result<(), ParseError> {
-    for (index, original) in text.lines().enumerate() {
-        let line = strip_comment(original).trim();
-        if Keyword::of(line) != Some(Keyword::Use) {
+    for (number, line) in Layout::new(text).numbered() {
+        if line.keyword() != Some(Keyword::Use) {
             continue;
         }
-        let number = index + 1;
-        let spec = parse_use(line, number)?;
+        let spec = parse_use(line.code, number)?;
         let imported_path = path
             .parent()
             .unwrap_or_else(|| Path::new("."))
@@ -697,7 +695,7 @@ fn read_imports(
                 .map_err(|errors| {
                     let at = ImportedAt {
                         number,
-                        use_line: original,
+                        use_line: line.text,
                         spec_path: &rebase(&spec.path, ""),
                         text: &imported_text,
                     };

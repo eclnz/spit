@@ -115,10 +115,6 @@ impl Keyword {
         }
         Some((*keyword, rest))
     }
-
-    pub(crate) fn of(line: &str) -> Option<Self> {
-        Self::split(line).map(|(keyword, _)| keyword)
-    }
 }
 
 /// Whether `text` has an `=` outside parentheses.
@@ -179,24 +175,28 @@ pub(crate) fn removed_section(line: &str) -> Option<&'static str> {
 mod tests {
     use super::{Header, Keyword};
 
+    fn keyword(line: &str) -> Option<Keyword> {
+        Keyword::split(line).map(|(keyword, _)| keyword)
+    }
+
     #[test]
     fn lines_are_classified_by_their_first_word() {
         assert_eq!(
             Keyword::split("source raw [id]"),
             Some((Keyword::Source, "raw [id]"))
         );
-        assert_eq!(Keyword::of("path: out/{@entities}"), Some(Keyword::Path));
-        assert_eq!(Keyword::of("path raw: in/{id}"), Some(Keyword::Path));
-        assert_eq!(Keyword::of("paths = f(x)"), None);
-        assert_eq!(Keyword::of("stage analysis:"), Some(Keyword::Stage));
-        assert_eq!(Keyword::of("stage = f(x)"), None);
+        assert_eq!(keyword("path: out/{@entities}"), Some(Keyword::Path));
+        assert_eq!(keyword("path raw: in/{id}"), Some(Keyword::Path));
+        assert_eq!(keyword("paths = f(x)"), None);
+        assert_eq!(keyword("stage analysis:"), Some(Keyword::Stage));
+        assert_eq!(keyword("stage = f(x)"), None);
         assert_eq!(
-            Keyword::of("check ndim(n): check_ndim {@path} {n}"),
+            keyword("check ndim(n): check_ndim {@path} {n}"),
             Some(Keyword::Check)
         );
-        assert_eq!(Keyword::of("check = f(x)"), None);
-        assert_eq!(Keyword::of("check : Report = f(x)"), None);
-        assert_eq!(Keyword::of("sources:"), None);
+        assert_eq!(keyword("check = f(x)"), None);
+        assert_eq!(keyword("check : Report = f(x)"), None);
+        assert_eq!(keyword("sources:"), None);
         assert_eq!(
             Header::of("contexts visits:"),
             Some(Header::Contexts(Some("visits")))

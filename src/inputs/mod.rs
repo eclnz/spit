@@ -28,7 +28,7 @@ use crate::model::{
     ArtifactInstance, CoverageAction, CoverageGap, EntityBinding, GroupKey, InputRules, Pipeline,
     PipelineIndex, Removal, SourceInventory,
 };
-use crate::parser::{strip_comment, without_bom, Header, Keyword, Kind, ParseError, SourceMap};
+use crate::parser::{without_bom, Header, Keyword, Kind, Layout, Line, ParseError, SourceMap};
 use crate::paths::{inspect_paths, PathError, PathTemplate};
 
 pub(crate) use self::coverage::collect_rule_errors;
@@ -116,21 +116,19 @@ fn parse_recipe(
 fn header_lines(text: &str) -> Result<(RecipeHeader, String), ParseError> {
     let mut header = RecipeHeader::default();
     let mut rest = String::new();
-    for (index, original) in text.lines().enumerate() {
-        let number = index + 1;
-        let line = strip_comment(original).trim();
-        if let Some(file) = line.strip_prefix("pipeline ") {
+    for (number, line) in Layout::new(text).numbered() {
+        if let Some(file) = line.code.strip_prefix("pipeline ") {
             if header.pipeline.is_some() {
                 return Err(ParseError::new(number, "a .spitin names its pipeline once"));
             }
             header.pipeline = Some(PathBuf::from(file.trim()));
-        } else if let Some(folder) = line.strip_prefix("root ") {
+        } else if let Some(folder) = line.code.strip_prefix("root ") {
             if header.root.is_some() {
                 return Err(ParseError::new(number, "a .spitin names its root once"));
             }
             header.root = Some((PathBuf::from(folder.trim()), number));
         } else {
-            rest.push_str(original);
+            rest.push_str(line.text);
         }
         rest.push('\n');
     }
@@ -144,18 +142,18 @@ const PIPELINE_ONLY: &str = ", which every dataset shares; a .spitin binds it to
 
 /// Whether a line that starts with no keyword is a step, `out = f(in)`,
 /// rather than a record, whose `[` comes before any `=`.
-fn is_step(line: &str) -> bool {
-    Keyword::of(line).is_none()
+fn is_step(line: &Line) -> bool {
+    line.keyword().is_none()
         && line
+            .code
             .split_once('=')
             .is_some_and(|(outputs, call)| !outputs.contains('[') && call.contains('('))
 }
 
 fn check_input_lines(text: &str) -> Result<(), ParseError> {
-    for (index, original) in text.lines().enumerate() {
-        let line = strip_comment(original).trim();
+    for (number, line) in Layout::new(text).numbered() {
         let pipeline_only = matches!(
-            Keyword::of(line),
+            line.keyword(),
             Some(
                 Keyword::Source
                     | Keyword::Operation
@@ -171,27 +169,30 @@ fn check_input_lines(text: &str) -> Result<(), ParseError> {
             )
         );
         if pipeline_only {
-            let word = line.split_once([' ', ':']).map_or(line, |(word, _)| word);
+            let word = line
+                .code
+                .split_once([' ', ':'])
+                .map_or(line.code, |(word, _)| word);
             return Err(ParseError::new(
-                index + 1,
+                number,
                 format!("`{word}` belongs in the .spit pipeline{PIPELINE_ONLY}"),
             ));
         }
         if is_step(line) {
             return Err(ParseError::new(
-                index + 1,
+                number,
                 format!("a step belongs in the .spit pipeline{PIPELINE_ONLY}"),
             ));
         }
-        if Keyword::of(line) == Some(Keyword::Ext) {
+        if line.keyword() == Some(Keyword::Ext) {
             return Err(ParseError::new(
-                index + 1,
+                number,
                 "`ext:` completes the pipeline's default output paths; it belongs in the .spit pipeline",
             ));
         }
-        if matches!(Header::of(line), Some(Header::SourcePaths)) {
+        if line.header() == Some(Header::SourcePaths) {
             return Err(ParseError::new(
-                index + 1,
+                number,
                 "`source_paths:` belongs in a .spitout; use `path image:` in a .spitin",
             ));
         }

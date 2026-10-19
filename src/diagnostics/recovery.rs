@@ -5,7 +5,7 @@ use std::collections::BTreeSet;
 
 use rustc_hash::FxHashSet;
 
-use crate::parser::{parse_use, strip_comment, Keyword, UseSpec};
+use crate::parser::{parse_use, Keyword, Layout, Line, UseSpec};
 use crate::{ParseError, ParseErrorKind};
 
 /// Blank the lines that failed, preserving all later line numbers. This
@@ -33,28 +33,34 @@ pub(crate) fn recover_document<T>(
     text: &str,
     parse: impl Fn(&str) -> Result<T, Vec<ParseError>>,
 ) -> (Option<T>, Vec<ParseError>) {
-    let original_lines: Vec<&str> = text.lines().collect();
+    let layout = Layout::new(text);
     // Keep in step with operation_lines in src/parser/continuation.rs: a
     // signature is one declaration even when its error names a port line.
-    let mut signatures = vec![None; original_lines.len()];
+    let mut signatures = vec![None; layout.lines.len()];
     for (start, line) in crate::parser::operation_lines(text) {
         let end = start + line.lines().count();
         if end > start + 1 {
             signatures[start..end].fill(Some((start, end)));
         }
     }
-    let mut recovered = original_lines.join("\n");
+    let mut recovered = layout
+        .lines
+        .iter()
+        .map(|line| line.text)
+        .collect::<Vec<_>>()
+        .join("\n");
     let mut offset = 0;
-    let ranges: Vec<_> = original_lines
+    let ranges: Vec<_> = layout
+        .lines
         .iter()
         .map(|line| {
-            let range = offset..offset + line.len();
+            let range = offset..offset + line.text.len();
             offset = range.end + 1;
             range
         })
         .collect();
     let mut errors = Vec::new();
-    let mut failures = Failures::new(&original_lines);
+    let mut failures = Failures::new(&layout.lines);
     loop {
         let found = match parse(&recovered) {
             Ok(parsed) => return (Some(parsed), errors),
@@ -96,7 +102,7 @@ pub(crate) fn recover_document<T>(
 /// only repeats one is left out. Each question is answered from tables
 /// built as the errors come, not by reading every earlier error again.
 struct Failures<'a> {
-    lines: &'a [&'a str],
+    lines: &'a [Line<'a>],
     /// For each line, the nearest line above it that is not blank and not a
     /// step of a body: the header of the body the line is in.
     above: Vec<Option<usize>>,
@@ -113,12 +119,12 @@ struct Failures<'a> {
 }
 
 impl<'a> Failures<'a> {
-    fn new(lines: &'a [&'a str]) -> Self {
+    fn new(lines: &'a [Line<'a>]) -> Self {
         let mut above = Vec::with_capacity(lines.len());
         let mut header = None;
         for (index, line) in lines.iter().enumerate() {
             above.push(header);
-            if !line.trim().is_empty() && !body_line(line) {
+            if !line.text.trim().is_empty() && !body_line(line.text) {
                 header = Some(index);
             }
         }
@@ -136,31 +142,30 @@ impl<'a> Failures<'a> {
     fn note(&mut self, error: &ParseError) {
         self.error_lines.insert(error.line());
         let failed = error.line().saturating_sub(1);
-        let Some(&line) = self.lines.get(failed) else {
+        let Some(line) = self.lines.get(failed) else {
             return;
         };
         self.declare(line);
         // An error in a step of the operation's body: the nearest line above
         // it that is not indented beneath a header declares the operation.
-        if line.starts_with(char::is_whitespace) {
+        if line.text.starts_with(char::is_whitespace) {
             if let Some(header) = self.above[failed] {
-                self.declare(self.lines[header]);
+                self.declare(&self.lines[header]);
             }
         }
     }
 
     /// Note the operation `line` declares, if it declares one.
-    fn declare(&mut self, line: &'a str) {
+    fn declare(&mut self, line: &Line<'a>) {
         // A `use` line that failed brought in no operation, so a call of one
         // it would have brought in only repeats its error.
-        let trimmed = strip_comment(line).trim();
-        if Keyword::of(trimmed) == Some(Keyword::Use) {
-            if let Ok(spec) = parse_use(trimmed, 0) {
+        if line.keyword() == Some(Keyword::Use) {
+            if let Ok(spec) = parse_use(line.code, 0) {
                 self.failed_uses.push(spec);
             }
             return;
         }
-        let Some(declaration) = line.trim().strip_prefix("operation ") else {
+        let Some(declaration) = line.text.trim().strip_prefix("operation ") else {
             return;
         };
         match declaration.split_once('(') {
@@ -211,7 +216,9 @@ impl<'a> Failures<'a> {
             .iter()
             .enumerate()
             .skip(header)
-            .find(|(_, line)| !line.trim().is_empty() && !line.starts_with(char::is_whitespace))
+            .find(|(_, line)| {
+                !line.text.trim().is_empty() && !line.text.starts_with(char::is_whitespace)
+            })
             .map_or(self.lines.len(), |(index, _)| index);
         header < end && self.error_lines.range(header + 1..=end).next().is_some()
     }

@@ -2,7 +2,7 @@
 
 The [overview](../architecture.md) shows the public file flow. These sections describe the internal data boundaries used by contributors.
 
-The parser reads a document as one of two kinds. A pipeline may hold no `discover`, `exclude` or `require` rule and no `sources:` or `contexts:` record, and `parse_pipeline` returns it as a `Pipeline`. A recipe holds rules, source paths and records, and `parse_input_spec` returns it as an `InputSpec`. `Pipeline` holds no input rules.
+The parser reads a document as one of two kinds. A pipeline may hold no `discover`, `exclude` or `require` rule and no `sources:` or `contexts:` record, and `parse_pipeline` returns it as a `Pipeline`. A recipe holds rules, source paths and records, and `parse_input_spec` returns it as an `InputSpec`. `Pipeline` holds no input rules. Every reader of a document's lines takes them from `Layout` (`src/parser/layout.rs`), which reads each line once: its indentation, its code without its comment, and what it starts with, a `Keyword`, a records `Header`, or neither. The imports, the recipe checks, the inventory reader, the editor's words and error recovery read lines from it, so they agree on what each line is.
 
 `SourceInventory` is a separate internal input. It contains `SourceRecord` values identified by product name and complete entity binding, optional observed contexts, and any source path rules settled from a recipe. A dataset indexer may construct this structure directly or emit the `.spitout` text format, where a flat record reads `image[sub=1,ses=1]` and a named context may nest its source products. The core does not know how an indexer found those records.
 
