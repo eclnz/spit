@@ -395,6 +395,16 @@ fn a_line_that_fails_still_closes_the_stage_before_it() {
     assert_eq!(lines_of(&found), [5], "{found:?}");
 }
 
+/// Error recovery parses again without a failed line, and keeps the line
+/// in its place when blanking it would put the lines after it back in the
+/// block it closed, so they are read on the next pass as on the first.
+#[test]
+fn a_failed_line_that_closes_a_stage_keeps_it_closed_on_every_pass() {
+    let text = "source raw : T [sub]\noperation step(input: T) -> T\nstage s:\n    a = step(raw)\np = nostep(raw)\n    b = step(raw)\n      c = step(raw)\n";
+    let found = error_lines(text);
+    assert_eq!(lines_of(&found), [5], "{found:?}");
+}
+
 /// A call whose arguments clash with what its operation's body reads fails
 /// without recording the call, so each call is an error of its own.
 #[test]
