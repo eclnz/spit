@@ -7,8 +7,9 @@ use std::path::PathBuf;
 use crate::model::{EntityBinding, Removal, SourceInventory, SourceRecord};
 use crate::paths::PathTemplate;
 
-use super::keyword::{Header, Keyword};
-use super::lexical::{comma_items, identifier, qualified_identifier, strip_comment};
+use super::keyword::Header;
+use super::layout::{Head, Layout, Line};
+use super::lexical::{comma_items, identifier, qualified_identifier};
 use super::ParseError;
 
 /// A document's text split in two: the rest, and any records
@@ -27,17 +28,17 @@ pub(crate) fn split_document(text: &str) -> DocumentText {
     let mut inventory_section = false;
     let mut inventory_line = None;
 
-    for (index, original) in text.lines().enumerate() {
-        let line = strip_comment(original).trim();
+    for (number, line) in Layout::new(text).numbered() {
         // Records run from a `sources:` or `contexts:` header to the next
         // header, statement or step.
-        match Header::of(line) {
-            Some(_) => {
+        match line.head {
+            Head::Header(_) => {
                 inventory_section = true;
-                inventory_line.get_or_insert(index + 1);
+                inventory_line.get_or_insert(number);
             }
-            None if Keyword::of(line).is_some() || is_step(line) => inventory_section = false,
-            None => {}
+            Head::Keyword(..) => inventory_section = false,
+            _ if is_step(line.code) => inventory_section = false,
+            _ => {}
         }
         // Each line goes to one side and a blank line to the other, so both
         // texts keep the document's line numbers.
@@ -46,7 +47,7 @@ pub(crate) fn split_document(text: &str) -> DocumentText {
         } else {
             &mut pipeline_text
         };
-        target.push_str(original);
+        target.push_str(line.text);
         pipeline_text.push('\n');
         inventory_text.push('\n');
     }
@@ -93,11 +94,15 @@ fn parse_inventory_with_lines(
     let mut section = None;
     let mut parent: Option<(EntityBinding, usize)> = None;
     let mut group: Option<(Vec<EntityBinding>, usize)> = None;
-    for (index, original) in text.lines().enumerate() {
-        let number = index + 1;
-        let line = strip_comment(original).trim();
-        let indent = original.len() - original.trim_start().len();
-        if line.is_empty() {
+    for (number, read) in Layout::new(text).numbered() {
+        let Line {
+            text: original,
+            indent,
+            code: line,
+            head,
+            ..
+        } = *read;
+        if head == Head::Blank {
             continue;
         }
         if let Some(folder) = line.strip_prefix("root ") {
@@ -116,7 +121,7 @@ fn parse_inventory_with_lines(
             inventory.root = Some(PathBuf::from(folder.trim()));
             continue;
         }
-        match Header::of(line) {
+        match read.header() {
             Some(Header::Sources) => {
                 section = Some(InventorySection::Sources);
                 parent = None;
@@ -161,7 +166,7 @@ fn parse_inventory_with_lines(
                     }
                 }
                 Some(InventorySection::Removed) => {
-                    parse_removed_line(original, number, &mut inventory.removed)
+                    parse_removed_line(read, number, &mut inventory.removed)
                         .map_err(|e| e.locate(original))?;
                 }
                 Some(InventorySection::SourcePaths) => {
@@ -257,11 +262,11 @@ fn parse_inventory_with_lines(
 /// `rule:`, `at:` and `reason:` lines. Values are read from the whole line,
 /// so a `#` in a reason is kept.
 fn parse_removed_line(
-    original: &str,
+    read: &Line,
     number: usize,
     removed: &mut Vec<Removal>,
 ) -> Result<(), ParseError> {
-    let line = original.trim();
+    let line = read.text.trim();
     if let Some((key, value)) = line
         .split_once(':')
         .filter(|(key, _)| matches!(*key, "rule" | "at" | "reason" | "found"))
@@ -286,7 +291,7 @@ fn parse_removed_line(
         }
         return Ok(());
     }
-    let line = strip_comment(original).trim();
+    let line = read.code;
     let (product, entities) = if line.starts_with('[') {
         (None, parse_context(line, number)?)
     } else {
