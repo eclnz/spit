@@ -12,7 +12,7 @@
 use std::borrow::Cow;
 use std::ops::Range;
 
-use super::keyword::{Header, Keyword};
+use super::keyword::{has_top_level_equals, Header, Keyword};
 use super::lexical::strip_comment;
 
 /// The lines of one text, as `str::lines` gives them, and its statements.
@@ -55,6 +55,10 @@ pub(crate) enum Block {
     /// A `default:` line's: the `path:`, `ext:` and `check:` defaults of
     /// the file or stage it is in. Nothing in it opens a block.
     Defaults,
+    /// A keyword's alone with its `:`, as `source:`: statements of that
+    /// keyword, each written without it. Only an `operation:` block's
+    /// entries open blocks, their bodies.
+    Keyword(Keyword),
 }
 
 /// One physical line.
@@ -94,44 +98,58 @@ impl<'t> Layout<'t> {
         let mut open: Vec<(usize, usize, Block)> = Vec::new();
         let mut start = 0;
         while start < lines.len() {
-            let range = start..signature_end(&lines, start);
-            start = range.end;
-            let first = &lines[range.start];
-            let blank = range.len() == 1 && first.head == Head::Blank;
-            if blank {
+            let first = &lines[start];
+            if first.head == Head::Blank {
                 statements.push(Statement {
-                    lines: range,
+                    lines: start..start + 1,
                     parent: None,
                     opens: None,
-                    blank,
+                    blank: true,
                     stray: false,
                 });
+                start += 1;
                 continue;
             }
-            let stray = first.head == Head::Other && !first.code.contains('=');
-            while !stray
-                && open
-                    .last()
-                    .is_some_and(|&(_, indent, _)| first.indent <= indent)
-            {
-                open.pop();
+            // The blocks the line is indented beneath.
+            let keep = open
+                .iter()
+                .take_while(|&&(_, indent, _)| indent < first.indent)
+                .count();
+            let block = keep.checked_sub(1).map(|last| open[last].2);
+            // An entry of a keyword block has no keyword of its own, so it
+            // is no stray line.
+            let entry = matches!(block, Some(Block::Keyword(_) | Block::Defaults));
+            let stray = !entry && first.head == Head::Other && !first.code.contains('=');
+            if !stray {
+                open.truncate(keep);
             }
+            let block = open.last().map(|&(_, _, block)| block);
             let parent = open.last().map(|&(opener, _, _)| opener);
-            // Only a stage's lines may open blocks.
-            let in_body = open
-                .last()
-                .is_some_and(|&(_, _, block)| block != Block::Stage);
-            let opens = (!in_body).then(|| opens(&lines[range.clone()])).flatten();
+            let mut end = brackets_end(&lines, start);
+            let opens = opens(&lines[start..end], block);
+            // A command goes on over the lines indented beneath it.
+            let keyword = match block {
+                Some(Block::Keyword(keyword)) => Some(keyword),
+                _ => first.keyword(),
+            };
+            let command = matches!(
+                keyword,
+                Some(Keyword::Command | Keyword::Verify | Keyword::Check)
+            );
+            if command && opens.is_none() {
+                end = indented_end(&lines, start, end);
+            }
             if let Some(block) = opens {
                 open.push((statements.len(), first.indent, block));
             }
             statements.push(Statement {
-                lines: range,
+                lines: start..end,
                 parent,
                 opens,
-                blank,
+                blank: false,
                 stray,
             });
+            start = end;
         }
         Self { lines, statements }
     }
@@ -202,6 +220,33 @@ impl<'t> Line<'t> {
         }
     }
 
+    /// Whether the line reads as a step, `outputs = operation(inputs)`:
+    /// names, with any types and dimensions, then `=`, a name and `(`.
+    /// A command's word such as `--threads=4` or `KEY=value` does not.
+    pub(crate) fn is_step(&self) -> bool {
+        let Some((outputs, call)) = self.code.split_once('=') else {
+            return false;
+        };
+        let name = |text: &str| {
+            text.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_')
+                && text
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == ':')
+        };
+        name(
+            outputs
+                .trim()
+                .split([',', ':', ' '])
+                .next()
+                .unwrap_or_default(),
+        ) && outputs
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || " \t_,:<>[]".contains(c))
+            && call
+                .split_once('(')
+                .is_some_and(|(operation, _)| name(operation.trim()))
+    }
+
     /// The records header the line is, if one.
     pub(crate) fn header(&self) -> Option<Header<'t>> {
         match self.head {
@@ -211,47 +256,81 @@ impl<'t> Line<'t> {
     }
 }
 
-/// The block a statement on `lines` opens: a `stage` line's, whatever it
-/// holds, an `operation` header's that ends in `:`, and `default:`'s.
-fn opens(lines: &[Line]) -> Option<Block> {
-    match lines[0].keyword()? {
-        Keyword::Stage => Some(Block::Stage),
-        Keyword::Default if lines[0].code == "default:" => Some(Block::Defaults),
-        Keyword::Operation => lines
+/// The block a statement on `lines`, in `block`, opens. Where a stage's
+/// lines or the top level may open blocks: a `stage` line's, whatever it
+/// holds; an `operation` header's that ends in `:`; `default:`'s; and a
+/// keyword's alone with its `:`, as `source:`. In an `operation:` block, an
+/// entry that ends in `:` opens its body. Nothing else opens a block.
+fn opens(lines: &[Line], block: Option<Block>) -> Option<Block> {
+    let first = &lines[0];
+    let ends_in_colon = || {
+        lines
             .iter()
             .rev()
             .find(|line| !line.code.is_empty())
-            .filter(|line| line.code.ends_with(':'))
-            .map(|_| Block::Body),
+            .is_some_and(|line| line.code.ends_with(':'))
+    };
+    match block {
+        None | Some(Block::Stage) => {}
+        Some(Block::Keyword(Keyword::Operation)) => {
+            return ends_in_colon().then_some(Block::Body);
+        }
+        Some(_) => return None,
+    }
+    match first.head {
+        Head::Keyword(keyword, ":") if lines.len() == 1 && keyword != Keyword::Default => {
+            Some(Block::Keyword(keyword))
+        }
+        Head::Keyword(Keyword::Stage, _) => Some(Block::Stage),
+        Head::Keyword(Keyword::Default, _) if first.code == "default:" => Some(Block::Defaults),
+        Head::Keyword(Keyword::Operation, _) => ends_in_colon().then_some(Block::Body),
         _ => None,
     }
 }
 
-/// One past the last line of the statement that starts at `start`: an
-/// `operation` signature takes the lines after it while its parentheses are
-/// open, and any other line is a statement of its own.
-fn signature_end(lines: &[Line], start: usize) -> usize {
+/// One past the last line of the statement that starts at `start`, going
+/// on while its parentheses are open, as an `operation` signature or a
+/// step's arguments may. A line that starts a declaration or a step, or is
+/// indented no deeper than the first and does not close the parentheses,
+/// is never part of it, even when a missing closer leaves them open.
+fn brackets_end(lines: &[Line], start: usize) -> usize {
     let first = &lines[start];
-    if first.keyword() != Some(Keyword::Operation) {
-        return start + 1;
-    }
     let mut depth = balance(first.uncommented);
     let mut end = start + 1;
     while depth > 0 {
         let Some(next) = lines.get(end) else {
             break;
         };
-        // A declaration or a body step is never part of a signature, even
-        // when a missing closer leaves the parentheses open.
         if !next.code.is_empty()
             && (next.keyword().is_some()
-                || next.code.contains('=')
+                || has_top_level_equals(next.code)
                 || (next.indent <= first.indent && !next.code.starts_with(')')))
         {
             break;
         }
         depth += balance(next.uncommented);
         end += 1;
+    }
+    end
+}
+
+/// One past the last line of a command that starts at `start` and has read
+/// up to `end`: it takes each line after that is indented deeper than its
+/// first, with the blank lines between them, up to one that starts a
+/// statement of its own, with a keyword or as a step, so that a statement
+/// indented by mistake is never read as a command's words.
+fn indented_end(lines: &[Line], start: usize, mut end: usize) -> usize {
+    let indent = lines[start].indent;
+    let mut next = end;
+    while let Some(line) = lines.get(next) {
+        if line.head == Head::Blank {
+            next += 1;
+        } else if line.indent > indent && line.keyword().is_none() && !line.is_step() {
+            next += 1;
+            end = next;
+        } else {
+            break;
+        }
     }
     end
 }
@@ -388,5 +467,85 @@ frob 1
                 (16, Some(13), None),
             ]
         );
+    }
+
+    /// A keyword alone with its `:` opens a block of its entries; in an
+    /// `operation:` block, an entry ending in `:` opens its body. A command
+    /// goes on over the lines indented beneath it, and any statement while
+    /// its brackets are open.
+    #[test]
+    fn keyword_blocks_and_statements_over_several_lines() {
+        use super::Block::{Body, Keyword as Of};
+        let text = "\
+command:
+    run: tool {a}
+        --flag
+
+        {@output}
+    other: tool
+operation:
+    twice(x: A) -> (out: A):
+        out = step(x)
+    pair(
+        x: A
+    ) -> A
+step = f(
+    a @ where(id=1)
+)
+source raw : T [id]
+    stray = f(raw)
+command copy: cp --mode=fast
+    {input}
+    copied = copy(raw)
+    operation late(x: A) -> A
+";
+        let layout = Layout::new(text);
+        let shape: Vec<_> = layout
+            .statements
+            .iter()
+            .filter(|statement| !statement.blank)
+            .map(|statement| (statement.lines.clone(), statement.parent, statement.opens))
+            .collect();
+        assert_eq!(
+            shape,
+            [
+                (0..1, None, Some(Of(Keyword::Command))),
+                (1..5, Some(0), None),
+                (5..6, Some(0), None),
+                (6..7, None, Some(Of(Keyword::Operation))),
+                (7..8, Some(3), Some(Body)),
+                (8..9, Some(4), None),
+                (9..12, Some(3), None),
+                (12..15, None, None),
+                (15..16, None, None),
+                // Only a command goes on over an indented line.
+                (16..17, None, None),
+                // And not over one that starts a statement of its own.
+                (17..19, None, None),
+                (19..20, None, None),
+                (20..21, None, None),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_step_is_names_then_a_call() {
+        for step in [
+            "a = f(x)",
+            "a, b = f(x)",
+            "a : T [id] = f(x)",
+            "m : Map<A,B> = ns::f(x)",
+        ] {
+            assert!(Layout::new(step).lines[0].is_step(), "{step}");
+        }
+        for word in [
+            "--threads=4",
+            "KEY=value tool",
+            "x=1",
+            "a = b",
+            "{@output}=f(x)",
+        ] {
+            assert!(!Layout::new(word).lines[0].is_step(), "{word}");
+        }
     }
 }

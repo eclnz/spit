@@ -59,11 +59,30 @@ const WORDS: [(Keyword, &str); 15] = [
     (Keyword::Sidecars, "sidecars"),
 ];
 
+/// The keywords that open a block of their statements when written alone
+/// with a `:`, as `source:`, and the word for each.
+pub(crate) const BLOCKS: [(Keyword, &str); 8] = [
+    (Keyword::Source, "source"),
+    (Keyword::Operation, "operation"),
+    (Keyword::Command, "command"),
+    (Keyword::Verify, "verify"),
+    (Keyword::Check, "check"),
+    (Keyword::Path, "path"),
+    (Keyword::Require, "require"),
+    (Keyword::Exclude, "exclude"),
+];
+
 impl Keyword {
     /// The keyword `line` starts with, and the text after it. A trimmed
     /// line is expected. `stage` and `dimensions` start a statement only
     /// without `=`, since a step's output product may have either name.
+    /// A keyword of [`BLOCKS`] alone with its `:` gives `:` as its text.
     pub(crate) fn split(line: &str) -> Option<(Self, &str)> {
+        if let Some(word) = line.strip_suffix(':') {
+            if let Some(&(keyword, _)) = BLOCKS.iter().find(|(_, name)| *name == word) {
+                return Some((keyword, ":"));
+            }
+        }
         // `default:` opens a block, and `default path: ...` and the like set
         // one default. A step may make a product named `default`, as in
         // `default = f(x)` or `default: Report = f(x)`.
@@ -140,7 +159,7 @@ impl Keyword {
 }
 
 /// Whether `text` has an `=` outside parentheses.
-fn has_top_level_equals(text: &str) -> bool {
+pub(super) fn has_top_level_equals(text: &str) -> bool {
     let mut depth = 0usize;
     text.chars().any(|c| {
         match c {
@@ -219,6 +238,11 @@ mod tests {
         assert_eq!(keyword("default: Report = f(x)"), None);
         assert_eq!(keyword("default : Report = f(x)"), None);
         assert_eq!(keyword("defaults:"), None);
+        assert_eq!(Keyword::split("source:"), Some((Keyword::Source, ":")));
+        assert_eq!(Keyword::split("check:"), Some((Keyword::Check, ":")));
+        assert_eq!(Keyword::split("path:"), Some((Keyword::Path, ":")));
+        assert_eq!(keyword("check: nonempty"), Some(Keyword::Checks));
+        assert_eq!(keyword("stage:"), None);
         assert_eq!(keyword("path raw: in/{id}"), Some(Keyword::Path));
         assert_eq!(keyword("paths = f(x)"), None);
         assert_eq!(keyword("stage analysis:"), Some(Keyword::Stage));

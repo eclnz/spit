@@ -20,18 +20,19 @@ pub(super) fn single_colon(line: &str) -> Option<usize> {
     })
 }
 
-/// Parse a path rule. A default `path:` inside `stage` covers only that
-/// stage's products.
+/// Parse a path rule from `rest`, the text after `path`: `: template` for
+/// the default rule, which inside `stage` covers only that stage's
+/// products, or `product: template` for one product's.
 pub(super) fn parse_path(
     stage: Option<String>,
     original: &str,
-    line: &str,
+    rest: &str,
     number: usize,
 ) -> Result<PathRule, ParseError> {
-    let (product, template) = if let Some(template) = line.strip_prefix("path:") {
+    let (product, template) = if let Some(template) = rest.strip_prefix(':') {
         (None, template)
     } else {
-        let declaration = line.strip_prefix("path ").unwrap_or("");
+        let declaration = rest.trim_start();
         let delimiter = single_colon(declaration)
             .ok_or_else(|| ParseError::new(number, "expected `:` after path product name"))?;
         let (product, template) = declaration.split_at(delimiter);
