@@ -440,3 +440,13 @@ fn a_broken_composite_retains_its_contract_without_claiming_inferred_results() {
         .any(|detail| detail.starts_with("This call expands to:")));
     assert_eq!(at(&all, 4, "prep_registration").details.len(), 1);
 }
+
+/// A stage header that fails keeps its lines, so the editor still explains
+/// the steps beneath it while the header is being written.
+#[test]
+fn steps_beneath_a_stage_header_being_written_keep_their_hovers() {
+    let text = "source a : A [s]\noperation f(x: A) -> B\nstage pre\n    b = f(a)\n";
+    let all = hovers(text);
+    assert!(at(&all, 4, "b").signature.starts_with("b: "));
+    assert_eq!(at(&all, 4, "f").signature, "operation f(x: $A) -> $B");
+}

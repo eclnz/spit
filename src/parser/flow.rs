@@ -2,7 +2,10 @@
 //! `outputs = operation(inputs)`, and stages whose lines are indented
 //! beneath a `stage name:` header.
 
+use rustc_hash::FxHashSet;
+
 use crate::model::{CommandRole, DefaultChecks, Invocation};
+use crate::span::Place;
 
 use super::body::OpenBody;
 use super::check::parse_default_checks;
@@ -11,245 +14,170 @@ use super::declarations::{
 };
 use super::entities::parse_entities;
 use super::keyword::{removed_section, Keyword};
-use super::layout::Layout;
+use super::layout::{Block, Layout};
 use super::lexical::{comma_items, extension, identifier, strip_comment};
 use super::source_map::{name_place, step_place, tail_place};
 use super::{FlowStep, ParseError, StatementKind, StepOutput, Syntax, SHELL_SOURCE_REMOVED};
 
-/// Parse the lines of `text`, reading on past a line that fails as if it
-/// were blank, so that one pass finds the errors that blanking each failed
-/// line in turn would, one error per pass. Where a blank line would not
-/// leave the rest reading the same, parsing stops after the error instead.
-pub(super) fn parse_flow(text: &str) -> Syntax {
-    let mut syntax = Syntax::default();
-    let mut open = Open::default();
-    // After a line that ended a body: the indentation of the body's header,
-    // and the statement the line made, if it did not fail. Were that line
-    // blank, the body would stay open, and so it would past each line after
-    // it that is blank in turn, so a later line indented beneath the header
-    // would belong to the body. A line that cannot be blank ends the watch.
-    let mut ended_body: Option<(Option<usize>, usize)> = None;
-    // The statements that closed stages, with the indentation of the header
-    // of the outermost stage each closed, which a later line may still be
-    // indented beneath. Were such a statement blank, the stage would stay
-    // open, and that line would belong to it. The headers fall as the
-    // statements come. A statement that cannot fail ends the watch: it
-    // closes the stage whether or not the others are blank.
-    let mut closed: Vec<(usize, usize)> = Vec::new();
+/// Parse the statements of `text`. Its structure, which lines make a
+/// statement and which block holds each, comes from its layout, so a
+/// statement that fails leaves the others reading as they would without it,
+/// and one pass finds every syntax error. A statement whose first line is
+/// in `skipped`, one that failed in an earlier pass of error recovery,
+/// keeps its place in that structure but is not read.
+///
+/// A block whose opening statement fails, or is skipped, keeps its lines,
+/// and they are read in the stage around it, as ordinary statements.
+pub(crate) fn parse_flow(text: &str, skipped: &FxHashSet<usize>) -> Syntax {
     let layout = Layout::new(text);
-    for lines in &layout.statements {
-        let index = lines.start;
-        let logical = layout.text(lines.clone());
-        let original = logical.as_ref();
-        if !closed.is_empty() && !strip_comment(original).trim().is_empty() {
-            let indent = original.len() - original.trim_start().len();
-            while let Some(&(statement, header)) = closed.last() {
-                if indent <= header {
-                    break;
-                }
-                syntax.statements[statement].stateful = true;
-                closed.pop();
-            }
+    let mut syntax = Syntax::default();
+    // For each statement that opens a stage, by index: the stage's full
+    // name, once its header is read, and the indentation its lines share,
+    // once the first that parses is read.
+    let mut stage_names: Vec<Option<String>> = vec![None; layout.statements.len()];
+    let mut stage_indents: Vec<Option<usize>> = vec![None; layout.statements.len()];
+    // The operation whose body is being read, and the statement opening it.
+    let mut body: Option<(usize, OpenBody)> = None;
+    for (index, statement) in layout.statements.iter().enumerate() {
+        if statement.blank {
+            continue;
         }
-        if let Some((statement, header)) = ended_body {
-            if !strip_comment(original).trim().is_empty()
-                && original.len() - original.trim_start().len() > header
-            {
-                ended_body = None;
-                match statement {
-                    Some(statement) => syntax.statements[statement].stateful = true,
-                    None => return syntax,
-                }
-            }
-        }
-        let number = index + 1;
-        let before = syntax.statements.len();
-        match flow_line(&mut syntax, &mut open, original, number) {
-            Ok(effect) => {
-                // The statement the line made, if it made one.
-                let made =
-                    syntax.statements.len().checked_sub(1).filter(|&last| {
-                        last >= before && syntax.statements[last].place.line == number
-                    });
-                if let Some(made) = made {
-                    if let Some(header) = effect.closed {
-                        closed.push((made, header));
-                    }
-                    if let Some(header) = effect.ended_body {
-                        ended_body = Some((Some(made), header));
-                    } else if matches!(
-                        syntax.statements[made].kind,
-                        StatementKind::Stage { .. }
-                            | StatementKind::Command(..)
-                            | StatementKind::Check(..)
-                    ) {
-                        // Lowering cannot fail these.
-                        ended_body = None;
-                        closed.clear();
+        let text = layout.text(statement);
+        let original = text.as_ref();
+        let line = strip_comment(original).trim();
+        let number = statement.lines.start + 1;
+        let indent = layout.first(statement).indent;
+        if let Some((opener, mut open)) = body.take() {
+            if statement.parent == Some(opener) {
+                if !skipped.contains(&number) {
+                    if let Err(error) = open.line(original, line, number, indent) {
+                        syntax.fail(error.locate(original));
                     }
                 }
+                body = Some((opener, open));
+                continue;
             }
-            Err(failed) => {
-                let at = syntax.statements.len();
-                syntax.errors.push((at, failed.error.locate(original)));
-                if failed.stop {
-                    return syntax;
-                }
-                if let Some(header) = failed.ended_body {
-                    ended_body = Some((None, header));
-                }
+            let header = open.header().to_owned();
+            if let Err(error) = open.close(&mut syntax, Some(original)) {
+                syntax.fail(error.locate(&header));
             }
+        }
+        if skipped.contains(&number) {
+            continue;
+        }
+        // The stage whose block holds the statement, if one does.
+        let block = statement
+            .parent
+            .filter(|&parent| layout.statements[parent].opens == Some(Block::Stage));
+        let stage = enclosing_stage(&layout, &stage_names, statement.parent);
+        let shared = block
+            .filter(|_| !statement.stray)
+            .and_then(|block| Some((block, stage_indents[block]?)));
+        let read = match shared {
+            Some((block, shared)) if shared != indent => {
+                let name = stage_names[block].as_deref().unwrap_or_else(|| {
+                    written_stage_name(layout.first(&layout.statements[block]).code)
+                });
+                Err(ParseError::new(
+                    number,
+                    format!(
+                        "this line is indented differently from the other lines of stage `{name}`"
+                    ),
+                ))
+            }
+            _ => flow_rest(
+                original,
+                line,
+                number,
+                indent,
+                stage,
+                !in_stage_block(&layout, statement.parent),
+            ),
+        };
+        if let (Some(block), Ok(_)) = (block, &read) {
+            stage_indents[block].get_or_insert(indent);
+        }
+        match read {
+            Ok(Read::Statement(kind)) => syntax.push(original, number, kind),
+            Ok(Read::Stage { name, place }) => {
+                syntax.push(
+                    original,
+                    number,
+                    StatementKind::Stage {
+                        name: name.clone(),
+                        place,
+                    },
+                );
+                stage_names[index] = Some(name);
+            }
+            Ok(Read::Body(open)) => body = Some((index, open)),
+            Err(error) => syntax.fail(error.locate(original)),
         }
     }
-    if let Some(body) = open.body {
-        let header = body.header().to_owned();
-        if let Err(error) = body.close(&mut syntax, None) {
-            let at = syntax.statements.len();
-            syntax.errors.push((at, error.locate(&header)));
+    if let Some((_, open)) = body {
+        let header = open.header().to_owned();
+        if let Err(error) = open.close(&mut syntax, None) {
+            syntax.fail(error.locate(&header));
         }
     }
     syntax
 }
 
-/// What a line that parsed did to the blocks open at it.
-#[derive(Default)]
-struct Effect {
-    /// It closed stages, the outermost of which has a header with this
-    /// indentation.
-    closed: Option<usize>,
-    /// It ended a body, whose header has this indentation.
-    ended_body: Option<usize>,
-}
-
-/// A line that failed to parse, and what reading on from it needs.
-struct Failed {
-    /// Boxed, so that `Result` stays small where a line parses.
-    error: Box<ParseError>,
-    /// Reading on as if the line were blank would not read the rest the
-    /// way blanking it would.
-    stop: bool,
-    /// The line ended a body, whose header has this indentation.
-    ended_body: Option<usize>,
-}
-
-impl Failed {
-    /// A failure that left the parse as it was.
-    fn clean(error: ParseError) -> Self {
-        Self {
-            error: Box::new(error),
-            stop: false,
-            ended_body: None,
+/// The full name of the stage a statement whose block opener is `parent`
+/// is in: that of the nearest stage around it whose header was read.
+fn enclosing_stage<'a>(
+    layout: &Layout,
+    stage_names: &'a [Option<String>],
+    mut parent: Option<usize>,
+) -> Option<&'a str> {
+    while let Some(opener) = parent {
+        if let Some(name) = &stage_names[opener] {
+            return Some(name);
         }
+        parent = layout.statements[opener].parent;
     }
+    None
 }
 
-/// The blocks open at a line of the flow form: its stages, and an
-/// operation's body.
-#[derive(Default)]
-struct Open {
-    stages: OpenStages,
-    body: Option<OpenBody>,
-}
-
-/// The stages open at a line of the flow form, outermost first.
-#[derive(Default)]
-struct OpenStages(Vec<OpenStage>);
-
-struct OpenStage {
-    /// The full name, such as `preprocess/denoise`.
-    name: String,
-    /// The indentation of the stage's header.
-    header: usize,
-    /// The indentation the stage's lines share, once the first is read.
-    body: Option<usize>,
-    /// The statement whose line fixed it, if a statement did. Were that line
-    /// blank, the next line of the stage would fix it instead.
-    fixed_by: Option<usize>,
-}
-
-impl OpenStages {
-    /// How many stages a line indented by `indent` is inside.
-    fn keep(&self, indent: usize) -> usize {
-        let mut keep = self.0.len();
-        while keep > 0 && indent <= self.0[keep - 1].header {
-            keep -= 1;
+/// Whether a statement whose block opener is `parent` is in a stage's
+/// block, whether or not the stage's header was read.
+fn in_stage_block(layout: &Layout, mut parent: Option<usize>) -> bool {
+    while let Some(opener) = parent {
+        if layout.statements[opener].opens == Some(Block::Stage) {
+            return true;
         }
-        keep
+        parent = layout.statements[opener].parent;
     }
-
-    /// The innermost of the first `keep` stages.
-    fn name_at(&self, keep: usize) -> Option<&str> {
-        let last = keep.checked_sub(1)?;
-        self.0.get(last).map(|stage| stage.name.as_str())
-    }
-
-    /// Check that a line indented by `indent`, inside the first `keep`
-    /// stages, lines up with the other lines of its stage. Nothing changes
-    /// until [`OpenStages::enter`], so a line that fails leaves the stages
-    /// as a blank line would.
-    fn check(&self, keep: usize, indent: usize, number: usize) -> Result<(), ParseError> {
-        let Some(stage) = keep.checked_sub(1).and_then(|last| self.0.get(last)) else {
-            return Ok(());
-        };
-        match stage.body {
-            Some(body) if body != indent => Err(ParseError::new(
-                number,
-                format!(
-                    "this line is indented differently from the other lines of stage `{}`",
-                    stage.name
-                ),
-            )),
-            _ => Ok(()),
-        }
-    }
-
-    /// The indentation of the header of the outermost stage that entering
-    /// with `keep` stages would close, if it would close one.
-    fn closes(&self, keep: usize) -> Option<usize> {
-        self.0.get(keep).map(|stage| stage.header)
-    }
-
-    /// Whether entering with `keep` stages would fix the indentation of the
-    /// stage's lines.
-    fn fixes(&self, keep: usize) -> bool {
-        keep.checked_sub(1)
-            .is_some_and(|last| self.0[last].body.is_none())
-    }
-
-    /// The statement whose line fixed the indentation of the lines of the
-    /// innermost of the first `keep` stages.
-    fn fixed_by(&self, keep: usize) -> Option<usize> {
-        self.0.get(keep.checked_sub(1)?)?.fixed_by
-    }
-
-    /// Close each stage that a line indented by `indent` is not inside,
-    /// leaving the first `keep`, and fix the indentation of the stage's lines
-    /// at the first, by `statement`, the one the line makes if it makes one.
-    fn enter(&mut self, keep: usize, indent: usize, statement: Option<usize>) {
-        self.0.truncate(keep);
-        if let Some(stage) = self.0.last_mut() {
-            if stage.body.is_none() {
-                stage.body = Some(indent);
-                stage.fixed_by = statement;
-            }
-        }
-    }
+    false
 }
 
-/// Open a stage for a `stage name:` header, inside the current stage if
-/// there is one. Its lines are indented beneath it, and the next line that
-/// is not ends it.
+/// The name a `stage` line gives, as written, for a message about the
+/// lines of a stage whose header did not parse.
+fn written_stage_name(code: &str) -> &str {
+    let rest = code.strip_prefix("stage").unwrap_or(code).trim();
+    rest.strip_suffix(':').unwrap_or(rest).trim()
+}
+
+/// What a statement read: an ordinary statement, a stage's header, or the
+/// header of an operation whose body follows.
+enum Read {
+    Statement(StatementKind),
+    Stage { name: String, place: Place },
+    Body(OpenBody),
+}
+
+/// Read a `stage name:` header, inside `stage` if there is one. Its lines
+/// are indented beneath it, and the next line that is not ends it.
 fn open_stage(
-    syntax: &mut Syntax,
-    stages: &mut OpenStages,
-    keep: usize,
     original: &str,
     declaration: &str,
-    indent: usize,
     number: usize,
-) -> Result<(), ParseError> {
+    indent: usize,
+    stage: Option<&str>,
+    top_level: bool,
+) -> Result<Read, ParseError> {
     let syntax_error = "expected `stage name:`, with the stage's lines indented beneath it";
-    if stages.name_at(keep).is_none() && indent > 0 {
+    if top_level && indent > 0 {
         return Err(ParseError::new(
             number,
             "a stage header outside every stage starts at the beginning of its line",
@@ -260,112 +188,38 @@ fn open_stage(
         .strip_suffix(':')
         .ok_or_else(|| ParseError::new(number, syntax_error))?;
     let name = identifier(name.trim(), number, "stage name")?;
-    let full = match stages.name_at(keep) {
+    let place = name_place(original, number, declaration, name);
+    let name = match stage {
         Some(parent) => format!("{parent}/{name}"),
         None => name.to_owned(),
     };
-    let place = name_place(original, number, declaration, name);
-    stages.enter(keep, indent, Some(syntax.statements.len()));
-    syntax.push(
-        original,
-        number,
-        StatementKind::Stage {
-            name: full.clone(),
-            place,
-        },
-    );
-    stages.0.push(OpenStage {
-        name: full,
-        header: indent,
-        body: None,
-        fixed_by: None,
-    });
-    Ok(())
+    Ok(Read::Stage { name, place })
 }
 
-fn flow_line(
-    syntax: &mut Syntax,
-    open: &mut Open,
-    original: &str,
-    number: usize,
-) -> Result<Effect, Failed> {
-    let line = strip_comment(original).trim();
-    if line.is_empty() {
-        return Ok(Effect::default());
-    }
-    let Open { stages, body } = open;
-    let indent = original.len() - original.trim_start().len();
-    // A line indented beneath an operation's header is a step of its body;
-    // the next that is not ends it.
-    let mut ended_body = None;
-    if let Some(open) = body.as_mut() {
-        if open.holds(indent) {
-            return open
-                .line(original, line, number, indent)
-                .map(|()| Effect::default())
-                .map_err(Failed::clean);
-        }
-        let ended = body.take().expect("a body is open");
-        ended_body = Some(ended.header_indent());
-        ended
-            .close(syntax, Some(original))
-            .map_err(|error| Failed {
-                error: Box::new(error),
-                stop: true,
-                ended_body: None,
-            })?;
-    }
-    flow_rest(syntax, stages, body, original, line, number, indent)
-        .map(|closed| Effect { closed, ended_body })
-        .map_err(|error| Failed {
-            error: Box::new(error),
-            stop: false,
-            ended_body,
-        })
-}
-
-/// The rest of a line that is no step of an open body. Until it succeeds it
-/// changes nothing but `syntax`'s statements, as a blank line would. It
-/// says whether it closed a stage, and the indentation of the outermost
-/// stage's header, which a blank line would not. It also fixes the
-/// indentation of a stage's lines, which a blank line would not: where a
-/// later line of the stage is indented otherwise, the statement is marked
-/// `stateful`.
+/// Read the statement on line `number`, `original`, whose content is
+/// `line`, in `stage`; `top_level` says that no block holds it.
 fn flow_rest(
-    syntax: &mut Syntax,
-    stages: &mut OpenStages,
-    body: &mut Option<OpenBody>,
     original: &str,
     line: &str,
     number: usize,
     indent: usize,
-) -> Result<Option<usize>, ParseError> {
+    stage: Option<&str>,
+    top_level: bool,
+) -> Result<Read, ParseError> {
     if let Some(instead) = removed_section(line) {
         return Err(ParseError::new(
             number,
             format!("SPIT no longer reads `{line}` sections; {instead}"),
         ));
     }
-    let keep = stages.keep(indent);
-    if let Err(error) = stages.check(keep, indent, number) {
-        // Were the line that fixed the indentation of the stage's lines
-        // blank, this one would fix it, and not fail.
-        if let Some(statement) = stages.fixed_by(keep) {
-            syntax.statements[statement].stateful = true;
-        }
-        return Err(error);
-    }
-    let stage = stages.name_at(keep).map(str::to_owned);
     let top_level_only = |what: &str| {
-        stage.as_ref().map_or(Ok(()), |name| {
+        stage.map_or(Ok(()), |name| {
             Err(ParseError::new(
                 number,
                 format!("{what} belongs at the top level, outside stage `{name}`"),
             ))
         })
     };
-    let closed = stages.closes(keep);
-    let moved = closed.is_some() || stages.fixes(keep);
     if line == "root" {
         return Err(ParseError::new(
             number,
@@ -374,8 +228,7 @@ fn flow_rest(
     }
     let kind = match Keyword::split(line) {
         Some((Keyword::Stage, declaration)) => {
-            return open_stage(syntax, stages, keep, original, declaration, indent, number)
-                .map(|()| closed);
+            return open_stage(original, declaration, number, indent, stage, top_level);
         }
         Some((Keyword::Sidecars, _)) => {
             return Err(ParseError::new(
@@ -415,25 +268,19 @@ fn flow_rest(
             StatementKind::Discover(parse_discover(declaration.trim(), number)?)
         }
         Some((Keyword::Operation, declaration)) => {
-            let kind = StatementKind::operation(original, declaration, number, stage.clone())?;
+            let kind =
+                StatementKind::operation(original, declaration, number, stage.map(str::to_owned))?;
             // A header ending in `:` opens the body of steps that carry the
-            // operation out.
-            if let (Some(_), StatementKind::Operation(operation, place, stage, _)) =
-                (declaration.trim().strip_suffix(':'), &kind)
-            {
-                stages.enter(keep, indent, None);
-                *body = Some(OpenBody::open(
-                    operation.clone(),
-                    place.clone(),
-                    stage.clone(),
-                    original,
-                    number,
-                    indent,
-                    moved,
-                ));
-                return Ok(closed);
+            // operation out. Keep in step with `opens` in
+            // `src/parser/layout.rs`, which gives the body its lines.
+            match (declaration.trim().ends_with(':'), kind) {
+                (true, StatementKind::Operation(operation, place, stage, _)) => {
+                    return Ok(Read::Body(OpenBody::open(
+                        operation, place, stage, original, number,
+                    )));
+                }
+                (_, kind) => kind,
             }
-            kind
         }
         Some((keyword @ (Keyword::Require | Keyword::Skip | Keyword::Drop), _)) => {
             top_level_only(if keyword == Keyword::Require {
@@ -472,7 +319,7 @@ fn flow_rest(
         Some((Keyword::Checks, list)) => {
             let (uses, exempt) = parse_default_checks(list.trim(), number)?;
             StatementKind::DefaultChecks {
-                stage,
+                stage: stage.map(str::to_owned),
                 checks: DefaultChecks {
                     checks: uses,
                     exempt,
@@ -483,16 +330,19 @@ fn flow_rest(
         Some((Keyword::ShellSource, _)) => {
             return Err(ParseError::new(number, SHELL_SOURCE_REMOVED));
         }
-        Some((Keyword::Path, _)) => StatementKind::Path(parse_path(stage, original, line, number)?),
+        Some((Keyword::Path, _)) => StatementKind::Path(parse_path(
+            stage.map(str::to_owned),
+            original,
+            line,
+            number,
+        )?),
         Some((Keyword::Ext, rest)) => StatementKind::Extension {
-            stage,
+            stage: stage.map(str::to_owned),
             extension: extension(rest.trim(), number)?.to_owned(),
         },
-        None => flow_statement(original, line, number, stage.as_deref())?,
+        None => flow_statement(original, line, number, stage)?,
     };
-    stages.enter(keep, indent, Some(syntax.statements.len()));
-    syntax.push(original, number, kind);
-    Ok(closed)
+    Ok(Read::Statement(kind))
 }
 
 /// Where a pipeline's dataset is said, for a `pipeline` line

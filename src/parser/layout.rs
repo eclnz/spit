@@ -1,7 +1,13 @@
 //! A document's lines, each read once: its indentation, its code without
-//! its comment, and what it starts with; and the statements those lines
-//! make. Every reader of a document's lines takes them from here, so they
-//! agree on what each line is and which lines make one statement.
+//! its comment, and what it starts with; the statements those lines make;
+//! and the blocks those statements open. Every reader of a document's lines
+//! takes them from here, so they agree on what each line is.
+//!
+//! Structure comes from the lines' surface alone, before any statement's
+//! content is parsed: which lines make a statement, which statements open a
+//! block, and which block holds each. A statement whose content fails to
+//! parse still has its place in that structure, so a failure never changes
+//! how the lines after it are read.
 
 use std::borrow::Cow;
 use std::ops::Range;
@@ -13,10 +19,39 @@ use super::lexical::strip_comment;
 #[derive(Clone, Debug, Default)]
 pub(crate) struct Layout<'t> {
     pub(crate) lines: Vec<Line<'t>>,
-    /// Each statement, as the indices of the lines it spans, in order.
-    /// Every line is in exactly one. A statement is one line, but for an
-    /// `operation` whose parentheses stay open past its first line.
-    pub(crate) statements: Vec<Range<usize>>,
+    /// Each statement, in order. Every line is in exactly one.
+    pub(crate) statements: Vec<Statement>,
+}
+
+/// One statement: a line, or an `operation` signature whose parentheses
+/// stay open past its first line.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct Statement {
+    /// The indices of the lines it spans.
+    pub(crate) lines: Range<usize>,
+    /// The statement whose block holds it, by its index: the nearest
+    /// statement before it that opens a block and is indented less. `None`
+    /// at the top level, and for a blank statement.
+    pub(crate) parent: Option<usize>,
+    /// The block it opens, if it opens one.
+    pub(crate) opens: Option<Block>,
+    /// It holds no code.
+    pub(crate) blank: bool,
+    /// It can start no statement: it has no keyword and no `=`, so it
+    /// fails wherever it stands. It neither opens nor closes a block, so
+    /// that a stray line, such as a typo at the start of a line, does not
+    /// move the lines after it out of their block.
+    pub(crate) stray: bool,
+}
+
+/// A block of lines indented beneath the statement that opens it.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum Block {
+    /// A `stage` line's: the stage's lines, whatever the line holds.
+    Stage,
+    /// An `operation` header's that ends in `:`: the steps that carry the
+    /// operation out. Nothing in a body opens a block.
+    Body,
 }
 
 /// One physical line.
@@ -51,20 +86,63 @@ impl<'t> Layout<'t> {
     pub(crate) fn new(text: &'t str) -> Self {
         let lines: Vec<_> = text.lines().map(Line::new).collect();
         let mut statements = Vec::with_capacity(lines.len());
+        // The blocks open at the statement being read, innermost last: the
+        // statement that opens each, its indentation, and its kind.
+        let mut open: Vec<(usize, usize, Block)> = Vec::new();
         let mut start = 0;
         while start < lines.len() {
-            let end = signature_end(&lines, start);
-            statements.push(start..end);
-            start = end;
+            let range = start..signature_end(&lines, start);
+            start = range.end;
+            let first = &lines[range.start];
+            let blank = range.len() == 1 && first.head == Head::Blank;
+            if blank {
+                statements.push(Statement {
+                    lines: range,
+                    parent: None,
+                    opens: None,
+                    blank,
+                    stray: false,
+                });
+                continue;
+            }
+            let stray = first.head == Head::Other && !first.code.contains('=');
+            while !stray
+                && open
+                    .last()
+                    .is_some_and(|&(_, indent, _)| first.indent <= indent)
+            {
+                open.pop();
+            }
+            let parent = open.last().map(|&(opener, _, _)| opener);
+            let in_body = open
+                .last()
+                .is_some_and(|&(_, _, block)| block == Block::Body);
+            let opens = (!in_body).then(|| opens(&lines[range.clone()])).flatten();
+            if let Some(block) = opens {
+                open.push((statements.len(), first.indent, block));
+            }
+            statements.push(Statement {
+                lines: range,
+                parent,
+                opens,
+                blank,
+                stray,
+            });
         }
         Self { lines, statements }
     }
 
-    /// The text of the statement on `lines`. A statement of one line is the
-    /// line as written. One of several is each line without its comment,
-    /// joined by newlines, so that a token's address within it still gives
-    /// its line and column (`ParseError::locate`).
-    pub(crate) fn text(&self, lines: Range<usize>) -> Cow<'t, str> {
+    /// The first line of `statement`.
+    pub(crate) fn first(&self, statement: &Statement) -> &Line<'t> {
+        &self.lines[statement.lines.start]
+    }
+
+    /// The text of `statement`. A statement of one line is the line as
+    /// written. One of several is each line without its comment, joined by
+    /// newlines, so that a token's address within it still gives its line
+    /// and column (`ParseError::locate`).
+    pub(crate) fn text(&self, statement: &Statement) -> Cow<'t, str> {
+        let lines = statement.lines.clone();
         if lines.len() == 1 {
             return Cow::Borrowed(self.lines[lines.start].text);
         }
@@ -126,6 +204,21 @@ impl<'t> Line<'t> {
             Head::Header(header) => Some(header),
             _ => None,
         }
+    }
+}
+
+/// The block a statement on `lines` opens: a `stage` line's, whatever it
+/// holds, and an `operation` header's that ends in `:`.
+fn opens(lines: &[Line]) -> Option<Block> {
+    match lines[0].keyword()? {
+        Keyword::Stage => Some(Block::Stage),
+        Keyword::Operation => lines
+            .iter()
+            .rev()
+            .find(|line| !line.code.is_empty())
+            .filter(|line| line.code.ends_with(':'))
+            .map(|_| Block::Body),
+        _ => None,
     }
 }
 
@@ -221,12 +314,74 @@ mod tests {
     fn an_operation_signature_spans_lines_while_its_parentheses_are_open() {
         let text = "operation f(\n    x: A,  # first\n\n    y: B,\n) -> C\nz = f(a, b)\noperation g(\nw = g(z)\n";
         let layout = Layout::new(text);
-        assert_eq!(layout.statements, [0..5, 5..6, 6..7, 7..8]);
+        let lines: Vec<_> = layout.statements.iter().map(|s| s.lines.clone()).collect();
+        assert_eq!(lines, [0..5, 5..6, 6..7, 7..8]);
         assert_eq!(
-            layout.text(0..5),
+            layout.text(&layout.statements[0]),
             "operation f(\n    x: A,  \n\n    y: B,\n) -> C"
         );
         // An unclosed signature stops before a step, which is never part of one.
-        assert_eq!(layout.text(6..7), "operation g(");
+        assert_eq!(layout.text(&layout.statements[2]), "operation g(");
+    }
+
+    /// Each statement's parent and the block it opens, from indentation and
+    /// the statement's first word alone.
+    #[test]
+    fn blocks_come_from_indentation_and_the_opening_line() {
+        let text = "\
+source a : A [s]
+stage pre        # no colon, but a stage line opens a block
+    b = f(a)
+
+    stage inner:
+        c = f(b)
+    operation g(
+        x: A,
+    ) -> B:
+        y = f(x)
+        stage nested:
+            z = f(y)
+    d = f(c)
+operation h(x: A) -> B
+    e = f(a)
+stage post:
+    g = f(a)
+frob 1
+    k = f(g)
+";
+        let layout = Layout::new(text);
+        let shape: Vec<_> = layout
+            .statements
+            .iter()
+            .enumerate()
+            .filter(|(_, statement)| !statement.blank)
+            .map(|(index, statement)| (index, statement.parent, statement.opens))
+            .collect();
+        use super::Block::{Body, Stage};
+        assert_eq!(
+            shape,
+            [
+                (0, None, None),
+                (1, None, Some(Stage)),
+                (2, Some(1), None),
+                (4, Some(1), Some(Stage)),
+                (5, Some(4), None),
+                (6, Some(1), Some(Body)),
+                (7, Some(6), None),
+                // Nothing in a body opens a block.
+                (8, Some(6), None),
+                (9, Some(6), None),
+                (10, Some(1), None),
+                (11, None, None),
+                // An operation without a body opens none, so a line indented
+                // beneath it is at the top level.
+                (12, None, None),
+                (13, None, Some(Stage)),
+                (14, Some(13), None),
+                // A line that can start no statement closes no block.
+                (15, Some(13), None),
+                (16, Some(13), None),
+            ]
+        );
     }
 }

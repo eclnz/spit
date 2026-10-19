@@ -571,7 +571,7 @@ pub(crate) fn parse_located_document(
     path: &Path,
     kind: Kind,
 ) -> Result<ParsedDocument, ParseError> {
-    parse_located_document_recovering(text, path, kind).map_err(|errors| {
+    parse_located_document_recovering(text, path, kind, &FxHashSet::default()).map_err(|errors| {
         errors
             .into_iter()
             .next()
@@ -579,20 +579,22 @@ pub(crate) fn parse_located_document(
     })
 }
 
-/// As [`parse_located_document`], with every error that blanking each line
-/// the first names, one after the other, would find; see
+/// As [`parse_located_document`], with every error one parse finds, and
+/// the statements that start on a line in `skipped` left out; see
 /// [`parse_document_recovering`].
 pub(crate) fn parse_located_document_recovering(
     text: &str,
     path: &Path,
     kind: Kind,
+    skipped: &FxHashSet<usize>,
 ) -> Result<ParsedDocument, Vec<ParseError>> {
     let root = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
     let base = root.parent().map_or_else(PathBuf::new, Path::to_path_buf);
     let name = root
         .file_name()
         .map_or_else(String::new, |name| name.to_string_lossy().into_owned());
-    parse_document_at_inner(text, &root, &base, &mut vec![root.clone()], kind).map_err(|errors| {
+    let mut stack = vec![root.clone()];
+    parse_document_at_inner(text, &root, &base, &mut stack, kind, skipped).map_err(|errors| {
         errors
             .into_iter()
             .map(|error| named_in(error, &name))
@@ -609,6 +611,7 @@ fn parse_document_at_inner(
     base: &Path,
     stack: &mut Vec<PathBuf>,
     kind: Kind,
+    skipped: &FxHashSet<usize>,
 ) -> Result<ParsedDocument, Vec<ParseError>> {
     let text = without_bom(raw);
     let mut files = vec![SourceFile {
@@ -632,7 +635,7 @@ fn parse_document_at_inner(
         &mut file_texts,
     )
     .map_err(|error| vec![error])?;
-    let mut document = parse_document_recovering(text, &imports, kind)?;
+    let mut document = parse_document_recovering(text, &imports, kind, skipped)?;
     if let Some((root, _)) = &mut document.pipeline.root {
         *root = path.parent().unwrap_or_else(|| Path::new("")).join(&*root);
     }
@@ -690,17 +693,23 @@ fn read_imports(
             )
         })?;
         stack.push(canonical.clone());
-        let module =
-            parse_document_at_inner(&imported_text, &canonical, base, stack, Kind::Pipeline)
-                .map_err(|errors| {
-                    let at = ImportedAt {
-                        number,
-                        use_line: line.text,
-                        spec_path: &rebase(&spec.path, ""),
-                        text: &imported_text,
-                    };
-                    in_import(&errors[0], at, |file| rebase(&spec.path, file))
-                });
+        let module = parse_document_at_inner(
+            &imported_text,
+            &canonical,
+            base,
+            stack,
+            Kind::Pipeline,
+            &FxHashSet::default(),
+        )
+        .map_err(|errors| {
+            let at = ImportedAt {
+                number,
+                use_line: line.text,
+                spec_path: &rebase(&spec.path, ""),
+                text: &imported_text,
+            };
+            in_import(&errors[0], at, |file| rebase(&spec.path, file))
+        });
         stack.pop();
         let module = module?;
         let rebased = |file: &str| rebase(&spec.path, file);

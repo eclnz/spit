@@ -8,12 +8,12 @@ use rustc_hash::FxHashSet;
 use crate::parser::{parse_use, Keyword, Layout, Line, UseSpec};
 use crate::{ParseError, ParseErrorKind};
 
-/// Blank the lines that failed, preserving all later line numbers. This
-/// lets the existing parser continue to report errors on other lines without
+/// Read on past the statements that fail, preserving all later line
+/// numbers. This lets the parser report errors on other lines without
 /// changing the fail-fast parsing API used by the CLI and library callers.
 pub(super) fn recover_parse_errors<T>(
     text: &str,
-    parse: impl Fn(&str) -> Result<T, Vec<ParseError>>,
+    parse: impl Fn(&str, &FxHashSet<usize>) -> Result<T, Vec<ParseError>>,
 ) -> Result<T, Vec<ParseError>> {
     let (parsed, errors) = recover_document(text, parse);
     match parsed {
@@ -25,20 +25,26 @@ pub(super) fn recover_parse_errors<T>(
 /// Keep the independently parseable declarations for editor information,
 /// while retaining every error for callers that require a valid document.
 ///
-/// Each parse gives the errors that blanking the line of the first, and then
-/// of the next, would find one after the other, so that its time is not paid
-/// again for each of them. They are taken in order, each as if the lines
-/// before it were already blank.
+/// `parse` reads a text with some lines blanked, passing over the
+/// statements that start on the lines it is given (`parse_flow`). Each
+/// parse gives errors, and the statements they are on are then left out:
+/// a statement that opens a block holding lines is passed over, so that the
+/// block keeps its lines, and any other is blanked. Parsing again finds the
+/// errors those hid, until a parse finds none.
 pub(crate) fn recover_document<T>(
     text: &str,
-    parse: impl Fn(&str) -> Result<T, Vec<ParseError>>,
+    parse: impl Fn(&str, &FxHashSet<usize>) -> Result<T, Vec<ParseError>>,
 ) -> (Option<T>, Vec<ParseError>) {
     let layout = Layout::new(text);
-    // A signature is one declaration even when its error names a port line.
-    let mut signatures = vec![None; layout.lines.len()];
-    for lines in &layout.statements {
-        if lines.len() > 1 {
-            signatures[lines.clone()].fill(Some((lines.start, lines.end)));
+    // For each line, the statement it is in; a signature is one declaration
+    // even when its error names a port line.
+    let mut statement_of = vec![0; layout.lines.len()];
+    // For each statement, whether a block it opens holds lines.
+    let mut holds = vec![false; layout.statements.len()];
+    for (index, statement) in layout.statements.iter().enumerate() {
+        statement_of[statement.lines.clone()].fill(index);
+        if let Some(parent) = statement.parent {
+            holds[parent] = true;
         }
     }
     let mut recovered = layout
@@ -57,26 +63,38 @@ pub(crate) fn recover_document<T>(
             range
         })
         .collect();
+    let mut skipped = FxHashSet::default();
     let mut errors = Vec::new();
     let mut failures = Failures::new(&layout.lines);
     loop {
-        let found = match parse(&recovered) {
+        let found = match parse(&recovered, &skipped) {
             Ok(parsed) => return (Some(parsed), errors),
             Err(found) => found,
         };
         for error in found {
-            let Some(range) = error
+            let Some(index) = error
                 .line()
                 .checked_sub(1)
-                .and_then(|index| ranges.get(index))
-                .filter(|range| !recovered[(*range).clone()].trim().is_empty())
+                .filter(|&index| index < layout.lines.len())
             else {
                 errors.push(error);
                 return (None, errors);
             };
-            recovered.replace_range(range.clone(), &" ".repeat(range.len()));
-            if let Some((start, end)) = signatures[error.line() - 1] {
-                for range in &ranges[start..end] {
+            let statement = statement_of[index];
+            let lines = layout.statements[statement].lines.clone();
+            // A statement left out already that fails again would fail on
+            // every parse.
+            let left_out = if holds[statement] {
+                !skipped.insert(lines.start + 1)
+            } else {
+                recovered[ranges[index].clone()].trim().is_empty()
+            };
+            if left_out {
+                errors.push(error);
+                return (None, errors);
+            }
+            if !holds[statement] {
+                for range in &ranges[lines] {
                     recovered.replace_range(range.clone(), &" ".repeat(range.len()));
                 }
             }

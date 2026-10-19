@@ -20,6 +20,8 @@ pub(crate) use entities::EntitiesDeclaration;
 use std::fmt;
 use std::ops::Range;
 
+use rustc_hash::FxHashSet;
+
 use crate::model::{
     CheckDef, CommandDef, CommandRole, CoverageRule, DefaultChecks, DirectoryDiscovery, Invocation,
     OperationDef, ProductDef, StepOutput,
@@ -165,14 +167,10 @@ impl ParseError {
 pub(crate) struct Syntax {
     /// Every statement read, up to where parsing stopped.
     pub(crate) statements: Vec<Statement>,
-    /// Each line that does not parse, with how many statements were read
-    /// before it, so that lowering can report errors in the order that
-    /// blanking the lines one at a time would. A line that fails leaves the
-    /// parse as it was, as if the line were blank, and reading goes on; it
-    /// stops at an error after which a blank line would read differently.
-    /// Keep in step with `lower` in `src/lower/mod.rs`, which orders them
-    /// among the statements' own errors, and with `recover_document` in
-    /// `src/diagnostics/recovery.rs`, which blanks the lines they name.
+    /// Each statement that does not parse, with how many statements were
+    /// read before it, so that lowering can report errors in the order of
+    /// their lines. Keep in step with `lower` in `src/lower/mod.rs`, which
+    /// orders them among the statements' own errors.
     pub(crate) errors: Vec<(usize, ParseError)>,
 }
 
@@ -181,17 +179,6 @@ pub(crate) struct Statement {
     /// The statement's line content, for errors about it as a whole.
     pub(crate) place: Place,
     pub(crate) kind: StatementKind,
-    /// Reading the statement's line changed how a later line reads, beyond
-    /// adding the statement: it closed a stage that the later line is
-    /// indented beneath, fixed the indentation of a stage's lines that
-    /// the later line does not share, or ended a body that the later line
-    /// is indented beneath. A blank line would not, so a failing statement
-    /// that did this cannot be passed over as if its line were blank. The
-    /// parser marks it when it reads the later line (`parse_flow` and
-    /// `flow_rest` in `src/parser/flow.rs`), and for the header of an
-    /// operation with a body, which blanking would leave to its steps, when
-    /// it closes or fixes a stage at all.
-    pub(crate) stateful: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -273,9 +260,10 @@ pub(crate) enum Kind {
     Recipe,
 }
 
-/// Parse a pipeline's statements.
-pub(crate) fn parse_syntax(text: &str) -> Syntax {
-    parse_flow(text)
+/// Parse a pipeline's statements, passing over those that start on a line
+/// in `skipped` (see [`parse_flow`]).
+pub(crate) fn parse_syntax(text: &str, skipped: &FxHashSet<usize>) -> Syntax {
+    parse_flow(text, skipped)
 }
 
 impl StatementKind {
@@ -353,7 +341,11 @@ impl Syntax {
         self.statements.push(Statement {
             place: Place::new(number, content_columns(original)),
             kind,
-            stateful: false,
         });
+    }
+
+    /// Record `error`, from a statement that did not parse.
+    fn fail(&mut self, error: ParseError) {
+        self.errors.push((self.statements.len(), error));
     }
 }

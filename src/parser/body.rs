@@ -20,27 +20,18 @@ pub(super) struct OpenBody {
     /// The header line, and its number.
     text: String,
     number: usize,
-    /// The indentation of the header.
-    header: usize,
     /// The indentation the body's steps share, once the first is read.
     body: Option<usize>,
-    /// The header closed a stage, or fixed the indentation of a stage's
-    /// lines, which a blank line would not.
-    moved_stages: bool,
 }
 
 impl OpenBody {
-    /// Open the body of `operation`, declared on line `number`, `original`,
-    /// at `indent`. `moved_stages` says that the header closed a stage, or
-    /// fixed the indentation of a stage's lines.
+    /// Open the body of `operation`, declared on line `number`, `original`.
     pub(super) fn open(
         operation: OperationDef,
         place: Place,
         stage: Option<String>,
         original: &str,
         number: usize,
-        indent: usize,
-        moved_stages: bool,
     ) -> Self {
         Self {
             operation,
@@ -48,15 +39,8 @@ impl OpenBody {
             stage,
             text: original.to_owned(),
             number,
-            header: indent,
             body: None,
-            moved_stages,
         }
-    }
-
-    /// Whether a line indented by `indent` belongs to the body.
-    pub(super) fn holds(&self, indent: usize) -> bool {
-        indent > self.header
     }
 
     /// Read a step of the body, `line` being the content of `original`.
@@ -68,6 +52,12 @@ impl OpenBody {
         indent: usize,
     ) -> Result<(), ParseError> {
         let name = &self.operation.name;
+        if Keyword::split(line).is_some() || !line.contains('=') {
+            return Err(ParseError::new(
+                number,
+                format!("the body of operation `{name}` holds only steps, each `output = operation(inputs)`; declare operations, checks and paths outside it"),
+            ));
+        }
         match self.body {
             None => {}
             Some(body) if body == indent => {}
@@ -80,15 +70,9 @@ impl OpenBody {
                 ))
             }
         }
-        if Keyword::split(line).is_some() || !line.contains('=') {
-            return Err(ParseError::new(
-                number,
-                format!("the body of operation `{name}` holds only steps, each `output = operation(inputs)`; declare operations, checks and paths outside it"),
-            ));
-        }
         let (invocation, outputs) = parse_flow_step(line, number)?;
         let place = step_place(original, number, &invocation).call();
-        // A step that fails leaves the body as it was, as a blank line would.
+        // The first step that parses fixes how far the steps are indented.
         self.body = Some(indent);
         self.operation.steps.push(BodyStep {
             invocation,
@@ -96,11 +80,6 @@ impl OpenBody {
             place,
         });
         Ok(())
-    }
-
-    /// The indentation of the header.
-    pub(super) fn header_indent(&self) -> usize {
-        self.header
     }
 
     /// The header line, for locating an error in it.
@@ -121,9 +100,6 @@ impl OpenBody {
             self.number,
             StatementKind::Operation(self.operation, self.place, self.stage, ended),
         );
-        if let Some(statement) = syntax.statements.last_mut() {
-            statement.stateful = self.moved_stages;
-        }
         Ok(())
     }
 }
