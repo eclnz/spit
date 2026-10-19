@@ -28,7 +28,7 @@ A statement opens a block if it looks like one from the surface: `stage …:`, `
 ## Steps
 
 1. [x] **Physical lines** (`65de752`). Added `Layout` with each line's indent, code, comment and `Head`. Moved `read_imports`, `header_lines`, `check_input_lines`, `split_document`, `parse_inventory_with_lines`, `builtin_words`, `operation_lines` and recovery's line reading onto it, and removed `Keyword::of`. Each reader keeps its own rules where they differed, such as the two `is_step`s. Output is byte-for-byte the same as `dev` on every example and fixture. `parse_flow` and `body.rs` still read logical lines themselves; steps 2 and 3 move them. `split_document` and `parse_inventory_with_lines` each build a layout of their own text for now; sharing one layout per document comes with step 2.
-2. [ ] **Logical statements.** Join lines in `Layout`, keeping today's rule (an `operation` with open parentheses), and delete `continuation.rs` and recovery's `signatures`. Nothing a user sees changes.
+2. [x] **Logical statements.** `Layout::statements` groups the lines into statements, keeping today's rule (an `operation` with open parentheses). `parse_flow` and recovery's `signatures` read them, and `continuation.rs` is gone. Nothing a user sees changes. Each reader still builds a layout of the text it is given: `split_document` passes the parser a copy with the records blanked, and recovery reparses a blanked copy after each error. One layout per document comes with step 4, once recovery no longer reparses.
 3. [ ] **Block tree.** Build stages and operation bodies in `Layout`, and have `parse_flow` walk them in place of `Open` and `OpenStages`. Nothing changes for a valid file.
 4. [ ] **Structure before content.** Remove `stateful`, `Failure::clean`, `defer_parse_errors`, the watches in `parse_flow` and, for pipelines, the reparse loop in `recover_document`. This changes recovery on purpose: a `stage` line with lines indented beneath it opens a block whatever its content. Review each changed expectation in `tests/syntax_errors.rs` and `tests/diagnostics.rs` rather than re-saving them all.
 5. [ ] **The language changes in #130.** With the structure settled first, these become mostly rules in `Layout`.
@@ -39,4 +39,4 @@ Each step runs the checks in `AGENTS.md`, including `profiling/bench.py pipeline
 
 - A multi-line statement's text: keep it as one slice of the original text, newlines and comments included, and have content parsers treat a newline as a space and strip comments line by line. This would replace the joined `Cow` and the address arithmetic in `ParseError::locate`.
 - Whether to separate syntax nodes from model types (`ProductDef` and others in `StatementKind`). This is only needed for a formatter, not for #130.
-- Whether the two `is_step`s should become one. Merging them changes how some unusual lines are read, so it belongs in its own commit with its own tests.
+- The two `is_step`s become one `Head::Step`: eclnz/spit#131.

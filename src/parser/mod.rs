@@ -3,7 +3,6 @@
 mod body;
 mod check;
 mod command;
-mod continuation;
 mod declarations;
 mod entities;
 mod flow;
@@ -31,7 +30,6 @@ use crate::span::{address_of, columns_at, content_columns, Focus, Located, Place
 use self::flow::parse_flow;
 
 pub(crate) use self::body::empty_body;
-pub(crate) use self::continuation::operation_lines;
 pub(crate) use self::declarations::{parse_use, ExcludeLine, UseSpec};
 pub use self::inventory::parse_source_inventory;
 pub(crate) use self::inventory::{source_record_lines, split_document};
