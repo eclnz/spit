@@ -16,6 +16,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use rustc_hash::FxHashSet;
+
 use crate::command::collect_commands;
 use crate::compile::collect_pipeline;
 use crate::imports::parse_located_document_recovering;
@@ -63,10 +65,10 @@ impl<'a> Context<'a> {
 
     /// Parse a pipeline in this context: with its imports resolved from its
     /// path, and its recipe checked and applied.
-    fn parse(&self, text: &str) -> Result<Parsed, Vec<ParseError>> {
+    fn parse(&self, text: &str, skipped: &FxHashSet<usize>) -> Result<Parsed, Vec<ParseError>> {
         let mut document = match self.path {
-            Some(path) => parse_located_document_recovering(text, path, Kind::Pipeline)?,
-            None => parse_document_recovering(text, &BTreeMap::new(), Kind::Pipeline)?,
+            Some(path) => parse_located_document_recovering(text, path, Kind::Pipeline, skipped)?,
+            None => parse_document_recovering(text, &BTreeMap::new(), Kind::Pipeline, skipped)?,
         };
         let Some(recipe) = self.recipe else {
             return Ok(Parsed {
@@ -168,10 +170,12 @@ pub fn diagnose_in(text: &str, source_text: Option<&str>, context: Context<'_>) 
 /// a recipe adds.
 pub fn diagnose_checked(text: &str, context: Context<'_>) -> Diagnosis {
     let text = without_bom(text);
-    let parsed = recover_parse_errors(text, |text| context.parse(text)).map_err(|errors| {
-        let diagnostics = located_all(DiagnosticSource::Pipeline, errors, text);
-        finish(diagnostics.collect(), text, None)
-    })?;
+    let parsed = recover_parse_errors(text, |text, skipped| context.parse(text, skipped)).map_err(
+        |errors| {
+            let diagnostics = located_all(DiagnosticSource::Pipeline, errors, text);
+            finish(diagnostics.collect(), text, None)
+        },
+    )?;
     let warnings = check_document(&parsed.document, text, None)?;
     Ok(parsed.checked(finish(warnings, text, None)))
 }
@@ -191,8 +195,8 @@ pub fn diagnose_checked_with_records(
 ) -> Diagnosis<(Checked, Records)> {
     let (text, records) = (without_bom(text), without_bom(records));
     let parsed = (
-        recover_parse_errors(text, |text| context.parse(text)),
-        recover_parse_errors(records, |records| {
+        recover_parse_errors(text, |text, skipped| context.parse(text, skipped)),
+        recover_parse_errors(records, |records, _| {
             parse_source_inventory(records).map_err(|error| vec![error])
         }),
     );
@@ -249,7 +253,7 @@ pub fn diagnose_checked_with_inventory(
     context: Context<'_>,
 ) -> Option<(Checked, Records)> {
     let text = without_bom(text);
-    let parsed = recover_parse_errors(text, |text| context.parse(text)).ok()?;
+    let parsed = recover_parse_errors(text, |text, skipped| context.parse(text, skipped)).ok()?;
     let document = &parsed.document;
     let no_rules = InputRules::default();
     let rules = context.recipe.map_or(&no_rules, |recipe| &recipe.rules);

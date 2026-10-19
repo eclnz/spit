@@ -5,7 +5,7 @@
 
 use std::collections::BTreeMap;
 
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 mod entities;
 mod expand;
@@ -293,10 +293,10 @@ impl PipelineBuilder {
     }
 }
 
-/// A statement that did not lower. Keep in step with `parse_flow` in
-/// `src/parser/flow.rs`, whose lines change what later lines mean only once
-/// they succeed: a statement that may be passed over as a blank line is one
-/// that did not change the builder and is not `stateful`.
+/// A statement that did not lower. Lowering goes on past one that left the
+/// builder as it was, as the statements after it read the same without it,
+/// and stops at one that may not have, for error recovery to parse the
+/// document again without it.
 pub(crate) struct Failure {
     /// Boxed, so that `Result` stays small where a statement succeeds.
     pub(crate) error: Box<ParseError>,
@@ -326,12 +326,11 @@ impl From<ParseError> for Failure {
 }
 
 /// Lower each statement in order, with `imports` holding the definitions
-/// each `use` line brings in, by line. The errors are those that blanking
-/// the line of the first, and then of the next, would find, one after the
-/// other: the syntax errors parsing found, and the statements that fail,
-/// in the order they were read. Lowering goes on past a statement that
-/// failed without changing the builder, and stops at one that may have, as
-/// blanking its line would not leave the later statements reading the same.
+/// each `use` line brings in, by line. The errors are the syntax errors
+/// parsing found and the statements that fail, in the order they were read.
+/// Lowering goes on past a statement that failed without changing the
+/// builder, as the later statements read the same without it, and stops at
+/// one that may have, for error recovery to parse again without it.
 pub(crate) fn lower(
     syntax: &Syntax,
     imports: &BTreeMap<usize, Pipeline>,
@@ -340,12 +339,9 @@ pub(crate) fn lower(
     let mut builder = PipelineBuilder::default();
     let mut errors = Vec::new();
     let mut parsing = syntax.errors.iter().peekable();
-    let mut defer_parse_errors = false;
     for (index, statement) in syntax.statements.iter().enumerate() {
         while let Some((_, error)) = parsing.next_if(|(read, _)| *read <= index) {
-            if !defer_parse_errors {
-                errors.push(error.clone());
-            }
+            errors.push(error.clone());
         }
         let rule = matches!(
             statement.kind,
@@ -361,24 +357,14 @@ pub(crate) fn lower(
         };
         if let Err(failure) = lowered {
             let error = failure.error.within(&statement.place);
-            // Diagnose later statements in the original parse even when
-            // blanking this line would change their parse. Recovery will
-            // blank the reported lines and parse that interpretation next.
             let goes_on = failure.clean && error.line() == statement.place.line;
-            if goes_on && statement.stateful {
-                // These syntax errors may disappear when recovery blanks the
-                // failed line. Read them on the next pass instead.
-                defer_parse_errors = true;
-            }
             errors.push(error);
             if !goes_on {
                 return Err(errors);
             }
         }
     }
-    if !defer_parse_errors {
-        errors.extend(parsing.map(|(_, error)| error.clone()));
-    }
+    errors.extend(parsing.map(|(_, error)| error.clone()));
     if !errors.is_empty() {
         return Err(errors);
     }
@@ -603,17 +589,10 @@ fn lower_body(
     let StatementKind::Operation(operation, place, stage, ended) = &statement.kind else {
         unreachable!("an operation is lowered from an operation statement");
     };
-    let BodyCheck { mut failed, unmade } = builder
+    let BodyCheck { failed, unmade } = builder
         .check_body(operation, place)
         .map_err(Failure::from)?;
     let all_failed = failed.len() == operation.steps.len();
-    if all_failed && statement.stateful {
-        // Were the header blank, the lines after it would not read the same.
-        // The next parse reads the body with no steps.
-        let (_, last) = failed.pop().expect("a body has a step");
-        errors.extend(failed.into_iter().map(|(_, error)| error));
-        return Err(Failure::from(last));
-    }
     let mut kept = operation.clone();
     if !failed.is_empty() {
         let mut position = 0;
@@ -694,7 +673,7 @@ pub(crate) fn parse_document_with_imports(
     imports: &BTreeMap<usize, Pipeline>,
     kind: Kind,
 ) -> Result<ParsedDocument, ParseError> {
-    parse_document_recovering(text, imports, kind).map_err(|errors| {
+    parse_document_recovering(text, imports, kind, &FxHashSet::default()).map_err(|errors| {
         errors
             .into_iter()
             .next()
@@ -702,17 +681,18 @@ pub(crate) fn parse_document_with_imports(
     })
 }
 
-/// As [`parse_document_with_imports`], giving every error that blanking
-/// each line the first names, one after the other, would find: the first is
-/// the error the other gives, and each of the rest comes only where blanking
-/// the lines of those before it would not change what it is.
+/// As [`parse_document_with_imports`], giving every error one parse finds:
+/// the first is the error the other gives, and each of the rest is one that
+/// leaving out the statements of those before it would not change. The
+/// statements that start on a line in `skipped` are left out (`parse_flow`).
 pub(crate) fn parse_document_recovering(
     text: &str,
     imports: &BTreeMap<usize, Pipeline>,
     kind: Kind,
+    skipped: &FxHashSet<usize>,
 ) -> Result<ParsedDocument, Vec<ParseError>> {
     let document = split_document(text);
-    let lowered = lower(&parse_syntax(&document.pipeline), imports, kind);
+    let lowered = lower(&parse_syntax(&document.pipeline, skipped), imports, kind);
     let inventory = match (kind, document.inventory_line) {
         (_, None) => None,
         (Kind::Recipe, Some(_)) => {
