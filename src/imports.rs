@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 mod located;
 
 use crate::blob::git_blob_id;
-use crate::lower::{parse_document_recovering, Failure, ParsedDocument, PipelineBuilder};
+use crate::lower::{parse_document_recovering, ParsedDocument, PipelineBuilder};
 use crate::model::{
     CheckDef, CheckUse, CommandDef, CommandRole, OperationDef, Pipeline, PipelineIndex, ProductDef,
     SidecarGroup, SourceFile,
@@ -20,28 +20,28 @@ pub(crate) use located::relative_path;
 use located::{in_import, named_in, rebase, ImportedAt};
 
 /// Merge what the `use` line at `place` imports into `builder`. An import
-/// that fails for what it brings in, before it has changed anything, leaves
-/// the builder as a blank line would.
+/// that fails for what it brings in fails before it changes anything, so
+/// the builder is left as it was.
 pub(crate) fn apply_import(
     builder: &mut PipelineBuilder,
     imports: &BTreeMap<usize, Pipeline>,
     place: &Place,
-) -> Result<(), Failure> {
+) -> Result<(), ParseError> {
     let line = place.line;
     let pipeline = &mut builder.pipeline;
     let imported = imports.get(&line).ok_or_else(|| {
-        Failure::clean(ParseError::new(
+        ParseError::new(
             line,
             "imports require a document path; use parse_pipeline_at",
-        ))
+        )
     })?;
     for ((kind, existing), (_, imported)) in defined(pipeline).into_iter().zip(defined(imported)) {
         let existing: FxHashSet<_> = existing.into_iter().collect();
         if let Some(name) = imported.into_iter().find(|name| existing.contains(name)) {
-            return Err(Failure::clean(ParseError::new(
+            return Err(ParseError::new(
                 line,
                 format!("import conflicts with {kind} `{name}`"),
-            )));
+            ));
         }
     }
     // Two imports may bring the same check, which is one check; a
@@ -57,10 +57,10 @@ pub(crate) fn apply_import(
         match existing {
             Some(existing) if existing == check => {}
             Some(_) => {
-                return Err(Failure::clean(ParseError::new(
+                return Err(ParseError::new(
                     line,
                     format!("import conflicts with check `{}`", check.name),
-                )))
+                ))
             }
             None => new_checks.push(check),
         }
@@ -86,7 +86,7 @@ pub(crate) fn apply_import(
     for operation in &imported.operations {
         builder
             .add_operation(operation.clone(), place.clone(), None)
-            .map_err(Failure::from)?;
+            .expect("an imported operation conflicting with one already declared is found above");
     }
     let lines = &mut builder.lines;
     lines.imported.extend(

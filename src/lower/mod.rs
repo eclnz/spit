@@ -54,15 +54,40 @@ pub(crate) struct PipelineBuilder {
     /// Each product a call made for itself, with the call and the operation
     /// it calls, which steps written in the pipeline may not read.
     intermediates: FxHashMap<String, CallId>,
+    /// While a flow step is added, what each map entry it wrote held
+    /// before, so that a step that fails leaves the builder as it was
+    /// (`add_flow_step`). Keep in step with every map a step writes.
+    journal: Option<Vec<Undo>>,
+}
+
+/// A map entry a flow step wrote, and what it held before.
+enum Undo {
+    Output(String, Option<Output>),
+    ProductPlace(String, Option<Place>),
+    ProductId(String),
+    Invocation(String, Option<Step>),
+    Intermediate(String, Option<CallId>),
 }
 
 impl PipelineBuilder {
     pub(crate) fn add_product(&mut self, product: ProductDef, place: Place) {
-        self.lines.products.insert(product.name.clone(), place);
-        self.product_ids
-            .entry(product.name.clone())
-            .or_insert(ProductId::at(self.pipeline.products.len()));
+        let before = self.lines.products.insert(product.name.clone(), place);
+        self.record(|| Undo::ProductPlace(product.name.clone(), before));
+        if !self.product_ids.contains_key(&product.name) {
+            self.product_ids.insert(
+                product.name.clone(),
+                ProductId::at(self.pipeline.products.len()),
+            );
+            self.record(|| Undo::ProductId(product.name.clone()));
+        }
         self.pipeline.products.push(product);
+    }
+
+    /// Note `undo` while a flow step is added.
+    fn record(&mut self, undo: impl FnOnce() -> Undo) {
+        if let Some(journal) = &mut self.journal {
+            journal.push(undo());
+        }
     }
 
     /// Add `operation`, declared at `place` in `stage`, unless an operation
@@ -129,7 +154,8 @@ impl PipelineBuilder {
 
     fn add_invocation(&mut self, invocation: Invocation, step: &Step) {
         for output in &invocation.outputs {
-            self.lines.invocations.insert(output.clone(), step.clone());
+            let before = self.lines.invocations.insert(output.clone(), step.clone());
+            self.record(|| Undo::Invocation(output.clone(), before));
         }
         self.pipeline.invocations.push(invocation);
     }
@@ -146,7 +172,7 @@ impl PipelineBuilder {
     }
 
     /// Add a path rule. A rule that repeats one already given fails before
-    /// it changes anything, as a blank line would leave the builder.
+    /// it changes anything.
     fn add_path(&mut self, rule: &PathRule, line: usize) -> Result<(), ParseError> {
         let Self {
             pipeline, lines, ..
@@ -214,7 +240,7 @@ impl PipelineBuilder {
     }
 
     /// Add a `check:` list. One that repeats the list already given fails
-    /// before it changes anything, as a blank line would leave the builder.
+    /// before it changes anything.
     fn add_default_checks(
         &mut self,
         stage: Option<&str>,
@@ -276,7 +302,8 @@ impl PipelineBuilder {
             } else {
                 Output::Inferred
             };
-            self.outputs.insert(output.name.clone(), declared);
+            let before = self.outputs.insert(output.name.clone(), declared);
+            self.record(|| Undo::Output(output.name.clone(), before));
             let product = ProductDef::new(
                 output.name.clone(),
                 output.artifact_type.clone().unwrap_or(TypeExpr::Unknown),
@@ -296,44 +323,11 @@ impl PipelineBuilder {
     }
 }
 
-/// A statement that did not lower. Lowering goes on past one that left the
-/// builder as it was, as the statements after it read the same without it,
-/// and stops at one that may not have, for error recovery to parse the
-/// document again without it.
-pub(crate) struct Failure {
-    /// Boxed, so that `Result` stays small where a statement succeeds.
-    pub(crate) error: Box<ParseError>,
-    /// It left the builder as it was before the statement, as a blank line
-    /// would, and its error is on the statement's own line.
-    pub(crate) clean: bool,
-}
-
-impl Failure {
-    pub(crate) fn clean(error: ParseError) -> Self {
-        Self {
-            error: Box::new(error),
-            clean: true,
-        }
-    }
-}
-
-/// An error from a statement that may have changed the builder before it
-/// failed, unless it says it did not.
-impl From<ParseError> for Failure {
-    fn from(error: ParseError) -> Self {
-        Self {
-            error: Box::new(error),
-            clean: false,
-        }
-    }
-}
-
 /// Lower each statement in order, with `imports` holding the definitions
 /// each `use` line brings in, by line. The errors are the syntax errors
 /// parsing found and the statements that fail, in the order they were read.
-/// Lowering goes on past a statement that failed without changing the
-/// builder, as the later statements read the same without it, and stops at
-/// one that may have, for error recovery to parse again without it.
+/// A statement is lowered whole or not at all, so lowering goes on past
+/// every one that fails.
 pub(crate) fn lower(
     syntax: &Syntax,
     imports: &BTreeMap<usize, Pipeline>,
@@ -351,20 +345,17 @@ pub(crate) fn lower(
             StatementKind::Discover(_) | StatementKind::Constraint(..) | StatementKind::Exclude(..)
         );
         let lowered = if rule && kind == Kind::Pipeline {
-            Err(Failure::clean(ParseError::new(
+            Err(ParseError::new(
                 statement.place.line,
                 "`discover`, `require` and `exclude` rules belong in a .spitin recipe, not a pipeline",
-            )))
+            ))
         } else {
             lower_statement(&mut builder, imports, statement, &mut errors)
         };
-        if let Err(failure) = lowered {
-            let error = failure.error.within(&statement.place);
-            let goes_on = failure.clean && error.line() == statement.place.line;
-            errors.push(error);
-            if !goes_on {
-                return Err(errors);
-            }
+        // A statement that fails leaves the builder as it was, so lowering
+        // goes on, and the statements after it read as they would without it.
+        if let Err(error) = lowered {
+            errors.push(error.within(&statement.place));
         }
     }
     errors.extend(parsing.map(|(_, error)| error.clone()));
@@ -443,15 +434,15 @@ fn lower_statement(
     imports: &BTreeMap<usize, Pipeline>,
     statement: &Statement,
     errors: &mut Vec<ParseError>,
-) -> Result<(), Failure> {
+) -> Result<(), ParseError> {
     match &statement.kind {
         StatementKind::Import => apply_import(builder, imports, &statement.place)?,
         StatementKind::Root(root) => {
             if builder.pipeline.root.is_some() {
-                return Err(Failure::clean(ParseError::new(
+                return Err(ParseError::new(
                     statement.place.line,
                     "a .spit names its root once",
-                )));
+                ));
             }
             builder.pipeline.root = Some((root.clone(), statement.place.line));
         }
@@ -465,20 +456,20 @@ fn lower_statement(
                     .get(sibling)
                     .and_then(|&id| builder.pipeline.products.get(id.index()))
                     .ok_or_else(|| {
-                        Failure::clean(ParseError::new(
+                        ParseError::new(
                             place.line,
                             format!("source `{}` is beside unknown source `{sibling}`; declare `{sibling}` first", product.name),
-                        ))
+                        )
                     })?;
                 if anchor.beside.is_some()
                     || anchor.folder
                     || anchor.extension.is_none()
                     || builder.outputs.contains_key(sibling)
                 {
-                    return Err(Failure::clean(ParseError::new(
+                    return Err(ParseError::new(
                         place.line,
                         format!("source `{}` must be beside a file source with an extension, not `{sibling}`", product.name),
-                    )));
+                    ));
                 }
                 product.dimensions.clone_from(&anchor.dimensions);
                 if let Some(&number) = builder.sidecar_group_numbers.get(sibling) {
@@ -506,18 +497,16 @@ fn lower_statement(
         }
         StatementKind::Discover(discovery) => {
             if builder.inputs.discovery(&discovery.name).is_some() {
-                return Err(Failure::clean(ParseError::new(
+                return Err(ParseError::new(
                     statement.place.line,
                     format!("duplicate discovery `{}`", discovery.name),
-                )));
+                ));
             }
             builder.inputs.discoveries.push(discovery.clone());
         }
         StatementKind::Operation(operation, place, stage, _) => {
             if operation.steps.is_empty() {
-                return builder
-                    .add_operation(operation.clone(), place.clone(), stage.as_deref())
-                    .map_err(Failure::clean);
+                return builder.add_operation(operation.clone(), place.clone(), stage.as_deref());
             }
             lower_body(builder, statement, errors)?;
         }
@@ -547,31 +536,26 @@ fn lower_statement(
         }
         StatementKind::Dimensions(order) => {
             if builder.dimension_order.is_some() {
-                return Err(Failure::clean(ParseError::new(
+                return Err(ParseError::new(
                     statement.place.line,
                     "a pipeline has one `dimensions` line",
-                )));
+                ));
             }
             builder.dimension_order = Some((order.clone(), statement.place.clone()));
         }
-        StatementKind::Entities(declaration) => builder
-            .entities
-            .add(&mut builder.pipeline, declaration, &statement.place)
-            .map_err(Failure::clean)?,
-        StatementKind::Path(rule) => builder
-            .add_path(rule, statement.place.line)
-            .map_err(Failure::clean)?,
+        StatementKind::Entities(declaration) => {
+            builder
+                .entities
+                .add(&mut builder.pipeline, declaration, &statement.place)?
+        }
+        StatementKind::Path(rule) => builder.add_path(rule, statement.place.line)?,
         StatementKind::DefaultChecks {
             stage,
             checks,
             place,
-        } => builder
-            .add_default_checks(stage.as_deref(), checks, place)
-            .map_err(Failure::clean)?,
+        } => builder.add_default_checks(stage.as_deref(), checks, place)?,
         StatementKind::Extension { stage, extension } => {
-            builder
-                .add_extension(stage.as_deref(), extension, statement.place.line)
-                .map_err(Failure::clean)?;
+            builder.add_extension(stage.as_deref(), extension, statement.place.line)?;
         }
         StatementKind::FlowStep(flow) => builder.add_flow_step(flow)?,
     }
@@ -579,22 +563,20 @@ fn lower_statement(
 }
 
 /// Lower `statement`, an operation with a body. A step of the body that
-/// fails to check has its error given to `errors` and is left out, as
-/// blanking its line would leave it, and the steps after it are checked
-/// without it, so that a body with many bad steps is checked once. The
-/// operation is added with the steps that are left, and a body left with
-/// none is an error on the header, which is blank in the end.
+/// fails to check has its error given to `errors` and is left out, and the
+/// steps after it are checked without it, so that a body with many bad
+/// steps is checked once. The operation is added with the steps that are
+/// left, and a body left with none is an error on the header. Every
+/// failure comes before the builder changes.
 fn lower_body(
     builder: &mut PipelineBuilder,
     statement: &Statement,
     errors: &mut Vec<ParseError>,
-) -> Result<(), Failure> {
+) -> Result<(), ParseError> {
     let StatementKind::Operation(operation, place, stage, ended) = &statement.kind else {
         unreachable!("an operation is lowered from an operation statement");
     };
-    let BodyCheck { failed, unmade } = builder
-        .check_body(operation, place)
-        .map_err(Failure::from)?;
+    let BodyCheck { failed, unmade } = builder.check_body(operation, place)?;
     let all_failed = failed.len() == operation.steps.len();
     let mut kept = operation.clone();
     if !failed.is_empty() {
@@ -612,11 +594,9 @@ fn lower_body(
         return Ok(());
     }
     if let Some(error) = unmade {
-        return Err(Failure::from(error));
+        return Err(error);
     }
-    builder
-        .add_operation(kept, place.clone(), stage.as_deref())
-        .map_err(Failure::from)
+    builder.add_operation(kept, place.clone(), stage.as_deref())
 }
 
 /// The dimensions a flow step's undeclared outputs take: those of the input
