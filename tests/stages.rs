@@ -67,11 +67,15 @@ fn an_unindented_line_ends_a_stage() {
 }
 
 #[test]
-fn a_product_named_stage_is_still_a_step() {
+fn no_product_may_be_named_stage() {
     let text = "source raw [id]\noperation copy(a: A) -> A\nstage = copy(raw)\n";
-    let pipeline = parse_pipeline(text).unwrap();
-    assert!(pipeline.stages.is_empty());
-    assert_eq!(pipeline.invocations[0].outputs, ["stage"]);
+    let error = parse_pipeline(text).unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("`stage` is one of SPIT's keywords, so no product may take it as its name"),
+        "{error}"
+    );
 }
 
 #[test]

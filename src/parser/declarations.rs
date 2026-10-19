@@ -9,7 +9,9 @@ use crate::paths::{validate_discovery_rule, PathTemplate};
 use crate::types::{parse_type_expr, TypeExpr, TypeParseError};
 
 use super::check::{only_checks, split_clauses};
-use super::lexical::{call_parts, comma_items, identifier, qualified_identifier, split_ending};
+use super::lexical::{
+    call_parts, comma_items, identifier, product_name, qualified_identifier, split_ending,
+};
 use super::source_map::tail_place;
 use super::{ParseError, PathRule};
 
@@ -229,7 +231,7 @@ pub(super) fn parse_product(line: &str, number: usize) -> Result<ProductDef, Par
     } else {
         (named.trim(), TypeExpr::Unknown)
     };
-    let name = identifier(name, number, "product name").map_err(|error| {
+    let name = product_name(name, number, "product name").map_err(|error| {
         if dimensions.is_none() && name.split_whitespace().count() > 1 {
             ParseError::new(
                 number,

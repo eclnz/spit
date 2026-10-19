@@ -92,7 +92,7 @@ fn an_exclude_names_an_artifact_a_group_or_part_of_a_source() {
     assert_eq!(spec.rules.exclusions[1].reason, None);
 
     for (rule, message) in [
-        ("exclude\n", "expected source"),
+        ("exclude\n", "names a source, values"),
         ("exclude from\n", "expected"),
         ("exclude []\n", "names a source, values"),
         ("exclude bold[sub=02\n", "closing `]`"),

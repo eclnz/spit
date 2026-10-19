@@ -4,6 +4,8 @@ This manual defines valid `.spit` pipelines, `.spitin` recipes, and `.spitout` i
 
 A `#` that starts a word begins a comment, as in Bash. A `#` inside a word or in quotes is kept, so `--color=#fff` and `'#run'` are ordinary arguments.
 
+A line's first word says what it is, so the words that start statements are reserved: no product, whether a source or a step's output, may be named `use`, `root`, `source`, `discover`, `operation`, `command`, `verify`, `check`, `require`, `exclude`, `path`, `ext`, `default`, `entities`, `stage` or `dimensions`, nor `drop`, `skip`, `sidecars` or `shell-source`, which earlier versions read. `check = clean(raw)` is an error that says so.
+
 ## Keyword blocks
 
 A keyword alone with its `:` opens a block of its statements, each written on a line indented beneath it without the keyword. These read the same:
@@ -309,7 +311,7 @@ Lists add up. A step's outputs run the file's checks, then those of each stage a
 
 To run less than a wider list sets, write `!` before the check. In a stage, `default check: !nonempty` drops the file's `nonempty` for that stage's outputs and the stages in it, and a stage inside it may add it back. On an operation's output, `-> (empty_ok: Table @ check(!nonempty), rows: Table)` drops it for that output alone, wherever the operation is called. `!` names a check as written, `ndim(3)` included, and an output's own `@ check(nonempty)` is never dropped by it.
 
-A file or a stage has one `default check:` line. Its checks and the ones it drops must be declared checks, with the right number of arguments. A product may still be named `check`: `check = clean(raw)` and `check : Table [id] = clean(raw)` are steps. The `.spitdag` has no new fields: each default becomes a check on the artifact, after the job's command, beside the others, and `spit dag --commands` lists it as a `check:` line.
+A file or a stage has one `default check:` line. Its checks and the ones it drops must be declared checks, with the right number of arguments. The `.spitdag` has no new fields: each default becomes a check on the artifact, after the job's command, beside the others, and `spit dag --commands` lists it as a `check:` line.
 
 ## Defaults
 
@@ -333,7 +335,7 @@ stage preprocess:
 
 `default:` opens a block of them: each line indented beneath it is a `path:`, `ext:` or `check:` line, read as if `default` came before it, and nothing else belongs there. A default outside every stage covers the whole file, stages included; one inside a stage covers that stage and the stages nested in it. For a path or an extension the nearest one wins, and check lists add up. A file or a stage sets each default once, whether on its own line or in a block. In a `.spitin` recipe, `default path:` is the rule for sources with none of their own; `default ext:` and `default check:` belong in the pipeline.
 
-A `path:`, `ext:` or `check:` line without `default`, outside a `default:` block, is an error that says how to write it. A product may still be named `default`: `default = f(x)` is a step.
+A `path:`, `ext:` or `check:` line without `default`, outside a `default:` block, is an error that says how to write it.
 
 ## Stages
 

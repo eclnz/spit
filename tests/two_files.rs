@@ -88,7 +88,7 @@ fn a_recipe_line_that_belongs_in_the_pipeline_says_so_at_its_line() {
         ),
         (
             "(x, y) = f(a, b, c)",
-            "error: line 3, column 1: a step belongs in the .spit pipeline",
+            "error: line 3, column 1: invalid output product `(x, y)`",
         ),
         (
             "path out: x/{sub}.txt",

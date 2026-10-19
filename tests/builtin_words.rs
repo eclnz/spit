@@ -20,7 +20,8 @@ fn words_are_found_by_where_they_are_written() {
     let cases = [
         ("source image : Image [subject, visit]", "source", Some("source")),
         ("    stage clean:", "stage", Some("stage")),
-        ("stage = merge(sorted @ vary(part))", "stage", None),
+        // A keyword's word is reserved, so this is `stage`, and an error.
+        ("stage = merge(sorted @ vary(part))", "stage", Some("stage")),
         ("default path: results/{@product}/{@entities}.txt", "path", Some("path")),
         ("path image: input/{subject}.txt", "path", Some("path")),
         ("path image: input/{subject}.txt", "subject", None),
@@ -34,7 +35,7 @@ fn words_are_found_by_where_they_are_written() {
         ("discover y: [y] from dirs data/{y:year}", "year", Some("year")),
         ("command c: tool {x:date}", "date", None),
         ("default ext: .nii.gz", "ext", Some("ext")),
-        ("ext: Image = convert(dicom)", "ext", None),
+        ("ext: Image = convert(dicom)", "ext", Some("ext")),
         ("operation mean(images: many Image @ min(2)) -> Image", "many", Some("many")),
         ("operation mean(images: many Image @ min(2)) -> Image", "min", Some("min")),
         (
