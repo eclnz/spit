@@ -20,8 +20,6 @@ pub(crate) use entities::EntitiesDeclaration;
 use std::fmt;
 use std::ops::Range;
 
-use rustc_hash::FxHashSet;
-
 use crate::model::{
     CheckDef, CommandDef, CommandRole, CoverageRule, DefaultChecks, DirectoryDiscovery, Invocation,
     OperationDef, ProductDef, StepOutput,
@@ -34,7 +32,7 @@ use self::flow::parse_flow;
 pub(crate) use self::body::empty_body;
 pub(crate) use self::declarations::{parse_use, ExcludeLine, UseSpec};
 pub use self::inventory::parse_source_inventory;
-pub(crate) use self::inventory::{source_record_lines, split_document};
+pub(crate) use self::inventory::{parse_inventory_recovering, source_record_lines, split_document};
 pub(crate) use self::keyword::{Header, Keyword};
 pub(crate) use self::layout::{Block, Head, Layout, Line};
 pub(crate) use self::lexical::{glued_comment, strip_comment, without_bom};
@@ -260,10 +258,9 @@ pub(crate) enum Kind {
     Recipe,
 }
 
-/// Parse a pipeline's statements, passing over those that start on a line
-/// in `skipped` (see [`parse_flow`]).
-pub(crate) fn parse_syntax(text: &str, skipped: &FxHashSet<usize>) -> Syntax {
-    parse_flow(text, skipped)
+/// Parse a pipeline's statements.
+pub(crate) fn parse_syntax(text: &str) -> Syntax {
+    parse_flow(text)
 }
 
 impl StatementKind {

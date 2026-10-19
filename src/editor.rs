@@ -63,12 +63,9 @@ impl HoverKind {
 pub fn pipeline_hovers(text: &str, path: &Path) -> Vec<Hover> {
     let bom_column = usize::from(text.starts_with('\u{feff}'));
     let text = without_bom(text);
-    let (document, _) = recover_document(text, |text, skipped| {
-        parse_located_document_recovering(text, path, Kind::Pipeline, skipped)
+    let (document, _) = recover_document(text, |text| {
+        parse_located_document_recovering(text, path, Kind::Pipeline)
     });
-    let Some(document) = document else {
-        return Vec::new();
-    };
     let pipeline = &document.pipeline;
     let checked = collect_pipeline(pipeline);
     let steps = &checked.pipeline.steps;

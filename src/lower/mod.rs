@@ -5,7 +5,7 @@
 
 use std::collections::BTreeMap;
 
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashMap;
 
 mod entities;
 mod expand;
@@ -20,7 +20,7 @@ use crate::model::{
 };
 use crate::order::{order_dimensions, Output};
 use crate::parser::{
-    empty_body, parse_source_inventory, parse_syntax, split_document, without_bom, ExcludeLine,
+    empty_body, parse_inventory_recovering, parse_syntax, split_document, without_bom, ExcludeLine,
     Kind, ParseError, ParseErrorKind, PathRule, Rule, SourceMap, Statement, StatementKind, Step,
     Syntax,
 };
@@ -327,12 +327,13 @@ impl PipelineBuilder {
 /// each `use` line brings in, by line. The errors are the syntax errors
 /// parsing found and the statements that fail, in the order they were read.
 /// A statement is lowered whole or not at all, so lowering goes on past
-/// every one that fails.
+/// every one that fails, and the builder it gives holds every statement
+/// that did not.
 pub(crate) fn lower(
     syntax: &Syntax,
     imports: &BTreeMap<usize, Pipeline>,
     kind: Kind,
-) -> Result<PipelineBuilder, Vec<ParseError>> {
+) -> (PipelineBuilder, Vec<ParseError>) {
     let mut builder = PipelineBuilder::default();
     let mut errors = Vec::new();
     let mut parsing = syntax.errors.iter().peekable();
@@ -359,23 +360,22 @@ pub(crate) fn lower(
         }
     }
     errors.extend(parsing.map(|(_, error)| error.clone()));
-    if !errors.is_empty() {
-        return Err(errors);
-    }
-    check_bodies_have_no_commands(&builder).map_err(|error| vec![error])?;
-    check_source_beside_paths(&builder).map_err(|error| vec![error])?;
-    order_dimensions(
-        &mut builder.pipeline.products,
-        &builder.outputs,
-        builder.dimension_order.as_ref(),
-        &builder.lines,
-    )
-    .map_err(|error| vec![error])?;
-    builder
-        .entities
-        .validate(&builder.pipeline)
-        .map_err(|error| vec![error])?;
-    Ok(builder)
+    // The checks of the whole pipeline read what was lowered, without the
+    // statements that failed, as the pipeline would read once they are
+    // fixed or gone. Each gives its first error.
+    let checks = [
+        check_bodies_have_no_commands(&builder),
+        check_source_beside_paths(&builder),
+        order_dimensions(
+            &mut builder.pipeline.products,
+            &builder.outputs,
+            builder.dimension_order.as_ref(),
+            &builder.lines,
+        ),
+        builder.entities.validate(&builder.pipeline),
+    ];
+    errors.extend(checks.into_iter().filter_map(Result::err));
+    (builder, errors)
 }
 
 /// An operation with a body is carried out by its steps, so it takes no
@@ -656,42 +656,33 @@ pub(crate) fn parse_document_with_imports(
     imports: &BTreeMap<usize, Pipeline>,
     kind: Kind,
 ) -> Result<ParsedDocument, ParseError> {
-    parse_document_recovering(text, imports, kind, &FxHashSet::default()).map_err(|errors| {
-        errors
+    match parse_document_recovering(text, imports, kind) {
+        (document, errors) if errors.is_empty() => Ok(document),
+        (_, errors) => Err(errors
             .into_iter()
             .next()
-            .expect("a document that fails has an error")
-    })
+            .expect("a document that fails has an error")),
+    }
 }
 
-/// As [`parse_document_with_imports`], giving every error one parse finds:
-/// the first is the error the other gives, and each of the rest is one that
-/// leaving out the statements of those before it would not change. The
-/// statements that start on a line in `skipped` are left out (`parse_flow`).
+/// As [`parse_document_with_imports`], in one parse: the document, without
+/// the statements that fail, and every error, the first being the error the
+/// other gives.
 pub(crate) fn parse_document_recovering(
     text: &str,
     imports: &BTreeMap<usize, Pipeline>,
     kind: Kind,
-    skipped: &FxHashSet<usize>,
-) -> Result<ParsedDocument, Vec<ParseError>> {
+) -> (ParsedDocument, Vec<ParseError>) {
     let document = split_document(text);
-    let lowered = lower(&parse_syntax(&document.pipeline, skipped), imports, kind);
+    let (builder, mut errors) = lower(&parse_syntax(&document.pipeline), imports, kind);
     let inventory = match (kind, document.inventory_line) {
         (_, None) => None,
         (Kind::Recipe, Some(_)) => {
-            Some(parse_source_inventory(&document.inventory).map_err(|error| vec![error])?)
+            let (inventory, found) = parse_inventory_recovering(&document.inventory);
+            errors.extend(found);
+            Some(inventory)
         }
-        // An error on an earlier line is the first.
         (Kind::Pipeline, Some(line)) => {
-            let mut errors = lowered.as_ref().err().cloned().unwrap_or_default();
-            let earlier = errors
-                .iter()
-                .take_while(|error| error.line() < line)
-                .count();
-            if earlier == errors.len() && !errors.is_empty() {
-                return Err(errors);
-            }
-            errors.truncate(earlier);
             let records = document
                 .inventory
                 .lines()
@@ -699,21 +690,28 @@ pub(crate) fn parse_document_recovering(
                 .filter(|(_, text)| !text.trim().is_empty())
                 .map(|(index, _)| index + 1)
                 .collect();
-            errors.push(
+            // In line order, as a caller that takes the first error reads
+            // the first in the document.
+            let at = errors
+                .iter()
+                .take_while(|error| error.line() < line)
+                .count();
+            errors.insert(
+                at,
                 ParseError::new(
                     line,
                     "`sources:` and `contexts:` records belong in a .spitout, not a pipeline",
                 )
                 .with_kind(ParseErrorKind::MisplacedRecords { lines: records }),
             );
-            return Err(errors);
+            None
         }
     };
-    let builder = lowered?;
-    Ok(ParsedDocument {
+    let document = ParsedDocument {
         pipeline: builder.pipeline,
         inputs: builder.inputs,
         inventory,
         lines: builder.lines,
-    })
+    };
+    (document, errors)
 }

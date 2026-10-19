@@ -2,8 +2,6 @@
 //! `outputs = operation(inputs)`, and stages whose lines are indented
 //! beneath a `stage name:` header.
 
-use rustc_hash::FxHashSet;
-
 use crate::model::{CommandRole, DefaultChecks, Invocation};
 use crate::span::Place;
 
@@ -24,13 +22,11 @@ use super::{FlowStep, ParseError, StatementKind, StepOutput, Syntax, SHELL_SOURC
 /// Parse the statements of `text`. Its structure, which lines make a
 /// statement and which block holds each, comes from its layout, so a
 /// statement that fails leaves the others reading as they would without it,
-/// and one pass finds every syntax error. A statement whose first line is
-/// in `skipped`, one that failed in an earlier pass of error recovery,
-/// keeps its place in that structure but is not read.
+/// and one pass finds every syntax error.
 ///
-/// A block whose opening statement fails, or is skipped, keeps its lines,
-/// and they are read in the stage around it, as ordinary statements.
-pub(crate) fn parse_flow(text: &str, skipped: &FxHashSet<usize>) -> Syntax {
+/// A block whose opening statement fails keeps its lines, and they are read
+/// in the stage around it, as ordinary statements.
+pub(crate) fn parse_flow(text: &str) -> Syntax {
     let layout = Layout::new(text);
     let mut syntax = Syntax::default();
     // For each statement that opens a stage, by index: the stage's full
@@ -51,10 +47,8 @@ pub(crate) fn parse_flow(text: &str, skipped: &FxHashSet<usize>) -> Syntax {
         let indent = layout.first(statement).indent;
         if let Some((opener, mut open)) = body.take() {
             if statement.parent == Some(opener) {
-                if !skipped.contains(&number) {
-                    if let Err(error) = open.line(original, line, number, indent) {
-                        syntax.fail(error.locate(original));
-                    }
+                if let Err(error) = open.line(original, line, number, indent) {
+                    syntax.fail(error.locate(original));
                 }
                 body = Some((opener, open));
                 continue;
@@ -63,9 +57,6 @@ pub(crate) fn parse_flow(text: &str, skipped: &FxHashSet<usize>) -> Syntax {
             if let Err(error) = open.close(&mut syntax, Some(original)) {
                 syntax.fail(error.locate(&header));
             }
-        }
-        if skipped.contains(&number) {
-            continue;
         }
         // The stage, `default:` or keyword block that holds the statement,
         // if one does; their lines share one indentation.

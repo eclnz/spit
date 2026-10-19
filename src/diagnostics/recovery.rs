@@ -8,129 +8,45 @@ use rustc_hash::FxHashSet;
 use crate::parser::{parse_use, Keyword, Layout, Line, UseSpec};
 use crate::{ParseError, ParseErrorKind};
 
-/// Read on past the statements that fail, preserving all later line
-/// numbers. This lets the parser report errors on other lines without
-/// changing the fail-fast parsing API used by the CLI and library callers.
+/// The document `parse` reads from `text`, or every error it has.
 pub(super) fn recover_parse_errors<T>(
     text: &str,
-    parse: impl Fn(&str, &FxHashSet<usize>) -> Result<T, Vec<ParseError>>,
+    parse: impl FnOnce(&str) -> (T, Vec<ParseError>),
 ) -> Result<T, Vec<ParseError>> {
     let (parsed, errors) = recover_document(text, parse);
-    match parsed {
-        Some(parsed) if errors.is_empty() => Ok(parsed),
-        _ => Err(errors),
+    if errors.is_empty() {
+        Ok(parsed)
+    } else {
+        Err(errors)
     }
 }
 
-/// Keep the independently parseable declarations for editor information,
-/// while retaining every error for callers that require a valid document.
+/// The document `parse` reads from `text`, with the statements that failed
+/// left out, and its errors less those that only repeat another.
 ///
-/// `parse` reads a text with some lines blanked, passing over the
-/// statements that start on the lines it is given (`parse_flow`). Each
-/// parse gives errors, and the statements they are on are then left out.
-/// One whose blank lines would read the lines after it otherwise, as it
-/// opens a block that holds lines or closes a block a later line is
-/// indented beneath, is passed over, so that the structure stays as it was;
-/// any other is blanked, as is a `use` line, which imports read before the
-/// parser does. Parsing again finds the errors those hid, until a parse
-/// finds none.
+/// The parse reads past a statement that fails, leaving out all of it, so
+/// one parse finds every error. An error that follows from another, such as
+/// a call to an operation whose declaration failed, is left out.
 pub(crate) fn recover_document<T>(
     text: &str,
-    parse: impl Fn(&str, &FxHashSet<usize>) -> Result<T, Vec<ParseError>>,
-) -> (Option<T>, Vec<ParseError>) {
+    parse: impl FnOnce(&str) -> (T, Vec<ParseError>),
+) -> (T, Vec<ParseError>) {
+    let (parsed, mut found) = parse(text);
+    if found.is_empty() {
+        return (parsed, found);
+    }
+    // An error is explained by one on an earlier line.
+    found.sort_by_key(ParseError::line);
     let layout = Layout::new(text);
-    // For each line, the statement it is in; a signature is one declaration
-    // even when its error names a port line.
-    let mut statement_of = vec![0; layout.lines.len()];
-    // For each statement, whether blanking it would change how the lines
-    // after it are read: a block it opens holds lines, or it closes a block
-    // that was open after the statement before it.
-    let mut structural = vec![false; layout.statements.len()];
-    // How many blocks hold each statement.
-    let mut depth = vec![0; layout.statements.len()];
-    // The blocks open after the last statement with code.
-    let mut open_after = 0;
-    for (index, statement) in layout.statements.iter().enumerate() {
-        statement_of[statement.lines.clone()].fill(index);
-        if statement.blank {
-            continue;
-        }
-        if let Some(parent) = statement.parent {
-            structural[parent] = true;
-            depth[index] = depth[parent] + 1;
-        }
-        if depth[index] < open_after && !statement.stray {
-            structural[index] = true;
-        }
-        open_after = depth[index] + usize::from(statement.opens.is_some());
-    }
-    let mut recovered = layout
-        .lines
-        .iter()
-        .map(|line| line.text)
-        .collect::<Vec<_>>()
-        .join("\n");
-    let mut offset = 0;
-    let ranges: Vec<_> = layout
-        .lines
-        .iter()
-        .map(|line| {
-            let range = offset..offset + line.text.len();
-            offset = range.end + 1;
-            range
-        })
-        .collect();
-    let mut skipped = FxHashSet::default();
+    let mut failures = Failures::new(&layout.lines, found.iter().map(ParseError::line).collect());
     let mut errors = Vec::new();
-    let mut failures = Failures::new(&layout.lines);
-    loop {
-        let found = match parse(&recovered, &skipped) {
-            Ok(parsed) => return (Some(parsed), errors),
-            Err(found) => found,
-        };
-        for error in found {
-            let Some(index) = error
-                .line()
-                .checked_sub(1)
-                .filter(|&index| index < layout.lines.len())
-            else {
-                errors.push(error);
-                return (None, errors);
-            };
-            let statement = statement_of[index];
-            let lines = layout.statements[statement].lines.clone();
-            let pass_over =
-                structural[statement] && layout.lines[lines.start].keyword() != Some(Keyword::Use);
-            // A statement left out already that fails again would fail on
-            // every parse.
-            let left_out = if pass_over {
-                !skipped.insert(lines.start + 1)
-            } else {
-                recovered[ranges[index].clone()].trim().is_empty()
-            };
-            if left_out {
-                errors.push(error);
-                return (None, errors);
-            }
-            if !pass_over {
-                for range in &ranges[lines] {
-                    recovered.replace_range(range.clone(), &" ".repeat(range.len()));
-                }
-            }
-            // Misplaced records are one error, however many lines.
-            if let ParseErrorKind::MisplacedRecords { lines: records } = error.kind() {
-                for record in records {
-                    if let Some(range) = ranges.get(record - 1) {
-                        recovered.replace_range(range.clone(), &" ".repeat(range.len()));
-                    }
-                }
-            }
-            if !failures.explains(&error) && !failures.empties_body(&error) {
-                failures.note(&error);
-                errors.push(error);
-            }
+    for error in found {
+        if !failures.explains(&error) && !failures.empties_body(&error) {
+            failures.note(&error);
+            errors.push(error);
         }
     }
+    (parsed, errors)
 }
 
 /// What the errors kept so far say of the operations, so that an error that
@@ -149,12 +65,12 @@ struct Failures<'a> {
     unnamed: Vec<&'a str>,
     /// The `use` lines that failed.
     failed_uses: Vec<UseSpec>,
-    /// The line of each error kept.
+    /// The line of each error found.
     error_lines: BTreeSet<usize>,
 }
 
 impl<'a> Failures<'a> {
-    fn new(lines: &'a [Line<'a>]) -> Self {
+    fn new(lines: &'a [Line<'a>], error_lines: BTreeSet<usize>) -> Self {
         let mut above = Vec::with_capacity(lines.len());
         let mut header = None;
         for (index, line) in lines.iter().enumerate() {
@@ -169,13 +85,12 @@ impl<'a> Failures<'a> {
             named: FxHashSet::default(),
             unnamed: Vec::new(),
             failed_uses: Vec::new(),
-            error_lines: BTreeSet::new(),
+            error_lines,
         }
     }
 
     /// Keep `error`, which is reported.
     fn note(&mut self, error: &ParseError) {
-        self.error_lines.insert(error.line());
         let failed = error.line().saturating_sub(1);
         let Some(line) = self.lines.get(failed) else {
             return;
@@ -237,8 +152,8 @@ impl<'a> Failures<'a> {
                 .any(|declaration| declaration.starts_with(operation.as_str()))
     }
 
-    /// A body left with no steps because each of its steps already failed,
-    /// and was blanked, would only repeat those errors.
+    /// A body left with no steps because each of its steps already failed
+    /// would only repeat those errors.
     fn empties_body(&self, error: &ParseError) -> bool {
         if *error.kind() != ParseErrorKind::EmptyBody {
             return false;
