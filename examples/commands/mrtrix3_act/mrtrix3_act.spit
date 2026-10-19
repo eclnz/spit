@@ -10,8 +10,8 @@
 # is the artifact's own dimension values, such as sub=01__ses=01__run=01.
 # An operation whose tool writes another format declares its extension, and
 # a stage whose files share one sets its own `ext:`.
-path: derivatives/{@stage}/{@product}/{@entities}
-ext: .mif
+default path: derivatives/{@stage}/{@product}/{@entities}
+default ext: .mif
 
 # Each DWI run and reverse-PE b=0 travels with sidecars that share its file
 # name and differ only by extension. Where the files are is the dataset's to
@@ -93,7 +93,7 @@ stage anatomy:
 
     stage parcellation:
         # SynthSeg writes NIfTI, so the remapped labels stay NIfTI too.
-        ext: .nii.gz
+        default ext: .nii.gz
 
         # Generate a parcellation in native T1 space, then remap its integer labels.
         operation parcellate_t1(mri: MRI<T1w,S>) -> MRI<Parcellation,S>

@@ -111,9 +111,9 @@ fn aggregate_hovers_show_inference_and_output_dimensions() {
 #[test]
 fn product_paths_report_explicit_nearest_stage_pipeline_and_builtin_rules() {
     let text = "source raw : Lines [id]\npath raw: in/{id}.txt\n\
-                path: results/{@product}/{@entities}.txt\noperation copy(input: Lines) -> Lines\n\
+                default path: results/{@product}/{@entities}.txt\noperation copy(input: Lines) -> Lines\n\
                 global = copy(raw)\n\
-                stage outer:\n    path: outer/{@product}/{@entities}.txt\n    stage inner:\n        inherited = copy(raw)\n        explicit = copy(raw)\n\
+                stage outer:\n    default path: outer/{@product}/{@entities}.txt\n    stage inner:\n        inherited = copy(raw)\n        explicit = copy(raw)\n\
                 path explicit: special/{id}.txt\n";
     let all = hovers(text);
     assert!(at(&all, 5, "global")
@@ -242,7 +242,7 @@ fn cli_editor_analysis_is_opt_in_and_preserves_error_diagnostics() {
 
 #[test]
 fn hovers_keep_resolved_path_hints_and_extensions() {
-    let text = "path: out/[{@labels}_]{@product}\next: .txt\nsource raw [sub]\npath raw: in/{sub}.txt\noperation copy(input)\nresult = copy(raw)\n";
+    let text = "default path: out/[{@labels}_]{@product}\ndefault ext: .txt\nsource raw [sub]\npath raw: in/{sub}.txt\noperation copy(input)\nresult = copy(raw)\n";
     let all = hovers(text);
     assert!(at(&all, 6, "result")
         .details
@@ -275,7 +275,7 @@ fn hovers_keep_resolved_path_hints_and_extensions() {
 fn path_hints_keep_literal_braces_and_brackets_doubled() {
     // `{{lit}}` and `[[x]]` are literal text: the hint writes them as the rule
     // does, so they are not read as a placeholder and a group.
-    let text = "path: out/{{lit}}/[[x]]/{@product}/{sub}.txt\nsource raw [sub]\npath raw: in/{sub}.txt\noperation copy(input)\nresult = copy(raw)\n";
+    let text = "default path: out/{{lit}}/[[x]]/{@product}/{sub}.txt\nsource raw [sub]\npath raw: in/{sub}.txt\noperation copy(input)\nresult = copy(raw)\n";
     let all = hovers(text);
     assert!(at(&all, 5, "result")
         .details
@@ -286,7 +286,7 @@ fn path_hints_keep_literal_braces_and_brackets_doubled() {
 #[test]
 fn beside_outputs_keep_their_path_and_signature_in_hovers() {
     let all = hovers(
-        "source raw [id]\npath raw: in/{id}.txt\npath: out/{@product}/{@entities}\noperation convert(input) -> (image: Image .nii.gz, meta: Json .json beside image)\nimage, meta = convert(raw)\n",
+        "source raw [id]\npath raw: in/{id}.txt\ndefault path: out/{@product}/{@entities}\noperation convert(input) -> (image: Image .nii.gz, meta: Json .json beside image)\nimage, meta = convert(raw)\n",
     );
     assert!(at(&all, 4, "convert")
         .signature
@@ -299,7 +299,7 @@ fn beside_outputs_keep_their_path_and_signature_in_hovers() {
 
 #[test]
 fn a_source_shows_its_extension_and_no_stage_default() {
-    let text = "path: {@stage}/{@product}/{@entities}\n\
+    let text = "default path: {@stage}/{@product}/{@entities}\n\
                 source events : Events .tsv [sub]\n\
                 stage prep:\n    operation f(x)\n    y = f(events)\n";
     let events = at(&hovers(text), 2, "events");

@@ -518,8 +518,8 @@ impl fmt::Display for ExtensionSource {
         match self {
             Self::Operation(operation) => write!(f, "operation `{operation}`"),
             Self::Source(source) => write!(f, "source `{source}`"),
-            Self::Stage(stage) => write!(f, "stage `{stage}`'s `ext:`"),
-            Self::Default => f.write_str("`ext:`"),
+            Self::Stage(stage) => write!(f, "stage `{stage}`'s `default ext:`"),
+            Self::Default => f.write_str("`default ext:`"),
         }
     }
 }

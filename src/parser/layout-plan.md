@@ -37,6 +37,9 @@ A statement opens a block if it looks like one from the surface: a `stage` line,
    - Valid files: byte-for-byte the same as `dev` on every example and fixture. Invalid files: 4,200 damaged copies of the examples, fuzzed through both builds, never disagreed on whether a file is valid and never panicked. The differences were reviewed. Most are improvements (a stray line reports its own error, a broken stage's lines keep the right stage, fewer cascades); a few are the agreed rule that a failed line still closes its block. Three tests in `tests/syntax_errors.rs` changed for that reason, and three were added.
    - **Not done, and why:** `Failure::clean` and the reparse loop in `recover_document` stay. Lowering stops at a statement that may have changed the builder, and recovery's reparse also finds errors in imported libraries, misplaced records and inventory lines; a one-pass experiment failed nine tests across those. Recovery now passes the parser a set of failed block headers to skip, rather than blanking them, so their blocks keep their lines on the next pass. Removing the loop needs lowering to be atomic per statement, which is outside this plan.
 4. [ ] **The language changes in #130.** With the structure settled first, these become mostly rules in `Layout`.
+   - [x] The `default` keyword (this commit, see below): `default path:`, `default ext:`, `default check:` and the `default:` block (`Block::Defaults`). The old `path:`, `ext:` and `check:` lines are errors that say how to write them; there are no users to keep them for.
+   - [ ] Keyword blocks.
+   - [ ] Multi-line declarations.
 
 Each step runs the checks in `AGENTS.md`, including `profiling/bench.py pipeline` and `dataset` against the commit before, since parsing counts as performance-related code.
 

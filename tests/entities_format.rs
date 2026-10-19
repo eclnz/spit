@@ -21,7 +21,7 @@ fn ok(args: &[&str]) -> String {
 #[test]
 fn one_format_covers_each_shape_without_changing_identity_or_labels() {
     let pipeline = parse_pipeline(&format!(
-        "{FORMAT}{FLOW}path: {{@product}}/{{@entities}}.txt\npath config: config.txt\n"
+        "{FORMAT}{FLOW}default path: {{@product}}/{{@entities}}.txt\npath config: config.txt\n"
     ))
     .unwrap();
     inspect_paths(&pipeline).unwrap();
@@ -59,7 +59,7 @@ fn one_format_covers_each_shape_without_changing_identity_or_labels() {
 #[test]
 fn empty_entities_can_drop_an_optional_group_and_default_outputs_use_the_format() {
     let pipeline = parse_pipeline(&format!(
-        "entities: {{key}}_{{value}} separated \"-\" empty \"\"\n{FLOW}path: out/[{{@entities}}_]{{@product}}.txt\npath raw: raw/{{@entities}}.txt\npath config: config.txt\n"
+        "entities: {{key}}_{{value}} separated \"-\" empty \"\"\n{FLOW}default path: out/[{{@entities}}_]{{@product}}.txt\npath raw: raw/{{@entities}}.txt\npath config: config.txt\n"
     ))
     .unwrap();
     inspect_paths(&pipeline).unwrap();
@@ -96,7 +96,7 @@ fn fresh_discovery_and_saved_inventory_produce_the_same_dag_and_hints() {
     );
     let pipeline = tree.write(
         "pipeline.spit",
-        &format!("{FORMAT}{FLOW}path: out/{{@product}}/{{@entities}}.txt\n"),
+        &format!("{FORMAT}{FLOW}default path: out/{{@product}}/{{@entities}}.txt\n"),
     );
     let recipe = tree.write(
         "data.spitin",
@@ -129,7 +129,7 @@ fn fresh_discovery_and_saved_inventory_produce_the_same_dag_and_hints() {
     assert!(hovers.contains("#entity-formatting"), "{hovers}");
     // A saved custom source rule retains its spelling when output formatting changes.
     tree.write("pipeline.spit", &format!(
-        "entities: {{key}}-{{value}} separated \"_\"\n{FLOW}path: out/{{@product}}/{{@entities}}.txt\n"
+        "entities: {{key}}-{{value}} separated \"_\"\n{FLOW}default path: out/{{@product}}/{{@entities}}.txt\n"
     ));
     let changed = ok(&["dag", pipeline, saved, "--json"]);
     assert!(

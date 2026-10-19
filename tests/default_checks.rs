@@ -65,7 +65,7 @@ fn after(commands: &str, product: &str) -> Vec<String> {
 #[test]
 fn a_file_default_checks_every_output_but_no_input_or_source() {
     let commands = commands(&format!(
-        "{DECLARED}check: nonempty\nfirst = clean(raw)\nsecond = clean(first)\n"
+        "{DECLARED}default check: nonempty\nfirst = clean(raw)\nsecond = clean(first)\n"
     ));
     assert_eq!(after(&commands, "first"), ["test -s out/first/id=1.txt"]);
     // `second` reads `first` through a port with its own check, which the
@@ -78,7 +78,7 @@ fn a_file_default_checks_every_output_but_no_input_or_source() {
 #[test]
 fn a_stage_default_follows_the_stage_of_the_call() {
     let commands = commands(&format!(
-        "{DECLARED}first = clean(raw)\nstage pre:\n    check: ndim(3)\n    second = clean(first)\nthird = clean(second)\n"
+        "{DECLARED}first = clean(raw)\nstage pre:\n    default check: ndim(3)\n    second = clean(first)\nthird = clean(second)\n"
     ));
     assert!(after(&commands, "first").is_empty());
     assert_eq!(
@@ -91,7 +91,7 @@ fn a_stage_default_follows_the_stage_of_the_call() {
 #[test]
 fn stage_defaults_add_to_the_file_and_the_stages_around_them_in_order() {
     let commands = commands(&format!(
-        "{DECLARED}check: nonempty\nstage pre:\n    check: ndim(3)\n    stage deep:\n        check: lines(1)\n        second = clean(raw)\n"
+        "{DECLARED}default check: nonempty\nstage pre:\n    default check: ndim(3)\n    stage deep:\n        default check: lines(1)\n        second = clean(raw)\n"
     ));
     assert_eq!(
         after(&commands, "second"),
@@ -106,7 +106,7 @@ fn stage_defaults_add_to_the_file_and_the_stages_around_them_in_order() {
 #[test]
 fn a_stage_or_an_output_opts_out_with_a_bang() {
     let commands = commands(&format!(
-        "{DECLARED}check: nonempty\nstage pre:\n    check: ndim(3), !nonempty\n    a, b = split(raw)\nstage plain:\n    c = clean(raw)\n"
+        "{DECLARED}default check: nonempty\nstage pre:\n    default check: ndim(3), !nonempty\n    a, b = split(raw)\nstage plain:\n    c = clean(raw)\n"
     ));
     // The stage drops the file's check; `b` also lists its own.
     assert_eq!(after(&commands, "a"), ["check_ndim out/a/id=1.txt 3"]);
@@ -122,7 +122,9 @@ fn a_stage_or_an_output_opts_out_with_a_bang() {
 
 #[test]
 fn an_output_opts_out_of_a_file_default_for_itself_alone() {
-    let commands = commands(&format!("{DECLARED}check: nonempty\na, b = split(raw)\n"));
+    let commands = commands(&format!(
+        "{DECLARED}default check: nonempty\na, b = split(raw)\n"
+    ));
     assert_eq!(after(&commands, "a"), ["test -s out/a/id=1.txt"]);
     assert_eq!(after(&commands, "b"), ["check_lines out/b/id=1.txt 9"]);
 }
@@ -130,7 +132,7 @@ fn an_output_opts_out_of_a_file_default_for_itself_alone() {
 #[test]
 fn a_check_on_one_artifact_runs_once_however_many_lists_name_it() {
     let commands = commands(&format!(
-        "{DECLARED}operation twice(text: Text) -> Text .txt @ check(nonempty)\ncommand twice: sort -o {{@output}} {{text}}\ncheck: nonempty, nonempty\nstage pre:\n    check: nonempty\n    done = twice(raw)\n"
+        "{DECLARED}operation twice(text: Text) -> Text .txt @ check(nonempty)\ncommand twice: sort -o {{@output}} {{text}}\ndefault check: nonempty, nonempty\nstage pre:\n    default check: nonempty\n    done = twice(raw)\n"
     ));
     assert_eq!(after(&commands, "done"), ["test -s out/done/id=1.txt"]);
 }
@@ -138,7 +140,7 @@ fn a_check_on_one_artifact_runs_once_however_many_lists_name_it() {
 #[test]
 fn a_producer_default_covers_the_check_a_reader_would_repeat() {
     let commands = commands(&format!(
-        "{DECLARED}operation read(text: Text @ check(nonempty)) -> Text .txt\ncommand read: sort -o {{@output}} {{text}}\ncheck: nonempty\nfirst = clean(raw)\nsecond = read(first)\n"
+        "{DECLARED}operation read(text: Text @ check(nonempty)) -> Text .txt\ncommand read: sort -o {{@output}} {{text}}\ndefault check: nonempty\nfirst = clean(raw)\nsecond = read(first)\n"
     ));
     assert_eq!(
         commands.matches("test -s out/first/id=1.txt").count(),
@@ -149,7 +151,9 @@ fn a_producer_default_covers_the_check_a_reader_would_repeat() {
 
 #[test]
 fn defaults_are_checked_like_other_uses() {
-    let unknown = errors(&format!("{DECLARED}check: missing\nfirst = clean(raw)\n"));
+    let unknown = errors(&format!(
+        "{DECLARED}default check: missing\nfirst = clean(raw)\n"
+    ));
     assert!(
         unknown
             .iter()
@@ -157,13 +161,15 @@ fn defaults_are_checked_like_other_uses() {
         "{unknown:?}"
     );
     let arity = errors(&format!(
-        "{DECLARED}stage s:\n    check: ndim\n    first = clean(raw)\n"
+        "{DECLARED}stage s:\n    default check: ndim\n    first = clean(raw)\n"
     ));
     assert!(
         arity.iter().any(|e| e.contains("takes 1 argument")),
         "{arity:?}"
     );
-    let opt_out = errors(&format!("{DECLARED}check: !missing\nfirst = clean(raw)\n"));
+    let opt_out = errors(&format!(
+        "{DECLARED}default check: !missing\nfirst = clean(raw)\n"
+    ));
     assert!(
         opt_out
             .iter()
@@ -171,13 +177,15 @@ fn defaults_are_checked_like_other_uses() {
         "{opt_out:?}"
     );
     let twice = errors(&format!(
-        "{DECLARED}check: nonempty\ncheck: nonempty\nfirst = clean(raw)\n"
+        "{DECLARED}default check: nonempty\ndefault check: nonempty\nfirst = clean(raw)\n"
     ));
     assert!(
-        twice.iter().any(|e| e.contains("duplicate `check:` list")),
+        twice
+            .iter()
+            .any(|e| e.contains("duplicate `default check:` list")),
         "{twice:?}"
     );
-    let empty = errors(&format!("{DECLARED}check:\nfirst = clean(raw)\n"));
+    let empty = errors(&format!("{DECLARED}default check:\nfirst = clean(raw)\n"));
     assert!(!empty.is_empty());
 }
 
@@ -197,7 +205,7 @@ fn a_product_may_still_be_named_check() {
         "check: Text [id] = clean(raw)",
         "check : Text [id] = clean(raw)",
     ] {
-        let source = format!("{DECLARED}check: nonempty\n{step}\nmore = clean(check)\n");
+        let source = format!("{DECLARED}default check: nonempty\n{step}\nmore = clean(check)\n");
         assert!(errors(&source).is_empty(), "{step}: {:?}", errors(&source));
     }
 }

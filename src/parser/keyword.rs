@@ -14,17 +14,23 @@ pub(crate) enum Keyword {
     Verify,
     /// `check name(params): command`, a test of one artifact.
     Check,
-    /// `check:`, the checks every output in a file or stage runs.
+    /// `check:`, the checks every output in a file or stage runs, written
+    /// after `default` or in a `default:` block.
     Checks,
     Require,
     /// `skip` and `drop`, kept to give migration errors.
     Skip,
     Drop,
     Exclude,
-    /// `path:` for a default, `path product:` for one product.
+    /// `path product:` for one product's rule, and `path:` for the default
+    /// one, written after `default` or in a `default:` block.
     Path,
-    /// `ext:`, the extension a default path is completed with.
+    /// `ext:`, the extension a default path is completed with, written
+    /// after `default` or in a `default:` block.
     Ext,
+    /// `default path:`, `default ext:` and `default check:`, and `default:`,
+    /// which opens a block of them.
+    Default,
     Entities,
     Stage,
     /// `dimensions [...]`, the order every product's dimensions follow.
@@ -58,6 +64,22 @@ impl Keyword {
     /// line is expected. `stage` and `dimensions` start a statement only
     /// without `=`, since a step's output product may have either name.
     pub(crate) fn split(line: &str) -> Option<(Self, &str)> {
+        // `default:` opens a block, and `default path: ...` and the like set
+        // one default. A step may make a product named `default`, as in
+        // `default = f(x)` or `default: Report = f(x)`.
+        if let Some(rest) = line.strip_prefix("default") {
+            let block = rest
+                .strip_prefix(':')
+                .is_some_and(|after| after.trim().is_empty());
+            let setting = rest.starts_with(' ')
+                && matches!(
+                    Self::split(rest.trim_start()),
+                    Some((Self::Path | Self::Ext | Self::Checks, _))
+                );
+            if block || setting {
+                return Some((Self::Default, rest));
+            }
+        }
         if let Some(rest) = line.strip_prefix("shell-source:") {
             return Some((Self::ShellSource, rest));
         }
@@ -186,6 +208,17 @@ mod tests {
             Some((Keyword::Source, "raw [id]"))
         );
         assert_eq!(keyword("path: out/{@entities}"), Some(Keyword::Path));
+        assert_eq!(
+            Keyword::split("default path: out/{@entities}"),
+            Some((Keyword::Default, " path: out/{@entities}"))
+        );
+        assert_eq!(keyword("default ext: .txt"), Some(Keyword::Default));
+        assert_eq!(keyword("default check: nonempty"), Some(Keyword::Default));
+        assert_eq!(keyword("default:"), Some(Keyword::Default));
+        assert_eq!(keyword("default = f(x)"), None);
+        assert_eq!(keyword("default: Report = f(x)"), None);
+        assert_eq!(keyword("default : Report = f(x)"), None);
+        assert_eq!(keyword("defaults:"), None);
         assert_eq!(keyword("path raw: in/{id}"), Some(Keyword::Path));
         assert_eq!(keyword("paths = f(x)"), None);
         assert_eq!(keyword("stage analysis:"), Some(Keyword::Stage));

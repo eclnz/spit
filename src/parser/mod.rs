@@ -36,7 +36,7 @@ pub(crate) use self::declarations::{parse_use, ExcludeLine, UseSpec};
 pub use self::inventory::parse_source_inventory;
 pub(crate) use self::inventory::{source_record_lines, split_document};
 pub(crate) use self::keyword::{Header, Keyword};
-pub(crate) use self::layout::{Layout, Line};
+pub(crate) use self::layout::{Head, Layout, Line};
 pub(crate) use self::lexical::{glued_comment, strip_comment, without_bom};
 pub(crate) use self::render_inventory::as_read_back;
 pub use self::render_inventory::render_source_inventory;

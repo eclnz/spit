@@ -8,7 +8,7 @@ use spit::{diagnose, resolve, Diagnostic};
 /// Lines of reads per group and lane, a calibration table per group and
 /// revision, and three operations a body can call.
 const BASE: &str = "\
-path: out/[{@stage}/]{@product}/{@entities}.txt
+default path: out/[{@stage}/]{@product}/{@entities}.txt
 source raw : Lines [group, lane]
 path raw: in/{group}/r{lane}.txt
 source cal : Table [group, revision]
@@ -329,7 +329,7 @@ fn checks_on_a_bodys_ports_and_outputs_run_on_the_steps_that_read_and_make_them(
     let text = format!(
         "\
 use summarise from libs/lib.spit as L
-path: out/{{@product}}/{{@entities}}.txt
+default path: out/{{@product}}/{{@entities}}.txt
 source raw : Lines [group, lane]
 path raw: in/{{group}}/r{{lane}}.txt
 source cal : Table [group, revision]
@@ -381,7 +381,7 @@ fn the_spitdag_names_each_file_read_each_call_and_where_each_job_comes_from() {
     let text = format!(
         "\
 use summarise from libs/lib.spit as L
-path: out/{{@product}}/{{@entities}}.txt
+default path: out/{{@product}}/{{@entities}}.txt
 source raw : Lines [group, lane]
 path raw: in/{{group}}/r{{lane}}.txt
 source cal : Table [group, revision]

@@ -17,7 +17,7 @@ command convert: dcm2niix -o {image.dir} -f {image.stem} {dicom} {mask}
 verify convert: test -d {dicom}
 operation avg(images: many Image @ min(2)) -> Image .nii.gz
 command avg: avg {images} {@output}
-path: out/{@product}/{@entities}
+default path: out/{@product}/{@entities}
 stage pre:
     image, meta = convert(dicom, mask)
 stage post:
@@ -122,7 +122,7 @@ fn a_scan_and_its_records_settle_to_the_same_plan() {
         "source bold : Bold [sub, ses, run]\npath bold: sub-{sub}/ses-{ses}/run-{run}.nii\n\
          source t1w : T1 [sub, ses]\npath t1w: sub-{sub}/ses-{ses}/t1w.nii\n\
          operation align(bold: Bold, t1w: T1) -> Bold\ncommand align: align {bold} {t1w} {@output}\n\
-         path: out/{@product}/{@entities}\naligned = align(bold, t1w)\n",
+         default path: out/{@product}/{@entities}\naligned = align(bold, t1w)\n",
     );
     let rules = "exclude bold[sub=2,ses=1,run=2]   # bad\n\
                  exclude [sub] where t1w count<1\n\

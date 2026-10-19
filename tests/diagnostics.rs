@@ -132,7 +132,7 @@ fn a_coverage_error_names_the_failing_rule_when_rules_share_a_product() {
 fn every_semantic_error_is_reported_once_in_line_order() {
     let text = "\
 source raw : Table [id, batch]
-path: {@product}/{@entities}.csv
+default path: {@product}/{@entities}.csv
 path raw: in/{id}.csv
 operation clean(table: Table) -> Table
 command clean: tool {table} {result}
@@ -225,7 +225,7 @@ source spare [id]# note
 fn path_rule_errors_point_to_the_rule_in_use() {
     let text = "\
 source raw [id]
-path: {@entities}.csv
+default path: {@entities}.csv
 operation clean(input)
 cleaned = clean(raw)
 source other [id]

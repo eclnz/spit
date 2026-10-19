@@ -131,7 +131,7 @@ fn check_and_its_json_give_each_diagnostic_one_severity() {
     tree.write("warned.spit", WARNED);
     tree.write(
         "broken.spit",
-        "source raw [id, batch]\npath: {@product}/{@entities}.txt\npath raw: in/{id}.txt\noperation clean(input)\ncleaned = clean(rwa)\n",
+        "source raw [id, batch]\ndefault path: {@product}/{@entities}.txt\npath raw: in/{id}.txt\noperation clean(input)\ncleaned = clean(rwa)\n",
     );
     tree.write(
         "comment.spit",

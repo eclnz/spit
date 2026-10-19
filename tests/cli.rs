@@ -454,7 +454,7 @@ fn recipe_path_rules_show_combined_coverage_and_origin() {
     );
     tree.write(
         "data.spitin",
-        "pipeline analysis.spit\nroot .\npath: input/{@product}/{@entities}\n",
+        "pipeline analysis.spit\nroot .\ndefault path: input/{@product}/{@entities}\n",
     );
     let defaulted = spit(&["check", recipe.to_str().unwrap()]);
     assert!(defaulted.status.success(), "{}", stderr(&defaulted));
@@ -558,7 +558,7 @@ fn check_prints_every_diagnostic_and_fails_only_on_errors() {
     let broken = directory.join("broken.spit");
     fs::write(
         &broken,
-        "source raw [id, batch]\npath: {@product}/{@entities}.txt\npath raw: in/{id}.txt\noperation clean(input)\ncleaned = clean(rwa)\n",
+        "source raw [id, batch]\ndefault path: {@product}/{@entities}.txt\npath raw: in/{id}.txt\noperation clean(input)\ncleaned = clean(rwa)\n",
     )
     .unwrap();
     let warned = directory.join("warned.spit");
@@ -631,7 +631,7 @@ fn a_recipe_run_in_memory_prints_each_pipeline_warning_once() {
     tree.write(
         "analysis.spit",
         "source raw : Raw [id]\nsource spare : Raw [id]\npath raw: in/{id}.txt\n\
-         path spare: sp/{id}.txt\npath: out/{@product}/{id}.txt\n\
+         path spare: sp/{id}.txt\ndefault path: out/{@product}/{id}.txt\n\
          operation clean(raw: Raw) -> Clean\ncommand clean: tool {raw} {@output}\ncleaned = clean(raw)\n",
     );
     let recipe = tree.write("data.spitin", "pipeline analysis.spit\nroot .\n");
@@ -670,7 +670,7 @@ fn drop_rules_that_remove_every_group_stop_each_command() {
         "analysis.spit",
         "source image : Img [sub, ses]\npath image: data/sub-{sub}/ses-{ses}/image.nii\n\
          operation clean(img: Img) -> Clean\ncommand clean: tool {img} {@output}\n\
-         path: out/{@product}/{sub}_{ses}.txt\ncleaned = clean(image)\n",
+         default path: out/{@product}/{sub}_{ses}.txt\ncleaned = clean(image)\n",
     );
     // Every subject has one session, so the drop removes every subject;
     // before, a `require` after it checked nothing and passed.

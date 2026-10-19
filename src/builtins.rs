@@ -69,6 +69,7 @@ pub enum Word {
     ShapeDate,
     EntitiesFormat,
     ConfiguredEntities,
+    Default,
 }
 
 /// What a word's hover says.
@@ -92,7 +93,7 @@ impl Word {
 }
 
 /// Every word's documentation, in the order of [`Word`].
-pub static DOCS: [Doc; 50] = [
+pub static DOCS: [Doc; 51] = [
     Doc {
         name: "source",
         kind: "keyword",
@@ -125,15 +126,15 @@ pub static DOCS: [Doc; 50] = [
         name: "path",
         kind: "keyword",
         anchor: "paths",
-        example: "path: results/{@product}/{@entities}.txt\npath image: input/{subject}/{visit}/{run}.txt",
-        summary: "`path:` sets the default rule; without one, outputs go to `out/{@product}/{@entities}`. `path product:` sets one product's rule, and for a source, how its files are found. A `path:` line in a stage is the default for that stage's products, and one in a `.spitin` recipe the default for sources with no rule. Paths are relative to the dataset root. Text in `[...]` is kept only for a product with a value for every placeholder in it.",
+        example: "path image: input/{subject}/{visit}/{run}.txt\ndefault path: results/{@product}/{@entities}.txt",
+        summary: "`path product:` sets one product's rule, and for a source, how its files are found. `default path:` sets the rule for products with none of their own; without one, outputs go to `out/{@product}/{@entities}`. A default in a stage is the rule for that stage's products, and one in a `.spitin` recipe the rule for sources with none. Paths are relative to the dataset root. Text in `[...]` is kept only for a product with a value for every placeholder in it.",
     },
     Doc {
         name: "ext",
         kind: "keyword",
         anchor: "extensions",
-        example: "path: derivatives/{@product}/{@entities}\next: .nii.gz",
-        summary: "The extension for operations that declare none, completing a default path rule. Like `path:`, it may be written at the top level or in a stage. A product's own `path product:` rule never takes it.",
+        example: "default path: derivatives/{@product}/{@entities}\ndefault ext: .nii.gz",
+        summary: "`default ext:` is the extension for operations that declare none, completing a default path rule. Like `default path:`, it may be written at the top level or in a stage. A product's own `path product:` rule never takes it.",
     },
     Doc {
         name: "stage",
@@ -314,28 +315,28 @@ pub static DOCS: [Doc; 50] = [
         name: "@product",
         kind: "placeholder",
         anchor: "paths",
-        example: "path: results/{@product}/{@entities}.txt",
+        example: "default path: results/{@product}/{@entities}.txt",
         summary: "The product's name in a path, as `aligned`. An imported `alias::name` becomes `alias.name`.",
     },
     Doc {
         name: "@entities",
         kind: "placeholder",
         anchor: "paths",
-        example: "path: results/{@product}/{@entities}.txt",
+        example: "default path: results/{@product}/{@entities}.txt",
         summary: "Every dimension as `dim=value`, in the pipeline's dimension order, joined by `__`, as `subject=A__run=2`; `global` for a product with no dimensions.",
     },
     Doc {
         name: "@stage",
         kind: "placeholder",
         anchor: "paths",
-        example: "path: {@stage}/{@product}/{@entities}.txt",
+        example: "default path: {@stage}/{@product}/{@entities}.txt",
         summary: "The stage whose block holds the step, one directory per level, as `preprocess/align`. An error for a product made outside every stage, unless it is in an optional `[...]` group.",
     },
     Doc {
         name: "@labels",
         kind: "placeholder",
         anchor: "paths",
-        example: "path: derivatives/sub-{sub}[/ses-{ses}]/{@labels}_{@product}",
+        example: "default path: derivatives/sub-{sub}[/ses-{ses}]/{@labels}_{@product}",
         summary: "Every dimension as `key-value`, in the pipeline's dimension order, joined by `_`, as `subject-A_run-2`. SPIT warns if a value contains `-`, since a BIDS reader cannot recover it from the file name.",
     },
     Doc {
@@ -391,8 +392,8 @@ pub static DOCS: [Doc; 50] = [
         name: "check",
         kind: "keyword",
         anchor: "checks",
-        example: "check ndim(n): check_ndim {@path} {n}\ncheck nonempty: test -s {@path}\ncheck: nonempty",
-        summary: "Declares a test of one artifact, run by a backend: `{@path}` is the artifact, and each `{param}` the text an `@ check(...)` gives it. A nonzero exit fails the job, even when its command succeeded. SPIT does not run it. A bare `check:` line lists the checks every output in the file, or in the stage it is written in, runs; `!name` drops one a wider scope sets.",
+        example: "check ndim(n): check_ndim {@path} {n}\ncheck nonempty: test -s {@path}\ndefault check: nonempty",
+        summary: "Declares a test of one artifact, run by a backend: `{@path}` is the artifact, and each `{param}` the text an `@ check(...)` gives it. A nonzero exit fails the job, even when its command succeeded. SPIT does not run it. `default check:` lists the checks every output in the file, or in the stage it is written in, runs; `!name` drops one a wider scope sets.",
     },
     Doc {
         name: "check-clause",
@@ -440,8 +441,15 @@ pub static DOCS: [Doc; 50] = [
         name: "@entities:custom",
         kind: "placeholder",
         anchor: "entity-formatting",
-        example: "entities: {key}_{value} separated \"-\"\npath: {@product}/{@entities}",
+        example: "entities: {key}_{value} separated \"-\"\ndefault path: {@product}/{@entities}",
         summary: "Every dimension using this pipeline's `entities:` template, separator and label aliases, in the pipeline's dimension order. Values and labels are percent escaped. A product with no dimensions uses the declared `empty` text, or `global` when none is declared.",
+    },
+    Doc {
+        name: "default",
+        kind: "keyword",
+        anchor: "defaults",
+        example: "default path: results/{@product}/{@entities}\ndefault:\n    ext: .nii.gz\n    check: nonempty",
+        summary: "Sets a default for the outputs of the file, or of the stage it is written in: `default path:` the rule for products with none of their own, `default ext:` the extension that completes it, and `default check:` the checks every output runs. `default:` opens a block of them. In a `.spitin` recipe, `default path:` is the rule for sources with none of their own.",
     },
 ];
 
@@ -541,6 +549,7 @@ fn statement(line: &Line) -> Option<(Word, usize)> {
             Keyword::Exclude => Word::Exclude,
             Keyword::Path => Word::Path,
             Keyword::Ext => Word::Ext,
+            Keyword::Default => Word::Default,
             Keyword::Stage => Word::Stage,
             Keyword::Dimensions => Word::Dimensions,
             Keyword::Entities => Word::EntitiesFormat,
@@ -575,14 +584,23 @@ fn line_words(line: &Line, found: &mut Vec<(Range<usize>, Word)>) {
         found.push((indent..indent + length, word));
         return;
     }
-    let statement = statement(line);
-    let kind = statement.map(|(word, _)| word);
-    if let Some((word, length)) = statement {
-        found.push((indent..indent + length, word));
+    // The statement's word, the offset it starts at and its length. After
+    // `default`, the setting is read as its own line would be.
+    let mut statement = statement(line).map(|(word, length)| (word, indent, length));
+    if let Some((Word::Default, at, length)) = statement {
+        found.push((at..at + length, Word::Default));
+        let rest = &code[at + length..];
+        let setting = code.len() - rest.trim_start().len();
+        statement = self::statement(&Line::new(&code[setting..]))
+            .map(|(word, length)| (word, setting, length));
     }
+    if let Some((word, at, length)) = statement {
+        found.push((at..at + length, word));
+    }
+    let kind = statement.map(|(word, _, _)| word);
     placeholders(code, kind, found);
     let bytes = code.as_bytes();
-    let mut start = indent + statement.map_or(0, |(_, length)| length);
+    let mut start = statement.map_or(indent, |(_, at, length)| at + length);
     while start < bytes.len() {
         if !(bytes[start].is_ascii_alphabetic() || bytes[start] == b'_') {
             start += 1;

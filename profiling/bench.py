@@ -10,14 +10,14 @@ usage:
 the path checks quadratic: plain, with `--json`, and with `--json --hovers`.
 `dataset` times `spit inputs`, `spit dag` and `spit check` on a BIDS-like
 dataset of subjects, sessions and runs, with `extra` more steps after the
-first four, and once more with `ext:` completing the default path.
+first four, and once more with `default ext:` completing the default path.
 `profile` runs one `spit check` on a chain under callgrind and prints the
 functions that take the most instructions, inclusive.
 
 `--new` defaults to this repository's `target/release/spit`; build it with
 `cargo build --release` first. `--old` is another build to compare with,
 such as one from a worktree of an earlier commit. A build from before
-`{@product}` is given the old `{product}` spelling automatically.
+`default` or `{@product}` is given its own spelling automatically.
 
 With `--old`, `pipeline` and `dataset` are a regression check: each of the
 new build's times is compared with the old build's, and the command exits
@@ -44,25 +44,28 @@ WORK = os.path.join(HERE, "work")
 DEFAULT_NEW = os.path.join(HERE, "..", "target", "release", "spit")
 
 
-def uses_at(binary):
-    """Whether `binary` spells built-in placeholders `{@product}`."""
-    with tempfile.TemporaryDirectory() as folder:
-        path = os.path.join(folder, "probe.spit")
-        with open(path, "w") as file:
-            file.write("path: out/{@product}/{@entities}\nsource raw [id]\npath raw: in/{id}\n")
-        return subprocess.run([binary, "check", path], capture_output=True).returncode == 0
-
-
-def placeholders(binary):
-    at = "@" if uses_at(binary) else ""
-    return "{%sproduct}" % at, "{%sentities}" % at
+def spelling(binary):
+    """How `binary` writes a default and built-in placeholders: the word
+    before a default (`default `, which older builds lack), and `{@product}`
+    and `{@entities}` (`{product}` in builds older still)."""
+    for default, at in [("default ", "@"), ("", "@"), ("", "")]:
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, "probe.spit")
+            with open(path, "w") as file:
+                file.write(
+                    f"{default}path: out/{{{at}product}}/{{{at}entities}}\n"
+                    "source raw [id]\npath raw: in/{id}\n"
+                )
+            if subprocess.run([binary, "check", path], capture_output=True).returncode == 0:
+                return default, "{%sproduct}" % at, "{%sentities}" % at
+    return "", "{product}", "{entities}"
 
 
 def chain(binary, steps):
     """A pipeline of `steps` steps, each reading the one before."""
-    product, entities = placeholders(binary)
+    default, product, entities = spelling(binary)
     lines = [
-        f"path: out/{product}/{entities}.txt",
+        f"{default}path: out/{product}/{entities}.txt",
         "source raw : T [sub]",
         "path raw: in/{sub}.txt",
         "operation step(x: T) -> T",
@@ -76,12 +79,12 @@ def chain(binary, steps):
 
 def study(binary, extra, ext):
     """The scaling test's pipeline, with `extra` steps after its four, and
-    with `ext:` completing the default path when `ext` is set."""
-    product, entities = placeholders(binary)
+    with `default ext:` completing the default path when `ext` is set."""
+    default, product, entities = spelling(binary)
     if ext:
-        lines = [f"path: out/{product}/{entities}", "ext: .txt"]
+        lines = [f"{default}path: out/{product}/{entities}", f"{default}ext: .txt"]
     else:
-        lines = [f"path: out/{product}/{entities}.txt"]
+        lines = [f"{default}path: out/{product}/{entities}.txt"]
     lines += [
         "source image : Image [sub, ses, run]",
         "path image: sub-{sub}/ses-{ses}/image_run-{run}.nii",
@@ -204,7 +207,7 @@ def run_pipeline(args):
             write(folder, "chain.spit", chain(binary, steps))
             times = [quickest([binary, "check", "chain.spit"], folder, args.repeats)]
             times.append(quickest([binary, "check", "chain.spit", "--json"], folder, args.repeats))
-            if uses_at(binary):
+            if spelling(binary)[1] == "{@product}":
                 hovers = [binary, "check", "chain.spit", "--json", "--hovers"]
                 times.append(quickest(hovers, folder, args.repeats))
             cells = "".join(f"{value:>10.1f}" for value in times)
@@ -221,7 +224,7 @@ def run_dataset(args):
         for extra in numbers(args.extra):
             for name, binary in builds(args):
                 variants = [(name, False)]
-                if name == "new" and uses_at(binary):
+                if name == "new" and spelling(binary)[1] == "{@product}":
                     variants.append(("new+ext", True))
                 for label, ext in variants:
                     folder = os.path.join(WORK, f"study-{label}-{subjects}-{extra}")

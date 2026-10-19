@@ -204,7 +204,10 @@ impl PipelineBuilder {
             None => (&mut self.pipeline.extension, String::new()),
         };
         if slot.is_some() {
-            return Err(ParseError::new(line, format!("duplicate `ext:`{whose}")));
+            return Err(ParseError::new(
+                line,
+                format!("duplicate `default ext:`{whose}"),
+            ));
         }
         *slot = Some(extension.to_owned());
         Ok(())
@@ -236,7 +239,7 @@ impl PipelineBuilder {
         if *slot != DefaultChecks::default() {
             return Err(ParseError::new(
                 place.line,
-                format!("duplicate `check:` list{whose}; write the checks in one line"),
+                format!("duplicate `default check:` list{whose}; write the checks in one line"),
             )
             .within(place));
         }

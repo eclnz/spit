@@ -8,7 +8,7 @@ use spit::diagnose;
 use support::{spit, text, Tree};
 
 const CONVERT: &str = "\
-path: derivatives/{@product}/{@entities}
+default path: derivatives/{@product}/{@entities}
 source dicom [sub]
 path dicom: sourcedata/sub-{sub}
 operation convert(dicom) -> (image: Image .nii.gz, meta: Json .json beside image)
