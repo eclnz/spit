@@ -34,13 +34,11 @@ pub(crate) fn recover_document<T>(
     parse: impl Fn(&str) -> Result<T, Vec<ParseError>>,
 ) -> (Option<T>, Vec<ParseError>) {
     let layout = Layout::new(text);
-    // Keep in step with operation_lines in src/parser/continuation.rs: a
-    // signature is one declaration even when its error names a port line.
+    // A signature is one declaration even when its error names a port line.
     let mut signatures = vec![None; layout.lines.len()];
-    for (start, line) in crate::parser::operation_lines(text) {
-        let end = start + line.lines().count();
-        if end > start + 1 {
-            signatures[start..end].fill(Some((start, end)));
+    for lines in &layout.statements {
+        if lines.len() > 1 {
+            signatures[lines.clone()].fill(Some((lines.start, lines.end)));
         }
     }
     let mut recovered = layout

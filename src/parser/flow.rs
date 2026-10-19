@@ -11,6 +11,7 @@ use super::declarations::{
 };
 use super::entities::parse_entities;
 use super::keyword::{removed_section, Keyword};
+use super::layout::Layout;
 use super::lexical::{comma_items, extension, identifier, strip_comment};
 use super::source_map::{name_place, step_place, tail_place};
 use super::{FlowStep, ParseError, StatementKind, StepOutput, Syntax, SHELL_SOURCE_REMOVED};
@@ -35,7 +36,10 @@ pub(super) fn parse_flow(text: &str) -> Syntax {
     // statements come. A statement that cannot fail ends the watch: it
     // closes the stage whether or not the others are blank.
     let mut closed: Vec<(usize, usize)> = Vec::new();
-    for (index, logical) in super::continuation::operation_lines(text) {
+    let layout = Layout::new(text);
+    for lines in &layout.statements {
+        let index = lines.start;
+        let logical = layout.text(lines.clone());
         let original = logical.as_ref();
         if !closed.is_empty() && !strip_comment(original).trim().is_empty() {
             let indent = original.len() - original.trim_start().len();
