@@ -32,7 +32,9 @@ use self::flow::parse_flow;
 pub(crate) use self::body::empty_body;
 pub(crate) use self::declarations::{parse_use, ExcludeLine, UseSpec};
 pub use self::inventory::parse_source_inventory;
-pub(crate) use self::inventory::{parse_inventory_recovering, source_record_lines, split_document};
+pub(crate) use self::inventory::{
+    document_records, parse_inventory_recovering, source_record_lines,
+};
 pub(crate) use self::keyword::{Header, Keyword};
 pub(crate) use self::layout::{Block, Head, Layout, Line};
 pub(crate) use self::lexical::{glued_comment, strip_comment, without_bom};
@@ -258,9 +260,9 @@ pub(crate) enum Kind {
     Recipe,
 }
 
-/// Parse a pipeline's statements.
-pub(crate) fn parse_syntax(text: &str) -> Syntax {
-    parse_flow(text)
+/// Parse a pipeline's statements, laid out in `layout`.
+pub(crate) fn parse_syntax(layout: &Layout) -> Syntax {
+    parse_flow(layout)
 }
 
 impl StatementKind {

@@ -19,15 +19,14 @@ use super::lexical::{
 use super::source_map::{name_place, step_place, tail_place};
 use super::{FlowStep, ParseError, StatementKind, StepOutput, Syntax, SHELL_SOURCE_REMOVED};
 
-/// Parse the statements of `text`. Its structure, which lines make a
+/// Parse the statements laid out in `layout`. Their structure, which lines make a
 /// statement and which block holds each, comes from its layout, so a
 /// statement that fails leaves the others reading as they would without it,
 /// and one pass finds every syntax error.
 ///
 /// A block whose opening statement fails keeps its lines, and they are read
 /// in the stage around it, as ordinary statements.
-pub(crate) fn parse_flow(text: &str) -> Syntax {
-    let layout = Layout::new(text);
+pub(crate) fn parse_flow(layout: &Layout) -> Syntax {
     let mut syntax = Syntax::default();
     // For each statement that opens a stage, by index: the stage's full
     // name, once its header is read, and the indentation its lines share,
@@ -71,7 +70,7 @@ pub(crate) fn parse_flow(text: &str) -> Syntax {
             Some(Block::Keyword(keyword)) => Some(keyword),
             _ => None,
         };
-        let stage = enclosing_stage(&layout, &stage_names, statement.parent);
+        let stage = enclosing_stage(layout, &stage_names, statement.parent);
         let shared = block
             .filter(|_| !statement.stray)
             .and_then(|block| Some((block, stage_indents[block]?)));
@@ -104,7 +103,7 @@ pub(crate) fn parse_flow(text: &str) -> Syntax {
                 indent,
                 Within {
                     stage,
-                    top_level: !in_stage_block(&layout, statement.parent),
+                    top_level: !in_stage_block(layout, statement.parent),
                     defaults: opened == Some(Block::Defaults),
                     block: keyword,
                 },

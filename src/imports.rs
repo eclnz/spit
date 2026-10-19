@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 mod located;
 
 use crate::blob::git_blob_id;
-use crate::lower::{parse_document_recovering, ParsedDocument, PipelineBuilder};
+use crate::lower::{parse_layout, ParsedDocument, PipelineBuilder};
 use crate::model::{
     CheckDef, CheckUse, CommandDef, CommandRole, OperationDef, Pipeline, PipelineIndex, ProductDef,
     SidecarGroup, SourceFile,
@@ -624,7 +624,8 @@ fn parse_document_at_inner(
     let mut imports = BTreeMap::new();
     let mut file_texts = BTreeMap::new();
     let mut errors = Vec::new();
-    for (number, line) in Layout::new(text).numbered() {
+    let layout = Layout::new(text);
+    for (number, line) in layout.numbered() {
         if line.keyword() != Some(Keyword::Use) {
             continue;
         }
@@ -641,7 +642,7 @@ fn parse_document_at_inner(
         });
         imports.insert(number, pipeline);
     }
-    let (mut document, found) = parse_document_recovering(text, &imports, kind);
+    let (mut document, found) = parse_layout(&layout, &imports, kind);
     errors.extend(found);
     if let Some((root, _)) = &mut document.pipeline.root {
         *root = path.parent().unwrap_or_else(|| Path::new("")).join(&*root);

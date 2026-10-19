@@ -20,9 +20,8 @@ use crate::model::{
 };
 use crate::order::{order_dimensions, Output};
 use crate::parser::{
-    empty_body, parse_inventory_recovering, parse_syntax, split_document, without_bom, ExcludeLine,
-    Kind, ParseError, ParseErrorKind, PathRule, Rule, SourceMap, Statement, StatementKind, Step,
-    Syntax,
+    document_records, empty_body, parse_syntax, without_bom, ExcludeLine, Kind, Layout, ParseError,
+    ParseErrorKind, PathRule, Rule, SourceMap, Statement, StatementKind, Step, Syntax,
 };
 use crate::shape::{step_context, step_driver, BoundInput};
 use crate::span::Place;
@@ -673,22 +672,34 @@ pub(crate) fn parse_document_recovering(
     imports: &BTreeMap<usize, Pipeline>,
     kind: Kind,
 ) -> (ParsedDocument, Vec<ParseError>) {
-    let document = split_document(text);
-    let (builder, mut errors) = lower(&parse_syntax(&document.pipeline), imports, kind);
-    let inventory = match (kind, document.inventory_line) {
+    parse_layout(&Layout::new(text), imports, kind)
+}
+
+/// As [`parse_document_recovering`], for the document laid out in
+/// `layout`.
+pub(crate) fn parse_layout(
+    layout: &Layout,
+    imports: &BTreeMap<usize, Pipeline>,
+    kind: Kind,
+) -> (ParsedDocument, Vec<ParseError>) {
+    let (builder, mut errors) = lower(&parse_syntax(layout), imports, kind);
+    // The line of the first `sources:` or `contexts:` header.
+    let records_line = layout
+        .numbered()
+        .find(|(_, line)| line.record)
+        .map(|(number, _)| number);
+    let inventory = match (kind, records_line) {
         (_, None) => None,
         (Kind::Recipe, Some(_)) => {
-            let (inventory, found) = parse_inventory_recovering(&document.inventory);
+            let (inventory, found) = document_records(layout);
             errors.extend(found);
             Some(inventory)
         }
         (Kind::Pipeline, Some(line)) => {
-            let records = document
-                .inventory
-                .lines()
-                .enumerate()
-                .filter(|(_, text)| !text.trim().is_empty())
-                .map(|(index, _)| index + 1)
+            let records = layout
+                .numbered()
+                .filter(|(_, read)| read.record && !read.text.trim().is_empty())
+                .map(|(number, _)| number)
                 .collect();
             // In line order, as a caller that takes the first error reads
             // the first in the document.

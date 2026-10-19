@@ -74,6 +74,10 @@ pub(crate) struct Line<'t> {
     /// The line without its comment, trimmed.
     pub(crate) code: &'t str,
     pub(crate) head: Head<'t>,
+    /// It is in a records section: a `sources:` or `contexts:` header, and
+    /// the lines after it up to the next statement or step. The inventory
+    /// reader reads these lines, and to every statement they are blank.
+    pub(crate) record: bool,
 }
 
 /// What a line's code starts with.
@@ -93,7 +97,16 @@ pub(crate) enum Head<'t> {
 
 impl<'t> Layout<'t> {
     pub(crate) fn new(text: &'t str) -> Self {
-        let lines: Vec<_> = text.lines().map(Line::new).collect();
+        let mut lines: Vec<_> = text.lines().map(Line::new).collect();
+        let mut records = false;
+        for line in &mut lines {
+            match line.head {
+                Head::Header(_) => records = true,
+                Head::Keyword(..) | Head::Step => records = false,
+                _ => {}
+            }
+            line.record = records;
+        }
         let mut statements = Vec::with_capacity(lines.len());
         // The blocks open at the statement being read, innermost last: the
         // statement that opens each, its indentation, and its kind.
@@ -101,7 +114,7 @@ impl<'t> Layout<'t> {
         let mut start = 0;
         while start < lines.len() {
             let first = &lines[start];
-            if first.head == Head::Blank {
+            if first.blank() {
                 statements.push(Statement {
                     lines: start..start + 1,
                     parent: None,
@@ -175,7 +188,9 @@ impl<'t> Layout<'t> {
             if index > 0 {
                 joined.push('\n');
             }
-            joined.push_str(line.uncommented);
+            if !line.record {
+                joined.push_str(line.uncommented);
+            }
         }
         Cow::Owned(joined)
     }
@@ -213,7 +228,14 @@ impl<'t> Line<'t> {
             uncommented,
             code,
             head,
+            record: false,
         }
+    }
+
+    /// Whether the line holds no statement's code: it is blank, or a
+    /// record.
+    pub(crate) fn blank(&self) -> bool {
+        self.head == Head::Blank || self.record
     }
 
     /// The keyword the line starts with, if one.
@@ -273,7 +295,7 @@ fn opens(lines: &[Line], block: Option<Block>) -> Option<Block> {
         lines
             .iter()
             .rev()
-            .find(|line| !line.code.is_empty())
+            .find(|line| !line.blank())
             .is_some_and(|line| line.code.ends_with(':'))
     };
     match block {
@@ -307,6 +329,10 @@ fn brackets_end(lines: &[Line], start: usize) -> usize {
         let Some(next) = lines.get(end) else {
             break;
         };
+        if next.record {
+            end += 1;
+            continue;
+        }
         if !next.code.is_empty()
             && (next.keyword().is_some()
                 || has_top_level_equals(next.code)
@@ -329,7 +355,7 @@ fn indented_end(lines: &[Line], start: usize, mut end: usize) -> usize {
     let indent = lines[start].indent;
     let mut next = end;
     while let Some(line) = lines.get(next) {
-        if line.head == Head::Blank {
+        if line.blank() {
             next += 1;
         } else if line.indent > indent && matches!(line.head, Head::Other) {
             next += 1;
@@ -397,6 +423,25 @@ mod tests {
             Layout::new("path: out/{@entities}").lines[0].keyword(),
             Some(Keyword::Path)
         );
+    }
+
+    /// Records run from their header to the next statement or step, and
+    /// are blank to the statements around them, even inside parentheses.
+    #[test]
+    fn records_are_marked_and_blank_to_statements() {
+        let text = "x = f(a,\nsources:\n    raw[id=1]\n)\nsource raw : T [id]\n";
+        let layout = Layout::new(text);
+        let records: Vec<_> = layout.lines.iter().map(|line| line.record).collect();
+        assert_eq!(records, [false, true, true, true, false]);
+        let statements: Vec<_> = layout
+            .statements
+            .iter()
+            .filter(|statement| !statement.blank)
+            .map(|statement| statement.lines.clone())
+            .collect();
+        assert_eq!(statements, [0..4, 4..5]);
+        // The `)` is under the header, so a record, and the step stays open.
+        assert_eq!(layout.text(&layout.statements[0]), "x = f(a,\n\n\n");
     }
 
     #[test]
