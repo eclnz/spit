@@ -223,7 +223,7 @@ fn default_setting(
                 "a default path rule names no product; write one product's rule as `path product: ...`, without `default`",
             ))
         }
-        Some((Keyword::Ext, rest)) => StatementKind::Extension {
+        Some((Keyword::Ext, rest)) if setting.starts_with("ext:") => StatementKind::Extension {
             stage,
             extension: extension(rest.trim(), number)?.to_owned(),
         },
