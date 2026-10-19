@@ -21,7 +21,7 @@ fn errors(text: &str) -> Vec<String> {
 }
 
 const CONVERT: &str = "\
-path: out/{@product}/{@entities}
+default path: out/{@product}/{@entities}
 source dicom [sub]
 path dicom: in/{sub}
 operation convert(dicom) -> (image: Image .nii.gz, meta: Json .json beside image)
@@ -62,7 +62,7 @@ fn a_beside_output_follows_its_siblings_own_rule() {
         "derivatives/sub-{sub}/anat/sub-{sub}_brain_mask.nii.gz"
     );
     let staged = parse_pipeline(
-        "path: {@stage}/{@product}/{@entities}\nsource dicom [sub]\npath dicom: in/{sub}\n\
+        "default path: {@stage}/{@product}/{@entities}\nsource dicom [sub]\npath dicom: in/{sub}\n\
          operation convert(dicom) -> (image: Image .nii.gz, meta .json beside image)\n\
          stage import:\n    image, meta = convert(dicom)\n",
     )
@@ -155,7 +155,7 @@ fn a_beside_output_names_a_sibling_with_an_extension() {
 fn a_beside_output_cannot_share_a_path_with_another_product() {
     // `meta` is written at `out/{sub}.json`, where `note` writes too.
     let found = errors(
-        "path: out/{@entities}\nsource dicom [sub]\npath dicom: in/{sub}\n\
+        "default path: out/{@entities}\nsource dicom [sub]\npath dicom: in/{sub}\n\
          operation convert(dicom) -> (image: Image .nii.gz, meta: Json .json beside image)\n\
          command convert: convert {dicom} {image}\n\
          operation note(dicom) -> Json .json\ncommand note: note {dicom} {@output}\n\

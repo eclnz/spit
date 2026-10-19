@@ -145,7 +145,7 @@ fn a_recipe_default_places_each_companion_at_the_anchor_name() {
     tree.write("pipeline.spit", UNPLACED);
     let recipe = tree.write(
         "dataset.spitin",
-        "pipeline pipeline.spit\nroot .\npath: site-{site}/shot-{shot}/{@product}\n",
+        "pipeline pipeline.spit\nroot .\ndefault path: site-{site}/shot-{shot}/{@product}\n",
     );
     let (ok, out, err) = spit(&["inputs", recipe.to_str().unwrap()]);
     assert!(ok, "{err}");
@@ -342,7 +342,7 @@ fn records_count_what_an_earlier_run_removed() {
 /// `PHOTOS` with a step that reads the image alone, beside the one that
 /// reads every member.
 const TWO_STEPS: &str = "\
-path: out/{@product}/site-{site}_shot-{shot}
+default path: out/{@product}/site-{site}_shot-{shot}
 source raw : Image .raw [site, shot]
 path raw: site-{site}/shot-{shot}.raw
 source gps : Track .gpx beside raw

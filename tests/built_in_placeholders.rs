@@ -17,7 +17,7 @@ fn errors(text: &str) -> Vec<String> {
 
 #[test]
 fn a_dimension_may_take_a_built_in_name() {
-    let text = "path: out/{@stage}/{@product}/{stage}_{product}\nsource raw [stage, product]\npath raw: in/{stage}/{product}\noperation copy(a: A) -> A\nstage prep:\n    copied = copy(raw)\n";
+    let text = "default path: out/{@stage}/{@product}/{stage}_{product}\nsource raw [stage, product]\npath raw: in/{stage}/{product}\noperation copy(a: A) -> A\nstage prep:\n    copied = copy(raw)\n";
     assert_eq!(errors(text), Vec::<String>::new());
     let pipeline = parse_pipeline(text).unwrap();
     assert_eq!(
@@ -34,7 +34,7 @@ fn an_old_form_says_what_to_write() {
         ("stage", "the stage that makes it"),
     ] {
         let text = format!(
-            "path: out/{{{name}}}/{{@entities}}\nsource raw [id]\npath raw: in/{{id}}\noperation copy(a: A) -> A\ncopied = copy(raw)\n"
+            "default path: out/{{{name}}}/{{@entities}}\nsource raw [id]\npath raw: in/{{id}}\noperation copy(a: A) -> A\ncopied = copy(raw)\n"
         );
         assert_eq!(
             errors(&text),
@@ -47,7 +47,7 @@ fn an_old_form_says_what_to_write() {
 
 #[test]
 fn an_unknown_built_in_is_an_error() {
-    let found = errors("path: out/{@name}/{@entities}\n");
+    let found = errors("default path: out/{@name}/{@entities}\n");
     assert!(
         found.iter().any(|error| error.contains(
             "unknown built-in placeholder `{@name}`; path templates have `{@product}`, `{@entities}`, `{@labels}` and `{@stage}`"
@@ -107,7 +107,7 @@ fn optional_groups_reject_unknown_dimensions_and_invalid_nesting() {
     for text in ["out/[x]/{@product}", "out/[{ses}[{run}]]", "out/[{ses}"] {
         assert!(PathTemplate::parse(text).is_err(), "{text}");
     }
-    let found = errors("path: out/[ses-{sess}]{@product}.txt\nsource raw [ses]\n");
+    let found = errors("default path: out/[ses-{sess}]{@product}.txt\nsource raw [ses]\n");
     assert!(
         found
             .iter()
@@ -118,7 +118,7 @@ fn optional_groups_reject_unknown_dimensions_and_invalid_nesting() {
 
 #[test]
 fn a_dimensionless_product_omits_an_optional_label_group() {
-    let text = "path: out/[{@labels}_]{@product}.txt\nsource singleton\n";
+    let text = "default path: out/[{@labels}_]{@product}.txt\nsource singleton\n";
     assert!(errors(text).is_empty());
     let pipeline = parse_pipeline(text).unwrap();
     assert_eq!(
@@ -126,7 +126,7 @@ fn a_dimensionless_product_omits_an_optional_label_group() {
         "out/{@product}.txt"
     );
 
-    let missing = errors("path: out/{@labels}.txt\nsource singleton\n");
+    let missing = errors("default path: out/{@labels}.txt\nsource singleton\n");
     assert!(
         missing
             .iter()
@@ -140,7 +140,7 @@ fn labels_warn_when_a_value_contains_a_dash() {
     let tree = Tree::new("dashed-label", &["data/in/sub-01-a.txt"]);
     tree.write(
         "pipeline.spit",
-        "path: out/{@product}/{@entities}.txt\nsource raw [sub]\npath raw: in/{@labels}.txt\noperation copy(input)\ncommand copy: cp {input} {@output}\nresult = copy(raw)\n",
+        "default path: out/{@product}/{@entities}.txt\nsource raw [sub]\npath raw: in/{@labels}.txt\noperation copy(input)\ncommand copy: cp {input} {@output}\nresult = copy(raw)\n",
     );
     let recipe = tree.write("recipe.spitin", "pipeline pipeline.spit\nroot data\n");
     let result = spit(&["dag", recipe.to_str().unwrap()]);
@@ -184,7 +184,7 @@ fn discovery_uses_each_sources_resolved_groups_and_labels() {
     );
     tree.write(
         "pipeline.spit",
-        "path: in/sub-{sub}[/ses-{ses}]/{@labels}_{@product}.txt\nsource image [sub, ses]\nsource metadata [sub]\n",
+        "default path: in/sub-{sub}[/ses-{ses}]/{@labels}_{@product}.txt\nsource image [sub, ses]\nsource metadata [sub]\n",
     );
     let recipe = tree.write("recipe.spitin", "pipeline pipeline.spit\nroot data\n");
     let result = spit(&["inputs", recipe.to_str().unwrap()]);

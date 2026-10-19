@@ -97,7 +97,7 @@ fn files_at_the_pipelines_output_paths_are_not_unmatched() {
     );
     tree.write(
         "pipeline.spit",
-        "source x [s]\npath x: in/{s}.txt\npath: out/{@stage}/{@product}/{@entities}\next: .csv\n\
+        "source x [s]\npath x: in/{s}.txt\ndefault path: out/{@stage}/{@product}/{@entities}\ndefault ext: .csv\n\
          path report: out/report.csv\npath stored: out/stored/{@entities}\n\
          stage clean:\n    operation clean(x) -> Clean\n    command clean: clean {x} {@output}\n    cleaned = clean(x)\n\
          operation summarize(items: many Clean) -> Report\ncommand summarize: summarize {items} {@output}\n\
@@ -121,7 +121,7 @@ fn files_at_the_pipelines_output_paths_are_not_unmatched() {
 }
 
 const DISCOVERED: &str = "\
-path: derived/{@product}/{@entities}.txt
+default path: derived/{@product}/{@entities}.txt
 source frame [subject, run]
 path frame: raw/sub-{subject}/run-{run}.dat
 source lut
@@ -176,7 +176,7 @@ fn directory_discovery_finds_observed_subject_session_pairs() {
     );
     let text = "\
 discover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}
-path: results/{@product}/{@entities}.txt
+default path: results/{@product}/{@entities}.txt
 source image [sub, ses]
 path image: data/sub-{sub}/ses-{ses}/image.nii.gz
 operation process(image) -> Output

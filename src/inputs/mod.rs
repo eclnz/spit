@@ -28,7 +28,9 @@ use crate::model::{
     ArtifactInstance, CoverageAction, CoverageGap, EntityBinding, GroupKey, InputRules, Pipeline,
     PipelineIndex, Removal, SourceInventory,
 };
-use crate::parser::{without_bom, Header, Keyword, Kind, Layout, Line, ParseError, SourceMap};
+use crate::parser::{
+    without_bom, Head, Header, Keyword, Kind, Layout, Line, ParseError, SourceMap,
+};
 use crate::paths::{inspect_paths, PathError, PathTemplate};
 
 pub(crate) use self::coverage::collect_rule_errors;
@@ -152,8 +154,21 @@ fn is_step(line: &Line) -> bool {
 
 fn check_input_lines(text: &str) -> Result<(), ParseError> {
     for (number, line) in Layout::new(text).numbered() {
+        // After `default`, the setting decides where the line belongs.
+        let (keyword, written) = match line.head {
+            Head::Keyword(Keyword::Default, rest) => (
+                Keyword::split(rest.trim()).map(|(keyword, _)| keyword),
+                line.code,
+            ),
+            _ => (
+                line.keyword(),
+                line.code
+                    .split_once([' ', ':'])
+                    .map_or(line.code, |(word, _)| word),
+            ),
+        };
         let pipeline_only = matches!(
-            line.keyword(),
+            keyword,
             Some(
                 Keyword::Source
                     | Keyword::Operation
@@ -169,10 +184,7 @@ fn check_input_lines(text: &str) -> Result<(), ParseError> {
             )
         );
         if pipeline_only {
-            let word = line
-                .code
-                .split_once([' ', ':'])
-                .map_or(line.code, |(word, _)| word);
+            let word = written.split_once(':').map_or(written, |(word, _)| word);
             return Err(ParseError::new(
                 number,
                 format!("`{word}` belongs in the .spit pipeline{PIPELINE_ONLY}"),
@@ -184,10 +196,10 @@ fn check_input_lines(text: &str) -> Result<(), ParseError> {
                 format!("a step belongs in the .spit pipeline{PIPELINE_ONLY}"),
             ));
         }
-        if line.keyword() == Some(Keyword::Ext) {
+        if keyword == Some(Keyword::Ext) {
             return Err(ParseError::new(
                 number,
-                "`ext:` completes the pipeline's default output paths; it belongs in the .spit pipeline",
+                "a default `ext:` completes the pipeline's default output paths; it belongs in the .spit pipeline",
             ));
         }
         if line.header() == Some(Header::SourcePaths) {
@@ -226,7 +238,7 @@ fn finish_spec(
             let line = lines.default_path.as_ref().map_or(1, |place| place.line);
             return Err(ParseError::new(
                 line,
-                "a .spitin `path:` is the default for sources, and no source is made in a stage; leave out `{@stage}`",
+                "a .spitin `default path:` is the rule for sources with none of their own, and no source is made in a stage; leave out `{@stage}`",
             ));
         }
     }
@@ -632,7 +644,7 @@ impl fmt::Display for InputError {
             ),
             Self::NoSourcePath { product } => write!(
                 f,
-                "source `{product}` has no path rule, so its files cannot be found; write `path {product}:` in the pipeline or the recipe, or a default `path:` in the recipe"
+                "source `{product}` has no path rule, so its files cannot be found; write `path {product}:` in the pipeline or the recipe, or `default path:` in the recipe"
             ),
             Self::ConflictingSourcePaths { product } => write!(
                 f,

@@ -52,6 +52,9 @@ pub(crate) enum Block {
     /// An `operation` header's that ends in `:`: the steps that carry the
     /// operation out. Nothing in a body opens a block.
     Body,
+    /// A `default:` line's: the `path:`, `ext:` and `check:` defaults of
+    /// the file or stage it is in. Nothing in it opens a block.
+    Defaults,
 }
 
 /// One physical line.
@@ -114,9 +117,10 @@ impl<'t> Layout<'t> {
                 open.pop();
             }
             let parent = open.last().map(|&(opener, _, _)| opener);
+            // Only a stage's lines may open blocks.
             let in_body = open
                 .last()
-                .is_some_and(|&(_, _, block)| block == Block::Body);
+                .is_some_and(|&(_, _, block)| block != Block::Stage);
             let opens = (!in_body).then(|| opens(&lines[range.clone()])).flatten();
             if let Some(block) = opens {
                 open.push((statements.len(), first.indent, block));
@@ -208,10 +212,11 @@ impl<'t> Line<'t> {
 }
 
 /// The block a statement on `lines` opens: a `stage` line's, whatever it
-/// holds, and an `operation` header's that ends in `:`.
+/// holds, an `operation` header's that ends in `:`, and `default:`'s.
 fn opens(lines: &[Line]) -> Option<Block> {
     match lines[0].keyword()? {
         Keyword::Stage => Some(Block::Stage),
+        Keyword::Default if lines[0].code == "default:" => Some(Block::Defaults),
         Keyword::Operation => lines
             .iter()
             .rev()

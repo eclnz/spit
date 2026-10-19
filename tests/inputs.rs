@@ -177,7 +177,7 @@ fn missing_source_coverage_names_the_path_rule_and_unmatched_file() {
     );
     let recipe = tree.write(
         "analysis.spitin",
-        "pipeline analysis.spit\nroot .\npath: t1w sub-{sub}/ses-{ses}\nrequire [sub, ses] where t1w count=1\n",
+        "pipeline analysis.spit\nroot .\ndefault path: t1w sub-{sub}/ses-{ses}\nrequire [sub, ses] where t1w count=1\n",
     );
     let run = |extra: &[&str]| {
         Command::new(env!("CARGO_BIN_EXE_spit"))
@@ -619,7 +619,7 @@ fn a_recipe_that_does_not_fit_its_pipeline_says_why() {
             spit::InputError::NoSourcePath {
                 product: "raw".into(),
             },
-            "source `raw` has no path rule, so its files cannot be found; write `path raw:` in the pipeline or the recipe, or a default `path:` in the recipe",
+            "source `raw` has no path rule, so its files cannot be found; write `path raw:` in the pipeline or the recipe, or `default path:` in the recipe",
         ),
     ] {
         let found = spit::parse_input_spec(recipe)
@@ -632,7 +632,7 @@ fn a_recipe_that_does_not_fit_its_pipeline_says_why() {
 }
 
 const STAGED: &str = "\
-path: {@stage}/{@product}/{@entities}
+default path: {@stage}/{@product}/{@entities}
 source image: Image [sub]
 source mask: Image [sub]
 source atlas: Image
@@ -660,7 +660,7 @@ fn a_recipe_path_is_the_default_for_sources_with_no_rule() {
         "{coverage}"
     );
     let recipe = parse_input_spec(
-        "path: raw/{@product}/{@entities}.nii.gz\npath mask: raw/masks/sub-{sub}.nii.gz\n",
+        "default path: raw/{@product}/{@entities}.nii.gz\npath mask: raw/masks/sub-{sub}.nii.gz\n",
     )
     .unwrap();
     // Only `image` has no rule of its own; the recipe stays as written.
@@ -702,12 +702,12 @@ fn a_recipe_path_is_the_default_for_sources_with_no_rule() {
 
 #[test]
 fn a_recipe_path_cannot_name_a_stage() {
-    let error = parse_input_spec("path: x/{@stage}/{@product}/{@entities}\n").unwrap_err();
+    let error = parse_input_spec("default path: x/{@stage}/{@product}/{@entities}\n").unwrap_err();
     assert_eq!(error.line(), 1);
     assert!(
         error
             .to_string()
-            .contains("a .spitin `path:` is the default for sources, and no source is made in a stage; leave out `{@stage}`"),
+            .contains("a .spitin `default path:` is the rule for sources with none of their own, and no source is made in a stage; leave out `{@stage}`"),
         "{error}"
     );
 }
@@ -718,7 +718,7 @@ fn check_lists_a_recipe_default_as_the_recipes() {
     fs::write(tree.0.join("staged.spit"), STAGED).unwrap();
     fs::write(
         tree.0.join("staged.spitin"),
-        "pipeline staged.spit\nroot .\npath: raw/{@product}/{@entities}.nii.gz\n",
+        "pipeline staged.spit\nroot .\ndefault path: raw/{@product}/{@entities}.nii.gz\n",
     )
     .unwrap();
     let recipe = tree.0.join("staged.spitin");
@@ -745,15 +745,15 @@ fn check_finds_a_bad_recipe_source_path_at_its_line() {
         |recipe: &str| support::rendered(&spit::diagnose_recipe_against(recipe, &pipeline));
     // A default shared by two sources must tell them apart.
     assert_eq!(
-        diagnose("path: raw/{@entities}.nii.gz\n"),
+        diagnose("default path: raw/{@entities}.nii.gz\n"),
         ["error: line 1: products `image` and `mask` bind to the same path `raw/sub=sub.nii.gz` for the same entities; include `{@product}` or distinguish their path rules"]
     );
     // A recipe's own rule is checked too, which only `--path-rules` did.
     assert_eq!(
-        diagnose("path: raw/{@product}/{@entities}.nii.gz\npath mask: raw/mask.nii.gz\n"),
+        diagnose("default path: raw/{@product}/{@entities}.nii.gz\npath mask: raw/mask.nii.gz\n"),
         ["error: line 2: path template for `mask` omits dimension `sub`; artifacts differing only in `sub` would share a path"]
     );
-    assert!(diagnose("path: raw/{@product}/{@entities}.nii.gz\n").is_empty());
+    assert!(diagnose("default path: raw/{@product}/{@entities}.nii.gz\n").is_empty());
 }
 
 #[test]
@@ -767,10 +767,10 @@ fn one_recipe_default_covers_sources_of_different_extensions() {
         ],
     );
     let pipeline = parse_pipeline(
-        "path: {@stage}/{@product}/{@entities}\nsource image : Image .nii.gz [sub]\nsource events .tsv [sub]\nstage prep:\n    operation fit(image: Image, events)\n    fitted = fit(image, events)\n",
+        "default path: {@stage}/{@product}/{@entities}\nsource image : Image .nii.gz [sub]\nsource events .tsv [sub]\nstage prep:\n    operation fit(image: Image, events)\n    fitted = fit(image, events)\n",
     )
     .unwrap();
-    let recipe = parse_input_spec("path: raw/sub-{sub}/{@product}\n").unwrap();
+    let recipe = parse_input_spec("default path: raw/sub-{sub}/{@product}\n").unwrap();
     let resolved = recipe
         .resolve(&pipeline, InputSource::Discover(tree.path()))
         .unwrap();

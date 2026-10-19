@@ -4,8 +4,8 @@
 # call and library line it came from.
 use clean_dwi_session, register_to_dwi from mrtrix_dwi.spit as mrx
 
-path: derivatives/{@stage}/{@product}/{@entities}
-ext: .mif
+default path: derivatives/{@stage}/{@product}/{@entities}
+default ext: .mif
 
 source raw_dwi : MRI<DWI,Acquired> .nii.gz [sub, ses, run]
 source dwi_bvec : GradientDirections .bvec beside raw_dwi

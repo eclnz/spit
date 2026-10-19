@@ -395,7 +395,7 @@ mod tests {
         let mut previous = "raw".to_owned();
         for index in 0..steps {
             text += &format!(
-                "stage s{index}:\n    check: c{}\n    p{index} = step({previous})\n",
+                "stage s{index}:\n    default check: c{}\n    p{index} = step({previous})\n",
                 steps - 1
             );
             previous = format!("p{index}");

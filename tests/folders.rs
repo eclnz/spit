@@ -139,7 +139,7 @@ fn a_folder_may_have_an_extension_and_takes_no_default_one() {
     let pipeline = tree.write(
         "pipeline.spit",
         "\
-ext: .txt
+default ext: .txt
 source table [id]
 path table: in/{id}.csv
 operation store(table) -> Zarr .zarr/

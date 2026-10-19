@@ -9,7 +9,7 @@ use support::{spit, text, Tree};
 use spit::{parse_input_spec, parse_pipeline, InputSource};
 
 const PIPELINE: &str = "\
-path: def/{@product}/{@entities}.txt
+default path: def/{@product}/{@entities}.txt
 source a [sub]
 path a: own/a-{sub}.txt
 source b [sub]
@@ -46,7 +46,7 @@ fn a_source_takes_its_own_rule_then_the_recipes_default_then_the_pipelines() {
     ];
     assert_eq!(
         found(
-            "path b: rec/b-{sub}.txt\npath: rdef/{@product}-{sub}.txt\n",
+            "path b: rec/b-{sub}.txt\ndefault path: rdef/{@product}-{sub}.txt\n",
             &files
         ),
         ["own/a-1.txt", "rec/b-1.txt", "rdef/c-1.txt"]

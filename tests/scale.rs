@@ -236,7 +236,12 @@ fn a_body_with_every_step_failing_is_reported_in_reasonable_time() {
 #[test]
 #[ignore = "slow in a debug build; run with --release"]
 fn many_repeated_path_extension_and_check_lines_are_reported_in_reasonable_time() {
-    for first in ["path: a", "path raw: a", "ext: .a", "check: nonempty"] {
+    for first in [
+        "default path: a",
+        "path raw: a",
+        "default ext: .a",
+        "default check: nonempty",
+    ] {
         let text =
             format!("source raw : T [sub]\n{first}\n") + &format!("{first}\n").repeat(20_000);
         let start = Instant::now();

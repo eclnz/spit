@@ -38,7 +38,7 @@ fn a_line_that_fails_still_closes_the_stage_it_is_outdented_from() {
     // The unindented `path:` fails, but indentation alone decides where a
     // stage ends, so it ends stage `outer` all the same, and the indented
     // stage header after it is outside every stage.
-    let text = "path: {@product}.txt\nsource raw : Table [id]\noperation copy(table: Table) -> Table\nstage outer:\n    stage first:\n        a = copy(raw)\npath: {@product}.csv\n    stage second:\n        b = copy(a)\n";
+    let text = "default path: {@product}.txt\nsource raw : Table [id]\noperation copy(table: Table) -> Table\nstage outer:\n    stage first:\n        a = copy(raw)\ndefault path: {@product}.csv\n    stage second:\n        b = copy(a)\n";
     let issues = errors(diagnose(text, None));
     assert_eq!(
         issues
@@ -168,7 +168,7 @@ fn seeded_deletions_report_every_damaged_inventory_line() {
 fn deletion_messages_name_the_missing_syntax_without_cascading() {
     let pipeline: Vec<String> = [
         "source raw : Image [id]",
-        "path: out/{@product}/{id}.txt",
+        "default path: out/{@product}/{id}.txt",
         "operation copy(input: Image) -> Image",
         "command copy: tool {input} {@output}",
         "result = copy(raw)",
@@ -197,7 +197,7 @@ fn deletion_messages_name_the_missing_syntax_without_cascading() {
             DiagnosticSource::Pipeline,
             1,
             ":",
-            "expected `:` after path product",
+            "expected `:` after `default path`",
         ),
         (
             DiagnosticSource::Pipeline,
@@ -370,7 +370,7 @@ fn a_body_with_every_step_failing_is_reported_by_its_steps_alone() {
 /// A rule that repeats one is an error that leaves the first as it was.
 #[test]
 fn a_repeated_path_extension_or_check_list_is_an_error_of_its_own() {
-    let text = "source raw : T [sub]\noperation step(input: T) -> T\npath: a\npath: b\npath raw: c\npath raw: d\next: .x\next: .y\ncheck: nonempty\ncheck: nonempty\nstage s:\n    path: a\n    path: b\n    ext: .x\n    ext: .y\n";
+    let text = "source raw : T [sub]\noperation step(input: T) -> T\ndefault path: a\ndefault path: b\npath raw: c\npath raw: d\ndefault ext: .x\ndefault ext: .y\ndefault check: nonempty\ndefault check: nonempty\nstage s:\n    default path: a\n    default path: b\n    default ext: .x\n    default ext: .y\n";
     let found = error_lines(text);
     assert_eq!(lines_of(&found), [4, 6, 8, 10, 13, 15], "{found:?}");
 }

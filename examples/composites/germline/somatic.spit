@@ -4,7 +4,7 @@
 # `tumour_bam.aligned`.
 use align_sample from germline.spit as gl
 
-path: out/{@product}/{@entities}
+default path: out/{@product}/{@entities}
 
 source reference : Fasta .fa
 source normal_r1 : Fastq .fastq.gz [patient, lane]

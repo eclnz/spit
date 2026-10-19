@@ -3,8 +3,8 @@
 A path rule turns an artifact identity into a path relative to the dataset root. A pipeline can set a default, and a particular product can override it:
 
 ```spit
-path: results/{@product}/{@entities}
-ext: .nii.gz
+default path: results/{@product}/{@entities}
+default ext: .nii.gz
 source image : Image .nii.gz [sub, run]
 path image: raw/sub-{sub}/run-{run}.nii.gz
 ```
@@ -25,16 +25,16 @@ SPIT's placeholders start with `@`; a plain name is a dimension. `[text]` makes 
 
 ## Extensions
 
-An operation can declare the extension its output file has; `ext:` supplies a default when the operation does not. Sources can declare their extensions too. A default rule can therefore omit the suffix:
+An operation can declare the extension its output file has; `default ext:` supplies a default when the operation does not. Sources can declare their extensions too. A default rule can therefore omit the suffix:
 
 ```spit
-path: derived/{@product}/{@entities}
-ext: .csv
+default path: derived/{@product}/{@entities}
+default ext: .csv
 source events .tsv [sub]
 operation analyse(events) -> Report .json
 ```
 
-The source takes `.tsv` and the operation's output takes `.json`; `ext: .csv` applies only where no output extension is declared. See [extensions](../language-reference.md#extensions) for exact precedence and errors.
+The source takes `.tsv` and the operation's output takes `.json`; `default ext: .csv` applies only where no output extension is declared. See [extensions](../language-reference.md#extensions) for exact precedence and errors.
 
 For a tool that writes a second output next to the first without taking its path, declare it `beside` the first output. The companion follows the first output's stem with a different suffix:
 

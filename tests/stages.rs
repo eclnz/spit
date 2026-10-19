@@ -130,7 +130,7 @@ fn a_stage_path_rule_covers_only_that_stage() {
 
 #[test]
 fn stage_placeholder_needs_a_stage() {
-    let text = "path: {@stage}/{@product}/{@entities}\nsource raw [id]\npath raw: in/{id}\noperation copy(a: A) -> A\nloose = copy(raw)\n";
+    let text = "default path: {@stage}/{@product}/{@entities}\nsource raw [id]\npath raw: in/{id}\noperation copy(a: A) -> A\nloose = copy(raw)\n";
     let diagnostics = diagnose(text, None);
     assert_eq!(
         messages(&diagnostics),
@@ -140,7 +140,7 @@ fn stage_placeholder_needs_a_stage() {
         )]
     );
     // The fix the message gives works.
-    let fixed = text.replace("path: {@stage}/", "path: [{@stage}/]");
+    let fixed = text.replace("default path: {@stage}/", "default path: [{@stage}/]");
     assert_eq!(messages(&diagnose(&fixed, None)), []);
 }
 
@@ -230,16 +230,16 @@ fn stage_syntax_errors() {
             ),
         ),
         (
-            "stage prep:\n    path: a/{@product}/{@entities}\n    path: b/{@product}/{@entities}\n",
+            "stage prep:\n    default path: a/{@product}/{@entities}\n    default path: b/{@product}/{@entities}\n",
             (Some(3), "duplicate default path template for stage `prep`"),
         ),
         (
-            "stage prep:\n    path: a/{@product}/{@entities}\nstage prep:\n    path: b/{@product}/{@entities}\n",
+            "stage prep:\n    default path: a/{@product}/{@entities}\nstage prep:\n    default path: b/{@product}/{@entities}\n",
             (Some(4), "duplicate default path template for stage `prep`"),
         ),
         (
-            "stage prep:\n    ext: .txt\nstage prep:\n    ext: .csv\n",
-            (Some(4), "duplicate `ext:` for stage `prep`"),
+            "stage prep:\n    default ext: .txt\nstage prep:\n    default ext: .csv\n",
+            (Some(4), "duplicate `default ext:` for stage `prep`"),
         ),
     ];
     for (text, expected) in cases {
@@ -258,7 +258,7 @@ fn a_stage_opened_again_continues_its_first_block() {
     // As in the usability study: `func` split into two blocks around a step
     // of another stage. The second block's steps join `func`, and take its
     // default path, wherever in the two blocks that is written.
-    let text = "source raw [id]\npath raw: in/{@entities}\noperation copy(a: A) -> A\nstage func:\n    a = copy(raw)\nstage anat:\n    b = copy(a)\nstage func:\n    path: f/{@product}/{@entities}\n    c = copy(b)\n    stage inner:\n        d = copy(c)\nstage func:\n    stage inner:\n        e = copy(d)\n";
+    let text = "source raw [id]\npath raw: in/{@entities}\noperation copy(a: A) -> A\nstage func:\n    a = copy(raw)\nstage anat:\n    b = copy(a)\nstage func:\n    default path: f/{@product}/{@entities}\n    c = copy(b)\n    stage inner:\n        d = copy(c)\nstage func:\n    stage inner:\n        e = copy(d)\n";
     assert_eq!(messages(&diagnose(text, None)), []);
     let (pipeline, _) = support::parse_fixture(text).unwrap();
     let names: Vec<_> = pipeline.stages.iter().map(|stage| &stage.name).collect();
@@ -339,7 +339,7 @@ fn the_same_name_can_be_nested_in_different_stages() {
 
 #[test]
 fn nested_stages_nest_their_paths_and_inherit_defaults() {
-    let text = "path: {@stage}/{@product}/{@entities}\nsource raw [id]\npath raw: in/{id}\noperation copy(a: A) -> A\nstage outer:\n    path: out/{@stage}/{@product}/{@entities}\n    stage inner:\n        a = copy(raw)\n    stage own:\n        path: own/{@product}/{@entities}\n        b = copy(a)\n";
+    let text = "default path: {@stage}/{@product}/{@entities}\nsource raw [id]\npath raw: in/{id}\noperation copy(a: A) -> A\nstage outer:\n    default path: out/{@stage}/{@product}/{@entities}\n    stage inner:\n        a = copy(raw)\n    stage own:\n        default path: own/{@product}/{@entities}\n        b = copy(a)\n";
     let (pipeline, _) = support::parse_fixture(text).unwrap();
     let coverage = inspect_paths(&pipeline).unwrap();
     let rule = |product: &str| {

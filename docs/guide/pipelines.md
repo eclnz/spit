@@ -41,7 +41,7 @@ operation denoise(input: Image) -> Image .nii.gz @ check(nonempty)
 
 SPIT records these commands in the DAG; the runner performs them. A failed check or verify fails the job. Checks can take declared parameters, such as `check ndim(n): check_ndim {@path} {n}` and `@ check(ndim(3))`. See [checks](../language-reference.md#checks) for attachment points and execution order.
 
-For checks shared by every output in a file or stage, write `check: nonempty, ndim(3)` once. A nested stage can remove an inherited check with `check: !nonempty`; an output can do the same with `@ check(!nonempty)`. See [default checks](../language-reference.md#default-checks).
+For checks shared by every output in a file or stage, write `default check: nonempty, ndim(3)` once. A nested stage can remove an inherited check with `default check: !nonempty`; an output can do the same with `@ check(!nonempty)`. See [default checks](../language-reference.md#default-checks).
 
 ## Composite operations
 
@@ -64,7 +64,7 @@ The call expands to the body's steps, and a body may call another operation with
 
 ```spit
 stage preprocess:
-    path: derived/{@stage}/{@product}/{@entities}
+    default path: derived/{@stage}/{@product}/{@entities}
     denoised = denoise(image)
 
 stage analysis:

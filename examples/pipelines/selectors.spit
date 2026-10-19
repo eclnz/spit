@@ -4,7 +4,7 @@
 
 entities: {key}_{value} separated "-"
 entities station: site
-path: derived/{@product}/{@entities}.csv
+default path: derived/{@product}/{@entities}.csv
 
 source reading : Series [station, day]
 path reading: raw/{station}/{day}.csv

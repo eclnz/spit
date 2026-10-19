@@ -445,7 +445,7 @@ fn extension_disagreement<'p>(
             "{default} ends in `{written}`, but {source} declares `{expected}`; write {default} without an extension, so each source's declared extension completes it"
         ),
         ExtensionSource::Stage(_) | ExtensionSource::Default => format!(
-            "{default} ends in `{written}`, but {source} sets `{expected}`; write the extension once, with `ext:`"
+            "{default} ends in `{written}`, but {source} sets `{expected}`; write the extension once, with `default ext:`"
         ),
     };
     Some(Disagreement { message, said_once })
@@ -521,13 +521,13 @@ fn shape_errors(
         }
     };
     if let Some(template) = &pipeline.path_template {
-        let owner = "`path:` is the default for outputs too; write the shape in a `path` rule for each source, as `path <source>: ...`".to_owned();
+        let owner = "`default path:` is the rule for outputs too; write the shape in a `path` rule for each source, as `path <source>: ...`".to_owned();
         report(template, lines.default_path.clone(), owner);
     }
     for stage in &pipeline.stages {
         if let Some(template) = &stage.path_template {
             let owner = format!(
-                "stage `{}`'s `path:` is the default for its products; write the shape in a `path` rule for each source, as `path <source>: ...`",
+                "stage `{}`'s `default path:` is the rule for its products; write the shape in a `path` rule for each source, as `path <source>: ...`",
                 stage.name
             );
             report(template, lines.stage_paths.get(&stage.name).cloned(), owner);
