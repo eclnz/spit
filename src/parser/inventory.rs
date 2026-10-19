@@ -12,51 +12,6 @@ use super::layout::{Head, Layout, Line};
 use super::lexical::{comma_items, identifier, qualified_identifier};
 use super::ParseError;
 
-/// A document's text split in two: the rest, and any records
-/// under `sources:` or `contexts:` headers. Each keeps the document's line
-/// numbers, with blank lines where the other's lines were.
-pub(crate) struct DocumentText {
-    pub(crate) pipeline: String,
-    pub(crate) inventory: String,
-    /// The line of the first `sources:` or `contexts:` header.
-    pub(crate) inventory_line: Option<usize>,
-}
-
-pub(crate) fn split_document(text: &str) -> DocumentText {
-    let mut pipeline_text = String::new();
-    let mut inventory_text = String::new();
-    let mut inventory_section = false;
-    let mut inventory_line = None;
-
-    for (number, line) in Layout::new(text).numbered() {
-        // Records run from a `sources:` or `contexts:` header to the next
-        // header, statement or step.
-        match line.head {
-            Head::Header(_) => {
-                inventory_section = true;
-                inventory_line.get_or_insert(number);
-            }
-            Head::Keyword(..) | Head::Step => inventory_section = false,
-            _ => {}
-        }
-        // Each line goes to one side and a blank line to the other, so both
-        // texts keep the document's line numbers.
-        let target = if inventory_section {
-            &mut inventory_text
-        } else {
-            &mut pipeline_text
-        };
-        target.push_str(line.text);
-        pipeline_text.push('\n');
-        inventory_text.push('\n');
-    }
-    DocumentText {
-        pipeline: pipeline_text,
-        inventory: inventory_text,
-        inventory_line,
-    }
-}
-
 /// Parse an inventory supplied by a dataset indexer or written as a fixture.
 /// Records are logical identities, each optionally followed by `: path`, the
 /// file relative to the dataset root. They never hold artifact types.
@@ -73,7 +28,15 @@ pub fn parse_source_inventory(text: &str) -> Result<SourceInventory, ParseError>
 /// As [`parse_source_inventory`], in one parse: the records of the lines
 /// that read, and an error for each line that does not.
 pub(crate) fn parse_inventory_recovering(text: &str) -> (SourceInventory, Vec<ParseError>) {
-    let parsed = parse_inventory_with_lines(text);
+    let layout = Layout::new(super::without_bom(text));
+    let parsed = read_inventory(layout.numbered());
+    (parsed.inventory, parsed.errors)
+}
+
+/// The records of a document laid out in `layout`, read as
+/// [`parse_inventory_recovering`] reads an inventory's lines.
+pub(crate) fn document_records(layout: &Layout) -> (SourceInventory, Vec<ParseError>) {
+    let parsed = read_inventory(layout.numbered().filter(|(_, line)| line.record));
     (parsed.inventory, parsed.errors)
 }
 
@@ -85,7 +48,9 @@ struct ParsedInventory {
     errors: Vec<ParseError>,
 }
 
-fn parse_inventory_with_lines(text: &str) -> ParsedInventory {
+fn read_inventory<'a, 't: 'a>(
+    lines: impl Iterator<Item = (usize, &'a Line<'t>)>,
+) -> ParsedInventory {
     enum InventorySection {
         Sources,
         SourcePaths,
@@ -93,14 +58,13 @@ fn parse_inventory_with_lines(text: &str) -> ParsedInventory {
         Removed,
     }
 
-    let text = super::without_bom(text);
     let mut inventory = SourceInventory::default();
     let mut record_lines = Vec::new();
     let mut section = None;
     let mut parent: Option<(EntityBinding, usize)> = None;
     let mut group: Option<(Vec<EntityBinding>, usize)> = None;
     let mut errors = Vec::new();
-    for (number, read) in Layout::new(text).numbered() {
+    for (number, read) in lines {
         let Line {
             text: original,
             indent,
@@ -419,8 +383,8 @@ fn parse_group(
 /// Locate valid source records in an inventory without parsing each line as
 /// a separate document. Used only to place diagnostics after a failed check.
 pub(crate) fn source_record_lines(text: &str) -> Vec<(usize, SourceRecord)> {
-    let inventory_text = split_document(text).inventory;
-    let parsed = parse_inventory_with_lines(&inventory_text);
+    let layout = Layout::new(text);
+    let parsed = read_inventory(layout.numbered().filter(|(_, line)| line.record));
     if parsed.errors.is_empty() {
         parsed.record_lines
     } else {
