@@ -27,10 +27,13 @@ pub(super) fn recover_parse_errors<T>(
 ///
 /// `parse` reads a text with some lines blanked, passing over the
 /// statements that start on the lines it is given (`parse_flow`). Each
-/// parse gives errors, and the statements they are on are then left out:
-/// a statement that opens a block holding lines is passed over, so that the
-/// block keeps its lines, and any other is blanked. Parsing again finds the
-/// errors those hid, until a parse finds none.
+/// parse gives errors, and the statements they are on are then left out.
+/// One whose blank lines would read the lines after it otherwise, as it
+/// opens a block that holds lines or closes a block a later line is
+/// indented beneath, is passed over, so that the structure stays as it was;
+/// any other is blanked, as is a `use` line, which imports read before the
+/// parser does. Parsing again finds the errors those hid, until a parse
+/// finds none.
 pub(crate) fn recover_document<T>(
     text: &str,
     parse: impl Fn(&str, &FxHashSet<usize>) -> Result<T, Vec<ParseError>>,
@@ -39,13 +42,27 @@ pub(crate) fn recover_document<T>(
     // For each line, the statement it is in; a signature is one declaration
     // even when its error names a port line.
     let mut statement_of = vec![0; layout.lines.len()];
-    // For each statement, whether a block it opens holds lines.
-    let mut holds = vec![false; layout.statements.len()];
+    // For each statement, whether blanking it would change how the lines
+    // after it are read: a block it opens holds lines, or it closes a block
+    // that was open after the statement before it.
+    let mut structural = vec![false; layout.statements.len()];
+    // How many blocks hold each statement.
+    let mut depth = vec![0; layout.statements.len()];
+    // The blocks open after the last statement with code.
+    let mut open_after = 0;
     for (index, statement) in layout.statements.iter().enumerate() {
         statement_of[statement.lines.clone()].fill(index);
-        if let Some(parent) = statement.parent {
-            holds[parent] = true;
+        if statement.blank {
+            continue;
         }
+        if let Some(parent) = statement.parent {
+            structural[parent] = true;
+            depth[index] = depth[parent] + 1;
+        }
+        if depth[index] < open_after && !statement.stray {
+            structural[index] = true;
+        }
+        open_after = depth[index] + usize::from(statement.opens.is_some());
     }
     let mut recovered = layout
         .lines
@@ -82,9 +99,11 @@ pub(crate) fn recover_document<T>(
             };
             let statement = statement_of[index];
             let lines = layout.statements[statement].lines.clone();
+            let pass_over =
+                structural[statement] && layout.lines[lines.start].keyword() != Some(Keyword::Use);
             // A statement left out already that fails again would fail on
             // every parse.
-            let left_out = if holds[statement] {
+            let left_out = if pass_over {
                 !skipped.insert(lines.start + 1)
             } else {
                 recovered[ranges[index].clone()].trim().is_empty()
@@ -93,7 +112,7 @@ pub(crate) fn recover_document<T>(
                 errors.push(error);
                 return (None, errors);
             }
-            if !holds[statement] {
+            if !pass_over {
                 for range in &ranges[lines] {
                     recovered.replace_range(range.clone(), &" ".repeat(range.len()));
                 }
