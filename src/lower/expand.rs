@@ -6,8 +6,6 @@
 
 use std::collections::BTreeSet;
 
-use rustc_hash::FxHashMap;
-
 use crate::model::{
     Call, CallId, CheckUse, InputBinding, Invocation, OperationDef, Pipeline, Port, StepOrigin,
     StepOutput, DEFAULT_OUTPUT,
@@ -15,7 +13,7 @@ use crate::model::{
 use crate::parser::{FlowStep, ParseError, Step};
 use crate::types::TypeExpr;
 
-use super::{Failure, PipelineBuilder};
+use super::{PipelineBuilder, Undo};
 
 /// A step still to be added: the one written in the pipeline, or one a
 /// call to an operation with a body made.
@@ -29,22 +27,81 @@ impl PipelineBuilder {
     /// a body adds the body's steps in its place, in order, and a call in
     /// a body is expanded in turn; a worklist, not recursion, so a deep
     /// nesting of bodies cannot overflow the stack.
-    pub(super) fn add_flow_step(&mut self, flow: &FlowStep) -> Result<(), Failure> {
-        self.reject_intermediates(flow).map_err(Failure::clean)?;
+    ///
+    /// A step that fails leaves the builder as it was: the steps, products
+    /// and calls its earlier expansions added are taken out again, and the
+    /// map entries they wrote restored (`journal`).
+    pub(super) fn add_flow_step(&mut self, flow: &FlowStep) -> Result<(), ParseError> {
+        self.reject_intermediates(flow)?;
+        let mark = (
+            self.pipeline.products.len(),
+            self.pipeline.invocations.len(),
+            self.pipeline.calls.len(),
+        );
+        self.journal = Some(Vec::new());
+        let added = self.expand_flow_step(flow);
+        let journal = self
+            .journal
+            .take()
+            .expect("a journal is kept while a step is added");
+        if added.is_err() {
+            self.roll_back(mark, journal);
+        }
+        added
+    }
+
+    /// Take out what a flow step added since `mark`, the lengths of the
+    /// products, steps and calls before it, restoring each map entry it
+    /// wrote from `journal`, latest first.
+    fn roll_back(
+        &mut self,
+        (products, invocations, calls): (usize, usize, usize),
+        journal: Vec<Undo>,
+    ) {
+        self.pipeline.products.truncate(products);
+        self.pipeline.invocations.truncate(invocations);
+        self.pipeline.calls.truncate(calls);
+        for undo in journal.into_iter().rev() {
+            match undo {
+                Undo::Output(name, Some(before)) => {
+                    self.outputs.insert(name, before);
+                }
+                Undo::Output(name, None) => {
+                    self.outputs.remove(&name);
+                }
+                Undo::ProductPlace(name, Some(before)) => {
+                    self.lines.products.insert(name, before);
+                }
+                Undo::ProductPlace(name, None) => {
+                    self.lines.products.remove(&name);
+                }
+                Undo::ProductId(name) => {
+                    self.product_ids.remove(&name);
+                }
+                Undo::Invocation(name, Some(before)) => {
+                    self.lines.invocations.insert(name, before);
+                }
+                Undo::Invocation(name, None) => {
+                    self.lines.invocations.remove(&name);
+                }
+                Undo::Intermediate(name, Some(before)) => {
+                    self.intermediates.insert(name, before);
+                }
+                Undo::Intermediate(name, None) => {
+                    self.intermediates.remove(&name);
+                }
+            }
+        }
+    }
+
+    /// The expansion `add_flow_step` makes, which may fail part way.
+    fn expand_flow_step(&mut self, flow: &FlowStep) -> Result<(), ParseError> {
         let mut pending = vec![Pending {
             invocation: flow.invocation.clone(),
             outputs: flow.outputs.clone(),
         }];
-        // Until a call to an operation with a body has changed the builder,
-        // a step that fails leaves it as it was.
-        let mut untouched = true;
         while let Some(next) = pending.pop() {
-            let operation = self
-                .called(&next.invocation, &flow.step)
-                .map_err(|error| Failure {
-                    error: Box::new(error),
-                    clean: untouched,
-                })?;
+            let operation = self.called(&next.invocation, &flow.step)?;
             if self.pipeline.operations[operation].steps.is_empty() {
                 self.add_step(
                     next.invocation,
@@ -59,19 +116,17 @@ impl PipelineBuilder {
             let Pipeline {
                 operations, calls, ..
             } = &mut self.pipeline;
-            let steps = expand(
+            let Expansion { steps, made } = expand(
                 next,
                 &operations[operation],
                 &flow.step,
                 calls,
-                &mut self.intermediates,
                 &self.lines.imported,
-            )
-            .map_err(|failure| Failure {
-                clean: untouched && failure.clean,
-                ..failure
-            })?;
-            untouched = false;
+            )?;
+            for (product, call) in made {
+                let before = self.intermediates.insert(product.clone(), call);
+                self.record(|| Undo::Intermediate(product, before));
+            }
             pending.extend(steps.into_iter().rev());
         }
         Ok(())
@@ -118,8 +173,7 @@ impl PipelineBuilder {
     /// before it, read only its ports and the products of earlier steps,
     /// and between them assign each output once. An error in the header is
     /// the one error. An error in a step is that of the step, which the
-    /// check then leaves out, as blanking its line would, and goes on to the
-    /// steps after it.
+    /// check then leaves out, and goes on to the steps after it.
     pub(super) fn check_body(
         &self,
         operation: &OperationDef,
@@ -228,19 +282,25 @@ pub(super) struct BodyCheck {
     pub(super) unmade: Option<ParseError>,
 }
 
+/// What a call expands to: the body's steps over the caller's products,
+/// and the products the call made for itself, each with the call.
+struct Expansion {
+    steps: Vec<Pending>,
+    made: Vec<(String, CallId)>,
+}
+
 /// Replace `call` of `operation` by the body's steps over the caller's
 /// products, recording the call. The call is recorded once its steps are
-/// made, so an error leaves `calls` and `intermediates` as they were, which
-/// the error says. `step` is where the call written in
+/// made, so an error leaves `calls` as it was, and the products the call
+/// made for itself are returned for the caller to file. `step` is where the call written in
 /// the pipeline is, which the steps a nested call makes share.
 fn expand(
     call: Pending,
     operation: &OperationDef,
     step: &Step,
     calls: &mut Vec<Call>,
-    intermediates: &mut FxHashMap<String, CallId>,
     imported: &BTreeSet<String>,
-) -> Result<Vec<Pending>, Failure> {
+) -> Result<Expansion, ParseError> {
     let Pending {
         invocation: caller,
         outputs: written,
@@ -259,18 +319,18 @@ fn expand(
         .within(&place)
     };
     if caller.inputs.len() != operation.inputs.len() {
-        return Err(Failure::clean(mismatch(
+        return Err(mismatch(
             "inputs",
             operation.inputs.len(),
             caller.inputs.len(),
-        )));
+        ));
     }
     if caller.outputs.len() != operation.outputs.len() {
-        return Err(Failure::clean(mismatch(
+        return Err(mismatch(
             "outputs",
             operation.outputs.len(),
             caller.outputs.len(),
-        )));
+        ));
     }
     let instance = caller.output_product().to_owned();
     // The call files its own products under `instance::`, which an import
@@ -282,15 +342,13 @@ fn expand(
         .filter(|name| name.starts_with(&prefix))
     {
         let place = at();
-        return Err(Failure::clean(
-            ParseError::new(
-                place.line,
-                format!(
-                    "this call files the products it makes for itself under `{prefix}`, as an import does `{taken}`; rename the call's first output or the import's alias"
-                ),
-            )
-            .within(&place),
-        ));
+        return Err(ParseError::new(
+            place.line,
+            format!(
+                "this call files the products it makes for itself under `{prefix}`, as an import does `{taken}`; rename the call's first output or the import's alias"
+            ),
+        )
+        .within(&place));
     }
     let id = CallId::at(calls.len());
     // The body's own products, under the call's name.
@@ -338,7 +396,7 @@ fn expand(
             inputs.push(match port {
                 Some(port) => merge(&caller.inputs[port], binding).map_err(|problem| {
                     let place = at();
-                    Failure::clean(ParseError::new(place.line, problem).within(&place))
+                    ParseError::new(place.line, problem).within(&place)
                 })?,
                 None => InputBinding {
                     product: rename(&binding.product),
@@ -428,8 +486,10 @@ fn expand(
         parent: caller.origin.as_ref().map(|origin| origin.call),
         place: at(),
     });
-    intermediates.extend(made.into_iter().map(|product| (product, id)));
-    Ok(steps)
+    Ok(Expansion {
+        steps,
+        made: made.into_iter().map(|product| (product, id)).collect(),
+    })
 }
 
 /// The binding a body step gives a port, over the caller's argument: the

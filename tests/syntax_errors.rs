@@ -441,7 +441,11 @@ fn the_steps_of_a_body_whose_header_fails_are_read_as_ordinary_statements() {
 /// A default needs the `:` after its setting's word, as `default ext:`.
 #[test]
 fn a_default_without_its_colon_is_an_error() {
-    for line in ["default ext .txt", "default path out/{@product}", "default check nonempty"] {
+    for line in [
+        "default ext .txt",
+        "default path out/{@product}",
+        "default check nonempty",
+    ] {
         let found = error_lines(&format!("source raw : T [sub]\n{line}\n"));
         assert_eq!(lines_of(&found), [2], "{line}: {found:?}");
     }
