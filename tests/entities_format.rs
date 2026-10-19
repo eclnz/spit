@@ -166,18 +166,28 @@ fn imports_keep_library_source_formats_and_use_caller_output_formats() {
 }
 
 #[test]
-fn aliases_can_precede_the_format_and_entities_remains_a_product_name() {
-    let pipeline = parse_pipeline("entities   sub: subject\nentities: {key}_{value} separated \"-\"\nsource raw [sub]\noperation copy(x) -> Image\nentities : Image [sub] = copy(raw)\n").unwrap();
+fn aliases_can_precede_the_format_and_no_product_is_named_entities() {
+    let pipeline = parse_pipeline("entities   sub: subject\nentities: {key}_{value} separated \"-\"\nsource raw [sub]\noperation copy(x) -> Image\nmade : Image [sub] = copy(raw)\n").unwrap();
     assert_eq!(
-        pipeline.path_template_for("entities").unwrap().to_string(),
+        pipeline.path_template_for("made").unwrap().to_string(),
         "out/{@product}/subject_{sub}"
     );
-    let pipeline = parse_pipeline(
+    let error = parse_pipeline(
         "entities sub: subject\nsource raw [sub]\noperation copy(x)\nentities = copy(raw)\n",
+    )
+    .unwrap_err();
+    assert!(
+        error.to_string().contains(
+            "`entities` is one of SPIT's keywords, so no product may take it as its name"
+        ),
+        "{error}"
+    );
+    let pipeline = parse_pipeline(
+        "entities sub: subject\nsource raw [sub]\noperation copy(x)\nmade = copy(raw)\n",
     )
     .unwrap();
     assert_eq!(
-        pipeline.path_template_for("entities").unwrap().to_string(),
+        pipeline.path_template_for("made").unwrap().to_string(),
         "out/{@product}/subject={sub}"
     );
 }

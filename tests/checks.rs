@@ -220,8 +220,13 @@ fn a_many_port_takes_its_minimum_and_its_checks_in_either_order() {
 }
 
 #[test]
-fn a_step_may_still_make_a_product_named_check() {
-    assert!(errors("source raw [id]\noperation f(x) -> Y\ncheck = f(raw)\n").is_empty());
+fn no_product_may_be_named_check() {
+    let found = errors("source raw [id]\noperation f(x) -> Y\ncheck = f(raw)\n");
+    assert!(
+        found.iter().any(|error| error
+            .contains("`check` is one of SPIT's keywords, so no product may take it as its name")),
+        "{found:?}"
+    );
 }
 
 #[test]

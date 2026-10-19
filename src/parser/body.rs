@@ -6,6 +6,7 @@ use crate::span::{content_columns, Place};
 
 use super::flow::parse_flow_step;
 use super::keyword::Keyword;
+use super::layout::is_step;
 use super::source_map::step_place;
 use super::{ParseError, ParseErrorKind, StatementKind, Syntax};
 
@@ -52,7 +53,8 @@ impl OpenBody {
         indent: usize,
     ) -> Result<(), ParseError> {
         let name = &self.operation.name;
-        if Keyword::split(line).is_some() || !line.contains('=') {
+        // A step whose product takes a keyword's word fails as a step does.
+        if !is_step(line) && (Keyword::split(line).is_some() || !line.contains('=')) {
             return Err(ParseError::new(
                 number,
                 format!("the body of operation `{name}` holds only steps, each `output = operation(inputs)`; declare operations, checks and paths outside it"),

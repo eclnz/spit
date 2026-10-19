@@ -199,13 +199,19 @@ fn opting_out_belongs_on_an_output() {
 }
 
 #[test]
-fn a_product_may_still_be_named_check() {
+fn no_product_may_be_named_check() {
     for step in [
         "check = clean(raw)",
         "check: Text [id] = clean(raw)",
         "check : Text [id] = clean(raw)",
+        "out, check = split(raw)",
     ] {
-        let source = format!("{DECLARED}default check: nonempty\n{step}\nmore = clean(check)\n");
-        assert!(errors(&source).is_empty(), "{step}: {:?}", errors(&source));
+        let found = errors(&format!("{DECLARED}default check: nonempty\n{step}\n"));
+        assert!(
+            found.iter().any(|error| error.contains(
+                "`check` is one of SPIT's keywords, so no product may take it as its name"
+            )),
+            "{step}: {found:?}"
+        );
     }
 }

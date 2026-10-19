@@ -28,9 +28,7 @@ use crate::model::{
     ArtifactInstance, CoverageAction, CoverageGap, EntityBinding, GroupKey, InputRules, Pipeline,
     PipelineIndex, Removal, SourceInventory,
 };
-use crate::parser::{
-    without_bom, Head, Header, Keyword, Kind, Layout, Line, ParseError, SourceMap,
-};
+use crate::parser::{without_bom, Head, Header, Keyword, Kind, Layout, ParseError, SourceMap};
 use crate::paths::{inspect_paths, PathError, PathTemplate};
 
 pub(crate) use self::coverage::collect_rule_errors;
@@ -142,16 +140,6 @@ fn header_lines(text: &str) -> Result<(RecipeHeader, String), ParseError> {
 const PIPELINE_ONLY: &str = ", which every dataset shares; a .spitin binds it to one dataset with \
      its `root`, source paths, and `discover`, `exclude` and `require` rules";
 
-/// Whether a line that starts with no keyword is a step, `out = f(in)`,
-/// rather than a record, whose `[` comes before any `=`.
-fn is_step(line: &Line) -> bool {
-    line.keyword().is_none()
-        && line
-            .code
-            .split_once('=')
-            .is_some_and(|(outputs, call)| !outputs.contains('[') && call.contains('('))
-}
-
 fn check_input_lines(text: &str) -> Result<(), ParseError> {
     for (number, line) in Layout::new(text).numbered() {
         // After `default`, the setting decides where the line belongs.
@@ -190,7 +178,7 @@ fn check_input_lines(text: &str) -> Result<(), ParseError> {
                 format!("`{word}` belongs in the .spit pipeline{PIPELINE_ONLY}"),
             ));
         }
-        if is_step(line) {
+        if line.head == Head::Step {
             return Err(ParseError::new(
                 number,
                 format!("a step belongs in the .spit pipeline{PIPELINE_ONLY}"),

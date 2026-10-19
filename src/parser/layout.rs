@@ -85,7 +85,9 @@ pub(crate) enum Head<'t> {
     Keyword(Keyword, &'t str),
     /// A records header such as `sources:`.
     Header(Header<'t>),
-    /// Anything else: a step, a record, or a line that fails to parse.
+    /// A step, `outputs = operation(inputs)` (see [`is_step`]).
+    Step,
+    /// Anything else: a record, or a line that fails to parse.
     Other,
 }
 
@@ -200,6 +202,8 @@ impl<'t> Line<'t> {
             Head::Header(header)
         } else if let Some((keyword, rest)) = Keyword::split(code) {
             Head::Keyword(keyword, rest)
+        } else if is_step(code) {
+            Head::Step
         } else {
             Head::Other
         };
@@ -220,33 +224,6 @@ impl<'t> Line<'t> {
         }
     }
 
-    /// Whether the line reads as a step, `outputs = operation(inputs)`:
-    /// names, with any types and dimensions, then `=`, a name and `(`.
-    /// A command's word such as `--threads=4` or `KEY=value` does not.
-    pub(crate) fn is_step(&self) -> bool {
-        let Some((outputs, call)) = self.code.split_once('=') else {
-            return false;
-        };
-        let name = |text: &str| {
-            text.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_')
-                && text
-                    .chars()
-                    .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == ':')
-        };
-        name(
-            outputs
-                .trim()
-                .split([',', ':', ' '])
-                .next()
-                .unwrap_or_default(),
-        ) && outputs
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || " \t_,:<>[]".contains(c))
-            && call
-                .split_once('(')
-                .is_some_and(|(operation, _)| name(operation.trim()))
-    }
-
     /// The records header the line is, if one.
     pub(crate) fn header(&self) -> Option<Header<'t>> {
         match self.head {
@@ -254,6 +231,35 @@ impl<'t> Line<'t> {
             _ => None,
         }
     }
+}
+
+/// Whether `code` reads as a step, `outputs = operation(inputs)`: names,
+/// with any types and dimensions, then `=`, a name and `(`. A command's
+/// word such as `--threads=4` or `KEY=value` does not, nor does a record
+/// such as `image[sub=1]`. This is the one rule for a step: every reader
+/// of a document takes it from a line's [`Head`].
+pub(crate) fn is_step(code: &str) -> bool {
+    let Some((outputs, call)) = code.split_once('=') else {
+        return false;
+    };
+    let name = |text: &str| {
+        text.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_')
+            && text
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == ':')
+    };
+    name(
+        outputs
+            .trim()
+            .split([',', ':', ' '])
+            .next()
+            .unwrap_or_default(),
+    ) && outputs
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || " \t_,:<>[]".contains(c))
+        && call
+            .split_once('(')
+            .is_some_and(|(operation, _)| name(operation.trim()))
 }
 
 /// The block a statement on `lines`, in `block`, opens. Where a stage's
@@ -325,7 +331,7 @@ fn indented_end(lines: &[Line], start: usize, mut end: usize) -> usize {
     while let Some(line) = lines.get(next) {
         if line.head == Head::Blank {
             next += 1;
-        } else if line.indent > indent && line.keyword().is_none() && !line.is_step() {
+        } else if line.indent > indent && matches!(line.head, Head::Other) {
             next += 1;
             end = next;
         } else {
@@ -362,7 +368,7 @@ mod tests {
                 Head::Blank,
                 Head::Header(Header::Sources),
                 Head::Other,
-                Head::Other,
+                Head::Step,
             ]
         );
         let record = &layout.lines[4];
@@ -376,13 +382,12 @@ mod tests {
     /// line no test there covers reads the same here.
     #[test]
     fn heads_follow_the_keyword_and_header_rules() {
-        for line in [
-            "stage = f(x)",
-            "check : Report = f(x)",
-            "contexts",
-            "products:",
-        ] {
+        for line in ["contexts", "products:"] {
             assert_eq!(Layout::new(line).lines[0].head, Head::Other, "{line}");
+        }
+        // A keyword's word is reserved: a line starting with one is no step.
+        for line in ["stage = f(x)", "check : Report = f(x)", "default = f(x)"] {
+            assert!(Layout::new(line).lines[0].keyword().is_some(), "{line}");
         }
         assert_eq!(
             Layout::new("contexts visits:").lines[0].header(),
@@ -536,7 +541,7 @@ command copy: cp --mode=fast
             "a : T [id] = f(x)",
             "m : Map<A,B> = ns::f(x)",
         ] {
-            assert!(Layout::new(step).lines[0].is_step(), "{step}");
+            assert_eq!(Layout::new(step).lines[0].head, Head::Step, "{step}");
         }
         for word in [
             "--threads=4",
@@ -544,8 +549,9 @@ command copy: cp --mode=fast
             "x=1",
             "a = b",
             "{@output}=f(x)",
+            "image[sub=1]",
         ] {
-            assert!(!Layout::new(word).lines[0].is_step(), "{word}");
+            assert_eq!(Layout::new(word).lines[0].head, Head::Other, "{word}");
         }
     }
 }

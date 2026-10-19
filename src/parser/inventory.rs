@@ -36,8 +36,7 @@ pub(crate) fn split_document(text: &str) -> DocumentText {
                 inventory_section = true;
                 inventory_line.get_or_insert(number);
             }
-            Head::Keyword(..) => inventory_section = false,
-            _ if is_step(line.code) => inventory_section = false,
+            Head::Keyword(..) | Head::Step => inventory_section = false,
             _ => {}
         }
         // Each line goes to one side and a blank line to the other, so both
@@ -56,19 +55,6 @@ pub(crate) fn split_document(text: &str) -> DocumentText {
         inventory: inventory_text,
         inventory_line,
     }
-}
-
-/// Whether `line` reads as a step, `output = operation(inputs)`, rather
-/// than a record such as `image[subject=A]` or a context `[subject=A]`.
-fn is_step(line: &str) -> bool {
-    let record = line.starts_with('[')
-        || line.find('[').is_some_and(|bracket| {
-            qualified_identifier(line[..bracket].trim(), 0, "product").is_ok()
-        });
-    !record
-        && line
-            .find('(')
-            .is_some_and(|paren| line[..paren].contains('='))
 }
 
 /// Parse an inventory supplied by a dataset indexer or written as a fixture.

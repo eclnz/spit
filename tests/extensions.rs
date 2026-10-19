@@ -279,9 +279,14 @@ fn extensions_are_checked_when_parsed() {
             .contains("duplicate `default ext:` for stage `s`"),
         "{staged}"
     );
-    // A step may still name its output `ext`.
-    let step = parse_pipeline("source raw [id]\noperation f(x)\next: Image = f(raw)\n").unwrap();
-    assert!(step.products.iter().any(|product| product.name == "ext"));
+    // No product may be named `ext`.
+    let step =
+        parse_pipeline("source raw [id]\noperation f(x)\next: Image = f(raw)\n").unwrap_err();
+    assert!(
+        step.to_string()
+            .contains("`ext` is one of SPIT's keywords, so no product may take it as its name"),
+        "{step}"
+    );
 }
 
 #[test]

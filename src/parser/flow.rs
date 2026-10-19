@@ -14,8 +14,10 @@ use super::declarations::{
 };
 use super::entities::parse_entities;
 use super::keyword::{removed_section, Keyword, BLOCKS};
-use super::layout::{Block, Layout};
-use super::lexical::{comma_items, extension, identifier, strip_comment};
+use super::layout::{is_step, Block, Layout};
+use super::lexical::{
+    comma_items, extension, identifier, product_name, reserved_name, strip_comment,
+};
 use super::source_map::{name_place, step_place, tail_place};
 use super::{FlowStep, ParseError, StatementKind, StepOutput, Syntax, SHELL_SOURCE_REMOVED};
 
@@ -337,6 +339,12 @@ fn flow_rest(
             return Ok(Read::Header);
         }
     }
+    // A keyword's word is reserved, so a step may not name its product
+    // with one.
+    if block.is_none() && split.is_some() && is_step(line) {
+        let word = line.split([' ', '\t', ':']).next().unwrap_or(line);
+        return Err(reserved_name(word, number));
+    }
     let kind = match split {
         Some((Keyword::Stage, declaration)) => {
             return open_stage(original, declaration, number, indent, stage, top_level);
@@ -561,7 +569,7 @@ fn parse_flow_output(left: &str, number: usize) -> Result<StepOutput, ParseError
         })
     } else {
         Ok(StepOutput {
-            name: identifier(left, number, "output product")?.to_owned(),
+            name: product_name(left, number, "output product")?.to_owned(),
             artifact_type: None,
             dimensions: None,
         })
