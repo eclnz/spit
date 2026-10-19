@@ -9,7 +9,7 @@
 use std::ops::Range;
 
 use crate::json::Json;
-use crate::parser::{without_bom, Header, Keyword, Layout, Line};
+use crate::parser::{without_bom, Block, Header, Keyword, Layout, Line};
 use crate::span::utf16_columns;
 
 /// The language reference the entries summarise; each links to a section.
@@ -468,10 +468,27 @@ pub fn builtin_words(text: &str) -> Vec<WordUse> {
     let mut uses = Vec::new();
     let mut found = Vec::new();
     let mut configured_entities = false;
-    for (index, read) in Layout::new(without_bom(text)).lines.iter().enumerate() {
+    let layout = Layout::new(without_bom(text));
+    // For each line that a statement's keyword covers without being on it,
+    // that keyword's word: an entry of a keyword block, such as `source:`,
+    // and each line after a statement's first, such as a command's.
+    let mut inherited = vec![None; layout.lines.len()];
+    for statement in &layout.statements {
+        let block = statement
+            .parent
+            .and_then(|parent| match layout.statements[parent].opens {
+                Some(Block::Keyword(keyword)) => keyword_word(keyword),
+                _ => None,
+            });
+        let first = statement.lines.start;
+        inherited[first] = block;
+        let own = layout.lines[first].keyword().and_then(keyword_word);
+        inherited[first + 1..statement.lines.end].fill(own.or(block));
+    }
+    for (index, read) in layout.lines.iter().enumerate() {
         let line = read.text;
         found.clear();
-        line_words(read, &mut found);
+        line_words(read, inherited[index], &mut found);
         configured_entities |= found.iter().any(|(_, word)| *word == Word::EntitiesFormat);
         found.sort_unstable_by_key(|(bytes, _)| bytes.start);
         let shift = 1 + if index == 0 { bom } else { 0 };
@@ -531,31 +548,35 @@ pub(crate) fn words_json(uses: &[WordUse]) -> [(&'static str, Json<'static>); 2]
     [("words", occurrences), ("word_docs", docs)]
 }
 
+/// The word of a statement that starts with `keyword`, if SPIT documents
+/// one.
+fn keyword_word(keyword: Keyword) -> Option<Word> {
+    Some(match keyword {
+        Keyword::Use => Word::Use,
+        Keyword::Root => Word::Root,
+        Keyword::Source => Word::Source,
+        Keyword::Discover => Word::Discover,
+        Keyword::Operation => Word::Operation,
+        Keyword::Command => Word::Command,
+        Keyword::Verify => Word::Verify,
+        Keyword::Check | Keyword::Checks => Word::Check,
+        Keyword::Require => Word::Require,
+        Keyword::Exclude => Word::Exclude,
+        Keyword::Path => Word::Path,
+        Keyword::Ext => Word::Ext,
+        Keyword::Default => Word::Default,
+        Keyword::Stage => Word::Stage,
+        Keyword::Dimensions => Word::Dimensions,
+        Keyword::Entities => Word::EntitiesFormat,
+        Keyword::Drop | Keyword::Sidecars | Keyword::Skip | Keyword::ShellSource => return None,
+    })
+}
+
 /// The statement `line` starts with, as SPIT's parser classifies it,
 /// and the length of its keyword.
 fn statement(line: &Line) -> Option<(Word, usize)> {
     if let Some(keyword) = line.keyword() {
-        let word = match keyword {
-            Keyword::Use => Word::Use,
-            Keyword::Root => Word::Root,
-            Keyword::Source => Word::Source,
-            Keyword::Discover => Word::Discover,
-            Keyword::Operation => Word::Operation,
-            Keyword::Command => Word::Command,
-            Keyword::Verify => Word::Verify,
-            Keyword::Check | Keyword::Checks => Word::Check,
-            Keyword::Require => Word::Require,
-            Keyword::Drop => return None,
-            Keyword::Exclude => Word::Exclude,
-            Keyword::Path => Word::Path,
-            Keyword::Ext => Word::Ext,
-            Keyword::Default => Word::Default,
-            Keyword::Stage => Word::Stage,
-            Keyword::Dimensions => Word::Dimensions,
-            Keyword::Entities => Word::EntitiesFormat,
-            Keyword::Sidecars => return None,
-            Keyword::Skip | Keyword::ShellSource => return None,
-        };
+        let word = keyword_word(keyword)?;
         let length = if word == Word::Ext {
             3
         } else {
@@ -571,7 +592,9 @@ fn statement(line: &Line) -> Option<(Word, usize)> {
 }
 
 /// Each word `line` uses, by byte range.
-fn line_words(line: &Line, found: &mut Vec<(Range<usize>, Word)>) {
+/// The words `line` uses, its statement's word being `inherited` when the
+/// keyword that gives it is not on the line.
+fn line_words(line: &Line, inherited: Option<Word>, found: &mut Vec<(Range<usize>, Word)>) {
     let code = line.uncommented;
     let indent = line.indent;
     if let Some(header) = line.header() {
@@ -597,7 +620,7 @@ fn line_words(line: &Line, found: &mut Vec<(Range<usize>, Word)>) {
     if let Some((word, at, length)) = statement {
         found.push((at..at + length, word));
     }
-    let kind = statement.map(|(word, _, _)| word);
+    let kind = statement.map(|(word, _, _)| word).or(inherited);
     placeholders(code, kind, found);
     let bytes = code.as_bytes();
     let mut start = statement.map_or(indent, |(_, at, length)| at + length);

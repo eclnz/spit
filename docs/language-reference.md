@@ -4,6 +4,48 @@ This manual defines valid `.spit` pipelines, `.spitin` recipes, and `.spitout` i
 
 A `#` that starts a word begins a comment, as in Bash. A `#` inside a word or in quotes is kept, so `--color=#fff` and `'#run'` are ordinary arguments.
 
+## Keyword blocks
+
+A keyword alone with its `:` opens a block of its statements, each written on a line indented beneath it without the keyword. These read the same:
+
+```text
+source raw : Image [sub]
+source mask : Mask [sub]
+command denoise: dn {image} {@output}
+```
+
+```text
+source:
+    raw : Image [sub]
+    mask : Mask [sub]
+
+command:
+    denoise: dn {image} {@output}
+```
+
+`source:`, `operation:`, `command:`, `verify:`, `check:` and `path:` open blocks in a pipeline, and `path:`, `require:` and `exclude:` in a recipe. An entry is read as its keyword's statement would be, with the same errors on its own line; a `source:` block inside a stage is an error at each entry, as a `source` line there is. The entries of a block share one indentation, and the next line that is not indented beneath the keyword ends it. In an `operation:` block, an entry that ends in `:` opens the [body of steps](#operations-carried-out-by-steps) that carries it out, indented beneath the entry. [Defaults](#defaults) have a block of their own, `default:`, and a stage's lines are a block of their own too.
+
+### Statements over several lines
+
+A statement goes on over the next lines while its brackets are open, as a long `operation` signature or a step's arguments may:
+
+```text
+registered = register(
+    denoised,
+    anatomy @ where(session=1)
+)
+```
+
+A command, of `command`, `verify` or `check`, also goes on over the lines indented beneath it, with blank lines and comments between them. A line break separates its words as a space does:
+
+```text
+command register: flirt -in {moving}
+    -ref {reference}
+    -out {@output}
+```
+
+Beneath any other statement, a line indented further is a statement of its own.
+
 ## Products and dimensions
 
 ```text
@@ -141,7 +183,7 @@ operation prep_registration(
 )
 ```
 
-Indent port lines beyond the `operation` line. A closing `)` may align with
+As any statement may while its brackets are open (see [statements over several lines](#statements-over-several-lines)), indent port lines beyond the `operation` line. A closing `)` may align with
 that line or remain indented. Keep `->` and the output list's opening `(` on
 the input list's closing line when both lists span lines. Commas still separate
 ports; do not add a comma after the last port. Blank lines and comments may

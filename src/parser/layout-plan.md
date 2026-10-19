@@ -38,8 +38,7 @@ A statement opens a block if it looks like one from the surface: a `stage` line,
    - **Not done, and why:** `Failure::clean` and the reparse loop in `recover_document` stay. Lowering stops at a statement that may have changed the builder, and recovery's reparse also finds errors in imported libraries, misplaced records and inventory lines; a one-pass experiment failed nine tests across those. Recovery now passes the parser a set of failed block headers to skip, rather than blanking them, so their blocks keep their lines on the next pass. Removing the loop needs lowering to be atomic per statement, which is outside this plan.
 4. [ ] **The language changes in #130.** With the structure settled first, these become mostly rules in `Layout`.
    - [x] The `default` keyword (`29099cd`): `default path:`, `default ext:`, `default check:` and the `default:` block (`Block::Defaults`). The old `path:`, `ext:` and `check:` lines are errors that say how to write them; there are no users to keep them for.
-   - [ ] Keyword blocks.
-   - [ ] Multi-line declarations.
+   - [x] Keyword blocks and statements over several lines (this commit, see below). `source:`, `operation:`, `command:`, `verify:`, `check:`, `path:`, `require:` and `exclude:` open blocks (`Block::Keyword`), whose entries the parser reads as that keyword's statements; an `operation:` entry ending in `:` opens its body. Any statement continues while its brackets are open. A deeper-indented line continues only a command (`command`, `verify` or a `check` declaration), and never when it starts a statement of its own: fuzzing showed that continuing every declaration let a mis-indented step or operation vanish into the line above it.
 
 Each step runs the checks in `AGENTS.md`, including `profiling/bench.py pipeline` and `dataset` against the commit before, since parsing counts as performance-related code.
 

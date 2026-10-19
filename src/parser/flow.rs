@@ -13,7 +13,7 @@ use super::declarations::{
     parse_dimension_order, parse_discover, parse_invocation_parts, parse_path, parse_product,
 };
 use super::entities::parse_entities;
-use super::keyword::{removed_section, Keyword};
+use super::keyword::{removed_section, Keyword, BLOCKS};
 use super::layout::{Block, Layout};
 use super::lexical::{comma_items, extension, identifier, strip_comment};
 use super::source_map::{name_place, step_place, tail_place};
@@ -65,16 +65,19 @@ pub(crate) fn parse_flow(text: &str, skipped: &FxHashSet<usize>) -> Syntax {
         if skipped.contains(&number) {
             continue;
         }
-        // The stage or `default:` block that holds the statement, if one
-        // does; their lines share one indentation.
+        // The stage, `default:` or keyword block that holds the statement,
+        // if one does; their lines share one indentation.
         let block = statement.parent.filter(|&parent| {
             matches!(
                 layout.statements[parent].opens,
-                Some(Block::Stage | Block::Defaults)
+                Some(Block::Stage | Block::Defaults | Block::Keyword(_))
             )
         });
-        let in_defaults =
-            block.is_some_and(|block| layout.statements[block].opens == Some(Block::Defaults));
+        let opened = block.and_then(|block| layout.statements[block].opens);
+        let keyword = match opened {
+            Some(Block::Keyword(keyword)) => Some(keyword),
+            _ => None,
+        };
         let stage = enclosing_stage(&layout, &stage_names, statement.parent);
         let shared = block
             .filter(|_| !statement.stray)
@@ -82,7 +85,13 @@ pub(crate) fn parse_flow(text: &str, skipped: &FxHashSet<usize>) -> Syntax {
         let read = match shared {
             Some((block, shared)) if shared != indent => {
                 let opener = &layout.statements[block];
-                let what = if opener.opens == Some(Block::Defaults) {
+                let what = if let Some(Block::Keyword(keyword)) = opener.opens {
+                    let word = BLOCKS
+                        .iter()
+                        .find(|&&(opens, _)| opens == keyword)
+                        .map_or("", |&(_, word)| word);
+                    format!("`{word}:`")
+                } else if opener.opens == Some(Block::Defaults) {
                     "`default:`".to_owned()
                 } else {
                     let name = stage_names[block]
@@ -100,9 +109,12 @@ pub(crate) fn parse_flow(text: &str, skipped: &FxHashSet<usize>) -> Syntax {
                 line,
                 number,
                 indent,
-                stage,
-                !in_stage_block(&layout, statement.parent),
-                in_defaults,
+                Within {
+                    stage,
+                    top_level: !in_stage_block(&layout, statement.parent),
+                    defaults: opened == Some(Block::Defaults),
+                    block: keyword,
+                },
             ),
         };
         if let (Some(block), Ok(_)) = (block, &read) {
@@ -122,7 +134,7 @@ pub(crate) fn parse_flow(text: &str, skipped: &FxHashSet<usize>) -> Syntax {
                 stage_names[index] = Some(name);
             }
             Ok(Read::Body(open)) => body = Some((index, open)),
-            Ok(Read::Defaults) => {}
+            Ok(Read::Header) => {}
             Err(error) => syntax.fail(error.locate(original)),
         }
     }
@@ -174,12 +186,13 @@ fn written_stage_name(code: &str) -> &str {
 const DEFAULT_SETTINGS: &str = "a default is a `path:` rule, an `ext:` extension or a `check:` list, as in `default path: out/{@product}/{@entities}`";
 
 /// What a statement read: an ordinary statement, a stage's header, the
-/// header of an operation whose body follows, or `default:`.
+/// header of an operation whose body follows, or the header of a block of
+/// defaults or of a keyword's statements, which is no statement itself.
 enum Read {
     Statement(StatementKind),
     Stage { name: String, place: Place },
     Body(OpenBody),
-    Defaults,
+    Header,
 }
 
 /// One default, `setting`, written after `default` or in a `default:`
@@ -193,8 +206,8 @@ fn default_setting(
 ) -> Result<StatementKind, ParseError> {
     let stage = stage.map(str::to_owned);
     Ok(match Keyword::split(setting) {
-        Some((Keyword::Path, _)) if setting.starts_with("path:") => {
-            StatementKind::Path(parse_path(stage, original, setting, number)?)
+        Some((Keyword::Path, rest)) if setting.starts_with("path:") => {
+            StatementKind::Path(parse_path(stage, original, rest, number)?)
         }
         Some((Keyword::Path, rest)) if !rest.contains(':') => {
             return Err(ParseError::new(
@@ -262,25 +275,41 @@ fn open_stage(
     Ok(Read::Stage { name, place })
 }
 
+/// Where a statement is: the blocks that hold it.
+struct Within<'a> {
+    /// The full name of the stage it is in, if any.
+    stage: Option<&'a str>,
+    /// No stage's block holds it, whether or not the stage's header was read.
+    top_level: bool,
+    /// A `default:` block holds it.
+    defaults: bool,
+    /// The keyword of the keyword block that holds it, whose statements are
+    /// written without it.
+    block: Option<Keyword>,
+}
+
 /// Read the statement on line `number`, `original`, whose content is
-/// `line`, in `stage`. `top_level` says that no stage's block holds it, and
-/// `in_defaults` that a `default:` block does.
+/// `line`, indented by `indent`, `within` its blocks.
 fn flow_rest(
     original: &str,
     line: &str,
     number: usize,
     indent: usize,
-    stage: Option<&str>,
-    top_level: bool,
-    in_defaults: bool,
+    within: Within,
 ) -> Result<Read, ParseError> {
+    let Within {
+        stage,
+        top_level,
+        defaults,
+        block,
+    } = within;
     if let Some(instead) = removed_section(line) {
         return Err(ParseError::new(
             number,
             format!("SPIT no longer reads `{line}` sections; {instead}"),
         ));
     }
-    if in_defaults {
+    if defaults {
         return default_setting(original, line, number, stage).map(Read::Statement);
     }
     let top_level_only = |what: &str| {
@@ -297,7 +326,18 @@ fn flow_rest(
             "expected `root <directory>`, such as `root data`",
         ));
     }
-    let kind = match Keyword::split(line) {
+    let split = match block {
+        Some(keyword) => Some((keyword, line)),
+        None => Keyword::split(line),
+    };
+    // A keyword alone with its `:` opens a block of its statements. Keep in
+    // step with `opens` in `src/parser/layout.rs`, which gives it its lines.
+    if let (None, Some((keyword, ":"))) = (block, split) {
+        if BLOCKS.iter().any(|&(opener, _)| opener == keyword) {
+            return Ok(Read::Header);
+        }
+    }
+    let kind = match split {
         Some((Keyword::Stage, declaration)) => {
             return open_stage(original, declaration, number, indent, stage, top_level);
         }
@@ -353,13 +393,13 @@ fn flow_rest(
                 (_, kind) => kind,
             }
         }
-        Some((keyword @ (Keyword::Require | Keyword::Skip | Keyword::Drop), _)) => {
+        Some((keyword @ (Keyword::Require | Keyword::Skip | Keyword::Drop), rest)) => {
             top_level_only(if keyword == Keyword::Require {
                 "`require`, which checks sources,"
             } else {
                 "`drop`, which is replaced by conditional `exclude`,"
             })?;
-            StatementKind::constraint(original, line, number)?
+            StatementKind::constraint(original, keyword, rest, number)?
         }
         Some((Keyword::Exclude, declaration)) => {
             top_level_only("`exclude`, which removes sources,")?;
@@ -371,7 +411,7 @@ fn flow_rest(
                         dimensions.len() > 1 && !dimensions.contains('=')
                     }))
             {
-                StatementKind::constraint(original, line, number)?
+                StatementKind::constraint(original, Keyword::Exclude, declaration, number)?
             } else {
                 StatementKind::exclude(original, declaration, number)?
             }
@@ -390,19 +430,21 @@ fn flow_rest(
         Some((Keyword::Default, rest)) => {
             let setting = rest.trim();
             if setting == ":" {
-                return Ok(Read::Defaults);
+                return Ok(Read::Header);
             }
             default_setting(original, setting, number, stage)?
         }
         Some((Keyword::ShellSource, _)) => {
             return Err(ParseError::new(number, SHELL_SOURCE_REMOVED));
         }
-        Some((Keyword::Path, _)) if !line.starts_with("path:") => StatementKind::Path(parse_path(
-            stage.map(str::to_owned),
-            original,
-            line,
-            number,
-        )?),
+        Some((Keyword::Path, rest)) if block.is_some() || !line.starts_with("path:") => {
+            StatementKind::Path(parse_path(
+                stage.map(str::to_owned),
+                original,
+                rest,
+                number,
+            )?)
+        }
         Some((Keyword::Path | Keyword::Ext | Keyword::Checks, _)) => {
             let setting = line.split_once(':').map_or(line, |(word, _)| word);
             return Err(ParseError::new(
