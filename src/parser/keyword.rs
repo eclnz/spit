@@ -14,17 +14,23 @@ pub(crate) enum Keyword {
     Verify,
     /// `check name(params): command`, a test of one artifact.
     Check,
-    /// `check:`, the checks every output in a file or stage runs.
+    /// `check:`, the checks every output in a file or stage runs, written
+    /// after `default` or in a `default:` block.
     Checks,
     Require,
     /// `skip` and `drop`, kept to give migration errors.
     Skip,
     Drop,
     Exclude,
-    /// `path:` for a default, `path product:` for one product.
+    /// `path product:` for one product's rule, and `path:` for the default
+    /// one, written after `default` or in a `default:` block.
     Path,
-    /// `ext:`, the extension a default path is completed with.
+    /// `ext:`, the extension a default path is completed with, written
+    /// after `default` or in a `default:` block.
     Ext,
+    /// `default path:`, `default ext:` and `default check:`, and `default:`,
+    /// which opens a block of them.
+    Default,
     Entities,
     Stage,
     /// `dimensions [...]`, the order every product's dimensions follow.
@@ -35,7 +41,10 @@ pub(crate) enum Keyword {
     ShellSource,
 }
 
-const WORDS: [(Keyword, &str); 15] = [
+/// Every keyword and its word. Each word is reserved: no product may take
+/// it as its name, so the first word of a line says whether it starts a
+/// statement.
+const WORDS: [(Keyword, &str); 20] = [
     (Keyword::Use, "use"),
     (Keyword::Root, "root"),
     (Keyword::Source, "source"),
@@ -48,81 +57,59 @@ const WORDS: [(Keyword, &str); 15] = [
     (Keyword::Skip, "skip"),
     (Keyword::Drop, "drop"),
     (Keyword::Exclude, "exclude"),
+    (Keyword::Path, "path"),
+    (Keyword::Ext, "ext"),
+    (Keyword::Default, "default"),
+    (Keyword::Entities, "entities"),
     (Keyword::Stage, "stage"),
     (Keyword::Dimensions, "dimensions"),
     (Keyword::Sidecars, "sidecars"),
+    (Keyword::ShellSource, "shell-source"),
 ];
 
-impl Keyword {
-    /// The keyword `line` starts with, and the text after it. A trimmed
-    /// line is expected. `stage` and `dimensions` start a statement only
-    /// without `=`, since a step's output product may have either name.
-    pub(crate) fn split(line: &str) -> Option<(Self, &str)> {
-        if let Some(rest) = line.strip_prefix("shell-source:") {
-            return Some((Self::ShellSource, rest));
-        }
-        if let Some(rest) = line.strip_prefix("path") {
-            if rest.starts_with([' ', ':']) {
-                return Some((Self::Path, rest));
-            }
-        }
-        if let Some(rest) = line.strip_prefix("entities:") {
-            if rest.contains("{key}") || rest.contains("{value}") || !has_top_level_equals(rest) {
-                return Some((Self::Entities, rest));
-            }
-        }
-        if let Some(rest) = line.strip_prefix("entities ") {
-            if rest
-                .trim_start()
-                .starts_with(|c: char| c.is_ascii_alphabetic() || c == '_')
-                && !rest.split(':').next().unwrap_or_default().contains('=')
-            {
-                return Some((Self::Entities, rest));
-            }
-        }
-        // A step may annotate an output named `ext`: `ext: Image = ...`.
-        if let Some(rest) = line.strip_prefix("ext:") {
-            return (!line.contains('=')).then_some((Self::Ext, rest));
-        }
-        // A step may make a product named `check`: `check: Report = f(x)`.
-        // An `=` inside parentheses is a check's argument, not a step.
-        if let Some(rest) = line.strip_prefix("check:") {
-            return (!has_top_level_equals(rest)).then_some((Self::Checks, rest));
-        }
-        let (word, rest) = line.split_once(' ')?;
-        let (keyword, _) = WORDS.iter().find(|(_, name)| *name == word)?;
-        if matches!(keyword, Self::Stage | Self::Dimensions | Self::Sidecars) && line.contains('=')
-        {
-            return None;
-        }
-        // `root = f(x)` and `root : Type = f(x)` are steps, but an
-        // equals sign inside a directory name is ordinary path text.
-        if *keyword == Self::Root
-            && (rest.trim_start().starts_with('=')
-                || (rest.trim_start().starts_with(':') && has_top_level_equals(rest)))
-        {
-            return None;
-        }
-        // A step may make a product named `check`, as in `check = f(x)` or
-        // `check : Report = f(x)`; a declaration names the check before any
-        // `:` or `=`.
-        if *keyword == Self::Check {
-            let head = rest.split(':').next().unwrap_or_default();
-            let named = rest.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_');
-            if !named || head.contains('=') {
-                return None;
-            }
-        }
-        Some((*keyword, rest))
-    }
+/// The keywords that open a block of their statements when written alone
+/// with a `:`, as `source:`, and the word for each.
+pub(crate) const BLOCKS: [(Keyword, &str); 8] = [
+    (Keyword::Source, "source"),
+    (Keyword::Operation, "operation"),
+    (Keyword::Command, "command"),
+    (Keyword::Verify, "verify"),
+    (Keyword::Check, "check"),
+    (Keyword::Path, "path"),
+    (Keyword::Require, "require"),
+    (Keyword::Exclude, "exclude"),
+];
 
-    pub(crate) fn of(line: &str) -> Option<Self> {
-        Self::split(line).map(|(keyword, _)| keyword)
+/// Whether `name` is a keyword's word, which no product may take.
+pub(crate) fn reserved(name: &str) -> bool {
+    WORDS.iter().any(|(_, word)| *word == name)
+}
+
+impl Keyword {
+    /// The keyword `line` starts with, and the text after its word. A
+    /// trimmed line is expected. The first word, up to a space or a `:`,
+    /// decides, since every keyword's word is reserved; the text after it
+    /// starts after one space. `check` followed by
+    /// `:` and a list is the old default list, `Checks`, and `ext:` and
+    /// `check:` give the text after their `:`. A keyword of [`BLOCKS`]
+    /// alone with its `:` gives `:` as its text.
+    pub(crate) fn split(line: &str) -> Option<(Self, &str)> {
+        let end = line.find([' ', '\t', ':']).unwrap_or(line.len());
+        let (word, rest) = line.split_at(end);
+        let &(keyword, _) = WORDS.iter().find(|(_, name)| *name == word)?;
+        if rest == ":" && BLOCKS.iter().any(|&(opens, _)| opens == keyword) {
+            return Some((keyword, ":"));
+        }
+        Some(match (keyword, rest.strip_prefix(':')) {
+            (Self::Check, Some(list)) => (Self::Checks, list),
+            (Self::Ext | Self::ShellSource, Some(after)) => (keyword, after),
+            _ => (keyword, rest.strip_prefix(' ').unwrap_or(rest)),
+        })
     }
 }
 
 /// Whether `text` has an `=` outside parentheses.
-fn has_top_level_equals(text: &str) -> bool {
+pub(super) fn has_top_level_equals(text: &str) -> bool {
     let mut depth = 0usize;
     text.chars().any(|c| {
         match c {
@@ -179,24 +166,45 @@ pub(crate) fn removed_section(line: &str) -> Option<&'static str> {
 mod tests {
     use super::{Header, Keyword};
 
+    fn keyword(line: &str) -> Option<Keyword> {
+        Keyword::split(line).map(|(keyword, _)| keyword)
+    }
+
     #[test]
     fn lines_are_classified_by_their_first_word() {
         assert_eq!(
             Keyword::split("source raw [id]"),
             Some((Keyword::Source, "raw [id]"))
         );
-        assert_eq!(Keyword::of("path: out/{@entities}"), Some(Keyword::Path));
-        assert_eq!(Keyword::of("path raw: in/{id}"), Some(Keyword::Path));
-        assert_eq!(Keyword::of("paths = f(x)"), None);
-        assert_eq!(Keyword::of("stage analysis:"), Some(Keyword::Stage));
-        assert_eq!(Keyword::of("stage = f(x)"), None);
+        assert_eq!(keyword("path: out/{@entities}"), Some(Keyword::Path));
         assert_eq!(
-            Keyword::of("check ndim(n): check_ndim {@path} {n}"),
+            Keyword::split("default path: out/{@entities}"),
+            Some((Keyword::Default, "path: out/{@entities}"))
+        );
+        assert_eq!(keyword("default ext: .txt"), Some(Keyword::Default));
+        assert_eq!(keyword("default check: nonempty"), Some(Keyword::Default));
+        assert_eq!(keyword("default:"), Some(Keyword::Default));
+        // Every keyword's word is reserved, so a line starting with one
+        // starts that statement, even shaped as a step.
+        assert_eq!(keyword("default = f(x)"), Some(Keyword::Default));
+        assert_eq!(keyword("default: Report = f(x)"), Some(Keyword::Default));
+        assert_eq!(keyword("defaults:"), None);
+        assert_eq!(Keyword::split("source:"), Some((Keyword::Source, ":")));
+        assert_eq!(Keyword::split("check:"), Some((Keyword::Check, ":")));
+        assert_eq!(Keyword::split("path:"), Some((Keyword::Path, ":")));
+        assert_eq!(keyword("check: nonempty"), Some(Keyword::Checks));
+        assert_eq!(keyword("stage:"), Some(Keyword::Stage));
+        assert_eq!(keyword("path raw: in/{id}"), Some(Keyword::Path));
+        assert_eq!(keyword("paths = f(x)"), None);
+        assert_eq!(keyword("stage analysis:"), Some(Keyword::Stage));
+        assert_eq!(keyword("stage = f(x)"), Some(Keyword::Stage));
+        assert_eq!(
+            keyword("check ndim(n): check_ndim {@path} {n}"),
             Some(Keyword::Check)
         );
-        assert_eq!(Keyword::of("check = f(x)"), None);
-        assert_eq!(Keyword::of("check : Report = f(x)"), None);
-        assert_eq!(Keyword::of("sources:"), None);
+        assert_eq!(keyword("check = f(x)"), Some(Keyword::Check));
+        assert_eq!(keyword("defaults = f(x)"), None);
+        assert_eq!(keyword("sources:"), None);
         assert_eq!(
             Header::of("contexts visits:"),
             Some(Header::Contexts(Some("visits")))

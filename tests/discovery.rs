@@ -97,12 +97,12 @@ fn files_at_the_pipelines_output_paths_are_not_unmatched() {
     );
     tree.write(
         "pipeline.spit",
-        "source x [s]\npath x: in/{s}.txt\npath: out/{@stage}/{@product}/{@entities}\next: .csv\n\
+        "source x [s]\npath x: in/{s}.txt\ndefault path: out/{@stage}/{@product}/{@entities}\ndefault ext: .csv\n\
          path report: out/report.csv\npath stored: out/stored/{@entities}\n\
          stage clean:\n    operation clean(x) -> Clean\n    command clean: clean {x} {@output}\n    cleaned = clean(x)\n\
          operation summarize(items: many Clean) -> Report\ncommand summarize: summarize {items} {@output}\n\
          report = summarize(cleaned @ vary(s))\n\
-         operation store(table: Clean) -> .zarr/\ncommand store: store {table} {@output}\nstored = store(cleaned)\n",
+         operation store(table: Clean) -> .zarr/\ncommand store: store {table} {@output}\nstored = store(cleaned)\ndefault entities: {@key}={@value} separated \"__\"\n",
     );
     let recipe = tree.write("recipe.spitin", "pipeline pipeline.spit\nroot data\n");
     let recipe = recipe.to_str().unwrap();
@@ -121,7 +121,7 @@ fn files_at_the_pipelines_output_paths_are_not_unmatched() {
 }
 
 const DISCOVERED: &str = "\
-path: derived/{@product}/{@entities}.txt
+default path: derived/{@product}/{@entities}.txt
 source frame [subject, run]
 path frame: raw/sub-{subject}/run-{run}.dat
 source lut
@@ -129,7 +129,7 @@ path lut: config/lut.txt
 operation stack(frames: many Frame, lut: Lut) -> Stack
 command stack: stack {frames} {lut} {@output}
 stacked = stack(frame @ vary(run), lut)
-";
+default entities: {@key}={@value} separated \"__\"\n";
 
 #[test]
 fn sources_are_discovered_from_their_path_rules() {
@@ -176,11 +176,12 @@ fn directory_discovery_finds_observed_subject_session_pairs() {
     );
     let text = "\
 discover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}
-path: results/{@product}/{@entities}.txt
+default path: results/{@product}/{@entities}.txt
 source image [sub, ses]
 path image: data/sub-{sub}/ses-{ses}/image.nii.gz
 operation process(image) -> Output
 output = process(image)
+default entities: {@key}={@value} separated \"__\"
 ";
     let (pipeline, spec) = parse(text);
     let inventory = discover_sources(&pipeline, &spec.rules, &tree.0).unwrap();
@@ -375,7 +376,9 @@ fn drop_source_group_can_omit_missing_files_in_a_discovered_context() {
          path image: data/sub-{sub}/ses-{ses}/image.nii.gz\n\
          exclude [sub] where image count<2\n\
          operation process(image: Image) -> Image\n\
-         result = process(image)\n",
+         result = process(image)\n\
+         default entities: {@key}={@value} separated \"__\"\n\
+         path result: out/{@product}/{@entities}\n",
     );
     let inventory = discover_sources(&pipeline, &spec.rules, &tree.0).unwrap();
     assert_eq!(inventory.artifacts.len(), 2);

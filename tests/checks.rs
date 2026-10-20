@@ -22,7 +22,7 @@ operation merge(items: many Text @ check(nonempty)) -> (all: Text .txt @ check(n
 command merge: cat {items} {all}
 cleaned = clean(raw)
 merged = merge(cleaned @ vary(id))
-";
+default entities: {@key}={@value} separated \"__\"\npath cleaned: out/{@product}[/{@entities}]\npath merged: out/{@product}[/{@entities}]\n";
 
 fn errors(text: &str) -> Vec<String> {
     diagnose(text, None)
@@ -68,9 +68,9 @@ Job 2  clean
   check:  test -s out/cleaned/id=2.txt
 
 Job 3  merge
-  run:    cat out/cleaned/id=1.txt out/cleaned/id=2.txt out/merged/global.txt
-  check:  test -s out/merged/global.txt
-  check:  check_lines out/merged/global.txt 2
+  run:    cat out/cleaned/id=1.txt out/cleaned/id=2.txt out/merged.txt
+  check:  test -s out/merged.txt
+  check:  check_lines out/merged.txt 2
 "
     );
 }
@@ -85,7 +85,7 @@ fn the_spitdag_names_each_check_its_port_and_its_artifact() {
 \"command\":[[\"check_lines\"],[{\"path\":\"in/1.txt\"}],[\"1\"]]},"
     ));
     assert!(json.contains(
-        "{\"when\":\"after\",\"check\":\"lines(2)\",\"port\":\"all\",\"path\":\"out/merged/global.txt\","
+        "{\"when\":\"after\",\"check\":\"lines(2)\",\"port\":\"all\",\"path\":\"out/merged.txt\","
     ));
 }
 
@@ -100,7 +100,7 @@ operation merge(items: many Text) -> (all: Text .txt)
 command merge: cat {items} {all}
 cleaned = clean(raw)
 merged = merge(cleaned @ vary(id))
-";
+default entities: {@key}={@value} separated \"__\"\npath cleaned: out/{@product}[/{@entities}]\npath merged: out/{@product}[/{@entities}]\n";
     let fingerprints = |json: &str| {
         json.match_indices("\"fingerprint\":")
             .map(|(at, _)| json[at..at + 32].to_owned())
@@ -205,7 +205,7 @@ fn a_many_port_takes_its_minimum_and_its_checks_in_either_order() {
         "items: many Text @ check(nonempty) @ min(2)",
     ] {
         let pipeline = format!(
-            "{CHECKS}source raw : Text [id]\noperation merge({port}) -> Text\nall = merge(raw @ vary(id))\n"
+            "{CHECKS}source raw : Text [id]\noperation merge({port}) -> Text\nall = merge(raw @ vary(id))\npath all: out/{{@product}}\n"
         );
         assert_eq!(errors(&pipeline), Vec::<String>::new(), "{port}");
         let parsed = spit::parse_pipeline(&pipeline).unwrap();
@@ -220,8 +220,13 @@ fn a_many_port_takes_its_minimum_and_its_checks_in_either_order() {
 }
 
 #[test]
-fn a_step_may_still_make_a_product_named_check() {
-    assert!(errors("source raw [id]\noperation f(x) -> Y\ncheck = f(raw)\n").is_empty());
+fn no_product_may_be_named_check() {
+    let found = errors("source raw [id]\noperation f(x) -> Y\ncheck = f(raw)\n");
+    assert!(
+        found.iter().any(|error| error
+            .contains("`check` is one of SPIT's keywords, so no product may take it as its name")),
+        "{found:?}"
+    );
 }
 
 #[test]
@@ -235,7 +240,8 @@ fn imports_bring_the_checks_their_definitions_attach() {
         "p.spit",
         "use lib.spit as l\nuse lines from lib.spit\n\
 operation keep(x: Text @ check(lines(2), l::nonempty)) -> Text .txt\n\
-command keep: cp {x} {@output}\nk = keep(l::raw)\n",
+command keep: cp {x} {@output}\nk = keep(l::raw)\n\
+default entities: {@key}={@value} separated \"__\"\npath k: out/{@product}[/{@entities}]\n",
     );
     let root = tree.path().join("data");
     let output = spit(&[

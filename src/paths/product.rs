@@ -12,18 +12,16 @@ use super::template::{
 use super::components::{push_encoded, unusable_path};
 
 /// Bind `artifact` to its relative path by its product's path template,
-/// `template`. `dimensions` gives the product's declared dimension order,
-/// which `{@entities}` follows. `label` names the path in errors: a
+/// `template`. `label` names the path in errors: a
 /// product's rule, or an artifact.
 pub(crate) fn bind_path(
     index: &PipelineIndex<'_>,
     template: &PathTemplate,
-    dimensions: &[String],
     artifact: Artifact<'_>,
     label: impl Fn() -> String,
 ) -> Result<String, PathError> {
     ProductPath::with_template(index, artifact.product, Cow::Borrowed(template))
-        .bind(dimensions, artifact, label)
+        .bind(artifact, label)
 }
 
 /// Binds many artifacts' paths, as [`bind_path`] does, finding each
@@ -57,7 +55,6 @@ impl<'p> PathBinder<'p> {
     pub(crate) fn bind_numbered(
         &mut self,
         number: u32,
-        dimensions: &[String],
         artifact: Artifact<'_>,
         label: impl Fn() -> String,
     ) -> Result<String, PathError> {
@@ -69,25 +66,24 @@ impl<'p> PathBinder<'p> {
             Some(product) => product,
             slot => slot.insert(ProductPath::new(&self.index, artifact.product)?),
         };
-        product.bind(dimensions, artifact, label)
+        product.bind(artifact, label)
     }
 
     pub(crate) fn bind(
         &mut self,
-        dimensions: &[String],
         artifact: Artifact<'_>,
         label: impl Fn() -> String,
     ) -> Result<String, PathError> {
         let Some(id) = self.index.id(artifact.product) else {
             // Not one of the pipeline's products: nothing shares its path.
             let product = ProductPath::new(&self.index, artifact.product)?;
-            return product.bind(dimensions, artifact, label);
+            return product.bind(artifact, label);
         };
         let product = match &mut self.products[id.index()] {
             Some(product) => product,
             slot => slot.insert(ProductPath::new(&self.index, artifact.product)?),
         };
-        product.bind(dimensions, artifact, label)
+        product.bind(artifact, label)
     }
 }
 
@@ -124,7 +120,6 @@ impl<'p> ProductPath<'p> {
 
     fn bind(
         &self,
-        dimensions: &[String],
         artifact: Artifact<'_>,
         label: impl Fn() -> String,
     ) -> Result<String, PathError> {
@@ -146,8 +141,14 @@ impl<'p> ProductPath<'p> {
                     })?;
                     relative.push_str(stage);
                 }
+                // A product with dimensions and a spelling has `{@entities}`
+                // written out.
                 PathPart::Placeholder(PathPlaceholder::Entities) => {
-                    push_entities(&mut relative, artifact, dimensions)?;
+                    return Err(error(unspelled_entities(
+                        artifact.product,
+                        artifact.entities.is_empty(),
+                    ))
+                    .focus(PathPlaceholder::Entities.to_string()));
                 }
                 PathPart::Placeholder(placeholder @ PathPlaceholder::Dimension(dimension, _)) => {
                     let value = artifact.entities.get(dimension).ok_or_else(|| {
@@ -161,17 +162,6 @@ impl<'p> ProductPath<'p> {
                         .focus(placeholder.to_string())
                     })?;
                     push_encoded(&mut relative, value);
-                }
-                // A product with dimensions has `{@labels}` written out.
-                PathPart::Placeholder(PathPlaceholder::Labels) => {
-                    return Err(error(format!(
-                        "path template for `{}` uses `{}`, but `{}` has no dimensions; put it in `[...]`, as `[{}_]`",
-                        artifact.product,
-                        PathPlaceholder::Labels,
-                        artifact.product,
-                        PathPlaceholder::Labels
-                    ))
-                    .focus(PathPlaceholder::Labels.to_string()));
                 }
                 PathPart::Group(_) => unreachable!("a product's template has its groups resolved"),
             }
@@ -222,28 +212,19 @@ pub(crate) fn shown_path(
     shown
 }
 
-/// Add what `{@entities}` binds to: each dimension as `dimension=value`, in
-/// declared order and joined by `__`, or `global` for none.
-fn push_entities(
-    relative: &mut String,
-    artifact: Artifact<'_>,
-    dimensions: &[String],
-) -> Result<(), PathError> {
-    if dimensions.is_empty() {
-        relative.push_str("global");
+/// Why `product`'s path keeps `{@entities}`: it has no dimensions, so no
+/// `{@entities}`, as a product outside every stage has no `{@stage}`, or no
+/// `default entities:` spells it. Keep in step with `push_resolved` in
+/// `template.rs`, which writes it out otherwise.
+pub(crate) fn unspelled_entities(product: &str, dimensionless: bool) -> String {
+    let placeholder = PathPlaceholder::Entities;
+    if dimensionless {
+        format!(
+            "path rule for `{product}` uses `{placeholder}`, but `{product}` has no dimensions; put it in `[...]`, as `[{placeholder}_]`"
+        )
+    } else {
+        format!(
+            "path rule for `{product}` uses `{placeholder}`, but no `default entities:` spells it; add one, as `default entities: {{@key}}={{@value}} separated \"__\"`"
+        )
     }
-    for (index, dimension) in dimensions.iter().enumerate() {
-        let value = artifact.entities.get(dimension).ok_or_else(|| {
-            error(format!(
-                "artifact `{artifact}` lacks dimension `{dimension}`"
-            ))
-        })?;
-        if index > 0 {
-            relative.push_str("__");
-        }
-        push_encoded(relative, dimension);
-        relative.push('=');
-        push_encoded(relative, value);
-    }
-    Ok(())
 }

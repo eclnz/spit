@@ -28,7 +28,7 @@ use crate::model::{
     ArtifactInstance, CoverageAction, CoverageGap, EntityBinding, GroupKey, InputRules, Pipeline,
     PipelineIndex, Removal, SourceInventory,
 };
-use crate::parser::{strip_comment, without_bom, Header, Keyword, Kind, ParseError, SourceMap};
+use crate::parser::{without_bom, Head, Header, Keyword, Kind, Layout, ParseError, SourceMap};
 use crate::paths::{inspect_paths, PathError, PathTemplate};
 
 pub(crate) use self::coverage::collect_rule_errors;
@@ -116,21 +116,19 @@ fn parse_recipe(
 fn header_lines(text: &str) -> Result<(RecipeHeader, String), ParseError> {
     let mut header = RecipeHeader::default();
     let mut rest = String::new();
-    for (index, original) in text.lines().enumerate() {
-        let number = index + 1;
-        let line = strip_comment(original).trim();
-        if let Some(file) = line.strip_prefix("pipeline ") {
+    for (number, line) in Layout::new(text).numbered() {
+        if let Some(file) = line.code.strip_prefix("pipeline ") {
             if header.pipeline.is_some() {
                 return Err(ParseError::new(number, "a .spitin names its pipeline once"));
             }
             header.pipeline = Some(PathBuf::from(file.trim()));
-        } else if let Some(folder) = line.strip_prefix("root ") {
+        } else if let Some(folder) = line.code.strip_prefix("root ") {
             if header.root.is_some() {
                 return Err(ParseError::new(number, "a .spitin names its root once"));
             }
             header.root = Some((PathBuf::from(folder.trim()), number));
         } else {
-            rest.push_str(original);
+            rest.push_str(line.text);
         }
         rest.push('\n');
     }
@@ -142,20 +140,23 @@ fn header_lines(text: &str) -> Result<(RecipeHeader, String), ParseError> {
 const PIPELINE_ONLY: &str = ", which every dataset shares; a .spitin binds it to one dataset with \
      its `root`, source paths, and `discover`, `exclude` and `require` rules";
 
-/// Whether a line that starts with no keyword is a step, `out = f(in)`,
-/// rather than a record, whose `[` comes before any `=`.
-fn is_step(line: &str) -> bool {
-    Keyword::of(line).is_none()
-        && line
-            .split_once('=')
-            .is_some_and(|(outputs, call)| !outputs.contains('[') && call.contains('('))
-}
-
 fn check_input_lines(text: &str) -> Result<(), ParseError> {
-    for (index, original) in text.lines().enumerate() {
-        let line = strip_comment(original).trim();
+    for (number, line) in Layout::new(text).numbered() {
+        // After `default`, the setting decides where the line belongs.
+        let (keyword, written) = match line.head {
+            Head::Keyword(Keyword::Default, rest) => (
+                Keyword::split(rest.trim()).map(|(keyword, _)| keyword),
+                line.code,
+            ),
+            _ => (
+                line.keyword(),
+                line.code
+                    .split_once([' ', ':'])
+                    .map_or(line.code, |(word, _)| word),
+            ),
+        };
         let pipeline_only = matches!(
-            Keyword::of(line),
+            keyword,
             Some(
                 Keyword::Source
                     | Keyword::Operation
@@ -165,33 +166,32 @@ fn check_input_lines(text: &str) -> Result<(), ParseError> {
                     | Keyword::Checks
                     | Keyword::Stage
                     | Keyword::Dimensions
-                    | Keyword::Entities
                     | Keyword::Sidecars
                     | Keyword::Use
             )
         );
         if pipeline_only {
-            let word = line.split_once([' ', ':']).map_or(line, |(word, _)| word);
+            let word = written.split_once(':').map_or(written, |(word, _)| word);
             return Err(ParseError::new(
-                index + 1,
+                number,
                 format!("`{word}` belongs in the .spit pipeline{PIPELINE_ONLY}"),
             ));
         }
-        if is_step(line) {
+        if line.head == Head::Step {
             return Err(ParseError::new(
-                index + 1,
+                number,
                 format!("a step belongs in the .spit pipeline{PIPELINE_ONLY}"),
             ));
         }
-        if Keyword::of(line) == Some(Keyword::Ext) {
+        if keyword == Some(Keyword::Ext) {
             return Err(ParseError::new(
-                index + 1,
-                "`ext:` completes the pipeline's default output paths; it belongs in the .spit pipeline",
+                number,
+                "a default `ext:` completes the pipeline's default output paths; it belongs in the .spit pipeline",
             ));
         }
-        if matches!(Header::of(line), Some(Header::SourcePaths)) {
+        if line.header() == Some(Header::SourcePaths) {
             return Err(ParseError::new(
-                index + 1,
+                number,
                 "`source_paths:` belongs in a .spitout; use `path image:` in a .spitin",
             ));
         }
@@ -225,12 +225,13 @@ fn finish_spec(
             let line = lines.default_path.as_ref().map_or(1, |place| place.line);
             return Err(ParseError::new(
                 line,
-                "a .spitin `path:` is the default for sources, and no source is made in a stage; leave out `{@stage}`",
+                "a .spitin `default path:` is the rule for sources with none of their own, and no source is made in a stage; leave out `{@stage}`",
             ));
         }
     }
     inputs.source_paths = pipeline.product_paths;
     inputs.source_default = pipeline.path_template;
+    inputs.source_entities = pipeline.entities_format;
     if let Some(folder) = folder {
         read_exclusion_files(&mut inputs, folder)?;
     }
@@ -276,6 +277,14 @@ impl InputSpec {
             }
             if pipeline.product_paths.contains_key(name) {
                 return Err(InputError::PathInBoth { product });
+            }
+        }
+        if let Some(format) = &self.rules.source_entities {
+            let dimensions = pipeline.dimension_order();
+            if let Some(dimension) = format.labels.keys().find(|name| !dimensions.contains(name)) {
+                return Err(InputError::Path(crate::paths::error(format!(
+                    "the recipe's entity label names unknown dimension `{dimension}`"
+                ))));
             }
         }
         // Directory discovery finds every source's files.
@@ -631,7 +640,7 @@ impl fmt::Display for InputError {
             ),
             Self::NoSourcePath { product } => write!(
                 f,
-                "source `{product}` has no path rule, so its files cannot be found; write `path {product}:` in the pipeline or the recipe, or a default `path:` in the recipe"
+                "source `{product}` has no path rule, so its files cannot be found; write `path {product}:` in the pipeline or the recipe, or `default path:` in the recipe"
             ),
             Self::ConflictingSourcePaths { product } => write!(
                 f,

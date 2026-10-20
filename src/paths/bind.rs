@@ -1,6 +1,5 @@
 //! Paths bound to the artifacts of resolved jobs, and the files they name.
 
-use std::collections::BTreeMap;
 use std::fmt;
 use std::path::Path;
 
@@ -111,8 +110,6 @@ pub(crate) fn bound_paths(
     dag: &ResolvedDag,
 ) -> Result<Vec<Option<String>>, PathError> {
     let mut binder = PathBinder::new(pipeline);
-    // Each product's dimensions, found once, by product number.
-    let mut dimensions: Vec<Option<&[String]>> = vec![None; dag.artifacts.products().count()];
     let mut paths = vec![None; dag.artifacts.len()];
     let mut owners: FxHashMap<String, ArtifactId> = FxHashMap::default();
     for id in dag
@@ -125,21 +122,9 @@ pub(crate) fn bound_paths(
         }
         let artifact = dag.artifact(id);
         let number = dag.artifacts.product_of(id);
-        let dimensions = match dimensions[number as usize] {
-            Some(dimensions) => dimensions,
-            None => {
-                let found = dag
-                    .product_dimensions
-                    .get(artifact.product)
-                    .ok_or_else(|| error(format!("unknown product `{}`", artifact.product)))?;
-                *dimensions[number as usize].insert(found)
-            }
-        };
         let relative = match dag.source_path(id) {
             Some(path) => path.to_owned(),
-            None => binder.bind_numbered(number, dimensions, artifact, || {
-                format!("path for `{artifact}`")
-            })?,
+            None => binder.bind_numbered(number, artifact, || format!("path for `{artifact}`"))?,
         };
         if let Some(previous) = owners.insert(relative.clone(), id) {
             let previous = dag.artifact(previous);
@@ -239,38 +224,4 @@ pub(crate) fn case_collisions(
     }
     collisions.sort_by(|[_, (left, _)], [_, (right, _)]| left.cmp(right));
     collisions
-}
-
-/// Each dimension value with a `-` that `{@labels}` writes into a path,
-/// as `01-a` in `sub-01-a`, which BIDS cannot read back: by dimension and
-/// value, with the first product whose path has it.
-pub(crate) fn dashed_labels(
-    pipeline: &Pipeline,
-    dag: &ResolvedDag,
-) -> Vec<(String, String, String)> {
-    let index = PipelineIndex::new(pipeline);
-    let mut writes: FxHashMap<&str, bool> = FxHashMap::default();
-    let mut found: BTreeMap<(&str, &str), &str> = BTreeMap::new();
-    for id in dag.artifacts.ids() {
-        let artifact = dag.artifact(id);
-        let labelled = *writes.entry(artifact.product).or_insert_with(|| {
-            index
-                .path_rule_for(artifact.product)
-                .is_some_and(|rule| rule.writes_labels(index.holder(artifact.product)))
-        });
-        if !labelled {
-            continue;
-        }
-        for (dimension, value) in artifact.entities.iter() {
-            if value.contains('-') {
-                found.entry((dimension, value)).or_insert(artifact.product);
-            }
-        }
-    }
-    found
-        .into_iter()
-        .map(|((dimension, value), product)| {
-            (product.to_owned(), dimension.to_owned(), value.to_owned())
-        })
-        .collect()
 }

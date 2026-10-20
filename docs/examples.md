@@ -56,14 +56,15 @@ Run `spit dag sweep.spit sweep.spitout --commands` to see 17 jobs: six `train`, 
 
 ## Cohort: discovery, exclusion, and grouped removal
 
-This recipe discovers session folders, removes a subject with fewer than two sessions, and excludes one damaged run while leaving its file in place. Each retained BOLD run gets motion correction and coregistration. A `many Bold` input collects runs per session; another collects session averages per subject. One default path gives all five derived products BIDS-style names: optional groups omit the session or stage where a product has none, and `{@labels}` writes the dimensions each product has.
+This recipe discovers session folders, removes a subject with fewer than two sessions, and excludes one damaged run while leaving its file in place. Each retained BOLD run gets motion correction and coregistration. A `many Bold` input collects runs per session; another collects session averages per subject. One default path gives all five derived products BIDS-style names: optional groups omit the session or stage where a product has none, and `{@entities}` writes the dimensions each product has as BIDS `key-value` labels, as `default entities:` spells them.
 
 Save as `cohort.spit`:
 
 ```spit
 # BIDS sessions with a dropped subject and an excluded motion-corrupted run.
-path: derivatives/sub-{sub}[/ses-{ses}][/{@stage}]/{@labels}_{@product}
-ext: .nii.gz
+default entities: {@key}-{@value} separated "_"
+default path: derivatives/sub-{sub}[/ses-{ses}][/{@stage}]/{@entities}_{@product}
+default ext: .nii.gz
 
 source t1w : T1 [sub, ses]
 path t1w: sub-{sub}/ses-{ses}/anat/sub-{sub}_ses-{ses}_T1w.nii.gz
@@ -137,9 +138,9 @@ Save as `sensors.spit`:
 # revision, compared with a station reference, split into two bands, and
 # summarised per station under that station's policy.
 
-entities: {key}_{value} separated "-"
-entities station: site
-path: derived/{@product}/{@entities}.csv
+default entities: {@key}_{@value} separated "-"
+default entities station: site
+default path: derived/{@product}/{@entities}.csv
 
 source reading : Series [station, day]
 path reading: raw/{station}/{day}.csv
@@ -222,7 +223,8 @@ Save as `imported.spit`:
 # Imported definitions, nested stages, aggregation and a stage path override.
 use text.spit as text
 
-path: {@stage}/{@product}/{@entities}.txt
+default entities: {@key}={@value} separated "__"
+default path: {@stage}/{@product}/{@entities}.txt
 
 stage preprocess:
     stage clean:
@@ -236,7 +238,7 @@ stage preprocess:
     resorted = text::sort_lines(merged)
 
 stage analysis:
-    path: results/{@product}/{@entities}.txt
+    default path: results/{@product}/{@entities}.txt
     operation tally_lines(input: Lines) -> Tally
     command tally_lines: uniq -c {input} {@output}
     tally = tally_lines(resorted)
@@ -334,7 +336,7 @@ Each pipeline below, under [`examples/`](https://github.com/eclnz/spit/tree/dev/
 | [Nested aggregation](https://github.com/eclnz/spit/blob/dev/examples/pipelines/complex.spit) | Partial types, irregular groups, and three successive aggregations | `cargo run -- dag examples/pipelines/complex.spit examples/pipelines/complex.spitout` | 25 |
 | [Selectors](https://github.com/eclnz/spit/blob/dev/examples/pipelines/selectors.spit) | `where`, `same`, verification, two outputs, a many input beside a single input, and custom entity formatting | `cargo run -- dag examples/pipelines/selectors.spit examples/pipelines/selectors.spitout` | 17 |
 | [Ragged sweep](https://github.com/eclnz/spit/blob/dev/examples/patterns/ragged_sweep/ragged_sweep.spit) | `each(model)` broadcasts over per-config seeds, then `vary` collects the runs | `cargo run -- dag examples/patterns/ragged_sweep/ragged_sweep.spit examples/patterns/ragged_sweep/ragged_sweep.spitout` | 17 |
-| [Cohort](https://github.com/eclnz/spit/blob/dev/examples/patterns/cohort/cohort.spit) | BIDS sessions, a dropped subject, an excluded run, and one default path with `[...]` groups and `{@labels}` | `cargo run -- dag examples/patterns/cohort/cohort.spitin` | 24 |
+| [Cohort](https://github.com/eclnz/spit/blob/dev/examples/patterns/cohort/cohort.spit) | BIDS sessions, a dropped subject, an excluded run, and one default path with `[...]` groups and BIDS-style `{@entities}` | `cargo run -- dag examples/patterns/cohort/cohort.spitin` | 24 |
 | [Analytics](https://github.com/eclnz/spit/blob/dev/examples/analytics/analytics.spit) | Five keyed joins, then day, customer, and tenant rollups | `cargo run -- dag examples/analytics/analytics.spit examples/analytics/analytics.spitout` | 34 |
 | [Text processing](https://github.com/eclnz/spit/blob/dev/examples/imports/imported.spit) | Imports, nested stages, aggregation and a stage path override | `cargo run -- dag examples/imports/imported.spitin` | 9 |
 | [Field survey](https://github.com/eclnz/spit/blob/dev/examples/commands/field_survey/field_survey.spit) | Source files declared `beside` their image, calibration, alignment between spaces, and commands | `cargo run -- dag examples/commands/field_survey/field_survey.spit examples/commands/field_survey/field_survey.spitout` | 93 |
@@ -356,7 +358,7 @@ The ACT example starts from BIDS NIfTI DWI runs with their gradient and JSON sid
 - `anatomy` makes a [SynthSeg parcellation](https://surfer.nmr.mgh.harvard.edu/fswiki/SynthSeg), aligns T1w to b=0 with [FLIRT](https://fsl.fmrib.ox.ac.uk/fsl/docs/registration/flirt/user_guide.html), [transformconvert](https://userdocs.mrtrix.org/en/latest/reference/commands/transformconvert.html), and [mrtransform](https://userdocs.mrtrix.org/en/latest/reference/commands/mrtransform.html), and builds the [tissue segmentation](https://userdocs.mrtrix.org/en/latest/reference/commands/5ttgen.html) and [seed interface](https://userdocs.mrtrix.org/en/latest/reference/commands/5tt2gmwmi.html).
 - `tractography` estimates [responses](https://userdocs.mrtrix.org/en/latest/reference/commands/dwi2response.html) and [FODs](https://userdocs.mrtrix.org/en/latest/reference/commands/dwi2fod.html), then runs [ACT tracking](https://userdocs.mrtrix.org/en/latest/reference/commands/tckgen.html), [SIFT2](https://userdocs.mrtrix.org/en/latest/reference/commands/tcksift2.html), and [connectome construction](https://userdocs.mrtrix.org/en/latest/reference/commands/tck2connectome.html).
 
-Outputs land in a folder per stage through one `{@stage}` path default. `ext: .mif` gives every image its extension, the parcellation stage sets `.nii.gz` for its own, and `estimate_responses` names `.txt` for each of its three outputs. Each DWI run's `.bvec`, `.bval` and `.json` sources are declared `beside` its `.nii.gz` source. The pipeline gives no source a path: each recipe gives the NIfTI source's BIDS path, and its companions follow it.
+Outputs land in a folder per stage through one `{@stage}` path default. `default ext: .mif` gives every image its extension, the parcellation stage sets `.nii.gz` for its own, and `estimate_responses` names `.txt` for each of its three outputs. Each DWI run's `.bvec`, `.bval` and `.json` sources are declared `beside` its `.nii.gz` source. The pipeline gives no source a path: each recipe gives the NIfTI source's BIDS path, and its companions follow it.
 
 Image products share one type, `MRI<Kind,Space>`, and product names carry the processing state, so `raw_dwi` and `denoised_dwi` are both `MRI<DWI,Acquired>`. Type variables let one operation serve several products: `extract_b0` and `mean_b0` run on both acquired and corrected DWI, and `mrtransform` moves both T1w and tissue images. So each of them is declared in the outer stage that holds all its calls, `preprocess` or `anatomy`, while every other operation sits beside its one step. Label images use their own operation for nearest-neighbor resampling.
 

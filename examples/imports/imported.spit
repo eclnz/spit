@@ -1,7 +1,8 @@
 # Imported definitions, nested stages, aggregation and a stage path override.
 use text.spit as text
 
-path: {@stage}/{@product}/{@entities}.txt
+default entities: {@key}={@value} separated "__"
+default path: {@stage}/{@product}/{@entities}.txt
 
 stage preprocess:
     stage clean:
@@ -15,7 +16,7 @@ stage preprocess:
     resorted = text::sort_lines(merged)
 
 stage analysis:
-    path: results/{@product}/{@entities}.txt
+    default path: results/{@product}/{@entities}.txt
     operation tally_lines(input: Lines) -> Tally
     command tally_lines: uniq -c {input} {@output}
     tally = tally_lines(resorted)

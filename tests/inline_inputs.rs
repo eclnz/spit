@@ -181,15 +181,21 @@ fn roots_are_top_level_once_and_require_a_directory() {
         let error = spit::parse_pipeline(text).unwrap_err();
         assert!(error.to_string().contains(message), "{text}: {error}");
     }
-    let pipeline = spit::parse_pipeline("root data=set\nsource raw: Text\noperation copy(raw: Text) -> Text\nroot : Text = copy(raw)\n").unwrap();
+    let pipeline = spit::parse_pipeline("root data=set\nsource raw: Text\n").unwrap();
     assert_eq!(
         pipeline.root.as_ref().map(|(root, _)| root.as_path()),
         Some(Path::new("data=set"))
     );
-    assert!(pipeline
-        .products
-        .iter()
-        .any(|product| product.name == "root"));
+    let error = spit::parse_pipeline(
+        "source raw: Text\noperation copy(raw: Text) -> Text\nroot : Text = copy(raw)\n",
+    )
+    .unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("`root` is one of SPIT's keywords, so no product may take it as its name"),
+        "{error}"
+    );
 }
 
 #[test]

@@ -92,7 +92,7 @@ fn an_exclude_names_an_artifact_a_group_or_part_of_a_source() {
     assert_eq!(spec.rules.exclusions[1].reason, None);
 
     for (rule, message) in [
-        ("exclude\n", "expected source"),
+        ("exclude\n", "names a source, values"),
         ("exclude from\n", "expected"),
         ("exclude []\n", "names a source, values"),
         ("exclude bold[sub=02\n", "closing `]`"),
@@ -293,7 +293,7 @@ fn an_excluded_file_may_lie_outside_the_discovered_contexts() {
         "source sales [store]\npath sales: stores/{store}/sales.csv\n\
          source price [store]\npath price: pricing/{store}.json\n\
          operation total(sales, price) -> Total\ncommand total: total {sales} {price} {@output}\n\
-         totals = total(sales, price)\n",
+         totals = total(sales, price)\ndefault entities: {@key}={@value} separated \"__\"\npath totals: out/{@product}/{@entities}\n",
     );
     let discover =
         "pipeline pipeline.spit\nroot .\ndiscover stores: [store] from dirs stores/{store}\n";

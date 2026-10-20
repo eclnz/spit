@@ -1,6 +1,6 @@
 pipeline complex.spit
 root complex_data
-path: {@product}/{@entities}
+default path: {@product}/{@entities}
 
 require [site, device, window] where reading count>=1
 require [site, device] where gain count=1

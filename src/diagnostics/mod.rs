@@ -25,7 +25,9 @@ use crate::inputs::{
 };
 use crate::lower::{parse_document_recovering, ParsedDocument};
 use crate::model::{ArtifactReport, CoverageGap, InputRules, PipelineIndex, SourceInventory};
-use crate::parser::{as_read_back, glued_comment, without_bom, Kind, Rule, SourceMap};
+use crate::parser::{
+    as_read_back, glued_comment, parse_inventory_recovering, without_bom, Kind, Rule, SourceMap,
+};
 use crate::paths::{collect_paths, shown_path, PathTemplate};
 use crate::resolver::first_failure;
 use crate::span::{content_columns, Lines, Place};
@@ -36,7 +38,7 @@ use crate::{
 
 use places::{error_location, error_step, in_call, subject_place};
 use recovery::recover_parse_errors;
-use warnings::{case_warnings, empty_step_warnings, label_warnings, near_miss_warnings, warnings};
+use warnings::{case_warnings, empty_step_warnings, near_miss_warnings, warnings};
 
 /// Where a pipeline is, and what applies to it, when diagnosing it.
 #[derive(Clone, Copy, Debug, Default)]
@@ -63,27 +65,29 @@ impl<'a> Context<'a> {
 
     /// Parse a pipeline in this context: with its imports resolved from its
     /// path, and its recipe checked and applied.
-    fn parse(&self, text: &str) -> Result<Parsed, Vec<ParseError>> {
-        let mut document = match self.path {
-            Some(path) => parse_located_document_recovering(text, path, Kind::Pipeline)?,
-            None => parse_document_recovering(text, &BTreeMap::new(), Kind::Pipeline)?,
+    fn parse(&self, text: &str) -> (Parsed, Vec<ParseError>) {
+        let (mut document, mut errors) = match self.path {
+            Some(path) => parse_located_document_recovering(text, path, Kind::Pipeline),
+            None => parse_document_recovering(text, &BTreeMap::new(), Kind::Pipeline),
         };
         let Some(recipe) = self.recipe else {
-            return Ok(Parsed {
+            let parsed = Parsed {
                 document,
                 as_written: None,
-            });
+            };
+            return (parsed, errors);
         };
-        recipe
-            .check(&document.pipeline)
-            .map_err(|error| vec![ParseError::new(1, error.to_string())])?;
+        if let Err(error) = recipe.check(&document.pipeline) {
+            errors.push(ParseError::new(1, error.to_string()));
+        }
         let as_written = document.pipeline.clone();
         recipe.apply_paths(&mut document.pipeline);
         document.inputs = recipe.rules.clone();
-        Ok(Parsed {
+        let parsed = Parsed {
             document,
             as_written: Some(as_written),
-        })
+        };
+        (parsed, errors)
     }
 }
 
@@ -107,8 +111,7 @@ impl Parsed {
 }
 
 /// The paths an editor shows: each product's, where it comes from a default
-/// rule or gains an extension, so is written out nowhere. Outputs with no
-/// rule at all show the built-in default they are given.
+/// rule or gains an extension, so is written out nowhere.
 fn shown_paths(pipeline: &Pipeline, lines: &SourceMap) -> Vec<ShownPath> {
     let index = PipelineIndex::new(pipeline);
     let templates = index.path_templates();
@@ -192,9 +195,7 @@ pub fn diagnose_checked_with_records(
     let (text, records) = (without_bom(text), without_bom(records));
     let parsed = (
         recover_parse_errors(text, |text| context.parse(text)),
-        recover_parse_errors(records, |records| {
-            parse_source_inventory(records).map_err(|error| vec![error])
-        }),
+        recover_parse_errors(records, parse_inventory_recovering),
     );
     let (parsed, inventory) = match parsed {
         (Ok(parsed), Ok(inventory)) => (parsed, inventory),
@@ -387,7 +388,6 @@ fn record_diagnostics(
             return Err(error);
         }
         diagnostics.extend(case_warnings(pipeline, lines, &report.dag));
-        diagnostics.extend(label_warnings(pipeline, lines, &report.dag));
         Ok(report)
     });
     match resolved {

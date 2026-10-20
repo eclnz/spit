@@ -9,7 +9,9 @@ use crate::paths::{validate_discovery_rule, PathTemplate};
 use crate::types::{parse_type_expr, TypeExpr, TypeParseError};
 
 use super::check::{only_checks, split_clauses};
-use super::lexical::{call_parts, comma_items, identifier, qualified_identifier, split_ending};
+use super::lexical::{
+    call_parts, comma_items, identifier, product_name, qualified_identifier, split_ending,
+};
 use super::source_map::tail_place;
 use super::{ParseError, PathRule};
 
@@ -20,18 +22,19 @@ pub(super) fn single_colon(line: &str) -> Option<usize> {
     })
 }
 
-/// Parse a path rule. A default `path:` inside `stage` covers only that
-/// stage's products.
+/// Parse a path rule from `rest`, the text after `path`: `: template` for
+/// the default rule, which inside `stage` covers only that stage's
+/// products, or `product: template` for one product's.
 pub(super) fn parse_path(
     stage: Option<String>,
     original: &str,
-    line: &str,
+    rest: &str,
     number: usize,
 ) -> Result<PathRule, ParseError> {
-    let (product, template) = if let Some(template) = line.strip_prefix("path:") {
+    let (product, template) = if let Some(template) = rest.strip_prefix(':') {
         (None, template)
     } else {
-        let declaration = line.strip_prefix("path ").unwrap_or("");
+        let declaration = rest.trim_start();
         let delimiter = single_colon(declaration)
             .ok_or_else(|| ParseError::new(number, "expected `:` after path product name"))?;
         let (product, template) = declaration.split_at(delimiter);
@@ -228,7 +231,7 @@ pub(super) fn parse_product(line: &str, number: usize) -> Result<ProductDef, Par
     } else {
         (named.trim(), TypeExpr::Unknown)
     };
-    let name = identifier(name, number, "product name").map_err(|error| {
+    let name = product_name(name, number, "product name").map_err(|error| {
         if dimensions.is_none() && name.split_whitespace().count() > 1 {
             ParseError::new(
                 number,

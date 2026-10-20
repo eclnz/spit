@@ -1,8 +1,10 @@
+default entities: {@key}={@value} separated "__"
+
 root command_demo_data  # The checked-in dataset; no recipe is needed to find it.
 source shard : Lines [group, part]
 
 # A general layout for generated products, with a different source layout.
-path: {@product}/{@entities}.txt
+default path: {@product}/{@entities}.txt
 path shard: input/{group}/{part}.txt
 
 operation sort_lines(input: Lines) -> Lines

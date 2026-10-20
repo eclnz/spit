@@ -20,7 +20,7 @@ subject = recon(image)
 operation stats(subject: FsSubject) -> Table .csv
 command stats: summarise {subject} {@output}
 table = stats(subject)
-";
+default entities: {@key}={@value} separated \"__\"\npath image: out/{@product}/{@entities}\npath subject: out/{@product}/{@entities}\npath table: out/{@product}/{@entities}\n";
 
 fn errors(text: &str) -> Vec<String> {
     diagnose(text, None)
@@ -120,7 +120,7 @@ fn hovers_and_path_rules_show_a_folder() {
         "{rules}"
     );
     assert!(
-        rules.contains("  subject (output folder): built-in default"),
+        rules.contains("  subject (output folder): explicit out/{@product}/sub={sub}\n"),
         "{rules}"
     );
 
@@ -139,7 +139,7 @@ fn a_folder_may_have_an_extension_and_takes_no_default_one() {
     let pipeline = tree.write(
         "pipeline.spit",
         "\
-ext: .txt
+default ext: .txt
 source table [id]
 path table: in/{id}.csv
 operation store(table) -> Zarr .zarr/
@@ -148,7 +148,7 @@ operation index(table) -> Index /
 command index: build_index {table} {@output}
 stored = store(table)
 indexed = index(table)
-",
+default entities: {@key}={@value} separated \"__\"\npath stored: out/{@product}/{@entities}\npath indexed: out/{@product}/{@entities}\n",
     );
     let inputs = tree.write("inputs.spitout", "sources:\n    table[id=a]\n");
     let plan = spit(&[
@@ -254,7 +254,7 @@ path info: dicom/sub={sub}/info.json
 operation convert(dicom: Dicom, info: Json) -> Image .nii.gz
 command convert: convert {dicom} {info} {@output}
 image = convert(dicom, info)
-";
+default entities: {@key}={@value} separated \"__\"\npath image: out/{@product}/{@entities}\n";
     assert_eq!(errors(pipeline), Vec::<String>::new());
     let tree = dataset(pipeline);
     tree.write("data/dicom/sub=01/info.json", "{}");
