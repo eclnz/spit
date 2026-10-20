@@ -63,11 +63,13 @@ The call expands to the body's steps, and a body may call another operation with
 ## Stages
 
 ```spit
+entities: {key}={value} separated "__" empty "global"
 stage preprocess:
     default path: derived/{@stage}/{@product}/{@entities}
     denoised = denoise(image)
 
 stage analysis:
+    default path: results/{@product}/{@entities}
     summary = summarise(denoised @ vary(sub))
 ```
 

@@ -22,7 +22,7 @@ stage pre:
     image, meta = convert(dicom, mask)
 stage post:
     mean = avg(image @ vary(sub))
-";
+entities: {key}={value} separated \"__\" empty \"global\"\n";
 
 /// Subject 03 has a folder but no mask.
 fn dataset() -> (Tree, String) {
@@ -122,7 +122,7 @@ fn a_scan_and_its_records_settle_to_the_same_plan() {
         "source bold : Bold [sub, ses, run]\npath bold: sub-{sub}/ses-{ses}/run-{run}.nii\n\
          source t1w : T1 [sub, ses]\npath t1w: sub-{sub}/ses-{ses}/t1w.nii\n\
          operation align(bold: Bold, t1w: T1) -> Bold\ncommand align: align {bold} {t1w} {@output}\n\
-         default path: out/{@product}/{@entities}\naligned = align(bold, t1w)\n",
+         default path: out/{@product}/{@entities}\naligned = align(bold, t1w)\nentities: {key}={value} separated \"__\" empty \"global\"\n",
     );
     let rules = "exclude bold[sub=2,ses=1,run=2]   # bad\n\
                  exclude [sub] where t1w count<1\n\

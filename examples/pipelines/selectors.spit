@@ -2,7 +2,7 @@
 # revision, compared with a station reference, split into two bands, and
 # summarised per station under that station's policy.
 
-entities: {key}_{value} separated "-"
+entities: {key}_{value} separated "-" empty "global"
 entities station: site
 default path: derived/{@product}/{@entities}.csv
 

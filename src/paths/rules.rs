@@ -30,8 +30,6 @@ pub enum PathRule {
         template: String,
     },
     Default(String),
-    /// The built-in default, for an output in a pipeline with no `path:`.
-    BuiltIn(String),
     /// An output its tool writes beside another's file, whose path follows
     /// that file's.
     Beside {
@@ -75,7 +73,6 @@ impl PathRule {
                 stage: stage.to_owned(),
                 template,
             },
-            (None, Some((PathOrigin::BuiltIn, _))) => Self::BuiltIn(template),
             (None, Some((PathOrigin::Default, _)) | None) => Self::Default(template),
         }
     }
@@ -143,8 +140,8 @@ impl PathCoverage {
         self
     }
 
-    /// Fail the products in `used` that no rule covers. Every output has a
-    /// rule, if only the built-in default, so only a source can have none.
+    /// Fail the products in `used` that no rule covers. The path checks fail
+    /// an output with none, so only a source can have none here.
     pub fn validate<'a>(&self, used: impl IntoIterator<Item = &'a str>) -> Result<(), PathError> {
         let used: BTreeSet<_> = used.into_iter().collect();
         let missing: Vec<_> = self
@@ -189,7 +186,6 @@ impl fmt::Display for PathCoverage {
                     write!(f, "stage {stage} default {template}")?;
                 }
                 PathRule::Default(template) => write!(f, "default {template}")?,
-                PathRule::BuiltIn(template) => write!(f, "built-in default {template}")?,
                 PathRule::Beside { sibling, template } => {
                     write!(f, "beside {sibling} {template}")?;
                 }
@@ -256,6 +252,16 @@ pub(crate) fn collect_paths(
                 .map(|(product, template)| (template, lines.paths.get(product).cloned())),
         );
     for (template, line) in rules {
+        if pipeline.entities_format.is_none() && template.names_entities() {
+            errors.push(
+                error(format!(
+                    "`{}` needs an `entities:` line to spell it; add one, as `entities: {{key}}={{value}} separated \"__\" empty \"global\"`",
+                    PathPlaceholder::Entities
+                ))
+                .at(line.clone())
+                .focus(PathPlaceholder::Entities.to_string()),
+            );
+        }
         let unknown: BTreeSet<_> = template
             .group_dimensions()
             .filter(|dimension| !had.contains(dimension))
@@ -287,6 +293,21 @@ pub(crate) fn collect_paths(
     for (id, product) in pipeline.products.iter().enumerate() {
         let template = templates[id].as_deref();
         let rule = PathRule::for_product(&index, &product.name, template);
+        // A recipe or a `.spitout` may give a source its rule, but nothing
+        // but the pipeline gives an output one.
+        if rule == PathRule::Missing
+            && outputs.contains(product.name.as_str())
+            && index.beside(&product.name).is_none()
+            && !skip.contains(&product.name)
+        {
+            errors.push(
+                error(format!(
+                    "output `{0}` has no path rule; write `path {0}: ...`, or a `default path:` for the pipeline or its stage",
+                    product.name
+                ))
+                .at(lines.products.get(&product.name).cloned()),
+            );
+        }
         if rule != PathRule::Missing && !skip.contains(&product.name) {
             let line = lines.path_rule(&index, &product.name);
             if let Some((sibling, _, _)) = index.beside(&product.name) {
@@ -307,6 +328,27 @@ pub(crate) fn collect_paths(
                 {
                     errors.push(error(problem.message).at(line.clone()));
                 }
+            }
+            // An empty spelling writes nothing, so only a group may hold it.
+            let writes_nothing = product.dimensions.is_empty()
+                && pipeline
+                    .entities_format
+                    .as_ref()
+                    .is_some_and(|format| format.empty.is_empty());
+            if writes_nothing
+                && index
+                    .path_rule_for(&product.name)
+                    .is_some_and(PathTemplate::needs_entities)
+            {
+                errors.push(
+                    error(format!(
+                        "`{0}` has no dimensions, so `{1}` writes nothing in its path; put it in `[...]`, as `[{1}_]`",
+                        product.name,
+                        PathPlaceholder::Entities
+                    ))
+                    .at(line.clone())
+                    .focus(PathPlaceholder::Entities.to_string()),
+                );
             }
             // `parse` checked the rule as written; a dropped group can leave
             // two open shapes touching in this product's path.
@@ -488,13 +530,9 @@ fn validate_path_template(
         .map(|dimension| (dimension.clone(), dimension.clone()))
         .collect();
     let artifact = ArtifactInstance::new(&product.name, product.artifact_type.clone(), entities);
-    bind_path(
-        index,
-        template,
-        &product.dimensions,
-        artifact.view(),
-        || format!("path rule for `{}`", product.name),
-    )
+    bind_path(index, template, artifact.view(), || {
+        format!("path rule for `{}`", product.name)
+    })
 }
 
 /// A shape narrows the files a source's rule finds, so it has no place in a

@@ -44,27 +44,38 @@ WORK = os.path.join(HERE, "work")
 DEFAULT_NEW = os.path.join(HERE, "..", "target", "release", "spit")
 
 
+# The `entities:` line that spells `{@entities}` as builds without one did.
+ENTITIES = 'entities: {key}={value} separated "__" empty "global"'
+
+
 def spelling(binary):
-    """How `binary` writes a default and built-in placeholders: the word
-    before a default (`default `, which older builds lack), and `{@product}`
-    and `{@entities}` (`{product}` in builds older still)."""
-    for default, at in [("default ", "@"), ("", "@"), ("", "")]:
+    """How `binary` writes a default and built-in placeholders: the lines a
+    pipeline starts with (the `entities:` line, which older builds lack), the
+    word before a default (`default `, which older builds still lack), and
+    `{@product}` and `{@entities}` (`{product}` in builds older still)."""
+    for prelude, default, at in [
+        ([ENTITIES], "default ", "@"),
+        ([], "default ", "@"),
+        ([], "", "@"),
+        ([], "", ""),
+    ]:
         with tempfile.TemporaryDirectory() as folder:
             path = os.path.join(folder, "probe.spit")
             with open(path, "w") as file:
                 file.write(
-                    f"{default}path: out/{{{at}product}}/{{{at}entities}}\n"
+                    "".join(line + "\n" for line in prelude)
+                    + f"{default}path: out/{{{at}product}}/{{{at}entities}}\n"
                     "source raw [id]\npath raw: in/{id}\n"
                 )
             if subprocess.run([binary, "check", path], capture_output=True).returncode == 0:
-                return default, "{%sproduct}" % at, "{%sentities}" % at
-    return "", "{product}", "{entities}"
+                return prelude, default, "{%sproduct}" % at, "{%sentities}" % at
+    return [], "", "{product}", "{entities}"
 
 
 def chain(binary, steps):
     """A pipeline of `steps` steps, each reading the one before."""
-    default, product, entities = spelling(binary)
-    lines = [
+    prelude, default, product, entities = spelling(binary)
+    lines = prelude + [
         f"{default}path: out/{product}/{entities}.txt",
         "source raw : T [sub]",
         "path raw: in/{sub}.txt",
@@ -80,11 +91,11 @@ def chain(binary, steps):
 def study(binary, extra, ext):
     """The scaling test's pipeline, with `extra` steps after its four, and
     with `default ext:` completing the default path when `ext` is set."""
-    default, product, entities = spelling(binary)
+    prelude, default, product, entities = spelling(binary)
     if ext:
-        lines = [f"{default}path: out/{product}/{entities}", f"{default}ext: .txt"]
+        lines = prelude + [f"{default}path: out/{product}/{entities}", f"{default}ext: .txt"]
     else:
-        lines = [f"{default}path: out/{product}/{entities}.txt"]
+        lines = prelude + [f"{default}path: out/{product}/{entities}.txt"]
     lines += [
         "source image : Image [sub, ses, run]",
         "path image: sub-{sub}/ses-{ses}/image_run-{run}.nii",
@@ -207,7 +218,7 @@ def run_pipeline(args):
             write(folder, "chain.spit", chain(binary, steps))
             times = [quickest([binary, "check", "chain.spit"], folder, args.repeats)]
             times.append(quickest([binary, "check", "chain.spit", "--json"], folder, args.repeats))
-            if spelling(binary)[1] == "{@product}":
+            if spelling(binary)[2] == "{@product}":
                 hovers = [binary, "check", "chain.spit", "--json", "--hovers"]
                 times.append(quickest(hovers, folder, args.repeats))
             cells = "".join(f"{value:>10.1f}" for value in times)
@@ -224,7 +235,7 @@ def run_dataset(args):
         for extra in numbers(args.extra):
             for name, binary in builds(args):
                 variants = [(name, False)]
-                if name == "new" and spelling(binary)[1] == "{@product}":
+                if name == "new" and spelling(binary)[2] == "{@product}":
                     variants.append(("new+ext", True))
                 for label, ext in variants:
                     folder = os.path.join(WORK, f"study-{label}-{subjects}-{extra}")

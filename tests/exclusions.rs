@@ -293,7 +293,7 @@ fn an_excluded_file_may_lie_outside_the_discovered_contexts() {
         "source sales [store]\npath sales: stores/{store}/sales.csv\n\
          source price [store]\npath price: pricing/{store}.json\n\
          operation total(sales, price) -> Total\ncommand total: total {sales} {price} {@output}\n\
-         totals = total(sales, price)\n",
+         totals = total(sales, price)\nentities: {key}={value} separated \"__\" empty \"global\"\npath totals: out/{@product}/{@entities}\n",
     );
     let discover =
         "pipeline pipeline.spit\nroot .\ndiscover stores: [store] from dirs stores/{store}\n";

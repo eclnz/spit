@@ -25,10 +25,17 @@ fn errors(text: &str) -> Vec<String> {
         .collect()
 }
 
-/// One raw file, and `pipeline` beside it; `spit dag --commands` on it.
+/// The path rule every output takes, appended after a test's pipeline.
+const OUTPUT_PATHS: &str = "\
+entities: {key}={value} separated \"__\" empty \"global\"
+default path: out/{@product}/{@entities}
+";
+
+/// One raw file, and `pipeline` beside it, its outputs written under
+/// `out/`; `spit dag --commands` on it.
 fn commands(pipeline: &str) -> String {
     let tree = Tree::new("default_checks", &["data/in/1.txt"]);
-    let file = tree.write("p.spit", pipeline);
+    let file = tree.write("p.spit", &format!("{pipeline}{OUTPUT_PATHS}"));
     let root = tree.path().join("data");
     let output = spit(&[
         "dag",

@@ -9,7 +9,10 @@ use crate::span::Place;
 #[derive(Default)]
 pub(super) struct EntitiesDeclarations {
     format: Option<Place>,
-    labels: BTreeMap<String, Place>,
+    /// Each relabelled dimension, its label and where it is declared. A
+    /// label may come before the format it belongs to, so `validate` gives
+    /// the labels to the format once every statement is lowered.
+    labels: BTreeMap<String, (String, Place)>,
 }
 
 impl EntitiesDeclarations {
@@ -29,14 +32,7 @@ impl EntitiesDeclarations {
                     )
                     .within(place));
                 }
-                let labels = pipeline
-                    .entities_format
-                    .take()
-                    .map(|format| format.labels)
-                    .unwrap_or_default();
-                let mut format = format.clone();
-                format.labels = labels;
-                pipeline.entities_format = Some(format);
+                pipeline.entities_format = Some(format.clone());
                 self.format = Some(place.clone());
             }
             EntitiesDeclaration::Label { dimension, label } => {
@@ -47,23 +43,34 @@ impl EntitiesDeclarations {
                     )
                     .within(place));
                 }
-                pipeline
-                    .entities_format
-                    .get_or_insert_with(Default::default)
-                    .labels
-                    .insert(dimension.clone(), label.clone());
-                self.labels.insert(dimension.clone(), place.clone());
+                self.labels
+                    .insert(dimension.clone(), (label.clone(), place.clone()));
             }
         }
         Ok(())
     }
 
-    pub(super) fn validate(&self, pipeline: &Pipeline) -> Result<(), ParseError> {
-        let Some(format) = &pipeline.entities_format else {
-            return Ok(());
-        };
+    /// Give the labels to the format, and check them against the
+    /// pipeline's dimensions.
+    pub(super) fn validate(&self, pipeline: &mut Pipeline) -> Result<(), ParseError> {
         let dimensions = pipeline.dimension_order();
-        for (dimension, place) in &self.labels {
+        let Some(format) = &mut pipeline.entities_format else {
+            return match self.labels.values().next() {
+                Some((_, place)) => Err(ParseError::new(
+                    place.line,
+                    "an entity label renames a dimension in the `entities:` format, and this pipeline declares none; add one, as `entities: {key}={value} separated \"__\" empty \"global\"`",
+                )
+                .within(place)),
+                None => Ok(()),
+            };
+        };
+        format.labels = self
+            .labels
+            .iter()
+            .map(|(dimension, (label, _))| (dimension.clone(), label.clone()))
+            .collect();
+        let format = &*format;
+        for (dimension, (_, place)) in &self.labels {
             if !dimensions.contains(dimension) {
                 return Err(ParseError::new(
                     place.line,
@@ -79,12 +86,8 @@ impl EntitiesDeclarations {
                 let place = self
                     .labels
                     .get(dimension)
-                    .or_else(|| {
-                        self.labels
-                            .iter()
-                            .find(|(name, _)| format.labels.get(*name) == Some(label))
-                            .map(|(_, place)| place)
-                    })
+                    .or_else(|| self.labels.values().find(|(other, _)| other == label))
+                    .map(|(_, place)| place)
                     .expect("a repeated entity label has at least one alias declaration");
                 return Err(ParseError::new(
                     place.line,

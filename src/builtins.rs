@@ -53,7 +53,6 @@ pub enum Word {
     Product,
     Entities,
     StageName,
-    Labels,
     Output,
     Dir,
     Stem,
@@ -68,7 +67,6 @@ pub enum Word {
     ShapeYear,
     ShapeDate,
     EntitiesFormat,
-    ConfiguredEntities,
     Default,
 }
 
@@ -93,7 +91,7 @@ impl Word {
 }
 
 /// Every word's documentation, in the order of [`Word`].
-pub static DOCS: [Doc; 51] = [
+pub static DOCS: [Doc; 49] = [
     Doc {
         name: "source",
         kind: "keyword",
@@ -127,7 +125,7 @@ pub static DOCS: [Doc; 51] = [
         kind: "keyword",
         anchor: "paths",
         example: "path image: input/{subject}/{visit}/{run}.txt\ndefault path: results/{@product}/{@entities}.txt",
-        summary: "`path product:` sets one product's rule, and for a source, how its files are found. `default path:` sets the rule for products with none of their own; without one, outputs go to `out/{@product}/{@entities}`. A default in a stage is the rule for that stage's products, and one in a `.spitin` recipe the rule for sources with none. Paths are relative to the dataset root. Text in `[...]` is kept only for a product with a value for every placeholder in it.",
+        summary: "`path product:` sets one product's rule, and for a source, how its files are found. `default path:` sets the rule for products with none of their own. An output with no rule is an error. A default in a stage is the rule for that stage's products, and one in a `.spitin` recipe the rule for sources with none. Paths are relative to the dataset root. Text in `[...]` is kept only for a product with a value for every placeholder in it.",
     },
     Doc {
         name: "ext",
@@ -315,7 +313,7 @@ pub static DOCS: [Doc; 51] = [
         name: "@product",
         kind: "placeholder",
         anchor: "paths",
-        example: "default path: results/{@product}/{@entities}.txt",
+        example: "entities: {key}={value} separated \"__\" empty \"global\"\ndefault path: results/{@product}/{@entities}.txt",
         summary: "The product's name in a path, as `aligned`. An imported `alias::name` becomes `alias.name`.",
     },
     Doc {
@@ -323,7 +321,7 @@ pub static DOCS: [Doc; 51] = [
         kind: "placeholder",
         anchor: "paths",
         example: "default path: results/{@product}/{@entities}.txt",
-        summary: "Every dimension as `dim=value`, in the pipeline's dimension order, joined by `__`, as `subject=A__run=2`; `global` for a product with no dimensions.",
+        summary: "Every dimension, in the pipeline's dimension order, written as the pipeline's `entities:` line spells it. Values and labels are percent escaped. A product with no dimensions takes the line's `empty` text. A pipeline that uses `{@entities}` needs an `entities:` line.",
     },
     Doc {
         name: "@stage",
@@ -331,13 +329,6 @@ pub static DOCS: [Doc; 51] = [
         anchor: "paths",
         example: "default path: {@stage}/{@product}/{@entities}.txt",
         summary: "The stage whose block holds the step, one directory per level, as `preprocess/align`. An error for a product made outside every stage, unless it is in an optional `[...]` group.",
-    },
-    Doc {
-        name: "@labels",
-        kind: "placeholder",
-        anchor: "paths",
-        example: "default path: derivatives/sub-{sub}[/ses-{ses}]/{@labels}_{@product}",
-        summary: "Every dimension as `key-value`, in the pipeline's dimension order, joined by `_`, as `subject-A_run-2`. SPIT warns if a value contains `-`, since a BIDS reader cannot recover it from the file name.",
     },
     Doc {
         name: "@output",
@@ -434,15 +425,8 @@ pub static DOCS: [Doc; 51] = [
         name: "entities",
         kind: "keyword",
         anchor: "entity-formatting",
-        example: "entities: {key}_{value} separated \"-\"\nentities sub: subject",
-        summary: "Defines how `{@entities}` writes each dimension: `{key}` is its label and `{value}` its escaped value. `separated` joins assignments, and `empty` names a product with no dimensions. `entities sub: subject` changes that dimension's path label, while bindings and their order stay the same. The declaration applies to the whole pipeline.",
-    },
-    Doc {
-        name: "@entities:custom",
-        kind: "placeholder",
-        anchor: "entity-formatting",
-        example: "entities: {key}_{value} separated \"-\"\ndefault path: {@product}/{@entities}",
-        summary: "Every dimension using this pipeline's `entities:` template, separator and label aliases, in the pipeline's dimension order. Values and labels are percent escaped. A product with no dimensions uses the declared `empty` text, or `global` when none is declared.",
+        example: "entities: {key}_{value} separated \"-\" empty \"all\"\nentities sub: subject",
+        summary: "Defines how `{@entities}` writes each dimension: `{key}` is its label and `{value}` its escaped value. `separated` joins assignments, and `empty` names a product with no dimensions; both are required. `entities sub: subject` changes that dimension's path label, while bindings and their order stay the same. The declaration applies to the whole pipeline.",
     },
     Doc {
         name: "default",
@@ -467,7 +451,6 @@ pub fn builtin_words(text: &str) -> Vec<WordUse> {
     let bom = usize::from(text.starts_with('\u{feff}'));
     let mut uses = Vec::new();
     let mut found = Vec::new();
-    let mut configured_entities = false;
     let layout = Layout::new(without_bom(text));
     // For each line that a statement's keyword covers without being on it,
     // that keyword's word: an entry of a keyword block, such as `source:`,
@@ -489,7 +472,6 @@ pub fn builtin_words(text: &str) -> Vec<WordUse> {
         let line = read.text;
         found.clear();
         line_words(read, inherited[index], &mut found);
-        configured_entities |= found.iter().any(|(_, word)| *word == Word::EntitiesFormat);
         found.sort_unstable_by_key(|(bytes, _)| bytes.start);
         let shift = 1 + if index == 0 { bom } else { 0 };
         uses.extend(found.iter().map(|(bytes, word)| {
@@ -500,13 +482,6 @@ pub fn builtin_words(text: &str) -> Vec<WordUse> {
                 word: *word,
             }
         }));
-    }
-    if configured_entities {
-        for word_use in &mut uses {
-            if word_use.word == Word::Entities {
-                word_use.word = Word::ConfiguredEntities;
-            }
-        }
     }
     uses
 }
@@ -724,7 +699,6 @@ fn placeholders(code: &str, statement: Option<Word>, found: &mut Vec<(Range<usiz
             "@product" => Some(Word::Product),
             "@entities" => Some(Word::Entities),
             "@stage" => Some(Word::StageName),
-            "@labels" => Some(Word::Labels),
             "@output" if in_command => Some(Word::Output),
             "@path" if in_check => Some(Word::PathPlaceholder),
             _ => None,

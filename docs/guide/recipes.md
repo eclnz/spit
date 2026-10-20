@@ -16,7 +16,7 @@ path image: raw/sub-{sub}/image.nii.gz
 default path: raw/{@product}/{@entities}
 ```
 
-A recipe's `path image:` names a source; its `default path:` is a default for sources. A pipeline's `default path:` is primarily for outputs and covers sources only when they have no more specific rule and the default fits them. A source's own rule belongs in either the pipeline or the recipe, not both. A recipe can also give the complete path of a main source whose companions are declared `beside` it. See [which file a line belongs in](../language-reference.md#which-file-a-line-belongs-in).
+A recipe's `path image:` names a source; its `default path:` is a default for sources, and `{@entities}` in it is spelled by the pipeline's `entities:` line. A pipeline's `default path:` is primarily for outputs and covers sources only when they have no more specific rule and the default fits them. A source's own rule belongs in either the pipeline or the recipe, not both. A recipe can also give the complete path of a main source whose companions are declared `beside` it. See [which file a line belongs in](../language-reference.md#which-file-a-line-belongs-in).
 
 ## Discovery
 

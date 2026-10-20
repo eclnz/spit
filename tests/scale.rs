@@ -34,7 +34,7 @@ fn a_long_chain_of_steps_compiles_without_overflowing_the_stack() {
 #[ignore = "slow in a debug build; run with --release"]
 fn many_sources_resolve_in_reasonable_time() {
     let pipeline =
-        parse_pipeline("source raw : T [sub]\noperation f(input: T) -> U\nout = f(raw)\n").unwrap();
+        parse_pipeline("source raw : T [sub]\noperation f(input: T) -> U\nout = f(raw)\nentities: {key}={value} separated \"__\" empty \"global\"\npath out: out/{@product}/{@entities}\n").unwrap();
     let mut records = String::from("sources:\n");
     for index in 0..40_000 {
         records += &format!("    raw[sub={index}]\n");

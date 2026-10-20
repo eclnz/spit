@@ -27,7 +27,8 @@ fn words_are_found_by_where_they_are_written() {
         ("path image: input/{subject}.txt", "subject", None),
         ("default path: {@stage}/{@product}/{@entities}.txt", "@stage", Some("@stage")),
         ("default path: {@stage}/{@product}/{@entities}.txt", "@entities", Some("@entities")),
-        ("default path: sub-{sub}/{@labels}_{@product}", "@labels", Some("@labels")),
+        // `{@labels}` is gone, so it is no longer a word with documentation.
+        ("default path: sub-{sub}/{@labels}_{@product}", "@labels", None),
         ("default path: out/{{@product}}", "@product", None),
         ("path log: logs/{server}/{date:date}.log", "date:date", Some("date")),
         ("path log: logs/{server}/{date:date}.log", "date:", None),
@@ -169,7 +170,7 @@ fn check(file: &str, args: &[&str], text: &str) -> (bool, String, String) {
 
 #[test]
 fn check_writes_each_words_documentation_once() {
-    let text = "source raw [id]\nsource other [id]\noperation copy(input)\nout = copy(raw)\n";
+    let text = "source raw [id]\nsource other [id]\noperation copy(input)\nout = copy(raw)\nentities: {key}={value} separated \"__\" empty \"global\"\npath out: out/{@product}/{@entities}\n";
     let (ok, json, _) = check("unsaved.spit", &["--json", "--stdin", "--hovers"], text);
     assert!(ok);
     assert!(json.contains(r#"{"line":1,"column":1,"end_column":7,"word":"source"}"#));

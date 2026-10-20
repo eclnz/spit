@@ -1,5 +1,6 @@
 # BIDS sessions with a dropped subject and an excluded motion-corrupted run.
-default path: derivatives/sub-{sub}[/ses-{ses}][/{@stage}]/{@labels}_{@product}
+entities: {key}-{value} separated "_" empty ""
+default path: derivatives/sub-{sub}[/ses-{ses}][/{@stage}]/{@entities}_{@product}
 default ext: .nii.gz
 
 source t1w : T1 [sub, ses]

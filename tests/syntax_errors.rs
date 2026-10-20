@@ -82,6 +82,9 @@ fn seeded_deletions_report_every_damaged_pipeline_line() {
         "operation copy(input)".to_owned(),
     ];
     original.extend((0..24).map(|index| format!("step_{index:02} = copy(raw)")));
+    // The path rule follows the steps, so it is never damaged.
+    original.push("entities: {key}={value} separated \"__\" empty \"global\"".to_owned());
+    original.push("default path: out/{@product}/{@entities}".to_owned());
     assert!(errors(diagnose(&original.join("\n"), None)).is_empty());
 
     let mut seed = 0x5eed_2026_u64;

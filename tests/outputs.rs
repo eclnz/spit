@@ -38,7 +38,7 @@ averaged = average(aligned @ vary(run))
 operation compare(image: Image<$K>, reference: Reference) -> Score
 command compare: score {image} {reference} -o {@output}
 score = compare(averaged, reference)
-";
+entities: {key}={value} separated \"__\" empty \"global\"\n";
 
 const DISCOVER: &str = "discover sessions: [sub, ses] from dirs sub-{sub}/ses-{ses}\n";
 /// A `require` rule that the gaps dataset fails.

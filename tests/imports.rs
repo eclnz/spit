@@ -93,7 +93,7 @@ fn diagnostics_resolve_imports_using_pipeline_location() {
     dir.write("base.spit", "operation clean(input)\n");
     let main = dir.write(
         "main.spit",
-        "source raw [id]\nuse clean from base.spit as prep\nresult = prep::clean(raw)\n",
+        "source raw [id]\nuse clean from base.spit as prep\nresult = prep::clean(raw)\nentities: {key}={value} separated \"__\" empty \"global\"\npath result: out/{@product}/{@entities}\n",
     );
     let text = fs::read_to_string(&main).unwrap();
     assert!(diagnose_in(&text, None, Context::at(&main)).is_empty());
@@ -109,7 +109,7 @@ fn an_operation_a_library_declares_in_a_stage_may_be_used_anywhere() {
     dir.write("base.spit", "stage tools:\n    operation clean(input)\n");
     let main = dir.write(
         "main.spit",
-        "source raw [id]\nuse base.spit\nstage prep:\n    result = clean(raw)\n",
+        "source raw [id]\nuse base.spit\nstage prep:\n    result = clean(raw)\nentities: {key}={value} separated \"__\" empty \"global\"\npath result: out/{@product}/{@entities}\n",
     );
     let text = fs::read_to_string(&main).unwrap();
     assert!(diagnose_in(&text, None, Context::at(&main)).is_empty());
@@ -167,7 +167,7 @@ fn import_all_brings_definitions_but_not_steps() {
     let dir = Tree::new("imports", &[]);
     dir.write(
         "base.spit",
-        "source raw [id]\noperation clean(input)\ncommand clean: cp {input} {@output}\ncleaned = clean(raw)\n",
+        "source raw [id]\noperation clean(input)\ncommand clean: cp {input} {@output}\ncleaned = clean(raw)\nentities: {key}={value} separated \"__\" empty \"global\"\npath cleaned: out/{@product}/{@entities}\n",
     );
     let main = dir.write(
         "main.spit",
@@ -307,7 +307,8 @@ fn an_imported_sidecars_group_still_reports_incomplete_bindings() {
     dir.write(
         "top.spit",
         "use raw from lib.spit as l\noperation cp(x: Image, m: Json) -> Image\n\
-         command cp: cp {x} {m} {@output}\nout = cp(l::raw, l::meta)\n",
+         command cp: cp {x} {m} {@output}\nout = cp(l::raw, l::meta)\n\
+         entities: {key}={value} separated \"__\" empty \"global\"\npath out: out/{@product}/{@entities}\n",
     );
     let recipe = dir.write(
         "top.spitin",

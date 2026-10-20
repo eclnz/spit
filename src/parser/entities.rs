@@ -16,31 +16,25 @@ pub(super) fn parse_entities(line: &str, number: usize) -> Result<EntitiesDeclar
         let (template, tail) = rest.trim().split_once(" separated ").ok_or_else(|| {
             ParseError::new(
                 number,
-                "expected `entities: {key}={value} separated \"__\"`",
+                "expected `entities: {key}={value} separated \"__\" empty \"global\"`",
             )
         })?;
         let template = unquote(template.trim());
         let (separator, tail) = quoted(tail.trim(), number)?;
-        let empty = if tail.trim().is_empty() {
-            "global"
-        } else {
-            let tail = tail.trim().strip_prefix("empty ").ok_or_else(|| {
-                ParseError::new(
-                    number,
-                    "after the entities separator, only `empty \"global\"` may follow",
-                )
-                .at_token(tail)
-            })?;
-            let (empty, rest) = quoted(tail.trim(), number)?;
-            if !rest.trim().is_empty() {
-                return Err(ParseError::new(
-                    number,
-                    "unexpected text after the empty entities name",
-                )
-                .at_token(rest));
-            }
-            empty
-        };
+        let tail = tail.trim().strip_prefix("empty ").ok_or_else(|| {
+            ParseError::new(
+                number,
+                "after the entities separator, write `empty \"global\"`: the spelling for a product with no dimensions",
+            )
+            .at_token(tail.trim())
+        })?;
+        let (empty, rest) = quoted(tail.trim(), number)?;
+        if !rest.trim().is_empty() {
+            return Err(
+                ParseError::new(number, "unexpected text after the empty entities name")
+                    .at_token(rest),
+            );
+        }
         let format = EntitiesFormat::parse(template, separator, empty)
             .map_err(|message| ParseError::new(number, message).at_token(template))?;
         return Ok(EntitiesDeclaration::Format(format));

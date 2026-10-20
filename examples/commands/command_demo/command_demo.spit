@@ -1,3 +1,5 @@
+entities: {key}={value} separated "__" empty "global"
+
 root command_demo_data  # The checked-in dataset; no recipe is needed to find it.
 source shard : Lines [group, part]
 

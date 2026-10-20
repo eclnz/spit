@@ -36,7 +36,7 @@ fn topology_needs_no_inventory_and_alias_matches() {
 #[test]
 fn reusable_and_nested_operations_have_one_component_diagram() {
     let tree = Tree::new("topology-components", &[]);
-    tree.write("pipe.spit", "source raw : T [sub]\noperation leaf(x: T) -> T\noperation clean(x: T) -> (result: T):\n    mid = leaf(x)\n    result = leaf(mid)\noperation wrapper(x: T) -> (result: T):\n    result = clean(x)\na = wrapper(raw)\nb = wrapper(a)\n");
+    tree.write("pipe.spit", "source raw : T [sub]\noperation leaf(x: T) -> T\noperation clean(x: T) -> (result: T):\n    mid = leaf(x)\n    result = leaf(mid)\noperation wrapper(x: T) -> (result: T):\n    result = clean(x)\na = wrapper(raw)\nb = wrapper(a)\nentities: {key}={value} separated \"__\" empty \"global\"\ndefault path: out/{@product}/{@entities}\n");
     let run = spit(&[
         "dag",
         tree.path().join("pipe.spit").to_str().unwrap(),

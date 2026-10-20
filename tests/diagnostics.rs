@@ -7,7 +7,7 @@ use spit::{diagnose, DiagnosticSource};
 #[test]
 fn validates_external_inventory_and_semantics() {
     let text =
-        "source raw : Image [id]\noperation copy(image: Image) -> Image\nresult = copy(raw)\n";
+        "source raw : Image [id]\noperation copy(image: Image) -> Image\nresult = copy(raw)\nentities: {key}={value} separated \"__\" empty \"global\"\npath result: out/{@product}/{@entities}\n";
     let bad_inventory = "sources:\n  raw[id=x,id=y]\n";
     let issues = errors(diagnose(text, Some(bad_inventory)));
     assert_eq!(issues.len(), 1);
@@ -25,7 +25,7 @@ fn validates_external_inventory_and_semantics() {
 
 #[test]
 fn checked_diagnosis_retains_the_original_pipeline_and_inventory() {
-    let pipeline = "source raw [id]\noperation copy(input)\nresult = copy(raw)\n";
+    let pipeline = "source raw [id]\noperation copy(input)\nresult = copy(raw)\nentities: {key}={value} separated \"__\" empty \"global\"\npath result: out/{@product}/{@entities}\n";
     let inventory = "sources:\n  raw[id=x]\n";
     let recipe = spit::parse_input_spec("path raw: data/{id}.txt\n").unwrap();
     let context = spit::Context {
@@ -35,7 +35,11 @@ fn checked_diagnosis_retains_the_original_pipeline_and_inventory() {
     let (checked, records) =
         spit::diagnose_checked_with_records(pipeline, inventory, context).unwrap();
     assert!(errors(checked.warnings).is_empty());
-    assert!(checked.pipeline.product_paths.is_empty());
+    // The recipe's rule for `raw` is not merged into the pipeline.
+    assert_eq!(
+        checked.pipeline.product_paths.keys().collect::<Vec<_>>(),
+        ["result"]
+    );
     assert_eq!(records.inventory.artifacts.len(), 1);
 }
 
@@ -45,7 +49,7 @@ fn type_errors_point_to_the_exact_flow_step_even_when_operation_is_reused() {
                 source lidar : Frame<Lidar> [id]\n\
                 operation inspect(frame: Frame<$Kind>) -> Checked<$Kind>\n\
                 camera_checked = inspect(camera)\n\
-                lidar_checked : Checked<Camera> [id] = inspect(lidar)\n";
+                lidar_checked : Checked<Camera> [id] = inspect(lidar)\nentities: {key}={value} separated \"__\" empty \"global\"\npath camera_checked: out/{@product}/{@entities}\n";
     let issues = errors(diagnose(text, None));
     assert_eq!(issues.len(), 1);
     assert_eq!(issues[0].source, DiagnosticSource::Pipeline);
@@ -59,7 +63,7 @@ fn inferred_type_error_points_to_the_consuming_step() {
                 operation first(a: A<X>) -> B<X>\n\
                 operation second(b: B<Standard>) -> C\n\
                 middle = first(raw)\n\
-                final = second(middle)\n";
+                final = second(middle)\nentities: {key}={value} separated \"__\" empty \"global\"\npath middle: out/{@product}/{@entities}\n";
     let issues = errors(diagnose(text, Some("sources:\n")));
     assert_eq!(issues.len(), 1);
     assert_eq!(issues[0].source, DiagnosticSource::Pipeline);
@@ -99,7 +103,7 @@ fn duplicate_declaration_points_to_the_second_declaration() {
 
 #[test]
 fn missing_join_input_points_to_the_call() {
-    let text = "source raw [id]\nsource reference [id]\noperation join(left, right)\nresult = join(raw, reference)\n";
+    let text = "source raw [id]\nsource reference [id]\noperation join(left, right)\nresult = join(raw, reference)\nentities: {key}={value} separated \"__\" empty \"global\"\npath result: out/{@product}/{@entities}\n";
     let issues = errors(diagnose(text, Some("sources:\n  raw[id=x]\n")));
     assert_eq!(issues.len(), 1);
     assert_eq!(issues[0].source, DiagnosticSource::Pipeline);
@@ -140,7 +144,7 @@ operation join(table: Table, table2: Table) -> Table
 cleaned = clean(raw)
 joined = join(cleaned)
 typo = clean(rwa)
-";
+entities: {key}={value} separated \"__\" empty \"global\"\n";
     assert_eq!(
         rendered(&diagnose(text, None)),
         [
@@ -204,6 +208,8 @@ operation copy(input)
 command copy: tool --color=#fff {input} {@output}# note
 result = copy(raw)
 source spare [id]# note
+entities: {key}={value} separated \"__\" empty \"global\"
+path result: out/{@product}/{@entities}
 ";
     assert_eq!(
         rendered(&diagnose(text, None)),
@@ -230,7 +236,7 @@ operation clean(input)
 cleaned = clean(raw)
 source other [id]
 path other: {@product}/{id}/{shard}.csv
-";
+entities: {key}={value} separated \"__\" empty \"global\"\n";
     assert_eq!(
         rendered(&diagnose(text, None)),
         [
@@ -246,7 +252,7 @@ fn a_cycle_is_reported_once_at_the_step_it_was_found_at() {
     let text = "operation copy(input: A) -> A\n\
                 a = copy(b)\n\
                 b = copy(c)\n\
-                c = copy(a)\n";
+                c = copy(a)\nentities: {key}={value} separated \"__\" empty \"global\"\npath b: out/{@product}/{@entities}\npath c: out/{@product}/{@entities}\n";
     let issues = errors(diagnose(text, None));
     assert_eq!(issues.len(), 1);
     assert_eq!(issues[0].line, Some(2));

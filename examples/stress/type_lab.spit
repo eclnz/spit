@@ -2,6 +2,8 @@
 # so concrete nested types must propagate across several generic invocations.
 # The same operation is instantiated for different K, S, and P bindings.
 
+entities: {key}={value} separated "__" empty "global"
+
 source lidar : Stream<Frame<Lidar,Sensor>,Raw> [lab, rig, capture, slice]
 source camera : Stream<Frame<Camera,Sensor>,Raw> [lab, rig, capture, slice]
 source unclassified : Stream<Frame<Unknown,Sensor>,Raw> [lab, rig, capture, slice]

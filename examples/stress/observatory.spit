@@ -2,6 +2,8 @@
 # devices, windows, channels, and segments. Every aggregation removes one axis.
 # Generic evidence() is instantiated independently at device, site, and org scope.
 
+entities: {key}={value} separated "__" empty "global"
+
 source raw : Signal<Raw> [org, site, device, window, channel, segment]
 source calibration : Calibration [org, site, device, channel]
 source clock : Clock [org, site]

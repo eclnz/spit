@@ -15,6 +15,8 @@ const PIPELINE: &str = "\
 source image: Image [sub, ses]
 operation process(image: Image) -> Image
 result = process(image)
+entities: {key}={value} separated \"__\" empty \"global\"
+path result: out/{@product}/{@entities}
 ";
 
 const RECIPE: &str = "\
@@ -50,7 +52,12 @@ fn the_stage_finds_contexts_and_sources_without_touching_the_pipeline() {
     assert_eq!(resolved.inventory.artifacts.len(), 3);
     assert_eq!(resolved.inventory.discovered["sessions"].len(), 3);
     assert!(resolved.gaps.is_empty());
-    assert!(pipeline.product_paths.is_empty());
+    // The recipe's source path stays in the recipe; only the pipeline's own
+    // rule is in the pipeline.
+    assert_eq!(
+        pipeline.product_paths.keys().collect::<Vec<_>>(),
+        ["result"]
+    );
 }
 
 #[test]
@@ -247,7 +254,7 @@ fn an_empty_inventory_is_still_a_valid_stage_result() {
 }
 
 #[test]
-fn a_named_recipe_runs_in_memory_and_defaults_output_paths() {
+fn a_named_recipe_runs_in_memory_and_binds_output_paths() {
     let tree = Tree::new(
         "spitin-sibling",
         &[
@@ -261,7 +268,9 @@ fn a_named_recipe_runs_in_memory_and_defaults_output_paths() {
         &pipeline_file,
         "source image: Image [sub, ses]\n\
          operation process(image: Image) -> Image\n\
-         result = process(image)\n",
+         result = process(image)\n\
+         entities: {key}={value} separated \"__\" empty \"global\"\n\
+         path result: out/{@product}/{@entities}\n",
     )
     .unwrap();
     fs::write(
@@ -285,7 +294,7 @@ fn a_named_recipe_runs_in_memory_and_defaults_output_paths() {
     );
     assert_eq!(String::from_utf8_lossy(&check.stdout), "Pipeline valid.\n");
     // Given in place of a .spitout, it runs the input stage in memory over
-    // the pipeline it names, and outputs with no rule take the built-in layout.
+    // the pipeline it names, and outputs take the pipeline's path rules.
     let recipe = tree.0.join("analysis.spitin");
     let paths = Command::new(env!("CARGO_BIN_EXE_spit"))
         .args(["dag", recipe.to_str().unwrap(), "--paths"])
@@ -320,7 +329,9 @@ fn explicit_spitin_uses_its_own_directory_and_require_reports_gaps() {
         &pipeline_file,
         "source image [sub, ses]\n\
          operation process(image: Image) -> Image\n\
-         result = process(image)\n",
+         result = process(image)\n\
+         entities: {key}={value} separated \"__\" empty \"global\"\n\
+         path result: out/{@product}/{@entities}\n",
     )
     .unwrap();
     let recipe = tree.0.join("dataset/inputs.spitin");
@@ -443,7 +454,8 @@ fn a_spitout_alone_drives_jobs_without_its_recipe() {
     let pipeline = tree.path().join("analysis.spit");
     fs::write(
         &pipeline,
-        format!("{PIPELINE}path result: results/{{sub}}_{{ses}}.nii.gz\ncommand process: tool {{image}} {{@output}}\n"),
+        "source image: Image [sub, ses]\noperation process(image: Image) -> Image\nresult = process(image)\n\
+         path result: results/{sub}_{ses}.nii.gz\ncommand process: tool {image} {@output}\n",
     )
     .unwrap();
     let recipe = tree.path().join("dataset.spitin");
@@ -589,7 +601,7 @@ fn contexts_follow_the_discover_rule_and_list_in_the_order_written() {
 fn a_recipe_that_does_not_fit_its_pipeline_says_why() {
     let pipeline = spit::parse_pipeline(
         "source raw [sub]\nsource other [sub]\npath other: o/{sub}.txt\n\
-         operation f(raw) -> Out\nout = f(raw)\n",
+         operation f(raw) -> Out\nout = f(raw)\npath out: o/{sub}.out\n",
     )
     .unwrap();
     for (recipe, error, message) in [
@@ -640,6 +652,7 @@ path atlas: atlas.nii.gz
 stage prep:
     operation apply(image: Image, mask: Image, atlas: Image) -> Image
     masked = apply(image, mask, atlas)
+entities: {key}={value} separated \"__\" empty \"global\"
 ";
 
 #[test]
@@ -689,7 +702,7 @@ fn a_recipe_path_is_the_default_for_sources_with_no_rule() {
     let text = spit::render_source_inventory(&resolved.inventory, &pipeline, &recipe.rules);
     assert!(
         text.starts_with(
-            "source_paths:\n    image: raw/{@product}/{@entities}.nii.gz\n    mask: raw/masks/sub-{sub}.nii.gz\n\n"
+            "source_paths:\n    image: raw/{@product}/sub={sub}.nii.gz\n    mask: raw/masks/sub-{sub}.nii.gz\n\n"
         ),
         "{text}"
     );
@@ -729,7 +742,7 @@ fn check_lists_a_recipe_default_as_the_recipes() {
     let listing = String::from_utf8_lossy(&check.stdout);
     assert!(check.status.success(), "{listing}");
     assert!(
-        listing.contains("image (source): default raw/{@product}/{@entities}.nii.gz (recipe)"),
+        listing.contains("image (source): default raw/{@product}/sub={sub}.nii.gz (recipe)"),
         "{listing}"
     );
     assert!(
@@ -767,7 +780,8 @@ fn one_recipe_default_covers_sources_of_different_extensions() {
         ],
     );
     let pipeline = parse_pipeline(
-        "default path: {@stage}/{@product}/{@entities}\nsource image : Image .nii.gz [sub]\nsource events .tsv [sub]\nstage prep:\n    operation fit(image: Image, events)\n    fitted = fit(image, events)\n",
+        "default path: {@stage}/{@product}/{@entities}\nsource image : Image .nii.gz [sub]\nsource events .tsv [sub]\nstage prep:\n    operation fit(image: Image, events)\n    fitted = fit(image, events)\n\
+         entities: {key}={value} separated \"__\" empty \"global\"\n",
     )
     .unwrap();
     let recipe = parse_input_spec("default path: raw/sub-{sub}/{@product}\n").unwrap();
