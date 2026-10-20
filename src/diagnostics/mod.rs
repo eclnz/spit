@@ -38,7 +38,7 @@ use crate::{
 
 use places::{error_location, error_step, in_call, subject_place};
 use recovery::recover_parse_errors;
-use warnings::{case_warnings, empty_step_warnings, label_warnings, near_miss_warnings, warnings};
+use warnings::{case_warnings, empty_step_warnings, near_miss_warnings, warnings};
 
 /// Where a pipeline is, and what applies to it, when diagnosing it.
 #[derive(Clone, Copy, Debug, Default)]
@@ -111,8 +111,7 @@ impl Parsed {
 }
 
 /// The paths an editor shows: each product's, where it comes from a default
-/// rule or gains an extension, so is written out nowhere. Outputs with no
-/// rule at all show the built-in default they are given.
+/// rule or gains an extension, so is written out nowhere.
 fn shown_paths(pipeline: &Pipeline, lines: &SourceMap) -> Vec<ShownPath> {
     let index = PipelineIndex::new(pipeline);
     let templates = index.path_templates();
@@ -389,7 +388,6 @@ fn record_diagnostics(
             return Err(error);
         }
         diagnostics.extend(case_warnings(pipeline, lines, &report.dag));
-        diagnostics.extend(label_warnings(pipeline, lines, &report.dag));
         Ok(report)
     });
     match resolved {

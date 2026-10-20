@@ -371,7 +371,7 @@ pub(crate) fn lower(
             builder.dimension_order.as_ref(),
             &builder.lines,
         ),
-        builder.entities.validate(&builder.pipeline),
+        builder.entities.validate(&mut builder.pipeline),
     ];
     errors.extend(checks.into_iter().filter_map(Result::err));
     (builder, errors)

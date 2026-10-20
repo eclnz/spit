@@ -2,6 +2,8 @@
 # by one call to `align_sample`. `spit dag somatic.spitin --paths` shows the
 # two calls' products filed apart, as `normal_bam.aligned` and
 # `tumour_bam.aligned`.
+entities: {key}={value} separated "__" empty "global"
+
 use align_sample from germline.spit as gl
 
 default path: out/{@product}/{@entities}

@@ -13,7 +13,7 @@ source raw : Lines [group, lane]
 path raw: in/{group}/r{lane}.txt
 source cal : Table [group, revision]
 path cal: cal/{group}-r{revision}.txt
-
+entities: {key}={value} separated \"__\" empty \"global\"
 operation clean(x: Lines, t: Table) -> Lines
 command clean: clean {x} {t} {@output}
 operation merge(xs: many Lines) -> Lines
@@ -335,6 +335,7 @@ path raw: in/{{group}}/r{{lane}}.txt
 source cal : Table [group, revision]
 path cal: cal/{{group}}-r{{revision}}.txt
 m, t = L::summarise(raw, cal @ where(revision=2))
+entities: {{key}}={{value}} separated \"__\" empty \"global\"
 {RECORDS}"
     );
     let main = tree.write("main.spit", &text);
@@ -387,6 +388,7 @@ path raw: in/{{group}}/r{{lane}}.txt
 source cal : Table [group, revision]
 path cal: cal/{{group}}-r{{revision}}.txt
 m, t = L::summarise(raw, cal @ where(revision=2))
+entities: {{key}}={{value}} separated \"__\" empty \"global\"
 {RECORDS}"
     );
     let main = tree.write("main.spit", &text);
@@ -606,7 +608,7 @@ command clean: clean {x} {t} {@output}
 operation flip(t: Table, x: Lines) -> (y: Lines):
     y = clean(x, t)
 out = flip(cal @ where(revision=1), raw)
-";
+entities: {key}={value} separated \"__\" empty \"global\"\npath out: out/{@product}/{@entities}\n";
     let hovers = spit::pipeline_hovers(text, std::path::Path::new("flip.spit"));
     let at = |line: usize, name: &str| {
         hovers

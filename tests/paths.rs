@@ -26,16 +26,20 @@ fn path_coverage_exposes_default_fallbacks_and_accepts_them() {
 }
 
 #[test]
-fn an_output_with_no_rule_takes_the_built_in_default_and_a_source_none() {
+fn an_output_with_no_rule_is_an_error_and_a_source_waits_for_one() {
     let pipeline =
         parse_pipeline("source raw [id]\noperation clean(x: Raw) -> Clean\ncleaned = clean(raw)\n")
             .unwrap();
+    assert!(inspect_paths(&pipeline)
+        .unwrap_err()
+        .to_string()
+        .contains("output `cleaned` has no path rule"));
+    let pipeline = parse_pipeline(
+        "source raw [id]\noperation clean(x: Raw) -> Clean\ncleaned = clean(raw)\npath cleaned: out/{id}.txt\n",
+    )
+    .unwrap();
     let coverage = inspect_paths(&pipeline).unwrap();
     assert_eq!(coverage.entries[0].rule, PathRule::Missing);
-    assert_eq!(
-        coverage.entries[1].rule,
-        PathRule::BuiltIn("out/{@product}/{@entities}".to_owned())
-    );
     coverage.validate(["cleaned"]).unwrap();
     assert!(coverage
         .validate(["raw", "cleaned"])
@@ -89,12 +93,13 @@ fn bound_dag_shows_port_names_and_paths_without_commands() {
     assert!(report.contains("reference: visit_dark_tiff[site=01,visit=01]"));
     assert!(report.contains("path: derivatives/yield_table/site=01__visit=01.csv"));
 
-    // An output no rule covers takes the built-in default.
-    pipeline.product_paths.remove("yield_table");
+    // Without the pipeline's `default path:`, an output no rule covers has
+    // no path, which is an error rather than a hidden default.
     pipeline.path_template = None;
-    assert!(bound(&pipeline, &dag)
-        .unwrap()
-        .contains("path: out/yield_table/site=01__visit=01.csv"));
+    assert_eq!(
+        bound(&pipeline, &dag).unwrap_err(),
+        "output `photo_img` has no path rule; write `path photo_img: ...`, or a `default path:` for the pipeline or its stage"
+    );
 }
 
 #[test]
@@ -102,7 +107,7 @@ fn path_rules_that_cannot_separate_artifacts_are_rejected() {
     let check = |text: &str| inspect_paths(&parse_pipeline(text).unwrap()).map(|_| ());
 
     let error =
-        check("source raw [id, batch]\ndefault path: {@product}/{@entities}.csv\npath raw: raw/{id}.csv\n")
+        check("source raw [id, batch]\ndefault path: {@product}/{@entities}.csv\npath raw: raw/{id}.csv\nentities: {key}={value} separated \"__\" empty \"global\"\n")
             .unwrap_err();
     assert!(
         error.message().contains("omits dimension `batch`"),
@@ -110,7 +115,7 @@ fn path_rules_that_cannot_separate_artifacts_are_rejected() {
     );
 
     let error = check(
-        "source raw [id]\ndefault path: {@entities}.csv\noperation clean(input)\ncleaned = clean(raw)\n",
+        "source raw [id]\ndefault path: {@entities}.csv\noperation clean(input)\ncleaned = clean(raw)\nentities: {key}={value} separated \"__\" empty \"global\"\n",
     )
     .unwrap_err();
     assert!(error.message().contains("`raw` and `cleaned`"), "{error}");

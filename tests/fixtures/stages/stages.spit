@@ -1,4 +1,5 @@
 # Text shards cleaned in one stage and summarised in the next.
+entities: {key}={value} separated "__" empty "global"
 default path: {@stage}/{@product}/{@entities}.txt
 
 source shard : Lines [group, part]

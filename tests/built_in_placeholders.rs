@@ -30,11 +30,14 @@ fn a_dimension_may_take_a_built_in_name() {
 fn an_old_form_says_what_to_write() {
     for (name, meaning) in [
         ("product", "the product's name"),
-        ("entities", "every dimension as `dimension=value`"),
+        (
+            "entities",
+            "every dimension, as the `entities:` line spells them",
+        ),
         ("stage", "the stage that makes it"),
     ] {
         let text = format!(
-            "default path: out/{{{name}}}/{{@entities}}\nsource raw [id]\npath raw: in/{{id}}\noperation copy(a: A) -> A\ncopied = copy(raw)\n"
+            "default path: out/{{{name}}}/{{@entities}}\nsource raw [id]\npath raw: in/{{id}}\noperation copy(a: A) -> A\ncopied = copy(raw)\nentities: {{key}}={{value}} separated \"__\" empty \"global\"\n"
         );
         assert_eq!(
             errors(&text),
@@ -50,7 +53,7 @@ fn an_unknown_built_in_is_an_error() {
     let found = errors("default path: out/{@name}/{@entities}\n");
     assert!(
         found.iter().any(|error| error.contains(
-            "unknown built-in placeholder `{@name}`; path templates have `{@product}`, `{@entities}`, `{@labels}` and `{@stage}`"
+            "unknown built-in placeholder `{@name}`; path templates have `{@product}`, `{@entities}` and `{@stage}`"
         )),
         "{found:?}"
     );
@@ -102,8 +105,8 @@ fn optional_groups_and_labels_resolve_for_each_cohort_product() {
 
 #[test]
 fn optional_groups_reject_unknown_dimensions_and_invalid_nesting() {
-    let template = PathTemplate::parse("out/[[literal]]_[{ses}_]{@labels}").unwrap();
-    assert_eq!(template.as_str(), "out/[[literal]]_[{ses}_]{@labels}");
+    let template = PathTemplate::parse("out/[[literal]]_[{ses}_]{@entities}").unwrap();
+    assert_eq!(template.as_str(), "out/[[literal]]_[{ses}_]{@entities}");
     for text in ["out/[x]/{@product}", "out/[{ses}[{run}]]", "out/[{ses}"] {
         assert!(PathTemplate::parse(text).is_err(), "{text}");
     }
@@ -117,42 +120,34 @@ fn optional_groups_reject_unknown_dimensions_and_invalid_nesting() {
 }
 
 #[test]
-fn a_dimensionless_product_omits_an_optional_label_group() {
-    let text = "default path: out/[{@labels}_]{@product}.txt\nsource singleton\n";
+fn a_dimensionless_product_omits_an_optional_entities_group() {
+    let text = "default path: out/[{@entities}_]{@product}.txt\nsource singleton\nentities: {key}-{value} separated \"_\" empty \"\"\n";
     assert!(errors(text).is_empty());
     let pipeline = parse_pipeline(text).unwrap();
     assert_eq!(
         pipeline.path_template_for("singleton").unwrap().as_str(),
         "out/{@product}.txt"
     );
-
-    let missing = errors("default path: out/{@labels}.txt\nsource singleton\n");
-    assert!(
-        missing
-            .iter()
-            .any(|error| error.contains("has no dimensions; put it in `[...]`")),
-        "{missing:?}"
+    // Outside a group, the empty spelling would leave `out/_singleton.txt`.
+    let found = errors(
+        "default path: out/{@entities}_{@product}.txt\nsource singleton\nentities: {key}-{value} separated \"_\" empty \"\"\n",
+    );
+    assert_eq!(
+        found,
+        ["`singleton` has no dimensions, so `{@entities}` writes nothing in its path; put it in `[...]`, as `[{@entities}_]`"]
     );
 }
 
 #[test]
-fn labels_warn_when_a_value_contains_a_dash() {
-    let tree = Tree::new("dashed-label", &["data/in/sub-01-a.txt"]);
-    tree.write(
-        "pipeline.spit",
-        "default path: out/{@product}/{@entities}.txt\nsource raw [sub]\npath raw: in/{@labels}.txt\noperation copy(input)\ncommand copy: cp {input} {@output}\nresult = copy(raw)\n",
+fn labels_are_gone_and_say_what_to_write_instead() {
+    let found = errors(
+        "default path: out/{@product}/{@labels}.txt\nsource raw [sub]\npath raw: in/{sub}.txt\n",
     );
-    let recipe = tree.write("recipe.spitin", "pipeline pipeline.spit\nroot data\n");
-    let result = spit(&["dag", recipe.to_str().unwrap()]);
     assert!(
-        result.status.success(),
-        "{}",
-        String::from_utf8_lossy(&result.stderr)
-    );
-    let warnings = String::from_utf8_lossy(&result.stderr);
-    assert!(
-        warnings.contains("`{@labels}` writes `sub-01-a`"),
-        "{warnings}"
+        found.iter().any(|error| error.contains(
+            "`{@labels}` is gone: write the spelling in an `entities:` line, as `entities: {key}-{value} separated \"_\" empty \"\"`, and use `{@entities}`"
+        )),
+        "{found:?}"
     );
 }
 
@@ -174,7 +169,7 @@ fn an_explicit_optional_path_has_an_editor_hint() {
 }
 
 #[test]
-fn discovery_uses_each_sources_resolved_groups_and_labels() {
+fn discovery_uses_each_sources_resolved_groups_and_entities() {
     let tree = Tree::new(
         "optional-source-paths",
         &[
@@ -184,7 +179,7 @@ fn discovery_uses_each_sources_resolved_groups_and_labels() {
     );
     tree.write(
         "pipeline.spit",
-        "default path: in/sub-{sub}[/ses-{ses}]/{@labels}_{@product}.txt\nsource image [sub, ses]\nsource metadata [sub]\n",
+        "default path: in/sub-{sub}[/ses-{ses}]/{@entities}_{@product}.txt\nsource image [sub, ses]\nsource metadata [sub]\nentities: {key}-{value} separated \"_\" empty \"\"\n",
     );
     let recipe = tree.write("recipe.spitin", "pipeline pipeline.spit\nroot data\n");
     let result = spit(&["inputs", recipe.to_str().unwrap()]);

@@ -9,7 +9,7 @@ mod rules;
 mod shape;
 mod template;
 
-pub(crate) use self::bind::{bound_paths, case_collisions, check_rules, dashed_labels};
+pub(crate) use self::bind::{bound_paths, case_collisions, check_rules};
 pub use self::bind::{
     validate_bound_source_files, validate_source_files, BoundPaths, VerifiedFiles,
 };

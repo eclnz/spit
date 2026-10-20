@@ -2,6 +2,8 @@
 # operations a library carries out by steps. `spit dag act.spitin --counts`
 # lists each call's steps under it; `--commands` starts each job with the
 # call and library line it came from.
+entities: {key}={value} separated "__" empty "global"
+
 use clean_dwi_session, register_to_dwi from mrtrix_dwi.spit as mrx
 
 default path: derivatives/{@stage}/{@product}/{@entities}

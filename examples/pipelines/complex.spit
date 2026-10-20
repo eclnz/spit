@@ -1,3 +1,6 @@
+entities: {key}={value} separated "__" empty "global"
+default path: out/{@product}/{@entities}
+
 source reading : Reading<Raw> [site, device, window, sample]
 source gain [site, device]
 source baseline : Baseline [site, window]

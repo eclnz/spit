@@ -4,7 +4,9 @@ use std::collections::BTreeMap;
 
 use crate::template::{parse_template, Part};
 
-/// How `{@entities}` writes each dimension. Labels change path text only.
+/// How `{@entities}` writes each dimension, as the pipeline's `entities:`
+/// line spells it: `{@entities}` has no spelling of its own. Labels change
+/// path text only.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct EntitiesFormat {
     pub prefix: String,
@@ -15,27 +17,16 @@ pub struct EntitiesFormat {
     pub labels: BTreeMap<String, String>,
 }
 
-impl Default for EntitiesFormat {
-    fn default() -> Self {
-        Self {
-            prefix: String::new(),
-            between: "=".to_owned(),
-            suffix: String::new(),
-            separator: "__".to_owned(),
-            empty: "global".to_owned(),
-            labels: BTreeMap::new(),
-        }
-    }
-}
-
 impl EntitiesFormat {
     /// Read one assignment, such as `{key}_{value}`, and its separator.
     pub fn parse(template: &str, separator: &str, empty: &str) -> Result<Self, String> {
         let mut format = Self {
+            prefix: String::new(),
             between: String::new(),
+            suffix: String::new(),
             separator: separator.to_owned(),
             empty: empty.to_owned(),
-            ..Self::default()
+            labels: BTreeMap::new(),
         };
         let mut phase = 0;
         for part in parse_template(template)? {

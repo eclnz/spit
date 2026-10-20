@@ -1,3 +1,6 @@
+entities: {key}={value} separated "__" empty "global"
+default path: out/{@product}/{@entities}
+
 source raw : Record [team, period, item]
 source policy : Policy [team]
 

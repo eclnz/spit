@@ -123,6 +123,9 @@ operation summary(input) -> Report<T>
 operation unused(input)
 clean = clean(raw)
 summed = summary(clean)
+entities: {key}={value} separated \"__\" empty \"global\"
+path clean: out/{@product}/{@entities}
+path summed: out/{@product}/{@entities}
 ";
 
 #[test]
@@ -131,15 +134,18 @@ fn check_and_its_json_give_each_diagnostic_one_severity() {
     tree.write("warned.spit", WARNED);
     tree.write(
         "broken.spit",
-        "source raw [id, batch]\ndefault path: {@product}/{@entities}.txt\npath raw: in/{id}.txt\noperation clean(input)\ncleaned = clean(rwa)\n",
+        "source raw [id, batch]\ndefault path: {@product}/{@entities}.txt\npath raw: in/{id}.txt\noperation clean(input)\ncleaned = clean(rwa)\n\
+         entities: {key}={value} separated \"__\" empty \"global\"\n",
     );
     tree.write(
         "comment.spit",
-        "source raw [id]\npath raw: in/{id}.txt# not a comment\noperation clean(input)\ncleaned = clean(raw)\n",
+        "source raw [id]\npath raw: in/{id}.txt# not a comment\noperation clean(input)\ncleaned = clean(raw)\n\
+         path cleaned: out/{id}.txt\n",
     );
     tree.write(
         "good.spit",
-        "source raw [id]\npath raw: in/{id}.txt\noperation clean(input)\ncleaned = clean(raw)\n",
+        "source raw [id]\npath raw: in/{id}.txt\noperation clean(input)\ncleaned = clean(raw)\n\
+         path cleaned: out/{id}.txt\n",
     );
     tree.write("missing_root.spitin", "pipeline good.spit\nroot nowhere\n");
     tree.write(

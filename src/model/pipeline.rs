@@ -31,7 +31,8 @@ pub struct Pipeline {
     /// The `check:` default of every output in the file, outside any stage.
     pub default_checks: DefaultChecks,
     pub path_template: Option<PathTemplate>,
-    /// The file's custom rendering of `{@entities}`; None keeps the built-in format.
+    /// How `{@entities}` is written, from the `entities:` line. A rule that
+    /// uses `{@entities}` in a pipeline without one is an error.
     pub entities_format: Option<EntitiesFormat>,
     /// The `ext:` default: the extension a default path rule is completed
     /// with when the operation declares none.
@@ -383,9 +384,6 @@ pub(crate) enum PathOrigin<'p> {
     Stage(&'p str),
     /// The pipeline's `path:` default.
     Default,
-    /// The built-in default, `out/{@product}/{@entities}`, for an output in
-    /// a pipeline with no `path:` default.
-    BuiltIn,
 }
 
 /// What a [`PipelineIndex::new`] finds once.
@@ -586,13 +584,9 @@ impl<'p> PipelineIndex<'p> {
         if let Some((stage, template)) = self.stage_path_rule(product) {
             return Some((PathOrigin::Stage(stage), template));
         }
-        match &pipeline.path_template {
-            Some(default) => (!(default.needs_stage() && self.is_source(product)))
-                .then_some((PathOrigin::Default, default)),
-            None => self
-                .producer(product)
-                .map(|_| (PathOrigin::BuiltIn, PathTemplate::built_in_output())),
-        }
+        let default = pipeline.path_template.as_ref()?;
+        (!(default.needs_stage() && self.is_source(product)))
+            .then_some((PathOrigin::Default, default))
     }
 
     /// The step that makes `product`, the operation it calls, and the port

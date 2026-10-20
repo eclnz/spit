@@ -56,13 +56,14 @@ Run `spit dag sweep.spit sweep.spitout --commands` to see 17 jobs: six `train`, 
 
 ## Cohort: discovery, exclusion, and grouped removal
 
-This recipe discovers session folders, removes a subject with fewer than two sessions, and excludes one damaged run while leaving its file in place. Each retained BOLD run gets motion correction and coregistration. A `many Bold` input collects runs per session; another collects session averages per subject. One default path gives all five derived products BIDS-style names: optional groups omit the session or stage where a product has none, and `{@labels}` writes the dimensions each product has.
+This recipe discovers session folders, removes a subject with fewer than two sessions, and excludes one damaged run while leaving its file in place. Each retained BOLD run gets motion correction and coregistration. A `many Bold` input collects runs per session; another collects session averages per subject. One default path gives all five derived products BIDS-style names: optional groups omit the session or stage where a product has none, and `{@entities}` writes the dimensions each product has as BIDS `key-value` labels, as the `entities:` line spells them.
 
 Save as `cohort.spit`:
 
 ```spit
 # BIDS sessions with a dropped subject and an excluded motion-corrupted run.
-default path: derivatives/sub-{sub}[/ses-{ses}][/{@stage}]/{@labels}_{@product}
+entities: {key}-{value} separated "_" empty ""
+default path: derivatives/sub-{sub}[/ses-{ses}][/{@stage}]/{@entities}_{@product}
 default ext: .nii.gz
 
 source t1w : T1 [sub, ses]
@@ -137,7 +138,7 @@ Save as `sensors.spit`:
 # revision, compared with a station reference, split into two bands, and
 # summarised per station under that station's policy.
 
-entities: {key}_{value} separated "-"
+entities: {key}_{value} separated "-" empty "global"
 entities station: site
 default path: derived/{@product}/{@entities}.csv
 
@@ -222,6 +223,7 @@ Save as `imported.spit`:
 # Imported definitions, nested stages, aggregation and a stage path override.
 use text.spit as text
 
+entities: {key}={value} separated "__" empty "global"
 default path: {@stage}/{@product}/{@entities}.txt
 
 stage preprocess:
@@ -334,7 +336,7 @@ Each pipeline below, under [`examples/`](https://github.com/eclnz/spit/tree/dev/
 | [Nested aggregation](https://github.com/eclnz/spit/blob/dev/examples/pipelines/complex.spit) | Partial types, irregular groups, and three successive aggregations | `cargo run -- dag examples/pipelines/complex.spit examples/pipelines/complex.spitout` | 25 |
 | [Selectors](https://github.com/eclnz/spit/blob/dev/examples/pipelines/selectors.spit) | `where`, `same`, verification, two outputs, a many input beside a single input, and custom entity formatting | `cargo run -- dag examples/pipelines/selectors.spit examples/pipelines/selectors.spitout` | 17 |
 | [Ragged sweep](https://github.com/eclnz/spit/blob/dev/examples/patterns/ragged_sweep/ragged_sweep.spit) | `each(model)` broadcasts over per-config seeds, then `vary` collects the runs | `cargo run -- dag examples/patterns/ragged_sweep/ragged_sweep.spit examples/patterns/ragged_sweep/ragged_sweep.spitout` | 17 |
-| [Cohort](https://github.com/eclnz/spit/blob/dev/examples/patterns/cohort/cohort.spit) | BIDS sessions, a dropped subject, an excluded run, and one default path with `[...]` groups and `{@labels}` | `cargo run -- dag examples/patterns/cohort/cohort.spitin` | 24 |
+| [Cohort](https://github.com/eclnz/spit/blob/dev/examples/patterns/cohort/cohort.spit) | BIDS sessions, a dropped subject, an excluded run, and one default path with `[...]` groups and BIDS-style `{@entities}` | `cargo run -- dag examples/patterns/cohort/cohort.spitin` | 24 |
 | [Analytics](https://github.com/eclnz/spit/blob/dev/examples/analytics/analytics.spit) | Five keyed joins, then day, customer, and tenant rollups | `cargo run -- dag examples/analytics/analytics.spit examples/analytics/analytics.spitout` | 34 |
 | [Text processing](https://github.com/eclnz/spit/blob/dev/examples/imports/imported.spit) | Imports, nested stages, aggregation and a stage path override | `cargo run -- dag examples/imports/imported.spitin` | 9 |
 | [Field survey](https://github.com/eclnz/spit/blob/dev/examples/commands/field_survey/field_survey.spit) | Source files declared `beside` their image, calibration, alignment between spaces, and commands | `cargo run -- dag examples/commands/field_survey/field_survey.spit examples/commands/field_survey/field_survey.spitout` | 93 |

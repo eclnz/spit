@@ -16,7 +16,7 @@ source meta .json beside raw
 operation load(image: Image, gps: Track, meta) -> Image
 command load: load {image} {gps} {meta} {@output}
 loaded = load(raw, gps, meta)
-";
+entities: {key}={value} separated \"__\" empty \"global\"\npath loaded: out/{@product}/{@entities}\n";
 
 const UNPLACED: &str = "\
 source raw : Image .raw [site, shot]
@@ -25,7 +25,7 @@ source meta .json beside raw
 operation load(image: Image, gps: Track, meta) -> Image
 command load: load {image} {gps} {meta} {@output}
 loaded = load(raw, gps, meta)
-";
+entities: {key}={value} separated \"__\" empty \"global\"\npath loaded: out/{@product}/{@entities}\n";
 
 const FILES: [&str; 6] = [
     "site-a/shot-1.raw",
