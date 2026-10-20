@@ -313,7 +313,7 @@ pub static DOCS: [Doc; 49] = [
         name: "@product",
         kind: "placeholder",
         anchor: "paths",
-        example: "entities: {key}={value} separated \"__\" empty \"global\"\ndefault path: results/{@product}/{@entities}.txt",
+        example: "default entities: {@key}={@value} separated \"__\"\ndefault path: results/{@product}/{@entities}.txt",
         summary: "The product's name in a path, as `aligned`. An imported `alias::name` becomes `alias.name`.",
     },
     Doc {
@@ -321,7 +321,7 @@ pub static DOCS: [Doc; 49] = [
         kind: "placeholder",
         anchor: "paths",
         example: "default path: results/{@product}/{@entities}.txt",
-        summary: "Every dimension, in the pipeline's dimension order, written as the pipeline's `entities:` line spells it. Values and labels are percent escaped. A product with no dimensions takes the line's `empty` text. A pipeline that uses `{@entities}` needs an `entities:` line.",
+        summary: "Every dimension, in the pipeline's dimension order, as the nearest `default entities:` spells it: the product's stage's, else the file's. Values and labels are percent escaped. A product with no dimensions has no `{@entities}`, so a default that covers one puts it in `[...]`.",
     },
     Doc {
         name: "@stage",
@@ -425,15 +425,15 @@ pub static DOCS: [Doc; 49] = [
         name: "entities",
         kind: "keyword",
         anchor: "entity-formatting",
-        example: "entities: {key}_{value} separated \"-\" empty \"all\"\nentities sub: subject",
-        summary: "Defines how `{@entities}` writes each dimension: `{key}` is its label and `{value}` its escaped value. `separated` joins assignments, and `empty` names a product with no dimensions; both are required. `entities sub: subject` changes that dimension's path label, while bindings and their order stay the same. The declaration applies to the whole pipeline.",
+        example: "default entities: {@key}_{@value} separated \"-\"\ndefault entities sub: subject",
+        summary: "After `default`, spells `{@entities}`: `{@key}` is each dimension's label, `{@value}` its escaped value, and `separated` the text between them. `default entities sub: subject` changes that dimension's label in paths; its identities and order stay the same. A spelling covers the products of the file or of the stage it is written in, and one in a `.spitin` recipe the rules the recipe gives."
     },
     Doc {
         name: "default",
         kind: "keyword",
         anchor: "defaults",
         example: "default path: results/{@product}/{@entities}\ndefault:\n    ext: .nii.gz\n    check: nonempty",
-        summary: "Sets a default for the outputs of the file, or of the stage it is written in: `default path:` the rule for products with none of their own, `default ext:` the extension that completes it, and `default check:` the checks every output runs. `default:` opens a block of them. In a `.spitin` recipe, `default path:` is the rule for sources with none of their own.",
+        summary: "Sets a default for the outputs of the file, or of the stage it is written in: `default path:` the rule for products with none of their own, `default ext:` the extension that completes it, `default check:` the checks every output runs, and `default entities:` how `{@entities}` is spelled. `default:` opens a block of them. In a `.spitin` recipe, `default path:` is the rule for sources with none of their own.",
     },
 ];
 

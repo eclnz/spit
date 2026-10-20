@@ -8,12 +8,12 @@ use spit::{diagnose, resolve, Diagnostic};
 /// Lines of reads per group and lane, a calibration table per group and
 /// revision, and three operations a body can call.
 const BASE: &str = "\
-default path: out/[{@stage}/]{@product}/{@entities}.txt
+default path: out/[{@stage}/]{@product}[/{@entities}].txt
 source raw : Lines [group, lane]
 path raw: in/{group}/r{lane}.txt
 source cal : Table [group, revision]
 path cal: cal/{group}-r{revision}.txt
-entities: {key}={value} separated \"__\" empty \"global\"
+default entities: {@key}={@value} separated \"__\"
 operation clean(x: Lines, t: Table) -> Lines
 command clean: clean {x} {t} {@output}
 operation merge(xs: many Lines) -> Lines
@@ -329,13 +329,13 @@ fn checks_on_a_bodys_ports_and_outputs_run_on_the_steps_that_read_and_make_them(
     let text = format!(
         "\
 use summarise from libs/lib.spit as L
-default path: out/{{@product}}/{{@entities}}.txt
+default path: out/{{@product}}[/{{@entities}}].txt
 source raw : Lines [group, lane]
 path raw: in/{{group}}/r{{lane}}.txt
 source cal : Table [group, revision]
 path cal: cal/{{group}}-r{{revision}}.txt
 m, t = L::summarise(raw, cal @ where(revision=2))
-entities: {{key}}={{value}} separated \"__\" empty \"global\"
+default entities: {{@key}}={{@value}} separated \"__\"
 {RECORDS}"
     );
     let main = tree.write("main.spit", &text);
@@ -382,13 +382,13 @@ fn the_spitdag_names_each_file_read_each_call_and_where_each_job_comes_from() {
     let text = format!(
         "\
 use summarise from libs/lib.spit as L
-default path: out/{{@product}}/{{@entities}}.txt
+default path: out/{{@product}}[/{{@entities}}].txt
 source raw : Lines [group, lane]
 path raw: in/{{group}}/r{{lane}}.txt
 source cal : Table [group, revision]
 path cal: cal/{{group}}-r{{revision}}.txt
 m, t = L::summarise(raw, cal @ where(revision=2))
-entities: {{key}}={{value}} separated \"__\" empty \"global\"
+default entities: {{@key}}={{@value}} separated \"__\"
 {RECORDS}"
     );
     let main = tree.write("main.spit", &text);
@@ -509,7 +509,7 @@ jobs  step
     );
     assert!(
         commands.ends_with(
-            "Job 13  merge\n  run:    merge out/a/group=a.txt out/a/group=b.txt out/all/global.txt\n"
+            "Job 13  merge\n  run:    merge out/a/group=a.txt out/a/group=b.txt out/all.txt\n"
         ),
         "{commands}"
     );
@@ -608,7 +608,7 @@ command clean: clean {x} {t} {@output}
 operation flip(t: Table, x: Lines) -> (y: Lines):
     y = clean(x, t)
 out = flip(cal @ where(revision=1), raw)
-entities: {key}={value} separated \"__\" empty \"global\"\npath out: out/{@product}/{@entities}\n";
+default entities: {@key}={@value} separated \"__\"\npath out: out/{@product}[/{@entities}]\n";
     let hovers = spit::pipeline_hovers(text, std::path::Path::new("flip.spit"));
     let at = |line: usize, name: &str| {
         hovers

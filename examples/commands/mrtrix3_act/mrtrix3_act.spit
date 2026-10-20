@@ -10,7 +10,7 @@
 # is the artifact's own dimension values, such as sub=01__ses=01__run=01.
 # An operation whose tool writes another format declares its extension, and
 # a stage whose files share one sets its own `ext:`.
-entities: {key}={value} separated "__" empty "global"
+default entities: {@key}={@value} separated "__"
 default path: derivatives/{@stage}/{@product}/{@entities}
 default ext: .mif
 

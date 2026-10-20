@@ -17,7 +17,7 @@ source t1w : T1 [sub, ses]
 path t1w: sub-{sub}/ses-{ses}/t1w.nii
 operation align(bold: Bold, t1w: T1) -> Bold
 aligned = align(bold, t1w)
-entities: {key}={value} separated \"__\" empty \"global\"\npath aligned: out/{@product}/{@entities}\n";
+default entities: {@key}={@value} separated \"__\"\npath aligned: out/{@product}/{@entities}\n";
 
 /// Subject 1 has two full sessions; subject 2 one session with three runs;
 /// subject 3 a session with runs but no T1w.

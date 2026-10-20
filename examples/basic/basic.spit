@@ -1,5 +1,5 @@
 # A small pipeline; its inputs are in basic.spitout.
-entities: {key}={value} separated "__" empty "global"
+default entities: {@key}={@value} separated "__"
 default path: out/{@product}/{@entities}
 
 source bold : BOLD [sub, ses, run]

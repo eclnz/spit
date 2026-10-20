@@ -25,7 +25,7 @@ fn calls_specialise_generics_and_products_across_a_chain() {
                 operation clean(input: Frame<S>) -> CleanFrame<S>\n\
                 cleaned = clean(raw)\n\
                 operation align(moving: CleanFrame<A>, reference: Reference<B>) -> Transform<A,B>\n\
-                transform = align(cleaned, reference)\nentities: {key}={value} separated \"__\" empty \"global\"\npath cleaned: out/{@product}/{@entities}\npath transform: out/{@product}/{@entities}\n";
+                transform = align(cleaned, reference)\ndefault entities: {@key}={@value} separated \"__\"\npath cleaned: out/{@product}/{@entities}\npath transform: out/{@product}/{@entities}\n";
     let all = hovers(text);
     assert_eq!(
         at(&all, 4, "cleaned").signature,
@@ -62,7 +62,7 @@ fn bindings_are_local_and_multi_outputs_have_their_own_types() {
                       source target : Frame<Target> [id]\n\
                       operation split(input: Frame<S>) -> (image: Frame<S>, report: Report<S>)\n\
                       first, first_report = split(native)\n\
-                      second, second_report = split(target)\nentities: {key}={value} separated \"__\" empty \"global\"\npath first: out/{@product}/{@entities}\npath second: out/{@product}/{@entities}\n",
+                      second, second_report = split(target)\ndefault entities: {@key}={@value} separated \"__\"\npath first: out/{@product}/{@entities}\npath second: out/{@product}/{@entities}\n",
     );
     assert!(at(&all, 4, "split")
         .details
@@ -114,7 +114,7 @@ fn product_paths_report_explicit_nearest_stage_and_pipeline_rules_or_their_absen
                 default path: results/{@product}/{@entities}.txt\noperation copy(input: Lines) -> Lines\n\
                 global = copy(raw)\n\
                 stage outer:\n    default path: outer/{@product}/{@entities}.txt\n    stage inner:\n        inherited = copy(raw)\n        explicit = copy(raw)\n\
-                path explicit: special/{id}.txt\nentities: {key}={value} separated \"__\" empty \"global\"\n";
+                path explicit: special/{id}.txt\ndefault entities: {@key}={@value} separated \"__\"\n";
     let all = hovers(text);
     assert!(at(&all, 5, "global")
         .details
@@ -192,7 +192,7 @@ fn broken_steps_do_not_claim_inferred_types_or_hide_independent_symbols() {
 
 #[test]
 fn hover_ranges_use_utf16_and_exclude_comments_and_literal_text() {
-    let text = "\u{feff}source raw [id]\noperation copy(first, second)\nout = copy(raw @ where(id=😀), raw) # raw copy\ncommand copy: echo raw {@output}\nentities: {key}={value} separated \"__\" empty \"global\"\npath out: out/{@product}/{@entities}\n";
+    let text = "\u{feff}source raw [id]\noperation copy(first, second)\nout = copy(raw @ where(id=😀), raw) # raw copy\ncommand copy: echo raw {@output}\ndefault entities: {@key}={@value} separated \"__\"\npath out: out/{@product}/{@entities}\n";
     let all = hovers(text);
     assert_eq!(at(&all, 1, "raw").column, 9);
     assert_eq!(at(&all, 3, "copy").column, 7);
@@ -243,7 +243,7 @@ fn cli_editor_analysis_is_opt_in_and_preserves_error_diagnostics() {
 
 #[test]
 fn hovers_keep_resolved_path_hints_and_extensions() {
-    let text = "default path: out/[{@entities}_]{@product}\ndefault ext: .txt\nsource raw [sub]\npath raw: in/{sub}.txt\noperation copy(input)\nresult = copy(raw)\nentities: {key}-{value} separated \"_\" empty \"\"\n";
+    let text = "default path: out/[{@entities}_]{@product}\ndefault ext: .txt\nsource raw [sub]\npath raw: in/{sub}.txt\noperation copy(input)\nresult = copy(raw)\ndefault entities: {@key}-{@value} separated \"_\"\n";
     let all = hovers(text);
     assert!(at(&all, 6, "result")
         .details
@@ -287,7 +287,7 @@ fn path_hints_keep_literal_braces_and_brackets_doubled() {
 #[test]
 fn beside_outputs_keep_their_path_and_signature_in_hovers() {
     let all = hovers(
-        "source raw [id]\npath raw: in/{id}.txt\ndefault path: out/{@product}/{@entities}\noperation convert(input) -> (image: Image .nii.gz, meta: Json .json beside image)\nimage, meta = convert(raw)\nentities: {key}={value} separated \"__\" empty \"global\"\n",
+        "source raw [id]\npath raw: in/{id}.txt\ndefault path: out/{@product}/{@entities}\noperation convert(input) -> (image: Image .nii.gz, meta: Json .json beside image)\nimage, meta = convert(raw)\ndefault entities: {@key}={@value} separated \"__\"\n",
     );
     assert!(at(&all, 4, "convert")
         .signature
@@ -302,7 +302,7 @@ fn beside_outputs_keep_their_path_and_signature_in_hovers() {
 fn a_source_shows_its_extension_and_no_stage_default() {
     let text = "default path: {@stage}/{@product}/{@entities}\n\
                 source events : Events .tsv [sub]\n\
-                stage prep:\n    operation f(x)\n    y = f(events)\nentities: {key}={value} separated \"__\" empty \"global\"\n";
+                stage prep:\n    operation f(x)\n    y = f(events)\ndefault entities: {@key}={@value} separated \"__\"\n";
     let events = at(&hovers(text), 2, "events");
     assert_eq!(events.signature, "events: Events .tsv [sub]");
     // A default that needs `{@stage}` is no source's rule.
@@ -322,7 +322,7 @@ operation prep_registration(image: MRI<$I,$Space,$Grid>) -> (parc: MRI<Parc,$Spa
 t1_parc, t1_resampled, t1_mask = prep_registration(raw_t1)
 command parcellate: tool {image} {parc} {resampled}
 command brainmask: tool {image} {@output}
-entities: {key}={value} separated \"__\" empty \"global\"\npath t1_parc: out/{@product}/{@entities}\n";
+default entities: {@key}={@value} separated \"__\"\npath t1_parc: out/{@product}/{@entities}\n";
 
 #[test]
 fn composite_hovers_show_typed_ports_and_one_body_in_the_right_context() {
@@ -361,7 +361,7 @@ fn composite_hovers_show_typed_ports_and_one_body_in_the_right_context() {
 
 #[test]
 fn primitive_calls_prioritise_bindings_and_keep_execution_information() {
-    let all = hovers("source raw: Text [id]\noperation copy(input: Text) -> Text\ncommand copy: cp {input} {@output}\nverify copy: test -f {input}\nout = copy(raw)\nentities: {key}={value} separated \"__\" empty \"global\"\npath out: out/{@product}/{@entities}\n");
+    let all = hovers("source raw: Text [id]\noperation copy(input: Text) -> Text\ncommand copy: cp {input} {@output}\nverify copy: test -f {input}\nout = copy(raw)\ndefault entities: {@key}={@value} separated \"__\"\npath out: out/{@product}/{@entities}\n");
     let declaration = at(&all, 2, "copy");
     assert!(declaration.details[0].starts_with("Single-artifact"));
     let call = at(&all, 5, "copy");
@@ -408,14 +408,14 @@ fn product_hovers_keep_inference_failures_and_bound_large_reader_lists() {
 
 #[test]
 fn call_hovers_explain_the_selectors_that_change_matching() {
-    let all = hovers("source raw: Text [sub, run]\nsource reference: Text [run]\noperation copy(input: Text, driver: Text) -> Text\npinned = copy(raw @ where(run=1) @ same(sub), raw)\nbroadcast = copy(raw @ each(sub), reference)\nentities: {key}={value} separated \"__\" empty \"global\"\npath pinned: out/{@product}/{@entities}\npath broadcast: out/{@product}/{@entities}\n");
+    let all = hovers("source raw: Text [sub, run]\nsource reference: Text [run]\noperation copy(input: Text, driver: Text) -> Text\npinned = copy(raw @ where(run=1) @ same(sub), raw)\nbroadcast = copy(raw @ each(sub), reference)\ndefault entities: {@key}={@value} separated \"__\"\npath pinned: out/{@product}/{@entities}\npath broadcast: out/{@product}/{@entities}\n");
     let pinned = at(&all, 4, "copy");
     assert!(pinned.details.contains(&"Pins input to run=1.".to_owned()));
     assert!(pinned.details.contains(&"Matches input on sub.".to_owned()));
     assert!(at(&all, 5, "copy")
         .details
         .contains(&"Broadcasts input across sub.".to_owned()));
-    let aggregate = hovers("source raw: Text [sub, run]\noperation merge(items: many Text) -> Text\nmerged = merge(raw @ vary(run))\nentities: {key}={value} separated \"__\" empty \"global\"\npath merged: out/{@product}/{@entities}\n");
+    let aggregate = hovers("source raw: Text [sub, run]\noperation merge(items: many Text) -> Text\nmerged = merge(raw @ vary(run))\ndefault entities: {@key}={@value} separated \"__\"\npath merged: out/{@product}/{@entities}\n");
     let call = at(&aggregate, 3, "merge");
     assert!(call.details[1].contains("items ←"));
     assert!(call.details[2].contains("output →"));

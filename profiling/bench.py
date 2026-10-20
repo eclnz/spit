@@ -44,17 +44,21 @@ WORK = os.path.join(HERE, "work")
 DEFAULT_NEW = os.path.join(HERE, "..", "target", "release", "spit")
 
 
-# The `entities:` line that spells `{@entities}` as builds without one did.
-ENTITIES = 'entities: {key}={value} separated "__" empty "global"'
+# The line that spells `{@entities}` as builds without one did: a default,
+# and the top-level line some builds before it took.
+ENTITIES = 'default entities: {@key}={@value} separated "__"'
+OLD_ENTITIES = 'entities: {key}={value} separated "__" empty "global"'
 
 
 def spelling(binary):
     """How `binary` writes a default and built-in placeholders: the lines a
-    pipeline starts with (the `entities:` line, which older builds lack), the
+    pipeline starts with (the line that spells `{@entities}`, which older
+    builds lack), the
     word before a default (`default `, which older builds still lack), and
     `{@product}` and `{@entities}` (`{product}` in builds older still)."""
     for prelude, default, at in [
         ([ENTITIES], "default ", "@"),
+        ([OLD_ENTITIES], "default ", "@"),
         ([], "default ", "@"),
         ([], "", "@"),
         ([], "", ""),

@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 use crate::command::CommandTemplate;
-use crate::paths::PathTemplate;
+use crate::paths::{EntitiesFormat, PathTemplate};
 use crate::span::Place;
 
 use super::{owned_strings, ArtifactInstance, ArtifactType};
@@ -539,6 +539,9 @@ pub struct StageDef {
     /// The `check:` default of this stage's outputs, added to those of the
     /// stages around it.
     pub checks: DefaultChecks,
+    /// The `default entities:` spelling of `{@entities}` for the same
+    /// products, in place of the pipeline's.
+    pub entities_format: Option<EntitiesFormat>,
 }
 
 /// A `check:` line: the checks every output of a file or stage runs, and
@@ -564,6 +567,7 @@ impl StageDef {
             path_template: None,
             extension: None,
             checks: DefaultChecks::default(),
+            entities_format: None,
         }
     }
 }

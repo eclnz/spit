@@ -175,7 +175,7 @@ fn written_stage_name(code: &str) -> &str {
 }
 
 /// What may follow `default`.
-const DEFAULT_SETTINGS: &str = "a default is a `path:` rule, an `ext:` extension or a `check:` list, as in `default path: out/{@product}/{@entities}`";
+const DEFAULT_SETTINGS: &str = "a default is a `path:` rule, an `ext:` extension, a `check:` list or an `entities:` spelling of `{@entities}`, as in `default path: out/{@product}/{@entities}`";
 
 /// What a statement read: an ordinary statement, a stage's header, the
 /// header of an operation whose body follows, or the header of a block of
@@ -188,8 +188,9 @@ enum Read {
 }
 
 /// One default, `setting`, written after `default` or in a `default:`
-/// block: the `path:` rule, the `ext:` extension or the `check:` list of
-/// the outputs in `stage` or, outside every stage, in the file.
+/// block: the `path:` rule, the `ext:` extension, the `check:` list or the
+/// `entities` spelling of the outputs in `stage` or, outside every stage,
+/// in the file.
 fn default_setting(
     original: &str,
     setting: &str,
@@ -216,6 +217,10 @@ fn default_setting(
         Some((Keyword::Ext, rest)) if setting.starts_with("ext:") => StatementKind::Extension {
             stage,
             extension: extension(rest.trim(), number)?.to_owned(),
+        },
+        Some((Keyword::Entities, _)) => StatementKind::Entities {
+            stage,
+            declaration: parse_entities(setting, number)?,
         },
         Some((Keyword::Checks, list)) => {
             let (uses, exempt) = parse_default_checks(list.trim(), number)?;
@@ -368,10 +373,6 @@ fn flow_rest(
             top_level_only("`dimensions`, which orders the whole pipeline,")?;
             StatementKind::Dimensions(parse_dimension_order(declaration, number)?)
         }
-        Some((Keyword::Entities, _)) => {
-            top_level_only("`entities`, which formats the whole pipeline's paths,")?;
-            StatementKind::Entities(parse_entities(line, number)?)
-        }
         Some((Keyword::Discover, declaration)) => {
             top_level_only("`discover`")?;
             StatementKind::Discover(parse_discover(declaration.trim(), number)?)
@@ -443,7 +444,7 @@ fn flow_rest(
                 number,
             )?)
         }
-        Some((Keyword::Path | Keyword::Ext | Keyword::Checks, _)) => {
+        Some((Keyword::Path | Keyword::Ext | Keyword::Checks | Keyword::Entities, _)) => {
             let setting = line.split_once(':').map_or(line, |(word, _)| word);
             return Err(ParseError::new(
                 number,

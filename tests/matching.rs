@@ -18,7 +18,7 @@ source policy [site]
 operation combine(results: many Result, policy: Policy) -> Summary
 command combine: summarize {results} --policy {policy} {@output}
 summary = combine(result @ vary(run), policy)
-entities: {key}={value} separated \"__\" empty \"global\"\npath summary: out/{@product}/{@entities}\n";
+default entities: {@key}={@value} separated \"__\"\npath summary: out/{@product}/{@entities}\n";
 
 #[test]
 fn a_many_input_can_share_an_operation_with_single_inputs() {
@@ -38,7 +38,7 @@ fn a_many_input_can_share_an_operation_with_single_inputs() {
 
 #[test]
 fn one_aggregate_can_vary_two_dimensions_in_product_order() {
-    let pipeline = "source summary [model, config]\noperation leaderboard(summaries: many Summary @ min(3)) -> Table\noverall = leaderboard(summary @ vary(model, config))\nentities: {key}={value} separated \"__\" empty \"global\"\npath overall: out/{@product}/{@entities}\n";
+    let pipeline = "source summary [model, config]\noperation leaderboard(summaries: many Summary @ min(3)) -> Table\noverall = leaderboard(summary @ vary(model, config))\ndefault entities: {@key}={@value} separated \"__\"\npath overall: out/{@product}/{@entities}\n";
     let inventory = "sources:\n  summary[model=b,config=1]\n  summary[model=a,config=10]\n  summary[model=a,config=2]\n";
     let dag = resolve_text(pipeline, inventory).unwrap();
     assert_eq!(dag.jobs.len(), 1);
@@ -161,7 +161,7 @@ fn where_pins_a_dimension_the_driver_lacks() {
 
 #[test]
 fn where_filters_the_driver_and_removes_its_dimension_from_the_output() {
-    let text = "source image [site, echo]\noperation keep(image: Image) -> Image\nfirst = keep(image @ where(echo=1))\nentities: {key}={value} separated \"__\" empty \"global\"\npath first: out/{@product}/{@entities}\n";
+    let text = "source image [site, echo]\noperation keep(image: Image) -> Image\nfirst = keep(image @ where(echo=1))\ndefault entities: {@key}={@value} separated \"__\"\npath first: out/{@product}/{@entities}\n";
     let (pipeline, _) = support::parse_fixture(text).unwrap();
     assert_eq!(pipeline.products[1].dimensions, ["site"]);
     let dag = resolve(
@@ -175,7 +175,7 @@ fn where_filters_the_driver_and_removes_its_dimension_from_the_output() {
 
 #[test]
 fn selectors_combine_on_one_binding() {
-    let text = "source frame [subject, acq, run]\noperation stack(frames: many Frame) -> Stack\nstacked = stack(frame @ where(acq=fast) @ vary(run))\nentities: {key}={value} separated \"__\" empty \"global\"\npath stacked: out/{@product}/{@entities}\n";
+    let text = "source frame [subject, acq, run]\noperation stack(frames: many Frame) -> Stack\nstacked = stack(frame @ where(acq=fast) @ vary(run))\ndefault entities: {@key}={@value} separated \"__\"\npath stacked: out/{@product}/{@entities}\n";
     let dag = resolve_text(
         text,
         "sources:\n  frame[subject=a,acq=fast,run=1]\n  frame[subject=a,acq=fast,run=2]\n  frame[subject=a,acq=slow,run=1]\n",
@@ -286,7 +286,7 @@ operation simulate(reading: Series, seed: Seed) -> Series
 trial = simulate(reading, seed @ each(rep))
 operation average(items: many Series) -> Series
 summary = average(trial @ vary(rep))
-entities: {key}={value} separated \"__\" empty \"global\"\npath trial: out/{@product}/{@entities}\npath summary: out/{@product}/{@entities}\n";
+default entities: {@key}={@value} separated \"__\"\npath trial: out/{@product}/{@entities}\npath summary: out/{@product}/{@entities}\n";
     let dag = resolve_text(
         text,
         "sources:\n  reading[station=01]\n  seed[rep=1]\n  seed[rep=2]\n  seed[rep=10]\n",
@@ -369,7 +369,7 @@ source signal [site, run]
 source calibration [site]
 operation apply(calibration: Calibration, data: Signal) -> Signal
 calibrated = apply(calibration, signal)
-entities: {key}={value} separated \"__\" empty \"global\"\npath calibrated: out/{@product}/{@entities}\n";
+default entities: {@key}={@value} separated \"__\"\npath calibrated: out/{@product}/{@entities}\n";
     let (pipeline, _) = support::parse_fixture(text).unwrap();
     assert_eq!(pipeline.products[2].dimensions, ["site", "run"]);
     let dag = resolve(
@@ -389,7 +389,7 @@ fn collections_and_jobs_follow_natural_declared_order() {
 source frame [subject, run]
 operation stack(frames: many Frame) -> Stack
 stacked = stack(frame @ vary(run))
-entities: {key}={value} separated \"__\" empty \"global\"\npath stacked: out/{@product}/{@entities}\n";
+default entities: {@key}={@value} separated \"__\"\npath stacked: out/{@product}/{@entities}\n";
     let pipeline = parse_pipeline(text).unwrap();
     let inventory = parse_source_inventory(
         "sources:\n  frame[subject=s10,run=10]\n  frame[subject=s10,run=2]\n  frame[subject=s2,run=1]\n  frame[subject=s10,run=1]\n",
@@ -409,7 +409,7 @@ entities: {key}={value} separated \"__\" empty \"global\"\npath stacked: out/{@p
 
 #[test]
 fn min_rejects_a_collection_that_is_too_small() {
-    let text = "source frame [subject, run]\noperation stack(frames: many Frame @ min(2)) -> Stack\nstacked = stack(frame @ vary(run))\nentities: {key}={value} separated \"__\" empty \"global\"\npath stacked: out/{@product}/{@entities}\n";
+    let text = "source frame [subject, run]\noperation stack(frames: many Frame @ min(2)) -> Stack\nstacked = stack(frame @ vary(run))\ndefault entities: {@key}={@value} separated \"__\"\npath stacked: out/{@product}/{@entities}\n";
     let result = resolve_text(
         text,
         "sources:\n  frame[subject=a,run=1]\n  frame[subject=a,run=2]\n  frame[subject=b,run=1]\n",

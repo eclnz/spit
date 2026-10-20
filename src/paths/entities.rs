@@ -4,37 +4,41 @@ use std::collections::BTreeMap;
 
 use crate::template::{parse_template, Part};
 
-/// How `{@entities}` writes each dimension, as the pipeline's `entities:`
-/// line spells it: `{@entities}` has no spelling of its own. Labels change
-/// path text only.
+/// How `{@entities}` writes each dimension, as a `default entities:` line
+/// spells it: `{@entities}` has no spelling of its own. Labels change path
+/// text only. A product with no dimensions has no `{@entities}`, as one
+/// outside every stage has no `{@stage}`.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct EntitiesFormat {
     pub prefix: String,
     pub between: String,
     pub suffix: String,
     pub separator: String,
-    pub empty: String,
     pub labels: BTreeMap<String, String>,
 }
 
 impl EntitiesFormat {
-    /// Read one assignment, such as `{key}_{value}`, and its separator.
-    pub fn parse(template: &str, separator: &str, empty: &str) -> Result<Self, String> {
+    /// Read one assignment, such as `{@key}_{@value}`, and its separator.
+    pub fn parse(template: &str, separator: &str) -> Result<Self, String> {
         let mut format = Self {
             prefix: String::new(),
             between: String::new(),
             suffix: String::new(),
             separator: separator.to_owned(),
-            empty: empty.to_owned(),
             labels: BTreeMap::new(),
         };
         let mut phase = 0;
         for part in parse_template(template)? {
             match part {
-                Part::Placeholder(name) if phase == 0 && name == "key" => phase = 1,
-                Part::Placeholder(name) if phase == 1 && name == "value" => phase = 2,
+                Part::Placeholder(name) if phase == 0 && name == "@key" => phase = 1,
+                Part::Placeholder(name) if phase == 1 && name == "@value" => phase = 2,
+                Part::Placeholder(name) if name == "key" || name == "value" => {
+                    return Err(format!(
+                        "write `{{@{name}}}`: SPIT's own placeholders take `@`, and `{{{name}}}` would be a dimension"
+                    ))
+                }
                 Part::Placeholder(_) => return Err(
-                    "an entities template needs `{key}` then `{value}`, once each, and no other placeholders".to_owned(),
+                    "an entities template needs `{@key}` then `{@value}`, once each, and no other placeholders".to_owned(),
                 ),
                 Part::Literal(text) => match phase {
                     0 => format.prefix.push_str(&text),
@@ -44,7 +48,9 @@ impl EntitiesFormat {
             }
         }
         if phase != 2 {
-            return Err("an entities template needs `{key}` then `{value}`, once each".to_owned());
+            return Err(
+                "an entities template needs `{@key}` then `{@value}`, once each".to_owned(),
+            );
         }
         format.validate()?;
         Ok(format)

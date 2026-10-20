@@ -169,7 +169,7 @@ fn later_known_input_refines_an_earlier_partial_variable_binding() {
 
 #[test]
 fn partial_type_cannot_hide_a_downstream_known_conflict() {
-    let text = "source partly : Frame<Unknown> [id]\nsource known : Frame<Foo> [id]\noperation merge(input1: A, input2: A) -> A\noperation sink(input: Frame<Bar>) -> Frame<Bar>\nmerged = merge(partly, known)\nfinal : Frame<Bar> [id] = sink(merged)\nentities: {key}={value} separated \"__\" empty \"global\"\npath merged: out/{@product}/{@entities}\n";
+    let text = "source partly : Frame<Unknown> [id]\nsource known : Frame<Foo> [id]\noperation merge(input1: A, input2: A) -> A\noperation sink(input: Frame<Bar>) -> Frame<Bar>\nmerged = merge(partly, known)\nfinal : Frame<Bar> [id] = sink(merged)\ndefault entities: {@key}={@value} separated \"__\"\npath merged: out/{@product}/{@entities}\n";
     let pipeline = parse_pipeline(text).unwrap();
     let empty = parse_source_inventory("sources:\n").unwrap();
     assert!(matches!(
@@ -195,7 +195,7 @@ fn unknown_is_indeterminate_without_binding_a_variable() {
 #[test]
 fn unresolved_output_variables_become_unknown_at_job_boundary() {
     let pipeline = parse_pipeline(
-        "source raw : Unknown [site]\noperation transform(input: A<S>) -> B<S>\nresult = transform(raw)\nentities: {key}={value} separated \"__\" empty \"global\"\npath result: out/{@product}/{@entities}\n",
+        "source raw : Unknown [site]\noperation transform(input: A<S>) -> B<S>\nresult = transform(raw)\ndefault entities: {@key}={@value} separated \"__\"\npath result: out/{@product}/{@entities}\n",
     )
     .unwrap();
     let inventory = parse_source_inventory("sources:\n  raw[site=A]\n").unwrap();
@@ -209,7 +209,7 @@ fn unresolved_output_variables_become_unknown_at_job_boundary() {
 #[test]
 fn generic_pipeline_infers_output_type_without_pipeline_annotations() {
     let pipeline = parse_pipeline(
-        "source signal : Signal<Native> [site]\noperation denoise(input: Signal<S>) -> FilteredSignal<S>\ndenoised = denoise(signal)\nentities: {key}={value} separated \"__\" empty \"global\"\npath denoised: out/{@product}/{@entities}\n",
+        "source signal : Signal<Native> [site]\noperation denoise(input: Signal<S>) -> FilteredSignal<S>\ndenoised = denoise(signal)\ndefault entities: {@key}={@value} separated \"__\"\npath denoised: out/{@product}/{@entities}\n",
     )
     .unwrap();
     let inventory = parse_source_inventory("sources:\n  signal[site=A]\n").unwrap();
@@ -223,7 +223,7 @@ fn generic_pipeline_infers_output_type_without_pipeline_annotations() {
 #[test]
 fn chained_generic_operations_propagate_concrete_type() {
     let pipeline = parse_pipeline(
-        "source raw : A<Native> [site]\noperation f(input: A<X>) -> B<X>\noperation g(input: B<Y>) -> C<Y>\nmiddle = f(raw)\nfinal = g(middle)\nentities: {key}={value} separated \"__\" empty \"global\"\npath middle: out/{@product}/{@entities}\npath final: out/{@product}/{@entities}\n",
+        "source raw : A<Native> [site]\noperation f(input: A<X>) -> B<X>\noperation g(input: B<Y>) -> C<Y>\nmiddle = f(raw)\nfinal = g(middle)\ndefault entities: {@key}={@value} separated \"__\"\npath middle: out/{@product}/{@entities}\npath final: out/{@product}/{@entities}\n",
     )
     .unwrap();
     let inventory = parse_source_inventory("sources:\n  raw[site=A]\n").unwrap();
@@ -241,7 +241,7 @@ fn chained_generic_operations_propagate_concrete_type() {
 #[test]
 fn operation_type_variables_do_not_leak_between_invocations() {
     let pipeline = parse_pipeline(
-        "source a : A<Native> [site]\nsource b : A<Standard> [site]\noperation convert(input: A<X>) -> B<X>\nout_a = convert(a)\nout_b = convert(b)\nentities: {key}={value} separated \"__\" empty \"global\"\npath out_a: out/{@product}/{@entities}\npath out_b: out/{@product}/{@entities}\n",
+        "source a : A<Native> [site]\nsource b : A<Standard> [site]\noperation convert(input: A<X>) -> B<X>\nout_a = convert(a)\nout_b = convert(b)\ndefault entities: {@key}={@value} separated \"__\"\npath out_a: out/{@product}/{@entities}\npath out_b: out/{@product}/{@entities}\n",
     )
     .unwrap();
     let inventory = parse_source_inventory("sources:\n  a[site=01]\n  b[site=01]\n").unwrap();

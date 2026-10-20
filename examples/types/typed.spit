@@ -1,5 +1,5 @@
 # Symbolic type inference; operation variables are local to each invocation.
-entities: {key}={value} separated "__" empty "global"
+default entities: {@key}={@value} separated "__"
 default path: out/{@product}/{@entities}
 
 source raw : Frame<Native> [sample]

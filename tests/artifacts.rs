@@ -78,7 +78,7 @@ operation align(moving: Scan, reference: Calibration) -> Scan
 aligned = align(cleaned, calibration)
 operation merge(runs: many Scan) -> Scan
 merged = merge(aligned @ vary(run))
-entities: {key}={value} separated \"__\" empty \"global\"\npath cleaned: out/{@product}/{@entities}\npath aligned: out/{@product}/{@entities}\npath merged: out/{@product}/{@entities}\n";
+default entities: {@key}={@value} separated \"__\"\npath cleaned: out/{@product}[/{@entities}]\npath aligned: out/{@product}[/{@entities}]\npath merged: out/{@product}[/{@entities}]\n";
 
 const ALIGN_SOURCES: &str = "\
 sources:
@@ -164,7 +164,7 @@ source calibration [subject, site]
 source mask [subject]
 operation align(moving: Scan, reference: Calibration, mask: Mask) -> Scan
 aligned = align(scan, calibration @ same(subject), mask)
-entities: {key}={value} separated \"__\" empty \"global\"\npath aligned: out/{@product}/{@entities}\n";
+default entities: {@key}={@value} separated \"__\"\npath aligned: out/{@product}[/{@entities}]\n";
     let sources = "\
 sources:
     scan[subject=01,run=1]
@@ -188,7 +188,7 @@ fn a_small_collection_leaves_other_groups_complete() {
 source day [site, date]
 operation summarise(days: many Day @ min(2)) -> Summary
 summary = summarise(day @ vary(date))
-entities: {key}={value} separated \"__\" empty \"global\"\npath summary: out/{@product}/{@entities}\n";
+default entities: {@key}={@value} separated \"__\"\npath summary: out/{@product}[/{@entities}]\n";
     let sources = "\
 sources:
     day[site=a,date=1]
@@ -215,8 +215,8 @@ source scan [subject, run]
 require [subject] where scan has run=1,2,3
 operation clean(scan: Scan) -> Scan
 cleaned = clean(scan)
-entities: {key}={value} separated \"__\" empty \"global\"
-path cleaned: out/{@product}/{@entities}
+default entities: {@key}={@value} separated \"__\"
+path cleaned: out/{@product}[/{@entities}]
 ";
     let sources = "\
 sources:
@@ -278,7 +278,7 @@ operation calibrate(cal, reading) -> Reading
 calibrated = calibrate(cal @ where(revision=2), reading)
 operation total(sales, price) -> Total
 totals = total(sales, price)
-entities: {key}={value} separated \"__\" empty \"global\"\npath calibrated: out/{@product}/{@entities}\npath totals: out/{@product}/{@entities}\n";
+default entities: {@key}={@value} separated \"__\"\npath calibrated: out/{@product}[/{@entities}]\npath totals: out/{@product}[/{@entities}]\n";
     let sources = "\
 sources:
     cal[station=north,revision=1]
@@ -423,7 +423,7 @@ operation both(total: Total) -> Both
 priced = price(day, rate)
 total = total(priced @ vary(date))
 both = both(total)
-entities: {key}={value} separated \"__\" empty \"global\"\npath priced: out/{@product}/{@entities}\npath total: out/{@product}/{@entities}\npath both: out/{@product}/{@entities}\n";
+default entities: {@key}={@value} separated \"__\"\npath priced: out/{@product}[/{@entities}]\npath total: out/{@product}[/{@entities}]\npath both: out/{@product}[/{@entities}]\n";
     let sources = "\
 sources:
     day[site=a,date=1]
@@ -455,7 +455,7 @@ fn by_target_on_a_complete_dataset_has_no_targets_section() {
 source day [site]
 operation summarise(day: Day) -> Summary
 summary = summarise(day)
-entities: {key}={value} separated \"__\" empty \"global\"\npath summary: out/{@product}/{@entities}\n";
+default entities: {@key}={@value} separated \"__\"\npath summary: out/{@product}[/{@entities}]\n";
     let sources = "sources:\n    day[site=a]\n";
     let (pipeline, _) = settle(text, sources).unwrap();
     let report = report(text, sources).unwrap();
@@ -480,7 +480,7 @@ a = mk(s, t)
 bb = left(a)
 cc = right(a)
 dd = join(bb, cc)
-entities: {key}={value} separated \"__\" empty \"global\"\npath a: out/{@product}/{@entities}\npath bb: out/{@product}/{@entities}\npath cc: out/{@product}/{@entities}\npath dd: out/{@product}/{@entities}\n";
+default entities: {@key}={@value} separated \"__\"\npath a: out/{@product}[/{@entities}]\npath bb: out/{@product}[/{@entities}]\npath cc: out/{@product}[/{@entities}]\npath dd: out/{@product}[/{@entities}]\n";
 
 #[test]
 fn by_target_names_an_artifact_two_branches_wait_on_where_it_is_shown() {
@@ -514,7 +514,7 @@ operation join(b: B, c: A) -> D
 c = mk(s, t)
 b = fold(c, c)
 d = join(b, c)
-entities: {key}={value} separated \"__\" empty \"global\"\npath c: out/{@product}/{@entities}\npath b: out/{@product}/{@entities}\npath d: out/{@product}/{@entities}\n";
+default entities: {@key}={@value} separated \"__\"\npath c: out/{@product}[/{@entities}]\npath b: out/{@product}[/{@entities}]\npath d: out/{@product}[/{@entities}]\n";
     let sources = "sources:\n    s[k=1]\n";
     let (pipeline, _) = settle(text, sources).unwrap();
     let report = report(text, sources).unwrap();
@@ -544,7 +544,7 @@ operation make(t: T, g: G) -> Shared
 operation use(s: S, shared: Shared) -> U
 gg = make(t, g)
 uu = use(s, gg)
-entities: {key}={value} separated \"__\" empty \"global\"\npath gg: out/{@product}/{@entities}\npath uu: out/{@product}/{@entities}\n";
+default entities: {@key}={@value} separated \"__\"\npath gg: out/{@product}[/{@entities}]\npath uu: out/{@product}[/{@entities}]\n";
     let sources = "sources:\n    s[k=1]\n    s[k=2]\n    s[k=3]\n    t\n";
     let (pipeline, _) = settle(text, sources).unwrap();
     let report = report(text, sources).unwrap();
@@ -569,7 +569,7 @@ Final targets that cannot be made: 3 (incomplete artifacts: 4)
 /// that every step is incomplete and the last is the only final target.
 fn broken_chain(steps: usize) -> (String, &'static str) {
     let mut text = String::from(
-        "source p0 [sub]\nsource miss [sub]\noperation first(a: T, b: T) -> T\noperation step(input: T) -> T\np1 = first(p0, miss)\nentities: {key}={value} separated \"__\" empty \"global\"\ndefault path: out/{@product}/{@entities}\n",
+        "source p0 [sub]\nsource miss [sub]\noperation first(a: T, b: T) -> T\noperation step(input: T) -> T\np1 = first(p0, miss)\ndefault entities: {@key}={@value} separated \"__\"\ndefault path: out/{@product}[/{@entities}]\n",
     );
     for index in 2..=steps {
         text += &format!("p{index} = step(p{})\n", index - 1);

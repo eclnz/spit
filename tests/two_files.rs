@@ -16,7 +16,7 @@ source b [sub]
 source c [sub]
 operation f(a, b, c) -> Out
 out = f(a, b, c)
-entities: {key}={value} separated \"__\" empty \"global\"\n";
+default entities: {@key}={@value} separated \"__\"\n";
 
 /// The path of each source record a scan of `files` finds with `recipe`.
 fn found(recipe: &str, files: &[&str]) -> Vec<String> {

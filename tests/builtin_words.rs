@@ -170,7 +170,7 @@ fn check(file: &str, args: &[&str], text: &str) -> (bool, String, String) {
 
 #[test]
 fn check_writes_each_words_documentation_once() {
-    let text = "source raw [id]\nsource other [id]\noperation copy(input)\nout = copy(raw)\nentities: {key}={value} separated \"__\" empty \"global\"\npath out: out/{@product}/{@entities}\n";
+    let text = "source raw [id]\nsource other [id]\noperation copy(input)\nout = copy(raw)\ndefault entities: {@key}={@value} separated \"__\"\npath out: out/{@product}/{@entities}\n";
     let (ok, json, _) = check("unsaved.spit", &["--json", "--stdin", "--hovers"], text);
     assert!(ok);
     assert!(json.contains(r#"{"line":1,"column":1,"end_column":7,"word":"source"}"#));

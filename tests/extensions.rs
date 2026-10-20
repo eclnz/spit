@@ -38,7 +38,7 @@ note = untyped(raw)
 
 /// How `{@entities}` is spelled, appended after a test's pipeline so that
 /// the lines before it keep their numbers.
-const ENTITIES: &str = "entities: {key}={value} separated \"__\" empty \"global\"\n";
+const ENTITIES: &str = "default entities: {@key}={@value} separated \"__\"\n";
 
 #[test]
 fn an_operation_completes_the_default_path_with_its_outputs_extensions() {
@@ -82,7 +82,7 @@ fn a_stage_ext_applies_to_its_steps_and_nested_stages() {
          \x20   stage deeper:\n\
          \x20       nested = copy(raw)\n\
          \x20       matrix = align(raw)\n\
-         entities: {key}={value} separated \"__\" empty \"global\"\n",
+         default entities: {@key}={@value} separated \"__\"\n",
     )
     .unwrap();
     assert_eq!(path(&pipeline, "outside"), "out/{@product}/id={id}.mif");
@@ -110,7 +110,7 @@ fn a_products_own_rule_takes_only_its_operations_extension() {
 #[test]
 fn a_source_on_the_default_rule_takes_ext() {
     let pipeline = parse_pipeline(
-        "default path: data/{@product}/{@entities}\ndefault ext: .csv\nsource table [id]\noperation copy(input)\ncopied = copy(table)\nentities: {key}={value} separated \"__\" empty \"global\"\n",
+        "default path: data/{@product}/{@entities}\ndefault ext: .csv\nsource table [id]\noperation copy(input)\ncopied = copy(table)\ndefault entities: {@key}={@value} separated \"__\"\n",
     )
     .unwrap();
     assert_eq!(path(&pipeline, "table"), "data/{@product}/id={id}.csv");
@@ -119,7 +119,7 @@ fn a_source_on_the_default_rule_takes_ext() {
 #[test]
 fn a_source_declares_its_extension_as_an_output_does() {
     let pipeline = parse_pipeline(
-        "default path: data/{@product}/{@entities}\ndefault ext: .csv\nsource image : Image .nii.gz [id]\nsource events .tsv [id]\nsource table [id]\npath events: logs/{id}\noperation copy(a, b, c)\ncopied = copy(image, events, table)\nentities: {key}={value} separated \"__\" empty \"global\"\n",
+        "default path: data/{@product}/{@entities}\ndefault ext: .csv\nsource image : Image .nii.gz [id]\nsource events .tsv [id]\nsource table [id]\npath events: logs/{id}\noperation copy(a, b, c)\ncopied = copy(image, events, table)\ndefault entities: {@key}={@value} separated \"__\"\n",
     )
     .unwrap();
     // It completes a default rule in place of `ext:`, and its own rule.
@@ -135,7 +135,7 @@ fn a_source_declares_its_extension_as_an_output_does() {
 #[test]
 fn a_sources_rule_ending_in_another_extension_is_an_error() {
     let found = errors(
-        "source events .tsv [id]\npath events: logs/{id}.csv\noperation f(x)\ny = f(events)\nentities: {key}={value} separated \"__\" empty \"global\"\npath y: out/{@product}/{@entities}\n",
+        "source events .tsv [id]\npath events: logs/{id}.csv\noperation f(x)\ny = f(events)\ndefault entities: {@key}={@value} separated \"__\"\npath y: out/{@product}/{@entities}\n",
     );
     assert_eq!(
         found,
@@ -144,7 +144,7 @@ fn a_sources_rule_ending_in_another_extension_is_an_error() {
             "path `events` ends in `.csv`, but source `events` declares `.tsv`; drop the extension or use `.tsv`; SPIT reads the extension from the first `.` after the last placeholder, so keep `.` out of the name before it".to_owned()
         )]
     );
-    let found = errors("default path: in/{@product}/{@entities}.csv\nsource events .tsv [id]\noperation f(x)\ny = f(events)\nentities: {key}={value} separated \"__\" empty \"global\"\n");
+    let found = errors("default path: in/{@product}/{@entities}.csv\nsource events .tsv [id]\noperation f(x)\ny = f(events)\ndefault entities: {@key}={@value} separated \"__\"\n");
     assert_eq!(
         found,
         [(
@@ -239,13 +239,13 @@ fn a_default_rule_ending_in_another_extension_is_one_error() {
     );
     // A default written with the extension `ext:` also sets.
     let found = errors(
-        "source raw [id]\npath raw: in/{id}\noperation copy(input)\nstage s:\n    default path: out/{@product}/{@entities}.img\n    default ext: .txt\n    copied = copy(raw)\nentities: {key}={value} separated \"__\" empty \"global\"\n",
+        "source raw [id]\npath raw: in/{id}\noperation copy(input)\nstage s:\n    default path: out/{@product}/{@entities}.img\n    default ext: .txt\n    copied = copy(raw)\ndefault entities: {@key}={@value} separated \"__\"\n",
     );
     assert!(found.iter().any(|(line, message)| *line == Some(5)
         && message == "stage `s`'s default path ends in `.img`, but stage `s`'s `default ext:` sets `.txt`; write the extension once, with `default ext:`"), "{found:?}");
     // The same extension written in both agrees.
     assert_eq!(
-        errors("default path: out/{@product}/{@entities}.img\ndefault ext: .img\nsource raw [id]\npath raw: in/{id}\noperation copy(input)\ncopied = copy(raw)\nentities: {key}={value} separated \"__\" empty \"global\"\n"),
+        errors("default path: out/{@product}/{@entities}.img\ndefault ext: .img\nsource raw [id]\npath raw: in/{id}\noperation copy(input)\ncopied = copy(raw)\ndefault entities: {@key}={@value} separated \"__\"\n"),
         []
     );
 }
@@ -300,7 +300,7 @@ fn an_imported_operation_brings_its_extension() {
     );
     let main = tree.write(
         "main.spit",
-        "default path: out/{@product}/{@entities}\nuse table, align from tools.spit as tools\nmatrix = tools::align(tools::table)\nentities: {key}={value} separated \"__\" empty \"global\"\n",
+        "default path: out/{@product}/{@entities}\nuse table, align from tools.spit as tools\nmatrix = tools::align(tools::table)\ndefault entities: {@key}={@value} separated \"__\"\n",
     );
     let pipeline = parse_pipeline_at(&fs::read_to_string(&main).unwrap(), &main).unwrap();
     assert_eq!(path(&pipeline, "matrix"), "out/{@product}/id={id}.mat");

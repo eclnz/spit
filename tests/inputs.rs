@@ -15,7 +15,7 @@ const PIPELINE: &str = "\
 source image: Image [sub, ses]
 operation process(image: Image) -> Image
 result = process(image)
-entities: {key}={value} separated \"__\" empty \"global\"
+default entities: {@key}={@value} separated \"__\"
 path result: out/{@product}/{@entities}
 ";
 
@@ -269,7 +269,7 @@ fn a_named_recipe_runs_in_memory_and_binds_output_paths() {
         "source image: Image [sub, ses]\n\
          operation process(image: Image) -> Image\n\
          result = process(image)\n\
-         entities: {key}={value} separated \"__\" empty \"global\"\n\
+         default entities: {@key}={@value} separated \"__\"\n\
          path result: out/{@product}/{@entities}\n",
     )
     .unwrap();
@@ -330,7 +330,7 @@ fn explicit_spitin_uses_its_own_directory_and_require_reports_gaps() {
         "source image [sub, ses]\n\
          operation process(image: Image) -> Image\n\
          result = process(image)\n\
-         entities: {key}={value} separated \"__\" empty \"global\"\n\
+         default entities: {@key}={@value} separated \"__\"\n\
          path result: out/{@product}/{@entities}\n",
     )
     .unwrap();
@@ -652,7 +652,7 @@ path atlas: atlas.nii.gz
 stage prep:
     operation apply(image: Image, mask: Image, atlas: Image) -> Image
     masked = apply(image, mask, atlas)
-entities: {key}={value} separated \"__\" empty \"global\"
+default entities: {@key}={@value} separated \"__\"
 ";
 
 #[test]
@@ -781,7 +781,7 @@ fn one_recipe_default_covers_sources_of_different_extensions() {
     );
     let pipeline = parse_pipeline(
         "default path: {@stage}/{@product}/{@entities}\nsource image : Image .nii.gz [sub]\nsource events .tsv [sub]\nstage prep:\n    operation fit(image: Image, events)\n    fitted = fit(image, events)\n\
-         entities: {key}={value} separated \"__\" empty \"global\"\n",
+         default entities: {@key}={@value} separated \"__\"\n",
     )
     .unwrap();
     let recipe = parse_input_spec("default path: raw/sub-{sub}/{@product}\n").unwrap();

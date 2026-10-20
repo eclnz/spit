@@ -3,7 +3,7 @@
 A path rule turns an artifact identity into a path relative to the dataset root. A pipeline can set a default, and a particular product can override it:
 
 ```spit
-entities: {key}={value} separated "__" empty "global"
+default entities: {@key}={@value} separated "__"
 default path: results/{@product}/{@entities}
 default ext: .nii.gz
 source image : Image .nii.gz [sub, run]
@@ -18,28 +18,28 @@ Here the `image` source has its own path; derived products take the default. SPI
 | --- | --- |
 | `{sub}`, `{run}`, etc. | A dimension value |
 | `{@product}` | The product name |
-| `{@entities}` | All dimension assignments, as the `entities:` line spells them |
+| `{@entities}` | All dimension assignments, as `default entities:` spells them |
 | `{@stage}` | The stage path of a derived product |
 
 SPIT's placeholders start with `@`; a plain name is a dimension. `[text]` makes a path segment optional when its placeholders have no value for that product. For example, `sub-{sub}[/ses-{ses}][/{@stage}]/{@entities}_{@product}` can cover both session and subject outputs. Every resolved product still gets one concrete template. The [path reference](../language-reference.md#paths) covers literal braces, validation, collision checks, and how path values are escaped.
 
 ## Entities
 
-`{@entities}` writes every dimension a product has, but SPIT does not decide how. The pipeline's `entities:` line spells each assignment, what goes between them, and what a product with no dimensions gets:
+`{@entities}` writes every dimension a product has, but SPIT does not decide how. A `default entities:` line spells each assignment and what goes between them:
 
 ```spit
-entities: {key}-{value} separated "_" empty ""
+default entities: {@key}-{@value} separated "_"
 default path: derivatives/sub-{sub}[/ses-{ses}]/{@entities}_{@product}
 ```
 
-That writes BIDS-style names such as `sub-01_ses-1_run-2_mc`. `entities sub: subject` writes the dimension `sub` as `subject` in paths. A pipeline that uses `{@entities}` without an `entities:` line is an error. See [entity formatting](../language-reference.md#entity-formatting).
+That writes BIDS-style names such as `sub-01_ses-1_run-2_mc`. `default entities sub: subject` writes the dimension `sub` as `subject` in paths. Like other defaults, one in a stage covers that stage's products, and one in a recipe the rules the recipe gives. A product with no dimensions has no `{@entities}`, so a default that covers one puts it in `[...]`, as `[{@entities}_]{@product}`. A rule that uses `{@entities}` with no spelling to cover it is an error. See [entity formatting](../language-reference.md#entity-formatting).
 
 ## Extensions
 
 An operation can declare the extension its output file has; `default ext:` supplies a default when the operation does not. Sources can declare their extensions too. A default rule can therefore omit the suffix:
 
 ```spit
-entities: {key}={value} separated "__" empty "global"
+default entities: {@key}={@value} separated "__"
 default path: derived/{@product}/{@entities}
 default ext: .csv
 source events .tsv [sub]

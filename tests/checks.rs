@@ -22,7 +22,7 @@ operation merge(items: many Text @ check(nonempty)) -> (all: Text .txt @ check(n
 command merge: cat {items} {all}
 cleaned = clean(raw)
 merged = merge(cleaned @ vary(id))
-entities: {key}={value} separated \"__\" empty \"global\"\npath cleaned: out/{@product}/{@entities}\npath merged: out/{@product}/{@entities}\n";
+default entities: {@key}={@value} separated \"__\"\npath cleaned: out/{@product}[/{@entities}]\npath merged: out/{@product}[/{@entities}]\n";
 
 fn errors(text: &str) -> Vec<String> {
     diagnose(text, None)
@@ -68,9 +68,9 @@ Job 2  clean
   check:  test -s out/cleaned/id=2.txt
 
 Job 3  merge
-  run:    cat out/cleaned/id=1.txt out/cleaned/id=2.txt out/merged/global.txt
-  check:  test -s out/merged/global.txt
-  check:  check_lines out/merged/global.txt 2
+  run:    cat out/cleaned/id=1.txt out/cleaned/id=2.txt out/merged.txt
+  check:  test -s out/merged.txt
+  check:  check_lines out/merged.txt 2
 "
     );
 }
@@ -85,7 +85,7 @@ fn the_spitdag_names_each_check_its_port_and_its_artifact() {
 \"command\":[[\"check_lines\"],[{\"path\":\"in/1.txt\"}],[\"1\"]]},"
     ));
     assert!(json.contains(
-        "{\"when\":\"after\",\"check\":\"lines(2)\",\"port\":\"all\",\"path\":\"out/merged/global.txt\","
+        "{\"when\":\"after\",\"check\":\"lines(2)\",\"port\":\"all\",\"path\":\"out/merged.txt\","
     ));
 }
 
@@ -100,7 +100,7 @@ operation merge(items: many Text) -> (all: Text .txt)
 command merge: cat {items} {all}
 cleaned = clean(raw)
 merged = merge(cleaned @ vary(id))
-entities: {key}={value} separated \"__\" empty \"global\"\npath cleaned: out/{@product}/{@entities}\npath merged: out/{@product}/{@entities}\n";
+default entities: {@key}={@value} separated \"__\"\npath cleaned: out/{@product}[/{@entities}]\npath merged: out/{@product}[/{@entities}]\n";
     let fingerprints = |json: &str| {
         json.match_indices("\"fingerprint\":")
             .map(|(at, _)| json[at..at + 32].to_owned())
@@ -241,7 +241,7 @@ fn imports_bring_the_checks_their_definitions_attach() {
         "use lib.spit as l\nuse lines from lib.spit\n\
 operation keep(x: Text @ check(lines(2), l::nonempty)) -> Text .txt\n\
 command keep: cp {x} {@output}\nk = keep(l::raw)\n\
-entities: {key}={value} separated \"__\" empty \"global\"\npath k: out/{@product}/{@entities}\n",
+default entities: {@key}={@value} separated \"__\"\npath k: out/{@product}[/{@entities}]\n",
     );
     let root = tree.path().join("data");
     let output = spit(&[

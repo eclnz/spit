@@ -15,7 +15,7 @@ pub use self::bind::{
 };
 pub(crate) use self::components::{decode_component, encode_component, validate_discovery_rule};
 pub use self::entities::EntitiesFormat;
-pub(crate) use self::product::{shown_path, stage_directories, PathBinder};
+pub(crate) use self::product::{shown_path, stage_directories, unspelled_entities, PathBinder};
 pub(crate) use self::rules::collect_paths;
 pub use self::rules::{inspect_paths, PathCoverage, PathCoverageEntry, PathRule};
 pub(crate) use self::shape::Shape;

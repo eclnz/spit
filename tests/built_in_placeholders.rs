@@ -32,12 +32,12 @@ fn an_old_form_says_what_to_write() {
         ("product", "the product's name"),
         (
             "entities",
-            "every dimension, as the `entities:` line spells them",
+            "every dimension, as `default entities:` spells them",
         ),
         ("stage", "the stage that makes it"),
     ] {
         let text = format!(
-            "default path: out/{{{name}}}/{{@entities}}\nsource raw [id]\npath raw: in/{{id}}\noperation copy(a: A) -> A\ncopied = copy(raw)\nentities: {{key}}={{value}} separated \"__\" empty \"global\"\n"
+            "default path: out/{{{name}}}/{{@entities}}\nsource raw [id]\npath raw: in/{{id}}\noperation copy(a: A) -> A\ncopied = copy(raw)\ndefault entities: {{@key}}={{@value}} separated \"__\"\n"
         );
         assert_eq!(
             errors(&text),
@@ -121,20 +121,21 @@ fn optional_groups_reject_unknown_dimensions_and_invalid_nesting() {
 
 #[test]
 fn a_dimensionless_product_omits_an_optional_entities_group() {
-    let text = "default path: out/[{@entities}_]{@product}.txt\nsource singleton\nentities: {key}-{value} separated \"_\" empty \"\"\n";
+    let text = "default path: out/[{@entities}_]{@product}.txt\nsource singleton\ndefault entities: {@key}-{@value} separated \"_\"\n";
     assert!(errors(text).is_empty());
     let pipeline = parse_pipeline(text).unwrap();
     assert_eq!(
         pipeline.path_template_for("singleton").unwrap().as_str(),
         "out/{@product}.txt"
     );
-    // Outside a group, the empty spelling would leave `out/_singleton.txt`.
+    // Outside a group, a product with no dimensions has no `{@entities}`. A
+    // default would leave such a source alone, so this is its own rule.
     let found = errors(
-        "default path: out/{@entities}_{@product}.txt\nsource singleton\nentities: {key}-{value} separated \"_\" empty \"\"\n",
+        "path singleton: out/{@entities}_{@product}.txt\nsource singleton\ndefault entities: {@key}-{@value} separated \"_\"\n",
     );
     assert_eq!(
         found,
-        ["`singleton` has no dimensions, so `{@entities}` writes nothing in its path; put it in `[...]`, as `[{@entities}_]`"]
+        ["path rule for `singleton` uses `{@entities}`, but `singleton` has no dimensions; put it in `[...]`, as `[{@entities}_]`"]
     );
 }
 
@@ -145,7 +146,7 @@ fn labels_are_gone_and_say_what_to_write_instead() {
     );
     assert!(
         found.iter().any(|error| error.contains(
-            "`{@labels}` is gone: write the spelling in an `entities:` line, as `entities: {key}-{value} separated \"_\" empty \"\"`, and use `{@entities}`"
+            "`{@labels}` is gone: spell `{@entities}` the same way, with `default entities: {@key}-{@value} separated \"_\"`"
         )),
         "{found:?}"
     );
@@ -179,7 +180,7 @@ fn discovery_uses_each_sources_resolved_groups_and_entities() {
     );
     tree.write(
         "pipeline.spit",
-        "default path: in/sub-{sub}[/ses-{ses}]/{@entities}_{@product}.txt\nsource image [sub, ses]\nsource metadata [sub]\nentities: {key}-{value} separated \"_\" empty \"\"\n",
+        "default path: in/sub-{sub}[/ses-{ses}]/{@entities}_{@product}.txt\nsource image [sub, ses]\nsource metadata [sub]\ndefault entities: {@key}-{@value} separated \"_\"\n",
     );
     let recipe = tree.write("recipe.spitin", "pipeline pipeline.spit\nroot data\n");
     let result = spit(&["inputs", recipe.to_str().unwrap()]);

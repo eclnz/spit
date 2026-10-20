@@ -110,7 +110,7 @@ other = f(extra @ where(subject=z))
 both = g(cleaned, image)
 path image: in/{subject}.img
 path extra: in/{subject}.extra
-entities: {key}={value} separated \"__\" empty \"global\"\npath cleaned: out/{@product}/{@entities}\npath other: out/{@product}/{@entities}\npath both: out/{@product}/{@entities}\n",
+default entities: {@key}={@value} separated \"__\"\npath cleaned: out/{@product}[/{@entities}]\npath other: out/{@product}[/{@entities}]\npath both: out/{@product}[/{@entities}]\n",
     );
     let inputs = tree.write(
         "inputs.spitout",
@@ -425,7 +425,7 @@ fn recipe_path_rules_show_combined_coverage_and_origin() {
     let tree = Tree::new("cli-recipe-paths", &[]);
     let pipeline = tree.write(
         "analysis.spit",
-        "source raw [id]\noperation copy(input)\nresult = copy(raw)\npath result: output/{id}.txt\nentities: {key}={value} separated \"__\" empty \"global\"\n",
+        "source raw [id]\noperation copy(input)\nresult = copy(raw)\npath result: output/{id}.txt\ndefault entities: {@key}={@value} separated \"__\"\n",
     );
     let recipe = tree.write(
         "data.spitin",
@@ -470,7 +470,7 @@ fn a_recorded_source_with_no_path_rule_is_not_looked_for_under_out() {
     let tree = Tree::new("cli-unruled-source", &[]);
     let pipeline = tree.write(
         "analysis.spit",
-        "source raw [id]\noperation copy(input)\nresult = copy(raw)\nentities: {key}={value} separated \"__\" empty \"global\"\npath result: out/{@product}/{@entities}\n",
+        "source raw [id]\noperation copy(input)\nresult = copy(raw)\ndefault entities: {@key}={@value} separated \"__\"\npath result: out/{@product}[/{@entities}]\n",
     );
     let records = tree.write("inputs.spitout", "sources:\n    raw[id=1]\n");
     let args = [
@@ -505,7 +505,7 @@ fn a_message_names_the_file_it_is_about_when_that_file_was_not_given() {
     fs::write(
         &pipeline,
         "source raw [id]\npath raw: in/{id}.txt\nsource ref [id]\npath ref: ref/{id}.txt\n\
-         operation link(raw, ref)\nlinked = link(raw, ref)\nentities: {key}={value} separated \"__\" empty \"global\"\npath linked: out/{@product}/{@entities}\n",
+         operation link(raw, ref)\nlinked = link(raw, ref)\ndefault entities: {@key}={@value} separated \"__\"\npath linked: out/{@product}[/{@entities}]\n",
     )
     .unwrap();
     let recipe = directory.join("data.spitin");
@@ -539,7 +539,7 @@ fn a_message_names_the_file_it_is_about_when_that_file_was_not_given() {
     // the records are named, as their lines are in another file.
     fs::write(
         &pipeline,
-        "source raw [id]\noperation link(raw)\nlinked = link(raw)\nentities: {key}={value} separated \"__\" empty \"global\"\npath linked: out/{@product}/{@entities}\n",
+        "source raw [id]\noperation link(raw)\nlinked = link(raw)\ndefault entities: {@key}={@value} separated \"__\"\npath linked: out/{@product}[/{@entities}]\n",
     )
     .unwrap();
     let records = directory.join("inputs.spitout");
@@ -563,13 +563,13 @@ fn check_prints_every_diagnostic_and_fails_only_on_errors() {
     let broken = directory.join("broken.spit");
     fs::write(
         &broken,
-        "source raw [id, batch]\ndefault path: {@product}/{@entities}.txt\npath raw: in/{id}.txt\noperation clean(input)\ncleaned = clean(rwa)\nentities: {key}={value} separated \"__\" empty \"global\"\n",
+        "source raw [id, batch]\ndefault path: {@product}/{@entities}.txt\npath raw: in/{id}.txt\noperation clean(input)\ncleaned = clean(rwa)\ndefault entities: {@key}={@value} separated \"__\"\n",
     )
     .unwrap();
     let warned = directory.join("warned.spit");
     fs::write(
         &warned,
-        "source raw [id]\nsource spare [id]\noperation clean(input)\ncleaned = clean(raw)\nentities: {key}={value} separated \"__\" empty \"global\"\npath cleaned: out/{@product}/{@entities}\n",
+        "source raw [id]\nsource spare [id]\noperation clean(input)\ncleaned = clean(raw)\ndefault entities: {@key}={@value} separated \"__\"\npath cleaned: out/{@product}[/{@entities}]\n",
     )
     .unwrap();
     let broken_check = spit(&["check", broken.to_str().unwrap()]);

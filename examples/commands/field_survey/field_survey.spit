@@ -5,7 +5,7 @@
 
 # Generated files go in a folder per product. Images default to .img; an
 # operation whose tool writes another format declares its extension.
-entities: {key}={value} separated "__" empty "global"
+default entities: {@key}={@value} separated "__"
 default path: derivatives/{@product}/{@entities}
 default ext: .img
 

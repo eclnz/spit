@@ -26,7 +26,7 @@ operation unused(table: Table) -> Table
 command clean: tool {table} {@output}
 cleaned = clean(raw)
 tagged : Tagged<Label> [id] = tag(cleaned)
-entities: {key}={value} separated \"__\" empty \"global\"\npath cleaned: out/{@product}/{@entities}\npath tagged: out/{@product}/{@entities}\n";
+default entities: {@key}={@value} separated \"__\"\npath cleaned: out/{@product}/{@entities}\npath tagged: out/{@product}/{@entities}\n";
     let diagnostics = diagnose(text, None);
     assert_eq!(
         rendered(&diagnostics),
@@ -52,7 +52,7 @@ entities: {key}={value} separated \"__\" empty \"global\"\npath cleaned: out/{@p
 
 #[test]
 fn a_line_with_an_error_shows_no_warnings() {
-    let text = "source raw : Table [id]\nsource spare : Table [id, id]\noperation clean(table: Table) -> Table\ncleaned = clean(raw)\nentities: {key}={value} separated \"__\" empty \"global\"\npath cleaned: out/{@product}/{@entities}\n";
+    let text = "source raw : Table [id]\nsource spare : Table [id, id]\noperation clean(table: Table) -> Table\ncleaned = clean(raw)\ndefault entities: {@key}={@value} separated \"__\"\npath cleaned: out/{@product}/{@entities}\n";
     assert_eq!(
         rendered(&diagnose(text, None)),
         ["error: line 2: product `spare` has duplicate or empty dimensions"]
@@ -69,7 +69,11 @@ operation g(image: Image, image2: Image) -> Image
 cleaned = f(image)
 other = f(extra @ where(subject=z))
 both = g(cleaned, image)
-entities: {key}={value} separated \"__\" empty \"global\"\npath cleaned: out/{@product}/{@entities}\npath other: out/{@product}/{@entities}\npath both: out/{@product}/{@entities}\n";
+default entities: {@key}={@value} separated \"__\"
+path cleaned: out/{@product}/{@entities}
+path other: out/other.txt
+path both: out/{@product}/{@entities}
+";
     assert_eq!(
         warnings(diagnose(text, Some("sources:\n  extra[subject=a]\n"))),
         [
@@ -112,7 +116,7 @@ source log : Log [day]
 operation digest(log: Log) -> Digest
 command digest: logdigest {log} {@output}
 digest = digest(log)
-entities: {key}={value} separated \"__\" empty \"global\"\npath digest: out/{@product}/{@entities}\n";
+default entities: {@key}={@value} separated \"__\"\npath digest: out/{@product}/{@entities}\n";
     let diagnostics = diagnose(text, None);
     assert_eq!(
         rendered(&diagnostics),

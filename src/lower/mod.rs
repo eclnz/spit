@@ -542,11 +542,12 @@ fn lower_statement(
             }
             builder.dimension_order = Some((order.clone(), statement.place.clone()));
         }
-        StatementKind::Entities(declaration) => {
-            builder
-                .entities
-                .add(&mut builder.pipeline, declaration, &statement.place)?
-        }
+        StatementKind::Entities { stage, declaration } => builder.entities.add(
+            &mut builder.pipeline,
+            stage.as_deref(),
+            declaration,
+            &statement.place,
+        )?,
         StatementKind::Path(rule) => builder.add_path(rule, statement.place.line)?,
         StatementKind::DefaultChecks {
             stage,

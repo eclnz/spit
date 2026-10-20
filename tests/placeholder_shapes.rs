@@ -99,7 +99,7 @@ fn the_nearest_file_shows_the_rule_with_its_shape() {
     tree.write(
         "a.spit",
         "source log [server, date]\npath log: logs/{server}/{date:date}.log\n\
-         operation d(log) -> .json\ncommand d: d {log} {@output}\nout = d(log)\nentities: {key}={value} separated \"__\" empty \"global\"\npath out: out/{@product}/{@entities}\n",
+         operation d(log) -> .json\ncommand d: d {log} {@output}\nout = d(log)\ndefault entities: {@key}={@value} separated \"__\"\npath out: out/{@product}/{@entities}\n",
     );
     let output = run(&tree, &["dag", "a.spit", "--root", "."]);
     let stderr = text(&output.stderr);
@@ -294,7 +294,7 @@ fn a_record_whose_value_fails_its_rules_shape_is_rejected() {
     tree.write(
         "a.spit",
         "source log [server, date]\npath log: logs/{server}/{date:date}.log\n\
-         operation d(log) -> .json\ncommand d: d {log} {@output}\nout = d(log)\nentities: {key}={value} separated \"__\" empty \"global\"\npath out: out/{@product}/{@entities}\n",
+         operation d(log) -> .json\ncommand d: d {log} {@output}\nout = d(log)\ndefault entities: {@key}={@value} separated \"__\"\npath out: out/{@product}/{@entities}\n",
     );
     tree.write("a.spitin", "pipeline a.spit\nroot .\n");
     tree.write(
@@ -335,7 +335,7 @@ fn the_default_owner_error_names_the_rule_to_write() {
     );
     assert!(!said.contains("path source:"), "{said}");
     let fixed = check(
-        "source s [d]\ndefault path: out/{@product}/{@entities}\npath s: in/{d:digits}.txt\nentities: {key}={value} separated \"__\" empty \"global\"\n",
+        "source s [d]\ndefault path: out/{@product}/{@entities}\npath s: in/{d:digits}.txt\ndefault entities: {@key}={@value} separated \"__\"\n",
     );
     assert!(fixed.contains("Pipeline valid."), "{fixed}");
 }

@@ -31,8 +31,10 @@ pub struct Pipeline {
     /// The `check:` default of every output in the file, outside any stage.
     pub default_checks: DefaultChecks,
     pub path_template: Option<PathTemplate>,
-    /// How `{@entities}` is written, from the `entities:` line. A rule that
-    /// uses `{@entities}` in a pipeline without one is an error.
+    /// How `{@entities}` is written, from the `default entities:` line
+    /// outside every stage. A product's spelling is its stage's, else this
+    /// one; a rule that uses `{@entities}` for a product with neither is an
+    /// error.
     pub entities_format: Option<EntitiesFormat>,
     /// The `ext:` default: the extension a default path rule is completed
     /// with when the operation declares none.
@@ -556,7 +558,7 @@ impl<'p> PipelineIndex<'p> {
     /// and whether a stage makes it.
     pub(crate) fn holder(&self, product: &str) -> Holder<'p> {
         Holder {
-            entities_format: self.pipeline.entities_format.as_ref(),
+            entities_format: self.entities_format_for(product),
             dimensions: self
                 .product(product)
                 .map_or(&[][..], |declared| declared.dimensions.as_slice()),
@@ -573,9 +575,10 @@ impl<'p> PipelineIndex<'p> {
     /// An output written beside another has no rule of its own, whatever
     /// this finds; ask [`PipelineIndex::beside`] first.
     ///
-    /// A default that needs `{@stage}` is for products made in a stage, so
-    /// it does not find a source, which is left for a rule of its own or
-    /// the recipe's default.
+    /// A default that needs `{@stage}` is for products made in a stage, and
+    /// one that needs `{@entities}` for products with dimensions, so neither
+    /// finds a source it cannot write, which is left for a rule of its own
+    /// or the recipe's default.
     pub(crate) fn path_origin(&self, product: &str) -> Option<(PathOrigin<'p>, &'p PathTemplate)> {
         let pipeline = self.pipeline;
         if let Some(template) = pipeline.product_paths.get(product) {
@@ -585,8 +588,14 @@ impl<'p> PipelineIndex<'p> {
             return Some((PathOrigin::Stage(stage), template));
         }
         let default = pipeline.path_template.as_ref()?;
-        (!(default.needs_stage() && self.is_source(product)))
-            .then_some((PathOrigin::Default, default))
+        // A default a source cannot use is left for the source's own rule or
+        // the recipe's default, as no source is made in a stage.
+        let unusable = default.needs_stage()
+            || (default.needs_entities()
+                && self
+                    .product(product)
+                    .is_some_and(|declared| declared.dimensions.is_empty()));
+        (!(unusable && self.is_source(product))).then_some((PathOrigin::Default, default))
     }
 
     /// The step that makes `product`, the operation it calls, and the port
@@ -682,6 +691,24 @@ impl<'p> PipelineIndex<'p> {
     }
 
     /// See [`Pipeline::stage_path_rule`].
+    /// How `{@entities}` is spelled for `product`: by its stage's `default
+    /// entities:`, or the nearest stage around it with one, else the
+    /// pipeline's.
+    pub(crate) fn entities_format_for(&self, product: &str) -> Option<&'p EntitiesFormat> {
+        let pipeline = self.pipeline;
+        self.stage_of(product)
+            .and_then(|stage| {
+                stage_and_parents(stage).find_map(|name| {
+                    pipeline
+                        .stages
+                        .iter()
+                        .find(|candidate| candidate.name == name)
+                        .and_then(|stage| stage.entities_format.as_ref())
+                })
+            })
+            .or(pipeline.entities_format.as_ref())
+    }
+
     pub(crate) fn stage_path_rule(&self, product: &str) -> Option<(&'p str, &'p PathTemplate)> {
         let pipeline = self.pipeline;
         let stage = self.stage_of(product)?;

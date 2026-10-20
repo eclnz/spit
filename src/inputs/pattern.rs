@@ -10,8 +10,8 @@ use rustc_hash::FxHashSet;
 
 use crate::model::{Pipeline, PipelineIndex, ProductDef};
 use crate::paths::{
-    error, product_text, stage_directories, PathError, PathPart, PathPlaceholder, PathTemplate,
-    Shape,
+    error, product_text, stage_directories, unspelled_entities, PathError, PathPart,
+    PathPlaceholder, PathTemplate, Shape,
 };
 
 /// One piece of a path rule: text written as is, or a dimension's value.
@@ -57,13 +57,12 @@ pub(super) fn path_pattern(
             PathPart::Placeholder(PathPlaceholder::Product) => {
                 pieces.push(Piece::Literal(product_text(&product.name).into_owned()));
             }
-            // A pipeline with an `entities:` line has `{@entities}`
-            // written out; the path checks fail a rule without one first.
+            // A source with dimensions and a spelling has `{@entities}`
+            // written out; the path checks fail the rest first.
             PathPart::Placeholder(PathPlaceholder::Entities) => {
-                return Err(error(format!(
-                    "path rule for `{}` uses `{}`, but the pipeline has no `entities:` line to spell it",
-                    product.name,
-                    PathPlaceholder::Entities
+                return Err(error(unspelled_entities(
+                    &product.name,
+                    product.dimensions.is_empty(),
                 )))
             }
             PathPart::Placeholder(PathPlaceholder::Stage) => match stage {

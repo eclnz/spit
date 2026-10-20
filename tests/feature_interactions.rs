@@ -17,12 +17,12 @@ command convert: dcm2niix -o {image.dir} -f {image.stem} {dicom} {mask}
 verify convert: test -d {dicom}
 operation avg(images: many Image @ min(2)) -> Image .nii.gz
 command avg: avg {images} {@output}
-default path: out/{@product}/{@entities}
+default path: out/{@product}[/{@entities}]
 stage pre:
     image, meta = convert(dicom, mask)
 stage post:
     mean = avg(image @ vary(sub))
-entities: {key}={value} separated \"__\" empty \"global\"\n";
+default entities: {@key}={@value} separated \"__\"\n";
 
 /// Subject 03 has a folder but no mask.
 fn dataset() -> (Tree, String) {
@@ -76,7 +76,7 @@ fn a_partial_plan_leaves_out_a_job_with_its_beside_output_and_aggregates_the_res
     // The aggregate runs over the two complete members, `meta` is written
     // beside its image, and both checks and the `verify` are on the job.
     assert!(plan.contains("out/image/sub=01.json"), "{plan}");
-    assert!(plan.contains("out/mean/global.nii.gz"), "{plan}");
+    assert!(plan.contains("out/mean.nii.gz"), "{plan}");
     assert!(plan.contains("nonempty"), "{plan}");
 }
 
@@ -122,7 +122,7 @@ fn a_scan_and_its_records_settle_to_the_same_plan() {
         "source bold : Bold [sub, ses, run]\npath bold: sub-{sub}/ses-{ses}/run-{run}.nii\n\
          source t1w : T1 [sub, ses]\npath t1w: sub-{sub}/ses-{ses}/t1w.nii\n\
          operation align(bold: Bold, t1w: T1) -> Bold\ncommand align: align {bold} {t1w} {@output}\n\
-         default path: out/{@product}/{@entities}\naligned = align(bold, t1w)\nentities: {key}={value} separated \"__\" empty \"global\"\n",
+         default path: out/{@product}[/{@entities}]\naligned = align(bold, t1w)\ndefault entities: {@key}={@value} separated \"__\"\n",
     );
     let rules = "exclude bold[sub=2,ses=1,run=2]   # bad\n\
                  exclude [sub] where t1w count<1\n\

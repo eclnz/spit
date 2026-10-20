@@ -123,7 +123,7 @@ operation summary(input) -> Report<T>
 operation unused(input)
 clean = clean(raw)
 summed = summary(clean)
-entities: {key}={value} separated \"__\" empty \"global\"
+default entities: {@key}={@value} separated \"__\"
 path clean: out/{@product}/{@entities}
 path summed: out/{@product}/{@entities}
 ";
@@ -135,7 +135,7 @@ fn check_and_its_json_give_each_diagnostic_one_severity() {
     tree.write(
         "broken.spit",
         "source raw [id, batch]\ndefault path: {@product}/{@entities}.txt\npath raw: in/{id}.txt\noperation clean(input)\ncleaned = clean(rwa)\n\
-         entities: {key}={value} separated \"__\" empty \"global\"\n",
+         default entities: {@key}={@value} separated \"__\"\n",
     );
     tree.write(
         "comment.spit",
