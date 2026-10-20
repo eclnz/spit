@@ -1,4 +1,4 @@
-entities: {key}={value} separated "__" empty "global"
+default entities: {@key}={@value} separated "__"
 
 root command_demo_data  # The checked-in dataset; no recipe is needed to find it.
 source shard : Lines [group, part]

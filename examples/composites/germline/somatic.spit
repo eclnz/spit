@@ -2,11 +2,11 @@
 # by one call to `align_sample`. `spit dag somatic.spitin --paths` shows the
 # two calls' products filed apart, as `normal_bam.aligned` and
 # `tumour_bam.aligned`.
-entities: {key}={value} separated "__" empty "global"
+default entities: {@key}={@value} separated "__"
 
 use align_sample from germline.spit as gl
 
-default path: out/{@product}/{@entities}
+default path: out/{@product}[/{@entities}]
 
 source reference : Fasta .fa
 source normal_r1 : Fastq .fastq.gz [patient, lane]

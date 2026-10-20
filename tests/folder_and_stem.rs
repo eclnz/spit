@@ -21,7 +21,7 @@ image, meta = convert(dicom)
 brain, mask = strip(image)
 listing = flat(dicom)
 path listing: {sub}
-entities: {key}={value} separated \"__\" empty \"global\"\n";
+default entities: {@key}={@value} separated \"__\"\n";
 
 fn errors(text: &str) -> Vec<String> {
     diagnose(text, None)

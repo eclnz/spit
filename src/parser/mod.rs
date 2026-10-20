@@ -211,7 +211,13 @@ pub(crate) enum StatementKind {
     Check(CheckDef, Place),
     /// A `dimensions [...]` line: the pipeline's dimension order.
     Dimensions(Vec<String>),
-    Entities(EntitiesDeclaration),
+    /// A `default entities` line: how `{@entities}` is spelled, or a
+    /// dimension's label in it, for the products of `stage` or, outside
+    /// every stage, of the whole pipeline.
+    Entities {
+        stage: Option<String>,
+        declaration: EntitiesDeclaration,
+    },
     Path(PathRule),
     /// An `ext:` line: the default extension of `stage`, or, outside every
     /// stage, of the whole pipeline.

@@ -107,7 +107,7 @@ fn path_rules_that_cannot_separate_artifacts_are_rejected() {
     let check = |text: &str| inspect_paths(&parse_pipeline(text).unwrap()).map(|_| ());
 
     let error =
-        check("source raw [id, batch]\ndefault path: {@product}/{@entities}.csv\npath raw: raw/{id}.csv\nentities: {key}={value} separated \"__\" empty \"global\"\n")
+        check("source raw [id, batch]\ndefault path: {@product}/{@entities}.csv\npath raw: raw/{id}.csv\ndefault entities: {@key}={@value} separated \"__\"\n")
             .unwrap_err();
     assert!(
         error.message().contains("omits dimension `batch`"),
@@ -115,7 +115,7 @@ fn path_rules_that_cannot_separate_artifacts_are_rejected() {
     );
 
     let error = check(
-        "source raw [id]\ndefault path: {@entities}.csv\noperation clean(input)\ncleaned = clean(raw)\nentities: {key}={value} separated \"__\" empty \"global\"\n",
+        "source raw [id]\ndefault path: {@entities}.csv\noperation clean(input)\ncleaned = clean(raw)\ndefault entities: {@key}={@value} separated \"__\"\n",
     )
     .unwrap_err();
     assert!(error.message().contains("`raw` and `cleaned`"), "{error}");

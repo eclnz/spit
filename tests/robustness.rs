@@ -49,7 +49,7 @@ fn a_path_inside_another_artifacts_file_is_rejected() {
         ["error: line 5, column 9: path rule for `y` puts files inside `in/s.txt`, the path of a `x` file, for the same entities; distinguish their path rules"]
     );
     // Different dimension names hide the overlap until paths are bound.
-    let text = "source x [s]\npath x: in/{s}.txt\nsource z [t]\npath z: in/{t}.txt/out.txt\noperation f(a, b) -> Text\ncommand f: cp {a} {b} {@output}\ndefault path: o/{@product}/{@entities}\ny = f(x, z @ where(t=1))\nentities: {key}={value} separated \"__\" empty \"global\"\nsources:\n    x[s=1]\n    z[t=1]\n";
+    let text = "source x [s]\npath x: in/{s}.txt\nsource z [t]\npath z: in/{t}.txt/out.txt\noperation f(a, b) -> Text\ncommand f: cp {a} {b} {@output}\ndefault path: o/{@product}/{@entities}\ny = f(x, z @ where(t=1))\ndefault entities: {@key}={@value} separated \"__\"\nsources:\n    x[s=1]\n    z[t=1]\n";
     let (pipeline, inventory) = support::parse_fixture(text).unwrap();
     let error = bind(&pipeline, &resolve(&pipeline, &inventory.unwrap()).unwrap()).unwrap_err();
     assert!(
@@ -123,7 +123,7 @@ fn shell_operators_in_a_command_are_errors() {
 
 #[test]
 fn quoted_operators_and_a_shell_script_stay_arguments() {
-    let text = "source x [s]\ndefault path: {@product}/{@entities}\noperation f(a) -> Text\ncommand f: sh -c 'cut -f1 \"$1\" > \"$2\"' sh {a} {@output} '|' \\;\ny = f(x)\nentities: {key}={value} separated \"__\" empty \"global\"\n";
+    let text = "source x [s]\ndefault path: {@product}/{@entities}\noperation f(a) -> Text\ncommand f: sh -c 'cut -f1 \"$1\" > \"$2\"' sh {a} {@output} '|' \\;\ny = f(x)\ndefault entities: {@key}={@value} separated \"__\"\n";
     let messages = rendered(&diagnose(text, None), text);
     assert!(messages.is_empty(), "{messages:?}");
 }
@@ -244,7 +244,7 @@ fn command_line_mistakes_are_named() {
 #[test]
 fn a_byte_order_mark_is_ignored_by_every_entry_point() {
     let bom = |text: &str| format!("\u{feff}{text}");
-    let valid = "source raw : Raw [id]\noperation clean(raw: Raw) -> Clean\ncleaned = clean(raw)\nentities: {key}={value} separated \"__\" empty \"global\"\npath cleaned: out/{@product}/{@entities}\n";
+    let valid = "source raw : Raw [id]\noperation clean(raw: Raw) -> Clean\ncleaned = clean(raw)\ndefault entities: {@key}={@value} separated \"__\"\npath cleaned: out/{@product}/{@entities}\n";
     let records = "sources:\n  raw[id=a]\n";
     parse_pipeline(&bom(valid)).unwrap();
     spit::parse_source_inventory(&bom(records)).unwrap();

@@ -102,7 +102,7 @@ fn files_at_the_pipelines_output_paths_are_not_unmatched() {
          stage clean:\n    operation clean(x) -> Clean\n    command clean: clean {x} {@output}\n    cleaned = clean(x)\n\
          operation summarize(items: many Clean) -> Report\ncommand summarize: summarize {items} {@output}\n\
          report = summarize(cleaned @ vary(s))\n\
-         operation store(table: Clean) -> .zarr/\ncommand store: store {table} {@output}\nstored = store(cleaned)\nentities: {key}={value} separated \"__\" empty \"global\"\n",
+         operation store(table: Clean) -> .zarr/\ncommand store: store {table} {@output}\nstored = store(cleaned)\ndefault entities: {@key}={@value} separated \"__\"\n",
     );
     let recipe = tree.write("recipe.spitin", "pipeline pipeline.spit\nroot data\n");
     let recipe = recipe.to_str().unwrap();
@@ -129,7 +129,7 @@ path lut: config/lut.txt
 operation stack(frames: many Frame, lut: Lut) -> Stack
 command stack: stack {frames} {lut} {@output}
 stacked = stack(frame @ vary(run), lut)
-entities: {key}={value} separated \"__\" empty \"global\"\n";
+default entities: {@key}={@value} separated \"__\"\n";
 
 #[test]
 fn sources_are_discovered_from_their_path_rules() {
@@ -181,7 +181,7 @@ source image [sub, ses]
 path image: data/sub-{sub}/ses-{ses}/image.nii.gz
 operation process(image) -> Output
 output = process(image)
-entities: {key}={value} separated \"__\" empty \"global\"
+default entities: {@key}={@value} separated \"__\"
 ";
     let (pipeline, spec) = parse(text);
     let inventory = discover_sources(&pipeline, &spec.rules, &tree.0).unwrap();
@@ -377,7 +377,7 @@ fn drop_source_group_can_omit_missing_files_in_a_discovered_context() {
          exclude [sub] where image count<2\n\
          operation process(image: Image) -> Image\n\
          result = process(image)\n\
-         entities: {key}={value} separated \"__\" empty \"global\"\n\
+         default entities: {@key}={@value} separated \"__\"\n\
          path result: out/{@product}/{@entities}\n",
     );
     let inventory = discover_sources(&pipeline, &spec.rules, &tree.0).unwrap();

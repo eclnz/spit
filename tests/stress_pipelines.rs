@@ -188,7 +188,7 @@ fn inferred_intermediate_type_mismatch_fails_even_with_no_artifacts() {
                 operation first(a: A<X>) -> B<X>\n\
                 middle = first(raw)\n\
                 operation second(b: B<Standard>) -> C\n\
-                final = second(middle)\nentities: {key}={value} separated \"__\" empty \"global\"\npath middle: out/{@product}/{@entities}\n";
+                final = second(middle)\ndefault entities: {@key}={@value} separated \"__\"\npath middle: out/{@product}/{@entities}\n";
     let pipeline = parse_pipeline(text).unwrap();
     for sources in ["sources:\n", "sources:\n    raw[id=one]\n"] {
         let inventory = parse_source_inventory(sources).unwrap();

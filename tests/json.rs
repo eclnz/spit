@@ -33,7 +33,7 @@ fn cli_accepts_stdin_and_returns_json() {
 
 #[test]
 fn cli_reports_semantic_error_line_in_json() {
-    let output = check_json(b"source raw : A<Native> [id]\noperation first(a: A<X>) -> B<X>\nmiddle = first(raw)\noperation second(b: B<Standard>) -> C\nfinal = second(middle)\nentities: {key}={value} separated \"__\" empty \"global\"\npath middle: out/{@product}/{@entities}\n",);
+    let output = check_json(b"source raw : A<Native> [id]\noperation first(a: A<X>) -> B<X>\nmiddle = first(raw)\noperation second(b: B<Standard>) -> C\nfinal = second(middle)\ndefault entities: {@key}={@value} separated \"__\"\npath middle: out/{@product}/{@entities}\n",);
     assert_eq!(output.status.code(), Some(1));
     let json = String::from_utf8(output.stdout).unwrap();
     assert!(json.contains("\"line\":5"), "{json}");

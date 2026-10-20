@@ -1,5 +1,5 @@
 # Nested stages: each stage in `preprocess` is compared only with its siblings.
-entities: {key}={value} separated "__" empty "global"
+default entities: {@key}={@value} separated "__"
 default path: {@stage}/{@product}/{@entities}.txt
 
 source shard : Lines [group, part]

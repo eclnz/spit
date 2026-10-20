@@ -14,7 +14,7 @@ fn dimensionless_sources_accept_bare_names_and_match_each_job() {
             0
         );
     }
-    let pipeline = parse_pipeline("source raw : Raw [id]\nsource testset : Data\noperation process(raw: Raw, testset: Data) -> Result\nresult = process(raw, testset)\nentities: {key}={value} separated \"__\" empty \"global\"\npath result: out/{@product}/{@entities}\n").unwrap();
+    let pipeline = parse_pipeline("source raw : Raw [id]\nsource testset : Data\noperation process(raw: Raw, testset: Data) -> Result\nresult = process(raw, testset)\ndefault entities: {@key}={@value} separated \"__\"\npath result: out/{@product}/{@entities}\n").unwrap();
     let inventory =
         parse_source_inventory("sources:\n    raw[id=1]\n    raw[id=2]\n    testset\n").unwrap();
     let dag = resolve(&pipeline, &inventory).unwrap();
@@ -50,7 +50,7 @@ registered = register(denoised, calibration)
 
 operation mean(signals: many AlignedSignal) -> MeanSignal
 mean_signal = mean(registered @ vary(run))
-entities: {key}={value} separated \"__\" empty \"global\"\npath denoised: out/{@product}/{@entities}\npath registered: out/{@product}/{@entities}\npath mean_signal: out/{@product}/{@entities}\n";
+default entities: {@key}={@value} separated \"__\"\npath denoised: out/{@product}/{@entities}\npath registered: out/{@product}/{@entities}\npath mean_signal: out/{@product}/{@entities}\n";
 const RECIPE: &str = "\
 require [site, day] where signal count>=1
 require [site, day] where calibration count=1
@@ -157,7 +157,7 @@ fn flow_form_requires_operation_declaration_before_use() {
 
 #[test]
 fn command_arguments_keep_quoted_hashes_and_strip_comments() {
-    let text = "source raw [id] # source comment\n# whole-line comment\noperation copy(input)\ncommand copy: tool --tag '#run' --label \"part#1\" --color=#fff {input} {@output} # command comment\nresult = copy(raw)\nentities: {key}={value} separated \"__\" empty \"global\"\npath result: out/{@product}/{@entities}\n";
+    let text = "source raw [id] # source comment\n# whole-line comment\noperation copy(input)\ncommand copy: tool --tag '#run' --label \"part#1\" --color=#fff {input} {@output} # command comment\nresult = copy(raw)\ndefault entities: {@key}={@value} separated \"__\"\npath result: out/{@product}/{@entities}\n";
     let pipeline = parse_pipeline(text).unwrap();
     assert_eq!(
         pipeline.commands[0].template,
@@ -168,7 +168,7 @@ fn command_arguments_keep_quoted_hashes_and_strip_comments() {
 #[test]
 fn equals_command_keeps_colons_in_arguments() {
     let pipeline = parse_pipeline(
-        "source raw [id]\noperation fetch(input)\ncommand fetch = tool --url https://example.com/a:b {input} {@output}\nresult = fetch(raw)\nentities: {key}={value} separated \"__\" empty \"global\"\npath result: out/{@product}/{@entities}\n",
+        "source raw [id]\noperation fetch(input)\ncommand fetch = tool --url https://example.com/a:b {input} {@output}\nresult = fetch(raw)\ndefault entities: {@key}={@value} separated \"__\"\npath result: out/{@product}/{@entities}\n",
     )
     .unwrap();
     assert_eq!(pipeline.commands[0].operation, "fetch");

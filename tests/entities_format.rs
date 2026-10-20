@@ -6,7 +6,7 @@ use spit::{inspect_paths, parse_pipeline, parse_pipeline_at, parse_source_invent
 use support::{bound, spit, text, Tree};
 
 const FORMAT: &str =
-    "entities: {key}_{value} separated \"-\" empty \"global\"\nentities sub: subject\n";
+    "default entities: {@key}_{@value} separated \"-\"\ndefault entities sub: subject\n";
 const FLOW: &str = "source raw [sub, ses, run]\nsource config\noperation copy(x)\noperation merge(x: many)\ncopied = copy(raw)\nsession = merge(copied @ vary(run))\nsubject = merge(session @ vary(ses))\nall = merge(subject @ vary(sub))\n";
 
 fn ok(args: &[&str]) -> String {
@@ -22,7 +22,7 @@ fn ok(args: &[&str]) -> String {
 #[test]
 fn one_format_covers_each_shape_without_changing_identity() {
     let pipeline = parse_pipeline(&format!(
-        "{FORMAT}{FLOW}default path: {{@product}}/{{@entities}}.txt\npath config: config.txt\n"
+        "{FORMAT}{FLOW}default path: {{@product}}[/{{@entities}}].txt\npath config: config.txt\n"
     ))
     .unwrap();
     inspect_paths(&pipeline).unwrap();
@@ -30,7 +30,7 @@ fn one_format_covers_each_shape_without_changing_identity() {
         ("copied", "{@product}/subject_{sub}-ses_{ses}-run_{run}.txt"),
         ("session", "{@product}/subject_{sub}-ses_{ses}.txt"),
         ("subject", "{@product}/subject_{sub}.txt"),
-        ("all", "{@product}/global.txt"),
+        ("all", "{@product}.txt"),
     ] {
         assert_eq!(
             pipeline.path_template_for(product).unwrap().to_string(),
@@ -45,13 +45,13 @@ fn one_format_covers_each_shape_without_changing_identity() {
         paths.contains("copied/subject_A%5FB-ses_01-run_2.txt"),
         "{paths}"
     );
-    assert!(paths.contains("all/global.txt"), "{paths}");
+    assert!(paths.contains("all.txt"), "{paths}");
 }
 
 #[test]
-fn empty_entities_can_drop_an_optional_group_and_output_rules_use_the_format() {
+fn a_dimensionless_product_drops_an_optional_group_and_output_rules_use_the_format() {
     let pipeline = parse_pipeline(&format!(
-        "entities: {{key}}_{{value}} separated \"-\" empty \"\"\n{FLOW}default path: out/[{{@entities}}_]{{@product}}.txt\npath raw: raw/{{@entities}}.txt\npath config: config.txt\n"
+        "default entities: {{@key}}_{{@value}} separated \"-\"\n{FLOW}default path: out/[{{@entities}}_]{{@product}}.txt\npath raw: raw/{{@entities}}.txt\npath config: config.txt\n"
     ))
     .unwrap();
     inspect_paths(&pipeline).unwrap();
@@ -72,10 +72,15 @@ fn empty_entities_can_drop_an_optional_group_and_output_rules_use_the_format() {
         "out/{@product}/subject_{sub}"
     );
 
-    let pipeline = parse_pipeline("entities: {key}={value} separated \"__\" empty \"all data\"\nsource config\npath config: in/{@entities}.txt\n").unwrap();
+    // Outside a group, a product with no dimensions has no `{@entities}`.
+    let pipeline = parse_pipeline("default entities: {@key}={@value} separated \"__\"\nsource config\npath config: in/{@entities}.txt\n").unwrap();
     assert_eq!(
         pipeline.path_template_for("config").unwrap().to_string(),
-        "in/all%20data.txt"
+        "in/{@entities}.txt"
+    );
+    assert_eq!(
+        inspect_paths(&pipeline).unwrap_err().to_string(),
+        "path rule for `config` uses `{@entities}`, but `config` has no dimensions; put it in `[...]`, as `[{@entities}_]`"
     );
 }
 
@@ -91,7 +96,7 @@ fn fresh_discovery_and_saved_inventory_produce_the_same_dag_and_hints() {
     );
     let pipeline = tree.write(
         "pipeline.spit",
-        &format!("{FORMAT}{FLOW}default path: out/{{@product}}/{{@entities}}.txt\n"),
+        &format!("{FORMAT}{FLOW}default path: out/{{@product}}[/{{@entities}}].txt\n"),
     );
     let recipe = tree.write(
         "data.spitin",
@@ -113,20 +118,23 @@ fn fresh_discovery_and_saved_inventory_produce_the_same_dag_and_hints() {
     let read = ok(&["dag", pipeline, saved, "--json"]);
     assert_eq!(fresh, read);
     assert!(read.contains("subject_A%5FB-ses_01-run_2.txt"), "{read}");
-    assert!(read.contains("out/all/global.txt"), "{read}");
+    assert!(read.contains("out/all.txt"), "{read}");
     let hints = ok(&["check", pipeline, "--json", "--hovers"]);
     assert!(
         hints.contains("out/session/subject_{sub}-ses_{ses}.txt"),
         "{hints}"
     );
     let hovers = ok(&["check", pipeline, "--json", "--hovers"]);
-    // `{@entities}`'s word documentation names the `entities:` line that spells it.
+    // `{@entities}`'s word documentation names the `default entities:` that spells it.
     assert!(hovers.contains("\"@entities\":{"), "{hovers}");
-    assert!(hovers.contains("`entities:` line spells it"), "{hovers}");
+    assert!(
+        hovers.contains("as the nearest `default entities:` spells it"),
+        "{hovers}"
+    );
     assert!(hovers.contains("#entity-formatting"), "{hovers}");
     // A saved custom source rule retains its spelling when output formatting changes.
     tree.write("pipeline.spit", &format!(
-        "entities: {{key}}-{{value}} separated \"_\" empty \"global\"\n{FLOW}default path: out/{{@product}}/{{@entities}}.txt\n"
+        "default entities: {{@key}}-{{@value}} separated \"_\"\n{FLOW}default path: out/{{@product}}[/{{@entities}}].txt\n"
     ));
     let changed = ok(&["dag", pipeline, saved, "--json"]);
     assert!(
@@ -149,7 +157,7 @@ fn imports_keep_library_source_formats_and_use_caller_output_formats() {
                 "{format}source raw [sub]\npath raw: raw/{{@entities}}.txt\noperation copy(x)\n"
             ),
         );
-        let main = tree.write("main.spit", "entities: {key}-{value} separated \"_\" empty \"global\"\nuse library.spit as lib\ncopied = lib::copy(lib::raw)\npath copied: out/{@product}/{@entities}\n");
+        let main = tree.write("main.spit", "default entities: {@key}-{@value} separated \"_\"\nuse library.spit as lib\ncopied = lib::copy(lib::raw)\npath copied: out/{@product}/{@entities}\n");
         let pipeline = parse_pipeline_at(&std::fs::read_to_string(&main).unwrap(), &main).unwrap();
         assert_eq!(
             pipeline.path_template_for("lib::raw").unwrap().to_string(),
@@ -164,13 +172,13 @@ fn imports_keep_library_source_formats_and_use_caller_output_formats() {
 
 #[test]
 fn aliases_can_precede_the_format_but_need_one_and_no_product_is_named_entities() {
-    let pipeline = parse_pipeline("entities   sub: subject\nentities: {key}_{value} separated \"-\" empty \"global\"\nsource raw [sub]\noperation copy(x) -> Image\nmade : Image [sub] = copy(raw)\npath made: out/{@product}/{@entities}\n").unwrap();
+    let pipeline = parse_pipeline("default entities sub: subject\ndefault entities: {@key}_{@value} separated \"-\"\nsource raw [sub]\noperation copy(x) -> Image\nmade : Image [sub] = copy(raw)\npath made: out/{@product}/{@entities}\n").unwrap();
     assert_eq!(
         pipeline.path_template_for("made").unwrap().to_string(),
         "out/{@product}/subject_{sub}"
     );
     let error = parse_pipeline(
-        "entities sub: subject\nsource raw [sub]\noperation copy(x)\nentities = copy(raw)\n",
+        "default entities sub: subject\nsource raw [sub]\noperation copy(x)\nentities = copy(raw)\n",
     )
     .unwrap_err();
     assert!(
@@ -181,14 +189,14 @@ fn aliases_can_precede_the_format_but_need_one_and_no_product_is_named_entities(
     );
     // A label renames a dimension in the format, so it needs one.
     let error = parse_pipeline(
-        "entities sub: subject\nsource raw [sub]\noperation copy(x)\nmade = copy(raw)\n",
+        "default entities sub: subject\nsource raw [sub]\noperation copy(x)\nmade = copy(raw)\n",
     )
     .unwrap_err();
     assert_eq!(error.line(), 1);
     assert!(
         error
             .message()
-            .contains("an entity label renames a dimension in the `entities:` format, and this pipeline declares none"),
+            .contains("an entity label renames a dimension in a `default entities:` spelling, and there is none"),
         "{error}"
     );
 }
@@ -199,7 +207,7 @@ fn discovery_decodes_values_and_escaped_aliases_and_accepts_assignment_affixes()
         "entities-escaping",
         &["raw/e_subject%5Fid:A%5Fb%2F%C3%A9!-e_ses:01!.txt"],
     );
-    tree.write("pipeline.spit", "entities: e_{key}:{value}! separated \"-\" empty \"global\"\nentities sub: subject_id\nsource raw [sub, ses]\noperation copy(x)\ncopied = copy(raw)\npath copied: out/{@product}/{@entities}\n");
+    tree.write("pipeline.spit", "default entities: e_{@key}:{@value}! separated \"-\"\ndefault entities sub: subject_id\nsource raw [sub, ses]\noperation copy(x)\ncopied = copy(raw)\npath copied: out/{@product}/{@entities}\n");
     let recipe = tree.write(
         "data.spitin",
         "pipeline pipeline.spit\nroot .\npath raw: raw/{@entities}.txt\n",
@@ -214,66 +222,103 @@ fn discovery_decodes_values_and_escaped_aliases_and_accepts_assignment_affixes()
 }
 
 #[test]
-fn bad_declarations_are_located_and_recipe_or_stage_overrides_are_rejected() {
+fn bad_declarations_are_located_and_old_forms_say_what_to_write() {
     for (declaration, message) in [
-        ("entities: {key} separated \"_\" empty \"global\"", "then `{value}`"),
-        ("entities: {value}_{key} separated \"-\" empty \"global\"", "then `{value}`"),
+        ("default entities: {@key} separated \"_\"", "then `{@value}`"),
+        ("default entities: {@value}_{@key} separated \"-\"", "then `{@value}`"),
         (
-            "entities: {key}_{value}_{value} separated \"-\" empty \"global\"",
+            "default entities: {@key}_{@value}_{@value} separated \"-\"",
             "once each",
         ),
         (
-            "entities: {key}_{unknown} separated \"-\" empty \"global\"",
+            "default entities: {@key}_{unknown} separated \"-\"",
             "no other placeholders",
         ),
         (
-            "entities: {key}_{value} separated by \"-\" empty \"global\"",
+            "default entities: {key}_{value} separated \"-\"",
+            "write `{@key}`: SPIT's own placeholders take `@`, and `{key}` would be a dimension",
+        ),
+        (
+            "default entities: {@key}_{@value}_{value} separated \"-\"",
+            "write `{@value}`: SPIT's own placeholders take `@`, and `{value}` would be a dimension",
+        ),
+        (
+            "default entities: {@key}_{@value} separated by \"-\"",
             "must be quoted",
         ),
         (
-            "entities: {key}_{value} separated \"/\" empty \"global\"",
+            "default entities: {@key}_{@value}",
+            "expected `default entities: {@key}={@value} separated \"__\"`",
+        ),
+        (
+            "default entities: {@key}_{@value} separated \"/\"",
             "one path component",
         ),
         (
-            "entities: {key}_{value} separated \"%\" empty \"global\"",
+            "default entities: {@key}_{@value} separated \"%\"",
             "one path component",
         ),
-        ("entities: {key}{value} separated \"-\" empty \"global\"", "ambiguous"),
+        ("default entities: {@key}{@value} separated \"-\"", "ambiguous"),
         (
-            "entities: {key}_{value} separated \"-\"",
-            "after the entities separator, write `empty \"global\"`",
+            "default entities: {@key}_{@value} separated \"-\" empty \"global\"",
+            "unexpected text after the entities separator; a product with no dimensions has no `{@entities}`, so put it in `[...]`",
         ),
-        ("entities: {key}_{value} separated \"-\" empty \"global\"\nentities other: subject", "unknown dimension"),
-        ("entities: {key}_{value} separated \"-\" empty \"global\"\nentities sub: ses", "more than one dimension"),
         (
-            "entities: {key}_{value} separated \"-\" empty \"global\"\nentities sub: subject\nentities sub: participant",
+            "entities: {@key}_{@value} separated \"-\"",
+            "a default is written after `default`, as `default entities: ...`, or in a `default:` block",
+        ),
+        ("default entities: {@key}_{@value} separated \"-\"\ndefault entities other: subject", "unknown dimension"),
+        ("default entities: {@key}_{@value} separated \"-\"\ndefault entities sub: ses", "more than one dimension"),
+        (
+            "default entities: {@key}_{@value} separated \"-\"\ndefault entities sub: subject\ndefault entities sub: participant",
             "duplicate entity label",
         ),
         (
-            "entities: {key}_{value} separated \"-\" empty \"global\"\nentities: {key}={value} separated \"__\" empty \"global\"",
-            "one `entities:` format",
+            "default entities: {@key}_{@value} separated \"-\"\ndefault entities: {@key}={@value} separated \"__\"",
+            "duplicate `default entities:`",
         ),
     ] {
         let error = parse_pipeline(&format!("source raw [sub, ses]\n{declaration}\n")).unwrap_err();
         assert!(error.line() >= 2, "{error}");
         assert!(error.message().contains(message), "{declaration}: {error}");
     }
+    // A stage sets its spelling once, and with `default` like the file.
     let error = parse_pipeline(
-        "stage outputs:\n  entities: {key}_{value} separated \"-\" empty \"global\"\n",
+        "source raw [sub]\nstage outputs:\n  default entities: {@key}_{@value} separated \"-\"\n  default entities: {@key}={@value} separated \"__\"\n",
     )
     .unwrap_err();
-    assert_eq!(error.line(), 2);
-    assert!(error.message().contains("whole pipeline"), "{error}");
-    let error =
-        spit::parse_input_spec("entities: {key}_{value} separated \"-\" empty \"global\"\n")
-            .unwrap_err();
+    assert_eq!(error.line(), 4);
+    assert!(
+        error
+            .message()
+            .contains("duplicate `default entities:` for stage `outputs`"),
+        "{error}"
+    );
+    let error = parse_pipeline(
+        "source raw [sub]\nstage outputs:\n  entities: {@key}_{@value} separated \"-\"\n",
+    )
+    .unwrap_err();
+    assert_eq!(error.line(), 3);
+    assert!(
+        error
+            .message()
+            .contains("a default is written after `default`"),
+        "{error}"
+    );
+    // So does a recipe.
+    let error = spit::parse_input_spec("entities: {@key}_{@value} separated \"-\"\n").unwrap_err();
     assert_eq!(error.line(), 1);
-    assert!(error.message().contains("pipeline"), "{error}");
+    assert!(
+        error
+            .message()
+            .contains("a default is written after `default`"),
+        "{error}"
+    );
 
     let tree = Tree::new("entities-errors", &[]);
     let file = tree.write(
         "bad.spit",
-        "source raw [sub]\nentities: {value}_{key} separated \"-\" empty \"global\"\n",
+        "source raw [sub]\ndefault entities: {@value}_{@key} separated \"-\"\n",
     );
     let output = spit(&["check", file.to_str().unwrap(), "--json", "--hovers"]);
     assert!(!output.status.success());
@@ -281,4 +326,129 @@ fn bad_declarations_are_located_and_recipe_or_stage_overrides_are_rejected() {
     assert!(json.contains("\"line\":2"), "{json}");
     assert!(json.contains("\"column\":"), "{json}");
     assert!(json.contains("\"word_docs\":"), "{json}");
+}
+
+#[test]
+fn a_stage_spelling_covers_its_products_and_the_stages_nested_in_it() {
+    let pipeline = parse_pipeline(
+        "default entities: {@key}_{@value} separated \"-\"\n\
+         default path: out/{@product}/{@entities}.txt\n\
+         source raw [sub, ses]\n\
+         path raw: in/{@entities}.txt\n\
+         operation copy(x)\n\
+         first = copy(raw)\n\
+         stage post:\n    \
+             default entities: {@key}={@value} separated \"__\"\n    \
+             default entities sub: subject\n    \
+             second = copy(first)\n    \
+             stage inner:\n        \
+                 third = copy(second)\n",
+    )
+    .unwrap();
+    inspect_paths(&pipeline).unwrap();
+    for (product, expected) in [
+        ("raw", "in/sub_{sub}-ses_{ses}.txt"),
+        ("first", "out/{@product}/sub_{sub}-ses_{ses}.txt"),
+        ("second", "out/{@product}/subject={sub}__ses={ses}.txt"),
+        ("third", "out/{@product}/subject={sub}__ses={ses}.txt"),
+    ] {
+        assert_eq!(
+            pipeline.path_template_for(product).unwrap().to_string(),
+            expected,
+            "{product}"
+        );
+    }
+    let inventory = parse_source_inventory("sources:\n raw[sub=1,ses=2]\n").unwrap();
+    let dag = resolve(&pipeline, &inventory).unwrap();
+    let paths = bound(&pipeline, &dag).unwrap();
+    for path in [
+        "out/first/sub_1-ses_2.txt",
+        "out/second/subject=1__ses=2.txt",
+        "out/third/subject=1__ses=2.txt",
+    ] {
+        assert!(paths.contains(path), "{path}: {paths}");
+    }
+}
+
+#[test]
+fn a_recipe_spelling_spells_the_recipes_own_source_rules() {
+    let tree = Tree::new(
+        "entities-recipe",
+        &["rec/sub-1_ses-2.txt", "labelled/subject-1_ses-2.txt"],
+    );
+    tree.write(
+        "pipeline.spit",
+        "default entities: {@key}_{@value} separated \"-\"\ndefault path: out/{@product}/{@entities}.txt\nsource raw [sub, ses]\noperation copy(x)\nfirst = copy(raw)\n",
+    );
+    let recipe = tree.write(
+        "data.spitin",
+        "pipeline pipeline.spit\nroot .\ndefault entities: {@key}-{@value} separated \"_\"\npath raw: rec/{@entities}.txt\n",
+    );
+    let recipe = recipe.to_str().unwrap();
+    let inventory = ok(&["inputs", recipe]);
+    assert!(
+        inventory.contains("raw: rec/sub-{sub}_ses-{ses}.txt"),
+        "{inventory}"
+    );
+    assert!(inventory.contains("raw[sub=1,ses=2]"), "{inventory}");
+    // The pipeline's spelling still spells the outputs.
+    let paths = ok(&["dag", recipe, "--paths"]);
+    assert!(paths.contains("path: rec/sub-1_ses-2.txt"), "{paths}");
+    assert!(paths.contains("path: out/first/sub_1-ses_2.txt"), "{paths}");
+
+    // A recipe's labels go with its spelling.
+    let labelled = tree.write(
+        "labelled.spitin",
+        "pipeline pipeline.spit\nroot .\ndefault entities: {@key}-{@value} separated \"_\"\ndefault entities sub: subject\npath raw: labelled/{@entities}.txt\n",
+    );
+    let inventory = ok(&["inputs", labelled.to_str().unwrap()]);
+    assert!(
+        inventory.contains("raw: labelled/subject-{sub}_ses-{ses}.txt"),
+        "{inventory}"
+    );
+    assert!(inventory.contains("raw[sub=1,ses=2]"), "{inventory}");
+
+    // Without one, the recipe's rules take the pipeline's spelling.
+    let plain = tree.write(
+        "plain.spitin",
+        "pipeline pipeline.spit\nroot .\npath raw: rec/{@entities}.txt\n",
+    );
+    let inventory = ok(&["inputs", plain.to_str().unwrap()]);
+    assert!(
+        inventory.contains("raw: rec/sub_{sub}-ses_{ses}.txt"),
+        "{inventory}"
+    );
+
+    // A label in a recipe needs the recipe's own spelling.
+    let error = spit::parse_input_spec(
+        "pipeline pipeline.spit\ndefault entities sub: subject\npath raw: rec/{@entities}.txt\n",
+    )
+    .unwrap_err();
+    assert_eq!(error.line(), 2);
+    assert!(
+        error
+            .message()
+            .contains("an entity label renames a dimension in a `default entities:` spelling, and there is none"),
+        "{error}"
+    );
+}
+
+#[test]
+fn a_default_that_needs_entities_leaves_a_dimensionless_source_to_its_own_rule() {
+    // As a default that needs `{@stage}` covers no source, one that needs
+    // `{@entities}` covers no source without dimensions: a recipe gives it
+    // its rule instead.
+    let pipeline = parse_pipeline(
+        "default entities: {@key}_{@value} separated \"-\"\n\
+         default path: out/{@product}/{@entities}.txt\n\
+         source raw [sub]\n\
+         source config\n",
+    )
+    .unwrap();
+    assert_eq!(
+        pipeline.path_rule_for("raw").map(|rule| rule.as_str()),
+        Some("out/{@product}/{@entities}.txt")
+    );
+    assert_eq!(pipeline.path_rule_for("config"), None);
+    inspect_paths(&pipeline).unwrap();
 }

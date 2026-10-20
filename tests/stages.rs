@@ -59,7 +59,7 @@ fn steps_belong_to_the_stage_whose_block_holds_them() {
 
 #[test]
 fn an_unindented_line_ends_a_stage() {
-    let text = "source raw [id]\noperation copy(a: A) -> A\nstage first:\n    a = copy(raw)\n\n    # a comment keeps the stage open\n    b = copy(a)\nc = copy(b)\nentities: {key}={value} separated \"__\" empty \"global\"\npath a: out/{@product}/{@entities}\npath b: out/{@product}/{@entities}\npath c: out/{@product}/{@entities}\n";
+    let text = "source raw [id]\noperation copy(a: A) -> A\nstage first:\n    a = copy(raw)\n\n    # a comment keeps the stage open\n    b = copy(a)\nc = copy(b)\ndefault entities: {@key}={@value} separated \"__\"\npath a: out/{@product}/{@entities}\npath b: out/{@product}/{@entities}\npath c: out/{@product}/{@entities}\n";
     let pipeline = parse_pipeline(text).unwrap();
     assert_eq!(pipeline.stage_of("a"), Some("first"));
     assert_eq!(pipeline.stage_of("b"), Some("first"));
@@ -134,7 +134,7 @@ fn a_stage_path_rule_covers_only_that_stage() {
 
 #[test]
 fn stage_placeholder_needs_a_stage() {
-    let text = "default path: {@stage}/{@product}/{@entities}\nsource raw [id]\npath raw: in/{id}\noperation copy(a: A) -> A\nloose = copy(raw)\nentities: {key}={value} separated \"__\" empty \"global\"\n";
+    let text = "default path: {@stage}/{@product}/{@entities}\nsource raw [id]\npath raw: in/{id}\noperation copy(a: A) -> A\nloose = copy(raw)\ndefault entities: {@key}={@value} separated \"__\"\n";
     let diagnostics = diagnose(text, None);
     assert_eq!(
         messages(&diagnostics),
@@ -152,7 +152,7 @@ fn stage_placeholder_needs_a_stage() {
 fn stages_may_read_from_each_other_in_a_cycle() {
     // A stage groups steps and scopes their paths; jobs are ordered by what
     // they read, so `first` and `third` may each read from the other.
-    let text = "source raw [id]\noperation copy(a: A) -> A\noperation pair(a: A, a2: A) -> A\nstage first:\n    a = copy(raw)\n    d = pair(a, late)\nstage second:\n    b = copy(a)\nglue = copy(b)\nstage third:\n    late = copy(glue)\nentities: {key}={value} separated \"__\" empty \"global\"\npath a: out/{@product}/{@entities}\npath d: out/{@product}/{@entities}\npath b: out/{@product}/{@entities}\npath glue: out/{@product}/{@entities}\npath late: out/{@product}/{@entities}\n";
+    let text = "source raw [id]\noperation copy(a: A) -> A\noperation pair(a: A, a2: A) -> A\nstage first:\n    a = copy(raw)\n    d = pair(a, late)\nstage second:\n    b = copy(a)\nglue = copy(b)\nstage third:\n    late = copy(glue)\ndefault entities: {@key}={@value} separated \"__\"\npath a: out/{@product}/{@entities}\npath d: out/{@product}/{@entities}\npath b: out/{@product}/{@entities}\npath glue: out/{@product}/{@entities}\npath late: out/{@product}/{@entities}\n";
     assert_eq!(messages(&diagnose(text, None)), []);
     let (pipeline, _) = support::parse_fixture(text).unwrap();
     let inventory = spit::parse_source_inventory("sources:\n    raw[id=1]\n").unwrap();
@@ -176,7 +176,7 @@ fn stages_may_read_from_each_other_in_a_cycle() {
 
 #[test]
 fn stages_that_only_read_forward_are_accepted() {
-    let text = "source raw [id]\noperation copy(a: A) -> A\nstage first:\n    a = copy(raw)\nstage second:\n    b = copy(a)\nstage third:\n    c = copy(a)\n    d = copy(b)\nentities: {key}={value} separated \"__\" empty \"global\"\npath a: out/{@product}/{@entities}\npath b: out/{@product}/{@entities}\npath c: out/{@product}/{@entities}\npath d: out/{@product}/{@entities}\n";
+    let text = "source raw [id]\noperation copy(a: A) -> A\nstage first:\n    a = copy(raw)\nstage second:\n    b = copy(a)\nstage third:\n    c = copy(a)\n    d = copy(b)\ndefault entities: {@key}={@value} separated \"__\"\npath a: out/{@product}/{@entities}\npath b: out/{@product}/{@entities}\npath c: out/{@product}/{@entities}\npath d: out/{@product}/{@entities}\n";
     assert!(diagnose(text, None).is_empty());
 }
 
@@ -262,7 +262,7 @@ fn a_stage_opened_again_continues_its_first_block() {
     // As in the usability study: `func` split into two blocks around a step
     // of another stage. The second block's steps join `func`, and take its
     // default path, wherever in the two blocks that is written.
-    let text = "source raw [id]\npath raw: in/{@entities}\noperation copy(a: A) -> A\nstage func:\n    a = copy(raw)\nstage anat:\n    b = copy(a)\nstage func:\n    default path: f/{@product}/{@entities}\n    c = copy(b)\n    stage inner:\n        d = copy(c)\nstage func:\n    stage inner:\n        e = copy(d)\nentities: {key}={value} separated \"__\" empty \"global\"\npath b: out/{@product}/{@entities}\n";
+    let text = "source raw [id]\npath raw: in/{@entities}\noperation copy(a: A) -> A\nstage func:\n    a = copy(raw)\nstage anat:\n    b = copy(a)\nstage func:\n    default path: f/{@product}/{@entities}\n    c = copy(b)\n    stage inner:\n        d = copy(c)\nstage func:\n    stage inner:\n        e = copy(d)\ndefault entities: {@key}={@value} separated \"__\"\npath b: out/{@product}/{@entities}\n";
     assert_eq!(messages(&diagnose(text, None)), []);
     let (pipeline, _) = support::parse_fixture(text).unwrap();
     let names: Vec<_> = pipeline.stages.iter().map(|stage| &stage.name).collect();
@@ -281,7 +281,7 @@ fn a_stage_opened_again_continues_its_first_block() {
     }
     assert!(bound.contains("path: out/b/id=1"), "{bound}");
     // A header that opens a stage again is no place to report it from.
-    let empty = "source raw [id]\noperation copy(a: A) -> A\nstage prep:\nstage prep:\n    a = copy(raw)\nstage idle:\nstage idle:\nentities: {key}={value} separated \"__\" empty \"global\"\npath a: out/{@product}/{@entities}\n";
+    let empty = "source raw [id]\noperation copy(a: A) -> A\nstage prep:\nstage prep:\n    a = copy(raw)\nstage idle:\nstage idle:\ndefault entities: {@key}={@value} separated \"__\"\npath a: out/{@product}/{@entities}\n";
     assert_eq!(
         messages(&diagnose(empty, None)),
         [(Some(6), "stage `idle` has no steps")]
@@ -291,7 +291,7 @@ fn a_stage_opened_again_continues_its_first_block() {
 #[test]
 fn an_empty_stage_is_reported() {
     let text =
-        "source raw [id]\noperation copy(a: A) -> A\nstage prep:\n    a = copy(raw)\nstage later:\nentities: {key}={value} separated \"__\" empty \"global\"\npath a: out/{@product}/{@entities}\n";
+        "source raw [id]\noperation copy(a: A) -> A\nstage prep:\n    a = copy(raw)\nstage later:\ndefault entities: {@key}={@value} separated \"__\"\npath a: out/{@product}/{@entities}\n";
     let diagnostics = diagnose(text, None);
     assert_eq!(
         messages(&diagnostics),
@@ -335,7 +335,7 @@ fn nested_stages_are_named_by_their_path() {
 
 #[test]
 fn the_same_name_can_be_nested_in_different_stages() {
-    let text = "source raw [id]\noperation copy(a: A) -> A\nstage one:\n    stage part:\n        a = copy(raw)\nstage two:\n    stage part:\n        b = copy(a)\nentities: {key}={value} separated \"__\" empty \"global\"\npath a: out/{@product}/{@entities}\npath b: out/{@product}/{@entities}\n";
+    let text = "source raw [id]\noperation copy(a: A) -> A\nstage one:\n    stage part:\n        a = copy(raw)\nstage two:\n    stage part:\n        b = copy(a)\ndefault entities: {@key}={@value} separated \"__\"\npath a: out/{@product}/{@entities}\npath b: out/{@product}/{@entities}\n";
     assert!(diagnose(text, None).is_empty());
     let pipeline = parse_pipeline(text).unwrap();
     assert_eq!(pipeline.stage_of("b"), Some("two/part"));
@@ -343,7 +343,7 @@ fn the_same_name_can_be_nested_in_different_stages() {
 
 #[test]
 fn nested_stages_nest_their_paths_and_inherit_defaults() {
-    let text = "default path: {@stage}/{@product}/{@entities}\nsource raw [id]\npath raw: in/{id}\noperation copy(a: A) -> A\nstage outer:\n    default path: out/{@stage}/{@product}/{@entities}\n    stage inner:\n        a = copy(raw)\n    stage own:\n        default path: own/{@product}/{@entities}\n        b = copy(a)\nentities: {key}={value} separated \"__\" empty \"global\"\n";
+    let text = "default path: {@stage}/{@product}/{@entities}\nsource raw [id]\npath raw: in/{id}\noperation copy(a: A) -> A\nstage outer:\n    default path: out/{@stage}/{@product}/{@entities}\n    stage inner:\n        a = copy(raw)\n    stage own:\n        default path: own/{@product}/{@entities}\n        b = copy(a)\ndefault entities: {@key}={@value} separated \"__\"\n";
     let (pipeline, _) = support::parse_fixture(text).unwrap();
     let coverage = inspect_paths(&pipeline).unwrap();
     let rule = |product: &str| {
@@ -385,9 +385,9 @@ fn an_outer_stage_counts_the_jobs_of_the_stages_nested_in_it() {
 #[test]
 fn nested_stages_may_read_from_each_other_in_a_cycle() {
     // Siblings within one stage, through a step in the outer stage itself.
-    let siblings = "source raw [id]\noperation copy(a: A) -> A\nstage outer:\n    glue : Item [id] = copy(a)\n    stage first:\n        a = copy(raw)\n        c : Item [id] = copy(b)\n    stage second:\n        b = copy(glue)\nentities: {key}={value} separated \"__\" empty \"global\"\npath glue: out/{@product}/{@entities}\npath a: out/{@product}/{@entities}\npath c: out/{@product}/{@entities}\npath b: out/{@product}/{@entities}\n";
+    let siblings = "source raw [id]\noperation copy(a: A) -> A\nstage outer:\n    glue : Item [id] = copy(a)\n    stage first:\n        a = copy(raw)\n        c : Item [id] = copy(b)\n    stage second:\n        b = copy(glue)\ndefault entities: {@key}={@value} separated \"__\"\npath glue: out/{@product}/{@entities}\npath a: out/{@product}/{@entities}\npath c: out/{@product}/{@entities}\npath b: out/{@product}/{@entities}\n";
     // Stages nested in two outer stages that read from each other.
-    let across = "source raw [id]\noperation copy(a: A) -> A\nstage prep:\n    stage deep:\n        a : Item [id] = copy(late)\n        c = copy(raw)\nstage later:\n    stage deep:\n        late = copy(c)\nentities: {key}={value} separated \"__\" empty \"global\"\npath a: out/{@product}/{@entities}\npath c: out/{@product}/{@entities}\npath late: out/{@product}/{@entities}\n";
+    let across = "source raw [id]\noperation copy(a: A) -> A\nstage prep:\n    stage deep:\n        a : Item [id] = copy(late)\n        c = copy(raw)\nstage later:\n    stage deep:\n        late = copy(c)\ndefault entities: {@key}={@value} separated \"__\"\npath a: out/{@product}/{@entities}\npath c: out/{@product}/{@entities}\npath late: out/{@product}/{@entities}\n";
     for text in [siblings, across] {
         assert_eq!(messages(&diagnose(text, None)), [], "{text}");
     }
@@ -395,13 +395,13 @@ fn nested_stages_may_read_from_each_other_in_a_cycle() {
 
 #[test]
 fn a_nested_stage_may_read_from_its_outer_stage_and_siblings() {
-    let text = "source raw [id]\noperation copy(a: A) -> A\nstage outer:\n    base = copy(raw)\n    stage first:\n        a = copy(base)\n    stage second:\n        b = copy(a)\n    top = copy(b)\nentities: {key}={value} separated \"__\" empty \"global\"\npath base: out/{@product}/{@entities}\npath a: out/{@product}/{@entities}\npath b: out/{@product}/{@entities}\npath top: out/{@product}/{@entities}\n";
+    let text = "source raw [id]\noperation copy(a: A) -> A\nstage outer:\n    base = copy(raw)\n    stage first:\n        a = copy(base)\n    stage second:\n        b = copy(a)\n    top = copy(b)\ndefault entities: {@key}={@value} separated \"__\"\npath base: out/{@product}/{@entities}\npath a: out/{@product}/{@entities}\npath b: out/{@product}/{@entities}\npath top: out/{@product}/{@entities}\n";
     assert!(diagnose(text, None).is_empty());
 }
 
 #[test]
 fn a_stage_whose_steps_are_all_nested_is_not_empty() {
-    let text = "source raw [id]\noperation copy(a: A) -> A\nstage outer:\n    stage inner:\n        a = copy(raw)\n    stage idle:\nentities: {key}={value} separated \"__\" empty \"global\"\npath a: out/{@product}/{@entities}\n";
+    let text = "source raw [id]\noperation copy(a: A) -> A\nstage outer:\n    stage inner:\n        a = copy(raw)\n    stage idle:\ndefault entities: {@key}={@value} separated \"__\"\npath a: out/{@product}/{@entities}\n";
     assert_eq!(
         messages(&diagnose(text, None)),
         [(Some(6), "stage `outer/idle` has no steps")]
@@ -412,7 +412,7 @@ fn a_stage_whose_steps_are_all_nested_is_not_empty() {
 fn an_operation_called_outside_its_stage_says_where_to_declare_it() {
     let declared = "source raw [id]\nstage prep:\n    stage clean:\n        operation copy(a: A) -> A\n        a = copy(raw)\n";
     // The path rules follow the calls, so the calls' lines stay as written.
-    let rules = "entities: {key}={value} separated \"__\" empty \"global\"\n\
+    let rules = "default entities: {@key}={@value} separated \"__\"\n\
                  path a: out/{@product}/{@entities}\npath b: out/{@product}/{@entities}\n";
     let warning = |called: &str, line: usize, target: &str| {
         format!("operation `copy` is declared in stage `prep/clean` but called {called} on line {line}; a stage does not limit where its operations are used, so declare it in {target}")
@@ -452,7 +452,7 @@ fn an_operation_called_outside_its_stage_says_where_to_declare_it() {
 
 #[test]
 fn the_stage_to_declare_in_holds_every_outside_call() {
-    let text = "source raw [id]\nstage a:\n    stage b:\n        operation copy(x: Text) -> Text\n        one = copy(raw)\n    stage c:\n        two = copy(one)\n    stage cd:\n        stage e:\n            three = copy(two)\nentities: {key}={value} separated \"__\" empty \"global\"\npath one: out/{@product}/{@entities}\npath two: out/{@product}/{@entities}\npath three: out/{@product}/{@entities}\n";
+    let text = "source raw [id]\nstage a:\n    stage b:\n        operation copy(x: Text) -> Text\n        one = copy(raw)\n    stage c:\n        two = copy(one)\n    stage cd:\n        stage e:\n            three = copy(two)\ndefault entities: {@key}={@value} separated \"__\"\npath one: out/{@product}/{@entities}\npath two: out/{@product}/{@entities}\npath three: out/{@product}/{@entities}\n";
     assert_eq!(
         messages(&diagnose(text, None)),
         [(Some(4), "operation `copy` is declared in stage `a/b` but called in stage `a/c` on line 7; a stage does not limit where its operations are used, so declare it in stage `a`, which holds every call")]
@@ -461,7 +461,7 @@ fn the_stage_to_declare_in_holds_every_outside_call() {
 
 #[test]
 fn an_operation_called_within_its_stage_is_in_place() {
-    let text = "source raw [id]\nstage prep:\n    operation copy(a: A) -> A\n    stage clean:\n        a = copy(raw)\n    b = copy(a)\nentities: {key}={value} separated \"__\" empty \"global\"\npath a: out/{@product}/{@entities}\npath b: out/{@product}/{@entities}\n";
+    let text = "source raw [id]\nstage prep:\n    operation copy(a: A) -> A\n    stage clean:\n        a = copy(raw)\n    b = copy(a)\ndefault entities: {@key}={@value} separated \"__\"\npath a: out/{@product}/{@entities}\npath b: out/{@product}/{@entities}\n";
     assert!(diagnose(text, None).is_empty());
 }
 

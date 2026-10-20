@@ -18,7 +18,7 @@ const STEPS: &str = "\
 operation mc(bold) -> .nii.gz
 command mc: mcflirt -in {bold} -out {@output}
 moco = mc(bold)
-entities: {key}={value} separated \"__\" empty \"global\"
+default entities: {@key}={@value} separated \"__\"
 path moco: out/{@product}/{@entities}
 ";
 

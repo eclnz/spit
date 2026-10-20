@@ -46,7 +46,7 @@ verify register: same_grid {bold} {anatomy}
 default check: nonempty
 denoised = denoise(bold)
 registered = register(denoised, t1w)
-entities: {key}={value} separated \"__\" empty \"global\"\npath denoised: out/{@product}/{@entities}\npath registered: out/{@product}/{@entities}\n";
+default entities: {@key}={@value} separated \"__\"\npath denoised: out/{@product}/{@entities}\npath registered: out/{@product}/{@entities}\n";
 
 const BLOCKS: &str = "\
 source:
@@ -83,7 +83,7 @@ registered = register(
     denoised,
     t1w
 )
-entities: {key}={value} separated \"__\" empty \"global\"\npath denoised: out/{@product}/{@entities}\npath registered: out/{@product}/{@entities}\n";
+default entities: {@key}={@value} separated \"__\"\npath denoised: out/{@product}/{@entities}\npath registered: out/{@product}/{@entities}\n";
 
 #[test]
 fn a_keyword_block_reads_as_its_statements_written_one_per_line() {
@@ -93,7 +93,7 @@ fn a_keyword_block_reads_as_its_statements_written_one_per_line() {
 
 #[test]
 fn an_operation_block_may_hold_an_operation_carried_out_by_steps() {
-    let text = "source:\n    raw : T [id]\npath raw: in/{id}.txt\noperation:\n    step(input: T) -> T .txt\n    twice(input: T) -> (out: T):\n        once = step(input)\n        out = step(once)\ncommand step: cp {input} {@output}\nresult = twice(raw)\nentities: {key}={value} separated \"__\" empty \"global\"\npath result: out/{@product}/{@entities}\npath result::once: out/{@product}/{@entities}\n";
+    let text = "source:\n    raw : T [id]\npath raw: in/{id}.txt\noperation:\n    step(input: T) -> T .txt\n    twice(input: T) -> (out: T):\n        once = step(input)\n        out = step(once)\ncommand step: cp {input} {@output}\nresult = twice(raw)\ndefault entities: {@key}={@value} separated \"__\"\npath result: out/{@product}/{@entities}\npath result::once: out/{@product}/{@entities}\n";
     assert_eq!(errors(text), []);
     let pipeline = parse_pipeline(text).unwrap();
     let twice = pipeline
@@ -136,7 +136,7 @@ fn the_entries_of_a_block_share_one_indentation() {
 /// other statement, an indented line is read on its own, as before.
 #[test]
 fn only_a_command_goes_on_over_indented_lines() {
-    let text = "source raw : T [id]\npath raw: in/{id}.txt\noperation copy(input: T) -> T .txt\ncommand copy: cp\n    {input}\n    {@output}\ndefault path: out/{@product}/{@entities}\n    copied = copy(raw)\nentities: {key}={value} separated \"__\" empty \"global\"\n";
+    let text = "source raw : T [id]\npath raw: in/{id}.txt\noperation copy(input: T) -> T .txt\ncommand copy: cp\n    {input}\n    {@output}\ndefault path: out/{@product}/{@entities}\n    copied = copy(raw)\ndefault entities: {@key}={@value} separated \"__\"\n";
     assert_eq!(errors(text), []);
     let pipeline = parse_pipeline(text).unwrap();
     assert_eq!(

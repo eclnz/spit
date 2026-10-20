@@ -1,4 +1,4 @@
-entities: {key}={value} separated "__" empty "global"
+default entities: {@key}={@value} separated "__"
 default path: out/{@product}/{@entities}
 
 source reading : Reading<Raw> [site, device, window, sample]

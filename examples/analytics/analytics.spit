@@ -1,7 +1,7 @@
 # Analytics example: a keyed relation pipeline with several joins and rollups.
 # Product names describe query stages. Relation<...,CustomerKey> records the
 # join key; repeated K variables in operation signatures enforce compatibility.
-entities: {key}={value} separated "__" empty "global"
+default entities: {@key}={@value} separated "__"
 default path: out/{@product}/{@entities}
 
 source events : Relation<Event,CustomerKey> [tenant, customer, day, event]

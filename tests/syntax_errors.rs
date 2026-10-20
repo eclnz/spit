@@ -83,7 +83,7 @@ fn seeded_deletions_report_every_damaged_pipeline_line() {
     ];
     original.extend((0..24).map(|index| format!("step_{index:02} = copy(raw)")));
     // The path rule follows the steps, so it is never damaged.
-    original.push("entities: {key}={value} separated \"__\" empty \"global\"".to_owned());
+    original.push("default entities: {@key}={@value} separated \"__\"".to_owned());
     original.push("default path: out/{@product}/{@entities}".to_owned());
     assert!(errors(diagnose(&original.join("\n"), None)).is_empty());
 

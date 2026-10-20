@@ -11,38 +11,33 @@ pub(crate) enum EntitiesDeclaration {
     Label { dimension: String, label: String },
 }
 
+/// Read a `default entities` setting: `entities: {@key}={@value}
+/// separated "__"`, the spelling, or `default entities sub: subject`, a label.
 pub(super) fn parse_entities(line: &str, number: usize) -> Result<EntitiesDeclaration, ParseError> {
     if let Some(rest) = line.strip_prefix("entities:") {
         let (template, tail) = rest.trim().split_once(" separated ").ok_or_else(|| {
             ParseError::new(
                 number,
-                "expected `entities: {key}={value} separated \"__\" empty \"global\"`",
+                "expected `default entities: {@key}={@value} separated \"__\"`",
             )
         })?;
         let template = unquote(template.trim());
-        let (separator, tail) = quoted(tail.trim(), number)?;
-        let tail = tail.trim().strip_prefix("empty ").ok_or_else(|| {
-            ParseError::new(
-                number,
-                "after the entities separator, write `empty \"global\"`: the spelling for a product with no dimensions",
-            )
-            .at_token(tail.trim())
-        })?;
-        let (empty, rest) = quoted(tail.trim(), number)?;
+        let (separator, rest) = quoted(tail.trim(), number)?;
         if !rest.trim().is_empty() {
-            return Err(
-                ParseError::new(number, "unexpected text after the empty entities name")
-                    .at_token(rest),
-            );
+            return Err(ParseError::new(
+                number,
+                "unexpected text after the entities separator; a product with no dimensions has no `{@entities}`, so put it in `[...]`",
+            )
+            .at_token(rest.trim()));
         }
-        let format = EntitiesFormat::parse(template, separator, empty)
+        let format = EntitiesFormat::parse(template, separator)
             .map_err(|message| ParseError::new(number, message).at_token(template))?;
         return Ok(EntitiesDeclaration::Format(format));
     }
     let rest = line.strip_prefix("entities ").unwrap_or_default();
     let (dimension, label) = rest
         .split_once(':')
-        .ok_or_else(|| ParseError::new(number, "expected `entities dimension: label`"))?;
+        .ok_or_else(|| ParseError::new(number, "expected `default entities dimension: label`"))?;
     let dimension = identifier(dimension.trim(), number, "entity dimension")?;
     let label = identifier(label.trim(), number, "entity label")?;
     Ok(EntitiesDeclaration::Label {
@@ -64,8 +59,7 @@ fn quoted(text: &str, number: usize) -> Result<(&str, &str), ParseError> {
         .next()
         .filter(|c| matches!(c, '"' | '\''))
         .ok_or_else(|| {
-            ParseError::new(number, "entities separator and empty name must be quoted")
-                .at_token(text)
+            ParseError::new(number, "the entities separator must be quoted").at_token(text)
         })?;
     let end = text[1..]
         .find(quote)

@@ -141,13 +141,12 @@ impl<'p> ProductPath<'p> {
                     })?;
                     relative.push_str(stage);
                 }
-                // A pipeline with an `entities:` line has `{@entities}`
-                // written out; the path checks fail a rule without one first.
+                // A product with dimensions and a spelling has `{@entities}`
+                // written out.
                 PathPart::Placeholder(PathPlaceholder::Entities) => {
-                    return Err(error(format!(
-                        "path template for `{}` uses `{}`, but the pipeline has no `entities:` line to spell it",
+                    return Err(error(unspelled_entities(
                         artifact.product,
-                        PathPlaceholder::Entities
+                        artifact.entities.is_empty(),
                     ))
                     .focus(PathPlaceholder::Entities.to_string()));
                 }
@@ -211,4 +210,21 @@ pub(crate) fn shown_path(
         }
     }
     shown
+}
+
+/// Why `product`'s path keeps `{@entities}`: it has no dimensions, so no
+/// `{@entities}`, as a product outside every stage has no `{@stage}`, or no
+/// `default entities:` spells it. Keep in step with `push_resolved` in
+/// `template.rs`, which writes it out otherwise.
+pub(crate) fn unspelled_entities(product: &str, dimensionless: bool) -> String {
+    let placeholder = PathPlaceholder::Entities;
+    if dimensionless {
+        format!(
+            "path rule for `{product}` uses `{placeholder}`, but `{product}` has no dimensions; put it in `[...]`, as `[{placeholder}_]`"
+        )
+    } else {
+        format!(
+            "path rule for `{product}` uses `{placeholder}`, but no `default entities:` spells it; add one, as `default entities: {{@key}}={{@value}} separated \"__\"`"
+        )
+    }
 }

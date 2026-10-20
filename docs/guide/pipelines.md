@@ -63,7 +63,7 @@ The call expands to the body's steps, and a body may call another operation with
 ## Stages
 
 ```spit
-entities: {key}={value} separated "__" empty "global"
+default entities: {@key}={@value} separated "__"
 stage preprocess:
     default path: derived/{@stage}/{@product}/{@entities}
     denoised = denoise(image)

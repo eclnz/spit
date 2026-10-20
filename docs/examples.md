@@ -56,13 +56,13 @@ Run `spit dag sweep.spit sweep.spitout --commands` to see 17 jobs: six `train`, 
 
 ## Cohort: discovery, exclusion, and grouped removal
 
-This recipe discovers session folders, removes a subject with fewer than two sessions, and excludes one damaged run while leaving its file in place. Each retained BOLD run gets motion correction and coregistration. A `many Bold` input collects runs per session; another collects session averages per subject. One default path gives all five derived products BIDS-style names: optional groups omit the session or stage where a product has none, and `{@entities}` writes the dimensions each product has as BIDS `key-value` labels, as the `entities:` line spells them.
+This recipe discovers session folders, removes a subject with fewer than two sessions, and excludes one damaged run while leaving its file in place. Each retained BOLD run gets motion correction and coregistration. A `many Bold` input collects runs per session; another collects session averages per subject. One default path gives all five derived products BIDS-style names: optional groups omit the session or stage where a product has none, and `{@entities}` writes the dimensions each product has as BIDS `key-value` labels, as `default entities:` spells them.
 
 Save as `cohort.spit`:
 
 ```spit
 # BIDS sessions with a dropped subject and an excluded motion-corrupted run.
-entities: {key}-{value} separated "_" empty ""
+default entities: {@key}-{@value} separated "_"
 default path: derivatives/sub-{sub}[/ses-{ses}][/{@stage}]/{@entities}_{@product}
 default ext: .nii.gz
 
@@ -138,8 +138,8 @@ Save as `sensors.spit`:
 # revision, compared with a station reference, split into two bands, and
 # summarised per station under that station's policy.
 
-entities: {key}_{value} separated "-" empty "global"
-entities station: site
+default entities: {@key}_{@value} separated "-"
+default entities station: site
 default path: derived/{@product}/{@entities}.csv
 
 source reading : Series [station, day]
@@ -223,7 +223,7 @@ Save as `imported.spit`:
 # Imported definitions, nested stages, aggregation and a stage path override.
 use text.spit as text
 
-entities: {key}={value} separated "__" empty "global"
+default entities: {@key}={@value} separated "__"
 default path: {@stage}/{@product}/{@entities}.txt
 
 stage preprocess:

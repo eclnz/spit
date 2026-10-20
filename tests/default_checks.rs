@@ -27,7 +27,7 @@ fn errors(text: &str) -> Vec<String> {
 
 /// The path rule every output takes, appended after a test's pipeline.
 const OUTPUT_PATHS: &str = "\
-entities: {key}={value} separated \"__\" empty \"global\"
+default entities: {@key}={@value} separated \"__\"
 default path: out/{@product}/{@entities}
 ";
 

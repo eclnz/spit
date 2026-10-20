@@ -2,7 +2,7 @@
 # devices, windows, channels, and segments. Every aggregation removes one axis.
 # Generic evidence() is instantiated independently at device, site, and org scope.
 
-entities: {key}={value} separated "__" empty "global"
+default entities: {@key}={@value} separated "__"
 
 source raw : Signal<Raw> [org, site, device, window, channel, segment]
 source calibration : Calibration [org, site, device, channel]
@@ -13,7 +13,7 @@ source target : SiteTarget [org, site]
 source policy : OrgPolicy [org]
 source schema : Schema
 
-default path: results/{@product}/{@entities}.dat
+default path: results/{@product}[/{@entities}].dat
 path raw: input/{org}/{site}/{device}/{window}/{channel}/{segment}.dat
 path schema: config/schema.dat
 

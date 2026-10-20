@@ -252,16 +252,6 @@ pub(crate) fn collect_paths(
                 .map(|(product, template)| (template, lines.paths.get(product).cloned())),
         );
     for (template, line) in rules {
-        if pipeline.entities_format.is_none() && template.names_entities() {
-            errors.push(
-                error(format!(
-                    "`{}` needs an `entities:` line to spell it; add one, as `entities: {{key}}={{value}} separated \"__\" empty \"global\"`",
-                    PathPlaceholder::Entities
-                ))
-                .at(line.clone())
-                .focus(PathPlaceholder::Entities.to_string()),
-            );
-        }
         let unknown: BTreeSet<_> = template
             .group_dimensions()
             .filter(|dimension| !had.contains(dimension))
@@ -328,27 +318,6 @@ pub(crate) fn collect_paths(
                 {
                     errors.push(error(problem.message).at(line.clone()));
                 }
-            }
-            // An empty spelling writes nothing, so only a group may hold it.
-            let writes_nothing = product.dimensions.is_empty()
-                && pipeline
-                    .entities_format
-                    .as_ref()
-                    .is_some_and(|format| format.empty.is_empty());
-            if writes_nothing
-                && index
-                    .path_rule_for(&product.name)
-                    .is_some_and(PathTemplate::needs_entities)
-            {
-                errors.push(
-                    error(format!(
-                        "`{0}` has no dimensions, so `{1}` writes nothing in its path; put it in `[...]`, as `[{1}_]`",
-                        product.name,
-                        PathPlaceholder::Entities
-                    ))
-                    .at(line.clone())
-                    .focus(PathPlaceholder::Entities.to_string()),
-                );
             }
             // `parse` checked the rule as written; a dropped group can leave
             // two open shapes touching in this product's path.

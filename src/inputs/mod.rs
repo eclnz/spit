@@ -166,7 +166,6 @@ fn check_input_lines(text: &str) -> Result<(), ParseError> {
                     | Keyword::Checks
                     | Keyword::Stage
                     | Keyword::Dimensions
-                    | Keyword::Entities
                     | Keyword::Sidecars
                     | Keyword::Use
             )
@@ -232,6 +231,7 @@ fn finish_spec(
     }
     inputs.source_paths = pipeline.product_paths;
     inputs.source_default = pipeline.path_template;
+    inputs.source_entities = pipeline.entities_format;
     if let Some(folder) = folder {
         read_exclusion_files(&mut inputs, folder)?;
     }
@@ -277,6 +277,14 @@ impl InputSpec {
             }
             if pipeline.product_paths.contains_key(name) {
                 return Err(InputError::PathInBoth { product });
+            }
+        }
+        if let Some(format) = &self.rules.source_entities {
+            let dimensions = pipeline.dimension_order();
+            if let Some(dimension) = format.labels.keys().find(|name| !dimensions.contains(name)) {
+                return Err(InputError::Path(crate::paths::error(format!(
+                    "the recipe's entity label names unknown dimension `{dimension}`"
+                ))));
             }
         }
         // Directory discovery finds every source's files.

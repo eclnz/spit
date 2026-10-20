@@ -30,7 +30,7 @@ operation strip(t1: Image) -> (brain: Image .nii.gz, mask: Image \"_mask.nii.gz\
 command strip: bet {t1} {brain} -m
 image, meta = convert(dicom)
 brain, mask = strip(image)
-entities: {key}={value} separated \"__\" empty \"global\"\n";
+default entities: {@key}={@value} separated \"__\"\n";
 
 #[test]
 fn a_beside_output_takes_its_siblings_path_and_name() {
@@ -62,7 +62,7 @@ fn a_beside_output_follows_its_siblings_own_rule() {
     let staged = parse_pipeline(
         "default path: {@stage}/{@product}/{@entities}\nsource dicom [sub]\npath dicom: in/{sub}\n\
          operation convert(dicom) -> (image: Image .nii.gz, meta .json beside image)\n\
-         stage import:\n    image, meta = convert(dicom)\nentities: {key}={value} separated \"__\" empty \"global\"\n",
+         stage import:\n    image, meta = convert(dicom)\ndefault entities: {@key}={@value} separated \"__\"\n",
     )
     .unwrap();
     assert_eq!(path(&staged, "meta"), "{@stage}/image/sub={sub}.json");
@@ -157,7 +157,7 @@ fn a_beside_output_cannot_share_a_path_with_another_product() {
          operation convert(dicom) -> (image: Image .nii.gz, meta: Json .json beside image)\n\
          command convert: convert {dicom} {image}\n\
          operation note(dicom) -> Json .json\ncommand note: note {dicom} {@output}\n\
-         image, meta = convert(dicom)\nn = note(dicom)\nentities: {key}={value} separated \"__\" empty \"global\"\n",
+         image, meta = convert(dicom)\nn = note(dicom)\ndefault entities: {@key}={@value} separated \"__\"\n",
     );
     assert!(
         found.iter().any(|message| message.contains(

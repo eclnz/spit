@@ -25,8 +25,9 @@ pub type PathError = Located<PathProblem>;
 pub(crate) enum PathPlaceholder {
     /// `{@product}`: the product's name.
     Product,
-    /// `{@entities}`: every dimension, in the pipeline's order, as its
-    /// `entities:` line spells them. A product's template has it written out.
+    /// `{@entities}`: every dimension, in the pipeline's order, as the
+    /// nearest `default entities:` spells them. A product's template has it
+    /// written out, unless the product has no dimensions or no spelling.
     Entities,
     /// `{@stage}`: the stage whose block holds the step.
     Stage,
@@ -56,7 +57,7 @@ impl PathPlaceholder {
                 "`{{{name}}}`: a built-in placeholder takes no shape; write the dimension, as `sub-{{sub:digits}}`"
             )),
             Some("labels") => Err(
-                "`{@labels}` is gone: write the spelling in an `entities:` line, as `entities: {key}-{value} separated \"_\" empty \"\"`, and use `{@entities}`".to_owned(),
+                "`{@labels}` is gone: spell `{@entities}` the same way, with `default entities: {@key}-{@value} separated \"_\"`".to_owned(),
             ),
             Some(built_in) => Self::built_in(built_in).ok_or_else(|| {
                 format!(
@@ -86,7 +87,7 @@ impl PathPlaceholder {
     pub(crate) fn hint(name: &str) -> Option<String> {
         let meaning = match Self::built_in(name)? {
             Self::Product => "the product's name",
-            Self::Entities => "every dimension, as the `entities:` line spells them",
+            Self::Entities => "every dimension, as `default entities:` spells them",
             Self::Stage => "the stage that makes it",
             Self::Dimension(..) => return None,
         };
@@ -139,12 +140,7 @@ impl Holder<'_> {
     fn has(self, placeholder: &PathPlaceholder) -> bool {
         match placeholder {
             PathPlaceholder::Product => true,
-            PathPlaceholder::Entities => {
-                !self.dimensions.is_empty()
-                    || self
-                        .entities_format
-                        .is_none_or(|format| !format.empty.is_empty())
-            }
+            PathPlaceholder::Entities => !self.dimensions.is_empty(),
             PathPlaceholder::Stage => self.in_stage,
             PathPlaceholder::Dimension(name, _) => self.dimensions.contains(name),
         }
@@ -239,17 +235,8 @@ impl PathTemplate {
         })
     }
 
-    /// Whether the template names `{@entities}`, in a `[...]` group or not.
-    pub(crate) fn names_entities(&self) -> bool {
-        let entities = |part: &PathPart| *part == PathPart::Placeholder(PathPlaceholder::Entities);
-        self.parts.iter().any(|part| match part {
-            PathPart::Group(group) => group.iter().any(entities),
-            part => entities(part),
-        })
-    }
-
     /// Whether the template names `{@entities}` outside a `[...]` group, so
-    /// that it writes the empty spelling for a product with no dimensions.
+    /// that only a product with dimensions can use it.
     pub(crate) fn needs_entities(&self) -> bool {
         self.parts
             .contains(&PathPart::Placeholder(PathPlaceholder::Entities))
@@ -552,13 +539,13 @@ fn push_literal(parts: &mut Vec<PathPart>, value: &str) {
 fn push_resolved(parts: &mut Vec<PathPart>, part: &PathPart, holder: Holder<'_>) {
     match part {
         PathPart::Literal(value) => push_literal(parts, value),
-        PathPart::Placeholder(PathPlaceholder::Entities) if holder.entities_format.is_some() => {
-            let format = holder
-                .entities_format
-                .expect("custom entities expansion has a format");
-            if holder.dimensions.is_empty() {
-                push_literal(parts, &encode_component(&format.empty));
-            }
+        // A product with no dimensions keeps `{@entities}`, which binding
+        // fails as it fails `{@stage}` outside every stage.
+        PathPart::Placeholder(PathPlaceholder::Entities) if !holder.dimensions.is_empty() => {
+            let Some(format) = holder.entities_format else {
+                parts.push(part.clone());
+                return;
+            };
             for (index, dimension) in holder.dimensions.iter().enumerate() {
                 if index > 0 {
                     push_literal(parts, &format.separator);
