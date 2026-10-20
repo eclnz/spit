@@ -99,7 +99,7 @@ fn the_nearest_file_shows_the_rule_with_its_shape() {
     tree.write(
         "a.spit",
         "source log [server, date]\npath log: logs/{server}/{date:date}.log\n\
-         operation d(log) -> .json\ncommand d: d {log} {@output}\nout = d(log)\n",
+         operation d(log) -> .json\ncommand d: d {log} {@output}\nout = d(log)\ndefault entities: {@key}={@value} separated \"__\"\npath out: out/{@product}/{@entities}\n",
     );
     let output = run(&tree, &["dag", "a.spit", "--root", "."]);
     let stderr = text(&output.stderr);
@@ -279,11 +279,11 @@ fn a_shape_on_an_output_or_a_default_is_an_error() {
         "{output}"
     );
     let default = check(
-        "source s [d]\npath s: in/{d}.txt\npath: out/{@product}/{d:digits}\n\
+        "source s [d]\npath s: in/{d}.txt\ndefault path: out/{@product}/{d:digits}\n\
          operation f(s) -> .txt\ncommand f: f {s} {@output}\no = f(s)\n",
     );
     assert!(
-        default.contains("`path:` is the default for outputs too"),
+        default.contains("`default path:` is the rule for outputs too"),
         "{default}"
     );
 }
@@ -294,7 +294,7 @@ fn a_record_whose_value_fails_its_rules_shape_is_rejected() {
     tree.write(
         "a.spit",
         "source log [server, date]\npath log: logs/{server}/{date:date}.log\n\
-         operation d(log) -> .json\ncommand d: d {log} {@output}\nout = d(log)\n",
+         operation d(log) -> .json\ncommand d: d {log} {@output}\nout = d(log)\ndefault entities: {@key}={@value} separated \"__\"\npath out: out/{@product}/{@entities}\n",
     );
     tree.write("a.spitin", "pipeline a.spit\nroot .\n");
     tree.write(
@@ -327,15 +327,16 @@ fn two_sources_with_one_dimension_name_collide_whatever_their_shapes() {
 #[test]
 fn the_default_owner_error_names_the_rule_to_write() {
     let said = check(
-        "source s [d]\npath: in/{d:digits}.txt\noperation f(s) -> .txt\ncommand f: f {s} {@output}\no = f(s)\n",
+        "source s [d]\ndefault path: in/{d:digits}.txt\noperation f(s) -> .txt\ncommand f: f {s} {@output}\no = f(s)\n",
     );
     assert!(
         said.contains("write the shape in a `path` rule for each source, as `path <source>: ...`"),
         "{said}"
     );
     assert!(!said.contains("path source:"), "{said}");
-    let fixed =
-        check("source s [d]\npath: out/{@product}/{@entities}\npath s: in/{d:digits}.txt\n");
+    let fixed = check(
+        "source s [d]\ndefault path: out/{@product}/{@entities}\npath s: in/{d:digits}.txt\ndefault entities: {@key}={@value} separated \"__\"\n",
+    );
     assert!(fixed.contains("Pipeline valid."), "{fixed}");
 }
 
@@ -345,7 +346,7 @@ fn a_dropped_group_can_leave_two_open_shapes_touching() {
     tree.write("a.spit", "source s [a, b]\nsource t [a, b, c]\n");
     tree.write(
         "a.spitin",
-        "pipeline a.spit\nroot .\npath: in/{a:digits}[-{c}]{b:digits}.txt\n",
+        "pipeline a.spit\nroot .\ndefault path: in/{a:digits}[-{c}]{b:digits}.txt\n",
     );
     let said = text(&run(&tree, &["check", "a.spitin"]).stderr);
     assert!(
@@ -366,7 +367,7 @@ fn a_dropped_group_leaving_a_separator_is_fine() {
     tree.write("a.spit", "source s [a, b]\nsource t [a, b, c]\n");
     tree.write(
         "a.spitin",
-        "pipeline a.spit\nroot .\npath: in/{a:digits}-[{c}-]{b:digits}.txt\n",
+        "pipeline a.spit\nroot .\ndefault path: in/{a:digits}-[{c}-]{b:digits}.txt\n",
     );
     let said = text(&run(&tree, &["check", "a.spitin"]).stdout);
     assert!(said.contains("Recipe valid."), "{said}");
@@ -488,7 +489,7 @@ fn a_recipes_shared_default_takes_a_shape() {
     tree.write("p.spit", "source s [d]\n");
     tree.write(
         "a.spitin",
-        "pipeline p.spit\nroot .\npath: in/{d:date}.txt\n",
+        "pipeline p.spit\nroot .\ndefault path: in/{d:date}.txt\n",
     );
     let stdout = text(&run(&tree, &["inputs", "a.spitin"]).stdout);
     assert!(

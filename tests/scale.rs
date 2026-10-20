@@ -34,7 +34,7 @@ fn a_long_chain_of_steps_compiles_without_overflowing_the_stack() {
 #[ignore = "slow in a debug build; run with --release"]
 fn many_sources_resolve_in_reasonable_time() {
     let pipeline =
-        parse_pipeline("source raw : T [sub]\noperation f(input: T) -> U\nout = f(raw)\n").unwrap();
+        parse_pipeline("source raw : T [sub]\noperation f(input: T) -> U\nout = f(raw)\ndefault entities: {@key}={@value} separated \"__\"\npath out: out/{@product}/{@entities}\n").unwrap();
     let mut records = String::from("sources:\n");
     for index in 0..40_000 {
         records += &format!("    raw[sub={index}]\n");
@@ -57,10 +57,10 @@ fn bad_steps(steps: usize, step: impl Fn(usize) -> String) -> String {
     text
 }
 
-/// Error recovery blanks the lines it reports and reads on, so each bad line
-/// must cost its own work, not another reading of the whole file: the editor
-/// takes this path on every change. 20,000 bad lines took minutes when each
-/// was read again; they take well under a second now.
+/// Error recovery reads past the lines it reports in one parse, so each bad
+/// line must cost its own work, not another reading of the whole file: the
+/// editor takes this path on every change. 20,000 bad lines took minutes
+/// when each was read again; they take well under a second now.
 #[test]
 #[ignore = "slow in a debug build; run with --release"]
 fn many_bad_selectors_are_reported_in_reasonable_time() {
@@ -97,22 +97,44 @@ fn many_calls_to_an_operation_that_failed_to_declare_are_left_out_in_reasonable_
     assert!(start.elapsed() < Duration::from_secs(10));
 }
 
-/// A clean lowering failure can end an operation body. Report the other
-/// failures in the original structure together, then reparse the blanked
-/// lines to discover any errors exposed by the changed body boundaries.
+/// A failing line that ends an operation's body, with a line indented
+/// beneath the body after it, cost a parse each while recovery blanked the
+/// failed line and parsed again (#90).
 #[test]
 #[ignore = "slow in a debug build; run with --release"]
 fn many_bad_steps_that_end_bodies_are_reported_in_reasonable_time() {
     let mut text = String::from("source raw : T [sub]\noperation step(input: T) -> T\n");
-    for index in 0..2_000 {
+    for index in 0..20_000 {
         text += &format!(
             "operation body{index}(input: T) -> (out: T):\n    out = step(input)\np{index} = nostep(raw)\n    extra = step(input)\n"
         );
     }
     let start = Instant::now();
     let issues = diagnose(&text, None);
-    assert_eq!(issues.len(), 2_000);
+    assert_eq!(issues.len(), 20_000);
     assert!(start.elapsed() < Duration::from_secs(10));
+}
+
+/// A body header that fails, here for an output no step makes, and a call
+/// whose expansion fails inside a nested call each cost a parse while
+/// lowering could stop part way through a statement (#90).
+#[test]
+#[ignore = "slow in a debug build; run with --release"]
+fn many_bad_body_headers_and_nested_call_failures_are_reported_in_reasonable_time() {
+    let mut headers = with_step("");
+    let mut nested = with_step(
+        "operation inner(x: T) -> (o: T):\n    o = step(x @ where(sub=1))\noperation outer(x: T) -> (o: T):\n    m = step(x)\n    o = inner(m)\n",
+    );
+    for index in 0..20_000 {
+        headers += &format!("operation body{index}(x: T) -> (r: T, s: T):\n    r = step(x)\n");
+        nested += &format!("r{index} = outer(raw @ where(sub=2))\n");
+    }
+    for (kind, text) in [("headers", headers), ("nested", nested)] {
+        let start = Instant::now();
+        let issues = diagnose(&text, None);
+        assert_eq!(issues.len(), 20_000, "{kind}");
+        assert!(start.elapsed() < Duration::from_secs(10), "{kind}");
+    }
 }
 
 /// The best of a few runs of `work`, which steadies a timing against noise.
@@ -236,7 +258,12 @@ fn a_body_with_every_step_failing_is_reported_in_reasonable_time() {
 #[test]
 #[ignore = "slow in a debug build; run with --release"]
 fn many_repeated_path_extension_and_check_lines_are_reported_in_reasonable_time() {
-    for first in ["path: a", "path raw: a", "ext: .a", "check: nonempty"] {
+    for first in [
+        "default path: a",
+        "path raw: a",
+        "default ext: .a",
+        "default check: nonempty",
+    ] {
         let text =
             format!("source raw : T [sub]\n{first}\n") + &format!("{first}\n").repeat(20_000);
         let start = Instant::now();

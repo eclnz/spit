@@ -5,6 +5,9 @@ Types help SPIT catch wiring mistakes while the pipeline is compiled. They are o
 ## Type declarations
 
 ```spit
+default entities: {@key}={@value} separated "__"
+default path: out/{@product}/{@entities}
+
 source raw : Frame<Native> [sample]
 source reference : Reference<Target> [sample]
 

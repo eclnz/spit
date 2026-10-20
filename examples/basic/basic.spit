@@ -1,4 +1,7 @@
 # A small pipeline; its inputs are in basic.spitout.
+default entities: {@key}={@value} separated "__"
+default path: out/{@product}/{@entities}
+
 source bold : BOLD [sub, ses, run]
 source t1w : T1w [sub, ses]
 

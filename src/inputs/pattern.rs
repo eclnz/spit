@@ -10,8 +10,8 @@ use rustc_hash::FxHashSet;
 
 use crate::model::{Pipeline, PipelineIndex, ProductDef};
 use crate::paths::{
-    encode_component, error, product_text, stage_directories, PathError, PathPart, PathPlaceholder,
-    PathTemplate, Shape,
+    error, product_text, stage_directories, unspelled_entities, PathError, PathPart,
+    PathPlaceholder, PathTemplate, Shape,
 };
 
 /// One piece of a path rule: text written as is, or a dimension's value.
@@ -57,18 +57,13 @@ pub(super) fn path_pattern(
             PathPart::Placeholder(PathPlaceholder::Product) => {
                 pieces.push(Piece::Literal(product_text(&product.name).into_owned()));
             }
+            // A source with dimensions and a spelling has `{@entities}`
+            // written out; the path checks fail the rest first.
             PathPart::Placeholder(PathPlaceholder::Entities) => {
-                if product.dimensions.is_empty() {
-                    pieces.push(Piece::Literal("global".to_owned()));
-                }
-                for (index, dimension) in product.dimensions.iter().enumerate() {
-                    let separator = if index == 0 { "" } else { "__" };
-                    pieces.push(Piece::Literal(format!(
-                        "{separator}{}=",
-                        encode_component(dimension)
-                    )));
-                    pieces.push(Piece::Value(dimension.clone(), None));
-                }
+                return Err(error(unspelled_entities(
+                    &product.name,
+                    product.dimensions.is_empty(),
+                )))
             }
             PathPart::Placeholder(PathPlaceholder::Stage) => match stage {
                 Some(stage) => pieces.push(Piece::Literal(stage.to_owned())),
@@ -85,15 +80,6 @@ pub(super) fn path_pattern(
             },
             PathPart::Placeholder(PathPlaceholder::Dimension(dimension, shape)) => {
                 pieces.push(Piece::Value(dimension.clone(), *shape));
-            }
-            // A source with dimensions has `{@labels}` written out, and
-            // its groups resolved; `inspect_paths` rejects the rest first.
-            PathPart::Placeholder(PathPlaceholder::Labels) => {
-                return Err(error(format!(
-                    "path rule for source `{}` uses `{}`, but the source has no dimensions",
-                    product.name,
-                    PathPlaceholder::Labels
-                )))
             }
             PathPart::Group(_) => unreachable!("a product's template has its groups resolved"),
         }

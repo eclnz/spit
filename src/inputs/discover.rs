@@ -477,9 +477,7 @@ fn require_source_files(
                 product.artifact_type.clone(),
                 binding.clone(),
             );
-            let relative = binder.bind(&product.dimensions, artifact.view(), || {
-                format!("source `{artifact}`")
-            })?;
+            let relative = binder.bind(artifact.view(), || format!("source `{artifact}`"))?;
             let full = root.join(&relative);
             // The listing keeps each directory entry's actual spelling, which
             // `is_file` alone would not on a case-insensitive filesystem
@@ -705,9 +703,7 @@ pub(crate) fn locate_sources(
             product.artifact_type.clone(),
             record.entities.clone(),
         );
-        let path = binder.bind(&product.dimensions, artifact.view(), || {
-            format!("source `{artifact}`")
-        })?;
+        let path = binder.bind(artifact.view(), || format!("source `{artifact}`"))?;
         if let Some(given) = &record.path {
             if *given != path {
                 return Err(error(format!(

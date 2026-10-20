@@ -66,9 +66,6 @@ pub fn pipeline_hovers(text: &str, path: &Path) -> Vec<Hover> {
     let (document, _) = recover_document(text, |text| {
         parse_located_document_recovering(text, path, Kind::Pipeline)
     });
-    let Some(document) = document else {
-        return Vec::new();
-    };
     let pipeline = &document.pipeline;
     let checked = collect_pipeline(pipeline);
     let steps = &checked.pipeline.steps;
@@ -454,16 +451,14 @@ fn product_details(
             (None, Some((PathOrigin::Stage(stage), _))) => {
                 format!("Path template: {path} (inherited from stage {stage}).")
             }
-            (None, Some((PathOrigin::BuiltIn, _))) => {
-                format!("Path template: {path} (built-in output default).")
-            }
             (None, Some((PathOrigin::Default, _))) => {
                 format!("Path template: {path} (pipeline default).")
             }
-            (None, None) => {
+            (None, None) if index.is_source(&product.name) => {
                 "No pipeline path rule; a recipe or inventory must supply the source path."
                     .to_owned()
             }
+            (None, None) => "No path rule; the pipeline must give one.".to_owned(),
         },
     );
     details

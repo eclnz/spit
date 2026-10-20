@@ -14,7 +14,7 @@ use spit::{
 use support::Tree;
 
 const PIPELINE: &str = "\
-path: derivatives/{@product}/{@entities}.txt
+default path: derivatives/{@product}/{@entities}.txt
 source image : Image<T1w> [sub, ses, run]
 path image: sub-{sub}/ses-{ses}/anat/sub-{sub}_ses-{ses}_run-{run}_T1w.nii
 source mask : Mask [sub]
@@ -38,7 +38,7 @@ averaged = average(aligned @ vary(run))
 operation compare(image: Image<$K>, reference: Reference) -> Score
 command compare: score {image} {reference} -o {@output}
 score = compare(averaged, reference)
-";
+default entities: {@key}={@value} separated \"__\"\n";
 
 const DISCOVER: &str = "discover sessions: [sub, ses] from dirs sub-{sub}/ses-{ses}\n";
 /// A `require` rule that the gaps dataset fails.

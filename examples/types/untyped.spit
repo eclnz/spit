@@ -1,4 +1,7 @@
 # Types are optional; product names, dimensions, and cardinality resolve the DAG.
+default entities: {@key}={@value} separated "__"
+default path: out/{@product}/{@entities}
+
 source raw [subject, repeat]
 
 operation process(input)

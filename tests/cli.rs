@@ -110,7 +110,7 @@ other = f(extra @ where(subject=z))
 both = g(cleaned, image)
 path image: in/{subject}.img
 path extra: in/{subject}.extra
-",
+default entities: {@key}={@value} separated \"__\"\npath cleaned: out/{@product}[/{@entities}]\npath other: out/{@product}[/{@entities}]\npath both: out/{@product}[/{@entities}]\n",
     );
     let inputs = tree.write(
         "inputs.spitout",
@@ -275,7 +275,7 @@ fn path_rules_report_fallbacks_and_check_accepts_them() {
     assert!(rules.status.success(), "{}", stderr(&rules));
     let report = stdout(&rules);
     assert!(report.contains("raw_photo (source): explicit"));
-    assert!(report.contains("photo_response (output): default derivatives/{@product}/{@entities}.txt, `.txt` from operation `estimate_response`"));
+    assert!(report.contains("photo_response (output): default derivatives/{@product}/site={site}__visit={visit}.txt, `.txt` from operation `estimate_response`"));
     assert!(report.contains("vegetation (output): default"));
 
     // A rule that resolves is enough, whether it is a product's own or a
@@ -323,8 +323,8 @@ fn check_json_reads_the_pipeline_file_and_dag_json_emits_the_spitdag() {
     assert_eq!(
         stdout(&check),
         "{\"diagnostics\":[],\"paths\":[\
-         {\"product\":\"sorted\",\"line\":10,\"path\":\"sorted/{@entities}.txt\"},\
-         {\"product\":\"merged\",\"line\":14,\"path\":\"merged/{@entities}.txt\"}]}\n"
+         {\"product\":\"sorted\",\"line\":12,\"path\":\"sorted/group={group}__part={part}.txt\"},\
+         {\"product\":\"merged\",\"line\":16,\"path\":\"merged/group={group}.txt\"}]}\n"
     );
     let run = || {
         spit(&[
@@ -401,17 +401,22 @@ fn dag_json_stage_is_an_array_of_names() {
 }
 
 #[test]
-fn path_rules_show_the_built_in_default_for_an_output_with_no_rule() {
+fn path_rules_reject_an_output_with_no_rule() {
     let tree = Tree::new("cli-paths", &[]);
     let directory = tree.path();
     let file = directory.join("spit paths.spit");
     let pipeline =
         "source raw [id]\npath raw: input/{id}.txt\noperation copy(input)\nresult = copy(raw)\n";
     fs::write(&file, pipeline).unwrap();
-    let built_in = spit(&["check", file.to_str().unwrap(), "--path-rules"]);
-    assert!(built_in.status.success(), "{}", stderr(&built_in));
+    // There is no built-in path: an output needs a rule, or a default.
+    let unruled = spit(&["check", file.to_str().unwrap(), "--path-rules"]);
+    assert!(!unruled.status.success());
     assert!(
-        stdout(&built_in).contains("result (output): built-in default out/{@product}/{@entities}")
+        stderr(&unruled).contains(
+            "line 4, column 1: output `result` has no path rule; write `path result: ...`, or a `default path:` for the pipeline or its stage"
+        ),
+        "{}",
+        stderr(&unruled)
     );
 }
 
@@ -420,7 +425,7 @@ fn recipe_path_rules_show_combined_coverage_and_origin() {
     let tree = Tree::new("cli-recipe-paths", &[]);
     let pipeline = tree.write(
         "analysis.spit",
-        "source raw [id]\noperation copy(input)\nresult = copy(raw)\npath result: output/{id}.txt\n",
+        "source raw [id]\noperation copy(input)\nresult = copy(raw)\npath result: output/{id}.txt\ndefault entities: {@key}={@value} separated \"__\"\n",
     );
     let recipe = tree.write(
         "data.spitin",
@@ -454,7 +459,7 @@ fn recipe_path_rules_show_combined_coverage_and_origin() {
     );
     tree.write(
         "data.spitin",
-        "pipeline analysis.spit\nroot .\npath: input/{@product}/{@entities}\n",
+        "pipeline analysis.spit\nroot .\ndefault path: input/{@product}/{@entities}\n",
     );
     let defaulted = spit(&["check", recipe.to_str().unwrap()]);
     assert!(defaulted.status.success(), "{}", stderr(&defaulted));
@@ -465,7 +470,7 @@ fn a_recorded_source_with_no_path_rule_is_not_looked_for_under_out() {
     let tree = Tree::new("cli-unruled-source", &[]);
     let pipeline = tree.write(
         "analysis.spit",
-        "source raw [id]\noperation copy(input)\nresult = copy(raw)\n",
+        "source raw [id]\noperation copy(input)\nresult = copy(raw)\ndefault entities: {@key}={@value} separated \"__\"\npath result: out/{@product}[/{@entities}]\n",
     );
     let records = tree.write("inputs.spitout", "sources:\n    raw[id=1]\n");
     let args = [
@@ -500,7 +505,7 @@ fn a_message_names_the_file_it_is_about_when_that_file_was_not_given() {
     fs::write(
         &pipeline,
         "source raw [id]\npath raw: in/{id}.txt\nsource ref [id]\npath ref: ref/{id}.txt\n\
-         operation link(raw, ref)\nlinked = link(raw, ref)\n",
+         operation link(raw, ref)\nlinked = link(raw, ref)\ndefault entities: {@key}={@value} separated \"__\"\npath linked: out/{@product}[/{@entities}]\n",
     )
     .unwrap();
     let recipe = directory.join("data.spitin");
@@ -534,7 +539,7 @@ fn a_message_names_the_file_it_is_about_when_that_file_was_not_given() {
     // the records are named, as their lines are in another file.
     fs::write(
         &pipeline,
-        "source raw [id]\noperation link(raw)\nlinked = link(raw)\n",
+        "source raw [id]\noperation link(raw)\nlinked = link(raw)\ndefault entities: {@key}={@value} separated \"__\"\npath linked: out/{@product}[/{@entities}]\n",
     )
     .unwrap();
     let records = directory.join("inputs.spitout");
@@ -558,13 +563,13 @@ fn check_prints_every_diagnostic_and_fails_only_on_errors() {
     let broken = directory.join("broken.spit");
     fs::write(
         &broken,
-        "source raw [id, batch]\npath: {@product}/{@entities}.txt\npath raw: in/{id}.txt\noperation clean(input)\ncleaned = clean(rwa)\n",
+        "source raw [id, batch]\ndefault path: {@product}/{@entities}.txt\npath raw: in/{id}.txt\noperation clean(input)\ncleaned = clean(rwa)\ndefault entities: {@key}={@value} separated \"__\"\n",
     )
     .unwrap();
     let warned = directory.join("warned.spit");
     fs::write(
         &warned,
-        "source raw [id]\nsource spare [id]\noperation clean(input)\ncleaned = clean(raw)\n",
+        "source raw [id]\nsource spare [id]\noperation clean(input)\ncleaned = clean(raw)\ndefault entities: {@key}={@value} separated \"__\"\npath cleaned: out/{@product}[/{@entities}]\n",
     )
     .unwrap();
     let broken_check = spit(&["check", broken.to_str().unwrap()]);
@@ -631,7 +636,7 @@ fn a_recipe_run_in_memory_prints_each_pipeline_warning_once() {
     tree.write(
         "analysis.spit",
         "source raw : Raw [id]\nsource spare : Raw [id]\npath raw: in/{id}.txt\n\
-         path spare: sp/{id}.txt\npath: out/{@product}/{id}.txt\n\
+         path spare: sp/{id}.txt\ndefault path: out/{@product}/{id}.txt\n\
          operation clean(raw: Raw) -> Clean\ncommand clean: tool {raw} {@output}\ncleaned = clean(raw)\n",
     );
     let recipe = tree.write("data.spitin", "pipeline analysis.spit\nroot .\n");
@@ -670,7 +675,7 @@ fn drop_rules_that_remove_every_group_stop_each_command() {
         "analysis.spit",
         "source image : Img [sub, ses]\npath image: data/sub-{sub}/ses-{ses}/image.nii\n\
          operation clean(img: Img) -> Clean\ncommand clean: tool {img} {@output}\n\
-         path: out/{@product}/{sub}_{ses}.txt\ncleaned = clean(image)\n",
+         default path: out/{@product}/{sub}_{ses}.txt\ncleaned = clean(image)\n",
     );
     // Every subject has one session, so the drop removes every subject;
     // before, a `require` after it checked nothing and passed.

@@ -6,27 +6,31 @@ use std::collections::BTreeMap;
 
 use crate::model::{CountRequirement, CoverageAction, CoverageRule};
 
+use super::keyword::Keyword;
 use super::lexical::{comma_items, identifier, qualified_identifier};
 use super::ParseError;
 
-pub(super) fn parse_coverage_rule(line: &str, number: usize) -> Result<CoverageRule, ParseError> {
-    if let Some(rest) = line.strip_prefix("exclude ") {
-        return parse_drop(rest, number);
-    }
-    if let Some(rest) = line.strip_prefix("drop ") {
-        return Err(ParseError::new(
+/// Parse a `require` or conditional `exclude` rule, `rest` being the text
+/// after its `keyword`.
+pub(super) fn parse_coverage_rule(
+    keyword: Keyword,
+    rest: &str,
+    number: usize,
+) -> Result<CoverageRule, ParseError> {
+    let rest = rest.trim_start();
+    match keyword {
+        Keyword::Exclude => parse_drop(rest, number),
+        Keyword::Drop => Err(ParseError::new(
             number,
             format!("`drop` is replaced by conditional `exclude`: write `exclude {rest}`"),
-        ));
+        )),
+        Keyword::Skip => Err(skip_replaced(rest, number)),
+        _ => parse_require(
+            rest,
+            number,
+            "expected `require [dimensions] where source` and a condition: `count=1`, `has run=1,2`, or both",
+        ),
     }
-    if let Some(rest) = line.strip_prefix("skip ") {
-        return Err(skip_replaced(rest, number));
-    }
-    let syntax = "expected `require [dimensions] where source` and a condition: `count=1`, `has run=1,2`, or both";
-    let rest = line
-        .strip_prefix("require ")
-        .ok_or_else(|| ParseError::new(number, syntax))?;
-    parse_require(rest, number, syntax)
 }
 
 /// Parse the text after `require`: `[dimensions] where source`, then a
