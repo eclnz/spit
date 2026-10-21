@@ -18,7 +18,7 @@ use self::definitions::{
 };
 use self::steps::step_shape;
 pub(crate) use self::steps::StepShape;
-use self::types::infer_types;
+use self::types::{check_calls, infer_types};
 
 /// A pipeline whose declarations and steps hold without any inventory.
 pub(crate) struct CompiledPipeline<'a> {
@@ -126,6 +126,14 @@ pub(crate) fn collect_pipeline(pipeline: &Pipeline) -> PipelineCheck<'_> {
             }
         }
     }
+    check_calls(
+        &pipeline.calls,
+        &operations,
+        &products,
+        &inferred_types,
+        &mut errors,
+        &mut poisoned,
+    );
     PipelineCheck {
         pipeline: CompiledPipeline { steps },
         errors,

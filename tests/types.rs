@@ -493,3 +493,81 @@ fn a_type_a_call_of_a_generic_body_cannot_have_is_reported_at_that_call() {
         )]
     );
 }
+
+#[test]
+fn a_call_of_an_operation_with_a_body_is_held_to_its_signature() {
+    // Each error as its line, the text it points at, its message and the
+    // lines it relates.
+    let errors = |calls: &str| -> Vec<(usize, String, String, Vec<usize>)> {
+        let text = format!(
+            "{FRAMES}source tx : Transform<Native,Target> [site]\npath tx: in/{{site}}/x.txt\n\
+             operation warp(x: Frame<A>, t: Transform<A,B>) -> Frame<B>\n\
+             command warp: warp {{x}} {{t}} {{@output}}\n{calls}"
+        );
+        support::errors(spit::diagnose(&text, None))
+            .into_iter()
+            .map(|error| {
+                let line = error.line.unwrap_or_default();
+                let columns = error.columns.clone().unwrap_or_default();
+                let at = text.lines().nth(line - 1).unwrap_or_default()[columns].to_owned();
+                let related = error.related.iter().map(|place| place.line).collect();
+                (line, at, error.message, related)
+            })
+            .collect()
+    };
+    let error = |line: usize, at: &str, message: &str, related: &[usize]| {
+        (line, at.to_owned(), message.to_owned(), related.to_vec())
+    };
+    // The output the signature gives is not the one the body makes.
+    let align = "operation align(frame: Frame<S>, t: Transform<S,T>) -> (aligned: Frame<S>):\n    aligned = warp(frame, t)\n";
+    assert_eq!(
+        errors(&format!("{align}a = align(native, tx)\n")),
+        [error(
+            23,
+            "a",
+            "type conflict at `align.aligned` (product `a`): variable `S` was inferred as Native, but now requires Target",
+            &[],
+        )]
+    );
+    assert_eq!(
+        errors(&format!(
+            "{}a = align(native, tx)\n",
+            align.replace("aligned: Frame<S>", "aligned: Frame<T>")
+        )),
+        []
+    );
+    // An input the signature does not accept, though the body's steps do.
+    let tally = "operation tally(frame: Frame<Native>) -> (s):\n    s = measure(frame)\n";
+    assert_eq!(
+        errors(&format!("{tally}a = tally(native)\nb = tally(target)\n")),
+        [error(
+            24,
+            "target",
+            "type mismatch at `tally.frame`: product `target` is Frame<Target>, expected Frame<Native>",
+            &[],
+        )]
+    );
+    // Called in a body, reported at the call written in the pipeline.
+    assert_eq!(
+        errors(&format!(
+            "{tally}operation outer(frame: Frame<S>) -> (s):\n    s = tally(frame)\nc = outer(target)\n"
+        )),
+        [error(
+            25,
+            "target",
+            "in `c = outer(...)`: type mismatch at `tally.frame`: product `target` is Frame<Target>, expected Frame<Native>",
+            &[24],
+        )]
+    );
+    // One variable holds across the inputs of one call, and only that call.
+    let pair = "operation pair(x: Frame<S>, y: Frame<S>) -> (z: Frame<S>):\n    z = smooth(x)\n";
+    assert_eq!(
+        errors(&format!("{pair}d = pair(native, native)\ne = pair(native, target)\n")),
+        [error(
+            24,
+            "target",
+            "type conflict at `pair.y` (product `target`): variable `S` was inferred as Native, but now requires Target",
+            &[],
+        )]
+    );
+}
