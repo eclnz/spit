@@ -8,9 +8,16 @@ theme:
 markdown_extensions:
   - admonition
   - pymdownx.details
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_div_format
   - tables
   - toc:
       permalink: true
+extra_javascript:
+  - https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js
 nav:
   - Home: index.md
   - Getting started: getting-started.md
@@ -30,7 +37,10 @@ nav:
   - Examples: examples.md
   - Architecture:
       - Overview: architecture.md
-      - Compiler stages: architecture/phases.md
+      - Parsing and lowering: architecture/parsing.md
+      - Inputs: architecture/inputs.md
+      - Resolution: architecture/resolution.md
       - Binding and output: architecture/binding.md
+      - Diagnostics and the editor: architecture/diagnostics.md
       - Extending SPIT: architecture/extending.md
       - Performance: architecture/performance.md
