@@ -53,13 +53,14 @@ flowchart LR
 
 ## Invariants
 
-- **Errors are data, and rendering is separate.** The same error prints as text or as JSON.
-- **The text and JSON agree on severity.** Test: `tests/severity.rs`, for the examples and for one case of each warning.
-- **Each word in `DOCS` names a section of the language reference by its `anchor`.** Test: `tests/builtin_words.rs`.
-- **The cost of diagnosing grows with the diagnostics, not the length of the file.** Test: `rendering_diagnostics_costs_the_diagnostics_not_the_length_of_the_file` in `tests/scale.rs`.
-
-The other tests are `tests/diagnostics.rs`, `tests/warnings.rs`, `tests/hovers.rs`, `tests/imported_errors.rs`, `tests/json.rs` and `tests/syntax_errors.rs`.
+- **The text and the JSON agree on each diagnostic's severity.** Tests: [`check_and_its_json_give_each_diagnostic_one_severity`](https://github.com/eclnz/spit/blob/dev/tests/severity.rs), [`every_example_checks_the_same_both_ways`](https://github.com/eclnz/spit/blob/dev/tests/severity.rs).
+- **Each error is reported once, in line order.** Test: [`every_semantic_error_is_reported_once_in_line_order`](https://github.com/eclnz/spit/blob/dev/tests/diagnostics.rs).
+- **A line with an error shows no warnings.** Test: [`a_line_with_an_error_shows_no_warnings`](https://github.com/eclnz/spit/blob/dev/tests/warnings.rs).
+- **An error in an imported file is placed in that file, and at the `use` line.** Test: [`a_body_that_reads_a_missing_product_is_reported_in_the_library`](https://github.com/eclnz/spit/blob/dev/tests/imported_errors.rs).
+- **An error in a call's step points at the call and into the body.** Tests: [`an_error_in_a_call_points_at_the_argument_the_caller_gave_and_into_the_body`](https://github.com/eclnz/spit/blob/dev/tests/composites.rs), [`an_error_in_an_imported_nested_call_relates_each_call_and_the_step`](https://github.com/eclnz/spit/blob/dev/tests/composites.rs).
+- **Each word in `DOCS` is documented once, and names a section of the language reference.** Test: [`every_word_is_documented_once_and_links_to_a_section`](https://github.com/eclnz/spit/blob/dev/tests/builtin_words.rs).
+- **The cost of diagnosing grows with the diagnostics, not the length of the file.** Test: [`rendering_diagnostics_costs_the_diagnostics_not_the_length_of_the_file`](https://github.com/eclnz/spit/blob/dev/tests/scale.rs), which runs on request.
 
 ## Failure
 
-Diagnosis itself never fails: a document that cannot be read gives errors, not a failure. Bad input never panics (`tests/mutation_fuzz.rs`).
+Diagnosis itself never fails: a document that cannot be read gives errors, not a failure. Bad input never panics: [`tests/mutation_fuzz.rs`](https://github.com/eclnz/spit/blob/dev/tests/mutation_fuzz.rs).

@@ -69,13 +69,11 @@ The entry points are in [`src/resolver/mod.rs`](https://github.com/eclnz/spit/bl
 
 ## Invariants
 
-- **Steps are expanded in dependency order,** so every input's producer has run before its consumer is matched.
-- **An incomplete job's outputs stay candidates for later steps.** A consumer of one is reported as blocked, not left out without a word.
-- **A blocked gap always follows the gap that blocks it.** So the first unmatched gap explains every failure, and `resolve` returns it (`first_failure`).
-- **Every artifact is in the `Artifacts` table once,** and jobs hold its id (see [performance](performance.md)).
-- **A job's ID is its place in dependency order, from 1.** IDs are local to one resolution, and change when the inventory does.
-
-The tests are `tests/matching.rs`, `tests/resolver.rs`, `tests/artifacts.rs`, `tests/types.rs`, `tests/type_errors.rs`, `tests/stages.rs`, `tests/composites.rs` and `tests/multiple_outputs.rs`.
+- **Jobs come in dependency order, numbered from 1.** Every input's producer is expanded before its consumer is matched, and a job's ID is its place in that order. IDs are local to one resolution, and change when the inventory does. Test: [`tracks_dependencies_through_full_pipeline`](https://github.com/eclnz/spit/blob/dev/tests/resolver.rs).
+- **An incomplete job's outputs stay candidates for later steps.** A consumer of one is reported as blocked, not left out without a word. Test: [`keeps_complete_jobs_and_blocks_consumers_of_incomplete_ones`](https://github.com/eclnz/spit/blob/dev/tests/artifacts.rs).
+- **A blocked gap always follows the gap that blocks it.** So the first unmatched gap explains every failure, and `resolve` returns it (`first_failure`). Test: [`resolve_fails_with_the_first_gap_the_report_finds`](https://github.com/eclnz/spit/blob/dev/tests/artifacts.rs).
+- **A coverage gap holds back its sources.** A job that needs one is blocked, as it would be by an incomplete producer. Test: [`a_coverage_gap_holds_back_its_sources_and_blocks_their_consumers`](https://github.com/eclnz/spit/blob/dev/tests/artifacts.rs).
+- **Types are checked before any job is made.** Test: [`checks_types_before_concrete_expansion`](https://github.com/eclnz/spit/blob/dev/tests/resolver.rs).
 
 ## Failure
 
