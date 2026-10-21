@@ -36,7 +36,7 @@ use crate::{
     ResolveError,
 };
 
-use places::{error_location, error_step, in_call, subject_place};
+use places::{at_call, error_location, error_step, in_call, subject_place, InCall};
 use recovery::recover_parse_errors;
 use warnings::{case_warnings, empty_step_warnings, near_miss_warnings, warnings};
 
@@ -503,6 +503,15 @@ fn pipeline_diagnostics(
         .iter()
         .chain(&rule_errors)
         .map(|(subject, error)| {
+            let diagnostic =
+                |place| Diagnostic::error(DiagnosticSource::Pipeline, place, error.to_string());
+            if let DefinitionSubject::Call(call) = subject {
+                let port = error_step(error).and_then(|(_, port)| port);
+                return match at_call(pipeline, lines, *call, port) {
+                    Some(call) => placed(diagnostic(None), call),
+                    None => diagnostic(None),
+                };
+            }
             let place = subject_place(pipeline, lines, subject, error)
                 .or_else(|| error_location(pipeline, lines, error, inventory_text, false).1);
             let step = match subject {
@@ -512,12 +521,7 @@ fn pipeline_diagnostics(
                 )),
                 _ => error_step(error),
             };
-            within_call(
-                Diagnostic::error(DiagnosticSource::Pipeline, place, error.to_string()),
-                pipeline,
-                lines,
-                step,
-            )
+            within_call(diagnostic(place), pipeline, lines, step)
         })
         .collect();
     let source = DiagnosticSource::Pipeline;
@@ -544,14 +548,19 @@ fn pipeline_diagnostics(
 /// call written in the text when a call to an operation carried out by
 /// steps made that step; see [`in_call`].
 fn within_call(
-    mut diagnostic: Diagnostic,
+    diagnostic: Diagnostic,
     pipeline: &Pipeline,
     lines: &SourceMap,
     step: Option<(&str, Option<&str>)>,
 ) -> Diagnostic {
-    let Some(call) = step.and_then(|(output, port)| in_call(pipeline, lines, output, port)) else {
-        return diagnostic;
-    };
+    match step.and_then(|(output, port)| in_call(pipeline, lines, output, port)) {
+        Some(call) => placed(diagnostic, call),
+        None => diagnostic,
+    }
+}
+
+/// `diagnostic` reported where `call` says.
+fn placed(mut diagnostic: Diagnostic, call: InCall) -> Diagnostic {
     diagnostic.source = DiagnosticSource::Pipeline;
     diagnostic.line = Some(call.place.line);
     diagnostic.columns = Some(call.place.columns);
