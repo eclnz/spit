@@ -68,7 +68,7 @@ pub fn pipeline_hovers(text: &str, path: &Path) -> Vec<Hover> {
     });
     let pipeline = &document.pipeline;
     let checked = collect_pipeline(pipeline);
-    let steps = &checked.pipeline.steps;
+    let steps = &checked.steps;
     let steps_by_output: BTreeMap<_, _> = steps
         .iter()
         .map(|step| (step.invocation.output_product(), step))
