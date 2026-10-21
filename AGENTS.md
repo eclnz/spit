@@ -25,7 +25,7 @@ git show <commit>^:<path>                                        # the plan as i
 **What is not a plan.** These stay in the tree:
 
 - The user-facing docs: `README.md` and `docs/`.
-- How the code works now. That belongs in `docs/architecture.md` and its focused pages under `docs/architecture/`, so move it there before deleting a plan that explains it.
+- How the code works now. That belongs on the architecture page that owns its contract (see [Writing documentation](#writing-documentation)), so move it there before deleting a plan that explains it.
 - Tools that are still used, such as `usability/harness` and `profiling/`.
 - Records of what happened, such as the usability study's rounds, archived in `usability/rounds.zip`.
 
@@ -78,6 +78,54 @@ The five rules under [Performance](docs/architecture/performance.md) come first:
 - **Two crates, and a new one must earn its place.** SPIT depends on `mimalloc` and `rustc-hash`. `serde_json` was tried and removed, because the hand-written writer was 15% faster and needed five fewer crates (`1b4b141`). A new dependency needs `profiling/bench.py` numbers, and the output must stay byte-for-byte the same.
 - **The three steps stay apart.** Compile, inputs and resolve don't reach into each other except as `tests/architecture.rs` allows. Every module is private, and the library's API is what `lib.rs` re-exports, so add to `lib.rs` only what a caller outside the crate needs.
 
+## Writing documentation
+
+SPIT's documentation has two audiences, and each page is written for one of them.
+
+| Reader | Pages | What they hold |
+|---|---|---|
+| People writing pipelines | `README.md`, `docs/guide/`, `docs/reference/`, `docs/language-reference.md`, `docs/cli.md`, `docs/spitdag.md`, `docs/examples.md` | What SPIT does, as its user sees it |
+| Contributors and coding agents | `docs/architecture.md`, `docs/architecture/` | How the code works now |
+
+This file holds the rules for agents. Why something was built, and how it changed, belongs in issues, pull requests and commit messages, not on a page.
+
+**Pages for people writing pipelines** teach the contract they can see: syntax, what a command prints or writes, and what a mistake reports and how to fix it.
+
+- Lead with a short example that runs, then show what it gives.
+- Explain no compiler internals: no Rust types, modules or stages.
+- Use a diagram only where an example can't show the point, such as how files pass between commands.
+
+**Pages for contributors** each describe one contract between components: the data that crosses a boundary, and what each side may rely on. A page is not one per Rust module, and it is not the story of a refactor.
+
+- Lead with a small Mermaid diagram of the data flowing through the component, with each box a real type.
+- Then give, briefly, in lists where a list fits:
+  - **Data:** the types in and out, and the functions that make them, named as `Type::method` and linked to their file.
+  - **Responsibilities:** what the component decides, and what it leaves to others.
+  - **Invariants:** what always holds, one to a bullet, each with the test that checks it.
+  - **Failure:** what bad input gives.
+  - **Trade-offs:** only those a contributor could undo by mistake.
+- Use prose only for what a list or diagram can't say.
+- Describe the code as it is. Don't write "used to", "was replaced" or "now". Cite a commit when its reason matters to a reader.
+
+**Where things go.**
+
+- `docs/architecture.md` is a short map: one diagram of the whole data flow, and one line and link for each page.
+- Each contract is described once. A page that needs a rule another page owns links to it rather than repeating it. `docs/language-reference.md` owns the syntax, and `docs/spitdag.md` owns the `.spitdag` format.
+- Add an architecture page only for a contract no page owns. Don't add module-level READMEs.
+
+**When documentation changes.** Update it in the commit that changes what it describes.
+
+- A change to what users see (syntax, a command's output, a diagnostic, a field of the `.spitdag`) updates the user page that owns it, with an example that works.
+- A change to a contract (the data crossing a boundary, an invariant, failure behaviour) updates its architecture page and diagram.
+- A refactor that keeps both needs no documentation change, unless a page names a type, function or file it renamed or moved.
+
+**Checking documentation.**
+
+- Check every claim against the binary or the code, not against an earlier page or pull request.
+- Run every example a page shows. Name every type, function, file and test exactly, so a search finds it.
+- Build the site as [the checks](#checks-before-every-commit) show, and check that each changed diagram renders on GitHub and on the site.
+- When a pull request changes documentation, say in it what could not be run or checked.
+
 ## The VS Code extension
 
 [spit-vscode](https://github.com/eclnz/spit-vscode) is SPIT's editor extension, and it must stay in step with SPIT. It runs `spit check <file> --json --stdin --hovers` and shows the diagnostics, path hints and hovers that output holds. Its grammar, `syntaxes/spit.tmLanguage.json`, colours SPIT's keywords, headers and placeholders itself, and its README lists them.
@@ -115,6 +163,14 @@ usability/harness/rebuild_keys.sh             # expect `ok` for every answer key
 
 - **Stored outputs.** They are under `tests/fixtures/outputs/`. Re-save them with `SPIT_BLESS=1 cargo test --release --test outputs`, then read `git diff tests/fixtures` before committing.
 - **Links.** A changed Markdown file's links and anchors should resolve. GitHub's anchor for `## \`dag --partial\`` is `#dag---partial`.
+- **Documentation site.** When a commit changes `docs/` or `properdocs.yml`, build the site as CI does:
+
+  ```sh
+  python3 -m venv /tmp/docs-venv
+  /tmp/docs-venv/bin/pip install -q -r .github/docs-requirements.txt
+  /tmp/docs-venv/bin/properdocs build --strict --site-dir /tmp/spit-site
+  ```
+
 - **Speed.** A change to performance-related code is benchmarked, whether or not it means to change speed. That is code that runs once per artifact, job, record or step, and any change to how data is laid out, copied, hashed, allocated or written: the model and its tables, parsing, resolving, binding, discovery, and the writers. Build the commit before in a worktree and run `profiling/bench.py pipeline` and `profiling/bench.py dataset` with `--old` set to it, as `profiling/README.md` shows, and check that output is byte-for-byte the same.
   - **It is a regression check.** With `--old`, each command compares the two builds at one size of its workload, takes a few seconds, and exits with status 1 when a time is more than 1.3 times the old build's and more than 5 ms slower. Give more sizes only to see how a stage scales, such as when a change claims a speed-up.
   - **Runs vary.** On a shared machine two runs of the same build can differ by 10% or more. When the check fails, run it again; a slowdown is a regression when it fails both times.
@@ -127,6 +183,5 @@ usability/harness/rebuild_keys.sh             # expect `ok` for every answer key
 - **Issues.** Bugs, feature requests and work left for later go in the GitHub issue tracker, one issue each, not in a report's or a plan's list of next steps. A report or commit that leaves work undone links its issues.
 - **Commit messages.** The title is a plain sentence, such as "Replace skip with drop, which names the groups it removes". Then prose saying what was wrong and what changed, then the co-author and session trailers.
 - **No model names** in files pushed to the repository.
-- **Guide updates travel with behaviour.** Each commit updates the README, `docs/language-reference.md`, `docs/spitdag.md` or the relevant `docs/architecture/` page for what it changes.
-- **Verify before documenting.** Check every claim in the guide against the binary.
+- **Documentation travels with behaviour,** as [Writing documentation](#writing-documentation) sets out.
 - **New recipe rule keywords** go in `split_rules` in `tests/support/mod.rs` as well, which separates a test's recipe rules from its pipeline by keyword.
