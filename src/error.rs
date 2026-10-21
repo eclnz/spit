@@ -1,6 +1,8 @@
 use std::fmt;
 
-use crate::model::{ArtifactInstance, ArtifactType, CountRequirement, EntityBinding, SourceRecord};
+use crate::model::{
+    ArtifactInstance, ArtifactType, CallId, CountRequirement, EntityBinding, SourceRecord,
+};
 
 /// The declaration an [`ResolveError::InvalidDefinition`] refers to, so callers
 /// such as editor diagnostics can locate it without parsing the message.
@@ -10,6 +12,9 @@ pub enum DefinitionSubject {
     Operation(String),
     /// An invocation, named by the product it produces.
     Invocation(String),
+    /// A call to an operation carried out by steps, by its place in
+    /// `Pipeline::calls`.
+    Call(CallId),
     /// A coverage rule, by its index in `Pipeline::constraints`.
     Constraint(usize),
     /// The dimensions a coverage rule groups by, by the rule's index.
