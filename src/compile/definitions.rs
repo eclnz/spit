@@ -235,6 +235,9 @@ pub(super) fn index_producers(
             // Keep in step with `Artifacts` in `model/artifacts.rs`, which keeps one
             // type per product because only one step makes each.
             if producers.contains_key(output) {
+                // Neither step is the product's, so no type or shape of
+                // either reaches the steps that read it.
+                poisoned.insert(output.clone());
                 errors.push((
                     site.clone(),
                     ResolveError::InvalidDefinition {
