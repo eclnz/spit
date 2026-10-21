@@ -22,7 +22,7 @@ pub(super) fn parse_coverage_rule(
         Keyword::Exclude => parse_drop(rest, number),
         Keyword::Drop => Err(ParseError::new(
             number,
-            format!("`drop` is replaced by conditional `exclude`: write `exclude {rest}`"),
+            format!("`drop` starts no rule; a conditional `exclude` removes the groups that meet a condition: write `exclude {rest}`"),
         )),
         Keyword::Skip => Err(skip_replaced(rest, number)),
         _ => parse_require(
@@ -267,9 +267,9 @@ fn skip_replaced(rest: &str, number: usize) -> ParseError {
             });
     let message = match suggestion {
         Some(rule) => format!(
-            "`skip` is replaced by conditional `exclude`, which names the groups to remove: write `{rule}`"
+            "`skip` starts no rule; a conditional `exclude` names the groups to remove: write `{rule}`"
         ),
-        None => "`skip` is replaced by conditional `exclude`, which names the groups to remove, as in `exclude [sub] where sessions count<2`".to_owned(),
+        None => "`skip` starts no rule; a conditional `exclude` names the groups to remove, as in `exclude [sub] where sessions count<2`".to_owned(),
     };
     ParseError::new(number, message)
 }

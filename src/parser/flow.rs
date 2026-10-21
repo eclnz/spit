@@ -17,7 +17,7 @@ use super::lexical::{
     comma_items, extension, identifier, product_name, reserved_name, strip_comment,
 };
 use super::source_map::{name_place, step_place, tail_place};
-use super::{FlowStep, ParseError, StatementKind, StepOutput, Syntax, SHELL_SOURCE_REMOVED};
+use super::{FlowStep, ParseError, StatementKind, StepOutput, Syntax, SHELL_SOURCE_ERROR};
 
 /// Parse the statements laid out in `layout`. Their structure, which lines make a
 /// statement and which block holds each, comes from its layout, so a
@@ -303,7 +303,7 @@ fn flow_rest(
     if let Some(instead) = removed_section(line) {
         return Err(ParseError::new(
             number,
-            format!("SPIT no longer reads `{line}` sections; {instead}"),
+            format!("`{line}` opens no section; {instead}"),
         ));
     }
     if defaults {
@@ -347,7 +347,7 @@ fn flow_rest(
         Some((Keyword::Sidecars, _)) => {
             return Err(ParseError::new(
                 number,
-                "`sidecars` is replaced by `source name : Type .ext beside sibling`; give the sibling source the path and dimensions",
+                "`sidecars` starts no statement; declare each companion as `source name : Type .ext beside sibling`, and give the sibling source the path and dimensions",
             ));
         }
         Some((Keyword::Use, _)) => {
@@ -393,11 +393,11 @@ fn flow_rest(
             }
         }
         Some((keyword @ (Keyword::Require | Keyword::Skip | Keyword::Drop), rest)) => {
-            top_level_only(if keyword == Keyword::Require {
-                "`require`, which checks sources,"
-            } else {
-                "`drop`, which is replaced by conditional `exclude`,"
-            })?;
+            // `skip` and `drop` start no rule anywhere, so their own error,
+            // which gives the `exclude` to write, comes first.
+            if keyword == Keyword::Require {
+                top_level_only("`require`, which checks sources,")?;
+            }
             StatementKind::constraint(original, keyword, rest, number)?
         }
         Some((Keyword::Exclude, declaration)) => {
@@ -434,7 +434,7 @@ fn flow_rest(
             default_setting(original, setting, number, stage)?
         }
         Some((Keyword::ShellSource, _)) => {
-            return Err(ParseError::new(number, SHELL_SOURCE_REMOVED));
+            return Err(ParseError::new(number, SHELL_SOURCE_ERROR));
         }
         Some((Keyword::Path, rest)) if block.is_some() || !line.starts_with("path:") => {
             StatementKind::Path(parse_path(

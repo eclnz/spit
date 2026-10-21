@@ -35,9 +35,9 @@ pub(crate) enum Keyword {
     Stage,
     /// `dimensions [...]`, the order every product's dimensions follow.
     Dimensions,
-    /// The removed `sidecars` block, kept to explain its replacement.
+    /// `sidecars`, which starts no statement, read to say what to write instead.
     Sidecars,
-    /// The removed `shell-source:` line, kept to explain its removal.
+    /// `shell-source:`, which starts no statement, read to say what to write instead.
     ShellSource,
 }
 

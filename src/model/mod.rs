@@ -7,6 +7,7 @@ mod artifacts;
 mod dag;
 mod definitions;
 mod entities;
+mod index;
 mod inputs;
 mod pipeline;
 
@@ -14,6 +15,7 @@ pub use artifacts::*;
 pub use dag::*;
 pub use definitions::*;
 pub use entities::*;
+pub(crate) use index::*;
 pub use inputs::*;
 pub use pipeline::*;
 
