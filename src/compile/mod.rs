@@ -82,20 +82,22 @@ pub(crate) fn collect_pipeline(pipeline: &Pipeline) -> PipelineCheck<'_> {
         &mut poisoned,
     );
     check_stages(pipeline, &mut errors);
-    let order = match invocation_order(&pipeline.invocations, &producers) {
-        Ok(order) => order,
-        Err(cycle) => {
-            errors.push(cycle.into_error());
-            (0..pipeline.invocations.len()).collect()
+    // Source order is no dependency order, so a step in a cycle is not
+    // checked at all, and the steps that read from it are skipped below.
+    let order = invocation_order(&pipeline.invocations, &producers);
+    for cycle in order.cycles {
+        for &step in &cycle.steps {
+            poisoned.extend(pipeline.invocations[step].outputs.iter().cloned());
         }
-    };
+        errors.push(cycle.into_error());
+    }
     // Inferred intermediate types are also part of the reusable pipeline
     // contract. Check them in dependency order so a type error does not depend
     // on whether an inventory happens to contain concrete source artifacts.
     // A step that fails, or uses something that failed, quiets its consumers.
     let mut inferred_types = BTreeMap::new();
     let mut steps = Vec::new();
-    for &index in &order {
+    for &index in &order.steps {
         let invocation = &pipeline.invocations[index];
         let depends_on_failure = poisoned.contains(&invocation.operation)
             || invocation
