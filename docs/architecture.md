@@ -1,6 +1,6 @@
 # Architecture
 
-SPIT is a compiler, and this part of the documentation describes how it works now, for contributors. Each stage takes data and returns data. The [guide](guide/concepts.md) describes the same flow from the user's side, and [AGENTS.md](https://github.com/eclnz/spit/blob/dev/AGENTS.md) holds the rules for changing the code.
+SPIT is a compiler, and this part of the documentation describes how it works, for contributors. Each stage takes data and returns data. The [guide](guide/concepts.md) describes the same flow from the user's side, and [AGENTS.md](https://github.com/eclnz/spit/blob/dev/AGENTS.md) holds the rules for changing the code.
 
 ```mermaid
 flowchart LR

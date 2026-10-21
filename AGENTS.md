@@ -24,7 +24,7 @@ git show <commit>^:<path>                                        # the plan as i
 
 **What is not a plan.** These stay in the tree:
 
-- Documentation: `README.md` and `docs/`. A plan that explains how the code works now moves that to the architecture page that owns it, as [Writing documentation](#writing-documentation) says, before it is deleted.
+- Documentation: `README.md` and `docs/`. A plan that explains how the code works moves that to the architecture page that owns it, as [Writing documentation](#writing-documentation) says, before it is deleted.
 - Tools that are still used, such as `usability/harness` and `profiling/`.
 - Records of what happened, such as the usability study's rounds, archived in `usability/rounds.zip`.
 
@@ -78,19 +78,24 @@ The five rules under [Performance](docs/architecture/performance.md) come first:
 
 **Dependencies and boundaries**
 
-- **Two crates, and a new one must earn its place.** SPIT depends on `mimalloc` and `rustc-hash`. `serde_json` was tried and removed, because the hand-written writer was 15% faster and needed five fewer crates (`1b4b141`). A new dependency needs `profiling/bench.py` numbers, and the output must stay byte-for-byte the same.
+- **Two crates, and a new one must earn its place.** SPIT depends on `mimalloc` and `rustc-hash`. It writes JSON by hand rather than with `serde_json`, which is 15% faster and needs five fewer crates (`1b4b141`). A new dependency needs `profiling/bench.py` numbers, and the output must stay byte-for-byte the same.
 - **The three steps stay apart.** Compile, inputs and resolve don't reach into each other except as `tests/architecture.rs` allows. Every module is private, and the library's API is what `lib.rs` re-exports, so add to `lib.rs` only what a caller outside the crate needs.
 
 ## Writing documentation
+
+**Documentation says what SPIT is, as briefly as it can, and not how it got there.** A page doesn't recount what a component replaced, what was tried, or what a refactor changed. Git, pull requests and issues keep that history, and a page may cite a commit or an issue by its number when the reason behind a rule matters.
+
+- **Why this matters.** A page that tells a story grows with every change and goes stale. A page that describes the present changes only when the present does.
+- **For contributors, the diagram is the description.** A page's Mermaid diagram shows the components as they are and the data passing between them. The text around it adds only what a diagram can't show: types, invariants, failure behaviour. When the code changes, change the diagram, and delete any prose the diagram has made redundant.
 
 SPIT's documentation has two audiences, and each page is written for one of them.
 
 | Reader | Pages | What they hold |
 |---|---|---|
 | People writing pipelines | `README.md`, `docs/guide/`, `docs/reference/`, `docs/language-reference.md`, `docs/cli.md`, `docs/spitdag.md`, `docs/examples.md` | What SPIT does, as its user sees it |
-| Contributors and coding agents | `docs/architecture.md`, `docs/architecture/` | How the code works now |
+| Contributors and coding agents | `docs/architecture.md`, `docs/architecture/` | How the code works |
 
-This file holds the rules for agents. Why something was built, and how it changed, belongs in issues, pull requests and commit messages, not on a page.
+This file holds the rules for agents.
 
 **Pages for people writing pipelines** teach the contract they can see: syntax, what a command prints or writes, and what a mistake reports and how to fix it.
 
@@ -98,7 +103,7 @@ This file holds the rules for agents. Why something was built, and how it change
 - Explain no compiler internals: no Rust types, modules or stages.
 - Use a diagram only where an example can't show the point, such as how files pass between commands.
 
-**Pages for contributors** each describe one contract between components: the data that crosses a boundary, and what each side may rely on. A page is not one per Rust module, and it is not the story of a refactor.
+**Pages for contributors** each describe one contract between components: the data that crosses a boundary, and what each side may rely on. A page is not one per Rust module.
 
 - Lead with a small Mermaid diagram of the data flowing through the component, with each box a real type.
 - Then give, briefly, in lists where a list fits:
@@ -108,7 +113,6 @@ This file holds the rules for agents. Why something was built, and how it change
   - **Failure:** what bad input gives.
   - **Trade-offs:** only those a contributor could undo by mistake.
 - Use prose only for what a list or diagram can't say.
-- Describe the code as it is. Don't write "used to", "was replaced" or "now". Cite a commit when its reason matters to a reader.
 
 **Where things go.**
 
@@ -126,6 +130,7 @@ This file holds the rules for agents. Why something was built, and how it change
 
 - Check every claim against the binary or the code, not against an earlier page or pull request.
 - Run every example the page shows. Name every type, function, file and test exactly, so a search finds it.
+- Read the change for history. Words such as "now", "no longer", "used to", "was replaced" and "previously" usually mark a sentence about the past. Rewrite it to say what is.
 - Check that its links and anchors resolve. GitHub's anchor for `## \`dag --partial\`` is `#dag---partial`.
 - For a change to `docs/` or `properdocs.yml`, build the site as CI does, and check that each changed diagram renders:
 
