@@ -1,55 +1,79 @@
 # Binding and output
 
-The resolver creates logical artifacts and jobs; binding assigns paths and command arguments. See the [DAG format manual](../spitdag.md) for the serialized contract.
+Binding turns a `ResolvedDag`, which holds logical artifacts and jobs, into a `BoundDag`, which a runner can carry out with no pipeline. It gives each artifact its path from the path rules, and expands each job's commands and checks into arguments. [The DAG format](../spitdag.md) owns the `.spitdag` file this writes, field by field; this page covers how SPIT builds it.
 
-The resolved DAG has logical identities, plus the file of each source whose record gave one. `bind_dag` binds every other source and output identity with the path templates and expands each command, giving the `BoundDag`. Neither physical discovery nor command execution is part of the resolver.
+```mermaid
+flowchart LR
+    dag["ResolvedDag"] --> rules["check_rules<br/>validate_commands"]
+    pipeline["Pipeline"] --> rules
+    rules --> paths["bound_paths<br/>PathBinder"]
+    paths --> jobs["bind_jobs<br/>commands and checks"]
+    jobs --> bound["BoundDag"]
+    bound --> write["write_document"]
+    write --> file[".spitdag"]
+```
 
-A DAG keeps each artifact once, in its `Artifacts` table, and jobs refer to artifacts by `ArtifactId`: a dataset has far more job inputs than artifacts. Every artifact of a product has the product's type, so the table keeps a product's name and type once, and each artifact is its product's number and its entities. What belongs to each artifact, such as a source's file or a bound path, is a column indexed by id. The `BoundDag` keeps the same table, with each artifact's path, and a command names a file by its artifact. What every job of one step shares is kept once too: `ResolvedDag::steps` holds each step's operation and stage, and a job names its step by `StepId`. `BoundDag::steps` adds each step's port names, so a bound job's inputs and outputs are artifact ids in its step's port order, and binding finds each step's operation and commands once rather than for every job. Whether an artifact is a file or a folder belongs to its product, as its type does: a source's declaration or an output's port says so, `PipelineIndex::is_folder` reads it, and the `BoundDag` keeps it once per product.
+## Data
 
-??? info "Commands, paths, and diagnostics"
+- **`bind_dag(&pipeline, &dag)`** ([`src/resolver/bind.rs`](https://github.com/eclnz/spit/blob/dev/src/resolver/bind.rs)) gives the `BoundDag`. `bind_dag_with` takes paths that `validate_bound_source_files` already bound, so `dag` with a root binds them once.
+- **`BoundDag`** ([`src/spitdag/mod.rs`](https://github.com/eclnz/spit/blob/dev/src/spitdag/mod.rs)) keeps:
+    - the same `Artifacts` table as the `ResolvedDag`, with each artifact's path as a column by id;
+    - each product's dimensions, and whether its artifacts are folders, once per product;
+    - the steps (`BoundStep`), each with its port names, so a job's inputs and outputs are artifact ids in port order;
+    - the jobs (`BoundJob`), with each command an `Argument` list of `ArgPart`s;
+    - what was removed and left out, the pipeline's files, and the calls.
+- **`PathTemplate`** ([`src/paths/template.rs`](https://github.com/eclnz/spit/blob/dev/src/paths/template.rs)) is a rule's text read into parts. `PipelineIndex::path_template_for` completes a product's rule:
+    - its `[...]` groups kept or dropped for the product's dimensions and stage;
+    - `{@entities}` written out, as the nearest `default entities:` spells it;
+    - its extension added: an operation's output extension, a source's declared one, or else `default ext:`.
+- **`PathBinder`** ([`src/paths/product.rs`](https://github.com/eclnz/spit/blob/dev/src/paths/product.rs)) binds artifacts to paths. `PathBinder::bind_numbered` finds each product's template and stage once, by its number in the artifact table.
+- **`CommandTemplate`** ([`src/command.rs`](https://github.com/eclnz/spit/blob/dev/src/command.rs)) is a command's arguments, each literal text and `{placeholders}`.
+- **`write_document`** ([`src/spitdag/write.rs`](https://github.com/eclnz/spit/blob/dev/src/spitdag/write.rs)) writes each artifact's JSON once, and hashes each job's fingerprint from its work.
 
-    ## Command definitions and the bound DAG
+## Responsibilities
 
-    An operation's logical signature defines its input ports, its outputs, and its shape and cardinality rules. An operation with several outputs names them, as in `-> (wm: Response, csf: Response)`; one job writes them all, each output binds to its own product and path, and downstream consumers of any of them depend on that job. A single unnamed output is the port `output`. Its executable implementation is a separate `command` declaration keyed by operation name. For example, `operation register(moving: MRI<M,S>, reference: MRI<N,T>) -> Transform<S,T>` and `command register: flirt -in {moving} -ref {reference} -omat {@output}` give each argument an explicit source and position. An aggregate's call names the dimensions it collects with `@ vary(run)`, so one operation can collect runs in one step and sessions in another; the resolver checks them against the output family's dimensions. SPIT does not infer a command-line interface from the logical signature.
+**Paths** ([`src/paths`](https://github.com/eclnz/spit/tree/dev/src/paths)):
 
-    The compilation flow is:
+- **Every step sees the same completed template for a product.** Binding, discovery and the extension checks all read it from `PipelineIndex::path_template_for`.
+- **Where a product's rule comes from.** `PipelineIndex::path_origin` is the one place that chooses, in this order:
+    1. the product's own rule;
+    2. its stage's default, or that of the nearest stage around it with one;
+    3. the pipeline's `default path:`.
 
-    ```text
-    pipeline text + .spitout -> logical resolution and validation -> concrete DAG
-    concrete DAG + path templates -> bound artifact paths
-    bound paths + operation commands -> argument expansion -> .spitdag
-    ```
+    A pipeline default that needs `{@stage}` outside a group is no source's rule, since no stage makes a source. Nor is one that needs `{@entities}` outside a group the rule of a source with no dimensions.
+- **A companion source's path follows its main source.** That holds for an output a tool writes beside another too (`PipelineIndex::beside`), and when a recipe supplies the main source's rule.
+- **A recipe can give a source with no rule one.** It gives its own `path source:` rule, or else its `default path:`. `InputRules` keeps the recipe as written, `InputRules::source_paths_for` gives the rule for each source, and the input stage merges them into the inventory.
+- **`{@entities}` is spelled by an `EntitiesFormat`.** One may come from the file (`Pipeline::entities_format`), a stage (`StageDef::entities_format`) or a recipe (`InputRules::source_entities`). `PipelineIndex::entities_format_for` finds a product's spelling, and `PathTemplate::resolve` expands it into literal keys and ordinary placeholders once per product, so binding and discovery never see it.
+- **A placeholder in a source rule may take a shape,** as in `{date:date}` (`Shape`, in [`src/paths/shape.rs`](https://github.com/eclnz/spit/blob/dev/src/paths/shape.rs)). Shapes narrow matching only. `collect_paths` rejects a shape in a rule that writes: an output's rule, or a pipeline or stage default.
+- **Rules are checked before any job exists.** `inspect_paths` and `collect_paths` ([`src/paths/rules.rs`](https://github.com/eclnz/spit/blob/dev/src/paths/rules.rs)) report:
+    - a rule ending in another extension;
+    - a dimension outside a group that the product lacks;
+    - a group naming a dimension no product has;
+    - an output no rule covers, at its declaration.
 
-    `spit check pipeline.spit --path-rules` reports whether each declared product uses an explicit rule, a default rule, or no rule, and the extension added to it: an operation's output extension or a source's declared one, else `default ext:` for a default rule. `Pipeline::path_template_for` gives every step the same completed template: the rule with its `[...]` groups kept or dropped and `{@entities}` written out, as the nearest `default entities:` spells it, for that product's dimensions and stage, then its extension added. Binding, discovery and the extension checks see that one plain template, and the path checks report a rule ending in another extension, a dimension outside a group that the product lacks, and a group naming a dimension no product has. For a pipeline that checks clean, `check --json` also lists each product whose path no rule writes in full, with the line that declares it, which the editor shows beside it. A source with no rule may receive one from a recipe: its own `path source:` rule, else its `default path:` default. A pipeline default that needs `{@stage}` outside a group is no source's rule, since `PipelineIndex::path_rule_for` gives it only to products a stage could make. Nor is one that needs `{@entities}` outside a group the rule of a source with no dimensions. `InputRules` keeps the recipe as written, its default in `source_default`; nothing settles it in place. `InputRules::defaulted_sources` derives the sources the default covers, and `InputRules::source_paths_for` the rule the recipe gives each source, borrowed when the default covers none, so discovery and the path checks see only per-source rules. `InputSpec::resolve` merges those into the inventory, so the settled inventory carries every source rule, and the `.spitout` writer reads them from it. `spit check recipe.spitin --path-rules` lists the combined rules and marks those supplied by the recipe, and those from its default. Path templates are validated at compile time even for product families with no resolved jobs, and `dag` checks collisions among concrete paths. A default rule can cover many families. SPIT writes no path of its own: the path checks fail an output no rule covers, at its declaration, and a source needs a rule from the pipeline, the recipe or the `.spitout`. `spit check recipe.spitin` fails a recipe without records that leaves a source uncovered, as a scan would, and binding a DAG fails a source with records but no rule, rather than look for its files under `out/`. A recipe's source rule is carried once in the `.spitout` for standalone resolution.
+    They also bind a sample artifact of every product, which fails for a product whose `{@entities}` or `{@stage}` cannot be written (`unspelled_entities`).
 
-    A `default entities:` line is an `EntitiesFormat`: assignment literals, a separator and a table of label aliases. `Pipeline::entities_format` holds the file's, each `StageDef::entities_format` a stage's, and `InputRules::source_entities` a recipe's. `{@entities}` has no other spelling. Parsing checks its template, and lowering gives each spelling its labels and checks them after dimensions are ordered. `PipelineIndex::entities_format_for` finds a product's spelling, its nearest stage's else the file's, and `PathTemplate::resolve` expands `{@entities}` into escaped literal keys and ordinary dimension placeholders once per product, so binding and discovery never see it. `InputRules::named_source_paths` resolves the rules a recipe gives with the recipe's spelling first, if it has one. A product with no dimensions keeps `{@entities}`, as one outside every stage keeps `{@stage}`, and so does one no spelling covers: the path checks bind a sample artifact of every product, which fails either with a message that says which (`unspelled_entities`), and discovery fails them the same way. The inventory writer resolves source templates before saving them, and imports resolve a library's source templates before copying them to the caller. Artifact identities and dimension ordering are independent of this formatting.
+**Commands and checks:**
 
-    A placeholder in a source rule may take a shape, `{date:date}`: `PathPlaceholder::Dimension` holds an optional `Shape`, a `Copy` enum in `src/paths/shape.rs` that tests a value's text and knows whether every value is one length. The template is parsed once, so matching reads the shape from the `Piece` and allocates nothing; `match_from` in `src/inputs/pattern.rs` tests it where a value's end is chosen, and a shape of one length is the only end tried. A dimension written twice has its shape in both places (`inherit_shapes`). Shapes narrow matching only: binding writes a value as before, so the `.spitdag` and the paths a rule writes do not change, and `collect_paths` rejects a shape in a rule that writes (an output's, or a pipeline or stage default). `locate_sources` rejects a record whose value fails its rule's shape, since discovery would not have read it.
+- **Each placeholder names a port.** `{x.dir}` and `{x.stem}` give an output's folder, and its file name without its extension. A `many` port expands into one argument per artifact, in the collection's order, so its placeholder must fill a whole argument.
+- **A `verify` command uses the same placeholders,** for inputs only.
+- **Each bare shell operator word is rejected,** such as `|` or `>`, at its column. A runner runs a command without a shell, so `CommandTemplate::parse` marks those words. A quoted one is literal text.
+- **A check is its own small model.** `CheckDef` is a check declaration, and `CheckUse` its use on an input port, an output port or a source. `src/check.rs` validates them, and at binding gives each step its checks once (`step_checks`) and each job one command per checked artifact.
+- **Commands and checks change no job, path, dependency or fingerprint.**
 
-    Editor hovers come from `src/editor.rs` and `src/builtins.rs`, which read a document as `check` does and belong to no step. `editor` explains a pipeline's own operations and products from its compilation. `src/editor/signatures.rs` lays signatures out at port boundaries, and `src/editor/operations.rs` separates generic declaration information from concrete call mappings and expansions. Output signatures are formatted once, even when a long signature needs multiple lines. Product hovers retain inference failures, omit repeated declared types and bound consumer lists with a count. Hover fields remain plain text; the extension renders known code sections without trusting Markdown from user names or templates. `builtins` holds SPIT's own words in one static table, `DOCS`, indexed by the `Word` enum. It scans each line once, with the parser's comment rule and its statement and header classification (`Keyword`, `Header`), and records each use as a line, UTF-16 columns and a `Word`, so `check --json --hovers` writes each word's documentation once however often the word is used. A test checks that each entry's `anchor` names a section of the language reference.
+**`spit dag --paths`** shows each job's named inputs and outputs and their paths: the `.spitdag` without its commands.
 
-    `spit dag --paths` reports each concrete job, its named input artifacts and output artifact, and their relative paths: the `.spitdag` without its commands.
+## Invariants
 
+- **The output is the same bytes for the same pipeline, inventory, root and SPIT version.** It never depends on hash order (see AGENTS.md). Stored outputs under `tests/fixtures/outputs/` check it (`tests/outputs.rs`).
+- **No two outputs share a path.** `dag` checks collisions among concrete paths.
+- **SPIT writes no path of its own.** An output with no rule fails at its declaration. A source with records but no rule fails at binding, rather than being looked for under `out/`.
+- **What every job of a step shares is kept once.** Binding finds each step's operation, commands and checks once, not once per job.
+- **A `.spitdag` belongs to one inventory.** A new inventory needs a new `dag`.
 
-??? info "Serialization and execution details"
+The tests are `tests/paths.rs`, `tests/extensions.rs`, `tests/entities_format.rs`, `tests/placeholder_shapes.rs`, `tests/folder_and_stem.rs`, `tests/folders.rs`, `tests/beside.rs`, `tests/commands.rs`, `tests/checks.rs`, `tests/default_checks.rs` and `tests/outputs.rs`.
 
-    `spit dag -o plan.spitdag` writes the `BoundDag`, and `spit dag --json` prints it, as schema version 7: `{"version":7,"generator":{...},"root":...,"external_inputs":[...],"targets":[...],"executables":[...],"removed":[...],"left_out":[...],"pipeline_files":[...],"calls":[...],"jobs":[...]}`. `pipeline_files` names each file read by its git blob id, which `src/blob.rs` computes by hand, and `calls` with each job's `origin` say which call to an operation carried out by steps a job came from.
+## Failure
 
-    - `generator` names the program that wrote the file and its version, as `{"name":"spit","version":"0.2.2"}`.
-    - `root` is the absolute dataset folder every path is relative to: the recipe's root or the root a `.spitout` records. It is `null` when `dag` was given no folder, as with a `.spitout` that records no root, and the backend must then be told where the dataset is.
-    - `external_inputs` contains every job input whose producer is outside the graph: the sources. A backend can check they exist before it starts.
-    - `targets` contains every output no job reads: what a full run leaves behind. Every other output is an intermediate a backend may remove once its readers have run.
-    - `executables` lists, once each and sorted, the program each command, `verify` command and check runs: its first argument, when that is plain text. A backend can look for each on `PATH` before it runs anything.
-    - `jobs` lists every job after the jobs it depends on, so running them in the order given is always valid. Jobs retain their numeric IDs, which count up from 1 in that order.
-
-    Each job has `operation`, `stage` as an array of names from outermost to innermost (empty for an ungrouped job), `fingerprint`, `inputs` keyed by port name with arrays of artifacts (also for `one` ports), `outputs` keyed by port name, numeric `depends_on` IDs, the numeric `dependents` IDs of the jobs that read its outputs, `command`, `verify`, and `checks`, each a check's command bound to one artifact, with when it runs, the check as written, and its port and path. An artifact has `product`, an `entities` object, a structured `type`, its `path` relative to the dataset root, and its `kind`, `"file"` or `"folder"`: a known type is `{"name":"MRI","args":[{"name":"Parcellation","args":[]},{"name":"Diffusion","args":[]}]}`; an unknown type or argument is `null`. `command` is the job's argument list, or `null` for an operation with no command, and `verify` a list of them. Each argument is an array of parts, each a literal string or `{"path":...}`, joined without spaces, so a backend can place the root before every path and quote the rest.
-
-    The output is deterministic for a given pipeline, inventory, root and SPIT version. Job IDs are local to that resolution and can change when the inventory changes, so a backend that remembers jobs between runs keys them by their output paths, which no two jobs share. A job's `fingerprint` is 16 hexadecimal digits: a 64-bit FNV-1a hash of its operation, inputs, outputs, command and `verify` commands, as the `.spitdag` writes them. It ignores the job's ID, stage, origin and neighbours, so it stays the same when other jobs come and go, and changes when anything the job reads, writes or runs does. A backend that stores each job's fingerprint beside its outputs can tell that a job must run again after its command changed, even if its outputs are newer than its inputs.
-
-    With a dataset root, from a recipe or a `.spitout` that records one, `dag` and `artifacts` also check that each source file needed by the resolved DAG exists as a file under that directory. Derived output paths are validated but are not expected to exist before execution. After it, every one must: a backend fails a job whose command leaves a declared output missing, so no output is optional (see [missing outputs](../spitdag.md#missing-outputs)). The field survey example has an integration test that creates empty files at its declared source paths and checks both complete and missing-input cases.
-
-    Each placeholder refers to an input or output port; `{x.dir}` and `{x.stem}` give an output's folder and its file name without its extension, written to the `.spitdag` as `dir` and `stem` parts. A many port expands into individual quoted arguments in the collection's order, and its placeholder must occupy a complete argument. A `verify operation:` command uses the same placeholders for inputs only; a backend runs it before each of the operation's jobs and stops if it fails. It is where domain checks belong, such as comparing image grids with the tool that reads them. Unknown placeholders, path collisions, and an embedded many expansion fail before the `.spitdag` is written. Commands name executables expected on `PATH`; SPIT does not manage their installation. Command templates cannot influence matching, grouping, type checks, or job count. A backend runs a command without a shell, so `CommandTemplate::parse` marks each bare shell operator word, such as `|` or `>`, and the parser rejects it at its column; a quoted one is a literal argument. Checks of file contents are a task for domain-specific `verify` commands and `check`s. A `check` is its own small model, `CheckDef`, with its uses (`CheckUse`) on input ports, output ports and sources; `src/check.rs` validates them with the commands and, at binding, gives each step its checks once (`step_checks`) and each job one command per checked artifact. Binding indexes check declarations and stage defaults once, and keeps each produced product’s output checks by product id. Consumer steps reuse that list when deciding whether the producer already ran a check. Checks never change jobs, paths, dependencies or fingerprints.
-
-    The `.spitdag` is specific to the supplied inventory; a new inventory requires a new `dag`.
-
-`examples/basic/basic.spit` is a small pipeline, with its recipe in `basic.spitin` and its inputs in `basic.spitout`. They use imaging names as sample data; `src/` contains no imaging-specific types, operations, or assumptions.
+- Every failure comes before the `.spitdag` is written: an unknown placeholder, a path collision, an embedded `many` expansion, or a rule that cannot be bound. Each is a `BindError`, made from a `PathError` or a `CommandError`.
+- With a dataset root, `dag` and `artifacts` also check that each source file the DAG needs exists under it (`validate_bound_source_files`). Output paths are checked as paths, but are not expected to exist before the run.

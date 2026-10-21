@@ -52,6 +52,12 @@ The entry points differ in what they read and what they return:
     - infers the dimensions of the products a step makes;
     - puts every product's dimensions in the pipeline's order (`order_dimensions` in `src/order.rs`);
     - runs the checks that need the whole document, on what it lowered: `check_bodies_have_no_commands`, `check_source_beside_paths`, and the `{@entities}` spellings.
+- **What lowering keeps for later stages:**
+    - **Stages.** Each `Invocation` records the `stage` whose block holds it. The resolver keeps it once per step, in `DagStep::stage`. `Pipeline::stages` keeps one `StageDef` per name, with its default path rule, `default ext:` and `default entities:`. A nested stage's name is its path, such as `preprocess/combine`. A stage opened again continues its first block.
+    - **A stage groups steps and scopes paths. It is not a namespace.** An operation declared in one is global. `SourceMap::operation_stages` records its stage only so that a warning can flag a call from outside it. A stage doesn't order jobs, or limit what its steps read.
+    - **Extensions.** A source's `ProductDef` carries the extension it declares. An operation's `OutputPort` carries its optional extension and, for an output its tool writes beside another, that sibling and its suffix.
+    - **Companion sources.** A companion source keeps its main source and suffix in `ProductDef::beside`. `Pipeline::sidecar_groups` keeps each main source with its companions, so that the input stage can report a group found only in part.
+    - **Collection minimums.** `@ min(n)` on a `many` port lowers to `OperationDef::minimum_collection`. An operation takes at most one `many` input, so the minimum belongs to the operation.
 - **Imports.** Each `use` line is read from the same `Layout` as the statements. Its library is parsed in turn, and the definitions it selects are merged into the caller.
 - **Not done here:**
     - checking each step against its operation, types and cycles, which `compile` does (`validate_pipeline`);
@@ -90,7 +96,29 @@ The entry points differ in what they read and what they return:
 
     Test: `calls_to_an_operation_that_failed_to_declare_repeat_its_error`.
 
-How the errors that remain are ordered, placed and shown is described under [diagnostics](phases.md).
+How the errors that remain are ordered, placed and shown is described under [diagnostics](diagnostics.md).
+
+## Calls to operations carried out by steps
+
+An operation whose header ends in `:` keeps its body in `OperationDef::steps`, each a `BodyStep` with its place. `src/parser/body.rs` opens the body. A call to such an operation reaches the `Pipeline` only as the steps it expands to, so `compile`, the resolver and binding see ordinary steps.
+
+```mermaid
+flowchart LR
+    call["a call, as written"] --> expand["add_flow_step<br/>worklist"]
+    body["OperationDef::steps"] --> expand
+    expand --> steps["Invocation per body step<br/>with origin and checks"]
+    expand --> table["Pipeline::calls<br/>Call by CallId"]
+```
+
+- **The body is checked where it is declared** (`check_body`). Its steps call operations declared before it, read only its ports and earlier steps' products, and assign each named output once.
+- **Each body step becomes a step over the caller's products:**
+    - a port reads the caller's argument, with the caller's selectors merged with the body's own;
+    - an output is the product the caller names;
+    - a product the body makes for itself is filed under the call's first output, as `first::product`, which `{@product}` writes `first.product`. So two calls never share an identity or a path.
+- **Each call is a `Call` in `Pipeline::calls`, by `CallId`.** It holds the operation, the products the call reads and writes, its parent call and its place.
+- **Each step a call makes carries `Invocation::origin`,** the call and the body step's place. It also carries in `Invocation::checks` the checks that the body attaches to the ports it reads and writes. Only the views, the diagnostics and the `.spitdag` read the origin.
+- **An import brings an operation with its body whole,** with the operations and checks its steps use under the same prefix. `OperationDef::file` names the file that declares it, and `Pipeline::files` lists each file read, with its git blob id (`src/blob.rs`).
+- **Each step is type-checked against its own operation,** which says nothing of the types the called operation promises. `check_calls`, in `src/compile/types.rs`, checks those (see [resolution](resolution.md)).
 
 ## Trade-offs
 

@@ -38,7 +38,9 @@ nav:
   - Architecture:
       - Overview: architecture.md
       - Parsing and lowering: architecture/parsing.md
-      - Compiler stages: architecture/phases.md
+      - Inputs: architecture/inputs.md
+      - Resolution: architecture/resolution.md
       - Binding and output: architecture/binding.md
+      - Diagnostics and the editor: architecture/diagnostics.md
       - Extending SPIT: architecture/extending.md
       - Performance: architecture/performance.md
