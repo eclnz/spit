@@ -179,11 +179,11 @@ fn equals_command_keeps_colons_in_arguments() {
 }
 
 #[test]
-fn shell_source_is_rejected_with_migration_guidance() {
+fn shell_source_says_to_put_the_program_on_path() {
     let text = "source raw [id]\noperation copy(input)\nresult = copy(raw)\nshell-source: scripts/functions.sh\n";
     let error = parse_pipeline(text).unwrap_err();
     assert_eq!(error.line(), 4);
-    assert!(error.message().contains("executable available on PATH"));
+    assert!(error.message().contains("put it on PATH"));
 }
 
 #[test]
@@ -275,7 +275,7 @@ fn removed_sections_say_what_to_write_instead() {
         let error = parse_pipeline(&format!("source raw [id]\n{header}\n")).unwrap_err();
         assert_eq!(error.line(), 2, "{header}");
         assert!(
-            error.message().contains("no longer reads") && error.message().contains(instead),
+            error.message().contains("opens no section") && error.message().contains(instead),
             "{header}: {error}"
         );
     }

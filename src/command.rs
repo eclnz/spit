@@ -259,8 +259,10 @@ fn check_command_placeholders(
                         .iter()
                         .any(|output| output.name == DEFAULT_OUTPUT)
                 {
-                    CommandError::new("`{output}` is now `{@output}` in commands")
-                        .focus(format!("{{{name}}}"))
+                    CommandError::new(
+                        "`{output}` names no port; write `{@output}` for the output's path",
+                    )
+                    .focus(format!("{{{name}}}"))
                 } else {
                     unknown()
                 }
