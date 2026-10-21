@@ -37,8 +37,10 @@ flowchart LR
 - **The command line and the editor read the same list.** `spit check` prints it and fails on an error. `spit check --json` gives it to the editor with each `severity`, and the editor shows it as given.
 - **The list is ordered and thinned** (`order`):
     - by source, then file, then line;
-    - only the first error on each line is kept;
+    - a second error on a line is dropped when it has the same span as one kept there, or when either covers the whole line, since that is one fault said twice, such as a shared path rule failing for each product that uses it. An error elsewhere on the line is kept;
     - a warning on a line that has an error is dropped.
+
+    The checks that make the errors leave out the ones that follow from another (see [resolution](resolution.md#failure)), so this thinning only removes repeats.
 - **An error in an imported file belongs to the `use` line that reads it.** It carries the library's path, line, columns and text, and each `use` line that reads it (`Location::imported`, in [`src/span.rs`](https://github.com/eclnz/spit/blob/dev/src/span.rs)).
 - **Hovers.**
     - `src/editor/signatures.rs` lays signatures out at port boundaries.
@@ -55,6 +57,7 @@ flowchart LR
 
 - **The text and the JSON agree on each diagnostic's severity.** Tests: [`check_and_its_json_give_each_diagnostic_one_severity`](https://github.com/eclnz/spit/blob/dev/tests/severity.rs), [`every_example_checks_the_same_both_ways`](https://github.com/eclnz/spit/blob/dev/tests/severity.rs).
 - **Each error is reported once, in line order.** Test: [`every_semantic_error_is_reported_once_in_line_order`](https://github.com/eclnz/spit/blob/dev/tests/diagnostics.rs).
+- **Two faults on one line are both reported.** Test: [`independent_errors_on_one_line_are_each_reported`](https://github.com/eclnz/spit/blob/dev/tests/diagnostics.rs).
 - **A line with an error shows no warnings.** Test: [`a_line_with_an_error_shows_no_warnings`](https://github.com/eclnz/spit/blob/dev/tests/warnings.rs).
 - **An error in an imported file is placed in that file, and at the `use` line.** Test: [`a_body_that_reads_a_missing_product_is_reported_in_the_library`](https://github.com/eclnz/spit/blob/dev/tests/imported_errors.rs).
 - **An error in a call's step points at the call and into the body.** Tests: [`an_error_in_a_call_points_at_the_argument_the_caller_gave_and_into_the_body`](https://github.com/eclnz/spit/blob/dev/tests/composites.rs), [`an_error_in_an_imported_nested_call_relates_each_call_and_the_step`](https://github.com/eclnz/spit/blob/dev/tests/composites.rs).

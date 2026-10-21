@@ -343,9 +343,45 @@ g = take(scan)
             ),
         ]
     );
+    // Nothing resolves a pipeline with a cycle, so no DAG is made from it.
     let pipeline = spit::parse_pipeline(text).unwrap();
     assert!(matches!(
         spit::validate_pipeline(&pipeline),
         Err(spit::ResolveError::Cycle { .. })
     ));
+    assert!(matches!(
+        spit::resolve(&pipeline, &spit::SourceInventory::default()),
+        Err(spit::ResolveError::Cycle { .. })
+    ));
+}
+
+#[test]
+fn independent_errors_on_one_line_are_each_reported() {
+    // The default rule has a shape, which only a source's rule may, and apart
+    // from that it gives the source and the output one path.
+    let text = "source s [d]\ndefault path: in/{d:digits}.txt\noperation f(s) -> .txt\ncommand f: f {s} {@output}\no = f(s)\n";
+    let found = errors(diagnose(text, None));
+    let said: Vec<_> = found
+        .iter()
+        .map(|error| (error.line, error.columns.clone()))
+        .collect();
+    assert_eq!(
+        said,
+        [(Some(2), Some(17..27)), (Some(2), Some(14..31))],
+        "{found:?}"
+    );
+    assert!(found[0].message.contains("`{d:digits}` has a shape"));
+    assert!(found[1]
+        .message
+        .contains("products `s` and `o` bind to the same path `in/d.txt`"));
+}
+
+#[test]
+fn a_dimension_misspelled_in_a_rule_is_one_error() {
+    // `{sess}` leaves `raw`'s `ses` out of its path, which is the same mistake.
+    let text = "default path: out/[ses-{sess}]{@product}.txt\nsource raw [ses]\n";
+    assert_eq!(
+        rendered(&errors(diagnose(text, None))),
+        ["error: line 1: path rule names `{sess}`, which no product has"]
+    );
 }

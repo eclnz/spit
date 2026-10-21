@@ -251,11 +251,18 @@ pub(crate) fn collect_paths(
                 .filter(|(product, _)| !skip.contains(*product))
                 .map(|(product, template)| (template, lines.paths.get(product).cloned())),
         );
+    // A rule naming a dimension no product has is not checked further for the
+    // products that use it: what it omits is most often the dimension it
+    // misspelled, which would be reported again.
+    let mut misspelled = Vec::new();
     for (template, line) in rules {
         let unknown: BTreeSet<_> = template
             .group_dimensions()
             .filter(|dimension| !had.contains(dimension))
             .collect();
+        if !unknown.is_empty() {
+            misspelled.push(template);
+        }
         for dimension in unknown {
             errors.push(
                 error(format!(
@@ -330,7 +337,11 @@ pub(crate) fn collect_paths(
                     .at(line.clone()),
                 );
             }
+            let rule_misspelled = index
+                .path_rule_for(&product.name)
+                .is_some_and(|written| misspelled.iter().any(|&rule| std::ptr::eq(rule, written)));
             match validate_path_template(&index, product, template) {
+                Err(_) if rule_misspelled => {}
                 Err(e) => errors.push(e.at(line)),
                 // A repeated product name is reported by the resolver as a duplicate.
                 Ok(sample) => {

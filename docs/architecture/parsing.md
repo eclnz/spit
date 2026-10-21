@@ -60,7 +60,7 @@ The entry points differ in what they read and what they return:
     - **Collection minimums.** `@ min(n)` on a `many` port lowers to `OperationDef::minimum_collection`. An operation takes at most one `many` input, so the minimum belongs to the operation.
 - **Imports.** Each `use` line's library is parsed in turn, and the definitions it selects are merged into the caller.
 - **Not done here:**
-    - checking each step against its operation, types and cycles, which `compile` does (`validate_pipeline`);
+    - checking each step against its operation, types and cycles, which `collect_pipeline` does (see [resolution](resolution.md));
     - checking path rules, which `paths` does;
     - anything that needs a dataset.
 

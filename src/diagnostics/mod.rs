@@ -13,6 +13,7 @@ pub(crate) use recovery::recover_document;
 
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
+use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -583,7 +584,11 @@ fn order(mut diagnostics: Vec<Diagnostic>) -> Vec<Diagnostic> {
         )
     }
     diagnostics.sort_by(|a, b| key(a).cmp(&key(b)));
-    let mut errored = BTreeSet::new();
+    // The spans already reported as errors on each line. A second error at
+    // the same span, or where either covers the whole line, is one fault said
+    // again, such as a shared path rule failing for each product it serves.
+    // An error elsewhere on the line is a fault of its own, and is kept.
+    let mut errored: BTreeMap<_, Vec<Option<Range<usize>>>> = BTreeMap::new();
     let keep: Vec<bool> = diagnostics
         .iter()
         .map(|diagnostic| {
@@ -591,13 +596,18 @@ fn order(mut diagnostics: Vec<Diagnostic>) -> Vec<Diagnostic> {
                 return true;
             };
             let place = (diagnostic.source, diagnostic.file.as_deref(), line);
-            if errored.contains(&place) {
-                return false;
+            let spans = errored.entry(place).or_default();
+            if !diagnostic.is_error() {
+                return spans.is_empty();
             }
-            if diagnostic.is_error() {
-                errored.insert(place);
+            let columns = &diagnostic.columns;
+            let repeats = spans
+                .iter()
+                .any(|span| span.is_none() || columns.is_none() || span == columns);
+            if !repeats {
+                spans.push(columns.clone());
             }
-            true
+            !repeats
         })
         .collect();
     let mut keep = keep.into_iter();
