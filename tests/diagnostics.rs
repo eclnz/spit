@@ -310,3 +310,68 @@ fn a_cycle_is_reported_once_at_the_step_it_was_found_at() {
     assert_eq!(issues[0].columns, Some(0..1));
     assert_eq!(issues[0].message, "pipeline cycle: a -> b -> c -> a");
 }
+
+#[test]
+fn every_independent_cycle_is_reported_once_and_quiets_what_reads_it() {
+    let text = "\
+default path: out/{@product}/{site}
+source scan : Scan [site]
+operation copy(x: Scan) -> Scan
+operation two(x: Scan, y: Scan) -> Scan
+operation take(x: Photo) -> Photo
+c = copy(c)
+d = two(e, d)
+e = take(d)
+f = take(e)
+g = take(scan)
+";
+    let found: Vec<_> = errors(diagnose(text, None))
+        .into_iter()
+        .map(|error| (error.line.unwrap_or_default(), error.message))
+        .collect();
+    // `d` reads itself and `e`, two loops in one group of steps, which is
+    // said once. `e` is never checked against `d` in source order, `f` reads
+    // from the loop, and `g` reads from neither, so it is still checked.
+    assert_eq!(
+        found,
+        [
+            (6, "pipeline cycle: c -> c".to_owned()),
+            (7, "pipeline cycle: d -> e -> d".to_owned()),
+            (
+                10,
+                "type mismatch at `take.x`: product `scan` is Scan, expected Photo".to_owned()
+            ),
+        ]
+    );
+    // Nothing resolves a pipeline with a cycle, so no DAG is made from it.
+    let pipeline = spit::parse_pipeline(text).unwrap();
+    assert!(matches!(
+        spit::validate_pipeline(&pipeline),
+        Err(spit::ResolveError::Cycle { .. })
+    ));
+    assert!(matches!(
+        spit::resolve(&pipeline, &spit::SourceInventory::default()),
+        Err(spit::ResolveError::Cycle { .. })
+    ));
+}
+
+#[test]
+fn independent_errors_on_one_line_are_each_reported() {
+    // The default rule has a shape, which only a source's rule may, and apart
+    // from that it gives the source and the output one path.
+    let text = "source s [d]\ndefault path: in/{d:digits}.txt\noperation f(s) -> .txt\ncommand f: f {s} {@output}\no = f(s)\n";
+    let found = errors(diagnose(text, None));
+    let said: Vec<_> = found
+        .iter()
+        .map(|error| (error.line, error.columns.clone()))
+        .collect();
+    assert_eq!(
+        said,
+        [(Some(2), Some(17..27)), (Some(2), Some(14..31))],
+        "{found:?}"
+    );
+    assert!(found[0].message.contains("`{d:digits}` has a shape"));
+    assert!(found[1]
+        .message
+        .contains("products `s` and `o` bind to the same path `in/d.txt`"));
+}
