@@ -24,8 +24,7 @@ git show <commit>^:<path>                                        # the plan as i
 
 **What is not a plan.** These stay in the tree:
 
-- The user-facing docs: `README.md` and `docs/`.
-- How the code works now. That belongs on the architecture page that owns its contract (see [Writing documentation](#writing-documentation)), so move it there before deleting a plan that explains it.
+- Documentation: `README.md` and `docs/`. A plan that explains how the code works now moves that to the architecture page that owns it, as [Writing documentation](#writing-documentation) says, before it is deleted.
 - Tools that are still used, such as `usability/harness` and `profiling/`.
 - Records of what happened, such as the usability study's rounds, archived in `usability/rounds.zip`.
 
@@ -37,9 +36,13 @@ Records and data that people rarely read, and that only a tool needs as files, a
 
 ## Writing the code
 
-SPIT is a compiler, so most of its code is data being turned into other data: text into statements, statements into a `Pipeline`, a pipeline and an inventory into a DAG, a DAG into a `.spitdag`. The code is laid out around that data, not around objects that hide it. These rules describe how the code is written now. A change that breaks one should say why in its commit message.
+SPIT is a compiler: each stage turns data into other data, and the code is laid out around that data, not around objects that hide it. [The architecture map](docs/architecture.md) shows the stages and links to each one's page. These rules describe how the code is written now. A change that breaks one says why in its commit message.
 
-Some rules are checked, not just written down. `Cargo.toml` forbids `unsafe` and turns on clippy's `disallowed_types`, which `clippy.toml` sets to the standard library's `HashMap` and `HashSet` with their default hasher, and to `Rc`, `RefCell` and `Cell`. `src/lib.rs` and `src/main.rs` deny `unwrap` outside tests, in the library and in the command line. `tests/architecture.rs` checks file length and the boundaries between steps. `cargo clippy` and `cargo test` run these checks, so the checks before every commit cover them.
+Some rules are checked, not only written down, and the checks before every commit run them:
+
+- `Cargo.toml` forbids `unsafe`, and turns on clippy's `disallowed_types`. `clippy.toml` uses that to forbid the standard `HashMap` and `HashSet` with their default hasher, and `Rc`, `RefCell` and `Cell`.
+- `src/lib.rs` and `src/main.rs` deny `unwrap` outside tests.
+- `tests/architecture.rs` checks file length and the boundaries between steps.
 
 The five rules under [Performance](docs/architecture/performance.md) come first: one table with columns by id, text interned once, grouping by symbol keys, finding once and then looking up, and doing each piece of work once. The rules below are how the rest of the code keeps to them.
 
@@ -64,7 +67,7 @@ The five rules under [Performance](docs/architecture/performance.md) come first:
 
 **Errors and invariants**
 
-- **Errors are data.** An error is an enum variant whose fields say what went wrong, and `Located<E>` says where. Rendering is separate, in `src/diagnostics` and `render.rs`, so that the same error can be printed as text or as JSON.
+- **Errors are data.** An error is an enum variant whose fields say what went wrong, and `Located<E>` says where. Rendering is separate, in each error's `Display` (`src/error.rs`) and in `src/diagnostics`, so that the same error can be printed as text or as JSON.
 - **Bad input never panics.** Outside tests, `unwrap` isn't used, and clippy rejects it. `expect` and `unreachable!` state an invariant the code already holds, and their message says what it is, as in `unreachable!("a product's template has its groups resolved")`. Anything a user's file can cause is an error.
 - **Name the other half of an invariant.** When code relies on something another place guarantees, a comment says so with "Keep in step with" and names that place, as the `Ord` for `EntityBinding` does for its hash. Add the comment on both sides.
 - **No `unsafe`.** The compiler rejects it.
@@ -119,11 +122,19 @@ This file holds the rules for agents. Why something was built, and how it change
 - A change to a contract (the data crossing a boundary, an invariant, failure behaviour) updates its architecture page and diagram.
 - A refactor that keeps both needs no documentation change, unless a page names a type, function or file it renamed or moved.
 
-**Checking documentation.**
+**Checking documentation.** Before committing a change to a Markdown file:
 
 - Check every claim against the binary or the code, not against an earlier page or pull request.
-- Run every example a page shows. Name every type, function, file and test exactly, so a search finds it.
-- Build the site as [the checks](#checks-before-every-commit) show, and check that each changed diagram renders on GitHub and on the site.
+- Run every example the page shows. Name every type, function, file and test exactly, so a search finds it.
+- Check that its links and anchors resolve. GitHub's anchor for `## \`dag --partial\`` is `#dag---partial`.
+- For a change to `docs/` or `properdocs.yml`, build the site as CI does, and check that each changed diagram renders:
+
+  ```sh
+  python3 -m venv /tmp/docs-venv
+  /tmp/docs-venv/bin/pip install -q -r .github/docs-requirements.txt
+  /tmp/docs-venv/bin/properdocs build --strict --site-dir /tmp/spit-site
+  ```
+
 - When a pull request changes documentation, say in it what could not be run or checked.
 
 ## The VS Code extension
@@ -162,15 +173,7 @@ usability/harness/rebuild_keys.sh             # expect `ok` for every answer key
   `ignore.messie` at the root leaves out the files Cargo and clippy need there under fixed names, which Messie would otherwise judge as unrelated to the rest of the root. Add a file there only when a tool requires its name and place.
 
 - **Stored outputs.** They are under `tests/fixtures/outputs/`. Re-save them with `SPIT_BLESS=1 cargo test --release --test outputs`, then read `git diff tests/fixtures` before committing.
-- **Links.** A changed Markdown file's links and anchors should resolve. GitHub's anchor for `## \`dag --partial\`` is `#dag---partial`.
-- **Documentation site.** When a commit changes `docs/` or `properdocs.yml`, build the site as CI does:
-
-  ```sh
-  python3 -m venv /tmp/docs-venv
-  /tmp/docs-venv/bin/pip install -q -r .github/docs-requirements.txt
-  /tmp/docs-venv/bin/properdocs build --strict --site-dir /tmp/spit-site
-  ```
-
+- **Documentation.** A commit that changes a Markdown file runs the checks under [Checking documentation](#writing-documentation).
 - **Speed.** A change to performance-related code is benchmarked, whether or not it means to change speed. That is code that runs once per artifact, job, record or step, and any change to how data is laid out, copied, hashed, allocated or written: the model and its tables, parsing, resolving, binding, discovery, and the writers. Build the commit before in a worktree and run `profiling/bench.py pipeline` and `profiling/bench.py dataset` with `--old` set to it, as `profiling/README.md` shows, and check that output is byte-for-byte the same.
   - **It is a regression check.** With `--old`, each command compares the two builds at one size of its workload, takes a few seconds, and exits with status 1 when a time is more than 1.3 times the old build's and more than 5 ms slower. Give more sizes only to see how a stage scales, such as when a change claims a speed-up.
   - **Runs vary.** On a shared machine two runs of the same build can differ by 10% or more. When the check fails, run it again; a slowdown is a regression when it fails both times.
@@ -183,5 +186,4 @@ usability/harness/rebuild_keys.sh             # expect `ok` for every answer key
 - **Issues.** Bugs, feature requests and work left for later go in the GitHub issue tracker, one issue each, not in a report's or a plan's list of next steps. A report or commit that leaves work undone links its issues.
 - **Commit messages.** The title is a plain sentence, such as "Replace skip with drop, which names the groups it removes". Then prose saying what was wrong and what changed, then the co-author and session trailers.
 - **No model names** in files pushed to the repository.
-- **Documentation travels with behaviour,** as [Writing documentation](#writing-documentation) sets out.
 - **New recipe rule keywords** go in `split_rules` in `tests/support/mod.rs` as well, which separates a test's recipe rules from its pipeline by keyword.
