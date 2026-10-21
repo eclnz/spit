@@ -40,7 +40,7 @@ flowchart LR
     - a second error on a line is dropped when it has the same span as one kept there, or when either covers the whole line, since that is one fault said twice, such as a shared path rule failing for each product that uses it. An error elsewhere on the line is kept;
     - a warning on a line that has an error is dropped.
 
-    The checks that make the errors leave out the ones that follow from another (see [resolution](resolution.md#failure)), so this thinning only removes repeats.
+    Errors that follow from another are left out by the checks that make them (see [resolution](resolution.md#failure)), not here.
 - **An error in an imported file belongs to the `use` line that reads it.** It carries the library's path, line, columns and text, and each `use` line that reads it (`Location::imported`, in [`src/span.rs`](https://github.com/eclnz/spit/blob/dev/src/span.rs)).
 - **Hovers.**
     - `src/editor/signatures.rs` lays signatures out at port boundaries.
