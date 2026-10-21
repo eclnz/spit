@@ -4,7 +4,7 @@ This manual defines valid `.spit` pipelines, `.spitin` recipes, and `.spitout` i
 
 A `#` that starts a word begins a comment, as in Bash. A `#` inside a word or in quotes is kept, so `--color=#fff` and `'#run'` are ordinary arguments.
 
-A line's first word says what it is, so the words that start statements are reserved: no product, whether a source or a step's output, may be named `use`, `root`, `source`, `discover`, `operation`, `command`, `verify`, `check`, `require`, `exclude`, `path`, `ext`, `default`, `entities`, `stage` or `dimensions`, nor `drop`, `skip`, `sidecars` or `shell-source`, which earlier versions read. `check = clean(raw)` is an error that says so.
+A line's first word says what it is, so the words that start statements are reserved: no product, whether a source or a step's output, may be named `use`, `root`, `source`, `discover`, `operation`, `command`, `verify`, `check`, `require`, `exclude`, `path`, `ext`, `default`, `entities`, `stage` or `dimensions`, nor `drop`, `skip` or `sidecars`. Those three, and `shell-source`, start a line only to give an error that says what to write instead. `check = clean(raw)` is an error that says so.
 
 ## Keyword blocks
 
@@ -195,7 +195,7 @@ operation carried out by steps, put `:` after the completed signature and
 indent its body beneath the `operation` line. Single-line declarations keep
 the same meaning.
 
-Every input port has a name, and its placeholder is that name. A port is written `name`, `name: Type`, `name: many`, or `name: many Type`; a lowercase word alone, as in `operation copy(image)`, is an untyped port, and type names start with a capital letter. In `source reading : Series [station, day]`, `reading` is the product that identifies artifacts and `Series` is its type: write `operation compare(reading: Series)`, then call it with `compare(reading)`. `{@output}` is the path of a single unnamed output; its `@` marks a SPIT-supplied placeholder, while a named output such as `{wm}` uses the name in the operation declaration. `output` cannot name an input or explicit output port, and the old `{output}` spelling is an error that points to `{@output}`. A command must use every output placeholder, or its `.dir` or `.stem`, except an output written [`beside`](#files-a-tool-writes-beside-another) another; a `verify` command may use inputs only. Command templates give ordered words and arguments, not shell pipelines or redirection, since a backend runs a command without a shell. An unquoted `|`, `>`, `&&`, `;`, `2>&1` or the like is therefore an error; quote it (`'>'`) to pass it to the program as an argument. A command that needs a pipe or a redirection runs a shell itself and passes the paths to it as arguments, so that a path is never read as shell text: `command first: sh -c 'cut -f1 "$1" > "$2"' sh {table} {@output}`. The same holds for `verify` and `check` commands. Words are split and quoted as in Bash, and every argument is passed literally: `$` and backticks are not expanded. As in Bash, text in single quotes is literal, so `awk '{print $1}'` needs no escaping; a placeholder is filled in unquoted text or double quotes. Write `{{` or `}}` for a literal brace elsewhere. Every command is checked when the pipeline is loaded: braces and quotes must balance, placeholders must name the operation's ports, and each output must appear, as above.
+Every input port has a name, and its placeholder is that name. A port is written `name`, `name: Type`, `name: many`, or `name: many Type`; a lowercase word alone, as in `operation copy(image)`, is an untyped port, and type names start with a capital letter. In `source reading : Series [station, day]`, `reading` is the product that identifies artifacts and `Series` is its type: write `operation compare(reading: Series)`, then call it with `compare(reading)`. `{@output}` is the path of a single unnamed output; its `@` marks a SPIT-supplied placeholder, while a named output such as `{wm}` uses the name in the operation declaration. `output` cannot name an input or explicit output port, and `{output}` is an error that points to `{@output}`. A command must use every output placeholder, or its `.dir` or `.stem`, except an output written [`beside`](#files-a-tool-writes-beside-another) another; a `verify` command may use inputs only. Command templates give ordered words and arguments, not shell pipelines or redirection, since a backend runs a command without a shell. An unquoted `|`, `>`, `&&`, `;`, `2>&1` or the like is therefore an error; quote it (`'>'`) to pass it to the program as an argument. A command that needs a pipe or a redirection runs a shell itself and passes the paths to it as arguments, so that a path is never read as shell text: `command first: sh -c 'cut -f1 "$1" > "$2"' sh {table} {@output}`. The same holds for `verify` and `check` commands. Words are split and quoted as in Bash, and every argument is passed literally: `$` and backticks are not expanded. As in Bash, text in single quotes is literal, so `awk '{print $1}'` needs no escaping; a placeholder is filled in unquoted text or double quotes. Write `{{` or `}}` for a literal brace elsewhere. Every command is checked when the pipeline is loaded: braces and quotes must balance, placeholders must name the operation's ports, and each output must appear, as above.
 
 Products, operations and dimensions have separate names, so a dimension may share a product's (`model @ each(model)`). A product may also share its operation's name, but `spit check` warns: name the result, as in `coregistered = coreg(mc, brain)`, so the step reads as what it makes.
 
@@ -311,7 +311,7 @@ Lists add up. A step's outputs run the file's checks, then those of each stage a
 
 To run less than a wider list sets, write `!` before the check. In a stage, `default check: !nonempty` drops the file's `nonempty` for that stage's outputs and the stages in it, and a stage inside it may add it back. On an operation's output, `-> (empty_ok: Table @ check(!nonempty), rows: Table)` drops it for that output alone, wherever the operation is called. `!` names a check as written, `ndim(3)` included, and an output's own `@ check(nonempty)` is never dropped by it.
 
-A file or a stage has one `default check:` line. Its checks and the ones it drops must be declared checks, with the right number of arguments. The `.spitdag` has no new fields: each default becomes a check on the artifact, after the job's command, beside the others, and `spit dag --commands` lists it as a `check:` line.
+A file or a stage has one `default check:` line. Its checks and the ones it drops must be declared checks, with the right number of arguments. Default checks add no field to the `.spitdag`: each default becomes a check on the artifact, after the job's command, beside the others, and `spit dag --commands` lists it as a `check:` line.
 
 ## Defaults
 
@@ -608,7 +608,7 @@ pipeline survey.spit
 path raw_photo: site-{site}/visit-{visit}/photos/shot-{shot}.raw
 ```
 
-A recipe's default `default path:` also places the main source. For `default path: data/{site}/{visit}/{shot}/{@product}`, the files are `data/a/1/3/raw_photo.raw` and `data/a/1/3/raw_photo.json`. The `.spitout` records the main source's path under `source_paths:`; the companion's path is derived from it. When importing definitions, import the main source to bring all its companions. With an alias, `path text::raw_photo:` names the imported main source.
+A recipe's `default path:` also places the main source. For `default path: data/{site}/{visit}/{shot}/{@product}`, the files are `data/a/1/3/raw_photo.raw` and `data/a/1/3/raw_photo.json`. The `.spitout` records the main source's path under `source_paths:`; the companion's path is derived from it. When importing definitions, import the main source to bring all its companions. With an alias, `path text::raw_photo:` names the imported main source.
 
 When `spit inputs` scans a dataset, or a command reads records from a recipe or `.spitout`, it warns about each identity that holds some of these sources and lacks others, as `warning: raw_photo[site=A,visit=2,shot=3] has .raw and .gpx but no .json`. Warnings follow source declaration order, then value order. A file a named or conditional `exclude` rule removes is not counted as missing, nor is one listed under `.spitout`'s `removed:` section.
 
@@ -629,7 +629,7 @@ require [sub, ses] where image count=1
 path image: data/sub-{sub}/ses-{ses}/image.nii.gz
 ```
 
-A recipe may contain `discover`, `exclude` and `require` rules, `path product:` rules for source products, a default `default path:` rule for its sources, and `sources:`/`contexts:` records. It cannot declare sources, operations, steps, commands, stages, imports or `default ext:`; the pipeline still declares each logical `source` with its dimensions and optional type. Rules in a pipeline are an error, and so are records.
+A recipe may contain `discover`, `exclude` and `require` rules, `path product:` rules for source products, a `default path:` rule for its sources, and `sources:`/`contexts:` records. It cannot declare sources, operations, steps, commands, stages, imports or `default ext:`; the pipeline still declares each logical `source` with its dimensions and optional type. Rules in a pipeline are an error, and so are records.
 
 A recipe's `default path:` line is the default for every source with no rule of its own, in the pipeline or the recipe. Where a dataset keeps its inputs is the dataset's to say, so the pipeline's `default path:` can say where outputs go, by stage if it likes, and the recipe says where sources are:
 
@@ -670,7 +670,7 @@ Two forms of `exclude` leave data out; `require` checks what remains:
 
 Named exclusions apply first, even when written after conditional exclusions. Every conditional exclusion then sees the same retained inventory, and all matching groups are removed together. `require` checks what remains. Each removal is reported on stderr and recorded in the `.spitout`.
 
-Conditional `exclude` and `require` name the groups first, then `where`, then the source or discovery rule and a condition. A conditional exclusion removes each group that meets its condition; `require` stops the run unless every group meets its own. A `require` in the older order, source first and the groups after `per`, as in `require t1w count=1 per [sub, ses]`, is an error that gives the rule rewritten. An old `drop` rule is rejected with an error that shows its `exclude` replacement.
+Conditional `exclude` and `require` name the groups first, then `where`, then the source or discovery rule and a condition. A conditional exclusion removes each group that meets its condition; `require` stops the run unless every group meets its own. A `require` written source first with the groups after `per`, as in `require t1w count=1 per [sub, ses]`, is an error that gives the rule in this order. A `drop` rule is an error that gives the conditional `exclude` to write instead.
 
 Rules that count form their groups from every artifact and discovered context in the dataset, whichever source or discovery found it. `exclude [store] where pricing count=0` groups by every store any source or discovery has, so a store with sales but no price list is a group with none: its count is 0.
 
@@ -698,8 +698,8 @@ error: line 3, column 13: `image` has path rules in both .spit and .spitin; keep
 A source takes the first path rule of these that it has:
 
 1. its own `path source:` rule, from whichever file gives it;
-2. the recipe's default `default path:`;
-3. the pipeline's default `default path:`, unless it names `{@stage}` outside a group.
+2. the recipe's `default path:`;
+3. the pipeline's `default path:`, unless it names `{@stage}` outside a group.
 
 A rule written for one source comes before any default, and the dataset's default for its inputs comes before the pipeline's general one. An output's path never comes from the recipe. `spit check recipe.spitin --path-rules` shows which rule each source takes, and marks those the recipe gives `(recipe)`.
 
