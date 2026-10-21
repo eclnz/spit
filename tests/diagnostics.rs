@@ -101,6 +101,55 @@ fn duplicate_declaration_points_to_the_second_declaration() {
     assert!(issues[0].message.contains("duplicate product name"));
 }
 
+/// Two steps that make `y`, steps that read it directly and through
+/// another, and a step on its own that has an error.
+const TWO_PRODUCERS: &str = "\
+source lines : Lines [site]
+source table : Table [site]
+operation clean(x: Lines) -> Lines
+operation tab(x: Table) -> Table
+operation count(x: Lines) -> Count
+operation split(x: Lines) -> (a: Lines, b: Table)
+";
+
+#[test]
+fn a_product_two_steps_make_quiets_every_step_that_reads_it() {
+    let errors = |steps: &str| -> Vec<(usize, String)> {
+        errors(diagnose(&format!("{TWO_PRODUCERS}{steps}"), None))
+            .into_iter()
+            .map(|error| (error.line.unwrap_or_default(), error.message))
+            .collect()
+    };
+    let readers = "z = count(y)\nz2 = clean(y)\nzz = tab(z2)\nw = count(table)\n";
+    // Whichever step comes first, neither's type reaches the readers of
+    // `y`, and the step that reads only `table` is still checked.
+    for producers in [
+        "y = clean(lines)\ny = tab(table)\n",
+        "y = tab(table)\ny = clean(lines)\n",
+        "y, t = split(lines)\ny = tab(table)\nu = tab(t)\n",
+        "y = tab(table)\ny, t = split(lines)\nu = tab(t)\n",
+    ] {
+        let found = errors(&format!("{producers}{readers}"));
+        let w = 7 + producers.lines().count() + 3;
+        assert_eq!(
+            found,
+            [
+                (8, "duplicate product name `y`".to_owned()),
+                (
+                    w,
+                    "type mismatch at `count.x`: product `table` is Table, expected Lines"
+                        .to_owned()
+                ),
+            ],
+            "{producers}"
+        );
+        // Nor can it be resolved.
+        let pipeline =
+            spit::parse_pipeline(&format!("{TWO_PRODUCERS}{producers}{readers}")).unwrap();
+        assert!(spit::validate_pipeline(&pipeline).is_err(), "{producers}");
+    }
+}
+
 #[test]
 fn missing_join_input_points_to_the_call() {
     let text = "source raw [id]\nsource reference [id]\noperation join(left, right)\nresult = join(raw, reference)\ndefault entities: {@key}={@value} separated \"__\"\npath result: out/{@product}/{@entities}\n";
