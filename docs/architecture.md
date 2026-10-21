@@ -35,7 +35,7 @@ Each page describes one contract:
 
 ## Boundaries
 
-- **Three steps stay apart.** `compile`, `inputs` and the resolver (`resolver`, `render`) reach into each other only as `tests/architecture.rs` allows: inputs may use compile, the resolver may use compile, and neither may use the other. The command line, the editor and `src/diagnostics` may use every step.
+- **Three steps stay apart.** `compile`, `inputs` and the resolver (`resolver`, `render`) reach into each other only in one direction: inputs may use compile, the resolver may use compile, and neither may use the other. The command line, the editor and `src/diagnostics` may use every step. Test: [`step_modules_do_not_import_later_steps`](https://github.com/eclnz/spit/blob/dev/tests/architecture.rs).
 - **The model is shared.** `src/model` holds the data every step reads: `Pipeline`, `InputRules`, `SourceInventory`, `ResolvedDag` and the `Artifacts` table.
 - **The library's API is what `src/lib.rs` re-exports.** Every module is private.
 - **No domain knowledge.** The examples use imaging names, but `src/` holds no imaging types, operations or assumptions.

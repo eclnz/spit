@@ -65,13 +65,12 @@ flowchart LR
 
 ## Invariants
 
-- **The output is the same bytes for the same pipeline, inventory, root and SPIT version.** It never depends on hash order (see AGENTS.md). Stored outputs under `tests/fixtures/outputs/` check it (`tests/outputs.rs`).
-- **No two outputs share a path.** `dag` checks collisions among concrete paths.
-- **SPIT writes no path of its own.** An output with no rule fails at its declaration. A source with records but no rule fails at binding, rather than being looked for under `out/`.
-- **What every job of a step shares is kept once.** Binding finds each step's operation, commands and checks once, not once per job.
-- **A `.spitdag` belongs to one inventory.** A new inventory needs a new `dag`.
+- **The output is the same bytes for the same pipeline, inventory, root and SPIT version.** It never depends on hash order (AGENTS.md says how the code keeps to that). Test: [`tests/outputs.rs`](https://github.com/eclnz/spit/blob/dev/tests/outputs.rs), which compares every example's output with a stored copy under `tests/fixtures/outputs/`.
+- **No two artifacts share a path.** Products whose rules give the same path for the same entities are an error. Tests: [`path_rule_errors_point_to_the_rule_in_use`](https://github.com/eclnz/spit/blob/dev/tests/diagnostics.rs), [`two_sources_with_one_dimension_name_collide_whatever_their_shapes`](https://github.com/eclnz/spit/blob/dev/tests/placeholder_shapes.rs).
+- **SPIT writes no path of its own.** An output with no rule fails at its declaration. A source with records but no rule fails at binding, rather than being looked for under `out/`. Tests: [`an_output_with_no_rule_is_an_error_and_a_source_waits_for_one`](https://github.com/eclnz/spit/blob/dev/tests/paths.rs), [`a_recorded_source_with_no_path_rule_is_not_looked_for_under_out`](https://github.com/eclnz/spit/blob/dev/tests/cli.rs).
+- **Checks change neither the jobs nor their fingerprints.** Test: [`checks_change_neither_the_jobs_nor_their_fingerprints`](https://github.com/eclnz/spit/blob/dev/tests/checks.rs).
 
-The tests are `tests/paths.rs`, `tests/extensions.rs`, `tests/entities_format.rs`, `tests/placeholder_shapes.rs`, `tests/folder_and_stem.rs`, `tests/folders.rs`, `tests/beside.rs`, `tests/commands.rs`, `tests/checks.rs`, `tests/default_checks.rs` and `tests/outputs.rs`.
+A `.spitdag` belongs to the inventory it was made from: a new inventory needs a new `dag`.
 
 ## Failure
 

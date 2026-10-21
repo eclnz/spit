@@ -79,7 +79,7 @@ The five rules under [Performance](docs/architecture/performance.md) come first:
 **Dependencies and boundaries**
 
 - **Two crates, and a new one must earn its place.** SPIT depends on `mimalloc` and `rustc-hash`. It writes JSON by hand rather than with `serde_json`, which is 15% faster and needs five fewer crates (`1b4b141`). A new dependency needs `profiling/bench.py` numbers, and the output must stay byte-for-byte the same.
-- **The three steps stay apart.** Compile, inputs and resolve don't reach into each other except as `tests/architecture.rs` allows. Every module is private, and the library's API is what `lib.rs` re-exports, so add to `lib.rs` only what a caller outside the crate needs.
+- **The three steps stay apart.** Don't make one step use another beyond what [the boundaries](docs/architecture.md#boundaries) allow, which `tests/architecture.rs` enforces. Add to `lib.rs` only what a caller outside the crate needs.
 
 ## Writing documentation
 
@@ -106,10 +106,10 @@ This file holds the rules for agents.
 **Pages for contributors** each describe one contract between components: the data that crosses a boundary, and what each side may rely on. A page is not one per Rust module.
 
 - Lead with a small Mermaid diagram of the data flowing through the component, with each box a real type.
-- Then give, briefly, in lists where a list fits:
-  - **Data:** the types in and out, and the functions that make them, named as `Type::method` and linked to their file.
+- Then give, briefly, in lists rather than tables (the site's theme doesn't wrap table cells, so a wide table scrolls sideways):
+  - **Data:** for each type in the diagram, what it holds that the diagram doesn't show, and the function that makes it, named as `Type::method` and linked to its file.
   - **Responsibilities:** what the component decides, and what it leaves to others.
-  - **Invariants:** what always holds, one to a bullet, each with the test that checks it.
+  - **Invariants:** what always holds, one to a bullet, each with a link to the test that checks it. A property no test checks is not listed as an invariant.
   - **Failure:** what bad input gives.
   - **Trade-offs:** only those a contributor could undo by mistake.
 - Use prose only for what a list or diagram can't say.
