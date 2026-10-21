@@ -42,8 +42,7 @@ pub(crate) use self::render_inventory::as_read_back;
 pub use self::render_inventory::render_source_inventory;
 pub(crate) use self::source_map::{Rule, SourceMap, Step};
 
-const SHELL_SOURCE_REMOVED: &str =
-    "shell-source is no longer supported; make the command executable available on PATH";
+const SHELL_SOURCE_ERROR: &str = "`shell-source` starts no statement: a command runs a program, not a shell function, so make the program executable and put it on PATH";
 
 /// A parse error, with the line it is on.
 pub type ParseError = Located<ParseFailure>;
