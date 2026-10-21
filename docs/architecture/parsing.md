@@ -78,7 +78,7 @@ The entry points differ in what they read and what they return:
 - **There is one rule for a step,** `is_step`, which every reader takes from `Head::Step`. Test: [`a_step_is_names_then_a_call`](https://github.com/eclnz/spit/blob/dev/src/parser/layout.rs).
 - **Records are blank to statements.** Lines a `sources:` or `contexts:` header starts are read only by the inventory reader. Test: [`records_are_marked_and_blank_to_statements`](https://github.com/eclnz/spit/blob/dev/src/parser/layout.rs).
 - **A statement is lowered whole or not at all.** Every failure comes before the builder changes, except a call whose expansion fails part way, which `add_flow_step` rolls back with `PipelineBuilder::journal`. So the statements after a failed one lower as they would without it. Tests: [`each_bad_step_of_a_body_is_an_error_and_the_operation_keeps_the_rest`](https://github.com/eclnz/spit/blob/dev/tests/syntax_errors.rs), [`a_body_with_every_step_failing_is_reported_by_its_steps_alone`](https://github.com/eclnz/spit/blob/dev/tests/syntax_errors.rs).
-- **Expansion uses a worklist, not recursion,** so bodies nest to any depth and a chain of steps can be any length. Test: [`a_long_chain_of_steps_compiles_without_overflowing_the_stack`](https://github.com/eclnz/spit/blob/dev/tests/scale.rs), which runs on request.
+- **A pipeline of any length parses and lowers without overflowing the stack.** Test: [`a_long_chain_of_steps_compiles_without_overflowing_the_stack`](https://github.com/eclnz/spit/blob/dev/tests/scale.rs), which runs on request.
 - **Damaged text never panics.** Test: [`tests/mutation_fuzz.rs`](https://github.com/eclnz/spit/blob/dev/tests/mutation_fuzz.rs).
 - **The cost of errors grows with the errors, not the file.** Tests: the `..._in_reasonable_time` cases in [`tests/scale.rs`](https://github.com/eclnz/spit/blob/dev/tests/scale.rs), which run on request.
 
@@ -113,6 +113,7 @@ flowchart LR
     - a port reads the caller's argument, with the caller's selectors merged with the body's own;
     - an output is the product the caller names;
     - a product the body makes for itself is filed under the call's first output, as `first::product`, which `{@product}` writes `first.product`. So two calls never share an identity or a path.
+- **`add_flow_step` expands calls with a worklist, not recursion,** so bodies may nest to any depth.
 - **Each call is a `Call` in `Pipeline::calls`, by `CallId`.** It holds the operation, the products the call reads and writes, its parent call and its place.
 - **Each step a call makes carries `Invocation::origin`,** the call and the body step's place. It also carries in `Invocation::checks` the checks that the body attaches to the ports it reads and writes. Only the views, the diagnostics and the `.spitdag` read the origin.
 - **An import brings an operation with its body whole,** with the operations and checks its steps use under the same prefix. `OperationDef::file` names the file that declares it, and `Pipeline::files` lists each file read, with its git blob id (`src/blob.rs`).

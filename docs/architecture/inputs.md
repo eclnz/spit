@@ -30,7 +30,7 @@ flowchart LR
     - what was `removed`, and why;
     - the `root`.
 
-    A dataset indexer may build one directly. Its text form, the `.spitout`, is read by `parse_source_inventory` and written by `render_source_inventory`.
+    Named contexts whose `discover` rule is gone are kept, as a record of where they came from. A dataset indexer may build one directly. Its text form, the `.spitout`, is read by `parse_source_inventory` and written by `render_source_inventory`.
 - **`ResolvedInputs`** is the stage's result:
     - the inventory;
     - each `CoverageGap`: a `require` rule that failed, with the sources it holds back;
@@ -69,7 +69,7 @@ While it scans, the stage also:
 ## Invariants
 
 - **Resolution sees only an inventory.** Nothing after this stage reads an `InputRules`, and the resolver may not use the `inputs` module. Test: [`step_modules_do_not_import_later_steps`](https://github.com/eclnz/spit/blob/dev/tests/architecture.rs).
-- **A `.spitout` stands alone.** It carries every source identity, and each source path rule the recipe supplied, so `dag` and `artifacts` run from it without the recipe. Named contexts whose rule is gone are kept as a record of where they came from. Test: [`a_spitout_alone_drives_jobs_without_its_recipe`](https://github.com/eclnz/spit/blob/dev/tests/inputs.rs).
+- **A `.spitout` stands alone.** It carries every source identity, and each source path rule the recipe supplied, so `dag` and `artifacts` run from it without the recipe. Test: [`a_spitout_alone_drives_jobs_without_its_recipe`](https://github.com/eclnz/spit/blob/dev/tests/inputs.rs).
 - **A file fits one source.** A file that two sources' rules match is an error. Tests: [`a_file_matching_two_source_rules_is_rejected`](https://github.com/eclnz/spit/blob/dev/tests/discovery.rs), [`two_rules_that_both_read_a_file_still_conflict`](https://github.com/eclnz/spit/blob/dev/tests/placeholder_shapes.rs).
 - **Exclusions are applied before expectations.** A context or file that an `exclude` rule removes is never reported missing. Tests: [`a_discovered_context_left_out_needs_no_files`](https://github.com/eclnz/spit/blob/dev/tests/exclusions.rs), [`an_expected_file_excluded_by_name_need_not_exist`](https://github.com/eclnz/spit/blob/dev/tests/exclusions.rs), [`an_excluded_file_may_lie_outside_the_discovered_contexts`](https://github.com/eclnz/spit/blob/dev/tests/exclusions.rs), [`a_session_missing_its_file_can_be_dropped_rather_than_fail_discovery`](https://github.com/eclnz/spit/blob/dev/tests/conditional_exclusions.rs).
 - **Shapes narrow matching only.** A placeholder's `Shape` decides which files match, and never changes how a value is written. Tests: [`a_leading_zero_is_kept`](https://github.com/eclnz/spit/blob/dev/tests/placeholder_shapes.rs), [`a_shape_on_an_output_or_a_default_is_an_error`](https://github.com/eclnz/spit/blob/dev/tests/placeholder_shapes.rs).
