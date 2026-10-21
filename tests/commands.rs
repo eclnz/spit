@@ -13,13 +13,13 @@ fn commands_are_validated_even_without_resolved_jobs() {
     assert!(
         check("command normalize: normalize --mode {table} {output}")
             .unwrap_err()
-            .contains("`{output}` is now `{@output}`")
+            .contains("`{output}` names no port; write `{@output}`")
     );
     assert!(check("command normalize: normalize --mode {table} {@output.dir}").is_ok());
     assert!(
         check("command normalize: normalize --mode {table} {output.dir}")
             .unwrap_err()
-            .contains("`{output}` is now `{@output}`")
+            .contains("`{output}` names no port; write `{@output}`")
     );
     assert!(check("command normalize: normalize --mode {raw} {@output}")
         .unwrap_err()

@@ -60,8 +60,8 @@ pub(super) fn parse_operation(line: &str, number: usize) -> Result<OperationDef,
         return Err(ParseError::new(
             number,
             format!(
-                "an operation no longer names the dimensions it collects; remove `@ drop({vary})` \
-                 and write `@ vary({vary})` on the many input of each call, as in \
+                "an operation does not name the dimensions it collects, its calls do: remove \
+                 `@ drop({vary})` and write `@ vary({vary})` on the many input of each call, as in \
                  `result = {name}(input @ vary({vary}))`"
             ),
         )
@@ -198,8 +198,8 @@ const AFTER_OUTPUT: &str = "nothing follows an operation's outputs but their `@ 
 /// What a clause on an input port may be.
 const ON_PORT: &str = "expected `@ min(count)` on a many input, or `@ check(...)`";
 
-/// An `@ min(count)` clause, and a removed `@ drop(...)` clause, each with
-/// its text, kept to point at it and to say what to write instead.
+/// An `@ min(count)` clause, and an `@ drop(...)` clause, which is an error,
+/// each with its text, kept to point at it and to say what to write instead.
 #[derive(Default)]
 struct Clauses<'a> {
     drop: Option<(Vec<String>, &'a str)>,
