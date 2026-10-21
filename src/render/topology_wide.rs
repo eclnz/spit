@@ -171,10 +171,12 @@ pub(super) fn render(
 
 impl<'a> Canvas<'a> {
     fn point(&self, band: usize, x: usize, y: usize) -> (usize, usize) {
-        (
-            self.margin + if band % 2 == 0 { x } else { self.inner - 1 - x },
-            band * self.pitch + y,
-        )
+        let x = if band.is_multiple_of(2) {
+            x
+        } else {
+            self.inner - 1 - x
+        };
+        (self.margin + x, band * self.pitch + y)
     }
 
     fn line(&mut self, band: usize, from: (usize, usize), to: (usize, usize)) {
@@ -207,7 +209,7 @@ impl<'a> Canvas<'a> {
     fn fold(&mut self, band: usize, end: usize, lane: usize) {
         let from = self.point(band, end, lane * 2);
         let to = self.point(band + 1, 0, lane * 2);
-        let x = if band % 2 == 0 {
+        let x = if band.is_multiple_of(2) {
             WIDTH - 2 - lane * 2
         } else {
             1 + lane * 2
