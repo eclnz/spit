@@ -407,3 +407,89 @@ fn a_type_variable_prints_marked_so_it_differs_from_a_named_type() {
         "{found:?}"
     );
 }
+
+/// Frames in two spaces, generic operations over them, and an operation
+/// with a body whose ports are generic.
+const FRAMES: &str = "\
+default path: out/{@product}[/{@entities}].txt
+default entities: {@key}={@value} separated \"__\"
+source native : Frame<Native> [site]
+path native: in/{site}/n.txt
+source target : Frame<Target> [site]
+path target: in/{site}/t.txt
+operation smooth(x: Frame<S>) -> Frame<S>
+command smooth: smooth {x} {@output}
+operation measure(x: Frame<S>) -> Stats<S>
+command measure: measure {x} {@output}
+operation fix(x: Frame<Native>) -> Frame<Native>
+command fix: fix {x} {@output}
+operation summarise(frame: Frame<S>) -> (smoothed: Frame<S>, stats: Stats<S>):
+    cleaned = smooth(frame)
+    smoothed = smooth(cleaned)
+    stats = measure(smoothed)
+";
+
+#[test]
+fn calls_of_one_generic_body_infer_their_types_apart() {
+    let pipeline = parse_pipeline(&format!(
+        "{FRAMES}a, a_stats = summarise(native)\nb, b_stats = summarise(target)\n"
+    ))
+    .unwrap();
+    let inventory =
+        parse_source_inventory("sources:\n  native[site=01]\n  target[site=01]\n").unwrap();
+    let dag = resolve(&pipeline, &inventory).unwrap();
+    let types: Vec<_> = dag
+        .jobs
+        .iter()
+        .map(|job| dag.artifact(job.output()))
+        .map(|output| format!("{}: {}", output.product, output.artifact_type))
+        .collect();
+    // Neither call's `S` reaches the other's steps, inside or out.
+    assert_eq!(
+        types,
+        [
+            "a::cleaned: Frame<Native>",
+            "a: Frame<Native>",
+            "a_stats: Stats<Native>",
+            "b::cleaned: Frame<Target>",
+            "b: Frame<Target>",
+            "b_stats: Stats<Target>",
+        ]
+    );
+}
+
+#[test]
+fn a_type_a_call_of_a_generic_body_cannot_have_is_reported_at_that_call() {
+    // Each error as its line, its message and the lines it relates.
+    let errors = |calls: &str| -> Vec<(usize, String, Vec<usize>)> {
+        support::errors(spit::diagnose(&format!("{FRAMES}{calls}"), None))
+            .into_iter()
+            .map(|error| {
+                let related = error.related.iter().map(|place| place.line).collect();
+                (error.line.unwrap_or_default(), error.message, related)
+            })
+            .collect()
+    };
+    // A step of the body takes only `Native`: the call over `target`
+    // fails, at the call and the step, and the call over `native` does not.
+    assert_eq!(
+        errors(
+            "operation tidy(frame: Frame<S>) -> (tidied: Frame<S>):\n    tidied = fix(frame)\n\
+             a = tidy(native)\nb = tidy(target)\n"
+        ),
+        [(
+            20,
+            "in `b = tidy(...)`: type mismatch at `fix.x`: product `target` is Frame<Target>, expected Frame<Native>".to_owned(),
+            vec![18],
+        )]
+    );
+    // The caller declares a type the body cannot make from its input.
+    assert_eq!(
+        errors("a, a_stats = summarise(native)\nb : Frame<Native> [site], b_stats = summarise(target)\n"),
+        [(
+            18,
+            "in `b, b_stats = summarise(...)`: type conflict at `smooth.output` (product `b`): variable `S` was inferred as Target, but now requires Native".to_owned(),
+            vec![15],
+        )]
+    );
+}
