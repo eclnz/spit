@@ -82,7 +82,12 @@ fn step_part(pipeline: &Pipeline, step: &Step, output: &str, error: &ResolveErro
         ResolveError::UnknownOperation { .. } => Some(step.operation()),
         ResolveError::InvalidAggregationDimension { product, .. } => input_named(product),
         ResolveError::UnsupportedShapeRelationship { .. } => Some(step.call()),
-        _ => Some(step.output()),
+        // An error about one product of a step with several is at that one.
+        _ => Some(
+            invocation
+                .and_then(|invocation| invocation.outputs.iter().position(|name| name == output))
+                .map_or_else(|| step.output(), |index| step.output_at(index)),
+        ),
     };
     part.unwrap_or_else(|| step.call())
 }

@@ -2,7 +2,7 @@
 //! `outputs = operation(inputs)`, and stages whose lines are indented
 //! beneath a `stage name:` header.
 
-use crate::model::{CommandRole, DefaultChecks, Invocation};
+use crate::model::{CommandRole, DefaultChecks, Invocation, TypeChecking};
 use crate::span::Place;
 
 use super::body::OpenBody;
@@ -373,6 +373,19 @@ fn flow_rest(
             top_level_only("`dimensions`, which orders the whole pipeline,")?;
             StatementKind::Dimensions(parse_dimension_order(declaration, number)?)
         }
+        Some((Keyword::Types, setting)) => {
+            top_level_only("`types`, which covers the whole pipeline,")?;
+            StatementKind::Types(match setting.trim() {
+                "strict" => TypeChecking::Strict,
+                "standard" => TypeChecking::Standard,
+                _ => {
+                    return Err(ParseError::new(
+                        number,
+                        "expected `types strict` or `types standard`",
+                    ))
+                }
+            })
+        }
         Some((Keyword::Discover, declaration)) => {
             top_level_only("`discover`")?;
             StatementKind::Discover(parse_discover(declaration.trim(), number)?)
@@ -490,7 +503,7 @@ fn flow_statement(
             number,
             format!(
                 "`{word}` does not start a statement; {hint}a pipeline line starts with \
-                 source, dimensions, operation, command, verify, check, path, default, root, stage or use, or is a step \
+                 source, dimensions, types, operation, command, verify, check, path, default, root, stage or use, or is a step \
                  `output = operation(inputs)`, and a recipe line starts with pipeline, \
                  root, discover, require, exclude, path or default"
             ),
@@ -568,9 +581,10 @@ fn parse_flow_output(left: &str, number: usize) -> Result<StepOutput, ParseError
 }
 
 /// The words a statement can start with, for suggesting one.
-const STATEMENT_WORDS: [&str; 16] = [
+const STATEMENT_WORDS: [&str; 17] = [
     "source",
     "dimensions",
+    "types",
     "operation",
     "command",
     "verify",

@@ -36,6 +36,8 @@ pub(crate) struct PipelineBuilder {
     pub(crate) lines: SourceMap,
     /// The `dimensions [...]` line, and where it is.
     dimension_order: Option<(Vec<String>, Place)>,
+    /// Whether a `types` line has been read.
+    types_line: bool,
     entities: entities::EntitiesDeclarations,
     /// Each product a step makes, and whether the step wrote its dimensions.
     outputs: BTreeMap<String, Output>,
@@ -541,6 +543,16 @@ fn lower_statement(
                 ));
             }
             builder.dimension_order = Some((order.clone(), statement.place.clone()));
+        }
+        StatementKind::Types(types) => {
+            if builder.types_line {
+                return Err(ParseError::new(
+                    statement.place.line,
+                    "a pipeline has one `types` line",
+                ));
+            }
+            builder.types_line = true;
+            builder.pipeline.types = *types;
         }
         StatementKind::Entities { stage, declaration } => builder.entities.add(
             &mut builder.pipeline,
