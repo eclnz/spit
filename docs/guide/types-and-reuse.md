@@ -1,6 +1,6 @@
 # Types
 
-Types help SPIT catch wiring mistakes while the pipeline is compiled. They are optional: an untyped product is allowed, and missing type information does not itself fail a step. Add types to the boundaries where a mistaken connection would be costly.
+Types help SPIT catch wiring mistakes while the pipeline is compiled. They are optional: an untyped product is allowed, and missing type information does not itself fail a step. Add types to the boundaries where a mistaken connection would be costly. To require a type everywhere, add `types strict` at the top of the pipeline: a missing type is then an error, while a type inference gives a product still needs no annotation ([strict typing](../language-reference.md#strict-typing)).
 
 ## Type declarations
 

@@ -5,12 +5,13 @@
 
 mod definitions;
 mod steps;
+mod strict;
 mod types;
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::error::{DefinitionSubject, ResolveError};
-use crate::model::{Invocation, OperationDef, Pipeline, ProductDef};
+use crate::model::{Invocation, OperationDef, Pipeline, ProductDef, TypeChecking};
 use crate::types::{Substitutions, TypeExpr};
 
 use self::definitions::{
@@ -18,6 +19,7 @@ use self::definitions::{
 };
 use self::steps::step_shape;
 pub(crate) use self::steps::StepShape;
+use self::strict::check_strict;
 use self::types::{check_calls, infer_types};
 
 /// A pipeline whose declarations and steps hold without any inventory. Only
@@ -53,7 +55,8 @@ pub(crate) struct PipelineCheck<'a> {
 }
 
 /// Check everything that depends only on the pipeline text: declarations,
-/// each step's operation, inputs, dimensions and inferred types, and cycles.
+/// each step's operation, inputs, dimensions and inferred types, cycles,
+/// and under `types strict` that no type is left unknown.
 /// Returns the first error [`collect_pipeline`] finds; the diagnostics give
 /// them all.
 pub fn validate_pipeline(pipeline: &Pipeline) -> Result<(), ResolveError> {
@@ -146,6 +149,9 @@ pub(crate) fn collect_pipeline(pipeline: &Pipeline) -> PipelineCheck<'_> {
         &mut errors,
         &mut poisoned,
     );
+    if pipeline.types == TypeChecking::Strict {
+        check_strict(pipeline, &operations, &steps, &mut errors, &poisoned);
+    }
     PipelineCheck {
         steps,
         errors,
