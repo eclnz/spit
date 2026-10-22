@@ -54,7 +54,7 @@ pub use model::{
     DirectoryDiscovery, EntityBinding, Exclusion, Gap, IncompleteJob, InputBinding, InputPort,
     InputRules, Invocation, Job, JobId, OperationDef, OutputPort, Pipeline, Port, ProductDef,
     Removal, ResolvedDag, ShapeRule, SidecarGroup, SourceFile, SourceInventory, SourceRecord,
-    StageDef, StepId, StepOrigin, StepOutput,
+    StageDef, StepId, StepOrigin, StepOutput, TypeChecking,
 };
 pub use parser::{parse_source_inventory, render_source_inventory, ParseError, ParseErrorKind};
 pub use paths::{

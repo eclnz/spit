@@ -68,6 +68,7 @@ pub enum Word {
     ShapeDate,
     EntitiesFormat,
     Default,
+    Types,
 }
 
 /// What a word's hover says.
@@ -91,7 +92,7 @@ impl Word {
 }
 
 /// Every word's documentation, in the order of [`Word`].
-pub static DOCS: [Doc; 49] = [
+pub static DOCS: [Doc; 50] = [
     Doc {
         name: "source",
         kind: "keyword",
@@ -435,6 +436,13 @@ pub static DOCS: [Doc; 49] = [
         example: "default path: results/{@product}/{@entities}\ndefault:\n    ext: .nii.gz\n    check: nonempty",
         summary: "Sets a default for the outputs of the file, or of the stage it is written in: `default path:` the rule for products with none of their own, `default ext:` the extension that completes it, `default check:` the checks every output runs, and `default entities:` how `{@entities}` is spelled. `default:` opens a block of them. In a `.spitin` recipe, `default path:` is the rule for sources with none of their own.",
     },
+    Doc {
+        name: "types",
+        kind: "keyword",
+        anchor: "optional-types",
+        example: "types strict",
+        summary: "How much of the pipeline must be typed, once at the top level. `types strict` makes it an error for a source to have no type, for an operation a step or call uses to have a port with no type, or for a product a step makes to have a type inference leaves partly unknown. `types standard`, the default, checks only the types that are known. An imported file's `types` line does not apply.",
+    },
 ];
 
 /// One use of a word: its 1-based line and 1-based UTF-16 columns, the end
@@ -542,6 +550,7 @@ fn keyword_word(keyword: Keyword) -> Option<Word> {
         Keyword::Default => Word::Default,
         Keyword::Stage => Word::Stage,
         Keyword::Dimensions => Word::Dimensions,
+        Keyword::Types => Word::Types,
         Keyword::Entities => Word::EntitiesFormat,
         Keyword::Drop | Keyword::Sidecars | Keyword::Skip | Keyword::ShellSource => return None,
     })

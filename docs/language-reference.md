@@ -680,7 +680,7 @@ A `.spit` pipeline is the reusable graph: what work to do and where its results 
 
 | Line | Pipeline | Recipe |
 | --- | --- | --- |
-| `source`, `dimensions`, `operation`, `command`, `verify`, steps, `stage`, `use`, `default ext:` | yes | no |
+| `source`, `dimensions`, `types`, `operation`, `command`, `verify`, steps, `stage`, `use`, `default ext:` | yes | no |
 | `path product:` for a product a step makes | yes | no |
 | `path product:` for a source that is not declared `beside` another | either one, not both | either one, not both |
 | `default path:` | covers outputs, and sources nothing else covers | covers sources only |
@@ -887,10 +887,45 @@ The section is a record, not a rule: the records above it already leave these ou
 
 ## Optional types
 
-Types are additive. You can leave them out, add them to selected products and operations, or type the whole pipeline. Known mismatches fail; missing type information does not.
+Types are additive. You can leave them out, add them to selected products and operations, or type the whole pipeline. Known mismatches fail; missing type information does not, unless the pipeline asks for [strict typing](#strict-typing).
 
 In operation signatures, a single capital letter such as `S` is a local type variable. Use a `$` prefix for longer names, such as `$SourceSpace` or `$Kind`. An unprefixed name such as `World` is a concrete type; every type name starts with a capital letter. Variables are allowed in operation signatures, not product declarations:
 
 ```text
 operation project(sample: Frame<$Kind,$SourceSpace>, calibration: Calibration<$Kind,$SourceSpace,$TargetSpace>) -> Frame<$Kind,$TargetSpace>
 ```
+
+### Strict typing
+
+`types strict`, once at the top level, makes every missing type an error. Once inference is done:
+
+- each source has a type with no `Unknown` part;
+- each port of an operation a step or call uses has a type, which may be generic;
+- each product a step makes has a type with no unknown part.
+
+A product a step makes needs no type of its own when inference gives it one:
+
+```text
+types strict
+default entities: {@key}={@value} separated "__"
+default path: out/{@product}/{@entities}
+
+source scan : Frame<Native> [subject]
+source atlas
+
+operation smooth(frame: Frame<S>) -> Frame<S>
+operation register(frame: Frame<S>, atlas: Atlas<T>) -> Frame<T>
+command smooth: smooth {frame} {@output}
+command register: register {frame} {atlas} {@output}
+
+smoothed = smooth(scan)
+registered = register(smoothed, atlas)
+```
+
+```text
+error: line 6, column 8: `types strict` needs a type on source `atlas`, as in `source atlas : Type`
+```
+
+With `source atlas : Atlas<MNI>`, the pipeline is valid: `smoothed` is `Frame<Native>` and `registered` is `Frame<MNI>`, though neither is written. A missing type is reported once, where it is missing: here `registered`, which reads `atlas`, is not reported as well. A variable that no input fixes, as in `operation wrap(x: Image) -> Frame<T>`, is reported at the product the step makes, with the type to write there, such as `wrapped : Frame<Type> [subject] = wrap(...)`. An operation no step or call uses may leave its ports untyped.
+
+`types standard`, the default, checks only the types that are known. The importing file's line decides for everything it imports; an imported file's `types` line does not apply. A recipe takes no `types` line.

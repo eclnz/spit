@@ -50,6 +50,21 @@ pub struct Pipeline {
     /// The files the pipeline was read from: its own first, then each file
     /// an import read, once. Empty for a pipeline parsed without a path.
     pub files: Vec<SourceFile>,
+    /// How much of the pipeline must be typed, from its `types` line.
+    /// Imports never bring one: the file given to SPIT decides.
+    pub types: TypeChecking,
+}
+
+/// How much of a pipeline must be typed.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum TypeChecking {
+    /// Types are optional: a type that is not known is not checked.
+    #[default]
+    Standard,
+    /// Every source, every port of an operation a step or call uses, and
+    /// every product a step makes has a type with no unknown part, once
+    /// inference is done.
+    Strict,
 }
 
 /// A file a pipeline was read from.
