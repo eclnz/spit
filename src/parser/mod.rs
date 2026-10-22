@@ -22,7 +22,7 @@ use std::ops::Range;
 
 use crate::model::{
     CheckDef, CommandDef, CommandRole, CoverageRule, DefaultChecks, DirectoryDiscovery, Invocation,
-    OperationDef, ProductDef, StepOutput,
+    OperationDef, ProductDef, StepOutput, TypeChecking,
 };
 use crate::paths::PathTemplate;
 use crate::span::{address_of, columns_at, content_columns, Focus, Located, Place};
@@ -210,6 +210,8 @@ pub(crate) enum StatementKind {
     Check(CheckDef, Place),
     /// A `dimensions [...]` line: the pipeline's dimension order.
     Dimensions(Vec<String>),
+    /// A `types` line: how much of the pipeline must be typed.
+    Types(TypeChecking),
     /// A `default entities` line: how `{@entities}` is spelled, or a
     /// dimension's label in it, for the products of `stage` or, outside
     /// every stage, of the whole pipeline.
