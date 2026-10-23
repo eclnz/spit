@@ -51,8 +51,8 @@ pub use lower::parse_pipeline;
 pub use model::{
     stage_within, Artifact, ArtifactId, ArtifactInstance, ArtifactKey, ArtifactReport,
     ArtifactType, Artifacts, Beside, BodyStep, Call, CallId, Cardinality, CommandDef, CommandRole,
-    CountRequirement, CoverageAction, CoverageGap, CoverageRule, DagStep, DimensionOrders,
-    DirectoryDiscovery, EntityBinding, Exclusion, Gap, IncompleteJob, InputBinding, InputPort,
+    ContextPattern, CountRequirement, CoverageAction, CoverageGap, CoverageRule, DagStep,
+    DimensionOrders, EntityBinding, Exclusion, Gap, IncompleteJob, InputBinding, InputPort,
     InputRules, Invocation, Job, JobId, OperationDef, OutputPort, Pipeline, Port, ProductDef,
     Removal, ResolvedDag, ShapeRule, SidecarGroup, SourceFile, SourceInventory, SourceRecord,
     StageDef, StepId, StepOrigin, StepOutput,

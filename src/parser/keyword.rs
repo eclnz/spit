@@ -7,7 +7,6 @@
 pub(crate) enum Keyword {
     Use,
     Source,
-    Discover,
     Operation,
     Command,
     Verify,
@@ -33,10 +32,9 @@ pub(crate) enum Keyword {
     ShellSource,
 }
 
-const WORDS: [(Keyword, &str); 14] = [
+const WORDS: [(Keyword, &str); 13] = [
     (Keyword::Use, "use"),
     (Keyword::Source, "source"),
-    (Keyword::Discover, "discover"),
     (Keyword::Operation, "operation"),
     (Keyword::Command, "command"),
     (Keyword::Verify, "verify"),

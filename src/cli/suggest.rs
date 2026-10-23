@@ -45,6 +45,9 @@ pub(crate) fn suggest(loaded: &Loaded, file: &str) -> Result<(), Box<dyn Error>>
 /// pipeline when the lines are for a recipe.
 fn render(suggestions: &Suggestions, pipeline: Option<&str>) -> String {
     let mut text = String::new();
+    if pipeline.is_some() && !suggestions.sources.is_empty() {
+        text.push_str("inputs:\n");
+    }
     for (index, source) in suggestions.sources.iter().enumerate() {
         if index > 0 {
             text.push('\n');
@@ -128,7 +131,12 @@ fn write_source(text: &mut String, source: &SuggestedSource, pipeline: Option<&s
         }
     }
     write_notes(text, source);
-    let _ = writeln!(text, "path {}: {}", source.name, source.rule);
+    write_path(text, &source.name, &source.rule, pipeline.is_some());
+}
+
+fn write_path(text: &mut String, name: &str, path: &str, recipe: bool) {
+    let prefix = if recipe { "    " } else { "path " };
+    let _ = writeln!(text, "{prefix}{name}: {path}");
 }
 
 /// Sources sharing a file stem: the first has the path and dimensions;
@@ -151,7 +159,7 @@ fn write_beside_sources(text: &mut String, source: &SuggestedSource, pipeline: O
                 let _ = writeln!(text, "#   {line}");
             }
             write_notes(text, source);
-            let _ = writeln!(text, "path {anchor}: {}{extension}", source.rule);
+            write_path(text, anchor, &format!("{}{extension}", source.rule), true);
         }
         None => {
             write_notes(text, source);

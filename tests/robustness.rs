@@ -249,7 +249,7 @@ fn a_byte_order_mark_is_ignored_by_every_entry_point() {
     parse_pipeline(&bom(valid)).unwrap();
     spit::parse_source_inventory(&bom(records)).unwrap();
     spit::parse_input_spec(&bom(
-        "pipeline analysis.spit\nroot .\npath raw: in/{id}.txt\n",
+        "pipeline analysis.spit\nroot .\ninputs:\n    raw: in/{id}.txt\n",
     ))
     .unwrap();
     assert_eq!(

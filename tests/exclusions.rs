@@ -232,7 +232,7 @@ fn a_discovered_context_left_out_needs_no_files() {
     // discovery of every session succeed.
     let tree = dataset(
         "exclude-context",
-        "discover sessions: [sub, ses] from dirs sub-{sub}/ses-{ses}\n\
+        "inputs:\n    contexts: sub-{sub}/ses-{ses}\n\
          exclude [sub=01,ses=02]  # scan never happened\n\
          exclude [sub=03]\n",
     );
@@ -247,38 +247,36 @@ fn a_discovered_context_left_out_needs_no_files() {
     // Without the exclusion, the empty session's reference is missing.
     tree.write(
         "data.spitin",
-        "pipeline pipeline.spit\nroot .\ndiscover sessions: [sub, ses] from dirs sub-{sub}/ses-{ses}\nexclude [sub=03]\n",
+        "pipeline pipeline.spit\nroot .\ninputs:\n    contexts: sub-{sub}/ses-{ses}\nexclude [sub=03]\nrequire [sub,ses] where ref count=1\n",
     );
     let (ok, _, stderr) = run(&tree, "inputs");
     assert!(!ok);
     assert!(
-        stderr.contains("missing source file for `ref[ses=02,sub=01]`"),
+        stderr.contains("source coverage for `ref` at [ses=02,sub=01]"),
         "{stderr}"
     );
 }
 
 #[test]
-fn an_expected_file_excluded_by_name_need_not_exist() {
+fn excluding_an_absent_file_reports_an_unmatched_exclusion() {
     let tree = dataset(
         "exclude-missing",
-        "discover sessions: [sub, ses] from dirs sub-{sub}/ses-{ses}\n\
+        "inputs:\n    contexts: sub-{sub}/ses-{ses}\n\
          exclude ref[sub=01,ses=02]  # never acquired\n\
          exclude [sub=03]\n",
     );
     tree.write("sub-01/ses-02/run-1.nii", "");
-    let (ok, stdout, stderr) = run(&tree, "inputs");
-    assert!(ok, "{stderr}");
+    let (ok, _, stderr) = run(&tree, "inputs");
+    assert!(!ok);
     assert!(
-        stderr.contains("note: excluded ref[sub=01,ses=02] (line 4): never acquired"),
+        stderr.contains("matches nothing in this dataset"),
         "{stderr}"
     );
-    assert!(stdout.contains("    ref[sub=01,ses=02]\n        rule: exclude ref[sub=01,ses=02]\n        at: line 4\n"), "{stdout}");
 }
 
 #[test]
 fn an_excluded_file_may_lie_outside_the_discovered_contexts() {
-    // Stores are discovered from their folders. Store s07's price list was
-    // saved as `S07.json`, a store no folder has, which stops discovery.
+    // Source matches remain valid outside directory contexts.
     let tree = Tree::new(
         "exclude-stray",
         &[
@@ -295,26 +293,23 @@ fn an_excluded_file_may_lie_outside_the_discovered_contexts() {
          operation total(sales, price) -> Total\ncommand total: total {sales} {price} {@output}\n\
          totals = total(sales, price)\n",
     );
-    let discover =
-        "pipeline pipeline.spit\nroot .\ndiscover stores: [store] from dirs stores/{store}\n";
+    let discover = "pipeline pipeline.spit\nroot .\ninputs:\n    contexts: stores/{store}\n";
     tree.write("data.spitin", discover);
     let (ok, _, stderr) = run(&tree, "inputs");
-    assert!(!ok);
-    assert!(
-        stderr.contains("`pricing/S07.json` for `price` lies outside the discovered contexts"),
-        "{stderr}"
-    );
+    assert!(ok, "{stderr}");
 
     // Excluding the misnamed file lets discovery go on, to the price list
     // store s07 lacks; excluding the store as well settles the dataset.
     tree.write(
         "data.spitin",
-        &format!("{discover}exclude price[store=S07]  # misnamed\n"),
+        &format!(
+            "{discover}exclude price[store=S07]  # misnamed\nrequire [store] where price count=1\n"
+        ),
     );
     let (ok, stdout, stderr) = run(&tree, "inputs");
     assert!(!ok, "unexpected inventory: {stdout}\nstderr: {stderr}");
     assert!(
-        stderr.contains("missing source file for `price[store=s07]`"),
+        stderr.contains("source coverage for `price` at [store=s07]"),
         "{stderr}"
     );
     tree.write(

@@ -108,10 +108,22 @@ def study(binary, extra, ext):
 
 RECIPE = """\
 pipeline analysis.spit
-discover sessions: [sub, ses] from dirs sub-{sub}/ses-{ses}
+inputs:
+    contexts: sub-{sub}/ses-{ses}
 require [sub, ses] where image count>=2
 require [sub, ses] where reference count=1
 """
+
+
+def recipe_for(binary):
+    """Use the build's recipe syntax when comparing across the language change."""
+    with tempfile.TemporaryDirectory() as folder:
+        write(folder, "analysis.spit", "source x [s]\npath x: {s}.txt\n")
+        write(folder, "probe.spitin", "pipeline analysis.spit\nroot .\ninputs:\n    contexts: {s}\n")
+        probe = subprocess.run([binary, "check", "probe.spitin"], cwd=folder, capture_output=True)
+    if probe.returncode == 0:
+        return RECIPE
+    return RECIPE.replace("inputs:\n    contexts:", "discover sessions: [sub, ses] from dirs")
 
 
 def dataset(subjects):
@@ -227,7 +239,7 @@ def run_dataset(args):
                     folder = os.path.join(WORK, f"study-{label}-{subjects}-{extra}")
                     write(folder, "analysis.spit", study(binary, extra, ext))
                     # The recipe names the dataset, and the .spitout records it.
-                    recipe = RECIPE.replace("\n", f"\nroot {root}\n", 1)
+                    recipe = recipe_for(binary).replace("\n", f"\nroot {root}\n", 1)
                     write(folder, "dataset.spitin", recipe)
                     inputs = [binary, "inputs", "dataset.spitin", "-o", "d.spitout"]
                     dag = [binary, "dag", "analysis.spit", "d.spitout", "-o", "a.spitdag"]

@@ -12,7 +12,7 @@ pub(crate) use self::bind::{bound_paths, case_collisions, check_rules, dashed_la
 pub use self::bind::{
     validate_bound_source_files, validate_source_files, BoundPaths, VerifiedFiles,
 };
-pub(crate) use self::components::{decode_component, encode_component, validate_discovery_rule};
+pub(crate) use self::components::{decode_component, encode_component, validate_context_pattern};
 pub(crate) use self::product::{shown_path, stage_directories, PathBinder};
 pub(crate) use self::rules::collect_paths;
 pub use self::rules::{inspect_paths, PathCoverage, PathCoverageEntry, PathRule};

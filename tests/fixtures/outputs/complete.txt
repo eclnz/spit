@@ -876,37 +876,32 @@ note: ran `spit inputs strict.spitin` in memory
 root .
 
 sources:
+    image[sub=01,ses=1,run=1]
+    image[sub=01,ses=1,run=2]
+    image[sub=01,ses=2,run=1]
+    image[sub=01,ses=2,run=2]
+    image[sub=02,ses=1,run=1]
+    image[sub=02,ses=1,run=2]
+    image[sub=02,ses=2,run=1]
+    image[sub=02,ses=2,run=2]
+    image[sub=03,ses=1,run=1]
+    image[sub=03,ses=1,run=2]
+    image[sub=03,ses=2,run=1]
+    image[sub=03,ses=2,run=2]
     mask[sub=01]
     mask[sub=02]
     mask[sub=03]
+    reference[sub=01,ses=1]
+    reference[sub=01,ses=2]
+    reference[sub=02,ses=1]
+    reference[sub=02,ses=2]
+    reference[sub=03,ses=1]
+    reference[sub=03,ses=2]
 
-contexts sessions:
-    [sub=01,ses=1]:
-        reference
-        [run=1,2]:
-            image
-
-    [sub=01,ses=2]:
-        reference
-        [run=1,2]:
-            image
-
-    [sub=02,ses=1]:
-        reference
-        [run=1,2]:
-            image
-
-    [sub=02,ses=2]:
-        reference
-        [run=1,2]:
-            image
-
-    [sub=03,ses=1]:
-        reference
-        [run=1,2]:
-            image
-
-    [sub=03,ses=2]:
-        reference
-        [run=1,2]:
-            image
+contexts:
+    [sub=01,ses=1]
+    [sub=01,ses=2]
+    [sub=02,ses=1]
+    [sub=02,ses=2]
+    [sub=03,ses=1]
+    [sub=03,ses=2]

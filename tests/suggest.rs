@@ -81,15 +81,11 @@ fn a_recipe_gets_its_path_rules_and_its_pipeline_the_source_lines() {
         out.contains(
             "# in a.spit:\n\
              #   source t1w_json .json [sub, ses]\n\
-             #   source t1w_nii_gz .nii.gz beside t1w_json\n\
-             path t1w_json: sub-{sub}/ses-{ses}/anat/sub-{sub}_ses-{ses}_T1w.json\n"
+             #   source t1w_nii_gz .nii.gz beside t1w_json\n    t1w_json: sub-{sub}/ses-{ses}/anat/sub-{sub}_ses-{ses}_T1w.json\n"
         ),
         "{out}"
     );
-    assert!(
-        out.contains("path bold: sub-{sub}/ses-{ses}/func/"),
-        "{out}"
-    );
+    assert!(out.contains("    bold: sub-{sub}/ses-{ses}/func/"), "{out}");
 }
 
 #[test]

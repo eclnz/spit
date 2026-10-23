@@ -10,8 +10,8 @@ use std::process::Command;
 use std::time::{Duration, Instant};
 
 use spit::{
-    discover_source_files, discover_sources, parse_pipeline, parse_source_inventory, resolve,
-    InputSource, InputSpec, Pipeline, ResolveError, ResolvedInputs, SourceInventory,
+    discover_source_files, discover_sources, parse_source_inventory, resolve, InputSource,
+    InputSpec, Pipeline, ResolveError, ResolvedInputs, SourceInventory,
 };
 
 /// A document's pipeline, and the input rules written beside it.
@@ -175,7 +175,7 @@ fn directory_discovery_finds_observed_subject_session_pairs() {
         ],
     );
     let text = "\
-discover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}
+inputs:\n    contexts: data/sub-{sub}/ses-{ses}
 path: results/{@product}/{@entities}.txt
 source image [sub, ses]
 path image: data/sub-{sub}/ses-{ses}/image.nii.gz
@@ -198,22 +198,23 @@ output = process(image)
 }
 
 #[test]
-fn discovered_directories_require_source_files_even_without_coverage_rules() {
+fn observed_directories_require_source_files_only_with_a_rule() {
     let tree = Tree::new("directory-coverage", &["data/sub-A/ses-1/image.nii.gz"]);
     fs::create_dir_all(tree.0.join("data/sub-B/ses-followup")).unwrap();
     let text = "\
-discover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}
+inputs:\n    contexts: data/sub-{sub}/ses-{ses}
 source image [sub, ses]
 path image: data/sub-{sub}/ses-{ses}/image.nii.gz
+require [sub, ses] where image count=1
 ";
     let (pipeline, spec) = parse(text);
-    let error = discover_sources(&pipeline, &spec.rules, &tree.0).unwrap_err();
-    assert!(
-        error
-            .message()
-            .contains("missing source file for `image[ses=followup,sub=B]`"),
-        "{error}"
-    );
+    let inventory = discover_sources(&pipeline, &spec.rules, &tree.0).unwrap();
+    assert_eq!(inventory.artifacts.len(), 1);
+    assert_eq!(inventory.contexts.len(), 2);
+    assert!(matches!(
+        settle(&pipeline, &spec, &inventory).require_complete(),
+        Err(ResolveError::CoverageViolation { found: 0, .. })
+    ));
 }
 
 #[test]
@@ -229,7 +230,7 @@ fn directory_bindings_expand_sources_at_their_declared_dimensions() {
         ],
     );
     let (pipeline, spec) = parse(
-        "discover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}\n\
+        "inputs:\n    contexts: data/sub-{sub}/ses-{ses}\n\
          source image [sub, ses]\n\
          path image: data/sub-{sub}/ses-{ses}/image.nii.gz\n\
          source reference [sub]\n\
@@ -247,7 +248,7 @@ fn directory_bindings_expand_sources_at_their_declared_dimensions() {
 }
 
 #[test]
-fn coverage_can_target_the_named_discovery_rule() {
+fn coverage_can_target_context_dimensions() {
     let tree = Tree::new(
         "directory-require",
         &[
@@ -262,18 +263,18 @@ fn coverage_can_target_the_named_discovery_rule() {
             "data/sub-5/ses-1/.keep",
         ],
     );
-    let text = "discover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}\n\
-                require [sub] where sessions count>=2\n";
+    let text = "inputs:\n    contexts: data/sub-{sub}/ses-{ses}\n\
+                require [sub] where contexts[sub,ses] count>=2\n";
     let (pipeline, spec) = parse(text);
     let inventory = discover_sources(&pipeline, &spec.rules, &tree.0).unwrap();
-    assert_eq!(inventory.discovered["sessions"].len(), 9);
+    assert_eq!(inventory.contexts.len(), 9);
     let rendered = spit::render_source_inventory(&inventory, &pipeline, &spec.rules);
-    assert!(rendered.starts_with("contexts sessions:\n"), "{rendered}");
+    assert!(rendered.starts_with("contexts:\n"), "{rendered}");
     assert_eq!(parse_source_inventory(&rendered).unwrap(), inventory);
     let inline = format!("{text}{rendered}");
     let (inline_pipeline, inline_spec, inline_inventory) =
         support::parse_with_rules(&inline).unwrap();
-    let inline_inventory = inline_inventory.expect("named contexts");
+    let inline_inventory = inline_inventory.expect("contexts");
     assert!(matches!(
         settle(&inline_pipeline, &inline_spec, &inline_inventory).require_complete(),
         Err(ResolveError::CoverageViolation {
@@ -285,14 +286,14 @@ fn coverage_can_target_the_named_discovery_rule() {
     assert!(matches!(
         settle(&pipeline, &spec, &inventory).require_complete(),
         Err(ResolveError::CoverageViolation { product, context, found: 1, discovery: true, .. })
-            if product == "sessions" && context.get("sub") == Some("5")
+            if product == "contexts[sub,ses]" && context.get("sub") == Some("5")
     ));
     let values = text.replace("count>=2", "has ses=1,2");
     let (pipeline, spec) = parse(&values);
     assert!(matches!(
         settle(&pipeline, &spec, &inventory).require_complete(),
         Err(ResolveError::MissingRequiredValue { product, context, dimension, value, discovery: true, .. })
-            if product == "sessions" && context.get("sub") == Some("5") && dimension == "ses" && value == "2"
+            if product == "contexts[sub,ses]" && context.get("sub") == Some("5") && dimension == "ses" && value == "2"
     ));
 }
 
@@ -312,9 +313,9 @@ fn drop_discovery_group_removes_subject_before_source_checks_and_jobs() {
             "data/sub-5/ses-1/.keep",
         ],
     );
-    let text = "discover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}\n\
-                exclude [sub] where sessions count<2\n\
-                require [sub] where sessions count>=2\n\
+    let text = "inputs:\n    contexts: data/sub-{sub}/ses-{ses}\n\
+                exclude [sub] where contexts[sub,ses] count<2\n\
+                require [sub] where contexts[sub,ses] count>=2\n\
                 source image [sub, ses]\n\
                 path image: data/sub-{sub}/ses-{ses}/image.nii.gz\n\
                 operation process(image: Image) -> Image\n\
@@ -322,7 +323,7 @@ fn drop_discovery_group_removes_subject_before_source_checks_and_jobs() {
                 path result: out/sub-{sub}/ses-{ses}/result.nii.gz\n";
     let (pipeline, spec) = parse(text);
     let inventory = discover_sources(&pipeline, &spec.rules, &tree.0).unwrap();
-    assert_eq!(inventory.discovered["sessions"].len(), 8);
+    assert_eq!(inventory.contexts.len(), 8);
     assert_eq!(inventory.artifacts.len(), 8);
     assert!(!inventory
         .contexts
@@ -343,7 +344,7 @@ fn drop_discovery_group_removes_subject_before_source_checks_and_jobs() {
         ("3", "4"),
         ("5", "1"),
     ];
-    let mut explicit = String::from("contexts sessions:\n");
+    let mut explicit = String::from("contexts:\n");
     for (sub, ses) in pairs {
         explicit.push_str(&format!("[sub={sub},ses={ses}]\n"));
     }
@@ -370,7 +371,7 @@ fn drop_source_group_can_omit_missing_files_in_a_discovered_context() {
         ],
     );
     let (pipeline, spec) = parse(
-        "discover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}\n\
+        "inputs:\n    contexts: data/sub-{sub}/ses-{ses}\n\
          source image [sub, ses]\n\
          path image: data/sub-{sub}/ses-{ses}/image.nii.gz\n\
          exclude [sub] where image count<2\n\
@@ -387,23 +388,23 @@ fn drop_source_group_can_omit_missing_files_in_a_discovered_context() {
 }
 
 #[test]
-fn drop_does_not_hide_invalid_inventory_bindings() {
+fn a_context_requirement_uses_only_its_selected_dimension_set() {
     let (pipeline, spec) = parse(
-        "discover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}\n\
-         exclude [sub] where sessions count<2\n",
+        "inputs:\n    contexts: data/sub-{sub}/ses-{ses}\n\
+         require [sub] where contexts[sub,ses] count=1\n",
     );
-    let inventory = parse_source_inventory("contexts sessions:\n[sub=5]\n").unwrap();
-    let error = spec
+    let inventory = parse_source_inventory("contexts:\n[sub=5]\n").unwrap();
+    let resolved = spec
         .resolve(&pipeline, InputSource::Inventory(inventory))
-        .unwrap_err();
-    assert!(
-        error.to_string().contains("must bind [sub, ses]"),
-        "{error}"
-    );
+        .unwrap();
+    assert!(matches!(
+        resolved.require_complete(),
+        Err(ResolveError::CoverageViolation { found: 0, .. })
+    ));
 }
 
 #[test]
-fn discovery_coverage_uses_only_its_own_bindings() {
+fn context_patterns_with_equal_dimensions_union_and_deduplicate() {
     let tree = Tree::new(
         "directory-rule-scope",
         &[
@@ -413,53 +414,38 @@ fn discovery_coverage_uses_only_its_own_bindings() {
         ],
     );
     let (pipeline, spec) = parse(
-        "discover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}\n\
-         discover controls: [sub, ses] from dirs controls/sub-{sub}/ses-{ses}\n\
-         require [sub] where sessions count>=2\n",
+        "inputs:\n    contexts: data/sub-{sub}/ses-{ses}\n    contexts: controls/sub-{sub}/ses-{ses}\n\
+         require [sub] where contexts[sub,ses] count>=2\n",
     );
     let inventory = discover_sources(&pipeline, &spec.rules, &tree.0).unwrap();
     assert_eq!(inventory.contexts.len(), 2);
-    assert_eq!(inventory.discovered["sessions"].len(), 1);
-    assert_eq!(inventory.discovered["controls"].len(), 2);
-    assert!(matches!(
-        settle(&pipeline, &spec, &inventory).require_complete(),
-        Err(ResolveError::CoverageViolation {
-            found: 1,
-            discovery: true,
-            ..
-        })
-    ));
+    assert!(settle(&pipeline, &spec, &inventory)
+        .require_complete()
+        .is_ok());
 }
 
 #[test]
-fn directory_discovery_rejects_unsafe_or_incomplete_patterns() {
+fn context_paths_reject_unsafe_or_reserved_patterns() {
     for declaration in [
-        "discover sessions: [sub, ses] from dirs data/sub-{sub}",
-        "discover sessions: [sub] from dirs ../data/sub-{sub}",
-        "discover sessions: [sub] from dirs data/sub-{other}",
-        "discover sessions: [sub, sub] from dirs data/sub-{sub}",
-        "discover sessions [sub] from dirs data/sub-{sub}",
+        "inputs:\n    contexts: ../data/sub-{sub}",
+        "inputs:\n    contexts: data/sub-{sub}[ses-{ses}]",
+        "inputs:\n    contexts: data/{@product}",
+        "inputs:\n    contexts: data/sub-{sub}/",
+        "inputs:",
     ] {
-        assert!(parse_pipeline(declaration).is_err(), "{declaration}");
+        assert!(
+            spit::parse_input_spec(declaration).is_err(),
+            "{declaration}"
+        );
     }
 }
 
 #[test]
-fn directory_discovery_errors_when_no_directories_match() {
+fn context_path_may_match_no_directories() {
     let tree = Tree::new("directory-empty", &["data/unrelated/file.txt"]);
-    let (pipeline, spec) =
-        parse("discover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}\n");
-    let error = discover_sources(&pipeline, &spec.rules, &tree.0).unwrap_err();
-    assert!(
-        error
-            .message()
-            .contains("discovery `sessions` matched no directories"),
-        "{error}"
-    );
-    assert!(
-        error.message().contains("data/sub-{sub}/ses-{ses}"),
-        "{error}"
-    );
+    let (pipeline, spec) = parse("inputs:\n    contexts: data/sub-{sub}/ses-{ses}\n");
+    let inventory = discover_sources(&pipeline, &spec.rules, &tree.0).unwrap();
+    assert!(inventory.contexts.is_empty());
 }
 
 #[test]

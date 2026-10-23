@@ -1,4 +1,4 @@
-contexts sessions:
+contexts:
     [sub=01,ses=01]:
         t1w
         [run=1,2]:

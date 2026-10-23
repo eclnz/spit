@@ -7,7 +7,7 @@ use crate::model::{CommandRole, DefaultChecks, Invocation};
 use super::body::OpenBody;
 use super::check::parse_default_checks;
 use super::declarations::{
-    parse_dimension_order, parse_discover, parse_invocation_parts, parse_path, parse_product,
+    parse_dimension_order, parse_invocation_parts, parse_path, parse_product,
 };
 use super::keyword::{removed_section, Keyword};
 use super::lexical::{comma_items, extension, identifier, strip_comment};
@@ -382,10 +382,6 @@ fn flow_rest(
         Some((Keyword::Dimensions, declaration)) => {
             top_level_only("`dimensions`, which orders the whole pipeline,")?;
             StatementKind::Dimensions(parse_dimension_order(declaration, number)?)
-        }
-        Some((Keyword::Discover, declaration)) => {
-            top_level_only("`discover`")?;
-            StatementKind::Discover(parse_discover(declaration.trim(), number)?)
         }
         Some((Keyword::Operation, declaration)) => {
             let kind = StatementKind::operation(original, declaration, number, stage.clone())?;

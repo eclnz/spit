@@ -51,7 +51,7 @@ SPIT runs in three steps. Each is one command, and each reads the files the prev
 | File | Holds |
 | --- | --- |
 | `.spit` | A pipeline: sources, operations, steps, commands, and path rules. No dataset appears in it. |
-| `.spitin` | A recipe for a dataset's inputs: the pipeline it serves, its dataset root, and its `discover`, `exclude` and `require` rules and source paths. |
+| `.spitin` | A recipe for a dataset's inputs: the pipeline it serves, its dataset root, and its `inputs:`, `exclude` and `require` rules and source paths. |
 | `.spitout` | A dataset's settled inputs: each source artifact, with its file, and the root they were found under. |
 | `.spitdag` | The resolved jobs, each with its artifacts' files and its command, as JSON, in an order they can run in: all a backend needs to run them, with the dataset folder, the programs the commands need, and a fingerprint of each job's work to tell when it must run again. |
 
@@ -59,7 +59,7 @@ The pipeline and the recipe split along one line. A `.spit` pipeline is the reus
 
 A later step may also take an earlier step's input and run that step in memory: `dag` and `artifacts` take a `.spitin` in place of the `.spitout`. A `.spitin` names its own pipeline, so it is given alone: `spit dag dataset.spitin`. Giving a `.spit` beside it is an error, so the two cannot disagree. A `.spitout` names no pipeline, so it takes one: `spit dag analysis.spit dataset.spitout`.
 
-A recipe is for when a dataset needs more than its folder: rules to find, check or leave out its inputs, or source paths of its own. When the pipeline's path rules already find every source, skip it and name the folder: `spit dag analysis.spit --root data`. That runs `spit inputs` in memory on the pipeline alone, so it takes no `discover`, `exclude` or `require` rules. `--root` is taken only this way: a recipe and a `.spitout` each say where their data is with a `root` line.
+A recipe is for when a dataset needs more than its folder: rules to find, check or leave out its inputs, or source paths of its own. When the pipeline's path rules already find every source, skip it and name the folder: `spit dag analysis.spit --root data`. That runs `spit inputs` in memory on the pipeline alone, so it takes no `inputs:`, `exclude` or `require` rules. `--root` is taken only this way: a recipe and a `.spitout` each say where their data is with a `root` line.
 
 SPIT itself runs nothing. A backend runs the `.spitdag`: [spit-bash](https://github.com/eclnz/spit-bash) runs its jobs on one machine, as in `spit-bash run dataset.spitin -j 4`, and takes the same files as `spit dag`.
 
@@ -232,12 +232,13 @@ Add rules when they say more than the files do. For example, beside an `analysis
 pipeline analysis.spit
 root .
 
-discover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}
-exclude [sub] where sessions count<2
-path image: data/sub-{sub}/ses-{ses}/image.nii.gz
+inputs:
+    contexts: data/sub-{sub}/ses-{ses}
+    image: data/sub-{sub}/ses-{ses}/image.nii.gz
+exclude [sub] where contexts[sub,ses] count<2
 ```
 
-`discover` reads the observed subject and session pairs from folders, and the image source expands over them, so a session folder without its image is an error rather than a session that silently has none. `exclude [sub] where sessions count<2` removes each subject with fewer than two sessions, reporting each on stderr. `require` instead fails such a group: `require [sub] where sessions count>=2` names the subject with one session and its count. `sessions` remains a discovery rule name, not a product. `exclude bold[sub=02,ses=01,run=3]  # corrupted` removes one named artifact, and `exclude from qc/excluded.csv` reads such rules from a spreadsheet; the `.spitout` records what each rule removed and why. Logical source types and operations stay in the `.spit`.
+`contexts:` observes directory bindings independently of source files. Add `require [sub, ses] where image count=1` to demand an image for each observed session. `exclude [sub] where contexts[sub,ses] count<2` removes subjects with fewer than two observed sessions. Requirements and exclusions count distinct bindings across context paths with that exact dimension set. Sources and operations remain in the pipeline.
 
 `spit check cohort.spitin` checks the rules against the pipeline without reading the dataset. `spit inputs cohort.spitin -o cohort.spitout` scans the folder its `root` line names, and writes what it found:
 
@@ -247,12 +248,13 @@ root .
 source_paths:
     image: data/sub-{sub}/ses-{ses}/image.nii.gz
 
-contexts sessions:
-    [sub=01,ses=01]:
-        image
+sources:
+    image[sub=01,ses=01]
+    image[sub=01,ses=02]
 
-    [sub=01,ses=02]:
-        image
+contexts:
+    [sub=01,ses=01]
+    [sub=01,ses=02]
 ```
 
 The `.spitout` lists the source identities found in the dataset, and the folder it found them in, relative to the `.spitout` itself. Paths come from the pipeline's source rules; when a recipe defines a source rule instead, the `.spitout` carries that rule once in `source_paths:`. Later steps need neither the recipe nor a rescan. A dataset indexer or person can write the same inventory. A record names no file of its own: its source's path rule gives it. The text processing example uses [command_demo.spitout](examples/commands/command_demo/command_demo.spitout):
@@ -392,7 +394,7 @@ To make a plan for the work that can run now, use `spit dag dataset.spitin --par
 
 Beyond the basics above, `.spit` files support typed products, multi-output operations, `many`/aggregation inputs with selectors (`where`, `same`, `vary`, `each`), symbolic type variables, stages, path placeholders, and `use` imports for sharing definitions across files; `.spitin` recipes add a dataset `root`, directory discovery, and named or conditional `exclude` rules, plus `require` checks.
 
-Paths are written once where they can be. SPIT's own path placeholders take `@`, as `{@product}`, `{@entities}`, `{@stage}` and `{@labels}`, so a bare `{sub}` is always a dimension. An operation names the extension each output's file has, as `-> Transform .mat`, and `ext:` sets one for the rest, so a default path is written without one. A recipe's `path:` is the default for sources, so where a dataset keeps its inputs stays with the dataset, and the pipeline's default can place outputs by stage. A source declares its files' extension as an operation declares its outputs', `source events .tsv [sub]`, so one default covers sources of different formats. A file that shares another file's stem is declared `beside` it. For sources, the companion inherits the main source's dimensions and path; for outputs, the same job writes both files. A recipe can give the main source's path for one dataset. A command can take an output's folder and name, `{image.dir}` and `{image.stem}`, for a tool that adds the extension itself. A `/` after a type makes a product's artifacts folders, as `source dicom : Dicom / [sub]` or `-> (subject: FsSubject /)`, for a tool that reads or writes a folder of files. A path can use `{@labels}` for BIDS-style dimension labels and `[...]` for a segment only some products have; the [cohort walkthrough](docs/examples.md#cohort-discovery-exclusion-and-grouped-removal) shows one default path for run, session, and subject outputs. See the [full language reference](docs/language-reference.md) for syntax and rules for each of these.
+Paths are written once where they can be. SPIT's own path placeholders take `@`, as `{@product}`, `{@entities}`, `{@stage}` and `{@labels}`, so a bare `{sub}` is always a dimension. An operation names the extension each output's file has, as `-> Transform .mat`, and `ext:` sets one for the rest, so a default path is written without one. A recipe's `inputs: default:` is the default for sources, so where a dataset keeps its inputs stays with the dataset, and the pipeline's default can place outputs by stage. A source declares its files' extension as an operation declares its outputs', `source events .tsv [sub]`, so one default covers sources of different formats. A file that shares another file's stem is declared `beside` it. For sources, the companion inherits the main source's dimensions and path; for outputs, the same job writes both files. A recipe can give the main source's path for one dataset. A command can take an output's folder and name, `{image.dir}` and `{image.stem}`, for a tool that adds the extension itself. A `/` after a type makes a product's artifacts folders, as `source dicom : Dicom / [sub]` or `-> (subject: FsSubject /)`, for a tool that reads or writes a folder of files. A path can use `{@labels}` for BIDS-style dimension labels and `[...]` for a segment only some products have; the [cohort walkthrough](docs/examples.md#cohort-discovery-exclusion-and-grouped-removal) shows one default path for run, session, and subject outputs. See the [full language reference](docs/language-reference.md) for syntax and rules for each of these.
 
 ## More examples
 

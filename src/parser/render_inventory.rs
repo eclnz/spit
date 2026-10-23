@@ -4,8 +4,6 @@
 use std::collections::BTreeMap;
 use std::fmt;
 
-use rustc_hash::{FxHashMap, FxHashSet};
-
 use crate::model::{
     DimensionOrders, EntityBinding, InputRules, Pipeline, SourceInventory, SourceRecord,
 };
@@ -56,16 +54,9 @@ pub(crate) fn as_read_back(
     for record in &mut read.artifacts {
         record.path = None;
     }
-    // Every named context is written as a context, and contexts are read
-    // back sorted, each once.
-    read.contexts
-        .extend(read.discovered.values().flatten().cloned());
+    // Contexts are written without discovery names and read back sorted.
     read.contexts.sort();
     read.contexts.dedup();
-    for bindings in read.discovered.values_mut() {
-        bindings.sort();
-        bindings.dedup();
-    }
     Some(read)
 }
 
@@ -81,8 +72,7 @@ fn written_source_paths(
     source_paths
 }
 
-/// A `.spitout`: its contexts, unnamed then by discovery rule, and its
-/// source records.
+/// A `.spitout`: its observed contexts and source records.
 ///
 /// Keep in step with `as_read_back`: whatever this leaves out or rewrites,
 /// such as a record's path or the order of contexts, it must too.
@@ -91,11 +81,6 @@ struct InventoryText<'a> {
     pipeline: &'a Pipeline,
     rules: &'a InputRules,
 }
-
-/// The records a `.spitout` writes under a discovered context instead of
-/// under `sources:`: for each context, each remaining dimension's value (or
-/// none) and the products with a record there.
-type Nested<'a> = FxHashMap<EntityBinding, FxHashMap<EntityBinding, Vec<&'a str>>>;
 
 impl fmt::Display for InventoryText<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -112,47 +97,18 @@ impl fmt::Display for InventoryText<'_> {
             }
             writeln!(f)?;
         }
-        let (nested, flat) = self.nest_records();
-        if !flat.is_empty() {
+        if !inventory.artifacts.is_empty() {
             writeln!(f, "sources:")?;
-            for record in flat {
+            for record in &inventory.artifacts {
                 self.write_record(f, record)?;
             }
             if !inventory.contexts.is_empty() {
                 writeln!(f)?;
             }
         }
-        let named: FxHashSet<_> = inventory.discovered.values().flatten().collect();
-        let unnamed: Vec<_> = inventory
-            .contexts
-            .iter()
-            .filter(|context| !named.contains(context))
-            .collect();
-        if !unnamed.is_empty() {
+        if !inventory.contexts.is_empty() {
             writeln!(f, "contexts:")?;
-            self.write_contexts(f, unnamed, &[])?;
-            writeln!(f)?;
-        }
-        for (name, bindings) in &inventory.discovered {
-            writeln!(f, "contexts {name}:")?;
-            let declared = self
-                .rules
-                .discovery(name)
-                .map_or(&[][..], |rule| rule.dimensions.as_slice());
-            let mut bindings: Vec<_> = bindings.iter().collect();
-            bindings.sort_by(|left, right| left.cmp_in(right, declared));
-            let order: Vec<_> = declared.iter().map(String::as_str).collect();
-            for (index, binding) in bindings.into_iter().enumerate() {
-                if index > 0 {
-                    writeln!(f)?;
-                }
-                let groups = nested.get(binding);
-                let colon = if groups.is_some() { ":" } else { "" };
-                writeln!(f, "    [{}]{colon}", in_order(binding, &order))?;
-                if let Some(groups) = groups {
-                    self.write_groups(f, groups)?;
-                }
-            }
+            self.write_contexts(f, inventory.contexts.iter().collect(), &[])?;
         }
         self.write_removed(f)
     }
@@ -197,40 +153,6 @@ impl InventoryText<'_> {
         Ok(())
     }
 
-    /// Split the records into those written under their discovered context
-    /// and those written under `sources:`. A single named discovery gives
-    /// each record with its dimensions one unambiguous context, and at most
-    /// one remaining dimension can be grouped under it.
-    fn nest_records(&self) -> (Nested<'_>, Vec<&SourceRecord>) {
-        let inventory = self.inventory;
-        let discovery = match inventory.discovered.iter().next() {
-            Some((name, contexts)) if inventory.discovered.len() == 1 => self
-                .rules
-                .discovery(name)
-                .map(|rule| (contexts.iter().collect::<FxHashSet<_>>(), &rule.dimensions)),
-            _ => None,
-        };
-        let mut nested: Nested<'_> = FxHashMap::default();
-        let mut flat = Vec::new();
-        for record in &inventory.artifacts {
-            let under = discovery.as_ref().and_then(|(contexts, dimensions)| {
-                let parent = record.entities.project(dimensions)?;
-                let remainder = record.entities.except(dimensions);
-                (contexts.contains(&parent) && remainder.len() <= 1).then_some((parent, remainder))
-            });
-            match under {
-                Some((parent, remainder)) => nested
-                    .entry(parent)
-                    .or_default()
-                    .entry(remainder)
-                    .or_default()
-                    .push(&record.product),
-                None => flat.push(record),
-            }
-        }
-        (nested, flat)
-    }
-
     /// A record under `sources:`; its path rule gives its file.
     fn write_record(&self, f: &mut fmt::Formatter<'_>, record: &SourceRecord) -> fmt::Result {
         if record.entities.is_empty() {
@@ -268,54 +190,6 @@ impl InventoryText<'_> {
         let order: Vec<&str> = order.iter().map(String::as_str).collect();
         for context in contexts {
             writeln!(f, "    [{}]", in_order(context, &order))?;
-        }
-        Ok(())
-    }
-
-    /// The products under one context: those with no further dimension, then
-    /// each further value, with runs of values that list the same products
-    /// written as one group, such as `[run=1,2]:`.
-    fn write_groups(
-        &self,
-        f: &mut fmt::Formatter<'_>,
-        groups: &FxHashMap<EntityBinding, Vec<&str>>,
-    ) -> fmt::Result {
-        let products = &self.pipeline.products;
-        let sorted_names = |names: &[&str]| {
-            let mut names = names.to_vec();
-            names.sort_by_key(|name| {
-                products
-                    .iter()
-                    .position(|product| product.name == *name)
-                    .unwrap_or(usize::MAX)
-            });
-            names.join(", ")
-        };
-        if let Some(names) = groups.get(&EntityBinding::default()) {
-            writeln!(f, "        {}", sorted_names(names))?;
-        }
-        let pipeline_order = self.pipeline.dimension_order();
-        let mut remaining: Vec<_> = groups
-            .iter()
-            .filter(|(binding, _)| !binding.is_empty())
-            .collect();
-        remaining.sort_by(|(left, _), (right, _)| left.cmp_in(right, &pipeline_order));
-        let mut remaining = remaining
-            .into_iter()
-            .filter_map(|(binding, names)| {
-                let (dimension, value) = binding.iter().next()?;
-                Some((dimension, value, sorted_names(names)))
-            })
-            .peekable();
-        while let Some((dimension, value, names)) = remaining.next() {
-            let mut values = vec![value];
-            while let Some((_, next, _)) = remaining.next_if(|(next_dimension, _, next_names)| {
-                *next_dimension == dimension && *next_names == names
-            }) {
-                values.push(next);
-            }
-            writeln!(f, "        [{dimension}={}]:", values.join(","))?;
-            writeln!(f, "            {names}")?;
         }
         Ok(())
     }
