@@ -16,7 +16,7 @@ For example, `path: out/{@product}/{@entities}` writes separate products and ide
 
 ## Built-in source shapes
 
-A dimension placeholder in a source path or a `discover ... from dirs` pattern can restrict the value it reads. The set of shapes is closed:
+A dimension placeholder in a source path or a `contexts:` directory pattern can restrict the value it reads. The set of shapes is closed:
 
 | Shape | Example | Values read |
 | --- | --- | --- |

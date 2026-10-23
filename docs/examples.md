@@ -100,8 +100,10 @@ Save as `cohort.spitin`:
 
 ```spit
 pipeline cohort.spit
+root .
 
-discover sessions: [sub, ses] from dirs sub-{sub}/ses-{ses}
+inputs:
+    contexts: sub-{sub}/ses-{ses}
 # Subject 03 has only one session and is removed as a whole.
 exclude [sub] where t1w count<2
 exclude bold[sub=02,ses=02,run=2]    # motion spike
@@ -345,4 +347,4 @@ cargo run -- dag examples/commands/mrtrix3_act/mrtrix3_act.spit examples/command
 cargo run -- dag examples/commands/mrtrix3_act/mrtrix3_act.spit examples/commands/mrtrix3_act/mrtrix3_mock_data/inputs.spitout -o examples/commands/mrtrix3_act/mrtrix3_mock_data/jobs.spitdag
 ```
 
-The script creates the three sessions and seven DWI runs listed in the example inventory. The recipe has no hand-written context or source records: it discovers session directories and scans the files. `inputs.spitout` nests 39 source identities under three session contexts, with no repeated paths because the pipeline declares them. The DAG contains 93 planned jobs. The files are empty, so the generated MRtrix3, FSL, and SynthSeg commands are for inspection only and cannot process this mock dataset.
+The script creates the three sessions and seven DWI runs listed in the example inventory. The recipe has no hand-written context or source records: it discovers session directories and scans the files. `inputs.spitout` lists 39 source identities and three session contexts, with no repeated paths because the pipeline declares them. The DAG contains 93 planned jobs. The files are empty, so the generated MRtrix3, FSL, and SynthSeg commands are for inspection only and cannot process this mock dataset.

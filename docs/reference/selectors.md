@@ -32,10 +32,9 @@ A file or stage can set output checks with `check: nonempty, ndim(3)`. A nested 
 | Clause | Example | Meaning |
 | --- | --- | --- |
 | `count` | `require [sub, ses] where t1w count=1` | Compare a source's artifact count or a discovery's context count with `=`, `!=`, `>=`, `<=`, `>` or `<`. |
-| `where` in a recipe | `exclude [sub] where sessions count<2` | Introduce a group's condition in `exclude` or `require`. This is distinct from a call's `@ where(...)`. |
+| `where` in a recipe | `exclude [sub] where contexts[sub,ses] count<2` | Introduce a group's condition in `exclude` or `require`. This is distinct from a call's `@ where(...)`. |
 | `missing` | `exclude [sub, ses] where bold missing run=1,2` | Remove a group if any listed value is absent. |
 | `has` | `require [sub, ses] where bold has run=1,2` | Check that listed values are present; `exclude` may use `has` to remove groups instead. |
-| `from dirs` | `discover sessions: [sub, ses] from dirs sub-{sub}/ses-{ses}` | Give `discover` its directory pattern. |
 | `from` in `exclude` | `exclude from qc/excluded.csv` | Read exclusion rows from a CSV file relative to the recipe. |
 
 Named exclusions apply first, then conditional exclusions, then `require`, regardless of line order. A requirement can check values, as `require [sub, ses] where image has run=1,2`. See [recipes](../language-reference.md#recipes) for groups, errors, and precedence.

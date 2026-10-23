@@ -344,12 +344,12 @@ pub(crate) fn lower(
         }
         let rule = matches!(
             statement.kind,
-            StatementKind::Discover(_) | StatementKind::Constraint(..) | StatementKind::Exclude(..)
+            StatementKind::Constraint(..) | StatementKind::Exclude(..)
         );
         let lowered = if rule && kind == Kind::Pipeline {
             Err(Failure::clean(ParseError::new(
                 statement.place.line,
-                "`discover`, `require` and `exclude` rules belong in a .spitin recipe, not a pipeline",
+                "`require` and `exclude` rules belong in a .spitin recipe, not a pipeline",
             )))
         } else {
             lower_statement(&mut builder, imports, statement, &mut errors)
@@ -487,15 +487,6 @@ fn lower_statement(
                 }
             }
             builder.add_product(product, place.clone());
-        }
-        StatementKind::Discover(discovery) => {
-            if builder.inputs.discovery(&discovery.name).is_some() {
-                return Err(Failure::clean(ParseError::new(
-                    statement.place.line,
-                    format!("duplicate discovery `{}`", discovery.name),
-                )));
-            }
-            builder.inputs.discoveries.push(discovery.clone());
         }
         StatementKind::Operation(operation, place, stage, _) => {
             if operation.steps.is_empty() {

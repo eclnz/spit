@@ -263,14 +263,6 @@ impl<'a> Excluder<'a> {
     }
 
     /// Whether a rule removes the artifact of `product` with `entities`,
-    /// without recording it.
-    pub(crate) fn excludes(&self, product: &str, entities: &EntityBinding) -> bool {
-        self.rules
-            .iter()
-            .any(|rule| rule.matches(product, entities))
-    }
-
-    /// Whether a rule removes the artifact of `product` with `entities`,
     /// recording it with the first rule that does.
     pub(crate) fn artifact(&mut self, product: &str, entities: &EntityBinding) -> bool {
         let mut first = None;
@@ -317,9 +309,6 @@ impl<'a> Excluder<'a> {
             .artifacts
             .retain(|record| !self.artifact(&record.product, &record.entities));
         inventory.contexts.retain(|binding| !self.context(binding));
-        for bindings in inventory.discovered.values_mut() {
-            bindings.retain(|binding| !self.context(binding));
-        }
     }
 
     /// A rule that names a source records each artifact it removes; one

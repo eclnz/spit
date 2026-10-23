@@ -110,7 +110,7 @@ pub(crate) fn apply_drops(
         .filter(|rule| rule.action == CoverageAction::Drop)
     {
         let groups = all_groups(inventory, &rule.group_by);
-        let members = members(rule, inventory, rules.discovery(&rule.product).is_some());
+        let members = members(rule, inventory);
         let written = match rule.line {
             Some(line) => format!("`{rule}` (line {line})"),
             None => format!("`{rule}`"),
@@ -156,7 +156,6 @@ fn all_groups(inventory: &SourceInventory, group_by: &[String]) -> Vec<(GroupKey
     let bindings = inventory
         .contexts
         .iter()
-        .chain(inventory.discovered.values().flatten())
         .chain(inventory.artifacts.iter().map(|record| &record.entities));
     distinct_groups(bindings, group_by)
 }
@@ -166,25 +165,24 @@ fn all_groups(inventory: &SourceInventory, group_by: &[String]) -> Vec<(GroupKey
 fn members<'a>(
     rule: &CoverageRule,
     inventory: &'a SourceInventory,
-    discovery: bool,
 ) -> FxHashMap<GroupKey, Vec<&'a EntityBinding>> {
-    let bindings: Box<dyn Iterator<Item = &EntityBinding>> = if discovery {
-        Box::new(
-            inventory
-                .discovered
-                .get(&rule.product)
-                .into_iter()
-                .flatten(),
-        )
-    } else {
-        Box::new(
-            inventory
-                .artifacts
-                .iter()
-                .filter(|record| record.product == rule.product)
-                .map(|record| &record.entities),
-        )
-    };
+    let bindings: Box<dyn Iterator<Item = &EntityBinding>> =
+        if let Some(dimensions) = context_target_dimensions(&rule.product) {
+            Box::new(inventory.contexts.iter().filter(move |binding| {
+                binding.len() == dimensions.len()
+                    && binding
+                        .dimensions()
+                        .all(|dimension| dimensions.contains(dimension))
+            }))
+        } else {
+            Box::new(
+                inventory
+                    .artifacts
+                    .iter()
+                    .filter(|record| record.product == rule.product)
+                    .map(|record| &record.entities),
+            )
+        };
     let mut members: FxHashMap<GroupKey, Vec<&EntityBinding>> = FxHashMap::default();
     for binding in bindings {
         if let Some(key) = binding.group_key(&rule.group_by) {
@@ -192,6 +190,20 @@ fn members<'a>(
         }
     }
     members
+}
+
+/// The exact set of dimensions selected by `contexts[dimensions]`.
+fn context_target_dimensions(target: &str) -> Option<BTreeSet<&str>> {
+    target
+        .strip_prefix("contexts[")?
+        .strip_suffix(']')
+        .map(|names| {
+            names
+                .split(',')
+                .map(str::trim)
+                .filter(|name| !name.is_empty())
+                .collect()
+        })
 }
 
 /// Each distinct projection of `bindings` onto `dimensions`, with its key,
@@ -219,7 +231,7 @@ fn distinct_groups<'a>(
     groups
 }
 
-/// Remove every context, discovered binding and source record in `groups`.
+/// Remove every context and source record in `groups`.
 fn remove_groups(inventory: &mut SourceInventory, groups: &[DroppedGroup]) {
     if groups.is_empty() {
         return;
@@ -227,9 +239,6 @@ fn remove_groups(inventory: &mut SourceInventory, groups: &[DroppedGroup]) {
     let index = DropIndex::new(groups);
     let dropped = |binding: &EntityBinding| index.matches(binding);
     inventory.contexts.retain(|binding| !dropped(binding));
-    for bindings in inventory.discovered.values_mut() {
-        bindings.retain(|binding| !dropped(binding));
-    }
     inventory
         .artifacts
         .retain(|record| !dropped(&record.entities));
@@ -252,7 +261,7 @@ fn missing_values<'a>(
     })
 }
 
-/// Check that a rule names a source or discovery rule and groups by its
+/// Check that a rule names a source or context domain and groups by its
 /// dimensions. Needs no inventory.
 pub(crate) fn check_coverage_rule(
     rule_index: usize,
@@ -260,19 +269,29 @@ pub(crate) fn check_coverage_rule(
     pipeline: &PipelineIndex<'_>,
     rules: &InputRules,
 ) -> Result<(), ResolveError> {
-    let discovery = rules.discovery(&rule.product);
+    let context_dimensions = context_target_dimensions(&rule.product);
     let product = pipeline.product(&rule.product);
-    if discovery.is_some() && product.is_some() {
+    let context_pattern = context_dimensions.as_ref().and_then(|wanted| {
+        rules.context_paths.iter().find(|pattern| {
+            pattern
+                .dimensions
+                .iter()
+                .map(String::as_str)
+                .collect::<BTreeSet<_>>()
+                == *wanted
+        })
+    });
+    if context_dimensions.is_some() && context_pattern.is_none() {
         return Err(ResolveError::InvalidDefinition {
             subject: DefinitionSubject::Constraint(rule_index),
             detail: format!(
-                "`{}` names both a product and a discovery rule",
+                "`{}` has no context path with exactly those dimensions",
                 rule.product
             ),
         });
     }
-    let dimensions = match (discovery, product) {
-        (Some(discovery), _) => &discovery.dimensions,
+    let dimensions = match (context_pattern, product) {
+        (Some(context), _) => &context.dimensions,
         (None, Some(product)) => &product.dimensions,
         (None, None) => {
             return Err(ResolveError::UnknownProduct {
@@ -280,7 +299,7 @@ pub(crate) fn check_coverage_rule(
             })
         }
     };
-    if discovery.is_none() && !pipeline.is_source(&rule.product) {
+    if context_pattern.is_none() && !pipeline.is_source(&rule.product) {
         return Err(ResolveError::InvalidDefinition {
             subject: DefinitionSubject::Constraint(rule_index),
             detail: format!(
@@ -290,8 +309,8 @@ pub(crate) fn check_coverage_rule(
         });
     }
     let group_by = dimension_set(&rule.group_by);
-    let target = if discovery.is_some() {
-        "that discovery rule"
+    let target = if context_pattern.is_some() {
+        "that context path"
     } else {
         "that product"
     };
@@ -352,7 +371,7 @@ pub(crate) fn coverage_gaps(
     // Each group's members, found in one pass rather than once per group.
     let mut sources: FxHashMap<GroupKey, Vec<&ArtifactInstance>> = FxHashMap::default();
     let bindings = if discovery {
-        members(rule, inventory, true)
+        members(rule, inventory)
     } else {
         let mut bindings: FxHashMap<GroupKey, Vec<&EntityBinding>> = FxHashMap::default();
         for artifact in artifacts.get(&rule.product).into_iter().flatten() {
@@ -446,8 +465,7 @@ pub(crate) struct InputCheck<'a> {
     pub(crate) gaps: Vec<CoverageGap>,
 }
 
-/// Check an inventory's records against the pipeline's sources and its
-/// named contexts against the discovery rules, and find what the `require`
+/// Check an inventory's records against the pipeline's sources and find what the `require`
 /// rules miss. `drop` rules have been applied already, where the inventory
 /// was settled, so each rule is judged once against what they leave.
 pub(crate) fn check_inventory<'a>(
@@ -455,7 +473,6 @@ pub(crate) fn check_inventory<'a>(
     rules: &InputRules,
     inventory: Cow<'a, SourceInventory>,
 ) -> Result<InputCheck<'a>, ResolveError> {
-    check_discovered(rules, &inventory)?;
     let requires = rules
         .constraints
         .iter()
@@ -468,28 +485,26 @@ pub(crate) fn check_inventory<'a>(
         check_records(pipeline, &inventory)?;
         BTreeMap::new()
     };
-    check_named_contexts(rules, &inventory)?;
     let gaps = rules
         .constraints
         .iter()
         .enumerate()
         .filter(|(_, rule)| rule.action == CoverageAction::Require)
         .flat_map(|(rule_index, rule)| {
-            let discovery = rules.discovery(&rule.product).is_some();
+            let discovery = context_target_dimensions(&rule.product).is_some();
             coverage_gaps(rule_index, rule, &inventory, &artifacts, discovery)
         })
         .collect();
     Ok(InputCheck { inventory, gaps })
 }
 
-/// Check records given directly, and their named contexts, before any rule
+/// Check records given directly before any rule
 /// removes some, so a removed group cannot hide a mistake in them.
 pub(crate) fn check_before_removal(
     pipeline: &Pipeline,
-    rules: &InputRules,
+    _rules: &InputRules,
     inventory: &SourceInventory,
 ) -> Result<(), ResolveError> {
-    check_discovered(rules, inventory)?;
     check_records(pipeline, inventory)
 }
 
@@ -499,51 +514,4 @@ fn check_records(pipeline: &Pipeline, inventory: &SourceInventory) -> Result<(),
     pipeline.check_sources(inventory, |_, record| {
         seen.insert((record.product.as_str(), &record.entities))
     })
-}
-
-/// A settled `.spitout` keeps the names of the rules that found its
-/// contexts; each context of a rule the recipe has must bind its dimensions.
-/// Without that rule the names are only a record of where they came from.
-fn check_discovered(rules: &InputRules, inventory: &SourceInventory) -> Result<(), ResolveError> {
-    for (name, bindings) in &inventory.discovered {
-        let Some(discovery) = rules.discovery(name) else {
-            continue;
-        };
-        let expected: BTreeSet<_> = discovery.dimensions.iter().map(String::as_str).collect();
-        for binding in bindings {
-            let found: BTreeSet<_> = binding.dimensions().collect();
-            if found != expected {
-                return Err(ResolveError::InvalidDefinition {
-                    subject: DefinitionSubject::None,
-                    detail: format!(
-                        "inventory context [{binding}] for discovery `{name}` must bind [{}]",
-                        discovery.dimensions.join(", ")
-                    ),
-                });
-            }
-        }
-    }
-    Ok(())
-}
-
-/// Each rule on a discovery needs that discovery's contexts named in the
-/// inventory.
-fn check_named_contexts(
-    rules: &InputRules,
-    inventory: &SourceInventory,
-) -> Result<(), ResolveError> {
-    for (rule_index, rule) in rules.constraints.iter().enumerate() {
-        if rules.discovery(&rule.product).is_some()
-            && !inventory.discovered.contains_key(&rule.product)
-        {
-            return Err(ResolveError::InvalidDefinition {
-                subject: DefinitionSubject::Constraint(rule_index),
-                detail: format!(
-                    "coverage rule for discovery `{}` needs named contexts in the inventory",
-                    rule.product
-                ),
-            });
-        }
-    }
-    Ok(())
 }

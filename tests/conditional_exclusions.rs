@@ -334,14 +334,14 @@ fn a_session_missing_its_file_can_be_dropped_rather_than_fail_discovery() {
         ],
     );
     let pipeline = parse_pipeline(PIPELINE).unwrap();
-    let discover = "discover sessions: [sub, ses] from dirs sub-{sub}/ses-{ses}\n";
-    let error = parse_input_spec(discover)
+    let discover = "inputs:\n    contexts: sub-{sub}/ses-{ses}\n";
+    let settled = parse_input_spec(&format!("{discover}require [sub, ses] where t1w count=1\n"))
         .unwrap()
         .resolve(&pipeline, InputSource::Discover(tree.path()))
-        .unwrap_err()
-        .to_string();
+        .unwrap();
+    let error = settled.require_complete().unwrap_err().to_string();
     assert!(
-        error.contains("missing source file for `t1w[ses=2,sub=1]`"),
+        error.contains("source coverage for `t1w` at [ses=2,sub=1]"),
         "{error}"
     );
     let settled = parse_input_spec(&format!("{discover}exclude [sub, ses] where t1w count=0\n"))

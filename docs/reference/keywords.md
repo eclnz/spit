@@ -32,8 +32,8 @@ These go in a `.spitin` file. A recipe names one dataset and its `.spit` pipelin
 | `pipeline` | `pipeline analysis.spit` | Name the pipeline relative to the recipe's folder. | [Recipes](../language-reference.md#recipes) |
 | `root` | `root data` | Name the dataset folder relative to the recipe's folder; `root .` means that folder. | [Recipes](../language-reference.md#recipes) |
 | `path` | `path image: raw/{sub}.nii.gz` or `path: raw/{@product}` | Give source path rules or a default for sources. Name the main source when its companions are declared `beside` it. | [File ownership](../language-reference.md#which-file-a-line-belongs-in) |
-| `discover` | `discover sessions: [sub, ses] from dirs sub-{sub}/ses-{ses}` | Read observed context bindings from directories. `from dirs` introduces the directory pattern. | [Discovery](../language-reference.md#discover-contexts-from-directories) |
-| `exclude` | `exclude image[sub=02]`, `exclude [sub] where sessions count<2`, or `exclude from qc/excluded.csv` | Remove named artifacts or groups, or groups meeting a condition; the `from` form reads a CSV. | [Exclusion](../language-reference.md#exclude-groups-that-meet-a-condition) |
+| `inputs:` | `inputs:` followed by indented source paths and `contexts:` patterns | Match source files and observe directories independently. | [Recipes](../language-reference.md#recipes) |
+| `exclude` | `exclude image[sub=02]`, `exclude [sub] where contexts[sub,ses] count<2`, or `exclude from qc/excluded.csv` | Remove named artifacts or groups, or groups meeting a condition; the `from` form reads a CSV. | [Exclusion](../language-reference.md#exclude-groups-that-meet-a-condition) |
 | `require` | `require [sub, ses] where image count=1` | Fail when a retained group lacks the required artifacts or values. | [Constraints](../language-reference.md#constraints) |
 
 A recipe can also contain `sources:` and `contexts:` records, using the same identity syntax as a `.spitout`. Named exclusions apply first, then conditional exclusions, then `require`, regardless of line order. See [recipe conditions](selectors.md#recipe-conditions).
@@ -46,7 +46,7 @@ A recipe can also contain `sources:` and `contexts:` records, using the same ide
 | --- | --- | --- |
 | `root` | `root ../data` | Dataset folder relative to this `.spitout`. Without it, `dag` does not check source files on disk. |
 | `source_paths:` | `source_paths:` followed by `image: data/{sub}.nii.gz` | Path rules supplied by the recipe, retained for `dag`. |
-| `contexts:` | `contexts:` or `contexts sessions:` | Observed bindings; the named form records one `discover` rule's contexts. |
+| `contexts:` | `contexts:` | Observed bindings, without discovery names. |
 | `sources:` | `sources:` followed by `image[sub=01]` | Settled source identities. A record's path comes from its source rule. |
 | `removed:` | `removed:` followed by removed identities and rule details | Record of what recipe rules removed; resolving jobs removes nothing more. |
 

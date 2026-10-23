@@ -12,25 +12,27 @@ Both paths are relative to the recipe's own folder. Run `spit inputs dataset.spi
 ## Give sources dataset-specific paths
 
 ```spit
-path image: raw/sub-{sub}/image.nii.gz
-path: raw/{@product}/{@entities}
+inputs:
+    image: raw/sub-{sub}/image.nii.gz
+    default: raw/{@product}/{@entities}
 ```
 
-A recipe's `path image:` names a source; its `path:` is a default for sources. A pipeline's `path:` is primarily for outputs and covers sources only when they have no more specific rule and the default fits them. A source's own rule belongs in either the pipeline or the recipe, not both. A recipe can also give the complete path of a main source whose companions are declared `beside` it. See [which file a line belongs in](../language-reference.md#which-file-a-line-belongs-in).
+A recipe's `inputs: image:` names a source; its `default:` entry supplies the fallback for sources. A pipeline's `path:` is primarily for outputs and covers sources only when they have no more specific rule and the default fits them. A source's own rule belongs in either the pipeline or the recipe, not both. A recipe can also give the complete path of a main source whose companions are declared `beside` it. See [which file a line belongs in](../language-reference.md#which-file-a-line-belongs-in).
 
 ## Discover observed contexts
 
 ```spit
-discover sessions: [sub, ses] from dirs sub-{sub}/ses-{ses}
+inputs:
+    contexts: sub-{sub}/ses-{ses}
 ```
 
-Each matching directory contributes an observed `[sub=...,ses=...]` context, including an empty directory. Sources within those dimensions can then be expected for each context. SPIT does not invent subject/session combinations. The [discovery reference](../language-reference.md#discover-contexts-from-directories) explains how source paths and missing files interact with contexts.
+Each matching directory contributes an observed `[sub=...,ses=...]` context, including an empty directory. A context does not require files; add `require` to check source coverage. Repeated `contexts:` entries belong in the same `inputs:` block as the source paths. SPIT does not invent subject/session combinations. The [discovery reference](../language-reference.md#discover-contexts-from-directories) explains how source paths and missing files interact with contexts.
 
 ## Leave out data or enforce coverage
 
 ```spit
 exclude bold[sub=02,ses=01,run=3]  # corrupted scan
-exclude [sub] where sessions count<2
+exclude [sub] where contexts[sub,ses] count<2
 require [sub, ses] where t1w count=1
 ```
 

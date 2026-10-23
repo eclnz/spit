@@ -117,7 +117,7 @@ fn a_recipe_gives_the_anchor_path() {
     tree.write("pipeline.spit", UNPLACED);
     let recipe = tree.write(
         "dataset.spitin",
-        "pipeline pipeline.spit\nroot .\npath raw: site-{site}/shot-{shot}.raw\n",
+        "pipeline pipeline.spit\nroot .\ninputs:\n    raw: site-{site}/shot-{shot}.raw\n",
     );
     let recipe = recipe.to_str().unwrap();
     let (ok, out, err) = spit(&["inputs", recipe]);
@@ -145,7 +145,7 @@ fn a_recipe_default_places_each_companion_at_the_anchor_name() {
     tree.write("pipeline.spit", UNPLACED);
     let recipe = tree.write(
         "dataset.spitin",
-        "pipeline pipeline.spit\nroot .\npath: site-{site}/shot-{shot}/{@product}\n",
+        "pipeline pipeline.spit\nroot .\ninputs:\n    default: site-{site}/shot-{shot}/{@product}\n",
     );
     let (ok, out, err) = spit(&["inputs", recipe.to_str().unwrap()]);
     assert!(ok, "{err}");
@@ -163,12 +163,16 @@ fn a_recipe_cannot_override_a_companion_path() {
     for (pipeline, recipe, message) in [
         (
             PHOTOS,
-            "path raw: elsewhere/{site}/{shot}.raw\n",
+            "inputs:\n    raw: elsewhere/{site}/{shot}.raw\n",
             "path rules in both",
         ),
-        (UNPLACED, "path gps: x.gpx\n", "beside `raw`"),
-        (UNPLACED, "path loaded: x\n", "made by a step"),
-        (UNPLACED, "path missing: x\n", "must name a source product"),
+        (UNPLACED, "inputs:\n    gps: x.gpx\n", "beside `raw`"),
+        (UNPLACED, "inputs:\n    loaded: x\n", "made by a step"),
+        (
+            UNPLACED,
+            "inputs:\n    missing: x\n",
+            "must name a source product",
+        ),
     ] {
         let tree = Tree::new("sidecars-recipe-errors", &[]);
         tree.write("pipeline.spit", pipeline);

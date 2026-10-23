@@ -84,11 +84,6 @@ fn rules_and_records_belong_outside_the_pipeline() {
         ("source x [a]\nrequire [a] where x count>=1\n", 2, ".spitin"),
         ("source x [a]\nexclude [a] where x count<1\n", 2, ".spitin"),
         ("source x [a]\nexclude x[a=1]\n", 2, ".spitin"),
-        (
-            "discover s: [a] from dirs d/{a}\nsource x [a]\n",
-            1,
-            ".spitin",
-        ),
         ("source x [a]\nsources:\n    x[a=1]\n", 2, ".spitout"),
         ("source x [a]\ncontexts:\n    [a=1]\n", 2, ".spitout"),
     ] {
@@ -299,14 +294,14 @@ fn a_source_record_names_no_file() {
 
 #[test]
 fn an_empty_named_contexts_section_records_its_discovery() {
-    let inventory = spit::parse_source_inventory("contexts sessions:\nsources:\n").unwrap();
-    assert_eq!(inventory.discovered.get("sessions"), Some(&Vec::new()));
+    let inventory = spit::parse_source_inventory("contexts:\nsources:\n").unwrap();
+    assert!(inventory.contexts.is_empty());
     assert!(inventory.contexts.is_empty());
 }
 
 #[test]
 fn nested_sources_expand_each_product_and_run() {
-    let text = "sources:\n    lut\n\ncontexts sessions:\n    [sub=01,ses=01]:\n        t1w\n        [run=01,02]:\n            dwi, bvec\n";
+    let text = "sources:\n    lut\n\ncontexts:\n    [sub=01,ses=01]:\n        t1w\n        [run=01,02]:\n            dwi, bvec\n";
     let inventory = parse_source_inventory(text).unwrap();
     assert_eq!(inventory.contexts.len(), 1);
     assert_eq!(inventory.artifacts.len(), 6);
@@ -315,9 +310,9 @@ fn nested_sources_expand_each_product_and_run() {
         .iter()
         .any(|record| record.product == "bvec" && record.entities.get("run") == Some("02")));
     for bad in [
-        "contexts sessions:\n    [sub=01]:\n        [sub=02]:\n            image\n",
-        "contexts sessions:\n    [sub=01]:\n        [run=01,]:\n            image\n",
-        "contexts sessions:\n    image\n",
+        "contexts:\n    [sub=01]:\n        [sub=02]:\n            image\n",
+        "contexts:\n    [sub=01]:\n        [run=01,]:\n            image\n",
+        "contexts:\n    image\n",
     ] {
         assert!(parse_source_inventory(bad).is_err(), "{bad}");
     }

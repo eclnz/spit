@@ -44,7 +44,8 @@ pub fn parse_fixture(text: &str) -> Result<(Pipeline, Option<SourceInventory>), 
 fn is_rule(line: &str) -> bool {
     let line = line.trim_start();
     line.trim_end() == "constraints:"
-        || ["discover ", "require ", "drop ", "exclude "]
+        || line.trim_end() == "inputs:"
+        || ["require ", "drop ", "exclude "]
             .iter()
             .any(|keyword| line.starts_with(keyword))
 }
@@ -54,10 +55,17 @@ fn is_rule(line: &str) -> bool {
 pub fn split_rules(text: &str) -> (String, String) {
     let mut pipeline = String::new();
     let mut recipe = String::new();
+    let mut input_indent = None;
     for line in text.lines() {
-        if is_rule(line) {
+        let indent = line.len() - line.trim_start().len();
+        let in_inputs =
+            input_indent.is_some_and(|header| line.trim().is_empty() || indent > header);
+        if !in_inputs && !line.trim().is_empty() {
+            input_indent = (line.trim() == "inputs:").then_some(indent);
+        }
+        if is_rule(line) || in_inputs {
             if line.trim() != "constraints:" {
-                recipe.push_str(line.trim_start());
+                recipe.push_str(if in_inputs { line } else { line.trim_start() });
                 recipe.push('\n');
             }
         } else {

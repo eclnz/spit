@@ -425,7 +425,7 @@ fn recipe_path_rules_show_combined_coverage_and_origin() {
     );
     let recipe = tree.write(
         "data.spitin",
-        "pipeline analysis.spit\nroot .\npath raw: input/{id}.txt\n",
+        "pipeline analysis.spit\nroot .\ninputs:\n    raw: input/{id}.txt\n",
     );
     let output = spit(&["check", recipe.to_str().unwrap(), "--path-rules"]);
     assert!(output.status.success(), "{}", stderr(&output));
@@ -455,7 +455,7 @@ fn recipe_path_rules_show_combined_coverage_and_origin() {
     );
     tree.write(
         "data.spitin",
-        "pipeline analysis.spit\nroot .\npath: input/{@product}/{@entities}\n",
+        "pipeline analysis.spit\nroot .\ninputs:\n    default: input/{@product}/{@entities}\n",
     );
     let defaulted = spit(&["check", recipe.to_str().unwrap()]);
     assert!(defaulted.status.success(), "{}", stderr(&defaulted));
@@ -677,8 +677,8 @@ fn drop_rules_that_remove_every_group_stop_each_command() {
     // before, a `require` after it checked nothing and passed.
     let recipe = tree.write(
         "data.spitin",
-        "pipeline analysis.spit\nroot .\ndiscover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}\n\
-         exclude [sub] where sessions count<2\nrequire [sub] where sessions count>=1\n",
+        "pipeline analysis.spit\nroot .\ninputs:\n    contexts: data/sub-{sub}/ses-{ses}\n\
+         exclude [sub] where contexts[sub,ses] count<2\nrequire [sub] where contexts[sub,ses] count>=1\n",
     );
     for command in ["inputs", "dag", "artifacts"] {
         let output = spit(&[command, recipe.to_str().unwrap()]);
@@ -686,7 +686,7 @@ fn drop_rules_that_remove_every_group_stop_each_command() {
         assert!(
             stderr(&output).contains(
                 "error: conditional exclude rules removed all 2 [sub] groups, leaving nothing to plan: \
-                 `exclude [sub] where sessions count<2` (line 4)"
+                 `exclude [sub] where contexts[sub,ses] count<2` (line 5)"
             ),
             "{command}: {}",
             stderr(&output)
