@@ -21,7 +21,7 @@ pub(crate) struct StepShape {
     pub(crate) driver: usize,
     /// The dimensions the driver groups its artifacts by. Each job's context,
     /// which every output takes, adds any an input broadcasts with
-    /// `@ each(...)`.
+    /// `@each(...)`.
     pub(crate) groups: Vec<String>,
     /// For each binding, the dimensions it is matched to the context on.
     pub(crate) joins: Vec<Vec<String>>,
@@ -83,7 +83,7 @@ fn check_shape_rule(
             if operation.minimum_collection.is_some() {
                 return Err(unsupported(
                     operation,
-                    "`@ min(count)` requires a many input",
+                    "`@min(count)` requires a many input",
                 ));
             }
             if inputs.is_empty() || many_ports != 0 {
@@ -129,7 +129,7 @@ fn check_vary(
         Some((input, extra)) => Err(unsupported(
             operation,
             format!(
-                "input `{}` has dimensions absent from the groups of `{}` @ vary({varied}): {}; aggregate them first, pin them with `@ where(...)`, match on fewer with `@ same(...)`, or broadcast them with `@ each(...)`",
+                "input `{}` has dimensions absent from the groups of `{}` @vary({varied}): {}; aggregate them first, pin them with `@where(...)`, match on fewer with `@same(...)`, or broadcast them with `@each(...)`",
                 input.binding.product,
                 driving.product,
                 extra.join(", ")
@@ -171,7 +171,7 @@ fn check_output_dimensions(
         )
     };
     let broadcast = if context.len() > groups.len() {
-        ", plus those broadcast with `@ each(...)`"
+        ", plus those broadcast with `@each(...)`"
     } else {
         ""
     };
@@ -201,17 +201,17 @@ fn check_broadcasts(
         for dimension in &input.binding.each {
             let problem = if driving.vary.contains(dimension) {
                 format!(
-                    "`@ each({dimension})` on `{product}` would restore the dimension `{}` @ vary({dimension}) collects",
+                    "`@each({dimension})` on `{product}` would restore the dimension `{}` @vary({dimension}) collects",
                     driving.product
                 )
             } else if groups.contains(dimension) {
                 format!(
-                    "`@ each({dimension})` on `{product}`: driving product `{}` already has `{dimension}`, so it is matched without `@ each`",
+                    "`@each({dimension})` on `{product}`: driving product `{}` already has `{dimension}`, so it is matched without `@each`",
                     driving.product
                 )
             } else if let Some(first) = broadcast.insert(dimension, product) {
                 format!(
-                    "`{first}` and `{product}` both broadcast `{dimension}`; keep `@ each({dimension})` on one and the other is matched on it"
+                    "`{first}` and `{product}` both broadcast `{dimension}`; keep `@each({dimension})` on one and the other is matched on it"
                 )
             } else {
                 continue;
@@ -238,7 +238,7 @@ fn check_selectors(
         .find(|dimension| !product.dimensions.contains(*dimension))
     {
         return fail(format!(
-            "`@ where({dimension}=...)`: product `{name}` has no dimension `{dimension}`"
+            "`@where({dimension}=...)`: product `{name}` has no dimension `{dimension}`"
         ));
     }
     let free = binding.free_dimensions(&product.dimensions);
@@ -248,7 +248,7 @@ fn check_selectors(
             .iter()
             .find(|dimension| !free.contains(*dimension))
             .map(|dimension| {
-                format!("`@ {selector}({dimension})`: product `{name}` has no unpinned dimension `{dimension}`")
+                format!("`@{selector}({dimension})`: product `{name}` has no unpinned dimension `{dimension}`")
             })
     };
     let port_name = &port.name;
@@ -256,11 +256,11 @@ fn check_selectors(
         Cardinality::Many => {
             if binding.vary.is_empty() {
                 return fail(format!(
-                    "many input `{port_name}` needs `@ vary(dimension)` naming the dimensions it collects, as in `{name} @ vary(run)`"
+                    "many input `{port_name}` needs `@vary(dimension)` naming the dimensions it collects, as in `{name} @vary(run)`"
                 ));
             }
             if dimension_set(&binding.vary).len() != binding.vary.len() {
-                return fail(format!("`@ vary(...)` repeats a dimension of `{name}`"));
+                return fail(format!("`@vary(...)` repeats a dimension of `{name}`"));
             }
             for dimension in &binding.vary {
                 if !free.contains(dimension) {
@@ -279,19 +279,19 @@ fn check_selectors(
             };
             if let Some(selector) = single_only {
                 return fail(format!(
-                    "`@ {selector}(...)` applies to single-artifact inputs, not many input `{port_name}`"
+                    "`@{selector}(...)` applies to single-artifact inputs, not many input `{port_name}`"
                 ));
             }
         }
         Cardinality::One => {
             if !binding.vary.is_empty() {
                 return fail(format!(
-                    "`@ vary(...)` applies to many inputs; input `{port_name}` takes one artifact"
+                    "`@vary(...)` applies to many inputs; input `{port_name}` takes one artifact"
                 ));
             }
             let same = binding.same.as_deref().unwrap_or_default();
             if dimension_set(same).len() != same.len() {
-                return fail(format!("`@ same(...)` repeats a dimension of `{name}`"));
+                return fail(format!("`@same(...)` repeats a dimension of `{name}`"));
             }
             if let Some(problem) =
                 not_free("same", same).or_else(|| not_free("each", &binding.each))
@@ -312,7 +312,7 @@ fn no_driver(operation: &OperationDef, inputs: &[BoundInput<'_>]) -> ResolveErro
     else {
         return unsupported(
             operation,
-            "every input uses `@ same(...)` or `@ each(...)`, so none can drive the step",
+            "every input uses `@same(...)` or `@each(...)`, so none can drive the step",
         );
     };
     let mut dimensions = dimension_set(&inputs[driver].dimensions);
@@ -327,7 +327,7 @@ fn no_driver(operation: &OperationDef, inputs: &[BoundInput<'_>]) -> ResolveErro
     unsupported(
         operation,
         format!(
-            "input `{}` has dimensions absent from driving product `{}`: {}; aggregate them first, pin them with `@ where(...)`, match on fewer with `@ same(...)`, or broadcast them with `@ each(...)`",
+            "input `{}` has dimensions absent from driving product `{}`: {}; aggregate them first, pin them with `@where(...)`, match on fewer with `@same(...)`, or broadcast them with `@each(...)`",
             input.binding.product,
             inputs[driver].binding.product,
             extra.join(", ")

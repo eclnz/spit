@@ -57,7 +57,7 @@ The entry points differ in what they read and what they return:
     - **A stage groups steps and scopes paths. It is not a namespace.** An operation declared in one is global. `SourceMap::operation_stages` records its stage only so that a warning can flag a call from outside it.
     - **Extensions.** A source's `ProductDef` carries the extension it declares. An operation's `OutputPort` carries its optional extension and, for an output its tool writes beside another, that sibling and its suffix.
     - **Companion sources.** A companion source keeps its main source and suffix in `ProductDef::beside`. `Pipeline::sidecar_groups` keeps each main source with its companions, so that the input stage can report a group found only in part.
-    - **Collection minimums.** `@ min(n)` on a `many` port lowers to `OperationDef::minimum_collection`. An operation takes at most one `many` input, so the minimum belongs to the operation.
+    - **Collection minimums.** `@min(n)` on a `many` port lowers to `OperationDef::minimum_collection`. An operation takes at most one `many` input, so the minimum belongs to the operation.
 - **Imports.** Each `use` line's library is parsed in turn, and the definitions it selects are merged into the caller.
 - **Not done here:**
     - checking each step against its operation, types and cycles, which `collect_pipeline` does (see [resolution](resolution.md));

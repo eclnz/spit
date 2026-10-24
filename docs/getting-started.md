@@ -27,10 +27,10 @@ sorted = sort_lines(shard)
 
 operation merge(items: many Lines) -> Lines
 command merge: sort -m -u -o {@output} {items}
-merged = merge(sorted @ vary(part))
+merged = merge(sorted @vary(part))
 ```
 
-`shard[group=alpha,part=01]` is one source artifact. The first step makes a `sorted` artifact for each shard. `@ vary(part)` gathers the sorted shards of each `group` into one `merged` artifact. The complete example also gives outputs a [default path rule](guide/paths.md).
+`shard[group=alpha,part=01]` is one source artifact. The first step makes a `sorted` artifact for each shard. `@vary(part)` gathers the sorted shards of each `group` into one `merged` artifact. The complete example also gives outputs a [default path rule](guide/paths.md).
 
 ## 3. Check it and inspect a plan
 

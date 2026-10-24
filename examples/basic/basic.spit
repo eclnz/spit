@@ -12,4 +12,4 @@ operation register(bold: DenoisedBOLD, anatomy: T1w) -> RegisteredBOLD
 registered = register(denoised, t1w)
 
 operation mean(runs: many RegisteredBOLD) -> MeanBOLD
-mean_bold = mean(registered @ vary(run))
+mean_bold = mean(registered @vary(run))

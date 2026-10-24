@@ -9,11 +9,11 @@ source model [model]
 source config [config]
 source seed [config, seed]
 operation train(model: Model, config: Config, seed: Seed) -> Weights
-trained = train(model @ each(model), config, seed)
+trained = train(model @each(model), config, seed)
 operation summarise(runs: many Weights) -> Summary
-summary = summarise(trained @ vary(seed))
+summary = summarise(trained @vary(seed))
 operation board(summaries: many Summary) -> Table
-table = board(summary @ vary(model, config))
+table = board(summary @vary(model, config))
 ";
 
 const RUNS: &str = "sources:

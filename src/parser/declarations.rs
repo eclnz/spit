@@ -8,7 +8,7 @@ use crate::model::{Beside, InputBinding, Invocation, ProductDef};
 use crate::paths::PathTemplate;
 use crate::types::{parse_type_expr, TypeExpr, TypeParseError};
 
-use super::check::{only_checks, split_clauses};
+use super::check::{no_space_after_at, only_checks, split_clauses};
 use super::lexical::{
     call_parts, comma_items, identifier, product_name, qualified_identifier, split_ending,
 };
@@ -165,7 +165,7 @@ pub(super) fn parse_dimension_order(text: &str, number: usize) -> Result<Vec<Str
 }
 
 pub(super) fn parse_product(line: &str, number: usize) -> Result<ProductDef, ParseError> {
-    let (line, clauses) = split_clauses(line, "expected `@ check(...)` after a source", number)?;
+    let (line, clauses) = split_clauses(line, "expected `@check(...)` after a source", number)?;
     let checks = only_checks(&clauses, "a source", number)?;
     let (line, beside) = match line.rsplit_once(" beside ") {
         Some((item, sibling)) => {
@@ -258,33 +258,34 @@ pub(super) fn parse_invocation_parts(
     Ok(Invocation::with_outputs(operation, bindings, outputs))
 }
 
-const SELECTORS: &str = "expected `@ vary(dimension)`, `@ where(dimension=value, ...)`, `@ same(dimension, ...)`, or `@ each(dimension, ...)`";
+const SELECTORS: &str = "expected `@vary(dimension)`, `@where(dimension=value, ...)`, `@same(dimension, ...)`, or `@each(dimension, ...)`";
 
-/// Parse `product [@ selector(...)]...`.
+/// Parse `product [@selector(...)]...`.
 fn parse_binding(arg: &str, number: usize) -> Result<InputBinding, ParseError> {
     let mut parts = arg.split('@');
     let product = parts.next().unwrap_or_default().trim();
     let mut binding =
         InputBinding::product(qualified_identifier(product, number, "input product")?);
     for selector in parts {
+        no_space_after_at(selector, number)?;
         let selector = selector.trim();
         let (keyword, arguments) = call_parts(selector, number)
             .map_err(|_| ParseError::new(number, SELECTORS).at_token(selector))?;
         let items = comma_items(arguments, number)?;
         if items.is_empty() {
             return Err(
-                ParseError::new(number, format!("`@ {keyword}()` needs a dimension"))
+                ParseError::new(number, format!("`@{keyword}()` needs a dimension"))
                     .at_token(selector),
             );
         }
         let duplicate =
-            || ParseError::new(number, format!("duplicate `@ {keyword}(...)`")).at_token(keyword);
+            || ParseError::new(number, format!("duplicate `@{keyword}(...)`")).at_token(keyword);
         match keyword {
             "vary" => {
                 if !binding.vary.is_empty() {
                     return Err(ParseError::new(
                         number,
-                        "write the dimensions in one clause: `@ vary(model, config)`",
+                        "write the dimensions in one clause: `@vary(model, config)`",
                     )
                     .at_token(selector));
                 }
@@ -293,7 +294,7 @@ fn parse_binding(arg: &str, number: usize) -> Result<InputBinding, ParseError> {
                     if binding.vary.iter().any(|name| name == dimension) {
                         return Err(ParseError::new(
                             number,
-                            format!("`@ vary(...)` repeats `{dimension}`"),
+                            format!("`@vary(...)` repeats `{dimension}`"),
                         )
                         .at_token(selector));
                     }
@@ -327,18 +328,18 @@ fn parse_binding(arg: &str, number: usize) -> Result<InputBinding, ParseError> {
     Ok(binding)
 }
 
-/// The `dimension=value` pins of `@ where(...)`, each dimension once.
+/// The `dimension=value` pins of `@where(...)`, each dimension once.
 fn parse_pins(items: &[&str], number: usize) -> Result<BTreeMap<String, String>, ParseError> {
     let mut pinned = BTreeMap::new();
     for &item in items {
         let (dimension, value) = item.split_once('=').ok_or_else(|| {
-            ParseError::new(number, "expected `dimension=value` in `@ where(...)`").at_token(item)
+            ParseError::new(number, "expected `dimension=value` in `@where(...)`").at_token(item)
         })?;
         let dimension = identifier(dimension.trim(), number, "where dimension")?;
         let value = value.trim();
         if value.is_empty() || value.chars().any(char::is_whitespace) {
             return Err(
-                ParseError::new(number, "a `@ where` value must be one nonempty token")
+                ParseError::new(number, "a `@where` value must be one nonempty token")
                     .at_token(item),
             );
         }
@@ -346,27 +347,25 @@ fn parse_pins(items: &[&str], number: usize) -> Result<BTreeMap<String, String>,
             .insert(dimension.to_owned(), value.to_owned())
             .is_some()
         {
-            return Err(ParseError::new(
-                number,
-                format!("`@ where(...)` pins `{dimension}` twice"),
-            )
-            .at_token(item));
+            return Err(
+                ParseError::new(number, format!("`@where(...)` pins `{dimension}` twice"))
+                    .at_token(item),
+            );
         }
     }
     Ok(pinned)
 }
 
-/// The dimensions of `@ each(...)`, each once.
+/// The dimensions of `@each(...)`, each once.
 fn parse_each(items: &[&str], number: usize) -> Result<Vec<String>, ParseError> {
     let mut each: Vec<String> = Vec::new();
     for &item in items {
         let dimension = identifier(item, number, "each dimension")?;
         if each.iter().any(|named| named == dimension) {
-            return Err(ParseError::new(
-                number,
-                format!("`@ each(...)` names `{dimension}` twice"),
-            )
-            .at_token(item));
+            return Err(
+                ParseError::new(number, format!("`@each(...)` names `{dimension}` twice"))
+                    .at_token(item),
+            );
         }
         each.push(dimension.to_owned());
     }

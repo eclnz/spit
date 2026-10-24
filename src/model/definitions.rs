@@ -27,7 +27,7 @@ pub struct ProductDef {
     /// Its suffix replaces that source's extension.
     pub beside: Option<Beside>,
     /// The checks a source's artifacts must pass before a job reads them, as
-    /// in `source t1w : Image [sub] @ check(ndim(3))`; none for an output.
+    /// in `source t1w : Image [sub] @check(ndim(3))`; none for an output.
     pub checks: Vec<CheckUse>,
 }
 
@@ -61,7 +61,7 @@ pub struct InputPort {
     pub artifact_type: ArtifactType,
     pub cardinality: Cardinality,
     /// The checks each artifact the port reads must pass before the job
-    /// runs, as in `dwi: DWI @ check(ndim(4))`.
+    /// runs, as in `dwi: DWI @check(ndim(4))`.
     pub checks: Vec<CheckUse>,
 }
 
@@ -110,10 +110,10 @@ pub struct OutputPort {
     /// its extension.
     pub beside: Option<Beside>,
     /// The checks the artifact must pass after the command writes it, as in
-    /// `-> Image @ check(nonempty)`.
+    /// `-> Image @check(nonempty)`.
     pub checks: Vec<CheckUse>,
     /// The default checks of the file or stage that this output opts out
-    /// of, as in `-> Image @ check(!nonempty)`.
+    /// of, as in `-> Image @check(!nonempty)`.
     pub exempt: Vec<CheckUse>,
 }
 
@@ -244,15 +244,15 @@ impl OperationDef {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct InputBinding {
     pub product: String,
-    /// `@ vary(dimensions)`: collect artifacts that differ in these dimensions.
+    /// `@vary(dimensions)`: collect artifacts that differ in these dimensions.
     pub vary: Vec<String>,
-    /// `@ where(dimension=value, ...)`: keep only artifacts with these values.
+    /// `@where(dimension=value, ...)`: keep only artifacts with these values.
     /// A pinned dimension no longer takes part in matching.
     pub pinned: BTreeMap<String, String>,
-    /// `@ same(dimension, ...)`: match the job on these dimensions only. Any
+    /// `@same(dimension, ...)`: match the job on these dimensions only. Any
     /// other dimension must leave exactly one artifact for each job.
     pub same: Option<Vec<String>>,
-    /// `@ each(dimension, ...)`: broadcast the input over these dimensions.
+    /// `@each(dimension, ...)`: broadcast the input over these dimensions.
     /// The step runs once per value of them found in the product, and its
     /// outputs gain them.
     pub each: Vec<String>,
@@ -461,7 +461,7 @@ impl CommandDef {
 }
 
 /// A test of one artifact, declared once as `check name(params): command`
-/// and attached where it applies with `@ check(name(arguments))`. Its
+/// and attached where it applies with `@check(name(arguments))`. Its
 /// command reads `{@path}`, the artifact, and each `{param}`, the text the
 /// attachment gives; a nonzero exit fails the job.
 #[derive(Clone, Debug, Eq, PartialEq)]

@@ -17,7 +17,7 @@ source result [site, run]
 source policy [site]
 operation combine(results: many Result, policy: Policy) -> Summary
 command combine: summarize {results} --policy {policy} {@output}
-summary = combine(result @ vary(run), policy)
+summary = combine(result @vary(run), policy)
 default entities: {@key}={@value} separated \"__\"\npath summary: out/{@product}/{@entities}\n";
 
 #[test]
@@ -38,7 +38,7 @@ fn a_many_input_can_share_an_operation_with_single_inputs() {
 
 #[test]
 fn one_aggregate_can_vary_two_dimensions_in_product_order() {
-    let pipeline = "source summary [model, config]\noperation leaderboard(summaries: many Summary @ min(3)) -> Table\noverall = leaderboard(summary @ vary(model, config))\ndefault entities: {@key}={@value} separated \"__\"\npath overall: out/{@product}/{@entities}\n";
+    let pipeline = "source summary [model, config]\noperation leaderboard(summaries: many Summary @min(3)) -> Table\noverall = leaderboard(summary @vary(model, config))\ndefault entities: {@key}={@value} separated \"__\"\npath overall: out/{@product}/{@entities}\n";
     let inventory = "sources:\n  summary[model=b,config=1]\n  summary[model=a,config=10]\n  summary[model=a,config=2]\n";
     let dag = resolve_text(pipeline, inventory).unwrap();
     assert_eq!(dag.jobs.len(), 1);
@@ -72,7 +72,7 @@ fn one_aggregate_can_vary_two_dimensions_in_product_order() {
         })
     ));
     for invalid in [
-        pipeline.replace("vary(model, config)", "vary(model) @ vary(config)"),
+        pipeline.replace("vary(model, config)", "vary(model) @vary(config)"),
         pipeline.replace("vary(model, config)", "vary(model, model)"),
     ] {
         assert!(parse_pipeline(&invalid).is_err(), "{invalid}");
@@ -94,7 +94,7 @@ fn a_call_varies_one_or_several_dimensions() {
         ),
     ] {
         let text = format!(
-            "source result [{source_dimensions}]\noperation combine(items: many Result) -> Summary\nsummary = combine(result @ vary({vary}))\n"
+            "source result [{source_dimensions}]\noperation combine(items: many Result) -> Summary\nsummary = combine(result @vary({vary}))\n"
         );
         let pipeline = parse_pipeline(&text).unwrap();
         assert_eq!(
@@ -124,7 +124,7 @@ fn a_single_input_of_an_aggregate_must_match_each_group() {
     assert!(matches!(
         spit::validate_pipeline(&pipeline),
         Err(ResolveError::UnsupportedShapeRelationship { detail, .. })
-            if detail.contains("input `policy` has dimensions absent from the groups of `result` @ vary(run): run")
+            if detail.contains("input `policy` has dimensions absent from the groups of `result` @vary(run): run")
     ));
 }
 
@@ -145,7 +145,7 @@ operation apply(data: Signal, calibration: Calibration) -> Signal
 
 #[test]
 fn where_pins_a_dimension_the_driver_lacks() {
-    let text = format!("{CALIBRATE}calibrated = apply(signal, calibration @ where(revision=2))\n");
+    let text = format!("{CALIBRATE}calibrated = apply(signal, calibration @where(revision=2))\n");
     let dag = resolve_text(
         &text,
         "sources:\n  signal[site=A,run=1]\n  calibration[site=A,revision=1]\n  calibration[site=A,revision=2]\n",
@@ -161,7 +161,7 @@ fn where_pins_a_dimension_the_driver_lacks() {
 
 #[test]
 fn where_filters_the_driver_and_removes_its_dimension_from_the_output() {
-    let text = "source image [site, echo]\noperation keep(image: Image) -> Image\nfirst = keep(image @ where(echo=1))\ndefault entities: {@key}={@value} separated \"__\"\npath first: out/{@product}/{@entities}\n";
+    let text = "source image [site, echo]\noperation keep(image: Image) -> Image\nfirst = keep(image @where(echo=1))\ndefault entities: {@key}={@value} separated \"__\"\npath first: out/{@product}/{@entities}\n";
     let (pipeline, _) = support::parse_fixture(text).unwrap();
     assert_eq!(pipeline.products[1].dimensions, ["site"]);
     let dag = resolve(
@@ -175,7 +175,7 @@ fn where_filters_the_driver_and_removes_its_dimension_from_the_output() {
 
 #[test]
 fn selectors_combine_on_one_binding() {
-    let text = "source frame [subject, acq, run]\noperation stack(frames: many Frame) -> Stack\nstacked = stack(frame @ where(acq=fast) @ vary(run))\ndefault entities: {@key}={@value} separated \"__\"\npath stacked: out/{@product}/{@entities}\n";
+    let text = "source frame [subject, acq, run]\noperation stack(frames: many Frame) -> Stack\nstacked = stack(frame @where(acq=fast) @vary(run))\ndefault entities: {@key}={@value} separated \"__\"\npath stacked: out/{@product}/{@entities}\n";
     let dag = resolve_text(
         text,
         "sources:\n  frame[subject=a,acq=fast,run=1]\n  frame[subject=a,acq=fast,run=2]\n  frame[subject=a,acq=slow,run=1]\n",
@@ -187,7 +187,7 @@ fn selectors_combine_on_one_binding() {
 
 #[test]
 fn same_matches_on_fewer_dimensions_and_requires_one_artifact() {
-    let text = format!("{CALIBRATE}calibrated = apply(signal, calibration @ same(site))\n");
+    let text = format!("{CALIBRATE}calibrated = apply(signal, calibration @same(site))\n");
     let dag = resolve_text(
         &text,
         "sources:\n  signal[site=A,run=1]\n  calibration[site=A,revision=1]\n",
@@ -208,16 +208,16 @@ fn same_matches_on_fewer_dimensions_and_requires_one_artifact() {
 fn selectors_are_checked_against_the_port_and_product() {
     for (call, expected) in [
         (
-            "apply(signal, calibration @ where(visit=1))",
+            "apply(signal, calibration @where(visit=1))",
             "has no dimension `visit`",
         ),
         (
-            "apply(signal, calibration @ same(run))",
+            "apply(signal, calibration @same(run))",
             "has no unpinned dimension `run`",
         ),
         (
-            "apply(signal @ vary(run), calibration @ where(revision=1))",
-            "`@ vary(...)` applies to many inputs",
+            "apply(signal @vary(run), calibration @where(revision=1))",
+            "`@vary(...)` applies to many inputs",
         ),
     ] {
         let text = format!("{CALIBRATE}calibrated = {call}\n");
@@ -229,7 +229,7 @@ fn selectors_are_checked_against_the_port_and_product() {
     ))
     .unwrap_err();
     assert!(
-        error.message().contains("`@ where(dimension=value, ...)`"),
+        error.message().contains("`@where(dimension=value, ...)`"),
         "{error}"
     );
 }
@@ -246,8 +246,7 @@ const SCENARIOS: &str = "sources:\n  reading[station=01]\n  reading[station=02]\
 
 #[test]
 fn each_runs_a_step_for_every_value_an_input_broadcasts() {
-    let text =
-        format!("{PREDICT}forecast = predict(reading, model @ each(scenario), parameters)\n");
+    let text = format!("{PREDICT}forecast = predict(reading, model @each(scenario), parameters)\n");
     let (pipeline, _) = support::parse_fixture(&text).unwrap();
     assert_eq!(pipeline.products[3].dimensions, ["station", "scenario"]);
     let dag = resolve(&pipeline, &parse_source_inventory(SCENARIOS).unwrap()).unwrap();
@@ -283,9 +282,9 @@ dimensions [station, rep]
 source reading [station]
 source seed [rep]
 operation simulate(reading: Series, seed: Seed) -> Series
-trial = simulate(reading, seed @ each(rep))
+trial = simulate(reading, seed @each(rep))
 operation average(items: many Series) -> Series
-summary = average(trial @ vary(rep))
+summary = average(trial @vary(rep))
 default entities: {@key}={@value} separated \"__\"\npath trial: out/{@product}/{@entities}\npath summary: out/{@product}/{@entities}\n";
     let dag = resolve_text(
         text,
@@ -308,19 +307,19 @@ default entities: {@key}={@value} separated \"__\"\npath trial: out/{@product}/{
 fn broadcasts_are_checked_against_the_step() {
     for (call, expected) in [
         (
-            "predict(reading, model @ each(station), parameters)",
+            "predict(reading, model @each(station), parameters)",
             "has no unpinned dimension `station`",
         ),
         (
-            "predict(reading, model @ where(scenario=base) @ each(scenario), parameters)",
+            "predict(reading, model @where(scenario=base) @each(scenario), parameters)",
             "has no unpinned dimension `scenario`",
         ),
         (
-            "predict(reading, model @ each(scenario), parameters @ each(scenario))",
+            "predict(reading, model @each(scenario), parameters @each(scenario))",
             "`model` and `parameters` both broadcast `scenario`",
         ),
         (
-            "predict(reading @ each(station), model @ each(scenario), parameters @ same(scenario))",
+            "predict(reading @each(station), model @each(scenario), parameters @same(scenario))",
             "none can drive the step",
         ),
     ] {
@@ -332,9 +331,9 @@ fn broadcasts_are_checked_against_the_step() {
 source reading [station, scenario]
 source model [scenario]
 operation fit(reading: Series, model: Model) -> Series
-fitted = fit(reading, model @ each(scenario))
+fitted = fit(reading, model @each(scenario))
 operation stack(items: many Series, model: Model) -> Stack
-stacked = stack(fitted @ vary(scenario), model @ each(scenario))
+stacked = stack(fitted @vary(scenario), model @each(scenario))
 ";
     let error = spit::validate_pipeline(&parse_pipeline(text).unwrap()).unwrap_err();
     assert!(
@@ -344,7 +343,7 @@ stacked = stack(fitted @ vary(scenario), model @ each(scenario))
         "{error}"
     );
     let text = text.replace(
-        "fitted = fit(reading, model @ each(scenario))",
+        "fitted = fit(reading, model @each(scenario))",
         "fitted = fit(reading, model)",
     );
     let error = spit::validate_pipeline(&parse_pipeline(&text).unwrap()).unwrap_err();
@@ -353,7 +352,7 @@ stacked = stack(fitted @ vary(scenario), model @ each(scenario))
         "{error}"
     );
     let error = parse_pipeline(&format!(
-        "{PREDICT}x = predict(reading, model @ each(scenario, scenario), parameters)\n"
+        "{PREDICT}x = predict(reading, model @each(scenario, scenario), parameters)\n"
     ))
     .unwrap_err();
     assert!(
@@ -388,7 +387,7 @@ fn collections_and_jobs_follow_natural_declared_order() {
     let text = "\
 source frame [subject, run]
 operation stack(frames: many Frame) -> Stack
-stacked = stack(frame @ vary(run))
+stacked = stack(frame @vary(run))
 default entities: {@key}={@value} separated \"__\"\npath stacked: out/{@product}/{@entities}\n";
     let pipeline = parse_pipeline(text).unwrap();
     let inventory = parse_source_inventory(
@@ -409,7 +408,7 @@ default entities: {@key}={@value} separated \"__\"\npath stacked: out/{@product}
 
 #[test]
 fn min_rejects_a_collection_that_is_too_small() {
-    let text = "source frame [subject, run]\noperation stack(frames: many Frame @ min(2)) -> Stack\nstacked = stack(frame @ vary(run))\ndefault entities: {@key}={@value} separated \"__\"\npath stacked: out/{@product}/{@entities}\n";
+    let text = "source frame [subject, run]\noperation stack(frames: many Frame @min(2)) -> Stack\nstacked = stack(frame @vary(run))\ndefault entities: {@key}={@value} separated \"__\"\npath stacked: out/{@product}/{@entities}\n";
     let result = resolve_text(
         text,
         "sources:\n  frame[subject=a,run=1]\n  frame[subject=a,run=2]\n  frame[subject=b,run=1]\n",
@@ -421,28 +420,28 @@ fn min_rejects_a_collection_that_is_too_small() {
     ));
     for (declaration, expected) in [
         (
-            "operation f(a: A) -> B @ min(2)",
-            "`@ min(count)` requires a many input",
+            "operation f(a: A) -> B @min(2)",
+            "`@min(count)` requires a many input",
         ),
         (
-            "operation f(as: many A @ min(0)) -> B",
+            "operation f(as: many A @min(0)) -> B",
             "needs a positive integer",
         ),
         (
-            "operation f(a: A @ min(2)) -> B",
-            "`@ min(count)` goes on a `many` input; `a` takes one artifact",
+            "operation f(a: A @min(2)) -> B",
+            "`@min(count)` goes on a `many` input; `a` takes one artifact",
         ),
         (
-            "operation f(as: many A @ min(2) @ min(3)) -> B",
-            "duplicate `@ min(...)`",
+            "operation f(as: many A @min(2) @min(3)) -> B",
+            "duplicate `@min(...)`",
         ),
         (
-            "operation f(as: many A @ vary(run)) -> B",
-            "expected `@ min(count)` on a many input",
+            "operation f(as: many A @vary(run)) -> B",
+            "expected `@min(count)` on a many input",
         ),
         (
-            "operation f(b: B, as: many A) -> (c: C, d: D) @ min(2)",
-            "write a many input's minimum beside it: `f(b: B, as: many A @ min(2)) -> (c: C, d: D)`",
+            "operation f(b: B, as: many A) -> (c: C, d: D) @min(2)",
+            "write a many input's minimum beside it: `f(b: B, as: many A @min(2)) -> (c: C, d: D)`",
         ),
         (
             "operation f(as: many A) -> B @ other",

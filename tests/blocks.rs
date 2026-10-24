@@ -150,7 +150,7 @@ fn only_a_command_goes_on_over_indented_lines() {
 /// leaves them open is still a step of its own.
 #[test]
 fn a_step_goes_on_while_its_brackets_are_open() {
-    let text = "source raw : T [id]\noperation pair(a: T, b: T) -> T\nboth = pair(\n    raw,\n    raw @ where(id=1)\n)\nbroken = pair(raw,\nnext = pair(raw, raw)\n";
+    let text = "source raw : T [id]\noperation pair(a: T, b: T) -> T\nboth = pair(\n    raw,\n    raw @where(id=1)\n)\nbroken = pair(raw,\nnext = pair(raw, raw)\n";
     let found = errors(text);
     let lines: Vec<_> = found.iter().map(|(line, _)| *line).collect();
     assert_eq!(lines, [7], "{found:?}");

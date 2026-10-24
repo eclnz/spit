@@ -1,4 +1,4 @@
-//! SPIT's own words, such as `source`, `@ vary(...)` and `{@entities}`,
+//! SPIT's own words, such as `source`, `@vary(...)` and `{@entities}`,
 //! where a document writes them, for an editor to explain on hover. Each
 //! word's documentation is one entry of a static table: an example, a
 //! summary of the language reference, and the section it comes from. A
@@ -174,8 +174,8 @@ pub static DOCS: [Doc; 50] = [
         name: "many",
         kind: "keyword",
         anchor: "operations-and-commands",
-        example: "operation mean(images: many Image) -> Image\naverage = mean(processed @ vary(run))",
-        summary: "A port that collects several artifacts into one job. Each call names the dimensions it collects with `@ vary(...)`. Its placeholder becomes one quoted argument per artifact, in the pipeline's dimension order, and must be a whole argument. An operation takes at most one `many` input.",
+        example: "operation mean(images: many Image) -> Image\naverage = mean(processed @vary(run))",
+        summary: "A port that collects several artifacts into one job. Each call names the dimensions it collects with `@vary(...)`. Its placeholder becomes one quoted argument per artifact, in the pipeline's dimension order, and must be a whole argument. An operation takes at most one `many` input.",
     },
     Doc {
         name: "beside",
@@ -188,35 +188,35 @@ pub static DOCS: [Doc; 50] = [
         name: "vary",
         kind: "selector",
         anchor: "operations-and-commands",
-        example: "average = mean(processed @ vary(run))",
+        example: "average = mean(processed @vary(run))",
         summary: "Collects a `many` input over the named dimensions, which leave the output's identity. One `vary(...)` may name several; the collection follows the pipeline's dimension order whatever order it lists them in.",
     },
     Doc {
         name: "each",
         kind: "selector",
         anchor: "operations-and-commands",
-        example: "forecast = predict(reading, model @ each(scenario), parameters)",
+        example: "forecast = predict(reading, model @each(scenario), parameters)",
         summary: "Broadcasts an input over a dimension the driving input lacks: the step runs once for each of the input's values, and its outputs gain that dimension. The reverse of `vary`. Only one input may broadcast a given dimension.",
     },
     Doc {
         name: "where",
         kind: "selector",
         anchor: "operations-and-commands",
-        example: "calibrated = calibrate(reading, calibration @ where(revision=2))",
+        example: "calibrated = calibrate(reading, calibration @where(revision=2))",
         summary: "Keeps the artifacts with that value and takes the dimension out of matching, so a family with an extra dimension can join a less specific input.",
     },
     Doc {
         name: "same",
         kind: "selector",
         anchor: "operations-and-commands",
-        example: "anomaly = compare(calibrated, reference @ same(station))",
+        example: "anomaly = compare(calibrated, reference @same(station))",
         summary: "Matches on the named dimensions alone. The input's other dimensions must then leave exactly one artifact for each job.",
     },
     Doc {
         name: "min",
         kind: "selector",
         anchor: "operations-and-commands",
-        example: "operation summarise(days: many Series @ min(2)) -> Summary",
+        example: "operation summarise(days: many Series @min(2)) -> Summary",
         summary: "Rejects a group whose `many` input has fewer artifacts than the minimum. With `dag --partial`, it counts what is left once incomplete members are removed.",
     },
     Doc {
@@ -385,13 +385,13 @@ pub static DOCS: [Doc; 50] = [
         kind: "keyword",
         anchor: "checks",
         example: "check ndim(n): check_ndim {@path} {n}\ncheck nonempty: test -s {@path}\ndefault check: nonempty",
-        summary: "Declares a test of one artifact, run by a backend: `{@path}` is the artifact, and each `{param}` the text an `@ check(...)` gives it. A nonzero exit fails the job, even when its command succeeded. SPIT does not run it. `default check:` lists the checks every output in the file, or in the stage it is written in, runs; `!name` drops one a wider scope sets.",
+        summary: "Declares a test of one artifact, run by a backend: `{@path}` is the artifact, and each `{param}` the text an `@check(...)` gives it. A nonzero exit fails the job, even when its command succeeded. SPIT does not run it. `default check:` lists the checks every output in the file, or in the stage it is written in, runs; `!name` drops one a wider scope sets.",
     },
     Doc {
         name: "check-clause",
         kind: "selector",
         anchor: "checks",
-        example: "operation denoise(dwi: DWI @ check(ndim(4))) -> DWI @ check(nonempty)",
+        example: "operation denoise(dwi: DWI @check(ndim(4))) -> DWI @check(nonempty)",
         summary: "Attaches checks to a port or a source. An input's checks, and its source's, run on each artifact before the job's command; an output's run after it, before the job counts as done.",
     },
     Doc {
@@ -640,6 +640,7 @@ fn line_words(line: &Line, inherited: Option<Word>, found: &mut Vec<(Range<usize
 fn rule_word(code: &str, range: Range<usize>, statement: Option<Word>) -> Option<Word> {
     let text = &code[range.clone()];
     let before = code[..range.start].trim_end();
+    let tight = code[..range.start].ends_with('@');
     let spaced = code[range.end..].starts_with(' ');
     let after = code[range.end..].trim_start();
     let selector = match text {
@@ -652,7 +653,9 @@ fn rule_word(code: &str, range: Range<usize>, statement: Option<Word>) -> Option
         _ => None,
     };
     if let Some(word) = selector {
-        if before.ends_with('@') && after.starts_with('(') {
+        // Keep in step with `no_space_after_at` in `parser/check.rs`: a clause
+        // is `@keyword(`, with nothing between the `@` and the keyword.
+        if tight && after.starts_with('(') {
             return Some(word);
         }
     }

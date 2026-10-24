@@ -39,7 +39,7 @@ operation clean_dwi_session(dwi: MRI<DWI,Acquired>, bvec: GradientDirections, bv
     reverse_mif = import_reverse_b0(reverse, reverse_metadata)
     denoised = denoise(imported)
     degibbsed = remove_gibbs(denoised)
-    session = concatenate_runs(degibbsed @ vary(run))
+    session = concatenate_runs(degibbsed @vary(run))
     forward_series = extract_b0(session)
     forward = mean_b0(forward_series)
     pe_pair = combine_pe_pair(forward, reverse_mif)

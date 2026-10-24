@@ -13,7 +13,7 @@ fn multiline_lists_match_single_line_signatures() {
     for text in [
         "operation prep(\n    image: Image,\n    mask: Mask\n) -> Result\n",
         "operation prep(image: Image) -> (\n    image: Image,\n    mask: Mask\n)\n",
-        "operation prep(\n    image: Image @ check(nonempty),\n    mask: Mask\n) -> (\n    result: Image @ check(nonempty),\n    mask: Mask\n)\ncheck nonempty: test -s {@file}\n",
+        "operation prep(\n    image: Image @check(nonempty),\n    mask: Mask\n) -> (\n    result: Image @check(nonempty),\n    mask: Mask\n)\ncheck nonempty: test -s {@file}\n",
     ] {
         parse_pipeline(text).unwrap();
     }

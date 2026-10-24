@@ -46,7 +46,7 @@ operation average(images: many Image) -> Image
 operation compare(image: Image, reference: Reference) -> Score
 cleaned = clean(image, mask)
 aligned = align(cleaned, reference)
-averaged = average(aligned @ vary(run))
+averaged = average(aligned @vary(run))
 score = compare(averaged, reference)
 default entities: {@key}={@value} separated \"__\"\n";
 

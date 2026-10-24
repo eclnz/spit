@@ -8,4 +8,4 @@ operation process(input)
 processed = process(raw)
 
 operation combine(inputs: many)
-combined = combine(processed @ vary(repeat))
+combined = combine(processed @vary(repeat))

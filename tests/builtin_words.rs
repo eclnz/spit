@@ -21,7 +21,7 @@ fn words_are_found_by_where_they_are_written() {
         ("source image : Image [subject, visit]", "source", Some("source")),
         ("    stage clean:", "stage", Some("stage")),
         // A keyword's word is reserved, so this is `stage`, and an error.
-        ("stage = merge(sorted @ vary(part))", "stage", Some("stage")),
+        ("stage = merge(sorted @vary(part))", "stage", Some("stage")),
         ("default path: results/{@product}/{@entities}.txt", "path", Some("path")),
         ("path image: input/{subject}.txt", "path", Some("path")),
         ("path image: input/{subject}.txt", "subject", None),
@@ -37,8 +37,8 @@ fn words_are_found_by_where_they_are_written() {
         ("command c: tool {x:date}", "date", None),
         ("default ext: .nii.gz", "ext", Some("ext")),
         ("ext: Image = convert(dicom)", "ext", Some("ext")),
-        ("operation mean(images: many Image @ min(2)) -> Image", "many", Some("many")),
-        ("operation mean(images: many Image @ min(2)) -> Image", "min", Some("min")),
+        ("operation mean(images: many Image @min(2)) -> Image", "many", Some("many")),
+        ("operation mean(images: many Image @min(2)) -> Image", "min", Some("min")),
         (
             "operation strip(t1: Image) -> (brain: Image .nii.gz, mask: Image \"_mask.nii.gz\" beside brain)",
             "beside",
@@ -54,9 +54,9 @@ fn words_are_found_by_where_they_are_written() {
         ("command convert: dcm2niix -o {image.dir} -f {image.stem} {dicom}", "{ima", None),
         ("command copy: cp {input} {@output}  # {@output} again", "# {@output", None),
         ("verify register: check_same_grid {moving} {reference}", "verify", Some("verify")),
-        ("calibrated = calibrate(reading, calibration @ where(revision=2))", "where", Some("where")),
-        ("anomaly = compare(calibrated, reference @ same(station))", "same", Some("same")),
-        ("forecast = predict(reading, model @ each(scenario))", "each", Some("each")),
+        ("calibrated = calibrate(reading, calibration @where(revision=2))", "where", Some("where")),
+        ("anomaly = compare(calibrated, reference @same(station))", "same", Some("same")),
+        ("forecast = predict(reading, model @each(scenario))", "each", Some("each")),
         ("each = predict(reading)", "each", None),
         ("use shard, sort_lines from text.spit as text", "from", Some("use-from")),
         ("use shard, sort_lines from text.spit as text", " as", Some("use-as")),
@@ -91,12 +91,11 @@ fn words_are_found_by_where_they_are_written() {
 
 #[test]
 fn columns_count_utf16_units_and_skip_a_byte_order_mark() {
-    let words =
-        builtin_words("\u{feff}source raw [id]\nout = copy(raw @ where(id=😀) @ vary(id))\n");
+    let words = builtin_words("\u{feff}source raw [id]\nout = copy(raw @where(id=😀) @vary(id))\n");
     assert_eq!((words[0].line, words[0].columns.clone()), (1, 2..8));
     let vary = words.iter().find(|word| word.word == Word::Vary).unwrap();
     // The emoji is two UTF-16 units.
-    assert_eq!((vary.line, vary.columns.clone()), (2, 33..37));
+    assert_eq!((vary.line, vary.columns.clone()), (2, 31..35));
 }
 
 #[test]

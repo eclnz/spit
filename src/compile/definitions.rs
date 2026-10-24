@@ -156,7 +156,7 @@ fn check_operation(operation: &OperationDef) -> Result<(), ResolveError> {
     }
     if operation.minimum_collection == Some(0) {
         return Err(invalid(format!(
-            "operation `{}` needs `@ min(count)` of at least 1",
+            "operation `{}` needs `@min(count)` of at least 1",
             operation.name
         )));
     }

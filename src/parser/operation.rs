@@ -1,5 +1,5 @@
 //! Operation declarations: `name(inputs) -> outputs`, where a `many`
-//! input may carry an `@ min(count)` clause, and any port `@ check(...)`.
+//! input may carry an `@min(count)` clause, and any port `@check(...)`.
 
 use crate::model::{Cardinality, InputPort, OperationDef, OutputPort, ShapeRule, DEFAULT_OUTPUT};
 use crate::types::{parse_type_expr, TypeExpr};
@@ -40,7 +40,7 @@ pub(super) fn parse_operation(line: &str, number: usize) -> Result<OperationDef,
     if let Some(clause) = trailing.iter().find(|clause| clause.keyword == "check") {
         return Err(ParseError::new(
             number,
-            "`@ check(...)` follows the port it checks, as in `(image: Image @ check(nonempty))` or `-> (mask: Mask @ check(nonempty))`",
+            "`@check(...)` follows the port it checks, as in `(image: Image @check(nonempty))` or `-> (mask: Mask @check(nonempty))`",
         )
         .at_token(clause.text));
     }
@@ -61,8 +61,8 @@ pub(super) fn parse_operation(line: &str, number: usize) -> Result<OperationDef,
             number,
             format!(
                 "an operation does not name the dimensions it collects, its calls do: remove \
-                 `@ drop({vary})` and write `@ vary({vary})` on the many input of each call, as in \
-                 `result = {name}(input @ vary({vary}))`"
+                 `@drop({vary})` and write `@vary({vary})` on the many input of each call, as in \
+                 `result = {name}(input @vary({vary}))`"
             ),
         )
         .at_token(clause));
@@ -110,7 +110,7 @@ fn matching_paren(text: &str, open: usize) -> Option<usize> {
     None
 }
 
-/// An input port with its checks, and the minimum its `@ min(count)`
+/// An input port with its checks, and the minimum its `@min(count)`
 /// clause sets, which only a `many` port may have.
 fn parse_port_with_minimum(
     input: &str,
@@ -136,7 +136,7 @@ fn parse_port_with_minimum(
         return Err(ParseError::new(
             number,
             format!(
-                "`@ min(count)` goes on a `many` input; `{}` takes one artifact",
+                "`@min(count)` goes on a `many` input; `{}` takes one artifact",
                 port.name
             ),
         )
@@ -159,7 +159,7 @@ fn misplaced_minimum(
         .iter()
         .position(|port| port.cardinality == Cardinality::Many)
     else {
-        return ParseError::new(number, "`@ min(count)` requires a many input");
+        return ParseError::new(number, "`@min(count)` requires a many input");
     };
     let inputs: Vec<String> = inputs
         .iter()
@@ -167,7 +167,7 @@ fn misplaced_minimum(
         .map(|(index, input)| {
             let input = input.trim();
             if index == many {
-                format!("{input} @ min({count})")
+                format!("{input} @min({count})")
             } else {
                 input.to_owned()
             }
@@ -189,16 +189,16 @@ fn misplaced_minimum(
 /// What a clause after the signature may be: none is now, but `min` and
 /// `drop`, which were, are read to say what to write instead.
 const TRAILING: &str =
-    "nothing follows an operation's outputs; write `@ min(count)` on its many input";
+    "nothing follows an operation's outputs; write `@min(count)` on its many input";
 
 /// What a clause after an output may be.
-const AFTER_OUTPUT: &str = "nothing follows an operation's outputs but their `@ check(...)`; \
-     write `@ min(count)` on its many input";
+const AFTER_OUTPUT: &str = "nothing follows an operation's outputs but their `@check(...)`; \
+     write `@min(count)` on its many input";
 
 /// What a clause on an input port may be.
-const ON_PORT: &str = "expected `@ min(count)` on a many input, or `@ check(...)`";
+const ON_PORT: &str = "expected `@min(count)` on a many input, or `@check(...)`";
 
-/// An `@ min(count)` clause, and an `@ drop(...)` clause, which is an error,
+/// An `@min(count)` clause, and an `@drop(...)` clause, which is an error,
 /// each with its text, kept to point at it and to say what to write instead.
 #[derive(Default)]
 struct Clauses<'a> {
@@ -225,7 +225,7 @@ fn parse_clauses<'a>(
                 let dimensions = comma_items(argument, number)?;
                 if dimensions.is_empty() {
                     return Err(
-                        ParseError::new(number, "`@ drop(...)` needs a dimension").at_token(clause)
+                        ParseError::new(number, "`@drop(...)` needs a dimension").at_token(clause)
                     );
                 }
                 let mut names = Vec::new();
@@ -234,7 +234,7 @@ fn parse_clauses<'a>(
                     if names.contains(&dimension.to_owned()) {
                         return Err(ParseError::new(
                             number,
-                            format!("`@ drop(...)` repeats `{dimension}`"),
+                            format!("`@drop(...)` repeats `{dimension}`"),
                         )
                         .at_token(clause));
                     }
@@ -248,14 +248,14 @@ fn parse_clauses<'a>(
                     .ok()
                     .filter(|count| *count > 0)
                     .ok_or_else(|| {
-                        ParseError::new(number, "`@ min(count)` needs a positive integer")
+                        ParseError::new(number, "`@min(count)` needs a positive integer")
                             .at_token(argument)
                     })?;
                 parsed.min = Some((count, clause));
             }
             "drop" | "min" => {
                 return Err(
-                    ParseError::new(number, format!("duplicate `@ {keyword}(...)`"))
+                    ParseError::new(number, format!("duplicate `@{keyword}(...)`"))
                         .at_token(keyword),
                 )
             }

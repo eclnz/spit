@@ -1,4 +1,4 @@
-//! Runtime checks: `check` declarations, `@ check(...)` on ports and
+//! Runtime checks: `check` declarations, `@check(...)` on ports and
 //! sources, and the checks each job carries in the `.spitdag`.
 
 mod support;
@@ -14,14 +14,14 @@ check lines(n): check_lines {@path} {n}
 /// Lines cleaned one by one, then merged: the source, both input ports and
 /// both outputs carry checks.
 const LINES: &str = "\
-source raw : Text [id] @ check(nonempty)
+source raw : Text [id] @check(nonempty)
 path raw: in/{id}.txt
-operation clean(text: Text @ check(lines(1))) -> Text .txt @ check(nonempty)
+operation clean(text: Text @check(lines(1))) -> Text .txt @check(nonempty)
 command clean: sort -o {@output} {text}
-operation merge(items: many Text @ check(nonempty)) -> (all: Text .txt @ check(nonempty, lines(2)))
+operation merge(items: many Text @check(nonempty)) -> (all: Text .txt @check(nonempty, lines(2)))
 command merge: cat {items} {all}
 cleaned = clean(raw)
-merged = merge(cleaned @ vary(id))
+merged = merge(cleaned @vary(id))
 default entities: {@key}={@value} separated \"__\"\npath cleaned: out/{@product}[/{@entities}]\npath merged: out/{@product}[/{@entities}]\n";
 
 fn errors(text: &str) -> Vec<String> {
@@ -99,7 +99,7 @@ command clean: sort -o {@output} {text}
 operation merge(items: many Text) -> (all: Text .txt)
 command merge: cat {items} {all}
 cleaned = clean(raw)
-merged = merge(cleaned @ vary(id))
+merged = merge(cleaned @vary(id))
 default entities: {@key}={@value} separated \"__\"\npath cleaned: out/{@product}[/{@entities}]\npath merged: out/{@product}[/{@entities}]\n";
     let fingerprints = |json: &str| {
         json.match_indices("\"fingerprint\":")
@@ -141,8 +141,8 @@ fn a_reader_runs_a_check_its_producer_skipped() {
     // `clean` checks its output only for lines, so `merge` still checks
     // that each is not empty.
     let pipeline = format!("{CHECKS}{LINES}").replace(
-        "-> Text .txt @ check(nonempty)",
-        "-> Text .txt @ check(lines(1))",
+        "-> Text .txt @check(nonempty)",
+        "-> Text .txt @check(lines(1))",
     );
     let commands = dag(&pipeline, &["--commands"]);
     assert!(commands.contains(
@@ -155,16 +155,16 @@ fn checks_and_their_uses_are_checked_where_they_are_written() {
     let pipeline = |rest: &str| format!("{CHECKS}source raw : Text [id]\n{rest}");
     let first = |text: &str| errors(text).into_iter().next().unwrap_or_default();
     assert_eq!(
-        first(&pipeline("operation f(x: Text @ check(nope)) -> Text\n")),
+        first(&pipeline("operation f(x: Text @check(nope)) -> Text\n")),
         "4: unknown check `nope`; declare it with `check nope: ...`"
     );
     assert_eq!(
-        first(&pipeline("operation f(x: Text @ check(lines)) -> Text\n")),
+        first(&pipeline("operation f(x: Text @check(lines)) -> Text\n")),
         "4: check `lines` takes 1 argument (n), but `lines` gives 0"
     );
     assert_eq!(
         first(&pipeline(
-            "operation f(x: Text @ check(nonempty(2))) -> Text\n"
+            "operation f(x: Text @check(nonempty(2))) -> Text\n"
         )),
         "4: check `nonempty` takes no arguments; write `nonempty`"
     );
@@ -185,15 +185,15 @@ fn checks_and_their_uses_are_checked_where_they_are_written() {
         "3: duplicate check `nonempty`"
     );
     assert!(first(&pipeline(
-        "operation f(x: Text) -> Text\ny : Text [id] @ check(nonempty) = f(raw)\n"
+        "operation f(x: Text) -> Text\ny : Text [id] @check(nonempty) = f(raw)\n"
     ))
-    .contains("a step's product takes no `@ check(...)`"));
-    assert!(first(&pipeline("operation f(x: Text) @ check(nonempty)\n"))
-        .contains("`@ check(...)` follows the port it checks"));
-    assert!(first(&pipeline("source other [id] @ vary(id)\n"))
-        .contains("a source takes only `@ check(...)`"));
+    .contains("a step's product takes no `@check(...)`"));
+    assert!(first(&pipeline("operation f(x: Text) @check(nonempty)\n"))
+        .contains("`@check(...)` follows the port it checks"));
+    assert!(first(&pipeline("source other [id] @vary(id)\n"))
+        .contains("a source takes only `@check(...)`"));
     assert!(first(&pipeline(
-        "operation f(x: Text @ check(lines(a b))) -> Text\n"
+        "operation f(x: Text @check(lines(a b))) -> Text\n"
     ))
     .contains("cannot be a check argument"));
 }
@@ -201,11 +201,11 @@ fn checks_and_their_uses_are_checked_where_they_are_written() {
 #[test]
 fn a_many_port_takes_its_minimum_and_its_checks_in_either_order() {
     for port in [
-        "items: many Text @ min(2) @ check(nonempty)",
-        "items: many Text @ check(nonempty) @ min(2)",
+        "items: many Text @min(2) @check(nonempty)",
+        "items: many Text @check(nonempty) @min(2)",
     ] {
         let pipeline = format!(
-            "{CHECKS}source raw : Text [id]\noperation merge({port}) -> Text\nall = merge(raw @ vary(id))\npath all: out/{{@product}}\n"
+            "{CHECKS}source raw : Text [id]\noperation merge({port}) -> Text\nall = merge(raw @vary(id))\npath all: out/{{@product}}\n"
         );
         assert_eq!(errors(&pipeline), Vec::<String>::new(), "{port}");
         let parsed = spit::parse_pipeline(&pipeline).unwrap();
@@ -214,9 +214,9 @@ fn a_many_port_takes_its_minimum_and_its_checks_in_either_order() {
         assert_eq!(operation.inputs[0].checks[0].to_string(), "nonempty");
     }
     assert!(errors(&format!(
-        "{CHECKS}operation f(x @ check(nonempty) @ min(2)) -> Y\n"
+        "{CHECKS}operation f(x @check(nonempty) @min(2)) -> Y\n"
     ))[0]
-        .contains("`@ min(count)` goes on a `many` input"));
+        .contains("`@min(count)` goes on a `many` input"));
 }
 
 #[test]
@@ -234,12 +234,12 @@ fn imports_bring_the_checks_their_definitions_attach() {
     let tree = Tree::new("check-imports", &["data/in/1.txt"]);
     tree.write(
         "lib.spit",
-        &format!("{CHECKS}source raw : Text [id] @ check(nonempty)\npath raw: in/{{id}}.txt\n"),
+        &format!("{CHECKS}source raw : Text [id] @check(nonempty)\npath raw: in/{{id}}.txt\n"),
     );
     let file = tree.write(
         "p.spit",
         "use lib.spit as l\nuse lines from lib.spit\n\
-operation keep(x: Text @ check(lines(2), l::nonempty)) -> Text .txt\n\
+operation keep(x: Text @check(lines(2), l::nonempty)) -> Text .txt\n\
 command keep: cp {x} {@output}\nk = keep(l::raw)\n\
 default entities: {@key}={@value} separated \"__\"\npath k: out/{@product}[/{@entities}]\n",
     );

@@ -540,7 +540,7 @@ operation:
         x: A
     ) -> A
 step = f(
-    a @ where(id=1)
+    a @where(id=1)
 )
 source raw : T [id]
     stray = f(raw)

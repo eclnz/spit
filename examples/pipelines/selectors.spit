@@ -24,13 +24,13 @@ path policy: policy/{station}.toml
 operation calibrate(calibration: Calibration, series: Series) -> Series
 verify calibrate: check_calibration {calibration} {series}
 command calibrate: apply_calibration --calibration {calibration} {series} {@output}
-calibrated = calibrate(calibration @ where(revision=2), reading)
+calibrated = calibrate(calibration @where(revision=2), reading)
 
 # `same(station)` matches the reference on station alone; each station must
 # have exactly one, whatever day it was measured.
 operation compare(series: Series, reference: Series) -> Series
 command compare: subtract_reference {series} {reference} {@output}
-anomaly = compare(calibrated, reference @ same(station))
+anomaly = compare(calibrated, reference @same(station))
 
 # One job writes both bands.
 operation split_bands(series: Series) -> (low: Series, high: Series)
@@ -39,7 +39,7 @@ low_band, high_band = split_bands(anomaly)
 
 # A many input can sit beside single inputs, each matched once per group.
 # The days arrive in natural order, and fewer than two is an error.
-operation summarise(days: many Series @ min(2), policy: Policy) -> Summary
+operation summarise(days: many Series @min(2), policy: Policy) -> Summary
 command summarise: summarise --policy {policy} {days} --out {@output}
 path summary: derived/summary/{station}.json
-summary = summarise(low_band @ vary(day), policy)
+summary = summarise(low_band @vary(day), policy)

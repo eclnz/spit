@@ -13,10 +13,10 @@ operation inspect(reading: Reading<Raw>) -> Flag
 checked = inspect(reading)
 
 operation mean(readings: many Reading<Normalized>) -> Reading<Normalized>
-window_mean = mean(normalized @ vary(sample))
+window_mean = mean(normalized @vary(sample))
 
 operation score(reading: Reading<Normalized>, target: Target) -> Score
 scored = score(window_mean, target)
 
-device_mean = mean(window_mean @ vary(window))
-site_mean = mean(device_mean @ vary(device))
+device_mean = mean(window_mean @vary(window))
+site_mean = mean(device_mean @vary(device))

@@ -82,7 +82,7 @@ fn bindings_are_local_and_multi_outputs_have_their_own_types() {
 
 #[test]
 fn aggregate_hovers_show_inference_and_output_dimensions() {
-    let all = hovers("source raw : Frame<Native> [id, run]\noperation merge(items: many Frame<S> @ min(2)) -> Frame<S>\nmerged : Frame<Native> [id] = merge(raw @ vary(run))\n");
+    let all = hovers("source raw : Frame<Native> [id, run]\noperation merge(items: many Frame<S> @min(2)) -> Frame<S>\nmerged : Frame<Native> [id] = merge(raw @vary(run))\n");
     assert_eq!(
         at(&all, 3, "merged").signature,
         "merged: Frame<Native> [id]"
@@ -91,7 +91,7 @@ fn aggregate_hovers_show_inference_and_output_dimensions() {
     assert!(call.signature.contains("many Frame<$S>"));
     assert!(
         call.signature
-            .contains("(items: many Frame<$S> @ min(2)) -> "),
+            .contains("(items: many Frame<$S> @min(2)) -> "),
         "{}",
         call.signature
     );
@@ -192,7 +192,7 @@ fn broken_steps_do_not_claim_inferred_types_or_hide_independent_symbols() {
 
 #[test]
 fn hover_ranges_use_utf16_and_exclude_comments_and_literal_text() {
-    let text = "\u{feff}source raw [id]\noperation copy(first, second)\nout = copy(raw @ where(id=😀), raw) # raw copy\ncommand copy: echo raw {@output}\ndefault entities: {@key}={@value} separated \"__\"\npath out: out/{@product}/{@entities}\n";
+    let text = "\u{feff}source raw [id]\noperation copy(first, second)\nout = copy(raw @where(id=😀), raw) # raw copy\ncommand copy: echo raw {@output}\ndefault entities: {@key}={@value} separated \"__\"\npath out: out/{@product}/{@entities}\n";
     let all = hovers(text);
     assert_eq!(at(&all, 1, "raw").column, 9);
     assert_eq!(at(&all, 3, "copy").column, 7);
@@ -203,7 +203,7 @@ fn hover_ranges_use_utf16_and_exclude_comments_and_literal_text() {
     assert_eq!(inputs.len(), 2, "the comment is not a reference");
     assert_eq!(inputs[0].column, 12);
     assert_eq!(
-        inputs[1].column, 32,
+        inputs[1].column, 31,
         "astral selector values use two UTF-16 units"
     );
     assert!(!all
@@ -408,14 +408,14 @@ fn product_hovers_keep_inference_failures_and_bound_large_reader_lists() {
 
 #[test]
 fn call_hovers_explain_the_selectors_that_change_matching() {
-    let all = hovers("source raw: Text [sub, run]\nsource reference: Text [run]\noperation copy(input: Text, driver: Text) -> Text\npinned = copy(raw @ where(run=1) @ same(sub), raw)\nbroadcast = copy(raw @ each(sub), reference)\ndefault entities: {@key}={@value} separated \"__\"\npath pinned: out/{@product}/{@entities}\npath broadcast: out/{@product}/{@entities}\n");
+    let all = hovers("source raw: Text [sub, run]\nsource reference: Text [run]\noperation copy(input: Text, driver: Text) -> Text\npinned = copy(raw @where(run=1) @same(sub), raw)\nbroadcast = copy(raw @each(sub), reference)\ndefault entities: {@key}={@value} separated \"__\"\npath pinned: out/{@product}/{@entities}\npath broadcast: out/{@product}/{@entities}\n");
     let pinned = at(&all, 4, "copy");
     assert!(pinned.details.contains(&"Pins input to run=1.".to_owned()));
     assert!(pinned.details.contains(&"Matches input on sub.".to_owned()));
     assert!(at(&all, 5, "copy")
         .details
         .contains(&"Broadcasts input across sub.".to_owned()));
-    let aggregate = hovers("source raw: Text [sub, run]\noperation merge(items: many Text) -> Text\nmerged = merge(raw @ vary(run))\ndefault entities: {@key}={@value} separated \"__\"\npath merged: out/{@product}/{@entities}\n");
+    let aggregate = hovers("source raw: Text [sub, run]\noperation merge(items: many Text) -> Text\nmerged = merge(raw @vary(run))\ndefault entities: {@key}={@value} separated \"__\"\npath merged: out/{@product}/{@entities}\n");
     let call = at(&aggregate, 3, "merge");
     assert!(call.details[1].contains("items ←"));
     assert!(call.details[2].contains("output →"));
