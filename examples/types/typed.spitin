@@ -1,3 +1,4 @@
 pipeline typed.spit
 root typed_data
-default path: {@product}/{@entities}
+inputs:
+    default: {@product}/{@entities}

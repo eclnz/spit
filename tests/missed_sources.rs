@@ -56,7 +56,7 @@ fn a_recipe_rule_names_the_nearest_file() {
     tree.write("a.spit", &format!("source bold [sub, ses, run]\n{STEPS}"));
     tree.write(
         "a.spitin",
-        "pipeline a.spit\nroot data\npath bold: sub-{sub}/func/sub-{sub}_ses-{ses}_task-rest_run-{run}_bold.nii.gz\n",
+        "pipeline a.spit\nroot data\ninputs:\n    bold: sub-{sub}/func/sub-{sub}_ses-{ses}_task-rest_run-{run}_bold.nii.gz\n",
     );
     let stderr = stderr(&tree, &["inputs", "a.spitin"]);
     assert!(
@@ -112,10 +112,7 @@ fn a_coverage_failure_points_to_the_nearest_file() {
     );
     tree.write(
         "a.spitin",
-        "pipeline a.spit\nroot data\n\
-         path bold: sub-{sub}/ses-{ses}/func/sub-{sub}_ses-{ses}_run-{run}_bold.nii.gz\n\
-         path t1w: sub-{sub}/ses-{ses}/anat/sub-{sub}_ses-{ses}_T1w.nii.gz\n\
-         require [sub, ses] where bold count>=1\n",
+        "pipeline a.spit\nroot data\ninputs:\n    bold: sub-{sub}/ses-{ses}/func/sub-{sub}_ses-{ses}_run-{run}_bold.nii.gz\n    t1w: sub-{sub}/ses-{ses}/anat/sub-{sub}_ses-{ses}_T1w.nii.gz\nrequire [sub, ses] where bold count>=1\n",
     );
     let stderr = stderr(&tree, &["inputs", "a.spitin"]);
     assert!(

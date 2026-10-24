@@ -233,12 +233,12 @@ fn a_discovered_context_needs_its_folder() {
     }
     let recipe = tree.write(
         "recipe.spitin",
-        "pipeline pipeline.spit\nroot data\ndiscover subjects: [sub] from dirs contexts/sub={sub}\n",
+        "pipeline pipeline.spit\nroot data\ninputs:\n    contexts: contexts/sub={sub}\nrequire [sub] where dicom count=1\n",
     );
     let found = spit(&["inputs", recipe.to_str().unwrap()]);
     assert!(!found.status.success());
     assert!(
-        text(&found.stderr).contains("missing source folder for `dicom[sub=03]`"),
+        text(&found.stderr).contains("source coverage for `dicom` at [sub=03]"),
         "{}",
         text(&found.stderr)
     );

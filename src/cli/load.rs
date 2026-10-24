@@ -183,7 +183,7 @@ pub(crate) fn settle(loaded: &Loaded) -> Result<(ResolvedInputs, PathBuf), Box<d
         eprintln!("note: {note}");
     }
     if let Some(root) = &resolved.root {
-        let contexts = if recipe.rules.discoveries.is_empty() {
+        let contexts = if recipe.rules.context_paths.is_empty() {
             String::new()
         } else {
             format!(" and {} contexts", resolved.inventory.contexts.len())

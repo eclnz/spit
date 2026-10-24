@@ -3,7 +3,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::model::DirectoryDiscovery;
+use crate::model::ContextPattern;
 
 use super::template::{error, PathError, PathPart, PathPlaceholder};
 
@@ -96,13 +96,10 @@ pub(crate) fn enclosing_path<'a, T>(
 }
 
 /// Check that a directory rule names a valid context path.
-pub(crate) fn validate_discovery_rule(rule: &DirectoryDiscovery) -> Result<(), PathError> {
+pub(crate) fn validate_context_pattern(rule: &ContextPattern) -> Result<(), PathError> {
     let dimensions: BTreeSet<_> = rule.dimensions.iter().collect();
-    if rule.dimensions.is_empty() || dimensions.len() != rule.dimensions.len() {
-        return Err(error(format!(
-            "discovery `{}` needs distinct dimensions",
-            rule.name
-        )));
+    if dimensions.len() != rule.dimensions.len() {
+        return Err(error("context path needs distinct dimensions"));
     }
     let mut used = BTreeSet::new();
     let mut sample = String::new();
@@ -110,10 +107,9 @@ pub(crate) fn validate_discovery_rule(rule: &DirectoryDiscovery) -> Result<(), P
         match part {
             PathPart::Literal(value) => sample.push_str(value),
             PathPart::Group(_) => {
-                return Err(error(format!(
-                    "discovery `{}` pattern cannot have an optional `[...]` part; every directory it finds has each dimension",
-                    rule.name
-                )));
+                return Err(error(
+                    "context path cannot have an optional `[...]` part; every directory it finds has each dimension",
+                ));
             }
             PathPart::Placeholder(PathPlaceholder::Dimension(name, _))
                 if dimensions.contains(name) =>
@@ -123,8 +119,7 @@ pub(crate) fn validate_discovery_rule(rule: &DirectoryDiscovery) -> Result<(), P
             }
             PathPart::Placeholder(placeholder) => {
                 return Err(error(format!(
-                    "discovery `{}` uses undeclared or reserved placeholder `{placeholder}`",
-                    rule.name
+                    "context path uses reserved placeholder `{placeholder}`"
                 )));
             }
         }
@@ -135,18 +130,16 @@ pub(crate) fn validate_discovery_rule(rule: &DirectoryDiscovery) -> Result<(), P
         .find(|dimension| !used.contains(dimension))
     {
         return Err(error(format!(
-            "discovery `{}` pattern omits dimension `{missing}`",
-            rule.name
+            "context path pattern omits dimension `{missing}`"
         )));
     }
     if sample.is_empty() || sample.ends_with('/') {
-        return Err(error(format!(
-            "discovery `{}` must name a directory without a trailing `/`",
-            rule.name
-        )));
+        return Err(error(
+            "context path must name a directory without a trailing `/`",
+        ));
     }
     if let Some(reason) = unusable_path(&sample) {
-        return Err(error(format!("discovery `{}` pattern {reason}", rule.name)));
+        return Err(error(format!("context path pattern {reason}")));
     }
     Ok(())
 }

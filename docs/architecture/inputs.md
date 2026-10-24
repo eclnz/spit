@@ -17,7 +17,7 @@ flowchart LR
 
 - **`InputSpec`** ([`src/inputs/mod.rs`](https://github.com/eclnz/spit/blob/dev/src/inputs/mod.rs)) is a parsed recipe: its pipeline, its root, its `InputRules`, and any records it writes itself.
 - **`InputRules`** ([`src/model/inputs.rs`](https://github.com/eclnz/spit/blob/dev/src/model/inputs.rs)) keeps the recipe's rules as written:
-    - `discoveries`, the `discover ... from dirs` rules;
+    - `context_paths`, unnamed `ContextPattern` directory patterns;
     - `exclusions`;
     - `constraints`, which are the `require` rules and the conditional `exclude` rules (`CoverageAction::Drop`);
     - the source path rules, with the default in `source_default`.
@@ -25,12 +25,12 @@ flowchart LR
     Nothing settles the rules in place. `InputRules::defaulted_sources` derives the sources the default covers, and `InputRules::source_paths_for` the rule the recipe gives each source.
 - **`InputSource`** says where the inventory comes from: `Discover(root)` scans a folder, and `Inventory(records)` takes records from a `.spitout` or the recipe.
 - **`SourceInventory`** is a list of `SourceRecord`s: a product, a complete `EntityBinding`, and optionally the file's path. Beside them it keeps:
-    - the observed `contexts`, and in `discovered` the contexts each named `discover` rule found;
+    - the deduplicated observed `contexts`;
     - the `source_paths` a recipe supplied;
     - what was `removed`, and why;
     - the `root`.
 
-    Named contexts whose `discover` rule is gone are kept, as a record of where they came from. A dataset indexer may build one directly. Its text form, the `.spitout`, is read by `parse_source_inventory` and written by `render_source_inventory`.
+    Context bindings carry dimensions and values, without rule names.
 - **`ResolvedInputs`** is the stage's result:
     - the inventory;
     - each `CoverageGap`: a `require` rule that failed, with the sources it holds back;
@@ -44,15 +44,15 @@ flowchart LR
 
 1. **Check the pipeline and the rules.** `validate_pipeline`, then `InputSpec::check`.
 2. **Find the sources.**
-    - Given a root, `discover` (in [`src/inputs/discover.rs`](https://github.com/eclnz/spit/blob/dev/src/inputs/discover.rs)) walks the folder. It matches files and folders against each source's completed path rule, and reads entity values from the placeholders. A `discover name: [dimensions] from dirs pattern` rule also matches directories, and adds their bindings as contexts. A source product whose dimensions such a rule covers is then expected in every one of its contexts.
+    - Given a root, `discover` (in [`src/inputs/discover.rs`](https://github.com/eclnz/spit/blob/dev/src/inputs/discover.rs)) walks the folder. It matches files and folders against each source's completed path rule, and reads entity values from the placeholders. Each unnamed `contexts:` pattern inside `inputs:` also matches directories and adds deduplicated bindings. Source matching and directory observations are independent; neither makes a source mandatory.
     - Given records, the stage takes them as they are, then applies the `exclude` rules (`Excluder`) and the conditional `exclude` rules (`apply_drops`).
 3. **Settle each source's path rule.** `merge_source_paths` moves the recipe's rules into the inventory, and `inspect_paths` checks them with the pipeline's.
-4. **Check the `require` rules.** `check_inventory` (in [`src/inputs/coverage.rs`](https://github.com/eclnz/spit/blob/dev/src/inputs/coverage.rs)) returns each `CoverageGap`. A rule counts a source family within each observed context. It does not set how many contexts a dataset has. So a missing image in one observed session fails, without a global subject or session count. A rule can also require entity values, such as `run=1,2`, in each group.
+4. **Check the `require` rules.** `check_inventory` (in [`src/inputs/coverage.rs`](https://github.com/eclnz/spit/blob/dev/src/inputs/coverage.rs)) returns each `CoverageGap`. A rule counts a source family or an exact `contexts[dimensions]` domain within each observed group. Global `[]` grouping projects any observation to one empty binding; an empty inventory has no groups. So a missing image in one observed session fails, without a global subject or session count. A rule can also require entity values, such as `run=1,2`, in each group.
 5. **Check each record's file.** `locate_sources` checks that each record's path fits its rule, including any shape on a placeholder.
 
 While it scans, the stage also:
 
-- **Applies `exclude` rules as it finds things** ([`src/inputs/exclusions.rs`](https://github.com/eclnz/spit/blob/dev/src/inputs/exclusions.rs)). An excluded context expects no files, and an excluded file may lie outside the discovered contexts. Each conditional `exclude` rule is then judged once against what was found, counting a file a context expects but lacks as absent. The groups any rule rejects are removed together, before expected files are checked.
+- **Applies `exclude` rules as it finds things** ([`src/inputs/exclusions.rs`](https://github.com/eclnz/spit/blob/dev/src/inputs/exclusions.rs)). Named exclusions remove matching observed contexts and files. Each conditional exclusion is judged against those retained observations, where an absent source has count zero. The groups any rule rejects are removed together, and requirements check what remains.
 - **Leaves out SPIT's own files.** Files at an output's completed path, or inside an output folder, are not reported as unmatched sources, so an earlier run's outputs under the root are ignored (`OutputPaths` in [`src/inputs/pattern.rs`](https://github.com/eclnz/spit/blob/dev/src/inputs/pattern.rs)). An output whose path cannot be bound is skipped there, and resolution reports it.
 - **Reports the near misses.** For each source whose rule matches no file, it records the unmatched file the rule matches furthest into, and where the two part.
 - **Notes companion groups found only in part** (`incomplete_groups`), whether scanned or written as records. Records are grouped in one pass by `GroupKey`, and only an incomplete group's binding is written out as text.

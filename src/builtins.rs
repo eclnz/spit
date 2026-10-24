@@ -39,8 +39,8 @@ pub enum Word {
     Min,
     Pipeline,
     Root,
-    Discover,
-    DiscoverFrom,
+    Inputs,
+    ContextEntry,
     Require,
     RequireWhere,
     Count,
@@ -126,7 +126,7 @@ pub static DOCS: [Doc; 50] = [
         kind: "keyword",
         anchor: "paths",
         example: "path image: input/{subject}/{visit}/{run}.txt\ndefault path: results/{@product}/{@entities}.txt",
-        summary: "`path product:` sets one product's rule, and for a source, how its files are found. `default path:` sets the rule for products with none of their own. An output with no rule is an error. A default in a stage is the rule for that stage's products, and one in a `.spitin` recipe the rule for sources with none. Paths are relative to the dataset root. Text in `[...]` is kept only for a product with a value for every placeholder in it.",
+        summary: "`path product:` sets one product's rule, and for a source, how its files are found. `default path:` sets the rule for products with none of their own. An output with no rule is an error. A default in a stage is the rule for that stage's products. Recipes give source paths and a fallback inside `inputs:`. Paths are relative to the dataset root. Text in `[...]` is kept only for a product with a value for every placeholder in it.",
     },
     Doc {
         name: "ext",
@@ -234,18 +234,18 @@ pub static DOCS: [Doc; 50] = [
         summary: "The dataset root, the folder paths are relative to. A pipeline or recipe may name one, relative to that file's folder; a recipe inherits its pipeline's root when it has none. Declaring it in both is an error, and `root .` is the declaring file's folder; in a `.spitout` that `spit inputs -o` writes, it is relative to the `.spitout`'s folder.",
     },
     Doc {
-        name: "discover",
+        name: "inputs:",
         kind: "keyword",
-        anchor: "discover-contexts-from-directories",
-        example: "discover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}",
-        summary: "Finds a dataset's contexts from its directories: each matching directory, even an empty one, gives one binding, and only those found on disk are used. `sessions` names the rule, which `require` and conditional `exclude` can count. A source whose dimensions fit within the rule's expects a file for each binding.",
+        anchor: "recipes",
+        example: "inputs:\n    image: data/sub-{sub}/image.nii.gz\n    contexts: data/sub-{sub}",
+        summary: "A recipe's source paths and optional context directory patterns. Each source entry matches existing files; each `contexts:` entry observes matching directories, including empty ones. Neither creates a requirement by itself. `default:` is the fallback source path.",
     },
     Doc {
-        name: "discover-from",
+        name: "contexts",
         kind: "keyword",
-        anchor: "discover-contexts-from-directories",
-        example: "discover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}",
-        summary: "The directory pattern a `discover` rule matches, relative to the dataset root. It uses every declared dimension and no other placeholder.",
+        anchor: "recipes",
+        example: "    contexts: data/sub-{sub}/ses-{ses}",
+        summary: "A directory pattern in `inputs:`. Matching directories contribute observed bindings; placeholders supply dimensions. It may match no directories and does not require source files.",
     },
     Doc {
         name: "require",
@@ -259,21 +259,21 @@ pub static DOCS: [Doc; 50] = [
         kind: "keyword",
         anchor: "constraints",
         example: "require [subject, visit] where image count=1",
-        summary: "Introduces a `require` rule's condition, after the groups it checks: the source or discovery rule to count, then a `count`, `has` values, or both. Each group is checked on its own.",
+        summary: "Introduces a `require` rule's condition, after the groups it checks: the source or `contexts[dimensions]` target to count, then a `count`, `has` values, or both. Each group is checked on its own.",
     },
     Doc {
         name: "count",
         kind: "keyword",
         anchor: "constraints",
         example: "require [subject, visit] where image count>=2\nexclude [sub] where sessions count<2",
-        summary: "How many artifacts of a source, or contexts of a discovery, each group holds, compared with `=`, `!=`, `>=`, `<=`, `>` or `<`.",
+        summary: "How many artifacts of a source, or contexts in an exact dimension domain, each group holds, compared with `=`, `!=`, `>=`, `<=`, `>` or `<`.",
     },
     Doc {
         name: "exclude-where",
         kind: "keyword",
         anchor: "exclude-groups-that-meet-a-condition",
         example: "exclude [sub, ses] where t1w count=0",
-        summary: "Introduces a conditional `exclude` rule's condition: the source or discovery rule to count, then a `count`, `missing` values or `has` values.",
+        summary: "Introduces a conditional `exclude` rule's condition: the source or `contexts[dimensions]` target to count, then a `count`, `missing` values or `has` values.",
     },
     Doc {
         name: "missing",
@@ -370,8 +370,8 @@ pub static DOCS: [Doc; 50] = [
         name: "contexts:",
         kind: "header",
         anchor: "inputs",
-        example: "contexts sessions:\n    [sub=01,ses=01]:\n        t1w",
-        summary: "Groups named even when one of their inputs is absent. `contexts sessions:` holds the bindings the `discover sessions` rule found, with the source identities under each.",
+        example: "contexts:\n    [sub=01,ses=01]",
+        summary: "Observed directory bindings, including empty directories. Context paths in a recipe are unnamed; their capture dimensions determine which `contexts[dimensions]` requirement counts them.",
     },
     Doc {
         name: "removed:",
@@ -538,7 +538,6 @@ fn keyword_word(keyword: Keyword) -> Option<Word> {
         Keyword::Use => Word::Use,
         Keyword::Root => Word::Root,
         Keyword::Source => Word::Source,
-        Keyword::Discover => Word::Discover,
         Keyword::Operation => Word::Operation,
         Keyword::Command => Word::Command,
         Keyword::Verify => Word::Verify,
@@ -581,6 +580,14 @@ fn statement(line: &Line) -> Option<(Word, usize)> {
 fn line_words(line: &Line, inherited: Option<Word>, found: &mut Vec<(Range<usize>, Word)>) {
     let code = line.uncommented;
     let indent = line.indent;
+    let trimmed = code.trim();
+    if trimmed == "inputs:" {
+        found.push((indent..indent + "inputs:".len(), Word::Inputs));
+        return;
+    }
+    if indent > 0 && trimmed.starts_with("contexts: ") {
+        found.push((indent..indent + "contexts".len(), Word::ContextEntry));
+    }
     if let Some(header) = line.header() {
         let (word, length) = match header {
             Header::Sources => (Word::Sources, "sources".len()),
@@ -657,8 +664,6 @@ fn rule_word(code: &str, range: Range<usize>, statement: Option<Word>) -> Option
         }
         (Word::Use, "as") if spaced => Some(Word::UseAs),
         (Word::Use, "from") if spaced => Some(Word::UseFrom),
-        (Word::Discover, "from") if after.starts_with("dirs ") => Some(Word::DiscoverFrom),
-        (Word::Discover, "dirs") if before.ends_with(" from") => Some(Word::DiscoverFrom),
         (Word::Exclude, "from") if spaced && before.trim_start() == "exclude" => {
             Some(Word::ExcludeFrom)
         }

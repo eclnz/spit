@@ -100,7 +100,7 @@ fn fresh_discovery_and_saved_inventory_produce_the_same_dag_and_hints() {
     );
     let recipe = tree.write(
         "data.spitin",
-        "pipeline pipeline.spit\nroot .\npath raw: raw/{@entities}.txt\npath config: config.txt\n",
+        "pipeline pipeline.spit\nroot .\ninputs:\n    raw: raw/{@entities}.txt\n    config: config.txt\n",
     );
     tree.write("config.txt", "");
     let saved = tree.path().join("data.spitout");
@@ -210,7 +210,7 @@ fn discovery_decodes_values_and_escaped_aliases_and_accepts_assignment_affixes()
     tree.write("pipeline.spit", "default entities: e_{@key}:{@value}! separated \"-\"\ndefault entities sub: subject_id\nsource raw [sub, ses]\noperation copy(x)\ncopied = copy(raw)\npath copied: out/{@product}/{@entities}\n");
     let recipe = tree.write(
         "data.spitin",
-        "pipeline pipeline.spit\nroot .\npath raw: raw/{@entities}.txt\n",
+        "pipeline pipeline.spit\nroot .\ninputs:\n    raw: raw/{@entities}.txt\n",
     );
     let inventory = ok(&["inputs", recipe.to_str().unwrap()]);
     assert!(inventory.contains("sub=A_b/é,ses=01"), "{inventory}");
@@ -382,7 +382,7 @@ fn a_recipe_spelling_spells_the_recipes_own_source_rules() {
     );
     let recipe = tree.write(
         "data.spitin",
-        "pipeline pipeline.spit\nroot .\ndefault entities: {@key}-{@value} separated \"_\"\npath raw: rec/{@entities}.txt\n",
+        "pipeline pipeline.spit\nroot .\ndefault entities: {@key}-{@value} separated \"_\"\ninputs:\n    raw: rec/{@entities}.txt\n",
     );
     let recipe = recipe.to_str().unwrap();
     let inventory = ok(&["inputs", recipe]);
@@ -399,7 +399,7 @@ fn a_recipe_spelling_spells_the_recipes_own_source_rules() {
     // A recipe's labels go with its spelling.
     let labelled = tree.write(
         "labelled.spitin",
-        "pipeline pipeline.spit\nroot .\ndefault entities: {@key}-{@value} separated \"_\"\ndefault entities sub: subject\npath raw: labelled/{@entities}.txt\n",
+        "pipeline pipeline.spit\nroot .\ndefault entities: {@key}-{@value} separated \"_\"\ndefault entities sub: subject\ninputs:\n    raw: labelled/{@entities}.txt\n",
     );
     let inventory = ok(&["inputs", labelled.to_str().unwrap()]);
     assert!(
@@ -411,7 +411,7 @@ fn a_recipe_spelling_spells_the_recipes_own_source_rules() {
     // Without one, the recipe's rules take the pipeline's spelling.
     let plain = tree.write(
         "plain.spitin",
-        "pipeline pipeline.spit\nroot .\npath raw: rec/{@entities}.txt\n",
+        "pipeline pipeline.spit\nroot .\ninputs:\n    raw: rec/{@entities}.txt\n",
     );
     let inventory = ok(&["inputs", plain.to_str().unwrap()]);
     assert!(
@@ -421,7 +421,7 @@ fn a_recipe_spelling_spells_the_recipes_own_source_rules() {
 
     // A label in a recipe needs the recipe's own spelling.
     let error = spit::parse_input_spec(
-        "pipeline pipeline.spit\ndefault entities sub: subject\npath raw: rec/{@entities}.txt\n",
+        "pipeline pipeline.spit\ndefault entities sub: subject\ninputs:\n    raw: rec/{@entities}.txt\n",
     )
     .unwrap_err();
     assert_eq!(error.line(), 2);

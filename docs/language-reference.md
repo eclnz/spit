@@ -419,7 +419,7 @@ default path: results/{@product}/{@entities}.txt
 path image: input/{subject}/{visit}/{run}.txt
 ```
 
-`default path:` sets a default, and `path image:` overrides it for `image`. SPIT writes no path the pipeline does not: an output with no rule of its own, no stage default and no `default path:` is an error that names it. A source with no rule needs one from a recipe or a `.spitout`'s `source_paths:`. A recipe's `default path:` sets the default for sources instead; see [Recipes](#recipes). Each output of a multi-output step has its own product, so its own rule. A `default path:` line inside a [stage](#stages) sets the default for that stage's products. Paths are relative to the [dataset root](#recipes): the folder a pipeline or recipe's `root` line names, or the root a `.spitout` records. A pipeline without a root may take `--root`; the flag is relative to the working folder and cannot accompany a recipe or inventory.
+`default path:` sets a default, and `path image:` overrides it for `image`. SPIT writes no path the pipeline does not: an output with no rule of its own, no stage default and no `default path:` is an error that names it. A source with no rule needs one from a recipe or a `.spitout`'s `source_paths:`. A recipe's `default:` entry inside `inputs:` sets the default for sources instead; see [Recipes](#recipes). Each output of a multi-output step has its own product, so its own rule. A `default path:` line inside a [stage](#stages) sets the default for that stage's products. Paths are relative to the [dataset root](#recipes): the folder a pipeline or recipe's `root` line names, or the root a `.spitout` records. A pipeline without a root may take `--root`; the flag is relative to the working folder and cannot accompany a recipe or inventory.
 
 A source with no dimensions can use a fixed path, such as `path testset: eval/testset.parquet`.
 
@@ -535,9 +535,9 @@ With `{date:date}`, `logs/web1/notes.log`, `2026-9-1.log`, `20260901.log`, `2026
 
 Where a shape may be written:
 
-- In a source's `path` rule, in the pipeline or a recipe's `path <source>:` line or a recipe's `default path:` line, and in a `.spitout`'s `source_paths:`. A recipe's `default path:` is a default for sources only.
-- In a `discover ... from dirs` pattern, as `discover days: [day] from dirs data/{day:date}`.
-- Not in an output's rule, nor in a pipeline or stage `default path:` default, which outputs take: a shape only narrows what is read, so on a rule that writes it would check nothing, and SPIT says so. A source whose rule is a pipeline default writes its shape in a rule of its own, `path <source>: ...`, or in a recipe's `default path:` default, instead. `{@entities}` takes no shape either; write `sub-{sub:digits}`.
+- In a source's `path` rule, in the pipeline or a recipe's source entry inside `inputs:` or a recipe's `default:` entry inside `inputs:` line, and in a `.spitout`'s `source_paths:`. A recipe's `default:` entry inside `inputs:` is a default for sources only.
+- In an `inputs:` context entry, as `contexts: data/{day:date}`.
+- Not in an output's rule, nor in a pipeline or stage `default path:` default, which outputs take: a shape only narrows what is read, so on a rule that writes it would check nothing, and SPIT says so. A source whose rule is a pipeline default writes its shape in a rule of its own, `path <source>: ...`, or in a recipe's `default:` entry inside `inputs:` default, instead. `{@entities}` takes no shape either; write `sub-{sub:digits}`.
 
 A shape reads the text of a value, which holds letters, digits and `-` only, so no shape contains `.`, `_` or `/`: `2026_09_02.log` matches no `{date}` at all, and a `.` after a placeholder still starts the extension. A dimension written twice, as `{id:digits}/{id}`, has its shape in both places; give it one shape only. Two placeholders with nothing between them may not both take a shape of any length, as `{a:digits}{b:digits}` does, since where one ends is not written; `{year:year}{n:digits}` is fine, because a year is four digits, and `{date:date}-{run:digits}` has its `-`. The check also runs on each product's path once the `[...]` groups its dimensions lack are dropped: `in/{a:digits}[-{c}]{b:digits}.txt` is fine for a product with `c`, but for one without it is `in/{a:digits}{b:digits}.txt`, and SPIT rejects it, naming the product. A shaped placeholder beside an unshaped one, `{a:digits}{b}`, is allowed and splits the way unshaped neighbours do, shortest first: `123.txt` reads `a=1`, `b=23`. A file that both a shaped rule and a general rule match, such as `{date:date}.log` and `{name}.log`, is still an error naming both sources; SPIT has no precedence between rules, so shape both or name more of the path. Shaping does not tell two sources' paths apart where they are compiled: `source a [d]`, `source b [d]` with `path a: in/{d:date}.log` and `path b: in/{d:digits}.log` is rejected, since both bind `in/d.log` for the same entities. Name the two sources' dimensions differently, as `[d]` and `[n]`, as well as shaping them. A record in a `.spitout` or an `inputs` file whose value fails its rule's shape is an error, since discovery would not read its file.
 
@@ -605,10 +605,11 @@ source photo_json : CaptureMetadata .json beside raw_photo
 
 # dataset.spitin
 pipeline survey.spit
-path raw_photo: site-{site}/visit-{visit}/photos/shot-{shot}.raw
+inputs:
+    raw_photo: site-{site}/visit-{visit}/photos/shot-{shot}.raw
 ```
 
-A recipe's `default path:` also places the main source. For `default path: data/{site}/{visit}/{shot}/{@product}`, the files are `data/a/1/3/raw_photo.raw` and `data/a/1/3/raw_photo.json`. The `.spitout` records the main source's path under `source_paths:`; the companion's path is derived from it. When importing definitions, import the main source to bring all its companions. With an alias, `path text::raw_photo:` names the imported main source.
+A recipe's `default:` entry inside `inputs:` also places the main source. For `default path: data/{site}/{visit}/{shot}/{@product}`, the files are `data/a/1/3/raw_photo.raw` and `data/a/1/3/raw_photo.json`. The `.spitout` records the main source's path under `source_paths:`; the companion's path is derived from it. When importing definitions, import the main source to bring all its companions. With an alias, `path text::raw_photo:` names the imported main source.
 
 When `spit inputs` scans a dataset, or a command reads records from a recipe or `.spitout`, it warns about each identity that holds some of these sources and lacks others, as `warning: raw_photo[site=A,visit=2,shot=3] has .raw and .gpx but no .json`. Warnings follow source declaration order, then value order. A file a named or conditional `exclude` rule removes is not counted as missing, nor is one listed under `.spitout`'s `removed:` section.
 
@@ -622,16 +623,17 @@ A `.spitin` recipe says how to find and select one dataset's inputs. Basic file 
 pipeline analysis.spit
 root .
 
-discover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}
+inputs:
+    contexts: data/sub-{sub}/ses-{ses}
+    image: data/sub-{sub}/ses-{ses}/image.nii.gz
 exclude image[sub=04,ses=2]    # scanner fault
-exclude [sub] where sessions count<2
+exclude [sub] where contexts[sub,ses] count<2
 require [sub, ses] where image count=1
-path image: data/sub-{sub}/ses-{ses}/image.nii.gz
 ```
 
-A recipe may contain `discover`, `exclude` and `require` rules, `path product:` rules for source products, a `default path:` rule for its sources, and `sources:`/`contexts:` records. It cannot declare sources, operations, steps, commands, stages, imports or `default ext:`; the pipeline still declares each logical `source` with its dimensions and optional type. Rules in a pipeline are an error, and so are records.
+A recipe may contain `inputs:`, `exclude` and `require` rules, `path product:` rules for source products, a `default path:` rule for its sources, and `sources:`/`contexts:` records. It cannot declare sources, operations, steps, commands, stages, imports or `default ext:`; the pipeline still declares each logical `source` with its dimensions and optional type. Rules in a pipeline are an error, and so are records.
 
-A recipe's `default path:` line is the default for every source with no rule of its own, in the pipeline or the recipe. Where a dataset keeps its inputs is the dataset's to say, so the pipeline's `default path:` can say where outputs go, by stage if it likes, and the recipe says where sources are:
+A recipe's `default:` entry inside `inputs:` line is the default for every source with no rule of its own, in the pipeline or the recipe. Where a dataset keeps its inputs is the dataset's to say, so the pipeline's `default path:` can say where outputs go, by stage if it likes, and the recipe says where sources are:
 
 ```text
 # analysis.spit
@@ -643,7 +645,8 @@ source events .tsv [sub]
 # dataset.spitin
 pipeline analysis.spit
 root .
-default path: rawdata/sub-{sub}/{@product}
+inputs:
+    default: rawdata/sub-{sub}/{@product}
 ```
 
 A source takes the recipe's default only when it has no rule of its own, and the pipeline's default only when the recipe has none; see [Which file a line belongs in](#which-file-a-line-belongs-in). A pipeline default that names `{@stage}` outside a group finds no source, since no source is made in a stage, so it covers only outputs. Likewise, one that names `{@entities}` outside a group finds no source without dimensions. Each source completes the recipe's default with the extension it declares, so one default finds `rawdata/sub-01/t1w.nii.gz` and `rawdata/sub-01/events.tsv`. `default ext:` completes output paths and does not apply to the recipe's default, so a source that declares no extension takes the default as written. It cannot name `{@stage}`. `spit check recipe.spitin --path-rules` lists a source it covers as `default ... (recipe)`, and the `.spitout` writes it under `source_paths:` as each such source's rule.
@@ -664,13 +667,13 @@ Two forms of `exclude` leave data out; `require` checks what remains:
 | To | Write | For example |
 | --- | --- | --- |
 | Remove named artifacts or groups, such as a corrupted run | `exclude` | `exclude bold[sub=02,ses=02,run=3]  # corrupted` |
-| Remove every group that meets a condition, as the data changes | `exclude` | `exclude [sub] where sessions count<2` |
+| Remove every group that meets a condition, as the data changes | `exclude` | `exclude [sub] where contexts[sub,ses] count<2` |
 | Plan what can be completed despite missing inputs | `dag --partial` | `spit dag dataset.spitin --partial -o plan.spitdag` |
 | Stop, when the data is incomplete | `require` | `require [sub, ses] where t1w count=1` |
 
 Named exclusions apply first, even when written after conditional exclusions. Every conditional exclusion then sees the same retained inventory, and all matching groups are removed together. `require` checks what remains. Each removal is reported on stderr and recorded in the `.spitout`.
 
-Conditional `exclude` and `require` name the groups first, then `where`, then the source or discovery rule and a condition. A conditional exclusion removes each group that meets its condition; `require` stops the run unless every group meets its own. A `require` written source first with the groups after `per`, as in `require t1w count=1 per [sub, ses]`, is an error that gives the rule in this order. A `drop` rule is an error that gives the conditional `exclude` to write instead.
+Conditional `exclude` and `require` name the groups first, then `where`, then the source or `contexts[dimensions]` target and a condition. A conditional exclusion removes each group that meets its condition; `require` stops the run unless every group meets its own. A `require` written source first with the groups after `per`, as in `require t1w count=1 per [sub, ses]`, is an error that gives the rule in this order. A `drop` rule is an error that gives the conditional `exclude` to write instead.
 
 Rules that count form their groups from every artifact and discovered context in the dataset, whichever source or discovery found it. `exclude [store] where pricing count=0` groups by every store any source or discovery has, so a store with sales but no price list is a group with none: its count is 0.
 
@@ -691,38 +694,37 @@ A `.spit` pipeline is the reusable graph: what work to do and where its results 
 Put a source's own rule in the pipeline when every dataset for that pipeline shares the layout, and in the recipe when the layout belongs to one dataset. A line in the wrong file is an error that says which file it belongs in, at its line:
 
 ```text
-error: line 3, column 1: a step belongs in the .spit pipeline, which every dataset shares; a .spitin binds it to one dataset with its `root`, source paths, and `discover`, `exclude` and `require` rules
+error: line 3, column 1: a step belongs in the .spit pipeline, which every dataset shares; a .spitin binds it to one dataset with its `root`, source paths, and `inputs:`, `exclude` and `require` rules
 error: line 3, column 13: `image` has path rules in both .spit and .spitin; keep the pipeline's if every dataset has this layout, or the recipe's if only this one does
 ```
 
 A source takes the first path rule of these that it has:
 
 1. its own `path source:` rule, from whichever file gives it;
-2. the recipe's `default path:`;
+2. the recipe's `default:` entry inside `inputs:`;
 3. the pipeline's `default path:`, unless it names `{@stage}` outside a group.
 
 A rule written for one source comes before any default, and the dataset's default for its inputs comes before the pipeline's general one. An output's path never comes from the recipe. `spit check recipe.spitin --path-rules` shows which rule each source takes, and marks those the recipe gives `(recipe)`.
 
 ### Discover contexts from directories
 
-```text
-discover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}
+```spit
+inputs:
+    image: data/sub-{sub}/ses-{ses}/image.nii.gz
+    contexts: data/sub-{sub}/ses-{ses}
+require [sub, ses] where image count=1
+require [sub] where contexts[sub,ses] count>=2
 ```
 
-`discover` extracts global entity bindings from directories. `sessions` names the rule; it is not an artifact or an input to a step. Each matching directory contributes one `[sub=...,ses=...]` binding, including an empty directory. Values can be strings and need not be sequential. Only pairs found on disk are included; SPIT does not form a Cartesian product of subjects and sessions. The pattern is relative to the dataset root. `spit inputs` writes the bindings under `contexts sessions:`.
+Each `contexts:` entry matches directories relative to the dataset root, including empty directories. Placeholders supply their dimensions. A pattern may match zero, one or many directories. Repeated context entries union their observations and deduplicate identical bindings. Only bindings found on disk are included; paths never construct a Cartesian product. The pipeline's dimension declarations determine order; path placeholders do not reorder it.
 
-If a `discover` declaration matches no directories, discovery fails and names that declaration and its pattern.
+Source entries observe existing files or folders. Context entries observe directories independently: they neither require source files nor reject source matches outside those directories. Write `require` for every obligation. An empty observed directory can establish a group whose required source count is zero. An entirely absent directory supplies no identity.
 
-Sources whose dimensions fit within the rule's dimensions expand over the observed bindings. For example, `source image [sub, ses]` expects one image per discovered pair, while `source reference [sub]` expects one per observed subject. Their `path` rules must name regular files; a missing file is an error. A source with another dimension, such as `run`, is still found by scanning its file path rule and can use `require` to check run coverage. The directory pattern must use every declared dimension, contain no other placeholders, and name a relative directory without `.` or `..` components. Values that cannot be represented faithfully in a `.spitout` are skipped with a warning.
+`contexts[sub,ses]` selects context bindings with exactly those capture dimensions and counts each distinct full binding once within each group. A target must have a context pattern with that exact dimension set. Patterns with additional dimensions belong to a different domain. `require [] where lut count=1` checks a global source such as a shared lookup table. The global group exists when any source or context was observed; a completely empty inventory still errors with no groups to check.
 
-`require` can target the name of a discovery rule directly:
+Context paths contain no reserved placeholders or optional `[...]` groups and name relative directories without `.` or `..` components or a trailing slash. Values that cannot be represented faithfully in a `.spitout` are skipped with a warning. Inventories write observations under the unnamed `contexts:` header.
 
-```text
-require [sub] where sessions count>=2
-require [sub] where sessions has ses=1,2
-```
-
-The first rule needs at least two observed session bindings per subject. The second specifically needs sessions `1` and `2`. These rules count the directories matched by `sessions`, not artifacts from a product called `sessions`. Records keep the rule name as `contexts sessions:` followed by its `[sub=...,ses=...]` records, which `spit inputs` writes.
+This replaces named `discover` statements and recipe-level `path` statements directly. Move each `path source: pattern` to `source: pattern` inside `inputs:`, move `path:` to `default:`, and move directory patterns to repeated `contexts:` entries. Remove discovery names and dimension lists; use `contexts[dimensions]` in requirements that count directories. There are no compatibility aliases.
 
 ### Constraints
 
@@ -746,13 +748,13 @@ The cohort walkthrough uses conditional `exclude` to remove a subject with too f
 Conditional `exclude` removes every group that meets its condition: the groups, then `where`, then what removes one.
 
 ```text
-exclude [sub] where sessions count<2
+exclude [sub] where contexts[sub,ses] count<2
 exclude [sub, ses] where t1w count=0
 exclude [sub, ses] where bold missing run=1,2
 exclude [sub, ses] where bold has run=3
 ```
 
-After `where` comes the source or discovery rule to count, then one condition:
+After `where` comes the source or `contexts[dimensions]` target to count, then one condition:
 
 - **A count,** with any comparison: `count<2` removes each group with fewer than two.
 - **`missing` values:** `missing run=1,2` removes each group without a run 1 or without a run 2.
@@ -760,7 +762,7 @@ After `where` comes the source or discovery rule to count, then one condition:
 
 Removing a group removes every artifact and discovered context within it, of every source. An artifact without all the group's dimensions, such as a subject's reference when only its sessions are removed, stays; if no job then uses it, `spit artifacts` lists it as unused. Each conditional `exclude` rule has one condition, and a group is removed when any rule's condition holds. Every rule is judged against the same inventory, so writing them in another order changes nothing. A conditional `exclude` rule that would remove every group of its grouping is an error, since nothing would be left to plan.
 
-A file a discovered context expects but lacks counts as absent, so `exclude [sub, ses] where t1w count=0` removes a session whose T1w is missing, rather than failing on the missing file. Each removed group is reported on stderr, `note: excluded [sub=5] by \`exclude [sub] where sessions count<2\` (line 3); found 1`, and recorded in the `.spitout`.
+A file a discovered context expects but lacks counts as absent, so `exclude [sub, ses] where t1w count=0` removes a session whose T1w is missing, rather than failing on the missing file. Each removed group is reported on stderr, `note: excluded [sub=5] by \`exclude [sub] where contexts[sub,ses] count<2\` (line 3); found 1`, and recorded in the `.spitout`.
 
 A conditional `exclude` rule's values name a dimension within each group, not one of its groups: `exclude [store] where sales missing store=s07` is an error, since each group has one store. To remove named groups, write `exclude [store=s07]`.
 
@@ -809,9 +811,9 @@ exclude [store=s07]            # price list filed as S07; renamed next week
 exclude pricing[store=S07]     # the same list, under the name it was filed as
 ```
 
-Named exclusions apply before scanning and missing-file validation. An excluded discovered context expects no files, an excluded file needs to exist nowhere, and a file excluded by name may lie outside every discovered context, such as a misnamed copy. Conditional exclusions then see what named exclusions leave, and `require` checks the final inventory.
+Named exclusions remove observed artifacts or contexts. A rule matching nothing is an error. Conditional exclusions then see what named exclusions leave, and `require` checks the final inventory.
 
-A placeholder in a source rule matches any text within one folder or file name unless it takes a [shape](#shapes-on-a-source-placeholder), as `{date:date}`. Without one, `logs/{server}/{date}.log` reads `logs/web1/notes.log` as `date=notes`: check the count in `note: found N source artifacts`, and leave out a file whose value does not belong with [`exclude`](#exclude-named-artifacts), a shape, or a rule that names more of its path. Files whose whole paths match no source path rule are ignored while scanning. `spit inputs` counts them in a note, naming them when there are at most three and otherwise counting them by extension, leaving out SPIT's own `.spit`, `.spitin`, `.spitout` and `.spitdag` files and any file at a path the pipeline gives one of its outputs, or inside an output folder, such as what an earlier run wrote under the root; `spit inputs dataset.spitin --unmatched` lists their paths relative to the dataset root instead of writing a `.spitout`, even if a `require` rule fails. When a `require` count fails after the scan found no files for its source, `inputs` and `dag` name the path rule used and show an unmatched file whose path contains the source name, when there is one. A recipe's `default path:` is a default for sources; use `path <source>:` for one source. Required source paths must match the spelling found by the scan: `pricing/S07.json` does not satisfy `pricing/s07.json`, even on a case-insensitive filesystem. A file with a near miss in an identity value, such as `store=S07` where a job needs `store=s07`, may still match a source rule: it is then a source artifact, and `dag` and `artifacts` warn when it is unused and point to it at the failed join.
+A placeholder in a source rule matches any text within one folder or file name unless it takes a [shape](#shapes-on-a-source-placeholder), as `{date:date}`. Without one, `logs/{server}/{date}.log` reads `logs/web1/notes.log` as `date=notes`: check the count in `note: found N source artifacts`, and leave out a file whose value does not belong with [`exclude`](#exclude-named-artifacts), a shape, or a rule that names more of its path. Files whose whole paths match no source path rule are ignored while scanning. `spit inputs` counts them in a note, naming them when there are at most three and otherwise counting them by extension, leaving out SPIT's own `.spit`, `.spitin`, `.spitout` and `.spitdag` files and any file at a path the pipeline gives one of its outputs, or inside an output folder, such as what an earlier run wrote under the root; `spit inputs dataset.spitin --unmatched` lists their paths relative to the dataset root instead of writing a `.spitout`, even if a `require` rule fails. When a `require` count fails after the scan found no files for its source, `inputs` and `dag` name the path rule used and show an unmatched file whose path contains the source name, when there is one. A recipe's `default:` entry inside `inputs:` is a default for sources; use `path <source>:` for one source. Required source paths must match the spelling found by the scan: `pricing/S07.json` does not satisfy `pricing/s07.json`, even on a case-insensitive filesystem. A file with a near miss in an identity value, such as `store=S07` where a job needs `store=s07`, may still match a source rule: it is then a source artifact, and `dag` and `artifacts` warn when it is unused and point to it at the failed join.
 
 Rules can also come from a CSV file, relative to the recipe's folder, such as a lab's list of scans that failed quality control:
 
@@ -838,12 +840,12 @@ sources:
     image[subject=A,visit=1,run=1]
 ```
 
-For one named directory discovery, `spit inputs` nests source identities under each context. A list of values in a nested dimension expands each listed product for every value:
+`spit inputs` writes flat source records and unnamed contexts. Hand-written inventories may also nest source identities under a context. A list of values in a nested dimension expands each listed product for every value:
 
 ```text
 sources:
     source_lut
-contexts sessions:
+contexts:
     [sub=01,ses=01]:
         reverse_b0, t1w
         [run=01,02]:
@@ -876,7 +878,7 @@ removed:
         at: line 4
         reason: corrupted: motion spike at volume 140
     [sub=07]
-        rule: exclude [sub] where sessions count<2
+        rule: exclude [sub] where contexts[sub,ses] count<2
         at: line 6
         found: 1
 ```

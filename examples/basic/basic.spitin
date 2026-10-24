@@ -1,6 +1,7 @@
 pipeline basic.spit
 root basic_data
-default path: {@product}/{@entities}
+inputs:
+    default: {@product}/{@entities}
 
 require [sub, ses] where bold count>=1
 require [sub, ses] where t1w count=1

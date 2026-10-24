@@ -21,8 +21,8 @@ use std::fmt;
 use std::ops::Range;
 
 use crate::model::{
-    CheckDef, CommandDef, CommandRole, CoverageRule, DefaultChecks, DirectoryDiscovery, Invocation,
-    OperationDef, ProductDef, StepOutput, TypeChecking,
+    CheckDef, CommandDef, CommandRole, CoverageRule, DefaultChecks, Invocation, OperationDef,
+    ProductDef, StepOutput, TypeChecking,
 };
 use crate::paths::PathTemplate;
 use crate::span::{address_of, columns_at, content_columns, Focus, Located, Place};
@@ -193,7 +193,6 @@ pub(crate) enum StatementKind {
     },
     /// A `source` declaration.
     Product(ProductDef, Place),
-    Discover(DirectoryDiscovery),
     /// An `operation` declaration, where its name sits, and the stage its
     /// line is in, if any. The operation is global either way.
     /// A body that holds no step is an error where the body ends: on the

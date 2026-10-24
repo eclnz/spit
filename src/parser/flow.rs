@@ -8,7 +8,7 @@ use crate::span::Place;
 use super::body::OpenBody;
 use super::check::parse_default_checks;
 use super::declarations::{
-    parse_dimension_order, parse_discover, parse_invocation_parts, parse_path, parse_product,
+    parse_dimension_order, parse_invocation_parts, parse_path, parse_product,
 };
 use super::entities::parse_entities;
 use super::keyword::{removed_section, Keyword, BLOCKS};
@@ -386,10 +386,6 @@ fn flow_rest(
                 }
             })
         }
-        Some((Keyword::Discover, declaration)) => {
-            top_level_only("`discover`")?;
-            StatementKind::Discover(parse_discover(declaration.trim(), number)?)
-        }
         Some((Keyword::Operation, declaration)) => {
             let kind =
                 StatementKind::operation(original, declaration, number, stage.map(str::to_owned))?;
@@ -505,7 +501,7 @@ fn flow_statement(
                 "`{word}` does not start a statement; {hint}a pipeline line starts with \
                  source, dimensions, types, operation, command, verify, check, path, default, root, stage or use, or is a step \
                  `output = operation(inputs)`, and a recipe line starts with pipeline, \
-                 root, discover, require, exclude, path or default"
+                 root, inputs, require, exclude or default"
             ),
         )
         .at_token(word));
@@ -527,7 +523,7 @@ fn flow_statement(
     } else {
         Err(ParseError::new(
             number,
-            "expected source, discover, operation, command, verify, check, require, path, default, stage, or output = operation(inputs)",
+            "expected source, operation, command, verify, check, require, path, default, stage, or output = operation(inputs)",
         ))
     }
 }
@@ -581,7 +577,7 @@ fn parse_flow_output(left: &str, number: usize) -> Result<StepOutput, ParseError
 }
 
 /// The words a statement can start with, for suggesting one.
-const STATEMENT_WORDS: [&str; 17] = [
+const STATEMENT_WORDS: [&str; 16] = [
     "source",
     "dimensions",
     "types",
@@ -595,7 +591,6 @@ const STATEMENT_WORDS: [&str; 17] = [
     "use",
     "pipeline",
     "root",
-    "discover",
     "require",
     "drop",
     "exclude",

@@ -1,6 +1,6 @@
 //! The input stage: settle which contexts and sources a dataset holds.
 //!
-//! It reads a `.spitin` recipe of `discover`, `exclude`, `require` and source
+//! It reads a `.spitin` recipe of `inputs:`, `exclude`, `require` and source
 //! path rules, and the pipeline's source declarations. It scans a root or
 //! takes records already written, and returns a plain inventory with what it
 //! removed and what the `require` rules find missing. Resolving jobs needs
@@ -10,6 +10,7 @@ mod coverage;
 mod discover;
 mod exclusions;
 mod pattern;
+mod recipe;
 mod variants;
 
 use std::borrow::Cow;
@@ -42,6 +43,7 @@ pub(crate) use self::exclusions::collect_exclusion_errors;
 pub use self::exclusions::UnmatchedExclusion;
 use self::exclusions::{read_exclusion_files, Excluder};
 pub use self::pattern::{MissedSource, NearestFile};
+use self::recipe::{expand_input_block, restore_path_places};
 pub use self::variants::{case_variants, CaseVariants, Spelling};
 
 /// A recipe's rules and any inventory records written with them.
@@ -105,9 +107,13 @@ fn parse_recipe(
     text: &str,
     parse: impl FnOnce(&str) -> Result<ParsedDocument, ParseError>,
 ) -> Result<(RecipeHeader, ParsedDocument), ParseError> {
-    let (header, text) = header_lines(without_bom(text))?;
+    let (header, original) = header_lines(without_bom(text))?;
+    let (text, contexts) = expand_input_block(&original)?;
     check_input_lines(&text)?;
-    Ok((header, parse(&text)?))
+    let mut document = parse(&text)?;
+    restore_path_places(&original, &mut document.lines);
+    document.inputs.context_paths = contexts;
+    Ok((header, document))
 }
 
 /// The pipeline a recipe names with `pipeline analysis.spit` and the root
@@ -138,7 +144,7 @@ fn header_lines(text: &str) -> Result<(RecipeHeader, String), ParseError> {
 /// Why a line belongs in the pipeline rather than the recipe: what each
 /// file holds.
 const PIPELINE_ONLY: &str = ", which every dataset shares; a .spitin binds it to one dataset with \
-     its `root`, source paths, and `discover`, `exclude` and `require` rules";
+     its `root`, source paths, and `inputs:`, `exclude` and `require` rules";
 
 fn check_input_lines(text: &str) -> Result<(), ParseError> {
     for (number, line) in Layout::new(text).numbered() {
@@ -201,7 +207,7 @@ fn check_input_lines(text: &str) -> Result<(), ParseError> {
 }
 
 /// A recipe holds rules and records, and paths only for sources; it names
-/// `pipeline`. Its `path:` line is the default for sources.
+/// `pipeline`. Its `default:` entry supplies the fallback for sources.
 fn finish_spec(
     document: ParsedDocument,
     header: RecipeHeader,
@@ -226,7 +232,7 @@ fn finish_spec(
             let line = lines.default_path.as_ref().map_or(1, |place| place.line);
             return Err(ParseError::new(
                 line,
-                "a .spitin `default path:` is the rule for sources with none of their own, and no source is made in a stage; leave out `{@stage}`",
+                "a .spitin `inputs: default:` is for sources, and no source is made in a stage; leave out `{@stage}`",
             ));
         }
     }
@@ -286,12 +292,6 @@ impl InputSpec {
                 return Err(InputError::Path(crate::paths::error(format!(
                     "the recipe's entity label names unknown dimension `{dimension}`"
                 ))));
-            }
-        }
-        // Directory discovery finds every source's files.
-        if !self.rules.discoveries.is_empty() {
-            if let Some(product) = self.source_without_path(pipeline) {
-                return Err(InputError::NoSourcePath { product });
             }
         }
         if let Some((_, error)) = collect_rule_errors(pipeline, &self.rules, &BTreeSet::new())
@@ -637,11 +637,11 @@ impl fmt::Display for InputError {
             ),
             Self::MemberPath { product, group } => write!(
                 f,
-                "source `{product}` is beside `{group}` and takes its path from it; write `path {group}:` instead"
+                "source `{product}` is beside `{group}` and takes its path from it; give `{group}` the path in `inputs:` instead"
             ),
             Self::NoSourcePath { product } => write!(
                 f,
-                "source `{product}` has no path rule, so its files cannot be found; write `path {product}:` in the pipeline or the recipe, or `default path:` in the recipe"
+                "source `{product}` has no path rule, so its files cannot be found; write `path {product}:` in the pipeline or `{product}:` or `default:` in the recipe's `inputs:` block"
             ),
             Self::ConflictingSourcePaths { product } => write!(
                 f,
@@ -683,8 +683,7 @@ pub enum InputSource<'a> {
 /// What the input stage settled about a dataset.
 #[derive(Debug)]
 pub struct ResolvedInputs {
-    /// The contexts and sources that remain after `exclude` rules, with the named
-    /// discovery contexts kept for the `.spitout`.
+    /// The observed contexts and sources that remain after `exclude` rules.
     pub inventory: SourceInventory,
     /// Each file left out because a value in its path cannot be read, and
     /// why. What the recipe's rules removed is in `inventory.removed`.
@@ -719,12 +718,8 @@ impl ResolvedInputs {
             .collect()
     }
 
-    /// The inventory for resolving jobs: the same contexts and sources without
-    /// the bookkeeping that ties them to discovery rules.
+    /// The inventory for resolving jobs.
     pub fn dag_inventory(&self) -> SourceInventory {
-        SourceInventory {
-            discovered: BTreeMap::new(),
-            ..self.inventory.clone()
-        }
+        self.inventory.clone()
     }
 }

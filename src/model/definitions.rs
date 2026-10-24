@@ -552,10 +552,9 @@ pub struct DefaultChecks {
     pub exempt: Vec<CheckUse>,
 }
 
-/// A directory pattern that discovers concrete entity bindings under a root.
+/// A directory pattern that observes concrete entity bindings under a root.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct DirectoryDiscovery {
-    pub name: String,
+pub struct ContextPattern {
     pub dimensions: Vec<String>,
     pub template: PathTemplate,
 }

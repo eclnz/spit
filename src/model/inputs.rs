@@ -8,14 +8,14 @@ use std::path::PathBuf;
 
 use crate::paths::{EntitiesFormat, Holder, PathTemplate};
 
-use super::{owned_strings, DirectoryDiscovery, EntityBinding, Pipeline, PipelineIndex};
+use super::{owned_strings, ContextPattern, EntityBinding, Pipeline, PipelineIndex};
 
-/// How a dataset's sources are found and filtered: directory discovery,
+/// How a dataset's sources are found and filtered: observed directories,
 /// `exclude` and `require` rules, and where source files live. The input stage
 /// reads these; job resolution never does.
 #[derive(Clone, Debug, Default)]
 pub struct InputRules {
-    pub discoveries: Vec<DirectoryDiscovery>,
+    pub context_paths: Vec<ContextPattern>,
     /// `require` and conditional `exclude` rules, in declaration order.
     pub constraints: Vec<CoverageRule>,
     /// `exclude` rules, in declaration order, with each row of a file an
@@ -26,7 +26,7 @@ pub struct InputRules {
     pub exclusion_files: Vec<(String, usize)>,
     /// Path rules for source products that the recipe, not the pipeline, sets.
     pub source_paths: BTreeMap<String, PathTemplate>,
-    /// The recipe's `path:` line: the rule for each source with none of its
+    /// The recipe's `default:` entry: the rule for each source with none of its
     /// own, in the pipeline or the recipe. It stays as written;
     /// [`InputRules::source_paths_for`] gives each source its rule.
     pub source_default: Option<PathTemplate>,
@@ -38,7 +38,7 @@ pub struct InputRules {
 
 impl InputRules {
     pub fn is_empty(&self) -> bool {
-        self.discoveries.is_empty()
+        self.context_paths.is_empty()
             && self.constraints.is_empty()
             && self.exclusions.is_empty()
             && self.exclusion_files.is_empty()
@@ -121,11 +121,6 @@ impl InputRules {
             paths.insert(name.to_owned(), self.spelled(pipeline, name, default));
         }
         Cow::Owned(paths)
-    }
-
-    /// The discovery rule named `name`, if any.
-    pub fn discovery(&self, name: &str) -> Option<&DirectoryDiscovery> {
-        self.discoveries.iter().find(|rule| rule.name == name)
     }
 }
 
@@ -286,9 +281,6 @@ pub struct SourceInventory {
     /// Observed contexts can expose missing artifacts even when no other source
     /// family has an artifact for that context.
     pub contexts: Vec<EntityBinding>,
-    /// Bindings from each named directory discovery rule. These are also
-    /// present in `contexts`, but retain their origin for coverage rules.
-    pub discovered: BTreeMap<String, Vec<EntityBinding>>,
     /// Source path rules settled from a recipe, when the pipeline does not
     /// declare them. A .spitout carries each rule once for standalone DAGs.
     pub source_paths: BTreeMap<String, PathTemplate>,

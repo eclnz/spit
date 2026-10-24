@@ -1,3 +1,4 @@
 pipeline untyped.spit
 root untyped_data
-default path: {@product}/{@entities}
+inputs:
+    default: {@product}/{@entities}

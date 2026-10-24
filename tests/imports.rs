@@ -312,7 +312,7 @@ fn an_imported_sidecars_group_still_reports_incomplete_bindings() {
     );
     let recipe = dir.write(
         "top.spitin",
-        "pipeline top.spit\nroot d\npath l::raw: p/{shot}.raw\n",
+        "pipeline top.spit\nroot d\ninputs:\n    l::raw: p/{shot}.raw\n",
     );
     let output = support::spit(&["inputs", recipe.to_str().unwrap()]);
     let stderr = support::text(&output.stderr);

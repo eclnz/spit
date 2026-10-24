@@ -20,8 +20,8 @@ path result: out/{@product}/{@entities}
 ";
 
 const RECIPE: &str = "\
-discover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}
-path image: data/sub-{sub}/ses-{ses}/image.nii.gz
+inputs:\n    contexts: data/sub-{sub}/ses-{ses}
+    image: data/sub-{sub}/ses-{ses}/image.nii.gz
 ";
 
 const FILES: [&str; 3] = [
@@ -50,7 +50,6 @@ fn the_stage_finds_contexts_and_sources_without_touching_the_pipeline() {
         .unwrap();
     assert_eq!(resolved.inventory.contexts.len(), 3);
     assert_eq!(resolved.inventory.artifacts.len(), 3);
-    assert_eq!(resolved.inventory.discovered["sessions"].len(), 3);
     assert!(resolved.gaps.is_empty());
     // The recipe's source path stays in the recipe; only the pipeline's own
     // rule is in the pipeline.
@@ -65,7 +64,7 @@ fn jobs_resolve_from_the_logical_pipeline_and_the_stages_inventory() {
     let tree = Tree::new("dag", &FILES);
     let resolved = inventory_of(RECIPE, &tree);
     let inventory = resolved.dag_inventory();
-    assert!(inventory.discovered.is_empty());
+    assert_eq!(inventory.contexts.len(), 3);
     let dag = resolve(&parse_pipeline(PIPELINE).unwrap(), &inventory).unwrap();
     assert_eq!(dag.jobs.len(), 3);
 }
@@ -73,13 +72,16 @@ fn jobs_resolve_from_the_logical_pipeline_and_the_stages_inventory() {
 #[test]
 fn drop_rules_are_applied_by_the_stage_before_jobs_exist() {
     let tree = Tree::new("drop", &FILES);
-    let recipe = format!("{RECIPE}exclude [sub] where sessions count<2\n");
+    let recipe = format!("{RECIPE}exclude [sub] where contexts[sub,ses] count<2\n");
     let resolved = inventory_of(&recipe, &tree);
     assert_eq!(resolved.inventory.artifacts.len(), 2);
     let removed = &resolved.inventory.removed;
     assert_eq!(removed.len(), 1);
     assert_eq!(removed[0].identity(), "[sub=5]");
-    assert_eq!(removed[0].rule, "exclude [sub] where sessions count<2");
+    assert_eq!(
+        removed[0].rule,
+        "exclude [sub] where contexts[sub,ses] count<2"
+    );
     assert_eq!(removed[0].found, Some(1));
     let dag = resolve(
         &parse_pipeline(PIPELINE).unwrap(),
@@ -92,7 +94,7 @@ fn drop_rules_are_applied_by_the_stage_before_jobs_exist() {
 #[test]
 fn require_gaps_are_the_stages_to_report_and_do_not_reach_the_resolver() {
     let tree = Tree::new("missing", &FILES);
-    let recipe = format!("{RECIPE}require [sub] where sessions count>=2\n");
+    let recipe = format!("{RECIPE}require [sub] where contexts[sub,ses] count>=2\n");
     let resolved = inventory_of(&recipe, &tree);
     assert_eq!(resolved.gaps.len(), 1);
     assert!(matches!(
@@ -115,7 +117,7 @@ fn require_gaps_are_the_stages_to_report_and_do_not_reach_the_resolver() {
 #[test]
 fn a_recipe_can_settle_records_that_were_already_written() {
     let recipe = parse_input_spec(
-        "path image: data/{sub}/{ses}.nii.gz\nrequire [sub] where image count>=2\n",
+        "inputs:\n    image: data/{sub}/{ses}.nii.gz\nrequire [sub] where image count>=2\n",
     )
     .unwrap();
     let inventory = spit::parse_source_inventory(
@@ -184,7 +186,7 @@ fn missing_source_coverage_names_the_path_rule_and_unmatched_file() {
     );
     let recipe = tree.write(
         "analysis.spitin",
-        "pipeline analysis.spit\nroot .\ndefault path: t1w sub-{sub}/ses-{ses}\nrequire [sub, ses] where t1w count=1\n",
+        "pipeline analysis.spit\nroot .\ninputs:\n    default: t1w sub-{sub}/ses-{ses}\nrequire [sub, ses] where t1w count=1\n",
     );
     let run = |extra: &[&str]| {
         Command::new(env!("CARGO_BIN_EXE_spit"))
@@ -231,7 +233,7 @@ fn missing_source_coverage_names_the_path_rule_and_unmatched_file() {
 #[test]
 fn a_recipe_path_for_an_unknown_source_is_rejected_by_the_stage() {
     let tree = Tree::new("unknown", &FILES);
-    let recipe = parse_input_spec(&format!("{RECIPE}path other: x/{{sub}}.txt\n")).unwrap();
+    let recipe = parse_input_spec(&format!("{RECIPE}    other: x/{{sub}}.txt\n")).unwrap();
     let error = recipe
         .resolve(
             &parse_pipeline(PIPELINE).unwrap(),
@@ -243,7 +245,7 @@ fn a_recipe_path_for_an_unknown_source_is_rejected_by_the_stage() {
 
 #[test]
 fn an_empty_inventory_is_still_a_valid_stage_result() {
-    let recipe = parse_input_spec("path image: data/{sub}/{ses}.nii.gz\n").unwrap();
+    let recipe = parse_input_spec("inputs:\n    image: data/{sub}/{ses}.nii.gz\n").unwrap();
     let resolved = recipe
         .resolve(
             &parse_pipeline(PIPELINE).unwrap(),
@@ -276,10 +278,9 @@ fn a_named_recipe_runs_in_memory_and_binds_output_paths() {
     fs::write(
         tree.0.join("analysis.spitin"),
         "pipeline analysis.spit\nroot .\n\
-         discover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}\n\
-         exclude [sub] where sessions count<2\n\
-         require [sub] where sessions count>=2\n\
-         path image: data/sub-{sub}/ses-{ses}/image.nii.gz\n",
+         inputs:\n    contexts: data/sub-{sub}/ses-{ses}\n    image: data/sub-{sub}/ses-{ses}/image.nii.gz\n\
+         exclude [sub] where contexts[sub,ses] count<2\n\
+         require [sub] where contexts[sub,ses] count>=2\n",
     )
     .unwrap();
     // A recipe beside the pipeline is not loaded unless named.
@@ -304,7 +305,7 @@ fn a_named_recipe_runs_in_memory_and_binds_output_paths() {
     assert!(paths.status.success(), "{notes}");
     assert!(
         notes.contains(
-            "note: excluded [sub=5] by `exclude [sub] where sessions count<2` (line 4); found 1"
+            "note: excluded [sub=5] by `exclude [sub] where contexts[sub,ses] count<2` (line 6); found 1"
         ),
         "{notes}"
     );
@@ -338,9 +339,8 @@ fn explicit_spitin_uses_its_own_directory_and_require_reports_gaps() {
     fs::write(
         &recipe,
         "pipeline ../pipeline.spit\nroot .\n\
-         discover sessions: [sub, ses] from dirs data/sub-{sub}/ses-{ses}\n\
-         require [sub] where sessions count>=2\n\
-         path image: data/sub-{sub}/ses-{ses}/image.nii.gz\n",
+         inputs:\n    contexts: data/sub-{sub}/ses-{ses}\n    image: data/sub-{sub}/ses-{ses}/image.nii.gz\n\
+         require [sub] where contexts[sub,ses] count>=2\n",
     )
     .unwrap();
     let run = |args: &[&str]| {
@@ -363,7 +363,7 @@ fn explicit_spitin_uses_its_own_directory_and_require_reports_gaps() {
         assert!(!output.status.success(), "{args:?}");
         assert!(
             String::from_utf8_lossy(&output.stderr)
-                .contains("discovery coverage for `sessions` at [sub=5]"),
+                .contains("discovery coverage for `contexts[sub,ses]` at [sub=5]"),
             "{args:?}: {}",
             String::from_utf8_lossy(&output.stderr)
         );
@@ -406,20 +406,19 @@ fn a_spitout_writes_values_in_the_declared_dimension_order() {
         &Default::default(),
     );
     // `image` declares [sub, ses]: its records and the contexts follow suit.
-    assert!(text.contains("contexts sessions:\n"), "{text}");
+    assert!(text.contains("contexts:\n"), "{text}");
     assert!(text.contains("    image[sub=1,ses=1]\n"), "{text}");
 }
 
 #[test]
-fn a_discovered_spitout_groups_sources_by_session() {
+fn a_spitout_lists_sources_and_unnamed_contexts() {
     let pipeline = parse_pipeline(
         "source image: Image [sub, ses, run]\nsource t1w: Image [sub, ses]\nsource lut: Table\n",
     )
     .unwrap();
-    let recipe =
-        parse_input_spec("discover sessions: [sub, ses] from dirs sub-{sub}/ses-{ses}\n").unwrap();
+    let recipe = parse_input_spec("inputs:\n    contexts: sub-{sub}/ses-{ses}\n").unwrap();
     let inventory = spit::parse_source_inventory(
-        "contexts sessions:\n    [sub=02,ses=01]\n    [sub=01,ses=02]\n    [sub=01,ses=01]\n\
+        "contexts:\n    [sub=02,ses=01]\n    [sub=01,ses=02]\n    [sub=01,ses=01]\n\
 sources:\n    image[sub=02,ses=01,run=01]\n\
     image[sub=01,ses=02,run=01]\n\
     image[sub=01,ses=01,run=02]\n\
@@ -430,21 +429,24 @@ sources:\n    image[sub=02,ses=01,run=01]\n\
     .unwrap();
     let rendered = spit::render_source_inventory(&inventory, &pipeline, &recipe.rules);
     let shared = rendered.find("    lut\n").unwrap();
-    let first = rendered.find("    [sub=01,ses=01]:").unwrap();
-    let second = rendered.find("    [sub=01,ses=02]:").unwrap();
-    let third = rendered.find("    [sub=02,ses=01]:").unwrap();
+    let first = rendered.find("    [sub=01,ses=01]").unwrap();
+    let second = rendered.find("    [sub=01,ses=02]").unwrap();
+    let third = rendered.find("    [sub=02,ses=01]").unwrap();
     assert!(
         shared < first && first < second && second < third,
         "{rendered}"
     );
-    assert!(rendered.contains("[run=01,02]:"), "{rendered}");
+    assert!(
+        rendered.contains("image[sub=01,ses=01,run=01]"),
+        "{rendered}"
+    );
     let reparsed = spit::parse_source_inventory(&rendered).unwrap();
     let mut actual = reparsed.artifacts;
     let mut expected = inventory.artifacts;
     actual.sort_by(|a, b| a.product.cmp(&b.product).then(a.entities.cmp(&b.entities)));
     expected.sort_by(|a, b| a.product.cmp(&b.product).then(a.entities.cmp(&b.entities)));
     assert_eq!(actual, expected);
-    assert_eq!(reparsed.discovered, inventory.discovered);
+    assert_eq!(reparsed.contexts, inventory.contexts);
 }
 
 #[test]
@@ -480,10 +482,7 @@ fn a_spitout_alone_drives_jobs_without_its_recipe() {
         spitout.contains("source_paths:\n    image: data/sub-{sub}/ses-{ses}/image.nii.gz"),
         "{spitout}"
     );
-    assert!(
-        spitout.contains("[sub=1,ses=2]:\n        image"),
-        "{spitout}"
-    );
+    assert!(spitout.contains("image[sub=1,ses=2]"), "{spitout}");
     // Step 3 from the .spitout and the pipeline, with the recipe removed.
     fs::remove_file(recipe).unwrap();
     let dag = spit(&["dag", pipeline, saved, "--paths"]);
@@ -579,22 +578,22 @@ fn contexts_follow_the_discover_rule_and_list_in_the_order_written() {
     let text = spit::render_source_inventory(&resolved.inventory, &pipeline, &spec.rules);
     let contexts: Vec<_> = text
         .lines()
-        .skip_while(|line| *line != "contexts sessions:")
+        .skip_while(|line| *line != "contexts:")
         .skip(1)
         .filter(|line| line.starts_with("    ["))
         .collect();
     assert_eq!(
         contexts,
         [
-            "    [sub=1,ses=1]:",
-            "    [sub=1,ses=2]:",
-            "    [sub=2,ses=1]:",
-            "    [sub=10,ses=1]:",
+            "    [ses=1,sub=1]",
+            "    [ses=1,sub=2]",
+            "    [ses=1,sub=10]",
+            "    [ses=2,sub=1]",
         ],
         "{text}"
     );
     // Records keep their own product's declared order.
-    assert!(text.contains("        image\n"), "{text}");
+    assert!(text.contains("    image[ses=1,sub=1]\n"), "{text}");
 }
 
 #[test]
@@ -606,32 +605,25 @@ fn a_recipe_that_does_not_fit_its_pipeline_says_why() {
     .unwrap();
     for (recipe, error, message) in [
         (
-            "path out: x/{sub}.txt\n",
+            "inputs:\n    out: x/{sub}.txt\n",
             spit::InputError::OutputPath {
                 product: "out".into(),
             },
             "`out` is made by a step, so its path belongs in the .spit pipeline; a .spitin gives paths only for sources",
         ),
         (
-            "path nothing: x/{sub}.txt\n",
+            "inputs:\n    nothing: x/{sub}.txt\n",
             spit::InputError::NotASource {
                 product: "nothing".into(),
             },
             "input path `nothing` must name a source product in the pipeline",
         ),
         (
-            "path other: y/{sub}.txt\n",
+            "inputs:\n    other: y/{sub}.txt\n",
             spit::InputError::PathInBoth {
                 product: "other".into(),
             },
             "`other` has path rules in both .spit and .spitin; keep the pipeline's if every dataset has this layout, or the recipe's if only this one does",
-        ),
-        (
-            "discover subs: [sub] from dirs data/sub-{sub}\n",
-            spit::InputError::NoSourcePath {
-                product: "raw".into(),
-            },
-            "source `raw` has no path rule, so its files cannot be found; write `path raw:` in the pipeline or the recipe, or `default path:` in the recipe",
         ),
     ] {
         let found = spit::parse_input_spec(recipe)
@@ -673,7 +665,7 @@ fn a_recipe_path_is_the_default_for_sources_with_no_rule() {
         "{coverage}"
     );
     let recipe = parse_input_spec(
-        "default path: raw/{@product}/{@entities}.nii.gz\npath mask: raw/masks/sub-{sub}.nii.gz\n",
+        "inputs:\n    default: raw/{@product}/{@entities}.nii.gz\n    mask: raw/masks/sub-{sub}.nii.gz\n",
     )
     .unwrap();
     // Only `image` has no rule of its own; the recipe stays as written.
@@ -715,12 +707,13 @@ fn a_recipe_path_is_the_default_for_sources_with_no_rule() {
 
 #[test]
 fn a_recipe_path_cannot_name_a_stage() {
-    let error = parse_input_spec("default path: x/{@stage}/{@product}/{@entities}\n").unwrap_err();
-    assert_eq!(error.line(), 1);
+    let error =
+        parse_input_spec("inputs:\n    default: x/{@stage}/{@product}/{@entities}\n").unwrap_err();
+    assert_eq!(error.line(), 2);
     assert!(
         error
             .to_string()
-            .contains("a .spitin `default path:` is the rule for sources with none of their own, and no source is made in a stage; leave out `{@stage}`"),
+            .contains("a .spitin `inputs: default:` is for sources, and no source is made in a stage; leave out `{@stage}`"),
         "{error}"
     );
 }
@@ -731,7 +724,7 @@ fn check_lists_a_recipe_default_as_the_recipes() {
     fs::write(tree.0.join("staged.spit"), STAGED).unwrap();
     fs::write(
         tree.0.join("staged.spitin"),
-        "pipeline staged.spit\nroot .\ndefault path: raw/{@product}/{@entities}.nii.gz\n",
+        "pipeline staged.spit\nroot .\ninputs:\n    default: raw/{@product}/{@entities}.nii.gz\n",
     )
     .unwrap();
     let recipe = tree.0.join("staged.spitin");
@@ -758,15 +751,15 @@ fn check_finds_a_bad_recipe_source_path_at_its_line() {
         |recipe: &str| support::rendered(&spit::diagnose_recipe_against(recipe, &pipeline));
     // A default shared by two sources must tell them apart.
     assert_eq!(
-        diagnose("default path: raw/{@entities}.nii.gz\n"),
-        ["error: line 1: products `image` and `mask` bind to the same path `raw/sub=sub.nii.gz` for the same entities; include `{@product}` or distinguish their path rules"]
+        diagnose("inputs:\n    default: raw/{@entities}.nii.gz\n"),
+        ["error: line 2: products `image` and `mask` bind to the same path `raw/sub=sub.nii.gz` for the same entities; include `{@product}` or distinguish their path rules"]
     );
     // A recipe's own rule is checked too, which only `--path-rules` did.
     assert_eq!(
-        diagnose("default path: raw/{@product}/{@entities}.nii.gz\npath mask: raw/mask.nii.gz\n"),
-        ["error: line 2: path template for `mask` omits dimension `sub`; artifacts differing only in `sub` would share a path"]
+        diagnose("inputs:\n    default: raw/{@product}/{@entities}.nii.gz\n    mask: raw/mask.nii.gz\n"),
+        ["error: line 3: path template for `mask` omits dimension `sub`; artifacts differing only in `sub` would share a path"]
     );
-    assert!(diagnose("default path: raw/{@product}/{@entities}.nii.gz\n").is_empty());
+    assert!(diagnose("inputs:\n    default: raw/{@product}/{@entities}.nii.gz\n").is_empty());
 }
 
 #[test]
@@ -784,7 +777,7 @@ fn one_recipe_default_covers_sources_of_different_extensions() {
          default entities: {@key}={@value} separated \"__\"\n",
     )
     .unwrap();
-    let recipe = parse_input_spec("default path: raw/sub-{sub}/{@product}\n").unwrap();
+    let recipe = parse_input_spec("inputs:\n    default: raw/sub-{sub}/{@product}\n").unwrap();
     let resolved = recipe
         .resolve(&pipeline, InputSource::Discover(tree.path()))
         .unwrap();

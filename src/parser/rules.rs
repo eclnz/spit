@@ -115,9 +115,34 @@ fn parse_groups_where<'a>(
             format!("expected `where` after the groups, as in `{example}`"),
         )
     })?;
-    let mut tokens = after.split_whitespace();
-    let product = qualified_identifier(tokens.next().unwrap_or(""), number, "constraint product")?;
-    Ok((dimensions, product, tokens))
+    let target_end = match after.strip_prefix("contexts[") {
+        Some(_) => after
+            .find(']')
+            .map(|end| end + 1)
+            .ok_or_else(|| ParseError::new(number, "expected `]` after context dimensions"))?,
+        None => after.find(char::is_whitespace).unwrap_or(after.len()),
+    };
+    let (target, terms) = after.split_at(target_end);
+    let product = if let Some(dimensions) = target.strip_prefix("contexts[") {
+        let dimensions = dimensions.strip_suffix(']').ok_or_else(|| {
+            ParseError::new(number, "expected `]` after context dimensions").at_token(target)
+        })?;
+        let dimensions = comma_items(dimensions, number)?;
+        let mut seen = std::collections::BTreeSet::new();
+        for dimension in dimensions {
+            identifier(dimension, number, "context dimension")?;
+            if !seen.insert(dimension) {
+                return Err(ParseError::new(
+                    number,
+                    "context target dimensions must be distinct",
+                ));
+            }
+        }
+        target
+    } else {
+        qualified_identifier(target, number, "constraint product")?
+    };
+    Ok((dimensions, product, terms.split_whitespace()))
 }
 
 /// The source, terms and dimensions after `per` of a rule in the old
@@ -356,12 +381,6 @@ fn parse_group_dimensions(dimensions: &str, number: usize) -> Result<Vec<&str>, 
         ParseError::new(number, "expected closing `]` in constraint dimensions").at_token(bracketed)
     })?;
     let dimensions = comma_items(dimensions, number)?;
-    if dimensions.is_empty() {
-        return Err(ParseError::new(
-            number,
-            "coverage rule needs group dimensions",
-        ));
-    }
     for dimension in &dimensions {
         identifier(dimension, number, "constraint dimension")?;
     }

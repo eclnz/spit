@@ -54,7 +54,7 @@ fn read_inventory<'a, 't: 'a>(
     enum InventorySection {
         Sources,
         SourcePaths,
-        Contexts(Option<String>),
+        Contexts,
         Removed,
     }
 
@@ -106,7 +106,7 @@ fn read_inventory<'a, 't: 'a>(
                     group = None;
                 }
                 Some(Header::Contexts(None)) => {
-                    section = Some(InventorySection::Contexts(None));
+                    section = Some(InventorySection::Contexts);
                     parent = None;
                     group = None;
                 }
@@ -116,14 +116,11 @@ fn read_inventory<'a, 't: 'a>(
                     group = None;
                 }
                 Some(Header::Contexts(Some(name))) => {
-                    let name = identifier(name, number, "discovery name")
-                        .map_err(|error| error.locate(original))?;
-                    // A named section says the discovery ran, even when every
-                    // context it found was skipped and the section is empty.
-                    inventory.discovered.entry(name.to_owned()).or_default();
-                    section = Some(InventorySection::Contexts(Some(name.to_owned())));
-                    parent = None;
-                    group = None;
+                    return Err(ParseError::new(
+                        number,
+                        format!("named context section `{name}` is replaced by `contexts:`"),
+                    )
+                    .locate(original));
                 }
                 _ => match section {
                     Some(InventorySection::Sources) => {
@@ -163,7 +160,7 @@ fn read_inventory<'a, 't: 'a>(
                         }
                         inventory.source_paths.insert(name.to_owned(), template);
                     }
-                    Some(InventorySection::Contexts(ref name)) => {
+                    Some(InventorySection::Contexts) => {
                         let nests_under = parent
                             .as_ref()
                             .filter(|(_, at)| line.starts_with('[') && indent > *at);
@@ -175,13 +172,6 @@ fn read_inventory<'a, 't: 'a>(
                             let context = parse_context(line.trim_end_matches(':'), number)
                                 .map_err(|e| e.locate(original))?;
                             inventory.contexts.push(context.clone());
-                            if let Some(name) = name {
-                                inventory
-                                    .discovered
-                                    .entry(name.clone())
-                                    .or_default()
-                                    .push(context.clone());
-                            }
                             parent = line.ends_with(':').then_some((context, indent));
                             group = None;
                         } else {
@@ -229,10 +219,6 @@ fn read_inventory<'a, 't: 'a>(
     // inventory as reading its text does here.
     inventory.contexts.sort();
     inventory.contexts.dedup();
-    for bindings in inventory.discovered.values_mut() {
-        bindings.sort();
-        bindings.dedup();
-    }
     ParsedInventory {
         inventory,
         record_lines,

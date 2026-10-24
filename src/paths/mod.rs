@@ -13,7 +13,7 @@ pub(crate) use self::bind::{bound_paths, case_collisions, check_rules};
 pub use self::bind::{
     validate_bound_source_files, validate_source_files, BoundPaths, VerifiedFiles,
 };
-pub(crate) use self::components::{decode_component, encode_component, validate_discovery_rule};
+pub(crate) use self::components::{decode_component, encode_component, validate_context_pattern};
 pub use self::entities::EntitiesFormat;
 pub(crate) use self::product::{shown_path, stage_directories, unspelled_entities, PathBinder};
 pub(crate) use self::rules::collect_paths;

@@ -1,6 +1,7 @@
 pipeline analytics.spit
 root analytics_data
-default path: {@product}/{@entities}
+inputs:
+    default: {@product}/{@entities}
 
 require [tenant, customer, day] where events count>=1
 require [tenant, customer] where customers count=1
