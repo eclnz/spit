@@ -317,7 +317,7 @@ source t1w : MRI<T1w,Anatomical> [sub, ses]
 --- mrtrix_dwi.spit = examples/composites/mrtrix/mrtrix_dwi.spit
 -->
 
-```text
+```spit
 use clean_dwi_session, register_to_dwi from mrtrix_dwi.spit as mrx
 
 stage preprocess:

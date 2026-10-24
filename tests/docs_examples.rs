@@ -420,13 +420,13 @@ fn command_verdict(page: &str, block: &Block) -> Option<String> {
     }
     match (block.language.as_str(), kind) {
         ("text", None) if looks_like_spit(&block.text) => Some(format!(
-            "{at}: looks like SPIT code in a `text` block; fence it `spit`, or put \
-             `{OPEN} fragment -->`, `setup` or `recipe` before it, or `plain` if it is not SPIT"
+            "{at}: looks like SPIT code in a `text` block; fence it `spit`, \
+             or put `{OPEN} plain -->` before it if it is not SPIT"
         )),
         ("text", None) | ("text", Some(Kind::Plain)) => None,
-        ("text", Some(Kind::Setup | Kind::Recipe | Kind::Files | Kind::Fragment)) => {
-            spit_verdict(page, block)
-        }
+        ("text", Some(Kind::Setup | Kind::Recipe | Kind::Files | Kind::Fragment)) => Some(format!(
+            "{at}: SPIT code is fenced `spit`, whatever the marker before it says"
+        )),
         ("text", Some(Kind::Output)) => {
             let marker = block.marker.as_ref()?;
             let tree = command_tree(marker, &block.previous);
