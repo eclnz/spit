@@ -94,5 +94,6 @@ The entry points are in [`src/resolver/mod.rs`](https://github.com/eclnz/spit/bl
 - `collect_pipeline` reports every error that does not follow from another:
     - each declaration's check gives its first fault;
     - a step's shape is checked only once its types hold, since a product of the wrong type at a port is most often an argument in the wrong place, which would make the shape wrong too;
+    - a product whose path rule names a dimension no product has is not also checked for the dimensions its rule omits, since the unknown name is most often a misspelling of one it has;
 - The command line diagnoses a file before `inputs`, `dag` or `artifacts` uses it, so each of those prints every error, not only the first ([diagnostics](diagnostics.md)).
 - An input the inventory cannot supply makes a job incomplete. `resolve` fails with the first such gap, and the report keeps them all.
