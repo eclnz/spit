@@ -598,6 +598,8 @@ The companion is an ordinary source that a step reads by name. It inherits `raw_
 
 The path can come from a [recipe](#recipes) when the layout varies by dataset. Name the main source and give its complete file path, including its extension:
 
+<!-- spit-doc: fragment -->
+
 ```spit
 # survey.spit
 source raw_photo : Image<Photo,Captured> .raw [site, visit, shot]
@@ -707,6 +709,8 @@ A source takes the first path rule of these that it has:
 A rule written for one source comes before any default, and the dataset's default for its inputs comes before the pipeline's general one. An output's path never comes from the recipe. `spit check recipe.spitin --path-rules` shows which rule each source takes, and marks those the recipe gives `(recipe)`.
 
 ### Discover contexts from directories
+
+<!-- spit-doc: fragment -->
 
 ```spit
 inputs:

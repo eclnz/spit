@@ -24,6 +24,8 @@ Types do not select artifacts. Product names and dimensions determine which sour
 
 ## Reusable definitions
 
+<!-- spit-doc: fragment -->
+
 ```spit
 use text.spit as text
 sorted = text::sort_lines(text::shard)
