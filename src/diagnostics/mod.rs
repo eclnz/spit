@@ -584,11 +584,13 @@ fn order(mut diagnostics: Vec<Diagnostic>) -> Vec<Diagnostic> {
         )
     }
     diagnostics.sort_by(|a, b| key(a).cmp(&key(b)));
-    // The spans already reported as errors on each line. A second error at
-    // the same span, or where either covers the whole line, is one fault said
-    // again, such as a shared path rule failing for each product it serves.
-    // An error elsewhere on the line is a fault of its own, and is kept.
-    let mut errored: BTreeMap<_, Vec<Option<Range<usize>>>> = BTreeMap::new();
+    // The errors already reported on each line. A second error with the same
+    // message at the same span, or where either covers the whole line, is one
+    // fault said again, such as a shared path rule failing for each product it
+    // serves. An error with another message, or elsewhere on the line, is a
+    // fault of its own, and is kept.
+    type Reported<'a> = (&'a str, Option<Range<usize>>);
+    let mut errored: BTreeMap<_, Vec<Reported>> = BTreeMap::new();
     let keep: Vec<bool> = diagnostics
         .iter()
         .map(|diagnostic| {
@@ -601,11 +603,12 @@ fn order(mut diagnostics: Vec<Diagnostic>) -> Vec<Diagnostic> {
                 return spans.is_empty();
             }
             let columns = &diagnostic.columns;
-            let repeats = spans
-                .iter()
-                .any(|span| span.is_none() || columns.is_none() || span == columns);
+            let repeats = spans.iter().any(|(message, span)| {
+                *message == diagnostic.message
+                    && (span.is_none() || columns.is_none() || span == columns)
+            });
             if !repeats {
-                spans.push(columns.clone());
+                spans.push((&diagnostic.message, columns.clone()));
             }
             !repeats
         })

@@ -80,17 +80,20 @@ pub(crate) fn compile(pipeline: &Pipeline) -> Result<CompiledPipeline<'_>, Resol
 pub(crate) fn collect_pipeline(pipeline: &Pipeline) -> PipelineCheck<'_> {
     let mut errors = Vec::new();
     let mut poisoned = BTreeSet::new();
+    let mut duplicated = BTreeSet::new();
     let products = index_products(
         &pipeline.products,
         &pipeline.invocations,
         &mut errors,
         &mut poisoned,
+        &mut duplicated,
     );
     let operations = index_operations(&pipeline.operations, &mut errors, &mut poisoned);
     let producers = index_producers(
         &pipeline.invocations,
         &products,
         &operations,
+        &duplicated,
         &mut errors,
         &mut poisoned,
     );
