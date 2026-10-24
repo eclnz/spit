@@ -380,6 +380,98 @@
       }
     },
     {
+      "pipeline": "examples/runnable/checks/notes.spit",
+      "recipe": "examples/runnable/checks/notes.spitin",
+      "expect": {
+        "sources": {
+          "note": 2
+        },
+        "operations": {
+          "copy": 2
+        },
+        "targets": {
+          "copied": 2
+        },
+        "dependencies": 0,
+        "removals": 0,
+        "calls": 0
+      }
+    },
+    {
+      "pipeline": "examples/runnable/folders/albums.spit",
+      "recipe": "examples/runnable/folders/albums.spitin",
+      "expect": {
+        "sources": {
+          "trip": 2
+        },
+        "operations": {
+          "copy": 2,
+          "pack": 2
+        },
+        "targets": {
+          "archive": 2
+        },
+        "dependencies": 2,
+        "removals": 0,
+        "calls": 0
+      }
+    },
+    {
+      "pipeline": "examples/runnable/lines/lines.spit",
+      "recipe": "examples/runnable/lines/lines.spitin",
+      "expect": {
+        "sources": {
+          "shard": 3
+        },
+        "operations": {
+          "merge": 2,
+          "sort_lines": 3
+        },
+        "targets": {
+          "merged": 2
+        },
+        "dependencies": 3,
+        "removals": 0,
+        "calls": 0
+      }
+    },
+    {
+      "pipeline": "examples/runnable/steps/steps.spit",
+      "recipe": "examples/runnable/steps/steps.spitin",
+      "expect": {
+        "sources": {
+          "note": 1
+        },
+        "operations": {
+          "sort_lines": 2
+        },
+        "targets": {
+          "tidied": 1
+        },
+        "dependencies": 1,
+        "removals": 0,
+        "calls": 1
+      }
+    },
+    {
+      "pipeline": "examples/runnable/verify/checked_copy.spit",
+      "recipe": "examples/runnable/verify/checked_copy.spitin",
+      "expect": {
+        "sources": {
+          "text": 1
+        },
+        "operations": {
+          "copy": 1
+        },
+        "targets": {
+          "copied": 1
+        },
+        "dependencies": 0,
+        "removals": 0,
+        "calls": 0
+      }
+    },
+    {
       "pipeline": "examples/stress/observatory.spit",
       "recipe": "examples/stress/observatory.spitin",
       "expect": {

@@ -111,8 +111,14 @@ fn dag_output(arguments: &[&Path]) -> String {
 fn a_recipe_and_the_spitout_beside_it_settle_the_same_jobs() {
     let recipes = example_recipes();
     assert!(recipes.len() >= 10, "{recipes:?}");
+    let mut compared = 0;
     for recipe in recipes {
         let spitout = recipe.with_extension("spitout");
+        // The runnable examples are planned from their recipe alone.
+        if !spitout.exists() {
+            continue;
+        }
+        compared += 1;
         let text = fs::read_to_string(&recipe).unwrap();
         let named = text
             .lines()
@@ -128,4 +134,5 @@ fn a_recipe_and_the_spitout_beside_it_settle_the_same_jobs() {
             spitout.display()
         );
     }
+    assert!(compared >= 10, "{compared} recipes have a .spitout");
 }
