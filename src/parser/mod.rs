@@ -211,6 +211,9 @@ pub(crate) enum StatementKind {
     Dimensions(Vec<String>),
     /// A `types` line: how much of the pipeline must be typed.
     Types(TypeChecking),
+    /// A `type Name<Param, ...>` line: a parameterized type and the names
+    /// of its parameters, in order.
+    TypeDecl(String, Vec<String>),
     /// A `default entities` line: how `{@entities}` is spelled, or a
     /// dimension's label in it, for the products of `stage` or, outside
     /// every stage, of the whole pipeline.

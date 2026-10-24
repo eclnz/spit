@@ -69,6 +69,7 @@ pub enum Word {
     EntitiesFormat,
     Default,
     Types,
+    Type,
 }
 
 /// What a word's hover says.
@@ -92,7 +93,7 @@ impl Word {
 }
 
 /// Every word's documentation, in the order of [`Word`].
-pub static DOCS: [Doc; 50] = [
+pub static DOCS: [Doc; 51] = [
     Doc {
         name: "source",
         kind: "keyword",
@@ -443,6 +444,13 @@ pub static DOCS: [Doc; 50] = [
         example: "types strict",
         summary: "How much of the pipeline must be typed, once at the top level. `types strict` makes it an error for a source to have no type, for an operation a step or call uses to have a port with no type, or for a product a step makes to have a type inference leaves partly unknown. `types standard`, the default, checks only the types that are known. An imported file's `types` line does not apply.",
     },
+    Doc {
+        name: "type",
+        kind: "keyword",
+        anchor: "declared-types",
+        example: "type Frame<Kind, Space>",
+        summary: "Declares a parameterized type and names its parameters, in order. A type written with this name takes that many arguments wherever it appears, in a source, an operation's port or a step's product; arguments are still given by position. Under `types strict`, a type written with arguments must be declared.",
+    },
 ];
 
 /// One use of a word: its 1-based line and 1-based UTF-16 columns, the end
@@ -550,6 +558,7 @@ fn keyword_word(keyword: Keyword) -> Option<Word> {
         Keyword::Stage => Word::Stage,
         Keyword::Dimensions => Word::Dimensions,
         Keyword::Types => Word::Types,
+        Keyword::Type => Word::Type,
         Keyword::Entities => Word::EntitiesFormat,
         Keyword::Drop | Keyword::Sidecars | Keyword::Skip | Keyword::ShellSource => return None,
     })

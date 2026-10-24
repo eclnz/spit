@@ -40,12 +40,14 @@ pub(crate) enum Keyword {
     ShellSource,
     /// `types strict` or `types standard`, how much of the pipeline must be typed.
     Types,
+    /// `type Name<Param, ...>`, which declares a parameterized type.
+    Type,
 }
 
 /// Every keyword and its word. Each word is reserved: no product may take
 /// it as its name, so the first word of a line says whether it starts a
 /// statement.
-const WORDS: [(Keyword, &str); 20] = [
+const WORDS: [(Keyword, &str); 21] = [
     (Keyword::Use, "use"),
     (Keyword::Root, "root"),
     (Keyword::Source, "source"),
@@ -66,6 +68,7 @@ const WORDS: [(Keyword, &str); 20] = [
     (Keyword::Sidecars, "sidecars"),
     (Keyword::ShellSource, "shell-source"),
     (Keyword::Types, "types"),
+    (Keyword::Type, "type"),
 ];
 
 /// The keywords that open a block of their statements when written alone

@@ -389,7 +389,7 @@ fn a_misspelled_dimension_is_not_also_reported_as_omitted() {
 fn unrelated_errors_at_one_span_are_each_reported() {
     // `wrapped` has two faults of its own: its type is left open, and it has
     // no path rule. Both point at the same text.
-    let text = "types strict\nsource raw : Image [sub]\noperation wrap(x: Image) -> Frame<T>\ncommand wrap: w {x} {@output}\nwrapped = wrap(raw)\n";
+    let text = "types strict\nsource raw : Image [sub]\noperation wrap(x: Image) -> Frame<T>\ncommand wrap: w {x} {@output}\nwrapped = wrap(raw)\ntype Frame<Kind>\n";
     let found = errors(diagnose(text, None));
     let said: Vec<_> = found.iter().map(|error| error.line).collect();
     assert_eq!(said, [Some(5), Some(5)], "{found:?}");

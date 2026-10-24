@@ -9,6 +9,7 @@ use super::body::OpenBody;
 use super::check::parse_default_checks;
 use super::declarations::{
     parse_dimension_order, parse_invocation_parts, parse_path, parse_product,
+    parse_type_declaration,
 };
 use super::entities::parse_entities;
 use super::keyword::{removed_section, Keyword, BLOCKS};
@@ -385,6 +386,10 @@ fn flow_rest(
                     ))
                 }
             })
+        }
+        Some((Keyword::Type, declaration)) => {
+            top_level_only("`type`, which declares a type for the whole pipeline,")?;
+            parse_type_declaration(declaration, number)?
         }
         Some((Keyword::Operation, declaration)) => {
             let kind =
