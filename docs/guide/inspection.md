@@ -2,6 +2,8 @@
 
 SPIT checks a pipeline before running any work. A useful inspection loop is:
 
+<!-- spit-doc: fragment -->
+
 ```sh
 spit check pipeline.spit --path-rules
 spit inputs dataset.spitin --unmatched
@@ -24,6 +26,8 @@ Identity values match as written: `store=s07` and `store=S07` are different. An 
 ## Partial plans
 
 Plain `dag` stops at an incomplete job. `spit artifacts dataset.spitin` reports all incompleteness it can trace. If you need a plan for work whose inputs are complete, run:
+
+<!-- spit-doc: fragment -->
 
 ```sh
 spit dag dataset.spitin --partial -o plan.spitdag

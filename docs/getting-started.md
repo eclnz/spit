@@ -6,6 +6,8 @@ This walkthrough uses the checked-in [text processing pipeline](https://github.c
 
 Install a stable [Rust toolchain](https://www.rust-lang.org/tools/install), then run from the repository root:
 
+<!-- spit-doc: fragment -->
+
 ```sh
 cargo build
 ```
@@ -39,6 +41,8 @@ merged = merge(sorted @vary(part))
 
 ## 3. Check it and inspect a plan
 
+<!-- spit-doc: run -->
+
 ```sh
 cargo run -- check examples/commands/command_demo/command_demo.spit --path-rules
 cargo run -- dag examples/commands/command_demo/command_demo.spit --counts --commands
@@ -47,6 +51,8 @@ cargo run -- dag examples/commands/command_demo/command_demo.spit --counts --com
 The inline root and source path find two `alpha` shards and one `beta` shard in the checked-in data folder. The `.spitout` beside the pipeline records the same inputs. The plan has three sort jobs and two merge jobs. `--counts` shows the number per step; `--commands` shows the filled command arguments before anything runs.
 
 ## 4. Save the plan
+
+<!-- spit-doc: run -->
 
 ```sh
 cargo run -- dag examples/commands/command_demo/command_demo.spit -o /tmp/command_demo.spitdag

@@ -118,6 +118,8 @@ require [sub, ses] where bold count>=1
 
 Create a tiny dataset beside those two files. These files can be empty because SPIT plans work without reading their contents:
 
+<!-- spit-doc: run -->
+
 ```sh
 for sub in 01 02 03; do
   for ses in 01 02; do
@@ -270,6 +272,12 @@ require [group] where text::shard count>=1
 
 Create two shards in group alpha and one in beta:
 
+<!-- spit-doc: run
+--- imported.spit = examples/imports/imported.spit
+--- imported.spitin = examples/imports/imported.spitin
+--- text.spit = examples/imports/text.spit
+-->
+
 ```sh
 mkdir -p text_data/input/alpha text_data/input/beta
 touch text_data/input/alpha/01.txt text_data/input/alpha/02.txt text_data/input/beta/01.txt
@@ -303,6 +311,10 @@ stage anatomy:
 
 Over the ACT example's mock data, the session call makes the 48 jobs the hand-written `preprocess` stage makes, the same number of each operation. `spit dag examples/composites/mrtrix/act.spitin --counts` lists them under the call:
 
+<!-- spit-doc: output
+spit dag examples/composites/mrtrix/act.spitin --counts
+-->
+
 ```text
 jobs  step                                                   stage
       corrected_dwi, session_b0 = mrx::clean_dwi_session     preprocess
@@ -313,20 +325,35 @@ jobs  step                                                   stage
 
 The products the body makes for itself are filed under the call's first output, as `corrected_dwi::imported`, written `corrected_dwi.imported` in a path. `--commands` starts each job with the call and the library line it came from:
 
+<!-- spit-doc: output
+spit dag examples/composites/mrtrix/act.spitin --commands
+-->
+
 ```text
 Job 49  mrx::export_nifti  [anatomy]
-  from:   t1w_dwi = mrx::register_to_dwi (act.spit line 24), mrtrix_dwi.spit line 65
+  from:   t1w_dwi = mrx::register_to_dwi (act.spit line 26), mrtrix_dwi.spit line 65
   run:    mrconvert derivatives/preprocess/session_b0/sub=01__ses=01.mif derivatives/anatomy/t1w_dwi.b0_nifti/sub=01__ses=01.nii.gz
 ```
 
-An error in a step the call makes is reported at the call, with the library line beneath it. Without the reverse b=0 of `sub-02`'s first session, `spit dag` stops at the call:
+An error in a step the call makes is reported at the call, with the library line beneath it. The recipe's `require [sub, ses] where reverse_b0 count=1` reports a missing reverse b=0 first, as a gap in the sources. Without that line, and without the reverse b=0 of `sub-02`'s first session, `spit dag` stops at the call:
+
+<!-- spit-doc: output
+rm examples/commands/mrtrix3_act/mrtrix3_mock_data/sub-02/ses-01/fmap/*
+grep -v 'reverse_b0 count=1' examples/composites/mrtrix/act.spitin > act.spitin.new
+mv act.spitin.new examples/composites/mrtrix/act.spitin
+spit dag examples/composites/mrtrix/act.spitin
+-->
 
 ```text
-error: line 21, column 33: in `corrected_dwi, session_b0 = mrx::clean_dwi_session(...)`: no `corrected_dwi::reverse_mif` artifact for input `reverse` of `mrx::combine_pe_pair` at [ses=01,sub=02]
+error: examples/composites/mrtrix/act.spit: line 23, column 33: in `corrected_dwi, session_b0 = mrx::clean_dwi_session(...)`: no `corrected_dwi::reverse_mif` artifact for input `reverse` of `mrx::combine_pe_pair` at [ses=01,sub=02]
   --> mrtrix_dwi.spit: line 45, column 15: the step in the body of `mrx::clean_dwi_session`
 ```
 
 [`germline.spit`](https://github.com/eclnz/spit/blob/dev/examples/composites/germline/germline.spit) aligns one sample's lanes with BWA, sorts and merges them with samtools, marks duplicates with GATK, which writes the BAM's index beside it, and calls a GVCF. [`somatic.spit`](https://github.com/eclnz/spit/blob/dev/examples/composites/germline/somatic.spit) calls it for a tumour and its matched normal, 7 jobs each. The two calls have the same steps but file their products apart, as `normal_bam.aligned` and `tumour_bam.aligned`. The check `align_sample` puts on its `bam` output runs beside the one `mark_duplicates` puts on its own, on the job that makes the BAM:
+
+<!-- spit-doc: output
+spit dag examples/composites/germline/somatic.spitin --commands
+-->
 
 ```text
   check:  test -s out/normal_bam/patient=P01.bam
@@ -381,6 +408,8 @@ SPIT emits these command lines; it does not read acquisition metadata, check tra
 
 To try source discovery with empty placeholder files, run:
 
+<!-- spit-doc: run -->
+
 ```sh
 sh examples/commands/mrtrix3_act/mock_mrtrix3_inputs.sh
 cargo run -- inputs examples/commands/mrtrix3_act/mrtrix3_act.spitin -o examples/commands/mrtrix3_act/mrtrix3_mock_data/inputs.spitout
@@ -393,6 +422,8 @@ The script creates the three sessions and seven DWI runs listed in the example i
 ## Check every example locally
 
 From the repository root, run:
+
+<!-- spit-doc: fragment -->
 
 ```sh
 cargo build --release && python3 examples/checks/check.py

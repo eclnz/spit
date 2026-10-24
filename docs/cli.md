@@ -13,6 +13,8 @@ SPIT checks a pipeline, settles a dataset's inputs, and resolves jobs. Run `spit
 
 `check` accepts one `.spit`, `.spitin`, or `.spitout` file. `inputs` accepts a `.spitin` recipe, or a `.spit` pipeline with an inline `root` or `--root <directory>`. `dag` and `artifacts` accept those same forms, or a pipeline with a `.spitout`. A recipe names its pipeline and either declares a root or inherits that pipeline's root. Inline roots are relative to their declaring file; `--root` is relative to the working folder and is an error when the pipeline already declares a root. A `.spitout` does not name its pipeline, so pass the pipeline separately.
 
+<!-- spit-doc: fragment -->
+
 ```sh
 spit dag dataset.spitin
 spit dag pipeline.spit dataset.spitout
@@ -46,6 +48,8 @@ Use `-` in place of a `.spitout` to read it from standard input. A recipe and a 
 `check --json` writes diagnostics to standard output and exits 1 if any are errors. Warnings alone exit 0.
 
 ## A practical sequence
+
+<!-- spit-doc: fragment -->
 
 ```sh
 spit check dataset.spitin --path-rules
