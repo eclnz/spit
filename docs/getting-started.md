@@ -16,7 +16,10 @@ The executable is `target/debug/spit`. The commands below use `cargo run --` so 
 
 The essential lines are:
 
-<!-- spit-doc: fragment -->
+<!-- spit-doc: setup
+default entities: {@key}={@value} separated "_"
+default path: output/{@product}/{@entities}.txt
+-->
 
 ```spit
 root command_demo_data
@@ -55,7 +58,11 @@ The `.spitdag` is the job description a [runner](https://github.com/eclnz/spit-b
 
 For a small pipeline, set `root data` and source path rules in the `.spit`, then run `spit inputs analysis.spit` or `spit dag analysis.spit`. The folder is relative to the pipeline file. Add a recipe when selection or coverage rules are needed:
 
-<!-- spit-doc: fragment -->
+<!-- spit-doc: recipe
+--- analysis.spit
+source image : Image [sub]
+path image: image-{sub}.nii.gz
+-->
 
 ```spit
 pipeline analysis.spit

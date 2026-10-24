@@ -2,7 +2,11 @@
 
 A `.spitin` recipe binds a reusable pipeline to a dataset. It names the pipeline and the root folder containing source data:
 
-<!-- spit-doc: fragment -->
+<!-- spit-doc: recipe
+--- analysis.spit
+source image : Image [sub]
+path image: data/sub-{sub}/image.nii.gz
+-->
 
 ```spit
 pipeline analysis.spit
@@ -13,7 +17,12 @@ Both paths are relative to the recipe's own folder. If the pipeline already decl
 
 ## Source paths
 
-<!-- spit-doc: fragment -->
+<!-- spit-doc: recipe
+pipeline analysis.spit
+root data
+--- analysis.spit
+source image : Image [sub]
+-->
 
 ```spit
 inputs:
@@ -25,7 +34,13 @@ A recipe's `image:` entry inside `inputs:` names a source; its `default:` entry 
 
 ## Discovery
 
-<!-- spit-doc: fragment -->
+<!-- spit-doc: recipe
+pipeline analysis.spit
+root data
+--- analysis.spit
+source image : Image [sub, ses]
+path image: image-{sub}-{ses}.nii.gz
+-->
 
 ```spit
 inputs:
@@ -36,7 +51,17 @@ Each matching directory contributes an observed `[sub=...,ses=...]` context, inc
 
 ## Coverage
 
-<!-- spit-doc: fragment -->
+<!-- spit-doc: recipe
+pipeline analysis.spit
+root data
+inputs:
+    t1w: sub-{sub}/ses-{ses}/t1w.nii.gz
+    bold: sub-{sub}/ses-{ses}/bold-{run}.nii.gz
+    contexts: sub-{sub}/ses-{ses}
+--- analysis.spit
+source t1w : T1 [sub, ses]
+source bold : Bold [sub, ses, run]
+-->
 
 ```spit
 exclude bold[sub=02,ses=01,run=3]  # corrupted scan

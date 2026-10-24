@@ -4,7 +4,10 @@ The input with the most dimensions normally drives a step. SPIT makes a job for 
 
 ## Shared dimensions
 
-<!-- spit-doc: fragment -->
+<!-- spit-doc: setup
+default entities: {@key}={@value} separated "_"
+default path: out/{@product}/{@entities}
+-->
 
 ```spit
 source reading : Series [station, day]
@@ -17,7 +20,15 @@ Each `reading[station=...,day=...]` drives a job. That job reads the `policy` fo
 
 ## Selectors
 
-<!-- spit-doc: fragment -->
+<!-- spit-doc: setup
+source reading : Series [station, day]
+source calibration : Series [station, revision]
+source reference : Series [station]
+operation calibrate(series: Series, calibration: Series) -> Series
+operation compare(series: Series, reference: Series) -> Series
+default entities: {@key}={@value} separated "_"
+default path: out/{@product}/{@entities}
+-->
 
 ```spit
 calibrated = calibrate(reading, calibration @where(revision=2))
@@ -28,7 +39,11 @@ anomaly = compare(calibrated, reference @same(station))
 
 ## Collections
 
-<!-- spit-doc: fragment -->
+<!-- spit-doc: setup
+source calibrated : Series [station, day]
+default entities: {@key}={@value} separated "_"
+default path: out/{@product}/{@entities}
+-->
 
 ```spit
 operation summarise(days: many Series @min(2)) -> Report
@@ -39,7 +54,10 @@ report = summarise(calibrated @vary(day))
 
 ## Broadcasting
 
-<!-- spit-doc: fragment -->
+<!-- spit-doc: setup
+default entities: {@key}={@value} separated "_"
+default path: out/{@product}/{@entities}
+-->
 
 ```spit
 dimensions [station, scenario]
