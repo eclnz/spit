@@ -55,8 +55,13 @@ class Run:
 
 def workspace(repo, target):
     # Copy actual example data and imports, excluding every stored inventory.
-    shutil.copytree(repo / "examples", target / "examples",
-                    ignore=shutil.ignore_patterns("*.spitout", "*.spitdag", "checks", "__pycache__"))
+    # The `checks` folder here holds this script; `runnable/checks` is an example.
+    def ignore(directory, names):
+        return {name for name in names
+                if name.endswith((".spitout", ".spitdag")) or name == "__pycache__"
+                or (name == "checks" and Path(directory).name == "examples")}
+
+    shutil.copytree(repo / "examples", target / "examples", ignore=ignore)
 
 
 def check_entry(binary, repo, entry, logs):
