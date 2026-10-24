@@ -75,6 +75,8 @@ require [sub, ses] where t1w count=1
 
 `spit inputs dataset.spitin -o dataset.spitout` writes the settled source identities and source paths. A hand-written `.spitout` works too:
 
+<!-- spit-doc: spitout -->
+
 ```text
 sources:
     shard[group=alpha,part=01]
