@@ -130,6 +130,7 @@ This file holds the rules for agents.
 
 - Check every claim against the binary or the code, not against an earlier page or pull request.
 - Run every example the page shows. Name every type, function, file and test exactly, so a search finds it.
+  - `tests/docs_examples.rs` runs `spit check` on each `spit` block of the user pages, and fails one that does not check. A block that is not a whole pipeline, such as a recipe or a step that continues an earlier block, is marked with `<!-- spit-doc: fragment -->` on the line before it. The test covers no recipe, `sh`, `text` or `json` block (#165), so run those by hand.
 - Read the change for history. Words such as "now", "no longer", "used to", "was replaced" and "previously" usually mark a sentence about the past. Rewrite it to say what is.
 - Check that its links and anchors resolve. GitHub's anchor for `## \`dag --partial\`` is `#dag---partial`.
 - For a change to `docs/` or `properdocs.yml`, build the site as CI does, and check that each changed diagram renders:

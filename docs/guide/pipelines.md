@@ -6,6 +6,8 @@ A `.spit` pipeline declares sources, operations, commands, and steps. Declaratio
 
 ## Operations
 
+<!-- spit-doc: fragment -->
+
 ```spit
 source image : Image .nii.gz [sub]
 
@@ -15,6 +17,8 @@ denoised = denoise(image)
 ```
 
 An input port is `name` or `name: Type`; add `many` for a collection. An output can be unnamed, as above, or named. Calls follow input port order. A named output is assigned to its corresponding product and used in a command by its port name:
+
+<!-- spit-doc: fragment -->
 
 ```spit
 operation split(series: Series) -> (low: Series .csv, high: Series .csv)
@@ -27,6 +31,8 @@ Every non-`beside` output must be used in its command. The command is an executa
 ## Checks
 
 Use `verify` for a job-specific input test, before its main command:
+
+<!-- spit-doc: fragment -->
 
 ```spit
 verify denoise: inspect_image {input}
@@ -47,6 +53,8 @@ For checks shared by every output in a file or stage, write `default check: none
 
 An operation can have an indented body in place of a `command`. Its outputs are named because the body assigns each one:
 
+<!-- spit-doc: fragment -->
+
 ```spit
 operation clean(input: Lines) -> Lines
 command clean: clean_tool {input} {@output}
@@ -62,6 +70,8 @@ The call expands to the body's steps, and a body may call another operation with
 
 ## Stages
 
+<!-- spit-doc: fragment -->
+
 ```spit
 default entities: {@key}={@value} separated "__"
 stage preprocess:
@@ -76,6 +86,8 @@ stage analysis:
 A stage groups steps and can give their products a path and extension default. Stages can nest; a product's `{@stage}` is its stage path. Stages do not impose execution order: product dependencies do. Stage syntax and rules are in [stages](../language-reference.md#stages).
 
 ## Imports
+
+<!-- spit-doc: fragment -->
 
 ```spit
 use text.spit as text
