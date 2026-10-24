@@ -15,7 +15,7 @@ stage preprocess:
     stage combine:
         operation merge(items: many Lines) -> Lines
         command merge: sort -m -u -o {@output} {items}
-        merged = merge(sorted @ vary(part))
+        merged = merge(sorted @vary(part))
 
     # Written in `preprocess` itself, after its nested stages.
     resorted = sort_lines(merged)

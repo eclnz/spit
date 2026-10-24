@@ -7,7 +7,7 @@ use support::{bound, spit, text, Tree};
 
 const FORMAT: &str =
     "default entities: {@key}_{@value} separated \"-\"\ndefault entities sub: subject\n";
-const FLOW: &str = "source raw [sub, ses, run]\nsource config\noperation copy(x)\noperation merge(x: many)\ncopied = copy(raw)\nsession = merge(copied @ vary(run))\nsubject = merge(session @ vary(ses))\nall = merge(subject @ vary(sub))\n";
+const FLOW: &str = "source raw [sub, ses, run]\nsource config\noperation copy(x)\noperation merge(x: many)\ncopied = copy(raw)\nsession = merge(copied @vary(run))\nsubject = merge(session @vary(ses))\nall = merge(subject @vary(sub))\n";
 
 fn ok(args: &[&str]) -> String {
     let result = spit(args);

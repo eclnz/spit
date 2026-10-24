@@ -11,9 +11,9 @@ check lines(n): check_lines {@path} {n}
 check ndim(n): check_ndim {@path} {n}
 source raw : Text [id]
 path raw: in/{id}.txt
-operation clean(text: Text @ check(lines(5))) -> Text .txt
+operation clean(text: Text @check(lines(5))) -> Text .txt
 command clean: sort -o {@output} {text}
-operation split(text: Text) -> (a: Text .txt, b: Text .txt @ check(!nonempty, lines(9)))
+operation split(text: Text) -> (a: Text .txt, b: Text .txt @check(!nonempty, lines(9)))
 command split: sp {text} {a} {b}
 ";
 
@@ -139,7 +139,7 @@ fn an_output_opts_out_of_a_file_default_for_itself_alone() {
 #[test]
 fn a_check_on_one_artifact_runs_once_however_many_lists_name_it() {
     let commands = commands(&format!(
-        "{DECLARED}operation twice(text: Text) -> Text .txt @ check(nonempty)\ncommand twice: sort -o {{@output}} {{text}}\ndefault check: nonempty, nonempty\nstage pre:\n    default check: nonempty\n    done = twice(raw)\n"
+        "{DECLARED}operation twice(text: Text) -> Text .txt @check(nonempty)\ncommand twice: sort -o {{@output}} {{text}}\ndefault check: nonempty, nonempty\nstage pre:\n    default check: nonempty\n    done = twice(raw)\n"
     ));
     assert_eq!(after(&commands, "done"), ["test -s out/done/id=1.txt"]);
 }
@@ -147,7 +147,7 @@ fn a_check_on_one_artifact_runs_once_however_many_lists_name_it() {
 #[test]
 fn a_producer_default_covers_the_check_a_reader_would_repeat() {
     let commands = commands(&format!(
-        "{DECLARED}operation read(text: Text @ check(nonempty)) -> Text .txt\ncommand read: sort -o {{@output}} {{text}}\ndefault check: nonempty\nfirst = clean(raw)\nsecond = read(first)\n"
+        "{DECLARED}operation read(text: Text @check(nonempty)) -> Text .txt\ncommand read: sort -o {{@output}} {{text}}\ndefault check: nonempty\nfirst = clean(raw)\nsecond = read(first)\n"
     ));
     assert_eq!(
         commands.matches("test -s out/first/id=1.txt").count(),
@@ -198,7 +198,7 @@ fn defaults_are_checked_like_other_uses() {
 
 #[test]
 fn opting_out_belongs_on_an_output() {
-    let input = errors("operation f(x: Text @ check(!nonempty)) -> Text\n");
+    let input = errors("operation f(x: Text @check(!nonempty)) -> Text\n");
     assert!(
         input.iter().any(|e| e.contains("cannot opt out")),
         "{input:?}"

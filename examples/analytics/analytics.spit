@@ -26,10 +26,10 @@ operation join_campaigns(events: Relation<PurchasedEvent,K>, campaigns: Relation
 attributed_events = join_campaigns(purchased_events, campaigns)
 
 operation aggregate_day(events: many Relation<AttributedEvent,K>) -> Relation<CustomerDayMetric,K>
-daily_metrics = aggregate_day(attributed_events @ vary(event))
+daily_metrics = aggregate_day(attributed_events @vary(event))
 
 operation aggregate_customer(days: many Relation<CustomerDayMetric,K>) -> Relation<CustomerMetric,K>
-customer_metrics = aggregate_customer(daily_metrics @ vary(day))
+customer_metrics = aggregate_customer(daily_metrics @vary(day))
 
 operation aggregate_tenant(customers: many Relation<CustomerMetric,CustomerKey>) -> Relation<TenantMetric,TenantKey>
-tenant_metrics = aggregate_tenant(customer_metrics @ vary(customer))
+tenant_metrics = aggregate_tenant(customer_metrics @vary(customer))

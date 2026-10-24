@@ -36,12 +36,12 @@ Use a `check` to test one artifact, whether it is a source, an input port, or an
 
 ```spit
 check nonempty: test -s {@path}
-operation denoise(input: Image) -> Image .nii.gz @ check(nonempty)
+operation denoise(input: Image) -> Image .nii.gz @check(nonempty)
 ```
 
-SPIT records these commands in the DAG; the runner performs them. A failed check or verify fails the job. Checks can take declared parameters, such as `check ndim(n): check_ndim {@path} {n}` and `@ check(ndim(3))`. See [checks](../language-reference.md#checks) for attachment points and execution order.
+SPIT records these commands in the DAG; the runner performs them. A failed check or verify fails the job. Checks can take declared parameters, such as `check ndim(n): check_ndim {@path} {n}` and `@check(ndim(3))`. See [checks](../language-reference.md#checks) for attachment points and execution order.
 
-For checks shared by every output in a file or stage, write `default check: nonempty, ndim(3)` once. A nested stage can remove an inherited check with `default check: !nonempty`; an output can do the same with `@ check(!nonempty)`. See [default checks](../language-reference.md#default-checks).
+For checks shared by every output in a file or stage, write `default check: nonempty, ndim(3)` once. A nested stage can remove an inherited check with `default check: !nonempty`; an output can do the same with `@check(!nonempty)`. See [default checks](../language-reference.md#default-checks).
 
 ## Composite operations
 
@@ -70,7 +70,7 @@ stage preprocess:
 
 stage analysis:
     default path: results/{@product}/{@entities}
-    summary = summarise(denoised @ vary(sub))
+    summary = summarise(denoised @vary(sub))
 ```
 
 A stage groups steps and can give their products a path and extension default. Stages can nest; a product's `{@stage}` is its stage path. Stages do not impose execution order: product dependencies do. Stage syntax and rules are in [stages](../language-reference.md#stages).

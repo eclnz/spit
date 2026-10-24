@@ -1,6 +1,6 @@
 //! Runtime checks: `check name(params): command` declarations, and the
-//! `@ clause(...)` list a port or a source may end with, of which
-//! `@ check(...)` attaches checks.
+//! `@clause(...)` list a port or a source may end with, of which
+//! `@check(...)` attaches checks.
 
 use crate::command::CommandTemplate;
 use crate::model::{CheckDef, CheckUse};
@@ -69,7 +69,7 @@ pub(super) fn parse_check(line: &str, number: usize) -> Result<CheckDef, ParseEr
     })
 }
 
-/// One `@ keyword(argument)` clause after a port or a source, with its
+/// One `@keyword(argument)` clause after a port or a source, with its
 /// whole text for errors.
 pub(super) struct Clause<'a> {
     pub(super) keyword: &'a str,
@@ -78,7 +78,7 @@ pub(super) struct Clause<'a> {
 }
 
 /// Split `text` at its first `@` outside brackets into what it declares
-/// and the clauses after it, each `@ keyword(argument)`; `expected` says
+/// and the clauses after it, each `@keyword(argument)`; `expected` says
 /// what may be written there, for a clause that is not of that form.
 pub(super) fn split_clauses<'a>(
     text: &'a str,
@@ -91,6 +91,7 @@ pub(super) fn split_clauses<'a>(
     let mut clauses = Vec::new();
     let mut rest = &text[at..];
     while let Some(after) = rest.strip_prefix('@') {
+        no_space_after_at(after, number)?;
         let next = top_level_at(after).unwrap_or(after.len());
         let clause = after[..next].trim();
         let (keyword, argument) = clause
@@ -107,6 +108,29 @@ pub(super) fn split_clauses<'a>(
     Ok((text[..at].trim_end(), clauses))
 }
 
+/// An error when `after`, the text following an `@`, starts with whitespace
+/// before a clause's `keyword(`: a clause is written `@keyword(...)`.
+///
+/// Keep in step with `rule_word` in `builtins.rs`, which colours a keyword
+/// only when it follows its `@` directly.
+pub(super) fn no_space_after_at(after: &str, number: usize) -> Result<(), ParseError> {
+    let clause = after.trim_start();
+    if clause.len() == after.len() {
+        return Ok(());
+    }
+    let keyword = clause.split(['(', ' ', '\t']).next().unwrap_or_default();
+    // Another word falls through to the error that lists what may be written.
+    let known = ["each", "vary", "where", "same", "min", "check", "drop"].contains(&keyword);
+    if known && clause[keyword.len()..].trim_start().starts_with('(') {
+        return Err(ParseError::new(
+            number,
+            format!("write `@{keyword}(...)`, with no space between `@` and `{keyword}`"),
+        )
+        .at_token(clause));
+    }
+    Ok(())
+}
+
 /// The first `@` in `text` outside parentheses, brackets and angles.
 fn top_level_at(text: &str) -> Option<usize> {
     let mut depth = 0usize;
@@ -121,7 +145,7 @@ fn top_level_at(text: &str) -> Option<usize> {
     None
 }
 
-/// The checks a `@ check(...)` clause attaches: `nonempty, ndim(3)`, and
+/// The checks a `@check(...)` clause attaches: `nonempty, ndim(3)`, and
 /// for an output, the defaults it opts out of, written `!nonempty`.
 pub(super) fn check_uses(
     clause: &Clause<'_>,
@@ -131,7 +155,7 @@ pub(super) fn check_uses(
     if items.is_empty() {
         return Err(ParseError::new(
             number,
-            "`@ check(...)` names at least one check, as in `@ check(nonempty)`",
+            "`@check(...)` names at least one check, as in `@check(nonempty)`",
         )
         .at_token(clause.text));
     }
@@ -219,7 +243,7 @@ fn check_argument(argument: &str, number: usize) -> Result<String, ParseError> {
     Ok(argument.to_owned())
 }
 
-/// The checks of `clauses`, which may only be `@ check(...)`; `what` names
+/// The checks of `clauses`, which may only be `@check(...)`; `what` names
 /// where they are written for the error about any other clause. Opting out
 /// of a default, `!name`, is for an output alone.
 pub(super) fn only_checks(
@@ -252,7 +276,7 @@ pub(super) fn output_checks(
             return Err(ParseError::new(
                 number,
                 format!(
-                    "{what} takes only `@ check(...)`, not `@ {}(...)`",
+                    "{what} takes only `@check(...)`, not `@{}(...)`",
                     clause.keyword
                 ),
             )
@@ -296,7 +320,7 @@ mod tests {
     #[test]
     fn clauses_split_after_the_port_and_name_their_checks() {
         let (port, clauses) =
-            split_clauses("dwi: DWI @ check(ndim(4), nonempty) @ check(x)", "", 1).unwrap();
+            split_clauses("dwi: DWI @check(ndim(4), nonempty) @check(x)", "", 1).unwrap();
         assert_eq!(port, "dwi: DWI");
         assert_eq!(clauses.len(), 2);
         let (uses, exempt) = check_uses(&clauses[0], 1).unwrap();
@@ -306,9 +330,9 @@ mod tests {
         let (port, clauses) = split_clauses("items: many Table<Image @ x>", "", 1).unwrap();
         assert_eq!(port, "items: many Table<Image @ x>");
         assert!(clauses.is_empty());
-        let (_, clauses) = split_clauses("x @ check(a(\"b c\"))", "", 1).unwrap();
+        let (_, clauses) = split_clauses("x @check(a(\"b c\"))", "", 1).unwrap();
         assert!(check_uses(&clauses[0], 1).is_err());
-        let (_, clauses) = split_clauses("x @ check()", "", 1).unwrap();
+        let (_, clauses) = split_clauses("x @check()", "", 1).unwrap();
         assert!(check_uses(&clauses[0], 1).is_err());
     }
 }

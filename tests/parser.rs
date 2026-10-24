@@ -49,7 +49,7 @@ operation register(signal: FilteredSignal, calibration: Calibration) -> AlignedS
 registered = register(denoised, calibration)
 
 operation mean(signals: many AlignedSignal) -> MeanSignal
-mean_signal = mean(registered @ vary(run))
+mean_signal = mean(registered @vary(run))
 default entities: {@key}={@value} separated \"__\"\npath denoised: out/{@product}/{@entities}\npath registered: out/{@product}/{@entities}\npath mean_signal: out/{@product}/{@entities}\n";
 const RECIPE: &str = "\
 require [site, day] where signal count>=1
@@ -95,7 +95,7 @@ fn rules_and_records_belong_outside_the_pipeline() {
 
 #[test]
 fn reports_line_for_bad_text() {
-    let text = "source signal : Signal [site, run]\noperation denoise(signals: many Signal)\n\n  denoised = denoise(signal @ vary(run) @ vary(day))\n";
+    let text = "source signal : Signal [site, run]\noperation denoise(signals: many Signal)\n\n  denoised = denoise(signal @vary(run) @vary(day))\n";
     let error = parse_pipeline(text).unwrap_err();
     assert_eq!(error.line(), 4);
     assert!(error.to_string().contains("line 4"));
@@ -127,7 +127,7 @@ fn flow_form_infers_intermediate_products_and_keeps_inventory_separate() {
 operation clean(image: Image<S>) -> Clean<S>\n\
 cleaned = clean(raw)\n\
 operation mean(cleans: many Clean<S>) -> Mean<S>\n\
-average : Mean<Native> [site] = mean(cleaned @ vary(run))\n\
+average : Mean<Native> [site] = mean(cleaned @vary(run))\n\
 sources:\n\
     raw[site=A,run=1]\n\
     raw[site=A,run=2]\n";

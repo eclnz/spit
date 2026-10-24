@@ -67,7 +67,7 @@ source extra [subject]
 operation f(image: Image) -> Image
 operation g(image: Image, image2: Image) -> Image
 cleaned = f(image)
-other = f(extra @ where(subject=z))
+other = f(extra @where(subject=z))
 both = g(cleaned, image)
 default entities: {@key}={@value} separated \"__\"
 path cleaned: out/{@product}/{@entities}

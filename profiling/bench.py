@@ -114,7 +114,7 @@ def study(binary, extra, ext):
         "operation touch(image: Image) -> Image",
         "cleaned = clean(image, mask)",
         "aligned = align(cleaned, reference)",
-        "averaged = average(aligned @ vary(run))",
+        "averaged = average(aligned @vary(run))",
         "score = compare(averaged, reference)",
     ]
     previous = "averaged"

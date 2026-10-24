@@ -12,7 +12,7 @@ stage preprocess:
 
     operation merge(items: many Lines) -> Lines
     command merge: sort -m -u -o {@output} {items}
-    merged = merge(sorted @ vary(part))
+    merged = merge(sorted @vary(part))
 
 stage analysis:
     default path: results/{@product}/{@entities}.txt
