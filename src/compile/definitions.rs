@@ -16,6 +16,7 @@ pub(super) fn index_products<'a>(
     invocations: &[Invocation],
     errors: &mut Vec<(DefinitionSubject, ResolveError)>,
     poisoned: &mut BTreeSet<String>,
+    duplicated: &mut BTreeSet<String>,
 ) -> BTreeMap<&'a str, &'a ProductDef> {
     let mut indexed = BTreeMap::new();
     for product in products {
@@ -33,6 +34,7 @@ pub(super) fn index_products<'a>(
             }
             poisoned.insert(product.name.clone());
         } else if indexed.contains_key(product.name.as_str()) {
+            duplicated.insert(product.name.clone());
             errors.push((
                 site,
                 ResolveError::InvalidDefinition {
@@ -207,6 +209,7 @@ pub(super) fn index_producers(
     invocations: &[Invocation],
     products: &BTreeMap<&str, &ProductDef>,
     operations: &BTreeMap<&str, &OperationDef>,
+    duplicated: &BTreeSet<String>,
     errors: &mut Vec<(DefinitionSubject, ResolveError)>,
     poisoned: &mut BTreeSet<String>,
 ) -> BTreeMap<String, usize> {
@@ -240,15 +243,19 @@ pub(super) fn index_producers(
                 // Neither step is the product's, so no type or shape of
                 // either reaches the steps that read it.
                 poisoned.insert(output.clone());
-                errors.push((
-                    site.clone(),
-                    ResolveError::InvalidDefinition {
-                        subject: site.clone(),
-                        detail: format!(
-                            "product `{output}` has more than one producing invocation"
-                        ),
-                    },
-                ));
+                // Two steps that name a product each declare it, which was
+                // reported as a duplicate at the second step's line.
+                if !duplicated.contains(output) {
+                    errors.push((
+                        site.clone(),
+                        ResolveError::InvalidDefinition {
+                            subject: site.clone(),
+                            detail: format!(
+                                "product `{output}` has more than one producing invocation"
+                            ),
+                        },
+                    ));
+                }
             } else {
                 producers.insert(output.clone(), index);
             }
