@@ -10,11 +10,19 @@ A line's first word says what it is, so the words that start statements are rese
 
 A keyword alone with its `:` opens a block of its statements, each written on a line indented beneath it without the keyword. These read the same:
 
+<!-- spit-doc: setup
+operation denoise(image: Image) -> Image
+-->
+
 ```text
 source raw : Image [sub]
 source mask : Mask [sub]
 command denoise: dn {image} {@output}
 ```
+
+<!-- spit-doc: setup
+operation denoise(image: Image) -> Image
+-->
 
 ```text
 source:
@@ -31,6 +39,14 @@ command:
 
 A statement goes on over the next lines while its brackets are open, as a long `operation` signature or a step's arguments may:
 
+<!-- spit-doc: setup
+source denoised : Image [sub, session]
+source anatomy : Image [sub, session]
+operation register(moving: Image, reference: Image) -> Image
+default entities: {@key}={@value} separated "_"
+default path: out/{@product}/{@entities}
+-->
+
 ```text
 registered = register(
     denoised,
@@ -39,6 +55,10 @@ registered = register(
 ```
 
 A command, of `command`, `verify` or `check`, also goes on over the lines indented beneath it, with blank lines and comments between them. A line break separates its words as a space does:
+
+<!-- spit-doc: setup
+operation register(moving: Image, reference: Image) -> Image
+-->
 
 ```text
 command register: flirt -in {moving}
@@ -50,7 +70,7 @@ Beneath any other statement, a line indented further is a statement of its own.
 
 ## Products and dimensions
 
-```text
+```spit
 source image : Image [subject, visit, run]
 source reference [subject, visit]
 source testset : Data
@@ -64,6 +84,14 @@ A source may declare the extension its files have after its type, as an operatio
 A source with no dimensions takes no brackets: `source testset : Data` and `source calibration` each declare one artifact, displayed by its bare name. A source with no dimensions matches every job that takes it as an input, without a selector.
 
 An assignment introduces a derived product automatically:
+
+<!-- spit-doc: setup
+source image : Image [subject, visit, run]
+operation process(image: Image) -> Image
+operation mean(items: many Image) -> Image
+default entities: {@key}={@value} separated "_"
+default path: out/{@product}/{@entities}
+-->
 
 ```text
 processed = process(image)
@@ -84,6 +112,10 @@ Each source states the order of its own dimensions: `source bold [sub, ses, run]
 
 When a product holds two dimensions that no source orders, declare the order once, anywhere at the top level:
 
+<!-- spit-doc: setup
+source runs : Run [model, config, seed]
+-->
+
 ```text
 dimensions [model, config, seed]
 ```
@@ -92,7 +124,7 @@ This happens when `@each` broadcasts a dimension that no source shares with the 
 
 ## Operations and commands
 
-```text
+```spit
 operation process(image: Image) -> Image
 command process: process_tool --in {image} --out {@output}
 
@@ -101,6 +133,13 @@ command mean: mean_tool {images} --out {@output}
 ```
 
 Declare an operation before its first use. Inputs in a call follow the port order in the declaration, and SPIT checks each product's type against that port. For example, with `operation compare(series: Series, policy: Policy)`, `compare(reading, policy)` uses `reading` as `series`; reversing the arguments is a type error when their types are known. A `one` input must resolve to exactly one artifact for each job, so every other input may only use dimensions the driving input has, unless it broadcasts them with `@each(...)`; SPIT rejects a pipeline that breaks this before reading any inputs, and reports a missing match for a job. Steps may be written in any order, but none may read its way back to its own output: each group of steps that read each other in a loop is one error, `pipeline cycle: d -> e -> d`, reported at one of its steps, and neither those steps nor the steps that read from them are checked further. Every `many` input names the dimensions it collects at the call, with `@vary(dimension, ...)`; the operation only says `many`, so one operation can collect runs in one step and sessions in another. Its command placeholder expands to one separately quoted argument per artifact, in natural order. Artifacts are compared dimension by dimension in the pipeline's [dimension order](#dimension-order). Within a value, runs of digits compare as numbers and other characters compare one by one, so `run=2` comes before `run=10`, ISO dates such as `2026-09-01` sort by date, and names sort by character (`lr-high`, `lr-low`, `warmup`). Values equal as numbers but written differently, such as `1` and `01`, are then ordered by their text. A many placeholder must occupy a whole argument. An operation takes at most one `many` input, which may sit beside `one` inputs; each of those is matched once per group:
+
+<!-- spit-doc: setup
+source reading : Series [station, day]
+source policy : Policy [station]
+default entities: {@key}={@value} separated "_"
+default path: out/{@product}/{@entities}
+-->
 
 ```text
 operation summarise(days: many Series @min(2), policy: Policy) -> Summary
@@ -111,6 +150,12 @@ summary = summarise(reading @vary(day), policy)
 
 One aggregate can remove several dimensions at once. List them in one `@vary(...)`; their order within the clause does not change the collection order. With `summary [model, config]`, this makes one leaderboard over all model and config combinations, ordered first by model and then by config:
 
+<!-- spit-doc: setup
+source summary : Summary [model, config]
+default entities: {@key}={@value} separated "_"
+default path: out/{@product}[/{@entities}]
+-->
+
 ```text
 operation leaderboard(summaries: many Summary) -> Table
 board = leaderboard(summary @vary(model, config))
@@ -119,6 +164,16 @@ board = leaderboard(summary @vary(model, config))
 `@min(n)` counts the whole collection, across both dimensions. A call that writes two `@vary` clauses is an error; put both dimensions in one clause. The collection order follows the pipeline's [dimension order](#dimension-order), even if `@vary` lists those dimensions in another order. The ragged sweep example declares `dimensions [model, config, seed]` and gets a model-first collection.
 
 Selectors narrow what an input matches. The sensors walkthrough shows `where` and `same` with a complete inventory:
+
+<!-- spit-doc: setup
+source reading : Series [station, day]
+source calibration : Series [station, revision]
+source reference : Series [station]
+operation calibrate(series: Series, calibration: Series) -> Series
+operation compare(series: Series, reference: Series) -> Series
+default entities: {@key}={@value} separated "_"
+default path: out/{@product}/{@entities}
+-->
 
 ```text
 calibrated = calibrate(reading, calibration @where(revision=2))
@@ -129,14 +184,30 @@ anomaly = compare(calibrated, reference @same(station))
 
 Every `@` clause, whether a selector, `@min(n)` or `@check(...)`, is written with its keyword directly after the `@`. A space between them is an error that says what to write:
 
+<!-- spit-doc: fragment -->
+
 ```text
 source series : T [day]
 operation f(x: many T) -> T
 r = f(series @ vary(day))
+```
+
+<!-- spit-doc: output
+spit check x.spit || true
+--- x.spit = @previous
+-->
+
+```text
 error: line 3, column 16: write `@vary(...)`, with no space between `@` and `vary`
 ```
 
 `each` does the reverse of `vary`: it broadcasts an input over a dimension the driving input lacks, so the step runs once for every value and its outputs gain that dimension:
+
+<!-- spit-doc: setup
+operation predict(series: Series, model: Model, parameters: Parameters) -> Series
+default entities: {@key}={@value} separated "_"
+default path: out/{@product}/{@entities}
+-->
 
 ```text
 dimensions [station, scenario]
@@ -149,6 +220,16 @@ forecast = predict(reading, model @each(scenario), parameters)
 
 With two stations and two scenarios, this makes four `forecast[station=...,scenario=...]` jobs. The values come from the artifacts of the broadcast input, so adding a scenario to the inputs adds its jobs. Other inputs are matched on the new dimension as usual; here `parameters` supplies the settings for each scenario. Only one input may broadcast a given dimension, and the driving input must not already have it. No source holds both `station` and `scenario`, so the `dimensions` line orders them, and `forecast` has dimensions `[station, scenario]`. `each` pairs with `vary`, so a sweep can be collected again. It crosses only the broadcast input's observed values with each driving artifact; values held by other inputs stay correlated through matching. The ragged sweep example shows models crossed with observed config/seed pairs without inventing a missing seed:
 
+<!-- spit-doc: setup
+dimensions [station, rep]
+source reading : Series [station]
+source seed : Seed [rep]
+operation simulate(series: Series, seed: Seed) -> Trial
+operation average(trials: many Trial) -> Summary
+default entities: {@key}={@value} separated "_"
+default path: out/{@product}/{@entities}
+-->
+
 ```text
 trial = simulate(reading, seed @each(rep))
 summary = average(trial @vary(rep))
@@ -158,6 +239,12 @@ An output's type may be followed by the extension the tool gives its file, as in
 
 An operation can write several outputs in one job. Name each output; its name is its placeholder, and the call assigns one product to each:
 
+<!-- spit-doc: setup
+source dwi : DWI [sub]
+default entities: {@key}={@value} separated "_"
+default path: out/{@product}/{@entities}
+-->
+
 ```text
 operation estimate(dwi: DWI) -> (wm: Response, gm: Response, csf: Response)
 command estimate: dwi2response dhollander {dwi} {wm} {gm} {csf}
@@ -165,6 +252,11 @@ wm_response, gm_response, csf_response = estimate(dwi)
 ```
 
 A `verify` command checks a job's inputs before its command runs, using the tools that understand the files. SPIT does not run it; it writes each job's `verify` commands into the `.spitdag` beside its command, and a backend runs them first, in order. If one fails, the job does not run, and neither does any job that depends on it:
+
+<!-- spit-doc: setup
+operation register(moving: Image, reference: Image) -> Image
+command register: reg {moving} {reference} {@output}
+-->
 
 ```text
 verify register: check_same_grid {moving} {reference}
@@ -174,7 +266,7 @@ A `verify` command may use any input port, including a `many` one, which is fill
 
 A tool that takes a folder and a name instead of a path, and adds the extension itself, is given an output's folder with `{image.dir}`, and its file name without its extension with `{image.stem}`. Either counts as using the output. `.stem` needs the output to declare its [extension](#extensions), so that SPIT knows where the name ends, unless the output is a [folder](#folders), whose stem without one is its whole name:
 
-```text
+```spit
 operation convert(dicom: DicomDir) -> (image: Image .nii.gz, meta: Json .json beside image)
 command convert: dcm2niix -z y -b y -o {image.dir} -f {image.stem} {dicom}
 ```
@@ -210,6 +302,10 @@ Products, operations and dimensions have separate names, so a dimension may shar
 
 The first word of a command must be an executable available on `PATH` (or an executable path). SPIT emits that command without managing its installation or loading shell functions:
 
+<!-- spit-doc: setup
+operation process(image: Image) -> Image
+-->
+
 ```text
 command process: process_tool {image} {@output}
 ```
@@ -217,6 +313,13 @@ command process: process_tool {image} {@output}
 ### Operations carried out by steps
 
 An operation may be carried out by steps instead of a command: its header ends in `:`, and its steps are indented beneath it. A call to it looks like any other call, and becomes the body's steps over the caller's products, each with its own jobs:
+
+<!-- spit-doc: setup
+source raw : Lines [group, lane]
+source calibration : Table [revision]
+default entities: {@key}={@value} separated "_"
+default path: out/{@product}/{@entities}
+-->
 
 ```text
 operation clean(x: Lines, t: Table) -> Lines
@@ -275,9 +378,39 @@ A check on an input or output of such an operation, as `reads: Lines @check(line
 
 `spit check pipeline.spit --calls` lists each call's steps before any data is read. It shows the call, its line and stage, the file that declares the operation with its file's blob id, then each step with the line of the body that writes it; a call in a body is shown under its caller:
 
+<!-- spit-doc: output
+spit check p.spit --calls
+--- libs/lib.spit
+operation clean(x: Lines, t: Table) -> Lines
+command clean: clean {x} {t} {@output}
+operation merge(xs: many Lines) -> Lines
+command merge: merge {xs} {@output}
+use count.spit as C
+
+
+operation tidy(x: Lines, t: Table) -> (y: Lines):
+    # one clean step
+    y = clean(x, t)
+
+operation summarise(reads: Lines, table: Table) -> (merged: Lines, total: Count):
+    cleaned = tidy(reads, table)
+    merged = merge(cleaned @vary(lane))
+    total = C::count(merged)
+--- libs/count.spit
+operation count(x: Lines) -> Count
+command count: wc {x} {@output}
+--- p.spit
+use libs/lib.spit as L
+default path: out/{@product}[/lane-{lane}]
+source raw : Lines [lane]
+source cal : Table
+stage report:
+    m, t = L::summarise(raw, cal)
+-->
+
 ```text
 m, t = L::summarise(…)  line 6  [report]
-  L::summarise  libs/lib.spit  blob 3b18e5c
+  L::summarise  libs/lib.spit  blob 9a45eab
   line 13  m::cleaned = L::tidy(raw, cal)
     line 10  m::cleaned = L::clean(raw, cal)
   line 14  m = L::merge(m::cleaned)
@@ -336,7 +469,7 @@ An operation with a body names its outputs, as `-> (result: Type)`, since its st
 
 A `check` tests one artifact once its file exists, with the tools that understand it. Declare it once, then attach it with `@check(...)` where it applies:
 
-```text
+```spit
 check ndim(n): check_ndim {@path} {n}
 check nonempty: test -s {@path}
 
@@ -357,6 +490,14 @@ Checks are global, as operations are. `use` brings in the checks of the operatio
 ### Default checks
 
 When every output in a file or stage needs the same check, write one `default check:` line instead of repeating `@check(...)` on each output, as `default path:` and `default ext:` set a default for the products they cover:
+
+<!-- spit-doc: setup
+source raw : Image [sub]
+operation denoise(input: Image) -> Image
+command denoise: dn {input} {@output}
+default entities: {@key}={@value} separated "_"
+default path: out/{@product}/{@entities}
+-->
 
 ```text
 check nonempty: test -s {@path}
@@ -380,6 +521,13 @@ A file or a stage has one `default check:` line. Its checks and the ones it drop
 ## Defaults
 
 `default` sets something for every output of the file, or of the [stage](#stages) it is written in, that has no setting of its own:
+
+<!-- spit-doc: setup
+source raw : Image [sub]
+operation denoise(input: Image) -> Image
+command denoise: dn {input} {@output}
+check nonempty: test -s {@path}
+-->
 
 ```text
 default entities: {@key}={@value} separated "__"
@@ -407,7 +555,7 @@ A `path:`, `ext:`, `check:` or `entities:` line without `default`, outside a `de
 
 A stage groups the steps of one phase of a pipeline, such as preprocessing or analysis. Write `stage name:` at the start of a line and indent the stage's lines beneath it; the next line that is not indented ends the stage. A stage is one block: a stage name may not be opened twice, so a step that belongs to it goes inside that block, and steps may use products from a later stage. The [text processing example](https://github.com/eclnz/spit/blob/dev/examples/imports/imported.spit) combines stages with imports; a stage on its own looks like this:
 
-```text
+```spit
 default entities: {@key}={@value} separated "__"
 default path: {@stage}/{@product}/{@entities}.txt
 
@@ -435,6 +583,14 @@ A stage owns the products its steps assign. Operations and commands stay global,
 
 Stages nest. A `stage` header inside a stage opens a stage within it, named by its path, such as `preprocess/combine`; a line back at the outer stage's indentation closes it. The [text processing example](https://github.com/eclnz/spit/blob/dev/examples/imports/imported.spit) uses the same nested structure:
 
+<!-- spit-doc: setup
+source shard : Lines [group, part]
+operation sort_lines(input: Lines) -> Lines
+operation merge(items: many Lines) -> Lines
+default entities: {@key}={@value} separated "_"
+default path: out/{@product}/{@entities}
+-->
+
 ```text
 stage preprocess:
     stage clean:
@@ -461,6 +617,12 @@ A step outside every stage stays valid.
 ## Reuse definitions
 
 Import operations, source families and [checks](#checks) from another `.spit` file. The path is relative to the file containing the `use` line. An operation brings its `command`; a source brings its path rule; either brings the checks it attaches. A source with companions declared [`beside`](#sidecar-files) it brings those companions with it. A companion cannot be imported alone: import its main source. A recipe names an imported main source as `text::raw_photo` when the import uses `as text`. An [operation carried out by steps](#operations-carried-out-by-steps) brings the operations its steps call. Imports do not bring pipeline steps.
+
+<!-- spit-doc: setup
+default entities: {@key}={@value} separated "_"
+default path: out/{@product}/{@entities}
+--- text.spit = examples/imports/text.spit
+-->
 
 ```text
 use text.spit as text
@@ -491,6 +653,10 @@ A library that imports a broken library lists each `use` line, nearest the error
 
 ## Paths
 
+<!-- spit-doc: setup
+source image : Image [subject, visit, run]
+-->
+
 ```text
 default entities: {@key}={@value} separated "__"
 default path: results/{@product}/{@entities}.txt
@@ -513,6 +679,10 @@ A template fills these placeholders from the artifact it names, here `aligned[su
 SPIT's own placeholders take `@`, and a dimension takes none, so a dimension may be called `product` or `stage`. `{product}` with no such dimension is an error that says to write `{@product}`. Values keep letters, digits, and `-`; any other byte is written as `%` and two hex digits, so a value never adds a directory.
 
 A path may put text in `[...]` when only some products have it. SPIT keeps the group if every placeholder in it has a value for the product, or drops the whole group if a dimension is absent, `{@stage}` has no stage, or `{@entities}` has no dimensions to write. For example, the cohort pipeline uses one default for run images, session averages, and subject averages:
+
+<!-- spit-doc: setup
+source image : Image [sub, ses]
+-->
 
 ```text
 default entities: {@key}-{@value} separated "_"
@@ -552,7 +722,7 @@ Path hints, discovery and binding expand the same template for each product's di
 
 A tool decides the format of the file it writes, so an operation can say which extension each output's file has, after its type. A multi-output operation gives one per port:
 
-```text
+```spit
 operation align(moving: Image, reference: Image) -> Transform .mat
 operation fit(runs: many Data @min(2)) -> (weights: Weights .npz, quality: Metrics .json)
 ```
@@ -561,7 +731,7 @@ An extension is a `.` and letters, digits, `-` or `_`, and may have several part
 
 `default ext:` sets the extension for operations that declare none, at the top level or in a stage, as `default path:` sets the default path. Default path rules are then written without an extension:
 
-```text
+```spit
 default entities: {@key}={@value} separated "__"
 default path: derivatives/{@product}/{@entities}
 default ext: .img
@@ -623,6 +793,11 @@ Path rules also find sources. With `root data`, `spit inputs recipe.spitin` list
 
 A placeholder in a source rule matches any text within one folder or file name, so `logs/{server}/{date}.log` reads `logs/web1/notes.log` as `date=notes`. A shape after a `:` narrows it:
 
+<!-- spit-doc: setup
+source log : Log [server, date]
+source run : Run [sub, run]
+-->
+
 ```text
 path log: logs/{server}/{date:date}.log
 path run: raw/sub-{sub:digits}_run-{run:digits}.csv
@@ -648,7 +823,7 @@ A shape reads the text of a value, which holds letters, digits and `-` only, so 
 
 Some tools write a second file beside the one they are told to write, such as the `.json` that dcm2niix writes next to its image, or the mask FSL's `bet -m` names after its brain image. Declare such an output `beside` the output it follows, with what its file name ends with in place of that output's extension:
 
-```text
+```spit
 operation convert(dicom: DicomDir) -> (image: Image .nii.gz, meta: Json .json beside image)
 operation strip(t1: Image) -> (brain: Image .nii.gz, mask: Image "_mask.nii.gz" beside brain)
 ```
@@ -667,7 +842,7 @@ Later steps read it as any other output, and the `.spitdag` lists it among the j
 
 Some tools read or write a folder of files rather than one file: a DICOM series, a FreeSurfer subject, a Zarr store. A `/` after a product's type, where an extension goes, makes its artifacts folders. It may follow an extension, as in `.zarr/`:
 
-```text
+```spit
 source dicom : Dicom / [sub]
 path dicom: dicom/sub={sub}
 operation recon(t1: Image) -> (subject: FsSubject /)
@@ -677,6 +852,10 @@ operation store(table: Table) -> Zarr .zarr/
 A folder's path rule names the folder, without a trailing `/`. `spit inputs` finds a folder source by matching its rule against the folders under the root, and the files inside a folder it finds are read with it, so they are not listed among the files no rule matches. A file whose path matches a folder source's rule, or a folder whose path matches a file source's, is skipped with a warning that says which kind the source reads. A folder source whose rule matches no folder is warned about as a file source is, naming the nearest folder rather than the nearest file. `dag` checks that each source folder exists, as it does each source file.
 
 A command is given a folder by its path, as a file is: `{dicom}` above is `dicom/sub=01`. `{subject.dir}` is the folder it is in, and `{subject.stem}` its name without its extension, which for a folder without one is its whole name, so a tool that takes a parent folder and a name can be given both:
+
+<!-- spit-doc: setup
+operation recon(t1: T1) -> (subject: Subject /)
+-->
 
 ```text
 command recon: recon-all -i {t1} -sd {subject.dir} -s {subject.stem}
@@ -725,6 +904,11 @@ A missing companion is a warning because it matters only to a step that reads it
 
 A `.spitin` recipe says how to find and select one dataset's inputs. Basic file locations may live in the pipeline: with `root data` and source path rules in `analysis.spit`, `spit inputs analysis.spit` scans the folder and `spit dag analysis.spit` resolves its jobs without a recipe. `root` belongs at the top level, once, and its folder is relative to that pipeline file. A pipeline without a root may instead take `--root data`. A recipe's first line names the pipeline it serves, relative to the recipe's folder, and its `root` line the dataset folder:
 
+<!-- spit-doc: recipe
+--- analysis.spit
+source image : Image [sub, ses]
+-->
+
 ```text
 pipeline analysis.spit
 root .
@@ -740,6 +924,9 @@ require [sub, ses] where image count=1
 A recipe may contain `inputs:`, `exclude` and `require` rules, `path product:` rules for source products, a `default path:` rule for its sources, and `sources:`/`contexts:` records. It cannot declare sources, operations, steps, commands, stages, imports or `default ext:`; the pipeline still declares each logical `source` with its dimensions and optional type. Rules in a pipeline are an error, and so are records.
 
 A recipe's `default:` entry inside `inputs:` line is the default for every source with no rule of its own, in the pipeline or the recipe. Where a dataset keeps its inputs is the dataset's to say, so the pipeline's `default path:` can say where outputs go, by stage if it likes, and the recipe says where sources are:
+
+<!-- spit-doc: files
+-->
 
 ```text
 # analysis.spit
@@ -758,6 +945,12 @@ inputs:
 A source takes the recipe's default only when it has no rule of its own, and the pipeline's default only when the recipe has none; see [Which file a line belongs in](#which-file-a-line-belongs-in). A pipeline default that names `{@stage}` outside a group finds no source, since no source is made in a stage, so it covers only outputs. Likewise, one that names `{@entities}` outside a group finds no source without dimensions. Each source completes the recipe's default with the extension it declares, so one default finds `rawdata/sub-01/t1w.nii.gz` and `rawdata/sub-01/events.tsv`. `default ext:` completes output paths and does not apply to the recipe's default, so a source that declares no extension takes the default as written. It cannot name `{@stage}`. `spit check recipe.spitin --path-rules` lists a source it covers as `default ... (recipe)`, and the `.spitout` writes it under `source_paths:` as each such source's rule.
 
 A recipe names its dataset root, the folder its paths are relative to, once, on the line after `pipeline` by convention:
+
+<!-- spit-doc: recipe
+--- analysis.spit
+source image : Image [sub]
+path image: image-{sub}.nii.gz
+-->
 
 ```text
 pipeline analysis.spit
@@ -857,12 +1050,32 @@ This replaces named `discover` statements and recipe-level `path` statements dir
 
 ### Constraints
 
+<!-- spit-doc: recipe
+pipeline analysis.spit
+root data
+inputs:
+    image: data/{subject}/{visit}/image-{run}.nii.gz
+    reference: data/{subject}/{visit}/ref.nii.gz
+--- analysis.spit
+source image : Image [subject, visit, run]
+source reference : Image [subject, visit]
+-->
+
 ```text
 require [subject, visit] where image count>=2
 require [subject, visit] where reference count=1
 ```
 
 Constraints, written in a recipe, check each observed group, and fail the run if any group fails. They do not set a total subject or visit count. The count takes any comparison: `count=1`, `count!=1`, `count>=2`, `count<=2`, `count>2` or `count<2`. A rule can also require particular values in each group with `has`, alone or after a count, as in `require [subject, visit] where image count>=2 has run=1,2`:
+
+<!-- spit-doc: recipe
+pipeline analysis.spit
+root data
+inputs:
+    image: data/{subject}/{visit}/image-{run}.nii.gz
+--- analysis.spit
+source image : Image [subject, visit, run]
+-->
 
 ```text
 require [subject, visit] where image has run=1,2
@@ -875,6 +1088,18 @@ A `require` rule is checked after conditional exclusions, against the groups the
 The cohort walkthrough uses conditional `exclude` to remove a subject with too few sessions and named `exclude` to remove one damaged run.
 
 Conditional `exclude` removes every group that meets its condition: the groups, then `where`, then what removes one.
+
+<!-- spit-doc: recipe
+pipeline analysis.spit
+root data
+inputs:
+    t1w: sub-{sub}/ses-{ses}/t1w.nii.gz
+    bold: sub-{sub}/ses-{ses}/bold-{run}.nii.gz
+    contexts: sub-{sub}/ses-{ses}
+--- analysis.spit
+source t1w : T1 [sub, ses]
+source bold : Bold [sub, ses, run]
+-->
 
 ```text
 exclude [sub] where contexts[sub,ses] count<2
@@ -899,6 +1124,18 @@ A conditional `exclude` rule's values name a dimension within each group, not on
 
 `exclude` removes artifacts by name, such as a corrupted run or a subject who withdrew, while their files stay where they are:
 
+<!-- spit-doc: recipe
+pipeline analysis.spit
+root data
+inputs:
+    bold: sub-{sub}/ses-{ses}/bold-{run}.nii.gz
+    calibration: calibration.txt
+    contexts: sub-{sub}/ses-{ses}
+--- analysis.spit
+source bold : Bold [sub, ses, run]
+source calibration : Table
+-->
+
 ```text
 exclude bold[sub=02,ses=02,run=3]    # corrupted: motion spike at volume 140
 exclude [sub=07]                     # withdrew consent
@@ -915,6 +1152,21 @@ A rule names a source, some values, or both, and removes every artifact whose id
 A comment on the line is kept as the rule's reason. Values are compared as written, so `sub=2` does not match `sub=02`. An exclude that matches nothing is an error, naming any value it comes close to, so a typo or a rule the data has outgrown does not pass unnoticed. `spit check` tests each rule against the pipeline: its source must be one, and each dimension it names must be that source's, or, for values alone, some source's.
 
 Because values are compared as written, a group removed under one spelling keeps a source filed under another. Say store `s07`'s price list was filed as `pricing/S07.json`, so no job can price its sales, and the recipe removes the store for now:
+
+<!-- spit-doc: recipe
+pipeline store.spit
+root store
+--- store.spit
+default entities: {@key}={@value} separated "_"
+default path: out/{@product}/{@entities}
+source sales : Sales [store]
+path sales: sales/{store}.csv
+source pricing : Prices [store]
+path pricing: pricing/{store}.json
+operation price(sales: Sales, pricing: Prices) -> Report
+command price: price {sales} {pricing} {@output}
+report = price(sales, pricing)
+-->
 
 ```text
 exclude [store=s07]            # price list filed as S07; renamed next week
@@ -979,6 +1231,21 @@ note: 1 source artifact is used by no job: pricing[store=S07]; `spit artifacts` 
 
 The group rule did not remove it, since `S07` is not `s07`. A second rule names it, and the note goes:
 
+<!-- spit-doc: recipe
+pipeline store.spit
+root store
+--- store.spit
+default entities: {@key}={@value} separated "_"
+default path: out/{@product}/{@entities}
+source sales : Sales [store]
+path sales: sales/{store}.csv
+source pricing : Prices [store]
+path pricing: pricing/{store}.json
+operation price(sales: Sales, pricing: Prices) -> Report
+command price: price {sales} {pricing} {@output}
+report = price(sales, pricing)
+-->
+
 ```text
 exclude [store=s07]            # price list filed as S07; renamed next week
 exclude pricing[store=S07]     # the same list, under the name it was filed as
@@ -989,6 +1256,18 @@ Named exclusions remove observed artifacts or contexts. A rule matching nothing 
 A placeholder in a source rule matches any text within one folder or file name unless it takes a [shape](#shapes-on-a-source-placeholder), as `{date:date}`. Without one, `logs/{server}/{date}.log` reads `logs/web1/notes.log` as `date=notes`: check the count in `note: found N source artifacts`, and leave out a file whose value does not belong with [`exclude`](#exclude-named-artifacts), a shape, or a rule that names more of its path. Files whose whole paths match no source path rule are ignored while scanning. `spit inputs` counts them in a note, naming them when there are at most three and otherwise counting them by extension, leaving out SPIT's own `.spit`, `.spitin`, `.spitout` and `.spitdag` files and any file at a path the pipeline gives one of its outputs, or inside an output folder, such as what an earlier run wrote under the root; `spit inputs dataset.spitin --unmatched` lists their paths relative to the dataset root instead of writing a `.spitout`, even if a `require` rule fails. When a `require` count fails after the scan found no files for its source, `inputs` and `dag` name the path rule used and show an unmatched file whose path contains the source name, when there is one. A recipe's `default:` entry inside `inputs:` is a default for sources; use `path <source>:` for one source. Required source paths must match the spelling found by the scan: `pricing/S07.json` does not satisfy `pricing/s07.json`, even on a case-insensitive filesystem. A file with a near miss in an identity value, such as `store=S07` where a job needs `store=s07`, may still match a source rule: it is then a source artifact, and `dag` and `artifacts` warn when it is unused and point to it at the failed join.
 
 Rules can also come from a CSV file, relative to the recipe's folder, such as a lab's list of scans that failed quality control:
+
+<!-- spit-doc: recipe
+pipeline analysis.spit
+root data
+inputs:
+    t1w: sub-{sub}/t1w.nii.gz
+--- analysis.spit
+source t1w : T1 [sub]
+--- qc/excluded.csv
+sub,reason
+01,consent withdrawn
+-->
 
 ```text
 exclude from qc/excluded.csv
@@ -1076,7 +1355,7 @@ Types are additive. You can leave them out, add them to selected products and op
 
 In operation signatures, a single capital letter such as `S` is a local type variable. Use a `$` prefix for longer names, such as `$SourceSpace` or `$Kind`. An unprefixed name such as `World` is a concrete type; every type name starts with a capital letter. Variables are allowed in operation signatures, not product declarations:
 
-```text
+```spit
 operation project(sample: Frame<$Kind,$SourceSpace>, calibration: Calibration<$Kind,$SourceSpace,$TargetSpace>) -> Frame<$Kind,$TargetSpace>
 ```
 
@@ -1089,6 +1368,8 @@ operation project(sample: Frame<$Kind,$SourceSpace>, calibration: Calibration<$K
 - each product a step makes has a type with no unknown part.
 
 A product a step makes needs no type of its own when inference gives it one:
+
+<!-- spit-doc: fragment -->
 
 ```text
 types strict

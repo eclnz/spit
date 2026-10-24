@@ -303,6 +303,20 @@ An operation can be carried out by steps instead of a command: its header ends i
 
 [`mrtrix_dwi.spit`](https://github.com/eclnz/spit/blob/dev/examples/composites/mrtrix/mrtrix_dwi.spit) declares the MRtrix3 operations of the ACT example's preprocessing, and two operations carried out by them: `clean_dwi_session`, from a session's DWI runs and reverse phase-encoded b=0 to its corrected series and mean b=0, and `register_to_dwi`, which moves an anatomical image onto that b=0. [`act.spit`](https://github.com/eclnz/spit/blob/dev/examples/composites/mrtrix/act.spit) calls each once:
 
+<!-- spit-doc: setup
+default entities: {@key}={@value} separated "__"
+default path: derivatives/{@stage}/{@product}/{@entities}
+default ext: .mif
+source raw_dwi : MRI<DWI,Acquired> .nii.gz [sub, ses, run]
+source dwi_bvec : GradientDirections .bvec beside raw_dwi
+source dwi_bval : GradientAmplitudes .bval beside raw_dwi
+source dwi_json : AcquisitionMetadata .json beside raw_dwi
+source reverse_b0 : MRI<B0,Acquired> .nii.gz [sub, ses]
+source reverse_b0_json : AcquisitionMetadata .json beside reverse_b0
+source t1w : MRI<T1w,Anatomical> [sub, ses]
+--- mrtrix_dwi.spit = examples/composites/mrtrix/mrtrix_dwi.spit
+-->
+
 ```text
 use clean_dwi_session, register_to_dwi from mrtrix_dwi.spit as mrx
 
