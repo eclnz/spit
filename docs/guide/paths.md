@@ -27,7 +27,9 @@ SPIT's placeholders start with `@`; a plain name is a dimension. `[text]` makes 
 
 `{@entities}` writes every dimension a product has, but SPIT does not decide how. A `default entities:` line spells each assignment and what goes between them:
 
-<!-- spit-doc: fragment -->
+<!-- spit-doc: setup
+source image : Image [sub, ses]
+-->
 
 ```spit
 default entities: {@key}-{@value} separated "_"

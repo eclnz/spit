@@ -607,7 +607,7 @@ The companion is an ordinary source that a step reads by name. It inherits `raw_
 
 The path can come from a [recipe](#recipes) when the layout varies by dataset. Name the main source and give its complete file path, including its extension:
 
-<!-- spit-doc: fragment -->
+<!-- spit-doc: files -->
 
 ```spit
 # survey.spit
@@ -616,6 +616,7 @@ source photo_json : CaptureMetadata .json beside raw_photo
 
 # dataset.spitin
 pipeline survey.spit
+root data
 inputs:
     raw_photo: site-{site}/visit-{visit}/photos/shot-{shot}.raw
 ```
@@ -719,7 +720,12 @@ A rule written for one source comes before any default, and the dataset's defaul
 
 ### Discover contexts from directories
 
-<!-- spit-doc: fragment -->
+<!-- spit-doc: recipe
+pipeline survey.spit
+root data
+--- survey.spit
+source image : Image [sub, ses]
+-->
 
 ```spit
 inputs:

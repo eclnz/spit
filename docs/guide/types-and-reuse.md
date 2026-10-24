@@ -24,7 +24,11 @@ Types do not select artifacts. Product names and dimensions determine which sour
 
 ## Reusable definitions
 
-<!-- spit-doc: fragment -->
+<!-- spit-doc: setup
+default entities: {@key}={@value} separated "_"
+default path: out/{@product}/{@entities}
+--- text.spit = examples/imports/text.spit
+-->
 
 ```spit
 use text.spit as text
