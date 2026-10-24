@@ -395,6 +395,8 @@ The lines directly in a stage share one indentation. A nested stage without its 
 
 A stage groups steps and scopes their paths; it does not order them. SPIT orders jobs by the products they read, so a stage needs no `after` clause, and two stages may read from each other: `b` in `first` may read `a` from `second` while `second` reads `c` from `first`. A stage opened again, by a second `stage name:` header at the same level, continues the first block: its steps belong to the same stage. Its `default path:` and `default ext:` lines are still given once, in either block. `dag` counts the jobs in each outermost stage and names each job's stage, and the `.spitdag` gives each job its stage as a list of names from outermost to innermost:
 
+<!-- spit-doc: run -->
+
 ```sh
 cargo run -- dag examples/imports/imported.spitin
 ```

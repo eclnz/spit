@@ -10,7 +10,17 @@
 //! - `files`: the block holds several files, each opened by a `# name.spit` or
 //!   `# name.spitin` line, and each is checked.
 //!
-//! In a `setup` or `recipe` comment, a line `--- name` opens a file written
+//! A `sh` block must say whether it runs, and a `text` block that shows what a
+//! command prints may say so:
+//!
+//! - `run` before a `sh` block: its lines run in a folder that holds a copy of
+//!   `examples/`, with `spit` and `cargo run --` both running the built binary,
+//!   and must succeed. A `sh` block with `fragment` before it is not run.
+//! - `output` before a `text` block: the lines of the comment before its first
+//!   `---` run in that folder, and every line of the block must be among the
+//!   lines the command printed, in order, so a block may show part of the output.
+//!
+//! In a `setup`, `recipe`, `run` or `output` comment, a line `--- name` opens a file written
 //! beside the block, which the lines after it hold, such as the pipeline a
 //! recipe names; `--- name = path` copies the repository's file `path`. The
 //! lines before the first `---` go before the block.
@@ -49,6 +59,8 @@ enum Kind {
     Setup,
     Recipe,
     Files,
+    Run,
+    Output,
 }
 
 /// The comment before a block.
@@ -67,6 +79,7 @@ enum Source {
 
 struct Block {
     line: usize,
+    language: String,
     text: String,
     marker: Option<Marker>,
 }
@@ -79,6 +92,8 @@ fn parse_marker(comment: &[&str]) -> Marker {
         "setup" => Kind::Setup,
         "recipe" => Kind::Recipe,
         "files" => Kind::Files,
+        "run" => Kind::Run,
+        "output" => Kind::Output,
         other => panic!("unknown spit-doc kind `{other}`"),
     };
     // A comment of several lines ends with a line that closes it.
@@ -124,9 +139,10 @@ fn spit_blocks(text: &str) -> Vec<Block> {
                 body.push('\n');
                 index += 1;
             }
-            if language == "spit" {
+            if ["spit", "sh", "text"].contains(&language) {
                 blocks.push(Block {
                     line: opening + 1,
+                    language: language.to_owned(),
                     text: body,
                     marker: marker_before(&lines, opening),
                 });
@@ -173,14 +189,38 @@ fn checks(tree: &Tree, file: &Path) -> Result<(), String> {
 fn write_files(tree: &Tree, marker: &Marker) {
     for (name, source) in &marker.files {
         match source {
-            Source::Text(text) => tree.write(name, text),
-            Source::Copy(path) => tree.write(name, &fs::read_to_string(path).unwrap()),
-        };
+            Source::Text(text) => {
+                tree.write(name, text);
+            }
+            Source::Copy(path) if Path::new(path).is_dir() => {
+                copy_folder(Path::new(path), &tree.path().join(name))
+            }
+            Source::Copy(path) => {
+                tree.write(name, &fs::read_to_string(path).unwrap());
+            }
+        }
     }
 }
 
-/// Why `block` fails its check, if it does.
-fn verdict(page: &str, block: &Block) -> Option<String> {
+/// Copy the folder `from` to `to`, with everything under it.
+fn copy_folder(from: &Path, to: &Path) {
+    let mut pending = vec![(from.to_path_buf(), to.to_path_buf())];
+    while let Some((from, to)) = pending.pop() {
+        fs::create_dir_all(&to).unwrap();
+        for entry in fs::read_dir(&from).unwrap() {
+            let entry = entry.unwrap();
+            let target = to.join(entry.file_name());
+            if entry.file_type().unwrap().is_dir() {
+                pending.push((entry.path(), target));
+            } else {
+                fs::copy(entry.path(), target).unwrap();
+            }
+        }
+    }
+}
+
+/// Why a `spit` block fails its check, if it does.
+fn spit_verdict(page: &str, block: &Block) -> Option<String> {
     let at = format!("{page}:{}", block.line);
     let tree = Tree::new("docs-examples", &[]);
     let alone = |text: &str| {
@@ -211,6 +251,9 @@ fn verdict(page: &str, block: &Block) -> Option<String> {
                 .err()
                 .map(|error| format!("{at}: does not check with its setup\n{error}"))
         }
+        Kind::Run | Kind::Output => Some(format!(
+            "{at}: `run` and `output` are for `sh` and `text` blocks"
+        )),
         Kind::Files => {
             let mut files: Vec<(String, String)> = Vec::new();
             for line in block.text.lines() {
@@ -240,6 +283,113 @@ fn verdict(page: &str, block: &Block) -> Option<String> {
                     .map(|error| format!("{at}: `{name}` does not check\n{error}"))
             })
         }
+    }
+}
+
+/// A folder to run commands in: a copy of `examples/`, the marker's files,
+/// and a `bin/` with `spit` and `cargo run --` both running the built binary.
+fn command_tree(marker: &Marker) -> Tree {
+    let tree = Tree::new("docs-commands", &[]);
+    copy_folder(Path::new("examples"), &tree.path().join("examples"));
+    write_files(&tree, marker);
+    install_shims(&tree);
+    tree
+}
+
+#[cfg(unix)]
+fn install_shims(tree: &Tree) {
+    use std::os::unix::fs::PermissionsExt;
+    let spit = env!("CARGO_BIN_EXE_spit");
+    let shims = [
+        ("spit", format!("#!/bin/sh\nexec '{spit}' \"$@\"\n")),
+        (
+            "cargo",
+            "#!/bin/sh\nif [ \"$1\" = run ] && [ \"$2\" = -- ]; then shift 2; exec spit \"$@\"; fi\n\
+             echo \"cargo $*: the docs test runs only cargo run --\" >&2\nexit 97\n"
+                .to_owned(),
+        ),
+    ];
+    for (name, text) in shims {
+        let path = tree.write(&format!("bin/{name}"), &text);
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+}
+
+#[cfg(not(unix))]
+fn install_shims(_: &Tree) {}
+
+/// What `script` prints in `tree`, standard output then standard error, and
+/// whether it succeeded.
+fn shell(tree: &Tree, script: &str) -> (bool, Vec<String>) {
+    let path = format!(
+        "{}:{}",
+        tree.path().join("bin").display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    let output = Command::new("sh")
+        .args(["-e", "-c", script])
+        .current_dir(tree.path())
+        .env("PATH", path)
+        .output()
+        .unwrap();
+    let mut printed = String::from_utf8_lossy(&output.stdout).into_owned();
+    printed += &String::from_utf8_lossy(&output.stderr);
+    (
+        output.status.success(),
+        printed
+            .lines()
+            .map(|line| line.trim_end().to_owned())
+            .collect(),
+    )
+}
+
+/// Why a `sh` or `text` block fails, if it does.
+fn command_verdict(page: &str, block: &Block) -> Option<String> {
+    let at = format!("{page}:{}", block.line);
+    let kind = block.marker.as_ref().map(|marker| &marker.kind);
+    if cfg!(not(unix)) {
+        return None;
+    }
+    match (block.language.as_str(), kind) {
+        ("text", None) => None,
+        ("text", Some(Kind::Output)) => {
+            let marker = block.marker.as_ref()?;
+            let tree = command_tree(marker);
+            let (_, lines) = shell(&tree, &marker.head);
+            let mut remaining = lines.iter();
+            block
+                .text
+                .lines()
+                .map(str::trim_end)
+                .filter(|line| !line.is_empty())
+                .find(|line| !remaining.any(|printed| printed == line))
+                .map(|line| {
+                    let printed: Vec<_> = lines.iter().take(12).cloned().collect();
+                    format!(
+                        "{at}: the command does not print `{line}` here, or not in this order\n{}",
+                        printed.join("\n")
+                    )
+                })
+        }
+        ("text", Some(_)) => Some(format!("{at}: a `text` block takes only `{OPEN} output`")),
+        ("sh", Some(Kind::Run)) => {
+            let marker = block.marker.as_ref()?;
+            let tree = command_tree(marker);
+            let (succeeded, printed) = shell(&tree, &block.text);
+            (!succeeded).then(|| format!("{at}: a command fails\n{}", printed.join("\n")))
+        }
+        ("sh", Some(Kind::Fragment)) => None,
+        _ => Some(format!(
+            "{at}: a `sh` block needs `{OPEN} run` or `{OPEN} fragment -->` before it"
+        )),
+    }
+}
+
+/// Why `block` fails its check, if it does.
+fn verdict(page: &str, block: &Block) -> Option<String> {
+    match block.language.as_str() {
+        "spit" => spit_verdict(page, block),
+        _ => command_verdict(page, block),
     }
 }
 

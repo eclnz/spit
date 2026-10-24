@@ -2,6 +2,8 @@
 
 Once the plan has the expected jobs, save it:
 
+<!-- spit-doc: fragment -->
+
 ```sh
 spit dag dataset.spitin -o plan.spitdag
 ```
