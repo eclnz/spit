@@ -17,8 +17,11 @@
 //!   `examples/`, with `spit` and `cargo run --` both running the built binary,
 //!   and must succeed. A `sh` block with `fragment` before it is not run.
 //! - `output` before a `text` block: the lines of the comment before its first
-//!   `---` run in that folder, and every line of the block must be among the
-//!   lines the command printed, in order, so a block may show part of the output.
+//!   `---` run in that folder, and every line of the block must be part of a
+//!   line the command printed, in order, so a block may leave out the `error:
+//!   line 3, column 1:` before a message, or show only part of the output.
+//! - `spitout` before a `text` block: the block is a `.spitout`, and is checked
+//!   as one.
 //!
 //! In a `setup`, `recipe`, `run` or `output` comment, a line `--- name` opens a file written
 //! beside the block, which the lines after it hold, such as the pipeline a
@@ -61,6 +64,8 @@ enum Kind {
     Files,
     Run,
     Output,
+    Spitout,
+    Plain,
 }
 
 /// The comment before a block.
@@ -75,12 +80,16 @@ struct Marker {
 enum Source {
     Text(String),
     Copy(String),
+    /// The text of the block before this one on the page.
+    Previous,
 }
 
 struct Block {
     line: usize,
     language: String,
     text: String,
+    /// The text of the code block before this one on the page.
+    previous: String,
     marker: Option<Marker>,
 }
 
@@ -94,6 +103,8 @@ fn parse_marker(comment: &[&str]) -> Marker {
         "files" => Kind::Files,
         "run" => Kind::Run,
         "output" => Kind::Output,
+        "spitout" => Kind::Spitout,
+        "plain" => Kind::Plain,
         other => panic!("unknown spit-doc kind `{other}`"),
     };
     // A comment of several lines ends with a line that closes it.
@@ -107,6 +118,7 @@ fn parse_marker(comment: &[&str]) -> Marker {
     for line in body {
         if let Some(spec) = line.strip_prefix("--- ") {
             files.push(match spec.split_once(" = ") {
+                Some((name, "@previous")) => (name.trim().to_owned(), Source::Previous),
                 Some((name, path)) => {
                     (name.trim().to_owned(), Source::Copy(path.trim().to_owned()))
                 }
@@ -127,6 +139,7 @@ fn parse_marker(comment: &[&str]) -> Marker {
 fn spit_blocks(text: &str) -> Vec<Block> {
     let lines: Vec<_> = text.lines().collect();
     let mut blocks = Vec::new();
+    let mut previous = String::new();
     let mut index = 0;
     while index < lines.len() {
         if lines[index].starts_with("```") {
@@ -143,10 +156,12 @@ fn spit_blocks(text: &str) -> Vec<Block> {
                 blocks.push(Block {
                     line: opening + 1,
                     language: language.to_owned(),
-                    text: body,
+                    text: body.clone(),
+                    previous: previous.clone(),
                     marker: marker_before(&lines, opening),
                 });
             }
+            previous = body;
         }
         index += 1;
     }
@@ -186,11 +201,14 @@ fn checks(tree: &Tree, file: &Path) -> Result<(), String> {
     }
 }
 
-fn write_files(tree: &Tree, marker: &Marker) {
+fn write_files(tree: &Tree, marker: &Marker, previous: &str) {
     for (name, source) in &marker.files {
         match source {
             Source::Text(text) => {
                 tree.write(name, text);
+            }
+            Source::Previous => {
+                tree.write(name, previous);
             }
             Source::Copy(path) if Path::new(path).is_dir() => {
                 copy_folder(Path::new(path), &tree.path().join(name))
@@ -240,7 +258,7 @@ fn spit_verdict(page: &str, block: &Block) -> Option<String> {
             if marker.kind == Kind::Setup && alone(&block.text).is_ok() {
                 return Some(format!("{at}: checks alone; remove its setup"));
             }
-            write_files(&tree, marker);
+            write_files(&tree, marker, &block.previous);
             let name = if marker.kind == Kind::Setup {
                 "whole.spit"
             } else {
@@ -251,8 +269,8 @@ fn spit_verdict(page: &str, block: &Block) -> Option<String> {
                 .err()
                 .map(|error| format!("{at}: does not check with its setup\n{error}"))
         }
-        Kind::Run | Kind::Output => Some(format!(
-            "{at}: `run` and `output` are for `sh` and `text` blocks"
+        Kind::Run | Kind::Output | Kind::Spitout | Kind::Plain => Some(format!(
+            "{at}: `run`, `output`, `spitout` and `plain` are for `sh` and `text` blocks"
         )),
         Kind::Files => {
             let mut files: Vec<(String, String)> = Vec::new();
@@ -288,10 +306,10 @@ fn spit_verdict(page: &str, block: &Block) -> Option<String> {
 
 /// A folder to run commands in: a copy of `examples/`, the marker's files,
 /// and a `bin/` with `spit` and `cargo run --` both running the built binary.
-fn command_tree(marker: &Marker) -> Tree {
+fn command_tree(marker: &Marker, previous: &str) -> Tree {
     let tree = Tree::new("docs-commands", &[]);
     copy_folder(Path::new("examples"), &tree.path().join("examples"));
-    write_files(&tree, marker);
+    write_files(&tree, marker, previous);
     install_shims(&tree);
     tree
 }
@@ -343,6 +361,56 @@ fn shell(tree: &Tree, script: &str) -> (bool, Vec<String>) {
     )
 }
 
+/// Whether the first line of `text` that is not a comment starts with one of
+/// SPIT's keywords, or is a step, so that the block is SPIT code.
+fn looks_like_spit(text: &str) -> bool {
+    const KEYWORDS: [&str; 15] = [
+        "source",
+        "operation",
+        "command",
+        "stage",
+        "use",
+        "default",
+        "path",
+        "verify",
+        "check",
+        "pipeline",
+        "inputs",
+        "exclude",
+        "require",
+        "dimensions",
+        "types",
+    ];
+    let Some(line) = text
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty() && !line.starts_with('#'))
+    else {
+        return false;
+    };
+    let word: String = line
+        .chars()
+        .take_while(|c| c.is_alphanumeric() || *c == '_')
+        .collect();
+    let after = line[word.len()..].chars().next();
+    if KEYWORDS.contains(&word.as_str()) && matches!(after, None | Some(' ' | ':')) {
+        return true;
+    }
+    // A step: `outputs = operation(`.
+    line.split_once(" = ").is_some_and(|(outputs, call)| {
+        outputs
+            .chars()
+            .all(|c| c.is_alphanumeric() || " _:,<>$".contains(c))
+            && call.split('(').next().is_some_and(|name| {
+                !name.is_empty()
+                    && name
+                        .chars()
+                        .all(|c| c.is_alphanumeric() || c == '_' || c == ':')
+            })
+            && call.contains('(')
+    })
+}
+
 /// Why a `sh` or `text` block fails, if it does.
 fn command_verdict(page: &str, block: &Block) -> Option<String> {
     let at = format!("{page}:{}", block.line);
@@ -351,10 +419,17 @@ fn command_verdict(page: &str, block: &Block) -> Option<String> {
         return None;
     }
     match (block.language.as_str(), kind) {
-        ("text", None) => None,
+        ("text", None) if looks_like_spit(&block.text) => Some(format!(
+            "{at}: looks like SPIT code in a `text` block; fence it `spit`, or put \
+             `{OPEN} fragment -->`, `setup` or `recipe` before it, or `plain` if it is not SPIT"
+        )),
+        ("text", None) | ("text", Some(Kind::Plain)) => None,
+        ("text", Some(Kind::Setup | Kind::Recipe | Kind::Files | Kind::Fragment)) => {
+            spit_verdict(page, block)
+        }
         ("text", Some(Kind::Output)) => {
             let marker = block.marker.as_ref()?;
-            let tree = command_tree(marker);
+            let tree = command_tree(marker, &block.previous);
             let (_, lines) = shell(&tree, &marker.head);
             let mut remaining = lines.iter();
             block
@@ -362,7 +437,7 @@ fn command_verdict(page: &str, block: &Block) -> Option<String> {
                 .lines()
                 .map(str::trim_end)
                 .filter(|line| !line.is_empty())
-                .find(|line| !remaining.any(|printed| printed == line))
+                .find(|line| !remaining.any(|printed| printed.contains(line)))
                 .map(|line| {
                     let printed: Vec<_> = lines.iter().take(12).cloned().collect();
                     format!(
@@ -371,10 +446,17 @@ fn command_verdict(page: &str, block: &Block) -> Option<String> {
                     )
                 })
         }
+        ("text", Some(Kind::Spitout)) => {
+            let tree = Tree::new("docs-spitout", &[]);
+            tree.write("block.spitout", &block.text);
+            checks(&tree, Path::new("block.spitout"))
+                .err()
+                .map(|error| format!("{at}: does not check as a .spitout\n{error}"))
+        }
         ("text", Some(_)) => Some(format!("{at}: a `text` block takes only `{OPEN} output`")),
         ("sh", Some(Kind::Run)) => {
             let marker = block.marker.as_ref()?;
-            let tree = command_tree(marker);
+            let tree = command_tree(marker, &block.previous);
             let (succeeded, printed) = shell(&tree, &block.text);
             (!succeeded).then(|| format!("{at}: a command fails\n{}", printed.join("\n")))
         }
