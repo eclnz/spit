@@ -49,7 +49,7 @@ fn a_path_inside_another_artifacts_file_is_rejected() {
         ["error: line 5, column 9: path rule for `y` puts files inside `in/s.txt`, the path of a `x` file, for the same entities; distinguish their path rules"]
     );
     // Different dimension names hide the overlap until paths are bound.
-    let text = "source x [s]\npath x: in/{s}.txt\nsource z [t]\npath z: in/{t}.txt/out.txt\noperation f(a, b) -> Text\ncommand f: cp {a} {b} {@output}\ndefault path: o/{@product}/{@entities}\ny = f(x, z @ where(t=1))\ndefault entities: {@key}={@value} separated \"__\"\nsources:\n    x[s=1]\n    z[t=1]\n";
+    let text = "source x [s]\npath x: in/{s}.txt\nsource z [t]\npath z: in/{t}.txt/out.txt\noperation f(a, b) -> Text\ncommand f: cp {a} {b} {@output}\ndefault path: o/{@product}/{@entities}\ny = f(x, z @where(t=1))\ndefault entities: {@key}={@value} separated \"__\"\nsources:\n    x[s=1]\n    z[t=1]\n";
     let (pipeline, inventory) = support::parse_fixture(text).unwrap();
     let error = bind(&pipeline, &resolve(&pipeline, &inventory.unwrap()).unwrap()).unwrap_err();
     assert!(

@@ -29,6 +29,6 @@ stage anat:
 stage func:
     mc = motioncorr(bold)
     coreg = register(mc, brain)
-    avg = sessionavg(coreg @ vary(run))
+    avg = sessionavg(coreg @vary(run))
 
-long = longitudinal(avg @ vary(ses))
+long = longitudinal(avg @vary(ses))

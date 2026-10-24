@@ -1,6 +1,6 @@
 //! Features that each work alone, used together: a folder source, a source
 //! `check`, a `verify`, a `beside` output, stages and a `many` input
-//! with `@ min`, planned with and without `--partial`.
+//! with `@min`, planned with and without `--partial`.
 
 mod support;
 
@@ -12,16 +12,16 @@ path dicom: dicom/sub={sub}
 source mask .nii [sub]
 path mask: mask/{sub}.nii
 check nonempty: test -s {@path}
-operation convert(dicom: Dicom, mask: Mask @ check(nonempty)) -> (image: Image .nii.gz, meta: Json .json beside image)
+operation convert(dicom: Dicom, mask: Mask @check(nonempty)) -> (image: Image .nii.gz, meta: Json .json beside image)
 command convert: dcm2niix -o {image.dir} -f {image.stem} {dicom} {mask}
 verify convert: test -d {dicom}
-operation avg(images: many Image @ min(2)) -> Image .nii.gz
+operation avg(images: many Image @min(2)) -> Image .nii.gz
 command avg: avg {images} {@output}
 default path: out/{@product}[/{@entities}]
 stage pre:
     image, meta = convert(dicom, mask)
 stage post:
-    mean = avg(image @ vary(sub))
+    mean = avg(image @vary(sub))
 default entities: {@key}={@value} separated \"__\"\n";
 
 /// Subject 03 has a folder but no mask.
@@ -83,7 +83,7 @@ fn a_partial_plan_leaves_out_a_job_with_its_beside_output_and_aggregates_the_res
 #[test]
 fn a_collection_below_its_minimum_is_left_out_when_members_are() {
     let (tree, _) = dataset();
-    // Only one complete member remains, below `@ min(2)`.
+    // Only one complete member remains, below `@min(2)`.
     std::fs::remove_file(tree.path().join("d/mask/02.nii")).unwrap();
     let recipe = tree.path().join("p.spitin");
     let output = spit(&["dag", recipe.to_str().unwrap(), "--partial", "--counts"]);

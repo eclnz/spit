@@ -429,7 +429,7 @@ fn full_inventory() -> SourceInventory {
 
 #[test]
 fn named_ports_and_the_calls_aggregate_shape_are_checked() {
-    let text = "source raw [site, run]\noperation combine(runs: many)\nresult = combine(raw @ vary(run))\nsources:\n  raw[site=01,run=2]\n  raw[site=01,run=1]\n";
+    let text = "source raw [site, run]\noperation combine(runs: many)\nresult = combine(raw @vary(run))\nsources:\n  raw[site=01,run=2]\n  raw[site=01,run=1]\n";
     let (pipeline, inventory) = support::parse_fixture(text).unwrap();
     assert_eq!(pipeline.operations[0].inputs[0].name, "runs");
     let dag = resolve(&pipeline, &inventory.unwrap()).unwrap();
@@ -447,18 +447,18 @@ fn a_many_input_names_its_dimensions_at_the_call() {
         .unwrap_err()
         .to_string();
     assert!(
-        error.contains("many input `runs` needs `@ vary(dimension)`"),
+        error.contains("many input `runs` needs `@vary(dimension)`"),
         "{error}"
     );
 
-    let dropped = "source raw [site, run]\noperation combine(runs: many) @ drop(run)\n";
+    let dropped = "source raw [site, run]\noperation combine(runs: many) @drop(run)\n";
     let error = parse_pipeline(dropped).unwrap_err();
     assert_eq!(error.line(), 2);
     assert!(
-        error.message().contains("remove `@ drop(run)`")
+        error.message().contains("remove `@drop(run)`")
             && error
                 .message()
-                .contains("`result = combine(input @ vary(run))`"),
+                .contains("`result = combine(input @vary(run))`"),
         "{error}"
     );
 }

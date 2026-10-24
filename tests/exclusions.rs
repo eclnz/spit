@@ -23,7 +23,7 @@ aligned = align(bold, ref)
 operation average(runs: many Bold) -> Bold
 command average: average {runs} {@output}
 path average: out/sub-{sub}_ses-{ses}_average.nii
-average = average(aligned @ vary(run))
+average = average(aligned @vary(run))
 ";
 
 const FILES: [&str; 8] = [

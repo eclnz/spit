@@ -14,10 +14,10 @@ operation enrich(record: CleanRecord, policy: Policy) -> EnrichedRecord
 enriched = enrich(cleaned, policy)
 
 operation audit_group(records: many ValidRecord) -> Audit
-audit = audit_group(validated @ vary(item))
+audit = audit_group(validated @vary(item))
 
 operation digest_group(records: many EnrichedRecord) -> Digest
-digest = digest_group(enriched @ vary(item))
+digest = digest_group(enriched @vary(item))
 
 operation assemble(audit: Audit, digest: Digest, policy: Policy) -> Report
 report = assemble(audit, digest, policy)

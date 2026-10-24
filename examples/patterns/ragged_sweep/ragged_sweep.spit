@@ -12,7 +12,7 @@ path testset: eval/testset.parquet
 operation train(model: Weights, config: Config, seed: Seed) -> Weights
 command train: train --model {model} --config {config} --seed {seed} --out {@output}
 path trained: runs/{model}/{config}/{seed}/weights.pt
-trained = train(model @ each(model), config, seed)
+trained = train(model @each(model), config, seed)
 operation evaluate(weights: Weights, testset: Data) -> Metrics
 command evaluate: evaluate {weights} {testset} --out {@output}
 path metrics: runs/{model}/{config}/{seed}/metrics.json
@@ -20,8 +20,8 @@ metrics = evaluate(trained, testset)
 operation summarise(runs: many Metrics) -> Summary
 command summarise: summarise {runs} --out {@output}
 path summary: summaries/{model}/{config}.json
-summary = summarise(metrics @ vary(seed))
+summary = summarise(metrics @vary(seed))
 operation leaderboard(summaries: many Summary) -> Table
 command leaderboard: leaderboard {summaries} --out {@output}
 path board: leaderboard.csv
-board = leaderboard(summary @ vary(model, config))
+board = leaderboard(summary @vary(model, config))

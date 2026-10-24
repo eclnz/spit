@@ -42,7 +42,7 @@ impl BoundInput<'_> {
     }
 }
 
-/// The dimensions the inputs broadcast with `@ each(...)`, in port order.
+/// The dimensions the inputs broadcast with `@each(...)`, in port order.
 pub(crate) fn broadcast_dimensions(inputs: &[BoundInput<'_>]) -> Vec<String> {
     let mut dimensions: Vec<String> = Vec::new();
     for dimension in inputs.iter().flat_map(|input| &input.binding.each) {

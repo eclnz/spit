@@ -276,7 +276,7 @@ fn port_site(invocation: &Invocation, operation: &OperationDef, index: usize) ->
     }
 }
 
-/// Every combination of the values the inputs broadcast with `@ each(...)`:
+/// Every combination of the values the inputs broadcast with `@each(...)`:
 /// for each such input, the values present in its product, in natural order.
 /// A step without broadcasts has one empty combination.
 fn broadcast_contexts(

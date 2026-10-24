@@ -29,7 +29,7 @@ Plain `dag` stops at an incomplete job. `spit artifacts dataset.spitin` reports 
 spit dag dataset.spitin --partial -o plan.spitdag
 ```
 
-The DAG records outputs it left out and their reasons. A `many` input uses its complete members, then checks any `@ min(n)` requirement. `--partial` is a choice for this planning run, not a recipe rule. Use conditional `exclude` for a repeatable data policy and `require` when missing coverage must fail the run. See [inputs and partial plans](../language-reference.md#inputs).
+The DAG records outputs it left out and their reasons. A `many` input uses its complete members, then checks any `@min(n)` requirement. `--partial` is a choice for this planning run, not a recipe rule. Use conditional `exclude` for a repeatable data policy and `require` when missing coverage must fail the run. See [inputs and partial plans](../language-reference.md#inputs).
 
 ## Diagnostics
 

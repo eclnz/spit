@@ -60,7 +60,7 @@ cleaned = clean(raw)
 joined = join(cleaned, other)
 typo = clean(rwa)
 short = join(cleaned)
-merged = merge(cleaned @ vary(batch))
+merged = merge(cleaned @vary(batch))
 default entities: {@key}={@value} separated \"__\"\npath cleaned: out/{@product}/{@entities}\n";
     assert_eq!(
         pointed(text, None),
@@ -69,7 +69,7 @@ default entities: {@key}={@value} separated \"__\"\npath cleaned: out/{@product}
             "error 8: rwa",
             "error 9: join(cleaned)",
             // `cleaned` has no `batch` dimension to vary.
-            "error 10: cleaned @ vary(batch)",
+            "error 10: cleaned @vary(batch)",
         ]
     );
 }

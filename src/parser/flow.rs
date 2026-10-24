@@ -558,7 +558,7 @@ fn parse_flow_output(left: &str, number: usize) -> Result<StepOutput, ParseError
         if !product.checks.is_empty() {
             return Err(ParseError::new(
                 number,
-                "a step's product takes no `@ check(...)`; attach the check to the operation's output, as in `-> Image @ check(nonempty)`",
+                "a step's product takes no `@check(...)`; attach the check to the operation's output, as in `-> Image @check(nonempty)`",
             )
             .at_token(left));
         }
@@ -644,7 +644,7 @@ mod unknown_tests {
         assert_eq!(unknown_keyword("cleaned = clean(raw)"), None);
         assert_eq!(unknown_keyword("low, high = split(x)"), None);
         assert_eq!(
-            unknown_keyword("mean : Image [s] = average(x @ vary(r))"),
+            unknown_keyword("mean : Image [s] = average(x @vary(r))"),
             None
         );
         assert_eq!(unknown_keyword("Cleaned stuff"), None);

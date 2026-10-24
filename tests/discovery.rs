@@ -101,7 +101,7 @@ fn files_at_the_pipelines_output_paths_are_not_unmatched() {
          path report: out/report.csv\npath stored: out/stored/{@entities}\n\
          stage clean:\n    operation clean(x) -> Clean\n    command clean: clean {x} {@output}\n    cleaned = clean(x)\n\
          operation summarize(items: many Clean) -> Report\ncommand summarize: summarize {items} {@output}\n\
-         report = summarize(cleaned @ vary(s))\n\
+         report = summarize(cleaned @vary(s))\n\
          operation store(table: Clean) -> .zarr/\ncommand store: store {table} {@output}\nstored = store(cleaned)\ndefault entities: {@key}={@value} separated \"__\"\n",
     );
     let recipe = tree.write("recipe.spitin", "pipeline pipeline.spit\nroot data\n");
@@ -128,7 +128,7 @@ source lut
 path lut: config/lut.txt
 operation stack(frames: many Frame, lut: Lut) -> Stack
 command stack: stack {frames} {lut} {@output}
-stacked = stack(frame @ vary(run), lut)
+stacked = stack(frame @vary(run), lut)
 default entities: {@key}={@value} separated \"__\"\n";
 
 #[test]

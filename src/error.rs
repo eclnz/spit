@@ -199,7 +199,7 @@ impl fmt::Display for ResolveError {
                 context,
             } => write!(
                 f,
-                "more than one `{product}` artifact matches input `{port}` of `{operation}` at [{context}]; select one with `@ where(...)`"
+                "more than one `{product}` artifact matches input `{port}` of `{operation}` at [{context}]; select one with `@where(...)`"
             ),
             Self::CollectionTooSmall {
                 site: PortSite {

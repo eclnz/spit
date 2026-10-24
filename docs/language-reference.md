@@ -34,7 +34,7 @@ A statement goes on over the next lines while its brackets are open, as a long `
 ```text
 registered = register(
     denoised,
-    anatomy @ where(session=1)
+    anatomy @where(session=1)
 )
 ```
 
@@ -67,13 +67,13 @@ An assignment introduces a derived product automatically:
 
 ```text
 processed = process(image)
-average = mean(processed @ vary(run))
+average = mean(processed @vary(run))
 ```
 
-The input with the most dimensions drives a normal operation and gives its outputs their dimensions, wherever it sits among the ports. Its observed artifacts determine the initial jobs: an input with `[config, seed]` creates only the config and seed pairs actually present, rather than every combination of known values. For an aggregation, `vary(run)` removes `run` from the output identity; `@ each(...)` adds a dimension, as described under selectors. You can write the output type and dimensions explicitly when helpful; SPIT checks them against the step and the [dimension order](#dimension-order):
+The input with the most dimensions drives a normal operation and gives its outputs their dimensions, wherever it sits among the ports. Its observed artifacts determine the initial jobs: an input with `[config, seed]` creates only the config and seed pairs actually present, rather than every combination of known values. For an aggregation, `vary(run)` removes `run` from the output identity; `@each(...)` adds a dimension, as described under selectors. You can write the output type and dimensions explicitly when helpful; SPIT checks them against the step and the [dimension order](#dimension-order):
 
 ```text
-average : Image [subject, visit] = mean(processed @ vary(run))
+average : Image [subject, visit] = mean(processed @vary(run))
 ```
 
 ### Dimension order
@@ -88,7 +88,7 @@ When a product holds two dimensions that no source orders, declare the order onc
 dimensions [model, config, seed]
 ```
 
-This happens when `@ each` broadcasts a dimension that no source shares with the driving input's: in the ragged sweep, `trained` holds `model` and `config`, and without the line `spit check` stops there and suggests one. A `dimensions` line names every dimension in the pipeline once, and each source must list its dimensions in that order. A step's output written with its dimensions, as in `summary : Summary [model, config] = ...`, must list them in the pipeline's order; the annotation checks the order, it does not set it.
+This happens when `@each` broadcasts a dimension that no source shares with the driving input's: in the ragged sweep, `trained` holds `model` and `config`, and without the line `spit check` stops there and suggests one. A `dimensions` line names every dimension in the pipeline once, and each source must list its dimensions in that order. A step's output written with its dimensions, as in `summary : Summary [model, config] = ...`, must list them in the pipeline's order; the annotation checks the order, it does not set it.
 
 ## Operations and commands
 
@@ -100,32 +100,41 @@ operation mean(images: many Image) -> Image
 command mean: mean_tool {images} --out {@output}
 ```
 
-Declare an operation before its first use. Inputs in a call follow the port order in the declaration, and SPIT checks each product's type against that port. For example, with `operation compare(series: Series, policy: Policy)`, `compare(reading, policy)` uses `reading` as `series`; reversing the arguments is a type error when their types are known. A `one` input must resolve to exactly one artifact for each job, so every other input may only use dimensions the driving input has, unless it broadcasts them with `@ each(...)`; SPIT rejects a pipeline that breaks this before reading any inputs, and reports a missing match for a job. Steps may be written in any order, but none may read its way back to its own output: each group of steps that read each other in a loop is one error, `pipeline cycle: d -> e -> d`, reported at one of its steps, and neither those steps nor the steps that read from them are checked further. Every `many` input names the dimensions it collects at the call, with `@ vary(dimension, ...)`; the operation only says `many`, so one operation can collect runs in one step and sessions in another. Its command placeholder expands to one separately quoted argument per artifact, in natural order. Artifacts are compared dimension by dimension in the pipeline's [dimension order](#dimension-order). Within a value, runs of digits compare as numbers and other characters compare one by one, so `run=2` comes before `run=10`, ISO dates such as `2026-09-01` sort by date, and names sort by character (`lr-high`, `lr-low`, `warmup`). Values equal as numbers but written differently, such as `1` and `01`, are then ordered by their text. A many placeholder must occupy a whole argument. An operation takes at most one `many` input, which may sit beside `one` inputs; each of those is matched once per group:
+Declare an operation before its first use. Inputs in a call follow the port order in the declaration, and SPIT checks each product's type against that port. For example, with `operation compare(series: Series, policy: Policy)`, `compare(reading, policy)` uses `reading` as `series`; reversing the arguments is a type error when their types are known. A `one` input must resolve to exactly one artifact for each job, so every other input may only use dimensions the driving input has, unless it broadcasts them with `@each(...)`; SPIT rejects a pipeline that breaks this before reading any inputs, and reports a missing match for a job. Steps may be written in any order, but none may read its way back to its own output: each group of steps that read each other in a loop is one error, `pipeline cycle: d -> e -> d`, reported at one of its steps, and neither those steps nor the steps that read from them are checked further. Every `many` input names the dimensions it collects at the call, with `@vary(dimension, ...)`; the operation only says `many`, so one operation can collect runs in one step and sessions in another. Its command placeholder expands to one separately quoted argument per artifact, in natural order. Artifacts are compared dimension by dimension in the pipeline's [dimension order](#dimension-order). Within a value, runs of digits compare as numbers and other characters compare one by one, so `run=2` comes before `run=10`, ISO dates such as `2026-09-01` sort by date, and names sort by character (`lr-high`, `lr-low`, `warmup`). Values equal as numbers but written differently, such as `1` and `01`, are then ordered by their text. A many placeholder must occupy a whole argument. An operation takes at most one `many` input, which may sit beside `one` inputs; each of those is matched once per group:
 
 ```text
-operation summarise(days: many Series @ min(2), policy: Policy) -> Summary
-summary = summarise(reading @ vary(day), policy)
+operation summarise(days: many Series @min(2), policy: Policy) -> Summary
+summary = summarise(reading @vary(day), policy)
 ```
 
-`@ min(2)` on the `many` input rejects a group with fewer than two artifacts; untyped, it is `days: many @ min(2)`. It goes beside the input it counts, not after the outputs: `-> Summary @ min(2)` is an error that gives the line rewritten. The sensors walkthrough combines a `many` input, two outputs, and `verify` in a complete plan.
+`@min(2)` on the `many` input rejects a group with fewer than two artifacts; untyped, it is `days: many @min(2)`. It goes beside the input it counts, not after the outputs: `-> Summary @min(2)` is an error that gives the line rewritten. The sensors walkthrough combines a `many` input, two outputs, and `verify` in a complete plan.
 
-One aggregate can remove several dimensions at once. List them in one `@ vary(...)`; their order within the clause does not change the collection order. With `summary [model, config]`, this makes one leaderboard over all model and config combinations, ordered first by model and then by config:
+One aggregate can remove several dimensions at once. List them in one `@vary(...)`; their order within the clause does not change the collection order. With `summary [model, config]`, this makes one leaderboard over all model and config combinations, ordered first by model and then by config:
 
 ```text
 operation leaderboard(summaries: many Summary) -> Table
-board = leaderboard(summary @ vary(model, config))
+board = leaderboard(summary @vary(model, config))
 ```
 
-`@ min(n)` counts the whole collection, across both dimensions. A call that writes two `@ vary` clauses is an error; put both dimensions in one clause. The collection order follows the pipeline's [dimension order](#dimension-order), even if `@ vary` lists those dimensions in another order. The ragged sweep example declares `dimensions [model, config, seed]` and gets a model-first collection.
+`@min(n)` counts the whole collection, across both dimensions. A call that writes two `@vary` clauses is an error; put both dimensions in one clause. The collection order follows the pipeline's [dimension order](#dimension-order), even if `@vary` lists those dimensions in another order. The ragged sweep example declares `dimensions [model, config, seed]` and gets a model-first collection.
 
 Selectors narrow what an input matches. The sensors walkthrough shows `where` and `same` with a complete inventory:
 
 ```text
-calibrated = calibrate(reading, calibration @ where(revision=2))
-anomaly = compare(calibrated, reference @ same(station))
+calibrated = calibrate(reading, calibration @where(revision=2))
+anomaly = compare(calibrated, reference @same(station))
 ```
 
-`where(revision=2)` keeps the artifacts with that value and takes `revision` out of matching, so a family with an extra dimension can join a less specific input. `same(station)` matches on `station` alone; the reference's other dimensions must then leave exactly one artifact for each job. Selectors can be combined, as in `frame @ where(acq=fast) @ vary(run)`.
+`where(revision=2)` keeps the artifacts with that value and takes `revision` out of matching, so a family with an extra dimension can join a less specific input. `same(station)` matches on `station` alone; the reference's other dimensions must then leave exactly one artifact for each job. Selectors can be combined, as in `frame @where(acq=fast) @vary(run)`.
+
+Every `@` clause, whether a selector, `@min(n)` or `@check(...)`, is written with its keyword directly after the `@`. A space between them is an error that says what to write:
+
+```text
+source series : T [day]
+operation f(x: many T) -> T
+r = f(series @ vary(day))
+error: line 3, column 16: write `@vary(...)`, with no space between `@` and `vary`
+```
 
 `each` does the reverse of `vary`: it broadcasts an input over a dimension the driving input lacks, so the step runs once for every value and its outputs gain that dimension:
 
@@ -135,14 +144,14 @@ source reading : Series [station]
 source model : Model [scenario]
 source parameters : Parameters [scenario]
 
-forecast = predict(reading, model @ each(scenario), parameters)
+forecast = predict(reading, model @each(scenario), parameters)
 ```
 
 With two stations and two scenarios, this makes four `forecast[station=...,scenario=...]` jobs. The values come from the artifacts of the broadcast input, so adding a scenario to the inputs adds its jobs. Other inputs are matched on the new dimension as usual; here `parameters` supplies the settings for each scenario. Only one input may broadcast a given dimension, and the driving input must not already have it. No source holds both `station` and `scenario`, so the `dimensions` line orders them, and `forecast` has dimensions `[station, scenario]`. `each` pairs with `vary`, so a sweep can be collected again. It crosses only the broadcast input's observed values with each driving artifact; values held by other inputs stay correlated through matching. The ragged sweep example shows models crossed with observed config/seed pairs without inventing a missing seed:
 
 ```text
-trial = simulate(reading, seed @ each(rep))
-summary = average(trial @ vary(rep))
+trial = simulate(reading, seed @each(rep))
+summary = average(trial @vary(rep))
 ```
 
 An output's type may be followed by the extension the tool gives its file, as in `-> Transform .mat`; see [extensions](#extensions). An output the tool writes next to another without being told where is declared [`beside`](#files-a-tool-writes-beside-another) it.
@@ -197,7 +206,7 @@ the same meaning.
 
 Every input port has a name, and its placeholder is that name. A port is written `name`, `name: Type`, `name: many`, or `name: many Type`; a lowercase word alone, as in `operation copy(image)`, is an untyped port, and type names start with a capital letter. In `source reading : Series [station, day]`, `reading` is the product that identifies artifacts and `Series` is its type: write `operation compare(reading: Series)`, then call it with `compare(reading)`. `{@output}` is the path of a single unnamed output; its `@` marks a SPIT-supplied placeholder, while a named output such as `{wm}` uses the name in the operation declaration. `output` cannot name an input or explicit output port, and `{output}` is an error that points to `{@output}`. A command must use every output placeholder, or its `.dir` or `.stem`, except an output written [`beside`](#files-a-tool-writes-beside-another) another; a `verify` command may use inputs only. Command templates give ordered words and arguments, not shell pipelines or redirection, since a backend runs a command without a shell. An unquoted `|`, `>`, `&&`, `;`, `2>&1` or the like is therefore an error; quote it (`'>'`) to pass it to the program as an argument. A command that needs a pipe or a redirection runs a shell itself and passes the paths to it as arguments, so that a path is never read as shell text: `command first: sh -c 'cut -f1 "$1" > "$2"' sh {table} {@output}`. The same holds for `verify` and `check` commands. Words are split and quoted as in Bash, and every argument is passed literally: `$` and backticks are not expanded. As in Bash, text in single quotes is literal, so `awk '{print $1}'` needs no escaping; a placeholder is filled in unquoted text or double quotes. Write `{{` or `}}` for a literal brace elsewhere. Every command is checked when the pipeline is loaded: braces and quotes must balance, placeholders must name the operation's ports, and each output must appear, as above.
 
-Products, operations and dimensions have separate names, so a dimension may share a product's (`model @ each(model)`). A product may also share its operation's name, but `spit check` warns: name the result, as in `coregistered = coreg(mc, brain)`, so the step reads as what it makes.
+Products, operations and dimensions have separate names, so a dimension may share a product's (`model @each(model)`). A product may also share its operation's name, but `spit check` warns: name the result, as in `coregistered = coreg(mc, brain)`, so the step reads as what it makes.
 
 The first word of a command must be an executable available on `PATH` (or an executable path). SPIT emits that command without managing its installation or loading shell functions:
 
@@ -219,10 +228,10 @@ command count: wc {x} {@output}
 
 operation summarise(reads: Lines, table: Table) -> (merged: Lines, total: Count):
     cleaned = clean(reads, table)
-    merged = merge(cleaned @ vary(lane))
+    merged = merge(cleaned @vary(lane))
     total = count(merged)
 
-first, first_total = summarise(raw, calibration @ where(revision=2))
+first, first_total = summarise(raw, calibration @where(revision=2))
 ```
 
 The body reads the operation's inputs, by their port names, and the products its earlier steps make, and it makes each named output once. Its outputs are the products the caller names: here `first` and `first_total`. A product the body makes for itself is filed under the call's first output, so `cleaned` is `first::cleaned`, written `first.cleaned` in a path, and a second call of `summarise` files its own apart. So a call's first output cannot also be an import's alias: `use parts.spit as first` with the call above is an error at the call. Only the outputs are the caller's to read: a step that reads `first::cleaned` is an error that says to make it an output.
@@ -237,7 +246,7 @@ error: line 4, column 21: in `m, t = L::summarise(...)`: type mismatch at `L::cl
 
 `spit check --json` gives the same places as the diagnostic's `related` list. `spit artifacts` names the call beside each artifact a call's step cannot make, as ``(L::clean, in `m, t = L::summarise(...)` on line 8)``, and the reasons in a partial `.spitdag`'s `left_out` start with it.
 
-A check on an input or output of such an operation, as `reads: Lines @ check(lines(2))`, runs on every step that reads that input or makes that output, beside the checks of the step's own operation; the same check on one artifact runs once. Imported, it brings the operations its steps call, and their commands and checks, under the same prefix, so `use summarise from lib.spit as L` brings `L::clean` too.
+A check on an input or output of such an operation, as `reads: Lines @check(lines(2))`, runs on every step that reads that input or makes that output, beside the checks of the step's own operation; the same check on one artifact runs once. Imported, it brings the operations its steps call, and their commands and checks, under the same prefix, so `use summarise from lib.spit as L` brings `L::clean` too.
 
 `spit check pipeline.spit --calls` lists each call's steps before any data is read. It shows the call, its line and stage, the file that declares the operation with its file's blob id, then each step with the line of the body that writes it; a call in a body is shown under its caller:
 
@@ -270,29 +279,29 @@ An operation with a body names its outputs, as `-> (result: Type)`, since its st
 
 ## Checks
 
-A `check` tests one artifact once its file exists, with the tools that understand it. Declare it once, then attach it with `@ check(...)` where it applies:
+A `check` tests one artifact once its file exists, with the tools that understand it. Declare it once, then attach it with `@check(...)` where it applies:
 
 ```text
 check ndim(n): check_ndim {@path} {n}
 check nonempty: test -s {@path}
 
-source t1w : Image .nii.gz [sub] @ check(ndim(3))
+source t1w : Image .nii.gz [sub] @check(ndim(3))
 
-operation denoise(dwi: DWI @ check(ndim(4))) -> DWI .mif @ check(nonempty)
-operation split(table: Table) -> (left: Table @ check(nonempty), right: Table)
+operation denoise(dwi: DWI @check(ndim(4))) -> DWI .mif @check(nonempty)
+operation split(table: Table) -> (left: Table @check(nonempty), right: Table)
 ```
 
 `{@path}` is the artifact being checked, and the check must use it. Each `{param}` is the word given where the check is attached: `ndim(4)` runs `check_ndim` with the artifact's path and `4`. A check may use nothing else, so it reads one artifact and never adds a dependency, and it must use every parameter. A check with no parameters is written without parentheses, where it is declared and where it is attached. An argument is one word, with no spaces, quotes, braces, commas or parentheses. The command is split and quoted like any [command](#operations-and-commands).
 
-`@ check(...)` follows an input port's type, an output's type and extension, or a source's dimensions, and may name several checks, as in `@ check(nonempty, ndim(3))`. The checks on an input port, and those of the source it reads, run on each artifact the port reads before the job's `verify` commands and command; a `many` port checks each artifact of its collection. The checks on an output run after the command, once the file exists, before the job counts as done. Several checks on one artifact all run; none replaces another. A step's product takes no checks: attach them to the operation's output.
+`@check(...)` follows an input port's type, an output's type and extension, or a source's dimensions, and may name several checks, as in `@check(nonempty, ndim(3))`. The checks on an input port, and those of the source it reads, run on each artifact the port reads before the job's `verify` commands and command; a `many` port checks each artifact of its collection. The checks on an output run after the command, once the file exists, before the job counts as done. Several checks on one artifact all run; none replaces another. A step's product takes no checks: attach them to the operation's output.
 
 SPIT does not run checks. It writes each job's checks into the `.spitdag`, bound to the artifacts they test (see [checks](spitdag.md#checks)), and a backend runs them. A failed check fails the job, even when its command succeeded, and the jobs that depend on it do not run. When the job that writes an artifact checks it after its command, a job in the same plan that reads it does not run the same check again. `spit dag --commands` shows each job's checks as `check:` lines, in the order they run.
 
-Checks are global, as operations are. `use` brings in the checks of the operations and sources it imports, and `use ndim from checks.spit` imports a check by name. With `as`, an imported check takes the prefix too, as in `@ check(img::ndim(3))`; see [reuse](#reuse-definitions).
+Checks are global, as operations are. `use` brings in the checks of the operations and sources it imports, and `use ndim from checks.spit` imports a check by name. With `as`, an imported check takes the prefix too, as in `@check(img::ndim(3))`; see [reuse](#reuse-definitions).
 
 ### Default checks
 
-When every output in a file or stage needs the same check, write one `default check:` line instead of repeating `@ check(...)` on each output, as `default path:` and `default ext:` set a default for the products they cover:
+When every output in a file or stage needs the same check, write one `default check:` line instead of repeating `@check(...)` on each output, as `default path:` and `default ext:` set a default for the products they cover:
 
 ```text
 check nonempty: test -s {@path}
@@ -305,11 +314,11 @@ stage preprocess:
     cleaned = denoise(raw)
 ```
 
-A `default check:` line outside every stage lists the checks run on every output of every step in it, stages included; one inside a stage lists them for the steps of that stage and the stages nested in it. A step takes the defaults of its own stage, not of the stage where its operation was declared, so a global operation called in two stages is checked by each stage's list. A default applies to every output of the step, each artifact of a named multi-output operation included. It never applies to an input port or a source: those keep the checks written at their `@ check(...)`.
+A `default check:` line outside every stage lists the checks run on every output of every step in it, stages included; one inside a stage lists them for the steps of that stage and the stages nested in it. A step takes the defaults of its own stage, not of the stage where its operation was declared, so a global operation called in two stages is checked by each stage's list. A default applies to every output of the step, each artifact of a named multi-output operation included. It never applies to an input port or a source: those keep the checks written at their `@check(...)`.
 
 Lists add up. A step's outputs run the file's checks, then those of each stage around the step from the outermost in, in the order written, and then the checks the operation's own output names. Where one check would run twice on an artifact, it runs once, at its first place. In the example above, `cleaned` runs `nonempty`, then `ndim(3)`.
 
-To run less than a wider list sets, write `!` before the check. In a stage, `default check: !nonempty` drops the file's `nonempty` for that stage's outputs and the stages in it, and a stage inside it may add it back. On an operation's output, `-> (empty_ok: Table @ check(!nonempty), rows: Table)` drops it for that output alone, wherever the operation is called. `!` names a check as written, `ndim(3)` included, and an output's own `@ check(nonempty)` is never dropped by it.
+To run less than a wider list sets, write `!` before the check. In a stage, `default check: !nonempty` drops the file's `nonempty` for that stage's outputs and the stages in it, and a stage inside it may add it back. On an operation's output, `-> (empty_ok: Table @check(!nonempty), rows: Table)` drops it for that output alone, wherever the operation is called. `!` names a check as written, `ndim(3)` included, and an output's own `@check(nonempty)` is never dropped by it.
 
 A file or a stage has one `default check:` line. Its checks and the ones it drops must be declared checks, with the right number of arguments. Default checks add no field to the `.spitdag`: each default becomes a check on the artifact, after the job's command, beside the others, and `spit dag --commands` lists it as a `check:` line.
 
@@ -357,7 +366,7 @@ stage preprocess:
 
     operation merge(items: many Lines) -> Lines
     command merge: sort -m -u -o {@output} {items}
-    merged = merge(sorted @ vary(part))
+    merged = merge(sorted @vary(part))
 
 stage analysis:
     default path: results/{@product}/{@entities}.txt
@@ -377,7 +386,7 @@ stage preprocess:
         sorted = sort_lines(shard)
 
     stage combine:
-        merged = merge(sorted @ vary(part))
+        merged = merge(sorted @vary(part))
 
     resorted = sort_lines(merged)    # in `preprocess` itself
 ```
@@ -476,7 +485,7 @@ A tool decides the format of the file it writes, so an operation can say which e
 
 ```text
 operation align(moving: Image, reference: Image) -> Transform .mat
-operation fit(runs: many Data @ min(2)) -> (weights: Weights .npz, quality: Metrics .json)
+operation fit(runs: many Data @min(2)) -> (weights: Weights .npz, quality: Metrics .json)
 ```
 
 An extension is a `.` and letters, digits, `-` or `_`, and may have several parts, as `.nii.gz` does. An untyped output may have one too: `-> .txt`. A source declares the extension of the files it reads in the same place, after its type: `source events : Events .tsv [sub]`.
@@ -889,7 +898,7 @@ removed:
 
 The section is a record, not a rule: the records above it already leave these out, and resolving jobs removes nothing more. Scanning again rewrites it from the recipe, so a removal survives a rescan. `dag` copies it into the `.spitdag`.
 
-`dag --partial` is a choice for one planning run, not a recipe rule. It keeps jobs with complete inputs, including aggregate jobs whose `many` input still has complete members, and writes the other outputs with their reasons in the `.spitdag`'s `left_out` array. A `many` input's `@ min(count)` is checked after incomplete members have been removed. Plain `dag` still fails on the first incomplete job and points to `artifacts` and `dag --partial`.
+`dag --partial` is a choice for one planning run, not a recipe rule. It keeps jobs with complete inputs, including aggregate jobs whose `many` input still has complete members, and writes the other outputs with their reasons in the `.spitdag`'s `left_out` array. A `many` input's `@min(count)` is checked after incomplete members have been removed. Plain `dag` still fails on the first incomplete job and points to `artifacts` and `dag --partial`.
 
 ## Optional types
 

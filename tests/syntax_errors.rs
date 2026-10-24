@@ -12,7 +12,7 @@ use spit::{diagnose, DiagnosticSource};
 #[test]
 fn reports_syntax_line_from_unsaved_text() {
     let text =
-        "source raw [id]\noperation copy(input)\nresult = copy(raw @ vary(id) @ vary(extra))\n";
+        "source raw [id]\noperation copy(input)\nresult = copy(raw @vary(id) @vary(extra))\n";
     let issues = errors(diagnose(text, None));
     assert_eq!(issues.len(), 1);
     assert_eq!(issues[0].source, DiagnosticSource::Pipeline);
@@ -323,7 +323,7 @@ fn calls_to_an_operation_that_failed_to_declare_repeat_its_error() {
 fn each_call_to_a_misspelled_operation_is_an_error_of_its_own() {
     let mut text = String::from("source raw : T [sub]\noperation step(input: T) -> T\n");
     for index in 0..50 {
-        text += &format!("p{index} = stpe(raw @ vary(sub))\np{index}b = step(raw @ bogus(sub))\n");
+        text += &format!("p{index} = stpe(raw @vary(sub))\np{index}b = step(raw @ bogus(sub))\n");
     }
     let issues = errors(diagnose(&text, None));
     let lines: Vec<_> = issues.iter().map(|issue| issue.line).collect();
@@ -412,7 +412,7 @@ fn a_failed_line_that_closes_a_stage_keeps_it_closed_on_every_pass() {
 /// without recording the call, so each call is an error of its own.
 #[test]
 fn each_call_whose_selectors_clash_with_its_body_is_an_error_of_its_own() {
-    let text = "source raw : T [sub]\noperation step(input: T) -> T\noperation inner(input: T) -> (out: T):\n    out = step(input @ where(sub=1))\noperation outer(input: T) -> (out: T):\n    out = inner(input @ where(sub=1))\nm = outer(raw @ where(sub=2))\nn = outer(raw @ where(sub=2))\nk = outer(raw)\n";
+    let text = "source raw : T [sub]\noperation step(input: T) -> T\noperation inner(input: T) -> (out: T):\n    out = step(input @where(sub=1))\noperation outer(input: T) -> (out: T):\n    out = inner(input @where(sub=1))\nm = outer(raw @where(sub=2))\nn = outer(raw @where(sub=2))\nk = outer(raw)\n";
     let found = error_lines(text);
     assert_eq!(lines_of(&found), [7, 8], "{found:?}");
 }
