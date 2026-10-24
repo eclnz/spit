@@ -201,3 +201,76 @@ impl Artifacts {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn binding(sub: &str) -> EntityBinding {
+        EntityBinding::from_pairs([("sub", sub)])
+    }
+
+    #[test]
+    fn adding_an_artifact_twice_gives_its_id_and_keeps_one_row() {
+        let mut artifacts = Artifacts::default();
+        let t = artifacts.product("raw", &TypeExpr::named("T"));
+        let first = artifacts.add(t, binding("1")).unwrap();
+        assert_eq!(artifacts.add(t, binding("1")), Err(first));
+        assert_eq!(artifacts.len(), 1);
+        assert_eq!(artifacts.ids().count(), 1);
+    }
+
+    #[test]
+    fn a_product_is_numbered_once_and_keeps_the_first_type_it_is_given() {
+        let mut artifacts = Artifacts::default();
+        let raw = artifacts.product("raw", &TypeExpr::named("T"));
+        let other = artifacts.product("other", &TypeExpr::named("U"));
+        assert_eq!((raw, other), (0, 1));
+        assert_eq!(artifacts.product("raw", &TypeExpr::named("U")), raw);
+        let listed: Vec<_> = artifacts.products().collect();
+        assert_eq!(
+            listed,
+            [
+                ("raw", &TypeExpr::named("T")),
+                ("other", &TypeExpr::named("U"))
+            ]
+        );
+        assert_eq!(artifacts.product_number("raw"), Some(0));
+        assert_eq!(artifacts.product_number("missing"), None);
+    }
+
+    #[test]
+    fn find_gives_what_add_added_and_nothing_else() {
+        let mut artifacts = Artifacts::default();
+        let raw = artifacts.product("raw", &TypeExpr::named("T"));
+        let other = artifacts.product("other", &TypeExpr::named("T"));
+        let id = artifacts.add(raw, binding("1")).unwrap();
+        assert_eq!(artifacts.find("raw", &binding("1")), Some(id));
+        assert_eq!(artifacts.find("raw", &binding("2")), None);
+        assert_eq!(artifacts.find("other", &binding("1")), None);
+        assert_eq!(artifacts.find("missing", &binding("1")), None);
+        // A product with the same entities is another artifact.
+        let same_entities = artifacts.add(other, binding("1")).unwrap();
+        assert_ne!(same_entities, id);
+        assert_eq!(artifacts.find("other", &binding("1")), Some(same_entities));
+    }
+
+    #[test]
+    fn ids_count_up_from_zero_in_the_order_artifacts_are_added() {
+        let mut artifacts = Artifacts::default();
+        let raw = artifacts.product("raw", &TypeExpr::named("T"));
+        let added = [binding("3"), binding("1"), binding("2")]
+            .map(|entities| artifacts.add(raw, entities).unwrap());
+        // A repeat takes no id.
+        artifacts.add(raw, binding("1")).unwrap_err();
+        let ids: Vec<_> = artifacts.ids().collect();
+        assert_eq!(ids, added);
+        let indexes: Vec<_> = ids.iter().map(|id| id.index()).collect();
+        assert_eq!(indexes, [0, 1, 2]);
+        assert_eq!(artifacts.get(ids[0]).entities, &binding("3"));
+        assert_eq!(
+            artifacts.get(ids[2]).to_instance().to_string(),
+            "raw[sub=2]"
+        );
+    }
+}
