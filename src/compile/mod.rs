@@ -3,6 +3,7 @@
 //! inferred types, and cycles. Input rules and resolving jobs build on what
 //! this returns.
 
+mod declared;
 mod definitions;
 mod steps;
 mod strict;
@@ -14,6 +15,7 @@ use crate::error::{DefinitionSubject, ResolveError};
 use crate::model::{Invocation, OperationDef, Pipeline, ProductDef, TypeChecking};
 use crate::types::{Substitutions, TypeExpr};
 
+use self::declared::check_declared;
 use self::definitions::{
     check_stages, index_operations, index_producers, index_products, invocation_order,
 };
@@ -98,6 +100,7 @@ pub(crate) fn collect_pipeline(pipeline: &Pipeline) -> PipelineCheck<'_> {
         &mut poisoned,
     );
     check_stages(pipeline, &mut errors);
+    check_declared(pipeline, &mut errors, &mut poisoned);
     // Source order is no dependency order, so a step in a cycle is not
     // checked at all, and the steps that read from it are skipped below.
     let order = invocation_order(&pipeline.invocations, &producers);

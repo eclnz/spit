@@ -61,6 +61,8 @@ fn words_are_found_by_where_they_are_written() {
         ("use shard, sort_lines from text.spit as text", "from", Some("use-from")),
         ("use shard, sort_lines from text.spit as text", " as", Some("use-as")),
         ("use as.spit", "as", None),
+        ("type Frame<Kind, Space>", "type", Some("type")),
+        ("type Frame<Kind, Space>", "Kind", None),
         ("dimensions [model, config, seed]", "dimensions", Some("dimensions")),
         ("source meta .json beside image", "beside", Some("beside")),
         ("    source photo_json .json", "source", Some("source")),

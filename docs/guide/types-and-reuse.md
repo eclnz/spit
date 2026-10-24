@@ -20,6 +20,8 @@ transform = align(cleaned, reference)
 
 The uppercase `S`, `A`, and `B` in operation signatures are local type variables. Each call binds them from its inputs, then uses those bindings to infer its output type. `Frame<Native>` and `Reference<Target>` are concrete product types. A known mismatch is an error; an unknown type can still pass through a call. The complete rules and longer `$Variable` spelling are in [optional types](../language-reference.md#optional-types). The checked-in [typed example](https://github.com/eclnz/spit/blob/dev/examples/types/typed.spit) uses this exact pipeline.
 
+Write `type Frame<Kind>` to declare how many arguments `Frame` takes and what to call them; SPIT then reports a `Frame` written with another number ([declared types](../language-reference.md#declared-types)).
+
 Types do not select artifacts. Product names and dimensions determine which source artifacts exist and which one a job reads. See [matching and collections](matching.md) for that part of resolution.
 
 ## Reusable definitions

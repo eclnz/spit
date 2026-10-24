@@ -1359,13 +1359,46 @@ In operation signatures, a single capital letter such as `S` is a local type var
 operation project(sample: Frame<$Kind,$SourceSpace>, calibration: Calibration<$Kind,$SourceSpace,$TargetSpace>) -> Frame<$Kind,$TargetSpace>
 ```
 
+### Declared types
+
+`type` declares a parameterized type and names its parameters, in order. A declared type takes that many arguments wherever it is written, in a source, an operation's port or a step's product. Arguments are still given by position, and a nested type is checked in turn:
+
+```spit
+type Frame<Kind, Space>
+type Space<Subject, Reference>
+
+source scan : Frame<Diffusion,Space<Sub01,T1>> [subject]
+operation smooth(frame: Frame<K,S>) -> Frame<K,S>
+```
+
+A type with too few or too many arguments is an error where it is written:
+
+<!-- spit-doc: fragment -->
+
+```text
+type Frame<Kind, Space>
+source scan : Frame<Diffusion> [subject]
+```
+
+<!-- spit-doc: output
+spit check wrong.spit || true
+--- wrong.spit = @previous
+-->
+
+```text
+error: line 2, column 8: source `scan`: `Frame<Diffusion>` has 1 type argument, but `Frame` is declared `type Frame<Kind, Space>` and takes 2 type arguments
+```
+
+A type that is not declared is not checked, unless the pipeline is [strict](#strict-typing). Declaring a name again with the same parameters is one declaration; other parameters under the same name are an error. An import brings the declarations of the file it reads. A recipe takes no `type` line.
+
 ### Strict typing
 
 `types strict`, once at the top level, makes every missing type an error. Once inference is done:
 
 - each source has a type with no `Unknown` part;
 - each port of an operation a step or call uses has a type, which may be generic;
-- each product a step makes has a type with no unknown part.
+- each product a step makes has a type with no unknown part;
+- each type written with arguments is [declared](#declared-types).
 
 A product a step makes needs no type of its own when inference gives it one:
 
@@ -1373,6 +1406,8 @@ A product a step makes needs no type of its own when inference gives it one:
 
 ```text
 types strict
+type Frame<Space>
+type Atlas<Space>
 default entities: {@key}={@value} separated "__"
 default path: out/{@product}/{@entities}
 
@@ -1394,7 +1429,7 @@ spit check atlas.spit || true
 -->
 
 ```text
-error: line 6, column 8: `types strict` needs a type on source `atlas`, as in `source atlas : Type`
+error: line 8, column 8: `types strict` needs a type on source `atlas`, as in `source atlas : Type`
 ```
 
 With `source atlas : Atlas<MNI>`, the pipeline is valid: `smoothed` is `Frame<Native>` and `registered` is `Frame<MNI>`, though neither is written. A missing type is reported once, where it is missing: here `registered`, which reads `atlas`, is not reported as well. A variable that no input fixes, as in `operation wrap(x: Image) -> Frame<T>`, is reported at the product the step makes, with the type to write there, such as `wrapped : Frame<Type> [subject] = wrap(...)`. An operation no step or call uses may leave its ports untyped.
