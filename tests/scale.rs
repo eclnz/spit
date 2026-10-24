@@ -154,11 +154,11 @@ fn many_bad_steps_that_end_bodies_are_reported_in_reasonable_time() {
 fn many_bad_body_headers_and_nested_call_failures_are_reported_in_reasonable_time() {
     let mut headers = with_step("");
     let mut nested = with_step(
-        "operation inner(x: T) -> (o: T):\n    o = step(x @ where(sub=1))\noperation outer(x: T) -> (o: T):\n    m = step(x)\n    o = inner(m)\n",
+        "operation inner(x: T) -> (o: T):\n    o = step(x @where(sub=1))\noperation outer(x: T) -> (o: T):\n    m = step(x)\n    o = inner(m)\n",
     );
     for index in 0..20_000 {
         headers += &format!("operation body{index}(x: T) -> (r: T, s: T):\n    r = step(x)\n");
-        nested += &format!("r{index} = outer(raw @ where(sub=2))\n");
+        nested += &format!("r{index} = outer(raw @where(sub=2))\n");
     }
     for (kind, text) in [("headers", headers), ("nested", nested)] {
         let start = Instant::now();
@@ -325,10 +325,10 @@ fn many_conflicting_imports_are_reported_in_reasonable_time() {
 #[ignore = "slow in a debug build; run with --release"]
 fn many_calls_that_clash_with_their_operations_body_are_reported_in_reasonable_time() {
     let mut text = with_step(
-        "operation inner(input: T) -> (out: T):\n    out = step(input @ where(sub=1))\noperation outer(input: T) -> (out: T):\n    out = inner(input @ where(sub=1))\n",
+        "operation inner(input: T) -> (out: T):\n    out = step(input @where(sub=1))\noperation outer(input: T) -> (out: T):\n    out = inner(input @where(sub=1))\n",
     );
     for index in 0..20_000 {
-        text += &format!("m{index} = outer(raw @ where(sub=2))\n");
+        text += &format!("m{index} = outer(raw @where(sub=2))\n");
     }
     let start = Instant::now();
     let issues = diagnose(&text, None);

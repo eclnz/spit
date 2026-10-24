@@ -16,13 +16,13 @@ pub(super) fn product_signature(product: &ProductDef, ty: &TypeExpr) -> String {
     )
 }
 
-/// ` @ check(a, b(1))` for the checks a port or source attaches, or nothing.
+/// ` @check(a, b(1))` for the checks a port or source attaches, or nothing.
 fn checks_text(checks: &[CheckUse]) -> String {
     if checks.is_empty() {
         return String::new();
     }
     let checks: Vec<_> = checks.iter().map(ToString::to_string).collect();
-    format!(" @ check({})", checks.join(", "))
+    format!(" @check({})", checks.join(", "))
 }
 
 pub(super) fn check_signature(check: &CheckDef) -> String {
@@ -59,7 +59,7 @@ pub(super) fn operation_signature(operation: &OperationDef) -> String {
             );
             // An operation has at most one many input, which its minimum counts.
             if let (true, Some(minimum)) = (many, operation.minimum_collection) {
-                let _ = write!(text, " @ min({minimum})");
+                let _ = write!(text, " @min({minimum})");
             }
             text.push_str(&checks_text(&port.checks));
             text

@@ -62,7 +62,7 @@ stage preprocess:
         # Consume run to make one session DWI for subsequent motion correction.
         operation concatenate_runs(runs: many MRI<DWI,S>) -> MRI<DWI,S>
         command concatenate_runs: dwicat {runs} {@output}
-        session_dwi = concatenate_runs(degibbsed_dwi @ vary(run))
+        session_dwi = concatenate_runs(degibbsed_dwi @vary(run))
 
         forward_b0_series = extract_b0(session_dwi)
 

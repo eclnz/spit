@@ -388,7 +388,7 @@ mod tests {
             text += &format!("check c{index}: test -s {{@path}}\n");
         }
         text += &format!(
-            "operation step(x: T @ check(c{})) -> T @ check(c{})\n",
+            "operation step(x: T @check(c{})) -> T @check(c{})\n",
             steps - 1,
             steps - 1
         );

@@ -4,7 +4,7 @@ These walkthroughs contain everything needed to reproduce their plans in an empt
 
 ## Ragged sweep: correlated seeds and collection order
 
-Each configuration owns its seeds: `fast` has 1 and 2, while `deep` has only 1. The `seed[config,seed]` artifacts drive training. `model @ each(model)` broadcasts each model over those **observed** config/seed pairs; it does not manufacture `deep` seed 2. No source holds both `model` and `config`, so nothing says which comes first; `dimensions [model, config, seed]` declares it once for the whole pipeline. Every product then lists its dimensions in that order, so `trained` is `[model, config, seed]`, `summary` is `[model, config]`, and the final `many Summary` collection sorts by model, then config. Without the line, `spit check` stops at `trained` and suggests it.
+Each configuration owns its seeds: `fast` has 1 and 2, while `deep` has only 1. The `seed[config,seed]` artifacts drive training. `model @each(model)` broadcasts each model over those **observed** config/seed pairs; it does not manufacture `deep` seed 2. No source holds both `model` and `config`, so nothing says which comes first; `dimensions [model, config, seed]` declares it once for the whole pipeline. Every product then lists its dimensions in that order, so `trained` is `[model, config, seed]`, `summary` is `[model, config]`, and the final `many Summary` collection sorts by model, then config. Without the line, `spit check` stops at `trained` and suggests it.
 
 Save as `sweep.spit`:
 
@@ -23,7 +23,7 @@ path testset: eval/testset.parquet
 operation train(model: Weights, config: Config, seed: Seed) -> Weights
 command train: train --model {model} --config {config} --seed {seed} --out {@output}
 path trained: runs/{model}/{config}/{seed}/weights.pt
-trained = train(model @ each(model), config, seed)
+trained = train(model @each(model), config, seed)
 operation evaluate(weights: Weights, testset: Data) -> Metrics
 command evaluate: evaluate {weights} {testset} --out {@output}
 path metrics: runs/{model}/{config}/{seed}/metrics.json
@@ -31,11 +31,11 @@ metrics = evaluate(trained, testset)
 operation summarise(runs: many Metrics) -> Summary
 command summarise: summarise {runs} --out {@output}
 path summary: summaries/{model}/{config}.json
-summary = summarise(metrics @ vary(seed))
+summary = summarise(metrics @vary(seed))
 operation leaderboard(summaries: many Summary) -> Table
 command leaderboard: leaderboard {summaries} --out {@output}
 path board: leaderboard.csv
-board = leaderboard(summary @ vary(model, config))
+board = leaderboard(summary @vary(model, config))
 ```
 
 Save as `sweep.spitout`:
@@ -92,9 +92,9 @@ stage anat:
 stage func:
     mc = motioncorr(bold)
     coreg = register(mc, brain)
-    avg = sessionavg(coreg @ vary(run))
+    avg = sessionavg(coreg @vary(run))
 
-long = longitudinal(avg @ vary(ses))
+long = longitudinal(avg @vary(ses))
 ```
 
 Save as `cohort.spitin`:
@@ -163,13 +163,13 @@ path policy: policy/{station}.toml
 operation calibrate(calibration: Calibration, series: Series) -> Series
 verify calibrate: check_calibration {calibration} {series}
 command calibrate: apply_calibration --calibration {calibration} {series} {@output}
-calibrated = calibrate(calibration @ where(revision=2), reading)
+calibrated = calibrate(calibration @where(revision=2), reading)
 
 # `same(station)` matches the reference on station alone; each station must
 # have exactly one, whatever day it was measured.
 operation compare(series: Series, reference: Series) -> Series
 command compare: subtract_reference {series} {reference} {@output}
-anomaly = compare(calibrated, reference @ same(station))
+anomaly = compare(calibrated, reference @same(station))
 
 # One job writes both bands.
 operation split_bands(series: Series) -> (low: Series, high: Series)
@@ -178,10 +178,10 @@ low_band, high_band = split_bands(anomaly)
 
 # A many input can sit beside single inputs, each matched once per group.
 # The days arrive in natural order, and fewer than two is an error.
-operation summarise(days: many Series @ min(2), policy: Policy) -> Summary
+operation summarise(days: many Series @min(2), policy: Policy) -> Summary
 command summarise: summarise --policy {policy} {days} --out {@output}
 path summary: derived/summary/{station}.json
-summary = summarise(low_band @ vary(day), policy)
+summary = summarise(low_band @vary(day), policy)
 ```
 
 Save as `sensors.spitout`:
@@ -238,7 +238,7 @@ stage preprocess:
     stage combine:
         operation merge(items: many Lines) -> Lines
         command merge: sort -m -u -o {@output} {items}
-        merged = merge(sorted @ vary(part))
+        merged = merge(sorted @vary(part))
 
     resorted = text::sort_lines(merged)
 

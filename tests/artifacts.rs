@@ -77,7 +77,7 @@ cleaned = clean(scan)
 operation align(moving: Scan, reference: Calibration) -> Scan
 aligned = align(cleaned, calibration)
 operation merge(runs: many Scan) -> Scan
-merged = merge(aligned @ vary(run))
+merged = merge(aligned @vary(run))
 default entities: {@key}={@value} separated \"__\"\npath cleaned: out/{@product}[/{@entities}]\npath aligned: out/{@product}[/{@entities}]\npath merged: out/{@product}[/{@entities}]\n";
 
 const ALIGN_SOURCES: &str = "\
@@ -163,7 +163,7 @@ source scan [subject, run]
 source calibration [subject, site]
 source mask [subject]
 operation align(moving: Scan, reference: Calibration, mask: Mask) -> Scan
-aligned = align(scan, calibration @ same(subject), mask)
+aligned = align(scan, calibration @same(subject), mask)
 default entities: {@key}={@value} separated \"__\"\npath aligned: out/{@product}[/{@entities}]\n";
     let sources = "\
 sources:
@@ -186,8 +186,8 @@ sources:
 fn a_small_collection_leaves_other_groups_complete() {
     let text = "\
 source day [site, date]
-operation summarise(days: many Day @ min(2)) -> Summary
-summary = summarise(day @ vary(date))
+operation summarise(days: many Day @min(2)) -> Summary
+summary = summarise(day @vary(date))
 default entities: {@key}={@value} separated \"__\"\npath summary: out/{@product}[/{@entities}]\n";
     let sources = "\
 sources:
@@ -275,7 +275,7 @@ source reading [station]
 source sales [store]
 source price [store]
 operation calibrate(cal, reading) -> Reading
-calibrated = calibrate(cal @ where(revision=2), reading)
+calibrated = calibrate(cal @where(revision=2), reading)
 operation total(sales, price) -> Total
 totals = total(sales, price)
 default entities: {@key}={@value} separated \"__\"\npath calibrated: out/{@product}[/{@entities}]\npath totals: out/{@product}[/{@entities}]\n";
@@ -421,7 +421,7 @@ operation price(day: Day, rate: Rate) -> Priced
 operation total(days: many Priced) -> Total
 operation both(total: Total) -> Both
 priced = price(day, rate)
-total = total(priced @ vary(date))
+total = total(priced @vary(date))
 both = both(total)
 default entities: {@key}={@value} separated \"__\"\npath priced: out/{@product}[/{@entities}]\npath total: out/{@product}[/{@entities}]\npath both: out/{@product}[/{@entities}]\n";
     let sources = "\

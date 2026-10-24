@@ -106,7 +106,7 @@ source extra [subject]
 operation f(image: Image) -> Image
 operation g(image: Image, image2: Image) -> Image
 cleaned = f(image)
-other = f(extra @ where(subject=z))
+other = f(extra @where(subject=z))
 both = g(cleaned, image)
 path image: in/{subject}.img
 path extra: in/{subject}.extra

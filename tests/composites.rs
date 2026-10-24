@@ -38,7 +38,7 @@ const SUMMARISE: &str = "
 # Clean every lane, merge them, and count the result.
 operation summarise(reads: Lines, table: Table) -> (merged: Lines, total: Count):
     cleaned = clean(reads, table)
-    merged = merge(cleaned @ vary(lane))
+    merged = merge(cleaned @vary(lane))
     total = count(merged)
 ";
 
@@ -58,8 +58,7 @@ fn errors(pipeline: &str) -> Vec<String> {
 
 #[test]
 fn a_call_becomes_its_bodys_steps_over_the_callers_products() {
-    let text =
-        format!("{BASE}{SUMMARISE}merged, total = summarise(raw, cal @ where(revision=2))\n");
+    let text = format!("{BASE}{SUMMARISE}merged, total = summarise(raw, cal @where(revision=2))\n");
     let (pipeline, _) = support::parse_fixture(&text).unwrap();
     let steps: Vec<_> = pipeline
         .invocations
@@ -102,8 +101,8 @@ fn a_call_becomes_its_bodys_steps_over_the_callers_products() {
 #[test]
 fn two_calls_file_their_own_products_apart() {
     let text = format!(
-        "{BASE}{SUMMARISE}first, first_total = summarise(raw, cal @ where(revision=1))\n\
-         second, second_total = summarise(raw, cal @ where(revision=2))\n"
+        "{BASE}{SUMMARISE}first, first_total = summarise(raw, cal @where(revision=1))\n\
+         second, second_total = summarise(raw, cal @where(revision=2))\n"
     );
     let (pipeline, records) = support::parse_fixture(&format!("{text}{RECORDS}")).unwrap();
     let dag = resolve(&pipeline, &records.unwrap()).unwrap();
@@ -129,11 +128,11 @@ operation tidy(reads: Lines, table: Table) -> (tidied: Lines):
 
 operation summarise(reads: Lines, table: Table) -> (merged: Lines, total: Count):
     cleaned = tidy(reads, table)
-    merged = merge(cleaned @ vary(lane))
+    merged = merge(cleaned @vary(lane))
     total = count(merged)
 
 stage report:
-    m, t = summarise(raw, cal @ where(revision=2))
+    m, t = summarise(raw, cal @where(revision=2))
 "
     );
     let (pipeline, _) = support::parse_fixture(&text).unwrap();
@@ -218,12 +217,12 @@ fn a_call_is_checked_at_the_call() {
         ),
         // Only the body's outputs are the caller's to read.
         (
-            "y, z = summarise(raw, cal @ where(revision=1))\nw = count(y::cleaned)\n",
+            "y, z = summarise(raw, cal @where(revision=1))\nw = count(y::cleaned)\n",
             "20: `y::cleaned` is made inside the call `y = summarise(...)` on line 19; make it an output of `summarise` to read it here",
         ),
         // A type the body's steps do not accept is reported at the call.
         (
-            "y, z = summarise(cal, cal @ where(revision=1))\n",
+            "y, z = summarise(cal, cal @where(revision=1))\n",
             "19: in `y, z = summarise(...)`: type mismatch at `clean.x`: product `cal` is Table, expected Lines",
         ),
     ] {
@@ -237,7 +236,7 @@ fn a_declared_output_type_holds_the_product_the_body_makes() {
         "{BASE}
 operation wrap(x: Lines, t: Table) -> (y: Count):
     y = clean(x, t)
-out = wrap(raw, cal @ where(revision=1))
+out = wrap(raw, cal @where(revision=1))
 "
     );
     assert_eq!(
@@ -248,8 +247,7 @@ out = wrap(raw, cal @ where(revision=1))
 
 #[test]
 fn an_operation_with_a_body_needs_no_command_and_its_call_uses_it() {
-    let text =
-        format!("{BASE}{SUMMARISE}merged, total = summarise(raw, cal @ where(revision=2))\n");
+    let text = format!("{BASE}{SUMMARISE}merged, total = summarise(raw, cal @where(revision=2))\n");
     let warnings: Vec<_> = diagnose(&text, None)
         .into_iter()
         .map(|warning| warning.message)
@@ -270,17 +268,17 @@ fn library(tree: &support::Tree) {
 use sub/count.spit as C
 check nonempty: test -s {@path}
 check lines(n): count_lines {@path} {n}
-operation clean(x: Lines, t: Table) -> Lines @ check(nonempty)
+operation clean(x: Lines, t: Table) -> Lines @check(nonempty)
 command clean: clean {x} {t} {@output}
 operation merge(xs: many Lines) -> Lines
 command merge: merge {xs} {@output}
 
-operation tidy(r: Lines @ check(lines(1)), t: Table) -> (o: Lines @ check(nonempty)):
+operation tidy(r: Lines @check(lines(1)), t: Table) -> (o: Lines @check(nonempty)):
     o = clean(r, t)
 
-operation summarise(reads: Lines @ check(lines(2)), table: Table) -> (merged: Lines @ check(lines(9)), total: Count):
+operation summarise(reads: Lines @check(lines(2)), table: Table) -> (merged: Lines @check(lines(9)), total: Count):
     cleaned = tidy(reads, table)
-    merged = merge(cleaned @ vary(lane))
+    merged = merge(cleaned @vary(lane))
     total = C::count(merged)
 ",
     );
@@ -294,7 +292,7 @@ fn an_imported_operation_brings_the_operations_its_body_calls() {
 use summarise from libs/lib.spit as L
 source raw : Lines [group, lane]
 source cal : Table [group, revision]
-m, t = L::summarise(raw, cal @ where(revision=2))
+m, t = L::summarise(raw, cal @where(revision=2))
 ";
     let main = tree.write("main.spit", text);
     let (pipeline, _) = support::parse_fixture_at(text, &main).unwrap();
@@ -334,7 +332,7 @@ source raw : Lines [group, lane]
 path raw: in/{{group}}/r{{lane}}.txt
 source cal : Table [group, revision]
 path cal: cal/{{group}}-r{{revision}}.txt
-m, t = L::summarise(raw, cal @ where(revision=2))
+m, t = L::summarise(raw, cal @where(revision=2))
 default entities: {{@key}}={{@value}} separated \"__\"
 {RECORDS}"
     );
@@ -387,7 +385,7 @@ source raw : Lines [group, lane]
 path raw: in/{{group}}/r{{lane}}.txt
 source cal : Table [group, revision]
 path cal: cal/{{group}}-r{{revision}}.txt
-m, t = L::summarise(raw, cal @ where(revision=2))
+m, t = L::summarise(raw, cal @where(revision=2))
 default entities: {{@key}}={{@value}} separated \"__\"
 {RECORDS}"
     );
@@ -461,11 +459,11 @@ operation tidy(reads: Lines, table: Table) -> (tidied: Lines):
 
 operation summarise(reads: Lines, table: Table) -> (merged: Lines):
     cleaned = tidy(reads, table)
-    merged = merge(cleaned @ vary(lane))
+    merged = merge(cleaned @vary(lane))
 
-a = summarise(raw, cal @ where(revision=1))
-b = summarise(raw, cal @ where(revision=2))
-all = merge(a @ vary(group))
+a = summarise(raw, cal @where(revision=1))
+b = summarise(raw, cal @where(revision=2))
+all = merge(a @vary(group))
 {RECORDS}"
     );
     let (pipeline, records) = support::parse_fixture(&text).unwrap();
@@ -584,7 +582,7 @@ m, t = L::summarise(cal, raw)
 #[test]
 fn what_cannot_be_made_names_the_call_it_comes_from() {
     let records = RECORDS.replace("    cal[group=b,revision=2]\n", "");
-    let text = format!("{BASE}{SUMMARISE}m, t = summarise(raw, cal @ where(revision=2))\n");
+    let text = format!("{BASE}{SUMMARISE}m, t = summarise(raw, cal @where(revision=2))\n");
     let (pipeline, _) = support::parse_fixture(&text).unwrap();
     let inventory = spit::parse_source_inventory(&records).unwrap();
     let report = spit::resolve_artifacts_excluding(&pipeline, &inventory, &[]).unwrap();
@@ -607,7 +605,7 @@ operation clean(x: Lines, t: Table) -> Lines
 command clean: clean {x} {t} {@output}
 operation flip(t: Table, x: Lines) -> (y: Lines):
     y = clean(x, t)
-out = flip(cal @ where(revision=1), raw)
+out = flip(cal @where(revision=1), raw)
 default entities: {@key}={@value} separated \"__\"\npath out: out/{@product}[/{@entities}]\n";
     let hovers = spit::pipeline_hovers(text, std::path::Path::new("flip.spit"));
     let at = |line: usize, name: &str| {
@@ -642,7 +640,7 @@ fn a_call_is_not_named_as_an_import_is() {
     let tree = support::Tree::new("composite-alias", &[]);
     tree.write("parts.spit", "source cleaned : Lines [group, lane]\n");
     let text = format!(
-        "{BASE}{SUMMARISE}use parts.spit as m\nm, t = summarise(raw, cal @ where(revision=2))\n"
+        "{BASE}{SUMMARISE}use parts.spit as m\nm, t = summarise(raw, cal @where(revision=2))\n"
     );
     let main = tree.write("main.spit", &text);
     let errors: Vec<_> = support::errors(spit::diagnose_in(&text, None, spit::Context::at(&main)))
@@ -665,7 +663,7 @@ source raw : Lines [group, lane]
 source cal : Table [group, revision]
 
 stage report:
-    m, t = L::summarise(raw, cal @ where(revision=2))
+    m, t = L::summarise(raw, cal @where(revision=2))
 ";
     let main = tree.write("main.spit", text);
     let (pipeline, _) = support::parse_fixture_at(text, &main).unwrap();

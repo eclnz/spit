@@ -199,7 +199,7 @@ impl PipelineBuilder {
         if operation.minimum_collection.is_some() {
             return Err(fail(
                 place,
-                format!("operation `{name}` has a body; write `@ min(...)` on the `many` input of the step that collects"),
+                format!("operation `{name}` has a body; write `@min(...)` on the `many` input of the step that collects"),
             ));
         }
         let mut known: BTreeSet<&str> = operation
@@ -512,7 +512,7 @@ fn merge(caller: &InputBinding, body: &InputBinding) -> Result<InputBinding, Str
         if let Some(previous) = merged.pinned.insert(dimension.clone(), value.clone()) {
             if previous != *value {
                 return Err(format!(
-                    "`{}` is given `@ where({dimension}={previous})` here, but the body reads it with `@ where({dimension}={value})`",
+                    "`{}` is given `@where({dimension}={previous})` here, but the body reads it with `@where({dimension}={value})`",
                     caller.product
                 ));
             }
@@ -521,9 +521,9 @@ fn merge(caller: &InputBinding, body: &InputBinding) -> Result<InputBinding, Str
     match (&caller.same, &body.same) {
         (Some(_), Some(_)) if caller.same != body.same => {
             return Err(format!(
-            "`{}` is given `@ same(...)` here, and the body reads it with another; give it once",
-            caller.product
-        ))
+                "`{}` is given `@same(...)` here, and the body reads it with another; give it once",
+                caller.product
+            ))
         }
         (None, Some(same)) => merged.same = Some(same.clone()),
         _ => {}
