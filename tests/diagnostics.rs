@@ -375,3 +375,12 @@ fn independent_errors_on_one_line_are_each_reported() {
         .message
         .contains("products `s` and `o` bind to the same path `in/d.txt`"));
 }
+
+#[test]
+fn a_misspelled_dimension_is_not_also_reported_as_omitted() {
+    let text = "default path: out/[ses-{sess}]{@product}.txt\nsource raw [ses]\n";
+    assert_eq!(
+        rendered(&diagnose(text, None)),
+        ["error: line 1: path rule names `{sess}`, which no product has"]
+    );
+}
