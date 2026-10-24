@@ -166,7 +166,10 @@ cargo build --release
 cargo test --release -q --no-fail-fast        # plain `cargo test` stops at the first failing test binary
 cargo clippy --release --all-targets -q
 usability/harness/rebuild_keys.sh             # expect `ok` for every answer key
+python3 examples/checks/check.py              # expect `ok` for every example
 ```
+
+A new `.spit` or `.spitin` file under `examples/` needs an entry in `examples/checks/coverage.json`, with the counts that script expects of its DAG, or the script fails.
 
 - **Messie.** CI also checks the repository's folders with Messie:
 
