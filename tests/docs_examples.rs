@@ -65,6 +65,7 @@ enum Kind {
     Run,
     Output,
     Spitout,
+    Plain,
 }
 
 /// The comment before a block.
@@ -103,6 +104,7 @@ fn parse_marker(comment: &[&str]) -> Marker {
         "run" => Kind::Run,
         "output" => Kind::Output,
         "spitout" => Kind::Spitout,
+        "plain" => Kind::Plain,
         other => panic!("unknown spit-doc kind `{other}`"),
     };
     // A comment of several lines ends with a line that closes it.
@@ -267,8 +269,8 @@ fn spit_verdict(page: &str, block: &Block) -> Option<String> {
                 .err()
                 .map(|error| format!("{at}: does not check with its setup\n{error}"))
         }
-        Kind::Run | Kind::Output | Kind::Spitout => Some(format!(
-            "{at}: `run`, `output` and `spitout` are for `sh` and `text` blocks"
+        Kind::Run | Kind::Output | Kind::Spitout | Kind::Plain => Some(format!(
+            "{at}: `run`, `output`, `spitout` and `plain` are for `sh` and `text` blocks"
         )),
         Kind::Files => {
             let mut files: Vec<(String, String)> = Vec::new();
@@ -359,6 +361,56 @@ fn shell(tree: &Tree, script: &str) -> (bool, Vec<String>) {
     )
 }
 
+/// Whether the first line of `text` that is not a comment starts with one of
+/// SPIT's keywords, or is a step, so that the block is SPIT code.
+fn looks_like_spit(text: &str) -> bool {
+    const KEYWORDS: [&str; 15] = [
+        "source",
+        "operation",
+        "command",
+        "stage",
+        "use",
+        "default",
+        "path",
+        "verify",
+        "check",
+        "pipeline",
+        "inputs",
+        "exclude",
+        "require",
+        "dimensions",
+        "types",
+    ];
+    let Some(line) = text
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty() && !line.starts_with('#'))
+    else {
+        return false;
+    };
+    let word: String = line
+        .chars()
+        .take_while(|c| c.is_alphanumeric() || *c == '_')
+        .collect();
+    let after = line[word.len()..].chars().next();
+    if KEYWORDS.contains(&word.as_str()) && matches!(after, None | Some(' ' | ':')) {
+        return true;
+    }
+    // A step: `outputs = operation(`.
+    line.split_once(" = ").is_some_and(|(outputs, call)| {
+        outputs
+            .chars()
+            .all(|c| c.is_alphanumeric() || " _:,<>$".contains(c))
+            && call.split('(').next().is_some_and(|name| {
+                !name.is_empty()
+                    && name
+                        .chars()
+                        .all(|c| c.is_alphanumeric() || c == '_' || c == ':')
+            })
+            && call.contains('(')
+    })
+}
+
 /// Why a `sh` or `text` block fails, if it does.
 fn command_verdict(page: &str, block: &Block) -> Option<String> {
     let at = format!("{page}:{}", block.line);
@@ -367,7 +419,14 @@ fn command_verdict(page: &str, block: &Block) -> Option<String> {
         return None;
     }
     match (block.language.as_str(), kind) {
-        ("text", None) => None,
+        ("text", None) if looks_like_spit(&block.text) => Some(format!(
+            "{at}: looks like SPIT code in a `text` block; fence it `spit`, or put \
+             `{OPEN} fragment -->`, `setup` or `recipe` before it, or `plain` if it is not SPIT"
+        )),
+        ("text", None) | ("text", Some(Kind::Plain)) => None,
+        ("text", Some(Kind::Setup | Kind::Recipe | Kind::Files | Kind::Fragment)) => {
+            spit_verdict(page, block)
+        }
         ("text", Some(Kind::Output)) => {
             let marker = block.marker.as_ref()?;
             let tree = command_tree(marker, &block.previous);
