@@ -131,3 +131,38 @@ fn a_library_error_does_not_hide_an_error_on_the_same_line_of_the_pipeline() {
     assert!(shown.contains("error: line 4, column 1"), "{shown}");
     drop(tree);
 }
+
+#[test]
+fn a_recipe_names_its_pipelines_library_relative_to_the_recipe() {
+    let tree = Tree::new("imported-errors-recipe", &[]);
+    tree.write(
+        "pipelines/libs/lib.spit",
+        &format!("{OPERATIONS}operation wrap(x: Lines) -> (out: Lines):\n    out = cp(nope)\n"),
+    );
+    tree.write("pipelines/pipeline.spit", "use wrap from libs/lib.spit\n");
+    let recipe = tree.write(
+        "recipes/check.spitin",
+        "pipeline ../pipelines/pipeline.spit\nroot .\n",
+    );
+    let recipe = recipe.to_str().unwrap();
+    let text = check(recipe, false);
+    assert!(
+        text.contains("error: ../pipelines/libs/lib.spit: line 4, column 11:"),
+        "{text}"
+    );
+    assert!(
+        text.contains("--> ../pipelines/pipeline.spit: line 1, column 1: imported here"),
+        "{text}"
+    );
+    assert!(!text.contains(tree.path().to_str().unwrap()), "{text}");
+    let json = check(recipe, true);
+    assert!(
+        json.contains("\"file\":\"../pipelines/libs/lib.spit\""),
+        "{json}"
+    );
+    assert!(
+        json.contains("\"related\":[{\"file\":\"../pipelines/pipeline.spit\""),
+        "{json}"
+    );
+    assert!(!json.contains(tree.path().to_str().unwrap()), "{json}");
+}

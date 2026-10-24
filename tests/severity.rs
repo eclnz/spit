@@ -79,7 +79,6 @@ fn agree(file: &Path) -> Vec<String> {
     };
     let plain = run(&["check", name]);
     let json = run(&["check", name, "--json", "--hovers"]);
-    assert!(json.status.success(), "{}", file.display());
     let printed = printed_diagnostics(&text(&plain.stderr));
     let given = json_diagnostics(&text(&json.stdout));
     assert_eq!(
@@ -103,6 +102,12 @@ fn agree(file: &Path) -> Vec<String> {
         "{}: {printed:?}",
         file.display()
     );
+    assert_eq!(
+        json.status.success(),
+        !errors,
+        "{}: {given:?}",
+        file.display()
+    );
     given.into_iter().map(|(severity, _)| severity).collect()
 }
 
@@ -118,6 +123,9 @@ operation summary(input) -> Report<T>
 operation unused(input)
 clean = clean(raw)
 summed = summary(clean)
+default entities: {@key}={@value} separated \"__\"
+path clean: out/{@product}/{@entities}
+path summed: out/{@product}/{@entities}
 ";
 
 #[test]
@@ -126,15 +134,18 @@ fn check_and_its_json_give_each_diagnostic_one_severity() {
     tree.write("warned.spit", WARNED);
     tree.write(
         "broken.spit",
-        "source raw [id, batch]\npath: {@product}/{@entities}.txt\npath raw: in/{id}.txt\noperation clean(input)\ncleaned = clean(rwa)\n",
+        "source raw [id, batch]\ndefault path: {@product}/{@entities}.txt\npath raw: in/{id}.txt\noperation clean(input)\ncleaned = clean(rwa)\n\
+         default entities: {@key}={@value} separated \"__\"\n",
     );
     tree.write(
         "comment.spit",
-        "source raw [id]\npath raw: in/{id}.txt# not a comment\noperation clean(input)\ncleaned = clean(raw)\n",
+        "source raw [id]\npath raw: in/{id}.txt# not a comment\noperation clean(input)\ncleaned = clean(raw)\n\
+         path cleaned: out/{id}.txt\n",
     );
     tree.write(
         "good.spit",
-        "source raw [id]\npath raw: in/{id}.txt\noperation clean(input)\ncleaned = clean(raw)\n",
+        "source raw [id]\npath raw: in/{id}.txt\noperation clean(input)\ncleaned = clean(raw)\n\
+         path cleaned: out/{id}.txt\n",
     );
     tree.write("missing_root.spitin", "pipeline good.spit\nroot nowhere\n");
     tree.write(

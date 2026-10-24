@@ -1,10 +1,13 @@
-# Types and reusable definitions
+# Types
 
-Types help SPIT catch wiring mistakes while the pipeline is compiled. They are optional: an untyped product is allowed, and missing type information does not itself fail a step. Add types to the boundaries where a mistaken connection would be costly.
+Types help SPIT catch wiring mistakes while the pipeline is compiled. They are optional: an untyped product is allowed, and missing type information does not itself fail a step. Add types to the boundaries where a mistaken connection would be costly. To require a type everywhere, add `types strict` at the top of the pipeline: a missing type is then an error, while a type inference gives a product still needs no annotation ([strict typing](../language-reference.md#strict-typing)).
 
-## Declare and check types
+## Type declarations
 
 ```spit
+default entities: {@key}={@value} separated "__"
+default path: out/{@product}/{@entities}
+
 source raw : Frame<Native> [sample]
 source reference : Reference<Target> [sample]
 
@@ -19,7 +22,7 @@ The uppercase `S`, `A`, and `B` in operation signatures are local type variables
 
 Types do not select artifacts. Product names and dimensions determine which source artifacts exist and which one a job reads. See [matching and collections](matching.md) for that part of resolution.
 
-## Import reusable declarations
+## Reusable definitions
 
 ```spit
 use text.spit as text
@@ -28,8 +31,10 @@ sorted = text::sort_lines(text::shard)
 
 `use` reads a `.spit` file relative to the importing file. With `as text`, imported names are qualified as `text::...`; without `as`, they enter the current scope. To select only some definitions, write `use shard, sort_lines from text.spit as text`.
 
-An imported operation carries its `command` and checks attached to its ports. An operation carried out by steps also brings the operations and checks its body needs. An imported source carries its path rule and attached checks. A check can also be imported by name. Imports do not bring in the other file's top-level steps, so a library file can define reusable pieces without adding jobs to the caller. Cycles, unknown names, and collisions are errors. See [reuse definitions](../language-reference.md#reuse-definitions) for the precise selection rules and the [import example](https://github.com/eclnz/spit/blob/dev/examples/imports/imported.spit) for a small complete file.
+An imported operation carries its `command` and checks attached to its ports. An operation carried out by steps also brings the operations and checks its body needs. An imported source carries its path rule and attached checks. A check can also be imported by name. Imports do not bring in the other file's top-level steps, so a library file can define reusable pieces without adding jobs to the caller. Cycles, unknown names, and collisions are errors. See [reuse definitions](../language-reference.md#reuse-definitions) for the precise selection rules and the [import example](https://github.com/eclnz/spit/blob/dev/examples/imports/imported.spit) for a complete pipeline combining imports, nested stages and aggregation.
 
-## Keep execution checks separate from types
+## Execution checks
 
 A type describes a logical file kind, such as `Frame<Native>`. SPIT does not read file contents to prove that a file is a valid frame. Use a `check` on one artifact or `verify` on a job's inputs for those runtime tests. [Pipelines and operations](pipelines.md) explains both.
+
+Next: [Matching](matching.md).

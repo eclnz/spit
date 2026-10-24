@@ -145,8 +145,13 @@ fn a_written_order_is_a_check_not_an_override() {
 }
 
 #[test]
-fn a_product_may_be_named_dimensions() {
-    let pipeline =
-        parse_pipeline("source raw [id]\noperation copy(raw)\ndimensions = copy(raw)\n").unwrap();
-    assert_eq!(pipeline.products[1].name, "dimensions");
+fn no_product_may_be_named_dimensions() {
+    let error = parse_pipeline("source raw [id]\noperation copy(raw)\ndimensions = copy(raw)\n")
+        .unwrap_err();
+    assert!(
+        error.to_string().contains(
+            "`dimensions` is one of SPIT's keywords, so no product may take it as its name"
+        ),
+        "{error}"
+    );
 }

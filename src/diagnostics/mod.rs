@@ -2,7 +2,10 @@
 
 mod diagnostic;
 mod places;
+mod recipe;
 mod recovery;
+
+pub use recipe::{diagnose_recipe, diagnose_recipe_against};
 mod warnings;
 
 pub use diagnostic::*;
@@ -10,6 +13,7 @@ pub(crate) use recovery::recover_document;
 
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
+use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -22,7 +26,9 @@ use crate::inputs::{
 };
 use crate::lower::{parse_document_recovering, ParsedDocument};
 use crate::model::{ArtifactReport, CoverageGap, InputRules, PipelineIndex, SourceInventory};
-use crate::parser::{as_read_back, glued_comment, without_bom, Kind, Rule, SourceMap};
+use crate::parser::{
+    as_read_back, glued_comment, parse_inventory_recovering, without_bom, Kind, Rule, SourceMap,
+};
 use crate::paths::{collect_paths, shown_path, PathTemplate};
 use crate::resolver::first_failure;
 use crate::span::{content_columns, Lines, Place};
@@ -31,9 +37,9 @@ use crate::{
     ResolveError,
 };
 
-use places::{error_location, error_step, in_call, subject_place};
+use places::{at_call, error_location, error_step, in_call, subject_place, InCall};
 use recovery::recover_parse_errors;
-use warnings::{case_warnings, empty_step_warnings, label_warnings, near_miss_warnings, warnings};
+use warnings::{case_warnings, empty_step_warnings, near_miss_warnings, warnings};
 
 /// Where a pipeline is, and what applies to it, when diagnosing it.
 #[derive(Clone, Copy, Debug, Default)]
@@ -60,27 +66,29 @@ impl<'a> Context<'a> {
 
     /// Parse a pipeline in this context: with its imports resolved from its
     /// path, and its recipe checked and applied.
-    fn parse(&self, text: &str) -> Result<Parsed, Vec<ParseError>> {
-        let mut document = match self.path {
-            Some(path) => parse_located_document_recovering(text, path, Kind::Pipeline)?,
-            None => parse_document_recovering(text, &BTreeMap::new(), Kind::Pipeline)?,
+    fn parse(&self, text: &str) -> (Parsed, Vec<ParseError>) {
+        let (mut document, mut errors) = match self.path {
+            Some(path) => parse_located_document_recovering(text, path, Kind::Pipeline),
+            None => parse_document_recovering(text, &BTreeMap::new(), Kind::Pipeline),
         };
         let Some(recipe) = self.recipe else {
-            return Ok(Parsed {
+            let parsed = Parsed {
                 document,
                 as_written: None,
-            });
+            };
+            return (parsed, errors);
         };
-        recipe
-            .check(&document.pipeline)
-            .map_err(|error| vec![ParseError::new(1, error.to_string())])?;
+        if let Err(error) = recipe.check(&document.pipeline) {
+            errors.push(ParseError::new(1, error.to_string()));
+        }
         let as_written = document.pipeline.clone();
         recipe.apply_paths(&mut document.pipeline);
         document.inputs = recipe.rules.clone();
-        Ok(Parsed {
+        let parsed = Parsed {
             document,
             as_written: Some(as_written),
-        })
+        };
+        (parsed, errors)
     }
 }
 
@@ -104,8 +112,7 @@ impl Parsed {
 }
 
 /// The paths an editor shows: each product's, where it comes from a default
-/// rule or gains an extension, so is written out nowhere. Outputs with no
-/// rule at all show the built-in default they are given.
+/// rule or gains an extension, so is written out nowhere.
 fn shown_paths(pipeline: &Pipeline, lines: &SourceMap) -> Vec<ShownPath> {
     let index = PipelineIndex::new(pipeline);
     let templates = index.path_templates();
@@ -189,9 +196,7 @@ pub fn diagnose_checked_with_records(
     let (text, records) = (without_bom(text), without_bom(records));
     let parsed = (
         recover_parse_errors(text, |text| context.parse(text)),
-        recover_parse_errors(records, |records| {
-            parse_source_inventory(records).map_err(|error| vec![error])
-        }),
+        recover_parse_errors(records, parse_inventory_recovering),
     );
     let (parsed, inventory) = match parsed {
         (Ok(parsed), Ok(inventory)) => (parsed, inventory),
@@ -280,209 +285,6 @@ pub fn diagnose_inputs(text: &str) -> Vec<Diagnostic> {
             finish(vec![diagnostic], text, Some(text))
         }
     }
-}
-
-/// Diagnose a `.spitin` recipe at `path` without reading any data: its own
-/// lines, then the pipeline its `pipeline` line names, then its rules and
-/// any records against that pipeline. The pipeline's own errors are named
-/// by file and line, since they are not in `text`.
-pub fn diagnose_recipe(text: &str, path: &Path) -> Vec<Diagnostic> {
-    let text = without_bom(text);
-    let error = |message: String| Diagnostic::error(DiagnosticSource::Pipeline, None, message);
-    let spec = match crate::inputs::parse_input_spec_at(text, path) {
-        Ok(spec) => spec,
-        Err(parse) => {
-            let diagnostic = Diagnostic::located(DiagnosticSource::Pipeline, &parse, text);
-            return finish(vec![diagnostic], text, None);
-        }
-    };
-    let Some(pipeline_path) = spec.pipeline else {
-        let message =
-            "name the pipeline this recipe is for, with a line such as `pipeline analysis.spit`";
-        return finish(vec![error(message.to_owned())], text, None);
-    };
-    let shown = pipeline_path.display().to_string();
-    let pipeline_text = match std::fs::read_to_string(&pipeline_path) {
-        Ok(pipeline_text) => pipeline_text,
-        Err(reason) => {
-            return finish(
-                vec![error(format!("cannot read pipeline `{shown}`: {reason}"))],
-                text,
-                None,
-            )
-        }
-    };
-    match diagnose_checked(&pipeline_text, Context::at(&pipeline_path)) {
-        Ok(checked) => {
-            let mut diagnostics = diagnose_recipe_against(text, &checked.pipeline);
-            // The rows of files `exclude from` lines name are read with the
-            // recipe at its path, not with its text; each error says where.
-            let rows = InputRules {
-                exclusions: spec
-                    .rules
-                    .exclusions
-                    .iter()
-                    .filter(|rule| !rule.origin.starts_with("line "))
-                    .cloned()
-                    .collect(),
-                ..InputRules::default()
-            };
-            diagnostics.extend(
-                collect_exclusion_errors(&PipelineIndex::new(&checked.pipeline), &rows)
-                    .into_iter()
-                    .map(|(_, problem)| error(problem.to_string())),
-            );
-            if let Some(warning) = missing_root(spec.root.as_ref(), text) {
-                diagnostics.push(warning);
-            }
-            diagnostics
-        }
-        Err(diagnostics) => {
-            let external: Arc<str> = Arc::from(pipeline_text.as_str());
-            let pipeline_errors = diagnostics
-                .into_iter()
-                .filter(Diagnostic::is_error)
-                .map(|mut diagnostic| {
-                    // A library's path is from the pipeline's folder.
-                    let folder = pipeline_path.parent().unwrap_or_else(|| Path::new(""));
-                    match &mut diagnostic.file {
-                        // An error in a library keeps its own file and text.
-                        Some(file) => *file = folder.join(&*file).display().to_string(),
-                        None => {
-                            diagnostic.file = Some(shown.clone());
-                            diagnostic.external_text = Some(Arc::clone(&external));
-                        }
-                    }
-                    for related in &mut diagnostic.related {
-                        if let Some(file) = &mut related.file {
-                            *file = folder.join(&*file).display().to_string();
-                        }
-                    }
-                    diagnostic
-                })
-                .collect();
-            finish(pipeline_errors, text, None)
-        }
-    }
-}
-
-/// A warning on the recipe's `root` line when the folder it names is not
-/// there, which `spit check` can say without reading any data. Not an
-/// error: the recipe may be checked on one machine and run on another,
-/// where the folder is; `spit inputs` stops on it where it runs.
-fn missing_root(root: Option<&(PathBuf, usize)>, text: &str) -> Option<Diagnostic> {
-    let (root, line) = root?;
-    if root.is_dir() {
-        return None;
-    }
-    let written = text.lines().nth(line - 1)?;
-    let folder = crate::parser::strip_comment(written)
-        .trim()
-        .strip_prefix("root ")?
-        .trim();
-    let start = written.find(folder)?;
-    let message = format!(
-        "dataset root `{folder}` is not a folder here; `spit inputs` and `spit dag` stop with an error unless it is one where they run"
-    );
-    Some(Diagnostic::new(
-        Severity::Warning,
-        DiagnosticSource::Pipeline,
-        Some(Place::new(*line, start..start + folder.len())),
-        message,
-    ))
-}
-
-/// Diagnose the text of a `.spitin` recipe against `pipeline`, reading no
-/// data: every rule's error at the rule, then its source paths and records.
-pub fn diagnose_recipe_against(text: &str, pipeline: &Pipeline) -> Vec<Diagnostic> {
-    let text = without_bom(text);
-    let (spec, lines) = match crate::inputs::parse_recipe_lines(text) {
-        Ok(parsed) => parsed,
-        Err(parse) => {
-            let diagnostic = Diagnostic::located(DiagnosticSource::Pipeline, &parse, text);
-            return finish(vec![diagnostic], text, None);
-        }
-    };
-    let mut diagnostics: Vec<_> = collect_rule_errors(pipeline, &spec.rules, &BTreeSet::new())
-        .into_iter()
-        .map(|(subject, error)| {
-            // A rule's own errors concern its product, or its groups.
-            let place = match &subject {
-                DefinitionSubject::Constraint(index) => lines.rules.get(*index).map(Rule::product),
-                DefinitionSubject::ConstraintGroup(index) => {
-                    lines.rules.get(*index).map(Rule::dimensions)
-                }
-                DefinitionSubject::Exclusion(index) => lines.exclusions.get(*index).cloned(),
-                _ => None,
-            };
-            Diagnostic::error(DiagnosticSource::Pipeline, place, error.to_string())
-        })
-        .collect();
-    if diagnostics.is_empty() {
-        let checked = match &spec.inventory {
-            Some(records) => spec
-                .resolve(pipeline, crate::InputSource::Inventory(records.clone()))
-                .map(|_| ()),
-            // A recipe without records is scanned, which finds every
-            // source by its rule.
-            None => spec
-                .check(pipeline)
-                .and_then(|()| match spec.source_without_path(pipeline) {
-                    Some(product) => Err(InputError::NoSourcePath { product }),
-                    None => Ok(()),
-                }),
-        };
-        if let Err(problem) = checked {
-            // Records written in the recipe keep its line numbers, and a
-            // path the recipe should not give is at its `path` line.
-            let place = match &problem {
-                InputError::Resolve(error) => {
-                    error_location(pipeline, &lines, error, text, false).1
-                }
-                InputError::NotASource { product }
-                | InputError::OutputPath { product }
-                | InputError::PathInBoth { product }
-                | InputError::MemberPath { product, .. } => lines.paths.get(product).cloned(),
-                _ => None,
-            };
-            diagnostics.push(Diagnostic::error(
-                DiagnosticSource::Pipeline,
-                place,
-                problem.to_string(),
-            ));
-        }
-    }
-    if diagnostics.is_empty() {
-        diagnostics = recipe_path_errors(pipeline, &spec, &lines, text);
-    }
-    finish(diagnostics, text, None)
-}
-
-/// Errors in the recipe's source path rules, its default's included, each
-/// at the recipe line that writes the rule. An error placed at one of the
-/// pipeline's rules, such as a collision with an output, has no place.
-fn recipe_path_errors(
-    pipeline: &Pipeline,
-    spec: &InputSpec,
-    lines: &SourceMap,
-    text: &str,
-) -> Vec<Diagnostic> {
-    let source_paths = spec.rules.source_paths_for(pipeline);
-    if source_paths.is_empty() {
-        return Vec::new();
-    }
-    let merged = with_source_paths(pipeline, &source_paths);
-    let mut places = SourceMap::default();
-    for name in source_paths.keys() {
-        if let Some(place) = lines.paths.get(name).or(lines.default_path.as_ref()) {
-            places.paths.insert(name.clone(), place.clone());
-        }
-    }
-    collect_paths(&merged, &places, &BTreeSet::new())
-        .1
-        .iter()
-        .map(|error| Diagnostic::located(DiagnosticSource::Pipeline, error, text))
-        .collect()
 }
 
 /// Each parse error in `text` as a diagnostic.
@@ -587,7 +389,6 @@ fn record_diagnostics(
             return Err(error);
         }
         diagnostics.extend(case_warnings(pipeline, lines, &report.dag));
-        diagnostics.extend(label_warnings(pipeline, lines, &report.dag));
         Ok(report)
     });
     match resolved {
@@ -703,6 +504,15 @@ fn pipeline_diagnostics(
         .iter()
         .chain(&rule_errors)
         .map(|(subject, error)| {
+            let diagnostic =
+                |place| Diagnostic::error(DiagnosticSource::Pipeline, place, error.to_string());
+            if let DefinitionSubject::Call(call) = subject {
+                let port = error_step(error).and_then(|(_, port)| port);
+                return match at_call(pipeline, lines, *call, port) {
+                    Some(call) => placed(diagnostic(None), call),
+                    None => diagnostic(None),
+                };
+            }
             let place = subject_place(pipeline, lines, subject, error)
                 .or_else(|| error_location(pipeline, lines, error, inventory_text, false).1);
             let step = match subject {
@@ -712,12 +522,7 @@ fn pipeline_diagnostics(
                 )),
                 _ => error_step(error),
             };
-            within_call(
-                Diagnostic::error(DiagnosticSource::Pipeline, place, error.to_string()),
-                pipeline,
-                lines,
-                step,
-            )
+            within_call(diagnostic(place), pipeline, lines, step)
         })
         .collect();
     let source = DiagnosticSource::Pipeline;
@@ -734,6 +539,9 @@ fn pipeline_diagnostics(
             .map(|error| Diagnostic::located(source, error, text)),
     );
     diagnostics.extend(warnings(pipeline, lines, &checked.poisoned));
+    if let Some(warning) = recipe::missing_root(pipeline.root.as_ref(), text) {
+        diagnostics.push(warning);
+    }
     diagnostics
 }
 
@@ -741,14 +549,19 @@ fn pipeline_diagnostics(
 /// call written in the text when a call to an operation carried out by
 /// steps made that step; see [`in_call`].
 fn within_call(
-    mut diagnostic: Diagnostic,
+    diagnostic: Diagnostic,
     pipeline: &Pipeline,
     lines: &SourceMap,
     step: Option<(&str, Option<&str>)>,
 ) -> Diagnostic {
-    let Some(call) = step.and_then(|(output, port)| in_call(pipeline, lines, output, port)) else {
-        return diagnostic;
-    };
+    match step.and_then(|(output, port)| in_call(pipeline, lines, output, port)) {
+        Some(call) => placed(diagnostic, call),
+        None => diagnostic,
+    }
+}
+
+/// `diagnostic` reported where `call` says.
+fn placed(mut diagnostic: Diagnostic, call: InCall) -> Diagnostic {
     diagnostic.source = DiagnosticSource::Pipeline;
     diagnostic.line = Some(call.place.line);
     diagnostic.columns = Some(call.place.columns);
@@ -771,7 +584,11 @@ fn order(mut diagnostics: Vec<Diagnostic>) -> Vec<Diagnostic> {
         )
     }
     diagnostics.sort_by(|a, b| key(a).cmp(&key(b)));
-    let mut errored = BTreeSet::new();
+    // The spans already reported as errors on each line. A second error at
+    // the same span, or where either covers the whole line, is one fault said
+    // again, such as a shared path rule failing for each product it serves.
+    // An error elsewhere on the line is a fault of its own, and is kept.
+    let mut errored: BTreeMap<_, Vec<Option<Range<usize>>>> = BTreeMap::new();
     let keep: Vec<bool> = diagnostics
         .iter()
         .map(|diagnostic| {
@@ -779,13 +596,18 @@ fn order(mut diagnostics: Vec<Diagnostic>) -> Vec<Diagnostic> {
                 return true;
             };
             let place = (diagnostic.source, diagnostic.file.as_deref(), line);
-            if errored.contains(&place) {
-                return false;
+            let spans = errored.entry(place).or_default();
+            if !diagnostic.is_error() {
+                return spans.is_empty();
             }
-            if diagnostic.is_error() {
-                errored.insert(place);
+            let columns = &diagnostic.columns;
+            let repeats = spans
+                .iter()
+                .any(|span| span.is_none() || columns.is_none() || span == columns);
+            if !repeats {
+                spans.push(columns.clone());
             }
-            true
+            !repeats
         })
         .collect();
     let mut keep = keep.into_iter();

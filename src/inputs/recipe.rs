@@ -72,7 +72,8 @@ pub(super) fn expand_input_block(text: &str) -> Result<(String, Vec<ContextPatte
             }
             _ if line.starts_with("discover ")
                 || line.starts_with("path ")
-                || line.starts_with("path:") =>
+                || line.starts_with("path:")
+                || line.starts_with("default path:") =>
             {
                 return Err(ParseError::new(
                     number,
@@ -120,7 +121,9 @@ fn write_entry(
                 format!("duplicate input path `{name}`"),
             ));
         }
-        ("default", path) => writeln!(out, "path: {path}").expect("writing to a String succeeds"),
+        ("default", path) => {
+            writeln!(out, "default path: {path}").expect("writing to a String succeeds")
+        }
         (name, path) => writeln!(out, "path {name}: {path}").expect("writing to a String succeeds"),
     }
     Ok(())

@@ -1,0 +1,4 @@
+pipeline typed.spit
+root typed_data
+inputs:
+    default: {@product}/{@entities}

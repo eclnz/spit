@@ -34,18 +34,24 @@ fn reports_independent_syntax_errors_across_a_pipeline() {
 }
 
 #[test]
-fn an_error_that_closes_a_stage_is_reported_alone() {
-    // The unindented `path:` ends stage `outer`, which would leave the
-    // indented stage header after it outside every stage. Only the first
-    // error is real: without that line, the header is where it belongs.
-    let text = "path: {@product}.txt\nsource raw : Table [id]\noperation copy(table: Table) -> Table\nstage outer:\n    stage first:\n        a = copy(raw)\npath: {@product}.csv\n    stage second:\n        b = copy(a)\n";
+fn a_line_that_fails_still_closes_the_stage_it_is_outdented_from() {
+    // The unindented `path:` fails, but indentation alone decides where a
+    // stage ends, so it ends stage `outer` all the same, and the indented
+    // stage header after it is outside every stage.
+    let text = "default path: {@product}.txt\nsource raw : Table [id]\noperation copy(table: Table) -> Table\nstage outer:\n    stage first:\n        a = copy(raw)\ndefault path: {@product}.csv\n    stage second:\n        b = copy(a)\n";
     let issues = errors(diagnose(text, None));
     assert_eq!(
         issues
             .iter()
             .map(|issue| (issue.line, issue.message.as_str()))
             .collect::<Vec<_>>(),
-        [(Some(7), "duplicate default path template")]
+        [
+            (Some(7), "duplicate default path template"),
+            (
+                Some(8),
+                "a stage header outside every stage starts at the beginning of its line"
+            )
+        ]
     );
 }
 
@@ -76,6 +82,9 @@ fn seeded_deletions_report_every_damaged_pipeline_line() {
         "operation copy(input)".to_owned(),
     ];
     original.extend((0..24).map(|index| format!("step_{index:02} = copy(raw)")));
+    // The path rule follows the steps, so it is never damaged.
+    original.push("default entities: {@key}={@value} separated \"__\"".to_owned());
+    original.push("default path: out/{@product}/{@entities}".to_owned());
     assert!(errors(diagnose(&original.join("\n"), None)).is_empty());
 
     let mut seed = 0x5eed_2026_u64;
@@ -162,7 +171,7 @@ fn seeded_deletions_report_every_damaged_inventory_line() {
 fn deletion_messages_name_the_missing_syntax_without_cascading() {
     let pipeline: Vec<String> = [
         "source raw : Image [id]",
-        "path: out/{@product}/{id}.txt",
+        "default path: out/{@product}/{id}.txt",
         "operation copy(input: Image) -> Image",
         "command copy: tool {input} {@output}",
         "result = copy(raw)",
@@ -191,7 +200,7 @@ fn deletion_messages_name_the_missing_syntax_without_cascading() {
             DiagnosticSource::Pipeline,
             1,
             ":",
-            "expected `:` after path product",
+            "expected `:` after `default path`",
         ),
         (
             DiagnosticSource::Pipeline,
@@ -280,11 +289,11 @@ fn records_in_a_pipeline_are_one_error_however_many_lines() {
     assert_eq!(found[1].0, Some(7));
 }
 
-/// Recovery reads on past each bad line as if it were blank. A blank line
-/// would not end the body of an operation, so a line indented beneath the
-/// body's header still belongs to it, however many lines before it fail.
+/// Indentation alone decides where a body ends, so a line that fails still
+/// ends the body it is outdented from, and a line indented after it is not
+/// in the body.
 #[test]
-fn blanking_a_line_that_ends_a_body_leaves_it_open_for_the_lines_after() {
+fn a_line_that_fails_still_ends_the_body_before_it() {
     let text = "source raw : Image [sub]\noperation step(x: Image) -> Image\noperation body(x: Image) -> (r: Image):\n  r = step(x)\nexclude [sub=1]\nfrob 1\nexclude [sub=1]\n  - raw: x\nstage s:\n  a = step(raw)\nstray line\n  b = step(raw)\n";
     let issues = errors(diagnose(text, None));
     let found: Vec<_> = issues
@@ -296,7 +305,7 @@ fn blanking_a_line_that_ends_a_body_leaves_it_open_for_the_lines_after() {
         [Some(5), Some(6), Some(7), Some(8), Some(11)],
         "{found:?}"
     );
-    assert!(found[3].1.contains("holds only steps"), "{found:?}");
+    assert!(found[3].1.starts_with("expected source"), "{found:?}");
 }
 
 #[test]
@@ -364,27 +373,37 @@ fn a_body_with_every_step_failing_is_reported_by_its_steps_alone() {
 /// A rule that repeats one is an error that leaves the first as it was.
 #[test]
 fn a_repeated_path_extension_or_check_list_is_an_error_of_its_own() {
-    let text = "source raw : T [sub]\noperation step(input: T) -> T\npath: a\npath: b\npath raw: c\npath raw: d\next: .x\next: .y\ncheck: nonempty\ncheck: nonempty\nstage s:\n    path: a\n    path: b\n    ext: .x\n    ext: .y\n";
+    let text = "source raw : T [sub]\noperation step(input: T) -> T\ndefault path: a\ndefault path: b\npath raw: c\npath raw: d\ndefault ext: .x\ndefault ext: .y\ndefault check: nonempty\ndefault check: nonempty\nstage s:\n    default path: a\n    default path: b\n    default ext: .x\n    default ext: .y\n";
     let found = error_lines(text);
     assert_eq!(lines_of(&found), [4, 6, 8, 10, 13, 15], "{found:?}");
 }
 
-/// The first line of a stage fixes how far its lines are indented. Were it
-/// blank, the next would fix it, and the lines after would be read against
-/// that.
+/// The first line of a stage fixes how far its lines are indented, even
+/// when it fails, and the lines after are read against that.
 #[test]
-fn blanking_the_first_line_of_a_stage_leaves_the_next_to_set_its_indentation() {
+fn the_first_line_of_a_stage_sets_its_indentation_even_when_it_fails() {
     let text = "source raw : T [sub]\noperation step(input: T) -> T\nstage s:\n    a = nostep(raw)\n      b = step(raw)\n    c = step(raw)\n";
     let found = error_lines(text);
-    assert_eq!(lines_of(&found), [4, 6], "{found:?}");
+    assert_eq!(lines_of(&found), [4, 5], "{found:?}");
     assert!(found[1].1.contains("indented differently"), "{found:?}");
 }
 
-/// A line that closes a stage and fails leaves it open for a line indented
-/// beneath its header, as a blank line would.
+/// A line that fails still closes the stage it is outdented from, so a
+/// line indented after it is at the top level, where any indentation is
+/// allowed.
 #[test]
-fn blanking_a_line_that_closes_a_stage_leaves_it_open_for_the_lines_after() {
+fn a_line_that_fails_still_closes_the_stage_before_it() {
     let text = "source raw : T [sub]\noperation step(input: T) -> T\nstage s:\n    a = step(raw)\np = nostep(raw)\n    b = step(raw)\nq = step(raw)\n";
+    let found = error_lines(text);
+    assert_eq!(lines_of(&found), [5], "{found:?}");
+}
+
+/// Error recovery parses again without a failed line, and keeps the line
+/// in its place when blanking it would put the lines after it back in the
+/// block it closed, so they are read on the next pass as on the first.
+#[test]
+fn a_failed_line_that_closes_a_stage_keeps_it_closed_on_every_pass() {
+    let text = "source raw : T [sub]\noperation step(input: T) -> T\nstage s:\n    a = step(raw)\np = nostep(raw)\n    b = step(raw)\n      c = step(raw)\n";
     let found = error_lines(text);
     assert_eq!(lines_of(&found), [5], "{found:?}");
 }
@@ -396,4 +415,41 @@ fn each_call_whose_selectors_clash_with_its_body_is_an_error_of_its_own() {
     let text = "source raw : T [sub]\noperation step(input: T) -> T\noperation inner(input: T) -> (out: T):\n    out = step(input @ where(sub=1))\noperation outer(input: T) -> (out: T):\n    out = inner(input @ where(sub=1))\nm = outer(raw @ where(sub=2))\nn = outer(raw @ where(sub=2))\nk = outer(raw)\n";
     let found = error_lines(text);
     assert_eq!(lines_of(&found), [7, 8], "{found:?}");
+}
+
+/// A stage header that fails still opens its block: its lines are read in
+/// the stage around it, so a stage nested in them is where it belongs, and
+/// an error among them is found in the same pass.
+#[test]
+fn a_stage_header_that_fails_keeps_its_lines() {
+    let text = "source a : A [s]\noperation f(x: A) -> A\nstage outer:\n    stage pre\n        b = f(a)\n        stage inner:\n            c = f(b)\n        d = nope(c)\n    e = f(d)\n";
+    let found = error_lines(text);
+    assert_eq!(lines_of(&found), [4, 8], "{found:?}");
+    assert!(
+        found[0].1.starts_with("expected `stage name:`"),
+        "{found:?}"
+    );
+}
+
+/// The steps of a body whose header fails are read where the body is, as
+/// ordinary statements: a call to the operation repeats the header's error
+/// and is not reported, and each step is still read.
+#[test]
+fn the_steps_of_a_body_whose_header_fails_are_read_as_ordinary_statements() {
+    let text = "source a : A [s]\nsource x : A [s]\noperation f(x: A) -> A\noperation h(x A) -> A:\n    y = f(x)\n    z = bad(\nc = h(a)\nd = f(c)\n";
+    let found = error_lines(text);
+    assert_eq!(lines_of(&found), [4, 6], "{found:?}");
+}
+
+/// A default needs the `:` after its setting's word, as `default ext:`.
+#[test]
+fn a_default_without_its_colon_is_an_error() {
+    for line in [
+        "default ext .txt",
+        "default path out/{@product}",
+        "default check nonempty",
+    ] {
+        let found = error_lines(&format!("source raw : T [sub]\n{line}\n"));
+        assert_eq!(lines_of(&found), [2], "{line}: {found:?}");
+    }
 }

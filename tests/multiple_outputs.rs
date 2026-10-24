@@ -8,7 +8,7 @@ use support::{bound, numbers, outputs};
 use spit::{parse_pipeline, parse_source_inventory, render_dag, resolve, validate_commands};
 
 const TISSUES: &str = "\
-path: {@product}/{@entities}.txt
+default path: {@product}/{@entities}.txt
 source dwi : DWI [subject]
 source mask : Mask [subject]
 operation responses(dwi: DWI) -> (wm: Response, csf: Response)
@@ -18,7 +18,7 @@ verify fods: same_grid {dwi} {mask}
 command fods: fit {dwi} {wm_response} {wm} {csf_response} {csf} -mask {mask}
 wm_response, csf_response = responses(dwi)
 wm_fod, csf_fod = fods(dwi, wm_response, csf_response, mask)
-";
+default entities: {@key}={@value} separated \"__\"\n";
 
 #[test]
 fn one_job_owns_every_output_of_an_operation() {

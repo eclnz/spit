@@ -169,7 +169,7 @@ fn later_known_input_refines_an_earlier_partial_variable_binding() {
 
 #[test]
 fn partial_type_cannot_hide_a_downstream_known_conflict() {
-    let text = "source partly : Frame<Unknown> [id]\nsource known : Frame<Foo> [id]\noperation merge(input1: A, input2: A) -> A\noperation sink(input: Frame<Bar>) -> Frame<Bar>\nmerged = merge(partly, known)\nfinal : Frame<Bar> [id] = sink(merged)\n";
+    let text = "source partly : Frame<Unknown> [id]\nsource known : Frame<Foo> [id]\noperation merge(input1: A, input2: A) -> A\noperation sink(input: Frame<Bar>) -> Frame<Bar>\nmerged = merge(partly, known)\nfinal : Frame<Bar> [id] = sink(merged)\ndefault entities: {@key}={@value} separated \"__\"\npath merged: out/{@product}/{@entities}\n";
     let pipeline = parse_pipeline(text).unwrap();
     let empty = parse_source_inventory("sources:\n").unwrap();
     assert!(matches!(
@@ -195,7 +195,7 @@ fn unknown_is_indeterminate_without_binding_a_variable() {
 #[test]
 fn unresolved_output_variables_become_unknown_at_job_boundary() {
     let pipeline = parse_pipeline(
-        "source raw : Unknown [site]\noperation transform(input: A<S>) -> B<S>\nresult = transform(raw)\n",
+        "source raw : Unknown [site]\noperation transform(input: A<S>) -> B<S>\nresult = transform(raw)\ndefault entities: {@key}={@value} separated \"__\"\npath result: out/{@product}/{@entities}\n",
     )
     .unwrap();
     let inventory = parse_source_inventory("sources:\n  raw[site=A]\n").unwrap();
@@ -209,7 +209,7 @@ fn unresolved_output_variables_become_unknown_at_job_boundary() {
 #[test]
 fn generic_pipeline_infers_output_type_without_pipeline_annotations() {
     let pipeline = parse_pipeline(
-        "source signal : Signal<Native> [site]\noperation denoise(input: Signal<S>) -> FilteredSignal<S>\ndenoised = denoise(signal)\n",
+        "source signal : Signal<Native> [site]\noperation denoise(input: Signal<S>) -> FilteredSignal<S>\ndenoised = denoise(signal)\ndefault entities: {@key}={@value} separated \"__\"\npath denoised: out/{@product}/{@entities}\n",
     )
     .unwrap();
     let inventory = parse_source_inventory("sources:\n  signal[site=A]\n").unwrap();
@@ -223,7 +223,7 @@ fn generic_pipeline_infers_output_type_without_pipeline_annotations() {
 #[test]
 fn chained_generic_operations_propagate_concrete_type() {
     let pipeline = parse_pipeline(
-        "source raw : A<Native> [site]\noperation f(input: A<X>) -> B<X>\noperation g(input: B<Y>) -> C<Y>\nmiddle = f(raw)\nfinal = g(middle)\n",
+        "source raw : A<Native> [site]\noperation f(input: A<X>) -> B<X>\noperation g(input: B<Y>) -> C<Y>\nmiddle = f(raw)\nfinal = g(middle)\ndefault entities: {@key}={@value} separated \"__\"\npath middle: out/{@product}/{@entities}\npath final: out/{@product}/{@entities}\n",
     )
     .unwrap();
     let inventory = parse_source_inventory("sources:\n  raw[site=A]\n").unwrap();
@@ -241,7 +241,7 @@ fn chained_generic_operations_propagate_concrete_type() {
 #[test]
 fn operation_type_variables_do_not_leak_between_invocations() {
     let pipeline = parse_pipeline(
-        "source a : A<Native> [site]\nsource b : A<Standard> [site]\noperation convert(input: A<X>) -> B<X>\nout_a = convert(a)\nout_b = convert(b)\n",
+        "source a : A<Native> [site]\nsource b : A<Standard> [site]\noperation convert(input: A<X>) -> B<X>\nout_a = convert(a)\nout_b = convert(b)\ndefault entities: {@key}={@value} separated \"__\"\npath out_a: out/{@product}/{@entities}\npath out_b: out/{@product}/{@entities}\n",
     )
     .unwrap();
     let inventory = parse_source_inventory("sources:\n  a[site=01]\n  b[site=01]\n").unwrap();
@@ -405,5 +405,169 @@ fn a_type_variable_prints_marked_so_it_differs_from_a_named_type() {
             .message
             .contains("product `raw` is T, expected List<$T>"),
         "{found:?}"
+    );
+}
+
+/// Frames in two spaces, generic operations over them, and an operation
+/// with a body whose ports are generic.
+const FRAMES: &str = "\
+default path: out/{@product}[/{@entities}].txt
+default entities: {@key}={@value} separated \"__\"
+source native : Frame<Native> [site]
+path native: in/{site}/n.txt
+source target : Frame<Target> [site]
+path target: in/{site}/t.txt
+operation smooth(x: Frame<S>) -> Frame<S>
+command smooth: smooth {x} {@output}
+operation measure(x: Frame<S>) -> Stats<S>
+command measure: measure {x} {@output}
+operation fix(x: Frame<Native>) -> Frame<Native>
+command fix: fix {x} {@output}
+operation summarise(frame: Frame<S>) -> (smoothed: Frame<S>, stats: Stats<S>):
+    cleaned = smooth(frame)
+    smoothed = smooth(cleaned)
+    stats = measure(smoothed)
+";
+
+#[test]
+fn calls_of_one_generic_body_infer_their_types_apart() {
+    let pipeline = parse_pipeline(&format!(
+        "{FRAMES}a, a_stats = summarise(native)\nb, b_stats = summarise(target)\n"
+    ))
+    .unwrap();
+    let inventory =
+        parse_source_inventory("sources:\n  native[site=01]\n  target[site=01]\n").unwrap();
+    let dag = resolve(&pipeline, &inventory).unwrap();
+    let types: Vec<_> = dag
+        .jobs
+        .iter()
+        .map(|job| dag.artifact(job.output()))
+        .map(|output| format!("{}: {}", output.product, output.artifact_type))
+        .collect();
+    // Neither call's `S` reaches the other's steps, inside or out.
+    assert_eq!(
+        types,
+        [
+            "a::cleaned: Frame<Native>",
+            "a: Frame<Native>",
+            "a_stats: Stats<Native>",
+            "b::cleaned: Frame<Target>",
+            "b: Frame<Target>",
+            "b_stats: Stats<Target>",
+        ]
+    );
+}
+
+#[test]
+fn a_type_a_call_of_a_generic_body_cannot_have_is_reported_at_that_call() {
+    // Each error as its line, its message and the lines it relates.
+    let errors = |calls: &str| -> Vec<(usize, String, Vec<usize>)> {
+        support::errors(spit::diagnose(&format!("{FRAMES}{calls}"), None))
+            .into_iter()
+            .map(|error| {
+                let related = error.related.iter().map(|place| place.line).collect();
+                (error.line.unwrap_or_default(), error.message, related)
+            })
+            .collect()
+    };
+    // A step of the body takes only `Native`: the call over `target`
+    // fails, at the call and the step, and the call over `native` does not.
+    assert_eq!(
+        errors(
+            "operation tidy(frame: Frame<S>) -> (tidied: Frame<S>):\n    tidied = fix(frame)\n\
+             a = tidy(native)\nb = tidy(target)\n"
+        ),
+        [(
+            20,
+            "in `b = tidy(...)`: type mismatch at `fix.x`: product `target` is Frame<Target>, expected Frame<Native>".to_owned(),
+            vec![18],
+        )]
+    );
+    // The caller declares a type the body cannot make from its input.
+    assert_eq!(
+        errors("a, a_stats = summarise(native)\nb : Frame<Native> [site], b_stats = summarise(target)\n"),
+        [(
+            18,
+            "in `b, b_stats = summarise(...)`: type conflict at `smooth.output` (product `b`): variable `S` was inferred as Target, but now requires Native".to_owned(),
+            vec![15],
+        )]
+    );
+}
+
+#[test]
+fn a_call_of_an_operation_with_a_body_is_held_to_its_signature() {
+    // Each error as its line, the text it points at, its message and the
+    // lines it relates.
+    let errors = |calls: &str| -> Vec<(usize, String, String, Vec<usize>)> {
+        let text = format!(
+            "{FRAMES}source tx : Transform<Native,Target> [site]\npath tx: in/{{site}}/x.txt\n\
+             operation warp(x: Frame<A>, t: Transform<A,B>) -> Frame<B>\n\
+             command warp: warp {{x}} {{t}} {{@output}}\n{calls}"
+        );
+        support::errors(spit::diagnose(&text, None))
+            .into_iter()
+            .map(|error| {
+                let line = error.line.unwrap_or_default();
+                let columns = error.columns.clone().unwrap_or_default();
+                let at = text.lines().nth(line - 1).unwrap_or_default()[columns].to_owned();
+                let related = error.related.iter().map(|place| place.line).collect();
+                (line, at, error.message, related)
+            })
+            .collect()
+    };
+    let error = |line: usize, at: &str, message: &str, related: &[usize]| {
+        (line, at.to_owned(), message.to_owned(), related.to_vec())
+    };
+    // The output the signature gives is not the one the body makes.
+    let align = "operation align(frame: Frame<S>, t: Transform<S,T>) -> (aligned: Frame<S>):\n    aligned = warp(frame, t)\n";
+    assert_eq!(
+        errors(&format!("{align}a = align(native, tx)\n")),
+        [error(
+            23,
+            "a",
+            "type conflict at `align.aligned` (product `a`): variable `S` was inferred as Native, but now requires Target",
+            &[],
+        )]
+    );
+    assert_eq!(
+        errors(&format!(
+            "{}a = align(native, tx)\n",
+            align.replace("aligned: Frame<S>", "aligned: Frame<T>")
+        )),
+        []
+    );
+    // An input the signature does not accept, though the body's steps do.
+    let tally = "operation tally(frame: Frame<Native>) -> (s):\n    s = measure(frame)\n";
+    assert_eq!(
+        errors(&format!("{tally}a = tally(native)\nb = tally(target)\n")),
+        [error(
+            24,
+            "target",
+            "type mismatch at `tally.frame`: product `target` is Frame<Target>, expected Frame<Native>",
+            &[],
+        )]
+    );
+    // Called in a body, reported at the call written in the pipeline.
+    assert_eq!(
+        errors(&format!(
+            "{tally}operation outer(frame: Frame<S>) -> (s):\n    s = tally(frame)\nc = outer(target)\n"
+        )),
+        [error(
+            25,
+            "target",
+            "in `c = outer(...)`: type mismatch at `tally.frame`: product `target` is Frame<Target>, expected Frame<Native>",
+            &[24],
+        )]
+    );
+    // One variable holds across the inputs of one call, and only that call.
+    let pair = "operation pair(x: Frame<S>, y: Frame<S>) -> (z: Frame<S>):\n    z = smooth(x)\n";
+    assert_eq!(
+        errors(&format!("{pair}d = pair(native, native)\ne = pair(native, target)\n")),
+        [error(
+            24,
+            "target",
+            "type conflict at `pair.y` (product `target`): variable `S` was inferred as Native, but now requires Target",
+            &[],
+        )]
     );
 }

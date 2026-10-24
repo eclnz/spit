@@ -25,7 +25,7 @@ fn calls_specialise_generics_and_products_across_a_chain() {
                 operation clean(input: Frame<S>) -> CleanFrame<S>\n\
                 cleaned = clean(raw)\n\
                 operation align(moving: CleanFrame<A>, reference: Reference<B>) -> Transform<A,B>\n\
-                transform = align(cleaned, reference)\n";
+                transform = align(cleaned, reference)\ndefault entities: {@key}={@value} separated \"__\"\npath cleaned: out/{@product}/{@entities}\npath transform: out/{@product}/{@entities}\n";
     let all = hovers(text);
     assert_eq!(
         at(&all, 4, "cleaned").signature,
@@ -62,7 +62,7 @@ fn bindings_are_local_and_multi_outputs_have_their_own_types() {
                       source target : Frame<Target> [id]\n\
                       operation split(input: Frame<S>) -> (image: Frame<S>, report: Report<S>)\n\
                       first, first_report = split(native)\n\
-                      second, second_report = split(target)\n",
+                      second, second_report = split(target)\ndefault entities: {@key}={@value} separated \"__\"\npath first: out/{@product}/{@entities}\npath second: out/{@product}/{@entities}\n",
     );
     assert!(at(&all, 4, "split")
         .details
@@ -109,12 +109,12 @@ fn aggregate_hovers_show_inference_and_output_dimensions() {
 }
 
 #[test]
-fn product_paths_report_explicit_nearest_stage_pipeline_and_builtin_rules() {
+fn product_paths_report_explicit_nearest_stage_and_pipeline_rules_or_their_absence() {
     let text = "source raw : Lines [id]\npath raw: in/{id}.txt\n\
-                path: results/{@product}/{@entities}.txt\noperation copy(input: Lines) -> Lines\n\
+                default path: results/{@product}/{@entities}.txt\noperation copy(input: Lines) -> Lines\n\
                 global = copy(raw)\n\
-                stage outer:\n    path: outer/{@product}/{@entities}.txt\n    stage inner:\n        inherited = copy(raw)\n        explicit = copy(raw)\n\
-                path explicit: special/{id}.txt\n";
+                stage outer:\n    default path: outer/{@product}/{@entities}.txt\n    stage inner:\n        inherited = copy(raw)\n        explicit = copy(raw)\n\
+                path explicit: special/{id}.txt\ndefault entities: {@key}={@value} separated \"__\"\n";
     let all = hovers(text);
     assert!(at(&all, 5, "global")
         .details
@@ -131,11 +131,12 @@ fn product_paths_report_explicit_nearest_stage_pipeline_and_builtin_rules() {
         .iter()
         .any(|detail| detail.contains("special/{id}.txt (explicit product rule)")));
     assert_eq!(at(&all, 11, "explicit").kind, HoverKind::Product);
+    // An output with no rule has no built-in one to fall back on.
     let defaults = hovers("source raw [id]\noperation copy(input)\nout = copy(raw)\n");
     assert!(at(&defaults, 3, "out")
         .details
         .iter()
-        .any(|detail| detail.contains("out/out/{@entities} (built-in output default)")));
+        .any(|detail| detail == "No path rule; the pipeline must give one."));
     assert!(at(&defaults, 1, "raw")
         .details
         .iter()
@@ -191,7 +192,7 @@ fn broken_steps_do_not_claim_inferred_types_or_hide_independent_symbols() {
 
 #[test]
 fn hover_ranges_use_utf16_and_exclude_comments_and_literal_text() {
-    let text = "\u{feff}source raw [id]\noperation copy(first, second)\nout = copy(raw @ where(id=😀), raw) # raw copy\ncommand copy: echo raw {@output}\n";
+    let text = "\u{feff}source raw [id]\noperation copy(first, second)\nout = copy(raw @ where(id=😀), raw) # raw copy\ncommand copy: echo raw {@output}\ndefault entities: {@key}={@value} separated \"__\"\npath out: out/{@product}/{@entities}\n";
     let all = hovers(text);
     assert_eq!(at(&all, 1, "raw").column, 9);
     assert_eq!(at(&all, 3, "copy").column, 7);
@@ -225,7 +226,7 @@ fn cli_editor_analysis_is_opt_in_and_preserves_error_diagnostics() {
         .write_all(b"source raw [id]\noperation copy(input)\ngood = copy(raw)\nbad syntax\n")
         .unwrap();
     let output = child.wait_with_output().unwrap();
-    assert!(output.status.success());
+    assert_eq!(output.status.code(), Some(1));
     let json = String::from_utf8(output.stdout).unwrap();
     assert!(json.contains("\"severity\":\"error\""));
     assert!(json.contains("\"hovers\":["));
@@ -242,7 +243,7 @@ fn cli_editor_analysis_is_opt_in_and_preserves_error_diagnostics() {
 
 #[test]
 fn hovers_keep_resolved_path_hints_and_extensions() {
-    let text = "path: out/[{@labels}_]{@product}\next: .txt\nsource raw [sub]\npath raw: in/{sub}.txt\noperation copy(input)\nresult = copy(raw)\n";
+    let text = "default path: out/[{@entities}_]{@product}\ndefault ext: .txt\nsource raw [sub]\npath raw: in/{sub}.txt\noperation copy(input)\nresult = copy(raw)\ndefault entities: {@key}-{@value} separated \"_\"\n";
     let all = hovers(text);
     assert!(at(&all, 6, "result")
         .details
@@ -275,7 +276,7 @@ fn hovers_keep_resolved_path_hints_and_extensions() {
 fn path_hints_keep_literal_braces_and_brackets_doubled() {
     // `{{lit}}` and `[[x]]` are literal text: the hint writes them as the rule
     // does, so they are not read as a placeholder and a group.
-    let text = "path: out/{{lit}}/[[x]]/{@product}/{sub}.txt\nsource raw [sub]\npath raw: in/{sub}.txt\noperation copy(input)\nresult = copy(raw)\n";
+    let text = "default path: out/{{lit}}/[[x]]/{@product}/{sub}.txt\nsource raw [sub]\npath raw: in/{sub}.txt\noperation copy(input)\nresult = copy(raw)\n";
     let all = hovers(text);
     assert!(at(&all, 5, "result")
         .details
@@ -286,7 +287,7 @@ fn path_hints_keep_literal_braces_and_brackets_doubled() {
 #[test]
 fn beside_outputs_keep_their_path_and_signature_in_hovers() {
     let all = hovers(
-        "source raw [id]\npath raw: in/{id}.txt\npath: out/{@product}/{@entities}\noperation convert(input) -> (image: Image .nii.gz, meta: Json .json beside image)\nimage, meta = convert(raw)\n",
+        "source raw [id]\npath raw: in/{id}.txt\ndefault path: out/{@product}/{@entities}\noperation convert(input) -> (image: Image .nii.gz, meta: Json .json beside image)\nimage, meta = convert(raw)\ndefault entities: {@key}={@value} separated \"__\"\n",
     );
     assert!(at(&all, 4, "convert")
         .signature
@@ -294,14 +295,14 @@ fn beside_outputs_keep_their_path_and_signature_in_hovers() {
     assert!(at(&all, 5, "meta")
         .details
         .iter()
-        .any(|detail| detail.contains("out/image/{@entities}.json (beside image)")));
+        .any(|detail| detail.contains("out/image/id={id}.json (beside image)")));
 }
 
 #[test]
 fn a_source_shows_its_extension_and_no_stage_default() {
-    let text = "path: {@stage}/{@product}/{@entities}\n\
+    let text = "default path: {@stage}/{@product}/{@entities}\n\
                 source events : Events .tsv [sub]\n\
-                stage prep:\n    operation f(x)\n    y = f(events)\n";
+                stage prep:\n    operation f(x)\n    y = f(events)\ndefault entities: {@key}={@value} separated \"__\"\n";
     let events = at(&hovers(text), 2, "events");
     assert_eq!(events.signature, "events: Events .tsv [sub]");
     // A default that needs `{@stage}` is no source's rule.
@@ -309,4 +310,144 @@ fn a_source_shows_its_extension_and_no_stage_default() {
         events.details.last().unwrap(),
         "No pipeline path rule; a recipe or inventory must supply the source path."
     );
+}
+
+const REGISTRATION: &str = "\
+source raw_t1: MRI<T1w,Native,Original> [sub]
+operation parcellate(image: MRI<$I,$Space,$Grid>) -> (parc: MRI<Parc,$Space,SynthGrid<$Grid>>, resampled: MRI<$I,$Space,SynthGrid<$Grid>>)
+operation brainmask(image: MRI<Parc,$Space,$Grid>) -> MRI<Mask,$Space,$Grid>
+operation prep_registration(image: MRI<$I,$Space,$Grid>) -> (parc: MRI<Parc,$Space,SynthGrid<$Grid>>, resampled: MRI<$I,$Space,SynthGrid<$Grid>>, mask: MRI<Mask,$Space,SynthGrid<$Grid>>):
+    parc, resampled = parcellate(image)
+    mask = brainmask(parc)
+t1_parc, t1_resampled, t1_mask = prep_registration(raw_t1)
+command parcellate: tool {image} {parc} {resampled}
+command brainmask: tool {image} {@output}
+default entities: {@key}={@value} separated \"__\"\npath t1_parc: out/{@product}/{@entities}\n";
+
+#[test]
+fn composite_hovers_show_typed_ports_and_one_body_in_the_right_context() {
+    let all = hovers(REGISTRATION);
+    let declaration = at(&all, 4, "prep_registration");
+    assert!(declaration.signature.contains("\n    image: MRI<"));
+    assert!(declaration.signature.contains(") -> (\n    parc: MRI<"));
+    assert!(declaration.signature.contains(",\n    resampled: MRI<"));
+    assert_eq!(declaration.details, ["Carried out by the steps in its body: parc, resampled = parcellate(image)\nmask = brainmask(parc)"]);
+    let call = at(&all, 7, "prep_registration");
+    assert!(call
+        .details
+        .iter()
+        .all(|detail| !detail.starts_with("Carried out")));
+    assert!(call
+        .details
+        .iter()
+        .any(|detail| detail == "image ← raw_t1: MRI<T1w,Native,Original> [sub]"));
+    assert!(
+        call.details
+            .iter()
+            .any(|detail| detail
+                .contains("mask → t1_mask: MRI<Mask,Native,SynthGrid<Original>> [sub]")),
+        "{:?}",
+        call.details
+    );
+    assert_eq!(
+        call.details
+            .iter()
+            .filter(|detail| detail.starts_with("This call expands to:"))
+            .count(),
+        1
+    );
+    assert!(call.details.iter().any(|detail| detail == "This call expands to: t1_parc, t1_resampled = parcellate(raw_t1)\nt1_mask = brainmask(t1_parc)"));
+}
+
+#[test]
+fn primitive_calls_prioritise_bindings_and_keep_execution_information() {
+    let all = hovers("source raw: Text [id]\noperation copy(input: Text) -> Text\ncommand copy: cp {input} {@output}\nverify copy: test -f {input}\nout = copy(raw)\ndefault entities: {@key}={@value} separated \"__\"\npath out: out/{@product}/{@entities}\n");
+    let declaration = at(&all, 2, "copy");
+    assert!(declaration.details[0].starts_with("Single-artifact"));
+    let call = at(&all, 5, "copy");
+    assert_eq!(call.signature, "operation copy(input: Text) -> Text");
+    assert_eq!(call.details[0], "This call:");
+    assert!(call
+        .details
+        .contains(&"Command: cp {input} {@output}".to_owned()));
+    assert!(call.details.contains(&"Verify: test -f {input}".to_owned()));
+    assert!(call
+        .details
+        .iter()
+        .all(|detail| !detail.starts_with("Single-artifact")));
+}
+
+#[test]
+fn product_hovers_keep_inference_failures_and_bound_large_reader_lists() {
+    let mut text = "source raw: Text [id]\noperation copy(input: Text) -> Text\n".to_owned();
+    for index in 0..12 {
+        text.push_str(&format!("out{index} = copy(raw)\n"));
+    }
+    text.push_str("broken = copy(missing)\n");
+    let all = hovers(&text);
+    let source = at(&all, 1, "raw");
+    assert!(source
+        .details
+        .contains(&"4 other steps also use this product.".to_owned()));
+    let readers = source
+        .details
+        .iter()
+        .find(|detail| detail.starts_with("Used by:"))
+        .unwrap();
+    assert!(readers.contains("out7 = copy"));
+    assert!(!readers.contains("out8 = copy"));
+    assert!(at(&all, 3, "out0")
+        .details
+        .iter()
+        .all(|detail| !detail.starts_with("Declared type:")));
+    assert!(at(&all, 15, "broken")
+        .details
+        .iter()
+        .any(|detail| detail.starts_with("Inference unavailable")));
+}
+
+#[test]
+fn call_hovers_explain_the_selectors_that_change_matching() {
+    let all = hovers("source raw: Text [sub, run]\nsource reference: Text [run]\noperation copy(input: Text, driver: Text) -> Text\npinned = copy(raw @ where(run=1) @ same(sub), raw)\nbroadcast = copy(raw @ each(sub), reference)\ndefault entities: {@key}={@value} separated \"__\"\npath pinned: out/{@product}/{@entities}\npath broadcast: out/{@product}/{@entities}\n");
+    let pinned = at(&all, 4, "copy");
+    assert!(pinned.details.contains(&"Pins input to run=1.".to_owned()));
+    assert!(pinned.details.contains(&"Matches input on sub.".to_owned()));
+    assert!(at(&all, 5, "copy")
+        .details
+        .contains(&"Broadcasts input across sub.".to_owned()));
+    let aggregate = hovers("source raw: Text [sub, run]\noperation merge(items: many Text) -> Text\nmerged = merge(raw @ vary(run))\ndefault entities: {@key}={@value} separated \"__\"\npath merged: out/{@product}/{@entities}\n");
+    let call = at(&aggregate, 3, "merge");
+    assert!(call.details[1].contains("items ←"));
+    assert!(call.details[2].contains("output →"));
+    assert_eq!(call.details[3], "Collects items across run.");
+}
+
+#[test]
+fn a_broken_composite_retains_its_contract_without_claiming_inferred_results() {
+    let text = REGISTRATION.replace("MRI<T1w,Native,Original>", "Text");
+    let all = hovers(&text);
+    let call = at(&all, 7, "prep_registration");
+    assert!(call
+        .details
+        .iter()
+        .any(|detail| detail.contains("could not be fully checked")));
+    assert!(call
+        .details
+        .iter()
+        .all(|detail| !detail.contains("MRI<Mask,Native,SynthGrid<Original>>")));
+    assert!(call
+        .details
+        .iter()
+        .any(|detail| detail.starts_with("This call expands to:")));
+    assert_eq!(at(&all, 4, "prep_registration").details.len(), 1);
+}
+
+/// A stage header that fails keeps its lines, so the editor still explains
+/// the steps beneath it while the header is being written.
+#[test]
+fn steps_beneath_a_stage_header_being_written_keep_their_hovers() {
+    let text = "source a : A [s]\noperation f(x: A) -> B\nstage pre\n    b = f(a)\n";
+    let all = hovers(text);
+    assert!(at(&all, 4, "b").signature.starts_with("b: "));
+    assert_eq!(at(&all, 4, "f").signature, "operation f(x: $A) -> $B");
 }

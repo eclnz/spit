@@ -33,7 +33,7 @@ const MAX_GROWTH: f64 = 9.0;
 const NOISE: Duration = Duration::from_millis(25);
 
 const PIPELINE: &str = "\
-path: out/{@product}/{@entities}.txt
+default path: out/{@product}/{@entities}.txt
 source image : Image [sub, ses, run]
 path image: sub-{sub}/ses-{ses}/image_run-{run}.nii
 source mask : Mask [sub]
@@ -48,7 +48,7 @@ cleaned = clean(image, mask)
 aligned = align(cleaned, reference)
 averaged = average(aligned @ vary(run))
 score = compare(averaged, reference)
-";
+default entities: {@key}={@value} separated \"__\"\n";
 
 const RECIPE: &str = "\
 inputs:\n    contexts: sub-{sub}/ses-{ses}
@@ -170,7 +170,7 @@ const STEPS: usize = 1_000;
 /// path rule so that every product's path is worked out.
 fn chain(steps: usize) -> String {
     let mut text = String::from(
-        "path: out/{@product}/{@entities}.txt\nsource p0 : T [sub]\npath p0: in/{sub}.txt\noperation step(input: T) -> T\n",
+        "default path: out/{@product}/{@entities}.txt\nsource p0 : T [sub]\npath p0: in/{sub}.txt\noperation step(input: T) -> T\ndefault entities: {@key}={@value} separated \"__\"\n",
     );
     for index in 1..=steps {
         text += &format!("p{index} = step(p{})\n", index - 1);

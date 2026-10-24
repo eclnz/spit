@@ -44,8 +44,7 @@ pub use imports::parse_pipeline_at;
 pub use inputs::{
     case_variants, discover_source_files, discover_sources, parse_input_spec, parse_input_spec_at,
     CaseVariants, Discovery, EveryGroupDropped, InputError, InputSource, InputSpec, MissedSource,
-    NearestFile, NearlyMatched, ResolvedInputs, Spelling, SuggestedSource, Suggestions,
-    UnmatchedExclusion,
+    NearestFile, ResolvedInputs, Spelling, UnmatchedExclusion,
 };
 pub use lower::parse_pipeline;
 pub use model::{
@@ -55,16 +54,17 @@ pub use model::{
     DimensionOrders, EntityBinding, Exclusion, Gap, IncompleteJob, InputBinding, InputPort,
     InputRules, Invocation, Job, JobId, OperationDef, OutputPort, Pipeline, Port, ProductDef,
     Removal, ResolvedDag, ShapeRule, SidecarGroup, SourceFile, SourceInventory, SourceRecord,
-    StageDef, StepId, StepOrigin, StepOutput,
+    StageDef, StepId, StepOrigin, StepOutput, TypeChecking,
 };
 pub use parser::{parse_source_inventory, render_source_inventory, ParseError, ParseErrorKind};
 pub use paths::{
-    inspect_paths, validate_bound_source_files, validate_source_files, BoundPaths, PathCoverage,
-    PathCoverageEntry, PathError, PathProblem, PathRule, PathTemplate, VerifiedFiles,
+    inspect_paths, validate_bound_source_files, validate_source_files, BoundPaths, EntitiesFormat,
+    PathCoverage, PathCoverageEntry, PathError, PathProblem, PathRule, PathTemplate, VerifiedFiles,
 };
 pub use render::{
     render_artifacts, render_artifacts_by_target, render_bound_dag, render_call, render_calls,
-    render_calls_json, render_dag, render_step_counts, unused_sources_summary, View,
+    render_calls_json, render_dag, render_pipeline_tree, render_step_counts,
+    unused_sources_summary, View,
 };
 pub use resolver::{
     bind_dag, bind_dag_with, resolve, resolve_artifacts_excluding, resolve_artifacts_partial,

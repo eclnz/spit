@@ -1,0 +1,4 @@
+pipeline untyped.spit
+root untyped_data
+inputs:
+    default: {@product}/{@entities}

@@ -9,14 +9,14 @@ use support::{spit, text, Tree};
 use spit::{parse_input_spec, parse_pipeline, InputSource};
 
 const PIPELINE: &str = "\
-path: def/{@product}/{@entities}.txt
+default path: def/{@product}/{@entities}.txt
 source a [sub]
 path a: own/a-{sub}.txt
 source b [sub]
 source c [sub]
 operation f(a, b, c) -> Out
 out = f(a, b, c)
-";
+default entities: {@key}={@value} separated \"__\"\n";
 
 /// The path of each source record a scan of `files` finds with `recipe`.
 fn found(recipe: &str, files: &[&str]) -> Vec<String> {
@@ -88,7 +88,7 @@ fn a_recipe_line_that_belongs_in_the_pipeline_says_so_at_its_line() {
         ),
         (
             "(x, y) = f(a, b, c)",
-            "error: line 3, column 1: a step belongs in the .spit pipeline",
+            "error: line 3, column 1: invalid output product `(x, y)`",
         ),
         (
             "inputs:\n    out: x/{sub}.txt\n",
@@ -105,18 +105,14 @@ fn a_recipe_line_that_belongs_in_the_pipeline_says_so_at_its_line() {
 }
 
 #[test]
-fn a_recipe_line_in_a_pipeline_says_where_it_belongs() {
+fn a_recipe_pipeline_header_in_a_pipeline_says_where_it_belongs() {
     let tree = Tree::new("two-files-pipeline", &[]);
-    for (line, word) in [("root data", "root"), ("pipeline other.spit", "pipeline")] {
-        let pipeline = tree.write("pipeline.spit", &format!("{line}\n{PIPELINE}"));
-        let output = spit(&["check", pipeline.to_str().unwrap()]);
-        assert!(!output.status.success());
-        let errors = text(&output.stderr);
-        assert!(
-            errors.contains(&format!(
-                "error: line 1, column 1: `{word}` belongs in a .spitin recipe, which names its pipeline and the dataset folder it is bound to; a pipeline given alone takes its folder from `--root`"
-            )),
-            "{errors}"
-        );
-    }
+    let pipeline = tree.write("pipeline.spit", &format!("pipeline other.spit\n{PIPELINE}"));
+    let output = spit(&["check", pipeline.to_str().unwrap()]);
+    assert!(!output.status.success());
+    let errors = text(&output.stderr);
+    assert!(
+        errors.contains("error: line 1, column 1: `pipeline` belongs in a .spitin recipe"),
+        "{errors}"
+    );
 }

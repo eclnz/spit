@@ -2,6 +2,7 @@
 
 use std::ops::Range;
 
+use super::keyword::reserved;
 use super::ParseError;
 
 /// `text` without a UTF-8 byte order mark, which some Windows editors write.
@@ -225,6 +226,31 @@ pub(super) fn identifier<'a>(
         .at_token(value));
     }
     Ok(value)
+}
+
+/// A product's name, `value`: an identifier, and no keyword's word, which
+/// is reserved.
+pub(super) fn product_name<'a>(
+    value: &'a str,
+    number: usize,
+    kind: &str,
+) -> Result<&'a str, ParseError> {
+    let name = identifier(value, number, kind)?;
+    if reserved(name) {
+        return Err(reserved_name(name, number));
+    }
+    Ok(name)
+}
+
+/// The error for a product named `name`, a keyword's reserved word.
+pub(super) fn reserved_name(name: &str, number: usize) -> ParseError {
+    ParseError::new(
+        number,
+        format!(
+            "`{name}` is one of SPIT's keywords, so no product may take it as its name; rename it"
+        ),
+    )
+    .at_token(name)
 }
 
 pub(super) fn qualified_identifier<'a>(

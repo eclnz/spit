@@ -61,7 +61,7 @@ joined = join(cleaned, other)
 typo = clean(rwa)
 short = join(cleaned)
 merged = merge(cleaned @ vary(batch))
-";
+default entities: {@key}={@value} separated \"__\"\npath cleaned: out/{@product}/{@entities}\n";
     assert_eq!(
         pointed(text, None),
         [
@@ -81,9 +81,9 @@ source raw : Table [id]
 operation clean(table: Table) -> Table
 command clean: tool {table} {result}
 cleaned = clean(raw)
-path: {@product}/{@entities}.csv
+default path: {@product}/{@entities}.csv
 path raw: in/{id}/{shard}.csv
-";
+default entities: {@key}={@value} separated \"__\"\n";
     assert_eq!(
         pointed(text, None),
         ["error 3: {result}", "error 6: {shard}"]
@@ -104,7 +104,7 @@ source spare : Table [id]
 operation clean(table: Table) -> Table
 command clean: tool {table} {@output}# note
 cleaned = clean(raw)
-";
+default entities: {@key}={@value} separated \"__\"\npath cleaned: out/{@product}/{@entities}\n";
     assert_eq!(
         pointed(text, None),
         ["warning 2: spare", "warning 4: {@output}#"]
@@ -177,7 +177,7 @@ fn invalid_type_variables_point_at_the_variable_not_the_whole_type() {
 #[test]
 fn recipe_rule_errors_point_at_the_product_or_the_grouped_dimensions() {
     let pipeline = spit::parse_pipeline(
-        "source raw : Table [id]\noperation clean(table: Table) -> Table\ncleaned = clean(raw)\n",
+        "source raw : Table [id]\noperation clean(table: Table) -> Table\ncleaned = clean(raw)\ndefault entities: {@key}={@value} separated \"__\"\npath cleaned: out/{@product}/{@entities}\n",
     )
     .unwrap();
     let recipe = "\
@@ -204,7 +204,7 @@ require [id] where cleaned count=1
 #[test]
 fn errors_in_records_written_in_a_recipe_point_at_the_record() {
     let pipeline = spit::parse_pipeline(
-        "source raw : Table [id, run]\noperation clean(table: Table) -> Table\ncleaned = clean(raw)\n",
+        "source raw : Table [id, run]\noperation clean(table: Table) -> Table\ncleaned = clean(raw)\ndefault entities: {@key}={@value} separated \"__\"\npath cleaned: out/{@product}/{@entities}\n",
     )
     .unwrap();
     for (record, message) in [
@@ -234,7 +234,7 @@ command clean: tool {table} {@output}
 command cleen: tool {input} {@output}
 command clean: other {table} {@output}
 cleaned = clean(raw)
-";
+default entities: {@key}={@value} separated \"__\"\npath cleaned: out/{@product}/{@entities}\n";
     assert_eq!(pointed(text, None), ["error 4: cleen", "error 5: clean"]);
 }
 

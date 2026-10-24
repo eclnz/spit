@@ -9,38 +9,39 @@ use std::path::{Path, PathBuf};
 mod located;
 
 use crate::blob::git_blob_id;
-use crate::lower::{parse_document_recovering, Failure, ParsedDocument, PipelineBuilder};
+use crate::lower::{parse_layout, ParsedDocument, PipelineBuilder};
 use crate::model::{
     CheckDef, CheckUse, CommandDef, CommandRole, OperationDef, Pipeline, PipelineIndex, ProductDef,
     SidecarGroup, SourceFile,
 };
-use crate::parser::{parse_use, strip_comment, without_bom, Keyword, Kind, ParseError, UseSpec};
+use crate::parser::{parse_use, without_bom, Keyword, Kind, Layout, Line, ParseError, UseSpec};
 use crate::span::Place;
-use located::{in_import, named_in, rebase, relative_path, ImportedAt};
+pub(crate) use located::relative_path;
+use located::{in_import, named_in, rebase, ImportedAt};
 
 /// Merge what the `use` line at `place` imports into `builder`. An import
-/// that fails for what it brings in, before it has changed anything, leaves
-/// the builder as a blank line would.
+/// that fails for what it brings in fails before it changes anything, so
+/// the builder is left as it was.
 pub(crate) fn apply_import(
     builder: &mut PipelineBuilder,
     imports: &BTreeMap<usize, Pipeline>,
     place: &Place,
-) -> Result<(), Failure> {
+) -> Result<(), ParseError> {
     let line = place.line;
     let pipeline = &mut builder.pipeline;
     let imported = imports.get(&line).ok_or_else(|| {
-        Failure::clean(ParseError::new(
+        ParseError::new(
             line,
             "imports require a document path; use parse_pipeline_at",
-        ))
+        )
     })?;
     for ((kind, existing), (_, imported)) in defined(pipeline).into_iter().zip(defined(imported)) {
         let existing: FxHashSet<_> = existing.into_iter().collect();
         if let Some(name) = imported.into_iter().find(|name| existing.contains(name)) {
-            return Err(Failure::clean(ParseError::new(
+            return Err(ParseError::new(
                 line,
                 format!("import conflicts with {kind} `{name}`"),
-            )));
+            ));
         }
     }
     // Two imports may bring the same check, which is one check; a
@@ -56,10 +57,10 @@ pub(crate) fn apply_import(
         match existing {
             Some(existing) if existing == check => {}
             Some(_) => {
-                return Err(Failure::clean(ParseError::new(
+                return Err(ParseError::new(
                     line,
                     format!("import conflicts with check `{}`", check.name),
-                )))
+                ))
             }
             None => new_checks.push(check),
         }
@@ -85,7 +86,7 @@ pub(crate) fn apply_import(
     for operation in &imported.operations {
         builder
             .add_operation(operation.clone(), place.clone(), None)
-            .map_err(Failure::from)?;
+            .expect("an imported operation conflicting with one already declared is found above");
     }
     let lines = &mut builder.lines;
     lines.imported.extend(
@@ -570,91 +571,111 @@ pub(crate) fn parse_located_document(
     path: &Path,
     kind: Kind,
 ) -> Result<ParsedDocument, ParseError> {
-    parse_located_document_recovering(text, path, kind).map_err(|errors| {
-        errors
+    match parse_located_document_recovering(text, path, kind) {
+        (document, errors) if errors.is_empty() => Ok(document),
+        (_, errors) => Err(errors
             .into_iter()
             .next()
-            .expect("a document that fails has an error")
-    })
+            .expect("a document that fails has an error")),
+    }
 }
 
-/// As [`parse_located_document`], with every error that blanking each line
-/// the first names, one after the other, would find; see
+/// As [`parse_located_document`], in one parse: the document, without the
+/// statements and imports that fail, and every error; see
 /// [`parse_document_recovering`].
 pub(crate) fn parse_located_document_recovering(
     text: &str,
     path: &Path,
     kind: Kind,
-) -> Result<ParsedDocument, Vec<ParseError>> {
+) -> (ParsedDocument, Vec<ParseError>) {
     let root = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
     let base = root.parent().map_or_else(PathBuf::new, Path::to_path_buf);
     let name = root
         .file_name()
         .map_or_else(String::new, |name| name.to_string_lossy().into_owned());
-    parse_document_at_inner(text, &root, &base, &mut vec![root.clone()], kind).map_err(|errors| {
-        errors
-            .into_iter()
-            .map(|error| named_in(error, &name))
-            .collect()
-    })
+    let mut stack = vec![root.clone()];
+    let (document, errors) = parse_document_at_inner(text, &root, &base, &mut stack, kind);
+    let errors = errors
+        .into_iter()
+        .map(|error| named_in(error, &name))
+        .collect();
+    (document, errors)
 }
 
 /// Parse `text`, the file at `path` as read, with its imports. The parsed
 /// pipeline lists the file first among its files, then each file an
-/// import read, relative to `path`'s folder.
+/// import read, relative to `path`'s folder. A `use` that fails imports
+/// nothing, and its error comes first, as `use` lines do.
 fn parse_document_at_inner(
     raw: &str,
     path: &Path,
     base: &Path,
     stack: &mut Vec<PathBuf>,
     kind: Kind,
-) -> Result<ParsedDocument, Vec<ParseError>> {
+) -> (ParsedDocument, Vec<ParseError>) {
     let text = without_bom(raw);
     let mut files = vec![SourceFile {
         path: path
             .file_name()
             .map_or_else(String::new, |name| name.to_string_lossy().into_owned()),
-        // The file as git holds it: the text given may be rebuilt from its
-        // lines, as error recovery does, without its last newline.
         blob: fs::read(path)
             .map_or_else(|_| git_blob_id(raw.as_bytes()), |bytes| git_blob_id(&bytes)),
     }];
     let mut imports = BTreeMap::new();
     let mut file_texts = BTreeMap::new();
-    read_imports(
-        text,
-        path,
-        base,
-        stack,
-        &mut files,
-        &mut imports,
-        &mut file_texts,
-    )
-    .map_err(|error| vec![error])?;
-    let mut document = parse_document_recovering(text, &imports, kind)?;
-    document.pipeline.files = files;
-    document.lines.file_texts = file_texts;
-    Ok(document)
-}
-
-/// Read each file `text`, the file at `path`, imports, adding the files it
-/// brings to `files` and `file_texts`, and what it selects to `imports`.
-fn read_imports(
-    text: &str,
-    path: &Path,
-    base: &Path,
-    stack: &mut Vec<PathBuf>,
-    files: &mut Vec<SourceFile>,
-    imports: &mut BTreeMap<usize, Pipeline>,
-    file_texts: &mut BTreeMap<String, String>,
-) -> Result<(), ParseError> {
-    for (index, original) in text.lines().enumerate() {
-        let line = strip_comment(original).trim();
-        if Keyword::of(line) != Some(Keyword::Use) {
+    let mut errors = Vec::new();
+    let layout = Layout::new(text);
+    for (number, line) in layout.numbered() {
+        if line.keyword() != Some(Keyword::Use) {
             continue;
         }
-        let number = index + 1;
-        let spec = parse_use(line, number)?;
+        let read = Import {
+            number,
+            line,
+            path,
+            base,
+        }
+        .read(stack, &mut files, &mut file_texts);
+        let pipeline = read.unwrap_or_else(|error| {
+            errors.push(error);
+            Pipeline::default()
+        });
+        imports.insert(number, pipeline);
+    }
+    let (mut document, found) = parse_layout(&layout, &imports, kind);
+    errors.extend(found);
+    if let Some((root, _)) = &mut document.pipeline.root {
+        *root = path.parent().unwrap_or_else(|| Path::new("")).join(&*root);
+    }
+    document.pipeline.files = files;
+    document.lines.file_texts = file_texts;
+    (document, errors)
+}
+
+/// A `use` line of the file at `path`: line `number`, `line`.
+struct Import<'a> {
+    number: usize,
+    line: &'a Line<'a>,
+    path: &'a Path,
+    base: &'a Path,
+}
+
+impl Import<'_> {
+    /// Read the library this `use` names, adding the files it brings to
+    /// `files` and `file_texts`, and give what it selects.
+    fn read(
+        &self,
+        stack: &mut Vec<PathBuf>,
+        files: &mut Vec<SourceFile>,
+        file_texts: &mut BTreeMap<String, String>,
+    ) -> Result<Pipeline, ParseError> {
+        let Self {
+            number,
+            line,
+            path,
+            base,
+        } = *self;
+        let spec = parse_use(line.code, number)?;
         let imported_path = path
             .parent()
             .unwrap_or_else(|| Path::new("."))
@@ -688,19 +709,18 @@ fn read_imports(
             )
         })?;
         stack.push(canonical.clone());
-        let module =
-            parse_document_at_inner(&imported_text, &canonical, base, stack, Kind::Pipeline)
-                .map_err(|errors| {
-                    let at = ImportedAt {
-                        number,
-                        use_line: original,
-                        spec_path: &rebase(&spec.path, ""),
-                        text: &imported_text,
-                    };
-                    in_import(&errors[0], at, |file| rebase(&spec.path, file))
-                });
+        let (module, errors) =
+            parse_document_at_inner(&imported_text, &canonical, base, stack, Kind::Pipeline);
         stack.pop();
-        let module = module?;
+        if let Some(first) = errors.first() {
+            let at = ImportedAt {
+                number,
+                use_line: line.text,
+                spec_path: &rebase(&spec.path, ""),
+                text: &imported_text,
+            };
+            return Err(in_import(first, at, |file| rebase(&spec.path, file)));
+        }
         let rebased = |file: &str| rebase(&spec.path, file);
         if let Some(own) = module.pipeline.files.first() {
             file_texts.insert(rebased(&own.path), without_bom(&imported_text).to_owned());
@@ -717,7 +737,6 @@ fn read_imports(
                 });
             }
         }
-        imports.insert(number, select_import(&module.pipeline, &spec, number)?);
+        select_import(&module.pipeline, &spec, number)
     }
-    Ok(())
 }

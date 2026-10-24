@@ -1,4 +1,0 @@
-pipeline nested.spit
-root nested_data
-
-require [group] where shard count>=1

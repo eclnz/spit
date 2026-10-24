@@ -17,7 +17,7 @@ source t1w : T1 [sub, ses]
 path t1w: sub-{sub}/ses-{ses}/t1w.nii
 operation align(bold: Bold, t1w: T1) -> Bold
 aligned = align(bold, t1w)
-";
+default entities: {@key}={@value} separated \"__\"\npath aligned: out/{@product}/{@entities}\n";
 
 /// Subject 1 has two full sessions; subject 2 one session with three runs;
 /// subject 3 a session with runs but no T1w.
@@ -117,12 +117,24 @@ fn a_conditional_exclude_rule_names_its_groups_and_the_condition_that_removes_th
 }
 
 #[test]
-fn drop_rules_name_the_exclude_replacement() {
+fn a_drop_rule_is_an_error_that_names_the_exclude_rule_to_write() {
     let error = parse_input_spec("drop [sub] where sessions count<2\n")
         .unwrap_err()
         .to_string();
     assert!(
-        error.contains("`drop` is replaced by conditional `exclude`: write `exclude [sub] where sessions count<2`"),
+        error.contains("`drop` starts no rule; a conditional `exclude` removes the groups that meet a condition: write `exclude [sub] where sessions count<2`"),
+        "{error}"
+    );
+}
+
+#[test]
+fn a_drop_rule_in_a_stage_names_the_exclude_rule_to_write() {
+    let error = parse_pipeline("source raw [sub]\nstage prep:\n    drop [sub] where raw count<2\n")
+        .unwrap_err()
+        .to_string();
+    assert!(
+        error.contains("`drop` starts no rule")
+            && error.contains("write `exclude [sub] where raw count<2`"),
         "{error}"
     );
 }
@@ -148,7 +160,7 @@ fn a_skip_rule_is_an_error_that_names_the_exclude_rule_to_write() {
             .to_string();
         assert!(
             error.contains(&format!(
-                "`skip` is replaced by conditional `exclude`, which names the groups to remove: write `{exclude}`"
+                "`skip` starts no rule; a conditional `exclude` names the groups to remove: write `{exclude}`"
             )),
             "{skip}: {error}"
         );

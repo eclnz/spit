@@ -4,13 +4,13 @@
 
 use std::borrow::Cow;
 use std::fmt;
-use std::sync::OnceLock;
 
 use crate::span::Located;
 use crate::template::{parse_template, Part};
 
 use super::components::encode_component;
 use super::shape::{shape_names, Shape};
+use super::EntitiesFormat;
 
 crate::span::message_error!(
     /// What is wrong with a path rule, or with the paths it gives artifacts.
@@ -25,13 +25,12 @@ pub type PathError = Located<PathProblem>;
 pub(crate) enum PathPlaceholder {
     /// `{@product}`: the product's name.
     Product,
-    /// `{@entities}`: every dimension as `dim=value`, in declared order.
+    /// `{@entities}`: every dimension, in the pipeline's order, as the
+    /// nearest `default entities:` spells them. A product's template has it
+    /// written out, unless the product has no dimensions or no spelling.
     Entities,
     /// `{@stage}`: the stage whose block holds the step.
     Stage,
-    /// `{@labels}`: every dimension as `dim-value`, joined by `_`, as BIDS
-    /// names them. A product's template has it written out.
-    Labels,
     /// Any other name: a dimension the product declares, with the shape
     /// its values must have when a source's files are found, as in
     /// `{date:date}`. A shape narrows what a rule matches and changes no
@@ -46,7 +45,6 @@ impl PathPlaceholder {
             "product" => Some(Self::Product),
             "entities" => Some(Self::Entities),
             "stage" => Some(Self::Stage),
-            "labels" => Some(Self::Labels),
             _ => None,
         }
     }
@@ -58,9 +56,12 @@ impl PathPlaceholder {
             Some(built_in) if built_in.contains(':') => Err(format!(
                 "`{{{name}}}`: a built-in placeholder takes no shape; write the dimension, as `sub-{{sub:digits}}`"
             )),
+            Some("labels") => Err(
+                "`{@labels}` is gone: spell `{@entities}` the same way, with `default entities: {@key}-{@value} separated \"_\"`".to_owned(),
+            ),
             Some(built_in) => Self::built_in(built_in).ok_or_else(|| {
                 format!(
-                    "unknown built-in placeholder `{{{name}}}`; path templates have `{{@product}}`, `{{@entities}}`, `{{@labels}}` and `{{@stage}}`"
+                    "unknown built-in placeholder `{{{name}}}`; path templates have `{{@product}}`, `{{@entities}}` and `{{@stage}}`"
                 )
             }),
             None => match name.split_once(':') {
@@ -86,9 +87,8 @@ impl PathPlaceholder {
     pub(crate) fn hint(name: &str) -> Option<String> {
         let meaning = match Self::built_in(name)? {
             Self::Product => "the product's name",
-            Self::Entities => "every dimension as `dimension=value`",
+            Self::Entities => "every dimension, as `default entities:` spells them",
             Self::Stage => "the stage that makes it",
-            Self::Labels => "every dimension as `dimension-value`",
             Self::Dimension(..) => return None,
         };
         Some(format!("; write `{{@{name}}}` for {meaning}"))
@@ -100,7 +100,6 @@ impl PathPlaceholder {
             Self::Product => "@product",
             Self::Entities => "@entities",
             Self::Stage => "@stage",
-            Self::Labels => "@labels",
             Self::Dimension(name, _) => name,
         }
     }
@@ -132,6 +131,7 @@ pub(crate) enum PathPart {
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Holder<'a> {
     pub(crate) dimensions: &'a [String],
+    pub(crate) entities_format: Option<&'a EntitiesFormat>,
     pub(crate) in_stage: bool,
 }
 
@@ -139,9 +139,9 @@ impl Holder<'_> {
     /// Whether `placeholder` has a value for the product.
     fn has(self, placeholder: &PathPlaceholder) -> bool {
         match placeholder {
-            PathPlaceholder::Product | PathPlaceholder::Entities => true,
+            PathPlaceholder::Product => true,
+            PathPlaceholder::Entities => !self.dimensions.is_empty(),
             PathPlaceholder::Stage => self.in_stage,
-            PathPlaceholder::Labels => !self.dimensions.is_empty(),
             PathPlaceholder::Dimension(name, _) => self.dimensions.contains(name),
         }
     }
@@ -175,15 +175,6 @@ pub(crate) fn product_text(name: &str) -> std::borrow::Cow<'_, str> {
 }
 
 impl PathTemplate {
-    /// Where an output goes when no rule covers it: no rule of its own,
-    /// no stage default and no `path:`. Sources never take it.
-    pub fn built_in_output() -> &'static Self {
-        static BUILT_IN: OnceLock<PathTemplate> = OnceLock::new();
-        BUILT_IN.get_or_init(|| {
-            Self::parse("out/{@product}/{@entities}").expect("built-in output path is valid")
-        })
-    }
-
     /// Parse a template such as `derivatives/{@stage}/{@product}/{@entities}.mif`.
     pub fn parse(text: impl Into<String>) -> Result<Self, PathError> {
         let text = text.into();
@@ -202,22 +193,25 @@ impl PathTemplate {
         open_shapes_apart(&all, &self.text)
     }
 
-    /// Whether the template has a `[...]` group or `{@labels}`, which each
-    /// product resolves its own way.
+    /// Whether the template has a `[...]` group, which each product
+    /// resolves its own way.
     pub(crate) fn varies(&self) -> bool {
-        self.parts.iter().any(|part| {
-            matches!(
-                part,
-                PathPart::Group(_) | PathPart::Placeholder(PathPlaceholder::Labels)
-            )
-        })
+        self.parts
+            .iter()
+            .any(|part| matches!(part, PathPart::Group(_)))
     }
 
     /// This template as `holder`'s product has it: each group kept whole or
-    /// dropped, and `{@labels}` written out as `sub-{sub}_ses-{ses}`. One
-    /// with no group or `{@labels}` is the same for every product.
+    /// dropped, and labels or custom entities written out as dimension
+    /// placeholders. A pipeline without an `entities:` line leaves
+    /// `{@entities}` in place, and binding it is an error.
     pub(crate) fn resolve(&self, holder: Holder<'_>) -> Cow<'_, Self> {
-        if !self.varies() {
+        if !self.varies()
+            && (holder.entities_format.is_none()
+                || !self
+                    .parts
+                    .contains(&PathPart::Placeholder(PathPlaceholder::Entities)))
+        {
             return Cow::Borrowed(self);
         }
         let mut parts = Vec::new();
@@ -241,14 +235,11 @@ impl PathTemplate {
         })
     }
 
-    /// Whether `holder`'s product's path has `{@labels}` written out in it.
-    pub(crate) fn writes_labels(&self, holder: Holder<'_>) -> bool {
-        let labels = |part: &PathPart| *part == PathPart::Placeholder(PathPlaceholder::Labels);
-        holder.has(&PathPlaceholder::Labels)
-            && self.parts.iter().any(|part| match part {
-                PathPart::Group(group) => holder.keeps(group) && group.iter().any(labels),
-                part => labels(part),
-            })
+    /// Whether the template names `{@entities}` outside a `[...]` group, so
+    /// that only a product with dimensions can use it.
+    pub(crate) fn needs_entities(&self) -> bool {
+        self.parts
+            .contains(&PathPart::Placeholder(PathPlaceholder::Entities))
     }
 
     /// Whether the template names `{@stage}` outside a `[...]` group, so
@@ -435,7 +426,7 @@ fn parse_parts(text: &str) -> Result<Vec<PathPart>, String> {
                         PathPart::Placeholder(
                             PathPlaceholder::Dimension(..)
                                 | PathPlaceholder::Stage
-                                | PathPlaceholder::Labels
+                                | PathPlaceholder::Entities
                         )
                     )
                 }) {
@@ -544,20 +535,30 @@ fn push_literal(parts: &mut Vec<PathPart>, value: &str) {
 }
 
 /// Add `part` of a group `holder`'s product keeps, or of no group, with
-/// `{@labels}` written out when the product has dimensions.
+/// `{@entities}` written out when the pipeline has an `entities:` line.
 fn push_resolved(parts: &mut Vec<PathPart>, part: &PathPart, holder: Holder<'_>) {
     match part {
         PathPart::Literal(value) => push_literal(parts, value),
-        PathPart::Placeholder(PathPlaceholder::Labels) if holder.has(&PathPlaceholder::Labels) => {
+        // A product with no dimensions keeps `{@entities}`, which binding
+        // fails as it fails `{@stage}` outside every stage.
+        PathPart::Placeholder(PathPlaceholder::Entities) if !holder.dimensions.is_empty() => {
+            let Some(format) = holder.entities_format else {
+                parts.push(part.clone());
+                return;
+            };
             for (index, dimension) in holder.dimensions.iter().enumerate() {
                 if index > 0 {
-                    push_literal(parts, "_");
+                    push_literal(parts, &format.separator);
                 }
-                push_literal(parts, &format!("{}-", encode_component(dimension)));
+                push_literal(parts, &format.prefix);
+                let label = format.labels.get(dimension).unwrap_or(dimension);
+                push_literal(parts, &encode_component(label));
+                push_literal(parts, &format.between);
                 parts.push(PathPart::Placeholder(PathPlaceholder::Dimension(
                     dimension.clone(),
                     None,
                 )));
+                push_literal(parts, &format.suffix);
             }
         }
         part => parts.push(part.clone()),

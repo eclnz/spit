@@ -4,21 +4,25 @@ mod body;
 mod check;
 mod command;
 mod declarations;
+mod entities;
 mod flow;
 mod inventory;
 mod keyword;
+mod layout;
 mod lexical;
 mod operation;
 mod render_inventory;
 mod rules;
 mod source_map;
 
+pub(crate) use entities::EntitiesDeclaration;
+
 use std::fmt;
 use std::ops::Range;
 
 use crate::model::{
     CheckDef, CommandDef, CommandRole, CoverageRule, DefaultChecks, Invocation, OperationDef,
-    ProductDef, StepOutput,
+    ProductDef, StepOutput, TypeChecking,
 };
 use crate::paths::PathTemplate;
 use crate::span::{address_of, columns_at, content_columns, Focus, Located, Place};
@@ -28,15 +32,17 @@ use self::flow::parse_flow;
 pub(crate) use self::body::empty_body;
 pub(crate) use self::declarations::{parse_use, ExcludeLine, UseSpec};
 pub use self::inventory::parse_source_inventory;
-pub(crate) use self::inventory::{source_record_lines, split_document};
+pub(crate) use self::inventory::{
+    document_records, parse_inventory_recovering, source_record_lines,
+};
 pub(crate) use self::keyword::{Header, Keyword};
+pub(crate) use self::layout::{Block, Head, Layout, Line};
 pub(crate) use self::lexical::{glued_comment, strip_comment, without_bom};
 pub(crate) use self::render_inventory::as_read_back;
 pub use self::render_inventory::render_source_inventory;
 pub(crate) use self::source_map::{Rule, SourceMap, Step};
 
-const SHELL_SOURCE_REMOVED: &str =
-    "shell-source is no longer supported; make the command executable available on PATH";
+const SHELL_SOURCE_ERROR: &str = "`shell-source` starts no statement: a command runs a program, not a shell function, so make the program executable and put it on PATH";
 
 /// A parse error, with the line it is on.
 pub type ParseError = Located<ParseFailure>;
@@ -118,6 +124,28 @@ impl ParseError {
     /// from; without one, point at the line's content.
     pub(crate) fn locate(mut self, line: &str) -> Self {
         if self.location.columns.is_none() {
+            if let Some(Focus::Address(address)) =
+                self.location.focus.as_ref().filter(|_| line.contains('\n'))
+            {
+                let base = line.as_ptr() as usize;
+                if let Some(start) = address
+                    .start
+                    .checked_sub(base)
+                    .filter(|&start| start < line.len())
+                {
+                    let prefix = &line[..start];
+                    let offset = prefix.rfind('\n').map_or(0, |index| index + 1);
+                    let end = address.end.saturating_sub(base).min(line.len());
+                    let end = line[start..end]
+                        .find('\n')
+                        .map_or(end, |index| start + index);
+                    self.location.line =
+                        Some(self.line() + prefix.bytes().filter(|&byte| byte == b'\n').count());
+                    self.location.columns = Some(start - offset..end - offset);
+                    self.location.focus = None;
+                    return self;
+                }
+            }
             let token = match self.location.focus.take() {
                 Some(Focus::Address(address)) => columns_at(line, &address),
                 Some(other @ Focus::Imported(_)) => {
@@ -138,14 +166,10 @@ impl ParseError {
 pub(crate) struct Syntax {
     /// Every statement read, up to where parsing stopped.
     pub(crate) statements: Vec<Statement>,
-    /// Each line that does not parse, with how many statements were read
-    /// before it, so that lowering can report errors in the order that
-    /// blanking the lines one at a time would. A line that fails leaves the
-    /// parse as it was, as if the line were blank, and reading goes on; it
-    /// stops at an error after which a blank line would read differently.
-    /// Keep in step with `lower` in `src/lower/mod.rs`, which orders them
-    /// among the statements' own errors, and with `recover_document` in
-    /// `src/diagnostics/recovery.rs`, which blanks the lines they name.
+    /// Each statement that does not parse, with how many statements were
+    /// read before it, so that lowering can report errors in the order of
+    /// their lines. Keep in step with `lower` in `src/lower/mod.rs`, which
+    /// orders them among the statements' own errors.
     pub(crate) errors: Vec<(usize, ParseError)>,
 }
 
@@ -154,23 +178,14 @@ pub(crate) struct Statement {
     /// The statement's line content, for errors about it as a whole.
     pub(crate) place: Place,
     pub(crate) kind: StatementKind,
-    /// Reading the statement's line changed how a later line reads, beyond
-    /// adding the statement: it closed a stage that the later line is
-    /// indented beneath, fixed the indentation of a stage's lines that
-    /// the later line does not share, or ended a body that the later line
-    /// is indented beneath. A blank line would not, so a failing statement
-    /// that did this cannot be passed over as if its line were blank. The
-    /// parser marks it when it reads the later line (`parse_flow` and
-    /// `flow_rest` in `src/parser/flow.rs`), and for the header of an
-    /// operation with a body, which blanking would leave to its steps, when
-    /// it closes or fixes a stage at all.
-    pub(crate) stateful: bool,
 }
 
 #[derive(Clone, Debug)]
 pub(crate) enum StatementKind {
     /// A `use` line; the definitions it brings in are loaded separately.
     Import,
+    /// The pipeline's optional dataset root.
+    Root(std::path::PathBuf),
     /// A `stage name:` header, by the stage's full name.
     Stage {
         name: String,
@@ -194,6 +209,15 @@ pub(crate) enum StatementKind {
     Check(CheckDef, Place),
     /// A `dimensions [...]` line: the pipeline's dimension order.
     Dimensions(Vec<String>),
+    /// A `types` line: how much of the pipeline must be typed.
+    Types(TypeChecking),
+    /// A `default entities` line: how `{@entities}` is spelled, or a
+    /// dimension's label in it, for the products of `stage` or, outside
+    /// every stage, of the whole pipeline.
+    Entities {
+        stage: Option<String>,
+        declaration: EntitiesDeclaration,
+    },
     Path(PathRule),
     /// An `ext:` line: the default extension of `stage`, or, outside every
     /// stage, of the whole pipeline.
@@ -242,9 +266,9 @@ pub(crate) enum Kind {
     Recipe,
 }
 
-/// Parse a pipeline's statements.
-pub(crate) fn parse_syntax(text: &str) -> Syntax {
-    parse_flow(text)
+/// Parse a pipeline's statements, laid out in `layout`.
+pub(crate) fn parse_syntax(layout: &Layout) -> Syntax {
+    parse_flow(layout)
 }
 
 impl StatementKind {
@@ -280,9 +304,15 @@ impl StatementKind {
         ))
     }
 
-    /// A `require` or conditional `exclude` rule, the whole content `line` of `original`.
-    fn constraint(original: &str, line: &str, number: usize) -> Result<Self, ParseError> {
-        let rule = rules::parse_coverage_rule(line, number)?;
+    /// A `require` or conditional `exclude` rule, `rest` being the text
+    /// after its `keyword` in `original`.
+    fn constraint(
+        original: &str,
+        keyword: Keyword,
+        rest: &str,
+        number: usize,
+    ) -> Result<Self, ParseError> {
+        let rule = rules::parse_coverage_rule(keyword, rest, number)?;
         let place = source_map::rule_place(original, number, &rule);
         Ok(Self::Constraint(rule, place))
     }
@@ -322,7 +352,11 @@ impl Syntax {
         self.statements.push(Statement {
             place: Place::new(number, content_columns(original)),
             kind,
-            stateful: false,
         });
+    }
+
+    /// Record `error`, from a statement that did not parse.
+    fn fail(&mut self, error: ParseError) {
+        self.errors.push((self.statements.len(), error));
     }
 }

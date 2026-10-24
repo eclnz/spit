@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::path::PathBuf;
 
-use crate::paths::PathTemplate;
+use crate::paths::{EntitiesFormat, Holder, PathTemplate};
 
 use super::{owned_strings, ContextPattern, EntityBinding, Pipeline, PipelineIndex};
 
@@ -30,6 +30,10 @@ pub struct InputRules {
     /// own, in the pipeline or the recipe. It stays as written;
     /// [`InputRules::source_paths_for`] gives each source its rule.
     pub source_default: Option<PathTemplate>,
+    /// The recipe's `default entities:` spelling, with its labels: how
+    /// `{@entities}` is written in the rules the recipe gives, in place of
+    /// the pipeline's.
+    pub source_entities: Option<EntitiesFormat>,
 }
 
 impl InputRules {
@@ -40,6 +44,7 @@ impl InputRules {
             && self.exclusion_files.is_empty()
             && self.source_paths.is_empty()
             && self.source_default.is_none()
+            && self.source_entities.is_none()
     }
 
     /// Sources with no rule in the pipeline or recipe, except those whose
@@ -62,13 +67,42 @@ impl InputRules {
             .collect()
     }
 
-    /// The source paths the recipe names. A source written beside another
-    /// takes that source's rule instead of having one of its own.
+    /// The source paths the recipe names, with `{@entities}` written out
+    /// as the recipe spells it, if it does.
     pub fn named_source_paths(
         &self,
-        _pipeline: &Pipeline,
+        pipeline: &Pipeline,
     ) -> Cow<'_, BTreeMap<String, PathTemplate>> {
-        Cow::Borrowed(&self.source_paths)
+        if self.source_entities.is_none() {
+            return Cow::Borrowed(&self.source_paths);
+        }
+        Cow::Owned(
+            self.source_paths
+                .iter()
+                .map(|(name, template)| (name.clone(), self.spelled(pipeline, name, template)))
+                .collect(),
+        )
+    }
+
+    /// `template`, a rule the recipe gives `source`, with `{@entities}`
+    /// written out as the recipe spells it. Without a spelling of its own,
+    /// the recipe's rules take the pipeline's.
+    fn spelled(&self, pipeline: &Pipeline, source: &str, template: &PathTemplate) -> PathTemplate {
+        let Some(format) = &self.source_entities else {
+            return template.clone();
+        };
+        let dimensions = pipeline
+            .products
+            .iter()
+            .find(|product| product.name == source)
+            .map_or(&[][..], |product| product.dimensions.as_slice());
+        template
+            .resolve(Holder {
+                dimensions,
+                entities_format: Some(format),
+                in_stage: false,
+            })
+            .into_owned()
     }
 
     /// The recipe's named paths, plus its default for sources that need one.
@@ -84,7 +118,7 @@ impl InputRules {
         };
         let mut paths = named.into_owned();
         for name in defaulted {
-            paths.insert(name.to_owned(), default.clone());
+            paths.insert(name.to_owned(), self.spelled(pipeline, name, default));
         }
         Cow::Owned(paths)
     }

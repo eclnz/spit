@@ -7,79 +7,50 @@ use std::path::PathBuf;
 use crate::model::{EntityBinding, Removal, SourceInventory, SourceRecord};
 use crate::paths::PathTemplate;
 
-use super::keyword::{Header, Keyword};
-use super::lexical::{comma_items, identifier, qualified_identifier, strip_comment};
+use super::keyword::Header;
+use super::layout::{Head, Layout, Line};
+use super::lexical::{comma_items, identifier, qualified_identifier};
 use super::ParseError;
-
-/// A document's text split in two: the rest, and any records
-/// under `sources:` or `contexts:` headers. Each keeps the document's line
-/// numbers, with blank lines where the other's lines were.
-pub(crate) struct DocumentText {
-    pub(crate) pipeline: String,
-    pub(crate) inventory: String,
-    /// The line of the first `sources:` or `contexts:` header.
-    pub(crate) inventory_line: Option<usize>,
-}
-
-pub(crate) fn split_document(text: &str) -> DocumentText {
-    let mut pipeline_text = String::new();
-    let mut inventory_text = String::new();
-    let mut inventory_section = false;
-    let mut inventory_line = None;
-
-    for (index, original) in text.lines().enumerate() {
-        let line = strip_comment(original).trim();
-        // Records run from a `sources:` or `contexts:` header to the next
-        // header, statement or step.
-        match Header::of(line) {
-            Some(_) => {
-                inventory_section = true;
-                inventory_line.get_or_insert(index + 1);
-            }
-            None if Keyword::of(line).is_some() || is_step(line) => inventory_section = false,
-            None => {}
-        }
-        // Each line goes to one side and a blank line to the other, so both
-        // texts keep the document's line numbers.
-        let target = if inventory_section {
-            &mut inventory_text
-        } else {
-            &mut pipeline_text
-        };
-        target.push_str(original);
-        pipeline_text.push('\n');
-        inventory_text.push('\n');
-    }
-    DocumentText {
-        pipeline: pipeline_text,
-        inventory: inventory_text,
-        inventory_line,
-    }
-}
-
-/// Whether `line` reads as a step, `output = operation(inputs)`, rather
-/// than a record such as `image[subject=A]` or a context `[subject=A]`.
-fn is_step(line: &str) -> bool {
-    let record = line.starts_with('[')
-        || line.find('[').is_some_and(|bracket| {
-            qualified_identifier(line[..bracket].trim(), 0, "product").is_ok()
-        });
-    !record
-        && line
-            .find('(')
-            .is_some_and(|paren| line[..paren].contains('='))
-}
 
 /// Parse an inventory supplied by a dataset indexer or written as a fixture.
 /// Records are logical identities, each optionally followed by `: path`, the
 /// file relative to the dataset root. They never hold artifact types.
 pub fn parse_source_inventory(text: &str) -> Result<SourceInventory, ParseError> {
-    parse_inventory_with_lines(text).map(|(inventory, _)| inventory)
+    match parse_inventory_recovering(text) {
+        (inventory, errors) if errors.is_empty() => Ok(inventory),
+        (_, errors) => Err(errors
+            .into_iter()
+            .next()
+            .expect("an inventory that fails has an error")),
+    }
 }
 
-fn parse_inventory_with_lines(
-    text: &str,
-) -> Result<(SourceInventory, Vec<(usize, SourceRecord)>), ParseError> {
+/// As [`parse_source_inventory`], in one parse: the records of the lines
+/// that read, and an error for each line that does not.
+pub(crate) fn parse_inventory_recovering(text: &str) -> (SourceInventory, Vec<ParseError>) {
+    let layout = Layout::new(super::without_bom(text));
+    let parsed = read_inventory(layout.numbered());
+    (parsed.inventory, parsed.errors)
+}
+
+/// The records of a document laid out in `layout`, read as
+/// [`parse_inventory_recovering`] reads an inventory's lines.
+pub(crate) fn document_records(layout: &Layout) -> (SourceInventory, Vec<ParseError>) {
+    let parsed = read_inventory(layout.numbered().filter(|(_, line)| line.record));
+    (parsed.inventory, parsed.errors)
+}
+
+/// An inventory as read: its records, each with its line, and an error for
+/// each line that does not read.
+struct ParsedInventory {
+    inventory: SourceInventory,
+    record_lines: Vec<(usize, SourceRecord)>,
+    errors: Vec<ParseError>,
+}
+
+fn read_inventory<'a, 't: 'a>(
+    lines: impl Iterator<Item = (usize, &'a Line<'t>)>,
+) -> ParsedInventory {
     enum InventorySection {
         Sources,
         SourcePaths,
@@ -87,155 +58,172 @@ fn parse_inventory_with_lines(
         Removed,
     }
 
-    let text = super::without_bom(text);
     let mut inventory = SourceInventory::default();
     let mut record_lines = Vec::new();
     let mut section = None;
     let mut parent: Option<(EntityBinding, usize)> = None;
     let mut group: Option<(Vec<EntityBinding>, usize)> = None;
-    for (index, original) in text.lines().enumerate() {
-        let number = index + 1;
-        let line = strip_comment(original).trim();
-        let indent = original.len() - original.trim_start().len();
-        if line.is_empty() {
+    let mut errors = Vec::new();
+    for (number, read) in lines {
+        let Line {
+            text: original,
+            indent,
+            code: line,
+            head,
+            ..
+        } = *read;
+        if head == Head::Blank {
             continue;
         }
-        if let Some(folder) = line.strip_prefix("root ") {
-            if section.is_some() {
-                return Err(ParseError::new(
-                    number,
-                    "`root` comes before every section of a .spitout",
-                )
-                .locate(original));
-            }
-            if inventory.root.is_some() {
-                return Err(
-                    ParseError::new(number, "a .spitout names its root once").locate(original)
-                );
-            }
-            inventory.root = Some(PathBuf::from(folder.trim()));
-            continue;
-        }
-        match Header::of(line) {
-            Some(Header::Sources) => {
-                section = Some(InventorySection::Sources);
-                parent = None;
-                group = None;
-            }
-            Some(Header::SourcePaths) => {
-                section = Some(InventorySection::SourcePaths);
-                parent = None;
-                group = None;
-            }
-            Some(Header::Contexts(None)) => {
-                section = Some(InventorySection::Contexts);
-                parent = None;
-                group = None;
-            }
-            Some(Header::Removed) => {
-                section = Some(InventorySection::Removed);
-                parent = None;
-                group = None;
-            }
-            Some(Header::Contexts(Some(name))) => {
-                return Err(ParseError::new(
-                    number,
-                    format!("named context section `{name}` is replaced by `contexts:`"),
-                )
-                .locate(original));
-            }
-            _ => match section {
-                Some(InventorySection::Sources) => {
-                    if line.contains(['[', ']', '=']) {
-                        let record = parse_source(line, number).map_err(|e| e.locate(original))?;
-                        record_lines.push((number, record.clone()));
-                        inventory.artifacts.push(record);
-                    } else {
-                        let records = parse_product_list(line, number, &EntityBinding::default())
-                            .map_err(|e| e.locate(original))?;
-                        record_lines.extend(records.iter().cloned().map(|record| (number, record)));
-                        inventory.artifacts.extend(records);
-                    }
+        // A line that fails changes nothing, and the lines after it are
+        // read as they would be without it.
+        let read = (|| -> Result<(), ParseError> {
+            if let Some(folder) = line.strip_prefix("root ") {
+                if section.is_some() {
+                    return Err(ParseError::new(
+                        number,
+                        "`root` comes before every section of a .spitout",
+                    )
+                    .locate(original));
                 }
-                Some(InventorySection::Removed) => {
-                    parse_removed_line(original, number, &mut inventory.removed)
-                        .map_err(|e| e.locate(original))?;
+                if inventory.root.is_some() {
+                    return Err(
+                        ParseError::new(number, "a .spitout names its root once").locate(original)
+                    );
                 }
-                Some(InventorySection::SourcePaths) => {
-                    let (name, template) = line.split_once(':').ok_or_else(|| {
-                        ParseError::new(number, "expected source path: product: template")
-                            .locate(original)
-                    })?;
-                    let name = qualified_identifier(name.trim(), number, "source product")
-                        .map_err(|e| e.locate(original))?;
-                    let template = PathTemplate::parse(template.trim())
-                        .map_err(|e| ParseError::new(number, e.to_string()).locate(original))?;
-                    if inventory
-                        .source_paths
-                        .insert(name.to_owned(), template)
-                        .is_some()
-                    {
-                        return Err(ParseError::new(
-                            number,
-                            format!("duplicate source path rule for `{name}`"),
-                        )
-                        .locate(original));
-                    }
+                inventory.root = Some(PathBuf::from(folder.trim()));
+                return Ok(());
+            }
+            match read.header() {
+                Some(Header::Sources) => {
+                    section = Some(InventorySection::Sources);
+                    parent = None;
+                    group = None;
                 }
-                Some(InventorySection::Contexts) => {
-                    let nests_under = parent
-                        .as_ref()
-                        .filter(|(_, at)| line.starts_with('[') && indent > *at);
-                    if let Some((context, _)) = nests_under {
-                        let values =
-                            parse_group(line, number, context).map_err(|e| e.locate(original))?;
-                        group = Some((values, indent));
-                    } else if line.starts_with('[') {
-                        let context = parse_context(line.trim_end_matches(':'), number)
-                            .map_err(|e| e.locate(original))?;
-                        inventory.contexts.push(context.clone());
-                        parent = line.ends_with(':').then_some((context, indent));
-                        group = None;
-                    } else {
-                        let (context, at) = parent.as_ref().ok_or_else(|| {
-                            ParseError::new(number, "source list needs a parent context")
-                                .locate(original)
-                        })?;
-                        if indent <= *at {
-                            return Err(ParseError::new(
-                                number,
-                                "source list must be indented under its context",
-                            )
-                            .locate(original));
-                        }
-                        let bases = group
-                            .as_ref()
-                            .filter(|(_, group_indent)| indent > *group_indent)
-                            .map_or_else(|| vec![context.clone()], |(values, _)| values.clone());
-                        for base in bases {
-                            let records = parse_product_list(line, number, &base)
-                                .map_err(|e| e.locate(original))?;
+                Some(Header::SourcePaths) => {
+                    section = Some(InventorySection::SourcePaths);
+                    parent = None;
+                    group = None;
+                }
+                Some(Header::Contexts(None)) => {
+                    section = Some(InventorySection::Contexts);
+                    parent = None;
+                    group = None;
+                }
+                Some(Header::Removed) => {
+                    section = Some(InventorySection::Removed);
+                    parent = None;
+                    group = None;
+                }
+                Some(Header::Contexts(Some(name))) => {
+                    return Err(ParseError::new(
+                        number,
+                        format!("named context section `{name}` is replaced by `contexts:`"),
+                    )
+                    .locate(original));
+                }
+                _ => match section {
+                    Some(InventorySection::Sources) => {
+                        if line.contains(['[', ']', '=']) {
+                            let record =
+                                parse_source(line, number).map_err(|e| e.locate(original))?;
+                            record_lines.push((number, record.clone()));
+                            inventory.artifacts.push(record);
+                        } else {
+                            let records =
+                                parse_product_list(line, number, &EntityBinding::default())
+                                    .map_err(|e| e.locate(original))?;
                             record_lines
                                 .extend(records.iter().cloned().map(|record| (number, record)));
                             inventory.artifacts.extend(records);
                         }
                     }
-                }
-                None => {
-                    return Err(ParseError::new(
+                    Some(InventorySection::Removed) => {
+                        parse_removed_line(read, number, &mut inventory.removed)
+                            .map_err(|e| e.locate(original))?;
+                    }
+                    Some(InventorySection::SourcePaths) => {
+                        let (name, template) = line.split_once(':').ok_or_else(|| {
+                            ParseError::new(number, "expected source path: product: template")
+                                .locate(original)
+                        })?;
+                        let name = qualified_identifier(name.trim(), number, "source product")
+                            .map_err(|e| e.locate(original))?;
+                        let template = PathTemplate::parse(template.trim())
+                            .map_err(|e| ParseError::new(number, e.to_string()).locate(original))?;
+                        if inventory.source_paths.contains_key(name) {
+                            return Err(ParseError::new(
+                                number,
+                                format!("duplicate source path rule for `{name}`"),
+                            )
+                            .locate(original));
+                        }
+                        inventory.source_paths.insert(name.to_owned(), template);
+                    }
+                    Some(InventorySection::Contexts) => {
+                        let nests_under = parent
+                            .as_ref()
+                            .filter(|(_, at)| line.starts_with('[') && indent > *at);
+                        if let Some((context, _)) = nests_under {
+                            let values = parse_group(line, number, context)
+                                .map_err(|e| e.locate(original))?;
+                            group = Some((values, indent));
+                        } else if line.starts_with('[') {
+                            let context = parse_context(line.trim_end_matches(':'), number)
+                                .map_err(|e| e.locate(original))?;
+                            inventory.contexts.push(context.clone());
+                            parent = line.ends_with(':').then_some((context, indent));
+                            group = None;
+                        } else {
+                            let (context, at) = parent.as_ref().ok_or_else(|| {
+                                ParseError::new(number, "source list needs a parent context")
+                                    .locate(original)
+                            })?;
+                            if indent <= *at {
+                                return Err(ParseError::new(
+                                    number,
+                                    "source list must be indented under its context",
+                                )
+                                .locate(original));
+                            }
+                            let bases = group
+                                .as_ref()
+                                .filter(|(_, group_indent)| indent > *group_indent)
+                                .map_or_else(
+                                    || vec![context.clone()],
+                                    |(values, _)| values.clone(),
+                                );
+                            for base in bases {
+                                let records = parse_product_list(line, number, &base)
+                                    .map_err(|e| e.locate(original))?;
+                                record_lines
+                                    .extend(records.iter().cloned().map(|record| (number, record)));
+                                inventory.artifacts.extend(records);
+                            }
+                        }
+                    }
+                    None => return Err(ParseError::new(
                         number,
                         "expected inventory section header: sources:, contexts:, or contexts name:",
                     )
-                    .locate(original))
-                }
-            },
+                    .locate(original)),
+                },
+            }
+            Ok(())
+        })();
+        if let Err(error) = read {
+            errors.push(error);
         }
     }
     // Keep in step with `as_read_back`, which must normalize a settled
     // inventory as reading its text does here.
     inventory.contexts.sort();
     inventory.contexts.dedup();
-    Ok((inventory, record_lines))
+    ParsedInventory {
+        inventory,
+        record_lines,
+        errors,
+    }
 }
 
 /// Read one line of a `removed:` section into `removed`: what was removed,
@@ -243,11 +231,11 @@ fn parse_inventory_with_lines(
 /// `rule:`, `at:` and `reason:` lines. Values are read from the whole line,
 /// so a `#` in a reason is kept.
 fn parse_removed_line(
-    original: &str,
+    read: &Line,
     number: usize,
     removed: &mut Vec<Removal>,
 ) -> Result<(), ParseError> {
-    let line = original.trim();
+    let line = read.text.trim();
     if let Some((key, value)) = line
         .split_once(':')
         .filter(|(key, _)| matches!(*key, "rule" | "at" | "reason" | "found"))
@@ -272,7 +260,7 @@ fn parse_removed_line(
         }
         return Ok(());
     }
-    let line = strip_comment(original).trim();
+    let line = read.code;
     let (product, entities) = if line.starts_with('[') {
         (None, parse_context(line, number)?)
     } else {
@@ -381,8 +369,13 @@ fn parse_group(
 /// Locate valid source records in an inventory without parsing each line as
 /// a separate document. Used only to place diagnostics after a failed check.
 pub(crate) fn source_record_lines(text: &str) -> Vec<(usize, SourceRecord)> {
-    let inventory_text = split_document(text).inventory;
-    parse_inventory_with_lines(&inventory_text).map_or_else(|_| Vec::new(), |(_, lines)| lines)
+    let layout = Layout::new(text);
+    let parsed = read_inventory(layout.numbered().filter(|(_, line)| line.record));
+    if parsed.errors.is_empty() {
+        parsed.record_lines
+    } else {
+        Vec::new()
+    }
 }
 
 fn parse_context(line: &str, number: usize) -> Result<EntityBinding, ParseError> {

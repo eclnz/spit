@@ -3,20 +3,22 @@
 
 mod bind;
 mod components;
+mod entities;
 mod product;
 mod rules;
 mod shape;
 mod template;
 
-pub(crate) use self::bind::{bound_paths, case_collisions, check_rules, dashed_labels};
+pub(crate) use self::bind::{bound_paths, case_collisions, check_rules};
 pub use self::bind::{
     validate_bound_source_files, validate_source_files, BoundPaths, VerifiedFiles,
 };
 pub(crate) use self::components::{decode_component, encode_component, validate_context_pattern};
-pub(crate) use self::product::{shown_path, stage_directories, PathBinder};
+pub use self::entities::EntitiesFormat;
+pub(crate) use self::product::{shown_path, stage_directories, unspelled_entities, PathBinder};
 pub(crate) use self::rules::collect_paths;
 pub use self::rules::{inspect_paths, PathCoverage, PathCoverageEntry, PathRule};
-pub(crate) use self::shape::{is_date, is_year, Shape};
+pub(crate) use self::shape::Shape;
 pub(crate) use self::template::{
     error, product_text, require_directory, Holder, PathPart, PathPlaceholder,
 };

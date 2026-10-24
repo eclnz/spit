@@ -16,7 +16,7 @@ source meta .json beside raw
 operation load(image: Image, gps: Track, meta) -> Image
 command load: load {image} {gps} {meta} {@output}
 loaded = load(raw, gps, meta)
-";
+default entities: {@key}={@value} separated \"__\"\npath loaded: out/{@product}/{@entities}\n";
 
 const UNPLACED: &str = "\
 source raw : Image .raw [site, shot]
@@ -25,7 +25,7 @@ source meta .json beside raw
 operation load(image: Image, gps: Track, meta) -> Image
 command load: load {image} {gps} {meta} {@output}
 loaded = load(raw, gps, meta)
-";
+default entities: {@key}={@value} separated \"__\"\npath loaded: out/{@product}/{@entities}\n";
 
 const FILES: [&str; 6] = [
     "site-a/shot-1.raw",
@@ -346,7 +346,7 @@ fn records_count_what_an_earlier_run_removed() {
 /// `PHOTOS` with a step that reads the image alone, beside the one that
 /// reads every member.
 const TWO_STEPS: &str = "\
-path: out/{@product}/site-{site}_shot-{shot}
+default path: out/{@product}/site-{site}_shot-{shot}
 source raw : Image .raw [site, shot]
 path raw: site-{site}/shot-{shot}.raw
 source gps : Track .gpx beside raw

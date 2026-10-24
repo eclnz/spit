@@ -6,7 +6,7 @@ use crate::model::{
     stage_within, ArtifactReport, CommandRole, PipelineIndex, ResolvedDag, SourceInventory,
 };
 use crate::parser::{SourceMap, Step};
-use crate::paths::{case_collisions, dashed_labels};
+use crate::paths::case_collisions;
 use crate::span::Place;
 use crate::{InputBinding, Pipeline, ResolveError};
 
@@ -58,27 +58,6 @@ pub(super) fn case_warnings(
                 format!(
                     "`{}[{}]` and `{}[{}]` have paths `{first_path}` and `{second_path}`, which differ only in case, so they are one file where case is ignored, as on macOS and Windows",
                     first.0, first.1, second.0, second.1
-                ),
-            )
-        })
-        .collect()
-}
-
-/// Flag values with a `-` that `{@labels}` writes, as `sub-01-a`, which
-/// BIDS reads as a new entity.
-pub(super) fn label_warnings(
-    pipeline: &Pipeline,
-    lines: &SourceMap,
-    dag: &ResolvedDag,
-) -> Vec<Diagnostic> {
-    let index = PipelineIndex::new(pipeline);
-    dashed_labels(pipeline, dag)
-        .into_iter()
-        .map(|(product, dimension, value)| {
-            warning(
-                lines.path_rule(&index, &product),
-                format!(
-                    "`{{@labels}}` writes `{dimension}-{value}` in the path of `{product}`; BIDS reads each `-` as the end of a key, so it cannot read `{value}` back"
                 ),
             )
         })
