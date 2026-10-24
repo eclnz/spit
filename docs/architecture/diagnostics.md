@@ -37,7 +37,7 @@ flowchart LR
 - **The command line and the editor read the same list.** `spit check` prints it and fails on an error. `spit check --json` gives it to the editor with each `severity`, and the editor shows it as given.
 - **The list is ordered and thinned** (`order`):
     - by source, then file, then line;
-    - a second error on a line is dropped when it has the same span as one kept there, or when either covers the whole line, since that is one fault said twice, such as a shared path rule failing for each product that uses it. An error elsewhere on the line is kept;
+    - a second error on a line is dropped when it has the same message and span as one kept there, or when either covers the whole line, since that is one fault said twice, such as a shared path rule failing for each product that uses it. An error with another message, or elsewhere on the line, is kept;
     - a warning on a line that has an error is dropped.
 
     Errors that follow from another are left out by the checks that make them (see [resolution](resolution.md#failure)), not here.
