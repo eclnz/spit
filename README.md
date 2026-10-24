@@ -8,6 +8,8 @@ SPIT turns a reusable pipeline and a dataset's inputs into concrete jobs. It che
 
 Requires the [stable Rust toolchain](https://www.rust-lang.org/tools/install). From this repository:
 
+<!-- spit-doc: run -->
+
 ```sh
 cargo run -- check examples/commands/command_demo/command_demo.spit
 cargo run -- dag examples/commands/command_demo/command_demo.spit --counts --commands
