@@ -6,7 +6,10 @@ A `.spit` pipeline declares sources, operations, commands, and steps. Declaratio
 
 ## Operations
 
-<!-- spit-doc: fragment -->
+<!-- spit-doc: setup
+default entities: {@key}={@value} separated "_"
+default path: out/{@product}/{@entities}
+-->
 
 ```spit
 source image : Image .nii.gz [sub]
@@ -18,7 +21,11 @@ denoised = denoise(image)
 
 An input port is `name` or `name: Type`; add `many` for a collection. An output can be unnamed, as above, or named. Calls follow input port order. A named output is assigned to its corresponding product and used in a command by its port name:
 
-<!-- spit-doc: fragment -->
+<!-- spit-doc: setup
+source series : Series [sub]
+default entities: {@key}={@value} separated "_"
+default path: out/{@product}/{@entities}
+-->
 
 ```spit
 operation split(series: Series) -> (low: Series .csv, high: Series .csv)
@@ -32,7 +39,14 @@ Every non-`beside` output must be used in its command. The command is an executa
 
 Use `verify` for a job-specific input test, before its main command:
 
-<!-- spit-doc: fragment -->
+<!-- spit-doc: setup
+source image : Image [sub]
+operation denoise(input: Image) -> Image
+command denoise: denoise_tool {input} --out {@output}
+denoised = denoise(image)
+default entities: {@key}={@value} separated "_"
+default path: out/{@product}/{@entities}
+-->
 
 ```spit
 verify denoise: inspect_image {input}
@@ -53,7 +67,11 @@ For checks shared by every output in a file or stage, write `default check: none
 
 An operation can have an indented body in place of a `command`. Its outputs are named because the body assigns each one:
 
-<!-- spit-doc: fragment -->
+<!-- spit-doc: setup
+source raw : Lines [sub]
+default entities: {@key}={@value} separated "_"
+default path: out/{@product}/{@entities}
+-->
 
 ```spit
 operation clean(input: Lines) -> Lines
@@ -70,7 +88,13 @@ The call expands to the body's steps, and a body may call another operation with
 
 ## Stages
 
-<!-- spit-doc: fragment -->
+<!-- spit-doc: setup
+source image : Image [sub]
+operation denoise(input: Image) -> Image
+command denoise: denoise_tool {input} --out {@output}
+operation summarise(items: many Image) -> Image
+command summarise: summarise_tool {items} --out {@output}
+-->
 
 ```spit
 default entities: {@key}={@value} separated "__"
@@ -79,7 +103,7 @@ stage preprocess:
     denoised = denoise(image)
 
 stage analysis:
-    default path: results/{@product}/{@entities}
+    default path: results/{@product}
     summary = summarise(denoised @vary(sub))
 ```
 
@@ -87,7 +111,11 @@ A stage groups steps and can give their products a path and extension default. S
 
 ## Imports
 
-<!-- spit-doc: fragment -->
+<!-- spit-doc: setup
+default entities: {@key}={@value} separated "_"
+default path: out/{@product}/{@entities}
+--- text.spit = examples/imports/text.spit
+-->
 
 ```spit
 use text.spit as text

@@ -1,7 +1,19 @@
-//! The `spit` code blocks in the user pages check: each is a pipeline that
-//! `spit check` accepts, or is marked as not meant to run alone. A marker is
-//! a comment on the line before the block, `<!-- spit-doc: fragment -->`, which
-//! no page shows.
+//! The `spit` code blocks in the user pages check. A block is a pipeline that
+//! `spit check` accepts, unless a comment before it says otherwise. The
+//! comment is hidden from readers, and starts `<!-- spit-doc: KIND`:
+//!
+//! - `fragment`, alone on its line: the block is not a whole file, and is not
+//!   checked. It must not check on its own, or the marker is stale.
+//! - `setup`: the lines of the comment are put before the block, and the
+//!   whole is checked as a pipeline. The block must not check on its own.
+//! - `recipe`: the same, but the whole is checked as a `.spitin` recipe.
+//! - `files`: the block holds several files, each opened by a `# name.spit` or
+//!   `# name.spitin` line, and each is checked.
+//!
+//! In a `setup` or `recipe` comment, a line `--- name` opens a file written
+//! beside the block, which the lines after it hold, such as the pipeline a
+//! recipe names; `--- name = path` copies the repository's file `path`. The
+//! lines before the first `---` go before the block.
 
 mod support;
 
@@ -11,7 +23,7 @@ use std::process::Command;
 
 use support::Tree;
 
-const MARKER: &str = "<!-- spit-doc: fragment -->";
+const OPEN: &str = "<!-- spit-doc:";
 
 /// The pages written for people writing pipelines.
 fn user_pages() -> Vec<String> {
@@ -31,9 +43,73 @@ fn user_pages() -> Vec<String> {
     pages
 }
 
-/// Each ```` ```spit ```` block of `text` with its line, its text, and
-/// whether a marker comment precedes it.
-fn spit_blocks(text: &str) -> Vec<(usize, String, bool)> {
+#[derive(Debug, PartialEq)]
+enum Kind {
+    Fragment,
+    Setup,
+    Recipe,
+    Files,
+}
+
+/// The comment before a block.
+struct Marker {
+    kind: Kind,
+    /// Lines before the first `---`, which go before the block.
+    head: String,
+    /// The files beside the block: a name, and its text or the path to copy.
+    files: Vec<(String, Source)>,
+}
+
+enum Source {
+    Text(String),
+    Copy(String),
+}
+
+struct Block {
+    line: usize,
+    text: String,
+    marker: Option<Marker>,
+}
+
+fn parse_marker(comment: &[&str]) -> Marker {
+    let first = comment[0].trim_start().trim_start_matches(OPEN).trim();
+    let word = first.trim_end_matches("-->").trim();
+    let kind = match word {
+        "fragment" => Kind::Fragment,
+        "setup" => Kind::Setup,
+        "recipe" => Kind::Recipe,
+        "files" => Kind::Files,
+        other => panic!("unknown spit-doc kind `{other}`"),
+    };
+    // A comment of several lines ends with a line that closes it.
+    let body = if comment.len() > 1 {
+        &comment[1..comment.len() - 1]
+    } else {
+        &[]
+    };
+    let mut head = String::new();
+    let mut files: Vec<(String, Source)> = Vec::new();
+    for line in body {
+        if let Some(spec) = line.strip_prefix("--- ") {
+            files.push(match spec.split_once(" = ") {
+                Some((name, path)) => {
+                    (name.trim().to_owned(), Source::Copy(path.trim().to_owned()))
+                }
+                None => (spec.trim().to_owned(), Source::Text(String::new())),
+            });
+        } else if let Some((_, Source::Text(text))) = files.last_mut() {
+            *text += line;
+            text.push('\n');
+        } else {
+            head += line;
+            head.push('\n');
+        }
+    }
+    Marker { kind, head, files }
+}
+
+/// Each ```` ```spit ```` block of `text`, with the marker comment before it.
+fn spit_blocks(text: &str) -> Vec<Block> {
     let lines: Vec<_> = text.lines().collect();
     let mut blocks = Vec::new();
     let mut index = 0;
@@ -49,12 +125,11 @@ fn spit_blocks(text: &str) -> Vec<(usize, String, bool)> {
                 index += 1;
             }
             if language == "spit" {
-                let marked = lines[..opening]
-                    .iter()
-                    .rev()
-                    .find(|line| !line.trim().is_empty())
-                    .is_some_and(|line| line.trim() == MARKER);
-                blocks.push((opening + 1, body, marked));
+                blocks.push(Block {
+                    line: opening + 1,
+                    text: body,
+                    marker: marker_before(&lines, opening),
+                });
             }
         }
         index += 1;
@@ -62,11 +137,30 @@ fn spit_blocks(text: &str) -> Vec<(usize, String, bool)> {
     blocks
 }
 
-fn checks(tree: &Tree, body: &str) -> Result<(), String> {
-    let file = tree.write("block.spit", body);
+/// The `<!-- spit-doc: ... -->` comment that ends on the last non-blank line
+/// before `opening`, if there is one.
+fn marker_before(lines: &[&str], opening: usize) -> Option<Marker> {
+    let end = (0..opening).rev().find(|&i| !lines[i].trim().is_empty())?;
+    if !lines[end].trim_end().ends_with("-->") {
+        return None;
+    }
+    let start = (0..=end)
+        .rev()
+        .find(|&i| lines[i].trim_start().starts_with(OPEN))?;
+    if lines[start..=end]
+        .iter()
+        .skip(1)
+        .any(|line| line.contains("<!--"))
+    {
+        return None;
+    }
+    Some(parse_marker(&lines[start..=end]))
+}
+
+fn checks(tree: &Tree, file: &Path) -> Result<(), String> {
     let output = Command::new(env!("CARGO_BIN_EXE_spit"))
         .arg("check")
-        .arg(&file)
+        .arg(tree.path().join(file))
         .output()
         .unwrap();
     if output.status.success() {
@@ -76,23 +170,86 @@ fn checks(tree: &Tree, body: &str) -> Result<(), String> {
     }
 }
 
-#[test]
-fn every_spit_block_in_the_user_pages_checks_or_is_marked_as_a_fragment() {
+fn write_files(tree: &Tree, marker: &Marker) {
+    for (name, source) in &marker.files {
+        match source {
+            Source::Text(text) => tree.write(name, text),
+            Source::Copy(path) => tree.write(name, &fs::read_to_string(path).unwrap()),
+        };
+    }
+}
+
+/// Why `block` fails its check, if it does.
+fn verdict(page: &str, block: &Block) -> Option<String> {
+    let at = format!("{page}:{}", block.line);
     let tree = Tree::new("docs-examples", &[]);
+    let alone = |text: &str| {
+        tree.write("block.spit", text);
+        checks(&tree, Path::new("block.spit"))
+    };
+    let Some(marker) = &block.marker else {
+        return alone(&block.text).err().map(|error| {
+            format!("{at}: does not check; fix it, or mark it with `{OPEN} fragment -->`\n{error}")
+        });
+    };
+    match marker.kind {
+        Kind::Fragment => alone(&block.text)
+            .is_ok()
+            .then(|| format!("{at}: is marked as a fragment but checks alone; remove the marker")),
+        Kind::Setup | Kind::Recipe => {
+            if marker.kind == Kind::Setup && alone(&block.text).is_ok() {
+                return Some(format!("{at}: checks alone; remove its setup"));
+            }
+            write_files(&tree, marker);
+            let name = if marker.kind == Kind::Setup {
+                "whole.spit"
+            } else {
+                "whole.spitin"
+            };
+            tree.write(name, &format!("{}{}", marker.head, block.text));
+            checks(&tree, Path::new(name))
+                .err()
+                .map(|error| format!("{at}: does not check with its setup\n{error}"))
+        }
+        Kind::Files => {
+            let mut files: Vec<(String, String)> = Vec::new();
+            for line in block.text.lines() {
+                let name = line
+                    .strip_prefix("# ")
+                    .filter(|name| name.ends_with(".spit") || name.ends_with(".spitin"));
+                match (name, files.last_mut()) {
+                    (Some(name), _) => files.push((name.to_owned(), String::new())),
+                    (None, Some((_, text))) => {
+                        *text += line;
+                        text.push('\n');
+                    }
+                    (None, None) => {}
+                }
+            }
+            if files.is_empty() {
+                return Some(format!(
+                    "{at}: marked `files` but holds no `# name.spit` line"
+                ));
+            }
+            for (name, text) in &files {
+                tree.write(name, text);
+            }
+            files.iter().find_map(|(name, _)| {
+                checks(&tree, Path::new(name))
+                    .err()
+                    .map(|error| format!("{at}: `{name}` does not check\n{error}"))
+            })
+        }
+    }
+}
+
+#[test]
+fn every_spit_block_in_the_user_pages_checks_or_says_why_it_does_not() {
     let mut problems = Vec::new();
     for page in user_pages() {
-        assert!(Path::new(&page).exists(), "{page}");
         let text = fs::read_to_string(&page).unwrap();
-        for (line, body, marked) in spit_blocks(&text) {
-            match (checks(&tree, &body), marked) {
-                (Err(error), false) => problems.push(format!(
-                    "{page}:{line}: does not check; fix it, or mark it with `{MARKER}`\n{error}"
-                )),
-                (Ok(()), true) => problems.push(format!(
-                    "{page}:{line}: is marked as a fragment but checks alone; remove the marker"
-                )),
-                _ => {}
-            }
+        for block in spit_blocks(&text) {
+            problems.extend(verdict(&page, &block));
         }
     }
     assert!(problems.is_empty(), "\n{}", problems.join("\n"));
