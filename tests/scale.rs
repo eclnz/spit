@@ -30,6 +30,37 @@ fn a_long_chain_of_steps_compiles_without_overflowing_the_stack() {
     assert!(start.elapsed() < Duration::from_secs(30));
 }
 
+/// `depth` operations, each calling the one before, and one call to the last.
+fn nested_calls(depth: usize) -> String {
+    let mut text = String::from(
+        "source raw : T [sub]\noperation step(input: T) -> T\noperation body0(x: T) -> (o: T):\n    o = step(x)\n",
+    );
+    for index in 1..depth {
+        text += &format!(
+            "operation body{index}(x: T) -> (o: T):\n    o = body{}(x)\n",
+            index - 1
+        );
+    }
+    text += &format!("out = body{}(raw)\n", depth - 1);
+    text
+}
+
+#[test]
+#[ignore = "slow in a debug build; run with --release"]
+fn calls_nested_ten_thousand_bodies_deep_lower_without_overflowing_the_stack() {
+    // A small stack, so that expansion recursing once per body overflows it.
+    let lowered = std::thread::Builder::new()
+        .stack_size(512 * 1024)
+        .spawn(|| {
+            let start = Instant::now();
+            let pipeline = parse_pipeline(&nested_calls(10_000)).unwrap();
+            validate_pipeline(&pipeline).unwrap();
+            assert!(start.elapsed() < Duration::from_secs(30));
+        })
+        .unwrap();
+    lowered.join().unwrap();
+}
+
 #[test]
 #[ignore = "slow in a debug build; run with --release"]
 fn many_sources_resolve_in_reasonable_time() {
