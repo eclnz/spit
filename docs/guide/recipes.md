@@ -2,6 +2,8 @@
 
 A `.spitin` recipe binds a reusable pipeline to a dataset. It names the pipeline and the root folder containing source data:
 
+<!-- spit-doc: fragment -->
+
 ```spit
 pipeline analysis.spit
 root data
@@ -10,6 +12,8 @@ root data
 Both paths are relative to the recipe's own folder. If the pipeline already declares a root, leave the recipe's out to inherit it; declaring a root in both is an error. Run `spit inputs dataset.spitin` to see the settled inputs, or `spit dag dataset.spitin` to resolve jobs directly. When the pipeline already gives every source a path and no dataset rules are needed, put `root data` in the pipeline and run `spit dag analysis.spit` without a recipe. A pipeline without a root can instead take `--root data`, relative to the working folder. All selection rules, including simple literal exclusions, require a recipe.
 
 ## Source paths
+
+<!-- spit-doc: fragment -->
 
 ```spit
 inputs:
@@ -21,6 +25,8 @@ A recipe's `image:` entry inside `inputs:` names a source; its `default:` entry 
 
 ## Discovery
 
+<!-- spit-doc: fragment -->
+
 ```spit
 inputs:
     contexts: sub-{sub}/ses-{ses}
@@ -29,6 +35,8 @@ inputs:
 Each matching directory contributes an observed `[sub=...,ses=...]` context, including an empty directory. Contexts and sources are independent observations. Write `require` to make a source mandatory within an observed group. Repeated context paths belong in the same `inputs:` block as source paths. SPIT does not invent subject/session combinations. The [discovery reference](../language-reference.md#discover-contexts-from-directories) explains how source paths and missing files interact with contexts.
 
 ## Coverage
+
+<!-- spit-doc: fragment -->
 
 ```spit
 exclude bold[sub=02,ses=01,run=3]  # corrupted scan

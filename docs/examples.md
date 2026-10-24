@@ -99,6 +99,8 @@ long = longitudinal(avg @ vary(ses))
 
 Save as `cohort.spitin`:
 
+<!-- spit-doc: fragment -->
+
 ```spit
 pipeline cohort.spit
 
@@ -220,6 +222,8 @@ command sort_lines: sort -u -o {@output} {input}
 
 Save as `imported.spit`:
 
+<!-- spit-doc: fragment -->
+
 ```spit
 # Imported definitions, nested stages, aggregation and a stage path override.
 use text.spit as text
@@ -246,6 +250,8 @@ stage analysis:
 ```
 
 Save as `imported.spitin`:
+
+<!-- spit-doc: fragment -->
 
 ```spit
 pipeline imported.spit

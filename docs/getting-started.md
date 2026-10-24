@@ -16,6 +16,8 @@ The executable is `target/debug/spit`. The commands below use `cargo run --` so 
 
 The essential lines are:
 
+<!-- spit-doc: fragment -->
+
 ```spit
 root command_demo_data
 source shard : Lines [group, part]
@@ -52,6 +54,8 @@ The `.spitdag` is the job description a [runner](https://github.com/eclnz/spit-b
 ## 5. Use a real dataset
 
 For a small pipeline, set `root data` and source path rules in the `.spit`, then run `spit inputs analysis.spit` or `spit dag analysis.spit`. The folder is relative to the pipeline file. Add a recipe when selection or coverage rules are needed:
+
+<!-- spit-doc: fragment -->
 
 ```spit
 pipeline analysis.spit
