@@ -165,7 +165,7 @@ fn a_block_with_no_entries_is_no_error() {
 
 #[test]
 fn a_recipe_writes_its_rules_and_source_paths_in_blocks() {
-    let recipe = "pipeline p.spit\nroot data\npath:\n    raw: in/{id}.txt\nrequire:\n    [id] where raw count=1\nexclude:\n    [id=2]\n";
+    let recipe = "pipeline p.spit\nroot data\ninputs:\n    raw: in/{id}.txt\nrequire:\n    [id] where raw count=1\nexclude:\n    [id=2]\n";
     let rules = spit::parse_input_spec(recipe).unwrap().rules;
     assert_eq!(rules.source_paths["raw"].as_str(), "in/{id}.txt");
     assert_eq!(rules.constraints.len(), 1);

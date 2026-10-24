@@ -12,25 +12,27 @@ Both paths are relative to the recipe's own folder. If the pipeline already decl
 ## Source paths
 
 ```spit
-path image: raw/sub-{sub}/image.nii.gz
-default path: raw/{@product}/{@entities}
+inputs:
+    image: raw/sub-{sub}/image.nii.gz
+    default: raw/{@product}/{@entities}
 ```
 
-A recipe's `path image:` names a source; its `default path:` is a default for sources, and `{@entities}` in its rules is spelled by its own `default entities:`, else the pipeline's. A pipeline's `default path:` is primarily for outputs and covers sources only when they have no more specific rule and the default fits them. A source's own rule belongs in either the pipeline or the recipe, not both. A recipe can also give the complete path of a main source whose companions are declared `beside` it. See [which file a line belongs in](../language-reference.md#which-file-a-line-belongs-in).
+A recipe's `image:` entry inside `inputs:` names a source; its `default:` entry supplies the fallback, and `{@entities}` in its rules is spelled by its own `default entities:`, else the pipeline's. A pipeline's `default path:` is primarily for outputs and covers sources only when they have no more specific rule and the default fits them. A source's own rule belongs in either the pipeline or the recipe, not both. A recipe can also give the complete path of a main source whose companions are declared `beside` it. See [which file a line belongs in](../language-reference.md#which-file-a-line-belongs-in).
 
 ## Discovery
 
 ```spit
-discover sessions: [sub, ses] from dirs sub-{sub}/ses-{ses}
+inputs:
+    contexts: sub-{sub}/ses-{ses}
 ```
 
-Each matching directory contributes an observed `[sub=...,ses=...]` context, including an empty directory. Sources within those dimensions can then be expected for each context. SPIT does not invent subject/session combinations. The [discovery reference](../language-reference.md#discover-contexts-from-directories) explains how source paths and missing files interact with contexts.
+Each matching directory contributes an observed `[sub=...,ses=...]` context, including an empty directory. Contexts and sources are independent observations. Write `require` to make a source mandatory within an observed group. Repeated context paths belong in the same `inputs:` block as source paths. SPIT does not invent subject/session combinations. The [discovery reference](../language-reference.md#discover-contexts-from-directories) explains how source paths and missing files interact with contexts.
 
 ## Coverage
 
 ```spit
 exclude bold[sub=02,ses=01,run=3]  # corrupted scan
-exclude [sub] where sessions count<2
+exclude [sub] where contexts[sub,ses] count<2
 require [sub, ses] where t1w count=1
 ```
 

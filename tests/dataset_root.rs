@@ -19,8 +19,8 @@ path result: results/{sub}_{ses}.nii.gz
 
 /// Rules relative to the dataset folder, not the recipe's.
 const RULES: &str = "\
-discover sessions: [sub, ses] from dirs sub-{sub}/ses-{ses}
-path image: sub-{sub}/ses-{ses}/image.nii.gz
+inputs:\n    contexts: sub-{sub}/ses-{ses}
+    image: sub-{sub}/ses-{ses}/image.nii.gz
 ";
 
 const FILES: [&str; 3] = [
@@ -186,7 +186,7 @@ fn a_root_line_does_not_make_written_records_a_scan() {
     tree.write("analysis.spit", PIPELINE);
     tree.write(
         "analysis.spitin",
-        "pipeline analysis.spit\nroot data\npath image: sub-{sub}/ses-{ses}/image.nii.gz\nsources:\n    image[sub=1,ses=1]\n",
+        "pipeline analysis.spit\nroot data\ninputs:\n    image: sub-{sub}/ses-{ses}/image.nii.gz\nsources:\n    image[sub=1,ses=1]\n",
     );
     let output = spit_in(tree.path(), &["inputs", "analysis.spitin"]);
     let (records, _) = succeeded(&output);

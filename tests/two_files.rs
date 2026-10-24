@@ -46,14 +46,14 @@ fn a_source_takes_its_own_rule_then_the_recipes_default_then_the_pipelines() {
     ];
     assert_eq!(
         found(
-            "path b: rec/b-{sub}.txt\ndefault path: rdef/{@product}-{sub}.txt\n",
+            "inputs:\n    b: rec/b-{sub}.txt\n    default: rdef/{@product}-{sub}.txt\n",
             &files
         ),
         ["own/a-1.txt", "rec/b-1.txt", "rdef/c-1.txt"]
     );
     // Without a recipe default, the pipeline's covers `c`.
     assert_eq!(
-        found("path b: rec/b-{sub}.txt\n", &files),
+        found("inputs:\n    b: rec/b-{sub}.txt\n", &files),
         ["own/a-1.txt", "rec/b-1.txt", "def/c/sub=1.txt"]
     );
 }
@@ -91,12 +91,12 @@ fn a_recipe_line_that_belongs_in_the_pipeline_says_so_at_its_line() {
             "error: line 3, column 1: invalid output product `(x, y)`",
         ),
         (
-            "path out: x/{sub}.txt",
-            "error: line 3, column 11: `out` is made by a step, so its path belongs in the .spit pipeline",
+            "inputs:\n    out: x/{sub}.txt\n",
+            "error: line 4, column 10: `out` is made by a step, so its path belongs in the .spit pipeline",
         ),
         (
-            "path a: x/{sub}.txt",
-            "error: line 3, column 9: `a` has path rules in both .spit and .spitin; keep the pipeline's if every dataset has this layout, or the recipe's if only this one does",
+            "inputs:\n    a: x/{sub}.txt\n",
+            "error: line 4, column 8: `a` has path rules in both .spit and .spitin; keep the pipeline's if every dataset has this layout, or the recipe's if only this one does",
         ),
     ] {
         let errors = recipe_errors(&format!("{line}\n"));

@@ -1,6 +1,7 @@
 pipeline branching.spit
 root branching_data
-default path: {@product}/{@entities}
+inputs:
+    default: {@product}/{@entities}
 
 require [team, period] where raw count>=1
 require [team] where policy count=1

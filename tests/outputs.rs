@@ -40,7 +40,7 @@ command compare: score {image} {reference} -o {@output}
 score = compare(averaged, reference)
 default entities: {@key}={@value} separated \"__\"\n";
 
-const DISCOVER: &str = "discover sessions: [sub, ses] from dirs sub-{sub}/ses-{ses}\n";
+const DISCOVER: &str = "inputs:\n    contexts: sub-{sub}/ses-{ses}\n";
 /// A `require` rule that the gaps dataset fails.
 const STRICT: &str = "\
 require [sub, ses] where image count>=2

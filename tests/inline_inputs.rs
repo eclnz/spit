@@ -76,12 +76,7 @@ fn recipes_inherit_the_pipeline_root_and_add_selection_rules() {
     // still belongs to the declaring pipeline, not to this recipe.
     tree.write(
         "recipes/selected.spitin",
-        "\
-pipeline ../code/analysis.spit
-discover ids: [id] from dirs groups/{id}
-require [id] where raw count=1
-exclude [id=b]
-",
+        "pipeline ../code/analysis.spit\ninputs:\n    contexts: groups/{id}\nrequire [id] where raw count=1\nexclude [id=b]\n",
     );
     tree.write("data/groups/a/marker", "");
     tree.write("data/groups/b/marker", "");
@@ -123,7 +118,7 @@ fn duplicate_roots_and_source_paths_are_errors_even_when_equal() {
     }
     tree.write(
         "code/analysis.spitin",
-        "pipeline analysis.spit\npath raw: input/{id}.txt\n",
+        "pipeline analysis.spit\ninputs:\n    raw: input/{id}.txt\n",
     );
     for command in ["check", "inputs", "dag"] {
         let output = run(&tree, &[command, "code/analysis.spitin"]);
@@ -143,7 +138,6 @@ fn duplicate_roots_and_source_paths_are_errors_even_when_equal() {
 fn every_selection_form_is_recipe_only_including_literal_exclusions() {
     let tree = dataset("inline-boundary");
     for rule in [
-        "discover ids: [id] from dirs groups/{id}",
         "require [id] where raw count=1",
         "exclude raw[id=b]",
         "exclude [id=b]",

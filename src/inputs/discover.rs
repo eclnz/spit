@@ -7,18 +7,19 @@ use std::path::{Path, PathBuf};
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use super::coverage::{apply_drops, DropIndex, EveryGroupDropped};
+use super::coverage::{apply_drops, EveryGroupDropped};
 use super::exclusions::{Excluder, UnmatchedExclusion};
 use super::pattern::{
     inherit_shapes, match_pattern, missed_source, path_pattern, MissedSource, OutputPaths, Piece,
 };
 use crate::model::{
-    ArtifactInstance, DirectoryDiscovery, EntityBinding, InputRules, Pipeline, PipelineIndex,
+    ArtifactInstance, ContextPattern, EntityBinding, InputRules, Pipeline, PipelineIndex,
     ProductDef, Removal, SourceInventory, SourceRecord,
 };
 use crate::paths::{
     decode_component, encode_component, error, inspect_paths, require_directory,
-    validate_discovery_rule, PathBinder, PathError, PathPart, PathPlaceholder, PathTemplate, Shape,
+    validate_context_pattern, PathBinder, PathError, PathPart, PathPlaceholder, PathTemplate,
+    Shape,
 };
 
 /// The source files found under a root, what the recipe's rules removed,
@@ -45,9 +46,7 @@ pub struct Discovery {
     pub emptied: Option<EveryGroupDropped>,
 }
 
-/// Find source artifacts and contexts under `root`. Directory rules provide
-/// contexts and require files for source products whose dimensions they cover;
-/// other source products are found by matching their file path rules.
+/// Find source artifacts and contexts under `root` from their path rules.
 pub fn discover_sources(
     pipeline: &Pipeline,
     rules: &InputRules,
@@ -97,7 +96,7 @@ pub(super) fn discover(
     require_directory(root)?;
     inspect_paths(pipeline)?;
     let directory_patterns = rules
-        .discoveries
+        .context_paths
         .iter()
         .map(DiscoveryPattern::new)
         .collect::<Result<Vec<_>, _>>()?;
@@ -166,12 +165,7 @@ pub(super) fn discover(
             missed_source(&source.product.name, &source.pieces, candidates, folder)
         })
         .collect();
-    find_contexts(
-        &directory_patterns,
-        &listing.directories,
-        root,
-        &mut discovery,
-    )?;
+    find_contexts(&directory_patterns, &listing.directories, &mut discovery);
     // Exclusions come first: an excluded context expects no files, and an
     // excluded file is neither found nor needed.
     let mut excluder = Excluder::new(&rules.exclusions);
@@ -179,20 +173,11 @@ pub(super) fn discover(
     inventory
         .contexts
         .retain(|binding| !excluder.context(binding));
-    for bindings in inventory.discovered.values_mut() {
-        bindings.retain(|binding| !excluder.context(binding));
-    }
-    let expected = expected_bindings(
-        &sources,
-        &directory_patterns,
-        &discovery.inventory.discovered,
-    );
     find_source_files(
         [
             (&file_sources, &listing.files),
             (&folder_sources, &listing.directories),
         ],
-        &expected,
         &mut excluder,
         &mut discovery,
     )?;
@@ -209,15 +194,6 @@ pub(super) fn discover(
     discovery
         .removed
         .extend(dropped.iter().map(|group| group.removal()));
-    require_source_files(
-        pipeline,
-        root,
-        &sources,
-        &listing,
-        &expected,
-        &DropIndex::new(&dropped),
-        &mut excluder,
-    )?;
     sort_records(&sources, &mut discovery.inventory.artifacts);
     match excluder.finish() {
         Ok(excluded) => {
@@ -243,14 +219,13 @@ fn sources_of(pipeline: &Pipeline) -> impl Iterator<Item = &ProductDef> {
 }
 
 /// A directory discovery rule, checked, as pieces to match.
-struct DiscoveryPattern<'a> {
-    rule: &'a DirectoryDiscovery,
+struct DiscoveryPattern {
     pieces: Vec<Piece>,
 }
 
-impl<'a> DiscoveryPattern<'a> {
-    fn new(rule: &'a DirectoryDiscovery) -> Result<Self, PathError> {
-        validate_discovery_rule(rule)?;
+impl DiscoveryPattern {
+    fn new(rule: &ContextPattern) -> Result<Self, PathError> {
+        validate_context_pattern(rule)?;
         let mut pieces: Vec<Piece> = rule
             .template
             .parts()
@@ -261,23 +236,13 @@ impl<'a> DiscoveryPattern<'a> {
                     Ok(Piece::Value(name.clone(), *shape))
                 }
                 PathPart::Placeholder(placeholder) => Err(error(format!(
-                    "discovery `{}` uses undeclared or reserved placeholder `{placeholder}`",
-                    rule.name
+                    "context path uses reserved placeholder `{placeholder}`"
                 ))),
                 PathPart::Group(_) => unreachable!("a discovery pattern has no group"),
             })
             .collect::<Result<_, _>>()?;
         inherit_shapes(&mut pieces);
-        Ok(Self { rule, pieces })
-    }
-
-    /// Whether this rule binds every dimension of `product`, so its contexts
-    /// say which of the product's files must exist.
-    fn covers(&self, product: &ProductDef) -> bool {
-        product
-            .dimensions
-            .iter()
-            .all(|dimension| self.rule.dimensions.contains(dimension))
+        Ok(Self { pieces })
     }
 }
 
@@ -306,73 +271,23 @@ fn source_patterns(pipeline: &Pipeline) -> Result<Vec<SourcePattern<'_>>, PathEr
 }
 
 /// Bind each directory that a discovery rule matches, recording the
-/// contexts each rule finds and skipping values that cannot be read. Every
-/// rule must match some directory.
-fn find_contexts(
-    patterns: &[DiscoveryPattern<'_>],
-    directories: &[String],
-    root: &Path,
-    discovery: &mut Discovery,
-) -> Result<(), PathError> {
+/// contexts each rule finds and skipping values that cannot be read.
+fn find_contexts(patterns: &[DiscoveryPattern], directories: &[String], discovery: &mut Discovery) {
     let mut contexts = BTreeSet::new();
-    let mut found = vec![BTreeSet::new(); patterns.len()];
     for directory in directories {
-        for (pattern, found) in patterns.iter().zip(&mut found) {
+        for pattern in patterns {
             let Some(bound) = match_pattern(&pattern.pieces, directory) else {
                 continue;
             };
             match read_binding(directory, bound) {
                 Ok(binding) => {
                     contexts.insert(binding.clone());
-                    found.insert(binding);
                 }
                 Err(note) => discovery.skipped.push(note),
             }
         }
     }
-    for (pattern, bindings) in patterns.iter().zip(&found) {
-        if bindings.is_empty() {
-            return Err(error(format!(
-                "discovery `{}` matched no directories under `{}` with pattern `{}`",
-                pattern.rule.name,
-                root.display(),
-                pattern.rule.template
-            )));
-        }
-    }
     discovery.inventory.contexts = contexts.into_iter().collect();
-    discovery.inventory.discovered = patterns
-        .iter()
-        .zip(found)
-        .map(|(pattern, bindings)| (pattern.rule.name.clone(), bindings.into_iter().collect()))
-        .collect();
-    Ok(())
-}
-
-/// For each source a discovery rule covers, the bindings its files must
-/// have: the rule's contexts, cut to the source's dimensions. A source
-/// whose covering rules found nothing is left out, so it is not checked.
-fn expected_bindings<'a>(
-    sources: &[SourcePattern<'a>],
-    patterns: &[DiscoveryPattern<'_>],
-    discovered: &BTreeMap<String, Vec<EntityBinding>>,
-) -> BTreeMap<&'a str, BTreeSet<EntityBinding>> {
-    let mut expected: BTreeMap<_, BTreeSet<_>> = BTreeMap::new();
-    for source in sources {
-        let dimensions = &source.product.dimensions;
-        for pattern in patterns
-            .iter()
-            .filter(|pattern| pattern.covers(source.product))
-        {
-            let bindings = discovered.get(&pattern.rule.name).into_iter().flatten();
-            expected
-                .entry(source.product.name.as_str())
-                .or_default()
-                .extend(bindings.filter_map(|binding| binding.project(dimensions)));
-        }
-    }
-    expected.retain(|_, bindings| !bindings.is_empty());
-    expected
 }
 
 /// A source with its place in the pipeline's list of sources.
@@ -391,13 +306,12 @@ fn first_match<'s, 'a>(sources: &[Placed<'s, 'a>], path: &str) -> Option<Placed<
 /// value cannot be read.
 fn find_source_files(
     kinds: [(&[Placed<'_, '_>], &[String]); 2],
-    expected: &BTreeMap<&str, BTreeSet<EntityBinding>>,
     excluder: &mut Excluder<'_>,
     discovery: &mut Discovery,
 ) -> Result<(), PathError> {
     for (sources, paths) in kinds {
         for path in paths {
-            let found = source_record(sources, path, expected, excluder, &mut discovery.skipped)?;
+            let found = source_record(sources, path, excluder, &mut discovery.skipped)?;
             discovery.inventory.artifacts.extend(found);
         }
     }
@@ -408,12 +322,10 @@ fn find_source_files(
 }
 
 /// The record for `file`, a file or a folder, if a source's rule matches
-/// it and no `exclude` rule removes it. It must match one source only, and
-/// lie within the contexts found for that source.
+/// it and no `exclude` rule removes it. It must match one source only.
 fn source_record(
     sources: &[Placed<'_, '_>],
     file: &str,
-    expected: &BTreeMap<&str, BTreeSet<EntityBinding>>,
     excluder: &mut Excluder<'_>,
     notes: &mut Vec<String>,
 ) -> Result<Option<SourceRecord>, PathError> {
@@ -432,18 +344,8 @@ fn source_record(
     };
     let name = product.name.as_str();
     let kind = if product.folder { "folder" } else { "file" };
-    // An excluded file may lie outside every discovered context, such as a
-    // misnamed copy of one that does.
     if excluder.artifact(name, &binding) {
         return Ok(None);
-    }
-    if expected
-        .get(name)
-        .is_some_and(|bindings| !bindings.contains(&binding))
-    {
-        return Err(error(format!(
-            "source {kind} `{file}` for `{name}` lies outside the discovered contexts"
-        )));
     }
     if let Some((other, _)) = matches.next() {
         return Err(error(format!(
@@ -452,59 +354,6 @@ fn source_record(
         )));
     }
     Ok(Some(SourceRecord::new(name, binding).at(file)))
-}
-
-/// Require the file or folder of every source binding a discovery rule expects,
-/// except in groups a conditional `exclude` rule removed. An excluded binding needs no file;
-/// when it has none, its exclusion is recorded here, since no file was found
-/// to record it by.
-fn require_source_files(
-    pipeline: &Pipeline,
-    root: &Path,
-    sources: &[SourcePattern<'_>],
-    listing: &Listing,
-    expected: &BTreeMap<&str, BTreeSet<EntityBinding>>,
-    dropped: &DropIndex<'_>,
-    excluder: &mut Excluder<'_>,
-) -> Result<(), PathError> {
-    let mut binder = PathBinder::new(pipeline);
-    for product in sources.iter().map(|source| source.product) {
-        let bindings = expected.get(product.name.as_str()).into_iter().flatten();
-        for binding in bindings.filter(|binding| !dropped.matches(binding)) {
-            let excluded = excluder.excludes(&product.name, binding);
-            let artifact = ArtifactInstance::new(
-                &product.name,
-                product.artifact_type.clone(),
-                binding.clone(),
-            );
-            let relative = binder.bind(artifact.view(), || format!("source `{artifact}`"))?;
-            let full = root.join(&relative);
-            // The listing keeps each directory entry's actual spelling, which
-            // `is_file` alone would not on a case-insensitive filesystem
-            // (`s07.json` when only `S07.json` is present). It also holds
-            // only files and folders, symbolic links followed, so a hit needs
-            // no `stat`. Keep in step with `Listing::walk`.
-            let (listed, kind) = if product.folder {
-                (&listing.directories, "folder")
-            } else {
-                (&listing.files, "file")
-            };
-            let present = listed.binary_search(&relative).is_ok();
-            if excluded {
-                if !present {
-                    excluder.artifact(&product.name, binding);
-                }
-                continue;
-            }
-            if !present {
-                return Err(error(format!(
-                    "missing source {kind} for `{artifact}` at discovered context: `{}`",
-                    full.display()
-                )));
-            }
-        }
-    }
-    Ok(())
 }
 
 /// Order records by their product's place in the pipeline, then by its
@@ -599,8 +448,6 @@ impl Listing {
     /// entry is, so only a link is looked up and resolved; a directory
     /// inside is its directory's canonical path and its name.
     ///
-    /// Keep in step with `require_source_files`, which trusts that every
-    /// entry here is a file or a directory and does not `stat` it again.
     fn walk(
         &mut self,
         directory: &Path,

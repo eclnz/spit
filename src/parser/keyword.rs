@@ -8,7 +8,6 @@ pub(crate) enum Keyword {
     Use,
     Root,
     Source,
-    Discover,
     Operation,
     Command,
     Verify,
@@ -46,11 +45,10 @@ pub(crate) enum Keyword {
 /// Every keyword and its word. Each word is reserved: no product may take
 /// it as its name, so the first word of a line says whether it starts a
 /// statement.
-const WORDS: [(Keyword, &str); 21] = [
+const WORDS: [(Keyword, &str); 20] = [
     (Keyword::Use, "use"),
     (Keyword::Root, "root"),
     (Keyword::Source, "source"),
-    (Keyword::Discover, "discover"),
     (Keyword::Operation, "operation"),
     (Keyword::Command, "command"),
     (Keyword::Verify, "verify"),

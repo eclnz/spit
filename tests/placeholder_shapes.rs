@@ -213,13 +213,13 @@ fn a_recipe_rule_and_a_discover_rule_take_shapes() {
     tree.write("a.spit", "source s [day]\n");
     tree.write(
         "a.spitin",
-        "pipeline a.spit\nroot .\ndiscover days: [day] from dirs data/{day:date}\npath s: data/{day:date}/a.txt\n",
+        "pipeline a.spit\nroot .\ninputs:\n    s: data/{day:date}/a.txt\n    contexts: data/{day:date}\n",
     );
     let output = run(&tree, &["inputs", "a.spitin"]);
     let stdout = text(&output.stdout);
     assert!(stdout.contains("[day=2026-09-01]") && stdout.contains("[day=2026-09-02]"));
     assert!(stdout.contains("s: data/{day:date}/a.txt"), "{stdout}");
-    assert!(stdout.contains("contexts days:"), "{stdout}");
+    assert!(stdout.contains("contexts:"), "{stdout}");
     assert!(!stdout.contains("old"), "{stdout}");
 }
 
@@ -346,7 +346,7 @@ fn a_dropped_group_can_leave_two_open_shapes_touching() {
     tree.write("a.spit", "source s [a, b]\nsource t [a, b, c]\n");
     tree.write(
         "a.spitin",
-        "pipeline a.spit\nroot .\ndefault path: in/{a:digits}[-{c}]{b:digits}.txt\n",
+        "pipeline a.spit\nroot .\ninputs:\n    default: in/{a:digits}[-{c}]{b:digits}.txt\n",
     );
     let said = text(&run(&tree, &["check", "a.spitin"]).stderr);
     assert!(
@@ -367,7 +367,7 @@ fn a_dropped_group_leaving_a_separator_is_fine() {
     tree.write("a.spit", "source s [a, b]\nsource t [a, b, c]\n");
     tree.write(
         "a.spitin",
-        "pipeline a.spit\nroot .\ndefault path: in/{a:digits}-[{c}-]{b:digits}.txt\n",
+        "pipeline a.spit\nroot .\ninputs:\n    default: in/{a:digits}-[{c}-]{b:digits}.txt\n",
     );
     let said = text(&run(&tree, &["check", "a.spitin"]).stdout);
     assert!(said.contains("Recipe valid."), "{said}");
@@ -471,7 +471,7 @@ fn a_shape_inside_an_optional_group_applies_where_the_group_is_kept() {
     tree.write("a.spit", "source s [d]\nsource t [d, v]\n");
     tree.write(
         "a.spitin",
-        "pipeline a.spit\nroot .\npath s: in/{d:date}.txt\npath t: in/{d:date}[-{v:digits}].txt\n",
+        "pipeline a.spit\nroot .\ninputs:\n    s: in/{d:date}.txt\n    t: in/{d:date}[-{v:digits}].txt\n",
     );
     let stdout = text(&run(&tree, &["inputs", "a.spitin"]).stdout);
     assert!(stdout.contains("t[d=2024-01-05,v=2]"), "{stdout}");
@@ -489,7 +489,7 @@ fn a_recipes_shared_default_takes_a_shape() {
     tree.write("p.spit", "source s [d]\n");
     tree.write(
         "a.spitin",
-        "pipeline p.spit\nroot .\ndefault path: in/{d:date}.txt\n",
+        "pipeline p.spit\nroot .\ninputs:\n    default: in/{d:date}.txt\n",
     );
     let stdout = text(&run(&tree, &["inputs", "a.spitin"]).stdout);
     assert!(

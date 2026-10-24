@@ -27,7 +27,7 @@ fn validates_external_inventory_and_semantics() {
 fn checked_diagnosis_retains_the_original_pipeline_and_inventory() {
     let pipeline = "source raw [id]\noperation copy(input)\nresult = copy(raw)\ndefault entities: {@key}={@value} separated \"__\"\npath result: out/{@product}/{@entities}\n";
     let inventory = "sources:\n  raw[id=x]\n";
-    let recipe = spit::parse_input_spec("path raw: data/{id}.txt\n").unwrap();
+    let recipe = spit::parse_input_spec("inputs:\n    raw: data/{id}.txt\n").unwrap();
     let context = spit::Context {
         recipe: Some(&recipe),
         ..spit::Context::at(std::path::Path::new("pipeline.spit"))
@@ -87,7 +87,7 @@ fn source_inventory_errors_point_to_the_source_line() {
 
     let nested = errors(diagnose(
         "source raw [sub, run]\n",
-        Some("contexts sessions:\n    [sub=01]:\n        [run=01]:\n            raw, raw\n"),
+        Some("contexts:\n    [sub=01]:\n        [run=01]:\n            raw, raw\n"),
     ));
     assert_eq!(nested[0].source, DiagnosticSource::Inventory);
     assert_eq!(nested[0].line, Some(4));
