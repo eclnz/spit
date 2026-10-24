@@ -40,6 +40,8 @@ board = leaderboard(summary @vary(model, config))
 
 Save as `sweep.spitout`:
 
+<!-- spit-doc: spitout -->
+
 ```text
 sources:
     model[model=small]
@@ -190,6 +192,8 @@ summary = summarise(low_band @vary(day), policy)
 ```
 
 Save as `sensors.spitout`:
+
+<!-- spit-doc: spitout -->
 
 ```text
 sources:

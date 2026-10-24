@@ -17,8 +17,11 @@
 //!   `examples/`, with `spit` and `cargo run --` both running the built binary,
 //!   and must succeed. A `sh` block with `fragment` before it is not run.
 //! - `output` before a `text` block: the lines of the comment before its first
-//!   `---` run in that folder, and every line of the block must be among the
-//!   lines the command printed, in order, so a block may show part of the output.
+//!   `---` run in that folder, and every line of the block must be part of a
+//!   line the command printed, in order, so a block may leave out the `error:
+//!   line 3, column 1:` before a message, or show only part of the output.
+//! - `spitout` before a `text` block: the block is a `.spitout`, and is checked
+//!   as one.
 //!
 //! In a `setup`, `recipe`, `run` or `output` comment, a line `--- name` opens a file written
 //! beside the block, which the lines after it hold, such as the pipeline a
@@ -61,6 +64,7 @@ enum Kind {
     Files,
     Run,
     Output,
+    Spitout,
 }
 
 /// The comment before a block.
@@ -98,6 +102,7 @@ fn parse_marker(comment: &[&str]) -> Marker {
         "files" => Kind::Files,
         "run" => Kind::Run,
         "output" => Kind::Output,
+        "spitout" => Kind::Spitout,
         other => panic!("unknown spit-doc kind `{other}`"),
     };
     // A comment of several lines ends with a line that closes it.
@@ -262,8 +267,8 @@ fn spit_verdict(page: &str, block: &Block) -> Option<String> {
                 .err()
                 .map(|error| format!("{at}: does not check with its setup\n{error}"))
         }
-        Kind::Run | Kind::Output => Some(format!(
-            "{at}: `run` and `output` are for `sh` and `text` blocks"
+        Kind::Run | Kind::Output | Kind::Spitout => Some(format!(
+            "{at}: `run`, `output` and `spitout` are for `sh` and `text` blocks"
         )),
         Kind::Files => {
             let mut files: Vec<(String, String)> = Vec::new();
@@ -381,6 +386,13 @@ fn command_verdict(page: &str, block: &Block) -> Option<String> {
                         printed.join("\n")
                     )
                 })
+        }
+        ("text", Some(Kind::Spitout)) => {
+            let tree = Tree::new("docs-spitout", &[]);
+            tree.write("block.spitout", &block.text);
+            checks(&tree, Path::new("block.spitout"))
+                .err()
+                .map(|error| format!("{at}: does not check as a .spitout\n{error}"))
         }
         ("text", Some(_)) => Some(format!("{at}: a `text` block takes only `{OPEN} output`")),
         ("sh", Some(Kind::Run)) => {

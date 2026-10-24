@@ -1006,6 +1006,8 @@ The header names the columns: `product` and `reason` are optional, and every oth
 
 A `.spitout` lists a dataset's settled source identities. `spit inputs` writes one, and a dataset indexer or a person can write one too. Paths come from rules in the pipeline or, if a recipe supplies a source rule, a `source_paths:` section written once in the `.spitout`. A source with records needs one or the other; `dag` fails one with neither rather than guess where its files are. `contexts:` names a group even when one of its required inputs is absent:
 
+<!-- spit-doc: spitout -->
+
 ```text
 contexts:
     [subject=A,visit=1]
@@ -1014,6 +1016,8 @@ sources:
 ```
 
 `spit inputs` writes flat source records and unnamed contexts. Hand-written inventories may also nest source identities under a context. A list of values in a nested dimension expands each listed product for every value:
+
+<!-- spit-doc: spitout -->
 
 ```text
 sources:
@@ -1027,6 +1031,8 @@ contexts:
 
 This declares two runs of each listed DWI source. Flat `product[dimension=value,...]` records remain valid. A source path rule declared only in a recipe is written once in the `.spitout`:
 
+<!-- spit-doc: spitout -->
+
 ```text
 source_paths:
     image: data/sub-{sub}/image.nii.gz
@@ -1036,6 +1042,8 @@ The DAG can then use the rule without loading the recipe. A record names no file
 
 A `.spitout` that `spit inputs -o` writes starts with the dataset root it was settled against:
 
+<!-- spit-doc: spitout -->
+
 ```text
 root ../data
 ```
@@ -1043,6 +1051,8 @@ root ../data
 The folder is relative to the `.spitout`'s own folder, and may be absolute. A printed `.spitout` records no root, since where it will be kept is unknown. `dag` and `artifacts` use it as the root, so they check the source files and run commands from it. The line comes before every section, once. A `.spitout` without one, printed or written by hand, has no root, so `dag` checks no source files; give it a `root` line, or run `dag` on the recipe.
 
 `spit inputs` also writes what the recipe's `exclude` rules removed, each with its rule, where the rule is, how many a counting rule found, and the reason:
+
+<!-- spit-doc: spitout -->
 
 ```text
 removed:
