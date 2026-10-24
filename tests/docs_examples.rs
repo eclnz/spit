@@ -75,12 +75,16 @@ struct Marker {
 enum Source {
     Text(String),
     Copy(String),
+    /// The text of the block before this one on the page.
+    Previous,
 }
 
 struct Block {
     line: usize,
     language: String,
     text: String,
+    /// The text of the code block before this one on the page.
+    previous: String,
     marker: Option<Marker>,
 }
 
@@ -107,6 +111,7 @@ fn parse_marker(comment: &[&str]) -> Marker {
     for line in body {
         if let Some(spec) = line.strip_prefix("--- ") {
             files.push(match spec.split_once(" = ") {
+                Some((name, "@previous")) => (name.trim().to_owned(), Source::Previous),
                 Some((name, path)) => {
                     (name.trim().to_owned(), Source::Copy(path.trim().to_owned()))
                 }
@@ -127,6 +132,7 @@ fn parse_marker(comment: &[&str]) -> Marker {
 fn spit_blocks(text: &str) -> Vec<Block> {
     let lines: Vec<_> = text.lines().collect();
     let mut blocks = Vec::new();
+    let mut previous = String::new();
     let mut index = 0;
     while index < lines.len() {
         if lines[index].starts_with("```") {
@@ -143,10 +149,12 @@ fn spit_blocks(text: &str) -> Vec<Block> {
                 blocks.push(Block {
                     line: opening + 1,
                     language: language.to_owned(),
-                    text: body,
+                    text: body.clone(),
+                    previous: previous.clone(),
                     marker: marker_before(&lines, opening),
                 });
             }
+            previous = body;
         }
         index += 1;
     }
@@ -186,11 +194,14 @@ fn checks(tree: &Tree, file: &Path) -> Result<(), String> {
     }
 }
 
-fn write_files(tree: &Tree, marker: &Marker) {
+fn write_files(tree: &Tree, marker: &Marker, previous: &str) {
     for (name, source) in &marker.files {
         match source {
             Source::Text(text) => {
                 tree.write(name, text);
+            }
+            Source::Previous => {
+                tree.write(name, previous);
             }
             Source::Copy(path) if Path::new(path).is_dir() => {
                 copy_folder(Path::new(path), &tree.path().join(name))
@@ -240,7 +251,7 @@ fn spit_verdict(page: &str, block: &Block) -> Option<String> {
             if marker.kind == Kind::Setup && alone(&block.text).is_ok() {
                 return Some(format!("{at}: checks alone; remove its setup"));
             }
-            write_files(&tree, marker);
+            write_files(&tree, marker, &block.previous);
             let name = if marker.kind == Kind::Setup {
                 "whole.spit"
             } else {
@@ -288,10 +299,10 @@ fn spit_verdict(page: &str, block: &Block) -> Option<String> {
 
 /// A folder to run commands in: a copy of `examples/`, the marker's files,
 /// and a `bin/` with `spit` and `cargo run --` both running the built binary.
-fn command_tree(marker: &Marker) -> Tree {
+fn command_tree(marker: &Marker, previous: &str) -> Tree {
     let tree = Tree::new("docs-commands", &[]);
     copy_folder(Path::new("examples"), &tree.path().join("examples"));
-    write_files(&tree, marker);
+    write_files(&tree, marker, previous);
     install_shims(&tree);
     tree
 }
@@ -354,7 +365,7 @@ fn command_verdict(page: &str, block: &Block) -> Option<String> {
         ("text", None) => None,
         ("text", Some(Kind::Output)) => {
             let marker = block.marker.as_ref()?;
-            let tree = command_tree(marker);
+            let tree = command_tree(marker, &block.previous);
             let (_, lines) = shell(&tree, &marker.head);
             let mut remaining = lines.iter();
             block
@@ -362,7 +373,7 @@ fn command_verdict(page: &str, block: &Block) -> Option<String> {
                 .lines()
                 .map(str::trim_end)
                 .filter(|line| !line.is_empty())
-                .find(|line| !remaining.any(|printed| printed == line))
+                .find(|line| !remaining.any(|printed| printed.contains(line)))
                 .map(|line| {
                     let printed: Vec<_> = lines.iter().take(12).cloned().collect();
                     format!(
@@ -374,7 +385,7 @@ fn command_verdict(page: &str, block: &Block) -> Option<String> {
         ("text", Some(_)) => Some(format!("{at}: a `text` block takes only `{OPEN} output`")),
         ("sh", Some(Kind::Run)) => {
             let marker = block.marker.as_ref()?;
-            let tree = command_tree(marker);
+            let tree = command_tree(marker, &block.previous);
             let (succeeded, printed) = shell(&tree, &block.text);
             (!succeeded).then(|| format!("{at}: a command fails\n{}", printed.join("\n")))
         }

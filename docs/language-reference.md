@@ -238,6 +238,31 @@ The body reads the operation's inputs, by their port names, and the products its
 
 A selector the caller gives an input holds wherever the body reads it, beside the body's own: above, every `clean` job reads revision 2, and `merge` collects each group's lanes. A call in a stage puts every step it makes in that stage. A body may call another operation with a body, which is expanded in turn; every operation a body calls is declared before it. An output written with a type, as `total: Count`, gives the caller's product that type, and SPIT checks it against the step that makes it. A call is held to the operation's signature as a call of any other operation is: each argument has its input's type, each output the type its port gives, and a type variable is one type throughout a call, so `operation align(frame: Frame<S>, t: Transform<S,T>) -> (aligned: Frame<S>)` is an error at the call's output when its body makes a `Frame<T>`. An error in a step the call makes, such as a type the step does not accept or an input the data lacks, is reported at the call, named before the message. It points at the argument the caller gave when the failing input reads one of the operation's inputs, at the product the caller names when it is one of the outputs, and at the whole call otherwise. Below it, a `-->` line gives each call it is nested in and the body's step, with their file and line:
 
+<!-- spit-doc: output
+spit check p1.spit || true
+--- libs/lib.spit
+operation clean(x: Lines, t: Table) -> Lines
+command clean: clean {x} {t} {@output}
+operation merge(xs: many Lines) -> Lines
+command merge: merge {xs} {@output}
+operation count(x: Lines) -> Count
+command count: wc {x} {@output}
+
+operation tidy(x: Lines, t: Table) -> (y: Lines):
+    # one clean step
+    y = clean(x, t)
+
+operation summarise(reads: Lines, table: Table) -> (merged: Lines, total: Count):
+    cleaned = tidy(reads, table)
+    merged = merge(cleaned @vary(lane))
+    total = count(merged)
+--- p1.spit
+use libs/lib.spit as L
+source raw : Lines [lane]
+source cal : Table
+m, t = L::summarise(cal, raw)
+-->
+
 ```text
 error: line 4, column 21: in `m, t = L::summarise(...)`: type mismatch at `L::clean.x`: product `cal` is Table, expected Lines
   --> libs/lib.spit: line 13, column 15: the call of `L::tidy` in the body of `L::summarise`
@@ -262,6 +287,36 @@ m, t = L::summarise(…)  line 6  [report]
 With `--json` the same calls are the `calls` array of `{"diagnostics":[...],"calls":[...]}`, one object per call with its `steps`, a nested call having its caller's `id` as `parent`.
 
 `spit dag --counts` lists a call's steps under it, with the call's jobs in all, so `summarise` over two groups of two lanes shows:
+
+<!-- spit-doc: output
+spit dag p2.spit p2.spitout --counts
+--- p2.spit
+default entities: {@key}={@value} separated "_"
+default path: out/{@product}/{@entities}
+source raw : Lines [group, lane]
+source calibration : Table [revision]
+operation clean(x: Lines, t: Table) -> Lines
+command clean: clean {x} {t} {@output}
+operation merge(xs: many Lines) -> Lines
+command merge: merge {xs} {@output}
+operation count(x: Lines) -> Count
+command count: wc {x} {@output}
+
+operation summarise(reads: Lines, table: Table) -> (merged: Lines, total: Count):
+    cleaned = clean(reads, table)
+    merged = merge(cleaned @vary(lane))
+    total = count(merged)
+
+first, first_total = summarise(raw, calibration @where(revision=2))
+--- p2.spitout
+sources:
+    raw[group=a,lane=1]
+    raw[group=a,lane=2]
+    raw[group=b,lane=1]
+    raw[group=b,lane=2]
+    calibration[revision=1]
+    calibration[revision=2]
+-->
 
 ```text
 jobs  step
@@ -415,6 +470,18 @@ sorted = text::sort_lines(text::shard)
 
 `as text` gives every imported name a prefix. Without it, `use text.spit` brings the names into the current scope. To import only a few definitions, use `use shard, sort_lines from text.spit as text`. A source imported as `text::shard` also uses that name in a recipe and a `.spitout`. SPIT reports missing names, import cycles, and name collisions. A message names a library by its path from the pipeline's folder, such as `libs/text.spit`, wherever the checkout is. An error in a library's own text is reported in the library, at its own line, and the `use` line that reads it follows as a related place:
 
+<!-- spit-doc: output
+spit check pipeline.spit || true
+--- libs/text.spit
+operation sortd(input: Lines) -> Lines
+command sortd: sort {input} {@output}
+operation wrap(x: Lines) -> (summary: Lines):
+    summary = sortd(nope)
+--- pipeline.spit
+use libs/text.spit as text
+source raw : Lines [id]
+-->
+
 ```text
 error: libs/text.spit: line 4, column 15: the body of `wrap` reads `nope`, which is neither one of its inputs nor made by an earlier step of it
   --> pipeline.spit: line 1, column 1: imported here
@@ -507,6 +574,19 @@ A product's path is its rule, completed with an extension when the rule ends wit
 
 A rule's extension is the text of its last file name after its final placeholder, from the first `.`, as `.nii.gz` in `sub-{sub}_T1w.nii.gz`. A rule that ends with the extension it would be given is left as it is, so a full BIDS-style path can keep it. A rule that ends with another is an error, since the tool writes a different file from the one the rule names:
 
+<!-- spit-doc: output
+spit check p4.spit || true
+--- p4.spit
+default entities: {@key}={@value} separated "_"
+default path: derivatives/{@product}/{@entities}
+source scan : Image [sub]
+path scan: raw/{sub}.nii.gz
+operation align(moving: Image) -> Transform .mat
+command align: align {moving} {@output}
+path matrix: derivatives/matrix/{sub}.txt
+matrix = align(scan)
+-->
+
 ```text
 path `matrix` ends in `.txt`, but operation `align` writes `.mat`; drop the extension or use `.mat`; SPIT reads the extension from the first `.` after the last placeholder, so keep `.` out of the name before it
 ```
@@ -521,8 +601,20 @@ Extensions are optional. An operation whose tool picks the format from the outpu
 
 `spit check --path-rules` shows each product's path with its extension, and where the extension is declared:
 
+<!-- spit-doc: output
+spit check p5.spit --path-rules
+--- p5.spit
+default entities: {@key}={@value} separated "_"
+default path: derivatives/{@product}/{@entities}
+source scan : Image [sub]
+path scan: raw/{sub}.nii.gz
+operation align(moving: Image) -> Transform .mat
+command align: align {moving} {@output}
+matrix = align(scan)
+-->
+
 ```text
-  matrix (output): default derivatives/{@product}/{@entities}.mat, `.mat` from operation `align`
+  matrix (output): default derivatives/{@product}/sub={sub}.mat, `.mat` from operation `align`
 ```
 
 Path rules also find sources. With `root data`, `spit inputs recipe.spitin` lists each file under `data` whose path matches a source's rule, in the pipeline or the recipe, reading entity values from its placeholders. A rule matches a file's whole path, so `responses/{region}/wave{wave}.csv` does not match `wave3.csv.bak` or `wave3.csv.1`, and files that match no rule are left out. When a source's rule matches no file, the scan warns and names the unmatched file nearest the rule, with the text where the file and the rule part; see the `spit artifacts` command. Use `spit inputs --unmatched` to list files outside all source rules, then add rules for the files the pipeline should read. Links to files and directories are followed. A value is read only as SPIT writes it, so a file such as `in/%41.txt`, whose value SPIT would write `A`, is skipped with a warning rather than listed under a path no job would use.
@@ -707,6 +799,22 @@ A `.spit` pipeline is the reusable graph: what work to do and where its results 
 
 Put a source's own rule in the pipeline when every dataset for that pipeline shares the layout, and in the recipe when the layout belongs to one dataset. A line in the wrong file is an error that says which file it belongs in, at its line:
 
+<!-- spit-doc: output
+spit check step.spitin || true
+spit check both.spitin || true
+--- survey.spit
+source image : Image [sub]
+path image: data/{sub}.nii.gz
+--- step.spitin
+pipeline survey.spit
+root data
+smoothed = smooth(image)
+--- both.spitin
+pipeline survey.spit
+inputs:
+     image: data/{sub}.nii.gz
+-->
+
 ```text
 error: line 3, column 1: a step belongs in the .spit pipeline, which every dataset shares; a .spitin binds it to one dataset with its `root`, source paths, and `inputs:`, `exclude` and `require` rules
 error: line 3, column 13: `image` has path rules in both .spit and .spitin; keep the pipeline's if every dataset has this layout, or the recipe's if only this one does
@@ -814,12 +922,56 @@ exclude [store=s07]            # price list filed as S07; renamed next week
 
 Given a `.spitin` recipe, `inputs`, `dag` and `artifacts` list the spellings together as they settle its inputs, so the two are seen as one store filed twice. Only ASCII letters fold, so `é` and `É` are different values with no note; and a `.spitout` given directly to `dag` or `artifacts` has no settling step, so it gets no note. The note names each spelling with the sources that have it, and `(excluded)` for one a rule removed:
 
+<!-- spit-doc: output
+spit inputs store.spitin
+--- store.spit
+default entities: {@key}={@value} separated "_"
+default path: out/{@product}/{@entities}
+source sales : Sales [store]
+path sales: sales/{store}.csv
+source pricing : Prices [store]
+path pricing: pricing/{store}.json
+operation price(sales: Sales, pricing: Prices) -> Report
+command price: price {sales} {pricing} {@output}
+report = price(sales, pricing)
+--- store.spitin
+pipeline store.spit
+root store
+exclude [store=s07]            # price list filed as S07; renamed next week
+--- store/sales/s01.csv
+--- store/sales/s07.csv
+--- store/pricing/s01.json
+--- store/pricing/S07.json
+-->
+
 ```text
-note: excluded [store=s07] (line 3)
+note: excluded [store=s07] (line 3): price list filed as S07; renamed next week
 note: `store` has values that differ only in ASCII letter case, which are different values to SPIT: `S07` in pricing, `s07` (excluded)
 ```
 
 The note comes up before any rule too, as ``... `S07` in pricing, `s07` in sales``. It names at most three sets for a dimension, then counts the rest. `dag` then plans the other stores, and notes that the misnamed file is left over:
+
+<!-- spit-doc: output
+spit dag store.spitin
+--- store.spit
+default entities: {@key}={@value} separated "_"
+default path: out/{@product}/{@entities}
+source sales : Sales [store]
+path sales: sales/{store}.csv
+source pricing : Prices [store]
+path pricing: pricing/{store}.json
+operation price(sales: Sales, pricing: Prices) -> Report
+command price: price {sales} {pricing} {@output}
+report = price(sales, pricing)
+--- store.spitin
+pipeline store.spit
+root store
+exclude [store=s07]            # price list filed as S07; renamed next week
+--- store/sales/s01.csv
+--- store/sales/s07.csv
+--- store/pricing/s01.json
+--- store/pricing/S07.json
+-->
 
 ```text
 note: 1 source artifact is used by no job: pricing[store=S07]; `spit artifacts` lists them
@@ -944,6 +1096,11 @@ command register: register {frame} {atlas} {@output}
 smoothed = smooth(scan)
 registered = register(smoothed, atlas)
 ```
+
+<!-- spit-doc: output
+spit check atlas.spit || true
+--- atlas.spit = @previous
+-->
 
 ```text
 error: line 6, column 8: `types strict` needs a type on source `atlas`, as in `source atlas : Type`
