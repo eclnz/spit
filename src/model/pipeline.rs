@@ -53,6 +53,9 @@ pub struct Pipeline {
     /// How much of the pipeline must be typed, from its `types` line.
     /// Imports never bring one: the file given to SPIT decides.
     pub types: TypeChecking,
+    /// Each type declared with `type Name<Param, ...>`, and its parameter
+    /// names in order. A declared type is written with that many arguments.
+    pub type_decls: BTreeMap<String, Vec<String>>,
 }
 
 /// How much of a pipeline must be typed.

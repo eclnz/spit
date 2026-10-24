@@ -11,9 +11,13 @@ use spit::{diagnose, diagnose_in, parse_pipeline, validate_pipeline, Context, Ty
 const HEADER: &str = "default entities: {@key}={@value} separated \"__\"\n\
                       default path: out/{@product}/{@entities}\n";
 
+/// The types the bodies below write with arguments, declared after them so
+/// that no line number moves.
+const DECLARED: &str = "type Frame<Kind>\ntype Mask<Kind>\ntype Pair<A, B>\n";
+
 /// The errors of `body` under `types strict`, as (line, message).
 fn strict(body: &str) -> Vec<(Option<usize>, String)> {
-    found(&format!("types strict\n{HEADER}{body}"))
+    found(&format!("types strict\n{HEADER}{body}{DECLARED}"))
 }
 
 fn found(text: &str) -> Vec<(Option<usize>, String)> {
@@ -34,7 +38,7 @@ fn a_type_declared_once_and_inferred_through_generic_steps_passes() {
                 twice = smooth(once)\n\
                 masked = mask(twice)\n";
     assert_eq!(strict(body), []);
-    let pipeline = parse_pipeline(&format!("types strict\n{HEADER}{body}")).unwrap();
+    let pipeline = parse_pipeline(&format!("types strict\n{HEADER}{body}{DECLARED}")).unwrap();
     assert_eq!(pipeline.types, TypeChecking::Strict);
     assert!(validate_pipeline(&pipeline).is_ok());
 }
@@ -126,7 +130,7 @@ fn a_nested_variable_left_open_in_one_output_of_several_is_reported_at_that_outp
                 operation split(x: Image) -> (a: Pair<Image,T>, b: Image)\n\
                 command split: s {x} {a} {b}\n\
                 first, second = split(raw)\n";
-    let text = format!("types strict\n{HEADER}{body}");
+    let text = format!("types strict\n{HEADER}{body}{DECLARED}");
     let issues = errors(diagnose(&text, None));
     assert_eq!(issues.len(), 1);
     assert_eq!(issues[0].line, Some(7));
@@ -211,7 +215,7 @@ fn a_variable_left_open_in_a_body_is_reported_at_the_call_with_the_body_s_name()
                     inner = wrap(x)\n    \
                     result = wrap(x)\n\
                 tidied = tidy(raw)\n";
-    let text = format!("types strict\n{HEADER}{body}");
+    let text = format!("types strict\n{HEADER}{body}{DECLARED}");
     let issues = errors(diagnose(&text, None));
     assert_eq!(issues.len(), 1, "{issues:?}");
     assert_eq!(issues[0].line, Some(10));

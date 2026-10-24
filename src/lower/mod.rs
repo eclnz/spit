@@ -535,6 +535,23 @@ fn lower_statement(
             }
             builder.dimension_order = Some((order.clone(), statement.place.clone()));
         }
+        StatementKind::TypeDecl(name, params) => {
+            if builder
+                .pipeline
+                .type_decls
+                .get(name)
+                .is_some_and(|earlier| earlier != params)
+            {
+                return Err(ParseError::new(
+                    statement.place.line,
+                    format!("type `{name}` is already declared with other parameters"),
+                ));
+            }
+            builder
+                .pipeline
+                .type_decls
+                .insert(name.clone(), params.clone());
+        }
         StatementKind::Types(types) => {
             if builder.types_line {
                 return Err(ParseError::new(

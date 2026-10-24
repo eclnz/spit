@@ -65,6 +65,24 @@ pub(crate) fn apply_import(
             None => new_checks.push(check),
         }
     }
+    for (name, params) in &imported.type_decls {
+        if pipeline
+            .type_decls
+            .get(name)
+            .is_some_and(|earlier| earlier != params)
+        {
+            return Err(ParseError::new(
+                line,
+                format!("import conflicts with type `{name}`"),
+            ));
+        }
+    }
+    pipeline.type_decls.extend(
+        imported
+            .type_decls
+            .iter()
+            .map(|(name, params)| (name.clone(), params.clone())),
+    );
     pipeline.product_paths.extend(
         imported
             .product_paths
@@ -220,6 +238,9 @@ struct Selection {
 fn select_import(module: &Pipeline, spec: &UseSpec, line: usize) -> Result<Pipeline, ParseError> {
     let module = Module::new(module);
     let mut selected = Selection::default();
+    // The types an operation's ports write are declared by the file,
+    // whichever names the import selects.
+    selected.pipeline.type_decls = module.index.pipeline.type_decls.clone();
     let import_all = spec.names.is_none();
     let names: Vec<&str> = match &spec.names {
         Some(names) => names.iter().map(String::as_str).collect(),

@@ -13,7 +13,7 @@ use super::lexical::{
     call_parts, comma_items, identifier, product_name, qualified_identifier, split_ending,
 };
 use super::source_map::tail_place;
-use super::{ParseError, PathRule};
+use super::{ParseError, PathRule, StatementKind};
 
 pub(super) fn single_colon(line: &str) -> Option<usize> {
     line.char_indices().find_map(|(index, character)| {
@@ -134,6 +134,32 @@ pub(super) fn type_error(number: usize, ty: &str, error: TypeParseError) -> Pars
     // Fall back to the whole type if a span is ever not a valid range in `ty`.
     let token = ty.get(error.span).unwrap_or(ty);
     ParseError::new(number, error.message).at_token(token)
+}
+
+/// The text after `type`, as in `type Frame<Kind, Space>`: a name and the
+/// names of its parameters, which are capitalized and differ.
+pub(super) fn parse_type_declaration(
+    text: &str,
+    number: usize,
+) -> Result<StatementKind, ParseError> {
+    let text = text.trim();
+    let expected = "expected `type Name<Param, ...>`, such as `type Frame<Kind, Space>`";
+    let declared = parse_type_expr(text, false).map_err(|error| type_error(number, text, error))?;
+    let TypeExpr::Applied { constructor, args } = declared else {
+        return Err(ParseError::new(number, expected).at_token(text));
+    };
+    let mut params: Vec<String> = Vec::new();
+    for arg in args {
+        let TypeExpr::Named(param) = arg else {
+            return Err(ParseError::new(number, expected).at_token(text));
+        };
+        if params.contains(&param) {
+            let message = format!("type `{constructor}` has parameter `{param}` twice");
+            return Err(ParseError::new(number, message).at_token(text));
+        }
+        params.push(param);
+    }
+    Ok(StatementKind::TypeDecl(constructor, params))
 }
 
 /// The list after `dimensions`, as in `dimensions [model, config, seed]`.
