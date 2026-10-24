@@ -2,6 +2,8 @@
 # so concrete nested types must propagate across several generic invocations.
 # The same operation is instantiated for different K, S, and P bindings.
 
+default entities: {@key}={@value} separated "__"
+
 source lidar : Stream<Frame<Lidar,Sensor>,Raw> [lab, rig, capture, slice]
 source camera : Stream<Frame<Camera,Sensor>,Raw> [lab, rig, capture, slice]
 source unclassified : Stream<Frame<Unknown,Sensor>,Raw> [lab, rig, capture, slice]
@@ -12,7 +14,7 @@ source reference : Reference<World> [lab, rig]
 source policy : Policy<World> [lab]
 source atlas : Atlas<World>
 
-path: artifacts/{@product}/{@entities}.bin
+default path: artifacts/{@product}[/{@entities}].bin
 path atlas: config/world-atlas.bin
 
 operation normalize(sample: Stream<Frame<K,S>,P>) -> Stream<Frame<K,S>,Normalized>

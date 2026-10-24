@@ -1,6 +1,6 @@
 # The `.spitdag` format
 
-A `.spitdag` is what `spit dag -o` writes and `spit dag --json` prints: every job a pipeline resolves to over one dataset, each with its files and its commands. A backend that runs the jobs reads nothing else: no pipeline, path rule or command template. This page describes version 7, the version `src/spitdag` writes. See [Getting started](getting-started.md) for how a `.spitdag` is made, and `spit dag --commands` for a readable view of the same commands.
+A `.spitdag` is what `spit dag -o` writes and `spit dag --json` prints: every job a pipeline resolves to over one dataset, each with its files and its commands. A backend that runs the jobs reads nothing else: no pipeline, path rule or command template. This page describes version 7, the version SPIT writes. Use `spit dag --commands` for a readable view of the same commands.
 
 ## Document
 
@@ -195,7 +195,7 @@ An operation can be carried out by a body of steps rather than a command, and a 
 
 The first is the pipeline itself, by its file name. The others are the files it imports, at any depth, each by its path from the pipeline's folder. `blob` is the file's git blob id, the SHA-1 of `blob <length>\0` and its bytes, which is what `git hash-object <file>` prints. `git log --all --find-object=<blob>` finds the revisions that hold that exact text, and `git hash-object` on a checkout's files tells whether the plan came from them.
 
-`calls` lists each call to an operation carried out by steps, in the order lowering expanded them:
+`calls` lists each call to an operation carried out by steps. Calls written in the pipeline come in the order they are written, each followed by the calls its body makes, in the order the body writes them, so a call's `parent` always comes before it:
 
 ```json
 "calls": [

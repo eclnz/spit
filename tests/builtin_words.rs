@@ -20,21 +20,23 @@ fn words_are_found_by_where_they_are_written() {
     let cases = [
         ("source image : Image [subject, visit]", "source", Some("source")),
         ("    stage clean:", "stage", Some("stage")),
-        ("stage = merge(sorted @ vary(part))", "stage", None),
-        ("path: results/{@product}/{@entities}.txt", "path", Some("path")),
+        // A keyword's word is reserved, so this is `stage`, and an error.
+        ("stage = merge(sorted @ vary(part))", "stage", Some("stage")),
+        ("default path: results/{@product}/{@entities}.txt", "path", Some("path")),
         ("path image: input/{subject}.txt", "path", Some("path")),
         ("path image: input/{subject}.txt", "subject", None),
-        ("path: {@stage}/{@product}/{@entities}.txt", "@stage", Some("@stage")),
-        ("path: {@stage}/{@product}/{@entities}.txt", "@entities", Some("@entities")),
-        ("path: sub-{sub}/{@labels}_{@product}", "@labels", Some("@labels")),
-        ("path: out/{{@product}}", "@product", None),
+        ("default path: {@stage}/{@product}/{@entities}.txt", "@stage", Some("@stage")),
+        ("default path: {@stage}/{@product}/{@entities}.txt", "@entities", Some("@entities")),
+        // `{@labels}` is gone, so it is no longer a word with documentation.
+        ("default path: sub-{sub}/{@labels}_{@product}", "@labels", None),
+        ("default path: out/{{@product}}", "@product", None),
         ("path log: logs/{server}/{date:date}.log", "date:date", Some("date")),
         ("path log: logs/{server}/{date:date}.log", "date:", None),
         ("path run: raw/run-{run:digits}.csv", "digits", Some("digits")),
         ("    contexts: data/{y:year}", "year", Some("year")),
         ("command c: tool {x:date}", "date", None),
-        ("ext: .nii.gz", "ext", Some("ext")),
-        ("ext: Image = convert(dicom)", "ext", None),
+        ("default ext: .nii.gz", "ext", Some("ext")),
+        ("ext: Image = convert(dicom)", "ext", Some("ext")),
         ("operation mean(images: many Image @ min(2)) -> Image", "many", Some("many")),
         ("operation mean(images: many Image @ min(2)) -> Image", "min", Some("min")),
         (
@@ -44,8 +46,8 @@ fn words_are_found_by_where_they_are_written() {
         ),
         ("command process: tool --in {image} --out {@output}", "@output", Some("@output")),
         ("command process: tool --in {image} --out {@output}", "image", None),
-        ("path: out/{output}", "output", None),
-        ("path: out/{@output}", "@output", None),
+        ("default path: out/{output}", "output", None),
+        ("default path: out/{@output}", "@output", None),
         ("command process: tool {output} {@output}", "{output", None),
         ("command convert: dcm2niix -o {image.dir} -f {image.stem} {dicom}", ".dir", Some(".dir")),
         ("command convert: dcm2niix -o {image.dir} -f {image.stem} {dicom}", ".stem", Some(".stem")),
@@ -166,7 +168,7 @@ fn check(file: &str, args: &[&str], text: &str) -> (bool, String, String) {
 
 #[test]
 fn check_writes_each_words_documentation_once() {
-    let text = "source raw [id]\nsource other [id]\noperation copy(input)\nout = copy(raw)\n";
+    let text = "source raw [id]\nsource other [id]\noperation copy(input)\nout = copy(raw)\ndefault entities: {@key}={@value} separated \"__\"\npath out: out/{@product}/{@entities}\n";
     let (ok, json, _) = check("unsaved.spit", &["--json", "--stdin", "--hovers"], text);
     assert!(ok);
     assert!(json.contains(r#"{"line":1,"column":1,"end_column":7,"word":"source"}"#));
@@ -193,7 +195,7 @@ fn a_recipe_and_a_spitout_have_words_too() {
         &["--json", "--stdin", "--hovers"],
         "require [id] where raw count>=1\n",
     );
-    assert!(ok);
+    assert!(!ok);
     assert!(json.contains("name the pipeline"), "{json}");
     assert!(json.contains(r#""word":"require""#));
     assert!(json.contains(r#""word":"require-where""#));
@@ -222,7 +224,7 @@ fn a_recipe_and_a_spitout_have_words_too() {
         &["--json", "--stdin"],
         "sources:\n    raw[id=1\n",
     );
-    assert!(ok);
+    assert!(!ok);
     assert!(
         json.contains(r#""source":"inventory","line":2,"column":9"#),
         "{json}"

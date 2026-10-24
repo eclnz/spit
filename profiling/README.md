@@ -35,7 +35,7 @@ measure how a stage scales. For that, give more sizes, as in
   dataset of subjects, each with a mask and two sessions of a reference and
   two runs, plus `--extra` steps after its four. It times `spit inputs`,
   `spit dag` from the `.spitout`, and `spit check`, and once more with
-  `ext:` completing the default path.
+  `default ext:` completing the default path.
 - **profile**: one `spit check` on a chain under callgrind, printing the
   `spit` functions that take the most instructions, inclusive. Give `spit
   check` more arguments after `--`, as in `profile -- --json --hovers`.
@@ -66,7 +66,7 @@ before taking it as a regression. The `new+ext` row of `dataset` has no old
 row to compare with.
 
 A build from before `{@product}` is given the old `{product}` spelling, and
-skips `--hovers` and `ext:`, which it does not have.
+skips `--hovers` and `default ext:`, which it does not have.
 
 ## Line-level profiles
 

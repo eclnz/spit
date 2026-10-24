@@ -18,6 +18,8 @@ const STEPS: &str = "\
 operation mc(bold) -> .nii.gz
 command mc: mcflirt -in {bold} -out {@output}
 moco = mc(bold)
+default entities: {@key}={@value} separated \"__\"
+path moco: out/{@product}/{@entities}
 ";
 
 fn stderr(tree: &Tree, args: &[&str]) -> String {
@@ -72,7 +74,8 @@ fn a_file_that_goes_on_past_the_rule_says_where_the_rule_ends() {
     tree.write(
         "a.spit",
         "source scan [id, run]\npath scan: scans/{id}/{run}.txt\n\
-         operation copy(scan) -> .txt\ncommand copy: cp {scan} {@output}\ncopied = copy(scan)\n",
+         operation copy(scan) -> .txt\ncommand copy: cp {scan} {@output}\ncopied = copy(scan)\n\
+         path copied: out/{id}/{run}.txt\n",
     );
     let stderr = stderr(&tree, &["inputs", "a.spit", "--root", "."]);
     assert!(

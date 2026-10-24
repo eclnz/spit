@@ -11,7 +11,6 @@ mod discover;
 mod exclusions;
 mod pattern;
 mod recipe;
-mod suggest;
 mod variants;
 
 use std::borrow::Cow;
@@ -30,7 +29,7 @@ use crate::model::{
     ArtifactInstance, CoverageAction, CoverageGap, EntityBinding, GroupKey, InputRules, Pipeline,
     PipelineIndex, Removal, SourceInventory,
 };
-use crate::parser::{strip_comment, without_bom, Header, Keyword, Kind, ParseError, SourceMap};
+use crate::parser::{without_bom, Head, Header, Keyword, Kind, Layout, ParseError, SourceMap};
 use crate::paths::{inspect_paths, PathError, PathTemplate};
 
 pub(crate) use self::coverage::collect_rule_errors;
@@ -38,14 +37,13 @@ pub use self::coverage::EveryGroupDropped;
 use self::coverage::{apply_drops, check_before_removal};
 pub(crate) use self::coverage::{check_inventory, InputCheck};
 pub(crate) use self::discover::with_source_paths;
-use self::discover::{discover, locate_sources, unmatched_files};
+use self::discover::{discover, locate_sources};
 pub use self::discover::{discover_source_files, discover_sources, Discovery};
 pub(crate) use self::exclusions::collect_exclusion_errors;
 pub use self::exclusions::UnmatchedExclusion;
 use self::exclusions::{read_exclusion_files, Excluder};
 pub use self::pattern::{MissedSource, NearestFile};
 use self::recipe::{expand_input_block, restore_path_places};
-pub use self::suggest::{NearlyMatched, SuggestedSource, Suggestions};
 pub use self::variants::{case_variants, CaseVariants, Spelling};
 
 /// A recipe's rules and any inventory records written with them.
@@ -71,18 +69,11 @@ pub fn parse_input_spec(text: &str) -> Result<InputSpec, ParseError> {
 }
 
 /// Parse a `.spitin` file at `path`. The pipeline it names and its root are
-/// relative to its folder, and a recipe that names its pipeline must name
-/// its root: a file says where its data is, whoever runs it.
+/// relative to its folder. A missing root may be supplied by the pipeline.
 pub fn parse_input_spec_at(text: &str, path: &Path) -> Result<InputSpec, ParseError> {
     let (header, document) = parse_recipe(text, |text| {
         parse_located_document(text, path, Kind::Recipe)
     })?;
-    if header.pipeline.is_some() && header.root.is_none() {
-        return Err(ParseError::new(
-            1,
-            "a recipe names its dataset root, the folder its paths are relative to, with a line such as `root data`, or `root .` for the recipe's own folder",
-        ));
-    }
     let folder = path.parent().unwrap_or_else(|| Path::new(""));
     let header = RecipeHeader {
         pipeline: header.pipeline.map(|pipeline| folder.join(pipeline)),
@@ -131,21 +122,19 @@ fn parse_recipe(
 fn header_lines(text: &str) -> Result<(RecipeHeader, String), ParseError> {
     let mut header = RecipeHeader::default();
     let mut rest = String::new();
-    for (index, original) in text.lines().enumerate() {
-        let number = index + 1;
-        let line = strip_comment(original).trim();
-        if let Some(file) = line.strip_prefix("pipeline ") {
+    for (number, line) in Layout::new(text).numbered() {
+        if let Some(file) = line.code.strip_prefix("pipeline ") {
             if header.pipeline.is_some() {
                 return Err(ParseError::new(number, "a .spitin names its pipeline once"));
             }
             header.pipeline = Some(PathBuf::from(file.trim()));
-        } else if let Some(folder) = line.strip_prefix("root ") {
+        } else if let Some(folder) = line.code.strip_prefix("root ") {
             if header.root.is_some() {
                 return Err(ParseError::new(number, "a .spitin names its root once"));
             }
             header.root = Some((PathBuf::from(folder.trim()), number));
         } else {
-            rest.push_str(original);
+            rest.push_str(line.text);
         }
         rest.push('\n');
     }
@@ -157,20 +146,23 @@ fn header_lines(text: &str) -> Result<(RecipeHeader, String), ParseError> {
 const PIPELINE_ONLY: &str = ", which every dataset shares; a .spitin binds it to one dataset with \
      its `root`, source paths, and `inputs:`, `exclude` and `require` rules";
 
-/// Whether a line that starts with no keyword is a step, `out = f(in)`,
-/// rather than a record, whose `[` comes before any `=`.
-fn is_step(line: &str) -> bool {
-    Keyword::of(line).is_none()
-        && line
-            .split_once('=')
-            .is_some_and(|(outputs, call)| !outputs.contains('[') && call.contains('('))
-}
-
 fn check_input_lines(text: &str) -> Result<(), ParseError> {
-    for (index, original) in text.lines().enumerate() {
-        let line = strip_comment(original).trim();
+    for (number, line) in Layout::new(text).numbered() {
+        // After `default`, the setting decides where the line belongs.
+        let (keyword, written) = match line.head {
+            Head::Keyword(Keyword::Default, rest) => (
+                Keyword::split(rest.trim()).map(|(keyword, _)| keyword),
+                line.code,
+            ),
+            _ => (
+                line.keyword(),
+                line.code
+                    .split_once([' ', ':'])
+                    .map_or(line.code, |(word, _)| word),
+            ),
+        };
         let pipeline_only = matches!(
-            Keyword::of(line),
+            keyword,
             Some(
                 Keyword::Source
                     | Keyword::Operation
@@ -180,32 +172,33 @@ fn check_input_lines(text: &str) -> Result<(), ParseError> {
                     | Keyword::Checks
                     | Keyword::Stage
                     | Keyword::Dimensions
+                    | Keyword::Types
                     | Keyword::Sidecars
                     | Keyword::Use
             )
         );
         if pipeline_only {
-            let word = line.split_once([' ', ':']).map_or(line, |(word, _)| word);
+            let word = written.split_once(':').map_or(written, |(word, _)| word);
             return Err(ParseError::new(
-                index + 1,
+                number,
                 format!("`{word}` belongs in the .spit pipeline{PIPELINE_ONLY}"),
             ));
         }
-        if is_step(line) {
+        if line.head == Head::Step {
             return Err(ParseError::new(
-                index + 1,
+                number,
                 format!("a step belongs in the .spit pipeline{PIPELINE_ONLY}"),
             ));
         }
-        if Keyword::of(line) == Some(Keyword::Ext) {
+        if keyword == Some(Keyword::Ext) {
             return Err(ParseError::new(
-                index + 1,
-                "`ext:` completes the pipeline's default output paths; it belongs in the .spit pipeline",
+                number,
+                "a default `ext:` completes the pipeline's default output paths; it belongs in the .spit pipeline",
             ));
         }
-        if matches!(Header::of(line), Some(Header::SourcePaths)) {
+        if line.header() == Some(Header::SourcePaths) {
             return Err(ParseError::new(
-                index + 1,
+                number,
                 "`source_paths:` belongs in a .spitout; use `path image:` in a .spitin",
             ));
         }
@@ -245,6 +238,7 @@ fn finish_spec(
     }
     inputs.source_paths = pipeline.product_paths;
     inputs.source_default = pipeline.path_template;
+    inputs.source_entities = pipeline.entities_format;
     if let Some(folder) = folder {
         read_exclusion_files(&mut inputs, folder)?;
     }
@@ -257,9 +251,21 @@ fn finish_spec(
 }
 
 impl InputSpec {
+    /// The recipe's root or the pipeline's, rejecting duplicate declarations.
+    pub fn root_for<'a>(
+        &'a self,
+        pipeline: &'a Pipeline,
+    ) -> Result<Option<&'a (PathBuf, usize)>, InputError> {
+        match (&self.root, &pipeline.root) {
+            (Some(_), Some(_)) => Err(InputError::RootInBoth),
+            (root, inline) => Ok(root.as_ref().or(inline.as_ref())),
+        }
+    }
+
     /// Check the recipe against the pipeline's source declarations, without
     /// reading any file or record.
     pub fn check(&self, pipeline: &Pipeline) -> Result<(), InputError> {
+        self.root_for(pipeline)?;
         let index = PipelineIndex::new(pipeline);
         for name in self.rules.source_paths.keys() {
             let product = name.clone();
@@ -278,6 +284,14 @@ impl InputSpec {
             }
             if pipeline.product_paths.contains_key(name) {
                 return Err(InputError::PathInBoth { product });
+            }
+        }
+        if let Some(format) = &self.rules.source_entities {
+            let dimensions = pipeline.dimension_order();
+            if let Some(dimension) = format.labels.keys().find(|name| !dimensions.contains(name)) {
+                return Err(InputError::Path(crate::paths::error(format!(
+                    "the recipe's entity label names unknown dimension `{dimension}`"
+                ))));
             }
         }
         if let Some((_, error)) = collect_rule_errors(pipeline, &self.rules, &BTreeSet::new())
@@ -388,22 +402,6 @@ impl InputSpec {
             gaps: checked.gaps,
             root,
         })
-    }
-
-    /// Suggest a source and path rule for each group of files under `root`
-    /// that no source rule matches, by the recipe's rules and `pipeline`'s.
-    /// A source with no rule is not an error here: a group of files may be
-    /// suggested as that source.
-    pub fn suggest(&self, pipeline: &Pipeline, root: &Path) -> Result<Suggestions, InputError> {
-        let located = with_source_paths(pipeline, &self.rules.source_paths_for(pipeline));
-        let (files, declared) = unmatched_files(&located, root)?;
-        let taken = pipeline
-            .products
-            .iter()
-            .map(|product| product.name.as_str())
-            .filter(|name| !declared.iter().any(|product| product.name == *name))
-            .collect();
-        Ok(suggest::suggest(&files, &declared, &taken))
     }
 
     /// Give a pipeline the recipe's source paths, so an editor can check
@@ -574,6 +572,8 @@ fn listed<'a>(items: impl Iterator<Item = &'a str>) -> String {
 /// Why a recipe cannot be applied to a pipeline, or to a dataset.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum InputError {
+    /// Both the recipe and pipeline declare a dataset root.
+    RootInBoth,
     /// The pipeline does not compile, a rule does not fit it, or the
     /// records break a rule.
     Resolve(ResolveError),
@@ -620,6 +620,7 @@ impl From<PathError> for InputError {
 impl fmt::Display for InputError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::RootInBoth => f.write_str("dataset root is declared in both .spit and .spitin; keep one declaration"),
             Self::Resolve(error) => error.fmt(f),
             Self::Path(error) => error.fmt(f),
             Self::NotASource { product } => write!(

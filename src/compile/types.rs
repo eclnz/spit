@@ -1,10 +1,10 @@
 //! Type checking of steps: unifying each port's type with the product bound
 //! to it, and inferring the types of the products a step makes.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
-use crate::error::{PortSite, ResolveError, TypeConflict};
-use crate::model::{Invocation, OperationDef, ProductDef};
+use crate::error::{DefinitionSubject, PortSite, ResolveError, TypeConflict};
+use crate::model::{Call, CallId, Invocation, OperationDef, ProductDef};
 use crate::types::{Substitutions, TypeExpr, TypeUnifyError};
 
 use super::find_product;
@@ -62,6 +62,74 @@ pub(super) fn infer_types(
         })
         .collect();
     Ok((types, substitutions))
+}
+
+/// Hold each call of an operation carried out by steps to the operation's
+/// own signature: unify each port with the product the caller gave it or
+/// the call made, under one set of variables per call. Its steps were
+/// checked against their own operations, which says nothing of the types
+/// the signature promises. A call that fails poisons its outputs; a call
+/// that reads or makes something already poisoned is not checked again.
+pub(super) fn check_calls(
+    calls: &[Call],
+    operations: &BTreeMap<&str, &OperationDef>,
+    products: &BTreeMap<&str, &ProductDef>,
+    inferred_types: &BTreeMap<String, TypeExpr>,
+    errors: &mut Vec<(DefinitionSubject, ResolveError)>,
+    poisoned: &mut BTreeSet<String>,
+) {
+    for (index, call) in calls.iter().enumerate() {
+        let Some(operation) = operations.get(call.operation.as_str()) else {
+            continue;
+        };
+        let failed = poisoned.contains(&call.operation)
+            || call
+                .inputs
+                .iter()
+                .chain(&call.outputs)
+                .any(|product| poisoned.contains(product));
+        if failed {
+            continue;
+        }
+        if let Err(error) = check_call(call, operation, products, inferred_types) {
+            errors.push((DefinitionSubject::Call(CallId::at(index)), error));
+            poisoned.extend(call.outputs.iter().cloned());
+        }
+    }
+}
+
+fn check_call(
+    call: &Call,
+    operation: &OperationDef,
+    products: &BTreeMap<&str, &ProductDef>,
+    inferred_types: &BTreeMap<String, TypeExpr>,
+) -> Result<(), ResolveError> {
+    let output_product = call.outputs.first().map_or("", String::as_str);
+    let mut substitutions = Substitutions::default();
+    let inputs = operation
+        .inputs
+        .iter()
+        .map(|port| (&port.name, &port.artifact_type));
+    let outputs = operation
+        .outputs
+        .iter()
+        .map(|port| (&port.name, &port.artifact_type));
+    for ((port, expected), product) in inputs.zip(&call.inputs).chain(outputs.zip(&call.outputs)) {
+        let actual = match inferred_types.get(product) {
+            Some(inferred) => inferred,
+            None => &find_product(products, product)?.artifact_type,
+        };
+        unify_port(
+            &mut substitutions,
+            operation,
+            output_product,
+            port,
+            product,
+            expected,
+            actual,
+        )?;
+    }
+    Ok(())
 }
 
 fn unify_port(

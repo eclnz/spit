@@ -99,7 +99,7 @@ fn the_nearest_file_shows_the_rule_with_its_shape() {
     tree.write(
         "a.spit",
         "source log [server, date]\npath log: logs/{server}/{date:date}.log\n\
-         operation d(log) -> .json\ncommand d: d {log} {@output}\nout = d(log)\n",
+         operation d(log) -> .json\ncommand d: d {log} {@output}\nout = d(log)\ndefault entities: {@key}={@value} separated \"__\"\npath out: out/{@product}/{@entities}\n",
     );
     let output = run(&tree, &["dag", "a.spit", "--root", "."]);
     let stderr = text(&output.stderr);
@@ -279,11 +279,11 @@ fn a_shape_on_an_output_or_a_default_is_an_error() {
         "{output}"
     );
     let default = check(
-        "source s [d]\npath s: in/{d}.txt\npath: out/{@product}/{d:digits}\n\
+        "source s [d]\npath s: in/{d}.txt\ndefault path: out/{@product}/{d:digits}\n\
          operation f(s) -> .txt\ncommand f: f {s} {@output}\no = f(s)\n",
     );
     assert!(
-        default.contains("`path:` is the default for outputs too"),
+        default.contains("`default path:` is the rule for outputs too"),
         "{default}"
     );
 }
@@ -294,7 +294,7 @@ fn a_record_whose_value_fails_its_rules_shape_is_rejected() {
     tree.write(
         "a.spit",
         "source log [server, date]\npath log: logs/{server}/{date:date}.log\n\
-         operation d(log) -> .json\ncommand d: d {log} {@output}\nout = d(log)\n",
+         operation d(log) -> .json\ncommand d: d {log} {@output}\nout = d(log)\ndefault entities: {@key}={@value} separated \"__\"\npath out: out/{@product}/{@entities}\n",
     );
     tree.write("a.spitin", "pipeline a.spit\nroot .\n");
     tree.write(
@@ -307,22 +307,6 @@ fn a_record_whose_value_fails_its_rules_shape_is_rejected() {
         said.contains("`date=notes`, which is not a `date`"),
         "{said}"
     );
-}
-
-#[test]
-fn a_suggested_rule_has_the_shape_and_reads_its_files() {
-    let tree = Tree::new(
-        "shapes-suggest",
-        &[
-            "logs/web1/2026-09-01.log",
-            "logs/web1/2026-09-02.log",
-            "logs/web2/2026-09-01.log",
-        ],
-    );
-    tree.write("a.spit", "");
-    tree.write("a.spitin", "pipeline a.spit\nroot .\n");
-    let stdout = text(&run(&tree, &["inputs", "a.spitin", "--suggest"]).stdout);
-    assert!(stdout.contains("{date:date}.log"), "{stdout}");
 }
 
 #[test]
@@ -343,15 +327,16 @@ fn two_sources_with_one_dimension_name_collide_whatever_their_shapes() {
 #[test]
 fn the_default_owner_error_names_the_rule_to_write() {
     let said = check(
-        "source s [d]\npath: in/{d:digits}.txt\noperation f(s) -> .txt\ncommand f: f {s} {@output}\no = f(s)\n",
+        "source s [d]\ndefault path: in/{d:digits}.txt\noperation f(s) -> .txt\ncommand f: f {s} {@output}\no = f(s)\n",
     );
     assert!(
         said.contains("write the shape in a `path` rule for each source, as `path <source>: ...`"),
         "{said}"
     );
     assert!(!said.contains("path source:"), "{said}");
-    let fixed =
-        check("source s [d]\npath: out/{@product}/{@entities}\npath s: in/{d:digits}.txt\n");
+    let fixed = check(
+        "source s [d]\ndefault path: out/{@product}/{@entities}\npath s: in/{d:digits}.txt\ndefault entities: {@key}={@value} separated \"__\"\n",
+    );
     assert!(fixed.contains("Pipeline valid."), "{fixed}");
 }
 

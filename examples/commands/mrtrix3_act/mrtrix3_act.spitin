@@ -5,6 +5,7 @@ root mrtrix3_mock_data
 # Where this dataset keeps each main source, in BIDS layout. Companion
 # sources follow the NIfTI source path with their own suffix.
 inputs:
+    contexts: sub-{sub}/ses-{ses}
     t1w: sub-{sub}/ses-{ses}/anat/sub-{sub}_ses-{ses}_T1w.nii.gz
     source_lut: config/source_lut.txt
     target_lut: config/target_lut.txt

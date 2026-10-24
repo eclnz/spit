@@ -30,7 +30,7 @@ impl Command {
     fn spec(self) -> CommandSpec {
         use Flag::{
             ByTarget, Calls, Commands, Counts, Hovers, Jobs, Json, Output, Partial, PathRules,
-            Paths, Root, Stdin, Suggest, Unmatched,
+            Paths, Root, Stdin, Tree, Unmatched,
         };
         match self {
             Self::Check => CommandSpec {
@@ -42,21 +42,21 @@ impl Command {
             },
             Self::Inputs => CommandSpec {
                 name: "inputs",
-                files: "<recipe.spitin>",
-                summary: "step 2: find a dataset's sources with a recipe, apply `exclude` and `require`, and write a .spitout",
-                example: "spit inputs dataset.spitin -o dataset.spitout\n  spit inputs dataset.spitin --suggest",
-                flags: &[Root, Output, Unmatched, Suggest],
+                files: "<recipe.spitin | pipeline.spit>",
+                summary: "step 2: find a dataset's sources with a pipeline or recipe, apply `exclude` and `require`, and write a .spitout",
+                example: "spit inputs dataset.spitin -o dataset.spitout\n  spit inputs dataset.spitin --unmatched",
+                flags: &[Root, Output, Unmatched],
             },
             Self::Dag => CommandSpec {
                 name: "dag",
-                files: "<recipe.spitin> or <pipeline.spit> <inputs.spitout | ->",
+                files: "<recipe.spitin> or <pipeline.spit> [inputs.spitout | -]",
                 summary: "step 3: resolve a pipeline's jobs over a dataset's inputs and print their commands; -o writes the .spitdag",
                 example: "spit dag dataset.spitin\n  spit dag dataset.spitin -o analysis.spitdag\n  spit dag analysis.spit dataset.spitout -o analysis.spitdag\n  spit dag dataset.spitin --counts",
-                flags: &[Root, Paths, Commands, Jobs, Counts, Partial, Json, Output],
+                flags: &[Root, Paths, Commands, Jobs, Counts, Partial, Json, Output, Tree],
             },
             Self::Artifacts => CommandSpec {
                 name: "artifacts",
-                files: "<recipe.spitin> or <pipeline.spit> <inputs.spitout | ->",
+                files: "<recipe.spitin> or <pipeline.spit> [inputs.spitout | -]",
                 summary: "step 3: report what can and cannot be made from a dataset's inputs, and why",
                 example: "spit artifacts dataset.spitin\n  spit artifacts dataset.spitin --by-target\n  spit artifacts analysis.spit dataset.spitout",
                 flags: &[Root, ByTarget],
@@ -121,12 +121,12 @@ pub(crate) enum Flag {
     Partial,
     ByTarget,
     Unmatched,
-    Suggest,
     PathRules,
     Json,
     Stdin,
     Hovers,
     Calls,
+    Tree,
 }
 
 const FLAGS: [Flag; 15] = [
@@ -139,16 +139,16 @@ const FLAGS: [Flag; 15] = [
     Flag::Partial,
     Flag::ByTarget,
     Flag::Unmatched,
-    Flag::Suggest,
     Flag::PathRules,
     Flag::Json,
     Flag::Stdin,
     Flag::Hovers,
     Flag::Calls,
+    Flag::Tree,
 ];
 
 /// Pairs of flags that cannot be used together.
-const CONFLICTS: [(Flag, Flag); 15] = [
+const CONFLICTS: [(Flag, Flag); 13] = [
     (Flag::Calls, Flag::PathRules),
     (Flag::Calls, Flag::Hovers),
     (Flag::Json, Flag::Paths),
@@ -157,8 +157,6 @@ const CONFLICTS: [(Flag, Flag); 15] = [
     (Flag::Json, Flag::Commands),
     (Flag::Json, Flag::PathRules),
     (Flag::Unmatched, Flag::Output),
-    (Flag::Suggest, Flag::Output),
-    (Flag::Suggest, Flag::Unmatched),
     (Flag::Counts, Flag::Json),
     (Flag::Jobs, Flag::Commands),
     (Flag::Jobs, Flag::Paths),
@@ -178,12 +176,12 @@ impl Flag {
             Self::Partial => "--partial",
             Self::ByTarget => "--by-target",
             Self::Unmatched => "--unmatched",
-            Self::Suggest => "--suggest",
             Self::PathRules => "--path-rules",
             Self::Json => "--json",
             Self::Stdin => "--stdin",
             Self::Hovers => "--hovers",
             Self::Calls => "--calls",
+            Self::Tree => "--tree",
         }
     }
 
@@ -198,8 +196,9 @@ impl Flag {
 
     fn help(self, command: Command) -> &'static str {
         match (self, command) {
+            (Self::Tree, _) => "show pipeline products and steps without reading a dataset; --ascii is an alias",
             (Self::Root, _) => {
-                "with a .spit pipeline and no recipe, the dataset folder to scan, relative to where spit runs"
+                "with a .spit pipeline that has no root line, the dataset folder to scan, relative to where spit runs"
             }
             (Self::Output, Command::Inputs) => "write the .spitout to <file>, not standard output",
             (Self::Output, _) => "write the .spitdag to <file>",
@@ -218,9 +217,6 @@ impl Flag {
             (Self::Unmatched, _) => {
                 "list files matching no source rule instead of writing a .spitout"
             }
-            (Self::Suggest, _) => {
-                "suggest source and path lines for files matching no source rule, instead of writing a .spitout"
-            }
             (Self::PathRules, _) => "list the path rule each product uses",
             (Self::Json, Command::Check) => "print diagnostics as JSON, for editors",
             (Self::Json, _) => "print the .spitdag",
@@ -237,6 +233,9 @@ impl Flag {
     }
 
     fn parse(name: &str) -> Option<Self> {
+        if name == "--ascii" {
+            return Some(Self::Tree);
+        }
         if name == "--output" {
             return Some(Self::Output);
         }
@@ -293,6 +292,16 @@ impl Flags {
     fn check_conflicts(&self, command: Command) -> Result<(), String> {
         if self.has(Flag::Hovers) && !self.has(Flag::Json) {
             return Err(misuse("--hovers requires --json", Some(command)));
+        }
+        if self.has(Flag::Tree) {
+            for (flag, _) in &self.0 {
+                if *flag != Flag::Tree {
+                    return Err(misuse(
+                        format_args!("--tree cannot be used with {}", flag.name()),
+                        Some(command),
+                    ));
+                }
+            }
         }
         for (first, second) in CONFLICTS {
             if self.has(first) && self.has(second) {
@@ -374,7 +383,7 @@ fn overview(f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "  {:<10} {}", command.name(), command.summary())?;
     }
     f.write_str(
-        "\nfiles:\n  .spit      a pipeline: sources, operations, steps, commands, path rules\n  .spitin    a recipe for a dataset's inputs, naming its pipeline\n  .spitout   a dataset's settled inputs, each source with its file\n  .spitdag   the resolved jobs, each with its files and command\n\nRun `spit help <command>` for its options.\n",
+        "\nfiles:\n  .spit      a pipeline: sources, operations, steps, commands, path rules, optional root\n  .spitin    a recipe for a dataset's inputs, naming its pipeline\n  .spitout   a dataset's settled inputs, each source with its file\n  .spitdag   the resolved jobs, each with its files and command\n\nRun `spit help <command>` for its options.\n",
     )
 }
 
@@ -387,6 +396,9 @@ fn command_help(f: &mut fmt::Formatter<'_>, command: Command) -> fmt::Result {
         " [options]"
     };
     writeln!(f, "usage: spit {name} {}{options}", command.files())?;
+    if command == Command::Dag {
+        writeln!(f, "       spit dag <pipeline.spit> --tree")?;
+    }
     if let Some(shortcut) = command.shortcut() {
         writeln!(f, "\n{shortcut}")?;
     }

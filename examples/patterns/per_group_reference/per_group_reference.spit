@@ -1,9 +1,0 @@
-# The reference filename records a measurement date, but matching uses station.
-source reading : Series [station, day]
-path reading: readings/{station}/{day}.csv
-source reference : Series [station, measured]
-path reference: references/{station}/{measured}.csv
-operation compare(reading: Series, reference: Series) -> Series
-command compare: compare {reading} {reference} --out {@output}
-path anomaly: anomalies/{station}/{day}.csv
-anomaly = compare(reading, reference @ same(station))
