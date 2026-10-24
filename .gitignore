@@ -4,3 +4,8 @@
 /profiling/work/
 
 *.afphoto
+
+# What spit-bash writes when it runs the examples in examples/runnable.
+/examples/runnable/*/output/
+/examples/runnable/*/.spit-bash/
+/examples/runnable/*/*.spitdag
