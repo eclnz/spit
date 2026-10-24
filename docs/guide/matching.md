@@ -4,6 +4,8 @@ The input with the most dimensions normally drives a step. SPIT makes a job for 
 
 ## Shared dimensions
 
+<!-- spit-doc: fragment -->
+
 ```spit
 source reading : Series [station, day]
 source policy : Policy [station]
@@ -15,6 +17,8 @@ Each `reading[station=...,day=...]` drives a job. That job reads the `policy` fo
 
 ## Selectors
 
+<!-- spit-doc: fragment -->
+
 ```spit
 calibrated = calibrate(reading, calibration @ where(revision=2))
 anomaly = compare(calibrated, reference @ same(station))
@@ -24,6 +28,8 @@ anomaly = compare(calibrated, reference @ same(station))
 
 ## Collections
 
+<!-- spit-doc: fragment -->
+
 ```spit
 operation summarise(days: many Series @ min(2)) -> Report
 report = summarise(calibrated @ vary(day))
@@ -32,6 +38,8 @@ report = summarise(calibrated @ vary(day))
 `@ vary(day)` collects the input's days for each remaining identity, such as each station, and removes `day` from the output identity. `many` names the operation port's cardinality; `@ vary` names the dimension the call collects. `@ min(2)` rejects a collection smaller than two. A collection is sorted by the pipeline's dimension order, with numeric runs ordered naturally (`2` before `10`). One operation can have at most one `many` input, beside ordinary inputs that are matched once per group. `@ vary(model, config)` collects over both dimensions in one call.
 
 ## Broadcasting
+
+<!-- spit-doc: fragment -->
 
 ```spit
 dimensions [station, scenario]
