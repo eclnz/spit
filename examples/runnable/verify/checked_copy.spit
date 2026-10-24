@@ -1,0 +1,10 @@
+source text : Lines [part]
+
+default entities: {@key}={@value} separated "_"
+default path: output/{@product}/{@entities}.txt
+path text: input/{part}.txt
+
+operation copy(input: Lines) -> Lines
+verify copy: test -s {input}
+command copy: cp {input} {@output}
+copied = copy(text)
