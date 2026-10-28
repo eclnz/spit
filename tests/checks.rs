@@ -114,7 +114,7 @@ default entities: {@key}={@value} separated \"__\"\npath cleaned: out/{@product}
     let without_checks = |json: &str| {
         let mut json = json.to_owned();
         while let Some(start) = json.find(",\"checks\":[{") {
-            let end = json[start..].find("}]}").unwrap() + start + 2;
+            let end = json[start..].find("}],\"cores\":").unwrap() + start + 2;
             json.replace_range(start..end, ",\"checks\":[]");
         }
         json.replace("\"check_lines\",", "")

@@ -6,7 +6,7 @@ use std::fmt::{self, Write as _};
 use crate::command::shell_word;
 use crate::model::{
     identity, push_identity, Artifact, ArtifactInstance, ArtifactReport, Call, CallId,
-    EntityBinding, Gap, IncompleteJob, JobId, Pipeline, ResolvedDag,
+    EntityBinding, Gap, IncompleteJob, JobId, Pipeline, ResolvedDag, Resources,
 };
 use crate::spitdag::{Argument, BoundDag, BoundJob, StepCall, When};
 use crate::types::TypeExpr;
@@ -265,13 +265,17 @@ fn render_commands(dag: &BoundDag) -> String {
 
 /// A job's commands in the order a backend runs them: its input checks,
 /// `verify` lines, `run` line, then its output checks. A job a call made
-/// first says where it comes from.
+/// first says where it comes from, and one whose operation declares what it
+/// needs says so next.
 fn push_command_lines(text: &mut String, dag: &BoundDag, job: &BoundJob) {
     let step = dag.step(job);
     if let Some(origin) = &step.origin {
         text.push_str("  from:   ");
         push_origin(text, dag, origin);
         text.push('\n');
+    }
+    if step.resources != Resources::default() {
+        writeln!(text, "  needs:  {}", step.resources).expect("writing to a String");
     }
     let checks = |text: &mut String, when: When| {
         for check in job

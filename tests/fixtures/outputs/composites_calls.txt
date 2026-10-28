@@ -27,25 +27,25 @@ $ spit check somatic.spit --calls
 exit: 0
 --- stdout
 normal_bam, normal_gvcf = gl::align_sample(…)  line 17
-  gl::align_sample  germline.spit  blob f93cbf2
-  line 27  normal_bam::aligned = gl::bwa_align(reference, normal_r1, normal_r2)
-  line 28  normal_bam::sorted = gl::sort_reads(normal_bam::aligned)
-  line 29  normal_bam::merged = gl::merge_lanes(normal_bam::sorted)
-  line 30  normal_bam, normal_bam::index, normal_bam::metrics = gl::mark_duplicates(normal_bam::merged)
-  line 31  normal_gvcf = gl::call_gvcf(reference, normal_bam, normal_bam::index)
+  gl::align_sample  germline.spit  blob 36ce212
+  line 32  normal_bam::aligned = gl::bwa_align(reference, normal_r1, normal_r2)
+  line 33  normal_bam::sorted = gl::sort_reads(normal_bam::aligned)
+  line 34  normal_bam::merged = gl::merge_lanes(normal_bam::sorted)
+  line 35  normal_bam, normal_bam::index, normal_bam::metrics = gl::mark_duplicates(normal_bam::merged)
+  line 36  normal_gvcf = gl::call_gvcf(reference, normal_bam, normal_bam::index)
 tumour_bam, tumour_gvcf = gl::align_sample(…)  line 18
-  gl::align_sample  germline.spit  blob f93cbf2
-  line 27  tumour_bam::aligned = gl::bwa_align(reference, tumour_r1, tumour_r2)
-  line 28  tumour_bam::sorted = gl::sort_reads(tumour_bam::aligned)
-  line 29  tumour_bam::merged = gl::merge_lanes(tumour_bam::sorted)
-  line 30  tumour_bam, tumour_bam::index, tumour_bam::metrics = gl::mark_duplicates(tumour_bam::merged)
-  line 31  tumour_gvcf = gl::call_gvcf(reference, tumour_bam, tumour_bam::index)
+  gl::align_sample  germline.spit  blob 36ce212
+  line 32  tumour_bam::aligned = gl::bwa_align(reference, tumour_r1, tumour_r2)
+  line 33  tumour_bam::sorted = gl::sort_reads(tumour_bam::aligned)
+  line 34  tumour_bam::merged = gl::merge_lanes(tumour_bam::sorted)
+  line 35  tumour_bam, tumour_bam::index, tumour_bam::metrics = gl::mark_duplicates(tumour_bam::merged)
+  line 36  tumour_gvcf = gl::call_gvcf(reference, tumour_bam, tumour_bam::index)
 Pipeline valid.
 --- stderr
 $ spit check somatic.spit --calls --json
 exit: 0
 --- stdout
-{"diagnostics":[],"calls":[{"id":0,"parent":null,"operation":"gl::align_sample","outputs":["normal_bam","normal_gvcf"],"inputs":["reference","normal_r1","normal_r2"],"line":17,"stage":null,"file":"germline.spit","blob":"f93cbf29f19468344d39176d717c860d52d8619c","steps":[{"line":27,"operation":"gl::bwa_align","outputs":["normal_bam::aligned"],"inputs":["reference","normal_r1","normal_r2"]},{"line":28,"operation":"gl::sort_reads","outputs":["normal_bam::sorted"],"inputs":["normal_bam::aligned"]},{"line":29,"operation":"gl::merge_lanes","outputs":["normal_bam::merged"],"inputs":["normal_bam::sorted"]},{"line":30,"operation":"gl::mark_duplicates","outputs":["normal_bam","normal_bam::index","normal_bam::metrics"],"inputs":["normal_bam::merged"]},{"line":31,"operation":"gl::call_gvcf","outputs":["normal_gvcf"],"inputs":["reference","normal_bam","normal_bam::index"]}]},{"id":1,"parent":null,"operation":"gl::align_sample","outputs":["tumour_bam","tumour_gvcf"],"inputs":["reference","tumour_r1","tumour_r2"],"line":18,"stage":null,"file":"germline.spit","blob":"f93cbf29f19468344d39176d717c860d52d8619c","steps":[{"line":27,"operation":"gl::bwa_align","outputs":["tumour_bam::aligned"],"inputs":["reference","tumour_r1","tumour_r2"]},{"line":28,"operation":"gl::sort_reads","outputs":["tumour_bam::sorted"],"inputs":["tumour_bam::aligned"]},{"line":29,"operation":"gl::merge_lanes","outputs":["tumour_bam::merged"],"inputs":["tumour_bam::sorted"]},{"line":30,"operation":"gl::mark_duplicates","outputs":["tumour_bam","tumour_bam::index","tumour_bam::metrics"],"inputs":["tumour_bam::merged"]},{"line":31,"operation":"gl::call_gvcf","outputs":["tumour_gvcf"],"inputs":["reference","tumour_bam","tumour_bam::index"]}]}]}
+{"diagnostics":[],"calls":[{"id":0,"parent":null,"operation":"gl::align_sample","outputs":["normal_bam","normal_gvcf"],"inputs":["reference","normal_r1","normal_r2"],"line":17,"stage":null,"file":"germline.spit","blob":"36ce212c05ab46a89aa05baee3a20b0e27537038","steps":[{"line":32,"operation":"gl::bwa_align","outputs":["normal_bam::aligned"],"inputs":["reference","normal_r1","normal_r2"]},{"line":33,"operation":"gl::sort_reads","outputs":["normal_bam::sorted"],"inputs":["normal_bam::aligned"]},{"line":34,"operation":"gl::merge_lanes","outputs":["normal_bam::merged"],"inputs":["normal_bam::sorted"]},{"line":35,"operation":"gl::mark_duplicates","outputs":["normal_bam","normal_bam::index","normal_bam::metrics"],"inputs":["normal_bam::merged"]},{"line":36,"operation":"gl::call_gvcf","outputs":["normal_gvcf"],"inputs":["reference","normal_bam","normal_bam::index"]}]},{"id":1,"parent":null,"operation":"gl::align_sample","outputs":["tumour_bam","tumour_gvcf"],"inputs":["reference","tumour_r1","tumour_r2"],"line":18,"stage":null,"file":"germline.spit","blob":"36ce212c05ab46a89aa05baee3a20b0e27537038","steps":[{"line":32,"operation":"gl::bwa_align","outputs":["tumour_bam::aligned"],"inputs":["reference","tumour_r1","tumour_r2"]},{"line":33,"operation":"gl::sort_reads","outputs":["tumour_bam::sorted"],"inputs":["tumour_bam::aligned"]},{"line":34,"operation":"gl::merge_lanes","outputs":["tumour_bam::merged"],"inputs":["tumour_bam::sorted"]},{"line":35,"operation":"gl::mark_duplicates","outputs":["tumour_bam","tumour_bam::index","tumour_bam::metrics"],"inputs":["tumour_bam::merged"]},{"line":36,"operation":"gl::call_gvcf","outputs":["tumour_gvcf"],"inputs":["reference","tumour_bam","tumour_bam::index"]}]}]}
 --- stderr
 $ spit check act.spit --calls --json --stdin
 exit: 1

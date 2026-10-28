@@ -31,6 +31,9 @@ pub(crate) struct SourceMap {
     pub(crate) exclusions: Vec<Place>,
     /// One template per `Pipeline::commands` element, in the same order.
     pub(crate) commands: Vec<Place>,
+    /// One operation name per `Pipeline::resources` element, in the same
+    /// order.
+    pub(crate) resources: Vec<Place>,
     /// One name per `Pipeline::checks` element, in the same order.
     pub(crate) checks: Vec<Place>,
     /// Templates of `path product:` rules, keyed by product.
