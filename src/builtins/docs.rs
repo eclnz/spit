@@ -108,14 +108,14 @@ pub static DOCS: [Doc; 55] = [
         kind: "keyword",
         anchor: "operations-and-commands",
         example: "command process: process_tool --in {image} --out {@output}",
-        summary: "The program an operation runs. Each `{port}` is filled in with an artifact's path, and every output must appear, or its `.dir` or `.stem`, except one written `beside` another. Words are split and quoted as in Bash, and every argument is passed literally: `|`, `>` and `$` are not a shell's. The first word must be an executable on `PATH`, or a path to one.",
+        summary: "The program an operation runs. Each `{port}` is filled in with an artifact's path, and a `{dimension}` of the job with its value, as text. Every output must appear, or its `.dir` or `.stem`, except one written `beside` another. Words are split and quoted as in Bash, and every argument is passed literally: `|`, `>` and `$` are not a shell's. The first word must be an executable on `PATH`, or a path to one.",
     },
     Doc {
         name: "verify",
         kind: "keyword",
         anchor: "operations-and-commands",
         example: "verify register: check_same_grid {moving} {reference}",
-        summary: "Checks a job's inputs before its command runs. SPIT does not run it: it writes it into the `.spitdag` beside the job's command, and a backend runs it first. If it fails, the job does not run, and neither does any job that depends on it. It may use input ports only, `many` ones included.",
+        summary: "Checks a job's inputs before its command runs. SPIT does not run it: it writes it into the `.spitdag` beside the job's command, and a backend runs it first. If it fails, the job does not run, and neither does any job that depends on it. It may use input ports only, `many` ones included, and the job's dimensions.",
     },
     Doc {
         name: "resources",

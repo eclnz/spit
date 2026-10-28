@@ -92,22 +92,22 @@ Job 30  average
   run:    mean derivatives/aligned/sub=03__ses=2__run=1.txt derivatives/aligned/sub=03__ses=2__run=2.txt -o derivatives/averaged/sub=03__ses=2.txt
 
 Job 31  compare
-  run:    score derivatives/averaged/sub=01__ses=1.txt sub-01/ses-1/reference.nii -o derivatives/score/sub=01__ses=1.txt
+  run:    score derivatives/averaged/sub=01__ses=1.txt sub-01/ses-1/reference.nii --label 'sub-01 ses-1' -o derivatives/score/sub=01__ses=1.txt
 
 Job 32  compare
-  run:    score derivatives/averaged/sub=01__ses=2.txt sub-01/ses-2/reference.nii -o derivatives/score/sub=01__ses=2.txt
+  run:    score derivatives/averaged/sub=01__ses=2.txt sub-01/ses-2/reference.nii --label 'sub-01 ses-2' -o derivatives/score/sub=01__ses=2.txt
 
 Job 33  compare
-  run:    score derivatives/averaged/sub=02__ses=1.txt sub-02/ses-1/reference.nii -o derivatives/score/sub=02__ses=1.txt
+  run:    score derivatives/averaged/sub=02__ses=1.txt sub-02/ses-1/reference.nii --label 'sub-02 ses-1' -o derivatives/score/sub=02__ses=1.txt
 
 Job 34  compare
-  run:    score derivatives/averaged/sub=02__ses=2.txt sub-02/ses-2/reference.nii -o derivatives/score/sub=02__ses=2.txt
+  run:    score derivatives/averaged/sub=02__ses=2.txt sub-02/ses-2/reference.nii --label 'sub-02 ses-2' -o derivatives/score/sub=02__ses=2.txt
 
 Job 35  compare
-  run:    score derivatives/averaged/sub=03__ses=1.txt sub-03/ses-1/reference.nii -o derivatives/score/sub=03__ses=1.txt
+  run:    score derivatives/averaged/sub=03__ses=1.txt sub-03/ses-1/reference.nii --label 'sub-03 ses-1' -o derivatives/score/sub=03__ses=1.txt
 
 Job 36  compare
-  run:    score derivatives/averaged/sub=03__ses=2.txt sub-03/ses-2/reference.nii -o derivatives/score/sub=03__ses=2.txt
+  run:    score derivatives/averaged/sub=03__ses=2.txt sub-03/ses-2/reference.nii --label 'sub-03 ses-2' -o derivatives/score/sub=03__ses=2.txt
 --- stderr
 note: found 21 source artifacts and 6 contexts under `.`
 note: ran `spit inputs strict.spitin` in memory
@@ -530,7 +530,7 @@ Job 31
     score[sub=01,ses=1] : Score
       path: derivatives/score/sub=01__ses=1.txt
   depends_on: 25
-  run:    score derivatives/averaged/sub=01__ses=1.txt sub-01/ses-1/reference.nii -o derivatives/score/sub=01__ses=1.txt
+  run:    score derivatives/averaged/sub=01__ses=1.txt sub-01/ses-1/reference.nii --label 'sub-01 ses-1' -o derivatives/score/sub=01__ses=1.txt
 
 Job 32
   operation: compare
@@ -543,7 +543,7 @@ Job 32
     score[sub=01,ses=2] : Score
       path: derivatives/score/sub=01__ses=2.txt
   depends_on: 26
-  run:    score derivatives/averaged/sub=01__ses=2.txt sub-01/ses-2/reference.nii -o derivatives/score/sub=01__ses=2.txt
+  run:    score derivatives/averaged/sub=01__ses=2.txt sub-01/ses-2/reference.nii --label 'sub-01 ses-2' -o derivatives/score/sub=01__ses=2.txt
 
 Job 33
   operation: compare
@@ -556,7 +556,7 @@ Job 33
     score[sub=02,ses=1] : Score
       path: derivatives/score/sub=02__ses=1.txt
   depends_on: 27
-  run:    score derivatives/averaged/sub=02__ses=1.txt sub-02/ses-1/reference.nii -o derivatives/score/sub=02__ses=1.txt
+  run:    score derivatives/averaged/sub=02__ses=1.txt sub-02/ses-1/reference.nii --label 'sub-02 ses-1' -o derivatives/score/sub=02__ses=1.txt
 
 Job 34
   operation: compare
@@ -569,7 +569,7 @@ Job 34
     score[sub=02,ses=2] : Score
       path: derivatives/score/sub=02__ses=2.txt
   depends_on: 28
-  run:    score derivatives/averaged/sub=02__ses=2.txt sub-02/ses-2/reference.nii -o derivatives/score/sub=02__ses=2.txt
+  run:    score derivatives/averaged/sub=02__ses=2.txt sub-02/ses-2/reference.nii --label 'sub-02 ses-2' -o derivatives/score/sub=02__ses=2.txt
 
 Job 35
   operation: compare
@@ -582,7 +582,7 @@ Job 35
     score[sub=03,ses=1] : Score
       path: derivatives/score/sub=03__ses=1.txt
   depends_on: 29
-  run:    score derivatives/averaged/sub=03__ses=1.txt sub-03/ses-1/reference.nii -o derivatives/score/sub=03__ses=1.txt
+  run:    score derivatives/averaged/sub=03__ses=1.txt sub-03/ses-1/reference.nii --label 'sub-03 ses-1' -o derivatives/score/sub=03__ses=1.txt
 
 Job 36
   operation: compare
@@ -595,7 +595,7 @@ Job 36
     score[sub=03,ses=2] : Score
       path: derivatives/score/sub=03__ses=2.txt
   depends_on: 30
-  run:    score derivatives/averaged/sub=03__ses=2.txt sub-03/ses-2/reference.nii -o derivatives/score/sub=03__ses=2.txt
+  run:    score derivatives/averaged/sub=03__ses=2.txt sub-03/ses-2/reference.nii --label 'sub-03 ses-2' -o derivatives/score/sub=03__ses=2.txt
 --- stderr
 note: found 21 source artifacts and 6 contexts under `.`
 note: ran `spit inputs strict.spitin` in memory
@@ -696,22 +696,22 @@ Job 30  average
   run:    mean derivatives/aligned/sub=03__ses=2__run=1.txt derivatives/aligned/sub=03__ses=2__run=2.txt -o derivatives/averaged/sub=03__ses=2.txt
 
 Job 31  compare
-  run:    score derivatives/averaged/sub=01__ses=1.txt sub-01/ses-1/reference.nii -o derivatives/score/sub=01__ses=1.txt
+  run:    score derivatives/averaged/sub=01__ses=1.txt sub-01/ses-1/reference.nii --label 'sub-01 ses-1' -o derivatives/score/sub=01__ses=1.txt
 
 Job 32  compare
-  run:    score derivatives/averaged/sub=01__ses=2.txt sub-01/ses-2/reference.nii -o derivatives/score/sub=01__ses=2.txt
+  run:    score derivatives/averaged/sub=01__ses=2.txt sub-01/ses-2/reference.nii --label 'sub-01 ses-2' -o derivatives/score/sub=01__ses=2.txt
 
 Job 33  compare
-  run:    score derivatives/averaged/sub=02__ses=1.txt sub-02/ses-1/reference.nii -o derivatives/score/sub=02__ses=1.txt
+  run:    score derivatives/averaged/sub=02__ses=1.txt sub-02/ses-1/reference.nii --label 'sub-02 ses-1' -o derivatives/score/sub=02__ses=1.txt
 
 Job 34  compare
-  run:    score derivatives/averaged/sub=02__ses=2.txt sub-02/ses-2/reference.nii -o derivatives/score/sub=02__ses=2.txt
+  run:    score derivatives/averaged/sub=02__ses=2.txt sub-02/ses-2/reference.nii --label 'sub-02 ses-2' -o derivatives/score/sub=02__ses=2.txt
 
 Job 35  compare
-  run:    score derivatives/averaged/sub=03__ses=1.txt sub-03/ses-1/reference.nii -o derivatives/score/sub=03__ses=1.txt
+  run:    score derivatives/averaged/sub=03__ses=1.txt sub-03/ses-1/reference.nii --label 'sub-03 ses-1' -o derivatives/score/sub=03__ses=1.txt
 
 Job 36  compare
-  run:    score derivatives/averaged/sub=03__ses=2.txt sub-03/ses-2/reference.nii -o derivatives/score/sub=03__ses=2.txt
+  run:    score derivatives/averaged/sub=03__ses=2.txt sub-03/ses-2/reference.nii --label 'sub-03 ses-2' -o derivatives/score/sub=03__ses=2.txt
 --- stderr
 note: found 21 source artifacts and 6 contexts under `.`
 note: ran `spit inputs strict.spitin` in memory
