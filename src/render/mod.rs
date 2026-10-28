@@ -295,6 +295,15 @@ fn push_command_lines(text: &mut String, dag: &BoundDag, job: &BoundJob) {
         Some(command) => push_command(text, dag, command),
         None => text.push_str("(no command)"),
     }
+    // As a shell writes them, so the line runs as it reads.
+    for (sign, file) in [("<", job.stdin), (">", job.stdout)] {
+        if let Some(file) = file {
+            text.push(' ');
+            text.push_str(sign);
+            text.push(' ');
+            text.push_str(&shell_word(dag.path(file)));
+        }
+    }
     text.push('\n');
     checks(text, When::After);
 }

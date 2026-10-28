@@ -19,7 +19,7 @@ pub use crate::check::When;
 use self::write::{write_document, PIECE};
 
 /// The schema version a `.spitdag` is written with.
-pub const SPITDAG_VERSION: usize = 7;
+pub const SPITDAG_VERSION: usize = 8;
 
 /// A resolved DAG with its paths bound and its commands expanded. Its
 /// artifacts are the resolved DAG's, each kept once with its path; jobs,
@@ -131,6 +131,11 @@ pub struct BoundJob {
     pub depends_on: Vec<JobId>,
     /// The command that makes the outputs; `None` when the operation has none.
     pub command: Option<Vec<Argument>>,
+    /// The input whose file `command` reads on its stdin, if any.
+    pub stdin: Option<ArtifactId>,
+    /// The output whose file `command` writes on its stdout, if any. It is
+    /// never also among the command's arguments.
+    pub stdout: Option<ArtifactId>,
     /// Commands that check the inputs before the job runs.
     pub verify: Vec<Vec<Argument>>,
     /// The checks of single artifacts: those on inputs, then those on

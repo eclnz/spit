@@ -1,0 +1,18 @@
+check nonempty: test -s {@path}
+
+source list : Lines [plot]
+
+default entities: {@key}={@value} separated "_"
+default path: output/{@product}/{@entities}.txt
+path list: input/{plot}.txt
+
+# grep reads the list on its stdin, and prints what it keeps on its stdout.
+operation uncomment(list: Lines) -> Lines @check(nonempty)
+command uncomment: grep -v '^#' < {list} > {@output}
+plain = uncomment(list)
+
+# sort prints the merged lists on its stdout.
+operation merge(items: many Lines) -> Lines
+command merge: sort {items} > {@output}
+path merged: output/merged.txt
+merged = merge(plain @vary(plot))
