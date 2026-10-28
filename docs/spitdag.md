@@ -24,7 +24,7 @@ A `.spitdag` is one JSON object, followed by a newline:
 
 | Field | Holds |
 | --- | --- |
-| `version` | The format's version, `8`. A change a reader must know about raises it. Version 6 added each job's [`checks`](#checks). Version 7 added `pipeline_files`, `calls` and each job's `origin`: see [Where jobs come from](#where-jobs-come-from). Version 8 added each job's `stdin` and `stdout`: see [Standard input and output](#standard-input-and-output). |
+| `version` | The format's version, `8`. A change a reader must know about raises it. Version 6 added each job's [`checks`](#checks). Version 7 added `pipeline_files`, `calls` and each job's `origin`: see [Where jobs come from](#where-jobs-come-from). Version 8 added each job's `stdin` and `stdout`, see [Standard input and output](#standard-input-and-output), and its `cores` and `memory`, see [Cores and memory](#cores-and-memory). |
 | `generator` | The program that wrote the file, and its version. |
 | `root` | The absolute dataset folder that every path is relative to, or `null` when it was not known: a `.spitout` that records no root. |
 | `external_inputs` | Every artifact a job reads but no job writes, once each: the sources. Ordered by path in natural order, the order `many` inputs take, so `wave2` comes before `wave10`. |
@@ -98,7 +98,9 @@ Each output that could not be produced has its identity and the input gaps that 
   "stdin": null,
   "stdout": null,
   "verify": [[ARGUMENT, ...], ...],
-  "checks": [CHECK, ...]
+  "checks": [CHECK, ...],
+  "cores": 8,
+  "memory": 17179869184
 }
 ```
 
@@ -118,6 +120,8 @@ Each output that could not be produced has its identity and the input gaps that 
 | `stdout` | The path, relative to `root`, of the output file `command`'s standard output is written to, or `null`. |
 | `verify` | The commands that check the inputs before `command` runs, in order; `[]` for none. |
 | `checks` | The checks of single artifacts the job reads and writes, in the order they run: see [Checks](#checks). `[]` for none. |
+| `cores` | The number of cores the job uses, a whole number from 1: see [Cores and memory](#cores-and-memory). |
+| `memory` | The most memory the job needs, in bytes, or `null` for no claim. |
 
 ### Commands
 
@@ -156,6 +160,24 @@ A command written `wc -l < {table} > {@output}` reads an input on its standard i
 - The command's standard error is the backend's in either case.
 
 The output is otherwise like any other: it must exist once `command` succeeds, as [Missing outputs](#missing-outputs) says, which an empty file does, and its `"after"` checks run on it.
+
+### Cores and memory
+
+`cores` and `memory` say what a job needs while its commands run, from its operation's `resources` line, so a backend that runs jobs at once can keep from oversubscribing the machine:
+
+```json
+"command": [["bwa"], ["mem"], ["-t"], ["8"], [{"path": "reference/genome.fa"}], [{"path": "in/sample=01.fastq.gz"}]],
+"cores": 8,
+"memory": 17179869184
+```
+
+- `cores` is always a whole number of at least 1. A job whose operation declares none has `1`.
+- `memory` is a whole number of bytes, at most 2^53, or `null` when the operation claims none.
+- Start a job only when the cores and memory it needs are free beside those of the jobs already running, and count them as taken until its `"after"` checks finish. A job that needs more than the backend has in all cannot be started that way: run it alone, or report it, as the backend chooses.
+- `memory` is what to set aside, not a limit SPIT asks to enforce. Treat `null` as needing none.
+- The command already holds the number of cores where the pipeline asked for it, with `{@cores}`, as `["-t"], ["8"]` above, so the tool uses what it was given; a backend changes nothing in `command`.
+
+`cores` and `memory` are left out of the job's [fingerprint](#fingerprint): they say how to schedule the job, not what it makes.
 
 ### Running `verify`
 
@@ -240,6 +262,6 @@ None of these is part of a job's [fingerprint](#fingerprint). A changed command 
 
 ## Fingerprint
 
-A job's fingerprint is a 64-bit FNV-1a hash of the compact JSON of what it reads, writes and runs: its `operation`, `inputs`, `outputs`, `command`, `stdin`, `stdout` and `verify`, in that order, each artifact with its product, entities, type, path and kind. `stdin` and `stdout` are left out of the hashed JSON when they are `null`. Its `id`, `stage`, `origin`, `depends_on`, `dependents` and `checks` are left out, so the fingerprint follows the work, not where the job falls in the plan.
+A job's fingerprint is a 64-bit FNV-1a hash of the compact JSON of what it reads, writes and runs: its `operation`, `inputs`, `outputs`, `command`, `stdin`, `stdout` and `verify`, in that order, each artifact with its product, entities, type, path and kind. `stdin` and `stdout` are left out of the hashed JSON when they are `null`. Its `id`, `stage`, `origin`, `depends_on`, `dependents`, `checks`, `cores` and `memory` are left out, so the fingerprint follows the work, not where the job falls in the plan.
 
 The fingerprint changes when the job's command, its files, or which artifacts it reads or writes change. It does not read the files themselves, so it does not change when an input file's contents do; a backend that must rerun a job after its inputs change combines the fingerprint with its own record of the files, such as their modification times or hashes.

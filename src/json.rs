@@ -165,6 +165,12 @@ pub(crate) fn write_array<O: Out, T>(
 }
 
 pub(crate) fn write_number(out: &mut impl Out, number: usize) {
+    write_u64(out, number as u64);
+}
+
+/// `number` in decimal, for a count that may pass `usize` on a 32-bit
+/// machine, such as a job's memory in bytes.
+pub(crate) fn write_u64(out: &mut impl Out, number: u64) {
     let mut digits = [0; 20];
     let mut start = digits.len();
     let mut rest = number;

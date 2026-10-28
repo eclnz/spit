@@ -47,6 +47,13 @@ pub(super) fn operation_details(pipeline: &Pipeline, operation: &OperationDef) -
             command.template
         ));
     }
+    for line in pipeline
+        .resources
+        .iter()
+        .filter(|line| line.operation == operation.name)
+    {
+        details.push(format!("Resources: {}", line.resources));
+    }
     details
 }
 

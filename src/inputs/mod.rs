@@ -168,6 +168,7 @@ fn check_input_lines(text: &str) -> Result<(), ParseError> {
                     | Keyword::Operation
                     | Keyword::Command
                     | Keyword::Verify
+                    | Keyword::Resources
                     | Keyword::Check
                     | Keyword::Checks
                     | Keyword::Stage
@@ -224,6 +225,7 @@ fn finish_spec(
         || !pipeline.operations.is_empty()
         || !pipeline.invocations.is_empty()
         || !pipeline.commands.is_empty()
+        || !pipeline.resources.is_empty()
         || !pipeline.stages.is_empty()
     {
         return Err(ParseError::new(1, "a .spitin file may contain discovery, coverage, source paths, and inventory records only"));

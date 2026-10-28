@@ -324,6 +324,23 @@ pub fn pipeline_hovers(text: &str, path: &Path) -> Vec<Hover> {
             }
         }
     }
+    // The operation a `resources` line names, where its place points; an
+    // imported line's place is the `use` line, which does not name it there.
+    for (resources, place) in pipeline.resources.iter().zip(&document.lines.resources) {
+        let named = text_lines
+            .get(place.line.saturating_sub(1))
+            .and_then(|line| line.get(place.columns.clone()))
+            == Some(resources.operation.as_str());
+        if let (true, Some((signature, details))) = (named, operation_info(&resources.operation)) {
+            add(
+                place.clone(),
+                HoverKind::Operation,
+                &resources.operation,
+                signature,
+                details,
+            );
+        }
+    }
     hovers.sort_by_key(|hover| (hover.line, hover.column, hover.end_column));
     hovers
         .dedup_by(|a, b| a.line == b.line && a.column == b.column && a.end_column == b.end_column);

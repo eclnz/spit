@@ -12,7 +12,7 @@ use crate::blob::git_blob_id;
 use crate::lower::{parse_layout, ParsedDocument, PipelineBuilder};
 use crate::model::{
     CheckDef, CheckUse, CommandDef, CommandRole, OperationDef, Pipeline, PipelineIndex, ProductDef,
-    SidecarGroup, SourceFile,
+    ResourcesDef, SidecarGroup, SourceFile,
 };
 use crate::parser::{parse_use, without_bom, Keyword, Kind, Layout, Line, ParseError, UseSpec};
 use crate::span::Place;
@@ -92,6 +92,9 @@ pub(crate) fn apply_import(
     for command in &imported.commands {
         builder.add_command(command.clone(), place.clone());
     }
+    for resources in &imported.resources {
+        builder.add_resources(resources.clone(), place.clone());
+    }
     for check in new_checks {
         builder.add_check(check.clone(), place.clone());
     }
@@ -126,7 +129,7 @@ pub(crate) fn apply_import(
 }
 
 /// What `pipeline` defines that an import may not define again, by kind.
-fn defined(pipeline: &Pipeline) -> [(&'static str, Vec<&str>); 5] {
+fn defined(pipeline: &Pipeline) -> [(&'static str, Vec<&str>); 6] {
     let products = pipeline
         .products
         .iter()
@@ -144,6 +147,12 @@ fn defined(pipeline: &Pipeline) -> [(&'static str, Vec<&str>); 5] {
         (
             "command for operation",
             commands.map(|command| command.operation.as_str()).collect(),
+        ),
+        (
+            "resources for operation",
+            (pipeline.resources.iter())
+                .map(|line| line.operation.as_str())
+                .collect(),
         ),
         (
             "path for product",
@@ -176,6 +185,8 @@ struct Module<'m> {
     checks: FxHashMap<&'m str, &'m CheckDef>,
     /// Each operation's commands, in order.
     commands: FxHashMap<&'m str, Vec<&'m CommandDef>>,
+    /// Each operation's `resources` lines.
+    resources: FxHashMap<&'m str, Vec<&'m ResourcesDef>>,
 }
 
 impl<'m> Module<'m> {
@@ -208,6 +219,13 @@ impl<'m> Module<'m> {
                 .or_default()
                 .push(command);
         }
+        let mut resources: FxHashMap<_, Vec<_>> = FxHashMap::default();
+        for line in &module.resources {
+            resources
+                .entry(line.operation.as_str())
+                .or_default()
+                .push(line);
+        }
         let groups = module
             .sidecar_groups
             .iter()
@@ -221,6 +239,7 @@ impl<'m> Module<'m> {
             members: module.sidecar_members(),
             checks,
             commands,
+            resources,
         }
     }
 }
@@ -474,6 +493,11 @@ fn import_operation(
             format!("imported file has duplicate command for `{name}`"),
         ));
     }
+    // A second line for the operation is reported where it is imported.
+    let resources = module
+        .resources
+        .get(name.as_str())
+        .map_or(&[][..], Vec::as_slice);
     if !selected.operations.insert(qualified.to_owned()) {
         return Err(ParseError::new(line, format!("duplicate import `{name}`")));
     }
@@ -493,6 +517,13 @@ fn import_operation(
         .extend(commands.iter().map(|command| CommandDef {
             operation: qualified.to_owned(),
             ..(*command).clone()
+        }));
+    selected
+        .pipeline
+        .resources
+        .extend(resources.iter().map(|line| ResourcesDef {
+            operation: qualified.to_owned(),
+            resources: line.resources,
         }));
     let checks = operation.inputs.iter().map(|port| &port.checks);
     let checks = checks.chain(operation.outputs.iter().map(|port| &port.checks));

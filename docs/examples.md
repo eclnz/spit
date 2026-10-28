@@ -378,6 +378,19 @@ spit dag examples/composites/germline/somatic.spitin --commands
   check:  samtools quickcheck out/normal_bam/patient=P01.bam
 ```
 
+BWA and samtools sort declare the cores and memory each job needs with `resources`, and take the cores as their thread count with `{@cores}`, so each alignment job shows what a runner sets aside for it:
+
+<!-- spit-doc: output
+spit dag examples/composites/germline/somatic.spitin --commands
+-->
+
+```text
+Job 1  gl::bwa_align
+  from:   normal_bam = gl::align_sample (somatic.spit line 17), germline.spit line 32
+  needs:  cores=8, memory=16G
+  run:    bwa mem -t 8 -o out/normal_bam.aligned/patient=P01__lane=1.sam
+```
+
 ## Inspect a dataset and its plan
 
 Use `spit inputs cohort.spitin` to see discovered source identities and removals before planning. If a dataset has files outside every source path rule, `spit inputs cohort.spitin --unmatched` lists those paths; it does not write an inventory. A file can match a source rule yet remain unused by every job. For example, the sensors inventory contains `calibration[station=north,revision=1]`, which is valid but unselected because the call uses `where(revision=2)`. `spit artifacts sensors.spit sensors.spitout` lists unused sources separately from missing joins.

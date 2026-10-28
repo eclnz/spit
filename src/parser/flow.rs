@@ -437,6 +437,9 @@ fn flow_rest(
             };
             StatementKind::command(original, declaration.trim(), number, role)?
         }
+        Some((Keyword::Resources, declaration)) => {
+            StatementKind::resources(original, declaration.trim(), number)?
+        }
         Some((Keyword::Check, declaration)) => {
             StatementKind::check(original, declaration.trim(), number)?
         }
@@ -504,7 +507,7 @@ fn flow_statement(
             number,
             format!(
                 "`{word}` does not start a statement; {hint}a pipeline line starts with \
-                 source, dimensions, types, operation, command, verify, check, path, default, root, stage or use, or is a step \
+                 source, dimensions, types, operation, command, verify, resources, check, path, default, root, stage or use, or is a step \
                  `output = operation(inputs)`, and a recipe line starts with pipeline, \
                  root, inputs, require, exclude or default"
             ),
@@ -528,7 +531,7 @@ fn flow_statement(
     } else {
         Err(ParseError::new(
             number,
-            "expected source, operation, command, verify, check, require, path, default, stage, or output = operation(inputs)",
+            "expected source, operation, command, verify, resources, check, require, path, default, stage, or output = operation(inputs)",
         ))
     }
 }
@@ -582,13 +585,14 @@ fn parse_flow_output(left: &str, number: usize) -> Result<StepOutput, ParseError
 }
 
 /// The words a statement can start with, for suggesting one.
-const STATEMENT_WORDS: [&str; 16] = [
+const STATEMENT_WORDS: [&str; 17] = [
     "source",
     "dimensions",
     "types",
     "operation",
     "command",
     "verify",
+    "resources",
     "check",
     "path",
     "default",

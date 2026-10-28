@@ -10,7 +10,7 @@ use std::io;
 
 use crate::model::{
     identity, natural_cmp, ArtifactId, ArtifactInstance, Artifacts, EntityBinding, JobId, Removal,
-    SourceFile, StepId,
+    Resources, SourceFile, StepId,
 };
 use crate::types::TypeExpr;
 
@@ -73,6 +73,8 @@ pub struct BoundStep {
     pub checks: Vec<StepCheck>,
     /// For a step a call made, the call and the line of the body's step.
     pub origin: Option<StepCall>,
+    /// What each of its jobs needs to run.
+    pub resources: Resources,
 }
 
 /// The call a step comes from, and the line of the step in the body of the
