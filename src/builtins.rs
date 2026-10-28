@@ -111,6 +111,7 @@ fn keyword_word(keyword: Keyword) -> Option<Word> {
         Keyword::Operation => Word::Operation,
         Keyword::Command => Word::Command,
         Keyword::Verify => Word::Verify,
+        Keyword::Resources => Word::Resources,
         Keyword::Check | Keyword::Checks => Word::Check,
         Keyword::Require => Word::Require,
         Keyword::Exclude => Word::Exclude,
@@ -291,6 +292,7 @@ fn placeholders(code: &str, statement: Option<Word>, found: &mut Vec<(Range<usiz
             "@entities" => Some(Word::Entities),
             "@stage" => Some(Word::StageName),
             "@output" if in_command => Some(Word::Output),
+            "@cores" if in_command => Some(Word::Cores),
             "@path" if in_check => Some(Word::PathPlaceholder),
             _ => None,
         };

@@ -11,8 +11,8 @@ use crate::paths::{EntitiesFormat, PathTemplate};
 
 use super::{
     ArtifactInstance, Call, CallId, CheckDef, CommandDef, DefaultChecks, EntityBinding,
-    ExtensionSource, Invocation, OperationDef, PipelineIndex, ProductDef, Removal, SidecarGroup,
-    SourceInventory, SourceRecord, StageDef,
+    ExtensionSource, Invocation, OperationDef, PipelineIndex, ProductDef, Removal, ResourcesDef,
+    SidecarGroup, SourceInventory, SourceRecord, StageDef,
 };
 
 /// The logical pipeline: what to make from which sources. It says nothing
@@ -26,6 +26,9 @@ pub struct Pipeline {
     pub operations: Vec<OperationDef>,
     pub invocations: Vec<Invocation>,
     pub commands: Vec<CommandDef>,
+    /// `resources` lines, in declaration order: what each job of an
+    /// operation needs to run.
+    pub resources: Vec<ResourcesDef>,
     /// `check` declarations, in declaration order.
     pub checks: Vec<CheckDef>,
     /// The `check:` default of every output in the file, outside any stage.

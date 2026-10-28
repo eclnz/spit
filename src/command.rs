@@ -185,7 +185,13 @@ impl PartialEq<&str> for CommandTemplate {
 pub(crate) enum Slot {
     Input(usize),
     Output(usize),
+    /// `{@cores}`: the cores each job of the operation uses, from its
+    /// `resources` line.
+    Cores,
 }
+
+/// The placeholder a command gives the cores its job uses.
+pub(crate) const CORES: &str = "@cores";
 
 /// What a placeholder gives of its port's file: the path, or, for an output
 /// as `{image.dir}` and `{image.stem}`, its folder or its file name without
@@ -215,6 +221,9 @@ pub(crate) fn slot(operation: &OperationDef, name: &str) -> Option<Slot> {
             .iter()
             .position(|port| port.name == DEFAULT_OUTPUT)
             .map(Slot::Output);
+    }
+    if name == CORES {
+        return Some(Slot::Cores);
     }
     if name.starts_with('@') {
         return None;
@@ -303,6 +312,12 @@ pub(crate) fn collect_commands(
             errors.push(e.at(line));
         }
     }
+    errors.extend(crate::resources::collect_resources(
+        pipeline,
+        &operations,
+        lines,
+        skip,
+    ));
     errors.extend(crate::check::collect_checks(pipeline, lines, skip));
     errors
 }
@@ -384,6 +399,12 @@ fn check_command_placeholders(
                     // A folder and a name tell the tool where to write.
                     written.insert(index);
                 }
+                Slot::Cores if facet != Facet::Path => {
+                    return fail(format!(
+                        "`{{{name}}}`: `{{@cores}}` is a number, the cores the job uses, and gives no `.dir` or `.stem`"
+                    ));
+                }
+                Slot::Cores => {}
                 Slot::Input(_) if facet != Facet::Path => {
                     return fail(format!(
                         "`{{{name}}}`: only an operation's outputs give `.dir` and `.stem`, for a tool that is told where to write"
@@ -446,6 +467,13 @@ fn redirected_ports(
                 operation.name
             ));
         };
+        if let Slot::Cores = slot {
+            return fail(format!(
+                "`{sign} {{{name}}}`: `{{@cores}}` is the number of cores the job uses, not a file; a command's {} one of its operation's {}",
+                if redirect.stream == Stream::Stdin { "stdin reads" } else { "stdout is written to" },
+                if redirect.stream == Stream::Stdin { "inputs" } else { "outputs" },
+            ));
+        }
         if facet != Ok(Facet::Path) {
             return fail(format!(
                 "`{sign} {{{name}}}`: a command's stdin and stdout are files, so write `{sign} {{{port}}}`"
@@ -474,6 +502,7 @@ fn redirected_ports(
                     ));
                 }
             }
+            (_, Slot::Cores) => unreachable!("`{{@cores}}` is rejected as a redirection above"),
             (Stream::Stdin, Slot::Output(_)) => {
                 return fail(format!(
                     "`< {{{name}}}`: `{port}` is an output of `{}`, and a command's stdin reads one of its inputs",

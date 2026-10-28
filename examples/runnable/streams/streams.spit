@@ -11,8 +11,10 @@ operation uncomment(list: Lines) -> Lines @check(nonempty)
 command uncomment: grep -v '^#' < {list} > {@output}
 plain = uncomment(list)
 
-# sort prints the merged lists on its stdout.
+# sort prints the merged lists on its stdout. A runner starts the job only
+# once two cores and 64 MiB are free.
 operation merge(items: many Lines) -> Lines
 command merge: sort {items} > {@output}
+resources merge: cores=2, memory=64M
 path merged: output/merged.txt
 merged = merge(plain @vary(plot))

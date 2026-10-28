@@ -11,6 +11,9 @@ pub(crate) enum Keyword {
     Operation,
     Command,
     Verify,
+    /// `resources operation: cores=8, memory=16G`, what each job of an
+    /// operation needs.
+    Resources,
     /// `check name(params): command`, a test of one artifact.
     Check,
     /// `check:`, the checks every output in a file or stage runs, written
@@ -47,13 +50,14 @@ pub(crate) enum Keyword {
 /// Every keyword and its word. Each word is reserved: no product may take
 /// it as its name, so the first word of a line says whether it starts a
 /// statement.
-const WORDS: [(Keyword, &str); 21] = [
+const WORDS: [(Keyword, &str); 22] = [
     (Keyword::Use, "use"),
     (Keyword::Root, "root"),
     (Keyword::Source, "source"),
     (Keyword::Operation, "operation"),
     (Keyword::Command, "command"),
     (Keyword::Verify, "verify"),
+    (Keyword::Resources, "resources"),
     (Keyword::Check, "check"),
     (Keyword::Require, "require"),
     (Keyword::Skip, "skip"),
@@ -73,11 +77,12 @@ const WORDS: [(Keyword, &str); 21] = [
 
 /// The keywords that open a block of their statements when written alone
 /// with a `:`, as `source:`, and the word for each.
-pub(crate) const BLOCKS: [(Keyword, &str); 8] = [
+pub(crate) const BLOCKS: [(Keyword, &str); 9] = [
     (Keyword::Source, "source"),
     (Keyword::Operation, "operation"),
     (Keyword::Command, "command"),
     (Keyword::Verify, "verify"),
+    (Keyword::Resources, "resources"),
     (Keyword::Check, "check"),
     (Keyword::Path, "path"),
     (Keyword::Require, "require"),
@@ -196,6 +201,14 @@ mod tests {
         assert_eq!(Keyword::split("source:"), Some((Keyword::Source, ":")));
         assert_eq!(Keyword::split("check:"), Some((Keyword::Check, ":")));
         assert_eq!(Keyword::split("path:"), Some((Keyword::Path, ":")));
+        assert_eq!(
+            Keyword::split("resources:"),
+            Some((Keyword::Resources, ":"))
+        );
+        assert_eq!(
+            Keyword::split("resources align: cores=8"),
+            Some((Keyword::Resources, "align: cores=8"))
+        );
         assert_eq!(keyword("check: nonempty"), Some(Keyword::Checks));
         assert_eq!(keyword("stage:"), Some(Keyword::Stage));
         assert_eq!(keyword("path raw: in/{id}"), Some(Keyword::Path));

@@ -9,7 +9,7 @@ use crate::check::{step_checks, CheckIndex, StepCheck, When, CHECKED_PATH};
 use crate::command::{facet, slot, validate_commands, CommandError, Facet, Slot, Stream};
 use crate::model::{
     ArtifactId, CallId, Cardinality, CommandDef, CommandRole, DagStep, Job, OperationDef, Pipeline,
-    PipelineIndex, ResolvedDag,
+    PipelineIndex, ResolvedDag, Resources,
 };
 use crate::paths::{bound_paths, check_rules, BoundPaths, PathError};
 use crate::spitdag::{
@@ -66,10 +66,23 @@ fn bind_jobs(
             .or_default()
             .push(command);
     }
+    // `validate_commands` makes sure an operation has one `resources` line
+    // at most.
+    let resources: FxHashMap<&str, Resources> = pipeline
+        .resources
+        .iter()
+        .map(|line| (line.operation.as_str(), line.resources))
+        .collect();
     let steps = dag
         .steps
         .iter()
-        .map(|step| StepCommands::new(&index, &checks, &commands, step))
+        .map(|step| {
+            let needs = resources
+                .get(step.operation.as_str())
+                .copied()
+                .unwrap_or_default();
+            StepCommands::new(&index, &checks, &commands, step, needs)
+        })
         .collect::<Result<Vec<_>, _>>()?;
     let mut produced = vec![false; dag.artifacts.len()];
     for &output in dag.jobs.iter().flat_map(|job| &job.outputs) {
@@ -146,6 +159,10 @@ struct StepCommands<'p> {
     verify: Vec<&'p CommandDef>,
     /// The checks every job runs, in the order they run.
     checks: Vec<StepCheck<'p>>,
+    /// What each job needs to run.
+    resources: Resources,
+    /// `resources.cores` as text, which `{@cores}` gives a command.
+    cores: String,
 }
 
 impl<'p> StepCommands<'p> {
@@ -154,6 +171,7 @@ impl<'p> StepCommands<'p> {
         checks: &CheckIndex<'p>,
         commands: &FxHashMap<&str, Vec<&'p CommandDef>>,
         step: &'p DagStep,
+        resources: Resources,
     ) -> Result<Self, BindError> {
         let operation = index.operation(&step.operation).ok_or_else(|| {
             BindError::Dag(format!(
@@ -181,6 +199,8 @@ impl<'p> StepCommands<'p> {
             run: commands(CommandRole::Run).next(),
             verify: commands(CommandRole::Verify).collect(),
             checks: step_checks(index, checks, operation, invocation),
+            resources,
+            cores: resources.cores.to_string(),
         })
     }
 
@@ -214,6 +234,7 @@ impl<'p> StepCommands<'p> {
                     written: check.written.clone(),
                 })
                 .collect(),
+            resources: self.resources,
         }
     }
 }
@@ -253,8 +274,7 @@ fn bind_job(
         .iter()
         .map(|&output| bound(output))
         .collect::<Result<_, _>>()?;
-    let expand_command =
-        |command: &CommandDef| expand(command.template.arguments(), operation, job);
+    let expand_command = |command: &CommandDef| expand(command.template.arguments(), step, job);
     let redirected = |stream: Stream| {
         let Some(name) = step.run.and_then(|run| run.template.redirected(stream)) else {
             return Ok(None);
@@ -264,7 +284,7 @@ fn bind_job(
         let artifact = match slot(operation, name) {
             Some(Slot::Input(index)) => job.inputs.get(index).and_then(|a| a.first()),
             Some(Slot::Output(index)) => job.outputs.get(index),
-            None => None,
+            Some(Slot::Cores) | None => None,
         };
         let artifact = *artifact
             .ok_or_else(|| CommandError::new(format!("job {} lacks `{{{name}}}`", job.id)))?;
@@ -358,13 +378,15 @@ fn check_command(check: &StepCheck<'_>, artifact: ArtifactId) -> Vec<Argument> {
         .collect()
 }
 
-/// A command's arguments for one job. A many input's placeholder, which is a
-/// whole argument, becomes one argument per artifact.
+/// A command's arguments for one job of `step`. A many input's placeholder,
+/// which is a whole argument, becomes one argument per artifact, and
+/// `{@cores}` the step's cores as text.
 fn expand(
     template: &[Vec<Part>],
-    operation: &OperationDef,
+    step: &StepCommands<'_>,
     job: &Job,
 ) -> Result<Vec<Argument>, BindError> {
+    let operation = step.operation;
     // Every artifact of the job has a path, which `bind_job` checks first.
     let path = |artifact: &ArtifactId| Ok::<_, BindError>(ArgPart::Path(*artifact));
     let lacks = |name: &str| CommandError::new(format!("job {} lacks `{{{name}}}`", job.id));
@@ -389,6 +411,10 @@ fn expand(
                     let (port, facet) = facet(name);
                     let slot = slot(operation, port);
                     let artifact = match slot {
+                        Some(Slot::Cores) => {
+                            argument.push(ArgPart::Text(step.cores.clone()));
+                            continue;
+                        }
                         Some(Slot::Output(index)) => job.outputs.get(index),
                         Some(Slot::Input(index)) => job.inputs.get(index).and_then(|a| a.first()),
                         // `validate_commands` rejects unknown placeholders.

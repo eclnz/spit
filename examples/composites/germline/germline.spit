@@ -7,10 +7,14 @@
 check nonempty: test -s {@path}
 check bam_ok: samtools quickcheck {@path}
 
+# BWA and samtools take as many threads as a runner gives each job, which
+# also sets aside the memory a job needs before starting it.
 operation bwa_align(reference: Fasta, r1: Fastq, r2: Fastq) -> Sam .sam
-command bwa_align: bwa mem -o {@output} {reference} {r1} {r2}
+command bwa_align: bwa mem -t {@cores} -o {@output} {reference} {r1} {r2}
+resources bwa_align: cores=8, memory=16G
 operation sort_reads(sam: Sam) -> Bam .bam @check(bam_ok)
-command sort_reads: samtools sort -o {@output} {sam}
+command sort_reads: samtools sort --threads {@cores} -o {@output} {sam}
+resources sort_reads: cores=4, memory=8G
 operation merge_lanes(lanes: many Bam) -> Bam .bam
 command merge_lanes: samtools merge -o {@output} {lanes}
 
@@ -19,6 +23,7 @@ operation mark_duplicates(bam: Bam) -> (marked: Bam .bam @check(nonempty), index
 command mark_duplicates: gatk MarkDuplicates -I {bam} -O {marked} -M {metrics} --CREATE_INDEX true
 operation call_gvcf(reference: Fasta, bam: Bam, index: BamIndex) -> Gvcf .g.vcf.gz
 command call_gvcf: gatk HaplotypeCaller -R {reference} -I {bam} -O {@output} -ERC GVCF
+resources call_gvcf: memory=8G
 
 # One sample's paired reads, a pair per lane, aligned against `reference`.
 # The BAM is checked as a BAM once duplicates are marked, beside the
