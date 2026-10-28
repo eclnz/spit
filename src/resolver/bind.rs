@@ -6,7 +6,7 @@ use std::fmt;
 use rustc_hash::FxHashMap;
 
 use crate::check::{step_checks, CheckIndex, StepCheck, When, CHECKED_PATH};
-use crate::command::{facet, slot, validate_commands, CommandError, Facet, Slot};
+use crate::command::{facet, slot, validate_commands, CommandError, Facet, Slot, Stream};
 use crate::model::{
     ArtifactId, CallId, Cardinality, CommandDef, CommandRole, DagStep, Job, OperationDef, Pipeline,
     PipelineIndex, ResolvedDag,
@@ -75,10 +75,18 @@ fn bind_jobs(
     for &output in dag.jobs.iter().flat_map(|job| &job.outputs) {
         produced[output.index()] = true;
     }
+    let folders: Vec<bool> = dag
+        .artifacts
+        .products()
+        .map(|(product, _)| index.is_folder(product))
+        .collect();
     let jobs = dag
         .jobs
         .iter()
-        .map(|job| bind_job(&steps[job.step.index()], dag, &paths, &produced, job))
+        .map(|job| {
+            let step = &steps[job.step.index()];
+            bind_job(step, dag, &paths, &produced, &folders, job)
+        })
         .collect::<Result<_, _>>()?;
     let dimensions = dag
         .artifacts
@@ -89,11 +97,6 @@ fn bind_jobs(
                 .cloned()
                 .unwrap_or_default()
         })
-        .collect();
-    let folders = dag
-        .artifacts
-        .products()
-        .map(|(product, _)| index.is_folder(product))
         .collect();
     let paths = paths.into_iter().map(Option::unwrap_or_default).collect();
     let mut bound = BoundDag::new(
@@ -216,12 +219,14 @@ impl<'p> StepCommands<'p> {
 }
 
 /// `job` with its commands expanded. `bound_paths` binds every artifact of
-/// every job, so each has a path.
+/// every job, so each has a path. `folders` says, by product number, whether
+/// a product's artifacts are folders.
 fn bind_job(
     step: &StepCommands<'_>,
     dag: &ResolvedDag,
     paths: &[Option<String>],
     produced: &[bool],
+    folders: &[bool],
     job: &Job,
 ) -> Result<BoundJob, BindError> {
     let operation = step.operation;
@@ -250,6 +255,28 @@ fn bind_job(
         .collect::<Result<_, _>>()?;
     let expand_command =
         |command: &CommandDef| expand(command.template.arguments(), operation, job);
+    let redirected = |stream: Stream| {
+        let Some(name) = step.run.and_then(|run| run.template.redirected(stream)) else {
+            return Ok(None);
+        };
+        // `validate_commands` makes sure stdin names a one input and stdout
+        // an output.
+        let artifact = match slot(operation, name) {
+            Some(Slot::Input(index)) => job.inputs.get(index).and_then(|a| a.first()),
+            Some(Slot::Output(index)) => job.outputs.get(index),
+            None => None,
+        };
+        let artifact = *artifact
+            .ok_or_else(|| CommandError::new(format!("job {} lacks `{{{name}}}`", job.id)))?;
+        if stream == Stream::Stdin && folders[dag.artifacts.product_of(artifact) as usize] {
+            return Err(BindError::Command(CommandError::new(format!(
+                "`< {{{name}}}` in the command for `{}` reads `{}` on its stdin, but it is a folder, and stdin reads one file",
+                operation.name,
+                dag.artifact(artifact)
+            ))));
+        }
+        Ok(Some(artifact))
+    };
     Ok(BoundJob {
         id: job.id,
         step: job.step,
@@ -257,6 +284,8 @@ fn bind_job(
         outputs,
         depends_on: job.dependencies.clone(),
         command: step.run.map(expand_command).transpose()?,
+        stdin: redirected(Stream::Stdin)?,
+        stdout: redirected(Stream::Stdout)?,
         verify: step
             .verify
             .iter()

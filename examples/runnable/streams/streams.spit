@@ -1,0 +1,18 @@
+check nonempty: test -s {@path}
+
+source list : Lines [plot]
+
+default entities: {@key}={@value} separated "_"
+default path: output/{@product}/{@entities}.txt
+path list: input/{plot}.txt
+
+# tr reads only its stdin, and prints the list in capitals on its stdout.
+operation shout(list: Lines) -> Lines @check(nonempty)
+command shout: tr a-z A-Z < {list} > {@output}
+loud = shout(list)
+
+# sort prints the merged lists on its stdout.
+operation merge(items: many Lines) -> Lines
+command merge: sort {items} > {@output}
+path merged: output/merged.txt
+merged = merge(loud @vary(plot))

@@ -179,6 +179,14 @@ fn write_job(
         Some(command) => write_command(out, dag, command),
         None => out.push_str("null"),
     });
+    // A job that redirects neither stream hashes as it did before they
+    // could be, so its fingerprint is unchanged.
+    let stdin = job
+        .stdin
+        .map(|id| object.field_at("stdin", |out| write_string(out, dag.path(id))));
+    let stdout = job
+        .stdout
+        .map(|id| object.field_at("stdout", |out| write_string(out, dag.path(id))));
     let verify = object.field_at("verify", |out| {
         write_array(out, &job.verify, |out, command| {
             write_command(out, dag, command);
@@ -225,6 +233,12 @@ fn write_job(
         write_array(out, dependents.iter().map(|id| id.number()), write_number);
     });
     object.raw("command", &work[command]);
+    for (name, span) in [("stdin", stdin), ("stdout", stdout)] {
+        match span {
+            Some(span) => object.raw(name, &work[span]),
+            None => object.field(name, |out| out.push_str("null")),
+        }
+    }
     object.raw("verify", &work[verify]);
     // A check tests the files a job reads or writes, not the job's work, so
     // the fingerprint leaves the checks out: a changed check is run again on
@@ -471,6 +485,8 @@ mod tests {
                         vec![ArgPart::Text("tool".into())],
                         vec![ArgPart::Text("--in=".into()), ArgPart::Path(raw)],
                     ]),
+                    stdin: None,
+                    stdout: None,
                     verify: vec![vec![vec![ArgPart::Path(raw)]]],
                     checks: vec![],
                 },
@@ -481,6 +497,8 @@ mod tests {
                     outputs: vec![mean],
                     depends_on: vec![JobId::new(1)],
                     command: None,
+                    stdin: None,
+                    stdout: None,
                     verify: vec![],
                     checks: vec![],
                 },
@@ -489,7 +507,7 @@ mod tests {
         dag.root = Some("/data/study".into());
         let text = dag.to_json();
         assert!(text.starts_with(&format!(
-            "{{\"version\":7,\"generator\":{{\"name\":\"spit\",\"version\":\"{}\"}},\
+            "{{\"version\":8,\"generator\":{{\"name\":\"spit\",\"version\":\"{}\"}},\
 \"root\":\"/data/study\",\"external_inputs\":[{{\"product\":\"raw\"",
             env!("CARGO_PKG_VERSION")
         )));
@@ -497,7 +515,10 @@ mod tests {
             text.contains("\"entities\":{\"sub\":\"1\",\"run\":\"a\\\"\\\\\\n\\u0001é\"}"),
             "{text}"
         );
-        assert!(text.contains("\"command\":null"), "{text}");
+        assert!(
+            text.contains("\"command\":null,\"stdin\":null,\"stdout\":null"),
+            "{text}"
+        );
         // A verify command that starts with a path names no program.
         assert!(
             text.contains("\"executables\":[\"tool\"],\"removed\":[],\"left_out\":[],\"pipeline_files\":[],\"calls\":[],\"jobs\""),
@@ -571,6 +592,8 @@ mod tests {
             outputs: vec![output],
             depends_on: vec![],
             command: None,
+            stdin: None,
+            stdout: None,
             verify: vec![],
             checks: vec![],
         };
@@ -601,6 +624,8 @@ mod tests {
             outputs: vec![clean],
             depends_on: vec![],
             command: Some(vec![vec![ArgPart::Text("tool".into())]]),
+            stdin: None,
+            stdout: None,
             verify: vec![],
             checks: vec![],
         };
@@ -625,6 +650,12 @@ mod tests {
             ..job(ids)
         };
         assert_ne!(print(&job), print(&changed));
+        // The same arguments, with the output on stdout.
+        let redirected = |ids: [ArtifactId; 3]| BoundJob {
+            stdout: Some(ids[1]),
+            ..job(ids)
+        };
+        assert_ne!(print(&job), print(&redirected));
         assert!(print(&job).bytes().all(|byte| byte.is_ascii_hexdigit()));
         // The hash of the work as compact JSON: a change to the JSON writer
         // changes every fingerprint, so it must be deliberate.
@@ -647,6 +678,8 @@ mod tests {
             outputs: vec![clean],
             depends_on: vec![],
             command: Some(vec![vec![ArgPart::Text("tool".into())]]),
+            stdin: None,
+            stdout: None,
             verify: vec![],
             checks: vec![],
         };

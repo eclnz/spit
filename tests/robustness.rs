@@ -109,7 +109,7 @@ fn shell_operators_in_a_command_are_errors() {
     let verify = "operation f(a) -> Text\nverify f: test -s {a} && true\n";
     let messages = rendered(&diagnose(verify, None), verify);
     assert!(
-        messages[0].starts_with("error: line 2, column 23: `&&` in the command for `f`"),
+        messages[0].starts_with("error: line 2, column 23: `&&` in the verify command for `f`"),
         "{messages:?}"
     );
 
