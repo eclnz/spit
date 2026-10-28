@@ -454,6 +454,25 @@
       }
     },
     {
+      "pipeline": "examples/runnable/streams/streams.spit",
+      "recipe": "examples/runnable/streams/streams.spitin",
+      "expect": {
+        "sources": {
+          "list": 2
+        },
+        "operations": {
+          "merge": 1,
+          "shout": 2
+        },
+        "targets": {
+          "merged": 1
+        },
+        "dependencies": 2,
+        "removals": 0,
+        "calls": 0
+      }
+    },
+    {
       "pipeline": "examples/runnable/verify/checked_copy.spit",
       "recipe": "examples/runnable/verify/checked_copy.spitin",
       "expect": {
