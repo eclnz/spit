@@ -1,8 +1,10 @@
 //! Command templates, and static checks of commands against their operations.
 //!
 //! A command is stored as a list of arguments, each made of literal text and
-//! `{placeholders}`. A backend runs the arguments as they are; [`shell_word`]
-//! quotes one for a person to read or paste into a shell.
+//! `{placeholders}`, and the ports its stdin and stdout are connected to,
+//! written `< {input}` and `> {output}`. A backend runs the arguments as
+//! they are; [`shell_word`] quotes one for a person to read or paste into a
+//! shell.
 
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
@@ -33,8 +35,50 @@ pub struct CommandTemplate {
     text: String,
     arguments: Vec<Argument>,
     /// Where in `text` each unquoted word a shell would read as an
-    /// operator, such as `|` or `>`, is.
+    /// operator, such as `|` or `>>`, is, other than a redirection.
     operators: Vec<Range<usize>>,
+    /// Each unquoted `<` or `>` word, with the word after it, in order.
+    redirects: Vec<Redirect>,
+}
+
+/// Which of a command's streams a redirection connects to a file.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum Stream {
+    /// `< {input}`: the command reads an input on its stdin.
+    Stdin,
+    /// `> {output}`: the command's stdout is written to an output.
+    Stdout,
+}
+
+impl Stream {
+    pub(crate) fn sign(self) -> &'static str {
+        match self {
+            Self::Stdin => "<",
+            Self::Stdout => ">",
+        }
+    }
+}
+
+/// An unquoted `<` or `>` word of a command, and the word after it.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct Redirect {
+    pub(crate) stream: Stream,
+    /// Where the `<` or `>` is in the template's text.
+    pub(crate) at: Range<usize>,
+    /// The word after it, parsed, and where it is in the template's text;
+    /// `None` at the end of the command.
+    pub(crate) target: Option<(Argument, Range<usize>)>,
+}
+
+impl Redirect {
+    /// The placeholder the redirection names, when the word after it is
+    /// one placeholder and nothing else.
+    pub(crate) fn placeholder(&self) -> Option<&str> {
+        match self.target.as_ref().map(|(parts, _)| parts.as_slice()) {
+            Some([Part::Placeholder(name)]) => Some(name),
+            _ => None,
+        }
+    }
 }
 
 impl CommandTemplate {
@@ -44,27 +88,68 @@ impl CommandTemplate {
     pub fn parse(text: impl Into<String>) -> Result<Self, CommandError> {
         let text = text.into();
         let words = split_arguments(&text)?;
-        let operators = words
-            .iter()
-            .filter(|word| word.bare && is_shell_operator(&word.text))
-            .map(|word| word.at.clone())
-            .collect();
-        let arguments = words
-            .iter()
-            .map(|word| parse_template(&word.text).map_err(CommandError::new))
-            .collect::<Result<Vec<_>, _>>()?;
+        let mut operators = Vec::new();
+        let mut redirects = Vec::new();
+        let mut arguments = Vec::new();
+        let mut words = words.into_iter();
+        while let Some(word) = words.next() {
+            let parse = |word: &Word| parse_template(&word.text).map_err(CommandError::new);
+            let stream = match word.text.as_str() {
+                "<" if word.bare => Some(Stream::Stdin),
+                ">" if word.bare => Some(Stream::Stdout),
+                _ => None,
+            };
+            if let Some(stream) = stream {
+                let target = match words.next() {
+                    Some(target) => Some((parse(&target)?, target.at)),
+                    None => None,
+                };
+                redirects.push(Redirect {
+                    stream,
+                    at: word.at,
+                    target,
+                });
+                continue;
+            }
+            if word.bare && is_shell_operator(&word.text) {
+                operators.push(word.at.clone());
+            }
+            arguments.push(parse(&word)?);
+        }
         if arguments.is_empty() {
-            return Err(CommandError::new("command template must not be empty"));
+            return Err(CommandError::new(if redirects.is_empty() {
+                "command template must not be empty"
+            } else {
+                "command template names no program to run, only where its stdin or stdout goes"
+            }));
         }
         Ok(Self {
             text,
             arguments,
             operators,
+            redirects,
         })
     }
 
+    /// Each `<` or `>` word, with the word after it, in the order written.
+    /// The parser allows them in an operation's command only, one of each,
+    /// each followed by one placeholder.
+    pub(crate) fn redirects(&self) -> &[Redirect] {
+        &self.redirects
+    }
+
+    /// The placeholder the command's `stream` is redirected to, as in
+    /// `> {@output}`, if any.
+    pub(crate) fn redirected(&self, stream: Stream) -> Option<&str> {
+        self.redirects
+            .iter()
+            .find(|redirect| redirect.stream == stream)
+            .and_then(Redirect::placeholder)
+    }
+
     /// Where in the template's text each unquoted word a shell would read
-    /// as an operator, such as `|` or `>`, is. The parser rejects them.
+    /// as an operator, such as `|` or `>>`, is, other than a `<` or `>`
+    /// redirection. The parser rejects them.
     pub(crate) fn shell_operators(&self) -> &[Range<usize>] {
         &self.operators
     }
@@ -228,6 +313,7 @@ fn check_command_placeholders(
     role: CommandRole,
 ) -> Result<(), CommandError> {
     let mut written = BTreeSet::new();
+    let stdout = redirected_ports(template, operation, &mut written)?;
     for parts in template.arguments() {
         let whole = parts.len() == 1;
         for part in parts {
@@ -290,6 +376,11 @@ fn check_command_placeholders(
                             operation.name
                         ));
                     }
+                    if stdout == Some(index) {
+                        return fail(format!(
+                            "`{{{name}}}`: `{port}` is the command's stdout, written `> {{{port}}}`, so it cannot be an argument too"
+                        ));
+                    }
                     // A folder and a name tell the tool where to write.
                     written.insert(index);
                 }
@@ -332,6 +423,68 @@ fn check_command_placeholders(
     Ok(())
 }
 
+/// Check the ports a command's stdin and stdout are redirected to: stdin
+/// reads one input's file, and stdout writes one output's, which counts as
+/// using it. The output's index, for stdout.
+fn redirected_ports(
+    template: &CommandTemplate,
+    operation: &OperationDef,
+    written: &mut BTreeSet<usize>,
+) -> Result<Option<usize>, CommandError> {
+    let mut stdout = None;
+    for redirect in template.redirects() {
+        // The parser makes sure each is followed by one placeholder.
+        let Some(name) = redirect.placeholder() else {
+            continue;
+        };
+        let sign = redirect.stream.sign();
+        let fail = |message: String| Err(CommandError::new(message).focus(format!("{{{name}}}")));
+        let (port, facet) = facet(name);
+        let Some(slot) = slot(operation, port) else {
+            return fail(format!(
+                "command for `{}` uses unknown placeholder `{{{name}}}`",
+                operation.name
+            ));
+        };
+        if facet != Ok(Facet::Path) {
+            return fail(format!(
+                "`{sign} {{{name}}}`: a command's stdin and stdout are files, so write `{sign} {{{port}}}`"
+            ));
+        }
+        match (redirect.stream, slot) {
+            (Stream::Stdout, Slot::Output(index)) => {
+                if operation.outputs[index].folder {
+                    return fail(format!(
+                        "`> {{{name}}}`: `{port}` is a folder, and a command's stdout is one file"
+                    ));
+                }
+                written.insert(index);
+                stdout = Some(index);
+            }
+            (Stream::Stdout, Slot::Input(_)) => {
+                return fail(format!(
+                    "`> {{{name}}}`: `{port}` is an input of `{}`, and a command's stdout is written to one of its outputs",
+                    operation.name
+                ));
+            }
+            (Stream::Stdin, Slot::Input(index)) => {
+                if operation.inputs[index].cardinality == Cardinality::Many {
+                    return fail(format!(
+                        "`< {{{name}}}`: `{port}` is a many input, and a command's stdin reads one file"
+                    ));
+                }
+            }
+            (Stream::Stdin, Slot::Output(_)) => {
+                return fail(format!(
+                    "`< {{{name}}}`: `{port}` is an output of `{}`, and a command's stdin reads one of its inputs",
+                    operation.name
+                ));
+            }
+        }
+    }
+    Ok(stdout)
+}
+
 /// `word` as a POSIX shell must be given it to read it back unchanged: as it
 /// is when every character is one a shell leaves alone, and otherwise in
 /// single quotes, with each `'` in it written `'\''`. The reverse of how a
@@ -356,8 +509,12 @@ struct Word {
     at: Range<usize>,
 }
 
-/// Whether `word` is a shell operator such as `|`, `&&`, `;`, `>`, or `2>&1`.
+/// Whether `word` is a shell operator such as `|`, `&&`, `;`, `>`, or `2>&1`,
+/// or a redirection written against its file, as in `>out.txt`.
 fn is_shell_operator(word: &str) -> bool {
+    if word.starts_with(['<', '>']) {
+        return true;
+    }
     let word = word.trim_start_matches(|character: char| character.is_ascii_digit());
     word.starts_with(['|', '&', ';', '<', '>'])
         && word

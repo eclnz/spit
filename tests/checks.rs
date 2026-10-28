@@ -78,7 +78,7 @@ Job 3  merge
 #[test]
 fn the_spitdag_names_each_check_its_port_and_its_artifact() {
     let json = dag(&format!("{CHECKS}{LINES}"), &["--json"]);
-    assert!(json.starts_with("{\"version\":7,"), "{json}");
+    assert!(json.starts_with("{\"version\":8,"), "{json}");
     assert!(json.contains("\"executables\":[\"cat\",\"check_lines\",\"sort\",\"test\"]"));
     assert!(json.contains(
         "\"checks\":[{\"when\":\"before\",\"check\":\"lines(1)\",\"port\":\"text\",\"path\":\"in/1.txt\",\

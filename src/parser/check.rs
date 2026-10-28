@@ -5,7 +5,7 @@
 use crate::command::CommandTemplate;
 use crate::model::{CheckDef, CheckUse};
 
-use super::command::reject_shell_operators;
+use super::command::{check_redirects, reject_shell_operators};
 use super::lexical::{comma_items, identifier, qualified_identifier};
 use super::ParseError;
 
@@ -61,7 +61,9 @@ pub(super) fn parse_check(line: &str, number: usize) -> Result<CheckDef, ParseEr
     let parsed = CommandTemplate::parse(template).map_err(|error| {
         ParseError::new(number, format!("check `{name}`: {}", error.message())).at_token(template)
     })?;
-    reject_shell_operators(template, &parsed, &format!("check `{name}`"), number)?;
+    let what = format!("check `{name}`");
+    reject_shell_operators(template, &parsed, &what, number)?;
+    check_redirects(template, &parsed, &what, false, number)?;
     Ok(CheckDef {
         name: name.to_owned(),
         parameters: names,

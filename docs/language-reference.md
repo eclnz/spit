@@ -296,7 +296,7 @@ operation carried out by steps, put `:` after the completed signature and
 indent its body beneath the `operation` line. Single-line declarations keep
 the same meaning.
 
-Every input port has a name, and its placeholder is that name. A port is written `name`, `name: Type`, `name: many`, or `name: many Type`; a lowercase word alone, as in `operation copy(image)`, is an untyped port, and type names start with a capital letter. In `source reading : Series [station, day]`, `reading` is the product that identifies artifacts and `Series` is its type: write `operation compare(reading: Series)`, then call it with `compare(reading)`. `{@output}` is the path of a single unnamed output; its `@` marks a SPIT-supplied placeholder, while a named output such as `{wm}` uses the name in the operation declaration. `output` cannot name an input or explicit output port, and `{output}` is an error that points to `{@output}`. A command must use every output placeholder, or its `.dir` or `.stem`, except an output written [`beside`](#files-a-tool-writes-beside-another) another; a `verify` command may use inputs only. Command templates give ordered words and arguments, not shell pipelines or redirection, since a backend runs a command without a shell. An unquoted `|`, `>`, `&&`, `;`, `2>&1` or the like is therefore an error; quote it (`'>'`) to pass it to the program as an argument. A command that needs a pipe or a redirection runs a shell itself and passes the paths to it as arguments, so that a path is never read as shell text: `command first: sh -c 'cut -f1 "$1" > "$2"' sh {table} {@output}`. The same holds for `verify` and `check` commands. Words are split and quoted as in Bash, and every argument is passed literally: `$` and backticks are not expanded. As in Bash, text in single quotes is literal, so `awk '{print $1}'` needs no escaping; a placeholder is filled in unquoted text or double quotes. Write `{{` or `}}` for a literal brace elsewhere. Every command is checked when the pipeline is loaded: braces and quotes must balance, placeholders must name the operation's ports, and each output must appear, as above.
+Every input port has a name, and its placeholder is that name. A port is written `name`, `name: Type`, `name: many`, or `name: many Type`; a lowercase word alone, as in `operation copy(image)`, is an untyped port, and type names start with a capital letter. In `source reading : Series [station, day]`, `reading` is the product that identifies artifacts and `Series` is its type: write `operation compare(reading: Series)`, then call it with `compare(reading)`. `{@output}` is the path of a single unnamed output; its `@` marks a SPIT-supplied placeholder, while a named output such as `{wm}` uses the name in the operation declaration. `output` cannot name an input or explicit output port, and `{output}` is an error that points to `{@output}`. A command must use every output placeholder, or its `.dir` or `.stem`, or write the output as its [stdout](#standard-input-and-output), except an output written [`beside`](#files-a-tool-writes-beside-another) another; a `verify` command may use inputs only. Command templates give ordered words and arguments, not shell pipelines, since a backend runs a command without a shell. Apart from a command's own `< {input}` and `> {output}`, described [below](#standard-input-and-output), an unquoted `|`, `>>`, `&&`, `;`, `2>&1` or the like is therefore an error; quote it (`'|'`) to pass it to the program as an argument. A command that needs a pipe runs a shell itself and passes the paths to it as arguments, so that a path is never read as shell text: `command first: sh -c 'cut -f1 "$1" | sort -u > "$2"' sh {table} {@output}`. The same holds for `verify` and `check` commands, which take no `<` or `>` at all. Words are split and quoted as in Bash, and every argument is passed literally: `$` and backticks are not expanded. As in Bash, text in single quotes is literal, so `awk '{print $1}'` needs no escaping; a placeholder is filled in unquoted text or double quotes. Write `{{` or `}}` for a literal brace elsewhere. Every command is checked when the pipeline is loaded: braces and quotes must balance, placeholders must name the operation's ports, and each output must appear, as above.
 
 Products, operations and dimensions have separate names, so a dimension may share a product's (`model @each(model)`). A product may also share its operation's name, but `spit check` warns: name the result, as in `coregistered = coreg(mc, brain)`, so the step reads as what it makes.
 
@@ -309,6 +309,34 @@ operation process(image: Image) -> Image
 ```text
 command process: process_tool {image} {@output}
 ```
+
+### Standard input and output
+
+Many tools print their result rather than write it to a file they are told. A command sends its stdout to one of its outputs with `>` and that output's placeholder, and reads one of its inputs on its stdin with `<`:
+
+<!-- spit-doc: setup
+source table : Table [sheet]
+default entities: {@key}={@value} separated "_"
+default path: out/{@product}/{@entities}
+-->
+
+```text
+operation first(table: Table) -> Column .tsv
+command first: cut -f1 {table} > {@output}
+
+operation count(table: Table) -> Count .txt
+command count: wc -l < {table} > {@output}
+
+column = first(table)
+lines = count(table)
+```
+
+A backend opens the output's file and connects it to the command, so no shell is involved and the path never reaches the program as text. `spit dag --commands` shows such a job's `run:` line with `<` and `>` and their paths at its end, as a shell would write them. The output is declared, given a path, checked and fingerprinted like any other, and writing it as stdout counts as using it.
+
+- `<` and `>` are each a word of their own, followed by one placeholder: `>{@output}` and `> out.txt` are errors.
+- A command has at most one of each. Its stdout is an output, not a [folder](#folders), and no argument names it too, not even its `.dir` or `.stem`. Its stdin is a `one` input whose artifacts are files.
+- Only an operation's `command` has them. A `verify` or `check` command that needs to redirect runs a shell, as above.
+- What the command writes to stderr is left to the backend, which typically logs it.
 
 ### Operations carried out by steps
 
