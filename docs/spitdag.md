@@ -1,6 +1,6 @@
 # The `.spitdag` format
 
-A `.spitdag` is what `spit dag -o` writes and `spit dag --json` prints: every job a pipeline resolves to over one dataset, each with its files and its commands. A backend that runs the jobs reads nothing else: no pipeline, path rule or command template. This page describes version 7, the version SPIT writes. Use `spit dag --commands` for a readable view of the same commands.
+A `.spitdag` is what `spit dag -o` writes and `spit dag --json` prints: every job a pipeline resolves to over one dataset, each with its files and its commands. A backend that runs the jobs reads nothing else: no pipeline, path rule or command template. This page describes version 8, the version SPIT writes. Use `spit dag --commands` for a readable view of the same commands.
 
 ## Document
 
@@ -8,7 +8,7 @@ A `.spitdag` is one JSON object, followed by a newline:
 
 ```json
 {
-  "version": 7,
+  "version": 8,
   "generator": {"name": "spit", "version": "0.2.2"},
   "root": "/data/study",
   "external_inputs": [ARTIFACT, ...],
@@ -24,7 +24,7 @@ A `.spitdag` is one JSON object, followed by a newline:
 
 | Field | Holds |
 | --- | --- |
-| `version` | The format's version, `7`. A change a reader must know about raises it. Version 6 added each job's [`checks`](#checks). Version 7 added `pipeline_files`, `calls` and each job's `origin`: see [Where jobs come from](#where-jobs-come-from). |
+| `version` | The format's version, `8`. A change a reader must know about raises it. Version 6 added each job's [`checks`](#checks). Version 7 added `pipeline_files`, `calls` and each job's `origin`: see [Where jobs come from](#where-jobs-come-from). Version 8 added each job's `stdin` and `stdout`: see [Standard input and output](#standard-input-and-output). |
 | `generator` | The program that wrote the file, and its version. |
 | `root` | The absolute dataset folder that every path is relative to, or `null` when it was not known: a `.spitout` that records no root. |
 | `external_inputs` | Every artifact a job reads but no job writes, once each: the sources. Ordered by path in natural order, the order `many` inputs take, so `wave2` comes before `wave10`. |
@@ -95,6 +95,8 @@ Each output that could not be produced has its identity and the input gaps that 
   "depends_on": [1, 2],
   "dependents": [6],
   "command": [ARGUMENT, ...],
+  "stdin": null,
+  "stdout": null,
   "verify": [[ARGUMENT, ...], ...],
   "checks": [CHECK, ...]
 }
@@ -112,6 +114,8 @@ Each output that could not be produced has its identity and the input gaps that 
 | `depends_on` | The jobs that write this job's inputs. |
 | `dependents` | The jobs that read this job's outputs. |
 | `command` | The command that writes the outputs, or `null` for an operation with none. |
+| `stdin` | The path, relative to `root`, of the input file `command` reads on its standard input, or `null`: see [Standard input and output](#standard-input-and-output). |
+| `stdout` | The path, relative to `root`, of the output file `command`'s standard output is written to, or `null`. |
 | `verify` | The commands that check the inputs before `command` runs, in order; `[]` for none. |
 | `checks` | The checks of single artifacts the job reads and writes, in the order they run: see [Checks](#checks). `[]` for none. |
 
@@ -134,6 +138,24 @@ That is four arguments: `tool`, `--in=in/1.txt`, `-o` and `out/1.txt`. A `many` 
 Use the `dir` or `stem` text as the part, as a `path` part is used. Version 4 added these two parts; a reader written for version 3 does not know them.
 
 Run each argument as one word, exactly as given: no shell is involved, so nothing in it is split, expanded or interpreted. Resolve each path against `root`, or run the command from `root`, where the relative paths name the right files.
+
+### Standard input and output
+
+A command written `wc -l < {table} > {@output}` reads an input on its standard input and writes an output on its standard output. Its job names the two files in `stdin` and `stdout`, and its `command` holds only the program and its arguments:
+
+```json
+"command": [["wc"], ["-l"]],
+"stdin": "in/sheet=a.tsv",
+"stdout": "out/lines/sheet=a.txt"
+```
+
+`stdout` is always the path of one of the job's `outputs`, a file, and never appears in `command`. `stdin` is the path of one of its `inputs`, a file. Either is `null` when the command does not redirect it, and both are `null` for a job whose `command` is `null`. `verify` commands and checks never redirect either.
+
+- Open `stdin` for reading and connect it to the command's standard input. When it is `null`, the command's standard input is whatever the backend gives every command.
+- Make `stdout`'s folder, as for any output, then connect a file for writing to the command's standard output. Write it to a temporary file in the same folder, and rename that onto `stdout` only once `command` exits with status 0, so a failed job never leaves a partial output at the path. When `stdout` is `null`, the command's standard output is the backend's, which typically logs it.
+- The command's standard error is the backend's in either case.
+
+The output is otherwise like any other: it must exist once `command` succeeds, as [Missing outputs](#missing-outputs) says, which an empty file does, and its `"after"` checks run on it.
 
 ### Running `verify`
 
@@ -218,6 +240,6 @@ None of these is part of a job's [fingerprint](#fingerprint). A changed command 
 
 ## Fingerprint
 
-A job's fingerprint is a 64-bit FNV-1a hash of the compact JSON of what it reads, writes and runs: its `operation`, `inputs`, `outputs`, `command` and `verify`, each artifact with its product, entities, type, path and kind. Its `id`, `stage`, `origin`, `depends_on`, `dependents` and `checks` are left out, so the fingerprint follows the work, not where the job falls in the plan.
+A job's fingerprint is a 64-bit FNV-1a hash of the compact JSON of what it reads, writes and runs: its `operation`, `inputs`, `outputs`, `command`, `stdin`, `stdout` and `verify`, in that order, each artifact with its product, entities, type, path and kind. `stdin` and `stdout` are left out of the hashed JSON when they are `null`. Its `id`, `stage`, `origin`, `depends_on`, `dependents` and `checks` are left out, so the fingerprint follows the work, not where the job falls in the plan.
 
 The fingerprint changes when the job's command, its files, or which artifacts it reads or writes change. It does not read the files themselves, so it does not change when an input file's contents do; a backend that must rerun a job after its inputs change combines the fingerprint with its own record of the files, such as their modification times or hashes.

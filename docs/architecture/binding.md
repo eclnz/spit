@@ -20,14 +20,14 @@ flowchart LR
     - the same `Artifacts` table as the `ResolvedDag`, with each artifact's path as a column by id;
     - each product's dimensions, and whether its artifacts are folders, once per product;
     - the steps (`BoundStep`), each with its port names, so a job's inputs and outputs are artifact ids in port order;
-    - the jobs (`BoundJob`), with each command an `Argument` list of `ArgPart`s;
+    - the jobs (`BoundJob`), with each command an `Argument` list of `ArgPart`s, and the artifacts its `stdin` and `stdout` are connected to;
     - what was removed and left out, the pipeline's files, and the calls.
 - **`PathTemplate`** ([`src/paths/template.rs`](https://github.com/eclnz/spit/blob/dev/src/paths/template.rs)) is a rule's text read into parts. `PipelineIndex::path_template_for` completes a product's rule:
     - its `[...]` groups kept or dropped for the product's dimensions and stage;
     - `{@entities}` written out, as the nearest `default entities:` spells it;
     - its extension added: an operation's output extension, a source's declared one, or else `default ext:`.
 - **`PathBinder`** ([`src/paths/product.rs`](https://github.com/eclnz/spit/blob/dev/src/paths/product.rs)) binds artifacts to paths. `PathBinder::bind_numbered` finds each product's template and stage once, by its number in the artifact table.
-- **`CommandTemplate`** ([`src/command.rs`](https://github.com/eclnz/spit/blob/dev/src/command.rs)) is a command's arguments, each literal text and `{placeholders}`.
+- **`CommandTemplate`** ([`src/command.rs`](https://github.com/eclnz/spit/blob/dev/src/command.rs)) is a command's arguments, each literal text and `{placeholders}`, and its `Redirect`s: each `<` or `>` word with the word after it, which are not arguments.
 - **`write_document`** ([`src/spitdag/write.rs`](https://github.com/eclnz/spit/blob/dev/src/spitdag/write.rs)) writes each artifact's JSON once, and hashes each job's fingerprint from its work.
 
 ## Responsibilities
@@ -57,7 +57,8 @@ flowchart LR
 
 - **Each placeholder names a port.** `{x.dir}` and `{x.stem}` give an output's folder, and its file name without its extension. A `many` port expands into one argument per artifact, in the collection's order, so its placeholder must fill a whole argument.
 - **A `verify` command uses the same placeholders,** for inputs only.
-- **Each bare shell operator word is rejected,** such as `|` or `>`, at its column. A runner runs a command without a shell, so `CommandTemplate::parse` marks those words. A quoted one is literal text.
+- **Each bare shell operator word is rejected,** such as `|` or `>>`, at its column. A runner runs a command without a shell, so `CommandTemplate::parse` marks those words. A quoted one is literal text.
+- **A bare `<` or `>` word connects a stream to a port.** `CommandTemplate::parse` takes it and the word after it out of the arguments as a `Redirect`. The parser (`check_redirects`) allows them only in an operation's command, once each, each followed by one placeholder; `validate_commands` checks that `>` names an output that is a file and no argument names, and `<` a `one` input. `bind_job` turns them into the job's `stdin` and `stdout` artifacts, and rejects a folder on stdin.
 - **A check is its own small model.** `CheckDef` is a check declaration, and `CheckUse` its use on an input port, an output port or a source. `src/check.rs` validates them, and at binding gives each step its checks once (`step_checks`) and each job one command per checked artifact.
 - **Commands and checks change no job, path, dependency or fingerprint.**
 
