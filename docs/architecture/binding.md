@@ -27,7 +27,7 @@ flowchart LR
     - `{@entities}` written out, as the nearest `default entities:` spells it;
     - its extension added: an operation's output extension, a source's declared one, or else `default ext:`.
 - **`PathBinder`** ([`src/paths/product.rs`](https://github.com/eclnz/spit/blob/dev/src/paths/product.rs)) binds artifacts to paths. `PathBinder::bind_numbered` finds each product's template and stage once, by its number in the artifact table.
-- **`CommandTemplate`** ([`src/command.rs`](https://github.com/eclnz/spit/blob/dev/src/command.rs)) is a command's arguments, each literal text and `{placeholders}`, and its `Redirect`s: each `<` or `>` word with the word after it, which are not arguments.
+- **`CommandTemplate`** ([`src/command/mod.rs`](https://github.com/eclnz/spit/blob/dev/src/command/mod.rs)) is a command's arguments, each literal text and `{placeholders}`, and its `Redirect`s: each `<` or `>` word with the word after it, which are not arguments.
 - **`write_document`** ([`src/spitdag/write.rs`](https://github.com/eclnz/spit/blob/dev/src/spitdag/write.rs)) writes each artifact's JSON once, and hashes each job's fingerprint from its work.
 
 ## Responsibilities
@@ -55,8 +55,9 @@ flowchart LR
 
 **Commands and checks:**
 
-- **Each placeholder names a port.** `{x.dir}` and `{x.stem}` give an output's folder, and its file name without its extension. A `many` port expands into one argument per artifact, in the collection's order, so its placeholder must fill a whole argument.
-- **A `verify` command uses the same placeholders,** for inputs only.
+- **A placeholder names a port, or else a dimension.** `slot` looks a name up among the operation's ports first, so a port shadows a dimension of the same name. `{x.dir}` and `{x.stem}` give an output's folder, and its file name without its extension. A `many` port expands into one argument per artifact, in the collection's order, so its placeholder must fill a whole argument.
+- **A dimension's placeholder is the job's value, as text.** Any other name is `Slot::Dimension`. `collect_commands` ([`src/command/validate.rs`](https://github.com/eclnz/spit/blob/dev/src/command/validate.rs)) checks it against each step calling the operation, by the dimensions of the product the step's first output makes, and so before any data is read; an operation no step calls is not checked. `expand` reads the value from the entities of the job's first output, which carry each of its step's dimensions, and writes it as an `ArgPart::Text` within its argument. Tests: [`a_command_and_its_verify_are_given_the_jobs_values_as_text`](https://github.com/eclnz/spit/blob/dev/tests/command_dimensions.rs), [`a_dimension_the_jobs_lack_is_an_error_at_the_placeholder`](https://github.com/eclnz/spit/blob/dev/tests/command_dimensions.rs).
+- **A `verify` command uses the same placeholders,** with inputs as its only ports.
 - **`{@cores}` is a number, not a port.** `slot` gives it as `Slot::Cores`, and `expand` writes the step's cores as text, from its operation's `ResourcesDef`, or 1 without one. `collect_resources` ([`src/resources.rs`](https://github.com/eclnz/spit/blob/dev/src/resources.rs)) checks that each `resources` line names an operation with no body, once.
 - **Each bare shell operator word is rejected,** such as `|` or `>>`, at its column. A runner runs a command without a shell, so `CommandTemplate::parse` marks those words. A quoted one is literal text.
 - **A bare `<` or `>` word connects a stream to a port.** `CommandTemplate::parse` takes it and the word after it out of the arguments as a `Redirect`. The parser (`check_redirects`) allows them only in an operation's command, once each, each followed by one placeholder; `validate_commands` checks that `>` names an output that is a file and no argument names, and `<` a `one` input. `bind_job` turns them into the job's `stdin` and `stdout` artifacts, and rejects a folder on stdin.
@@ -72,6 +73,7 @@ flowchart LR
 - **SPIT writes no path of its own.** An output with no rule fails at its declaration. A source with records but no rule fails at binding, rather than being looked for under `out/`. Tests: [`an_output_with_no_rule_is_an_error_and_a_source_waits_for_one`](https://github.com/eclnz/spit/blob/dev/tests/paths.rs), [`a_recorded_source_with_no_path_rule_is_not_looked_for_under_out`](https://github.com/eclnz/spit/blob/dev/tests/cli.rs).
 - **Checks change neither the jobs nor their fingerprints.** Test: [`checks_change_neither_the_jobs_nor_their_fingerprints`](https://github.com/eclnz/spit/blob/dev/tests/checks.rs).
 - **What a job needs leaves its fingerprint as it is.** Test: [`resources_leave_the_fingerprint_unless_the_command_uses_them`](https://github.com/eclnz/spit/blob/dev/tests/resources.rs).
+- **A dimension's value is in the fingerprint as the text it gives the command.** Test: [`a_value_joins_the_fingerprint_as_the_same_text_written_out_would`](https://github.com/eclnz/spit/blob/dev/tests/command_dimensions.rs).
 
 A `.spitdag` belongs to the inventory it was made from: a new inventory needs a new `dag`.
 

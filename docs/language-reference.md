@@ -296,7 +296,7 @@ operation carried out by steps, put `:` after the completed signature and
 indent its body beneath the `operation` line. Single-line declarations keep
 the same meaning.
 
-Every input port has a name, and its placeholder is that name. A port is written `name`, `name: Type`, `name: many`, or `name: many Type`; a lowercase word alone, as in `operation copy(image)`, is an untyped port, and type names start with a capital letter. In `source reading : Series [station, day]`, `reading` is the product that identifies artifacts and `Series` is its type: write `operation compare(reading: Series)`, then call it with `compare(reading)`. `{@output}` is the path of a single unnamed output; its `@` marks a SPIT-supplied placeholder, while a named output such as `{wm}` uses the name in the operation declaration. `output` cannot name an input or explicit output port, and `{output}` is an error that points to `{@output}`. A command must use every output placeholder, or its `.dir` or `.stem`, or write the output as its [stdout](#standard-input-and-output), except an output written [`beside`](#files-a-tool-writes-beside-another) another; a `verify` command may use inputs only. Command templates give ordered words and arguments, not shell pipelines, since a backend runs a command without a shell. Apart from a command's own `< {input}` and `> {output}`, described [below](#standard-input-and-output), an unquoted `|`, `>>`, `&&`, `;`, `2>&1` or the like is therefore an error; quote it (`'|'`) to pass it to the program as an argument. A command that needs a pipe runs a shell itself and passes the paths to it as arguments, so that a path is never read as shell text: `command first: sh -c 'cut -f1 "$1" | sort -u > "$2"' sh {table} {@output}`. The same holds for `verify` and `check` commands, which take no `<` or `>` at all. Words are split and quoted as in Bash, and every argument is passed literally: `$` and backticks are not expanded. As in Bash, text in single quotes is literal, so `awk '{print $1}'` needs no escaping; a placeholder is filled in unquoted text or double quotes. Write `{{` or `}}` for a literal brace elsewhere. Every command is checked when the pipeline is loaded: braces and quotes must balance, placeholders must name the operation's ports, and each output must appear, as above.
+Every input port has a name, and its placeholder is that name. A port is written `name`, `name: Type`, `name: many`, or `name: many Type`; a lowercase word alone, as in `operation copy(image)`, is an untyped port, and type names start with a capital letter. In `source reading : Series [station, day]`, `reading` is the product that identifies artifacts and `Series` is its type: write `operation compare(reading: Series)`, then call it with `compare(reading)`. `{@output}` is the path of a single unnamed output; its `@` marks a SPIT-supplied placeholder, while a named output such as `{wm}` uses the name in the operation declaration. `output` cannot name an input or explicit output port, and `{output}` is an error that points to `{@output}`. A command must use every output placeholder, or its `.dir` or `.stem`, or write the output as its [stdout](#standard-input-and-output), except an output written [`beside`](#files-a-tool-writes-beside-another) another; a `verify` command may use inputs only, of its ports. Command templates give ordered words and arguments, not shell pipelines, since a backend runs a command without a shell. Apart from a command's own `< {input}` and `> {output}`, described [below](#standard-input-and-output), an unquoted `|`, `>>`, `&&`, `;`, `2>&1` or the like is therefore an error; quote it (`'|'`) to pass it to the program as an argument. A command that needs a pipe runs a shell itself and passes the paths to it as arguments, so that a path is never read as shell text: `command first: sh -c 'cut -f1 "$1" | sort -u > "$2"' sh {table} {@output}`. The same holds for `verify` and `check` commands, which take no `<` or `>` at all. Words are split and quoted as in Bash, and every argument is passed literally: `$` and backticks are not expanded. As in Bash, text in single quotes is literal, so `awk '{print $1}'` needs no escaping; a placeholder is filled in unquoted text or double quotes. Write `{{` or `}}` for a literal brace elsewhere. Every command is checked when the pipeline is loaded: braces and quotes must balance, placeholders must name the operation's ports or a [dimension of its jobs](#a-jobs-dimension-values), and each output must appear, as above.
 
 Products, operations and dimensions have separate names, so a dimension may share a product's (`model @each(model)`). A product may also share its operation's name, but `spit check` warns: name the result, as in `coregistered = coreg(mc, brain)`, so the step reads as what it makes.
 
@@ -364,6 +364,75 @@ Each `align` job runs `bwa mem -t 8 ...`, and a backend starts one only when 8 c
 - `{@cores}` is the declared number, written into the command as text, in a `command` or a `verify` command. It is `1` for an operation that declares none. Write it where the tool takes its thread count, so that the tool uses what the backend set aside, and the number is written once.
 - An operation has one `resources` line, wherever it is written, as its `command` is. An imported operation brings its line with it. An [operation carried out by steps](#operations-carried-out-by-steps) has none: give each operation its body calls a line of its own.
 - What a job needs does not change what it makes, so a changed `resources` line does not make a job out of date, unless the command's `{@cores}` changes with it.
+
+### A job's dimension values
+
+A command can give a tool the values of the job it runs, as for a read group, a plot's title or a run's name. A placeholder that names a dimension of the job, such as `{sample}`, is that job's value:
+
+<!-- spit-doc: setup
+source reads : Fastq .fastq.gz [sample]
+source reference : Fasta .fa
+default entities: {@key}={@value} separated "_"
+default path: out/{@product}/{@entities}
+-->
+
+```text
+operation align(reference: Fasta, reads: Fastq) -> Sam .sam
+command align: bwa mem -R "@RG\tID:{sample}\tSM:{sample}" {reference} {reads} > {@output}
+
+aligned = align(reference, reads)
+```
+
+For `reads[sample=A]`, `spit dag --commands` shows the job's command with the value filled in:
+
+<!-- spit-doc: output
+spit dag rg.spit rg.spitout --commands
+--- rg.spit
+source reads : Fastq .fastq.gz [sample]
+source reference : Fasta .fa
+path reference: ref/genome
+default entities: {@key}={@value} separated "_"
+default path: out/{@product}/{@entities}
+operation align(reference: Fasta, reads: Fastq) -> Sam .sam
+command align: bwa mem -R "@RG\tID:{sample}\tSM:{sample}" {reference} {reads} > {@output}
+aligned = align(reference, reads)
+--- rg.spitout
+sources:
+    reads[sample=A]
+    reference
+-->
+
+```text
+  run:    bwa mem -R '@RG\tID:A\tSM:A' ref/genome.fa out/reads/sample=A.fastq.gz > out/aligned/sample=A.sam
+```
+
+- A job has the dimensions of its outputs: those of the input that drives it, less those a `many` input collects with `@vary`, with those an input broadcasts with `@each`. In the editor, a hover on the step's product shows them, as `aligned: Sam [sample]`.
+- The value is text in its argument, where the placeholder is. It never splits an argument or adds one. Inside single quotes a placeholder is literal text, so write an argument that needs quotes in double quotes, as above, where `\t` stays for `bwa` to read.
+- A `command` and a `verify` command may use it. It is not a file, so it gives no `.dir` or `.stem`, and `<` and `>` cannot name it. A `check` reads only its own parameters.
+- A port's name comes first. In `operation train(model: Weights, ...)`, `{model}` is the port's file, even in a step whose jobs have a `model` dimension. Rename the port to give the tool the value.
+- The `.spitdag` holds the value as text in the command, as it holds `{@cores}`.
+
+Every step that calls the operation must give its jobs the dimension. Otherwise `spit check` reports an error at the placeholder, with the dimensions the jobs do have. A dimension a `many` input collects has many values in each job, not one:
+
+<!-- spit-doc: fragment -->
+
+```text
+source seconds : Duration [speaker, digit]
+operation table(durations: many Duration) -> Table
+command table: table --digit {digit} {durations} -o {@output}
+summary = table(seconds @vary(digit))
+```
+
+<!-- spit-doc: output
+spit check v.spit || true
+--- v.spit = @previous
+-->
+
+```text
+error: line 3, column 30: command for `table` uses `{digit}`, but `durations` collects `seconds` across `digit` with `@vary(digit)`, so each job has many values of it; the jobs of `summary` have `speaker`
+```
+
+An operation that no step calls, as in a file of operations for other pipelines to import, is checked when a step calls it.
 
 ### Operations carried out by steps
 
