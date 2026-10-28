@@ -13,6 +13,7 @@ pub enum Word {
     Operation,
     Command,
     Verify,
+    Resources,
     Path,
     Ext,
     Stage,
@@ -48,6 +49,7 @@ pub enum Word {
     Stem,
     Stdin,
     Stdout,
+    Cores,
     Sources,
     SourcePaths,
     Contexts,
@@ -86,7 +88,7 @@ impl Word {
 }
 
 /// Every word's documentation, in the order of [`Word`].
-pub static DOCS: [Doc; 53] = [
+pub static DOCS: [Doc; 55] = [
     Doc {
         name: "source",
         kind: "keyword",
@@ -114,6 +116,13 @@ pub static DOCS: [Doc; 53] = [
         anchor: "operations-and-commands",
         example: "verify register: check_same_grid {moving} {reference}",
         summary: "Checks a job's inputs before its command runs. SPIT does not run it: it writes it into the `.spitdag` beside the job's command, and a backend runs it first. If it fails, the job does not run, and neither does any job that depends on it. It may use input ports only, `many` ones included.",
+    },
+    Doc {
+        name: "resources",
+        kind: "keyword",
+        anchor: "cores-and-memory",
+        example: "resources align: cores=8, memory=16G",
+        summary: "What each job of an operation needs to run: `cores=N`, at least 1, and `memory=SIZE`, a whole number and a unit, K, M, G or T. Either may be left out: a job needs one core and claims no memory unless it says so. A backend starts a job only when that many cores and that much memory are free. `{@cores}` in the command gives the tool the cores it was given.",
     },
     Doc {
         name: "path",
@@ -359,6 +368,13 @@ pub static DOCS: [Doc; 53] = [
         anchor: "standard-input-and-output",
         example: "command first: cut -f1 {table} > {@output}",
         summary: "Writes the command's stdout to one output's file, for a tool that prints its result. Counts as using the output, which no argument may name too. `>` and its placeholder are words of their own, and only an operation's `command` has one.",
+    },
+    Doc {
+        name: "@cores",
+        kind: "placeholder",
+        anchor: "cores-and-memory",
+        example: "resources align: cores=8\ncommand align: bwa mem -t {@cores} {reference} {reads} > {@output}",
+        summary: "The cores the operation's `resources` line gives each job, 1 when it gives none, written into the command as a number, so the tool uses as many threads as a backend set aside for it.",
     },
     Doc {
         name: "sources:",

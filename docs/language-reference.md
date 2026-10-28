@@ -4,7 +4,7 @@ This manual defines valid `.spit` pipelines, `.spitin` recipes, and `.spitout` i
 
 A `#` that starts a word begins a comment, as in Bash. A `#` inside a word or in quotes is kept, so `--color=#fff` and `'#run'` are ordinary arguments.
 
-A line's first word says what it is, so the words that start statements are reserved: no product, whether a source or a step's output, may be named `use`, `root`, `source`, `discover`, `operation`, `command`, `verify`, `check`, `require`, `exclude`, `path`, `ext`, `default`, `entities`, `stage` or `dimensions`, nor `drop`, `skip` or `sidecars`. Those three, and `shell-source`, start a line only to give an error that says what to write instead. `check = clean(raw)` is an error that says so.
+A line's first word says what it is, so the words that start statements are reserved: no product, whether a source or a step's output, may be named `use`, `root`, `source`, `discover`, `operation`, `command`, `verify`, `resources`, `check`, `require`, `exclude`, `path`, `ext`, `default`, `entities`, `stage` or `dimensions`, nor `drop`, `skip` or `sidecars`. Those three, and `shell-source`, start a line only to give an error that says what to write instead. `check = clean(raw)` is an error that says so.
 
 ## Keyword blocks
 
@@ -33,7 +33,7 @@ command:
     denoise: dn {image} {@output}
 ```
 
-`source:`, `operation:`, `command:`, `verify:`, `check:` and `path:` open blocks in a pipeline, and `path:`, `require:` and `exclude:` in a recipe. An entry is read as its keyword's statement would be, with the same errors on its own line; a `source:` block inside a stage is an error at each entry, as a `source` line there is. The entries of a block share one indentation, and the next line that is not indented beneath the keyword ends it. In an `operation:` block, an entry that ends in `:` opens the [body of steps](#operations-carried-out-by-steps) that carries it out, indented beneath the entry. [Defaults](#defaults) have a block of their own, `default:`, and a stage's lines are a block of their own too.
+`source:`, `operation:`, `command:`, `verify:`, `resources:`, `check:` and `path:` open blocks in a pipeline, and `path:`, `require:` and `exclude:` in a recipe. An entry is read as its keyword's statement would be, with the same errors on its own line; a `source:` block inside a stage is an error at each entry, as a `source` line there is. The entries of a block share one indentation, and the next line that is not indented beneath the keyword ends it. In an `operation:` block, an entry that ends in `:` opens the [body of steps](#operations-carried-out-by-steps) that carries it out, indented beneath the entry. [Defaults](#defaults) have a block of their own, `default:`, and a stage's lines are a block of their own too.
 
 ### Statements over several lines
 
@@ -337,6 +337,33 @@ A backend opens the output's file and connects it to the command, so no shell is
 - A command has at most one of each. Its stdout is an output, not a [folder](#folders), and no argument names it too, not even its `.dir` or `.stem`. Its stdin is a `one` input whose artifacts are files.
 - Only an operation's `command` has them. A `verify` or `check` command that needs to redirect runs a shell, as above.
 - What the command writes to stderr is left to the backend, which typically logs it.
+
+### Cores and memory
+
+A backend runs several jobs at once. To keep it from starting more than the machine has cores and memory for, a `resources` line says what each job of an operation needs, and `{@cores}` gives the command the cores its job was given:
+
+<!-- spit-doc: setup
+source reads : Fastq [sample]
+source reference : Fasta
+default entities: {@key}={@value} separated "_"
+default path: out/{@product}/{@entities}
+-->
+
+```text
+operation align(reference: Fasta, reads: Fastq) -> Sam .sam
+command align: bwa mem -t {@cores} {reference} {reads} > {@output}
+resources align: cores=8, memory=16G
+
+aligned = align(reference, reads)
+```
+
+Each `align` job runs `bwa mem -t 8 ...`, and a backend starts one only when 8 cores and 16 GiB of memory are free. `spit dag --commands` shows a `needs:` line above the `run:` line of each such job.
+
+- `cores=N` is the number of cores a job uses, a whole number from 1. `memory=SIZE` is the most memory it needs, a whole number and a unit: `K`, `M`, `G` or `T`, each 1024 times the one before, so `memory=1536M` for one and a half gigabytes. Give either or both, separated by a comma.
+- An operation without a `resources` line, or without `cores` in it, needs one core, and one without `memory` claims none, so a backend schedules its jobs as it schedules every job.
+- `{@cores}` is the declared number, written into the command as text, in a `command` or a `verify` command. It is `1` for an operation that declares none. Write it where the tool takes its thread count, so that the tool uses what the backend set aside, and the number is written once.
+- An operation has one `resources` line, wherever it is written, as its `command` is. An imported operation brings its line with it. An [operation carried out by steps](#operations-carried-out-by-steps) has none: give each operation its body calls a line of its own.
+- What a job needs does not change what it makes, so a changed `resources` line does not make a job out of date, unless the command's `{@cores}` changes with it.
 
 ### Operations carried out by steps
 
@@ -1010,7 +1037,7 @@ A `.spit` pipeline is the reusable graph: what work to do and where its results 
 
 | Line | Pipeline | Recipe |
 | --- | --- | --- |
-| `source`, `dimensions`, `types`, `operation`, `command`, `verify`, steps, `stage`, `use`, `default ext:` | yes | no |
+| `source`, `dimensions`, `types`, `operation`, `command`, `verify`, `resources`, steps, `stage`, `use`, `default ext:` | yes | no |
 | `path product:` for a product a step makes | yes | no |
 | `path product:` for a source that is not declared `beside` another | either one, not both | either one, not both |
 | `default path:` | covers outputs, and sources nothing else covers | covers sources only |

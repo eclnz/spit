@@ -22,6 +22,7 @@ mod parser;
 mod paths;
 mod render;
 mod resolver;
+mod resources;
 mod shape;
 mod span;
 mod spitdag;
@@ -53,8 +54,8 @@ pub use model::{
     ContextPattern, CountRequirement, CoverageAction, CoverageGap, CoverageRule, DagStep,
     DimensionOrders, EntityBinding, Exclusion, Gap, IncompleteJob, InputBinding, InputPort,
     InputRules, Invocation, Job, JobId, OperationDef, OutputPort, Pipeline, Port, ProductDef,
-    Removal, ResolvedDag, ShapeRule, SidecarGroup, SourceFile, SourceInventory, SourceRecord,
-    StageDef, StepId, StepOrigin, StepOutput, TypeChecking,
+    Removal, ResolvedDag, Resources, ResourcesDef, ShapeRule, SidecarGroup, SourceFile,
+    SourceInventory, SourceRecord, StageDef, StepId, StepOrigin, StepOutput, TypeChecking,
 };
 pub use parser::{parse_source_inventory, render_source_inventory, ParseError, ParseErrorKind};
 pub use paths::{

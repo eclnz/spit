@@ -63,6 +63,25 @@ SPIT records these commands in the DAG; the runner performs them. A failed check
 
 For checks shared by every output in a file or stage, write `default check: nonempty, ndim(3)` once. A nested stage can remove an inherited check with `default check: !nonempty`; an output can do the same with `@check(!nonempty)`. See [default checks](../language-reference.md#default-checks).
 
+## Cores and memory
+
+A runner starts several jobs at once. Say what each job of an operation needs, so that it starts only as many as the machine can hold, and pass the cores to the tool with `{@cores}`:
+
+<!-- spit-doc: setup
+source image : Image [sub]
+default entities: {@key}={@value} separated "_"
+default path: out/{@product}/{@entities}
+-->
+
+```spit
+operation denoise(input: Image) -> Image .nii.gz
+command denoise: denoise_tool --threads {@cores} {input} --out {@output}
+resources denoise: cores=4, memory=8G
+denoised = denoise(image)
+```
+
+Each job runs `denoise_tool --threads 4 ...`. An operation with no `resources` line needs one core and claims no memory. See [cores and memory](../language-reference.md#cores-and-memory).
+
 ## Composite operations
 
 An operation can have an indented body in place of a `command`. Its outputs are named because the body assigns each one:

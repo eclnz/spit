@@ -19,7 +19,7 @@ flowchart LR
 - **`BoundDag`** ([`src/spitdag/mod.rs`](https://github.com/eclnz/spit/blob/dev/src/spitdag/mod.rs)) keeps:
     - the same `Artifacts` table as the `ResolvedDag`, with each artifact's path as a column by id;
     - each product's dimensions, and whether its artifacts are folders, once per product;
-    - the steps (`BoundStep`), each with its port names, so a job's inputs and outputs are artifact ids in port order;
+    - the steps (`BoundStep`), each with its port names, so a job's inputs and outputs are artifact ids in port order, and the `Resources` each of its jobs needs;
     - the jobs (`BoundJob`), with each command an `Argument` list of `ArgPart`s, and the artifacts its `stdin` and `stdout` are connected to;
     - what was removed and left out, the pipeline's files, and the calls.
 - **`PathTemplate`** ([`src/paths/template.rs`](https://github.com/eclnz/spit/blob/dev/src/paths/template.rs)) is a rule's text read into parts. `PipelineIndex::path_template_for` completes a product's rule:
@@ -57,10 +57,11 @@ flowchart LR
 
 - **Each placeholder names a port.** `{x.dir}` and `{x.stem}` give an output's folder, and its file name without its extension. A `many` port expands into one argument per artifact, in the collection's order, so its placeholder must fill a whole argument.
 - **A `verify` command uses the same placeholders,** for inputs only.
+- **`{@cores}` is a number, not a port.** `slot` gives it as `Slot::Cores`, and `expand` writes the step's cores as text, from its operation's `ResourcesDef`, or 1 without one. `collect_resources` ([`src/resources.rs`](https://github.com/eclnz/spit/blob/dev/src/resources.rs)) checks that each `resources` line names an operation with no body, once.
 - **Each bare shell operator word is rejected,** such as `|` or `>>`, at its column. A runner runs a command without a shell, so `CommandTemplate::parse` marks those words. A quoted one is literal text.
 - **A bare `<` or `>` word connects a stream to a port.** `CommandTemplate::parse` takes it and the word after it out of the arguments as a `Redirect`. The parser (`check_redirects`) allows them only in an operation's command, once each, each followed by one placeholder; `validate_commands` checks that `>` names an output that is a file and no argument names, and `<` a `one` input. `bind_job` turns them into the job's `stdin` and `stdout` artifacts, and rejects a folder on stdin.
 - **A check is its own small model.** `CheckDef` is a check declaration, and `CheckUse` its use on an input port, an output port or a source. `src/check.rs` validates them, and at binding gives each step its checks once (`step_checks`) and each job one command per checked artifact.
-- **Commands and checks change no job, path, dependency or fingerprint.**
+- **Commands and checks change no job, path, dependency or fingerprint.** Nor does what a job needs: `cores` and `memory` are written from the step, outside the fingerprint's JSON.
 
 **`spit dag --paths`** shows each job's named inputs and outputs and their paths: the `.spitdag` without its commands.
 
@@ -70,6 +71,7 @@ flowchart LR
 - **No two artifacts share a path.** Products whose rules give the same path for the same entities are an error. Tests: [`path_rule_errors_point_to_the_rule_in_use`](https://github.com/eclnz/spit/blob/dev/tests/diagnostics.rs), [`two_sources_with_one_dimension_name_collide_whatever_their_shapes`](https://github.com/eclnz/spit/blob/dev/tests/placeholder_shapes.rs).
 - **SPIT writes no path of its own.** An output with no rule fails at its declaration. A source with records but no rule fails at binding, rather than being looked for under `out/`. Tests: [`an_output_with_no_rule_is_an_error_and_a_source_waits_for_one`](https://github.com/eclnz/spit/blob/dev/tests/paths.rs), [`a_recorded_source_with_no_path_rule_is_not_looked_for_under_out`](https://github.com/eclnz/spit/blob/dev/tests/cli.rs).
 - **Checks change neither the jobs nor their fingerprints.** Test: [`checks_change_neither_the_jobs_nor_their_fingerprints`](https://github.com/eclnz/spit/blob/dev/tests/checks.rs).
+- **What a job needs leaves its fingerprint as it is.** Test: [`resources_leave_the_fingerprint_unless_the_command_uses_them`](https://github.com/eclnz/spit/blob/dev/tests/resources.rs).
 
 A `.spitdag` belongs to the inventory it was made from: a new inventory needs a new `dag`.
 

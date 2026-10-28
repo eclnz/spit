@@ -4,7 +4,7 @@
 use std::io;
 use std::ops::Range;
 
-use crate::json::{write_array, write_number, write_string, ObjectWriter, Out};
+use crate::json::{write_array, write_number, write_string, write_u64, ObjectWriter, Out};
 use crate::model::{ArtifactId, JobId, Removal};
 use crate::types::TypeExpr;
 
@@ -259,6 +259,14 @@ fn write_job(
             item.finish();
         });
     });
+    // What a job needs says how to schedule it, not what it makes, so the
+    // fingerprint leaves it out. `{@cores}` in a command changes the
+    // command, which the fingerprint holds.
+    object.field("cores", |out| write_u64(out, step.resources.cores.into()));
+    object.field("memory", |out| match step.resources.memory {
+        Some(bytes) => write_u64(out, bytes),
+        None => out.push_str("null"),
+    });
     object.finish();
 }
 
@@ -432,6 +440,7 @@ mod tests {
             outputs: names(outputs),
             checks: vec![],
             origin: None,
+            resources: crate::model::Resources::default(),
         }
     }
 

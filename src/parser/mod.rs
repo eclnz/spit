@@ -12,6 +12,7 @@ mod layout;
 mod lexical;
 mod operation;
 mod render_inventory;
+mod resources;
 mod rules;
 mod source_map;
 
@@ -22,7 +23,7 @@ use std::ops::Range;
 
 use crate::model::{
     CheckDef, CommandDef, CommandRole, CoverageRule, DefaultChecks, Invocation, OperationDef,
-    ProductDef, StepOutput, TypeChecking,
+    ProductDef, ResourcesDef, StepOutput, TypeChecking,
 };
 use crate::paths::PathTemplate;
 use crate::span::{address_of, columns_at, content_columns, Focus, Located, Place};
@@ -205,6 +206,8 @@ pub(crate) enum StatementKind {
     /// what it names sits.
     Exclude(declarations::ExcludeLine, Option<String>, Place),
     Command(CommandDef, Place),
+    /// A `resources` line, and where its operation's name is.
+    Resources(ResourcesDef, Place),
     /// A `check` declaration, and where its name is.
     Check(CheckDef, Place),
     /// A `dimensions [...]` line: the pipeline's dimension order.
@@ -347,6 +350,14 @@ impl StatementKind {
         let command = command::parse_command(declaration, number, role)?;
         let place = source_map::tail_place(original, number, command.template.as_str());
         Ok(Self::Command(command, place))
+    }
+
+    /// A `resources` line, `declaration` being the text after its keyword
+    /// in `original`.
+    fn resources(original: &str, declaration: &str, number: usize) -> Result<Self, ParseError> {
+        let resources = resources::parse_resources(declaration, number)?;
+        let place = source_map::name_place(original, number, declaration, &resources.operation);
+        Ok(Self::Resources(resources, place))
     }
 }
 

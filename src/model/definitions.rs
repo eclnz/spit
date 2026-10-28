@@ -460,6 +460,62 @@ impl CommandDef {
     }
 }
 
+/// What one job of an operation needs to run, so that a runner starts only
+/// as many jobs as the machine has cores and memory for. An operation with
+/// no `resources` line needs one core and claims no memory.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Resources {
+    /// The cores a job uses, at least 1. `{@cores}` in a command gives it.
+    pub cores: u32,
+    /// The memory a job needs, in bytes, or `None` for no claim.
+    pub memory: Option<u64>,
+}
+
+impl Default for Resources {
+    fn default() -> Self {
+        Self {
+            cores: 1,
+            memory: None,
+        }
+    }
+}
+
+/// Reads as a `resources` line writes them, as in `cores=8, memory=16G`,
+/// with what is left undeclared left out.
+impl fmt::Display for Resources {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "cores={}", self.cores)?;
+        if let Some(bytes) = self.memory {
+            f.write_str(", memory=")?;
+            write_memory(f, bytes)?;
+        }
+        Ok(())
+    }
+}
+
+/// The units a `memory=` value is written in, each 1024 times the one
+/// before. Keep in step with `parse_memory` in `src/parser/resources.rs`.
+pub(crate) const MEMORY_UNITS: [(char, u32); 4] = [('K', 10), ('M', 20), ('G', 30), ('T', 40)];
+
+/// `bytes` in the largest unit that divides it, as in `16G`.
+fn write_memory(f: &mut fmt::Formatter<'_>, bytes: u64) -> fmt::Result {
+    let (unit, shift) = MEMORY_UNITS
+        .iter()
+        .rev()
+        .find(|&&(_, shift)| bytes.trailing_zeros() >= shift)
+        .copied()
+        .unwrap_or(('K', 10));
+    write!(f, "{}{unit}", bytes >> shift)
+}
+
+/// A `resources operation: cores=8, memory=16G` line: what each job of the
+/// operation needs.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ResourcesDef {
+    pub operation: String,
+    pub resources: Resources,
+}
+
 /// A test of one artifact, declared once as `check name(params): command`
 /// and attached where it applies with `@check(name(arguments))`. Its
 /// command reads `{@path}`, the artifact, and each `{param}`, the text the
