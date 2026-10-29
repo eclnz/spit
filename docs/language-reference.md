@@ -132,7 +132,7 @@ operation mean(images: many Image) -> Image
 command mean: mean_tool {images} --out {@output}
 ```
 
-Declare an operation before its first use. Inputs in a call follow the port order in the declaration, and SPIT checks each product's type against that port. For example, with `operation compare(series: Series, policy: Policy)`, `compare(reading, policy)` uses `reading` as `series`; reversing the arguments is a type error when their types are known. A `one` input must resolve to exactly one artifact for each job, so every other input may only use dimensions the driving input has, unless it broadcasts them with `@each(...)`; SPIT rejects a pipeline that breaks this before reading any inputs, and reports a missing match for a job. Steps may be written in any order, but none may read its way back to its own output: each group of steps that read each other in a loop is one error, `pipeline cycle: d -> e -> d`, reported at one of its steps, and neither those steps nor the steps that read from them are checked further. Every `many` input names the dimensions it collects at the call, with `@vary(dimension, ...)`; the operation only says `many`, so one operation can collect runs in one step and sessions in another. Its command placeholder expands to one separately quoted argument per artifact, in natural order. Artifacts are compared dimension by dimension in the pipeline's [dimension order](#dimension-order). Within a value, runs of digits compare as numbers and other characters compare one by one, so `run=2` comes before `run=10`, ISO dates such as `2026-09-01` sort by date, and names sort by character (`lr-high`, `lr-low`, `warmup`). Values equal as numbers but written differently, such as `1` and `01`, are then ordered by their text. A many placeholder must occupy a whole argument. An operation takes at most one `many` input, which may sit beside `one` inputs; each of those is matched once per group:
+Declare an operation before its first use. Inputs in a call follow the port order in the declaration, and SPIT checks each product's type against that port. For example, with `operation compare(series: Series, policy: Policy)`, `compare(reading, policy)` uses `reading` as `series`; reversing the arguments is a type error when their types are known. A `one` input must resolve to exactly one artifact for each job, so every other input may only use dimensions the driving input has, unless it broadcasts them with `@each(...)`; SPIT rejects a pipeline that breaks this before reading any inputs, and reports a missing match for a job. Steps may be written in any order, but none may read its way back to its own output: each group of steps that read each other in a loop is one error, `pipeline cycle: d -> e -> d`, reported at one of its steps, and neither those steps nor the steps that read from them are checked further. Every `many` input names the dimensions it collects at the call, with `@vary(dimension, ...)`; the operation only says `many`, so one operation can collect runs in one step and sessions in another. Its command placeholder expands to one separately quoted argument per artifact, in natural order, and `{images.run}` to each one's value of a dimension, in the same order; see [a job's dimension values](#a-jobs-dimension-values). Artifacts are compared dimension by dimension in the pipeline's [dimension order](#dimension-order). Within a value, runs of digits compare as numbers and other characters compare one by one, so `run=2` comes before `run=10`, ISO dates such as `2026-09-01` sort by date, and names sort by character (`lr-high`, `lr-low`, `warmup`). Values equal as numbers but written differently, such as `1` and `01`, are then ordered by their text. A many placeholder must occupy a whole argument. An operation takes at most one `many` input, which may sit beside `one` inputs; each of those is matched once per group:
 
 <!-- spit-doc: setup
 source reading : Series [station, day]
@@ -429,8 +429,43 @@ spit check v.spit || true
 -->
 
 ```text
-error: line 3, column 30: command for `table` uses `{digit}`, but `durations` collects `seconds` across `digit` with `@vary(digit)`, so each job has many values of it; the jobs of `summary` have `speaker`
+error: line 3, column 30: command for `table` uses `{digit}`, but `durations` collects `seconds` across `digit` with `@vary(digit)`, so each job has many values of it; `{durations.digit}` gives each artifact's, and the jobs of `summary` have `speaker`
 ```
+
+An input's placeholder followed by a dimension, as `{durations.digit}`, gives each of its artifacts' value of that dimension. For a `many` input it is one argument per artifact, in the order `{durations}` gives their paths, so a tool can pair them up; like `{durations}`, it is a whole argument. For a `one` input it is the artifact's value, as text within its argument, which reaches a dimension the job lacks, such as one pinned with `@where`:
+
+<!-- spit-doc: setup
+source seconds : Duration .txt [speaker, digit]
+default entities: {@key}={@value} separated "_"
+default path: out/{@product}/{@entities}
+-->
+
+```text
+operation table(durations: many Duration) -> Table .tsv
+command table: table --digits {durations.digit} --files {durations} > {@output}
+summary = table(seconds @vary(digit))
+```
+
+<!-- spit-doc: output
+spit dag t.spit t.spitout --commands
+--- t.spit
+source seconds : Duration .txt [speaker, digit]
+default entities: {@key}={@value} separated "_"
+default path: out/{@product}/{@entities}
+operation table(durations: many Duration) -> Table .tsv
+command table: table --digits {durations.digit} --files {durations} > {@output}
+summary = table(seconds @vary(digit))
+--- t.spitout
+sources:
+    seconds[speaker=theo,digit=3]
+    seconds[speaker=theo,digit=10]
+-->
+
+```text
+  run:    table --digits 3 10 --files out/seconds/speaker=theo_digit=3.txt out/seconds/speaker=theo_digit=10.txt > out/summary/speaker=theo.tsv
+```
+
+The product every step reads at the port must have the dimension; `spit check` reports one that lacks it at the placeholder. `.dir` and `.stem` keep their meaning, so a dimension named `dir` or `stem` cannot be read this way. An output's dimensions are its job's, written `{digit}`.
 
 An operation that no step calls, as in a file of operations for other pipelines to import, is checked when a step calls it.
 

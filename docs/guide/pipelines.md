@@ -98,7 +98,7 @@ command plot: plot_tool {input} --title "subject {sub}, session {ses}" --out {@o
 figure = plot(image)
 ```
 
-The job for `image[sub=01,ses=2]` runs `plot_tool ... --title 'subject 01, session 2' ...`. A job has the dimensions of its outputs, so a step that collects sessions with `@vary(ses)` has no one `{ses}`, and `spit check` says so. See [a job's dimension values](../language-reference.md#a-jobs-dimension-values).
+The job for `image[sub=01,ses=2]` runs `plot_tool ... --title 'subject 01, session 2' ...`. A job has the dimensions of its outputs, so a step that collects sessions with `@vary(ses)` has no one `{ses}`, and `spit check` says so. Such a step's `{items.ses}` gives each collected artifact's session instead, one argument per artifact, in the order `{items}` gives their paths. See [a job's dimension values](../language-reference.md#a-jobs-dimension-values).
 
 ## Composite operations
 
