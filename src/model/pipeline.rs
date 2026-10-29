@@ -10,7 +10,7 @@ use crate::error::{DefinitionSubject, ResolveError};
 use crate::paths::{EntitiesFormat, PathTemplate};
 
 use super::{
-    ArtifactInstance, Call, CallId, CheckDef, CommandDef, DefaultChecks, EntityBinding,
+    ArtifactInstance, BesideFile, Call, CallId, CheckDef, CommandDef, DefaultChecks, EntityBinding,
     ExtensionSource, Invocation, OperationDef, PipelineIndex, ProductDef, Removal, ResourcesDef,
     SidecarGroup, SourceInventory, SourceRecord, StageDef,
 };
@@ -142,8 +142,9 @@ impl Pipeline {
     }
 
     /// The path template `product` uses: its rule, with the extension
-    /// [`Pipeline::added_extension`] gives it, or, for an output written
-    /// beside another, that output's path with its extension replaced.
+    /// [`Pipeline::added_extension`] gives it, or, for a product written
+    /// beside another, that product's path with the suffix in place of its
+    /// extension or after it.
     pub fn path_template_for(&self, product: &str) -> Option<Cow<'_, PathTemplate>> {
         PipelineIndex::scan(self).path_template_for(product)
     }
@@ -163,9 +164,8 @@ impl Pipeline {
         PipelineIndex::scan(self).output_extension(product)
     }
 
-    /// For a source or output written beside another, its sibling, the
-    /// sibling's declared extension, and the suffix that replaces it.
-    pub fn beside(&self, product: &str) -> Option<(&str, &str, &str)> {
+    /// For a source or output written beside another, where its file lies.
+    pub fn beside(&self, product: &str) -> Option<BesideFile<'_>> {
         PipelineIndex::scan(self).beside(product)
     }
 

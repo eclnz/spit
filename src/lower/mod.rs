@@ -472,12 +472,20 @@ fn lower_statement(
                     })?;
                 if anchor.beside.is_some()
                     || anchor.folder
-                    || anchor.extension.is_none()
+                    || (anchor.extension.is_none() && !beside.append)
                     || builder.outputs.contains_key(sibling)
                 {
+                    let what = if beside.append {
+                        "a file source"
+                    } else {
+                        "a file source with an extension, or `+` to append to the whole name,"
+                    };
                     return Err(ParseError::new(
                         place.line,
-                        format!("source `{}` must be beside a file source with an extension, not `{sibling}`", product.name),
+                        format!(
+                            "source `{}` must be beside {what} not `{sibling}`",
+                            product.name
+                        ),
                     ));
                 }
                 product.dimensions.clone_from(&anchor.dimensions);
@@ -491,12 +499,14 @@ fn lower_statement(
                         .members
                         .push((product.name.clone(), beside.suffix.clone()));
                 } else {
-                    let extension = anchor.extension.as_ref().expect("checked above");
+                    // A main source with no extension of its own is named
+                    // by its source when a companion is missing.
+                    let extension = anchor.extension.clone().unwrap_or_else(|| sibling.clone());
                     builder.add_sidecar_group(SidecarGroup {
                         name: sibling.clone(),
                         dimensions: anchor.dimensions.clone(),
                         members: vec![
-                            (sibling.clone(), extension.clone()),
+                            (sibling.clone(), extension),
                             (product.name.clone(), beside.suffix.clone()),
                         ],
                     });

@@ -4,10 +4,11 @@ use std::borrow::Cow;
 
 use rustc_hash::FxHashMap;
 
-use crate::paths::{EntitiesFormat, Holder, PathTemplate};
+use crate::paths::{stage_directories, EntitiesFormat, Holder, PathTemplate};
 
 use super::{
-    stage_and_parents, ExtensionSource, Invocation, OperationDef, OutputPort, Pipeline, ProductDef,
+    stage_and_parents, BesideFile, ExtensionSource, Invocation, OperationDef, OutputPort, Pipeline,
+    ProductDef,
 };
 
 /// A product's place in [`Pipeline::products`], by which the columns of a
@@ -186,19 +187,43 @@ impl<'p> PipelineIndex<'p> {
 
     /// See [`Pipeline::path_template_for`].
     pub(crate) fn path_template_for(&self, product: &str) -> Option<Cow<'p, PathTemplate>> {
-        if let Some((sibling, sibling_extension, suffix)) = self.beside(product) {
-            // The sibling's own file: `{@product}` is its name, not this one's.
-            let template = self.path_template_for(sibling)?.with_product(sibling);
-            let stem = template
-                .without_extension(sibling_extension)
-                .unwrap_or(template);
-            return Some(Cow::Owned(stem.with_extension(suffix)));
+        let Some(first) = self.beside(product) else {
+            let template = self.path_rule_for(product)?.resolve(self.holder(product));
+            return Some(match self.added_extension(product) {
+                Some((extension, _)) => Cow::Owned(template.with_extension(extension)),
+                None => template,
+            });
+        };
+        // A file beside a file beside another follows it in turn, to the
+        // first with a rule of its own; a loop, as a chain of steps may be
+        // long.
+        let mut chain = vec![(product, first)];
+        while let Some(beside) = self.beside(chain[chain.len() - 1].1.sibling) {
+            if chain.len() > self.pipeline.products.len() {
+                return None;
+            }
+            chain.push((chain[chain.len() - 1].1.sibling, beside));
         }
-        let template = self.path_rule_for(product)?.resolve(self.holder(product));
-        Some(match self.added_extension(product) {
-            Some((extension, _)) => Cow::Owned(template.with_extension(extension)),
-            None => template,
-        })
+        let root = chain[chain.len() - 1].1.sibling;
+        let mut template = self.path_template_for(root)?.into_owned();
+        for &(follower, beside) in chain.iter().rev() {
+            // The sibling's own file: `{@product}` is its name, `{@stage}`
+            // its stage, and a value the step pins is the one it reads.
+            let pinned = beside
+                .input
+                .and_then(|input| self.producer(follower)?.0.inputs.get(input))
+                .map(|binding| &binding.pinned);
+            let stage = (self.stage_of(beside.sibling) != self.stage_of(follower))
+                .then(|| stage_directories(self, beside.sibling))
+                .flatten();
+            template = template.written_out(beside.sibling, stage.as_deref(), pinned);
+            if !beside.append {
+                let replaced = beside.replaces?;
+                template = template.without_extension(replaced).unwrap_or(template);
+            }
+            template = template.with_extension(beside.suffix);
+        }
+        Some(Cow::Owned(template))
     }
 
     /// Each product's path template, as [`PipelineIndex::path_template_for`]
@@ -214,10 +239,14 @@ impl<'p> PipelineIndex<'p> {
 
     /// Whether `product` has a path template, without building it.
     pub(crate) fn has_path(&self, product: &str) -> bool {
-        match self.beside(product) {
-            Some((sibling, _, _)) => self.has_path(sibling),
-            None => self.path_rule_for(product).is_some(),
+        let mut current = product;
+        for _ in 0..=self.pipeline.products.len() {
+            match self.beside(current) {
+                Some(beside) => current = beside.sibling,
+                None => return self.path_rule_for(current).is_some(),
+            }
         }
+        false
     }
 
     /// What `product` gives a path template's placeholders: its dimensions
@@ -285,22 +314,71 @@ impl<'p> PipelineIndex<'p> {
     }
 
     /// See [`Pipeline::beside`].
-    pub(crate) fn beside(&self, product: &str) -> Option<(&'p str, &'p str, &'p str)> {
+    pub(crate) fn beside(&self, product: &str) -> Option<BesideFile<'p>> {
         if self.is_source(product) {
             let beside = self.product(product)?.beside.as_ref()?;
             let sibling = self.product(&beside.sibling)?;
-            let extension = sibling.extension.as_deref()?;
-            return Some((sibling.name.as_str(), extension, beside.suffix.as_str()));
+            return Some(BesideFile {
+                sibling: sibling.name.as_str(),
+                replaces: sibling.extension.as_deref().filter(|_| !beside.append),
+                suffix: beside.suffix.as_str(),
+                append: beside.append,
+                input: None,
+            });
         }
         let (invocation, operation, port) = self.output_port(product)?;
         let beside = port.beside.as_ref()?;
-        let index = operation
+        let (sibling, replaces, input) = match operation
             .outputs
             .iter()
-            .position(|output| output.name == beside.sibling)?;
-        let sibling = invocation.outputs.get(index)?;
-        let extension = operation.outputs[index].extension.as_deref()?;
-        Some((sibling.as_str(), extension, beside.suffix.as_str()))
+            .position(|output| output.name == beside.sibling)
+        {
+            Some(index) => (
+                invocation.outputs.get(index)?.as_str(),
+                operation.outputs[index].extension.as_deref(),
+                None,
+            ),
+            None => {
+                let index = operation
+                    .inputs
+                    .iter()
+                    .position(|input| input.name == beside.sibling)?;
+                let sibling = invocation.inputs.get(index)?.product.as_str();
+                let replaces = if beside.append {
+                    None
+                } else {
+                    self.file_extension(sibling)
+                };
+                (sibling, replaces, Some(index))
+            }
+        };
+        Some(BesideFile {
+            sibling,
+            replaces: replaces.filter(|_| !beside.append),
+            suffix: beside.suffix.as_str(),
+            append: beside.append,
+            input,
+        })
+    }
+
+    /// The extension `product`'s file has, as far as the pipeline says: the
+    /// one a file written beside another takes from its suffix, else the
+    /// one it must have, else the one its rule ends with.
+    fn file_extension(&self, product: &str) -> Option<&'p str> {
+        if let Some((_, _, port)) = self.output_port(product) {
+            if port.beside.is_some() {
+                return port.extension.as_deref();
+            }
+        } else if let Some(declared) = self
+            .product(product)
+            .filter(|declared| declared.beside.is_some())
+        {
+            return declared.extension.as_deref();
+        }
+        match self.expected_extension(product) {
+            Some((extension, _)) => Some(extension),
+            None => self.path_rule_for(product)?.extension(),
+        }
     }
 
     /// See [`Pipeline::default_extension`].
