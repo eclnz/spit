@@ -380,9 +380,11 @@ fn check_command(check: &StepCheck<'_>, artifact: ArtifactId) -> Vec<Argument> {
 }
 
 /// A command's arguments for one job of `step`. A many input's placeholder,
-/// which is a whole argument, becomes one argument per artifact, `{@cores}`
-/// the step's cores as text, and a dimension's placeholder its value in the
-/// job's outputs, as text within its argument.
+/// which is a whole argument, becomes one argument per artifact: its path,
+/// or with `.dimension` its value of that dimension. `{@cores}` is the
+/// step's cores as text, a dimension's placeholder its value in the job's
+/// outputs, and a one input's `.dimension` its artifact's value, each as
+/// text within its argument.
 fn expand(
     template: &[Vec<Part>],
     step: &StepCommands<'_>,
@@ -393,14 +395,27 @@ fn expand(
     // Every artifact of the job has a path, which `bind_job` checks first.
     let path = |artifact: &ArtifactId| Ok::<_, BindError>(ArgPart::Path(*artifact));
     let lacks = |name: &str| CommandError::new(format!("job {} lacks `{{{name}}}`", job.id));
+    // `validate_commands` makes sure the product every step reads at the
+    // port has the dimension, and an artifact carries each of its product's.
+    let value = |artifact: ArtifactId, dimension: &str, name: &str| {
+        dag.artifacts
+            .entities(artifact)
+            .get(dimension)
+            .map(|value| ArgPart::Text(value.to_owned()))
+            .ok_or_else(|| lacks(name))
+    };
     let mut arguments = Vec::new();
     for parts in template {
         if let [Part::Placeholder(name)] = parts.as_slice() {
-            if let Some(Slot::Input(index)) = slot(operation, facet(name).0) {
+            let (port, facet) = facet(name);
+            if let Some(Slot::Input(index)) = slot(operation, port) {
                 if operation.inputs[index].cardinality == Cardinality::Many {
                     let artifacts = job.inputs.get(index).ok_or_else(|| lacks(name))?;
-                    for artifact in artifacts {
-                        arguments.push(vec![path(artifact)?]);
+                    for &artifact in artifacts {
+                        arguments.push(vec![match facet {
+                            Facet::Dimension(dimension) => value(artifact, dimension, name)?,
+                            _ => path(&artifact)?,
+                        }]);
                     }
                     continue;
                 }
@@ -437,11 +452,13 @@ fn expand(
                     };
                     let artifact = *artifact.ok_or_else(|| lacks(name))?;
                     // `validate_commands` allows `.dir` and `.stem` only on
-                    // an output, and `.stem` only with an extension or on a
-                    // folder, whose name is its stem.
+                    // an output, `.stem` only with an extension or on a
+                    // folder, whose name is its stem, and a dimension only
+                    // on an input.
                     argument.push(match (facet, slot) {
-                        (Ok(Facet::Dir), _) => ArgPart::Dir(artifact),
-                        (Ok(Facet::Stem), Some(Slot::Output(index))) => ArgPart::Stem {
+                        (Facet::Dimension(dimension), _) => value(artifact, dimension, name)?,
+                        (Facet::Dir, _) => ArgPart::Dir(artifact),
+                        (Facet::Stem, Some(Slot::Output(index))) => ArgPart::Stem {
                             artifact,
                             extension_len: operation.outputs[index]
                                 .extension

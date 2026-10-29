@@ -74,22 +74,22 @@ Job 24  align  [prep]
   run:    register derivatives/cleaned/sub=03__ses=2__run=2.txt sub-03/ses-2/reference.nii derivatives/aligned/sub=03__ses=2__run=2.txt
 
 Job 25  average
-  run:    mean derivatives/aligned/sub=01__ses=1__run=1.txt derivatives/aligned/sub=01__ses=1__run=2.txt -o derivatives/averaged/sub=01__ses=1.txt
+  run:    mean derivatives/aligned/sub=01__ses=1__run=1.txt derivatives/aligned/sub=01__ses=1__run=2.txt --runs 1 2 -o derivatives/averaged/sub=01__ses=1.txt
 
 Job 26  average
-  run:    mean derivatives/aligned/sub=01__ses=2__run=1.txt derivatives/aligned/sub=01__ses=2__run=2.txt -o derivatives/averaged/sub=01__ses=2.txt
+  run:    mean derivatives/aligned/sub=01__ses=2__run=1.txt derivatives/aligned/sub=01__ses=2__run=2.txt --runs 1 2 -o derivatives/averaged/sub=01__ses=2.txt
 
 Job 27  average
-  run:    mean derivatives/aligned/sub=02__ses=1__run=1.txt derivatives/aligned/sub=02__ses=1__run=2.txt -o derivatives/averaged/sub=02__ses=1.txt
+  run:    mean derivatives/aligned/sub=02__ses=1__run=1.txt derivatives/aligned/sub=02__ses=1__run=2.txt --runs 1 2 -o derivatives/averaged/sub=02__ses=1.txt
 
 Job 28  average
-  run:    mean derivatives/aligned/sub=02__ses=2__run=1.txt derivatives/aligned/sub=02__ses=2__run=2.txt -o derivatives/averaged/sub=02__ses=2.txt
+  run:    mean derivatives/aligned/sub=02__ses=2__run=1.txt derivatives/aligned/sub=02__ses=2__run=2.txt --runs 1 2 -o derivatives/averaged/sub=02__ses=2.txt
 
 Job 29  average
-  run:    mean derivatives/aligned/sub=03__ses=1__run=1.txt derivatives/aligned/sub=03__ses=1__run=2.txt -o derivatives/averaged/sub=03__ses=1.txt
+  run:    mean derivatives/aligned/sub=03__ses=1__run=1.txt derivatives/aligned/sub=03__ses=1__run=2.txt --runs 1 2 -o derivatives/averaged/sub=03__ses=1.txt
 
 Job 30  average
-  run:    mean derivatives/aligned/sub=03__ses=2__run=1.txt derivatives/aligned/sub=03__ses=2__run=2.txt -o derivatives/averaged/sub=03__ses=2.txt
+  run:    mean derivatives/aligned/sub=03__ses=2__run=1.txt derivatives/aligned/sub=03__ses=2__run=2.txt --runs 1 2 -o derivatives/averaged/sub=03__ses=2.txt
 
 Job 31  compare
   run:    score derivatives/averaged/sub=01__ses=1.txt sub-01/ses-1/reference.nii --label 'sub-01 ses-1' -o derivatives/score/sub=01__ses=1.txt
@@ -452,7 +452,7 @@ Job 25
     averaged[sub=01,ses=1] : Image<T1w>
       path: derivatives/averaged/sub=01__ses=1.txt
   depends_on: 13, 14
-  run:    mean derivatives/aligned/sub=01__ses=1__run=1.txt derivatives/aligned/sub=01__ses=1__run=2.txt -o derivatives/averaged/sub=01__ses=1.txt
+  run:    mean derivatives/aligned/sub=01__ses=1__run=1.txt derivatives/aligned/sub=01__ses=1__run=2.txt --runs 1 2 -o derivatives/averaged/sub=01__ses=1.txt
 
 Job 26
   operation: average
@@ -465,7 +465,7 @@ Job 26
     averaged[sub=01,ses=2] : Image<T1w>
       path: derivatives/averaged/sub=01__ses=2.txt
   depends_on: 15, 16
-  run:    mean derivatives/aligned/sub=01__ses=2__run=1.txt derivatives/aligned/sub=01__ses=2__run=2.txt -o derivatives/averaged/sub=01__ses=2.txt
+  run:    mean derivatives/aligned/sub=01__ses=2__run=1.txt derivatives/aligned/sub=01__ses=2__run=2.txt --runs 1 2 -o derivatives/averaged/sub=01__ses=2.txt
 
 Job 27
   operation: average
@@ -478,7 +478,7 @@ Job 27
     averaged[sub=02,ses=1] : Image<T1w>
       path: derivatives/averaged/sub=02__ses=1.txt
   depends_on: 17, 18
-  run:    mean derivatives/aligned/sub=02__ses=1__run=1.txt derivatives/aligned/sub=02__ses=1__run=2.txt -o derivatives/averaged/sub=02__ses=1.txt
+  run:    mean derivatives/aligned/sub=02__ses=1__run=1.txt derivatives/aligned/sub=02__ses=1__run=2.txt --runs 1 2 -o derivatives/averaged/sub=02__ses=1.txt
 
 Job 28
   operation: average
@@ -491,7 +491,7 @@ Job 28
     averaged[sub=02,ses=2] : Image<T1w>
       path: derivatives/averaged/sub=02__ses=2.txt
   depends_on: 19, 20
-  run:    mean derivatives/aligned/sub=02__ses=2__run=1.txt derivatives/aligned/sub=02__ses=2__run=2.txt -o derivatives/averaged/sub=02__ses=2.txt
+  run:    mean derivatives/aligned/sub=02__ses=2__run=1.txt derivatives/aligned/sub=02__ses=2__run=2.txt --runs 1 2 -o derivatives/averaged/sub=02__ses=2.txt
 
 Job 29
   operation: average
@@ -504,7 +504,7 @@ Job 29
     averaged[sub=03,ses=1] : Image<T1w>
       path: derivatives/averaged/sub=03__ses=1.txt
   depends_on: 21, 22
-  run:    mean derivatives/aligned/sub=03__ses=1__run=1.txt derivatives/aligned/sub=03__ses=1__run=2.txt -o derivatives/averaged/sub=03__ses=1.txt
+  run:    mean derivatives/aligned/sub=03__ses=1__run=1.txt derivatives/aligned/sub=03__ses=1__run=2.txt --runs 1 2 -o derivatives/averaged/sub=03__ses=1.txt
 
 Job 30
   operation: average
@@ -517,7 +517,7 @@ Job 30
     averaged[sub=03,ses=2] : Image<T1w>
       path: derivatives/averaged/sub=03__ses=2.txt
   depends_on: 23, 24
-  run:    mean derivatives/aligned/sub=03__ses=2__run=1.txt derivatives/aligned/sub=03__ses=2__run=2.txt -o derivatives/averaged/sub=03__ses=2.txt
+  run:    mean derivatives/aligned/sub=03__ses=2__run=1.txt derivatives/aligned/sub=03__ses=2__run=2.txt --runs 1 2 -o derivatives/averaged/sub=03__ses=2.txt
 
 Job 31
   operation: compare
@@ -678,22 +678,22 @@ Job 24  align  [prep]
   run:    register derivatives/cleaned/sub=03__ses=2__run=2.txt sub-03/ses-2/reference.nii derivatives/aligned/sub=03__ses=2__run=2.txt
 
 Job 25  average
-  run:    mean derivatives/aligned/sub=01__ses=1__run=1.txt derivatives/aligned/sub=01__ses=1__run=2.txt -o derivatives/averaged/sub=01__ses=1.txt
+  run:    mean derivatives/aligned/sub=01__ses=1__run=1.txt derivatives/aligned/sub=01__ses=1__run=2.txt --runs 1 2 -o derivatives/averaged/sub=01__ses=1.txt
 
 Job 26  average
-  run:    mean derivatives/aligned/sub=01__ses=2__run=1.txt derivatives/aligned/sub=01__ses=2__run=2.txt -o derivatives/averaged/sub=01__ses=2.txt
+  run:    mean derivatives/aligned/sub=01__ses=2__run=1.txt derivatives/aligned/sub=01__ses=2__run=2.txt --runs 1 2 -o derivatives/averaged/sub=01__ses=2.txt
 
 Job 27  average
-  run:    mean derivatives/aligned/sub=02__ses=1__run=1.txt derivatives/aligned/sub=02__ses=1__run=2.txt -o derivatives/averaged/sub=02__ses=1.txt
+  run:    mean derivatives/aligned/sub=02__ses=1__run=1.txt derivatives/aligned/sub=02__ses=1__run=2.txt --runs 1 2 -o derivatives/averaged/sub=02__ses=1.txt
 
 Job 28  average
-  run:    mean derivatives/aligned/sub=02__ses=2__run=1.txt derivatives/aligned/sub=02__ses=2__run=2.txt -o derivatives/averaged/sub=02__ses=2.txt
+  run:    mean derivatives/aligned/sub=02__ses=2__run=1.txt derivatives/aligned/sub=02__ses=2__run=2.txt --runs 1 2 -o derivatives/averaged/sub=02__ses=2.txt
 
 Job 29  average
-  run:    mean derivatives/aligned/sub=03__ses=1__run=1.txt derivatives/aligned/sub=03__ses=1__run=2.txt -o derivatives/averaged/sub=03__ses=1.txt
+  run:    mean derivatives/aligned/sub=03__ses=1__run=1.txt derivatives/aligned/sub=03__ses=1__run=2.txt --runs 1 2 -o derivatives/averaged/sub=03__ses=1.txt
 
 Job 30  average
-  run:    mean derivatives/aligned/sub=03__ses=2__run=1.txt derivatives/aligned/sub=03__ses=2__run=2.txt -o derivatives/averaged/sub=03__ses=2.txt
+  run:    mean derivatives/aligned/sub=03__ses=2__run=1.txt derivatives/aligned/sub=03__ses=2__run=2.txt --runs 1 2 -o derivatives/averaged/sub=03__ses=2.txt
 
 Job 31  compare
   run:    score derivatives/averaged/sub=01__ses=1.txt sub-01/ses-1/reference.nii --label 'sub-01 ses-1' -o derivatives/score/sub=01__ses=1.txt

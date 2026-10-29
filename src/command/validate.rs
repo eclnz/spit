@@ -29,22 +29,25 @@ pub(crate) const CORES: &str = "@cores";
 
 /// What a placeholder gives of its port's file: the path, or, for an output
 /// as `{image.dir}` and `{image.stem}`, its folder or its file name without
-/// its extension, for a tool that takes a folder and a name.
+/// its extension, for a tool that takes a folder and a name, or, for an
+/// input as `{images.sub}`, each of its artifacts' value of a dimension.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum Facet {
+pub(crate) enum Facet<'a> {
     Path,
     Dir,
     Stem,
+    Dimension(&'a str),
 }
 
-/// A placeholder's port and the facet of its file it gives, or the facet
-/// written when it is not one.
-pub(crate) fn facet(name: &str) -> (&str, Result<Facet, &str>) {
+/// A placeholder's port and the facet of its file it gives. `.dir` and
+/// `.stem` are always facets, so a dimension of either name cannot be read
+/// this way.
+pub(crate) fn facet(name: &str) -> (&str, Facet<'_>) {
     match name.split_once('.') {
-        None => (name, Ok(Facet::Path)),
-        Some((port, "dir")) => (port, Ok(Facet::Dir)),
-        Some((port, "stem")) => (port, Ok(Facet::Stem)),
-        Some((port, other)) => (port, Err(other)),
+        None => (name, Facet::Path),
+        Some((port, "dir")) => (port, Facet::Dir),
+        Some((port, "stem")) => (port, Facet::Stem),
+        Some((port, dimension)) => (port, Facet::Dimension(dimension)),
     }
 }
 
@@ -186,6 +189,7 @@ pub(crate) fn collect_commands(
                 steps: callers
                     .get(operation.name.as_str())
                     .map_or(&[], Vec::as_slice),
+                products: &products,
                 dimensions: &dimensions,
             },
         ) {
@@ -209,9 +213,11 @@ struct Caller<'p> {
 }
 
 /// What a command's dimension placeholders are checked against: the steps
-/// that call its operation, and every dimension the pipeline's products have.
+/// that call its operation, the pipeline's products, which their inputs
+/// read, and every dimension those products have.
 struct Callers<'a, 'p> {
     steps: &'a [Caller<'p>],
+    products: &'a BTreeMap<&'p str, &'p ProductDef>,
     dimensions: &'a BTreeSet<&'p str>,
 }
 
@@ -239,14 +245,6 @@ fn check_command_placeholders(
             let fail =
                 |message: String| Err(CommandError::new(message).focus(format!("{{{name}}}")));
             let (port, facet) = facet(name);
-            let facet = match facet {
-                Ok(facet) => facet,
-                Err(other) => {
-                    return fail(format!(
-                        "`{{{name}}}` gives no `.{other}`; write `{{{port}}}` for the file, `{{{port}.dir}}` for its folder, or `{{{port}.stem}}` for its name without its extension"
-                    ))
-                }
-            };
             if port == DEFAULT_OUTPUT
                 && operation
                     .outputs
@@ -258,6 +256,12 @@ fn check_command_placeholders(
                 );
             }
             let slot = slot(operation, port).ok_or_else(unknown)?;
+            // An output's dimensions are its job's, written `{dimension}`.
+            if let (Slot::Output(_), Facet::Dimension(other)) = (&slot, facet) {
+                return fail(format!(
+                    "`{{{name}}}` gives no `.{other}`; write `{{{port}}}` for the file, `{{{port}.dir}}` for its folder, or `{{{port}.stem}}` for its name without its extension"
+                ));
+            }
             match slot {
                 Slot::Output(index) => {
                     if role == CommandRole::Verify {
@@ -297,17 +301,20 @@ fn check_command_placeholders(
                 Slot::Cores => {}
                 Slot::Dimension if facet != Facet::Path => {
                     return fail(format!(
-                        "command for `{}` uses unknown placeholder `{{{name}}}`; only an operation's outputs give `.dir` and `.stem`",
-                        operation.name
+                        "command for `{}` uses unknown placeholder `{{{name}}}`: `{}` has no port `{port}`",
+                        operation.name, operation.name
                     ));
                 }
                 Slot::Dimension => check_dimension(operation, name, callers)?,
-                Slot::Input(_) if facet != Facet::Path => {
+                Slot::Input(_) if matches!(facet, Facet::Dir | Facet::Stem) => {
                     return fail(format!(
                         "`{{{name}}}`: only an operation's outputs give `.dir` and `.stem`, for a tool that is told where to write"
                     ));
                 }
                 Slot::Input(index) => {
+                    if let Facet::Dimension(dimension) = facet {
+                        check_input_dimension(operation, index, name, dimension, callers)?;
+                    }
                     if operation.inputs[index].cardinality == Cardinality::Many && !whole {
                         return Err(CommandError::new(format!(
                             "many input `{{{name}}}` must be a complete command argument"
@@ -341,6 +348,47 @@ fn check_command_placeholders(
     Ok(())
 }
 
+/// Check that every step calling `operation` reads, at its input `index`, a
+/// product with `dimension`, whose value each of its artifacts then has.
+fn check_input_dimension(
+    operation: &OperationDef,
+    index: usize,
+    name: &str,
+    dimension: &str,
+    callers: &Callers<'_, '_>,
+) -> Result<(), CommandError> {
+    let port = &operation.inputs[index].name;
+    for caller in callers.steps {
+        let Some(product) = caller
+            .invocation
+            .inputs
+            .get(index)
+            .and_then(|binding| callers.products.get(binding.product_name()))
+        else {
+            continue;
+        };
+        if product.dimensions.iter().any(|d| d == dimension) {
+            continue;
+        }
+        let has = names_or_none(&product.dimensions);
+        return Err(CommandError::new(format!(
+            "command for `{}` uses `{{{name}}}`, but `{}`, which `{port}` reads in the step making `{}`, has no dimension `{dimension}`; it has {has}",
+            operation.name, product.name, caller.product.name
+        ))
+        .focus(format!("{{{name}}}")));
+    }
+    Ok(())
+}
+
+/// `dimensions` as a list of names in backticks, or "no dimensions".
+fn names_or_none(dimensions: &[String]) -> String {
+    if dimensions.is_empty() {
+        return "no dimensions".to_owned();
+    }
+    let names: Vec<_> = dimensions.iter().map(|name| format!("`{name}`")).collect();
+    names.join(", ")
+}
+
 /// Check that every step calling `operation` gives its jobs a value of
 /// `dimension`, which its first output's product has. An operation no step
 /// calls, as in a file of operations for others to import, is checked when
@@ -360,16 +408,7 @@ fn check_dimension(
     else {
         return Ok(());
     };
-    let has = if product.dimensions.is_empty() {
-        "no dimensions".to_owned()
-    } else {
-        let names: Vec<_> = product
-            .dimensions
-            .iter()
-            .map(|name| format!("`{name}`"))
-            .collect();
-        names.join(", ")
-    };
+    let has = names_or_none(&product.dimensions);
     let step = format!("the jobs of `{}` have {has}", product.name);
     let varied = operation
         .inputs
@@ -378,11 +417,12 @@ fn check_dimension(
         .find(|(_, binding)| binding.vary.iter().any(|d| d == dimension));
     let message = match varied {
         Some((port, binding)) => format!(
-            "command for `{}` uses `{{{dimension}}}`, but `{}` collects `{}` across `{dimension}` with `@vary({})`, so each job has many values of it; {step}",
+            "command for `{}` uses `{{{dimension}}}`, but `{}` collects `{}` across `{dimension}` with `@vary({})`, so each job has many values of it; `{{{}.{dimension}}}` gives each artifact's, and {step}",
             operation.name,
             port.name,
             binding.product,
             binding.vary.join(", "),
+            port.name,
         ),
         None if callers.dimensions.contains(dimension) => format!(
             "command for `{}` uses dimension `{{{dimension}}}`, which its jobs lack: {step}",
@@ -427,7 +467,7 @@ fn redirected_ports(
                 if redirect.stream == Stream::Stdin { "inputs" } else { "outputs" },
             ));
         }
-        if facet != Ok(Facet::Path) {
+        if facet != Facet::Path {
             return fail(format!(
                 "`{sign} {{{name}}}`: a command's stdin and stdout are files, so write `{sign} {{{port}}}`"
             ));

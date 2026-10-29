@@ -1,5 +1,6 @@
-//! A command's `{dimension}` placeholders: each job's value filled in as
-//! text, and the errors for a dimension its jobs have no one value of.
+//! A command's `{dimension}` placeholders, each job's value filled in as
+//! text, and `{input.dimension}`, each of an input's artifacts' value; and
+//! the errors for a dimension there is no value of.
 
 mod support;
 
@@ -22,8 +23,14 @@ const SOURCES: &str = "sources:
 /// The pipeline `HEADER` and `rest` make, bound over `SOURCES`, as a
 /// `.spitdag`.
 fn spitdag(rest: &str) -> String {
+    spitdag_over(rest, SOURCES)
+}
+
+/// The pipeline `HEADER` and `rest` make, bound over `sources`, as a
+/// `.spitdag`.
+fn spitdag_over(rest: &str, sources: &str) -> String {
     let pipeline = parse_pipeline(&format!("{HEADER}{rest}")).unwrap();
-    let inventory = parse_source_inventory(SOURCES).unwrap();
+    let inventory = parse_source_inventory(sources).unwrap();
     let dag = resolve(&pipeline, &inventory).unwrap();
     bind_dag(&pipeline, &dag).unwrap().to_json()
 }
@@ -113,7 +120,7 @@ tabled = table(cell @vary(sheet, row))
 ";
     assert_eq!(
         diagnostics(lacks),
-        ["error: line 6: command for `table` uses `{sheet}`, but `cells` collects `cell` across `sheet` with `@vary(sheet, row)`, so each job has many values of it; the jobs of `tabled` have no dimensions (at `{sheet}`)"],
+        ["error: line 6: command for `table` uses `{sheet}`, but `cells` collects `cell` across `sheet` with `@vary(sheet, row)`, so each job has many values of it; `{cells.sheet}` gives each artifact's, and the jobs of `tabled` have no dimensions (at `{sheet}`)"],
     );
     let pinned = "source lookup : Lookup [version]
 operation join(cell: Cell, lookup: Lookup) -> Cell
@@ -187,7 +194,7 @@ fn a_dimension_is_text_not_a_file() {
     for (command, error) in [
         (
             "tag {sheet.dir} {cell} {@output}",
-            "command for `label` uses unknown placeholder `{sheet.dir}`; only an operation's outputs give `.dir` and `.stem`",
+            "command for `label` uses unknown placeholder `{sheet.dir}`: `label` has no port `sheet`",
         ),
         (
             "tag {cell} > {sheet}",
@@ -221,4 +228,76 @@ first = tidy(cell)
         json.contains("\"command\":[[\"tag\"],[\"a\"],[{\"path\":\"in/a/1.tsv\"}]"),
         "{json}"
     );
+}
+
+#[test]
+fn a_many_input_gives_each_artifacts_value_in_the_order_of_its_paths() {
+    let json = spitdag(
+        "operation table(cells: many Cell) -> Table .csv
+command table: table --rows {cells.row} --sheets {cells.sheet} --files {cells} -o {@output}
+verify table: check {cells.row}
+tabled = table(cell @vary(row))
+",
+    );
+    assert!(
+        json.contains("\"command\":[[\"table\"],[\"--rows\"],[\"1\"],[\"2\"],[\"--sheets\"],[\"a\"],[\"a\"],[\"--files\"],[{\"path\":\"in/a/1.tsv\"}],[{\"path\":\"in/a/2.tsv\"}]"),
+        "{json}"
+    );
+    assert!(
+        json.contains("\"verify\":[[[\"check\"],[\"1\"],[\"2\"]]]"),
+        "{json}"
+    );
+}
+
+#[test]
+fn a_one_input_gives_its_artifacts_value_within_an_argument() {
+    // The pinned `version` is no dimension of the job, but `lookup`'s
+    // artifact has it.
+    let json = spitdag_over(
+        "source lookup : Lookup [version]
+path lookup: lookups/{version}
+operation join(cell: Cell, lookup: Lookup) -> Cell
+command join: join --version=v{lookup.version} {cell} {lookup} {@output}
+joined = join(cell, lookup @where(version=2))
+",
+        &format!("{SOURCES}    lookup[version=1]\n    lookup[version=2]\n"),
+    );
+    assert!(
+        json.contains("\"command\":[[\"join\"],[\"--version=v\",\"2\"],[{\"path\":\"in/a/1.tsv\"}],[{\"path\":\"lookups/2\"}]"),
+        "{json}"
+    );
+}
+
+#[test]
+fn an_input_dimension_the_product_lacks_is_an_error_at_the_placeholder() {
+    let text = "operation table(cells: many Cell) -> Table .csv
+command table: table {cells.column} {cells} -o {@output}
+tabled = table(cell @vary(row))
+";
+    assert_eq!(
+        diagnostics(text),
+        ["error: line 6: command for `table` uses `{cells.column}`, but `cell`, which `cells` reads in the step making `tabled`, has no dimension `column`; it has `sheet`, `row` (at `{cells.column}`)"],
+    );
+    for (command, error) in [
+        (
+            "table --row={cells.row} {cells} -o {@output}",
+            "many input `{cells.row}` must be a complete command argument",
+        ),
+        (
+            "table {cells} -o {@output.row}",
+            "`{@output.row}` gives no `.row`; write `{@output}` for the file",
+        ),
+        (
+            "table {cells} < {cells.row} -o {@output}",
+            "`< {cells.row}`: a command's stdin and stdout are files",
+        ),
+    ] {
+        let found = diagnostics(&format!(
+            "operation table(cells: many Cell) -> Table .csv\ncommand table: {command}\ntabled = table(cell @vary(row))\n"
+        ));
+        assert!(
+            found.iter().any(|line| line.contains(error)),
+            "{command}: {found:?}"
+        );
+    }
 }
