@@ -5,7 +5,7 @@ default entities: {@key}={@value} separated "_"
 default path: output/{@product}/{@entities}
 
 operation copy(notes: Notes) -> Album /
-command copy: cp -R {notes} {@output}
+command copy: cp -R {notes}/. {@output}
 album = copy(trip)
 
 operation pack(album: Album) -> Archive .tar

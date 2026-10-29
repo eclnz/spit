@@ -916,7 +916,28 @@ operation recon(t1: T1) -> (subject: Subject /)
 command recon: recon-all -i {t1} -sd {subject.dir} -s {subject.stem}
 ```
 
-For `subject[sub=01]`, at `out/subject/sub=01`, this passes `-sd out/subject -s sub=01`. `spit dag --paths` shows a folder's path with a `/` after it, `spit check --path-rules` names it `(source folder)` or `(output folder)`, and the `.spitdag` gives each artifact a [`kind`](spitdag.md#artifact).
+For `subject[sub=01]`, at `out/subject/sub=01`, this passes `-sd out/subject -s sub=01`.
+
+A backend makes an output folder, empty, before the command runs, so a tool writes into it. That suits a tool that writes several files under a prefix and a tool that reads them by the same prefix, as an aligner reads its index. Make the index one folder, and name the prefix inside it in both commands:
+
+<!-- spit-doc: setup
+source reference : Fasta .fasta
+source r1 : Fastq .fastq.gz [sample]
+default entities: {@key}={@value} separated "_"
+default path: out/{@product}[/{@entities}]
+-->
+
+```text
+operation index(reference: Fasta) -> BwaIndex /
+command index: bwa index -p {@output}/genome {reference}
+operation align(index: BwaIndex, reads: Fastq) -> Sam .sam
+command align: bwa mem -o {@output} {index}/genome {reads}
+
+bwa_index = index(reference)
+aligned = align(bwa_index, r1)
+```
+
+`bwa index` writes `out/bwa_index/genome.amb` and its four other files, and each `align` job passes `out/bwa_index/genome` to `bwa mem`. A tool that copies a folder into its output copies its contents, as `cp -R {notes}/. {@output}` does, since `cp -R {notes} {@output}` puts a copy of `notes` inside the folder that already exists. `spit dag --paths` shows a folder's path with a `/` after it, `spit check --path-rules` names it `(source folder)` or `(output folder)`, and the `.spitdag` gives each artifact a [`kind`](spitdag.md#artifact).
 
 A job owns the folder it writes, so nothing else may be written in it or read from it: a path rule that puts another product's files inside a folder a job writes is an error, as is one that puts an output inside a source folder. A source may sit in a source folder, such as `dicom/sub={sub}/info.json` beside the `dicom` folder above, since no job writes either. A folder is not written [`beside`](#files-a-tool-writes-beside-another) another output, nor has an output beside it, and a source declared [`beside`](#sidecar-files) another is a file.
 

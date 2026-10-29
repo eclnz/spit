@@ -217,8 +217,7 @@ Checks are left out of the job's [fingerprint](#fingerprint), which identifies t
 
 A job that writes a folder owns it: SPIT rejects a pipeline that would put any other artifact inside it. So a backend may treat the folder as one output:
 
-- Make its parent folder before the command runs, as for a file, but not the folder itself, which the tool makes. Some tools refuse to write into a folder that already exists.
-- Remove a folder left by an earlier run before the command runs, so that files from that run do not mix with this one's.
+- Before the command runs, remove what an earlier run left at the folder's path, so that its files do not mix with this run's, then make the folder, empty, with its parents. The tool writes into a folder that exists, as a tool given a folder to fill, such as `bwa index -p` or `dcm2niix -o`, expects. A tool that refuses to write into an existing folder is wrapped in a command that removes it first.
 - After the command, require the folder to exist. It may be empty.
 - To tell whether a folder changed, look at the files under it, not the folder's own modification time, which changes only when an entry directly in it is added or removed.
 
