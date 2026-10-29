@@ -166,7 +166,7 @@ path policy: policy/{station}.toml
 # Every station must have readings for days 1 and 2.
 
 # The input with the most dimensions drives a step, whatever the port order.
-# `where` pins the calibration revision, so it no longer takes part in matching.
+# `where` pins the calibration revision, so it takes no part in matching.
 operation calibrate(calibration: Calibration, series: Series) -> Series
 verify calibrate: check_calibration {calibration} {series}
 command calibrate: apply_calibration --calibration {calibration} {series} {@output}

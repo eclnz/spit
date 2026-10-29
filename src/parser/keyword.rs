@@ -20,7 +20,8 @@ pub(crate) enum Keyword {
     /// after `default` or in a `default:` block.
     Checks,
     Require,
-    /// `skip` and `drop`, kept to give migration errors.
+    /// `skip` and `drop`, read only to give an error that says what to
+    /// write instead.
     Skip,
     Drop,
     Exclude,
@@ -99,7 +100,7 @@ impl Keyword {
     /// trimmed line is expected. The first word, up to a space or a `:`,
     /// decides, since every keyword's word is reserved; the text after it
     /// starts after one space. `check` followed by
-    /// `:` and a list is the old default list, `Checks`, and `ext:` and
+    /// `:` and a list is the default checks list, `Checks`, and `ext:` and
     /// `check:` give the text after their `:`. A keyword of [`BLOCKS`]
     /// alone with its `:` gives `:` as its text.
     pub(crate) fn split(line: &str) -> Option<(Self, &str)> {

@@ -198,7 +198,7 @@ pub(crate) struct StepCheck<'p> {
 }
 
 /// Definitions and producer checks found once for all the steps being bound.
-/// The first declaration of a name wins, as the old binding search did.
+/// The first declaration of a name wins.
 pub(crate) struct CheckIndex<'p> {
     defaults: &'p DefaultChecks,
     definitions: FxHashMap<&'p str, &'p CheckDef>,
