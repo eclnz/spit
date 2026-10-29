@@ -186,8 +186,8 @@ fn misplaced_minimum(
     )
 }
 
-/// What a clause after the signature may be: none is now, but `min` and
-/// `drop`, which were, are read to say what to write instead.
+/// What a clause after the signature may be: none. `min` and `drop` there
+/// are read only to say what to write instead.
 const TRAILING: &str =
     "nothing follows an operation's outputs; write `@min(count)` on its many input";
 
