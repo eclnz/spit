@@ -155,7 +155,7 @@ fn command_arguments_keep_quoted_hashes_and_strip_comments() {
     let text = "source raw [id] # source comment\n# whole-line comment\noperation copy(input)\ncommand copy: tool --tag '#run' --label \"part#1\" --color=#fff {input} {@output} # command comment\nresult = copy(raw)\ndefault entities: {@key}={@value} separated \"__\"\npath result: out/{@product}/{@entities}\n";
     let pipeline = parse_pipeline(text).unwrap();
     assert_eq!(
-        pipeline.commands[0].template,
+        pipeline.commands[0].lines[0],
         "tool --tag '#run' --label \"part#1\" --color=#fff {input} {@output}"
     );
 }
@@ -168,7 +168,7 @@ fn equals_command_keeps_colons_in_arguments() {
     .unwrap();
     assert_eq!(pipeline.commands[0].operation, "fetch");
     assert_eq!(
-        pipeline.commands[0].template,
+        pipeline.commands[0].lines[0],
         "tool --url https://example.com/a:b {input} {@output}"
     );
 }
@@ -235,7 +235,7 @@ fn hash_inside_a_word_is_text_as_in_bash() {
     )
     .unwrap();
     assert_eq!(
-        pipeline.commands[0].template,
+        pipeline.commands[0].lines[0],
         "tool --url=https://example.com/#top {input} {@output}# note"
     );
     let error = parse_pipeline("source raw [id]# note\n").unwrap_err();

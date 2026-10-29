@@ -181,8 +181,8 @@ pub(crate) fn collect_commands(
                 .at(line)
                 .focus(&command.operation),
             );
-        } else if let Err(e) = check_command_placeholders(
-            &command.template,
+        } else if let Err((at, e)) = check_command_placeholders(
+            &command.lines,
             operation,
             command.role,
             &Callers {
@@ -193,7 +193,8 @@ pub(crate) fn collect_commands(
                 dimensions: &dimensions,
             },
         ) {
-            errors.push(e.at(line));
+            let place = at.and_then(|at| lines.command_line(index, at));
+            errors.push(e.at(place.or(line)));
         }
     }
     errors.extend(crate::resources::collect_resources(
@@ -221,14 +222,81 @@ struct Callers<'a, 'p> {
     dimensions: &'a BTreeSet<&'p str>,
 }
 
+/// Check the placeholders of a command's `lines` against `operation`: each
+/// line may use every one, and between them they write every output. The
+/// line an error is on, from 0, or `None` for the whole command, with the
+/// error.
 fn check_command_placeholders(
-    template: &CommandTemplate,
+    lines: &[CommandTemplate],
     operation: &OperationDef,
     role: CommandRole,
     callers: &Callers<'_, '_>,
-) -> Result<(), CommandError> {
+) -> Result<(), (Option<usize>, CommandError)> {
     let mut written = BTreeSet::new();
-    let stdout = redirected_ports(template, operation, &mut written)?;
+    // The line whose stdout an output is, of which the parser allows one.
+    let mut stdout = None;
+    for (line, template) in lines.iter().enumerate() {
+        if let Some(index) =
+            redirected_ports(template, operation, &mut written).map_err(|e| (Some(line), e))?
+        {
+            stdout = Some((line, index));
+        }
+    }
+    for (line, template) in lines.iter().enumerate() {
+        check_line_placeholders(
+            template,
+            line,
+            stdout,
+            operation,
+            role,
+            callers,
+            &mut written,
+        )
+        .map_err(|e| (Some(line), e))?;
+    }
+    if role == CommandRole::Run {
+        // A tool writes an output beside another without being told where.
+        if let Some(port) = operation
+            .outputs
+            .iter()
+            .enumerate()
+            .find(|(index, port)| port.beside.is_none() && !written.contains(index))
+            .map(|(_, port)| port)
+        {
+            let what = if lines.len() > 1 {
+                "a line of the command"
+            } else {
+                "command"
+            };
+            return Err((
+                None,
+                CommandError::new(format!(
+                    "{what} for `{}` must use `{{{}}}`",
+                    operation.name,
+                    if port.name == DEFAULT_OUTPUT {
+                        "@output"
+                    } else {
+                        &port.name
+                    }
+                )),
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Check the placeholders of `template`, line `line` of its command, whose
+/// stdout, if any, is `stdout`: a line and an output's index. Each output it
+/// names is added to `written`.
+fn check_line_placeholders(
+    template: &CommandTemplate,
+    line: usize,
+    stdout: Option<(usize, usize)>,
+    operation: &OperationDef,
+    role: CommandRole,
+    callers: &Callers<'_, '_>,
+    written: &mut BTreeSet<usize>,
+) -> Result<(), CommandError> {
     for parts in template.arguments() {
         let whole = parts.len() == 1;
         for part in parts {
@@ -285,10 +353,20 @@ fn check_command_placeholders(
                             operation.name
                         ));
                     }
-                    if stdout == Some(index) {
-                        return fail(format!(
-                            "`{{{name}}}`: `{port}` is the command's stdout, written `> {{{port}}}`, so it cannot be an argument too"
-                        ));
+                    match stdout {
+                        Some((at, output)) if output == index && at == line => {
+                            return fail(format!(
+                                "`{{{name}}}`: `{port}` is the command's stdout, written `> {{{port}}}`, so it cannot be an argument too"
+                            ));
+                        }
+                        Some((at, output)) if output == index && at > line => {
+                            return fail(format!(
+                                "`{{{name}}}`: `{port}` is the stdout of line {} of the command, written `> {{{port}}}`, so it does not exist yet on line {}",
+                                at + 1,
+                                line + 1
+                            ));
+                        }
+                        _ => {}
                     }
                     // A folder and a name tell the tool where to write.
                     written.insert(index);
@@ -323,26 +401,6 @@ fn check_command_placeholders(
                     }
                 }
             }
-        }
-    }
-    if role == CommandRole::Run {
-        // A tool writes an output beside another without being told where.
-        if let Some(port) = operation
-            .outputs
-            .iter()
-            .enumerate()
-            .find(|(index, port)| port.beside.is_none() && !written.contains(index))
-            .map(|(_, port)| port)
-        {
-            return Err(CommandError::new(format!(
-                "command for `{}` must use `{{{}}}`",
-                operation.name,
-                if port.name == DEFAULT_OUTPUT {
-                    "@output"
-                } else {
-                    &port.name
-                }
-            )));
         }
     }
     Ok(())

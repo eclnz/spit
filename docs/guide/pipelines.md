@@ -33,7 +33,7 @@ command split: split_tool {series} --low {low} --high {high}
 low_band, high_band = split(series)
 ```
 
-Every non-`beside` output must be used in its command. The command is an executable with literal arguments, not a shell script; SPIT expands placeholders into paths, and a dimension's placeholder into the job's value, when it builds the DAG. A `many` input expands to one argument per artifact. Quoting rules, generic types, multi-output syntax and shell metacharacter restrictions are in [operations and commands](../language-reference.md#operations-and-commands).
+Every non-`beside` output must be used in its command. The command is an executable with literal arguments, not a shell script; SPIT expands placeholders into paths, and a dimension's placeholder into the job's value, when it builds the DAG. A `many` input expands to one argument per artifact. A job that runs two tools in turn, as one that sorts a file and then indexes it, gives each a line of its own beneath `command name:` (see [commands of several lines](../language-reference.md#commands-of-several-lines)). Quoting rules, generic types, multi-output syntax and shell metacharacter restrictions are in [operations and commands](../language-reference.md#operations-and-commands).
 
 ## Checks
 

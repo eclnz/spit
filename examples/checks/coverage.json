@@ -436,6 +436,25 @@
       }
     },
     {
+      "pipeline": "examples/runnable/sequence/sequence.spit",
+      "recipe": "examples/runnable/sequence/sequence.spitin",
+      "expect": {
+        "sources": {
+          "list": 2
+        },
+        "operations": {
+          "tally": 2
+        },
+        "targets": {
+          "counts": 2,
+          "sorted": 2
+        },
+        "dependencies": 0,
+        "removals": 0,
+        "calls": 0
+      }
+    },
+    {
       "pipeline": "examples/runnable/steps/steps.spit",
       "recipe": "examples/runnable/steps/steps.spitin",
       "expect": {

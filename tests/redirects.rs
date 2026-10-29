@@ -44,14 +44,14 @@ column, log = first(table)
     .unwrap();
     assert!(
         json.contains(
-            "\"command\":[[\"wc\"],[\"-l\"]],\"stdin\":\"in/a.tsv\",\"stdout\":\"out/counted/sheet=a.txt\",\"verify\":[]"
+            "\"commands\":[{\"command\":[[\"wc\"],[\"-l\"]],\"stdin\":\"in/a.tsv\",\"stdout\":\"out/counted/sheet=a.txt\"}],\"verify\":[]"
         ),
         "{json}"
     );
     assert!(
         json.contains(
             "\"command\":[[\"cut\"],[\"-f1\"],[{\"path\":\"in/a.tsv\"}],[\"--log\"],[{\"path\":\"out/log/sheet=a.txt\"}]],\
-\"stdin\":null,\"stdout\":\"out/column/sheet=a.tsv\""
+\"stdin\":null,\"stdout\":\"out/column/sheet=a.tsv\"}]"
         ),
         "{json}"
     );

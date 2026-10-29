@@ -72,8 +72,8 @@ pub use resolver::{
     BindError,
 };
 pub use spitdag::{
-    ArgPart, Argument, BoundArtifact, BoundCall, BoundCheck, BoundDag, BoundJob, BoundStep,
-    LeftOut, StepCall, StepCheck, When,
+    ArgPart, Argument, BoundArtifact, BoundCall, BoundCheck, BoundCommand, BoundDag, BoundJob,
+    BoundStep, LeftOut, StepCall, StepCheck, When,
 };
 pub use types::{
     parse_type_expr, Compatibility, Substitutions, TypeExpr, TypeParseError, TypeUnifyError,

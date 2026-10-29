@@ -41,7 +41,7 @@ pub(crate) use self::layout::{Block, Head, Layout, Line};
 pub(crate) use self::lexical::{glued_comment, strip_comment, without_bom};
 pub(crate) use self::render_inventory::as_read_back;
 pub use self::render_inventory::render_source_inventory;
-pub(crate) use self::source_map::{Rule, SourceMap, Step};
+pub(crate) use self::source_map::{CommandPlaces, Rule, SourceMap, Step};
 
 const SHELL_SOURCE_ERROR: &str = "`shell-source` starts no statement: a command runs a program, not a shell function, so make the program executable and put it on PATH";
 
@@ -205,7 +205,8 @@ pub(crate) enum StatementKind {
     /// An `exclude` rule, its reason from the line's comment, and where
     /// what it names sits.
     Exclude(declarations::ExcludeLine, Option<String>, Place),
-    Command(CommandDef, Place),
+    /// A command, with where it and each of its lines are.
+    Command(CommandDef, CommandPlaces),
     /// A `resources` line, and where its operation's name is.
     Resources(ResourcesDef, Place),
     /// A `check` declaration, and where its name is.
@@ -347,9 +348,8 @@ impl StatementKind {
         number: usize,
         role: CommandRole,
     ) -> Result<Self, ParseError> {
-        let command = command::parse_command(declaration, number, role)?;
-        let place = source_map::tail_place(original, number, command.template.as_str());
-        Ok(Self::Command(command, place))
+        let (command, places) = command::parse_command(original, declaration, number, role)?;
+        Ok(Self::Command(command, places))
     }
 
     /// A `resources` line, `declaration` being the text after its keyword
