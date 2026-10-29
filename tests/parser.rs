@@ -356,7 +356,9 @@ fn a_command_names_each_port_it_uses() {
         "tool {input1} {@output}",
         "tool {inputs} {@output}",
     ] {
-        let text = format!("operation f(scans: many Scan) -> Out\ncommand f: {template}\n");
+        let text = format!(
+            "source scan : Scan [run]\noperation f(scans: many Scan) -> Out\ncommand f: {template}\nout = f(scan @vary(run))\n"
+        );
         let error = spit::validate_commands(&parse_pipeline(&text).unwrap()).unwrap_err();
         assert!(
             error.to_string().contains("unknown placeholder"),

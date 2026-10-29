@@ -274,7 +274,8 @@ fn bind_job(
         .iter()
         .map(|&output| bound(output))
         .collect::<Result<_, _>>()?;
-    let expand_command = |command: &CommandDef| expand(command.template.arguments(), step, job);
+    let expand_command =
+        |command: &CommandDef| expand(command.template.arguments(), step, dag, job);
     let redirected = |stream: Stream| {
         let Some(name) = step.run.and_then(|run| run.template.redirected(stream)) else {
             return Ok(None);
@@ -284,7 +285,7 @@ fn bind_job(
         let artifact = match slot(operation, name) {
             Some(Slot::Input(index)) => job.inputs.get(index).and_then(|a| a.first()),
             Some(Slot::Output(index)) => job.outputs.get(index),
-            Some(Slot::Cores) | None => None,
+            Some(Slot::Cores | Slot::Dimension) | None => None,
         };
         let artifact = *artifact
             .ok_or_else(|| CommandError::new(format!("job {} lacks `{{{name}}}`", job.id)))?;
@@ -379,11 +380,13 @@ fn check_command(check: &StepCheck<'_>, artifact: ArtifactId) -> Vec<Argument> {
 }
 
 /// A command's arguments for one job of `step`. A many input's placeholder,
-/// which is a whole argument, becomes one argument per artifact, and
-/// `{@cores}` the step's cores as text.
+/// which is a whole argument, becomes one argument per artifact, `{@cores}`
+/// the step's cores as text, and a dimension's placeholder its value in the
+/// job's outputs, as text within its argument.
 fn expand(
     template: &[Vec<Part>],
     step: &StepCommands<'_>,
+    dag: &ResolvedDag,
     job: &Job,
 ) -> Result<Vec<Argument>, BindError> {
     let operation = step.operation;
@@ -413,6 +416,18 @@ fn expand(
                     let artifact = match slot {
                         Some(Slot::Cores) => {
                             argument.push(ArgPart::Text(step.cores.clone()));
+                            continue;
+                        }
+                        // `validate_commands` makes sure every step calling
+                        // the operation has the dimension, and a job's
+                        // outputs carry each of its step's dimensions.
+                        Some(Slot::Dimension) => {
+                            let value = job
+                                .outputs
+                                .first()
+                                .and_then(|&output| dag.artifacts.entities(output).get(port))
+                                .ok_or_else(|| lacks(name))?;
+                            argument.push(ArgPart::Text(value.to_owned()));
                             continue;
                         }
                         Some(Slot::Output(index)) => job.outputs.get(index),

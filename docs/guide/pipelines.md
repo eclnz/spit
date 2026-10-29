@@ -33,7 +33,7 @@ command split: split_tool {series} --low {low} --high {high}
 low_band, high_band = split(series)
 ```
 
-Every non-`beside` output must be used in its command. The command is an executable with literal arguments, not a shell script; SPIT expands placeholders into paths when it builds the DAG. A `many` input expands to one argument per artifact. Quoting rules, generic types, multi-output syntax and shell metacharacter restrictions are in [operations and commands](../language-reference.md#operations-and-commands).
+Every non-`beside` output must be used in its command. The command is an executable with literal arguments, not a shell script; SPIT expands placeholders into paths, and a dimension's placeholder into the job's value, when it builds the DAG. A `many` input expands to one argument per artifact. Quoting rules, generic types, multi-output syntax and shell metacharacter restrictions are in [operations and commands](../language-reference.md#operations-and-commands).
 
 ## Checks
 
@@ -81,6 +81,24 @@ denoised = denoise(image)
 ```
 
 Each job runs `denoise_tool --threads 4 ...`. An operation with no `resources` line needs one core and claims no memory. See [cores and memory](../language-reference.md#cores-and-memory).
+
+## A job's values
+
+A placeholder that names one of the job's dimensions gives the tool that job's value, as text:
+
+<!-- spit-doc: setup
+source image : Image [sub, ses]
+default entities: {@key}={@value} separated "_"
+default path: out/{@product}/{@entities}
+-->
+
+```spit
+operation plot(input: Image) -> Figure .png
+command plot: plot_tool {input} --title "subject {sub}, session {ses}" --out {@output}
+figure = plot(image)
+```
+
+The job for `image[sub=01,ses=2]` runs `plot_tool ... --title 'subject 01, session 2' ...`. A job has the dimensions of its outputs, so a step that collects sessions with `@vary(ses)` has no one `{ses}`, and `spit check` says so. See [a job's dimension values](../language-reference.md#a-jobs-dimension-values).
 
 ## Composite operations
 
