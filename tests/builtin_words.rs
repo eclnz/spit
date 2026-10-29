@@ -27,7 +27,7 @@ fn words_are_found_by_where_they_are_written() {
         ("path image: input/{subject}.txt", "subject", None),
         ("default path: {@stage}/{@product}/{@entities}.txt", "@stage", Some("@stage")),
         ("default path: {@stage}/{@product}/{@entities}.txt", "@entities", Some("@entities")),
-        // `{@labels}` is gone, so it is no longer a word with documentation.
+        // `{@labels}` is no built-in placeholder, so it has no documentation.
         ("default path: sub-{sub}/{@labels}_{@product}", "@labels", None),
         ("default path: out/{{@product}}", "@product", None),
         ("path log: logs/{server}/{date:date}.log", "date:date", Some("date")),

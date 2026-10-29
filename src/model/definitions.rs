@@ -247,7 +247,7 @@ pub struct InputBinding {
     /// `@vary(dimensions)`: collect artifacts that differ in these dimensions.
     pub vary: Vec<String>,
     /// `@where(dimension=value, ...)`: keep only artifacts with these values.
-    /// A pinned dimension no longer takes part in matching.
+    /// A pinned dimension takes no part in matching.
     pub pinned: BTreeMap<String, String>,
     /// `@same(dimension, ...)`: match the job on these dimensions only. Any
     /// other dimension must leave exactly one artifact for each job.

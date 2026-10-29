@@ -129,8 +129,8 @@ fn many_calls_to_an_operation_that_failed_to_declare_are_left_out_in_reasonable_
 }
 
 /// A failing line that ends an operation's body, with a line indented
-/// beneath the body after it, cost a parse each while recovery blanked the
-/// failed line and parsed again (#90).
+/// beneath the body after it, is reported without parsing the text again
+/// for each one.
 #[test]
 #[ignore = "slow in a debug build; run with --release"]
 fn many_bad_steps_that_end_bodies_are_reported_in_reasonable_time() {
@@ -147,8 +147,8 @@ fn many_bad_steps_that_end_bodies_are_reported_in_reasonable_time() {
 }
 
 /// A body header that fails, here for an output no step makes, and a call
-/// whose expansion fails inside a nested call each cost a parse while
-/// lowering could stop part way through a statement (#90).
+/// whose expansion fails inside a nested call, are each reported without
+/// parsing the text again for each one.
 #[test]
 #[ignore = "slow in a debug build; run with --release"]
 fn many_bad_body_headers_and_nested_call_failures_are_reported_in_reasonable_time() {
