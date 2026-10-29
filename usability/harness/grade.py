@@ -30,10 +30,18 @@ def render_arg(pieces):
     return "".join(out)
 
 
+def job_commands(job):
+    """A job's commands, each a list of arguments. The answer keys stored in
+    scenarios.zip hold each job's one command as `command`, which this reads too."""
+    if "commands" in job:
+        return [command["command"] for command in job["commands"]]
+    return [job["command"]] if job.get("command") else []
+
+
 def job_lines(dag):
     lines = Counter()
     for job in dag.get("jobs", []):
-        cmd = " ".join(render_arg(a) for a in job.get("command", []))
+        cmd = " && ".join(" ".join(render_arg(a) for a in c) for c in job_commands(job))
         verifies = [" ".join(render_arg(a) for a in v) for v in job.get("verify", [])]
         line = cmd + "".join(f"  [verify: {v}]" for v in verifies)
         lines[line] += 1

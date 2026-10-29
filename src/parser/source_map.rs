@@ -29,8 +29,8 @@ pub(crate) struct SourceMap {
     /// Where each `exclude` rule written in the recipe names what it
     /// removes, in the order of `InputRules::exclusions`.
     pub(crate) exclusions: Vec<Place>,
-    /// One template per `Pipeline::commands` element, in the same order.
-    pub(crate) commands: Vec<Place>,
+    /// Where each `Pipeline::commands` element is, in the same order.
+    pub(crate) commands: Vec<CommandPlaces>,
     /// One operation name per `Pipeline::resources` element, in the same
     /// order.
     pub(crate) resources: Vec<Place>,
@@ -53,6 +53,16 @@ pub(crate) struct SourceMap {
     /// The text of each file an import read, by its path as
     /// `Pipeline::files` gives it, for messages that point into it.
     pub(crate) file_texts: BTreeMap<String, String>,
+}
+
+/// Where a command is: the line that names its operation, and each of its
+/// lines. A command written on its `command` line has one line, at the
+/// same place as its header: the template. One written as a block has its
+/// header's content as its header, and its lines beneath it.
+#[derive(Clone, Debug)]
+pub(crate) struct CommandPlaces {
+    pub(crate) header: Place,
+    pub(crate) lines: Vec<Place>,
 }
 
 /// Where the parts of one step sit on its line.
@@ -121,8 +131,14 @@ impl Rule {
 }
 
 impl SourceMap {
+    /// Where the command at `index` names its operation.
     pub(crate) fn command(&self, index: usize) -> Option<Place> {
-        self.commands.get(index).cloned()
+        Some(self.commands.get(index)?.header.clone())
+    }
+
+    /// Where line `line`, from 0, of the command at `index` is.
+    pub(crate) fn command_line(&self, index: usize, line: usize) -> Option<Place> {
+        self.commands.get(index)?.lines.get(line).cloned()
     }
 
     /// The template of the path rule that `product` uses.

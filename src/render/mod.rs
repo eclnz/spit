@@ -264,7 +264,8 @@ fn render_commands(dag: &BoundDag) -> String {
 }
 
 /// A job's commands in the order a backend runs them: its input checks,
-/// `verify` lines, `run` line, then its output checks. A job a call made
+/// `verify` lines, a `run` line for each of its commands, then its output
+/// checks. A job a call made
 /// first says where it comes from, and one whose operation declares what it
 /// needs says so next.
 fn push_command_lines(text: &mut String, dag: &BoundDag, job: &BoundJob) {
@@ -294,21 +295,23 @@ fn push_command_lines(text: &mut String, dag: &BoundDag, job: &BoundJob) {
         push_command(text, dag, verify);
         text.push('\n');
     }
-    text.push_str("  run:    ");
-    match &job.command {
-        Some(command) => push_command(text, dag, command),
-        None => text.push_str("(no command)"),
+    if job.commands.is_empty() {
+        text.push_str("  run:    (no command)\n");
     }
-    // As a shell writes them, so the line runs as it reads.
-    for (sign, file) in [("<", job.stdin), (">", job.stdout)] {
-        if let Some(file) = file {
-            text.push(' ');
-            text.push_str(sign);
-            text.push(' ');
-            text.push_str(&shell_word(dag.path(file)));
+    for command in &job.commands {
+        text.push_str("  run:    ");
+        push_command(text, dag, &command.arguments);
+        // As a shell writes them, so the line runs as it reads.
+        for (sign, file) in [("<", command.stdin), (">", command.stdout)] {
+            if let Some(file) = file {
+                text.push(' ');
+                text.push_str(sign);
+                text.push(' ');
+                text.push_str(&shell_word(dag.path(file)));
+            }
         }
+        text.push('\n');
     }
-    text.push('\n');
     checks(text, When::After);
 }
 
