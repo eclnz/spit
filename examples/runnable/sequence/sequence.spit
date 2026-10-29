@@ -1,0 +1,13 @@
+source list : Lines [plot]
+path list: input/{plot}.txt
+
+default entities: {@key}={@value} separated "_"
+default path: output/{@product}/{@entities}
+
+# Two tools, one after the other, in one job: sort writes the sorted list,
+# then uniq reads it and prints how often each line comes on its stdout.
+operation tally(list: Lines) -> (sorted: Lines .txt, counts: Counts .txt)
+command tally:
+    sort -o {sorted} {list}
+    uniq -c {sorted} > {counts}
+sorted, counts = tally(list)

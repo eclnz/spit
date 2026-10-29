@@ -4,10 +4,11 @@
 use std::io;
 use std::ops::Range;
 
-use crate::json::{write_array, write_number, write_string, write_u64, ObjectWriter, Out};
+use crate::json::{write_array, write_number, write_string, write_u64, ObjectWriter};
 use crate::model::{ArtifactId, JobId, Removal};
 use crate::types::TypeExpr;
 
+use super::work::{fingerprint, write_hex, write_work_commands, WorkCommands};
 use super::{ArgPart, Argument, BoundArtifact, BoundDag, BoundJob, When, SPITDAG_VERSION};
 
 /// How much of a document [`BoundDag::write_json`] holds before writing it.
@@ -175,18 +176,7 @@ fn write_job(
         }
         outputs.finish();
     });
-    let command = object.field_at("command", |out| match &job.command {
-        Some(command) => write_command(out, dag, command),
-        None => out.push_str("null"),
-    });
-    // A job that redirects neither stream hashes as it did before they
-    // could be, so its fingerprint is unchanged.
-    let stdin = job
-        .stdin
-        .map(|id| object.field_at("stdin", |out| write_string(out, dag.path(id))));
-    let stdout = job
-        .stdout
-        .map(|id| object.field_at("stdout", |out| write_string(out, dag.path(id))));
+    let commands = write_work_commands(&mut object, dag, &job.commands);
     let verify = object.field_at("verify", |out| {
         write_array(out, &job.verify, |out, command| {
             write_command(out, dag, command);
@@ -232,13 +222,26 @@ fn write_job(
     object.field("dependents", |out| {
         write_array(out, dependents.iter().map(|id| id.number()), write_number);
     });
-    object.raw("command", &work[command]);
-    for (name, span) in [("stdin", stdin), ("stdout", stdout)] {
-        match span {
-            Some(span) => object.raw(name, &work[span]),
-            None => object.field(name, |out| out.push_str("null")),
+    object.field("commands", |out| match &commands {
+        WorkCommands::None => out.push_str("[]"),
+        WorkCommands::One {
+            command,
+            stdin,
+            stdout,
+        } => {
+            out.push_str("[{\"command\":");
+            out.push_str(&work[command.clone()]);
+            for (name, span) in [(",\"stdin\":", stdin), (",\"stdout\":", stdout)] {
+                out.push_str(name);
+                match span {
+                    Some(span) => out.push_str(&work[span.clone()]),
+                    None => out.push_str("null"),
+                }
+            }
+            out.push_str("}]");
         }
-    }
+        WorkCommands::Several(span) => out.push_str(&work[span.clone()]),
+    });
     object.raw("verify", &work[verify]);
     // A check tests the files a job reads or writes, not the job's work, so
     // the fingerprint leaves the checks out: a changed check is run again on
@@ -270,45 +273,10 @@ fn write_job(
     object.finish();
 }
 
-/// A 64-bit FNV-1a hash of a job's work written as compact JSON, as 16
-/// hexadecimal digits: the same on every platform and in every release,
-/// unlike the standard library's. The JSON writer's format is part of the
-/// `.spitdag` contract; a test pins a job's value.
-fn fingerprint(work: &str) -> u64 {
-    let mut hash = Fnv::new();
-    hash.push_str(work);
-    hash.0
-}
-
-/// `value` as 16 hexadecimal digits.
-fn write_hex(out: &mut String, value: u64) {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    for shift in (0..16).rev() {
-        out.push(char::from(HEX[(value >> (4 * shift)) as usize & 0xf]));
-    }
-}
-
-/// FNV-1a over the text written to it, so nothing is kept but the hash.
-struct Fnv(u64);
-
-impl Fnv {
-    fn new() -> Self {
-        Self(0xcbf2_9ce4_8422_2325)
-    }
-}
-
-impl Out for Fnv {
-    fn push_str(&mut self, text: &str) {
-        for byte in text.bytes() {
-            self.0 = (self.0 ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3);
-        }
-    }
-}
-
 /// An argument is an array of parts: a string for text, `{"path": ...}` for
 /// a file, and `{"dir": ..., "of": ...}` or `{"stem": ..., "of": ...}` for
 /// its folder or its name without its extension, with the file they are of.
-fn write_command(out: &mut String, dag: &BoundDag, command: &[Argument]) {
+pub(super) fn write_command(out: &mut String, dag: &BoundDag, command: &[Argument]) {
     write_array(out, command, |out, argument| {
         write_array(out, argument, |out, part| match part {
             ArgPart::Text(text) => write_string(out, text),
@@ -427,7 +395,16 @@ mod tests {
     use super::*;
     use crate::model::SourceFile;
     use crate::model::{Artifacts, EntityBinding, StepId};
-    use crate::spitdag::{BoundCall, BoundStep, StepCall};
+    use crate::spitdag::{BoundCall, BoundCommand, BoundStep, StepCall};
+
+    /// A command that runs `program` alone.
+    fn command(program: &str) -> BoundCommand {
+        BoundCommand {
+            arguments: vec![vec![ArgPart::Text(program.into())]],
+            stdin: None,
+            stdout: None,
+        }
+    }
 
     /// A step calling `operation` in `stage`, with ports named `inputs` and
     /// `outputs`.
@@ -490,12 +467,14 @@ mod tests {
                     inputs: vec![vec![raw]],
                     outputs: vec![clean],
                     depends_on: vec![],
-                    command: Some(vec![
-                        vec![ArgPart::Text("tool".into())],
-                        vec![ArgPart::Text("--in=".into()), ArgPart::Path(raw)],
-                    ]),
-                    stdin: None,
-                    stdout: None,
+                    commands: vec![BoundCommand {
+                        arguments: vec![
+                            vec![ArgPart::Text("tool".into())],
+                            vec![ArgPart::Text("--in=".into()), ArgPart::Path(raw)],
+                        ],
+                        stdin: None,
+                        stdout: None,
+                    }],
                     verify: vec![vec![vec![ArgPart::Path(raw)]]],
                     checks: vec![],
                 },
@@ -505,9 +484,7 @@ mod tests {
                     inputs: vec![vec![clean]],
                     outputs: vec![mean],
                     depends_on: vec![JobId::new(1)],
-                    command: None,
-                    stdin: None,
-                    stdout: None,
+                    commands: vec![],
                     verify: vec![],
                     checks: vec![],
                 },
@@ -525,7 +502,7 @@ mod tests {
             "{text}"
         );
         assert!(
-            text.contains("\"command\":null,\"stdin\":null,\"stdout\":null"),
+            text.contains("\"dependents\":[],\"commands\":[],\"verify\":[]"),
             "{text}"
         );
         // A verify command that starts with a path names no program.
@@ -545,6 +522,65 @@ mod tests {
         assert!(
             text.contains("\"depends_on\":[1],\"dependents\":[]"),
             "{text}"
+        );
+    }
+
+    #[test]
+    fn a_job_with_one_command_hashes_as_a_job_with_a_single_command_did() {
+        let steps = vec![step("clean", None, &["raw"], &["output"])];
+        let job = |commands: Vec<BoundCommand>| {
+            move |[raw, clean, _]: [ArtifactId; 3]| {
+                vec![BoundJob {
+                    id: JobId::new(1),
+                    step: StepId::new(0),
+                    inputs: vec![vec![raw]],
+                    outputs: vec![clean],
+                    depends_on: vec![],
+                    commands,
+                    verify: vec![],
+                    checks: vec![],
+                }]
+            }
+        };
+        let fingerprint_of = |text: &str| {
+            let start = text.find("\"fingerprint\":\"").unwrap() + 15;
+            text[start..start + 16].to_owned()
+        };
+        // The work a single command's job hashed: its arguments as
+        // `command`, and its stdout, which is not null, after it.
+        let one = bound(steps.clone(), |ids| {
+            job(vec![BoundCommand {
+                stdout: Some(ids[1]),
+                ..command("tool")
+            }])(ids)
+        });
+        let text = one.to_json();
+        assert!(
+            text.contains(
+                "\"commands\":[{\"command\":[[\"tool\"]],\"stdin\":null,\"stdout\":\"out/1.txt\"}]"
+            ),
+            "{text}"
+        );
+        let print = fingerprint_of(&text);
+        let raw_json = ArtifactJson::new(&one);
+        let ids: Vec<_> = one.artifacts.ids().collect();
+        let work = format!(
+            "{{\"operation\":\"clean\",\"inputs\":{{\"raw\":[{}]}},\"outputs\":{{\"output\":{}}},\"command\":[[\"tool\"]],\"stdout\":\"out/1.txt\",\"verify\":[]}}",
+            raw_json.get(ids[0]),
+            raw_json.get(ids[1]),
+        );
+        let mut hex = String::new();
+        write_hex(&mut hex, fingerprint(&work));
+        assert_eq!(print, hex);
+        // Several commands are written, and hashed, as a list.
+        let two = bound(steps, job(vec![command("tool"), command("index")])).to_json();
+        assert!(
+            two.contains("\"commands\":[{\"command\":[[\"tool\"]],\"stdin\":null,\"stdout\":null},{\"command\":[[\"index\"]],\"stdin\":null,\"stdout\":null}],\"verify\":[]"),
+            "{two}"
+        );
+        assert!(
+            two.contains("\"executables\":[\"index\",\"tool\"]"),
+            "{two}"
         );
     }
 
@@ -600,9 +636,7 @@ mod tests {
             inputs: vec![waves.to_vec()],
             outputs: vec![output],
             depends_on: vec![],
-            command: None,
-            stdin: None,
-            stdout: None,
+            commands: vec![],
             verify: vec![],
             checks: vec![],
         };
@@ -632,9 +666,7 @@ mod tests {
             inputs: vec![vec![raw]],
             outputs: vec![clean],
             depends_on: vec![],
-            command: Some(vec![vec![ArgPart::Text("tool".into())]]),
-            stdin: None,
-            stdout: None,
+            commands: vec![command("tool")],
             verify: vec![],
             checks: vec![],
         };
@@ -655,16 +687,25 @@ mod tests {
         };
         assert_eq!(print(&job), print(&renumbered));
         let changed = |ids| BoundJob {
-            command: Some(vec![vec![ArgPart::Text("other".into())]]),
+            commands: vec![command("other")],
             ..job(ids)
         };
         assert_ne!(print(&job), print(&changed));
         // The same arguments, with the output on stdout.
         let redirected = |ids: [ArtifactId; 3]| BoundJob {
-            stdout: Some(ids[1]),
+            commands: vec![BoundCommand {
+                stdout: Some(ids[1]),
+                ..command("tool")
+            }],
             ..job(ids)
         };
         assert_ne!(print(&job), print(&redirected));
+        // A second command is work too.
+        let sequence = |ids| BoundJob {
+            commands: vec![command("tool"), command("other")],
+            ..job(ids)
+        };
+        assert_ne!(print(&job), print(&sequence));
         assert!(print(&job).bytes().all(|byte| byte.is_ascii_hexdigit()));
         // The hash of the work as compact JSON: a change to the JSON writer
         // changes every fingerprint, so it must be deliberate.
@@ -686,9 +727,7 @@ mod tests {
             inputs: vec![vec![raw]],
             outputs: vec![clean],
             depends_on: vec![],
-            command: Some(vec![vec![ArgPart::Text("tool".into())]]),
-            stdin: None,
-            stdout: None,
+            commands: vec![command("tool")],
             verify: vec![],
             checks: vec![],
         };

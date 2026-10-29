@@ -20,8 +20,9 @@ use crate::model::{
 };
 use crate::order::{order_dimensions, Output};
 use crate::parser::{
-    document_records, empty_body, parse_syntax, without_bom, ExcludeLine, Kind, Layout, ParseError,
-    ParseErrorKind, PathRule, Rule, SourceMap, Statement, StatementKind, Step, Syntax,
+    document_records, empty_body, parse_syntax, without_bom, CommandPlaces, ExcludeLine, Kind,
+    Layout, ParseError, ParseErrorKind, PathRule, Rule, SourceMap, Statement, StatementKind, Step,
+    Syntax,
 };
 use crate::shape::{step_context, step_driver, BoundInput};
 use crate::span::Place;
@@ -143,8 +144,9 @@ impl PipelineBuilder {
         self.inputs.constraints.push(constraint);
     }
 
-    pub(crate) fn add_command(&mut self, command: CommandDef, place: Place) {
-        self.lines.commands.push(place);
+    /// Add `command`, which is at `places`.
+    pub(crate) fn add_command(&mut self, command: CommandDef, places: CommandPlaces) {
+        self.lines.commands.push(places);
         self.pipeline.commands.push(command);
     }
 
@@ -393,10 +395,11 @@ fn check_bodies_have_no_commands(builder: &PipelineBuilder) -> Result<(), ParseE
         operation_at,
         ..
     } = builder;
-    for (command, place) in pipeline.commands.iter().zip(&lines.commands) {
+    for (command, places) in pipeline.commands.iter().zip(&lines.commands) {
         let Some(&operation) = operation_at.get(&command.operation) else {
             continue;
         };
+        let place = &places.header;
         if !pipeline.operations[operation].steps.is_empty() {
             return Err(ParseError::new(
                 place.line,
@@ -525,8 +528,8 @@ fn lower_statement(
             });
             builder.lines.exclusions.push(place.clone());
         }
-        StatementKind::Command(command, place) => {
-            builder.add_command(command.clone(), place.clone());
+        StatementKind::Command(command, places) => {
+            builder.add_command(command.clone(), places.clone());
         }
         StatementKind::Resources(resources, place) => {
             builder.add_resources(resources.clone(), place.clone());

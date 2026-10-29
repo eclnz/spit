@@ -14,7 +14,9 @@ use crate::model::{
     CheckDef, CheckUse, CommandDef, CommandRole, OperationDef, Pipeline, PipelineIndex, ProductDef,
     ResourcesDef, SidecarGroup, SourceFile,
 };
-use crate::parser::{parse_use, without_bom, Keyword, Kind, Layout, Line, ParseError, UseSpec};
+use crate::parser::{
+    parse_use, without_bom, CommandPlaces, Keyword, Kind, Layout, Line, ParseError, UseSpec,
+};
 use crate::span::Place;
 pub(crate) use located::relative_path;
 use located::{in_import, named_in, rebase, ImportedAt};
@@ -90,7 +92,11 @@ pub(crate) fn apply_import(
             .map(|(product, template)| (product.clone(), template.clone())),
     );
     for command in &imported.commands {
-        builder.add_command(command.clone(), place.clone());
+        let places = CommandPlaces {
+            header: place.clone(),
+            lines: vec![place.clone(); command.lines.len()],
+        };
+        builder.add_command(command.clone(), places);
     }
     for resources in &imported.resources {
         builder.add_resources(resources.clone(), place.clone());

@@ -25,7 +25,7 @@ def summary(dag):
 
 
 def commands(job):
-    return ([job["command"]] if job["command"] is not None else []) + job["verify"] + [
+    return [command["command"] for command in job["commands"]] + job["verify"] + [
         check["command"] for check in job["checks"]
     ]
 
@@ -103,11 +103,11 @@ def concepts(name, dag):
                 require(series["entities"]["station"] == reference["entities"]["station"], "wrong station")
             if job["operation"] == "split_bands":
                 require(set(job["outputs"]) == {"low", "high"}, "bands must share one producer")
-                require(job["command"] == [
+                require([command["command"] for command in job["commands"]] == [[
                     ["band_split"], [{"path": job["inputs"]["series"][0]["path"]}],
                     ["--low"], [{"path": job["outputs"]["low"]["path"]}],
                     ["--high"], [{"path": job["outputs"]["high"]["path"]}],
-                ], "band command must bind each output to its own flag")
+                ]], "band command must bind each output to its own flag")
             if job["operation"] == "summarise":
                 days = [a["entities"]["day"] for a in job["inputs"]["days"]]
                 require(days == (["1", "2", "10"] if len(days) == 3 else ["1", "2"]), "wrong collection order")

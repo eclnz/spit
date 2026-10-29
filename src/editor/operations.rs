@@ -38,14 +38,15 @@ pub(super) fn operation_details(pipeline: &Pipeline, operation: &OperationDef) -
         .iter()
         .filter(|command| command.operation == operation.name)
     {
-        details.push(format!(
-            "{}: {}",
-            match command.role {
-                CommandRole::Run => "Command",
-                CommandRole::Verify => "Verify",
-            },
-            command.template
-        ));
+        for line in &command.lines {
+            details.push(format!(
+                "{}: {line}",
+                match command.role {
+                    CommandRole::Run => "Command",
+                    CommandRole::Verify => "Verify",
+                },
+            ));
+        }
     }
     for line in pipeline
         .resources

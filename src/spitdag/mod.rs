@@ -3,6 +3,7 @@
 //! nothing else; it never sees the pipeline, a path rule or a command
 //! template. Written as a `.spitdag`, a JSON document.
 
+mod work;
 mod write;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -131,18 +132,26 @@ pub struct BoundJob {
     /// The artifact of each output port, in its step's port order.
     pub outputs: Vec<ArtifactId>,
     pub depends_on: Vec<JobId>,
-    /// The command that makes the outputs; `None` when the operation has none.
-    pub command: Option<Vec<Argument>>,
-    /// The input whose file `command` reads on its stdin, if any.
-    pub stdin: Option<ArtifactId>,
-    /// The output whose file `command` writes on its stdout, if any. It is
-    /// never also among the command's arguments.
-    pub stdout: Option<ArtifactId>,
+    /// The commands that make the outputs, run in order until one fails;
+    /// empty when the operation has none.
+    pub commands: Vec<BoundCommand>,
     /// Commands that check the inputs before the job runs.
     pub verify: Vec<Vec<Argument>>,
     /// The checks of single artifacts: those on inputs, then those on
     /// outputs.
     pub checks: Vec<BoundCheck>,
+}
+
+/// One command of a job, and the files its streams are connected to.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BoundCommand {
+    pub arguments: Vec<Argument>,
+    /// The input whose file the command reads on its stdin, if any.
+    pub stdin: Option<ArtifactId>,
+    /// The output whose file the command writes on its stdout, if any. It
+    /// is never also among this command's arguments, and at most one of a
+    /// job's commands has one.
+    pub stdout: Option<ArtifactId>,
 }
 
 /// An artifact of a bound DAG, with its path.
@@ -328,7 +337,8 @@ impl BoundDag {
             .iter()
             .flat_map(|job| {
                 let checks = job.checks.iter().map(|check| &check.command);
-                job.command.iter().chain(&job.verify).chain(checks)
+                let commands = job.commands.iter().map(|command| &command.arguments);
+                commands.chain(&job.verify).chain(checks)
             })
             .filter_map(|command| {
                 command

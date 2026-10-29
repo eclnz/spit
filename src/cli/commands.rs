@@ -246,7 +246,7 @@ pub(crate) fn dag(args: &CliArgs) -> Result<(), Box<dyn Error>> {
             if let Some(root) = &prepared.root {
                 eprintln!("note: commands run from `{}`", root.display());
             }
-            if bound.jobs.iter().all(|job| job.command.is_none()) && !bound.jobs.is_empty() {
+            if bound.jobs.iter().all(|job| job.commands.is_empty()) && !bound.jobs.is_empty() {
                 eprintln!(
                     "note: no job has a command; `dag --jobs` lists each job's inputs and outputs"
                 );

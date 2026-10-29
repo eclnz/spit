@@ -305,17 +305,28 @@ pub fn pipeline_hovers(text: &str, path: &Path) -> Vec<Hover> {
         }
     }
     for (index, command) in pipeline.commands.iter().enumerate() {
-        let Some(template) = document.lines.command(index) else {
+        let Some(header) = document.lines.command(index) else {
             continue;
         };
+        // Before the template on a command's own line; a block's header
+        // line holds no template.
+        let block =
+            document.lines.command_line(index, 0).map(|line| line.line) != Some(header.line);
         if let (Some(line), Some((signature, details))) = (
-            text_lines.get(template.line.saturating_sub(1)),
+            text_lines.get(header.line.saturating_sub(1)),
             operation_info(&command.operation),
         ) {
-            if let Some(columns) = find_word(&line[..template.columns.start], 0, &command.operation)
+            let end = if block {
+                header.columns.end
+            } else {
+                header.columns.start
+            };
+            if let Some(columns) = line
+                .get(..end)
+                .and_then(|before| find_word(before, 0, &command.operation))
             {
                 add(
-                    Place::new(template.line, columns),
+                    Place::new(header.line, columns),
                     HoverKind::Operation,
                     &command.operation,
                     signature,
