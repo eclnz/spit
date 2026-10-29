@@ -17,7 +17,7 @@ use crate::diagnostics::{
 };
 use crate::imports::parse_located_document_recovering;
 use crate::json::Json;
-use crate::model::{Cardinality, PathOrigin, Pipeline, PipelineIndex, ProductDef};
+use crate::model::{BesideFile, Cardinality, PathOrigin, Pipeline, PipelineIndex, ProductDef};
 use crate::parser::{without_bom, Kind};
 use crate::paths::shown_path;
 use crate::render::written_step;
@@ -472,7 +472,9 @@ fn product_details(
             index.beside(&product.name),
             index.path_origin(&product.name),
         ) {
-            (Some((sibling, _, _)), _) => format!("Path template: {path} (beside {sibling})."),
+            (Some(BesideFile { sibling, .. }), _) => {
+                format!("Path template: {path} (beside {sibling}).")
+            }
             (None, Some((PathOrigin::Explicit, _))) => {
                 format!("Path template: {path} (explicit product rule).")
             }

@@ -101,7 +101,7 @@ pub(super) fn discover(
         .map(DiscoveryPattern::new)
         .collect::<Result<Vec<_>, _>>()?;
     let sources = source_patterns(pipeline)?;
-    let listing = Listing::of(root)?;
+    let mut listing = Listing::of(root)?;
     // Each source with its place in `sources`, as file and folder sources:
     // a file source's rule is matched against files, a folder source's
     // against folders.
@@ -119,6 +119,9 @@ pub(super) fn discover(
         }
     }
     let outputs = OutputPaths::of(pipeline, &listing.directories);
+    // A file a step writes beside a source's is no source, though a rule
+    // may match it.
+    listing.files.retain(|file| !outputs.beside_source(file));
     let mut discovery = Discovery::default();
     // SPIT's own files, such as a recipe kept in its dataset, and what an
     // earlier run of the pipeline wrote under the root are not data a rule

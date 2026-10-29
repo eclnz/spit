@@ -197,14 +197,21 @@ pub(super) fn split_ending(
         Some(rest) => (rest.trim_end(), true),
         None => (text, false),
     };
-    match text.find('.') {
-        Some(dot) => Ok((
+    let (head, extension) = match text.find('.') {
+        Some(dot) => (
             text[..dot].trim(),
             Some(extension(text[dot..].trim(), number)?),
-            folder,
-        )),
-        None => Ok((text, None, folder)),
+        ),
+        None => (text, None),
+    };
+    if head.ends_with('+') {
+        return Err(ParseError::new(
+            number,
+            "a `+` suffix follows the whole name of the file it is written beside; add `beside` and that file's port or source, as in `-> Fai +.fai beside fasta`, or drop the `+`",
+        )
+        .at_token(text));
     }
+    Ok((head, extension, folder))
 }
 
 pub(super) fn identifier<'a>(

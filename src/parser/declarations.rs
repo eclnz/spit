@@ -198,9 +198,10 @@ pub(super) fn parse_product(line: &str, number: usize) -> Result<ProductDef, Par
             if item.trim_end().ends_with(']') {
                 return Err(ParseError::new(number, "a source written `beside` another inherits its dimensions; remove its [dimensions]"));
             }
-            let (item, suffix) = super::operation::beside_suffix(item.trim(), number, "source")?;
+            let (item, suffix, append) =
+                super::operation::beside_suffix(item.trim(), number, "source")?;
             let sibling = identifier(sibling.trim(), number, "source beside name")?;
-            (item, Some((sibling, suffix)))
+            (item, Some((sibling, suffix, append)))
         }
         None => (line, None),
     };
@@ -255,18 +256,20 @@ pub(super) fn parse_product(line: &str, number: usize) -> Result<ProductDef, Par
     product.extension = extension.map(str::to_owned);
     product.folder = folder;
     product.checks = checks;
-    if let Some((sibling, suffix)) = beside {
+    if let Some((sibling, suffix, append)) = beside {
         if product.folder || !product.dimensions.is_empty() || product.extension.is_some() {
             return Err(ParseError::new(
                 number,
                 "a source written `beside` another inherits its dimensions and names only a suffix, as in `source meta : Json .json beside image`",
             ));
         }
-        product.extension = suffix.find('.').map(|dot| suffix[dot..].to_owned());
-        product.beside = Some(Beside {
+        let beside = Beside {
             sibling: sibling.to_owned(),
             suffix,
-        });
+            append,
+        };
+        product.extension = beside.extension().map(str::to_owned);
+        product.beside = Some(beside);
     }
     Ok(product)
 }
