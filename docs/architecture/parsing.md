@@ -122,4 +122,4 @@ flowchart LR
 ## Trade-offs
 
 - **Structure from the surface alone.** Because a line's content never decides structure, one bad line cannot move the lines after it. The cost is that `Layout` must classify a line from its first word, which is why statement keywords are reserved: no product may take one's name.
-- **Some passes lay the text out again.** `recover_document` does, and reads a failed line's text to find the operation it declares, which keeps the parser free of recovery state (#133 tracks reading it from the parse instead). A recipe's `header_lines` and `check_input_lines` do too.
+- **Some passes lay the text out again.** `recover_document` does, and reads a failed line's text to find the operation it declares, which keeps the parser free of recovery state. A recipe's `header_lines` and `check_input_lines` do too.

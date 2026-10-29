@@ -1,4 +1,4 @@
-//! The acceptance test of operations carried out by steps (#53), on the
+//! The acceptance test of operations carried out by steps, on the
 //! examples under `examples/composites/`: from a short imported call,
 //! every job it expands to can be inspected, and an error can be followed
 //! back to the call and the exact line of the library's body. What the CLI
