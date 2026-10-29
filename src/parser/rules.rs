@@ -145,8 +145,9 @@ fn parse_groups_where<'a>(
     Ok((dimensions, product, terms.split_whitespace()))
 }
 
-/// The source, terms and dimensions after `per` of a rule in the old
-/// `require` and `skip` order, which only errors read now.
+/// The source, terms and dimensions after `per` of a rule written in the
+/// `require ... per [...]` order, which is read only to say what to write
+/// instead.
 fn parse_require_parts<'a>(
     rest: &'a str,
     number: usize,
@@ -266,8 +267,8 @@ fn value_terms(values: &BTreeMap<String, Vec<String>>) -> String {
         .join(" ")
 }
 
-/// The error for a `skip` rule, which conditional `exclude` replaces, with the rule
-/// that removes the same groups when the old rule reads cleanly.
+/// The error for a `skip` rule, with the conditional `exclude` rule that
+/// removes the same groups when the `skip` rule reads cleanly.
 fn skip_replaced(rest: &str, number: usize) -> ParseError {
     let old = "expected `skip product count>=2 per [dimensions]`";
     let suggestion =
