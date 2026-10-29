@@ -436,18 +436,24 @@ pub enum CommandRole {
     Verify,
 }
 
+/// A `command` or `verify` line for an operation. A `command` written as
+/// a block, `command sort:` with its lines beneath it, runs each of
+/// `lines` in order and stops at the first that fails; every other command
+/// has one line.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CommandDef {
     pub operation: String,
-    pub template: CommandTemplate,
+    /// At least one, and exactly one for a `verify` command.
+    pub lines: Vec<CommandTemplate>,
     pub role: CommandRole,
 }
 
 impl CommandDef {
+    /// A command of one line.
     pub fn new(operation: impl Into<String>, template: CommandTemplate) -> Self {
         Self {
             operation: operation.into(),
-            template,
+            lines: vec![template],
             role: CommandRole::Run,
         }
     }

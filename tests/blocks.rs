@@ -140,7 +140,7 @@ fn only_a_command_goes_on_over_indented_lines() {
     assert_eq!(errors(text), []);
     let pipeline = parse_pipeline(text).unwrap();
     assert_eq!(
-        pipeline.commands[0].template.as_str(),
+        pipeline.commands[0].lines[0].as_str(),
         "cp\n    {input}\n    {@output}"
     );
     assert_eq!(pipeline.invocations.len(), 1);

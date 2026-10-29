@@ -24,7 +24,7 @@ A `.spitdag` is one JSON object, followed by a newline:
 
 | Field | Holds |
 | --- | --- |
-| `version` | The format's version, `8`. A change a reader must know about raises it. Version 6 added each job's [`checks`](#checks). Version 7 added `pipeline_files`, `calls` and each job's `origin`: see [Where jobs come from](#where-jobs-come-from). Version 8 added each job's `stdin` and `stdout`, see [Standard input and output](#standard-input-and-output), and its `cores` and `memory`, see [Cores and memory](#cores-and-memory). |
+| `version` | The format's version, `8`. A change a reader must know about raises it. Version 6 added each job's [`checks`](#checks). Version 7 added `pipeline_files`, `calls` and each job's `origin`: see [Where jobs come from](#where-jobs-come-from). Version 8 gives each job its [`commands`](#commands) in place of version 7's `command`, each with its `stdin` and `stdout`, see [Standard input and output](#standard-input-and-output), and added its `cores` and `memory`, see [Cores and memory](#cores-and-memory). |
 | `generator` | The program that wrote the file, and its version. |
 | `root` | The absolute dataset folder that every path is relative to, or `null` when it was not known: a `.spitout` that records no root. |
 | `external_inputs` | Every artifact a job reads but no job writes, once each: the sources. Ordered by path in natural order, the order `many` inputs take, so `wave2` comes before `wave10`. |
@@ -94,9 +94,7 @@ Each output that could not be produced has its identity and the input gaps that 
   "outputs": {"output": ARTIFACT},
   "depends_on": [1, 2],
   "dependents": [6],
-  "command": [ARGUMENT, ...],
-  "stdin": null,
-  "stdout": null,
+  "commands": [COMMAND, ...],
   "verify": [[ARGUMENT, ...], ...],
   "checks": [CHECK, ...],
   "cores": 8,
@@ -115,17 +113,29 @@ Each output that could not be produced has its identity and the input gaps that 
 | `outputs` | Each output port and the artifact it writes. A single unnamed output is `output`. |
 | `depends_on` | The jobs that write this job's inputs. |
 | `dependents` | The jobs that read this job's outputs. |
-| `command` | The command that writes the outputs, or `null` for an operation with none. |
-| `stdin` | The path, relative to `root`, of the input file `command` reads on its standard input, or `null`: see [Standard input and output](#standard-input-and-output). |
-| `stdout` | The path, relative to `root`, of the output file `command`'s standard output is written to, or `null`. |
-| `verify` | The commands that check the inputs before `command` runs, in order; `[]` for none. |
+| `commands` | The commands that write the outputs, run in order until one fails: see [Commands](#commands). `[]` for an operation with none. |
+| `verify` | The commands that check the inputs before `commands` run, in order; `[]` for none. Each is a list of arguments. |
 | `checks` | The checks of single artifacts the job reads and writes, in the order they run: see [Checks](#checks). `[]` for none. |
 | `cores` | The number of cores the job uses, a whole number from 1: see [Cores and memory](#cores-and-memory). |
 | `memory` | The most memory the job needs, in bytes, or `null` for no claim. |
 
 ### Commands
 
-A command is a list of arguments, and each argument is a list of parts, joined with nothing between them. A part is either literal text, a JSON string, or an artifact's path, `{"path": P}` with `P` relative to `root`. The template `tool --in={raw} -o {@output}` becomes:
+Each of a job's `commands` is an object:
+
+```json
+{"command": [["samtools"], ["index"], [{"path": "out/bam/sample=A.bam"}]], "stdin": null, "stdout": null}
+```
+
+| Field | Holds |
+| --- | --- |
+| `command` | The program and its arguments, a list of arguments as below. |
+| `stdin` | The path, relative to `root`, of the input file the command reads on its standard input, or `null`: see [Standard input and output](#standard-input-and-output). |
+| `stdout` | The path, relative to `root`, of the output file the command's standard output is written to, or `null`. |
+
+Most jobs have one command. A [command of several lines](language-reference.md#commands-of-several-lines) gives a job one for each line, in the order written. Run them in that order, each once the one before it exits with status 0. When one fails, the job fails, and the commands after it do not run; report which, by its place from 1, as in `command 2 exited with status 1`.
+
+A command's `command`, as a `verify` command and a check's, is a list of arguments, and each argument is a list of parts, joined with nothing between them. A part is either literal text, a JSON string, or an artifact's path, `{"path": P}` with `P` relative to `root`. The template `tool --in={raw} -o {@output}` becomes:
 
 ```json
 [["tool"], ["--in=", {"path": "in/1.txt"}], ["-o"], [{"path": "out/1.txt"}]]
@@ -145,28 +155,26 @@ Run each argument as one word, exactly as given: no shell is involved, so nothin
 
 ### Standard input and output
 
-A command written `wc -l < {table} > {@output}` reads an input on its standard input and writes an output on its standard output. Its job names the two files in `stdin` and `stdout`, and its `command` holds only the program and its arguments:
+A command written `wc -l < {table} > {@output}` reads an input on its standard input and writes an output on its standard output. It names the two files in `stdin` and `stdout`, and its `command` holds only the program and its arguments:
 
 ```json
-"command": [["wc"], ["-l"]],
-"stdin": "in/sheet=a.tsv",
-"stdout": "out/lines/sheet=a.txt"
+"commands": [{"command": [["wc"], ["-l"]], "stdin": "in/sheet=a.tsv", "stdout": "out/lines/sheet=a.txt"}]
 ```
 
-`stdout` is always the path of one of the job's `outputs`, a file, and never appears in `command`. `stdin` is the path of one of its `inputs`, a file. Either is `null` when the command does not redirect it, and both are `null` for a job whose `command` is `null`. `verify` commands and checks never redirect either.
+`stdout` is always the path of one of the job's `outputs`, a file, and never appears in that command's `command`. At most one of a job's commands has a `stdout`, and only the commands after it name its path. `stdin` is the path of one of the job's `inputs`, a file. Either is `null` when the command does not redirect it. `verify` commands and checks never redirect either.
 
 - Open `stdin` for reading and connect it to the command's standard input. When it is `null`, the command's standard input is whatever the backend gives every command.
-- Make `stdout`'s folder, as for any output, then connect a file for writing to the command's standard output. Write it to a temporary file in the same folder, and rename that onto `stdout` only once `command` exits with status 0, so a failed job never leaves a partial output at the path. When `stdout` is `null`, the command's standard output is the backend's, which typically logs it.
+- Make `stdout`'s folder, as for any output, then connect a file for writing to the command's standard output. Write it to a temporary file in the same folder, and rename that onto `stdout` only once the command exits with status 0, before the next command runs, so a failed job never leaves a partial output at the path. When `stdout` is `null`, the command's standard output is the backend's, which typically logs it.
 - The command's standard error is the backend's in either case.
 
-The output is otherwise like any other: it must exist once `command` succeeds, as [Missing outputs](#missing-outputs) says, which an empty file does, and its `"after"` checks run on it.
+The output is otherwise like any other: it must exist once the job's commands succeed, as [Missing outputs](#missing-outputs) says, which an empty file does, and its `"after"` checks run on it.
 
 ### Cores and memory
 
 `cores` and `memory` say what a job needs while its commands run, from its operation's `resources` line, so a backend that runs jobs at once can keep from oversubscribing the machine:
 
 ```json
-"command": [["bwa"], ["mem"], ["-t"], ["8"], [{"path": "reference/genome.fa"}], [{"path": "in/sample=01.fastq.gz"}]],
+"commands": [{"command": [["bwa"], ["mem"], ["-t"], ["8"], [{"path": "reference/genome.fa"}], [{"path": "in/sample=01.fastq.gz"}]], "stdin": null, "stdout": null}],
 "cores": 8,
 "memory": 17179869184
 ```
@@ -174,18 +182,18 @@ The output is otherwise like any other: it must exist once `command` succeeds, a
 - `cores` is always a whole number of at least 1. A job whose operation declares none has `1`.
 - `memory` is a whole number of bytes, at most 2^53, or `null` when the operation claims none.
 - Start a job only when the cores and memory it needs are free beside those of the jobs already running, and count them as taken until its `"after"` checks finish. A job that needs more than the backend has in all cannot be started that way: refuse it, or run it alone, as the backend chooses.
-- `memory` is the most the job's `verify` commands and `command` may hold, together with every process they start. A backend may stop a job that holds more, and report it as failed. Treat `null` as needing none and setting no limit.
-- The command already holds the number of cores where the pipeline asked for it, with `{@cores}`, as `["-t"], ["8"]` above, so the tool uses what it was given; a backend changes nothing in `command`.
+- `memory` is the most each of the job's `verify` commands and `commands` may hold, together with every process it starts. A backend may stop a job that holds more, and report it as failed. Treat `null` as needing none and setting no limit.
+- A command holds the number of cores where the pipeline asked for it, with `{@cores}`, as `["-t"], ["8"]` above, so the tool uses what it was given; a backend changes nothing in `commands`.
 
 `cores` and `memory` are left out of the job's [fingerprint](#fingerprint): they say how to schedule the job, not what it makes.
 
 ### Running `verify`
 
-A backend runs a job's `verify` commands, in order, before its `command`. If one fails, the job does not run, and neither does any job that depends on it, directly or through others.
+A backend runs a job's `verify` commands, in order, before its `commands`. If one fails, the job does not run, and neither does any job that depends on it, directly or through others.
 
 ### Missing outputs
 
-Every artifact in a job's `outputs` must exist once its `command` exits with status 0: a file, or for a `"folder"`, a folder, which may be empty. A job that leaves one missing fails, as a failed `command` does: a backend does not record it as a success, does not run its `"after"` checks, and runs no job that depends on it. Report each missing output with its port and path, as in `did not create output meta derivatives/image/sub=01.json`.
+Every artifact in a job's `outputs` must exist once its last command exits with status 0: a file, or for a `"folder"`, a folder, which may be empty. A job that leaves one missing fails, as a failed command does: a backend does not record it as a success, does not run its `"after"` checks, and runs no job that depends on it. Report each missing output with its port and path, as in `did not create output meta derivatives/image/sub=01.json`.
 
 A declared output is never optional. A tool may skip a file because of how it is run, as `dcm2niix -b n` writes no `.json` sidecar; the job then fails, and the fix is an operation that does not declare that output.
 
@@ -199,26 +207,26 @@ Each check runs one command on one artifact:
 
 | Field | Holds |
 | --- | --- |
-| `when` | `"before"` for a check of an input, which runs before the job's `verify` commands and its `command`; `"after"` for a check of an output, which runs after `command`, once the output exists. |
+| `when` | `"before"` for a check of an input, which runs before the job's `verify` commands and its `commands`; `"after"` for a check of an output, which runs after `commands`, once the output exists. |
 | `check` | The check as the pipeline attaches it, such as `ndim(4)` or `nonempty`, for reporting a failure. |
 | `port` | The input port, for `"before"`, or the output port, for `"after"`, whose artifact it checks. |
 | `path` | The checked artifact's path, relative to `root`. |
-| `command` | The check's command, as a [command](#commands) is written. |
+| `command` | The check's program and arguments, a list of arguments as a [command's](#commands) `command` is. |
 
 The `"before"` checks come first, then the `"after"` checks; within each, by port, then by artifact in the port's order, then in the order the pipeline attaches them. An input's checks include those of the source it reads. A check the job that writes an artifact runs on it is not repeated by a job in the same file that reads it.
 
 ### Running checks
 
-A backend runs a job in this order: the `"before"` checks, the `verify` commands, `command`, the check that every output exists, then the `"after"` checks. If any fails, the job fails, even when `command` exited with status 0, and no job that depends on it runs. Report a failure with the check, the port and the path, as in `check ndim(4) failed on output derivatives/dwi/sub=01.mif`.
+A backend runs a job in this order: the `"before"` checks, the `verify` commands, `commands`, the check that every output exists, then the `"after"` checks. If any fails, the job fails, even when its commands exited with status 0, and no job that depends on it runs. Report a failure with the check, the port and the path, as in `check ndim(4) failed on output derivatives/dwi/sub=01.mif`.
 
-Checks are left out of the job's [fingerprint](#fingerprint), which identifies the job's work: a changed check does not make a job's outputs out of date. A backend that records successful jobs records the checks each passed with, such as the JSON of its `checks`. When a job is otherwise current but its checks differ from the record, the backend runs the checks alone on the existing files rather than rerunning `command`. If one fails, the job fails and its record is dropped, so the next run reruns it.
+Checks are left out of the job's [fingerprint](#fingerprint), which identifies the job's work: a changed check does not make a job's outputs out of date. A backend that records successful jobs records the checks each passed with, such as the JSON of its `checks`. When a job is otherwise current but its checks differ from the record, the backend runs the checks alone on the existing files rather than rerunning `commands`. If one fails, the job fails and its record is dropped, so the next run reruns it.
 
 ## Folders
 
 A job that writes a folder owns it: SPIT rejects a pipeline that would put any other artifact inside it. So a backend may treat the folder as one output:
 
-- Before the command runs, remove what an earlier run left at the folder's path, so that its files do not mix with this run's, then make the folder, empty, with its parents. The tool writes into a folder that exists, as a tool given a folder to fill, such as `bwa index -p` or `dcm2niix -o`, expects. A tool that refuses to write into an existing folder is wrapped in a command that removes it first.
-- After the command, require the folder to exist. It may be empty.
+- Before the job's first command runs, remove what an earlier run left at the folder's path, so that its files do not mix with this run's, then make the folder, empty, with its parents. The tool writes into a folder that exists, as a tool given a folder to fill, such as `bwa index -p` or `dcm2niix -o`, expects. A tool that refuses to write into an existing folder is wrapped in a command that removes it first.
+- After the last command, require the folder to exist. It may be empty.
 - To tell whether a folder changed, look at the files under it, not the folder's own modification time, which changes only when an entry directly in it is added or removed.
 
 A source folder may hold other sources, but never an output.
@@ -257,10 +265,10 @@ The first is the pipeline itself, by its file name. The others are the files it 
 
 A job's `origin` names the call, by its position in `calls`, and the line of the body's step that made the job, in the file of the call's `file`. Following `parent` from there gives every call the job is nested in.
 
-None of these is part of a job's [fingerprint](#fingerprint). A changed command changes the fingerprints through `command`; an edit elsewhere in a library, such as to a comment, changes a blob id and reruns nothing.
+None of these is part of a job's [fingerprint](#fingerprint). A changed command changes the fingerprints through `commands`; an edit elsewhere in a library, such as to a comment, changes a blob id and reruns nothing.
 
 ## Fingerprint
 
-A job's fingerprint is a 64-bit FNV-1a hash of the compact JSON of what it reads, writes and runs: its `operation`, `inputs`, `outputs`, `command`, `stdin`, `stdout` and `verify`, in that order, each artifact with its product, entities, type, path and kind. `stdin` and `stdout` are left out of the hashed JSON when they are `null`. Its `id`, `stage`, `origin`, `depends_on`, `dependents`, `checks`, `cores` and `memory` are left out, so the fingerprint follows the work, not where the job falls in the plan.
+A job's fingerprint is a 64-bit FNV-1a hash of the compact JSON of what it reads, writes and runs: its `operation`, `inputs`, `outputs`, `commands` and `verify`, in that order, each artifact with its product, entities, type, path and kind. A job with several commands hashes `commands` as the file writes it. A job with one command hashes it as three fields in its place, `"command"`, the command's arguments, then `"stdin"` and `"stdout"`, each left out when it is `null`; a job with none hashes `"command":null`. So the work of a single-command job is hashed as `{"operation":...,"inputs":...,"outputs":...,"command":[["wc"],["-l"]],"stdin":"in/sheet=a.tsv","stdout":"out/lines/sheet=a.txt","verify":[]}`. Its `id`, `stage`, `origin`, `depends_on`, `dependents`, `checks`, `cores` and `memory` are left out, so the fingerprint follows the work, not where the job falls in the plan.
 
 The fingerprint changes when the job's command, its files, or which artifacts it reads or writes change. It does not read the files themselves, so it does not change when an input file's contents do; a backend that must rerun a job after its inputs change combines the fingerprint with its own record of the files, such as their modification times or hashes.

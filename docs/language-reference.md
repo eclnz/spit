@@ -33,7 +33,7 @@ command:
     denoise: dn {image} {@output}
 ```
 
-`source:`, `operation:`, `command:`, `verify:`, `resources:`, `check:` and `path:` open blocks in a pipeline, and `path:`, `require:` and `exclude:` in a recipe. An entry is read as its keyword's statement would be, with the same errors on its own line; a `source:` block inside a stage is an error at each entry, as a `source` line there is. The entries of a block share one indentation, and the next line that is not indented beneath the keyword ends it. In an `operation:` block, an entry that ends in `:` opens the [body of steps](#operations-carried-out-by-steps) that carries it out, indented beneath the entry. [Defaults](#defaults) have a block of their own, `default:`, and a stage's lines are a block of their own too.
+`source:`, `operation:`, `command:`, `verify:`, `resources:`, `check:` and `path:` open blocks in a pipeline, and `path:`, `require:` and `exclude:` in a recipe. An entry is read as its keyword's statement would be, with the same errors on its own line; a `source:` block inside a stage is an error at each entry, as a `source` line there is. The entries of a block share one indentation, and the next line that is not indented beneath the keyword ends it. In an `operation:` block, an entry that ends in `:` opens the [body of steps](#operations-carried-out-by-steps) that carries it out, indented beneath the entry, and in a `command:` block, the [lines of a command](#commands-of-several-lines), as `command sort:` does. [Defaults](#defaults) have a block of their own, `default:`, and a stage's lines are a block of their own too.
 
 ### Statements over several lines
 
@@ -54,7 +54,7 @@ registered = register(
 )
 ```
 
-A command, of `command`, `verify` or `check`, also goes on over the lines indented beneath it, with blank lines and comments between them. A line break separates its words as a space does:
+A command written after its `:`, of `command`, `verify` or `check`, also goes on over the lines indented beneath it, with blank lines and comments between them. A line break separates its words as a space does:
 
 <!-- spit-doc: setup
 operation register(moving: Image, reference: Image) -> Image
@@ -66,7 +66,7 @@ command register: flirt -in {moving}
     -out {@output}
 ```
 
-Beneath any other statement, a line indented further is a statement of its own.
+A `command` with nothing after its `:` runs [each line beneath it in turn](#commands-of-several-lines) instead. Beneath any other statement, a line indented further is a statement of its own.
 
 ## Products and dimensions
 
@@ -296,7 +296,7 @@ operation carried out by steps, put `:` after the completed signature and
 indent its body beneath the `operation` line. Single-line declarations keep
 the same meaning.
 
-Every input port has a name, and its placeholder is that name. A port is written `name`, `name: Type`, `name: many`, or `name: many Type`; a lowercase word alone, as in `operation copy(image)`, is an untyped port, and type names start with a capital letter. In `source reading : Series [station, day]`, `reading` is the product that identifies artifacts and `Series` is its type: write `operation compare(reading: Series)`, then call it with `compare(reading)`. `{@output}` is the path of a single unnamed output; its `@` marks a SPIT-supplied placeholder, while a named output such as `{wm}` uses the name in the operation declaration. `output` cannot name an input or explicit output port, and `{output}` is an error that points to `{@output}`. A command must use every output placeholder, or its `.dir` or `.stem`, or write the output as its [stdout](#standard-input-and-output), except an output written [`beside`](#files-a-tool-writes-beside-another) another; a `verify` command may use inputs only, of its ports. Command templates give ordered words and arguments, not shell pipelines, since a backend runs a command without a shell. Apart from a command's own `< {input}` and `> {output}`, described [below](#standard-input-and-output), an unquoted `|`, `>>`, `&&`, `;`, `2>&1` or the like is therefore an error; quote it (`'|'`) to pass it to the program as an argument. A command that needs a pipe runs a shell itself and passes the paths to it as arguments, so that a path is never read as shell text: `command first: sh -c 'cut -f1 "$1" | sort -u > "$2"' sh {table} {@output}`. The same holds for `verify` and `check` commands, which take no `<` or `>` at all. Words are split and quoted as in Bash, and every argument is passed literally: `$` and backticks are not expanded. As in Bash, text in single quotes is literal, so `awk '{print $1}'` needs no escaping; a placeholder is filled in unquoted text or double quotes. Write `{{` or `}}` for a literal brace elsewhere. Every command is checked when the pipeline is loaded: braces and quotes must balance, placeholders must name the operation's ports or a [dimension of its jobs](#a-jobs-dimension-values), and each output must appear, as above.
+Every input port has a name, and its placeholder is that name. A port is written `name`, `name: Type`, `name: many`, or `name: many Type`; a lowercase word alone, as in `operation copy(image)`, is an untyped port, and type names start with a capital letter. In `source reading : Series [station, day]`, `reading` is the product that identifies artifacts and `Series` is its type: write `operation compare(reading: Series)`, then call it with `compare(reading)`. `{@output}` is the path of a single unnamed output; its `@` marks a SPIT-supplied placeholder, while a named output such as `{wm}` uses the name in the operation declaration. `output` cannot name an input or explicit output port, and `{output}` is an error that points to `{@output}`. A command must use every output placeholder, or its `.dir` or `.stem`, or write the output as its [stdout](#standard-input-and-output), except an output written [`beside`](#files-a-tool-writes-beside-another) another, on one of its [lines](#commands-of-several-lines) or another; a `verify` command may use inputs only, of its ports. Command templates give ordered words and arguments, not shell pipelines, since a backend runs a command without a shell. Apart from a command's own `< {input}` and `> {output}`, described [below](#standard-input-and-output), an unquoted `|`, `>>`, `&&`, `;`, `2>&1` or the like is therefore an error; quote it (`'|'`) to pass it to the program as an argument. A command that runs two tools one after the other gives each [a line of its own](#commands-of-several-lines). One that needs a pipe runs a shell itself and passes the paths to it as arguments, so that a path is never read as shell text: `command first: sh -c 'cut -f1 "$1" | sort -u > "$2"' sh {table} {@output}`. The same holds for `verify` and `check` commands, which take no `<` or `>` at all. Words are split and quoted as in Bash, and every argument is passed literally: `$` and backticks are not expanded. As in Bash, text in single quotes is literal, so `awk '{print $1}'` needs no escaping; a placeholder is filled in unquoted text or double quotes. Write `{{` or `}}` for a literal brace elsewhere. Every command is checked when the pipeline is loaded: braces and quotes must balance, placeholders must name the operation's ports or a [dimension of its jobs](#a-jobs-dimension-values), and each output must appear, as above.
 
 Products, operations and dimensions have separate names, so a dimension may share a product's (`model @each(model)`). A product may also share its operation's name, but `spit check` warns: name the result, as in `coregistered = coreg(mc, brain)`, so the step reads as what it makes.
 
@@ -335,8 +335,77 @@ A backend opens the output's file and connects it to the command, so no shell is
 
 - `<` and `>` are each a word of their own, followed by one placeholder: `>{@output}` and `> out.txt` are errors.
 - A command has at most one of each. Its stdout is an output, not a [folder](#folders), and no argument names it too, not even its `.dir` or `.stem`. Its stdin is a `one` input whose artifacts are files.
+- In a [command of several lines](#commands-of-several-lines), each line may read an input on its stdin, and one line, at most, writes an output as its stdout. The lines after that one may name the output, as a file that exists; the lines before it may not.
 - Only an operation's `command` has them. A `verify` or `check` command that needs to redirect runs a shell, as above.
 - What the command writes to stderr is left to the backend, which typically logs it.
+
+### Commands of several lines
+
+A tool may write a file that another tool must then finish, as `samtools index` writes an index beside the BAM that `samtools sort` wrote. Both belong to one job, the one that writes the BAM. A `command` with nothing after its `:` runs each line indented beneath it, in order, and stops at the first that fails:
+
+<!-- spit-doc: setup
+source sam : Sam .sam [sample]
+default entities: {@key}={@value} separated "_"
+default path: out/{@product}/{@entities}
+-->
+
+```text
+operation sort(sam: Sam) -> (bam: Bam .bam, bai: Bai .bam.bai beside bam)
+resources sort: cores=4
+command sort:
+    samtools sort --threads {@cores} -o {bam} {sam}
+    samtools index {bam}
+
+bam, bai = sort(sam)
+```
+
+`spit dag --commands` shows a `run:` line for each, in the order they run:
+
+<!-- spit-doc: output
+spit dag sort.spit sort.spitout --commands
+--- sort.spit
+source sam : Sam .sam [sample]
+default entities: {@key}={@value} separated "_"
+default path: out/{@product}/{@entities}
+operation sort(sam: Sam) -> (bam: Bam .bam, bai: Bai .bam.bai beside bam)
+resources sort: cores=4
+command sort:
+    samtools sort --threads {@cores} -o {bam} {sam}
+    samtools index {bam}
+bam, bai = sort(sam)
+--- sort.spitout
+sources:
+    sam[sample=A]
+-->
+
+```text
+  needs:  cores=4
+  run:    samtools sort --threads 4 -o out/bam/sample=A.bam out/sam/sample=A.sam
+  run:    samtools index out/bam/sample=A.bam
+```
+
+- Each line is a command of its own, written as a command after its `:` is. A line indented further than the first goes on with the line above it, as a [command over several lines](#statements-over-several-lines) does; a line indented less is an error. Blank lines and comments may sit between them.
+- Every placeholder works on every line: the operation's ports, with `.dir` and `.stem`, `{@cores}`, and the [job's dimension values](#a-jobs-dimension-values).
+- Between them, the lines use every output, as one command must. An output a line writes may be named by the lines after it, which run once it is written.
+- Each line may have its own `<`, and one line at most has a `>`: see [Standard input and output](#standard-input-and-output).
+- In a `command:` block, an entry that ends in `:` holds its lines beneath it:
+
+<!-- spit-doc: setup
+source sam : Sam .sam [sample]
+operation sort(sam: Sam) -> (bam: Bam .bam, bai: Bai .bam.bai beside bam)
+default entities: {@key}={@value} separated "_"
+default path: out/{@product}/{@entities}
+bam, bai = sort(sam)
+-->
+
+```text
+command:
+    sort:
+        samtools sort -o {bam} {sam}
+        samtools index {bam}
+```
+
+- A `verify` or `check` line holds one command, written after its `:`. An operation's `verify` lines run in turn, so give each command a line of its own. A command that needs a pipe [runs a shell](#operations-and-commands): a line is one program and its arguments.
 
 ### Cores and memory
 
@@ -1022,7 +1091,7 @@ command recon: recon-all -i {t1} -sd {subject.dir} -s {subject.stem}
 
 For `subject[sub=01]`, at `out/subject/sub=01`, this passes `-sd out/subject -s sub=01`.
 
-A backend makes an output folder, empty, before the command runs, so a tool writes into it. That suits a tool that writes several files under a prefix and a tool that reads them by the same prefix, as an aligner reads its index. Make the index one folder, and name the prefix inside it in both commands:
+A backend makes an output folder, empty, before the job's first command runs, so a tool writes into it. That suits a tool that writes several files under a prefix and a tool that reads them by the same prefix, as an aligner reads its index. Make the index one folder, and name the prefix inside it in both commands:
 
 <!-- spit-doc: setup
 source reference : Fasta .fasta

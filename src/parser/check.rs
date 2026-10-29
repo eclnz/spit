@@ -54,6 +54,21 @@ pub(super) fn parse_check(line: &str, number: usize) -> Result<CheckDef, ParseEr
         )
         .at_token(head));
     }
+    // Lines beneath a header that ends in `:` read as a command's block,
+    // which only an operation's `command` has. Keep in step with
+    // `parse_command` in `src/parser/command.rs`.
+    if template
+        .split('\n')
+        .next()
+        .is_some_and(|first| first.trim().is_empty())
+        && !template.trim().is_empty()
+    {
+        return Err(ParseError::new(
+            number,
+            format!("a check runs one command, written after its `:`, as in `check {name}: test -s {{@path}}`"),
+        )
+        .at_token(head));
+    }
     let template = template.trim();
     if template.is_empty() {
         return Err(ParseError::new(number, "check command must not be empty").at_token(line));

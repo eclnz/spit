@@ -6,15 +6,17 @@ use std::fmt;
 use rustc_hash::FxHashMap;
 
 use crate::check::{step_checks, CheckIndex, StepCheck, When, CHECKED_PATH};
-use crate::command::{facet, slot, validate_commands, CommandError, Facet, Slot, Stream};
+use crate::command::{
+    facet, slot, validate_commands, CommandError, CommandTemplate, Facet, Slot, Stream,
+};
 use crate::model::{
     ArtifactId, CallId, Cardinality, CommandDef, CommandRole, DagStep, Job, OperationDef, Pipeline,
     PipelineIndex, ResolvedDag, Resources,
 };
 use crate::paths::{bound_paths, check_rules, BoundPaths, PathError};
 use crate::spitdag::{
-    ArgPart, Argument, BoundCall, BoundCheck, BoundDag, BoundJob, BoundStep, StepCall,
-    StepCheck as BoundStepCheck,
+    ArgPart, Argument, BoundCall, BoundCheck, BoundCommand, BoundDag, BoundJob, BoundStep,
+    StepCall, StepCheck as BoundStepCheck,
 };
 use crate::template::Part;
 
@@ -152,8 +154,8 @@ fn bind_jobs(
 struct StepCommands<'p> {
     step: &'p DagStep,
     operation: &'p OperationDef,
-    /// The command that makes the outputs: the first declared for the
-    /// operation, if any.
+    /// The command that makes the outputs, whose lines run in order: the
+    /// first declared for the operation, if any.
     run: Option<&'p CommandDef>,
     /// The `verify` commands, in the order they are declared.
     verify: Vec<&'p CommandDef>,
@@ -274,10 +276,8 @@ fn bind_job(
         .iter()
         .map(|&output| bound(output))
         .collect::<Result<_, _>>()?;
-    let expand_command =
-        |command: &CommandDef| expand(command.template.arguments(), step, dag, job);
-    let redirected = |stream: Stream| {
-        let Some(name) = step.run.and_then(|run| run.template.redirected(stream)) else {
+    let redirected = |template: &CommandTemplate, stream: Stream| {
+        let Some(name) = template.redirected(stream) else {
             return Ok(None);
         };
         // `validate_commands` makes sure stdin names a one input and stdout
@@ -298,19 +298,30 @@ fn bind_job(
         }
         Ok(Some(artifact))
     };
+    let commands = step
+        .run
+        .map_or(&[][..], |run| run.lines.as_slice())
+        .iter()
+        .map(|template| {
+            Ok(BoundCommand {
+                arguments: expand(template.arguments(), step, dag, job)?,
+                stdin: redirected(template, Stream::Stdin)?,
+                stdout: redirected(template, Stream::Stdout)?,
+            })
+        })
+        .collect::<Result<_, BindError>>()?;
     Ok(BoundJob {
         id: job.id,
         step: job.step,
         inputs,
         outputs,
         depends_on: job.dependencies.clone(),
-        command: step.run.map(expand_command).transpose()?,
-        stdin: redirected(Stream::Stdin)?,
-        stdout: redirected(Stream::Stdout)?,
+        commands,
         verify: step
             .verify
             .iter()
-            .map(|&command| expand_command(command))
+            .flat_map(|command| &command.lines)
+            .map(|template| expand(template.arguments(), step, dag, job))
             .collect::<Result<_, _>>()?,
         checks: bind_checks(&step.checks, produced, job),
     })
