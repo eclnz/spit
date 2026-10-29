@@ -108,7 +108,7 @@ pub static DOCS: [Doc; 55] = [
         kind: "keyword",
         anchor: "operations-and-commands",
         example: "command process: process_tool --in {image} --out {@output}",
-        summary: "The program an operation runs. Each `{port}` is filled in with an artifact's path, and a `{dimension}` of the job with its value, as text. Every output must appear, or its `.dir` or `.stem`, except one written `beside` another. Words are split and quoted as in Bash, and every argument is passed literally: `|`, `>` and `$` are not a shell's. The first word must be an executable on `PATH`, or a path to one.",
+        summary: "The program an operation runs. Each `{port}` is filled in with an artifact's path, a `{dimension}` of the job with its value, as text, and an input's `{port.dimension}` with each of its artifacts' value. Every output must appear, or its `.dir` or `.stem`, except one written `beside` another. Words are split and quoted as in Bash, and every argument is passed literally: `|`, `>` and `$` are not a shell's. The first word must be an executable on `PATH`, or a path to one.",
     },
     Doc {
         name: "verify",

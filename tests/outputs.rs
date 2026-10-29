@@ -32,7 +32,7 @@ stage prep:
     aligned = align(cleaned, reference)
 
 operation average(images: many Image<$K>) -> Image<$K>
-command average: mean {images} -o {@output}
+command average: mean {images} --runs {images.run} -o {@output}
 averaged = average(aligned @vary(run))
 
 operation compare(image: Image<$K>, reference: Reference) -> Score
