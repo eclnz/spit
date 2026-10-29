@@ -63,7 +63,8 @@ pub(super) fn step_shape(
                 input.joins()
             }
         })
-        .collect();
+        .collect::<Vec<_>>();
+    check_beside_inputs(operation, &inputs, &joins, &context)?;
     Ok(StepShape {
         driver,
         groups,
@@ -184,6 +185,54 @@ fn check_output_dimensions(
             context.join(", ")
         ),
     ))
+}
+
+/// An output written beside an input lies beside that input's file, so
+/// each job must read its own: the input has the dimensions of the step's
+/// context, no others but those it pins, and is matched on all of them.
+fn check_beside_inputs(
+    operation: &OperationDef,
+    inputs: &[BoundInput<'_>],
+    joins: &[Vec<String>],
+    context: &[String],
+) -> Result<(), ResolveError> {
+    let expected = dimension_set(context);
+    for port in &operation.outputs {
+        let Some(beside) = &port.beside else { continue };
+        let Some(index) = operation
+            .inputs
+            .iter()
+            .position(|input| input.name == beside.sibling)
+        else {
+            continue;
+        };
+        let input = &inputs[index];
+        let product = &input.binding.product;
+        let listed = |dimensions: &[String]| format!("[{}]", dimensions.join(", "));
+        let problem = if dimension_set(&input.dimensions) != expected {
+            format!(
+                "`{product}` has dimensions {}, and the step's jobs {}",
+                listed(&input.dimensions),
+                listed(context)
+            )
+        } else if dimension_set(&joins[index]) != expected {
+            format!(
+                "`{product}` is matched on {} only, of the step's {}",
+                listed(&joins[index]),
+                listed(context)
+            )
+        } else {
+            continue;
+        };
+        return Err(unsupported(
+            operation,
+            format!(
+                "output `{}` is written beside input `{}`, so each job must read its own `{}` file, but {problem}; write it beside an input with the step's dimensions, or give it a path of its own",
+                port.name, beside.sibling, beside.sibling
+            ),
+        ));
+    }
+    Ok(())
 }
 
 /// Check that each dimension an input broadcasts is new to the step: the

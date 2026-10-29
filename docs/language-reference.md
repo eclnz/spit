@@ -350,7 +350,7 @@ default path: out/{@product}/{@entities}
 -->
 
 ```text
-operation sort(sam: Sam) -> (bam: Bam .bam, bai: Bai .bam.bai beside bam)
+operation sort(sam: Sam) -> (bam: Bam .bam, bai: Bai +.bai beside bam)
 resources sort: cores=4
 command sort:
     samtools sort --threads {@cores} -o {bam} {sam}
@@ -367,7 +367,7 @@ spit dag sort.spit sort.spitout --commands
 source sam : Sam .sam [sample]
 default entities: {@key}={@value} separated "_"
 default path: out/{@product}/{@entities}
-operation sort(sam: Sam) -> (bam: Bam .bam, bai: Bai .bam.bai beside bam)
+operation sort(sam: Sam) -> (bam: Bam .bam, bai: Bai +.bai beside bam)
 resources sort: cores=4
 command sort:
     samtools sort --threads {@cores} -o {bam} {sam}
@@ -392,7 +392,7 @@ sources:
 
 <!-- spit-doc: setup
 source sam : Sam .sam [sample]
-operation sort(sam: Sam) -> (bam: Bam .bam, bai: Bai .bam.bai beside bam)
+operation sort(sam: Sam) -> (bam: Bam .bam, bai: Bai +.bai beside bam)
 default entities: {@key}={@value} separated "_"
 default path: out/{@product}/{@entities}
 bam, bai = sort(sam)
@@ -1058,11 +1058,51 @@ operation strip(t1: Image) -> (brain: Image .nii.gz, mask: Image "_mask.nii.gz" 
 
 Its path is its sibling's, without the sibling's extension, then the suffix: beside `out/image/sub=01.nii.gz`, `meta` is `out/image/sub=01.json`, and beside `sub-01_brain.nii.gz`, `mask` is `sub-01_brain_mask.nii.gz`. `{@product}` in the sibling's rule stays the sibling's name, since the file is beside the sibling's.
 
-The suffix is an extension, or quoted text of letters, digits, `.`, `-` and `_`; the output's own extension is the suffix from its first `.`. A `beside` output:
+A `+` before the suffix appends it to the sibling's whole file name instead, as index files are named: beside `out/bam/sample=A.bam`, `bai` below is `out/bam/sample=A.bam.bai`.
+
+<!-- spit-doc: setup
+source sam : Sam .sam [sample]
+default entities: {@key}={@value} separated "_"
+default path: out/{@product}/{@entities}
+-->
+
+```spit
+operation sort(sam: Sam) -> (bam: Bam .bam, bai: Bai +.bai beside bam)
+command sort:
+    samtools sort -o {bam} {sam}
+    samtools index {bam}
+bam, bai = sort(sam)
+```
+
+An output may also be written beside one of the operation's inputs, for a tool that writes next to the file it reads, as `samtools faidx` writes a FASTA's `.fai`. The input may be a source, and the file is then written into the dataset, beside the source's:
+
+<!-- spit-doc: setup
+source reference : Fasta .fasta
+source bam : Bam .bam [sample]
+path reference: reference/genome
+path bam: reads/{sample}
+path pileups: calls/{sample}
+-->
+
+```spit
+operation faidx(fasta: Fasta) -> Fai +.fai beside fasta
+command faidx: samtools faidx {fasta}
+genome_fai = faidx(reference)
+
+# bcftools finds the .fai beside the FASTA; taking it as an input makes each job wait for it.
+operation pileup(fasta: Fasta, fai: Fai, bam: Bam) -> Bcf .bcf
+command pileup: bcftools mpileup -f {fasta} -O b -o {@output} {bam}
+pileups = pileup(reference, genome_fai, bam)
+```
+
+`genome_fai` is `reference/genome.fasta.fai`. A step that needs it names it as an input, as `pileup` does, so its jobs run after the one that writes it, though its command need not name it. Its path follows the input's file wherever that file's path comes from, a rule in the pipeline, a [recipe](#recipes) or a `.spitout`, and `spit inputs` reads a file at its path as neither a source nor a file no rule matches. Each job writes its own file, so the input it is written beside is a `one` input with the step's dimensions, and no others but those it [pins](#operations-and-commands) with `@where(...)`, matched on all of them; it is a file, not a folder.
+
+The suffix is an extension, or quoted text of letters, digits, `.`, `-` and `_`, either one after a `+` to append it, as `+.fai` or `+"_index.txt"`; the output's own extension is the suffix from its first `.`. A `beside` output:
 
 - may be left out of the command, since the tool is not told where to write it;
 - has no path rule of its own; its path follows the sibling's;
-- names another output of the same operation, which declares an extension and is not itself written beside another.
+- names a `one` input of the operation, or another of its outputs that is not itself written beside another;
+- with a suffix that replaces an extension, names an input or output that has one, declared or given by its path rule.
 
 Later steps read it as any other output, and the `.spitdag` lists it among the job's outputs. A declared output is never optional: if the tool does not write it, the job fails as if its command had failed, and the jobs that read its outputs do not run (see [missing outputs](spitdag.md#missing-outputs)). Whether a tool writes a sidecar usually depends on how it is run, as `dcm2niix -b n` writes no `.json`, so the same flag leaves it out of every job; an operation run that way declares no `meta`. A tool that writes a file only for some data, as dcm2niix writes `.bval` and `.bvec` only for a diffusion series, is two operations, each called on the sources it fits.
 
@@ -1112,7 +1152,7 @@ aligned = align(bwa_index, r1)
 
 `bwa index` writes `out/bwa_index/genome.amb` and its four other files, and each `align` job passes `out/bwa_index/genome` to `bwa mem`. A tool that copies a folder into its output copies its contents, as `cp -R {notes}/. {@output}` does, since `cp -R {notes} {@output}` puts a copy of `notes` inside the folder that already exists. `spit dag --paths` shows a folder's path with a `/` after it, `spit check --path-rules` names it `(source folder)` or `(output folder)`, and the `.spitdag` gives each artifact a [`kind`](spitdag.md#artifact).
 
-A job owns the folder it writes, so nothing else may be written in it or read from it: a path rule that puts another product's files inside a folder a job writes is an error, as is one that puts an output inside a source folder. A source may sit in a source folder, such as `dicom/sub={sub}/info.json` beside the `dicom` folder above, since no job writes either. A folder is not written [`beside`](#files-a-tool-writes-beside-another) another output, nor has an output beside it, and a source declared [`beside`](#sidecar-files) another is a file.
+A job owns the folder it writes, so nothing else may be written in it or read from it: a path rule that puts another product's files inside a folder a job writes is an error, as is one that puts an output inside a source folder. A source may sit in a source folder, such as `dicom/sub={sub}/info.json` beside the `dicom` folder above, since no job writes either. A folder is not written [`beside`](#files-a-tool-writes-beside-another) another file, nor has an output beside it, and a source declared [`beside`](#sidecar-files) another is a file.
 
 ### Sidecar files
 
@@ -1125,7 +1165,15 @@ source photo_gps : GpsTrack .gpx beside raw_photo
 source photo_json : CaptureMetadata .json beside raw_photo
 ```
 
-The companion is an ordinary source that a step reads by name. It inherits `raw_photo`'s dimensions and path stem: `photo_gps` above reads `site-{site}/visit-{visit}/photos/shot-{shot}.gpx`. Declare the main source first. It must be a file with an extension; a companion cannot itself be the main source of another companion. A companion has no dimensions or path rule of its own. An extension such as `.json` replaces the main file's extension; a quoted suffix such as `"_mask.nii.gz"` is appended to its stem.
+The companion is an ordinary source that a step reads by name. It inherits `raw_photo`'s dimensions and path stem: `photo_gps` above reads `site-{site}/visit-{visit}/photos/shot-{shot}.gpx`. Declare the main source first. It must be a file; a companion cannot itself be the main source of another companion. A companion has no dimensions or path rule of its own. An extension such as `.json` replaces the main file's extension, which it must then have; a quoted suffix such as `"_mask.nii.gz"` is appended to its stem. A `+` before either appends it to the main file's whole name, as an index that ships with its file is named:
+
+```spit
+source reference : Fasta .fasta
+path reference: reference/genome
+source reference_fai : Fai +.fai beside reference
+```
+
+`reference_fai` reads `reference/genome.fasta.fai`.
 
 The path can come from a [recipe](#recipes) when the layout varies by dataset. Name the main source and give its complete file path, including its extension:
 

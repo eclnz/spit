@@ -1,7 +1,9 @@
 //! Operation declarations: `name(inputs) -> outputs`, where a `many`
 //! input may carry an `@min(count)` clause, and any port `@check(...)`.
 
-use crate::model::{Cardinality, InputPort, OperationDef, OutputPort, ShapeRule, DEFAULT_OUTPUT};
+use crate::model::{
+    Beside, Cardinality, InputPort, OperationDef, OutputPort, ShapeRule, DEFAULT_OUTPUT,
+};
 use crate::types::{parse_type_expr, TypeExpr};
 
 use super::check::{only_checks, output_checks, split_clauses, Clause};
@@ -82,6 +84,7 @@ pub(super) fn parse_operation(line: &str, number: usize) -> Result<OperationDef,
         ports.push(port);
     }
     let shape_rule = shape_rule(&ports, number)?;
+    check_beside(&ports, &outputs, line, number)?;
     if let Some((count, clause)) = clauses.min {
         return Err(misplaced_minimum(name, &inputs, &ports, line, count, number).at_token(clause));
     }
@@ -417,24 +420,21 @@ fn parse_outputs(
             .into_iter()
             .partition(|clause| clause.keyword == "check");
         let (checks, exempt) = output_checks(&checks, "an output", number)?;
-        if let Some((_, port)) = text.rsplit_once(" beside ") {
-            return Err(ParseError::new(
-                number,
-                "`beside` names another output of the same operation; name this one, as in `-> (image: Image .nii.gz, meta: Json .json beside image)`",
-            )
-            .at_token(port.trim()));
-        }
-        let (text, extension, folder) = split_ending(text, number)?;
+        let (text, beside) = split_beside(text, number)?;
+        let (text, extension, folder) = match beside {
+            Some(_) => (text, None, false),
+            None => split_ending(text, number)?,
+        };
         let output_type = if text.is_empty() {
             TypeExpr::Unknown
         } else {
             port_type(text, number)?
         };
-        let mut port = with_ending(
-            OutputPort::new(DEFAULT_OUTPUT, output_type),
-            extension,
-            folder,
-        );
+        let port = OutputPort::new(DEFAULT_OUTPUT, output_type);
+        let mut port = match beside {
+            Some(beside) => port.beside(beside),
+            None => with_ending(port, extension, folder),
+        };
         port.checks = checks;
         port.exempt = exempt;
         return Ok((vec![port], clauses));
@@ -457,16 +457,7 @@ fn parse_outputs(
         .map(|item| {
             let (item, clauses) = split_clauses(item, AFTER_OUTPUT, number)?;
             let (checks, exempt) = output_checks(&clauses, "an output", number)?;
-            let (item, beside) = match item.rsplit_once(" beside ") {
-                Some((item, sibling)) => {
-                    let (item, suffix) = beside_suffix(item.trim(), number, "output")?;
-                    (
-                        item,
-                        Some((identifier(sibling.trim(), number, "output port")?, suffix)),
-                    )
-                }
-                None => (item, None),
-            };
+            let (item, beside) = split_beside(item, number)?;
             let (item, extension, folder) = match beside {
                 Some(_) => (item, None, false),
                 None => split_ending(item, number)?,
@@ -490,43 +481,99 @@ fn parse_outputs(
             port.checks = checks;
             port.exempt = exempt;
             Ok(match beside {
-                Some((sibling, suffix)) => port.beside(sibling, suffix),
+                Some(beside) => port.beside(beside),
                 None => with_ending(port, extension, folder),
             })
         })
         .collect::<Result<Vec<_>, ParseError>>()?;
-    for port in &ports {
+    Ok((ports, clauses))
+}
+
+/// An output's text before ` beside port`, and what `beside` says, if it
+/// has one.
+fn split_beside(item: &str, number: usize) -> Result<(&str, Option<Beside>), ParseError> {
+    let Some((item, sibling)) = item.rsplit_once(" beside ") else {
+        return Ok((item, None));
+    };
+    let (item, suffix, append) = beside_suffix(item.trim(), number, "output")?;
+    let sibling = identifier(sibling.trim(), number, "port")?.to_owned();
+    Ok((
+        item,
+        Some(Beside {
+            sibling,
+            suffix,
+            append,
+        }),
+    ))
+}
+
+/// Check that each output written beside another names a port whose file
+/// it can lie beside: another output the tool is told to write, or a
+/// `one` input.
+fn check_beside(
+    inputs: &[InputPort],
+    ports: &[OutputPort],
+    line: &str,
+    number: usize,
+) -> Result<(), ParseError> {
+    for port in ports {
         let Some(beside) = &port.beside else { continue };
         let (name, sibling) = (&port.name, &beside.sibling);
+        let input = inputs.iter().find(|input| &input.name == sibling);
         let problem = match ports.iter().find(|other| &other.name == sibling) {
             Some(_) if name == sibling => format!(
-                "`{name}` is written beside itself; name another output of this operation, whose file it follows"
+                "`{name}` is written beside itself; name another output or an input of this operation, whose file it follows"
             ),
-            None => format!("`{name}` is written beside `{sibling}`, which is not an output of this operation"),
+            None => match input {
+                Some(input) if input.cardinality == Cardinality::Many => format!(
+                    "`{name}` is written beside `{sibling}`, a `many` input, but one job reads many `{sibling}` files and writes one `{name}`; name a `one` input"
+                ),
+                Some(_) => continue,
+                None => format!(
+                    "`{name}` is written beside `{sibling}`, which is neither an input nor an output of this operation"
+                ),
+            },
             Some(other) if other.folder => format!(
                 "`{name}` is written beside `{sibling}`, which is a folder, and only a file has files beside it; drop `beside {sibling}` and give the tool `{{{name}}}`"
             ),
             Some(other) if other.beside.is_some() => format!(
                 "`{name}` is written beside `{sibling}`, which is itself written beside another; name an output the tool is told to write"
             ),
-            Some(other) if other.extension.is_none() => format!(
-                "`{name}` is written beside `{sibling}`, which declares no extension for `{name}` to replace; give `{sibling}` one, as in `{sibling}: Image .nii.gz`"
+            Some(other) if other.extension.is_none() && !beside.append => format!(
+                "`{name}` is written beside `{sibling}`, which declares no extension for `{name}` to replace; give `{sibling}` one, as in `{sibling}: Image .nii.gz`, or append to its whole name with `+`"
             ),
             Some(_) => continue,
         };
-        return Err(ParseError::new(number, problem).at_token(sibling));
+        let error = ParseError::new(number, problem);
+        return Err(match named_beside(line, sibling) {
+            Some(token) => error.at_token(token),
+            None => error,
+        });
     }
-    Ok((ports, clauses))
+    Ok(())
 }
 
-/// A file written beside another: its text before the suffix, and the
-/// suffix its file name ends with, an extension such as `.json` or quoted
-/// text such as `"_mask.nii.gz"`.
+/// The first `sibling` that `beside` names in `line`, as a slice of it.
+fn named_beside<'a>(line: &'a str, sibling: &str) -> Option<&'a str> {
+    line.match_indices(" beside ").find_map(|(at, keyword)| {
+        let rest = line[at + keyword.len()..].trim_start();
+        let start = line.len() - rest.len();
+        let end = rest
+            .find(|character: char| !character.is_ascii_alphanumeric() && character != '_')
+            .unwrap_or(rest.len());
+        (&rest[..end] == sibling).then(|| &line[start..start + end])
+    })
+}
+
+/// A file written beside another: its text before the suffix, the suffix
+/// its file name ends with, an extension such as `.json` or quoted text
+/// such as `"_mask.nii.gz"`, and whether a `+` before it appends it to the
+/// whole name, as `+.fai` does, rather than replacing the extension.
 pub(super) fn beside_suffix<'a>(
     item: &'a str,
     number: usize,
     role: &str,
-) -> Result<(&'a str, String), ParseError> {
+) -> Result<(&'a str, String, bool), ParseError> {
     let article = if role == "output" { "an" } else { "a" };
     if let Some(quoted) = item.strip_suffix('"') {
         let open = quoted.rfind('"').ok_or_else(|| {
@@ -544,18 +591,37 @@ pub(super) fn beside_suffix<'a>(
             )
             .at_token(suffix));
         }
-        return Ok((quoted[..open].trim(), suffix.to_owned()));
+        let head = quoted[..open].trim_end();
+        return Ok(match head.strip_suffix('+') {
+            Some(head) => (head.trim(), suffix.to_owned(), true),
+            None => (head.trim(), suffix.to_owned(), false),
+        });
     }
-    match split_ending(item, number)? {
-        (item, _, true) => Err(ParseError::new(
+    // `+.fai`: the `+` sits against the extension it appends.
+    let (item, ending, append) = match item.find('.') {
+        Some(dot) if item[..dot].trim_end().ends_with('+') => {
+            let head = item[..dot].trim_end();
+            (
+                head[..head.len() - 1].trim(),
+                split_ending(&item[dot..], number)?,
+                true,
+            )
+        }
+        _ => {
+            let (item, extension, folder) = split_ending(item, number)?;
+            (item, ("", extension, folder), false)
+        }
+    };
+    match ending {
+        (_, _, true) => Err(ParseError::new(
             number,
             format!("{article} {role} written beside another is a file, not a folder; drop the `/`"),
         )
         .at_token(item)),
-        (item, Some(extension), false) => Ok((item, extension.to_owned())),
-        (item, None, false) => Err(ParseError::new(
+        (_, Some(extension), false) => Ok((item, extension.to_owned(), append)),
+        (_, None, false) => Err(ParseError::new(
             number,
-            format!("{article} {role} written beside another names what its file name ends with, as in `{item} .json beside image` or `{item} \"_mask.nii.gz\" beside image`"),
+            format!("{article} {role} written beside another names what its file name ends with, as in `{item} .json beside image`, `{item} \"_mask.nii.gz\" beside image` or `{item} +.fai beside fasta`"),
         )
         .at_token(item)),
     }

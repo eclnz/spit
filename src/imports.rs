@@ -570,7 +570,7 @@ fn import_source(
         name: qualified.to_owned(),
         beside: source.beside.as_ref().map(|beside| crate::model::Beside {
             sibling: qualified_check(&beside.sibling, alias),
-            suffix: beside.suffix.clone(),
+            ..beside.clone()
         }),
         ..source.clone()
     });

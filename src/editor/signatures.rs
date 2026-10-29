@@ -103,11 +103,7 @@ fn output_signature(port: &OutputPort, named: bool) -> String {
         port.artifact_type.to_string()
     };
     if let Some(beside) = &port.beside {
-        if beside.suffix.starts_with('.') {
-            let _ = write!(result, " {} beside {}", beside.suffix, beside.sibling);
-        } else {
-            let _ = write!(result, " \"{}\" beside {}", beside.suffix, beside.sibling);
-        }
+        let _ = write!(result, " {beside}");
     } else {
         result.push_str(&ending(port.extension.as_deref(), port.folder));
     }

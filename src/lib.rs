@@ -50,11 +50,11 @@ pub use inputs::{
 pub use lower::parse_pipeline;
 pub use model::{
     stage_within, Artifact, ArtifactId, ArtifactInstance, ArtifactKey, ArtifactReport,
-    ArtifactType, Artifacts, Beside, BodyStep, Call, CallId, Cardinality, CommandDef, CommandRole,
-    ContextPattern, CountRequirement, CoverageAction, CoverageGap, CoverageRule, DagStep,
-    DimensionOrders, EntityBinding, Exclusion, Gap, IncompleteJob, InputBinding, InputPort,
-    InputRules, Invocation, Job, JobId, OperationDef, OutputPort, Pipeline, Port, ProductDef,
-    Removal, ResolvedDag, Resources, ResourcesDef, ShapeRule, SidecarGroup, SourceFile,
+    ArtifactType, Artifacts, Beside, BesideFile, BodyStep, Call, CallId, Cardinality, CommandDef,
+    CommandRole, ContextPattern, CountRequirement, CoverageAction, CoverageGap, CoverageRule,
+    DagStep, DimensionOrders, EntityBinding, Exclusion, Gap, IncompleteJob, InputBinding,
+    InputPort, InputRules, Invocation, Job, JobId, OperationDef, OutputPort, Pipeline, Port,
+    ProductDef, Removal, ResolvedDag, Resources, ResourcesDef, ShapeRule, SidecarGroup, SourceFile,
     SourceInventory, SourceRecord, StageDef, StepId, StepOrigin, StepOutput, TypeChecking,
 };
 pub use parser::{parse_source_inventory, render_source_inventory, ParseError, ParseErrorKind};
