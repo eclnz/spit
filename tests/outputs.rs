@@ -36,7 +36,7 @@ command average: mean {images} -o {@output}
 averaged = average(aligned @vary(run))
 
 operation compare(image: Image<$K>, reference: Reference) -> Score
-command compare: score {image} {reference} -o {@output}
+command compare: score {image} {reference} --label \"sub-{sub} ses-{ses}\" -o {@output}
 score = compare(averaged, reference)
 default entities: {@key}={@value} separated \"__\"\n";
 

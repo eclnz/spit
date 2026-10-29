@@ -4,7 +4,8 @@ use spit::{parse_pipeline, validate_commands};
 
 #[test]
 fn commands_are_validated_even_without_resolved_jobs() {
-    let base = "source raw : Table [id]\noperation normalize(table: Table) -> Table\n";
+    let base =
+        "source raw : Table [id]\noperation normalize(table: Table) -> Table\nnormalized = normalize(raw)\n";
     let check = |command: &str| {
         let pipeline = parse_pipeline(&format!("{base}{command}\n")).unwrap();
         validate_commands(&pipeline).map_err(|error| error.to_string())
