@@ -357,7 +357,7 @@ resources align: cores=8, memory=16G
 aligned = align(reference, reads)
 ```
 
-Each `align` job runs `bwa mem -t 8 ...`, and a backend starts one only when 8 cores and 16 GiB of memory are free. `spit dag --commands` shows a `needs:` line above the `run:` line of each such job.
+Each `align` job runs `bwa mem -t 8 ...`, and a backend starts one only when 8 cores and 16 GiB of memory are free. A backend may stop a job that holds more memory than it declares, and fail it, as [spit-bash](https://github.com/eclnz/spit-bash) does, so declare the most a job needs on the largest input it gets. `spit dag --commands` shows a `needs:` line above the `run:` line of each such job.
 
 - `cores=N` is the number of cores a job uses, a whole number from 1. `memory=SIZE` is the most memory it needs, a whole number and a unit: `K`, `M`, `G` or `T`, each 1024 times the one before, so `memory=1536M` for one and a half gigabytes. Give either or both, separated by a comma.
 - An operation without a `resources` line, or without `cores` in it, needs one core, and one without `memory` claims none, so a backend schedules its jobs as it schedules every job.

@@ -173,8 +173,8 @@ The output is otherwise like any other: it must exist once `command` succeeds, a
 
 - `cores` is always a whole number of at least 1. A job whose operation declares none has `1`.
 - `memory` is a whole number of bytes, at most 2^53, or `null` when the operation claims none.
-- Start a job only when the cores and memory it needs are free beside those of the jobs already running, and count them as taken until its `"after"` checks finish. A job that needs more than the backend has in all cannot be started that way: run it alone, or report it, as the backend chooses.
-- `memory` is what to set aside, not a limit SPIT asks to enforce. Treat `null` as needing none.
+- Start a job only when the cores and memory it needs are free beside those of the jobs already running, and count them as taken until its `"after"` checks finish. A job that needs more than the backend has in all cannot be started that way: refuse it, or run it alone, as the backend chooses.
+- `memory` is the most the job's `verify` commands and `command` may hold, together with every process they start. A backend may stop a job that holds more, and report it as failed. Treat `null` as needing none and setting no limit.
 - The command already holds the number of cores where the pipeline asked for it, with `{@cores}`, as `["-t"], ["8"]` above, so the tool uses what it was given; a backend changes nothing in `command`.
 
 `cores` and `memory` are left out of the job's [fingerprint](#fingerprint): they say how to schedule the job, not what it makes.
