@@ -120,7 +120,7 @@ fn a_beside_output_names_a_sibling_with_an_extension() {
     for (outputs, message) in [
         (
             "(image: Image .nii.gz, meta .json beside picture)",
-            "`meta` is written beside `picture`, which is not an output of this operation",
+            "`meta` is written beside `picture`, which is neither an input nor an output of this operation",
         ),
         (
             "(image: Image .nii.gz, meta .json beside image, log .txt beside meta)",
@@ -132,7 +132,11 @@ fn a_beside_output_names_a_sibling_with_an_extension() {
         ),
         (
             "Json .json beside image",
-            "`beside` names another output of the same operation",
+            "`output` is written beside `image`, which is neither an input nor an output of this operation",
+        ),
+        (
+            "Json +.json",
+            "a `+` suffix follows the whole name of the file it is written beside; add `beside`",
         ),
         (
             "(image: Image .nii.gz, meta: Json beside image)",
@@ -187,6 +191,6 @@ fn an_output_cannot_be_written_beside_itself() {
     );
     assert_eq!(
         found,
-        ["`a` is written beside itself; name another output of this operation, whose file it follows"]
+        ["`a` is written beside itself; name another output or an input of this operation, whose file it follows"]
     );
 }

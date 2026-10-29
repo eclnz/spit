@@ -3,6 +3,7 @@
 //! about resolving or discovery.
 
 use std::borrow::Cow;
+use std::collections::BTreeMap;
 use std::fmt;
 
 use crate::span::Located;
@@ -350,20 +351,46 @@ impl PathTemplate {
     /// file gives it.
     #[must_use]
     pub(crate) fn with_product(&self, name: &str) -> Self {
+        self.written_out(name, None, None)
+    }
+
+    /// This template with `{@product}` written out as the text of the
+    /// product `name`, `{@stage}` as `stage`'s directories when it has one,
+    /// and each dimension in `values` as its value, so that a file written
+    /// beside `name`'s keeps the path `name`'s own artifact has.
+    #[must_use]
+    pub(crate) fn written_out(
+        &self,
+        name: &str,
+        stage: Option<&str>,
+        values: Option<&BTreeMap<String, String>>,
+    ) -> Self {
         let name = &product_text(name);
-        fn named(parts: &[PathPart], name: &str) -> Vec<PathPart> {
+        let written = |placeholder: &PathPlaceholder| match placeholder {
+            PathPlaceholder::Product => Some(name.to_string()),
+            PathPlaceholder::Stage => stage.map(str::to_owned),
+            PathPlaceholder::Dimension(dimension, _) => {
+                values?.get(dimension).map(|value| encode_component(value))
+            }
+            PathPlaceholder::Entities => None,
+        };
+        fn named(
+            parts: &[PathPart],
+            written: &impl Fn(&PathPlaceholder) -> Option<String>,
+        ) -> Vec<PathPart> {
             parts
                 .iter()
                 .map(|part| match part {
-                    PathPart::Placeholder(PathPlaceholder::Product) => {
-                        PathPart::Literal(name.to_owned())
-                    }
-                    PathPart::Group(group) => PathPart::Group(named(group, name)),
-                    part => part.clone(),
+                    PathPart::Placeholder(placeholder) => match written(placeholder) {
+                        Some(text) => PathPart::Literal(text),
+                        None => part.clone(),
+                    },
+                    PathPart::Group(group) => PathPart::Group(named(group, written)),
+                    part @ PathPart::Literal(_) => part.clone(),
                 })
                 .collect()
         }
-        let parts = named(&self.parts, name);
+        let parts = named(&self.parts, &written);
         Self {
             text: render(&parts),
             parts,

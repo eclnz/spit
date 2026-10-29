@@ -7,8 +7,8 @@ use std::fmt;
 use rustc_hash::FxHashSet;
 
 use crate::model::{
-    ArtifactInstance, EntityBinding, ExtensionSource, PathOrigin, Pipeline, PipelineIndex,
-    ProductDef,
+    ArtifactInstance, BesideFile, EntityBinding, ExtensionSource, PathOrigin, Pipeline,
+    PipelineIndex, ProductDef,
 };
 use crate::parser::SourceMap;
 use crate::span::Place;
@@ -50,11 +50,19 @@ impl PathRule {
         product: &str,
         template: Option<&PathTemplate>,
     ) -> Self {
-        let Some(template) = template else {
-            return Self::Missing;
-        };
         let beside = index.beside(product);
-        let rule_product = beside.map_or(product, |(sibling, _, _)| sibling);
+        let Some(template) = template else {
+            // A file beside an input whose rule only a recipe or the
+            // inventory gives lies beside that input's file all the same.
+            return match beside {
+                Some(beside) if beside.input.is_some() => Self::Beside {
+                    sibling: beside.sibling.to_owned(),
+                    template: format!("{}{}", if beside.append { "+" } else { "" }, beside.suffix),
+                },
+                _ => Self::Missing,
+            };
+        };
+        let rule_product = beside.map_or(product, |beside| beside.sibling);
         let template = if index
             .path_rule_for(rule_product)
             .is_some_and(PathTemplate::varies)
@@ -64,7 +72,7 @@ impl PathRule {
             template.to_string()
         };
         match (beside, index.path_origin(product)) {
-            (Some((sibling, _, _)), _) => Self::Beside {
+            (Some(BesideFile { sibling, .. }), _) => Self::Beside {
                 sibling: sibling.to_owned(),
                 template,
             },
@@ -304,9 +312,14 @@ pub(crate) fn collect_paths(
                 .at(lines.products.get(&product.name).cloned()),
             );
         }
-        if rule != PathRule::Missing && !skip.contains(&product.name) {
+        if let Some(problem) = beside_input_problem(&index, &product.name) {
+            if !skip.contains(&product.name) {
+                errors.push(error(problem).at(lines.products.get(&product.name).cloned()));
+            }
+        }
+        if template.is_some() && !skip.contains(&product.name) {
             let line = lines.path_rule(&index, &product.name);
-            if let Some((sibling, _, _)) = index.beside(&product.name) {
+            if let Some(BesideFile { sibling, .. }) = index.beside(&product.name) {
                 if pipeline.product_paths.contains_key(&product.name) {
                     errors.push(
                         error(format!(
@@ -352,8 +365,10 @@ pub(crate) fn collect_paths(
                         // A `beside` output has no rule to change, so the way out
                         // is its sibling's rule, or the other product's.
                         let fix = match (index.beside(&product.name), index.beside(other)) {
-                            (Some((sibling, _, _)), _) => beside_fix(&product.name, sibling, other),
-                            (None, Some((sibling, _, _))) => {
+                            (Some(BesideFile { sibling, .. }), _) => {
+                                beside_fix(&product.name, sibling, other)
+                            }
+                            (None, Some(BesideFile { sibling, .. })) => {
                                 beside_fix(other, sibling, &product.name)
                             }
                             (None, None) => {
@@ -409,6 +424,31 @@ pub(crate) fn collect_paths(
 /// Keep in step with `PathTemplate::extension`, which reads it so.
 const EXTENSION_START: &str =
     "; SPIT reads the extension from the first `.` after the last placeholder, so keep `.` out of the name before it";
+
+/// Why `product`, an output written beside one of its step's inputs,
+/// cannot lie beside the file of the product that step reads there: the
+/// product is a folder, or its suffix replaces an extension it lacks.
+fn beside_input_problem(index: &PipelineIndex<'_>, product: &str) -> Option<String> {
+    let beside = index.beside(product)?;
+    beside.input?;
+    let sibling = beside.sibling;
+    if index.is_folder(sibling) {
+        return Some(format!(
+            "`{product}` is written beside `{sibling}`, which is a folder, and only a file has files beside it; give `{product}` a path of its own"
+        ));
+    }
+    let declare = if index.is_source(sibling) {
+        format!("declare one, as in `source {sibling} : Type .ext`")
+    } else {
+        "give the output that writes it one".to_owned()
+    };
+    (!beside.append && beside.replaces.is_none()).then(|| {
+        format!(
+            "`{product}` is written beside `{sibling}`, which declares no extension for `{}` to replace; {declare}, or append to its whole name with `+{}`",
+            beside.suffix, beside.suffix
+        )
+    })
+}
 
 /// What to change when `beside`, written beside `sibling`, has the path of
 /// `other`: it has no rule of its own, so change `other`'s or `sibling`'s.

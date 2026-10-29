@@ -9,7 +9,8 @@ use super::product::PathBinder;
 use super::rules::inspect_paths;
 use super::template::{error, require_directory, PathError};
 use crate::model::{
-    Artifact, ArtifactId, ArtifactKey, EntityBinding, Pipeline, PipelineIndex, ResolvedDag,
+    Artifact, ArtifactId, ArtifactKey, BesideFile, EntityBinding, Pipeline, PipelineIndex,
+    ResolvedDag,
 };
 
 /// Check the files needed to start the resolved DAG under a dataset root.
@@ -112,28 +113,62 @@ pub(crate) fn bound_paths(
     let mut binder = PathBinder::new(pipeline);
     let mut paths = vec![None; dag.artifacts.len()];
     let mut owners: FxHashMap<String, ArtifactId> = FxHashMap::default();
-    for id in dag
-        .jobs
-        .iter()
-        .flat_map(|job| job.input_artifacts().chain(job.outputs.iter().copied()))
-    {
-        if paths[id.index()].is_some() {
-            continue;
-        }
-        let artifact = dag.artifact(id);
-        let number = dag.artifacts.product_of(id);
-        let relative = match dag.source_path(id) {
-            Some(path) => path.to_owned(),
-            None => binder.bind_numbered(number, artifact, || format!("path for `{artifact}`"))?,
-        };
+    let mut own = |id: ArtifactId, relative: String, paths: &mut Vec<Option<String>>| {
         if let Some(previous) = owners.insert(relative.clone(), id) {
-            let previous = dag.artifact(previous);
+            let (previous, artifact) = (dag.artifact(previous), dag.artifact(id));
             return Err(error(format!(
                 "artifacts `{}[{}]` and `{}[{}]` bind to the same path `{relative}`",
                 previous.product, previous.entities, artifact.product, artifact.entities
             )));
         }
         paths[id.index()] = Some(relative);
+        Ok(())
+    };
+    // An output written beside one of its job's inputs lies beside the file
+    // that input has, whatever gave it, so it is bound once the others are.
+    let beside: Vec<Option<BesideFile<'_>>> = dag
+        .artifacts
+        .products()
+        .map(|(product, _)| {
+            binder
+                .index()
+                .beside(product)
+                .filter(|beside| beside.input.is_some())
+        })
+        .collect();
+    let mut companions = Vec::new();
+    let mut deferred = vec![false; dag.artifacts.len()];
+    for job in &dag.jobs {
+        for id in job.input_artifacts().chain(job.outputs.iter().copied()) {
+            if paths[id.index()].is_some() || deferred[id.index()] {
+                continue;
+            }
+            let number = dag.artifacts.product_of(id);
+            if let Some(beside) = beside[number as usize] {
+                let input = beside
+                    .input
+                    .and_then(|input| job.inputs.get(input)?.first());
+                if let (Some(&input), true) = (input, job.outputs.contains(&id)) {
+                    companions.push((id, input, beside));
+                    deferred[id.index()] = true;
+                    continue;
+                }
+            }
+            let artifact = dag.artifact(id);
+            let relative = match dag.source_path(id) {
+                Some(path) => path.to_owned(),
+                None => {
+                    binder.bind_numbered(number, artifact, || format!("path for `{artifact}`"))?
+                }
+            };
+            own(id, relative, &mut paths)?;
+        }
+    }
+    // Jobs come after the jobs they read from, so a file beside a file
+    // beside another finds its input's path bound.
+    for (id, input, beside) in companions {
+        let relative = beside_path(dag, &paths, id, input, beside)?;
+        own(id, relative, &mut paths)?;
     }
     // The first such path in path order is the one reported. Paths share
     // their directories, so a directory found to hold no artifact, nor any
@@ -180,6 +215,35 @@ pub(crate) fn bound_paths(
         )));
     }
     Ok(paths)
+}
+
+/// The path of `id`, written beside `input`, whose path is bound: the
+/// input's path with `beside`'s suffix in place of its extension, or after
+/// its whole name.
+fn beside_path(
+    dag: &ResolvedDag,
+    paths: &[Option<String>],
+    id: ArtifactId,
+    input: ArtifactId,
+    beside: BesideFile<'_>,
+) -> Result<String, PathError> {
+    let artifact = dag.artifact(id);
+    let sibling = paths[input.index()].as_deref().ok_or_else(|| {
+        error(format!(
+            "no path is bound for `{}`, which `{artifact}` is written beside",
+            dag.artifact(input)
+        ))
+    })?;
+    let stem = match beside.replaces.filter(|_| !beside.append) {
+        Some(extension) => sibling.strip_suffix(extension).ok_or_else(|| {
+            error(format!(
+                "`{artifact}` is written beside `{sibling}`, which does not end with `{extension}` for `{}` to replace; append to its whole name with `+{}`",
+                beside.suffix, beside.suffix
+            ))
+        })?,
+        None => sibling,
+    };
+    Ok(format!("{stem}{}", beside.suffix))
 }
 
 /// Each artifact the jobs use, with its path, in no order.

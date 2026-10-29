@@ -23,8 +23,9 @@ pub struct ProductDef {
     /// `source dicom : Dicom / [sub]`; `false` for an output, whose
     /// operation says.
     pub folder: bool,
-    /// A source whose file shares another source's stem and dimensions.
-    /// Its suffix replaces that source's extension.
+    /// A source whose file lies beside another source's, with its
+    /// dimensions: its name is that file's, with the suffix in place of its
+    /// extension or after the whole name.
     pub beside: Option<Beside>,
     /// The checks a source's artifacts must pass before a job reads them, as
     /// in `source t1w : Image [sub] @check(ndim(3))`; none for an output.
@@ -105,9 +106,9 @@ pub struct OutputPort {
     /// Whether the tool writes a folder here rather than a file, as in
     /// `-> (subject: FsSubject /)`.
     pub folder: bool,
-    /// For a file the tool writes beside another output without being told
-    /// where: that output, and what this one's name ends with in place of
-    /// its extension.
+    /// For a file the tool writes beside another without being told where:
+    /// another output, or an input whose file it lies beside, and what this
+    /// one's name ends with.
     pub beside: Option<Beside>,
     /// The checks the artifact must pass after the command writes it, as in
     /// `-> Image @check(nonempty)`.
@@ -117,12 +118,56 @@ pub struct OutputPort {
     pub exempt: Vec<CheckUse>,
 }
 
-/// An output written beside the named port's file, its name that file's
-/// without its extension, then `suffix`: `.json`, or `_mask.nii.gz`.
+/// A file written beside the named port's or source's file. Its name is
+/// that file's without its extension, then `suffix` (`.json`, or
+/// `_mask.nii.gz`), or with `append`, that file's whole name, then `suffix`
+/// (`genome.fasta.fai`).
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Beside {
     pub sibling: String,
     pub suffix: String,
+    /// Whether the suffix follows the whole name, as `+.fai` writes, rather
+    /// than replacing the extension.
+    pub append: bool,
+}
+
+/// Where a product written beside another lies, as
+/// [`Pipeline::beside`](super::Pipeline::beside) gives it.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct BesideFile<'p> {
+    /// The product whose file this one lies beside.
+    pub sibling: &'p str,
+    /// The sibling's extension, which `suffix` replaces; `None` when the
+    /// suffix follows the whole name, or when the sibling has no extension
+    /// to replace.
+    pub replaces: Option<&'p str>,
+    pub suffix: &'p str,
+    pub append: bool,
+    /// For an output written beside one of its step's inputs, that input's
+    /// place among the operation's inputs; `None` beside an output or for
+    /// a source.
+    pub input: Option<usize>,
+}
+
+impl Beside {
+    /// The extension a file written so has: its suffix from the first `.`.
+    pub fn extension(&self) -> Option<&str> {
+        self.suffix.find('.').map(|dot| &self.suffix[dot..])
+    }
+}
+
+impl fmt::Display for Beside {
+    /// Reads as written: `+.fai beside fasta`, or `"_mask.nii.gz" beside image`.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.append {
+            f.write_str("+")?;
+        }
+        if self.suffix.starts_with('.') {
+            write!(f, "{} beside {}", self.suffix, self.sibling)
+        } else {
+            write!(f, "\"{}\" beside {}", self.suffix, self.sibling)
+        }
+    }
 }
 
 impl OutputPort {
@@ -138,16 +183,12 @@ impl OutputPort {
         }
     }
 
-    /// This output written beside `port`, its name ending with `suffix`. Its
-    /// extension is the suffix from its first `.`, if it has one.
+    /// This output written as `beside` says. Its extension is the suffix
+    /// from its first `.`, if it has one.
     #[must_use]
-    pub fn beside(mut self, port: impl Into<String>, suffix: impl Into<String>) -> Self {
-        let suffix = suffix.into();
-        self.extension = suffix.find('.').map(|dot| suffix[dot..].to_owned());
-        self.beside = Some(Beside {
-            sibling: port.into(),
-            suffix,
-        });
+    pub fn beside(mut self, beside: Beside) -> Self {
+        self.extension = beside.extension().map(str::to_owned);
+        self.beside = Some(beside);
         self
     }
 

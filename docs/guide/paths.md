@@ -59,7 +59,30 @@ operation convert(dicom: DicomDir) -> (image: Image .nii.gz, meta: Json .json be
 command convert: dcm2niix -o {image.dir} -f {image.stem} {dicom}
 ```
 
-`{image.dir}` and `{image.stem}` give a tool the destination folder and the name without its extension. Both count as using the output. A `beside` output has no independent path rule. See [files a tool writes beside another](../language-reference.md#files-a-tool-writes-beside-another).
+`{image.dir}` and `{image.stem}` give a tool the destination folder and the name without its extension. Both count as using the output. A `beside` output has no independent path rule.
+
+A tool may instead write next to a file it reads, as `samtools faidx` writes a FASTA's index. Declare that output `beside` the input, and a `+` before the suffix appends it to the whole file name:
+
+<!-- spit-doc: setup
+source bam : Bam .bam [sample]
+path bam: reads/{sample}
+path pileups: calls/{sample}
+-->
+
+```spit
+source reference : Fasta .fasta
+path reference: reference/genome
+
+operation faidx(fasta: Fasta) -> Fai +.fai beside fasta
+command faidx: samtools faidx {fasta}
+genome_fai = faidx(reference)
+
+operation pileup(fasta: Fasta, fai: Fai, bam: Bam) -> Bcf .bcf
+command pileup: bcftools mpileup -f {fasta} -O b -o {@output} {bam}
+pileups = pileup(reference, genome_fai, bam)
+```
+
+`faidx` writes `reference/genome.fasta.fai`, beside the source FASTA in the dataset. `pileup` takes the index as an input, so it waits for `faidx`, though bcftools finds the index by itself. See [files a tool writes beside another](../language-reference.md#files-a-tool-writes-beside-another).
 
 ## Folders and companions
 

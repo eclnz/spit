@@ -93,6 +93,8 @@ pub(super) fn path_pattern(
 pub(super) struct OutputPaths<'l> {
     /// The pattern of each file output.
     files: Vec<Vec<Piece>>,
+    /// The pattern of each file output written beside a source's file.
+    beside_sources: Vec<Vec<Piece>>,
     /// The directories a folder output's pattern matches.
     folders: FxHashSet<&'l str>,
 }
@@ -109,6 +111,7 @@ impl<'l> OutputPaths<'l> {
             .flat_map(|invocation| &invocation.outputs)
             .collect();
         let mut files = Vec::new();
+        let mut beside_sources = Vec::new();
         let mut folder_patterns = Vec::new();
         for product in &pipeline.products {
             if !outputs.contains(&product.name) {
@@ -124,7 +127,14 @@ impl<'l> OutputPaths<'l> {
             if index.is_folder(&product.name) {
                 folder_patterns.push(pieces);
             } else {
-                files.push(pieces);
+                let beside_source = index
+                    .beside(&product.name)
+                    .is_some_and(|beside| index.is_source(beside.sibling));
+                if beside_source {
+                    beside_sources.push(pieces);
+                } else {
+                    files.push(pieces);
+                }
             }
         }
         let folders = directories
@@ -136,7 +146,19 @@ impl<'l> OutputPaths<'l> {
             })
             .map(String::as_str)
             .collect();
-        Self { files, folders }
+        Self {
+            files,
+            beside_sources,
+            folders,
+        }
+    }
+
+    /// Whether `file` is at the path of an output written beside a source's
+    /// file, which is neither a source nor a file no rule matches.
+    pub(super) fn beside_source(&self, file: &str) -> bool {
+        self.beside_sources
+            .iter()
+            .any(|pieces| match_pattern(pieces, file).is_some())
     }
 
     /// Whether `file` is at an output's path, or inside an output folder.
@@ -144,6 +166,7 @@ impl<'l> OutputPaths<'l> {
         self.files
             .iter()
             .any(|pieces| match_pattern(pieces, file).is_some())
+            || self.beside_source(file)
             || file
                 .match_indices('/')
                 .any(|(end, _)| self.folders.contains(&file[..end]))
