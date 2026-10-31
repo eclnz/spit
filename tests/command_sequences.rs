@@ -62,7 +62,13 @@ fn a_block_of_one_line_is_the_same_job_as_the_line_written_after_the_colon() {
     let block = spitdag(
         "operation view(sam: Sam) -> Bam .bam\ncommand view:\n    samtools view -b {sam} > {@output}\nbam = view(sam)\n",
     );
-    assert_eq!(inline, block);
+    // The block puts the step on a later line.
+    let without_origin = |json: &str| {
+        let start = json.find("\"origin\":").unwrap();
+        let end = json.find(",\"fingerprint\"").unwrap();
+        format!("{}{}", &json[..start], &json[end..])
+    };
+    assert_eq!(without_origin(&inline), without_origin(&block));
 }
 
 #[test]

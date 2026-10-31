@@ -60,6 +60,9 @@ pub struct DagStep {
     pub stage: Option<String>,
     /// For a step a call made, the call and the step of the body it is.
     pub origin: Option<StepOrigin>,
+    /// The line the step is written on, in the pipeline for a step written
+    /// there and in the declaring file for a step a call made.
+    pub line: Option<usize>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

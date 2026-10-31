@@ -1,6 +1,6 @@
 # The `.spitdag` format
 
-A `.spitdag` is what `spit dag -o` writes and `spit dag --json` prints: every job a pipeline resolves to over one dataset, each with its files and its commands. A backend that runs the jobs reads nothing else: no pipeline, path rule or command template. This page describes version 8, the version SPIT writes. Use `spit dag --commands` for a readable view of the same commands.
+A `.spitdag` is what `spit dag -o` writes and `spit dag --json` prints: every job a pipeline resolves to over one dataset, each with its files and its commands. A backend that runs the jobs reads nothing else: no pipeline, path rule or command template. This page describes version 9, the version SPIT writes. Use `spit dag --commands` for a readable view of the same commands.
 
 ## Document
 
@@ -8,7 +8,7 @@ A `.spitdag` is one JSON object, followed by a newline:
 
 ```json
 {
-  "version": 8,
+  "version": 9,
   "generator": {"name": "spit", "version": "0.2.2"},
   "root": "/data/study",
   "external_inputs": [ARTIFACT, ...],
@@ -24,7 +24,7 @@ A `.spitdag` is one JSON object, followed by a newline:
 
 | Field | Holds |
 | --- | --- |
-| `version` | The format's version, `8`. A change a reader must know about raises it. Version 6 added each job's [`checks`](#checks). Version 7 added `pipeline_files`, `calls` and each job's `origin`: see [Where jobs come from](#where-jobs-come-from). Version 8 gives each job its [`commands`](#commands) in place of version 7's `command`, each with its `stdin` and `stdout`, see [Standard input and output](#standard-input-and-output), and added its `cores` and `memory`, see [Cores and memory](#cores-and-memory). |
+| `version` | The format's version, `9`. A change a reader must know about raises it. Version 6 added each job's [`checks`](#checks). Version 7 added `pipeline_files`, `calls` and each job's `origin`: see [Where jobs come from](#where-jobs-come-from). Version 8 gives each job its [`commands`](#commands) in place of version 7's `command`, each with its `stdin` and `stdout`, see [Standard input and output](#standard-input-and-output), and added its `cores` and `memory`, see [Cores and memory](#cores-and-memory). Version 9 gives every job an `origin`, with the `file` and `line` of its step, where version 8 left it `null` for a step written in the pipeline. |
 | `generator` | The program that wrote the file, and its version. |
 | `root` | The absolute dataset folder that every path is relative to, or `null` when it was not known: a `.spitout` that records no root. |
 | `external_inputs` | Every artifact a job reads but no job writes, once each: the sources. Ordered by path in natural order, the order `many` inputs take, so `wave2` comes before `wave10`. |
@@ -88,7 +88,7 @@ Each output that could not be produced has its identity and the input gaps that 
   "id": 4,
   "operation": "merge",
   "stage": ["preprocess", "combine"],
-  "origin": null,
+  "origin": {"call": null, "file": 0, "line": 7},
   "fingerprint": "357a0ff06e3e9e39",
   "inputs": {"items": [ARTIFACT, ...]},
   "outputs": {"output": ARTIFACT},
@@ -107,7 +107,7 @@ Each output that could not be produced has its identity and the input gaps that 
 | `id` | The job's number, from 1, unique in the file. |
 | `operation` | The operation the job runs. |
 | `stage` | The stage of the step that made the job, outermost first, such as `["preprocess", "combine"]`; `[]` outside every stage. |
-| `origin` | The call whose body holds the step that made the job, and that step's line, as `{"call": 0, "line": 14}`; `null` for a step written in the pipeline. See [Where jobs come from](#where-jobs-come-from). |
+| `origin` | Where the step that made the job is written, as `{"call": 0, "file": 1, "line": 14}`. See [Where jobs come from](#where-jobs-come-from). |
 | `fingerprint` | 16 hexadecimal digits identifying the job's work: see [Fingerprint](#fingerprint). |
 | `inputs` | Each input port and the artifacts bound to it, in port order. A `one` port holds one artifact; a `many` port holds its collection in natural order. |
 | `outputs` | Each output port and the artifact it writes. A single unnamed output is `output`. |
@@ -263,7 +263,12 @@ The first is the pipeline itself, by its file name. The others are the files it 
 | `file` | The file that declares the operation, by its position in `pipeline_files`. |
 | `at` | Where the call is written: a file, by its position in `pipeline_files`, and a line from 1. |
 
-A job's `origin` names the call, by its position in `calls`, and the line of the body's step that made the job, in the file of the call's `file`. Following `parent` from there gives every call the job is nested in.
+A job's `origin` says where the step that made it is written:
+
+- A step written in the pipeline has `"call": null`, and its `file`, by position in `pipeline_files`, and `line` are where the step is written.
+- A step in the body of an operation a call expanded has `call`, the call's position in `calls`, and its `file` is the call's `file`, the file that declares the operation. Following `parent` from the call gives every call the job is nested in.
+
+`file` is `null` when SPIT read the pipeline from no file, and then `pipeline_files` is empty.
 
 None of these is part of a job's [fingerprint](#fingerprint). A changed command changes the fingerprints through `commands`; an edit elsewhere in a library, such as to a comment, changes a blob id and reruns nothing.
 

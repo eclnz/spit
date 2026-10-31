@@ -97,7 +97,10 @@ impl PipelineBuilder {
     /// The expansion `add_flow_step` makes, which may fail part way.
     fn expand_flow_step(&mut self, flow: &FlowStep) -> Result<(), ParseError> {
         let mut pending = vec![Pending {
-            invocation: flow.invocation.clone(),
+            invocation: Invocation {
+                line: Some(flow.step.call().line),
+                ..flow.invocation.clone()
+            },
             outputs: flow.outputs.clone(),
         }];
         while let Some(next) = pending.pop() {
@@ -470,6 +473,7 @@ fn expand(
                     call: id,
                     step: body.place.clone(),
                 }),
+                line: Some(body.place.line),
                 checks,
             },
             outputs,
