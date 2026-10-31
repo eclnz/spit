@@ -444,10 +444,17 @@ default entities: {{@key}}={{@value}} separated \"__\"
         .map(|step| {
             step.origin
                 .as_ref()
-                .map(|origin| (origin.call, origin.line))
+                .map(|origin| (origin.call, origin.file, origin.line))
         })
         .collect();
-    assert_eq!(origins, [Some((1, 10)), Some((0, 14)), Some((0, 15))]);
+    assert_eq!(
+        origins,
+        [
+            Some((Some(1), Some(1), 10)),
+            Some((Some(0), Some(1), 14)),
+            Some((Some(0), Some(1), 15)),
+        ]
+    );
 }
 
 #[test]
@@ -694,4 +701,35 @@ m, t = L::summarise(…)  line 6  [report]
     let (plain, _) = support::parse_fixture(&format!("{BASE}\n")).unwrap();
     assert_eq!(spit::render_calls(&plain), "");
     assert_eq!(spit::render_calls_json(&plain), "[]");
+}
+
+#[test]
+fn a_step_written_in_the_pipeline_says_which_line_of_which_file_it_is() {
+    let tree = support::Tree::new("pipeline-step-origin", &[]);
+    let text = "\
+source raw : Lines [group]
+path raw: in/{group}.txt
+operation count(lines: Lines) -> Lines .txt
+command count: wc -l {lines} > {@output}
+default path: out/{@product}[/{@entities}].txt
+first = count(raw)
+second = count(first)
+default entities: {@key}={@value} separated \"__\"
+\nsources:\n    raw[group=a]\n";
+    let main = tree.write("main.spit", text);
+    let (pipeline, records) = support::parse_fixture_at(text, &main).unwrap();
+    let dag = resolve(&pipeline, &records.unwrap()).unwrap();
+    let bound = spit::bind_dag(&pipeline, &dag).unwrap();
+    let origins: Vec<_> = bound
+        .steps
+        .iter()
+        .map(|step| {
+            step.origin
+                .map(|origin| (origin.call, origin.file, origin.line))
+        })
+        .collect();
+    assert_eq!(
+        origins,
+        [Some((None, Some(0), 6)), Some((None, Some(0), 7))]
+    );
 }
