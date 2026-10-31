@@ -337,7 +337,7 @@ fn check_json_reads_the_pipeline_file_and_dag_json_emits_the_spitdag() {
     let dag = run();
     assert!(dag.status.success(), "{}", stderr(&dag));
     let graph = stdout(&dag);
-    assert!(graph.starts_with("{\"version\":9,\"generator\":{\"name\":\"spit\",\"version\":\""));
+    assert!(graph.starts_with("{\"version\":10,\"generator\":{\"name\":\"spit\",\"version\":\""));
     // The `.spitout`'s root, relative to its folder, is recorded in full.
     assert!(
         graph.contains("/examples/commands/command_demo/command_demo_data\",\"external_inputs\":["),
@@ -350,7 +350,9 @@ fn check_json_reads_the_pipeline_file_and_dag_json_emits_the_spitdag() {
     );
     assert_eq!(graph.matches("{\"product\":\"merged\"").count(), 4);
     assert!(
-        graph.contains("\"executables\":[\"sort\"],\"removed\":[],\"left_out\":[],\"pipeline_files\":[{\"path\":\"command_demo.spit\",\"blob\":\""),
+        graph.contains(
+            "\"executables\":[\"sort\"],\"removed\":[],\"left_out\":[],\"pipeline_folder\":\""
+        ),
         "{graph}"
     );
     assert!(

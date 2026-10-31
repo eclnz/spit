@@ -53,6 +53,10 @@ pub struct Pipeline {
     /// The files the pipeline was read from: its own first, then each file
     /// an import read, once. Empty for a pipeline parsed without a path.
     pub files: Vec<SourceFile>,
+    /// The folder of the pipeline's own file, as an absolute path, which
+    /// `{@here}` in a command is relative to. `None` for a pipeline parsed
+    /// without a path.
+    pub folder: Option<String>,
     /// How much of the pipeline must be typed, from its `types` line.
     /// Imports never bring one: the file given to SPIT decides.
     pub types: TypeChecking,

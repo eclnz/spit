@@ -20,7 +20,7 @@ pub use crate::check::When;
 use self::write::{write_document, PIECE};
 
 /// The schema version a `.spitdag` is written with.
-pub const SPITDAG_VERSION: usize = 9;
+pub const SPITDAG_VERSION: usize = 10;
 
 /// A resolved DAG with its paths bound and its commands expanded. Its
 /// artifacts are the resolved DAG's, each kept once with its path; jobs,
@@ -40,6 +40,9 @@ pub struct BoundDag {
     pub steps: Vec<BoundStep>,
     /// The files the pipeline was read from, with their blob ids.
     pub pipeline_files: Vec<SourceFile>,
+    /// The pipeline's folder, as an absolute path, which an [`ArgPart::Here`]
+    /// is under; `None` when the pipeline was not read from a file.
+    pub pipeline_folder: Option<String>,
     /// Each call to an operation with a body, which steps name.
     pub calls: Vec<BoundCall>,
     artifacts: Artifacts,
@@ -190,13 +193,22 @@ pub enum ArgPart {
         artifact: ArtifactId,
         extension_len: usize,
     },
+    /// The folder of the file declaring the operation, as `{@here}` gives
+    /// it. `relative` is under [`BoundDag::pipeline_folder`], `""` for the
+    /// folder itself; `text` is the two joined, so that no job holds a
+    /// second copy. Only `relative` is written, so a moved pipeline keeps its
+    /// fingerprints.
+    Here {
+        relative: String,
+        text: String,
+    },
 }
 
 impl ArgPart {
     /// The text this part is in a command, given the DAG it belongs to.
     pub fn text<'a>(&'a self, dag: &'a BoundDag) -> &'a str {
         match self {
-            Self::Text(text) => text,
+            Self::Text(text) | Self::Here { text, .. } => text,
             Self::Path(artifact) => dag.path(*artifact),
             Self::Dir(artifact) => folder_of(dag.path(*artifact)),
             Self::Stem {
@@ -263,6 +275,7 @@ impl BoundDag {
             jobs,
             steps,
             pipeline_files: Vec::new(),
+            pipeline_folder: None,
             calls: Vec::new(),
             artifacts,
             paths,

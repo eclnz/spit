@@ -75,6 +75,7 @@ fn bind_jobs(
         .iter()
         .map(|line| (line.operation.as_str(), line.resources))
         .collect();
+    let declared_in = pipeline.operation_files();
     let steps = dag
         .steps
         .iter()
@@ -83,7 +84,8 @@ fn bind_jobs(
                 .get(step.operation.as_str())
                 .copied()
                 .unwrap_or_default();
-            StepCommands::new(&index, &checks, &commands, step, needs)
+            let here = here_of(pipeline, &declared_in, &step.operation);
+            StepCommands::new(&index, &checks, &commands, step, needs, here)
         })
         .collect::<Result<Vec<_>, _>>()?;
     let mut produced = vec![false; dag.artifacts.len()];
@@ -123,8 +125,8 @@ fn bind_jobs(
         jobs,
     );
     bound.pipeline_files.clone_from(&pipeline.files);
+    bound.pipeline_folder.clone_from(&pipeline.folder);
     // Each operation's file, found once, then each call's looked up.
-    let declared_in = pipeline.operation_files();
     let files: Vec<Option<usize>> = pipeline
         .calls
         .iter()
@@ -160,6 +162,30 @@ fn bind_jobs(
     Ok(bound)
 }
 
+/// `{@here}` for `operation`: the folder of its file under the pipeline's
+/// folder, if the pipeline was read from files.
+fn here_of(
+    pipeline: &Pipeline,
+    declared_in: &FxHashMap<&str, Option<usize>>,
+    operation: &str,
+) -> Option<ArgPart> {
+    let folder = pipeline.folder.as_deref()?;
+    let file = declared_in.get(operation).copied().flatten()?;
+    let relative = pipeline.files[file]
+        .path
+        .rsplit_once('/')
+        .map_or("", |(parent, _)| parent);
+    let text = if relative.is_empty() {
+        folder.to_owned()
+    } else {
+        format!("{folder}/{relative}")
+    };
+    Some(ArgPart::Here {
+        relative: relative.to_owned(),
+        text,
+    })
+}
+
 /// A step's operation and commands, found once for all of its jobs.
 struct StepCommands<'p> {
     step: &'p DagStep,
@@ -175,6 +201,10 @@ struct StepCommands<'p> {
     resources: Resources,
     /// `resources.cores` as text, which `{@cores}` gives a command.
     cores: String,
+    /// The folder of the file declaring the operation, under the pipeline's
+    /// and as a part of a command, which `{@here}` gives; `None` when the
+    /// pipeline was not read from a file.
+    here: Option<ArgPart>,
 }
 
 impl<'p> StepCommands<'p> {
@@ -184,6 +214,7 @@ impl<'p> StepCommands<'p> {
         commands: &FxHashMap<&str, Vec<&'p CommandDef>>,
         step: &'p DagStep,
         resources: Resources,
+        here: Option<ArgPart>,
     ) -> Result<Self, BindError> {
         let operation = index.operation(&step.operation).ok_or_else(|| {
             BindError::Dag(format!(
@@ -213,6 +244,7 @@ impl<'p> StepCommands<'p> {
             checks: step_checks(index, checks, operation, invocation),
             resources,
             cores: resources.cores.to_string(),
+            here,
         })
     }
 
@@ -297,7 +329,7 @@ fn bind_job(
         let artifact = match slot(operation, name) {
             Some(Slot::Input(index)) => job.inputs.get(index).and_then(|a| a.first()),
             Some(Slot::Output(index)) => job.outputs.get(index),
-            Some(Slot::Cores | Slot::Dimension) | None => None,
+            Some(Slot::Cores | Slot::Here | Slot::Dimension) | None => None,
         };
         let artifact = *artifact
             .ok_or_else(|| CommandError::new(format!("job {} lacks `{{{name}}}`", job.id)))?;
@@ -454,6 +486,16 @@ fn expand(
                     let artifact = match slot {
                         Some(Slot::Cores) => {
                             argument.push(ArgPart::Text(step.cores.clone()));
+                            continue;
+                        }
+                        Some(Slot::Here) => {
+                            let here = step.here.clone().ok_or_else(|| {
+                                CommandError::new(format!(
+                                    "`{{@here}}` in the command for `{}` needs a pipeline read from a file",
+                                    operation.name
+                                ))
+                            })?;
+                            argument.push(here);
                             continue;
                         }
                         // `validate_commands` makes sure every step calling
