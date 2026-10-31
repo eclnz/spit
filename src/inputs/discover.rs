@@ -101,7 +101,8 @@ pub(super) fn discover(
         .map(DiscoveryPattern::new)
         .collect::<Result<Vec<_>, _>>()?;
     let sources = source_patterns(pipeline)?;
-    let mut listing = Listing::of(root)?;
+    let named_hidden = hidden_names(&sources, &directory_patterns);
+    let mut listing = Listing::of(root, &named_hidden)?;
     // Each source with its place in `sources`, as file and folder sources:
     // a file source's rule is matched against files, a folder source's
     // against folders.
@@ -425,6 +426,28 @@ fn is_spit_file(file: &str) -> bool {
     })
 }
 
+/// The folder names starting with `.` that a source or context rule writes
+/// out, such as `.cache` in `.cache/{id}.json`. Discovery enters no other
+/// hidden folder, so a runner's state or a `.git` is not listed as files
+/// that match no rule.
+fn hidden_names(sources: &[SourcePattern], contexts: &[DiscoveryPattern]) -> BTreeSet<String> {
+    let pieces = sources
+        .iter()
+        .flat_map(|source| source.pieces.iter())
+        .chain(contexts.iter().flat_map(|context| context.pieces.iter()));
+    let mut names = BTreeSet::new();
+    for piece in pieces {
+        if let Piece::Literal(text) = piece {
+            names.extend(
+                text.split('/')
+                    .filter(|part| part.starts_with('.'))
+                    .map(str::to_owned),
+            );
+        }
+    }
+    names
+}
+
 /// The directories and files under a root, each sorted, as `/`-separated
 /// paths relative to it.
 #[derive(Default)]
@@ -434,9 +457,9 @@ struct Listing {
 }
 
 impl Listing {
-    fn of(root: &Path) -> Result<Self, PathError> {
+    fn of(root: &Path, named_hidden: &BTreeSet<String>) -> Result<Self, PathError> {
         let mut listing = Self::default();
-        listing.walk(root, None, "", &mut BTreeSet::new())?;
+        listing.walk(root, None, "", &mut BTreeSet::new(), named_hidden)?;
         listing.directories.sort();
         listing.files.sort();
         Ok(listing)
@@ -457,6 +480,7 @@ impl Listing {
         canonical: Option<PathBuf>,
         prefix: &str,
         visited: &mut BTreeSet<PathBuf>,
+        named_hidden: &BTreeSet<String>,
     ) -> Result<(), PathError> {
         let unreadable = |reason: std::io::Error| {
             error(format!("cannot read `{}`: {reason}", directory.display()))
@@ -480,8 +504,11 @@ impl Listing {
                 _ => (path.is_dir(), path.is_file(), true),
             };
             if is_dir {
+                if name.starts_with('.') && !named_hidden.contains(&name) {
+                    continue;
+                }
                 let inner = (!linked).then(|| canonical.join(&name));
-                self.walk(&path, inner, &format!("{relative}/"), visited)?;
+                self.walk(&path, inner, &format!("{relative}/"), visited, named_hidden)?;
                 self.directories.push(relative);
             } else if is_file {
                 self.files.push(relative);
