@@ -434,6 +434,29 @@ Each `align` job runs `bwa mem -t 8 ...`, and a backend starts one only when 8 c
 - An operation has one `resources` line, wherever it is written, as its `command` is. An imported operation brings its line with it. An [operation carried out by steps](#operations-carried-out-by-steps) has none: give each operation its body calls a line of its own.
 - What a job needs does not change what it makes, so a changed `resources` line does not make a job out of date, unless the command's `{@cores}` changes with it.
 
+### Files beside the pipeline
+
+Commands run from the dataset root, so a script kept next to the pipeline cannot be named by a path that holds wherever the dataset is. `{@here}` in a command is the folder of the `.spit` file that declares the operation:
+
+<!-- spit-doc: setup
+source durations : Json [sample]
+default entities: {@key}={@value} separated "_"
+default path: out/{@product}/{@entities}
+-->
+
+```text
+operation table(durations: Json) -> Table .tsv
+command table: python3 {@here}/scripts/table.py {durations} > {@output}
+
+summary = table(durations)
+```
+
+With the pipeline in `digits/digits.spit`, `table` runs `python3 /home/lab/digits/scripts/table.py ...`. An operation imported from `libs/lib.spit` gets `libs`, the folder of the file that declares it, so a library ships its scripts with it.
+
+- Write `{@here}` in a `command` or a `verify` command, as the start of an argument, with the rest of the path after it. It gives no `.dir` or `.stem`, and cannot be redirected to or from.
+- A `.spitdag` holds the pipeline's folder once, as `pipeline_folder`, and each use as a [`here` part](spitdag.md#commands) under it. The folder is not part of a job's fingerprint, so moving the pipeline reruns nothing.
+- A pipeline given on standard input, or parsed without a file, has no folder, and `{@here}` in it is an error.
+
 ### A job's dimension values
 
 A command can give a tool the values of the job it runs, as for a read group, a plot's title or a run's name. A placeholder that names a dimension of the job, such as `{sample}`, is that job's value:

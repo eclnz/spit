@@ -67,6 +67,10 @@ pub(crate) fn write_document(
             item.finish();
         });
     });
+    document.field("pipeline_folder", |out| match &dag.pipeline_folder {
+        Some(folder) => write_string(out, folder),
+        None => out.push_str("null"),
+    });
     document.field("pipeline_files", |out| {
         write_array(out, &dag.pipeline_files, |out, file| {
             let mut item = ObjectWriter::start(out);
@@ -276,7 +280,8 @@ fn write_job(
 
 /// An argument is an array of parts: a string for text, `{"path": ...}` for
 /// a file, and `{"dir": ..., "of": ...}` or `{"stem": ..., "of": ...}` for
-/// its folder or its name without its extension, with the file they are of.
+/// its folder or its name without its extension, with the file they are of,
+/// and `{"here": ...}` for a folder under the pipeline's.
 pub(super) fn write_command(out: &mut String, dag: &BoundDag, command: &[Argument]) {
     write_array(out, command, |out, argument| {
         write_array(out, argument, |out, part| match part {
@@ -284,6 +289,11 @@ pub(super) fn write_command(out: &mut String, dag: &BoundDag, command: &[Argumen
             ArgPart::Path(artifact) => {
                 out.push_str("{\"path\":");
                 write_string(out, dag.path(*artifact));
+                out.push('}');
+            }
+            ArgPart::Here { relative, .. } => {
+                out.push_str("{\"here\":");
+                write_string(out, relative);
                 out.push('}');
             }
             ArgPart::Dir(artifact) | ArgPart::Stem { artifact, .. } => {
@@ -494,7 +504,7 @@ mod tests {
         dag.root = Some("/data/study".into());
         let text = dag.to_json();
         assert!(text.starts_with(&format!(
-            "{{\"version\":9,\"generator\":{{\"name\":\"spit\",\"version\":\"{}\"}},\
+            "{{\"version\":10,\"generator\":{{\"name\":\"spit\",\"version\":\"{}\"}},\
 \"root\":\"/data/study\",\"external_inputs\":[{{\"product\":\"raw\"",
             env!("CARGO_PKG_VERSION")
         )));
@@ -508,7 +518,7 @@ mod tests {
         );
         // A verify command that starts with a path names no program.
         assert!(
-            text.contains("\"executables\":[\"tool\"],\"removed\":[],\"left_out\":[],\"pipeline_files\":[],\"calls\":[],\"jobs\""),
+            text.contains("\"executables\":[\"tool\"],\"removed\":[],\"left_out\":[],\"pipeline_folder\":null,\"pipeline_files\":[],\"calls\":[],\"jobs\""),
             "{text}"
         );
         assert!(

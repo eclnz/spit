@@ -78,7 +78,7 @@ Job 3  merge
 #[test]
 fn the_spitdag_names_each_check_its_port_and_its_artifact() {
     let json = dag(&format!("{CHECKS}{LINES}"), &["--json"]);
-    assert!(json.starts_with("{\"version\":9,"), "{json}");
+    assert!(json.starts_with("{\"version\":10,"), "{json}");
     assert!(json.contains("\"executables\":[\"cat\",\"check_lines\",\"sort\",\"test\"]"));
     assert!(json.contains(
         "\"checks\":[{\"when\":\"before\",\"check\":\"lines(1)\",\"port\":\"text\",\"path\":\"in/1.txt\",\
@@ -128,7 +128,7 @@ default entities: {@key}={@value} separated \"__\"\npath cleaned: out/{@product}
             let end = json[start..].find("},").unwrap() + start + 1;
             json.replace_range(start..end, "\"origin\":null");
         }
-        let files = json.find(",\"pipeline_files\":").unwrap();
+        let files = json.find(",\"pipeline_folder\":").unwrap();
         let calls = json.find(",\"calls\":").unwrap();
         format!(
             "{}{}",

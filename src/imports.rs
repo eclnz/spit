@@ -660,10 +660,10 @@ pub(crate) fn parse_located_document_recovering(
     (document, errors)
 }
 
-/// Parse `text`, the file at `path` as read, with its imports. The parsed
-/// pipeline lists the file first among its files, then each file an
-/// import read, relative to `path`'s folder. A `use` that fails imports
-/// nothing, and its error comes first, as `use` lines do.
+/// Parse `text`, the file at `path` as read, with its imports. The pipeline
+/// lists the file first among its files, then each file an import read,
+/// relative to `path`'s folder. A `use` that fails imports nothing, and its
+/// error comes first, as `use` lines do.
 fn parse_document_at_inner(
     raw: &str,
     path: &Path,
@@ -675,12 +675,11 @@ fn parse_document_at_inner(
     let mut files = vec![SourceFile {
         path: path
             .file_name()
-            .map_or_else(String::new, |name| name.to_string_lossy().into_owned()),
+            .map_or_else(String::new, |n| n.to_string_lossy().into_owned()),
         blob: fs::read(path)
             .map_or_else(|_| git_blob_id(raw.as_bytes()), |bytes| git_blob_id(&bytes)),
     }];
-    let mut imports = BTreeMap::new();
-    let mut file_texts = BTreeMap::new();
+    let (mut imports, mut file_texts) = (BTreeMap::new(), BTreeMap::new());
     let mut errors = Vec::new();
     let layout = Layout::new(text);
     for (number, line) in layout.numbered() {
@@ -706,6 +705,7 @@ fn parse_document_at_inner(
         *root = path.parent().unwrap_or_else(|| Path::new("")).join(&*root);
     }
     document.pipeline.files = files;
+    document.pipeline.folder = fs::canonicalize(base).ok().map(|f| f.display().to_string());
     document.lines.file_texts = file_texts;
     (document, errors)
 }
