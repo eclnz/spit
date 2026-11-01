@@ -72,6 +72,19 @@ The five rules under [Performance](docs/architecture/performance.md) come first:
 - **Name the other half of an invariant.** When code relies on something another place guarantees, a comment says so with "Keep in step with" and names that place, as the `Ord` for `EntityBinding` does for its hash. Add the comment on both sides.
 - **No `unsafe`.** The compiler rejects it.
 
+**Comments**
+
+A comment earns its place by telling the reader what the code can't. A wrong or empty comment costs more than none, because the reader trusts it. Judge every comment you read or write against these rules.
+
+- **Say why, not what.** Write the reason behind a decision, the invariant the code relies on, or the case that looks odd and isn't. Don't restate the next line: `// add one to the count` over `count += 1` adds nothing.
+- **A doc comment says what an item means or guarantees.** Give what it holds or promises, and what the caller may rely on. Document every `pub` and `pub(crate)` item, each variant of an enum, and each field that is not obvious from its name and type. Write the contract, not how the body works. Link other items with rustdoc links, so a rename breaks the build instead of leaving a stale name.
+- **Put a comment next to the line it explains.** A reason for a branch goes on the branch, not above the function. Comment more where the logic is dense, such as a long `match` with special cases, and less where it is plain.
+- **Say each thing once.** When a rule is stated in a doc comment, a constant, an error message and a page, let one own the wording and have the rest point to it or say less. Where two places must agree, "Keep in step with" names each from the other.
+- **Keep it short.** A doc comment that nests "or, for…" clauses is a list in disguise: give each case its own `///` line, and each field of a returned tuple its own mention.
+- **Write in the present tense.** Say what the code does. No history, no plans, no issue or pull request numbers, as [Writing documentation](#writing-documentation) says. Put work left for later in an issue, not a `TODO`, `FIXME` or `HACK`.
+- **Delete a poor comment.** When you read a comment that is wrong, restates the code, says what a name already says, is commented-out code, tells a story, or says something only the author could follow, remove it, or rewrite it to give the reason. Don't leave it for someone else, and don't keep it because deleting feels like losing information: git keeps everything. If you change code, read the comments around it and fix or delete each one the change has made false.
+- **Deleting is a good change.** A commit that only removes poor comments is welcome, and its message says which kinds it removed. Don't pad a doc comment to fill the gap: one that only repeats the item's name is worse than none.
+
 **Files and modules**
 
 - **A Rust file has at most 800 lines, tests included.** A longer file usually holds two subjects, which read better as two modules. Split it along the data it handles, as `src/paths` is split into the template itself (`template.rs`), the path it gives one product's artifacts (`product.rs`), path components (`components.rs`), the checks on declared rules (`rules.rs`) and paths bound to a DAG (`bind.rs`), not into arbitrary halves. `tests/architecture.rs` fails a longer file.
