@@ -148,10 +148,29 @@ fn expand_job(
             }));
         }
     }
+    // What tells the artifacts of the driver's group apart, which the group
+    // of every other many input must have as well.
+    let paired = if operation.inputs.len() > 1
+        && operation
+            .inputs
+            .iter()
+            .enumerate()
+            .any(|(index, port)| index != shape.driver && port.cardinality == Cardinality::Many)
+    {
+        driven.clone()
+    } else {
+        Vec::new()
+    };
     let mut inputs = Vec::new();
     for (index, port) in operation.inputs.iter().enumerate() {
         let bound = if index == shape.driver {
             std::mem::take(&mut driven)
+        } else if port.cardinality == Cardinality::Many {
+            let group = indexes[index]
+                .get(&join_values(&shape.joins[index], &context))
+                .map_or(&[][..], Vec::as_slice);
+            gaps.extend(unpaired(step, artifacts, index, &paired, group, &context));
+            group.to_vec()
         } else {
             let matches = indexes[index]
                 .get(&join_values(&shape.joins[index], &context))
@@ -187,6 +206,49 @@ fn expand_job(
         context,
         gaps,
     }
+}
+
+/// The gaps left when the many input `index` holds `group` where the driver
+/// holds `driven`: an artifact of one with no partner of the same
+/// `varied` values in the other.
+fn unpaired(
+    step: &CompiledStep<'_>,
+    artifacts: &Artifacts,
+    index: usize,
+    driven: &[ArtifactId],
+    group: &[ArtifactId],
+    context: &EntityBinding,
+) -> Vec<Gap> {
+    let (invocation, operation, shape) = (step.invocation, step.operation, &step.shape);
+    let key = |artifact: ArtifactId| join_values(&shape.varied, artifacts.entities(artifact));
+    let held: FxHashSet<_> = group.iter().map(|&artifact| key(artifact)).collect();
+    let wanted: FxHashSet<_> = driven.iter().map(|&artifact| key(artifact)).collect();
+    let missing = |site: PortSite, from: &[ArtifactId], other: &FxHashSet<Vec<Option<&str>>>| {
+        from.iter()
+            .filter(|&&artifact| !other.contains(&key(artifact)))
+            .map(|&artifact| {
+                let mut missing = context.clone();
+                missing.extend(
+                    &artifacts
+                        .entities(artifact)
+                        .project(&shape.varied)
+                        .expect("an artifact binds every dimension of its product"),
+                );
+                Gap::Unmatched(ResolveError::MissingInput {
+                    site: site.clone(),
+                    context: Box::new(missing),
+                    near: None,
+                })
+            })
+            .collect::<Vec<_>>()
+    };
+    let mut gaps = missing(port_site(invocation, operation, index), driven, &held);
+    gaps.extend(missing(
+        port_site(invocation, operation, shape.driver),
+        group,
+        &wanted,
+    ));
+    gaps
 }
 
 /// The driver's artifacts grouped by the step's groups: one artifact per

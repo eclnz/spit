@@ -6,7 +6,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use rustc_hash::FxHashSet;
 
 use crate::error::{DefinitionSubject, ResolveError};
-use crate::model::{Cardinality, Invocation, OperationDef, Pipeline, ProductDef};
+use crate::model::{Invocation, OperationDef, Pipeline, ProductDef};
 
 use super::{find_operation, find_product};
 
@@ -142,17 +142,6 @@ fn check_operation(operation: &OperationDef) -> Result<(), ResolveError> {
                 operation.name
             )));
         }
-    }
-    let many = operation
-        .inputs
-        .iter()
-        .filter(|port| port.cardinality == Cardinality::Many)
-        .count();
-    if many > 1 {
-        return Err(invalid(format!(
-            "operation `{}` has more than one many input; a job groups one collection",
-            operation.name
-        )));
     }
     if operation.minimum_collection == Some(0) {
         return Err(invalid(format!(

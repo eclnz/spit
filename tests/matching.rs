@@ -128,13 +128,64 @@ fn a_single_input_of_an_aggregate_must_match_each_group() {
     ));
 }
 
+const PAIR: &str = "\
+source height [region, tile]
+source slope [region, tile]
+operation table(heights: many Height, slopes: many Slope) -> Table
+command table: stats {heights} {slopes} > {@output}
+summary = table(height @vary(tile), slope @vary(tile))
+default entities: {@key}={@value} separated \"__\"\npath summary: out/{@product}/{@entities}\n";
+
+const PAIRED: &str = "sources:\n  height[region=a,tile=1]\n  height[region=a,tile=2]\n  height[region=b,tile=1]\n  slope[region=a,tile=1]\n  slope[region=a,tile=2]\n  slope[region=b,tile=1]\n";
+
 #[test]
-fn an_operation_takes_at_most_one_many_input() {
-    let error = parse_pipeline("operation pair(a: many A, b: many B) -> C\n").unwrap_err();
+fn an_operation_can_collect_two_products_across_the_same_dimensions() {
+    let dag = resolve_text(PAIR, PAIRED).unwrap();
+    assert_eq!(dag.jobs.len(), 2);
+    let members = |port: usize| -> Vec<_> {
+        dag.jobs[0].inputs[port]
+            .iter()
+            .map(|id| dag.artifact(*id).to_string())
+            .collect()
+    };
+    assert_eq!(
+        members(0),
+        ["height[region=a,tile=1]", "height[region=a,tile=2]"]
+    );
+    assert_eq!(
+        members(1),
+        ["slope[region=a,tile=1]", "slope[region=a,tile=2]"]
+    );
+    assert_eq!(outputs(&dag), ["summary[region=a]", "summary[region=b]"]);
+}
+
+#[test]
+fn collections_that_hold_different_artifacts_are_not_paired() {
+    let inventory = PAIRED.replace("  slope[region=a,tile=2]\n", "");
+    let error = resolve_text(PAIR, &inventory).unwrap_err();
     assert!(
-        error.message().contains("at most one `many` input"),
+        error.to_string().contains("no `height` artifact")
+            || error.to_string().contains("no `slope` artifact"),
         "{error}"
     );
+    assert!(error.to_string().contains("[region=a,tile=2]"), "{error}");
+}
+
+#[test]
+fn collections_must_vary_over_the_same_dimensions() {
+    let different = PAIR.replace("slope @vary(tile)", "slope @vary(region, tile)");
+    let pipeline = parse_pipeline(&different).unwrap();
+    assert!(matches!(
+        spit::validate_pipeline(&pipeline),
+        Err(ResolveError::UnsupportedShapeRelationship { detail, .. })
+            if detail.contains("must vary over the same dimensions")
+    ));
+    let other_dimensions = PAIR.replace(
+        "source slope [region, tile]",
+        "source slope [region, tile, band]",
+    );
+    let pipeline = parse_pipeline(&other_dimensions).unwrap();
+    assert!(spit::validate_pipeline(&pipeline).is_err());
 }
 
 const CALIBRATE: &str = "\

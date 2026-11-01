@@ -48,7 +48,7 @@ The entry points are in [`src/resolver/mod.rs`](https://github.com/eclnz/spit/bl
 
 - **Each step has a driving input, which gives it one job per context.**
     - In a preserve step, the driver is the single-artifact input with the most dimensions, provided every other input is matched on a subset of them. Port order never changes the choice. The outputs take the driver's dimensions.
-    - In an aggregate step, the driver is its one `many` input, grouped by every dimension except those its `vary` names.
+    - In an aggregate step, the driver is its first `many` input, grouped by every dimension except those its `vary` names. Another `many` input must have the driver's dimensions and `vary`; each job takes its group, and an artifact whose varied values the other collection lacks is a `MissingInput` gap (`unpaired` in `src/resolver/matching.rs`).
 - **Every other input is matched to each job's context, and must leave exactly one artifact.**
 - **Selectors narrow a binding.**
     - `where(dim=value)` keeps the matching artifacts, and takes the pinned dimension out of matching.
