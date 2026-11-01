@@ -73,7 +73,10 @@ def validate(dag, expected):
             for argument in command:
                 require(bool(argument), f"empty argument in job {job['id']}")
                 for part in argument:
-                    if isinstance(part, dict):
+                    if isinstance(part, dict) and "here" in part:
+                        require(dag["pipeline_folder"] is not None, f"here part without a pipeline folder in job {job['id']}")
+                        require(not part["here"].startswith("/") and ".." not in part["here"].split("/"), "here part leaves the pipeline folder")
+                    elif isinstance(part, dict):
                         path = part.get("path", part.get("of"))
                         require(path in bound, f"command path is unbound in job {job['id']}: {path}")
                         if "dir" in part:
