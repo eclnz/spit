@@ -128,6 +128,7 @@ fn resolve_artifacts_with_partial(
             outputs: step.invocation.outputs.clone(),
             stage: step.invocation.stage.clone(),
             origin: step.invocation.origin.clone(),
+            line: step.invocation.line,
         });
         let outputs: Vec<u32> = step
             .outputs
