@@ -377,6 +377,10 @@ pub struct Invocation {
     /// the step of the body it is; `None` for a step written in the
     /// pipeline.
     pub origin: Option<StepOrigin>,
+    /// The line the step is written on: in the pipeline for a step written
+    /// there, in the file that declares the operation for a step a call
+    /// made. `None` for a step not read from a file.
+    pub line: Option<usize>,
     /// Checks the step runs beyond its operation's: those an operation with
     /// a body attaches to the inputs and outputs the step reads and makes.
     pub checks: Vec<(Port, CheckUse)>,
@@ -451,6 +455,7 @@ impl Invocation {
             outputs: outputs.into_iter().map(Into::into).collect(),
             stage: None,
             origin: None,
+            line: None,
             checks: Vec::new(),
         }
     }

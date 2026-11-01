@@ -130,6 +130,16 @@ fn bind_jobs(
         .iter()
         .map(|call| declared_in.get(call.operation.as_str()).copied().flatten())
         .collect();
+    for step in &mut bound.steps {
+        if let Some(origin) = &mut step.origin {
+            // A step a call made is written in the file declaring the call's
+            // operation; one written in the pipeline, in its first file.
+            origin.file = match origin.call {
+                Some(call) => files[call],
+                None => (!pipeline.files.is_empty()).then_some(0),
+            };
+        }
+    }
     bound.calls = pipeline
         .calls
         .iter()
@@ -223,9 +233,11 @@ impl<'p> StepCommands<'p> {
                 .iter()
                 .map(|port| port.name.clone())
                 .collect(),
-            origin: self.step.origin.as_ref().map(|origin| StepCall {
-                call: origin.call.index(),
-                line: origin.step.line,
+            // The file is filled in once the calls' files are known.
+            origin: self.step.line.map(|line| StepCall {
+                call: self.step.origin.as_ref().map(|origin| origin.call.index()),
+                file: None,
+                line,
             }),
             checks: self
                 .checks

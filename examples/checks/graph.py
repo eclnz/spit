@@ -80,8 +80,10 @@ def validate(dag, expected):
                             require(part["dir"] == str(Path(path).parent), "wrong directory argument")
         origin = job["origin"]
         if origin is not None:
-            require(0 <= origin["call"] < len(dag["calls"]), "unknown call origin")
-            require(origin["line"] > 0, "invalid body line")
+            # A step written in the pipeline has no call.
+            require(origin["call"] is None or 0 <= origin["call"] < len(dag["calls"]), "unknown call origin")
+            require(origin["file"] is None or 0 <= origin["file"] < len(dag["pipeline_files"]), "unknown origin file")
+            require(origin["line"] > 0, "invalid step line")
 
     require(len(dag["external_inputs"]) == len(external), "duplicate or missing external inputs")
     require({identity(a): a for a in dag["external_inputs"]} == external, "wrong external inputs")

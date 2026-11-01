@@ -270,7 +270,8 @@ fn render_commands(dag: &BoundDag) -> String {
 /// needs says so next.
 fn push_command_lines(text: &mut String, dag: &BoundDag, job: &BoundJob) {
     let step = dag.step(job);
-    if let Some(origin) = &step.origin {
+    // A step written in the pipeline is where the reader wrote it.
+    if let Some(origin) = step.origin.as_ref().filter(|origin| origin.call.is_some()) {
         text.push_str("  from:   ");
         push_origin(text, dag, origin);
         text.push('\n');
@@ -322,11 +323,12 @@ fn push_command_lines(text: &mut String, dag: &BoundDag, job: &BoundJob) {
 /// m = L::summarise (main.spit line 8), m::cleaned = L::tidy (libs/lib.spit line 13), libs/lib.spit line 10
 /// ```
 fn push_origin(text: &mut String, dag: &BoundDag, origin: &StepCall) {
+    let call = origin.call.expect("a step a call made has its call");
     let place = |file: Option<usize>, line: usize| match file {
         Some(file) => format!("{} line {line}", dag.pipeline_files[file].path),
         None => format!("line {line}"),
     };
-    let mut chain = vec![&dag.calls[origin.call]];
+    let mut chain = vec![&dag.calls[call]];
     while let Some(parent) = chain.last().and_then(|call| call.parent) {
         chain.push(&dag.calls[parent]);
     }

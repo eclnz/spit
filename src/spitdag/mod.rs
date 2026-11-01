@@ -20,7 +20,7 @@ pub use crate::check::When;
 use self::write::{write_document, PIECE};
 
 /// The schema version a `.spitdag` is written with.
-pub const SPITDAG_VERSION: usize = 8;
+pub const SPITDAG_VERSION: usize = 9;
 
 /// A resolved DAG with its paths bound and its commands expanded. Its
 /// artifacts are the resolved DAG's, each kept once with its path; jobs,
@@ -72,18 +72,23 @@ pub struct BoundStep {
     /// The checks its jobs run, which their [`BoundCheck`]s refer to by
     /// index.
     pub checks: Vec<StepCheck>,
-    /// For a step a call made, the call and the line of the body's step.
+    /// Where the step is written, when it was read from a file.
     pub origin: Option<StepCall>,
     /// What each of its jobs needs to run.
     pub resources: Resources,
 }
 
-/// The call a step comes from, and the line of the step in the body of the
-/// operation called, in the file that declares it.
+/// Where a step is written: the line and its file, and for a step a call
+/// made, the call.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct StepCall {
-    /// The call's position in [`BoundDag::calls`].
-    pub call: usize,
+    /// The call's position in [`BoundDag::calls`]; `None` for a step
+    /// written in the pipeline.
+    pub call: Option<usize>,
+    /// The file the line is in, in [`BoundDag::pipeline_files`]: the pipeline's
+    /// for a step written there, the one declaring the call's operation for a
+    /// step the call made.
+    pub file: Option<usize>,
     pub line: usize,
 }
 

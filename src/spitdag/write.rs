@@ -199,7 +199,8 @@ fn write_job(
     object.field("origin", |out| match &step.origin {
         Some(origin) => {
             let mut item = ObjectWriter::start(out);
-            item.field("call", |out| write_number(out, origin.call));
+            item.field("call", |out| write_optional_number(out, origin.call));
+            item.field("file", |out| write_optional_number(out, origin.file));
             item.field("line", |out| write_number(out, origin.line));
             item.finish();
         }
@@ -493,7 +494,7 @@ mod tests {
         dag.root = Some("/data/study".into());
         let text = dag.to_json();
         assert!(text.starts_with(&format!(
-            "{{\"version\":8,\"generator\":{{\"name\":\"spit\",\"version\":\"{}\"}},\
+            "{{\"version\":9,\"generator\":{{\"name\":\"spit\",\"version\":\"{}\"}},\
 \"root\":\"/data/study\",\"external_inputs\":[{{\"product\":\"raw\"",
             env!("CARGO_PKG_VERSION")
         )));
@@ -735,7 +736,11 @@ mod tests {
             vec![job(ids)]
         });
         let mut called = step("clean", None, &["raw"], &["output"]);
-        called.origin = Some(StepCall { call: 0, line: 4 });
+        called.origin = Some(StepCall {
+            call: Some(0),
+            file: Some(1),
+            line: 4,
+        });
         let mut dag = bound(vec![called], |ids| vec![job(ids)]);
         dag.pipeline_files = vec![
             SourceFile {
@@ -766,7 +771,7 @@ mod tests {
             "{text}"
         );
         assert!(
-            text.contains("\"origin\":{\"call\":0,\"line\":4},\"fingerprint\""),
+            text.contains("\"origin\":{\"call\":0,\"file\":1,\"line\":4},\"fingerprint\""),
             "{text}"
         );
         let print = |text: &str| {
