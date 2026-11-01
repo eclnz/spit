@@ -293,6 +293,7 @@ fn placeholders(code: &str, statement: Option<Word>, found: &mut Vec<(Range<usiz
             "@stage" => Some(Word::StageName),
             "@output" if in_command => Some(Word::Output),
             "@cores" if in_command => Some(Word::Cores),
+            "@here" if in_command => Some(Word::Here),
             "@path" if in_check => Some(Word::PathPlaceholder),
             _ => None,
         };

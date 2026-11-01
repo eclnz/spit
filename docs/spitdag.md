@@ -1,6 +1,6 @@
 # The `.spitdag` format
 
-A `.spitdag` is what `spit dag -o` writes and `spit dag --json` prints: every job a pipeline resolves to over one dataset, each with its files and its commands. A backend that runs the jobs reads nothing else: no pipeline, path rule or command template. This page describes version 9, the version SPIT writes. Use `spit dag --commands` for a readable view of the same commands.
+A `.spitdag` is what `spit dag -o` writes and `spit dag --json` prints: every job a pipeline resolves to over one dataset, each with its files and its commands. A backend that runs the jobs reads nothing else: no pipeline, path rule or command template. This page describes version 10, the version SPIT writes. Use `spit dag --commands` for a readable view of the same commands.
 
 ## Document
 
@@ -8,7 +8,7 @@ A `.spitdag` is one JSON object, followed by a newline:
 
 ```json
 {
-  "version": 9,
+  "version": 10,
   "generator": {"name": "spit", "version": "0.2.2"},
   "root": "/data/study",
   "external_inputs": [ARTIFACT, ...],
@@ -16,6 +16,7 @@ A `.spitdag` is one JSON object, followed by a newline:
   "executables": ["sort", ...],
   "removed": [REMOVAL, ...],
   "left_out": [LEFT_OUT, ...],
+  "pipeline_folder": "/home/lab/study",
   "pipeline_files": [FILE, ...],
   "calls": [CALL, ...],
   "jobs": [JOB, ...]
@@ -24,7 +25,7 @@ A `.spitdag` is one JSON object, followed by a newline:
 
 | Field | Holds |
 | --- | --- |
-| `version` | The format's version, `9`. A change a reader must know about raises it. Version 6 added each job's [`checks`](#checks). Version 7 added `pipeline_files`, `calls` and each job's `origin`: see [Where jobs come from](#where-jobs-come-from). Version 8 gives each job its [`commands`](#commands) in place of version 7's `command`, each with its `stdin` and `stdout`, see [Standard input and output](#standard-input-and-output), and added its `cores` and `memory`, see [Cores and memory](#cores-and-memory). Version 9 gives every job an `origin`, with the `file` and `line` of its step, where version 8 left it `null` for a step written in the pipeline. |
+| `version` | The format's version, `10`. A change a reader must know about raises it. Version 6 added each job's [`checks`](#checks). Version 7 added `pipeline_files`, `calls` and each job's `origin`: see [Where jobs come from](#where-jobs-come-from). Version 8 gives each job its [`commands`](#commands) in place of version 7's `command`, each with its `stdin` and `stdout`, see [Standard input and output](#standard-input-and-output), and added its `cores` and `memory`, see [Cores and memory](#cores-and-memory). Version 9 gives every job an `origin`, with the `file` and `line` of its step, where version 8 left it `null` for a step written in the pipeline. Version 10 added `pipeline_folder` and the `here` command part. |
 | `generator` | The program that wrote the file, and its version. |
 | `root` | The absolute dataset folder that every path is relative to, or `null` when it was not known: a `.spitout` that records no root. |
 | `external_inputs` | Every artifact a job reads but no job writes, once each: the sources. Ordered by path in natural order, the order `many` inputs take, so `wave2` comes before `wave10`. |
@@ -32,6 +33,7 @@ A `.spitdag` is one JSON object, followed by a newline:
 | `executables` | The program each command, `verify` command and check starts with, once each, in text order. A command whose first word is a path names no program and is left out. A backend can check these are installed before running anything. |
 | `removed` | What the input stage left out of the dataset, and why: see [Removal](#removal). `[]` when nothing was. |
 | `left_out` | Outputs whose jobs could not be planned, each with its reasons: see [Left out](#left-out). `[]` for a complete plan. |
+| `pipeline_folder` | The absolute path of the folder holding the pipeline's own file, which a [`here` part](#commands) is under; `null` when SPIT did not read the pipeline from a file. |
 | `pipeline_files` | Every file the pipeline was read from, with its git blob id: see [Where jobs come from](#where-jobs-come-from). |
 | `calls` | Every call to an operation carried out by steps: see [Where jobs come from](#where-jobs-come-from). `[]` for a pipeline that makes none. |
 | `jobs` | Every job, each after the jobs it depends on. |
@@ -150,6 +152,14 @@ That is four arguments: `tool`, `--in=in/1.txt`, `-o` and `out/1.txt`. A `many` 
 ```
 
 Use the `dir` or `stem` text as the part, as a `path` part is used. Version 4 added these two parts; a reader written for version 3 does not know them.
+
+`{@here}` in a template, the folder of the file that declares the operation, becomes a `here` part holding that folder relative to `pipeline_folder`, `""` for `pipeline_folder` itself:
+
+```json
+[["python3"], [{"here": "libs"}, "/scripts/table.py"]]
+```
+
+Use `pipeline_folder`, then `/` and the part's text unless it is empty, as the part's text. A part is written relative so that the [fingerprint](#fingerprint), which hashes the commands as written, does not change when the pipeline moves. Version 10 added this part; a reader written for version 9 does not know it.
 
 Run each argument as one word, exactly as given: no shell is involved, so nothing in it is split, expanded or interpreted. Resolve each path against `root`, or run the command from `root`, where the relative paths name the right files.
 
