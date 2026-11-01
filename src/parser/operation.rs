@@ -83,7 +83,7 @@ pub(super) fn parse_operation(line: &str, number: usize) -> Result<OperationDef,
         minimum = minimum.or(at_least);
         ports.push(port);
     }
-    let shape_rule = shape_rule(&ports, number)?;
+    let shape_rule = shape_rule(&ports);
     check_beside(&ports, &outputs, line, number)?;
     if let Some((count, clause)) = clauses.min {
         return Err(misplaced_minimum(name, &inputs, &ports, line, count, number).at_token(clause));
@@ -386,23 +386,16 @@ fn suggested_name(type_text: &str) -> String {
     }
 }
 
-/// Whether an operation aggregates, which it does with one many input.
-fn shape_rule(ports: &[InputPort], number: usize) -> Result<ShapeRule, ParseError> {
+/// Whether an operation aggregates, which it does with a many input.
+fn shape_rule(ports: &[InputPort]) -> ShapeRule {
     let many = ports
         .iter()
-        .filter(|port| port.cardinality == Cardinality::Many)
-        .count();
-    if many > 1 {
-        return Err(ParseError::new(
-            number,
-            "an operation takes at most one `many` input; each job groups one collection",
-        ));
-    }
-    Ok(if many == 1 {
+        .any(|port| port.cardinality == Cardinality::Many);
+    if many {
         ShapeRule::Aggregate
     } else {
         ShapeRule::Preserve
-    })
+    }
 }
 
 /// Parse an operation's output: one type, or `(name: Type, ...)` for

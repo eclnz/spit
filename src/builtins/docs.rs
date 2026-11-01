@@ -178,7 +178,7 @@ pub static DOCS: [Doc; 55] = [
         kind: "keyword",
         anchor: "operations-and-commands",
         example: "operation mean(images: many Image) -> Image\naverage = mean(processed @vary(run))",
-        summary: "A port that collects several artifacts into one job. Each call names the dimensions it collects with `@vary(...)`. Its placeholder becomes one quoted argument per artifact, in the pipeline's dimension order, and must be a whole argument. An operation takes at most one `many` input.",
+        summary: "A port that collects several artifacts into one job. Each call names the dimensions it collects with `@vary(...)`. Its placeholder becomes one quoted argument per artifact, in the pipeline's dimension order, and must be a whole argument. An operation may take several, when their calls vary over the same dimensions: each job gets one collection of each, paired by position.",
     },
     Doc {
         name: "beside",
