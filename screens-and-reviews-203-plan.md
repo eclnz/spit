@@ -36,8 +36,8 @@ branch of the same name.
 
 ```mermaid
 flowchart LR
-    recipe[".spitin<br/>review x from f.csv"] --> rules["InputRules::review_files"]
-    rules --> read["read_review_files"]
+    recipe[".spitin<br/>review x from f.csv"] --> rules["InputRules::reviews"]
+    rules --> read["read_verdicts"]
     read --> inventory["SourceInventory::verdicts<br/>written in the .spitout"]
     inventory --> resolve["resolve"]
     pipeline["Pipeline::reviews<br/>and each @review"] --> resolve
@@ -95,12 +95,53 @@ flowchart LR
 
 ### Steps
 
-- [ ] Parse `review`, `@review(...)`, `default review:` and the recipe rule.
-- [ ] Remove `exclude from`, keeping its CSV reader for review files.
-- [ ] Read review files into the inventory, and write them in the `.spitout`.
-- [ ] Withhold in the resolver; notes in `dag` and `artifacts`.
-- [ ] Documentation and examples.
-- [ ] spit-vscode.
+- [x] Parse `review`, `@review(...)`, `default review:` and the recipe rule (3678ffd).
+- [x] Remove `exclude from`, keeping its CSV reader for review files (3678ffd).
+- [x] Read review files into the inventory, and write them in the `.spitout` (3678ffd).
+- [x] Withhold in the resolver; notes in `dag` and `artifacts` (3678ffd).
+- [x] Documentation and examples (3678ffd). No example used `exclude from`.
+- [x] spit-vscode: branch `claude/screens-and-reviews` of spit-vscode, commit f965642.
+
+### Decisions made while building
+
+- **Verdict rows alone go in the `.spitout`.** Rejections, held artifacts and
+  unmatched rows depend on the artifacts the plan makes, outputs included,
+  which exist only once jobs are resolved. `dag` and `artifacts` work them
+  out from the rows and note them; `ArtifactReport::withheld` and
+  `unmatched_verdicts` carry them. The `.spitdag` is unchanged.
+- **The review file is checked when the input stage reads it.** The columns
+  and the conflicts between rows are checked then, from the pipeline alone;
+  a `.spitout` read as it is has its rows parsed, not checked again.
+- **Rows conflict by what they could judge, not by what exists.** Two rows
+  that agree on every dimension both give, with different verdicts, are an
+  error even when no artifact has those values, so a conflict does not come
+  and go with the data.
+- **A review attached to nothing accepts any dimension column.** There is no
+  product to check the column against; its rows match no artifact.
+- **`@review(!name)` drops a default on an output only, and `default review:`
+  covers outputs only**, as `default check:` does. A source or an input port
+  opts out of nothing.
+- **A review is imported with the operations and sources that attach it**,
+  and takes `alias::` with `as`, as a check does. A recipe names such a
+  review as `review lib::looked_at from file.csv`.
+- **A review names one file.** A second `review name from` line is an error.
+- **A verdict is exactly `pass` or `fail`**, in lower case.
+- **A review whose file is missing** gives a note from `spit inputs`
+  (`has no verdicts yet`) and holds back everything it judges.
+- **A `one` input whose artifact is withheld leaves its job out even when
+  another input has a gap**, because the job would not run in any case.
+- **With several `many` inputs, a member dropped from one drops the member
+  with the same `vary` values from the others**, so `{summaries}` and
+  `{summaries.sub}` stay paired and no `MissingInput` follows.
+- **An artifact is noted once for each step and port** that a review on an
+  input port keeps it from, however many jobs of the step would read it.
+- **A source a review withholds is not listed as used by no job.**
+- **No hover for a review declaration.** `check --json --hovers` gains the
+  words `review`, `review-clause`, `review-from` and `verdicts:` only, which
+  the extension shows without a change.
+- **spit-vscode's test run has four failures on `dev` too** (the tests at
+  `extension.test.js` that check output-path hints and three hovers); they
+  are not caused by this change.
 
 ## Phase 2: screens
 
