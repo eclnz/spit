@@ -55,6 +55,32 @@ fn unmatched_files_are_counted_and_can_be_listed_without_an_inventory() {
 }
 
 #[test]
+fn hidden_folders_are_not_scanned_unless_a_rule_names_them() {
+    let tree = Tree::new(
+        "hidden-folders",
+        &[
+            "data/in/a.txt",
+            "data/.runner/logs/1.log",
+            "data/.cache/b.txt",
+        ],
+    );
+    tree.write(
+        "pipeline.spit",
+        "source x [s]\nsource y [s]\npath x: in/{s}.txt\npath y: .cache/{s}.txt\n",
+    );
+    let recipe = tree.write("recipe.spitin", "pipeline pipeline.spit\nroot data\n");
+    let listing = spit(&["inputs", recipe.to_str().unwrap(), "--unmatched"]);
+    assert!(listing.status.success(), "{}", text(&listing.stderr));
+    assert_eq!(text(&listing.stdout), "");
+    let regular = spit(&["inputs", recipe.to_str().unwrap()]);
+    assert!(
+        text(&regular.stdout).contains("y[s=b]"),
+        "{}",
+        text(&regular.stdout)
+    );
+}
+
+#[test]
 fn many_unmatched_files_are_counted_by_extension() {
     let tree = Tree::new(
         "unmatched-by-extension",

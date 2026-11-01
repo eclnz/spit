@@ -103,7 +103,22 @@ source meta : Json .json beside raw
 path raw: photos/{site}/{shot}.raw
 ```
 
-The companion inherits the main source's dimensions and path stem; a recipe can instead provide `path raw: ...` for the main source. If a companion is missing for an identity, SPIT warns. An output declared `beside` another output is written by the same job. See [sidecar files](../language-reference.md#sidecar-files).
+The companion inherits the main source's dimensions and path stem. A recipe can give the main source's path in its `inputs:` block instead of the pipeline:
+
+<!-- spit-doc: recipe
+pipeline photos.spit
+root data
+--- photos.spit
+source raw : Image .raw [site, shot]
+source meta : Json .json beside raw
+-->
+
+```spit
+inputs:
+    raw: photos/{site}/{shot}.raw
+```
+
+If a companion is missing for an identity, SPIT warns. An output declared `beside` another output is written by the same job. See [sidecar files](../language-reference.md#sidecar-files).
 
 A source path placeholder can restrict the values it reads: `{run:digits}`, `{year:year}`, and `{date:date}` accept digits, four-digit years from 1900 to 2099, and real `YYYY-MM-DD` dates respectively. Shapes belong only on paths that read sources or discover directories. See [shapes on a source placeholder](../language-reference.md#shapes-on-a-source-placeholder).
 
