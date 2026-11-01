@@ -50,7 +50,24 @@ operation summarise(days: many Series @min(2)) -> Report
 report = summarise(calibrated @vary(day))
 ```
 
-`@vary(day)` collects the input's days for each remaining identity, such as each station, and removes `day` from the output identity. `many` names the operation port's cardinality; `@vary` names the dimension the call collects. `@min(2)` rejects a collection smaller than two. A collection is sorted by the pipeline's dimension order, with numeric runs ordered naturally (`2` before `10`). One operation can have at most one `many` input, beside ordinary inputs that are matched once per group. `@vary(model, config)` collects over both dimensions in one call.
+`@vary(day)` collects the input's days for each remaining identity, such as each station, and removes `day` from the output identity. `many` names the operation port's cardinality; `@vary` names the dimension the call collects. `@min(2)` rejects a collection smaller than two. A collection is sorted by the pipeline's dimension order, with numeric runs ordered naturally (`2` before `10`). An operation can have `many` inputs beside ordinary inputs that are matched once per group. `@vary(model, config)` collects over both dimensions in one call.
+
+An operation can collect two products side by side, such as each region's heights and slopes. Both calls vary over the same dimensions, so each job gets both collections, and the two placeholders expand in the same order:
+
+<!-- spit-doc: setup
+source heights : Json [region, tile]
+source slopes : Json [region, tile]
+default entities: {@key}={@value} separated "_"
+default path: out/{@product}/{@entities}
+-->
+
+```spit
+operation table(heights: many Json, slopes: many Json) -> Json
+command table: python3 table.py {heights} {slopes} > {@output}
+summary = table(heights @vary(tile), slopes @vary(tile))
+```
+
+Both products must have the same dimensions and the same `@vary`, and neither takes `@same` or `@each`. A tile one product has and the other lacks is an error that names it.
 
 ## Broadcasting
 

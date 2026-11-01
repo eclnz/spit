@@ -338,7 +338,10 @@ fn every_input_port_has_a_name() {
     let pipeline = parse_pipeline(
         "operation f(image, frames: many, mask: Mask, scans: many Scan<S>) -> Out\n",
     );
-    assert!(pipeline.is_err(), "one many input per operation");
+    assert!(
+        pipeline.is_ok(),
+        "an operation may take several many inputs"
+    );
     let pipeline =
         parse_pipeline("operation f(image, mask: Mask, scans: many Scan<S>) -> Out\n").unwrap();
     let ports: Vec<_> = pipeline.operations[0]
