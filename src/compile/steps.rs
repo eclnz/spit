@@ -25,6 +25,9 @@ pub(crate) struct StepShape {
     pub(crate) groups: Vec<String>,
     /// For each binding, the dimensions it is matched to the context on.
     pub(crate) joins: Vec<Vec<String>>,
+    /// The dimensions an aggregate step's many inputs vary over, which tell
+    /// the artifacts of one group apart; empty for a preserve step.
+    pub(crate) varied: Vec<String>,
 }
 
 /// Check each binding's selectors against its port and product, then find
@@ -51,6 +54,7 @@ pub(super) fn step_shape(
     };
     check_broadcasts(operation, &inputs, driver, &groups)?;
     let context = step_context(&inputs, &groups);
+    check_paired_collections(operation, &inputs, driver)?;
     check_vary(operation, &inputs, driver, &context)?;
     check_output_dimensions(operation, &inputs, driver, &groups, &context, outputs)?;
     let joins = inputs
@@ -59,21 +63,35 @@ pub(super) fn step_shape(
         .map(|(index, input)| {
             if index == driver {
                 input.dimensions.clone()
+            } else if input.many {
+                // Another collection, which takes the driver's group.
+                groups.clone()
             } else {
                 input.joins()
             }
         })
         .collect::<Vec<_>>();
+    let varied = if inputs[driver].many {
+        inputs[driver]
+            .dimensions
+            .iter()
+            .filter(|dimension| !groups.contains(dimension))
+            .cloned()
+            .collect()
+    } else {
+        Vec::new()
+    };
     check_beside_inputs(operation, &inputs, &joins, &context)?;
     Ok(StepShape {
         driver,
         groups,
         joins,
+        varied,
     })
 }
 
 /// A preserve operation takes only single-artifact inputs; an aggregate
-/// one takes exactly one many input.
+/// one takes at least one many input.
 fn check_shape_rule(
     operation: &OperationDef,
     inputs: &[BoundInput<'_>],
@@ -95,12 +113,48 @@ fn check_shape_rule(
             }
         }
         ShapeRule::Aggregate => {
-            if many_ports != 1 {
+            if many_ports == 0 {
                 return Err(unsupported(
                     operation,
-                    "aggregation requires exactly one many-artifact port",
+                    "aggregation requires a many-artifact port",
                 ));
             }
+        }
+    }
+    Ok(())
+}
+
+/// Another many input is a collection of the same groups as the driver's:
+/// it has the driver's dimensions, varies over the same ones, and is not
+/// matched or broadcast on its own terms, so each job pairs the artifacts of
+/// the two by position.
+fn check_paired_collections(
+    operation: &OperationDef,
+    inputs: &[BoundInput<'_>],
+    driver: usize,
+) -> Result<(), ResolveError> {
+    if !inputs[driver].many {
+        return Ok(());
+    }
+    let driving = inputs[driver].binding;
+    for (index, input) in inputs.iter().enumerate() {
+        if !input.many || index == driver {
+            continue;
+        }
+        let binding = input.binding;
+        let same = dimension_set(&input.dimensions) == dimension_set(&inputs[driver].dimensions)
+            && dimension_set(&binding.vary) == dimension_set(&driving.vary);
+        if !same || binding.same.is_some() || !binding.each.is_empty() {
+            return Err(unsupported(
+                operation,
+                format!(
+                    "many inputs `{}` and `{}` must vary over the same dimensions, so that each job pairs their artifacts: [{}] and [{}]; `@same(...)` and `@each(...)` do not go on them",
+                    driving.product,
+                    binding.product,
+                    inputs[driver].dimensions.join(", "),
+                    input.dimensions.join(", "),
+                ),
+            ));
         }
     }
     Ok(())
@@ -123,7 +177,7 @@ fn check_vary(
     let unmatched = inputs
         .iter()
         .enumerate()
-        .filter(|(index, _)| *index != driver)
+        .filter(|(index, input)| *index != driver && !input.many)
         .map(|(_, input)| (input, missing_from(&input.joins(), &grouped)))
         .find(|(_, extra)| !extra.is_empty());
     match unmatched {

@@ -49,7 +49,8 @@ pub(super) fn operation_signature(operation: &OperationDef) -> String {
     let inputs = operation
         .inputs
         .iter()
-        .map(|port| {
+        .enumerate()
+        .map(|(index, port)| {
             let many = port.cardinality == Cardinality::Many;
             let mut text = format!(
                 "{}: {}{}",
@@ -57,8 +58,14 @@ pub(super) fn operation_signature(operation: &OperationDef) -> String {
                 if many { "many " } else { "" },
                 port.artifact_type
             );
-            // An operation has at most one many input, which its minimum counts.
-            if let (true, Some(minimum)) = (many, operation.minimum_collection) {
+            // The minimum counts the artifacts of a job's collection, which
+            // every many input holds the same number of; the first shows it.
+            let first = operation
+                .inputs
+                .iter()
+                .position(|input| input.cardinality == Cardinality::Many)
+                == Some(index);
+            if let (true, Some(minimum)) = (first, operation.minimum_collection) {
                 let _ = write!(text, " @min({minimum})");
             }
             text.push_str(&checks_text(&port.checks));
