@@ -55,23 +55,6 @@ pub fn diagnose_recipe(text: &str, path: &Path) -> Vec<Diagnostic> {
                     }
                 }
             }
-            // The rows of files `exclude from` lines name are read with the
-            // recipe at its path, not with its text; each error says where.
-            let rows = InputRules {
-                exclusions: spec
-                    .rules
-                    .exclusions
-                    .iter()
-                    .filter(|rule| !rule.origin.starts_with("line "))
-                    .cloned()
-                    .collect(),
-                ..InputRules::default()
-            };
-            diagnostics.extend(
-                collect_exclusion_errors(&PipelineIndex::new(&checked.pipeline), &rows)
-                    .into_iter()
-                    .map(|(_, problem)| error(problem.to_string())),
-            );
             if let Some(warning) = missing_root(spec.root.as_ref(), text) {
                 diagnostics.push(warning);
             }
@@ -159,6 +142,7 @@ pub fn diagnose_recipe_against(text: &str, pipeline: &Pipeline) -> Vec<Diagnosti
                     lines.rules.get(*index).map(Rule::dimensions)
                 }
                 DefinitionSubject::Exclusion(index) => lines.exclusions.get(*index).cloned(),
+                DefinitionSubject::ReviewFile(index) => lines.review_files.get(*index).cloned(),
                 _ => None,
             };
             Diagnostic::error(DiagnosticSource::Pipeline, place, error.to_string())

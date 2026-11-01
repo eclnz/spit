@@ -1,7 +1,7 @@
 //! The input stage: settle which contexts and sources a dataset holds.
 //!
-//! It reads a `.spitin` recipe of `inputs:`, `exclude`, `require` and source
-//! path rules, and the pipeline's source declarations. It scans a root or
+//! It reads a `.spitin` recipe of `inputs:`, `exclude`, `require`, `review` and
+//! source path rules, and the pipeline's source declarations. It scans a root or
 //! takes records already written, and returns a plain inventory with what it
 //! removed and what the `require` rules find missing. Resolving jobs needs
 //! nothing else from it.
@@ -11,6 +11,7 @@ mod discover;
 mod exclusions;
 mod pattern;
 mod recipe;
+mod reviews;
 mod variants;
 
 use std::borrow::Cow;
@@ -39,11 +40,12 @@ pub(crate) use self::coverage::{check_inventory, InputCheck};
 pub(crate) use self::discover::with_source_paths;
 use self::discover::{discover, locate_sources};
 pub use self::discover::{discover_source_files, discover_sources, Discovery};
-pub(crate) use self::exclusions::collect_exclusion_errors;
+use self::exclusions::Excluder;
 pub use self::exclusions::UnmatchedExclusion;
-use self::exclusions::{read_exclusion_files, Excluder};
 pub use self::pattern::{MissedSource, NearestFile};
 use self::recipe::{expand_input_block, restore_path_places};
+pub use self::reviews::ReviewFileError;
+use self::reviews::{read_review_files, read_verdicts};
 pub use self::variants::{case_variants, CaseVariants, Spelling};
 
 /// A recipe's rules and any inventory records written with them.
@@ -64,7 +66,7 @@ pub fn parse_input_spec(text: &str) -> Result<InputSpec, ParseError> {
     let (header, document) = parse_recipe(text, |text| {
         parse_document_with_imports(text, &BTreeMap::new(), Kind::Recipe)
     })?;
-    // Files an `exclude from` line names are read from the working folder.
+    // Files a `review ... from` line names are read from the working folder.
     finish_spec(document, header, Some(Path::new("")))
 }
 
@@ -89,8 +91,7 @@ pub(crate) fn parse_recipe_lines(text: &str) -> Result<(InputSpec, SourceMap), P
         parse_document_with_imports(text, &BTreeMap::new(), Kind::Recipe)
     })?;
     let lines = std::mem::take(&mut document.lines);
-    // Its `exclude from` files are left unread: its rules' places are the
-    // lines of the recipe, and a file's rows have none there.
+    // Its review files are left unread: it is diagnosed from its text alone.
     Ok((finish_spec(document, header, None)?, lines))
 }
 
@@ -243,7 +244,7 @@ fn finish_spec(
     inputs.source_default = pipeline.path_template;
     inputs.source_entities = pipeline.entities_format;
     if let Some(folder) = folder {
-        read_exclusion_files(&mut inputs, folder)?;
+        read_review_files(&mut inputs, folder)?;
     }
     Ok(InputSpec {
         pipeline: header.pipeline,
@@ -389,6 +390,10 @@ impl InputSpec {
                 }
             };
         merge_source_paths(pipeline, &source_paths, &mut inventory)?;
+        // After any verdicts the inventory already held, as a .spitout does.
+        inventory
+            .verdicts
+            .extend(read_verdicts(pipeline, &self.rules).map_err(InputError::ReviewFile)?);
         let located = with_source_paths(pipeline, &inventory.source_paths);
         inspect_paths(&located)?;
         let checked = check_inventory(pipeline, &self.rules, Cow::Owned(inventory))?;
@@ -604,6 +609,9 @@ pub enum InputError {
     InventoryPathInBoth { product: String },
     /// An `exclude` rule matches nothing in the dataset.
     UnmatchedExclusion(UnmatchedExclusion),
+    /// A review's file is malformed, or names a column the review's
+    /// products do not have.
+    ReviewFile(ReviewFileError),
     /// conditional `exclude` rules remove every group of a grouping.
     EveryGroupDropped(EveryGroupDropped),
 }
@@ -658,6 +666,7 @@ impl fmt::Display for InputError {
                 "source `{product}` has path rules in both .spit and .spitout"
             ),
             Self::EveryGroupDropped(emptied) => emptied.fmt(f),
+            Self::ReviewFile(error) => error.fmt(f),
             Self::UnmatchedExclusion(unmatched) => {
                 write!(
                     f,

@@ -69,7 +69,26 @@ exclude [sub] where contexts[sub,ses] count<2
 require [sub, ses] where t1w count=1
 ```
 
-`exclude` removes named artifacts or groups, or every group meeting a condition, while their files remain on disk. `require` fails when a retained group lacks the required count or values. Named exclusions apply first, then conditional exclusions, then requirements, regardless of line order. `exclude from qc/excluded.csv` can read a list of exclusions. The [recipe reference](../language-reference.md#recipes), [conditional exclusion](../language-reference.md#exclude-groups-that-meet-a-condition), and [constraints](../language-reference.md#constraints) sections give the full syntax and failure rules.
+`exclude` removes named artifacts or groups, or every group meeting a condition, while their files remain on disk. `require` fails when a retained group lacks the required count or values. Named exclusions apply first, then conditional exclusions, then requirements, regardless of line order. The [recipe reference](../language-reference.md#recipes), [conditional exclusion](../language-reference.md#exclude-groups-that-meet-a-condition), and [constraints](../language-reference.md#constraints) sections give the full syntax and failure rules.
+
+## Reviews
+
+`exclude` leaves data out for a reason the recipe states. A judgement a person makes about an artifact, such as a scan that looks wrong, is a [review](../language-reference.md#reviews): the pipeline declares it and says what it judges, and the recipe names the file the verdicts are in.
+
+<!-- spit-doc: recipe
+--- analysis.spit
+review looked_at
+source t1w : T1 [sub] @review(looked_at)
+path t1w: sub-{sub}/t1w.nii.gz
+-->
+
+```spit
+pipeline analysis.spit
+root data
+review looked_at from qc/looked_at.csv
+```
+
+Each row of the CSV file gives a `verdict`, `pass` or `fail`, to the artifacts whose dimensions it names. A passed artifact is used as usual. A failed one, and one nobody has judged yet, is kept from the steps the review covers, and `spit dag` notes each on stderr without failing. A review whose file does not exist yet has no verdicts, so it holds back everything it judges until a person fills it in.
 
 ## Inventories
 
@@ -83,6 +102,6 @@ sources:
     shard[group=alpha,part=02]
 ```
 
-`spit dag pipeline.spit dataset.spitout` uses those records. A `.spitout` may also hold a `root`, `source_paths:`, `contexts`, and `removed:` records. A printed or hand-written inventory without `root` does not make `dag` check that source files exist. The [inputs reference](../language-reference.md#inputs) describes the complete format.
+`spit dag pipeline.spit dataset.spitout` uses those records. A `.spitout` may also hold a `root`, `source_paths:`, `contexts`, `removed:` and `verdicts:` records. A printed or hand-written inventory without `root` does not make `dag` check that source files exist. The [inputs reference](../language-reference.md#inputs) describes the complete format.
 
 Next: [Plans](inspection.md).

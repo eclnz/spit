@@ -23,6 +23,7 @@ mod paths;
 mod render;
 mod resolver;
 mod resources;
+mod review;
 mod shape;
 mod span;
 mod spitdag;
@@ -45,17 +46,18 @@ pub use imports::parse_pipeline_at;
 pub use inputs::{
     case_variants, discover_source_files, discover_sources, parse_input_spec, parse_input_spec_at,
     CaseVariants, Discovery, EveryGroupDropped, InputError, InputSource, InputSpec, MissedSource,
-    NearestFile, ResolvedInputs, Spelling, UnmatchedExclusion,
+    NearestFile, ResolvedInputs, ReviewFileError, Spelling, UnmatchedExclusion,
 };
 pub use lower::parse_pipeline;
 pub use model::{
     stage_within, Artifact, ArtifactId, ArtifactInstance, ArtifactKey, ArtifactReport,
     ArtifactType, Artifacts, Beside, BesideFile, BodyStep, Call, CallId, Cardinality, CommandDef,
     CommandRole, ContextPattern, CountRequirement, CoverageAction, CoverageGap, CoverageRule,
-    DagStep, DimensionOrders, EntityBinding, Exclusion, Gap, IncompleteJob, InputBinding,
-    InputPort, InputRules, Invocation, Job, JobId, OperationDef, OutputPort, Pipeline, Port,
-    ProductDef, Removal, ResolvedDag, Resources, ResourcesDef, ShapeRule, SidecarGroup, SourceFile,
-    SourceInventory, SourceRecord, StageDef, StepId, StepOrigin, StepOutput, TypeChecking,
+    DagStep, DefaultReviews, DimensionOrders, EntityBinding, Exclusion, Gap, IncompleteJob,
+    InputBinding, InputPort, InputRules, Invocation, Job, JobId, Judged, OperationDef, OutputPort,
+    Pipeline, Port, ProductDef, Removal, ResolvedDag, Resources, ResourcesDef, ReviewDef,
+    ReviewFile, ShapeRule, SidecarGroup, SourceFile, SourceInventory, SourceRecord, StageDef,
+    StepId, StepOrigin, StepOutput, TypeChecking, UnmatchedVerdicts, Verdict, VerdictRow, Withheld,
 };
 pub use parser::{parse_source_inventory, render_source_inventory, ParseError, ParseErrorKind};
 pub use paths::{

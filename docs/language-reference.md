@@ -4,7 +4,7 @@ This manual defines valid `.spit` pipelines, `.spitin` recipes, and `.spitout` i
 
 A `#` that starts a word begins a comment, as in Bash. A `#` inside a word or in quotes is kept, so `--color=#fff` and `'#run'` are ordinary arguments.
 
-A line's first word says what it is, so the words that start statements are reserved: no product, whether a source or a step's output, may be named `use`, `root`, `source`, `discover`, `operation`, `command`, `verify`, `resources`, `check`, `require`, `exclude`, `path`, `ext`, `default`, `entities`, `stage` or `dimensions`, nor `drop`, `skip` or `sidecars`. Those three, and `shell-source`, start a line only to give an error that says what to write instead. `check = clean(raw)` is an error that says so.
+A line's first word says what it is, so the words that start statements are reserved: no product, whether a source or a step's output, may be named `use`, `root`, `source`, `discover`, `operation`, `command`, `verify`, `resources`, `check`, `review`, `require`, `exclude`, `path`, `ext`, `default`, `entities`, `stage` or `dimensions`, nor `drop`, `skip` or `sidecars`. Those three, and `shell-source`, start a line only to give an error that says what to write instead. `check = clean(raw)` is an error that says so.
 
 ## Keyword blocks
 
@@ -33,7 +33,7 @@ command:
     denoise: dn {image} {@output}
 ```
 
-`source:`, `operation:`, `command:`, `verify:`, `resources:`, `check:` and `path:` open blocks in a pipeline, and `path:`, `require:` and `exclude:` in a recipe. An entry is read as its keyword's statement would be, with the same errors on its own line; a `source:` block inside a stage is an error at each entry, as a `source` line there is. The entries of a block share one indentation, and the next line that is not indented beneath the keyword ends it. In an `operation:` block, an entry that ends in `:` opens the [body of steps](#operations-carried-out-by-steps) that carries it out, indented beneath the entry, and in a `command:` block, the [lines of a command](#commands-of-several-lines), as `command sort:` does. [Defaults](#defaults) have a block of their own, `default:`, and a stage's lines are a block of their own too.
+`source:`, `operation:`, `command:`, `verify:`, `resources:`, `check:`, `review:` and `path:` open blocks in a pipeline, and `path:`, `require:`, `exclude:` and `review:` in a recipe. An entry is read as its keyword's statement would be, with the same errors on its own line; a `source:` block inside a stage is an error at each entry, as a `source` line there is. The entries of a block share one indentation, and the next line that is not indented beneath the keyword ends it. In an `operation:` block, an entry that ends in `:` opens the [body of steps](#operations-carried-out-by-steps) that carries it out, indented beneath the entry, and in a `command:` block, the [lines of a command](#commands-of-several-lines), as `command sort:` does. [Defaults](#defaults) have a block of their own, `default:`, and a stage's lines are a block of their own too.
 
 ### Statements over several lines
 
@@ -769,6 +769,110 @@ To run less than a wider list sets, write `!` before the check. In a stage, `def
 
 A file or a stage has one `default check:` line. Its checks and the ones it drops must be declared checks, with the right number of arguments. Default checks add no field to the `.spitdag`: each default becomes a check on the artifact, after the job's command, beside the others, and `spit dag --commands` lists it as a `check:` line.
 
+## Reviews
+
+A `review` is a judgement a person makes about an artifact, such as looking at a scan and finding it unusable. Declare it once, with a name and nothing else, attach it with `@review(...)` where it applies, and record the verdicts in a file the recipe names:
+
+```spit
+review looked_at
+
+source t1w : Image .nii.gz [sub] @review(looked_at)
+
+operation summarise(t1w: Image) -> Json .json
+operation table(summaries: many Json) -> Table .csv
+```
+
+<!-- spit-doc: recipe
+--- analysis.spit
+review looked_at
+source t1w : Image .nii.gz [sub] @review(looked_at)
+path t1w: sub-{sub}/t1w.nii.gz
+-->
+
+```text
+pipeline analysis.spit
+root data
+review looked_at from qc/looked_at.csv
+```
+
+```csv
+sub,verdict,reason
+04,fail,ghosting in frontal slices
+06,pass,
+```
+
+A review has no parameters and no command, since SPIT runs nothing for it: `review looked_at: ...` is an error that says so. `review:` opens a block of declarations, as [`check:`](#keyword-blocks) does. An unknown name in `@review(...)` is an error.
+
+`@review(...)` goes where [`@check(...)`](#checks) goes, after a source's dimensions, an input port's type, or an output's type and extension, and names several reviews as `@review(looked_at, second)`. What a review judges depends on where it is attached:
+
+- **On a source or an output,** it judges every artifact of that product for every step that reads it.
+- **On an input port,** it judges what that port reads, and no other step that reads the same product.
+
+A step's product takes no `@review(...)`: attach it to the operation's output. Reviews are global, as checks are: `use` brings in the reviews of the operations and sources it imports, and with `as`, an imported review takes the prefix too, as in `@review(lib::looked_at)`; see [reuse](#reuse-definitions). `default review: looked_at` lists the reviews that judge every output of a file or stage, written, nested and dropped with `!` as [default checks](#default-checks) are, as in `default review: !looked_at` or `-> Table @review(!looked_at)`. It applies to outputs, never to a source or an input port.
+
+### Verdicts
+
+The recipe's `review looked_at from qc/looked_at.csv` names the review's file, relative to the recipe's folder. Each review names one file. The file is a CSV with fields quoted as spreadsheets write them:
+
+- **A column for each dimension** to judge by. A column must be a dimension of every product the review is attached to.
+- **A `verdict` column,** whose cells are `pass` or `fail`.
+- **An optional `reason` column.**
+
+A row judges each artifact whose dimensions have the values the row gives. An empty cell leaves its dimension out, so one row covers every value of it: in a file with `sub`, `ses`, `verdict` and `reason` columns, `04,,fail,withdrew` fails every session of subject 04. Two rows that judge one artifact with different verdicts are an error, found whether or not the artifact exists, so `04,2,pass,` beside that row conflicts with it.
+
+These are errors, each naming the file and line: a column that is not a dimension of every product the review judges, a `verdict` that is not `pass` or `fail`, a row with no dimension value, and rows that conflict. A row that matches no artifact is a note, because a review file is a record of what was judged and often covers more than one run plans: a subset of the data, a reviewer working ahead of the data, or a sheet several pipelines share. The note counts the rows once for the file, as in `note: 12 verdicts in qc/looked_at.csv match no artifact (lines 6–17)`. A recipe that names a review the pipeline does not declare is an error.
+
+A review with no `review ... from` line in the recipe, or whose file does not exist yet, has no verdicts. That is no error: nobody has judged yet.
+
+### What a verdict does
+
+SPIT reads the review files when it makes the plan, so a review needs nothing from the `.spitdag` or the runner. An artifact the review judges is:
+
+- **Passed,** when a row says `pass`: it is used as usual.
+- **Rejected,** when a row says `fail`.
+- **Held,** when no row judges it.
+
+A rejected or held artifact is withheld from the readers its review covers. The job that makes a reviewed output still runs, so the steps that make what a person judges, such as pictures and summaries, can read every artifact. Then:
+
+- A job that reads a withheld artifact through a single-artifact input is left out, and its outputs are withheld in turn.
+- A job with a `many` input takes the members that remain, and has no job when none remain. `@min(count)` is checked on the members that remain.
+
+Withheld artifacts are not incomplete: `spit dag` succeeds, and `--partial` is not needed. `spit dag` and `spit artifacts` note each rejection and each held artifact on stderr, with the reason and the file and line of the row:
+
+<!-- spit-doc: output
+spit dag dataset.spitin --jobs
+--- analysis.spit
+review looked_at
+source t1w : Image [sub] @review(looked_at)
+path t1w: sub-{sub}/t1w.nii
+operation summarise(t1: Image) -> Json
+operation table(summaries: many Json) -> Table
+path summaries: out/{sub}.json
+path result: out/table.csv
+summaries = summarise(t1w)
+result = table(summaries @vary(sub))
+--- dataset.spitin
+pipeline analysis.spit
+root .
+review looked_at from qc/looked_at.csv
+--- qc/looked_at.csv
+sub,verdict,reason
+01,pass,
+02,fail,ghosting in frontal slices
+07,pass,
+--- sub-01/t1w.nii
+--- sub-02/t1w.nii
+--- sub-03/t1w.nii
+-->
+
+```text
+note: review `looked_at` rejected t1w[sub=02] (qc/looked_at.csv line 3): ghosting in frontal slices
+note: review `looked_at` holds back t1w[sub=03]: no verdict yet
+note: 1 verdict in qc/looked_at.csv matches no artifact (line 4)
+```
+
+`spit inputs` writes each row of the files into the `.spitout`'s [`verdicts:`](#inputs) section, so a DAG made from the `.spitout` is made from the same verdicts. A row is not an `exclude` rule: it removes nothing from the dataset, and the files stay where they are. To leave data out for a reason that is not a judgement, use [`exclude`](#exclude-named-artifacts).
+
 ## Defaults
 
 `default` sets something for every output of the file, or of the [stage](#stages) it is written in, that has no setting of its own:
@@ -796,9 +900,10 @@ stage preprocess:
 - `default path:` is the [path rule](#paths) for products with none of their own.
 - `default ext:` is the [extension](#extensions) that completes a default path rule.
 - `default check:` lists the [checks](#default-checks) every output runs.
+- `default review:` lists the [reviews](#reviews) that judge every output.
 - `default entities:` [spells `{@entities}`](#entity-formatting) for the products it covers.
 
-`default:` opens a block of them: each line indented beneath it is a `path:`, `ext:`, `check:` or `entities:` line, read as if `default` came before it, and nothing else belongs there. A default outside every stage covers the whole file, stages included; one inside a stage covers that stage and the stages nested in it. For a path, an extension or an entities spelling the nearest one wins, and check lists add up. A file or a stage sets each default once, whether on its own line or in a block. In a `.spitin` recipe, `default path:` is the rule for sources with none of their own and `default entities:` spells the rules the recipe gives; `default ext:` and `default check:` belong in the pipeline.
+`default:` opens a block of them: each line indented beneath it is a `path:`, `ext:`, `check:`, `review:` or `entities:` line, read as if `default` came before it, and nothing else belongs there. A default outside every stage covers the whole file, stages included; one inside a stage covers that stage and the stages nested in it. For a path, an extension or an entities spelling the nearest one wins, and check lists add up. A file or a stage sets each default once, whether on its own line or in a block. In a `.spitin` recipe, `default path:` is the rule for sources with none of their own and `default entities:` spells the rules the recipe gives; `default ext:`, `default check:` and `default review:` belong in the pipeline.
 
 A `path:`, `ext:`, `check:` or `entities:` line without `default`, outside a `default:` block, is an error that says how to write it.
 
@@ -867,7 +972,7 @@ A step outside every stage stays valid.
 
 ## Reuse definitions
 
-Import operations, source families and [checks](#checks) from another `.spit` file. The path is relative to the file containing the `use` line. An operation brings its `command`; a source brings its path rule; either brings the checks it attaches. A source with companions declared [`beside`](#sidecar-files) it brings those companions with it. A companion cannot be imported alone: import its main source. A recipe names an imported main source as `text::raw_photo` when the import uses `as text`. An [operation carried out by steps](#operations-carried-out-by-steps) brings the operations its steps call. Imports do not bring pipeline steps.
+Import operations, source families, [checks](#checks) and [reviews](#reviews) from another `.spit` file. The path is relative to the file containing the `use` line. An operation brings its `command`; a source brings its path rule; either brings the checks and reviews it attaches. A source with companions declared [`beside`](#sidecar-files) it brings those companions with it. A companion cannot be imported alone: import its main source. A recipe names an imported main source as `text::raw_photo` when the import uses `as text`. An [operation carried out by steps](#operations-carried-out-by-steps) brings the operations its steps call. Imports do not bring pipeline steps.
 
 <!-- spit-doc: setup
 default entities: {@key}={@value} separated "_"
@@ -1241,7 +1346,7 @@ exclude [sub] where contexts[sub,ses] count<2
 require [sub, ses] where image count=1
 ```
 
-A recipe may contain `inputs:`, `exclude` and `require` rules, `path product:` rules for source products, a `default path:` rule for its sources, and `sources:`/`contexts:` records. It cannot declare sources, operations, steps, commands, stages, imports or `default ext:`; the pipeline still declares each logical `source` with its dimensions and optional type. Rules in a pipeline are an error, and so are records.
+A recipe may contain `inputs:`, `exclude`, `require` and `review ... from` rules, `path product:` rules for source products, a `default path:` rule for its sources, and `sources:`/`contexts:` records. It cannot declare sources, operations, steps, commands, stages, imports or `default ext:`; the pipeline still declares each logical `source` with its dimensions and optional type. Rules in a pipeline are an error, and so are records.
 
 A recipe's `default:` entry inside `inputs:` line is the default for every source with no rule of its own, in the pipeline or the recipe. Where a dataset keeps its inputs is the dataset's to say, so the pipeline's `default path:` can say where outputs go, by stage if it likes, and the recipe says where sources are:
 
@@ -1298,7 +1403,7 @@ Rules that count form their groups from every artifact and discovered context in
 
 ### Which file a line belongs in
 
-A `.spit` pipeline is the reusable graph: what work to do and where its results go, for any dataset. A `.spitin` recipe binds that pipeline to one dataset: where its folder is, where its sources are when the pipeline does not say, and which of its data to leave out or require. A small pipeline can include its root and source paths. All selection policy stays in a recipe, regardless of how few lines it takes: even a literal `exclude raw[id=bad]` is recipe-only, as are conditional exclusions and external exclusion lists. The boundary is the declaration's meaning, not its length:
+A `.spit` pipeline is the reusable graph: what work to do and where its results go, for any dataset. A `.spitin` recipe binds that pipeline to one dataset: where its folder is, where its sources are when the pipeline does not say, and which of its data to leave out or require. A small pipeline can include its root and source paths. All selection policy stays in a recipe, regardless of how few lines it takes: even a literal `exclude raw[id=bad]` is recipe-only, as are conditional exclusions and the files that hold a review's verdicts. The boundary is the declaration's meaning, not its length:
 
 | Line | Pipeline | Recipe |
 | --- | --- | --- |
@@ -1308,7 +1413,8 @@ A `.spit` pipeline is the reusable graph: what work to do and where its results 
 | `default path:` | covers outputs, and sources nothing else covers | covers sources only |
 | `root` | either one, not both | either one, not both; otherwise inherits the pipeline root |
 | `pipeline` | no | yes |
-| `discover`, `require`, every `exclude` form, `sources:`, `contexts:` | no | yes |
+| `review name` | yes | no |
+| `discover`, `require`, every `exclude` form, `review name from file`, `sources:`, `contexts:`, `verdicts:` | no | yes |
 
 Put a source's own rule in the pipeline when every dataset for that pipeline shares the layout, and in the recipe when the layout belongs to one dataset. A line in the wrong file is an error that says which file it belongs in, at its line:
 
@@ -1575,31 +1681,7 @@ Named exclusions remove observed artifacts or contexts. A rule matching nothing 
 
 A placeholder in a source rule matches any text within one folder or file name unless it takes a [shape](#shapes-on-a-source-placeholder), as `{date:date}`. Without one, `logs/{server}/{date}.log` reads `logs/web1/notes.log` as `date=notes`: check the count in `note: found N source artifacts`, and leave out a file whose value does not belong with [`exclude`](#exclude-named-artifacts), a shape, or a rule that names more of its path. Files whose whole paths match no source path rule are ignored while scanning. `spit inputs` counts them in a note, naming them when there are at most three and otherwise counting them by extension, leaving out SPIT's own `.spit`, `.spitin`, `.spitout` and `.spitdag` files and any file at a path the pipeline gives one of its outputs, or inside an output folder, such as what an earlier run wrote under the root; `spit inputs dataset.spitin --unmatched` lists their paths relative to the dataset root instead of writing a `.spitout`, even if a `require` rule fails. When a `require` count fails after the scan found no files for its source, `inputs` and `dag` name the path rule used and show an unmatched file whose path contains the source name, when there is one. A recipe's `default:` entry inside `inputs:` is a default for sources; use `path <source>:` for one source. Required source paths must match the spelling found by the scan: `pricing/S07.json` does not satisfy `pricing/s07.json`, even on a case-insensitive filesystem. A file with a near miss in an identity value, such as `store=S07` where a job needs `store=s07`, may still match a source rule: it is then a source artifact, and `dag` and `artifacts` warn when it is unused and point to it at the failed join.
 
-Rules can also come from a CSV file, relative to the recipe's folder, such as a lab's list of scans that failed quality control:
-
-<!-- spit-doc: recipe
-pipeline analysis.spit
-root data
-inputs:
-    t1w: sub-{sub}/t1w.nii.gz
---- analysis.spit
-source t1w : T1 [sub]
---- qc/excluded.csv
-sub,reason
-01,consent withdrawn
--->
-
-```text
-exclude from qc/excluded.csv
-```
-
-```csv
-product,sub,ses,run,reason
-bold,02,02,3,"motion spike, volume 140"
-,07,,,withdrew consent
-```
-
-The header names the columns: `product` and `reason` are optional, and every other column is a dimension. Each row is one rule; an empty cell leaves its column out, so a row with no `product` names a group. Fields may be quoted, as spreadsheets write them. Each row must match something, and a message about a row names the file and its line.
+To record a person's judgement of an artifact, such as a lab's list of scans that failed quality control, use a [review](#reviews). `exclude from` is not a rule: a recipe line that starts so is an error that says what to write instead.
 
 ## Inputs
 
@@ -1666,6 +1748,23 @@ removed:
 ```
 
 The section is a record, not a rule: the records above it already leave these out, and resolving jobs removes nothing more. Scanning again rewrites it from the recipe, so a removal survives a rescan. `dag` copies it into the `.spitdag`.
+
+`spit inputs` also writes the rows of the files the recipe's `review ... from` lines name, each with its verdict, the file and line it was read from, and the reason:
+
+<!-- spit-doc: spitout -->
+
+```text
+verdicts:
+    looked_at[sub=04]
+        verdict: fail
+        at: qc/looked_at.csv line 2
+        reason: ghosting in frontal slices
+    looked_at[sub=06]
+        verdict: pass
+        at: qc/looked_at.csv line 3
+```
+
+Each entry names a review and the dimensions its row gives; a dimension the row leaves empty is absent. The section is a record the plan reads: [`dag`](#what-a-verdict-does) withholds the artifacts a verdict fails, and those with no verdict, from the readers their review covers. Rows are in the order of the recipe's `review` lines and each file's lines.
 
 `dag --partial` is a choice for one planning run, not a recipe rule. It keeps jobs with complete inputs, including aggregate jobs whose `many` input still has complete members, and writes the other outputs with their reasons in the `.spitdag`'s `left_out` array. A `many` input's `@min(count)` is checked after incomplete members have been removed. Plain `dag` still fails on the first incomplete job and points to `artifacts` and `dag --partial`.
 

@@ -1,175 +1,13 @@
 //! `exclude` rules: removing named artifacts and groups from a dataset,
-//! written in a recipe or read from a CSV file, and recording what each
-//! removed.
+//! and recording what each removed.
 
 use std::borrow::Cow;
 use std::collections::BTreeSet;
-use std::path::Path;
 
 use crate::error::{DefinitionSubject, ResolveError};
 use crate::model::{
     near_reason, EntityBinding, Exclusion, InputRules, PipelineIndex, Removal, SourceInventory,
 };
-use crate::parser::ParseError;
-
-/// Read each file the `exclude from` lines of `rules` name, relative to
-/// `folder`, adding a rule for each row after the rules written inline.
-pub(crate) fn read_exclusion_files(
-    rules: &mut InputRules,
-    folder: &Path,
-) -> Result<(), ParseError> {
-    for (file, line) in std::mem::take(&mut rules.exclusion_files) {
-        let text = std::fs::read_to_string(folder.join(&file)).map_err(|reason| {
-            ParseError::new(
-                line,
-                format!("cannot read `{file}` for `exclude from`: {reason}"),
-            )
-        })?;
-        let rows = exclusions_from_csv(&text, &file)
-            .map_err(|message| ParseError::new(line, format!("{file}: {message}")))?;
-        rules.exclusions.extend(rows);
-    }
-    Ok(())
-}
-
-/// The rules a CSV file holds: its header names each column, `product` and
-/// `reason` or a dimension, and each row after it is one rule, an empty
-/// cell leaving its column out.
-fn exclusions_from_csv(text: &str, file: &str) -> Result<Vec<Exclusion>, String> {
-    let mut rows = csv_rows(text.strip_prefix('\u{feff}').unwrap_or(text))?.into_iter();
-    let Some((_, header)) = rows.next() else {
-        return Err("expected a header row, such as `product,sub,ses,run,reason`".to_owned());
-    };
-    let mut seen = BTreeSet::new();
-    for column in &header {
-        let column = column.trim();
-        if !is_identifier(column) {
-            return Err(format!(
-                "line 1: column `{column}` must be `product`, `reason` or a dimension name"
-            ));
-        }
-        if !seen.insert(column) {
-            return Err(format!("line 1: column `{column}` appears twice"));
-        }
-    }
-    let mut exclusions = Vec::new();
-    for (line, cells) in rows {
-        if cells.len() != header.len() {
-            return Err(format!(
-                "line {line}: expected {} cells, as the header has, found {}",
-                header.len(),
-                cells.len()
-            ));
-        }
-        let mut product = None;
-        let mut reason = None;
-        let mut values = Vec::new();
-        for (column, cell) in header.iter().map(|column| column.trim()).zip(&cells) {
-            let cell = cell.trim();
-            if cell.is_empty() {
-                continue;
-            }
-            match column {
-                "product" => {
-                    if !is_qualified_identifier(cell) {
-                        return Err(format!("line {line}: `{cell}` is not a source name"));
-                    }
-                    product = Some(cell.to_owned());
-                }
-                "reason" => reason = Some(cell.split_whitespace().collect::<Vec<_>>().join(" ")),
-                dimension => {
-                    if cell.chars().any(char::is_whitespace) {
-                        return Err(format!(
-                            "line {line}: the value of `{dimension}` must be one token, not `{cell}`"
-                        ));
-                    }
-                    values.push((dimension.to_owned(), cell.to_owned()));
-                }
-            }
-        }
-        if product.is_none() && values.is_empty() {
-            return Err(format!("line {line}: names no source and no value"));
-        }
-        exclusions.push(Exclusion {
-            product,
-            values,
-            reason,
-            origin: format!("{file} line {line}"),
-        });
-    }
-    Ok(exclusions)
-}
-
-/// The rows of a CSV text, each with the line it starts on, as RFC 4180
-/// reads them: fields separated by commas, a field in double quotes may hold
-/// commas, line breaks and `""` for a quote. Blank lines are skipped.
-fn csv_rows(text: &str) -> Result<Vec<(usize, Vec<String>)>, String> {
-    let mut rows = Vec::new();
-    let mut row = Vec::new();
-    let mut field = String::new();
-    let mut line = 1;
-    let mut row_line = 1;
-    let mut quoted = false;
-    let mut chars = text.chars().peekable();
-    // Whether the row so far holds anything, so a blank line is no row.
-    let mut started = false;
-    while let Some(character) = chars.next() {
-        match (quoted, character) {
-            (true, '"') if chars.peek() == Some(&'"') => {
-                chars.next();
-                field.push('"');
-            }
-            (true, '"') => quoted = false,
-            (true, '\n') => {
-                line += 1;
-                field.push('\n');
-            }
-            (true, other) => field.push(other),
-            (false, '"') if field.is_empty() => {
-                quoted = true;
-                started = true;
-            }
-            (false, ',') => {
-                row.push(std::mem::take(&mut field));
-                started = true;
-            }
-            (false, '\r') if chars.peek() == Some(&'\n') => {}
-            (false, '\n') => {
-                if started || !field.is_empty() {
-                    row.push(std::mem::take(&mut field));
-                    rows.push((row_line, std::mem::take(&mut row)));
-                }
-                started = false;
-                line += 1;
-                row_line = line;
-            }
-            (false, other) => {
-                field.push(other);
-                started = true;
-            }
-        }
-    }
-    if quoted {
-        return Err(format!("line {row_line}: a quoted field is not closed"));
-    }
-    if started || !field.is_empty() {
-        row.push(field);
-        rows.push((row_line, row));
-    }
-    Ok(rows)
-}
-
-fn is_identifier(text: &str) -> bool {
-    let mut chars = text.chars();
-    chars
-        .next()
-        .is_some_and(|first| first.is_ascii_alphabetic() || first == '_')
-        && chars.all(|character| character.is_ascii_alphanumeric() || character == '_')
-}
-
-fn is_qualified_identifier(text: &str) -> bool {
-    text.split("::").all(is_identifier)
-}
 
 /// Check each rule against the pipeline without reading any data: a rule's
 /// product must be a source, and each dimension it names must be one of that
@@ -188,16 +26,9 @@ pub(crate) fn collect_exclusion_errors(
         .flat_map(|product| product.dimensions.iter().map(String::as_str))
         .collect();
     for (index, rule) in rules.exclusions.iter().enumerate() {
-        // A rule written in the recipe is placed at its line; a row of a
-        // file is not, so its message says where it is.
-        let at = if rule.origin.starts_with("line ") {
-            String::new()
-        } else {
-            format!(" ({})", rule.origin)
-        };
         let problem = |detail: String| ResolveError::InvalidDefinition {
             subject: DefinitionSubject::Exclusion(index),
-            detail: format!("`{rule}`{at}: {detail}"),
+            detail: format!("`{rule}`: {detail}"),
         };
         let dimensions: Cow<'_, [&str]> = match &rule.product {
             Some(name) => {
@@ -406,37 +237,6 @@ fn note_near(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn csv_rows_follow_rfc_4180() {
-        let rows = csv_rows("a,b\r\n\"x, y\",\"say \"\"hi\"\"\"\n\n\"two\nlines\",z\n").unwrap();
-        assert_eq!(
-            rows,
-            [
-                (1, vec!["a".into(), "b".into()]),
-                (2, vec!["x, y".into(), "say \"hi\"".into()]),
-                (4, vec!["two\nlines".into(), "z".into()]),
-            ]
-        );
-        assert!(csv_rows("a,\"b\n").is_err());
-    }
-
-    #[test]
-    fn a_csv_file_holds_one_rule_per_row() {
-        let text = "product,sub,ses,run,reason\nbold,02,02,3,\"motion spike, volume 140\"\n,03,,,withdrew\n";
-        let rules = exclusions_from_csv(text, "qc.csv").unwrap();
-        assert_eq!(rules[0].to_string(), "exclude bold[sub=02,ses=02,run=3]");
-        assert_eq!(rules[0].reason.as_deref(), Some("motion spike, volume 140"));
-        assert_eq!(rules[0].origin, "qc.csv line 2");
-        assert_eq!(rules[1].to_string(), "exclude [sub=03]");
-        assert!(exclusions_from_csv("product,sub\n,\n", "qc.csv")
-            .unwrap_err()
-            .contains("line 2: names no source and no value"));
-        assert!(exclusions_from_csv("product,sub name\n", "qc.csv").is_err());
-        assert!(exclusions_from_csv("sub\n1,2\n", "qc.csv")
-            .unwrap_err()
-            .contains("expected 1 cells"));
-    }
 
     #[test]
     fn near_values_differ_in_case_or_leading_zeros() {

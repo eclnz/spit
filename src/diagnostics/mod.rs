@@ -21,8 +21,8 @@ use crate::command::collect_commands;
 use crate::compile::collect_pipeline;
 use crate::imports::parse_located_document_recovering;
 use crate::inputs::{
-    check_inventory, collect_exclusion_errors, collect_rule_errors, with_source_paths, InputCheck,
-    InputError, InputSpec, ResolvedInputs,
+    check_inventory, collect_rule_errors, with_source_paths, InputCheck, InputError, InputSpec,
+    ResolvedInputs,
 };
 use crate::lower::{parse_document_recovering, ParsedDocument};
 use crate::model::{ArtifactReport, CoverageGap, InputRules, PipelineIndex, SourceInventory};

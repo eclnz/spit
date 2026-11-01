@@ -2,7 +2,7 @@
 //! `outputs = operation(inputs)`, and stages whose lines are indented
 //! beneath a `stage name:` header.
 
-use crate::model::{CommandRole, DefaultChecks, Invocation, TypeChecking};
+use crate::model::{CommandRole, DefaultChecks, DefaultReviews, Invocation, TypeChecking};
 use crate::span::Place;
 
 use super::body::OpenBody;
@@ -17,6 +17,7 @@ use super::layout::{is_step, Block, Layout};
 use super::lexical::{
     comma_items, extension, identifier, product_name, reserved_name, strip_comment,
 };
+use super::review::parse_default_reviews;
 use super::source_map::{name_place, step_place, tail_place};
 use super::{FlowStep, ParseError, StatementKind, StepOutput, Syntax, SHELL_SOURCE_ERROR};
 
@@ -176,7 +177,7 @@ fn written_stage_name(code: &str) -> &str {
 }
 
 /// What may follow `default`.
-const DEFAULT_SETTINGS: &str = "a default is a `path:` rule, an `ext:` extension, a `check:` list or an `entities:` spelling of `{@entities}`, as in `default path: out/{@product}/{@entities}`";
+const DEFAULT_SETTINGS: &str = "a default is a `path:` rule, an `ext:` extension, a `check:` list, a `review:` list or an `entities:` spelling of `{@entities}`, as in `default path: out/{@product}/{@entities}`";
 
 /// What a statement read: an ordinary statement, a stage's header, the
 /// header of an operation whose body follows, or the header of a block of
@@ -189,8 +190,8 @@ enum Read {
 }
 
 /// One default, `setting`, written after `default` or in a `default:`
-/// block: the `path:` rule, the `ext:` extension, the `check:` list or the
-/// `entities` spelling of the outputs in `stage` or, outside every stage,
+/// block: the `path:` rule, the `ext:` extension, the `check:` and `review:`
+/// lists or the `entities` spelling of the outputs in `stage` or, outside every stage,
 /// in the file.
 fn default_setting(
     original: &str,
@@ -231,6 +232,14 @@ fn default_setting(
                     checks: uses,
                     exempt,
                 },
+                place: tail_place(original, number, list.trim()),
+            }
+        }
+        Some((Keyword::Reviews, list)) => {
+            let (reviews, exempt) = parse_default_reviews(list.trim(), number)?;
+            StatementKind::DefaultReviews {
+                stage,
+                reviews: DefaultReviews { reviews, exempt },
                 place: tail_place(original, number, list.trim()),
             }
         }
@@ -443,6 +452,9 @@ fn flow_rest(
         Some((Keyword::Check, declaration)) => {
             StatementKind::check(original, declaration.trim(), number)?
         }
+        Some((Keyword::Review, declaration)) => {
+            StatementKind::review(original, declaration.trim(), number)?
+        }
         Some((Keyword::Default, rest)) => {
             let setting = rest.trim();
             if setting == ":" {
@@ -461,7 +473,10 @@ fn flow_rest(
                 number,
             )?)
         }
-        Some((Keyword::Path | Keyword::Ext | Keyword::Checks | Keyword::Entities, _)) => {
+        Some((
+            Keyword::Path | Keyword::Ext | Keyword::Checks | Keyword::Reviews | Keyword::Entities,
+            _,
+        )) => {
             let setting = line.split_once(':').map_or(line, |(word, _)| word);
             return Err(ParseError::new(
                 number,
@@ -507,9 +522,9 @@ fn flow_statement(
             number,
             format!(
                 "`{word}` does not start a statement; {hint}a pipeline line starts with \
-                 source, dimensions, types, operation, command, verify, resources, check, path, default, root, stage or use, or is a step \
+                 source, dimensions, types, operation, command, verify, resources, check, review, path, default, root, stage or use, or is a step \
                  `output = operation(inputs)`, and a recipe line starts with pipeline, \
-                 root, inputs, require, exclude or default"
+                 root, inputs, review, require, exclude or default"
             ),
         )
         .at_token(word));
@@ -531,7 +546,7 @@ fn flow_statement(
     } else {
         Err(ParseError::new(
             number,
-            "expected source, operation, command, verify, resources, check, require, path, default, stage, or output = operation(inputs)",
+            "expected source, operation, command, verify, resources, check, review, require, path, default, stage, or output = operation(inputs)",
         ))
     }
 }
@@ -563,10 +578,10 @@ pub(super) fn parse_flow_step(
 fn parse_flow_output(left: &str, number: usize) -> Result<StepOutput, ParseError> {
     if left.contains(':') {
         let product = parse_product(left, number)?;
-        if !product.checks.is_empty() {
+        if !product.checks.is_empty() || !product.reviews.is_empty() {
             return Err(ParseError::new(
                 number,
-                "a step's product takes no `@check(...)`; attach the check to the operation's output, as in `-> Image @check(nonempty)`",
+                "a step's product takes no `@check(...)` or `@review(...)`; attach it to the operation's output, as in `-> Image @check(nonempty)`",
             )
             .at_token(left));
         }
@@ -585,7 +600,7 @@ fn parse_flow_output(left: &str, number: usize) -> Result<StepOutput, ParseError
 }
 
 /// The words a statement can start with, for suggesting one.
-const STATEMENT_WORDS: [&str; 17] = [
+const STATEMENT_WORDS: [&str; 18] = [
     "source",
     "dimensions",
     "types",
@@ -594,6 +609,7 @@ const STATEMENT_WORDS: [&str; 17] = [
     "verify",
     "resources",
     "check",
+    "review",
     "path",
     "default",
     "stage",

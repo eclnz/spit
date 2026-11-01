@@ -10,8 +10,8 @@ use spit::{
     render_call, render_calls, render_calls_check_json, render_calls_json, render_check_json,
     render_dag, render_diagnostics_json, render_editor_json, render_source_inventory,
     render_step_counts, render_words_json, resolve_artifacts_partial, unused_sources_summary,
-    validate_bound_source_files, validate_source_files, BoundDag, BoundPaths, Context, Diagnostic,
-    FileNames, Gap, LeftOut, View,
+    validate_bound_source_files, validate_source_files, ArtifactReport, BoundDag, BoundPaths,
+    Context, Diagnostic, FileNames, Gap, LeftOut, View,
 };
 
 use super::args::{CliArgs, Flag};
@@ -217,6 +217,7 @@ pub(crate) fn dag(args: &CliArgs) -> Result<(), Box<dyn Error>> {
         paths = Some(bound);
     }
     eprintln!("note: {}", job_count(&prepared.pipeline, dag));
+    review_notes(&prepared.report);
     if args.has(Flag::Partial) {
         let left_out: usize = prepared
             .report
@@ -319,6 +320,7 @@ pub(crate) fn dag(args: &CliArgs) -> Result<(), Box<dyn Error>> {
 /// Step 3: what can be made, what cannot, and why.
 pub(crate) fn artifacts(args: &CliArgs) -> Result<(), Box<dyn Error>> {
     let prepared = prepare(args)?;
+    review_notes(&prepared.report);
     let mut report = prepared.report;
     report.coverage = prepared.inputs.gaps;
     if let Some(root) = &prepared.root {
@@ -331,4 +333,15 @@ pub(crate) fn artifacts(args: &CliArgs) -> Result<(), Box<dyn Error>> {
     };
     print!("{text}");
     Ok(())
+}
+
+/// A note on stderr for each artifact a review rejected or holds back, and
+/// for the rows of each review file that match no artifact.
+fn review_notes(report: &ArtifactReport) {
+    for withheld in &report.withheld {
+        eprintln!("note: {withheld}");
+    }
+    for unmatched in &report.unmatched_verdicts {
+        eprintln!("note: {unmatched}");
+    }
 }

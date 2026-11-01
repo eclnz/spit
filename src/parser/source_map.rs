@@ -36,6 +36,15 @@ pub(crate) struct SourceMap {
     pub(crate) resources: Vec<Place>,
     /// One name per `Pipeline::checks` element, in the same order.
     pub(crate) checks: Vec<Place>,
+    /// One name per `Pipeline::reviews` element, in the same order.
+    pub(crate) reviews: Vec<Place>,
+    /// Where each `review name from file` line of a recipe names the review,
+    /// in the order of `InputRules::reviews`.
+    pub(crate) review_files: Vec<Place>,
+    /// The `review:` list outside every stage.
+    pub(crate) default_reviews: Option<Place>,
+    /// The `review:` lists inside stages, keyed by stage.
+    pub(crate) stage_reviews: BTreeMap<String, Place>,
     /// Templates of `path product:` rules, keyed by product.
     pub(crate) paths: BTreeMap<String, Place>,
     /// Template of the default `path:` rule.

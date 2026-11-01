@@ -8,7 +8,7 @@ use std::path::PathBuf;
 
 use crate::paths::{EntitiesFormat, Holder, PathTemplate};
 
-use super::{owned_strings, ContextPattern, EntityBinding, Pipeline, PipelineIndex};
+use super::{owned_strings, ContextPattern, EntityBinding, Pipeline, PipelineIndex, VerdictRow};
 
 /// How a dataset's sources are found and filtered: observed directories,
 /// `exclude` and `require` rules, and where source files live. The input stage
@@ -18,12 +18,10 @@ pub struct InputRules {
     pub context_paths: Vec<ContextPattern>,
     /// `require` and conditional `exclude` rules, in declaration order.
     pub constraints: Vec<CoverageRule>,
-    /// `exclude` rules, in declaration order, with each row of a file an
-    /// `exclude from` line names in its place once the file is read.
+    /// `exclude` rules, in declaration order.
     pub exclusions: Vec<Exclusion>,
-    /// The files `exclude from` lines name, relative to the recipe's
-    /// folder, with the line of each, until they are read.
-    pub exclusion_files: Vec<(String, usize)>,
+    /// The `review name from file` lines, in declaration order.
+    pub reviews: Vec<ReviewFile>,
     /// Path rules for source products that the recipe, not the pipeline, sets.
     pub source_paths: BTreeMap<String, PathTemplate>,
     /// The recipe's `default:` entry: the rule for each source with none of its
@@ -41,7 +39,7 @@ impl InputRules {
         self.context_paths.is_empty()
             && self.constraints.is_empty()
             && self.exclusions.is_empty()
-            && self.exclusion_files.is_empty()
+            && self.reviews.is_empty()
             && self.source_paths.is_empty()
             && self.source_default.is_none()
             && self.source_entities.is_none()
@@ -124,6 +122,20 @@ impl InputRules {
     }
 }
 
+/// A recipe's `review name from file.csv` line: the file a person records a
+/// review's verdicts in.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ReviewFile {
+    pub review: String,
+    /// The file as the recipe writes it, relative to the recipe's folder.
+    pub file: String,
+    /// The recipe line it is written on.
+    pub line: usize,
+    /// The file's text, when it was read and exists. A review whose file does
+    /// not exist yet has no verdicts, which is no error.
+    pub text: Option<String>,
+}
+
 /// An `exclude` rule: it removes every source artifact whose identity
 /// includes each value it names, of its product or, when it names none, of
 /// every product, with every discovered context that does too.
@@ -132,10 +144,9 @@ pub struct Exclusion {
     pub product: Option<String>,
     /// Each dimension and value it names, in the order written.
     pub values: Vec<(String, String)>,
-    /// Why, from the comment on its line or a file's `reason` column.
+    /// Why, from the comment on its line.
     pub reason: Option<String>,
-    /// Where it is written: `line 4` of the recipe, or `qc/excluded.csv row
-    /// 3` for a row of a file an `exclude from` line names.
+    /// Where it is written: `line 4` of the recipe.
     pub origin: String,
 }
 
@@ -194,8 +205,7 @@ pub struct Removal {
     /// The rule, as `exclude bold[run=3]` or `exclude [sub] where sessions
     /// count<2`.
     pub rule: String,
-    /// Where the rule is written, when known: `line 4` of the recipe, or a
-    /// line of a file.
+    /// Where the rule is written, when known: `line 4` of the recipe.
     pub origin: Option<String>,
     pub reason: Option<String>,
     /// For a group a conditional `exclude` rule counted: how many it found.
@@ -287,6 +297,11 @@ pub struct SourceInventory {
     /// What the input stage left out, and why: a record, not a rule, so
     /// resolving jobs removes nothing more for it.
     pub removed: Vec<Removal>,
+    /// The rows of every review's file, review by review in the recipe's
+    /// order and each file's rows in line order: what the plan judges
+    /// the reviewed artifacts by. A review with no rows holds back everything
+    /// it judges.
+    pub verdicts: Vec<VerdictRow>,
     /// The dataset root a `.spitout`'s `root` line names, as written:
     /// relative to the `.spitout`'s folder unless absolute.
     pub root: Option<PathBuf>,

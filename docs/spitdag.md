@@ -67,11 +67,13 @@ Each artifact or group a named or conditional `exclude` rule removed, as the `.s
 | `product` | The removed artifact's product, or `null` for a group, which removed every artifact whose identity includes `entities`. |
 | `entities` | Each dimension and value, as strings, in name order. |
 | `rule` | The rule that removed it, as written. |
-| `origin` | Where the rule is: `line 4` of the recipe, or a line of a file an `exclude from` line names. `null` when not recorded. |
-| `reason` | Why, from a named exclusion's comment or a file's `reason` column; `null` when not given. |
+| `origin` | Where the rule is: `line 4` of the recipe. `null` when not recorded. |
+| `reason` | Why, from a named exclusion's comment; `null` when not given. |
 | `found` | For a group a counting conditional `exclude` rule removed, how many it found; `null` otherwise. |
 
 Nothing in `removed` is among the jobs' inputs: the record says what was left out, so a report can say so.
+
+A [review](language-reference.md#reviews) leaves no field here. SPIT applies the verdicts when it makes the plan: an artifact a review withholds is in no job's inputs, and the jobs that would have read it are not in the DAG.
 
 ## Left out
 

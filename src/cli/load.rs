@@ -179,6 +179,17 @@ pub(crate) fn settle(loaded: &Loaded) -> Result<(ResolvedInputs, PathBuf), Box<d
     for removal in &resolved.inventory.removed {
         eprintln!("note: {}", removal_note(removal, &orders));
     }
+    for review in recipe
+        .rules
+        .reviews
+        .iter()
+        .filter(|review| review.text.is_none())
+    {
+        eprintln!(
+            "note: review `{}` has no verdicts yet: `{}` does not exist",
+            review.review, review.file
+        );
+    }
     for note in case_variant_notes(&case_variants(&resolved.inventory)) {
         eprintln!("note: {note}");
     }

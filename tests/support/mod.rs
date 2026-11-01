@@ -40,7 +40,8 @@ pub fn parse_fixture(text: &str) -> Result<(Pipeline, Option<SourceInventory>), 
     Ok((parse_pipeline(&pipeline)?, records))
 }
 
-/// Whether `line` is a `discover`, `require` or `skip` rule.
+/// Whether `line` is a `discover`, `require`, `exclude` or `review ... from`
+/// rule. A bare `review name` declares a review in the pipeline.
 fn is_rule(line: &str) -> bool {
     let line = line.trim_start();
     line.trim_end() == "constraints:"
@@ -48,6 +49,7 @@ fn is_rule(line: &str) -> bool {
         || ["require ", "drop ", "exclude "]
             .iter()
             .any(|keyword| line.starts_with(keyword))
+        || (line.starts_with("review ") && line.contains(" from "))
 }
 
 /// The pipeline part of `text` with its rule lines blanked, so it keeps its
