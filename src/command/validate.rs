@@ -18,6 +18,8 @@ pub(crate) enum Slot {
     /// `{@cores}`: the cores each job of the operation uses, from its
     /// `resources` line.
     Cores,
+    /// `{@here}`: the folder of the file that declares the operation.
+    Here,
     /// Any other name: a dimension of the job, whose value the job's
     /// outputs carry. [`collect_commands`] checks that every step calling
     /// the operation has it.
@@ -26,6 +28,10 @@ pub(crate) enum Slot {
 
 /// The placeholder a command gives the cores its job uses.
 pub(crate) const CORES: &str = "@cores";
+
+/// The placeholder a command gives the folder of the file declaring its
+/// operation.
+pub(crate) const HERE: &str = "@here";
 
 /// What a placeholder gives of its port's file: the path, or, for an output
 /// as `{image.dir}` and `{image.stem}`, its folder or its file name without
@@ -63,6 +69,9 @@ pub(crate) fn slot(operation: &OperationDef, name: &str) -> Option<Slot> {
     }
     if name == CORES {
         return Some(Slot::Cores);
+    }
+    if name == HERE {
+        return Some(Slot::Here);
     }
     if name.starts_with('@') {
         return None;
@@ -377,6 +386,12 @@ fn check_line_placeholders(
                     ));
                 }
                 Slot::Cores => {}
+                Slot::Here if facet != Facet::Path => {
+                    return fail(format!(
+                        "`{{{name}}}`: `{{@here}}` is a folder, the one holding the file that declares the operation, and gives no `.dir` or `.stem`"
+                    ));
+                }
+                Slot::Here => {}
                 Slot::Dimension if facet != Facet::Path => {
                     return fail(format!(
                         "command for `{}` uses unknown placeholder `{{{name}}}`: `{}` has no port `{port}`",
@@ -518,6 +533,13 @@ fn redirected_ports(
                 operation.name
             ));
         };
+        if let Slot::Here = slot {
+            return fail(format!(
+                "`{sign} {{{name}}}`: `{{@here}}` is a folder, not a file; a command's {} one of its operation's {}",
+                if redirect.stream == Stream::Stdin { "stdin reads" } else { "stdout is written to" },
+                if redirect.stream == Stream::Stdin { "inputs" } else { "outputs" },
+            ));
+        }
         if let Slot::Cores = slot {
             return fail(format!(
                 "`{sign} {{{name}}}`: `{{@cores}}` is the number of cores the job uses, not a file; a command's {} one of its operation's {}",
@@ -553,7 +575,7 @@ fn redirected_ports(
                     ));
                 }
             }
-            (_, Slot::Cores | Slot::Dimension) => {
+            (_, Slot::Cores | Slot::Here | Slot::Dimension) => {
                 unreachable!("`{{@cores}}` and a dimension are rejected as a redirection above")
             }
             (Stream::Stdin, Slot::Output(_)) => {

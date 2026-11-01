@@ -50,6 +50,7 @@ pub enum Word {
     Stdin,
     Stdout,
     Cores,
+    Here,
     Sources,
     SourcePaths,
     Contexts,
@@ -88,7 +89,7 @@ impl Word {
 }
 
 /// Every word's documentation, in the order of [`Word`].
-pub static DOCS: [Doc; 55] = [
+pub static DOCS: [Doc; 56] = [
     Doc {
         name: "source",
         kind: "keyword",
@@ -375,6 +376,13 @@ pub static DOCS: [Doc; 55] = [
         anchor: "cores-and-memory",
         example: "resources align: cores=8\ncommand align: bwa mem -t {@cores} {reference} {reads} > {@output}",
         summary: "The cores the operation's `resources` line gives each job, 1 when it gives none, written into the command as a number, so the tool uses as many threads as a backend set aside for it.",
+    },
+    Doc {
+        name: "@here",
+        kind: "placeholder",
+        anchor: "files-beside-the-pipeline",
+        example: "command table: python3 {@here}/scripts/table.py {durations} > {@output}",
+        summary: "The folder of the `.spit` file that declares the operation, for a script kept beside the pipeline. A backend gets it as a path under the pipeline's folder, so the command does not depend on where the dataset root is.",
     },
     Doc {
         name: "sources:",
