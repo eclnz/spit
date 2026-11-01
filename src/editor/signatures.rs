@@ -8,11 +8,12 @@ use std::fmt::Write;
 
 pub(super) fn product_signature(product: &ProductDef, ty: &TypeExpr) -> String {
     format!(
-        "{}: {ty}{} [{}]{}",
+        "{}: {ty}{} [{}]{}{}",
         product.name,
         ending(product.extension.as_deref(), product.folder),
         product.dimensions.join(", "),
-        checks_text(&product.checks)
+        checks_text(&product.checks),
+        reviews_text(&product.reviews)
     )
 }
 
@@ -23,6 +24,14 @@ fn checks_text(checks: &[CheckUse]) -> String {
     }
     let checks: Vec<_> = checks.iter().map(ToString::to_string).collect();
     format!(" @check({})", checks.join(", "))
+}
+
+/// ` @review(a, b)` for the reviews a port or source attaches, or nothing.
+fn reviews_text(reviews: &[String]) -> String {
+    if reviews.is_empty() {
+        return String::new();
+    }
+    format!(" @review({})", reviews.join(", "))
 }
 
 pub(super) fn check_signature(check: &CheckDef) -> String {
@@ -69,6 +78,7 @@ pub(super) fn operation_signature(operation: &OperationDef) -> String {
                 let _ = write!(text, " @min({minimum})");
             }
             text.push_str(&checks_text(&port.checks));
+            text.push_str(&reviews_text(&port.reviews));
             text
         })
         .collect::<Vec<_>>();
@@ -115,5 +125,6 @@ fn output_signature(port: &OutputPort, named: bool) -> String {
         result.push_str(&ending(port.extension.as_deref(), port.folder));
     }
     result.push_str(&checks_text(&port.checks));
+    result.push_str(&reviews_text(&port.reviews));
     result
 }

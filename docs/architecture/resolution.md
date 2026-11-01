@@ -12,7 +12,8 @@ flowchart LR
     compiled --> expand["resolve_artifacts_excluding"]
     inventory["SourceInventory"] --> expand
     held["held-back sources<br/>from CoverageGaps"] --> expand
-    expand --> artifacts["ArtifactReport<br/>ResolvedDag, IncompleteJob"]
+    verdicts["SourceInventory::verdicts<br/>VerdictRow"] --> expand
+    expand --> artifacts["ArtifactReport<br/>ResolvedDag, IncompleteJob,<br/>Withheld"]
     artifacts --> resolve["resolve<br/>first unmatched gap, or the DAG"]
 ```
 
@@ -32,7 +33,7 @@ flowchart LR
     - the steps (`DagStep`), with each step's operation and stage once;
     - the `Artifacts` table every job refers to by `ArtifactId`;
     - the file of each source whose record gave one.
-- **`ArtifactReport`** holds every source, the DAG of the jobs that can run, each `IncompleteJob` with its gaps, and each `CoverageGap`. A `Gap` is one of two kinds:
+- **`ArtifactReport`** holds every source, the DAG of the jobs that can run, each `IncompleteJob` with its gaps, each `CoverageGap`, each `Withheld` artifact with the review that withholds it and why (`Judged::Rejected` with the row's reason and origin, or `Judged::Held`), and the rows of each review file that matched no artifact (`UnmatchedVerdicts`). A `Gap` is one of two kinds:
     - `Unmatched`: a missing or ambiguous input, or a collection below its minimum;
     - `Blocked`: an input that is itself incomplete, or a source a coverage gap holds back.
 
@@ -55,6 +56,15 @@ The entry points are in [`src/resolver/mod.rs`](https://github.com/eclnz/spit/bl
     - `same(dim, ...)` matches on the listed dimensions alone.
     - `each(dim, ...)` broadcasts a single input over dimensions the driver lacks. The step runs for every combination of the driver's groups with the values that input has, and the outputs gain those dimensions. An input that broadcasts cannot drive.
 - **Only a step's driving artifacts create contexts.** A step whose driver has no artifact in a context has no job there, complete or not.
+
+**Reviews** ([`src/resolver/reviews.rs`](https://github.com/eclnz/spit/blob/dev/src/resolver/reviews.rs) and [`src/review.rs`](https://github.com/eclnz/spit/blob/dev/src/review.rs)):
+
+- **A reviewed artifact is one of a product, or as an input port reads it, that a review is attached to.** `ReviewIndex` finds the reviews that judge each product for every reader: a source's `@review(...)`, and an output's, with the `review:` defaults of the file and the stages around its step. `port_reviews` finds those on one input port of one step.
+- **`Verdicts` looks an artifact up by its dimensions.** A row gives some dimensions and judges every artifact that has those values. Rows of a review are grouped by the dimensions they give, and an artifact is looked up once for each group.
+- **A review passes, rejects or holds.** A row that says `pass` passes the artifact. A row that says `fail` rejects it, and an artifact no row judges is held.
+- **A review on a product withholds its artifacts from every reader.** `Resolution::judge_product` flags each source when it is added, and each output when its job is made. The job that makes a reviewed output still runs.
+- **A review on an input port withholds an artifact from that port.** `Judging::block` tells `expand_job` whether the job may read an artifact. A `one` input whose artifact is withheld leaves the job out (`Expansion::left_out`), and the job's outputs are flagged withheld in turn, with no job and no gap. A `many` input drops the member (`Screen`), and leaves the job out when no member remains. With several `many` inputs, a member dropped from one drops the member with the same `vary` values from the others, so the collections stay paired.
+- **Withheld is not incomplete.** The flag is separate from `incomplete`, and a job left out for it is no `IncompleteJob`.
 
 **Step order** (`invocation_order`, in [`src/compile/definitions.rs`](https://github.com/eclnz/spit/blob/dev/src/compile/definitions.rs)). Steps are checked and expanded in dependency order, whatever order they are written in. The order is Tarjan's strongly connected components, walking from each step to the producers of its inputs with an explicit stack. A component of more than one step, or a step that reads itself, has no order. It is one `Cycle`, shown as a loop through it from the step the walk reached first, and its steps' outputs are poisoned.
 
@@ -82,6 +92,13 @@ The entry points are in [`src/resolver/mod.rs`](https://github.com/eclnz/spit/bl
 - **Jobs come in dependency order, numbered from 1.** Every input's producer is expanded before its consumer is matched, and a job's ID is its place in that order. Test: [`tracks_dependencies_through_full_pipeline`](https://github.com/eclnz/spit/blob/dev/tests/resolver.rs).
 - **An incomplete job's outputs stay candidates for later steps.** A consumer of one is reported as blocked, not left out without a word. Test: [`keeps_complete_jobs_and_blocks_consumers_of_incomplete_ones`](https://github.com/eclnz/spit/blob/dev/tests/artifacts.rs).
 - **A blocked gap always follows the gap that blocks it.** So the first unmatched gap explains every failure, and `resolve` returns it (`first_failure`). Test: [`resolve_fails_with_the_first_gap_the_report_finds`](https://github.com/eclnz/spit/blob/dev/tests/artifacts.rs).
+- **A withheld artifact is no gap.** A review that rejects or holds an artifact leaves out the jobs that read it, and `resolve` succeeds. Test: [`withholding_is_no_error`](https://github.com/eclnz/spit/blob/dev/tests/reviews.rs).
+- **A single-artifact input leaves its job out, and the job's outputs are withheld in turn.** Test: [`a_one_input_leaves_the_job_out_and_withholds_its_outputs_in_turn`](https://github.com/eclnz/spit/blob/dev/tests/reviews.rs).
+- **An aggregate takes the members that remain.** Test: [`an_aggregate_takes_the_members_that_remain`](https://github.com/eclnz/spit/blob/dev/tests/reviews.rs).
+- **A review on an output still lets its job run.** Test: [`a_review_on_an_output_withholds_what_the_job_made_but_still_runs_it`](https://github.com/eclnz/spit/blob/dev/tests/reviews.rs).
+- **A review on an input port covers that port alone.** Test: [`a_review_on_an_input_port_covers_that_port_alone`](https://github.com/eclnz/spit/blob/dev/tests/reviews.rs).
+- **A row judges every artifact that has its values, and an unjudged artifact is held.** Tests: [`a_row_with_empty_cells_covers_a_whole_group`](https://github.com/eclnz/spit/blob/dev/tests/reviews.rs), [`a_passed_artifact_is_used_and_a_failed_or_unjudged_one_is_withheld`](https://github.com/eclnz/spit/blob/dev/tests/reviews.rs).
+- **A row that matches no artifact is reported, once for its file.** Test: [`a_row_that_matches_no_artifact_is_noted_once_per_file`](https://github.com/eclnz/spit/blob/dev/tests/reviews.rs).
 - **A coverage gap holds back its sources.** A job that needs one is blocked, as it would be by an incomplete producer. Test: [`a_coverage_gap_holds_back_its_sources_and_blocks_their_consumers`](https://github.com/eclnz/spit/blob/dev/tests/artifacts.rs).
 - **Each artifact is in the `Artifacts` table once, and ids count up from 0 in the order they are added.** `Artifacts::add` gives the id of an artifact already there, and `Artifacts::product` keeps the first type a product is given. Tests: [`adding_an_artifact_twice_gives_its_id_and_keeps_one_row`](https://github.com/eclnz/spit/blob/dev/src/model/artifacts.rs), [`a_product_is_numbered_once_and_keeps_the_first_type_it_is_given`](https://github.com/eclnz/spit/blob/dev/src/model/artifacts.rs), [`find_gives_what_add_added_and_nothing_else`](https://github.com/eclnz/spit/blob/dev/src/model/artifacts.rs), [`ids_count_up_from_zero_in_the_order_artifacts_are_added`](https://github.com/eclnz/spit/blob/dev/src/model/artifacts.rs).
 - **Types are checked before any job is made.** Test: [`checks_types_before_concrete_expansion`](https://github.com/eclnz/spit/blob/dev/tests/resolver.rs).

@@ -30,6 +30,9 @@ pub struct ProductDef {
     /// The checks a source's artifacts must pass before a job reads them, as
     /// in `source t1w : Image [sub] @check(ndim(3))`; none for an output.
     pub checks: Vec<CheckUse>,
+    /// The reviews that judge a source's artifacts, as in
+    /// `source t1w : Image [sub] @review(looked_at)`; none for an output.
+    pub reviews: Vec<String>,
 }
 
 impl ProductDef {
@@ -46,6 +49,7 @@ impl ProductDef {
             folder: false,
             beside: None,
             checks: Vec::new(),
+            reviews: Vec::new(),
         }
     }
 }
@@ -64,6 +68,9 @@ pub struct InputPort {
     /// The checks each artifact the port reads must pass before the job
     /// runs, as in `dwi: DWI @check(ndim(4))`.
     pub checks: Vec<CheckUse>,
+    /// The reviews that judge each artifact the port reads, as in
+    /// `dwi: DWI @review(looked_at)`.
+    pub reviews: Vec<String>,
 }
 
 impl InputPort {
@@ -73,6 +80,7 @@ impl InputPort {
             artifact_type,
             cardinality: Cardinality::One,
             checks: Vec::new(),
+            reviews: Vec::new(),
         }
     }
 
@@ -82,6 +90,7 @@ impl InputPort {
             artifact_type,
             cardinality: Cardinality::Many,
             checks: Vec::new(),
+            reviews: Vec::new(),
         }
     }
 }
@@ -116,6 +125,12 @@ pub struct OutputPort {
     /// The default checks of the file or stage that this output opts out
     /// of, as in `-> Image @check(!nonempty)`.
     pub exempt: Vec<CheckUse>,
+    /// The reviews that judge the artifact, as in `-> Image
+    /// @review(looked_at)`.
+    pub reviews: Vec<String>,
+    /// The default reviews of the file or stage that this output opts out
+    /// of, as in `-> Image @review(!looked_at)`.
+    pub exempt_reviews: Vec<String>,
 }
 
 /// A file written beside the named port's or source's file. Its name is
@@ -180,6 +195,8 @@ impl OutputPort {
             beside: None,
             checks: Vec::new(),
             exempt: Vec::new(),
+            reviews: Vec::new(),
+            exempt_reviews: Vec::new(),
         }
     }
 
@@ -384,6 +401,9 @@ pub struct Invocation {
     /// Checks the step runs beyond its operation's: those an operation with
     /// a body attaches to the inputs and outputs the step reads and makes.
     pub checks: Vec<(Port, CheckUse)>,
+    /// Reviews the step applies beyond its operation's, as `checks` holds
+    /// checks.
+    pub reviews: Vec<(Port, String)>,
 }
 
 /// One of a step's ports, by its position among the operation's inputs or
@@ -457,6 +477,7 @@ impl Invocation {
             origin: None,
             line: None,
             checks: Vec::new(),
+            reviews: Vec::new(),
         }
     }
 
@@ -647,6 +668,9 @@ pub struct StageDef {
     /// The `check:` default of this stage's outputs, added to those of the
     /// stages around it.
     pub checks: DefaultChecks,
+    /// The `review:` default of this stage's outputs, added to those of the
+    /// stages around it.
+    pub reviews: DefaultReviews,
     /// The `default entities:` spelling of `{@entities}` for the same
     /// products, in place of the pipeline's.
     pub entities_format: Option<EntitiesFormat>,
@@ -658,6 +682,15 @@ pub struct StageDef {
 pub struct DefaultChecks {
     pub checks: Vec<CheckUse>,
     pub exempt: Vec<CheckUse>,
+}
+
+/// A `review:` line: the reviews that judge every output of a file or
+/// stage, and the reviews of the scope around it that its outputs are not
+/// judged by.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct DefaultReviews {
+    pub reviews: Vec<String>,
+    pub exempt: Vec<String>,
 }
 
 /// A directory pattern that observes concrete entity bindings under a root.
@@ -674,6 +707,7 @@ impl StageDef {
             path_template: None,
             extension: None,
             checks: DefaultChecks::default(),
+            reviews: DefaultReviews::default(),
             entities_format: None,
         }
     }

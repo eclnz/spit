@@ -8,10 +8,11 @@ use crate::model::{Beside, InputBinding, Invocation, ProductDef};
 use crate::paths::PathTemplate;
 use crate::types::{parse_type_expr, TypeExpr, TypeParseError};
 
-use super::check::{no_space_after_at, only_checks, split_clauses};
+use super::check::{no_space_after_at, split_clauses};
 use super::lexical::{
     call_parts, comma_items, identifier, product_name, qualified_identifier, split_ending,
 };
+use super::review::only_attachments;
 use super::source_map::tail_place;
 use super::{ParseError, PathRule, StatementKind};
 
@@ -191,8 +192,12 @@ pub(super) fn parse_dimension_order(text: &str, number: usize) -> Result<Vec<Str
 }
 
 pub(super) fn parse_product(line: &str, number: usize) -> Result<ProductDef, ParseError> {
-    let (line, clauses) = split_clauses(line, "expected `@check(...)` after a source", number)?;
-    let checks = only_checks(&clauses, "a source", number)?;
+    let (line, clauses) = split_clauses(
+        line,
+        "expected `@check(...)` or `@review(...)` after a source",
+        number,
+    )?;
+    let attached = only_attachments(&clauses, "a source", number)?;
     let (line, beside) = match line.rsplit_once(" beside ") {
         Some((item, sibling)) => {
             if item.trim_end().ends_with(']') {
@@ -255,7 +260,8 @@ pub(super) fn parse_product(line: &str, number: usize) -> Result<ProductDef, Par
     let mut product = ProductDef::new(name, artifact_type, &dimensions);
     product.extension = extension.map(str::to_owned);
     product.folder = folder;
-    product.checks = checks;
+    product.checks = attached.checks;
+    product.reviews = attached.reviews;
     if let Some((sibling, suffix, append)) = beside {
         if product.folder || !product.dimensions.is_empty() || product.extension.is_some() {
             return Err(ParseError::new(
@@ -405,38 +411,24 @@ fn owned(values: &[&str]) -> Vec<String> {
     values.iter().map(|value| (*value).to_owned()).collect()
 }
 
-/// What an `exclude` line names: a file of rules, or one rule.
+/// What an `exclude` line names: a source, the values an artifact's
+/// identity must include, or both, the values in the order written.
 #[derive(Clone, Debug)]
-pub(crate) enum ExcludeLine {
-    /// `exclude from qc/excluded.csv`, relative to the recipe's folder.
-    File(String),
-    /// A source, the values an artifact's identity must include, or both,
-    /// the values in the order written.
-    Rule {
-        product: Option<String>,
-        values: Vec<(String, String)>,
-    },
+pub(crate) struct ExcludeRule {
+    pub(crate) product: Option<String>,
+    pub(crate) values: Vec<(String, String)>,
 }
 
-/// Parse the text after `exclude`: `from <file>`, or a source with or
-/// without `[dimension=value,...]`, or `[dimension=value,...]` alone.
-pub(crate) fn parse_exclude(text: &str, number: usize) -> Result<ExcludeLine, ParseError> {
+/// Parse the text after `exclude`: a source with or without
+/// `[dimension=value,...]`, or `[dimension=value,...]` alone.
+pub(crate) fn parse_exclude(text: &str, number: usize) -> Result<ExcludeRule, ParseError> {
     let text = text.trim();
-    if text == "from" {
+    if text == "from" || text.starts_with("from ") {
         return Err(ParseError::new(
             number,
-            "expected one file after `exclude from`, such as `exclude from qc/excluded.csv`",
-        ));
-    }
-    if let Some(file) = text.strip_prefix("from ") {
-        let file = file.trim();
-        if file.is_empty() || file.chars().any(char::is_whitespace) {
-            return Err(ParseError::new(
-                number,
-                "expected one file after `exclude from`, such as `exclude from qc/excluded.csv`",
-            ));
-        }
-        return Ok(ExcludeLine::File(file.to_owned()));
+            "`exclude from` is gone: declare a `review` in the pipeline, attach it with `@review(name)`, and write `review name from file.csv` in the recipe",
+        )
+        .at_token(text));
     }
     let (product, bindings) = match text.split_once('[') {
         Some((product, bindings)) => (product.trim(), Some(bindings)),
@@ -466,5 +458,5 @@ pub(crate) fn parse_exclude(text: &str, number: usize) -> Result<ExcludeLine, Pa
             "`exclude` names a source, values such as `[sub=02]`, or both",
         ));
     }
-    Ok(ExcludeLine::Rule { product, values })
+    Ok(ExcludeRule { product, values })
 }

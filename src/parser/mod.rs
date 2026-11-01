@@ -13,6 +13,7 @@ mod lexical;
 mod operation;
 mod render_inventory;
 mod resources;
+mod review;
 mod rules;
 mod source_map;
 
@@ -22,8 +23,8 @@ use std::fmt;
 use std::ops::Range;
 
 use crate::model::{
-    CheckDef, CommandDef, CommandRole, CoverageRule, DefaultChecks, Invocation, OperationDef,
-    ProductDef, ResourcesDef, StepOutput, TypeChecking,
+    CheckDef, CommandDef, CommandRole, CoverageRule, DefaultChecks, DefaultReviews, Invocation,
+    OperationDef, ProductDef, ResourcesDef, ReviewDef, StepOutput, TypeChecking,
 };
 use crate::paths::PathTemplate;
 use crate::span::{address_of, columns_at, content_columns, Focus, Located, Place};
@@ -31,7 +32,7 @@ use crate::span::{address_of, columns_at, content_columns, Focus, Located, Place
 use self::flow::parse_flow;
 
 pub(crate) use self::body::empty_body;
-pub(crate) use self::declarations::{parse_use, ExcludeLine, UseSpec};
+pub(crate) use self::declarations::{parse_use, UseSpec};
 pub use self::inventory::parse_source_inventory;
 pub(crate) use self::inventory::{
     document_records, parse_inventory_recovering, source_record_lines,
@@ -204,13 +205,21 @@ pub(crate) enum StatementKind {
     Constraint(CoverageRule, Rule),
     /// An `exclude` rule, its reason from the line's comment, and where
     /// what it names sits.
-    Exclude(declarations::ExcludeLine, Option<String>, Place),
+    Exclude(declarations::ExcludeRule, Option<String>, Place),
     /// A command, with where it and each of its lines are.
     Command(CommandDef, CommandPlaces),
     /// A `resources` line, and where its operation's name is.
     Resources(ResourcesDef, Place),
     /// A `check` declaration, and where its name is.
     Check(CheckDef, Place),
+    /// A `review` declaration, and where its name is.
+    Review(ReviewDef, Place),
+    /// A recipe's `review name from file` line, and where the name is.
+    ReviewFile {
+        review: String,
+        file: String,
+        place: Place,
+    },
     /// A `dimensions [...]` line: the pipeline's dimension order.
     Dimensions(Vec<String>),
     /// A `types` line: how much of the pipeline must be typed.
@@ -237,6 +246,14 @@ pub(crate) enum StatementKind {
     DefaultChecks {
         stage: Option<String>,
         checks: DefaultChecks,
+        /// Where the list sits.
+        place: Place,
+    },
+    /// A `review:` line: the reviews of every output in `stage` or, outside
+    /// every stage, in the whole file.
+    DefaultReviews {
+        stage: Option<String>,
+        reviews: DefaultReviews,
         /// Where the list sits.
         place: Place,
     },
@@ -339,6 +356,25 @@ impl StatementKind {
         let check = check::parse_check(declaration, number)?;
         let place = source_map::name_place(original, number, declaration, &check.name);
         Ok(Self::Check(check, place))
+    }
+
+    /// A `review` line, `declaration` being the text after its keyword in
+    /// `original`.
+    fn review(original: &str, declaration: &str, number: usize) -> Result<Self, ParseError> {
+        Ok(match review::parse_review(declaration, number)? {
+            review::ReviewLine::Declare(review) => {
+                let place = source_map::name_place(original, number, declaration, &review.name);
+                Self::Review(review, place)
+            }
+            review::ReviewLine::File { review, file } => {
+                let place = source_map::name_place(original, number, declaration, &review);
+                Self::ReviewFile {
+                    review,
+                    file,
+                    place,
+                }
+            }
+        })
     }
 
     /// A command, or a `verify` command, for an operation.

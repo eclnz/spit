@@ -40,7 +40,7 @@ pub enum Word {
     Has,
     RequireHas,
     Exclude,
-    ExcludeFrom,
+    ReviewFrom,
     Product,
     Entities,
     StageName,
@@ -55,8 +55,11 @@ pub enum Word {
     SourcePaths,
     Contexts,
     Removed,
+    Verdicts,
     Check,
     CheckClause,
+    Review,
+    ReviewClause,
     PathPlaceholder,
     ShapeDigits,
     ShapeYear,
@@ -89,7 +92,7 @@ impl Word {
 }
 
 /// Every word's documentation, in the order of [`Word`].
-pub static DOCS: [Doc; 56] = [
+pub static DOCS: [Doc; 59] = [
     Doc {
         name: "source",
         kind: "keyword",
@@ -308,11 +311,11 @@ pub static DOCS: [Doc; 56] = [
         summary: "Removes named artifacts or groups and groups meeting a condition. Named exclusions apply before scanning; conditional exclusions run against the observed inventory before `require`. An exclude that names nothing or removes every group is an error.",
     },
     Doc {
-        name: "exclude-from",
+        name: "review-from",
         kind: "keyword",
-        anchor: "exclude-named-artifacts",
-        example: "exclude from qc/excluded.csv",
-        summary: "Reads `exclude` rules from a CSV file, relative to the recipe's folder, one rule per row. The header names the columns: `product` and `reason` are optional, and every other column is a dimension. An empty cell leaves its column out.",
+        anchor: "reviews",
+        example: "review looked_at from qc/looked_at.csv",
+        summary: "In a recipe, names the CSV file a review's verdicts are in, relative to the recipe's folder. The header holds a `verdict` column of `pass` or `fail`, an optional `reason`, and a column for each dimension to judge by; an empty cell covers every value of its dimension. A file that does not exist yet gives the review no verdicts, so everything it judges is held back.",
     },
     Doc {
         name: "@product",
@@ -413,6 +416,13 @@ pub static DOCS: [Doc; 56] = [
         summary: "What the recipe's `exclude` rules removed, each with its rule, line, count found and reason. A record, not a rule: the records above already leave these out, and `dag` copies it into the `.spitdag`.",
     },
     Doc {
+        name: "verdicts:",
+        kind: "header",
+        anchor: "inputs",
+        example: "verdicts:\n    looked_at[sub=04]\n        verdict: fail\n        at: qc/looked_at.csv line 2\n        reason: ghosting",
+        summary: "The rows of each review's file, each with its verdict, the file and line it was read from, and its reason. A record, not a rule: a DAG made from the `.spitout` judges artifacts by these rows.",
+    },
+    Doc {
         name: "check",
         kind: "keyword",
         anchor: "checks",
@@ -425,6 +435,20 @@ pub static DOCS: [Doc; 56] = [
         anchor: "checks",
         example: "operation denoise(dwi: DWI @check(ndim(4))) -> DWI @check(nonempty)",
         summary: "Attaches checks to a port or a source. An input's checks, and its source's, run on each artifact before the job's command; an output's run after it, before the job counts as done.",
+    },
+    Doc {
+        name: "review",
+        kind: "keyword",
+        anchor: "reviews",
+        example: "review looked_at\nsource t1w : Image [sub] @review(looked_at)\ndefault review: looked_at",
+        summary: "Declares a review: a judgement a person makes, recorded in a file the recipe names. A review has no parameters and no command. A reviewed artifact that passes is used as usual; one that fails, or that nobody has judged, is kept from the readers the review covers. `default review:` lists the reviews every output in the file, or in the stage it is written in, has; `!name` drops one a wider scope sets.",
+    },
+    Doc {
+        name: "review-clause",
+        kind: "selector",
+        anchor: "reviews",
+        example: "operation summarise(t1: T1w @review(looked_at)) -> Json @review(checked)",
+        summary: "Attaches reviews to a port or a source. A review on a source or an output covers every reader of the product; one on an input port covers that port alone. The job that makes a reviewed output still runs.",
     },
     Doc {
         name: "@path",

@@ -377,12 +377,26 @@ fn expand(
             .map(|(_, check)| check);
         declared.iter().chain(given).cloned().collect()
     };
+    // The reviews on each port, the same way.
+    let port_reviews = |port: Port| -> Vec<String> {
+        let declared = match port {
+            Port::Input(index) => &operation.inputs[index].reviews,
+            Port::Output(index) => &operation.outputs[index].reviews,
+        };
+        let given = caller
+            .reviews
+            .iter()
+            .filter(|(at, _)| *at == port)
+            .map(|(_, review)| review);
+        declared.iter().chain(given).cloned().collect()
+    };
     let mut steps = Vec::with_capacity(operation.steps.len());
     // The products the body makes for itself, filed once the steps are made.
     let mut made = Vec::new();
     for body in &operation.steps {
         // A step that reads a port, or makes an output, runs its checks.
         let mut checks = Vec::new();
+        let mut reviews = Vec::new();
         let mut inputs = Vec::with_capacity(body.invocation.inputs.len());
         for (position, binding) in body.invocation.inputs.iter().enumerate() {
             let port = operation
@@ -394,6 +408,11 @@ fn expand(
                     port_checks(Port::Input(port))
                         .into_iter()
                         .map(|check| (Port::Input(position), check)),
+                );
+                reviews.extend(
+                    port_reviews(Port::Input(port))
+                        .into_iter()
+                        .map(|review| (Port::Input(position), review)),
                 );
             }
             inputs.push(match port {
@@ -447,6 +466,11 @@ fn expand(
                         .into_iter()
                         .map(|check| (Port::Output(position), check)),
                 );
+                reviews.extend(
+                    port_reviews(Port::Output(port))
+                        .into_iter()
+                        .map(|review| (Port::Output(position), review)),
+                );
             }
         }
         for output in &body.outputs {
@@ -475,6 +499,7 @@ fn expand(
                 }),
                 line: Some(body.place.line),
                 checks,
+                reviews,
             },
             outputs,
         });
