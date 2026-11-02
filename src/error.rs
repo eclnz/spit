@@ -21,6 +21,9 @@ pub enum DefinitionSubject {
     ConstraintGroup(usize),
     /// An `exclude` rule, by its index in `InputRules::exclusions`.
     Exclusion(usize),
+    /// A recipe's `review ... from` line, by its index in
+    /// `InputRules::reviews`.
+    ReviewFile(usize),
     Source(SourceRecord),
     /// A stage, by name.
     Stage(String),

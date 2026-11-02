@@ -116,7 +116,8 @@ impl fmt::Display for InventoryText<'_> {
             writeln!(f, "contexts:")?;
             self.write_contexts(f, inventory.contexts.iter().collect(), &[])?;
         }
-        self.write_removed(f)
+        self.write_removed(f)?;
+        self.write_verdicts(f)
     }
 }
 
@@ -153,6 +154,38 @@ impl InventoryText<'_> {
                 writeln!(f, "        found: {found}")?;
             }
             if let Some(reason) = &removal.reason {
+                writeln!(f, "        reason: {reason}")?;
+            }
+        }
+        Ok(())
+    }
+
+    /// The rows of the review files, each with its verdict:
+    ///
+    /// ```text
+    /// verdicts:
+    ///     looked_at[sub=04]
+    ///         verdict: fail
+    ///         at: qc/looked_at.csv line 2
+    ///         reason: ghosting
+    /// ```
+    fn write_verdicts(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let verdicts = &self.inventory.verdicts;
+        if verdicts.is_empty() {
+            return Ok(());
+        }
+        let declared = self.pipeline.dimension_order();
+        writeln!(f, "\nverdicts:")?;
+        for row in verdicts {
+            writeln!(
+                f,
+                "    {}[{}]",
+                row.review,
+                in_order(&row.entities, &declared)
+            )?;
+            writeln!(f, "        verdict: {}", row.verdict.word())?;
+            writeln!(f, "        at: {}", row.origin())?;
+            if let Some(reason) = &row.reason {
                 writeln!(f, "        reason: {reason}")?;
             }
         }

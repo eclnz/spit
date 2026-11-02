@@ -27,6 +27,7 @@ pub(super) fn subject_place(
         DefinitionSubject::Constraint(index) => lines.rules.get(*index).map(Rule::product),
         DefinitionSubject::ConstraintGroup(index) => lines.rules.get(*index).map(Rule::dimensions),
         DefinitionSubject::Exclusion(index) => lines.exclusions.get(*index).cloned(),
+        DefinitionSubject::ReviewFile(index) => lines.review_files.get(*index).cloned(),
         DefinitionSubject::Stage(name) => lines.stages.get(name).cloned(),
         // Placed with the call it is in, by `at_call`.
         DefinitionSubject::Call(_) => None,

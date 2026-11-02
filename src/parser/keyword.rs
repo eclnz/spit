@@ -19,6 +19,12 @@ pub(crate) enum Keyword {
     /// `check:`, the checks every output in a file or stage runs, written
     /// after `default` or in a `default:` block.
     Checks,
+    /// `review name`, which declares a review, and in a recipe `review name
+    /// from file.csv`, the file its verdicts are in.
+    Review,
+    /// `review:`, the reviews that judge every output in a file or stage,
+    /// written after `default` or in a `default:` block.
+    Reviews,
     Require,
     /// `skip` and `drop`, read only to give an error that says what to
     /// write instead.
@@ -31,7 +37,7 @@ pub(crate) enum Keyword {
     /// `ext:`, the extension a default path is completed with, written
     /// after `default` or in a `default:` block.
     Ext,
-    /// `default path:`, `default ext:` and `default check:`, and `default:`,
+    /// `default path:`, `default ext:`, `default check:` and `default review:`, and `default:`,
     /// which opens a block of them.
     Default,
     Entities,
@@ -51,7 +57,7 @@ pub(crate) enum Keyword {
 /// Every keyword and its word. Each word is reserved: no product may take
 /// it as its name, so the first word of a line says whether it starts a
 /// statement.
-const WORDS: [(Keyword, &str); 22] = [
+const WORDS: [(Keyword, &str); 23] = [
     (Keyword::Use, "use"),
     (Keyword::Root, "root"),
     (Keyword::Source, "source"),
@@ -60,6 +66,7 @@ const WORDS: [(Keyword, &str); 22] = [
     (Keyword::Verify, "verify"),
     (Keyword::Resources, "resources"),
     (Keyword::Check, "check"),
+    (Keyword::Review, "review"),
     (Keyword::Require, "require"),
     (Keyword::Skip, "skip"),
     (Keyword::Drop, "drop"),
@@ -78,13 +85,14 @@ const WORDS: [(Keyword, &str); 22] = [
 
 /// The keywords that open a block of their statements when written alone
 /// with a `:`, as `source:`, and the word for each.
-pub(crate) const BLOCKS: [(Keyword, &str); 9] = [
+pub(crate) const BLOCKS: [(Keyword, &str); 10] = [
     (Keyword::Source, "source"),
     (Keyword::Operation, "operation"),
     (Keyword::Command, "command"),
     (Keyword::Verify, "verify"),
     (Keyword::Resources, "resources"),
     (Keyword::Check, "check"),
+    (Keyword::Review, "review"),
     (Keyword::Path, "path"),
     (Keyword::Require, "require"),
     (Keyword::Exclude, "exclude"),
@@ -100,8 +108,9 @@ impl Keyword {
     /// trimmed line is expected. The first word, up to a space or a `:`,
     /// decides, since every keyword's word is reserved; the text after it
     /// starts after one space. `check` followed by
-    /// `:` and a list is the default checks list, `Checks`, and `ext:` and
-    /// `check:` give the text after their `:`. A keyword of [`BLOCKS`]
+    /// `:` and a list is the default checks list, `Checks`, and `review`
+    /// followed by `:` and a list is `Reviews`; `ext:`, `check:` and
+    /// `review:` give the text after their `:`. A keyword of [`BLOCKS`]
     /// alone with its `:` gives `:` as its text.
     pub(crate) fn split(line: &str) -> Option<(Self, &str)> {
         let end = line.find([' ', '\t', ':']).unwrap_or(line.len());
@@ -112,6 +121,7 @@ impl Keyword {
         }
         Some(match (keyword, rest.strip_prefix(':')) {
             (Self::Check, Some(list)) => (Self::Checks, list),
+            (Self::Review, Some(list)) => (Self::Reviews, list),
             (Self::Ext | Self::ShellSource, Some(after)) => (keyword, after),
             _ => (keyword, rest.strip_prefix(' ').unwrap_or(rest)),
         })
@@ -141,6 +151,8 @@ pub(crate) enum Header<'a> {
     Contexts(Option<&'a str>),
     /// `removed:`, the record of what the input stage left out.
     Removed,
+    /// `verdicts:`, the rows of the review files a recipe names.
+    Verdicts,
 }
 
 impl<'a> Header<'a> {
@@ -150,6 +162,7 @@ impl<'a> Header<'a> {
             "sources:" => Self::Sources,
             "source_paths:" => Self::SourcePaths,
             "removed:" => Self::Removed,
+            "verdicts:" => Self::Verdicts,
             "contexts:" => Self::Contexts(None),
             _ => Self::Contexts(Some(
                 line.strip_prefix("contexts ")?.strip_suffix(':')?.trim(),
@@ -221,6 +234,9 @@ mod tests {
             Some(Keyword::Check)
         );
         assert_eq!(keyword("check = f(x)"), Some(Keyword::Check));
+        assert_eq!(keyword("review looked_at"), Some(Keyword::Review));
+        assert_eq!(keyword("review: looked_at"), Some(Keyword::Reviews));
+        assert_eq!(Keyword::split("review:"), Some((Keyword::Review, ":")));
         assert_eq!(keyword("defaults = f(x)"), None);
         assert_eq!(keyword("sources:"), None);
         assert_eq!(

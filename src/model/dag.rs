@@ -8,6 +8,7 @@ use crate::error::ResolveError;
 
 use super::{
     Artifact, ArtifactId, ArtifactInstance, Artifacts, CallId, SourceInventory, StepOrigin,
+    UnmatchedVerdicts, Withheld,
 };
 
 /// A job's number in its DAG, counted from 1 in the order the resolver
@@ -189,6 +190,14 @@ pub struct ArtifactReport {
     pub dag: ResolvedDag,
     pub incomplete: Vec<IncompleteJob>,
     pub coverage: Vec<CoverageGap>,
+    /// The reviewed artifacts a review keeps from their readers, rejected
+    /// or not yet judged, in the order the resolver meets them. A withheld
+    /// artifact is no gap: the jobs that would read it are left out, or
+    /// take the artifacts that remain.
+    pub withheld: Vec<Withheld>,
+    /// The rows of each review file that match no artifact the review
+    /// judges, file by file.
+    pub unmatched_verdicts: Vec<UnmatchedVerdicts>,
 }
 
 impl ArtifactReport {
@@ -196,7 +205,7 @@ impl ArtifactReport {
     /// the inventory holds that the plan has no use for, such as those a
     /// `where` selector leaves out, or a file whose name matches no value a
     /// job needs. Sources a coverage gap holds back are reported with the
-    /// gap, not here.
+    /// gap, and those a review withholds with the review, not here.
     pub fn unused_sources(&self) -> Vec<ArtifactId> {
         let mut read = vec![false; self.dag.artifacts.len()];
         let complete = self.dag.jobs.iter().flat_map(Job::input_artifacts);
@@ -206,6 +215,15 @@ impl ArtifactReport {
             .flat_map(|job| job.inputs.iter().copied());
         for id in complete.chain(incomplete) {
             read[id.index()] = true;
+        }
+        for withheld in &self.withheld {
+            if let Some(id) = self
+                .dag
+                .artifacts
+                .find(&withheld.artifact.product, &withheld.artifact.entities)
+            {
+                read[id.index()] = true;
+            }
         }
         for source in self.coverage.iter().flat_map(|gap| &gap.sources) {
             if let Some(id) = self.dag.artifacts.find(&source.product, &source.entities) {

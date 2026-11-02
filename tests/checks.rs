@@ -195,9 +195,9 @@ fn checks_and_their_uses_are_checked_where_they_are_written() {
     ))
     .contains("a step's product takes no `@check(...)`"));
     assert!(first(&pipeline("operation f(x: Text) @check(nonempty)\n"))
-        .contains("`@check(...)` follows the port it checks"));
+        .contains("`@check(...)` follows the port it applies to"));
     assert!(first(&pipeline("source other [id] @vary(id)\n"))
-        .contains("a source takes only `@check(...)`"));
+        .contains("a source takes `@check(...)` and `@review(...)`"));
     assert!(first(&pipeline(
         "operation f(x: Text @check(lines(a b))) -> Text\n"
     ))

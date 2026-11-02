@@ -142,7 +142,7 @@ fn every_selection_form_is_recipe_only_including_literal_exclusions() {
         "exclude raw[id=b]",
         "exclude [id=b]",
         "exclude raw",
-        "exclude from excluded.csv",
+        "review raw from excluded.csv",
         "exclude [id] where raw count<1",
     ] {
         tree.write("code/rejected.spit", &format!("{PIPELINE}{rule}\n"));

@@ -213,6 +213,7 @@ pub(crate) fn collect_commands(
         skip,
     ));
     errors.extend(crate::check::collect_checks(pipeline, lines, skip));
+    errors.extend(crate::review::collect_reviews(pipeline, lines, skip));
     errors
 }
 

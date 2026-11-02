@@ -441,6 +441,7 @@ pub(crate) fn collect_rule_errors(
     // named.
     let products = PipelineIndex::new(pipeline);
     let mut errors = super::exclusions::collect_exclusion_errors(&products, rules);
+    errors.extend(super::reviews::collect_review_errors(pipeline, rules));
     for (index, rule) in rules.constraints.iter().enumerate() {
         if poisoned.contains(&rule.product) {
             continue;

@@ -359,10 +359,15 @@ fn unobserved_sources<'a>(
     found
 }
 
+/// Warn of each step that resolves no jobs though its inputs have
+/// artifacts, and of each source with none that leaves steps empty. A step
+/// that reads a product in `withheld`, whose artifacts a review keeps from
+/// it, is not warned of: the review's notes say why it has no jobs.
 pub(super) fn empty_step_warnings(
     pipeline: &Pipeline,
     lines: &SourceMap,
     produced: &BTreeSet<&str>,
+    withheld: &BTreeSet<&str>,
     inventory: &SourceInventory,
 ) -> Vec<Diagnostic> {
     let observed: BTreeSet<_> = inventory
@@ -402,10 +407,9 @@ pub(super) fn empty_step_warnings(
             left_empty.entry(source).or_default().push(step);
         }
         if sources.is_empty()
-            && !invocation
-                .inputs
-                .iter()
-                .any(|input| empty_input(&input.product))
+            && !invocation.inputs.iter().any(|input| {
+                empty_input(&input.product) || withheld.contains(input.product.as_str())
+            })
         {
             warnings.push(Diagnostic::new(
                 Severity::Warning,

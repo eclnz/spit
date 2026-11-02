@@ -10,9 +10,10 @@ use crate::error::{DefinitionSubject, ResolveError};
 use crate::paths::{EntitiesFormat, PathTemplate};
 
 use super::{
-    ArtifactInstance, BesideFile, Call, CallId, CheckDef, CommandDef, DefaultChecks, EntityBinding,
-    ExtensionSource, Invocation, OperationDef, PipelineIndex, ProductDef, Removal, ResourcesDef,
-    SidecarGroup, SourceInventory, SourceRecord, StageDef,
+    ArtifactInstance, BesideFile, Call, CallId, CheckDef, CommandDef, DefaultChecks,
+    DefaultReviews, EntityBinding, ExtensionSource, Invocation, OperationDef, PipelineIndex,
+    ProductDef, Removal, ResourcesDef, ReviewDef, SidecarGroup, SourceInventory, SourceRecord,
+    StageDef,
 };
 
 /// The logical pipeline: what to make from which sources. It says nothing
@@ -33,6 +34,10 @@ pub struct Pipeline {
     pub checks: Vec<CheckDef>,
     /// The `check:` default of every output in the file, outside any stage.
     pub default_checks: DefaultChecks,
+    /// `review` declarations, in declaration order.
+    pub reviews: Vec<ReviewDef>,
+    /// The `review:` default of every output in the file, outside any stage.
+    pub default_reviews: DefaultReviews,
     pub path_template: Option<PathTemplate>,
     /// How `{@entities}` is written, from the `default entities:` line
     /// outside every stage. A product's spelling is its stage's, else this
