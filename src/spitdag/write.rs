@@ -2,14 +2,13 @@
 //! JSON written once, and each job's fingerprint hashed from its work.
 
 use std::io;
-use std::ops::Range;
 
 use crate::json::{write_array, write_number, write_string, write_u64, ObjectWriter};
 use crate::model::{ArtifactId, JobId, Removal};
-use crate::types::TypeExpr;
 
+use super::artifact_json::{write_artifact, ArtifactJson};
 use super::work::{fingerprint, write_hex, write_work_commands, WorkCommands};
-use super::{ArgPart, Argument, BoundArtifact, BoundDag, BoundJob, When, SPITDAG_VERSION};
+use super::{ArgPart, Argument, BoundDag, BoundJob, BoundStep, When, SPITDAG_VERSION};
 
 /// How much of a document [`BoundDag::write_json`] holds before writing it.
 pub(crate) const PIECE: usize = 1 << 16;
@@ -113,45 +112,10 @@ pub(crate) fn write_document(
     handed
 }
 
-/// Each artifact a job uses, as JSON, written once however many jobs use it.
-struct ArtifactJson {
-    text: String,
-    /// Where each artifact's JSON is in `text`, by id; empty for one no job
-    /// uses.
-    spans: Vec<Range<usize>>,
-}
-
-impl ArtifactJson {
-    fn new(dag: &BoundDag) -> Self {
-        let mut used = vec![false; dag.paths.len()];
-        for job in &dag.jobs {
-            for id in job.input_artifacts().chain(job.outputs.iter().copied()) {
-                used[id.index()] = true;
-            }
-        }
-        let mut text = String::new();
-        let spans = dag
-            .artifacts
-            .ids()
-            .map(|id| {
-                let start = text.len();
-                if used[id.index()] {
-                    write_artifact(&mut text, &dag.artifact(id));
-                }
-                start..text.len()
-            })
-            .collect();
-        Self { text, spans }
-    }
-
-    fn get(&self, id: ArtifactId) -> &str {
-        &self.text[self.spans[id.index()].clone()]
-    }
-}
-
 /// One job. What it reads, writes and runs is written first into `work`, a
 /// buffer reused between jobs, as the object its fingerprint hashes; the
-/// job's own fields then copy from it.
+/// job's own fields then copy from it, except its artifacts, which are
+/// written again with their types.
 fn write_job(
     out: &mut String,
     dag: &BoundDag,
@@ -164,21 +128,11 @@ fn write_job(
     work.clear();
     let mut object = ObjectWriter::start(work);
     let operation = object.field_at("operation", |out| write_string(out, &step.operation));
-    let inputs = object.field_at("inputs", |out| {
-        let mut inputs = ObjectWriter::start(out);
-        for (port, ids) in step.inputs.iter().zip(&job.inputs) {
-            inputs.field(port, |out| {
-                write_array(out, ids, |out, &id| out.push_str(artifacts.get(id)));
-            });
-        }
-        inputs.finish();
+    object.field_at("inputs", |out| {
+        write_inputs(out, step, job, |out, id| artifacts.push_identity(out, id));
     });
-    let outputs = object.field_at("outputs", |out| {
-        let mut outputs = ObjectWriter::start(out);
-        for (port, &artifact) in step.outputs.iter().zip(&job.outputs) {
-            outputs.field(port, |out| out.push_str(artifacts.get(artifact)));
-        }
-        outputs.finish();
+    object.field_at("outputs", |out| {
+        write_outputs(out, step, job, |out, id| artifacts.push_identity(out, id));
     });
     let commands = write_work_commands(&mut object, dag, &job.commands);
     let verify = object.field_at("verify", |out| {
@@ -215,8 +169,12 @@ fn write_job(
         write_hex(out, fingerprint(work));
         out.push('"');
     });
-    object.raw("inputs", &work[inputs]);
-    object.raw("outputs", &work[outputs]);
+    object.field("inputs", |out| {
+        write_inputs(out, step, job, |out, id| out.push_str(artifacts.get(id)));
+    });
+    object.field("outputs", |out| {
+        write_outputs(out, step, job, |out, id| out.push_str(artifacts.get(id)));
+    });
     object.field("depends_on", |out| {
         write_array(
             out,
@@ -278,6 +236,37 @@ fn write_job(
     object.finish();
 }
 
+/// A job's inputs as `{port: [artifact, ...]}`, each artifact written by
+/// `artifact`.
+fn write_inputs(
+    out: &mut String,
+    step: &BoundStep,
+    job: &BoundJob,
+    artifact: impl Fn(&mut String, ArtifactId),
+) {
+    let mut inputs = ObjectWriter::start(out);
+    for (port, ids) in step.inputs.iter().zip(&job.inputs) {
+        inputs.field(port, |out| {
+            write_array(out, ids, |out, &id| artifact(out, id))
+        });
+    }
+    inputs.finish();
+}
+
+/// A job's outputs as `{port: artifact}`, each artifact written by `artifact`.
+fn write_outputs(
+    out: &mut String,
+    step: &BoundStep,
+    job: &BoundJob,
+    artifact: impl Fn(&mut String, ArtifactId),
+) {
+    let mut outputs = ObjectWriter::start(out);
+    for (port, &id) in step.outputs.iter().zip(&job.outputs) {
+        outputs.field(port, |out| artifact(out, id));
+    }
+    outputs.finish();
+}
+
 /// An argument is an array of parts: a string for text, `{"path": ...}` for
 /// a file, and `{"dir": ..., "of": ...}` or `{"stem": ..., "of": ...}` for
 /// its folder or its name without its extension, with the file they are of,
@@ -314,29 +303,6 @@ pub(super) fn write_command(out: &mut String, dag: &BoundDag, command: &[Argumen
 // Artifacts are most of a `.spitdag`, so their fixed keys are written as
 // whole pieces rather than a field at a time.
 
-fn write_artifact(out: &mut String, artifact: &BoundArtifact<'_>) {
-    out.push_str("{\"product\":");
-    write_string(out, artifact.product);
-    out.push_str(",\"entities\":{");
-    for (index, (dimension, value)) in artifact.entities().enumerate() {
-        if index > 0 {
-            out.push(',');
-        }
-        write_string(out, dimension);
-        out.push(':');
-        write_string(out, value);
-    }
-    out.push_str("},\"type\":");
-    write_type(out, artifact.artifact_type);
-    out.push_str(",\"path\":");
-    write_string(out, artifact.path);
-    out.push_str(if artifact.folder {
-        ",\"kind\":\"folder\"}"
-    } else {
-        ",\"kind\":\"file\"}"
-    });
-}
-
 /// A removal as `{"product": ..., "entities": {...}, "rule": ..., "origin":
 /// ..., "reason": ...}`, with `null` for a group's product and for an
 /// origin or reason that is not known.
@@ -370,29 +336,6 @@ fn write_removal(out: &mut String, removal: &Removal) {
     out.push('}');
 }
 
-fn write_type(out: &mut String, artifact_type: &TypeExpr) {
-    match artifact_type {
-        TypeExpr::Unknown => out.push_str("null"),
-        TypeExpr::Variable(name) => {
-            out.push_str("{\"variable\":");
-            write_string(out, name);
-            out.push('}');
-        }
-        TypeExpr::Named(name) => {
-            out.push_str("{\"name\":");
-            write_string(out, name);
-            out.push_str(",\"args\":[]}");
-        }
-        TypeExpr::Applied { constructor, args } => {
-            out.push_str("{\"name\":");
-            write_string(out, constructor);
-            out.push_str(",\"args\":");
-            write_array(out, args, write_type);
-            out.push('}');
-        }
-    }
-}
-
 /// `value`, or `null` without one.
 fn write_optional_number(out: &mut String, value: Option<usize>) {
     match value {
@@ -407,6 +350,7 @@ mod tests {
     use crate::model::SourceFile;
     use crate::model::{Artifacts, EntityBinding, StepId};
     use crate::spitdag::{BoundCall, BoundCommand, BoundStep, StepCall};
+    use crate::types::TypeExpr;
 
     /// A command that runs `program` alone.
     fn command(program: &str) -> BoundCommand {
@@ -446,10 +390,19 @@ mod tests {
                 TypeExpr::named("Diffusion"),
             ],
         );
+        bound_of_type(&artifact_type, steps, jobs)
+    }
+
+    /// [`bound`], with every artifact of type `artifact_type`.
+    fn bound_of_type(
+        artifact_type: &TypeExpr,
+        steps: Vec<BoundStep>,
+        jobs: impl FnOnce([ArtifactId; 3]) -> Vec<BoundJob>,
+    ) -> BoundDag {
         let entities = EntityBinding::from_pairs([("sub", "1"), ("run", "a\"\\\n\u{1}é")]);
         let mut artifacts = Artifacts::default();
         let ids = ["raw", "clean", "mean"].map(|product| {
-            let number = artifacts.product(product, &artifact_type);
+            let number = artifacts.product(product, artifact_type);
             artifacts.add(number, entities.clone()).unwrap()
         });
         let paths = ["in/1.txt", "out/1.txt", "out/mean.txt"].map(String::from);
@@ -575,10 +528,16 @@ mod tests {
         let print = fingerprint_of(&text);
         let raw_json = ArtifactJson::new(&one);
         let ids: Vec<_> = one.artifacts.ids().collect();
+        // The work holds each artifact without its type.
+        let identity = |id| {
+            let mut text = String::new();
+            raw_json.push_identity(&mut text, id);
+            text
+        };
         let work = format!(
             "{{\"operation\":\"clean\",\"inputs\":{{\"raw\":[{}]}},\"outputs\":{{\"output\":{}}},\"command\":[[\"tool\"]],\"stdout\":\"out/1.txt\",\"verify\":[]}}",
-            raw_json.get(ids[0]),
-            raw_json.get(ids[1]),
+            identity(ids[0]),
+            identity(ids[1]),
         );
         let mut hex = String::new();
         write_hex(&mut hex, fingerprint(&work));
@@ -720,7 +679,7 @@ mod tests {
         assert!(print(&job).bytes().all(|byte| byte.is_ascii_hexdigit()));
         // The hash of the work as compact JSON: a change to the JSON writer
         // changes every fingerprint, so it must be deliberate.
-        assert_eq!(print(&job), "db70745bf9c6ad61");
+        assert_eq!(print(&job), "41b950f9f062e19d");
         let fnv = |text: &str| {
             let mut hex = String::new();
             write_hex(&mut hex, fingerprint(text));
@@ -728,6 +687,37 @@ mod tests {
         };
         assert_eq!(fnv(""), "cbf29ce484222325");
         assert_eq!(fnv("a"), "af63dc4c8601ec8c");
+    }
+
+    #[test]
+    fn a_type_is_written_but_not_fingerprinted() {
+        let print = |artifact_type: &TypeExpr| {
+            let steps = vec![step("clean", None, &["raw"], &["output"])];
+            let dag = bound_of_type(artifact_type, steps, |[raw, clean, _]| {
+                vec![BoundJob {
+                    id: JobId::new(1),
+                    step: StepId::new(0),
+                    inputs: vec![vec![raw]],
+                    outputs: vec![clean],
+                    depends_on: vec![],
+                    commands: vec![command("tool")],
+                    verify: vec![],
+                    checks: vec![],
+                }]
+            });
+            let text = dag.to_json();
+            let start = text.find("\"fingerprint\":\"").unwrap() + 15;
+            (text[start..start + 16].to_owned(), text)
+        };
+        let (plain, plain_text) = print(&TypeExpr::named("Image"));
+        let (narrow, narrow_text) = print(&TypeExpr::applied(
+            "Image",
+            vec![TypeExpr::named("MNI"), TypeExpr::named("Mm4")],
+        ));
+        assert_eq!(plain, narrow);
+        // The type is in the job's artifacts all the same.
+        assert!(narrow_text.contains("\"type\":{\"name\":\"Image\",\"args\":[{\"name\":\"MNI\""));
+        assert!(!plain_text.contains("MNI"));
     }
 
     #[test]
