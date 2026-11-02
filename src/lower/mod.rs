@@ -9,6 +9,7 @@ use rustc_hash::FxHashMap;
 
 mod entities;
 mod expand;
+mod reviews;
 
 use expand::BodyCheck;
 
@@ -20,9 +21,8 @@ use crate::model::{
 };
 use crate::order::{order_dimensions, Output};
 use crate::parser::{
-    document_records, empty_body, parse_syntax, without_bom, CommandPlaces, ExcludeLine, Kind,
-    Layout, ParseError, ParseErrorKind, PathRule, Rule, SourceMap, Statement, StatementKind, Step,
-    Syntax,
+    document_records, empty_body, parse_syntax, without_bom, CommandPlaces, Kind, Layout,
+    ParseError, ParseErrorKind, PathRule, Rule, SourceMap, Statement, StatementKind, Step, Syntax,
 };
 use crate::shape::{step_context, step_driver, BoundInput};
 use crate::span::Place;
@@ -349,17 +349,25 @@ pub(crate) fn lower(
         while let Some((_, error)) = parsing.next_if(|(read, _)| *read <= index) {
             errors.push(error.clone());
         }
-        let rule = matches!(
-            statement.kind,
-            StatementKind::Constraint(..) | StatementKind::Exclude(..)
-        );
-        let lowered = if rule && kind == Kind::Pipeline {
-            Err(ParseError::new(
+        let lowered = match (&statement.kind, kind) {
+            (StatementKind::Constraint(..) | StatementKind::Exclude(..), Kind::Pipeline) => {
+                Err(ParseError::new(
+                    statement.place.line,
+                    "`require` and `exclude` rules belong in a .spitin recipe, not a pipeline",
+                ))
+            }
+            (StatementKind::ReviewFile { .. }, Kind::Pipeline) => Err(ParseError::new(
                 statement.place.line,
-                "`require` and `exclude` rules belong in a .spitin recipe, not a pipeline",
-            ))
-        } else {
-            lower_statement(&mut builder, imports, statement, &mut errors)
+                "`review ... from` lines belong in a .spitin recipe; a pipeline declares a review as `review name`",
+            )),
+            (StatementKind::Review(review, _), Kind::Recipe) => Err(ParseError::new(
+                statement.place.line,
+                format!(
+                    "a recipe names the file of a review the pipeline declares, as `review {} from file.csv`; declare it in the pipeline with `review {}`",
+                    review.name, review.name
+                ),
+            )),
+            _ => lower_statement(&mut builder, imports, statement, &mut errors),
         };
         // A statement that fails leaves the builder as it was, so lowering
         // goes on, and the statements after it read as they would without it.
@@ -523,16 +531,10 @@ fn lower_statement(
         StatementKind::Constraint(constraint, rule) => {
             builder.add_constraint(constraint.clone(), rule.clone());
         }
-        StatementKind::Exclude(ExcludeLine::File(file), ..) => {
-            builder
-                .inputs
-                .exclusion_files
-                .push((file.clone(), statement.place.line));
-        }
-        StatementKind::Exclude(ExcludeLine::Rule { product, values }, reason, place) => {
+        StatementKind::Exclude(rule, reason, place) => {
             builder.inputs.exclusions.push(Exclusion {
-                product: product.clone(),
-                values: values.clone(),
+                product: rule.product.clone(),
+                values: rule.values.clone(),
                 reason: reason.clone(),
                 origin: format!("line {}", statement.place.line),
             });
@@ -547,6 +549,19 @@ fn lower_statement(
         StatementKind::Check(check, place) => {
             builder.add_check(check.clone(), place.clone());
         }
+        StatementKind::Review(review, place) => {
+            builder.add_review(review.clone(), place.clone());
+        }
+        StatementKind::ReviewFile {
+            review,
+            file,
+            place,
+        } => builder.add_review_file(review, file, place)?,
+        StatementKind::DefaultReviews {
+            stage,
+            reviews,
+            place,
+        } => builder.add_default_reviews(stage.as_deref(), reviews, place)?,
         StatementKind::Dimensions(order) => {
             if builder.dimension_order.is_some() {
                 return Err(ParseError::new(

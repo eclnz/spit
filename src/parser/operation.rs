@@ -1,14 +1,16 @@
 //! Operation declarations: `name(inputs) -> outputs`, where a `many`
-//! input may carry an `@min(count)` clause, and any port `@check(...)`.
+//! input may carry an `@min(count)` clause, and any port `@check(...)` and
+//! `@review(...)`.
 
 use crate::model::{
     Beside, Cardinality, InputPort, OperationDef, OutputPort, ShapeRule, DEFAULT_OUTPUT,
 };
 use crate::types::{parse_type_expr, TypeExpr};
 
-use super::check::{only_checks, output_checks, split_clauses, Clause};
+use super::check::{split_clauses, Clause};
 use super::declarations::type_error;
 use super::lexical::{call_parts, comma_items, identifier, split_ending};
+use super::review::{attachments, is_attachment, only_attachments};
 use super::ParseError;
 
 pub(super) fn parse_operation(line: &str, number: usize) -> Result<OperationDef, ParseError> {
@@ -39,10 +41,11 @@ pub(super) fn parse_operation(line: &str, number: usize) -> Result<OperationDef,
             split_clauses(rest, TRAILING, number)?.1,
         )
     };
-    if let Some(clause) = trailing.iter().find(|clause| clause.keyword == "check") {
+    if let Some(clause) = trailing.iter().find(|clause| is_attachment(clause)) {
+        let keyword = clause.keyword;
         return Err(ParseError::new(
             number,
-            "`@check(...)` follows the port it checks, as in `(image: Image @check(nonempty))` or `-> (mask: Mask @check(nonempty))`",
+            format!("`@{keyword}(...)` follows the port it applies to, as in `(image: Image @{keyword}(name))` or `-> (mask: Mask @{keyword}(name))`"),
         )
         .at_token(clause.text));
     }
@@ -120,11 +123,11 @@ fn parse_port_with_minimum(
     number: usize,
 ) -> Result<(InputPort, Option<usize>), ParseError> {
     let (input, clauses) = split_clauses(input, ON_PORT, number)?;
-    let (checks, clauses): (Vec<_>, Vec<_>) = clauses
-        .into_iter()
-        .partition(|clause| clause.keyword == "check");
+    let (attached, clauses): (Vec<_>, Vec<_>) = clauses.into_iter().partition(is_attachment);
     let mut port = parse_input_port(input, number)?;
-    port.checks = only_checks(&checks, "an input port", number)?;
+    let attached = only_attachments(&attached, "an input port", number)?;
+    port.checks = attached.checks;
+    port.reviews = attached.reviews;
     if clauses.is_empty() {
         return Ok((port, None));
     }
@@ -195,11 +198,12 @@ const TRAILING: &str =
     "nothing follows an operation's outputs; write `@min(count)` on its many input";
 
 /// What a clause after an output may be.
-const AFTER_OUTPUT: &str = "nothing follows an operation's outputs but their `@check(...)`; \
+const AFTER_OUTPUT: &str =
+    "nothing follows an operation's outputs but their `@check(...)` and `@review(...)`; \
      write `@min(count)` on its many input";
 
 /// What a clause on an input port may be.
-const ON_PORT: &str = "expected `@min(count)` on a many input, or `@check(...)`";
+const ON_PORT: &str = "expected `@min(count)` on a many input, or `@check(...)` or `@review(...)`";
 
 /// An `@min(count)` clause, and an `@drop(...)` clause, which is an error,
 /// each with its text, kept to point at it and to say what to write instead.
@@ -409,10 +413,8 @@ fn parse_outputs(
     let Some(list) = text.strip_prefix('(') else {
         let (text, clauses) = split_clauses(text, AFTER_OUTPUT, number)?;
         // An output's checks are its own; anything else is the operation's.
-        let (checks, clauses): (Vec<_>, Vec<_>) = clauses
-            .into_iter()
-            .partition(|clause| clause.keyword == "check");
-        let (checks, exempt) = output_checks(&checks, "an output", number)?;
+        let (attached, clauses): (Vec<_>, Vec<_>) = clauses.into_iter().partition(is_attachment);
+        let attached = attachments(&attached, "an output", number)?;
         let (text, beside) = split_beside(text, number)?;
         let (text, extension, folder) = match beside {
             Some(_) => (text, None, false),
@@ -428,8 +430,10 @@ fn parse_outputs(
             Some(beside) => port.beside(beside),
             None => with_ending(port, extension, folder),
         };
-        port.checks = checks;
-        port.exempt = exempt;
+        port.checks = attached.checks;
+        port.exempt = attached.exempt;
+        port.reviews = attached.reviews;
+        port.exempt_reviews = attached.exempt_reviews;
         return Ok((vec![port], clauses));
     };
     let closing =
@@ -449,7 +453,7 @@ fn parse_outputs(
         .into_iter()
         .map(|item| {
             let (item, clauses) = split_clauses(item, AFTER_OUTPUT, number)?;
-            let (checks, exempt) = output_checks(&clauses, "an output", number)?;
+            let attached = attachments(&clauses, "an output", number)?;
             let (item, beside) = split_beside(item, number)?;
             let (item, extension, folder) = match beside {
                 Some(_) => (item, None, false),
@@ -471,8 +475,10 @@ fn parse_outputs(
                 .at_token(name));
             }
             let mut port = OutputPort::new(name, output_type);
-            port.checks = checks;
-            port.exempt = exempt;
+            port.checks = attached.checks;
+            port.exempt = attached.exempt;
+            port.reviews = attached.reviews;
+            port.exempt_reviews = attached.exempt_reviews;
             Ok(match beside {
                 Some(beside) => port.beside(beside),
                 None => with_ending(port, extension, folder),

@@ -113,6 +113,7 @@ fn keyword_word(keyword: Keyword) -> Option<Word> {
         Keyword::Verify => Word::Verify,
         Keyword::Resources => Word::Resources,
         Keyword::Check | Keyword::Checks => Word::Check,
+        Keyword::Review | Keyword::Reviews => Word::Review,
         Keyword::Require => Word::Require,
         Keyword::Exclude => Word::Exclude,
         Keyword::Path => Word::Path,
@@ -166,6 +167,7 @@ fn line_words(line: &Line, inherited: Option<Word>, found: &mut Vec<(Range<usize
             Header::SourcePaths => (Word::SourcePaths, "source_paths".len()),
             Header::Contexts(_) => (Word::Contexts, "contexts".len()),
             Header::Removed => (Word::Removed, "removed".len()),
+            Header::Verdicts => (Word::Verdicts, "verdicts".len()),
         };
         found.push((indent..indent + length, word));
         return;
@@ -225,6 +227,7 @@ fn rule_word(code: &str, range: Range<usize>, statement: Option<Word>) -> Option
         "same" => Some(Word::Same),
         "min" => Some(Word::Min),
         "check" => Some(Word::CheckClause),
+        "review" => Some(Word::ReviewClause),
         _ => None,
     };
     if let Some(word) = selector {
@@ -242,8 +245,8 @@ fn rule_word(code: &str, range: Range<usize>, statement: Option<Word>) -> Option
         }
         (Word::Use, "as") if spaced => Some(Word::UseAs),
         (Word::Use, "from") if spaced => Some(Word::UseFrom),
-        (Word::Exclude, "from") if spaced && before.trim_start() == "exclude" => {
-            Some(Word::ExcludeFrom)
+        (Word::Review, "from") if spaced && before.split_whitespace().count() == 2 => {
+            Some(Word::ReviewFrom)
         }
         (Word::Require | Word::Exclude, "count") if after.starts_with(['=', '!', '>', '<']) => {
             Some(Word::Count)

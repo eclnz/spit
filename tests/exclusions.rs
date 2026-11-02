@@ -1,5 +1,5 @@
-//! `exclude` rules: removing named artifacts and groups from a dataset, in a
-//! recipe or from a CSV file, and the record of what each removed.
+//! `exclude` rules: removing named artifacts and groups from a dataset, and
+//! the record of what each removed.
 
 mod support;
 
@@ -93,7 +93,11 @@ fn an_exclude_names_an_artifact_a_group_or_part_of_a_source() {
 
     for (rule, message) in [
         ("exclude\n", "names a source, values"),
-        ("exclude from\n", "expected"),
+        ("exclude from\n", "`exclude from` is not a recipe rule"),
+        (
+            "exclude from qc/excluded.csv\n",
+            "write `review name from file.csv`",
+        ),
         ("exclude []\n", "names a source, values"),
         ("exclude bold[sub=02\n", "closing `]`"),
     ] {
@@ -341,49 +345,6 @@ fn a_failed_join_names_the_exclusion_that_caused_it() {
         "{stderr}"
     );
     assert!(stderr.contains("--partial"), "{stderr}");
-}
-
-#[test]
-fn rules_are_read_from_a_csv_file_beside_the_recipe() {
-    let tree = dataset("exclude-csv", "exclude from qc/excluded.csv\n");
-    tree.write(
-        "qc/excluded.csv",
-        "product,sub,ses,run,reason\nbold,02,01,3,\"motion spike, volume 140\"\n,03,,,no reference\n",
-    );
-    let (ok, stdout, stderr) = run(&tree, "inputs");
-    assert!(ok, "{stderr}");
-    assert!(
-        stderr.contains("note: excluded bold[sub=02,ses=01,run=3] (qc/excluded.csv line 2): motion spike, volume 140"),
-        "{stderr}"
-    );
-    assert!(
-        stdout.contains("        at: qc/excluded.csv line 3\n        reason: no reference\n"),
-        "{stdout}"
-    );
-
-    tree.write("qc/excluded.csv", "product,sub,ses,run\nbold,02,01,9\n");
-    let (ok, _, stderr) = run(&tree, "inputs");
-    assert!(!ok);
-    assert!(
-        stderr.contains("(qc/excluded.csv line 2) matches nothing"),
-        "{stderr}"
-    );
-
-    tree.write("qc/excluded.csv", "product,subject\nbold,02\n");
-    let (ok, _, stderr) = run(&tree, "check");
-    assert!(!ok);
-    assert!(
-        stderr.contains("(qc/excluded.csv line 2): `subject` is not a dimension of `bold`"),
-        "{stderr}"
-    );
-
-    std::fs::remove_file(tree.path().join("qc/excluded.csv")).unwrap();
-    let (ok, _, stderr) = run(&tree, "inputs");
-    assert!(!ok);
-    assert!(
-        stderr.contains("cannot read `qc/excluded.csv` for `exclude from`"),
-        "{stderr}"
-    );
 }
 
 #[test]

@@ -9,8 +9,10 @@ use crate::compile::{CompiledStep, StepShape};
 use crate::error::{NearMiss, PortSite, ResolveError};
 use crate::model::{
     near_reason, ArtifactId, Artifacts, Cardinality, EntityBinding, Gap, Invocation, Job, JobId,
-    OperationDef, StepId,
+    Judged, OperationDef, StepId,
 };
+
+use super::reviews::{Block, Judging};
 
 /// One job of a step: its inputs, and the context each of its outputs
 /// binds. `inputs` is complete only when `gaps` is empty.
@@ -18,6 +20,20 @@ pub(super) struct Expansion {
     pub(super) inputs: Vec<Vec<ArtifactId>>,
     pub(super) context: EntityBinding,
     pub(super) gaps: Vec<Gap>,
+    /// Whether a review, or an input a review withheld, leaves the job out:
+    /// no job is made, and its outputs are withheld in turn. It is no gap.
+    pub(super) left_out: bool,
+    /// The artifacts a review on an input port kept from the job.
+    pub(super) held: Vec<Held>,
+}
+
+/// An artifact a review on an input port kept from a job.
+pub(super) struct Held {
+    pub(super) artifact: ArtifactId,
+    /// The input port, by position.
+    pub(super) port: usize,
+    pub(super) review: String,
+    pub(super) judged: Judged,
 }
 
 /// Enumerate one step's jobs: one per driving artifact, or per group of the
@@ -28,6 +44,7 @@ pub(super) fn expand_step(
     families: &[Vec<ArtifactId>],
     incomplete: &[bool],
     partial: bool,
+    judging: &Judging<'_>,
 ) -> Vec<Expansion> {
     let (invocation, shape) = (step.invocation, &step.shape);
     let candidates: Vec<Vec<ArtifactId>> = invocation
@@ -82,6 +99,7 @@ pub(super) fn expand_step(
     let availability = Availability {
         incomplete,
         partial,
+        judging,
     };
     jobs.map(|(context, driven)| {
         expand_job(
@@ -105,6 +123,7 @@ type JoinIndex<'a> = FxHashMap<Vec<Option<&'a str>>, Vec<ArtifactId>>;
 struct Availability<'a> {
     incomplete: &'a [bool],
     partial: bool,
+    judging: &'a Judging<'a>,
 }
 
 /// `entities`' values for `joins`, in order; `None` where one is unbound.
@@ -130,8 +149,23 @@ fn expand_job(
     let Availability {
         incomplete,
         partial,
+        judging,
     } = availability;
     let mut gaps = Vec::new();
+    let mut screen = Screen::default();
+    if judging.active() {
+        screen = screen_inputs(step, artifacts, indexes, judging, &context, &driven);
+        if screen.left_out {
+            return Expansion {
+                inputs: Vec::new(),
+                context,
+                gaps,
+                left_out: true,
+                held: screen.held,
+            };
+        }
+        driven.retain(|&artifact| screen.keeps(shape.driver, artifact, step, artifacts));
+    }
     if partial
         && operation.inputs[shape.driver].cardinality == Cardinality::Many
         && driven.iter().any(|artifact| !incomplete[artifact.index()])
@@ -169,8 +203,13 @@ fn expand_job(
             let group = indexes[index]
                 .get(&join_values(&shape.joins[index], &context))
                 .map_or(&[][..], Vec::as_slice);
-            gaps.extend(unpaired(step, artifacts, index, &paired, group, &context));
-            group.to_vec()
+            let group: Vec<ArtifactId> = group
+                .iter()
+                .copied()
+                .filter(|&artifact| screen.keeps(index, artifact, step, artifacts))
+                .collect();
+            gaps.extend(unpaired(step, artifacts, index, &paired, &group, &context));
+            group
         } else {
             let matches = indexes[index]
                 .get(&join_values(&shape.joins[index], &context))
@@ -205,7 +244,111 @@ fn expand_job(
         inputs,
         context,
         gaps,
+        left_out: false,
+        held: screen.held,
     }
+}
+
+/// What the reviews, and the artifacts they withheld, keep from one job.
+#[derive(Default)]
+struct Screen<'a> {
+    /// The members of many inputs the job does not take, by port.
+    dropped: FxHashSet<(usize, ArtifactId)>,
+    /// With several many inputs, the `vary` values of those members, so that
+    /// the other inputs drop the members that pair with them.
+    keys: FxHashSet<Vec<Option<&'a str>>>,
+    left_out: bool,
+    held: Vec<Held>,
+}
+
+impl<'a> Screen<'a> {
+    /// Whether the job takes `artifact`, a member of many input `port`.
+    fn keeps(
+        &self,
+        port: usize,
+        artifact: ArtifactId,
+        step: &CompiledStep<'_>,
+        artifacts: &'a Artifacts,
+    ) -> bool {
+        !self.dropped.contains(&(port, artifact))
+            && (self.keys.is_empty()
+                || !self.keys.contains(&join_values(
+                    &step.shape.varied,
+                    artifacts.entities(artifact),
+                )))
+    }
+}
+
+/// Decide which artifacts the job may read. A `one` input whose artifact is
+/// kept from it leaves the job out; a many input drops that member, and
+/// leaves the job out when no member is left.
+fn screen_inputs<'a>(
+    step: &CompiledStep<'_>,
+    artifacts: &'a Artifacts,
+    indexes: &[JoinIndex<'_>],
+    judging: &Judging<'_>,
+    context: &EntityBinding,
+    driven: &[ArtifactId],
+) -> Screen<'a> {
+    let (operation, shape) = (step.operation, &step.shape);
+    let mut screen = Screen::default();
+    let many: Vec<usize> = (0..operation.inputs.len())
+        .filter(|&index| operation.inputs[index].cardinality == Cardinality::Many)
+        .collect();
+    let members = |index: usize| -> &[ArtifactId] {
+        if index == shape.driver {
+            return driven;
+        }
+        indexes[index]
+            .get(&join_values(&shape.joins[index], context))
+            .map_or(&[][..], Vec::as_slice)
+    };
+    for index in 0..operation.inputs.len() {
+        let is_many = many.contains(&index);
+        let members = members(index);
+        // A one input with no match, or several, is a gap the job reports.
+        if !is_many && members.len() != 1 {
+            continue;
+        }
+        for &artifact in members {
+            let Some(block) = judging.block(artifact, artifacts.entities(artifact), index) else {
+                continue;
+            };
+            if let Block::Review { review, judged } = block {
+                screen.held.push(Held {
+                    artifact,
+                    port: index,
+                    review: review.to_owned(),
+                    judged,
+                });
+            }
+            if !is_many {
+                screen.left_out = true;
+            } else {
+                screen.dropped.insert((index, artifact));
+                if many.len() > 1 {
+                    screen
+                        .keys
+                        .insert(join_values(&shape.varied, artifacts.entities(artifact)));
+                }
+            }
+        }
+    }
+    if screen.dropped.is_empty() {
+        return screen;
+    }
+    // A many input with members, none of which the job takes, leaves it out.
+    for &index in &many {
+        let members = members(index);
+        if !members.is_empty()
+            && !members
+                .iter()
+                .any(|&artifact| screen.keeps(index, artifact, step, artifacts))
+        {
+            screen.left_out = true;
+        }
+    }
+    screen
 }
 
 /// The gaps left when the many input `index` holds `group` where the driver

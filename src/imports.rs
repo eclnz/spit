@@ -7,11 +7,12 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 mod located;
+mod shared;
 
 use crate::blob::git_blob_id;
 use crate::lower::{parse_layout, ParsedDocument, PipelineBuilder};
 use crate::model::{
-    CheckDef, CheckUse, CommandDef, CommandRole, OperationDef, Pipeline, PipelineIndex, ProductDef,
+    CheckDef, CommandDef, CommandRole, OperationDef, Pipeline, PipelineIndex, ProductDef,
     ResourcesDef, SidecarGroup, SourceFile,
 };
 use crate::parser::{
@@ -20,6 +21,7 @@ use crate::parser::{
 use crate::span::Place;
 pub(crate) use located::relative_path;
 use located::{in_import, named_in, rebase, ImportedAt};
+use shared::{import_check, import_review, qualified_name, qualify_attached};
 
 /// Merge what the `use` line at `place` imports into `builder`. An import
 /// that fails for what it brings in fails before it changes anything, so
@@ -103,6 +105,13 @@ pub(crate) fn apply_import(
     }
     for check in new_checks {
         builder.add_check(check.clone(), place.clone());
+    }
+    // A review is only a name, so two imports bring one review, and a
+    // review the file declares itself is the same review.
+    for review in &imported.reviews {
+        if !builder.pipeline.reviews.contains(review) {
+            builder.add_review(review.clone(), place.clone());
+        }
     }
     for group in &imported.sidecar_groups {
         builder.add_sidecar_group(group.clone());
@@ -189,6 +198,8 @@ struct Module<'m> {
     members: FxHashMap<&'m str, &'m SidecarGroup>,
     /// The first check of a name.
     checks: FxHashMap<&'m str, &'m CheckDef>,
+    /// The reviews the file declares.
+    reviews: FxHashSet<&'m str>,
     /// Each operation's commands, in order.
     commands: FxHashMap<&'m str, Vec<&'m CommandDef>>,
     /// Each operation's `resources` lines.
@@ -244,6 +255,11 @@ impl<'m> Module<'m> {
             groups,
             members: module.sidecar_members(),
             checks,
+            reviews: module
+                .reviews
+                .iter()
+                .map(|review| review.name.as_str())
+                .collect(),
             commands,
             resources,
         }
@@ -258,6 +274,7 @@ struct Selection {
     operations: FxHashSet<String>,
     products: FxHashSet<String>,
     checks: FxHashSet<String>,
+    reviews: FxHashSet<String>,
 }
 
 fn select_import(module: &Pipeline, spec: &UseSpec, line: usize) -> Result<Pipeline, ParseError> {
@@ -300,11 +317,13 @@ fn select_import(module: &Pipeline, spec: &UseSpec, line: usize) -> Result<Pipel
         }
         let (operation, source) = (operations.first().copied(), sources.first().copied());
         let check = module.checks.get(name).copied();
-        if operation.is_none() && source.is_none() && group.is_none() && check.is_none() {
+        let review = module.reviews.contains(name);
+        if operation.is_none() && source.is_none() && group.is_none() && check.is_none() && !review
+        {
             return Err(ParseError::new(
                 line,
                 format!(
-                    "`{name}` is not a source, operation or check in `{}`",
+                    "`{name}` is not a source, operation, check or review in `{}`",
                     spec.path
                 ),
             ));
@@ -328,6 +347,9 @@ fn select_import(module: &Pipeline, spec: &UseSpec, line: usize) -> Result<Pipel
             for used in &source.checks {
                 import_check(&mut selected, &module, &used.check, alias);
             }
+            for review in &source.reviews {
+                import_review(&mut selected, &module, review, alias);
+            }
         }
         if let Some(group) = group {
             import_group(&mut selected, &module, group, spec.alias.as_deref(), line)?;
@@ -335,9 +357,12 @@ fn select_import(module: &Pipeline, spec: &UseSpec, line: usize) -> Result<Pipel
         if check.is_some() {
             import_check(&mut selected, &module, name, alias);
         }
+        if review {
+            import_review(&mut selected, &module, name, alias);
+        }
     }
     import_called(&mut selected, &module, spec, line)?;
-    qualify_checks(&mut selected.pipeline, spec.alias.as_deref());
+    qualify_attached(&mut selected.pipeline, spec.alias.as_deref());
     Ok(selected.pipeline)
 }
 
@@ -389,57 +414,12 @@ fn import_called(
     }
     // Brought in the order their file declares them.
     for operation in &module.index.pipeline.operations {
-        let name = qualified_check(&operation.name, alias);
+        let name = qualified_name(&operation.name, alias);
         if called.contains(operation.name.as_str()) && !selected.operations.contains(&name) {
             import_operation(selected, module, operation, spec, line)?;
         }
     }
     Ok(())
-}
-
-/// Bring in `module`'s check `name`, once however many imports use it.
-fn import_check(selected: &mut Selection, module: &Module<'_>, name: &str, alias: Option<&str>) {
-    let qualified = qualified_check(name, alias);
-    if selected.checks.contains(&qualified) {
-        return;
-    }
-    if let Some(check) = module.checks.get(name) {
-        selected.checks.insert(qualified.clone());
-        selected.pipeline.checks.push(CheckDef {
-            name: qualified,
-            ..(*check).clone()
-        });
-    }
-}
-
-fn qualified_check(name: &str, alias: Option<&str>) -> String {
-    alias.map_or_else(|| name.to_owned(), |alias| format!("{alias}::{name}"))
-}
-
-/// Name the checks the imported ports and sources use as they are imported.
-fn qualify_checks(selected: &mut Pipeline, alias: Option<&str>) {
-    if alias.is_none() {
-        return;
-    }
-    let qualify = |uses: &mut Vec<CheckUse>| {
-        for used in uses {
-            used.check = qualified_check(&used.check, alias);
-        }
-    };
-    for operation in &mut selected.operations {
-        operation
-            .inputs
-            .iter_mut()
-            .for_each(|port| qualify(&mut port.checks));
-        operation
-            .outputs
-            .iter_mut()
-            .for_each(|port| qualify(&mut port.checks));
-    }
-    selected
-        .products
-        .iter_mut()
-        .for_each(|product| qualify(&mut product.checks));
 }
 
 /// What `use path` brings in: every operation, source and check, each name
@@ -467,6 +447,7 @@ fn reusable_names<'m>(index: &PipelineIndex<'m>) -> Vec<&'m str> {
                 .map(|group| group.name.as_str()),
         )
         .chain(module.checks.iter().map(|check| check.name.as_str()))
+        .chain(module.reviews.iter().map(|review| review.name.as_str()))
         .filter(|name| seen.insert(*name))
         .collect()
 }
@@ -483,7 +464,7 @@ fn import_operation(
 ) -> Result<(), ParseError> {
     let name = &operation.name;
     let alias = spec.alias.as_deref();
-    let qualified = &qualified_check(name, alias);
+    let qualified = &qualified_name(name, alias);
     let commands = module
         .commands
         .get(name.as_str())
@@ -509,7 +490,7 @@ fn import_operation(
     }
     let mut steps = operation.steps.clone();
     for step in &mut steps {
-        step.invocation.operation = qualified_check(&step.invocation.operation, alias);
+        step.invocation.operation = qualified_name(&step.invocation.operation, alias);
     }
     selected.pipeline.operations.push(OperationDef {
         name: qualified.to_owned(),
@@ -535,6 +516,11 @@ fn import_operation(
     let checks = checks.chain(operation.outputs.iter().map(|port| &port.checks));
     for used in checks.flatten() {
         import_check(selected, module, &used.check, alias);
+    }
+    let reviews = operation.inputs.iter().map(|port| &port.reviews);
+    let reviews = reviews.chain(operation.outputs.iter().map(|port| &port.reviews));
+    for review in reviews.flatten() {
+        import_review(selected, module, review, alias);
     }
     Ok(())
 }
@@ -569,7 +555,7 @@ fn import_source(
     selected.pipeline.products.push(ProductDef {
         name: qualified.to_owned(),
         beside: source.beside.as_ref().map(|beside| crate::model::Beside {
-            sibling: qualified_check(&beside.sibling, alias),
+            sibling: qualified_name(&beside.sibling, alias),
             ..beside.clone()
         }),
         ..source.clone()
@@ -595,7 +581,7 @@ fn import_group(
     alias: Option<&str>,
     line: usize,
 ) -> Result<(), ParseError> {
-    let qualify = |name: &str| qualified_check(name, alias);
+    let qualify = |name: &str| qualified_name(name, alias);
     let mut members = Vec::new();
     for (member, extension) in &group.members {
         let source = module
@@ -606,6 +592,9 @@ fn import_group(
         import_source(selected, module, source, &qualify(member), alias, line)?;
         for used in &source.checks {
             import_check(selected, module, &used.check, alias);
+        }
+        for review in &source.reviews {
+            import_review(selected, module, review, alias);
         }
         members.push((qualify(member), extension.clone()));
     }

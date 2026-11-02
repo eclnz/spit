@@ -137,7 +137,10 @@ pub(super) fn no_space_after_at(after: &str, number: usize) -> Result<(), ParseE
     }
     let keyword = clause.split(['(', ' ', '\t']).next().unwrap_or_default();
     // Another word falls through to the error that lists what may be written.
-    let known = ["each", "vary", "where", "same", "min", "check", "drop"].contains(&keyword);
+    let known = [
+        "each", "vary", "where", "same", "min", "check", "review", "drop",
+    ]
+    .contains(&keyword);
     if known && clause[keyword.len()..].trim_start().starts_with('(') {
         return Err(ParseError::new(
             number,
@@ -258,52 +261,6 @@ fn check_argument(argument: &str, number: usize) -> Result<String, ParseError> {
         .at_token(argument));
     }
     Ok(argument.to_owned())
-}
-
-/// The checks of `clauses`, which may only be `@check(...)`; `what` names
-/// where they are written for the error about any other clause. Opting out
-/// of a default, `!name`, is for an output alone.
-pub(super) fn only_checks(
-    clauses: &[Clause<'_>],
-    what: &str,
-    number: usize,
-) -> Result<Vec<CheckUse>, ParseError> {
-    let (checks, exempt) = output_checks(clauses, what, number)?;
-    if let Some(used) = exempt.first() {
-        return Err(ParseError::new(
-            number,
-            format!("{what} cannot opt out of a default check; `!{used}` belongs on an output"),
-        )
-        .at_token(&used.check));
-    }
-    Ok(checks)
-}
-
-/// The checks of `clauses`, as [`only_checks`], and the default checks an
-/// output opts out of.
-pub(super) fn output_checks(
-    clauses: &[Clause<'_>],
-    what: &str,
-    number: usize,
-) -> Result<(Vec<CheckUse>, Vec<CheckUse>), ParseError> {
-    let mut checks = Vec::new();
-    let mut exempt = Vec::new();
-    for clause in clauses {
-        if clause.keyword != "check" {
-            return Err(ParseError::new(
-                number,
-                format!(
-                    "{what} takes only `@check(...)`, not `@{}(...)`",
-                    clause.keyword
-                ),
-            )
-            .at_token(clause.text));
-        }
-        let (uses, opted_out) = check_uses(clause, number)?;
-        checks.extend(uses);
-        exempt.extend(opted_out);
-    }
-    Ok((checks, exempt))
 }
 
 #[cfg(test)]

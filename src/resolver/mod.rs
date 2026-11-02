@@ -3,17 +3,23 @@
 
 mod bind;
 mod matching;
+mod reviews;
 
 use crate::error::ResolveError;
+use rustc_hash::FxHashSet;
+
 use crate::model::{
     ArtifactId, ArtifactInstance, ArtifactReport, ArtifactType, DagStep, Gap, IncompleteJob,
-    Invocation, JobId, OperationDef, Pipeline, ResolvedDag, SourceInventory, StepId,
+    Invocation, JobId, OperationDef, Pipeline, PipelineIndex, ResolvedDag, SourceInventory, StepId,
+    UnmatchedVerdicts, Withheld,
 };
+use crate::review::{port_reviews, ReviewIndex};
 
-use crate::compile::{compile, CompiledPipeline};
+use crate::compile::{compile, CompiledPipeline, CompiledStep};
 
 pub use self::bind::{bind_dag, bind_dag_with, BindError};
-use self::matching::{expand_step, make_job, Expansion};
+use self::matching::{expand_step, make_job, Expansion, Held};
+use self::reviews::{Judging, Verdicts};
 
 /// Resolve every job of `pipeline` over the sources in `inventory`, failing
 /// on the first job that cannot be made.
@@ -69,9 +75,18 @@ fn resolve_artifacts_with_partial(
     partial: bool,
 ) -> Result<ArtifactReport, ResolveError> {
     let CompiledPipeline { steps } = compile(pipeline)?;
+    let index = PipelineIndex::new(pipeline);
+    let reviewed = ReviewIndex::new(&index);
+    let verdicts = Verdicts::new(&inventory.verdicts);
     let mut resolution = Resolution {
         families: Vec::new(),
         incomplete: Vec::new(),
+        withheld: Vec::new(),
+        any_withheld: false,
+        withheld_report: Vec::new(),
+        held_seen: FxHashSet::default(),
+        reviewed: &reviewed,
+        verdicts: &verdicts,
         producers: Vec::new(),
         dag: ResolvedDag {
             product_dimensions: pipeline
@@ -112,6 +127,9 @@ fn resolve_artifacts_with_partial(
         }
     }
     resolution.grow();
+    for &source in &sources {
+        resolution.judge_product(source);
+    }
     for artifact in unavailable {
         if let Some(id) = resolution
             .dag
@@ -135,12 +153,25 @@ fn resolve_artifacts_with_partial(
             .iter()
             .map(|(product, artifact_type)| resolution.product(&product.name, artifact_type))
             .collect();
+        let judging = Judging {
+            withheld: &resolution.withheld,
+            verdicts: &verdicts,
+            ports: if pipeline.reviews.is_empty() {
+                vec![Vec::new(); step.operation.inputs.len()]
+            } else {
+                (0..step.operation.inputs.len())
+                    .map(|port| port_reviews(step.operation, step.invocation, port))
+                    .collect()
+            },
+            any_withheld: resolution.any_withheld,
+        };
         let expansions = expand_step(
             step,
             &resolution.dag.artifacts,
             &resolution.families,
             &resolution.incomplete,
             partial,
+            &judging,
         );
         for expansion in expansions {
             resolution.add(step.invocation, step.operation, id, &outputs, expansion)?;
@@ -154,6 +185,7 @@ fn resolve_artifacts_with_partial(
             });
         }
     }
+    let unmatched_verdicts = unmatched_verdicts(&resolution, &steps, inventory);
     let mut dag = resolution.dag;
     dag.locate_sources(inventory);
     Ok(ArtifactReport {
@@ -161,25 +193,91 @@ fn resolve_artifacts_with_partial(
         dag,
         incomplete: resolution.incomplete_jobs,
         coverage: Vec::new(),
+        withheld: resolution.withheld_report,
+        unmatched_verdicts,
     })
+}
+
+/// The rows of each review file that cover no artifact the review judges,
+/// file by file in the order the inventory lists them.
+fn unmatched_verdicts(
+    resolution: &Resolution<'_>,
+    steps: &[CompiledStep<'_>],
+    inventory: &SourceInventory,
+) -> Vec<UnmatchedVerdicts> {
+    if inventory.verdicts.is_empty() {
+        return Vec::new();
+    }
+    let artifacts = &resolution.dag.artifacts;
+    let mut matched = vec![false; inventory.verdicts.len()];
+    let mut mark = |product: &str, review: &str| {
+        let Some(number) = artifacts.product_number(product) else {
+            return;
+        };
+        for &artifact in &resolution.families[number as usize] {
+            resolution
+                .verdicts
+                .mark(review, artifacts.entities(artifact), &mut matched);
+        }
+    };
+    for (product, _) in artifacts.products() {
+        for review in resolution.reviewed.of(product) {
+            mark(product, review);
+        }
+    }
+    for step in steps {
+        for (port, binding) in step.invocation.inputs.iter().enumerate() {
+            for review in port_reviews(step.operation, step.invocation, port) {
+                mark(binding.product_name(), review);
+            }
+        }
+    }
+    let mut files: Vec<UnmatchedVerdicts> = Vec::new();
+    for (row, matched) in inventory.verdicts.iter().zip(matched) {
+        if matched {
+            continue;
+        }
+        match files.iter_mut().find(|known| known.file == row.file) {
+            Some(known) => known.lines.push(row.line),
+            None => files.push(UnmatchedVerdicts {
+                file: row.file.clone(),
+                lines: vec![row.line],
+            }),
+        }
+    }
+    files
 }
 
 /// The artifacts and jobs found so far, as steps are expanded in order.
 /// Artifacts are kept in the DAG's table; the rest is by artifact id or
 /// product number.
-struct Resolution {
+struct Resolution<'a> {
     /// Each product's artifacts, by product number, in natural order.
     families: Vec<Vec<ArtifactId>>,
     /// Artifacts that will not exist: sources the caller rules out, and
     /// the outputs of incomplete jobs.
     incomplete: Vec<bool>,
+    /// Artifacts no reader may use, though they may exist: those a review on
+    /// their product fails or holds, and the outputs of jobs left out for
+    /// reading one. Unlike `incomplete`, this is no error.
+    withheld: Vec<bool>,
+    /// Whether any artifact is withheld so far.
+    any_withheld: bool,
+    /// Each reviewed artifact a review withholds, as a note says it.
+    withheld_report: Vec<Withheld>,
+    /// The artifacts a review on an input port has been noted for, by step
+    /// and port, so a step that reads one many times notes it once.
+    held_seen: FxHashSet<(StepId, usize, ArtifactId)>,
+    /// The reviews on each product's artifacts for every reader.
+    reviewed: &'a ReviewIndex<'a>,
+    verdicts: &'a Verdicts<'a>,
     /// The job that makes each output artifact.
     producers: Vec<Option<JobId>>,
     dag: ResolvedDag,
     incomplete_jobs: Vec<IncompleteJob>,
 }
 
-impl Resolution {
+impl Resolution<'_> {
     /// The number of `product`, with a family for it.
     fn product(&mut self, product: &str, artifact_type: &ArtifactType) -> u32 {
         let number = self.dag.artifacts.product(product, artifact_type);
@@ -193,11 +291,51 @@ impl Resolution {
     fn grow(&mut self) {
         let len = self.dag.artifacts.len();
         self.incomplete.resize(len, false);
+        self.withheld.resize(len, false);
         self.producers.resize(len, None);
     }
 
-    /// Record one expanded job: a complete job joins the DAG, and one with
-    /// gaps is reported with its outputs marked incomplete.
+    /// Withhold `artifact` from every reader when a review on its product
+    /// fails it or has no verdict for it, and note why.
+    fn judge_product(&mut self, artifact: ArtifactId) {
+        let view = self.dag.artifacts.get(artifact);
+        for &review in self.reviewed.of(view.product) {
+            let Some(judged) = self.verdicts.judge(review, view.entities) else {
+                continue;
+            };
+            self.withheld_report.push(Withheld {
+                artifact: view.to_instance(),
+                review: review.to_owned(),
+                port: None,
+                outcome: judged,
+            });
+            self.withheld[artifact.index()] = true;
+            self.any_withheld = true;
+        }
+    }
+
+    /// Note each artifact a review on an input port kept from a job of
+    /// `step`, once however many jobs read it.
+    fn note_held(&mut self, step: StepId, operation: &OperationDef, held: Vec<Held>) {
+        for held in held {
+            if !self.held_seen.insert((step, held.port, held.artifact)) {
+                continue;
+            }
+            self.withheld_report.push(Withheld {
+                artifact: self.dag.artifacts.get(held.artifact).to_instance(),
+                review: held.review,
+                port: Some((
+                    operation.name.clone(),
+                    operation.inputs[held.port].name.clone(),
+                )),
+                outcome: held.judged,
+            });
+        }
+    }
+
+    /// Record one expanded job: a complete job joins the DAG, one with gaps
+    /// is reported with its outputs marked incomplete, and one a review
+    /// leaves out makes nothing, its outputs withheld in turn.
     fn add(
         &mut self,
         invocation: &Invocation,
@@ -219,7 +357,13 @@ impl Resolution {
             outputs.push(id);
         }
         self.grow();
-        if expansion.gaps.is_empty() {
+        self.note_held(step, operation, expansion.held);
+        if expansion.left_out {
+            for output in &outputs {
+                self.withheld[output.index()] = true;
+            }
+            self.any_withheld = true;
+        } else if expansion.gaps.is_empty() {
             let job = make_job(
                 JobId::new(self.dag.jobs.len() + 1),
                 step,
@@ -230,7 +374,11 @@ impl Resolution {
             for output in &job.outputs {
                 self.producers[output.index()] = Some(job.id);
             }
+            let made = job.outputs.clone();
             self.dag.jobs.push(job);
+            for output in made {
+                self.judge_product(output);
+            }
         } else {
             for output in &outputs {
                 self.incomplete[output.index()] = true;

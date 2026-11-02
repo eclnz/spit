@@ -1,0 +1,15 @@
+root .
+
+sources:
+    t1w[sub=01]
+    t1w[sub=02]
+    t1w[sub=03]
+    t1w[sub=04]
+
+verdicts:
+    looked_at[sub=01]
+        verdict: pass
+        at: qc/looked_at.csv line 2
+    looked_at[sub=02]
+        verdict: fail
+        at: qc/looked_at.csv line 3

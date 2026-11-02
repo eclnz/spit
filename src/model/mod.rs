@@ -10,6 +10,7 @@ mod entities;
 mod index;
 mod inputs;
 mod pipeline;
+mod reviews;
 
 pub use artifacts::*;
 pub use dag::*;
@@ -18,6 +19,7 @@ pub use entities::*;
 pub(crate) use index::*;
 pub use inputs::*;
 pub use pipeline::*;
+pub use reviews::*;
 
 fn owned_strings(values: impl IntoIterator<Item = impl AsRef<str>>) -> Vec<String> {
     values
