@@ -3,6 +3,7 @@
 //! nothing else; it never sees the pipeline, a path rule or a command
 //! template. Written as a `.spitdag`, a JSON document.
 
+mod artifact_json;
 mod work;
 mod write;
 
