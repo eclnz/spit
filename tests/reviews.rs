@@ -429,6 +429,7 @@ fn a_review_without_a_file_holds_back_everything_it_judges() {
         assert!(ok, "{stderr}");
         assert!(!stdout.contains("Job 1"), "{stdout}");
         assert!(stderr.contains("holds back t1w[sub=01]"), "{stderr}");
+        assert!(!stderr.contains("resolves no jobs"), "{stderr}");
         if !recipe.is_empty() {
             let (_, _, stderr) = run(&tree, "inputs");
             assert!(
@@ -532,13 +533,13 @@ fn a_recipe_names_only_reviews_the_pipeline_declares() {
 }
 
 #[test]
-fn exclude_from_is_gone_and_says_what_to_write() {
-    let tree = dataset("exclude-from-gone", "exclude from qc/excluded.csv\n");
+fn exclude_from_is_not_a_recipe_rule_and_says_what_to_write() {
+    let tree = dataset("exclude-from", "exclude from qc/excluded.csv\n");
     for command in ["check", "inputs", "dag"] {
         let (ok, _, stderr) = run(&tree, command);
         assert!(!ok, "{command}");
         assert!(
-            stderr.contains("`exclude from` is gone: declare a `review` in the pipeline, attach it with `@review(name)`, and write `review name from file.csv` in the recipe"),
+            stderr.contains("`exclude from` is not a recipe rule; to leave out what a person judged, declare a `review` in the pipeline, attach it with `@review(name)`, and write `review name from file.csv` in the recipe"),
             "{command}: {stderr}"
         );
     }

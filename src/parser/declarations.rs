@@ -426,7 +426,7 @@ pub(crate) fn parse_exclude(text: &str, number: usize) -> Result<ExcludeRule, Pa
     if text == "from" || text.starts_with("from ") {
         return Err(ParseError::new(
             number,
-            "`exclude from` is gone: declare a `review` in the pipeline, attach it with `@review(name)`, and write `review name from file.csv` in the recipe",
+            "`exclude from` is not a recipe rule; to leave out what a person judged, declare a `review` in the pipeline, attach it with `@review(name)`, and write `review name from file.csv` in the recipe",
         )
         .at_token(text));
     }

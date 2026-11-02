@@ -93,7 +93,7 @@ fn an_exclude_names_an_artifact_a_group_or_part_of_a_source() {
 
     for (rule, message) in [
         ("exclude\n", "names a source, values"),
-        ("exclude from\n", "`exclude from` is gone"),
+        ("exclude from\n", "`exclude from` is not a recipe rule"),
         (
             "exclude from qc/excluded.csv\n",
             "write `review name from file.csv`",
