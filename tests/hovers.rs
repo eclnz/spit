@@ -6,6 +6,24 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 use support::Tree;
 
+#[test]
+fn recipe_inputs_hover_with_source_and_path_dimensions() {
+    let tree = Tree::new("recipe-input-hovers", &[]);
+    tree.write("analysis.spit", "source bold: MRI [sub, run]\n");
+    tree.write(
+        "study.spitin",
+        "pipeline analysis.spit\ninputs:\n    bold: images/{sub}/{run}.nii.gz\n",
+    );
+    let recipe = tree.path().join("study.spitin");
+    let text = std::fs::read_to_string(&recipe).unwrap();
+    let json = spit::render_recipe_editor_json(&[], &text, &recipe);
+    assert!(json.contains("\\"name\\":\\"bold\\""), "{json}");
+    assert!(json.contains("\\"signature\\":\\"bold: MRI [sub, run]\\""), "{json}");
+    assert!(json.contains("\\"name\\":\\"{sub}\\""), "{json}");
+    assert!(json.contains("\\"name\\":\\"{run}\\""), "{json}");
+    assert!(json.contains("Input path: images/{sub}/{run}.nii.gz"), "{json}");
+}
+
 fn hovers(text: &str) -> Vec<Hover> {
     pipeline_hovers(text, Path::new("unsaved.spit"))
 }
