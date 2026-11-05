@@ -128,6 +128,24 @@ fn a_single_input_of_an_aggregate_must_match_each_group() {
     ));
 }
 
+#[test]
+fn a_missing_broadcast_suggests_the_input_and_dimension() {
+    let text = "\\
+source runs [sub, run]
+source dims [d]
+operation group_ica(runs: many Run, dims: Dims) -> Summary
+summary = group_ica(runs @vary(run), dims)
+";
+    let pipeline = parse_pipeline(text).unwrap();
+    let error = spit::validate_pipeline(&pipeline).unwrap_err();
+    assert!(
+        error.to_string().contains("`dims @each(d)`"),
+        "{error}"
+    );
+    let corrected = text.replace("dims)", "dims @each(d))");
+    spit::validate_pipeline(&parse_pipeline(&corrected).unwrap()).unwrap();
+}
+
 const PAIR: &str = "\
 source height [region, tile]
 source slope [region, tile]
