@@ -35,7 +35,7 @@ fn main() -> ExitCode {
             return ExitCode::SUCCESS;
         }
         Ok(Request::Version) => {
-            println!("spit {}", env!("CARGO_PKG_VERSION"));
+            println!("SPIT (Simple Pipeline in Text) compiler, version {}", env!("CARGO_PKG_VERSION"));
             return ExitCode::SUCCESS;
         }
         Err(error) => {
