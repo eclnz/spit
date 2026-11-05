@@ -41,7 +41,7 @@ fn help_lists_each_step_and_each_command_explains_itself() {
     let version = spit(&["--version"]);
     assert_eq!(
         stdout(&version),
-        format!("spit {}\n", env!("CARGO_PKG_VERSION"))
+        format!("SPIT (Simple Pipeline in Text) compiler, version {}\n", env!("CARGO_PKG_VERSION"))
     );
 }
 
