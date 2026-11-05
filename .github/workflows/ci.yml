@@ -25,6 +25,8 @@ jobs:
 
   examples:
     runs-on: ubuntu-latest
+    # A release build must not hold up routine PR validation indefinitely.
+    timeout-minutes: 8
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
