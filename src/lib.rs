@@ -40,7 +40,7 @@ pub use diagnostics::{
     Diagnosis, Diagnostic, DiagnosticSource, FileNames, Records, Related, Severity, ShownPath,
     SourceLines,
 };
-pub use editor::{pipeline_hovers, render_editor_json, render_words_json, Hover, HoverKind};
+pub use editor::{pipeline_hovers, render_editor_json, render_recipe_editor_json, render_words_json, Hover, HoverKind};
 pub use error::{DefinitionSubject, NearMiss, PortSite, ResolveError, TypeConflict};
 pub use imports::parse_pipeline_at;
 pub use inputs::{

@@ -217,10 +217,9 @@ fn a_recipe_and_a_spitout_have_words_too() {
     assert!(json.contains(r#""word":"require""#));
     assert!(json.contains(r#""word":"require-where""#));
     assert!(
-        !json.contains("\"hovers\""),
-        "a recipe's names are its pipeline's"
+        json.contains(r#""hovers":[]"#),
+        "a recipe without a named pipeline cannot resolve source hovers: {json}"
     );
-
     let records = "sources:\n    raw[id=1]\n";
     let (ok, json, _) = check(
         "unsaved.spitout",
