@@ -25,6 +25,8 @@ jobs:
 
   examples:
     runs-on: ubuntu-latest
+    # A release build must not hold up routine PR validation indefinitely.
+    timeout-minutes: 8
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -32,8 +34,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - run: cargo build --release --locked
-      - run: python3 examples/checks/check.py
+      # Functional example checks do not need an optimized release binary.
+      - run: cargo build --locked
+      - run: python3 examples/checks/check.py --binary target/debug/spit
       - name: Retain example logs and DAGs
         if: always()
         uses: actions/upload-artifact@v4
