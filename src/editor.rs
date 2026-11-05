@@ -518,6 +518,130 @@ pub fn render_editor_json(
     )
 }
 
+/// Give each source entry in a recipe's `inputs:` block its pipeline declaration,
+/// and explain the dimensions that its path placeholders refer to.
+pub fn render_recipe_editor_json(diagnostics: &[Diagnostic], text: &str, path: &Path) -> String {
+    let hovers = recipe_input_hovers(text, path);
+    let words = builtin_words(text);
+    let [words, word_docs] = words_json(&words);
+    format!(
+        "{}\n",
+        Json::object([
+            ("diagnostics", diagnostics_json(diagnostics, text, None)),
+            ("hovers", hovers_json(&hovers)),
+            words,
+            word_docs,
+        ])
+    )
+}
+
+fn recipe_input_hovers(text: &str, path: &Path) -> Vec<Hover> {
+    let Ok(spec) = crate::inputs::parse_input_spec_at(text, path) else {
+        return Vec::new();
+    };
+    let Some(pipeline_file) = spec.pipeline else {
+        return Vec::new();
+    };
+    let Ok(pipeline_text) = std::fs::read_to_string(&pipeline_file) else {
+        return Vec::new();
+    };
+    let Ok(pipeline) = crate::imports::parse_pipeline_at(&pipeline_text, &pipeline_file) else {
+        return Vec::new();
+    };
+    let mut hovers = Vec::new();
+    let mut block_indent = None;
+    for (index, raw) in text.lines().enumerate() {
+        let line = crate::parser::strip_comment(raw);
+        let trimmed = line.trim();
+        let indent = line.len() - line.trim_start().len();
+        if trimmed == "inputs:" {
+            block_indent = Some(indent);
+            continue;
+        }
+        let Some(header_indent) = block_indent else { continue };
+        if trimmed.is_empty() {
+            continue;
+        }
+        if indent <= header_indent {
+            block_indent = None;
+            continue;
+        }
+        let Some((name, template)) = trimmed.split_once(": ") else { continue };
+        if matches!(name, "contexts" | "default") {
+            continue;
+        }
+        let Some(source) = pipeline.products.iter().find(|source| source.name == name) else {
+            continue;
+        };
+        let Some(start) = raw.find(name) else { continue };
+        let span = utf16_columns(raw, &(start..start + name.len()));
+        let signature = format!(
+            "{}: {} [{}]",
+            source.name,
+            source.artifact_type,
+            source.dimensions.join(", ")
+        );
+        let mut details = vec![
+            format!("Source declared in {}.", pipeline_file.display()),
+            format!("Input path: {template}"),
+        ];
+        let mut placeholders = Vec::new();
+        let mut scan = 0;
+        while let Some(open) = template[scan..].find('{') {
+            let open = scan + open;
+            let Some(close) = template[open + 1..].find('}') else { break };
+            let close = open + 1 + close;
+            let name_in_path = &template[open + 1..close];
+            if !name_in_path.starts_with('@') && !name_in_path.is_empty() {
+                placeholders.push(name_in_path);
+            }
+            scan = close + 1;
+        }
+        for dimension in &placeholders {
+            if source.dimensions.iter().any(|known| known == dimension) {
+                details.push(format!("{{{dimension}}} is the source's `{dimension}` dimension."));
+            } else {
+                details.push(format!(
+                    "{{{dimension}}} is not a dimension of source `{name}`."
+                ));
+            }
+        }
+        hovers.push(Hover {
+            line: index + 1,
+            column: span.start + 1,
+            end_column: span.end + 1,
+            kind: HoverKind::Product,
+            name: name.to_owned(),
+            signature,
+            details,
+        });
+        // The path placeholders have precise ranges too, rather than sharing a
+        // tooltip with the whole input line.
+        let offset = start + name.len() + 2;
+        for dimension in placeholders {
+            let token = format!("{{{dimension}}}");
+            if let Some(relative) = raw.get(offset..).and_then(|rest| rest.find(&token)) {
+                let begin = offset + relative;
+                let columns = utf16_columns(raw, &(begin..begin + token.len()));
+                hovers.push(Hover {
+                    line: index + 1,
+                    column: columns.start + 1,
+                    end_column: columns.end + 1,
+                    kind: HoverKind::Product,
+                    name: token.clone(),
+                    signature: format!("Dimension {dimension}"),
+                    details: vec![if source.dimensions.iter().any(|known| known == dimension) {
+                        format!("{{{dimension}}} takes the `{dimension}` value of source `{name}`.")
+                    } else {
+                        format!("Source `{name}` has no `{dimension}` dimension.")
+                    }],
+                });
+            }
+        }
+    }
+    hovers
+}
+
 /// `check --json --hovers` for a recipe or a `.spitout`: its diagnostics and
 /// the built-in words it uses. Their names come from a pipeline, which
 /// explains them. Diagnostics about records point into `records_text`.
