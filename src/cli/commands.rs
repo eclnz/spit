@@ -9,7 +9,7 @@ use spit::{
     parse_input_spec_at, render_artifacts, render_artifacts_by_target, render_bound_dag,
     render_call, render_calls, render_calls_check_json, render_calls_json, render_check_json,
     render_dag, render_diagnostics_json, render_editor_json, render_source_inventory,
-    render_step_counts, render_words_json, resolve_artifacts_partial, unused_sources_summary,
+    render_step_counts, render_words_json, render_recipe_editor_json, resolve_artifacts_partial, unused_sources_summary,
     validate_bound_source_files, validate_source_files, ArtifactReport, BoundDag, BoundPaths,
     Context, Diagnostic, FileNames, Gap, LeftOut, View,
 };
@@ -66,7 +66,7 @@ pub(crate) fn check(args: &CliArgs) -> Result<(), Box<dyn Error>> {
         let diagnostics = diagnose_recipe(&text, path);
         if args.has(Flag::Json) {
             let json = if args.has(Flag::Hovers) {
-                render_words_json(&diagnostics, &text, None)
+                render_recipe_editor_json(&diagnostics, &text, path)
             } else {
                 render_diagnostics_json(&diagnostics, &text, None)
             };
