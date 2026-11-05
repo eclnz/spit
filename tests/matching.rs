@@ -130,7 +130,7 @@ fn a_single_input_of_an_aggregate_must_match_each_group() {
 
 #[test]
 fn a_missing_broadcast_suggests_the_input_and_dimension() {
-    let text = "\\
+    let text = "\
 source runs [sub, run]
 source dims [d]
 operation group_ica(runs: many Run, dims: Dims) -> Summary
