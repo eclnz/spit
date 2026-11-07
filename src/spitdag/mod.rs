@@ -21,7 +21,7 @@ pub use crate::check::When;
 use self::write::{write_document, PIECE};
 
 /// The schema version a `.spitdag` is written with.
-pub const SPITDAG_VERSION: usize = 10;
+pub const SPITDAG_VERSION: usize = 11;
 
 /// A resolved DAG with its paths bound and its commands expanded. Its
 /// artifacts are the resolved DAG's, each kept once with its path; jobs,
@@ -197,8 +197,8 @@ pub enum ArgPart {
     /// The folder of the file declaring the operation, as `{@here}` gives
     /// it. `relative` is under [`BoundDag::pipeline_folder`], `""` for the
     /// folder itself; `text` is the two joined, so that no job holds a
-    /// second copy. Only `relative` is written, so a moved pipeline keeps its
-    /// fingerprints.
+    /// second copy. Only `relative` is written, so a moved pipeline writes the
+    /// same commands.
     Here {
         relative: String,
         text: String,

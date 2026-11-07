@@ -1,14 +1,13 @@
-//! A job's work: what it reads, writes and runs, written as the compact
-//! JSON its fingerprint hashes.
+//! A job's commands, written as the JSON the document holds.
 
 use std::ops::Range;
 
-use crate::json::{write_array, write_string, ObjectWriter, Out};
+use crate::json::{write_array, write_string, ObjectWriter};
 
 use super::write::write_command;
 use super::{BoundCommand, BoundDag};
 
-/// Where a job's commands are in the work its fingerprint hashes.
+/// Where a job's commands are in the work buffer.
 pub(super) enum WorkCommands {
     /// `"command":null`, for a job with none.
     None,
@@ -23,10 +22,7 @@ pub(super) enum WorkCommands {
     Several(Range<usize>),
 }
 
-/// Write a job's `commands` into its work. A job with one command or none
-/// hashes as one did when a job had a single `command` with its `stdin` and
-/// `stdout`, each left out when null, so its fingerprint is unchanged; one
-/// with several hashes its `commands` as the document writes them.
+/// Write a job's `commands` into the work buffer.
 pub(super) fn write_work_commands(
     object: &mut ObjectWriter<'_, String>,
     dag: &BoundDag,
@@ -59,40 +55,5 @@ pub(super) fn write_work_commands(
                 item.finish();
             });
         })),
-    }
-}
-
-/// A 64-bit FNV-1a hash of a job's work written as compact JSON, as 16
-/// hexadecimal digits: the same on every platform and in every release,
-/// unlike the standard library's. The JSON writer's format is part of the
-/// `.spitdag` contract; a test pins a job's value.
-pub(super) fn fingerprint(work: &str) -> u64 {
-    let mut hash = Fnv::new();
-    hash.push_str(work);
-    hash.0
-}
-
-/// `value` as 16 hexadecimal digits.
-pub(super) fn write_hex(out: &mut String, value: u64) {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    for shift in (0..16).rev() {
-        out.push(char::from(HEX[(value >> (4 * shift)) as usize & 0xf]));
-    }
-}
-
-/// FNV-1a over the text written to it, so nothing is kept but the hash.
-struct Fnv(u64);
-
-impl Fnv {
-    fn new() -> Self {
-        Self(0xcbf2_9ce4_8422_2325)
-    }
-}
-
-impl Out for Fnv {
-    fn push_str(&mut self, text: &str) {
-        for byte in text.bytes() {
-            self.0 = (self.0 ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3);
-        }
     }
 }

@@ -18,7 +18,10 @@ fn recipe_inputs_hover_with_source_and_path_dimensions() {
     let text = std::fs::read_to_string(&recipe).unwrap();
     let json = spit::render_recipe_editor_json(&[], &text, &recipe);
     assert!(json.contains(r#""name":"bold""#), "{json}");
-    assert!(json.contains(r#""signature":"bold: MRI [sub, run]""#), "{json}");
+    assert!(
+        json.contains(r#""signature":"bold: MRI [sub, run]""#),
+        "{json}"
+    );
     assert!(json.contains(r#""name":"{sub}""#), "{json}");
     assert!(json.contains(r#""name":"{run}""#), "{json}");
     assert!(json.contains(r#""name":"{sub}""#), "{json}");

@@ -558,7 +558,9 @@ fn recipe_input_hovers(text: &str, path: &Path) -> Vec<Hover> {
             block_indent = Some(indent);
             continue;
         }
-        let Some(header_indent) = block_indent else { continue };
+        let Some(header_indent) = block_indent else {
+            continue;
+        };
         if trimmed.is_empty() {
             continue;
         }
@@ -566,14 +568,18 @@ fn recipe_input_hovers(text: &str, path: &Path) -> Vec<Hover> {
             block_indent = None;
             continue;
         }
-        let Some((name, template)) = trimmed.split_once(": ") else { continue };
+        let Some((name, template)) = trimmed.split_once(": ") else {
+            continue;
+        };
         if matches!(name, "contexts" | "default") {
             continue;
         }
         let Some(source) = pipeline.products.iter().find(|source| source.name == name) else {
             continue;
         };
-        let Some(start) = raw.find(name) else { continue };
+        let Some(start) = raw.find(name) else {
+            continue;
+        };
         let span = utf16_columns(raw, &(start..start + name.len()));
         let signature = format!(
             "{}: {} [{}]",
@@ -589,7 +595,9 @@ fn recipe_input_hovers(text: &str, path: &Path) -> Vec<Hover> {
         let mut scan = 0;
         while let Some(open) = template[scan..].find('{') {
             let open = scan + open;
-            let Some(close) = template[open + 1..].find('}') else { break };
+            let Some(close) = template[open + 1..].find('}') else {
+                break;
+            };
             let close = open + 1 + close;
             let name_in_path = &template[open + 1..close];
             if !name_in_path.starts_with('@') && !name_in_path.is_empty() {
@@ -599,7 +607,9 @@ fn recipe_input_hovers(text: &str, path: &Path) -> Vec<Hover> {
         }
         for dimension in &placeholders {
             if source.dimensions.iter().any(|known| known == dimension) {
-                details.push(format!("{{{dimension}}} is the source's `{dimension}` dimension."));
+                details.push(format!(
+                    "{{{dimension}}} is the source's `{dimension}` dimension."
+                ));
             } else {
                 details.push(format!(
                     "{{{dimension}}} is not a dimension of source `{name}`."
@@ -630,11 +640,15 @@ fn recipe_input_hovers(text: &str, path: &Path) -> Vec<Hover> {
                     kind: HoverKind::Product,
                     name: token.clone(),
                     signature: format!("Dimension {dimension}"),
-                    details: vec![if source.dimensions.iter().any(|known| known == dimension) {
-                        format!("{{{dimension}}} takes the `{dimension}` value of source `{name}`.")
-                    } else {
-                        format!("Source `{name}` has no `{dimension}` dimension.")
-                    }],
+                    details: vec![
+                        if source.dimensions.iter().any(|known| known == dimension) {
+                            format!(
+                                "{{{dimension}}} takes the `{dimension}` value of source `{name}`."
+                            )
+                        } else {
+                            format!("Source `{name}` has no `{dimension}` dimension.")
+                        },
+                    ],
                 });
             }
         }

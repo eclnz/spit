@@ -190,7 +190,10 @@ fn check_vary(
             let hint = if suggestion.is_empty() {
                 String::new()
             } else {
-                format!("; to broadcast these dimensions, try {}", suggestion.join(" with "))
+                format!(
+                    "; to broadcast these dimensions, try {}",
+                    suggestion.join(" with ")
+                )
             };
             Err(unsupported(
                 operation,
@@ -201,7 +204,7 @@ fn check_vary(
                     extra.join(", ")
                 ),
             ))
-        },
+        }
         None => Ok(()),
     }
 }
