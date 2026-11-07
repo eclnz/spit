@@ -65,7 +65,7 @@ fn a_block_of_one_line_is_the_same_job_as_the_line_written_after_the_colon() {
     // The block puts the step on a later line.
     let without_origin = |json: &str| {
         let start = json.find("\"origin\":").unwrap();
-        let end = json.find(",\"fingerprint\"").unwrap();
+        let end = json.find(",\"inputs\"").unwrap();
         format!("{}{}", &json[..start], &json[end..])
     };
     assert_eq!(without_origin(&inline), without_origin(&block));

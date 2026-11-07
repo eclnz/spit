@@ -221,14 +221,14 @@ fn only_an_operations_command_redirects() {
 }
 
 #[test]
-fn a_redirected_output_changes_the_jobs_fingerprint() {
+fn a_redirected_output_changes_the_jobs_commands() {
     let fingerprint = |command: &str| {
         let json = spitdag(&format!(
             "operation count(lines: Table) -> Count .txt\ncommand count: {command}\ncounted = count(table)\n"
         ))
         .unwrap();
-        let start = json.find("\"fingerprint\":\"").unwrap() + 15;
-        json[start..start + 16].to_owned()
+        let start = json.find("\"commands\":").unwrap();
+        json[start..start + json[start..].find(",\"checks\"").unwrap()].to_owned()
     };
     let argument = fingerprint("tool {lines} {@output}");
     let stdout = fingerprint("tool {lines} > {@output}");

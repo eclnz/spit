@@ -54,10 +54,10 @@ fn diagnostics(rest: &str) -> Vec<String> {
         .collect()
 }
 
-/// Each job's fingerprint in `json`, in order.
+/// Each job's `commands` and `verify` in `json`, in order.
 fn fingerprints(json: &str) -> Vec<&str> {
-    json.match_indices("\"fingerprint\":\"")
-        .map(|(at, key)| &json[at + key.len()..at + key.len() + 16])
+    json.match_indices("\"commands\":")
+        .map(|(at, _)| &json[at..at + json[at..].find(",\"checks\"").unwrap()])
         .collect()
 }
 
@@ -82,13 +82,13 @@ labelled = label(cell)
 }
 
 #[test]
-fn a_value_joins_the_fingerprint_as_the_same_text_written_out_would() {
+fn a_value_joins_the_commands_as_the_same_text_written_out_would() {
     let first = |command: &str| {
         let json = spitdag(&format!(
             "operation label(cell: Cell) -> Label .txt\ncommand label: {command}\nlabelled = label(cell)\n"
         ));
         let jobs = fingerprints(&json);
-        // Jobs that differ only in their values differ in fingerprint.
+        // Jobs that differ only in their values differ in commands.
         assert_eq!(jobs.len(), 3);
         jobs[0].to_owned()
     };

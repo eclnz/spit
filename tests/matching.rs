@@ -139,10 +139,7 @@ summary = group_ica(runs @vary(run), dims)
 ";
     let pipeline = parse_pipeline(text).unwrap();
     let error = spit::validate_pipeline(&pipeline).unwrap_err();
-    assert!(
-        error.to_string().contains("`dims @each(d)`"),
-        "{error}"
-    );
+    assert!(error.to_string().contains("`dims @each(d)`"), "{error}");
     let corrected = text.replace("dims)", "dims @each(d))");
     spit::validate_pipeline(&parse_pipeline(&corrected).unwrap()).unwrap();
 }
