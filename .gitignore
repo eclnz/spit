@@ -1,3 +1,5 @@
+.DS_Store
+
 /target/
 /site/
 # Pipelines, datasets and profiles that profiling/bench.py generates.
@@ -9,3 +11,5 @@
 /examples/runnable/*/output/
 /examples/runnable/*/.spit-bash/
 /examples/runnable/*/*.spitdag
+
+graphify-out
