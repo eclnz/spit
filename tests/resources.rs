@@ -30,10 +30,10 @@ fn diagnostics(rest: &str) -> Vec<String> {
     rendered(&diagnose(&format!("{HEADER}{rest}"), Some(SOURCES)))
 }
 
-/// The fingerprint of the first job in `json`.
+/// The commands of the first job in `json`.
 fn fingerprint(json: &str) -> String {
-    let start = json.find("\"fingerprint\":\"").unwrap() + 15;
-    json[start..start + 16].to_owned()
+    let start = json.find("\"commands\":").unwrap();
+    json[start..start + json[start..].find(",\"checks\"").unwrap()].to_owned()
 }
 
 #[test]
@@ -69,7 +69,7 @@ copied = copy(sorted)
 }
 
 #[test]
-fn resources_leave_the_fingerprint_unless_the_command_uses_them() {
+fn resources_leave_the_commands_unless_the_command_uses_them() {
     let job = |command: &str, resources: &str| {
         fingerprint(&spitdag(&format!(
             "operation sort(lines: Table) -> Table .tsv\ncommand sort: {command}\n{resources}sorted = sort(table)\n"

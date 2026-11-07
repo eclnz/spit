@@ -1,5 +1,5 @@
 //! Writing a bound DAG as a `.spitdag`: a job at a time, each artifact's
-//! JSON written once, and each job's fingerprint hashed from its work.
+//! JSON written once.
 
 use std::io;
 
@@ -7,7 +7,7 @@ use crate::json::{write_array, write_number, write_string, write_u64, ObjectWrit
 use crate::model::{ArtifactId, JobId, Removal};
 
 use super::artifact_json::{write_artifact, ArtifactJson};
-use super::work::{fingerprint, write_hex, write_work_commands, WorkCommands};
+use super::work::{write_work_commands, WorkCommands};
 use super::{ArgPart, Argument, BoundDag, BoundJob, BoundStep, When, SPITDAG_VERSION};
 
 /// How much of a document [`BoundDag::write_json`] holds before writing it.
@@ -112,10 +112,9 @@ pub(crate) fn write_document(
     handed
 }
 
-/// One job. What it reads, writes and runs is written first into `work`, a
-/// buffer reused between jobs, as the object its fingerprint hashes; the
-/// job's own fields then copy from it, except its artifacts, which are
-/// written again with their types.
+/// One job. Its operation, commands and `verify` are written first into
+/// `work`, a buffer reused between jobs, and the job's own fields copy from
+/// it.
 fn write_job(
     out: &mut String,
     dag: &BoundDag,
@@ -128,12 +127,6 @@ fn write_job(
     work.clear();
     let mut object = ObjectWriter::start(work);
     let operation = object.field_at("operation", |out| write_string(out, &step.operation));
-    object.field_at("inputs", |out| {
-        write_inputs(out, step, job, |out, id| artifacts.push_identity(out, id));
-    });
-    object.field_at("outputs", |out| {
-        write_outputs(out, step, job, |out, id| artifacts.push_identity(out, id));
-    });
     let commands = write_work_commands(&mut object, dag, &job.commands);
     let verify = object.field_at("verify", |out| {
         write_array(out, &job.verify, |out, command| {
@@ -152,8 +145,6 @@ fn write_job(
             write_string,
         );
     });
-    // Where a job comes from is not its work, so the fingerprint leaves it
-    // out, as it does the stage.
     object.field("origin", |out| match &step.origin {
         Some(origin) => {
             let mut item = ObjectWriter::start(out);
@@ -163,11 +154,6 @@ fn write_job(
             item.finish();
         }
         None => out.push_str("null"),
-    });
-    object.field("fingerprint", |out| {
-        out.push('"');
-        write_hex(out, fingerprint(work));
-        out.push('"');
     });
     object.field("inputs", |out| {
         write_inputs(out, step, job, |out, id| out.push_str(artifacts.get(id)));
@@ -206,9 +192,6 @@ fn write_job(
         WorkCommands::Several(span) => out.push_str(&work[span.clone()]),
     });
     object.raw("verify", &work[verify]);
-    // A check tests the files a job reads or writes, not the job's work, so
-    // the fingerprint leaves the checks out: a changed check is run again on
-    // the files, without rerunning the job.
     object.field("checks", |out| {
         write_array(out, &job.checks, |out, check| {
             let declared = &step.checks[check.check];
@@ -225,9 +208,8 @@ fn write_job(
             item.finish();
         });
     });
-    // What a job needs says how to schedule it, not what it makes, so the
-    // fingerprint leaves it out. `{@cores}` in a command changes the
-    // command, which the fingerprint holds.
+    // `{@cores}` in a command changes the command, which a backend that
+    // identifies work holds.
     object.field("cores", |out| write_u64(out, step.resources.cores.into()));
     object.field("memory", |out| match step.resources.memory {
         Some(bytes) => write_u64(out, bytes),
@@ -347,9 +329,8 @@ fn write_optional_number(out: &mut String, value: Option<usize>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::SourceFile;
     use crate::model::{Artifacts, EntityBinding, StepId};
-    use crate::spitdag::{BoundCall, BoundCommand, BoundStep, StepCall};
+    use crate::spitdag::{BoundCommand, BoundStep};
     use crate::types::TypeExpr;
 
     /// A command that runs `program` alone.
@@ -457,7 +438,7 @@ mod tests {
         dag.root = Some("/data/study".into());
         let text = dag.to_json();
         assert!(text.starts_with(&format!(
-            "{{\"version\":10,\"generator\":{{\"name\":\"spit\",\"version\":\"{}\"}},\
+            "{{\"version\":11,\"generator\":{{\"name\":\"spit\",\"version\":\"{}\"}},\
 \"root\":\"/data/study\",\"external_inputs\":[{{\"product\":\"raw\"",
             env!("CARGO_PKG_VERSION")
         )));
@@ -506,12 +487,7 @@ mod tests {
                 }]
             }
         };
-        let fingerprint_of = |text: &str| {
-            let start = text.find("\"fingerprint\":\"").unwrap() + 15;
-            text[start..start + 16].to_owned()
-        };
-        // The work a single command's job hashed: its arguments as
-        // `command`, and its stdout, which is not null, after it.
+        // A single command with a stdout.
         let one = bound(steps.clone(), |ids| {
             job(vec![BoundCommand {
                 stdout: Some(ids[1]),
@@ -525,24 +501,7 @@ mod tests {
             ),
             "{text}"
         );
-        let print = fingerprint_of(&text);
-        let raw_json = ArtifactJson::new(&one);
-        let ids: Vec<_> = one.artifacts.ids().collect();
-        // The work holds each artifact without its type.
-        let identity = |id| {
-            let mut text = String::new();
-            raw_json.push_identity(&mut text, id);
-            text
-        };
-        let work = format!(
-            "{{\"operation\":\"clean\",\"inputs\":{{\"raw\":[{}]}},\"outputs\":{{\"output\":{}}},\"command\":[[\"tool\"]],\"stdout\":\"out/1.txt\",\"verify\":[]}}",
-            identity(ids[0]),
-            identity(ids[1]),
-        );
-        let mut hex = String::new();
-        write_hex(&mut hex, fingerprint(&work));
-        assert_eq!(print, hex);
-        // Several commands are written, and hashed, as a list.
+        // Several commands are written as a list.
         let two = bound(steps, job(vec![command("tool"), command("index")])).to_json();
         assert!(
             two.contains("\"commands\":[{\"command\":[[\"tool\"]],\"stdin\":null,\"stdout\":null},{\"command\":[[\"index\"]],\"stdin\":null,\"stdout\":null}],\"verify\":[]"),
@@ -626,159 +585,5 @@ mod tests {
             .map(|input| input.path)
             .collect();
         assert_eq!(order, ["w/wave1.csv", "w/wave2.csv", "w/wave10.csv"]);
-    }
-
-    #[test]
-    fn a_fingerprint_follows_the_work_not_the_job_number() {
-        let job = |[raw, clean, _]: [ArtifactId; 3]| BoundJob {
-            id: JobId::new(1),
-            step: StepId::new(0),
-            inputs: vec![vec![raw]],
-            outputs: vec![clean],
-            depends_on: vec![],
-            commands: vec![command("tool")],
-            verify: vec![],
-            checks: vec![],
-        };
-        let print = |make: &dyn Fn([ArtifactId; 3]) -> BoundJob| {
-            // The same operation and ports, outside a stage and in one.
-            let steps = vec![
-                step("clean", None, &["raw"], &["output"]),
-                step("clean", Some("prep"), &["raw"], &["output"]),
-            ];
-            let text = bound(steps, |ids| vec![make(ids)]).to_json();
-            let start = text.find("\"fingerprint\":\"").unwrap() + 15;
-            text[start..start + 16].to_owned()
-        };
-        let renumbered = |ids| BoundJob {
-            id: JobId::new(7),
-            step: StepId::new(1),
-            ..job(ids)
-        };
-        assert_eq!(print(&job), print(&renumbered));
-        let changed = |ids| BoundJob {
-            commands: vec![command("other")],
-            ..job(ids)
-        };
-        assert_ne!(print(&job), print(&changed));
-        // The same arguments, with the output on stdout.
-        let redirected = |ids: [ArtifactId; 3]| BoundJob {
-            commands: vec![BoundCommand {
-                stdout: Some(ids[1]),
-                ..command("tool")
-            }],
-            ..job(ids)
-        };
-        assert_ne!(print(&job), print(&redirected));
-        // A second command is work too.
-        let sequence = |ids| BoundJob {
-            commands: vec![command("tool"), command("other")],
-            ..job(ids)
-        };
-        assert_ne!(print(&job), print(&sequence));
-        assert!(print(&job).bytes().all(|byte| byte.is_ascii_hexdigit()));
-        // The hash of the work as compact JSON: a change to the JSON writer
-        // changes every fingerprint, so it must be deliberate.
-        assert_eq!(print(&job), "41b950f9f062e19d");
-        let fnv = |text: &str| {
-            let mut hex = String::new();
-            write_hex(&mut hex, fingerprint(text));
-            hex
-        };
-        assert_eq!(fnv(""), "cbf29ce484222325");
-        assert_eq!(fnv("a"), "af63dc4c8601ec8c");
-    }
-
-    #[test]
-    fn a_type_is_written_but_not_fingerprinted() {
-        let print = |artifact_type: &TypeExpr| {
-            let steps = vec![step("clean", None, &["raw"], &["output"])];
-            let dag = bound_of_type(artifact_type, steps, |[raw, clean, _]| {
-                vec![BoundJob {
-                    id: JobId::new(1),
-                    step: StepId::new(0),
-                    inputs: vec![vec![raw]],
-                    outputs: vec![clean],
-                    depends_on: vec![],
-                    commands: vec![command("tool")],
-                    verify: vec![],
-                    checks: vec![],
-                }]
-            });
-            let text = dag.to_json();
-            let start = text.find("\"fingerprint\":\"").unwrap() + 15;
-            (text[start..start + 16].to_owned(), text)
-        };
-        let (plain, plain_text) = print(&TypeExpr::named("Image"));
-        let (narrow, narrow_text) = print(&TypeExpr::applied(
-            "Image",
-            vec![TypeExpr::named("MNI"), TypeExpr::named("Mm4")],
-        ));
-        assert_eq!(plain, narrow);
-        // The type is in the job's artifacts all the same.
-        assert!(narrow_text.contains("\"type\":{\"name\":\"Image\",\"args\":[{\"name\":\"MNI\""));
-        assert!(!plain_text.contains("MNI"));
-    }
-
-    #[test]
-    fn files_calls_and_origins_are_written_but_not_fingerprinted() {
-        let job = |[raw, clean, _]: [ArtifactId; 3]| BoundJob {
-            id: JobId::new(1),
-            step: StepId::new(0),
-            inputs: vec![vec![raw]],
-            outputs: vec![clean],
-            depends_on: vec![],
-            commands: vec![command("tool")],
-            verify: vec![],
-            checks: vec![],
-        };
-        let plain = bound(vec![step("clean", None, &["raw"], &["output"])], |ids| {
-            vec![job(ids)]
-        });
-        let mut called = step("clean", None, &["raw"], &["output"]);
-        called.origin = Some(StepCall {
-            call: Some(0),
-            file: Some(1),
-            line: 4,
-        });
-        let mut dag = bound(vec![called], |ids| vec![job(ids)]);
-        dag.pipeline_files = vec![
-            SourceFile {
-                path: "main.spit".into(),
-                blob: "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391".into(),
-            },
-            SourceFile {
-                path: "lib/prep.spit".into(),
-                blob: "ce013625030ba8dba906f756967f9e9ca394464a".into(),
-            },
-        ];
-        dag.calls = vec![BoundCall {
-            operation: "P::prep".into(),
-            instance: "ready".into(),
-            parent: None,
-            file: Some(1),
-            at_file: Some(0),
-            at_line: 9,
-        }];
-        let text = dag.to_json();
-        assert!(
-            text.contains(
-                "\"pipeline_files\":[{\"path\":\"main.spit\",\"blob\":\"e69de29bb2d1d6434b8b29ae775ad8c2e48c5391\"},\
-{\"path\":\"lib/prep.spit\",\"blob\":\"ce013625030ba8dba906f756967f9e9ca394464a\"}],\
-\"calls\":[{\"operation\":\"P::prep\",\"instance\":\"ready\",\"parent\":null,\"file\":1,\
-\"at\":{\"file\":0,\"line\":9}}],\"jobs\""
-            ),
-            "{text}"
-        );
-        assert!(
-            text.contains("\"origin\":{\"call\":0,\"file\":1,\"line\":4},\"fingerprint\""),
-            "{text}"
-        );
-        let print = |text: &str| {
-            let start = text.find("\"fingerprint\":\"").unwrap() + 15;
-            text[start..start + 16].to_owned()
-        };
-        assert!(plain.to_json().contains("\"origin\":null"));
-        assert_eq!(print(&plain.to_json()), print(&text));
     }
 }

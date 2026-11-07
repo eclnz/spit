@@ -78,7 +78,7 @@ Job 3  merge
 #[test]
 fn the_spitdag_names_each_check_its_port_and_its_artifact() {
     let json = dag(&format!("{CHECKS}{LINES}"), &["--json"]);
-    assert!(json.starts_with("{\"version\":10,"), "{json}");
+    assert!(json.starts_with("{\"version\":11,"), "{json}");
     assert!(json.contains("\"executables\":[\"cat\",\"check_lines\",\"sort\",\"test\"]"));
     assert!(json.contains(
         "\"checks\":[{\"when\":\"before\",\"check\":\"lines(1)\",\"port\":\"text\",\"path\":\"in/1.txt\",\
@@ -90,7 +90,7 @@ fn the_spitdag_names_each_check_its_port_and_its_artifact() {
 }
 
 #[test]
-fn checks_change_neither_the_jobs_nor_their_fingerprints() {
+fn checks_change_neither_the_jobs_nor_their_commands() {
     let unchecked = "\
 source raw : Text [id]
 path raw: in/{id}.txt
@@ -102,8 +102,8 @@ cleaned = clean(raw)
 merged = merge(cleaned @vary(id))
 default entities: {@key}={@value} separated \"__\"\npath cleaned: out/{@product}[/{@entities}]\npath merged: out/{@product}[/{@entities}]\n";
     let fingerprints = |json: &str| {
-        json.match_indices("\"fingerprint\":")
-            .map(|(at, _)| json[at..at + 32].to_owned())
+        json.match_indices("\"commands\":")
+            .map(|(at, _)| json[at..at + json[at..].find(",\"checks\"").unwrap()].to_owned())
             .collect::<Vec<_>>()
     };
     let checked = dag(&format!("{CHECKS}{LINES}"), &["--json"]);

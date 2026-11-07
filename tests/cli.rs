@@ -345,7 +345,7 @@ fn check_json_reads_the_pipeline_file_and_dag_json_emits_the_spitdag() {
     let dag = run();
     assert!(dag.status.success(), "{}", stderr(&dag));
     let graph = stdout(&dag);
-    assert!(graph.starts_with("{\"version\":10,\"generator\":{\"name\":\"spit\",\"version\":\""));
+    assert!(graph.starts_with("{\"version\":11,\"generator\":{\"name\":\"spit\",\"version\":\""));
     // The `.spitout`'s root, relative to its folder, is recorded in full.
     assert!(
         graph.contains("/examples/commands/command_demo/command_demo_data\",\"external_inputs\":["),
@@ -371,7 +371,6 @@ fn check_json_reads_the_pipeline_file_and_dag_json_emits_the_spitdag() {
         graph.contains("\"depends_on\":[1,2],\"dependents\":[]"),
         "{graph}"
     );
-    assert_eq!(graph.matches("\"fingerprint\":\"").count(), 5);
     // A bound DAG: every artifact has its path and every job its command.
     assert!(graph.contains("\"path\":\"input/alpha/01.txt\""), "{graph}");
     assert!(graph.contains("\"command\":[[\"sort\"]"), "{graph}");
