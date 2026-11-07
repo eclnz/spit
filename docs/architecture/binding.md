@@ -28,7 +28,7 @@ flowchart LR
     - its extension added: an operation's output extension, a source's declared one, or else `default ext:`.
 - **`PathBinder`** ([`src/paths/product.rs`](https://github.com/eclnz/spit/blob/dev/src/paths/product.rs)) binds artifacts to paths. `PathBinder::bind_numbered` finds each product's template and stage once, by its number in the artifact table.
 - **`CommandTemplate`** ([`src/command/mod.rs`](https://github.com/eclnz/spit/blob/dev/src/command/mod.rs)) is a command's arguments, each literal text and `{placeholders}`, and its `Redirect`s: each `<` or `>` word with the word after it, which are not arguments.
-- **`write_document`** ([`src/spitdag/write.rs`](https://github.com/eclnz/spit/blob/dev/src/spitdag/write.rs)) writes each artifact's JSON once, and hashes each job's fingerprint from its work, which `write_work_commands` ([`src/spitdag/work.rs`](https://github.com/eclnz/spit/blob/dev/src/spitdag/work.rs)) writes a job's commands into.
+- **`write_document`** ([`src/spitdag/write.rs`](https://github.com/eclnz/spit/blob/dev/src/spitdag/write.rs)) writes each artifact's JSON once, and each job's commands, which `write_work_commands` ([`src/spitdag/work.rs`](https://github.com/eclnz/spit/blob/dev/src/spitdag/work.rs)) writes a job's commands into.
 
 ## Responsibilities
 
@@ -65,7 +65,7 @@ flowchart LR
 - **Each bare shell operator word is rejected,** such as `|` or `>>`, at its column. A runner runs a command without a shell, so `CommandTemplate::parse` marks those words. A quoted one is literal text.
 - **A bare `<` or `>` word connects a stream to a port.** `CommandTemplate::parse` takes it and the word after it out of the arguments as a `Redirect`. The parser (`check_redirects`) allows them only in an operation's command, once each in a line, each followed by one placeholder, and a `>` in one line of a command at most; `validate_commands` checks that `>` names an output that is a file, which no argument of its line or a line before it names, and `<` a `one` input. `bind_job` turns them into each `BoundCommand`'s `stdin` and `stdout` artifacts, and rejects a folder on stdin.
 - **A check is its own small model.** `CheckDef` is a check declaration, and `CheckUse` its use on an input port, an output port or a source. `src/check.rs` validates them, and at binding gives each step its checks once (`step_checks`) and each job one command per checked artifact.
-- **Commands and checks change no job, path, dependency or fingerprint.** Nor does what a job needs: `cores` and `memory` are written from the step, outside the fingerprint's JSON.
+- **Commands and checks change no job, path or dependency.** Nor does what a job needs: `cores` and `memory` are written from the step.
 
 **`spit dag --paths`** shows each job's named inputs and outputs and their paths: the `.spitdag` without its commands.
 
@@ -74,10 +74,9 @@ flowchart LR
 - **The output is the same bytes for the same pipeline, inventory, root and SPIT version.** It never depends on hash order (AGENTS.md says how the code keeps to that). Test: [`tests/outputs.rs`](https://github.com/eclnz/spit/blob/dev/tests/outputs.rs), which compares every example's output with a stored copy under `tests/fixtures/outputs/`.
 - **No two artifacts share a path.** Products whose rules give the same path for the same entities are an error. Tests: [`path_rule_errors_point_to_the_rule_in_use`](https://github.com/eclnz/spit/blob/dev/tests/diagnostics.rs), [`two_sources_with_one_dimension_name_collide_whatever_their_shapes`](https://github.com/eclnz/spit/blob/dev/tests/placeholder_shapes.rs).
 - **SPIT writes no path of its own.** An output with no rule fails at its declaration. A source with records but no rule fails at binding, rather than being looked for under `out/`. Tests: [`an_output_with_no_rule_is_an_error_and_a_source_waits_for_one`](https://github.com/eclnz/spit/blob/dev/tests/paths.rs), [`a_recorded_source_with_no_path_rule_is_not_looked_for_under_out`](https://github.com/eclnz/spit/blob/dev/tests/cli.rs).
-- **Checks change neither the jobs nor their fingerprints.** Test: [`checks_change_neither_the_jobs_nor_their_fingerprints`](https://github.com/eclnz/spit/blob/dev/tests/checks.rs).
-- **A job with one command keeps the fingerprint a single command gave it.** Test: [`a_job_with_one_command_hashes_as_a_job_with_a_single_command_did`](https://github.com/eclnz/spit/blob/dev/src/spitdag/write.rs).
-- **What a job needs leaves its fingerprint as it is.** Test: [`resources_leave_the_fingerprint_unless_the_command_uses_them`](https://github.com/eclnz/spit/blob/dev/tests/resources.rs).
-- **A dimension's value is in the fingerprint as the text it gives the command.** Test: [`a_value_joins_the_fingerprint_as_the_same_text_written_out_would`](https://github.com/eclnz/spit/blob/dev/tests/command_dimensions.rs).
+- **Checks change neither the jobs nor their commands.** Test: [`checks_change_neither_the_jobs_nor_their_commands`](https://github.com/eclnz/spit/blob/dev/tests/checks.rs).
+- **What a job needs leaves its commands as they are unless a command uses it.** Test: [`resources_leave_the_commands_unless_the_command_uses_them`](https://github.com/eclnz/spit/blob/dev/tests/resources.rs).
+- **A dimension's value is in the commands as the text it gives them.** Test: [`a_value_joins_the_commands_as_the_same_text_written_out_would`](https://github.com/eclnz/spit/blob/dev/tests/command_dimensions.rs).
 
 A `.spitdag` belongs to the inventory it was made from: a new inventory needs a new `dag`.
 
