@@ -400,7 +400,13 @@ fn a_review_file_gives_the_verdicts_and_the_commands_note_what_they_did() {
         "qc/looked_at.csv",
         "sub,verdict,reason\n01,pass,\n02,fail,\"ghosting, frontal\"\n08,pass,\n09,pass,\n",
     );
-    let (ok, stdout, stderr) = run(&tree, "dag");
+    let recipe = tree.path().join("data.spitin");
+    let output = spit(&["dag", recipe.to_str().unwrap(), "--commands"]);
+    let (ok, stdout, stderr) = (
+        output.status.success(),
+        text(&output.stdout),
+        text(&output.stderr),
+    );
     assert!(ok, "{stderr}");
     assert!(stdout.contains("Job 2"), "{stdout}");
     assert!(

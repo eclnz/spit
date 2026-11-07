@@ -41,7 +41,10 @@ fn help_lists_each_step_and_each_command_explains_itself() {
     let version = spit(&["--version"]);
     assert_eq!(
         stdout(&version),
-        format!("SPIT (Simple Pipeline in Text) compiler, version {}\n", env!("CARGO_PKG_VERSION"))
+        format!(
+            "SPIT (Simple Pipeline in Text) compiler, version {}\n",
+            env!("CARGO_PKG_VERSION")
+        )
     );
 }
 
@@ -65,13 +68,14 @@ fn dag_resolves_a_pipeline_over_a_spitout() {
 }
 
 #[test]
-fn plain_dag_prints_the_commands_and_jobs_lists_the_artifacts() {
+fn plain_dag_prints_counts_and_commands_are_explicit() {
     let recipe = "examples/commands/command_demo/command_demo.spitin";
     let plain = spit(&["dag", recipe]);
     let commands = spit(&["dag", recipe, "--commands"]);
     assert!(plain.status.success(), "{}", stderr(&plain));
-    assert_eq!(stdout(&plain), stdout(&commands));
-    assert!(stdout(&plain).starts_with("Job 1  sort_lines\n  run:    sort"));
+    assert_eq!(stdout(&plain), stdout(&spit(&["dag", recipe, "--counts"])));
+    assert!(stdout(&plain).starts_with("jobs  step\n"));
+    assert!(stdout(&commands).starts_with("Job 1  sort_lines\n  run:    sort"));
 
     let jobs = spit(&["dag", recipe, "--jobs"]);
     assert!(stdout(&jobs).starts_with("Job 1\n  operation: sort_lines\n  inputs:\n"));
@@ -86,12 +90,10 @@ fn plain_dag_prints_the_commands_and_jobs_lists_the_artifacts() {
         );
     }
 
-    // A pipeline without commands points to the listing.
+    // A pipeline without commands still shows its step counts by default.
     let bare = spit(&["dag", "examples/basic/basic.spitin"]);
     assert!(bare.status.success(), "{}", stderr(&bare));
-    assert!(stderr(&bare).contains(
-        "note: no job has a command; `dag --jobs` lists each job's inputs and outputs\n"
-    ));
+    assert!(stdout(&bare).starts_with("jobs  step\n"));
     assert!(!stderr(&plain).contains("no job has a command"));
 }
 
@@ -126,6 +128,12 @@ default entities: {@key}={@value} separated \"__\"\npath cleaned: out/{@product}
 
     // With -o, the counts are printed and the .spitdag is written.
     let dag = tree.path().join("plan.spitdag");
+    let saved = tree.path().join("saved.spitdag");
+    let saved_alone = spit(&["dag", pipeline, inputs, "-o", saved.to_str().unwrap()]);
+    assert!(saved_alone.status.success(), "{}", stderr(&saved_alone));
+    assert!(stdout(&saved_alone).is_empty());
+    assert!(fs::read_to_string(&saved).unwrap().contains("\"jobs\""));
+
     let written = spit(&[
         "dag",
         pipeline,
