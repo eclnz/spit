@@ -181,15 +181,27 @@ fn check_vary(
         .map(|(_, input)| (input, missing_from(&input.joins(), &grouped)))
         .find(|(_, extra)| !extra.is_empty());
     match unmatched {
-        Some((input, extra)) => Err(unsupported(
-            operation,
-            format!(
-                "input `{}` has dimensions absent from the groups of `{}` @vary({varied}): {}; aggregate them first, pin them with `@where(...)`, match on fewer with `@same(...)`, or broadcast them with `@each(...)`",
-                input.binding.product,
-                driving.product,
-                extra.join(", ")
-            ),
-        )),
+        Some((input, extra)) => {
+            let suggestion = extra
+                .iter()
+                .filter(|dimension| !driving.vary.contains(dimension))
+                .map(|dimension| format!("`{} @each({dimension})`", input.binding.product))
+                .collect::<Vec<_>>();
+            let hint = if suggestion.is_empty() {
+                String::new()
+            } else {
+                format!("; to broadcast these dimensions, try {}", suggestion.join(" with "))
+            };
+            Err(unsupported(
+                operation,
+                format!(
+                    "input `{}` has dimensions absent from the groups of `{}` @vary({varied}): {}{hint}; aggregate them first, pin them with `@where(...)`, or match on fewer with `@same(...)`",
+                    input.binding.product,
+                    driving.product,
+                    extra.join(", ")
+                ),
+            ))
+        },
         None => Ok(()),
     }
 }
