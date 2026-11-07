@@ -132,7 +132,6 @@ fn command_lines_print_as_before() {
     let runs: [&[&str]; 3] = [
         &["dag", "strict.spitin", "--commands"],
         &["dag", "strict.spitin", "--commands", "--paths"],
-        // Plain `dag` prints the commands, as `--commands` does.
         &["dag", "strict.spitin"],
     ];
     let text: String = runs.iter().map(|args| run(&tree, args)).collect();
