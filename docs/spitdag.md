@@ -1,6 +1,6 @@
 # The `.spitdag` format
 
-A `.spitdag` is what `spit dag -o` writes and `spit dag --json` prints: every job a pipeline resolves to over one dataset, each with its files and its commands. A backend that runs the jobs reads nothing else: no pipeline, path rule or command template. This page describes version 10, the version SPIT writes. Use `spit dag --commands` for a readable view of the same commands.
+A `.spitdag` is what `spit dag -o` writes and `spit dag --json` prints: every job a pipeline resolves to over one dataset, each with its files and its commands. A backend that runs the jobs reads nothing else: no pipeline, path rule or command template. This page describes version 11, the version SPIT writes. Use `spit dag --commands` for a readable view of the same commands.
 
 ## Document
 
@@ -25,7 +25,7 @@ A `.spitdag` is one JSON object, followed by a newline:
 
 | Field | Holds |
 | --- | --- |
-| `version` | The format's version, `10`. A change a reader must know about raises it. Version 6 added each job's [`checks`](#checks). Version 7 added `pipeline_files`, `calls` and each job's `origin`: see [Where jobs come from](#where-jobs-come-from). Version 8 gives each job its [`commands`](#commands) in place of version 7's `command`, each with its `stdin` and `stdout`, see [Standard input and output](#standard-input-and-output), and added its `cores` and `memory`, see [Cores and memory](#cores-and-memory). Version 9 gives every job an `origin`, with the `file` and `line` of its step, where version 8 left it `null` for a step written in the pipeline. Version 10 added `pipeline_folder` and the `here` command part. |
+| `version` | The format's version, `11`. A change a reader must know about raises it. Version 6 added each job's [`checks`](#checks). Version 7 added `pipeline_files`, `calls` and each job's `origin`: see [Where jobs come from](#where-jobs-come-from). Version 8 gives each job its [`commands`](#commands) in place of version 7's `command`, each with its `stdin` and `stdout`, see [Standard input and output](#standard-input-and-output), and added its `cores` and `memory`, see [Cores and memory](#cores-and-memory). Version 9 gives every job an `origin`, with the `file` and `line` of its step, where version 8 left it `null` for a step written in the pipeline. Version 10 added `pipeline_folder` and the `here` command part. Version 11 removed each job's `fingerprint`: see [Identifying work](#identifying-work). |
 | `generator` | The program that wrote the file, and its version. |
 | `root` | The absolute dataset folder that every path is relative to, or `null` when it was not known: a `.spitout` that records no root. |
 | `external_inputs` | Every artifact a job reads but no job writes, once each: the sources. Ordered by path in natural order, the order `many` inputs take, so `wave2` comes before `wave10`. |
@@ -93,7 +93,6 @@ Each output that could not be produced has its identity and the input gaps that 
   "operation": "merge",
   "stage": ["preprocess", "combine"],
   "origin": {"call": null, "file": 0, "line": 7},
-  "fingerprint": "357a0ff06e3e9e39",
   "inputs": {"items": [ARTIFACT, ...]},
   "outputs": {"output": ARTIFACT},
   "depends_on": [1, 2],
@@ -112,7 +111,6 @@ Each output that could not be produced has its identity and the input gaps that 
 | `operation` | The operation the job runs. |
 | `stage` | The stage of the step that made the job, outermost first, such as `["preprocess", "combine"]`; `[]` outside every stage. |
 | `origin` | Where the step that made the job is written, as `{"call": 0, "file": 1, "line": 14}`. See [Where jobs come from](#where-jobs-come-from). |
-| `fingerprint` | 16 hexadecimal digits identifying the job's work: see [Fingerprint](#fingerprint). |
 | `inputs` | Each input port and the artifacts bound to it, in port order. A `one` port holds one artifact; a `many` port holds its collection in natural order. |
 | `outputs` | Each output port and the artifact it writes. A single unnamed output is `output`. |
 | `depends_on` | The jobs that write this job's inputs. |
@@ -161,7 +159,7 @@ Use the `dir` or `stem` text as the part, as a `path` part is used. Version 4 ad
 [["python3"], [{"here": "libs"}, "/scripts/table.py"]]
 ```
 
-Use `pipeline_folder`, then `/` and the part's text unless it is empty, as the part's text. A part is written relative so that the [fingerprint](#fingerprint), which hashes the commands as written, does not change when the pipeline moves. Version 10 added this part; a reader written for version 9 does not know it.
+Use `pipeline_folder`, then `/` and the part's text unless it is empty, as the part's text. A part is written relative so that the commands do not change when the pipeline moves. Version 10 added this part; a reader written for version 9 does not know it.
 
 Run each argument as one word, exactly as given: no shell is involved, so nothing in it is split, expanded or interpreted. Resolve each path against `root`, or run the command from `root`, where the relative paths name the right files.
 
@@ -197,7 +195,7 @@ The output is otherwise like any other: it must exist once the job's commands su
 - `memory` is the most each of the job's `verify` commands and `commands` may hold, together with every process it starts. A backend may stop a job that holds more, and report it as failed. Treat `null` as needing none and setting no limit.
 - A command holds the number of cores where the pipeline asked for it, with `{@cores}`, as `["-t"], ["8"]` above, so the tool uses what it was given; a backend changes nothing in `commands`.
 
-`cores` and `memory` are left out of the job's [fingerprint](#fingerprint): they say how to schedule the job, not what it makes.
+`cores` and `memory` say how to schedule the job, not what it makes, so a backend that identifies a job's work leaves them out.
 
 ### Running `verify`
 
@@ -231,7 +229,7 @@ The `"before"` checks come first, then the `"after"` checks; within each, by por
 
 A backend runs a job in this order: the `"before"` checks, the `verify` commands, `commands`, the check that every output exists, then the `"after"` checks. If any fails, the job fails, even when its commands exited with status 0, and no job that depends on it runs. Report a failure with the check, the port and the path, as in `check ndim(4) failed on output derivatives/dwi/sub=01.mif`.
 
-Checks are left out of the job's [fingerprint](#fingerprint), which identifies the job's work: a changed check does not make a job's outputs out of date. A backend that records successful jobs records the checks each passed with, such as the JSON of its `checks`. When a job is otherwise current but its checks differ from the record, the backend runs the checks alone on the existing files rather than rerunning `commands`. If one fails, the job fails and its record is dropped, so the next run reruns it.
+A backend that identifies a job's work leaves its checks out: a changed check does not make a job's outputs out of date. A backend that records successful jobs records the checks each passed with, such as the JSON of its `checks`. When a job is otherwise current but its checks differ from the record, the backend runs the checks alone on the existing files rather than rerunning `commands`. If one fails, the job fails and its record is dropped, so the next run reruns it.
 
 ## Folders
 
@@ -282,10 +280,15 @@ A job's `origin` says where the step that made it is written:
 
 `file` is `null` when SPIT read the pipeline from no file, and then `pipeline_files` is empty.
 
-None of these is part of a job's [fingerprint](#fingerprint). A changed command changes the fingerprints through `commands`; an edit elsewhere in a library, such as to a comment, changes a blob id and reruns nothing.
+None of these is part of a job's work. An edit elsewhere in a library, such as to a comment, changes a blob id and changes no command.
 
-## Fingerprint
+## Identifying work
 
-A job's fingerprint is a 64-bit FNV-1a hash of the compact JSON of what it reads, writes and runs: its `operation`, `inputs`, `outputs`, `commands` and `verify`, in that order, each artifact with its product, entities, path and kind. A job with several commands hashes `commands` as the file writes it. A job with one command hashes it as three fields in its place, `"command"`, the command's arguments, then `"stdin"` and `"stdout"`, each left out when it is `null`; a job with none hashes `"command":null`. So the work of a single-command job is hashed as `{"operation":...,"inputs":...,"outputs":...,"command":[["wc"],["-l"]],"stdin":"in/sheet=a.tsv","stdout":"out/lines/sheet=a.txt","verify":[]}`. Its `id`, `stage`, `origin`, `depends_on`, `dependents`, `checks`, `cores` and `memory` are left out, so the fingerprint follows the work, not where the job falls in the plan. An artifact's `type` is left out too: it is checked when SPIT compiles and is in no command, so a changed type does not make a job's outputs out of date.
+SPIT writes no fingerprint: a backend that decides whether a job must run again identifies the work itself. The document holds what it needs.
 
-The fingerprint changes when the job's command, its files, or which artifacts it reads or writes change. It does not read the files themselves, so it does not change when an input file's contents do; a backend that must rerun a job after its inputs change combines the fingerprint with its own record of the files, such as their modification times or hashes.
+- A job's `inputs` and `outputs` give each artifact's `product` and `entities`, which identify it apart from its `path`.
+- A command part `{"path": P}`, `{"dir": D, "of": P}` or `{"stem": S, "of": P}` names the job's input or output whose `path` is `P`. Each path belongs to one artifact, so replacing `P` with that artifact's product and entities gives the command without its storage paths. The same holds for `stdin`, `stdout` and a check's `path`.
+- A literal part, a `here` part and the order of arguments, commands and a `many` port's artifacts are part of the work as written.
+- An artifact's `type`, a job's `id`, `stage`, `origin`, `cores`, `memory` and `checks` say where the job came from or how to run it, not what it makes.
+
+A backend that must rerun a job after its inputs change combines its identity of the work with its own record of the files, such as their modification times or hashes.

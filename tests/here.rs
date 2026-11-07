@@ -62,12 +62,12 @@ fn here_is_the_folder_of_the_file_declaring_the_operation() {
 }
 
 #[test]
-fn moving_the_pipeline_changes_no_fingerprint() {
+fn moving_the_pipeline_changes_no_command() {
     let (_first, main) = pipeline("here-first");
     let (_second, moved) = pipeline("here-second");
     let fingerprints = |json: &str| {
-        json.match_indices("\"fingerprint\":")
-            .map(|(at, _)| json[at..at + 32].to_owned())
+        json.match_indices("\"commands\":")
+            .map(|(at, _)| json[at..at + json[at..].find(",\"checks\"").unwrap()].to_owned())
             .collect::<Vec<_>>()
     };
     let (first, second) = (dag(&main, "--json"), dag(&moved, "--json"));
