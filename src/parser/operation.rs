@@ -151,8 +151,8 @@ fn parse_port_with_minimum(
     Ok((port, Some(count)))
 }
 
-/// The error for a minimum written after the signature: the line as it is
-/// written now, with the minimum beside the `many` input it counts.
+/// The error for a minimum written after the signature: the line rewritten
+/// with the minimum beside the `many` input it counts.
 fn misplaced_minimum(
     name: &str,
     inputs: &[&str],

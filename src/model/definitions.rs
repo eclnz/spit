@@ -10,6 +10,8 @@ use crate::span::Place;
 
 use super::{owned_strings, ArtifactInstance, ArtifactType};
 
+/// A kind of artifact that a source provides or a step makes, with the
+/// dimensions that tell its artifacts apart.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProductDef {
     pub name: String,
@@ -36,6 +38,8 @@ pub struct ProductDef {
 }
 
 impl ProductDef {
+    /// A product with no extension, not a folder, beside no other file and
+    /// with no checks.
     pub fn new(
         name: impl Into<String>,
         artifact_type: ArtifactType,
@@ -54,12 +58,17 @@ impl ProductDef {
     }
 }
 
+/// How many artifacts of a product one job reads at an input port.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Cardinality {
+    /// Exactly one artifact.
     One,
+    /// A collection: every artifact of a group.
     Many,
 }
 
+/// An input of an operation: what its jobs read, and how many artifacts
+/// they read at once.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct InputPort {
     pub name: String,
@@ -74,6 +83,7 @@ pub struct InputPort {
 }
 
 impl InputPort {
+    /// An input that reads one artifact per job.
     pub fn one(name: impl Into<String>, artifact_type: ArtifactType) -> Self {
         Self {
             name: name.into(),
@@ -84,6 +94,7 @@ impl InputPort {
         }
     }
 
+    /// An input that reads a collection of artifacts per job.
     pub fn many(name: impl Into<String>, artifact_type: ArtifactType) -> Self {
         Self {
             name: name.into(),
@@ -95,6 +106,7 @@ impl InputPort {
     }
 }
 
+/// How an operation's jobs follow the dimensions of its inputs.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ShapeRule {
     /// The input with every dimension the others join on drives one job per
@@ -105,6 +117,7 @@ pub enum ShapeRule {
     Aggregate,
 }
 
+/// An output of an operation: the artifact one job writes at a port.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct OutputPort {
     pub name: String,
@@ -186,6 +199,8 @@ impl fmt::Display for Beside {
 }
 
 impl OutputPort {
+    /// An output with no extension, not a folder, beside no other file and
+    /// with no checks.
     pub fn new(name: impl Into<String>, artifact_type: ArtifactType) -> Self {
         Self {
             name: name.into(),
@@ -209,6 +224,7 @@ impl OutputPort {
         self
     }
 
+    /// This output with the extension its tool gives its file.
     #[must_use]
     pub fn with_extension(mut self, extension: impl Into<String>) -> Self {
         self.extension = Some(extension.into());
@@ -219,6 +235,8 @@ impl OutputPort {
 /// The port name of an operation's only, unnamed output.
 pub(crate) const DEFAULT_OUTPUT: &str = "output";
 
+/// A named operation: its inputs, its outputs, and how its jobs follow the
+/// dimensions of its inputs. Its command is a `CommandDef` of the same name.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct OperationDef {
     pub name: String,
@@ -274,6 +292,7 @@ impl OperationDef {
         )
     }
 
+    /// An operation with the outputs given, which are in declaration order.
     pub fn with_outputs(
         name: impl Into<String>,
         inputs: Vec<InputPort>,
@@ -291,6 +310,7 @@ impl OperationDef {
         }
     }
 
+    /// This operation requiring `minimum` artifacts at its many input.
     #[must_use]
     pub fn at_least(mut self, minimum: usize) -> Self {
         self.minimum_collection = Some(minimum);
@@ -317,6 +337,7 @@ pub struct InputBinding {
 }
 
 impl InputBinding {
+    /// A binding of `name` with no selectors.
     pub fn product(name: impl Into<String>) -> Self {
         Self {
             product: name.into(),
@@ -324,6 +345,8 @@ impl InputBinding {
         }
     }
 
+    /// A binding of `product` that collects its artifacts across `dimension`,
+    /// as `@vary(dimension)` writes.
     pub fn vary(product: impl Into<String>, dimension: impl Into<String>) -> Self {
         Self {
             vary: vec![dimension.into()],
@@ -331,6 +354,7 @@ impl InputBinding {
         }
     }
 
+    /// A binding of `product` that collects its artifacts across `dimensions`.
     pub fn varying(
         product: impl Into<String>,
         dimensions: impl IntoIterator<Item = impl Into<String>>,
@@ -341,24 +365,30 @@ impl InputBinding {
         }
     }
 
+    /// This binding keeping only artifacts whose `dimension` is `value`, as
+    /// `@where(dimension=value)` writes.
     #[must_use]
     pub fn pin(mut self, dimension: impl Into<String>, value: impl Into<String>) -> Self {
         self.pinned.insert(dimension.into(), value.into());
         self
     }
 
+    /// This binding matching its job on `dimensions` only, as `@same(...)`
+    /// writes.
     #[must_use]
     pub fn same_on(mut self, dimensions: impl IntoIterator<Item = impl AsRef<str>>) -> Self {
         self.same = Some(owned_strings(dimensions));
         self
     }
 
+    /// This binding broadcast over `dimensions`, as `@each(...)` writes.
     #[must_use]
     pub fn each_of(mut self, dimensions: impl IntoIterator<Item = impl AsRef<str>>) -> Self {
         self.each = owned_strings(dimensions);
         self
     }
 
+    /// The product the binding reads.
     pub fn product_name(&self) -> &str {
         &self.product
     }
@@ -381,6 +411,8 @@ impl InputBinding {
     }
 }
 
+/// A step: a call to an operation, with the product bound to each of its
+/// inputs and the products it makes.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Invocation {
     pub operation: String,
@@ -410,7 +442,9 @@ pub struct Invocation {
 /// outputs.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Port {
+    /// The input at this position among the operation's inputs.
     Input(usize),
+    /// The output at this position among the operation's outputs.
     Output(usize),
 }
 
@@ -432,6 +466,7 @@ impl CallId {
         Self(u32::try_from(index).expect("fewer than 2^32 calls in a pipeline"))
     }
 
+    /// The call's position in `Pipeline::calls`.
     pub fn index(self) -> usize {
         self.0 as usize
     }
@@ -456,6 +491,7 @@ pub struct Call {
 }
 
 impl Invocation {
+    /// A step with one output, outside any stage and not made by a call.
     pub fn new(
         operation: impl Into<String>,
         inputs: Vec<InputBinding>,
@@ -464,6 +500,7 @@ impl Invocation {
         Self::with_outputs(operation, inputs, [output_product])
     }
 
+    /// A step with the outputs given, outside any stage and not made by a call.
     pub fn with_outputs(
         operation: impl Into<String>,
         inputs: Vec<InputBinding>,
@@ -481,6 +518,7 @@ impl Invocation {
         }
     }
 
+    /// This step inside `stage`.
     #[must_use]
     pub fn in_stage(mut self, stage: impl Into<String>) -> Self {
         self.stage = Some(stage.into());
@@ -525,6 +563,7 @@ impl CommandDef {
         }
     }
 
+    /// A `verify` command of one line.
     pub fn verify(operation: impl Into<String>, template: CommandTemplate) -> Self {
         Self {
             role: CommandRole::Verify,
@@ -701,6 +740,7 @@ pub struct ContextPattern {
 }
 
 impl StageDef {
+    /// A stage with no defaults of its own.
     pub fn new(name: impl Into<String>) -> Self {
         Self {
             name: name.into(),

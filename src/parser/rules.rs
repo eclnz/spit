@@ -1,6 +1,6 @@
 //! A recipe's coverage rules: `require` and conditional `exclude`, which name their
 //! groups first, then `where` and the source they count, and the errors for
-//! a rule written in another rule's order or in an old form.
+//! a rule written in another order, which say how to write it.
 
 use std::collections::BTreeMap;
 
@@ -39,7 +39,7 @@ fn parse_require(rest: &str, number: usize, syntax: &str) -> Result<CoverageRule
     let rest = rest.trim_start();
     if !rest.starts_with('[') {
         return Err(
-            require_in_old_order(rest, number).unwrap_or_else(|| ParseError::new(number, syntax))
+            require_with_per(rest, number).unwrap_or_else(|| ParseError::new(number, syntax))
         );
     }
     let example = "require [sub, ses] where t1w count=1";
@@ -215,10 +215,10 @@ fn parse_drop(rest: &str, number: usize) -> Result<CoverageRule, ParseError> {
     Ok(rule)
 }
 
-/// The error for a `require` rule in its old order, source first and the
-/// groups after `per`, with the rule rewritten, or `None` when the text
-/// does not read as one.
-fn require_in_old_order(rest: &str, number: usize) -> Option<ParseError> {
+/// The error for a `require` rule written source first, with the groups
+/// after `per`, giving the rule rewritten, or `None` when the text does not
+/// read as one.
+fn require_with_per(rest: &str, number: usize) -> Option<ParseError> {
     let syntax = "expected `require [dimensions] where source`";
     let (product, terms, dimensions) = parse_require_parts(rest, number, syntax).ok()?;
     let mut rule = format!("require [{}] where {product}", dimensions.join(", "));
