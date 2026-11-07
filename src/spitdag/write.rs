@@ -471,7 +471,7 @@ mod tests {
     }
 
     #[test]
-    fn a_job_with_one_command_hashes_as_a_job_with_a_single_command_did() {
+    fn a_job_writes_one_or_several_commands_with_their_streams() {
         let steps = vec![step("clean", None, &["raw"], &["output"])];
         let job = |commands: Vec<BoundCommand>| {
             move |[raw, clean, _]: [ArtifactId; 3]| {

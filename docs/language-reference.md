@@ -331,7 +331,7 @@ column = first(table)
 lines = count(table)
 ```
 
-A backend opens the output's file and connects it to the command, so no shell is involved and the path never reaches the program as text. `spit dag --commands` shows such a job's `run:` line with `<` and `>` and their paths at its end, as a shell would write them. The output is declared, given a path, checked and fingerprinted like any other, and writing it as stdout counts as using it.
+A backend opens the output's file and connects it to the command, so no shell is involved and the path never reaches the program as text. `spit dag --commands` shows such a job's `run:` line with `<` and `>` and their paths at its end, as a shell would write them. The output is declared, given a path, and checked like any other, and writing it as stdout counts as using it.
 
 - `<` and `>` are each a word of their own, followed by one placeholder: `>{@output}` and `> out.txt` are errors.
 - A command has at most one of each. Its stdout is an output, not a [folder](#folders), and no argument names it too, not even its `.dir` or `.stem`. Its stdin is a `one` input whose artifacts are files.
@@ -454,7 +454,7 @@ summary = table(durations)
 With the pipeline in `digits/digits.spit`, `table` runs `python3 /home/lab/digits/scripts/table.py ...`. An operation imported from `libs/lib.spit` gets `libs`, the folder of the file that declares it, so a library ships its scripts with it.
 
 - Write `{@here}` in a `command` or a `verify` command, as the start of an argument, with the rest of the path after it. It gives no `.dir` or `.stem`, and cannot be redirected to or from.
-- A `.spitdag` holds the pipeline's folder once, as `pipeline_folder`, and each use as a [`here` part](spitdag.md#commands) under it. The folder is not part of a job's fingerprint, so moving the pipeline reruns nothing.
+- A `.spitdag` holds the pipeline's folder once, as `pipeline_folder`, and each use as a [`here` part](spitdag.md#commands) under it. The folder is not part of any command, so moving the pipeline changes none.
 - A pipeline given on standard input, or parsed without a file, has no folder, and `{@here}` in it is an error.
 
 ### A job's dimension values
