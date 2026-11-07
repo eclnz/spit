@@ -50,8 +50,8 @@ impl Command {
             Self::Dag => CommandSpec {
                 name: "dag",
                 files: "<recipe.spitin> or <pipeline.spit> [inputs.spitout | -]",
-                summary: "step 3: resolve a pipeline's jobs over a dataset's inputs and print their commands; -o writes the .spitdag",
-                example: "spit dag dataset.spitin\n  spit dag dataset.spitin -o analysis.spitdag\n  spit dag analysis.spit dataset.spitout -o analysis.spitdag\n  spit dag dataset.spitin --counts",
+                summary: "step 3: resolve a pipeline's jobs over a dataset's inputs and print step counts; --commands lists commands, -o writes the .spitdag",
+                example: "spit dag dataset.spitin\n  spit dag dataset.spitin --commands\n  spit dag dataset.spitin -o analysis.spitdag",
                 flags: &[Root, Paths, Commands, Jobs, Counts, Partial, Json, Output, Tree],
             },
             Self::Artifacts => CommandSpec {
@@ -204,7 +204,7 @@ impl Flag {
             (Self::Output, _) => "write the .spitdag to <file>",
             (Self::Paths, _) => "show each artifact's file",
             (Self::Commands, _) => {
-                "show each job's command lines, as a shell would run them, as plain dag does; with -o, as well as writing the .spitdag"
+                "show each job's command lines, as a shell would run them; with -o, as well as writing the .spitdag"
             }
             (Self::Jobs, _) => "list each job's input and output artifacts instead of its commands",
             (Self::Counts, _) => {

@@ -8,10 +8,10 @@ use spit::{
     bind_dag, bind_dag_with, diagnose_checked, diagnose_inputs, diagnose_recipe, inspect_paths,
     parse_input_spec_at, render_artifacts, render_artifacts_by_target, render_bound_dag,
     render_call, render_calls, render_calls_check_json, render_calls_json, render_check_json,
-    render_dag, render_diagnostics_json, render_editor_json, render_source_inventory,
-    render_step_counts, render_words_json, render_recipe_editor_json, resolve_artifacts_partial, unused_sources_summary,
-    validate_bound_source_files, validate_source_files, ArtifactReport, BoundDag, BoundPaths,
-    Context, Diagnostic, FileNames, Gap, LeftOut, View,
+    render_dag, render_diagnostics_json, render_editor_json, render_recipe_editor_json,
+    render_source_inventory, render_step_counts, render_words_json, resolve_artifacts_partial,
+    unused_sources_summary, validate_bound_source_files, validate_source_files, ArtifactReport,
+    BoundDag, BoundPaths, Context, Diagnostic, FileNames, Gap, LeftOut, View,
 };
 
 use super::args::{CliArgs, Flag};
@@ -234,7 +234,13 @@ pub(crate) fn dag(args: &CliArgs) -> Result<(), Box<dyn Error>> {
         Some(paths) => bind_dag_with(&prepared.pipeline, dag, paths),
         None => bind_dag(&prepared.pipeline, dag),
     };
-    if args.has(Flag::Counts) {
+    let counts = args.has(Flag::Counts)
+        || (!args.has(Flag::Commands)
+            && !args.has(Flag::Paths)
+            && !args.has(Flag::Jobs)
+            && !args.has(Flag::Output)
+            && !args.has(Flag::Json));
+    if counts {
         print!("{}", render_step_counts(&prepared.pipeline, dag));
     }
     let view = View {
@@ -253,7 +259,7 @@ pub(crate) fn dag(args: &CliArgs) -> Result<(), Box<dyn Error>> {
                 );
             }
         }
-        if args.has(Flag::Counts) {
+        if counts {
             println!();
         }
         print!("{}", render_bound_dag(bound, view));
@@ -302,14 +308,13 @@ pub(crate) fn dag(args: &CliArgs) -> Result<(), Box<dyn Error>> {
         return Ok(());
     }
     if args.has(Flag::Jobs) {
-        if args.has(Flag::Counts) {
+        if counts {
             println!();
         }
         print!("{}", render_dag(dag));
-    } else if view.paths || view.commands || !args.has(Flag::Counts) {
-        // Plain `dag` shows the commands, as `--commands` does.
+    } else if view.paths || view.commands || !counts {
         let view = View {
-            commands: view.commands || !view.paths,
+            commands: view.commands || (!view.paths && !counts),
             ..view
         };
         print_view(&bind(paths)?, view);

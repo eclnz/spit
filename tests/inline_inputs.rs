@@ -44,7 +44,7 @@ fn one_file_checks_scans_and_resolves_from_another_working_folder() {
     let records = success(run(&tree, &["inputs", "code/analysis.spit"]));
     assert!(records.contains("raw[id=a]"), "{records}");
     assert!(records.contains("raw[id=b]"), "{records}");
-    let commands = success(run(&tree, &["dag", "code/analysis.spit"]));
+    let commands = success(run(&tree, &["dag", "code/analysis.spit", "--commands"]));
     assert!(
         commands.contains("cp input/a.txt output/a.txt"),
         "{commands}"
@@ -64,7 +64,12 @@ fn one_file_checks_scans_and_resolves_from_another_working_folder() {
     assert!(written.starts_with("root ../data\n"), "{written}");
     let saved = success(run(
         &tree,
-        &["dag", "code/analysis.spit", "saved/inputs.spitout"],
+        &[
+            "dag",
+            "code/analysis.spit",
+            "saved/inputs.spitout",
+            "--commands",
+        ],
     ));
     assert_eq!(commands, saved);
 }
@@ -85,7 +90,10 @@ fn recipes_inherit_the_pipeline_root_and_add_selection_rules() {
     let inventory = spit::parse_source_inventory(&records).unwrap();
     assert_eq!(inventory.artifacts.len(), 1);
     assert_eq!(inventory.artifacts[0].entities.get("id"), Some("a"));
-    let commands = success(run(&tree, &["dag", "recipes/selected.spitin"]));
+    let commands = success(run(
+        &tree,
+        &["dag", "recipes/selected.spitin", "--commands"],
+    ));
     assert!(
         commands.contains("cp input/a.txt output/a.txt"),
         "{commands}"
@@ -254,7 +262,7 @@ fn absolute_roots_and_spaces_are_directory_text() {
         "code/analysis.spit",
         &PIPELINE.replace("../data", root.to_str().unwrap()),
     );
-    let commands = success(run(&tree, &["dag", "code/analysis.spit"]));
+    let commands = success(run(&tree, &["dag", "code/analysis.spit", "--commands"]));
     assert!(
         commands.contains("cp input/a.txt output/a.txt"),
         "{commands}"
