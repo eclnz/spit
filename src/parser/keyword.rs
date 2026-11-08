@@ -2,12 +2,15 @@
 //! records header such as `sources:` or `contexts name:`. Every reader of
 //! a document classifies its lines here, so they agree on what each is.
 
-/// A keyword that starts a statement.
+/// A keyword that starts a statement. The variants are declared in the
+/// order of [`Keyword::ALL`], which is the order suggestions are tried in.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum Keyword {
-    Use,
-    Root,
     Source,
+    /// `dimensions [...]`, the order every product's dimensions follow.
+    Dimensions,
+    /// `types strict` or `types standard`, how much of the pipeline must be typed.
+    Types,
     Operation,
     Command,
     Verify,
@@ -16,87 +19,217 @@ pub(crate) enum Keyword {
     Resources,
     /// `check name(params): command`, a test of one artifact.
     Check,
-    /// `check:`, the checks every output in a file or stage runs, written
-    /// after `default` or in a `default:` block.
-    Checks,
     /// `review name`, which declares a review, and in a recipe `review name
     /// from file.csv`, the file its verdicts are in.
     Review,
-    /// `review:`, the reviews that judge every output in a file or stage,
-    /// written after `default` or in a `default:` block.
-    Reviews,
-    Require,
-    /// `skip` and `drop`, read only to give an error that says what to
-    /// write instead.
-    Skip,
-    Drop,
-    Exclude,
     /// `path product:` for one product's rule, and `path:` for the default
     /// one, written after `default` or in a `default:` block.
     Path,
-    /// `ext:`, the extension a default path is completed with, written
-    /// after `default` or in a `default:` block.
-    Ext,
     /// `default path:`, `default ext:`, `default check:` and `default review:`, and `default:`,
     /// which opens a block of them.
     Default,
-    Entities,
     Stage,
-    /// `dimensions [...]`, the order every product's dimensions follow.
-    Dimensions,
+    Use,
+    Root,
+    Require,
+    Drop,
+    Exclude,
+    /// `check:`, the checks every output in a file or stage runs, written
+    /// after `default` or in a `default:` block.
+    Checks,
+    /// `review:`, the reviews that judge every output in a file or stage,
+    /// written after `default` or in a `default:` block.
+    Reviews,
+    /// `ext:`, the extension a default path is completed with, written
+    /// after `default` or in a `default:` block.
+    Ext,
+    Entities,
+    Skip,
     /// `sidecars`, which starts no statement, read to say what to write instead.
     Sidecars,
     /// `shell-source:`, which starts no statement, read to say what to write instead.
     ShellSource,
-    /// `types strict` or `types standard`, how much of the pipeline must be typed.
-    Types,
     /// `type Name<Param, ...>`, which declares a parameterized type.
     Type,
 }
 
-/// Every keyword and its word. Each word is reserved: no product may take
-/// it as its name, so the first word of a line says whether it starts a
-/// statement.
-const WORDS: [(Keyword, &str); 23] = [
-    (Keyword::Use, "use"),
-    (Keyword::Root, "root"),
-    (Keyword::Source, "source"),
-    (Keyword::Operation, "operation"),
-    (Keyword::Command, "command"),
-    (Keyword::Verify, "verify"),
-    (Keyword::Resources, "resources"),
-    (Keyword::Check, "check"),
-    (Keyword::Review, "review"),
-    (Keyword::Require, "require"),
-    (Keyword::Skip, "skip"),
-    (Keyword::Drop, "drop"),
-    (Keyword::Exclude, "exclude"),
-    (Keyword::Path, "path"),
-    (Keyword::Ext, "ext"),
-    (Keyword::Default, "default"),
-    (Keyword::Entities, "entities"),
-    (Keyword::Stage, "stage"),
-    (Keyword::Dimensions, "dimensions"),
-    (Keyword::Sidecars, "sidecars"),
-    (Keyword::ShellSource, "shell-source"),
-    (Keyword::Types, "types"),
-    (Keyword::Type, "type"),
-];
+/// Which file a keyword's statement belongs in.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum File {
+    /// A `.spit` pipeline; a recipe rejects the line as the pipeline's.
+    Pipeline,
+    /// A `.spitin` recipe.
+    Recipe,
+    /// Either file.
+    Both,
+    /// Neither: a word SPIT replaced, read in either file only to say what
+    /// to write instead.
+    Replaced,
+}
 
-/// The keywords that open a block of their statements when written alone
-/// with a `:`, as `source:`, and the word for each.
-pub(crate) const BLOCKS: [(Keyword, &str); 10] = [
-    (Keyword::Source, "source"),
-    (Keyword::Operation, "operation"),
-    (Keyword::Command, "command"),
-    (Keyword::Verify, "verify"),
-    (Keyword::Resources, "resources"),
-    (Keyword::Check, "check"),
-    (Keyword::Review, "review"),
-    (Keyword::Path, "path"),
-    (Keyword::Require, "require"),
-    (Keyword::Exclude, "exclude"),
-];
+/// What SPIT knows of one keyword, from [`Keyword::spec`].
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct Spec {
+    /// The word a line starts with. Each is reserved: no product may take
+    /// it as its name, so the first word of a line says whether it starts
+    /// a statement. `None` for a keyword [`Keyword::split`] tells from
+    /// another's word by what follows it.
+    pub(crate) word: Option<&'static str>,
+    /// Whether the word alone with a `:`, as `source:`, opens a block of
+    /// its statements.
+    pub(crate) block: bool,
+    /// The file its statement belongs in.
+    pub(crate) file: File,
+    /// Whether an unknown first word close to this one is told to write it.
+    pub(crate) suggested: bool,
+}
+
+impl Keyword {
+    /// Every keyword, in declaration order, which the assertion below keeps.
+    pub(crate) const ALL: [Self; 25] = [
+        Self::Source,
+        Self::Dimensions,
+        Self::Types,
+        Self::Operation,
+        Self::Command,
+        Self::Verify,
+        Self::Resources,
+        Self::Check,
+        Self::Review,
+        Self::Path,
+        Self::Default,
+        Self::Stage,
+        Self::Use,
+        Self::Root,
+        Self::Require,
+        Self::Drop,
+        Self::Exclude,
+        Self::Checks,
+        Self::Reviews,
+        Self::Ext,
+        Self::Entities,
+        Self::Skip,
+        Self::Sidecars,
+        Self::ShellSource,
+        Self::Type,
+    ];
+
+    /// The one table of keywords: every list of them derives from it.
+    pub(crate) const fn spec(self) -> Spec {
+        use File::{Both, Pipeline, Recipe, Replaced};
+        let (word, block, file, suggested) = match self {
+            Self::Source => ("source", true, Pipeline, true),
+            Self::Dimensions => ("dimensions", false, Pipeline, true),
+            Self::Types => ("types", false, Pipeline, true),
+            Self::Operation => ("operation", true, Pipeline, true),
+            Self::Command => ("command", true, Pipeline, true),
+            Self::Verify => ("verify", true, Pipeline, true),
+            Self::Resources => ("resources", true, Pipeline, true),
+            Self::Check => ("check", true, Pipeline, true),
+            // `review name from file.csv` names a review's file in a
+            // recipe; the parser rejects `review name` alone there.
+            Self::Review => ("review", true, Both, true),
+            Self::Path => ("path", true, Both, true),
+            Self::Default => ("default", false, Both, true),
+            Self::Stage => ("stage", false, Pipeline, true),
+            Self::Use => ("use", false, Pipeline, true),
+            Self::Root => ("root", false, Both, true),
+            Self::Require => ("require", true, Recipe, true),
+            Self::Drop => ("drop", false, Replaced, true),
+            Self::Exclude => ("exclude", true, Recipe, true),
+            Self::Checks | Self::Reviews => {
+                return Spec {
+                    word: None,
+                    block: false,
+                    file: Pipeline,
+                    suggested: false,
+                }
+            }
+            Self::Ext => ("ext", false, Pipeline, false),
+            Self::Entities => ("entities", false, Both, false),
+            Self::Skip => ("skip", false, Replaced, false),
+            // A recipe rejects `sidecars` as the pipeline's, and the
+            // pipeline says what to write instead.
+            Self::Sidecars => ("sidecars", false, Pipeline, false),
+            Self::ShellSource => ("shell-source", false, Replaced, false),
+            Self::Type => ("type", false, Pipeline, false),
+        };
+        Spec {
+            word: Some(word),
+            block,
+            file,
+            suggested,
+        }
+    }
+
+    /// The words of the keywords [`Spec::suggested`] marks, in the order
+    /// of [`Keyword::ALL`].
+    pub(crate) const SUGGESTED: [&'static str; count(Filter::Suggested)] = words(Filter::Suggested);
+}
+
+/// Which keywords a derived list holds.
+#[derive(Clone, Copy)]
+enum Filter {
+    Spelled,
+    Suggested,
+}
+
+const fn holds(filter: Filter, spec: Spec) -> bool {
+    match filter {
+        Filter::Spelled => spec.word.is_some(),
+        Filter::Suggested => spec.suggested,
+    }
+}
+
+const fn count(filter: Filter) -> usize {
+    let mut count = 0;
+    let mut index = 0;
+    while index < Keyword::ALL.len() {
+        let keyword = Keyword::ALL[index];
+        assert!(
+            keyword as usize == index,
+            "Keyword::ALL is in declaration order"
+        );
+        if holds(filter, keyword.spec()) {
+            count += 1;
+        }
+        index += 1;
+    }
+    count
+}
+
+const fn words<const N: usize>(filter: Filter) -> [&'static str; N] {
+    let mut words = [""; N];
+    let mut filled = 0;
+    let mut index = 0;
+    while index < Keyword::ALL.len() {
+        let spec = Keyword::ALL[index].spec();
+        if let (true, Some(word)) = (holds(filter, spec), spec.word) {
+            words[filled] = word;
+            filled += 1;
+        }
+        index += 1;
+    }
+    words
+}
+
+/// The keywords with a word of their own, and the word of each. The
+/// last variant closes [`Keyword::ALL`], so no keyword is left out of it.
+const WORDS: [(Keyword, &str); count(Filter::Spelled)] = {
+    assert!(Keyword::ALL.len() == Keyword::Type as usize + 1);
+    let mut table = [(Keyword::Source, ""); count(Filter::Spelled)];
+    let mut filled = 0;
+    let mut index = 0;
+    while index < Keyword::ALL.len() {
+        let keyword = Keyword::ALL[index];
+        if let Some(word) = keyword.spec().word {
+            table[filled] = (keyword, word);
+            filled += 1;
+        }
+        index += 1;
+    }
+    table
+};
 
 /// Whether `name` is a keyword's word, which no product may take.
 pub(crate) fn reserved(name: &str) -> bool {
@@ -110,13 +243,13 @@ impl Keyword {
     /// starts after one space. `check` followed by
     /// `:` and a list is the default checks list, `Checks`, and `review`
     /// followed by `:` and a list is `Reviews`; `ext:`, `check:` and
-    /// `review:` give the text after their `:`. A keyword of [`BLOCKS`]
-    /// alone with its `:` gives `:` as its text.
+    /// `review:` give the text after their `:`. A keyword that opens a
+    /// block, alone with its `:`, gives `:` as its text.
     pub(crate) fn split(line: &str) -> Option<(Self, &str)> {
         let end = line.find([' ', '\t', ':']).unwrap_or(line.len());
         let (word, rest) = line.split_at(end);
         let &(keyword, _) = WORDS.iter().find(|(_, name)| *name == word)?;
-        if rest == ":" && BLOCKS.iter().any(|&(opens, _)| opens == keyword) {
+        if rest == ":" && keyword.spec().block {
             return Some((keyword, ":"));
         }
         Some(match (keyword, rest.strip_prefix(':')) {

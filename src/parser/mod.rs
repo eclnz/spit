@@ -37,7 +37,7 @@ pub use self::inventory::parse_source_inventory;
 pub(crate) use self::inventory::{
     document_records, parse_inventory_recovering, source_record_lines,
 };
-pub(crate) use self::keyword::{Header, Keyword};
+pub(crate) use self::keyword::{File, Header, Keyword};
 pub(crate) use self::layout::{Block, Head, Layout, Line};
 pub(crate) use self::lexical::{glued_comment, strip_comment, without_bom};
 pub(crate) use self::render_inventory::as_read_back;

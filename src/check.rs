@@ -16,10 +16,8 @@ use crate::model::{
 };
 use crate::parser::SourceMap;
 use crate::span::Place;
+use crate::template::builtin::CHECKED_PATH;
 use crate::template::Part;
-
-/// The placeholder a check's command reads its artifact from.
-pub(crate) const CHECKED_PATH: &str = "@path";
 
 /// Check every `check` declaration and every use of one, collecting each
 /// error. Uses on operations in `skip`, which already failed, are not

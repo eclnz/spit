@@ -7,6 +7,7 @@ use crate::model::{
     Cardinality, CommandRole, Invocation, OperationDef, Pipeline, ProductDef, DEFAULT_OUTPUT,
 };
 use crate::parser::SourceMap;
+use crate::template::builtin::{CORES, HERE, OUTPUT};
 use crate::template::Part;
 
 use super::{CommandError, CommandTemplate, Stream};
@@ -25,13 +26,6 @@ pub(crate) enum Slot {
     /// the operation has it.
     Dimension,
 }
-
-/// The placeholder a command gives the cores its job uses.
-pub(crate) const CORES: &str = "@cores";
-
-/// The placeholder a command gives the folder of the file declaring its
-/// operation.
-pub(crate) const HERE: &str = "@here";
 
 /// What a placeholder gives of its port's file: the path, or, for an output
 /// as `{image.dir}` and `{image.stem}`, its folder or its file name without
@@ -60,7 +54,7 @@ pub(crate) fn facet(name: &str) -> (&str, Facet<'_>) {
 /// What `name` refers to in `operation`'s command. A port's name comes
 /// before a dimension's, so a dimension that shares it cannot be written.
 pub(crate) fn slot(operation: &OperationDef, name: &str) -> Option<Slot> {
-    if name == "@output" {
+    if name == OUTPUT {
         return operation
             .outputs
             .iter()
@@ -284,7 +278,7 @@ fn check_command_placeholders(
                     "{what} for `{}` must use `{{{}}}`",
                     operation.name,
                     if port.name == DEFAULT_OUTPUT {
-                        "@output"
+                        OUTPUT
                     } else {
                         &port.name
                     }
@@ -352,7 +346,7 @@ fn check_line_placeholders(
                     // A folder without an extension is its whole name.
                     let output = &operation.outputs[index];
                     if facet == Facet::Stem && output.extension.is_none() && !output.folder {
-                        let example = if port == "@output" {
+                        let example = if port == OUTPUT {
                             "-> Image .nii.gz".to_owned()
                         } else {
                             format!("{port}: Image .nii.gz")

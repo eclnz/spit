@@ -30,7 +30,9 @@ use crate::model::{
     ArtifactInstance, CoverageAction, CoverageGap, DefaultChecks, DefaultReviews, EntityBinding,
     GroupKey, InputRules, Pipeline, PipelineIndex, Removal, SourceInventory, TypeChecking,
 };
-use crate::parser::{without_bom, Head, Header, Keyword, Kind, Layout, ParseError, SourceMap};
+use crate::parser::{
+    without_bom, File, Head, Header, Keyword, Kind, Layout, ParseError, SourceMap,
+};
 use crate::paths::{inspect_paths, PathError, PathTemplate};
 
 pub(crate) use self::coverage::collect_rule_errors;
@@ -148,38 +150,10 @@ const PIPELINE_ONLY: &str = ", which every dataset shares; a .spitin binds it to
      its `root`, source paths, and `inputs:`, `exclude` and `require` rules";
 
 /// Whether a line that starts with `keyword` belongs only in a pipeline.
-/// Every keyword is named, so a new one must be placed. The rest pass to
-/// the recipe's parser, which reads them or says what to write instead.
+/// The rest pass to the recipe's parser, which reads them or says what to
+/// write instead.
 fn pipeline_only(keyword: Keyword) -> bool {
-    match keyword {
-        Keyword::Use
-        | Keyword::Source
-        | Keyword::Operation
-        | Keyword::Command
-        | Keyword::Verify
-        | Keyword::Resources
-        | Keyword::Check
-        | Keyword::Checks
-        | Keyword::Reviews
-        | Keyword::Ext
-        | Keyword::Stage
-        | Keyword::Dimensions
-        | Keyword::Sidecars
-        | Keyword::Types
-        | Keyword::Type => true,
-        // `review name from file.csv` names a review's file; the parser
-        // rejects `review name` alone, which declares one.
-        Keyword::Review
-        | Keyword::Root
-        | Keyword::Require
-        | Keyword::Exclude
-        | Keyword::Path
-        | Keyword::Entities
-        | Keyword::Default
-        | Keyword::Skip
-        | Keyword::Drop
-        | Keyword::ShellSource => false,
-    }
+    keyword.spec().file == File::Pipeline
 }
 
 fn check_input_lines(text: &str) -> Result<(), ParseError> {
