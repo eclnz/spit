@@ -27,8 +27,8 @@ use crate::error::ResolveError;
 use crate::imports::parse_located_document;
 use crate::lower::{parse_document_with_imports, ParsedDocument};
 use crate::model::{
-    ArtifactInstance, CoverageAction, CoverageGap, EntityBinding, GroupKey, InputRules, Pipeline,
-    PipelineIndex, Removal, SourceInventory,
+    ArtifactInstance, CoverageAction, CoverageGap, DefaultChecks, DefaultReviews, EntityBinding,
+    GroupKey, InputRules, Pipeline, PipelineIndex, Removal, SourceInventory, TypeChecking,
 };
 use crate::parser::{without_bom, Head, Header, Keyword, Kind, Layout, ParseError, SourceMap};
 use crate::paths::{inspect_paths, PathError, PathTemplate};
@@ -147,6 +147,41 @@ fn header_lines(text: &str) -> Result<(RecipeHeader, String), ParseError> {
 const PIPELINE_ONLY: &str = ", which every dataset shares; a .spitin binds it to one dataset with \
      its `root`, source paths, and `inputs:`, `exclude` and `require` rules";
 
+/// Whether a line that starts with `keyword` belongs only in a pipeline.
+/// Every keyword is named, so a new one must be placed. The rest pass to
+/// the recipe's parser, which reads them or says what to write instead.
+fn pipeline_only(keyword: Keyword) -> bool {
+    match keyword {
+        Keyword::Use
+        | Keyword::Source
+        | Keyword::Operation
+        | Keyword::Command
+        | Keyword::Verify
+        | Keyword::Resources
+        | Keyword::Check
+        | Keyword::Checks
+        | Keyword::Reviews
+        | Keyword::Ext
+        | Keyword::Stage
+        | Keyword::Dimensions
+        | Keyword::Sidecars
+        | Keyword::Types
+        | Keyword::Type => true,
+        // `review name from file.csv` names a review's file; the parser
+        // rejects `review name` alone, which declares one.
+        Keyword::Review
+        | Keyword::Root
+        | Keyword::Require
+        | Keyword::Exclude
+        | Keyword::Path
+        | Keyword::Entities
+        | Keyword::Default
+        | Keyword::Skip
+        | Keyword::Drop
+        | Keyword::ShellSource => false,
+    }
+}
+
 fn check_input_lines(text: &str) -> Result<(), ParseError> {
     for (number, line) in Layout::new(text).numbered() {
         // After `default`, the setting decides where the line belongs.
@@ -162,25 +197,14 @@ fn check_input_lines(text: &str) -> Result<(), ParseError> {
                     .map_or(line.code, |(word, _)| word),
             ),
         };
-        let pipeline_only = matches!(
-            keyword,
-            Some(
-                Keyword::Source
-                    | Keyword::Operation
-                    | Keyword::Command
-                    | Keyword::Verify
-                    | Keyword::Resources
-                    | Keyword::Check
-                    | Keyword::Checks
-                    | Keyword::Stage
-                    | Keyword::Dimensions
-                    | Keyword::Types
-                    | Keyword::Type
-                    | Keyword::Sidecars
-                    | Keyword::Use
-            )
-        );
-        if pipeline_only {
+        // A pipeline-only line, with a message of its own.
+        if keyword == Some(Keyword::Ext) {
+            return Err(ParseError::new(
+                number,
+                "a default `ext:` completes the pipeline's default output paths; it belongs in the .spit pipeline",
+            ));
+        }
+        if keyword.is_some_and(pipeline_only) {
             let word = written.split_once(':').map_or(written, |(word, _)| word);
             return Err(ParseError::new(
                 number,
@@ -191,12 +215,6 @@ fn check_input_lines(text: &str) -> Result<(), ParseError> {
             return Err(ParseError::new(
                 number,
                 format!("a step belongs in the .spit pipeline{PIPELINE_ONLY}"),
-            ));
-        }
-        if keyword == Some(Keyword::Ext) {
-            return Err(ParseError::new(
-                number,
-                "a default `ext:` completes the pipeline's default output paths; it belongs in the .spit pipeline",
             ));
         }
         if line.header() == Some(Header::SourcePaths) {
@@ -222,16 +240,53 @@ fn finish_spec(
         inventory,
         lines,
     } = document;
-    if !pipeline.products.is_empty()
-        || !pipeline.operations.is_empty()
-        || !pipeline.invocations.is_empty()
-        || !pipeline.commands.is_empty()
-        || !pipeline.resources.is_empty()
-        || !pipeline.stages.is_empty()
+    let Pipeline {
+        // A recipe's source rules.
+        product_paths,
+        path_template,
+        entities_format,
+        // Where the recipe was read from, not what its lines say.
+        files: _,
+        folder: _,
+        // `check_input_lines` and the parser reject the lines that make
+        // these; a field a new line fills must be placed here.
+        root,
+        products,
+        operations,
+        invocations,
+        commands,
+        resources,
+        checks,
+        default_checks,
+        reviews,
+        default_reviews,
+        extension,
+        stages,
+        sidecar_groups,
+        calls,
+        types,
+        type_decls,
+    } = pipeline;
+    if root.is_some()
+        || !products.is_empty()
+        || !operations.is_empty()
+        || !invocations.is_empty()
+        || !commands.is_empty()
+        || !resources.is_empty()
+        || !checks.is_empty()
+        || default_checks != DefaultChecks::default()
+        || !reviews.is_empty()
+        || default_reviews != DefaultReviews::default()
+        || extension.is_some()
+        || !stages.is_empty()
+        || !sidecar_groups.is_empty()
+        || !calls.is_empty()
+        || types != TypeChecking::default()
+        || !type_decls.is_empty()
     {
         return Err(ParseError::new(1, "a .spitin file may contain discovery, coverage, source paths, and inventory records only"));
     }
-    if let Some(default) = &pipeline.path_template {
+    if let Some(default) = &path_template {
         if default.needs_stage() {
             let line = lines.default_path.as_ref().map_or(1, |place| place.line);
             return Err(ParseError::new(
@@ -240,9 +295,9 @@ fn finish_spec(
             ));
         }
     }
-    inputs.source_paths = pipeline.product_paths;
-    inputs.source_default = pipeline.path_template;
-    inputs.source_entities = pipeline.entities_format;
+    inputs.source_paths = product_paths;
+    inputs.source_default = path_template;
+    inputs.source_entities = entities_format;
     if let Some(folder) = folder {
         read_review_files(&mut inputs, folder)?;
     }

@@ -90,6 +90,24 @@ review looked_at from qc/looked_at.csv
 
 Each row of the CSV file gives a `verdict`, `pass` or `fail`, to the artifacts whose dimensions it names. A passed artifact is used as usual. A failed one, and one nobody has judged yet, is kept from the steps the review covers, and `spit dag` notes each on stderr without failing. A review whose file does not exist yet has no verdicts, so it holds back everything it judges until a person fills it in.
 
+Which outputs a review judges is the pipeline's to say, with `@review(...)` or `default review:`, so every dataset is judged alike. A recipe only names the file, and a `default review:` line in it is an error:
+
+<!-- spit-doc: output
+spit check dataset.spitin || true
+--- analysis.spit
+review looked_at
+source t1w : T1 [sub] @review(looked_at)
+path t1w: sub-{sub}/t1w.nii.gz
+--- dataset.spitin
+pipeline analysis.spit
+root data
+default review: looked_at
+-->
+
+```text
+error: line 3, column 1: `default review` belongs in the .spit pipeline, which every dataset shares; a .spitin binds it to one dataset with its `root`, source paths, and `inputs:`, `exclude` and `require` rules
+```
+
 ## Inventories
 
 `spit inputs dataset.spitin -o dataset.spitout` writes the settled source identities and source paths. A hand-written `.spitout` works too:
