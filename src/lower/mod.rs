@@ -15,9 +15,10 @@ use expand::BodyCheck;
 
 use crate::imports::apply_import;
 use crate::model::{
-    CallId, Cardinality, CheckDef, CommandDef, CommandRole, CoverageRule, DefaultChecks, Exclusion,
-    InputBinding, InputRules, Invocation, OperationDef, Pipeline, ProductDef, ProductId,
-    ResourcesDef, SidecarGroup, SourceInventory, StageDef, StepOutput,
+    CallId, Cardinality, CheckDef, CheckId, CommandDef, CommandId, CommandRole, CoverageRule,
+    DefaultChecks, Exclusion, InputBinding, InputRules, Invocation, OperationDef, Pipeline,
+    ProductDef, ProductId, ResourcesDef, ResourcesId, SidecarGroup, SourceInventory, StageDef,
+    StepOutput,
 };
 use crate::order::{order_dimensions, Output};
 use crate::parser::{
@@ -146,17 +147,20 @@ impl PipelineBuilder {
 
     /// Add `command`, which is at `places`.
     pub(crate) fn add_command(&mut self, command: CommandDef, places: CommandPlaces) {
-        self.lines.commands.push(places);
+        let id = CommandId::at(self.pipeline.commands.len());
+        self.lines.commands.push(id, places);
         self.pipeline.commands.push(command);
     }
 
     pub(crate) fn add_resources(&mut self, resources: ResourcesDef, place: Place) {
-        self.lines.resources.push(place);
+        let id = ResourcesId::at(self.pipeline.resources.len());
+        self.lines.resources.push(id, place);
         self.pipeline.resources.push(resources);
     }
 
     pub(crate) fn add_check(&mut self, check: CheckDef, place: Place) {
-        self.lines.checks.push(place);
+        let id = CheckId::at(self.pipeline.checks.len());
+        self.lines.checks.push(id, place);
         self.pipeline.checks.push(check);
     }
 
@@ -403,11 +407,13 @@ fn check_bodies_have_no_commands(builder: &PipelineBuilder) -> Result<(), ParseE
         operation_at,
         ..
     } = builder;
-    for (command, places) in pipeline.commands.iter().zip(&lines.commands) {
+    for (index, command) in pipeline.commands.iter().enumerate() {
         let Some(&operation) = operation_at.get(&command.operation) else {
             continue;
         };
-        let place = &places.header;
+        let Some(place) = lines.command(CommandId::at(index)) else {
+            continue;
+        };
         if !pipeline.operations[operation].steps.is_empty() {
             return Err(ParseError::new(
                 place.line,
@@ -420,7 +426,7 @@ fn check_bodies_have_no_commands(builder: &PipelineBuilder) -> Result<(), ParseE
                     }
                 ),
             )
-            .within(place));
+            .within(&place));
         }
     }
     Ok(())

@@ -6,6 +6,9 @@ use crate::model::{CheckDef, CheckUse, Pipeline, ReviewDef};
 use super::{Module, Selection};
 
 /// Bring in `module`'s check `name`, once however many imports use it.
+/// The selection has no source map: [`apply_import`](super::apply_import)
+/// adds each check it holds through `PipelineBuilder::add_check`, at the
+/// `use` line, which is where an imported check is placed.
 pub(super) fn import_check(
     selected: &mut Selection,
     module: &Module<'_>,

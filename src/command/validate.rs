@@ -4,7 +4,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::model::{
-    Cardinality, CommandRole, Invocation, OperationDef, Pipeline, ProductDef, DEFAULT_OUTPUT,
+    Cardinality, CommandId, CommandRole, Invocation, OperationDef, Pipeline, ProductDef,
+    DEFAULT_OUTPUT,
 };
 use crate::parser::SourceMap;
 use crate::template::Part;
@@ -155,7 +156,8 @@ pub(crate) fn collect_commands(
         if skip.contains(&command.operation) {
             continue;
         }
-        let line = lines.command(index);
+        let id = CommandId::at(index);
+        let line = lines.command(id);
         let Some(operation) = operations.get(command.operation.as_str()) else {
             errors.push(
                 CommandError::new(format!(
@@ -202,7 +204,7 @@ pub(crate) fn collect_commands(
                 dimensions: &dimensions,
             },
         ) {
-            let place = at.and_then(|at| lines.command_line(index, at));
+            let place = at.and_then(|at| lines.command_line(id, at));
             errors.push(e.at(place.or(line)));
         }
     }
