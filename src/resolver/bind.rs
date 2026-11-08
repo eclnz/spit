@@ -5,7 +5,7 @@ use std::fmt;
 
 use rustc_hash::FxHashMap;
 
-use crate::check::{step_checks, CheckIndex, StepCheck, When, CHECKED_PATH};
+use crate::check::{step_checks, CheckIndex, StepCheck, When};
 use crate::command::{
     facet, slot, validate_commands, CommandError, CommandTemplate, Facet, Slot, Stream,
 };
@@ -18,6 +18,7 @@ use crate::spitdag::{
     ArgPart, Argument, BoundCall, BoundCheck, BoundCommand, BoundDag, BoundJob, BoundStep,
     StepCall, StepCheck as BoundStepCheck,
 };
+use crate::template::builtin::CHECKED_PATH;
 use crate::template::Part;
 
 /// Bind every artifact of `dag` to its path and expand every job's command,

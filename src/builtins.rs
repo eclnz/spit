@@ -10,6 +10,8 @@ use std::ops::Range;
 use crate::json::Json;
 use crate::parser::{without_bom, Block, Header, Keyword, Layout, Line};
 use crate::span::utf16_columns;
+use crate::template::builtin::CHECKED_PATH;
+use crate::template::builtin::{CORES, ENTITIES, HERE, OUTPUT, PRODUCT, STAGE};
 
 mod docs;
 
@@ -291,13 +293,13 @@ fn placeholders(code: &str, statement: Option<Word>, found: &mut Vec<(Range<usiz
         }
         let name = &code[start..end];
         let word = match name {
-            "@product" => Some(Word::Product),
-            "@entities" => Some(Word::Entities),
-            "@stage" => Some(Word::StageName),
-            "@output" if in_command => Some(Word::Output),
-            "@cores" if in_command => Some(Word::Cores),
-            "@here" if in_command => Some(Word::Here),
-            "@path" if in_check => Some(Word::PathPlaceholder),
+            PRODUCT => Some(Word::Product),
+            ENTITIES => Some(Word::Entities),
+            STAGE => Some(Word::StageName),
+            OUTPUT if in_command => Some(Word::Output),
+            CORES if in_command => Some(Word::Cores),
+            HERE if in_command => Some(Word::Here),
+            CHECKED_PATH if in_check => Some(Word::PathPlaceholder),
             _ => None,
         };
         if let Some(word) = word {
