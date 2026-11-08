@@ -84,7 +84,13 @@ fn step_part(pipeline: &Pipeline, step: &Step, output: &str, error: &ResolveErro
         ResolveError::InvalidAggregationDimension { product, .. } => input_named(product),
         ResolveError::UnsupportedShapeRelationship { .. } => Some(step.call()),
         // An error about one product of a step with several is at that one.
-        _ => Some(
+        ResolveError::DuplicateSourceArtifact { .. }
+        | ResolveError::DuplicateOutputArtifact { .. }
+        | ResolveError::Cycle { .. }
+        | ResolveError::CoverageViolation { .. }
+        | ResolveError::MissingRequiredValue { .. }
+        | ResolveError::NoGroupsToCheck { .. }
+        | ResolveError::InvalidDefinition { .. } => Some(
             invocation
                 .and_then(|invocation| invocation.outputs.iter().position(|name| name == output))
                 .map_or_else(|| step.output(), |index| step.output_at(index)),
@@ -189,7 +195,20 @@ fn inventory_place(error: &ResolveError, inventory_text: &str) -> Option<Place> 
         } => inventory_record_lines(inventory_text, &record.product, Some(&record.entities))
             .into_iter()
             .next(),
-        _ => None,
+        ResolveError::InvalidDefinition { .. }
+        | ResolveError::UnknownOperation { .. }
+        | ResolveError::TypeMismatch { .. }
+        | ResolveError::TypeVariableConflict { .. }
+        | ResolveError::MissingInput { .. }
+        | ResolveError::AmbiguousInput { .. }
+        | ResolveError::CollectionTooSmall { .. }
+        | ResolveError::InvalidAggregationDimension { .. }
+        | ResolveError::DuplicateOutputArtifact { .. }
+        | ResolveError::Cycle { .. }
+        | ResolveError::UnsupportedShapeRelationship { .. }
+        | ResolveError::CoverageViolation { .. }
+        | ResolveError::MissingRequiredValue { .. }
+        | ResolveError::NoGroupsToCheck { .. } => None,
     };
     // A source record is one line; point at all of it.
     inventory_line.and_then(|line| {
@@ -233,7 +252,17 @@ pub(super) fn error_step(error: &ResolveError) -> Option<(&str, Option<&str>)> {
         | ResolveError::CollectionTooSmall { site, .. } => {
             Some((&site.output_product, Some(&site.port)))
         }
-        _ => None,
+        ResolveError::UnknownProduct { .. }
+        | ResolveError::UnknownOperation { .. }
+        | ResolveError::InvalidAggregationDimension { .. }
+        | ResolveError::DuplicateSourceArtifact { .. }
+        | ResolveError::DuplicateOutputArtifact { .. }
+        | ResolveError::Cycle { .. }
+        | ResolveError::UnsupportedShapeRelationship { .. }
+        | ResolveError::CoverageViolation { .. }
+        | ResolveError::MissingRequiredValue { .. }
+        | ResolveError::NoGroupsToCheck { .. }
+        | ResolveError::InvalidDefinition { .. } => None,
     }
 }
 
