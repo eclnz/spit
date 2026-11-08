@@ -104,6 +104,44 @@ fn a_recipe_line_that_belongs_in_the_pipeline_says_so_at_its_line() {
     }
 }
 
+/// Each keyword a pipeline alone may hold, in a recipe, on its own line
+/// and in a `default:` block, is an error at its line that names it.
+#[test]
+fn every_pipeline_only_line_in_a_recipe_is_an_error() {
+    let belongs = ", which every dataset shares; a .spitin binds it to one dataset with its `root`, source paths, and `inputs:`, `exclude` and `require` rules";
+    for (line, word) in [
+        ("use lib.spit", "use"),
+        ("source:", "source"),
+        ("operation f(a: T) -> T", "operation"),
+        ("verify f: test -s {@output}", "verify"),
+        ("resources f: cores=2", "resources"),
+        ("check ok: test -s {path}", "check"),
+        ("default check: nonempty", "default check"),
+        ("default review: looked_at", "default review"),
+        ("default:\n    check: nonempty", "check"),
+        ("default:\n    review: looked_at", "review"),
+        ("stage prep:", "stage"),
+        ("dimensions [sub]", "dimensions"),
+        ("sidecars a", "sidecars"),
+        ("types strict", "types"),
+        ("type Pair<A> = A", "type"),
+    ] {
+        let at = 3 + line.matches('\n').count();
+        let errors = recipe_errors(&format!("{line}\n"));
+        let message = format!("error: line {at}, column ");
+        assert!(
+            errors.contains(&message)
+                && errors.contains(&format!("`{word}` belongs in the .spit pipeline{belongs}")),
+            "{line}: {errors}"
+        );
+    }
+    let errors = recipe_errors("default ext: .txt\n");
+    assert!(
+        errors.contains("error: line 3, column 1: a default `ext:` completes the pipeline's default output paths; it belongs in the .spit pipeline"),
+        "{errors}"
+    );
+}
+
 #[test]
 fn a_recipe_pipeline_header_in_a_pipeline_says_where_it_belongs() {
     let tree = Tree::new("two-files-pipeline", &[]);

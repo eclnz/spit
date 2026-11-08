@@ -1346,7 +1346,7 @@ exclude [sub] where contexts[sub,ses] count<2
 require [sub, ses] where image count=1
 ```
 
-A recipe may contain `inputs:`, `exclude`, `require` and `review ... from` rules, `path product:` rules for source products, a `default path:` rule for its sources, and `sources:`/`contexts:` records. It cannot declare sources, operations, steps, commands, stages, imports or `default ext:`; the pipeline still declares each logical `source` with its dimensions and optional type. Rules in a pipeline are an error, and so are records.
+A recipe may contain `inputs:`, `exclude`, `require` and `review ... from` rules, `path product:` rules for source products, a `default path:` rule for its sources, and `sources:`/`contexts:` records. It cannot declare sources, operations, steps, commands, checks, stages, imports, types, or `default ext:`, `default check:` and `default review:`; the pipeline still declares each logical `source` with its dimensions and optional type. Rules in a pipeline are an error, and so are records.
 
 A recipe's `default:` entry inside `inputs:` line is the default for every source with no rule of its own, in the pipeline or the recipe. Where a dataset keeps its inputs is the dataset's to say, so the pipeline's `default path:` can say where outputs go, by stage if it likes, and the recipe says where sources are:
 
@@ -1407,7 +1407,7 @@ A `.spit` pipeline is the reusable graph: what work to do and where its results 
 
 | Line | Pipeline | Recipe |
 | --- | --- | --- |
-| `source`, `dimensions`, `types`, `operation`, `command`, `verify`, `resources`, steps, `stage`, `use`, `default ext:` | yes | no |
+| `source`, `dimensions`, `types`, `type`, `operation`, `command`, `verify`, `resources`, `check`, steps, `stage`, `use`, `default ext:`, `default check:`, `default review:` | yes | no |
 | `path product:` for a product a step makes | yes | no |
 | `path product:` for a source that is not declared `beside` another | either one, not both | either one, not both |
 | `default path:` | covers outputs, and sources nothing else covers | covers sources only |
