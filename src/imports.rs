@@ -6,6 +6,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+mod kind;
 mod located;
 mod shared;
 
@@ -19,6 +20,7 @@ use crate::parser::{
     parse_use, without_bom, CommandPlaces, Keyword, Kind, Layout, Line, ParseError, UseSpec,
 };
 use crate::span::Place;
+use kind::{first_conflict, DeclKind};
 pub(crate) use located::relative_path;
 use located::{in_import, named_in, rebase, ImportedAt};
 use shared::{import_check, import_review, qualified_name, qualify_attached};
@@ -39,47 +41,8 @@ pub(crate) fn apply_import(
             "imports require a document path; use parse_pipeline_at",
         )
     })?;
-    for ((kind, existing), (_, imported)) in defined(pipeline).into_iter().zip(defined(imported)) {
-        let existing: FxHashSet<_> = existing.into_iter().collect();
-        if let Some(name) = imported.into_iter().find(|name| existing.contains(name)) {
-            return Err(ParseError::new(
-                line,
-                format!("import conflicts with {kind} `{name}`"),
-            ));
-        }
-    }
-    // Two imports may bring the same check, which is one check; a
-    // different check of the same name is a conflict. Found before anything
-    // is added, so that a conflict leaves the builder as it was.
-    let mut new_checks: Vec<&CheckDef> = Vec::new();
-    for check in &imported.checks {
-        let existing = pipeline
-            .checks
-            .iter()
-            .chain(new_checks.iter().copied())
-            .find(|c| c.name == check.name);
-        match existing {
-            Some(existing) if existing == check => {}
-            Some(_) => {
-                return Err(ParseError::new(
-                    line,
-                    format!("import conflicts with check `{}`", check.name),
-                ))
-            }
-            None => new_checks.push(check),
-        }
-    }
-    for (name, params) in &imported.type_decls {
-        if pipeline
-            .type_decls
-            .get(name)
-            .is_some_and(|earlier| earlier != params)
-        {
-            return Err(ParseError::new(
-                line,
-                format!("import conflicts with type `{name}`"),
-            ));
-        }
+    if let Some(message) = first_conflict(pipeline, imported) {
+        return Err(ParseError::new(line, message));
     }
     pipeline.type_decls.extend(
         imported
@@ -103,8 +66,11 @@ pub(crate) fn apply_import(
     for resources in &imported.resources {
         builder.add_resources(resources.clone(), place.clone());
     }
-    for check in new_checks {
-        builder.add_check(check.clone(), place.clone());
+    // Two imports may bring the same check, which is one check.
+    for check in &imported.checks {
+        if !(builder.pipeline.checks.iter()).any(|earlier| earlier.name == check.name) {
+            builder.add_check(check.clone(), place.clone());
+        }
     }
     // A review is only a name, so two imports bring one review, and a
     // review the file declares itself is the same review.
@@ -141,47 +107,6 @@ pub(crate) fn apply_import(
         lines.paths.insert(product.clone(), place.clone());
     }
     Ok(())
-}
-
-/// What `pipeline` defines that an import may not define again, by kind.
-fn defined(pipeline: &Pipeline) -> [(&'static str, Vec<&str>); 6] {
-    let products = pipeline
-        .products
-        .iter()
-        .map(|product| product.name.as_str());
-    let operations = pipeline.operations.iter();
-    let commands = pipeline.commands.iter();
-    [
-        ("product", products.collect()),
-        (
-            "operation",
-            operations
-                .map(|operation| operation.name.as_str())
-                .collect(),
-        ),
-        (
-            "command for operation",
-            commands.map(|command| command.operation.as_str()).collect(),
-        ),
-        (
-            "resources for operation",
-            (pipeline.resources.iter())
-                .map(|line| line.operation.as_str())
-                .collect(),
-        ),
-        (
-            "path for product",
-            pipeline.product_paths.keys().map(String::as_str).collect(),
-        ),
-        (
-            "source companions",
-            pipeline
-                .sidecar_groups
-                .iter()
-                .map(|group| group.name.as_str())
-                .collect(),
-        ),
-    ]
 }
 
 /// An imported file's operations, sources, checks and commands by name, found
@@ -318,8 +243,7 @@ fn select_import(module: &Pipeline, spec: &UseSpec, line: usize) -> Result<Pipel
         let (operation, source) = (operations.first().copied(), sources.first().copied());
         let check = module.checks.get(name).copied();
         let review = module.reviews.contains(name);
-        if operation.is_none() && source.is_none() && group.is_none() && check.is_none() && !review
-        {
+        if !(DeclKind::ALL.iter()).any(|kind| kind.selectable(&module, name)) {
             return Err(ParseError::new(
                 line,
                 format!(

@@ -248,6 +248,26 @@ fn an_import_may_not_define_again_what_the_file_defines() {
     }
 }
 
+#[test]
+fn an_imported_check_conflicts_only_when_it_differs() {
+    let dir = Tree::new("imports", &[]);
+    dir.write("base.spit", "check nonempty: test -s {@path}\n");
+    let same = dir.write(
+        "same.spit",
+        "check nonempty: test -s {@path}\nuse nonempty from base.spit\n",
+    );
+    let (pipeline, _) =
+        support::parse_fixture_at(&fs::read_to_string(&same).unwrap(), &same).unwrap();
+    assert_eq!(pipeline.checks.len(), 1);
+    let other = dir.write(
+        "other.spit",
+        "check nonempty: test -f {@path}\nuse nonempty from base.spit\n",
+    );
+    let error = parse_pipeline_at(&fs::read_to_string(&other).unwrap(), &other).unwrap_err();
+    assert_eq!(error.line(), 2);
+    assert_eq!(error.message(), "import conflicts with check `nonempty`");
+}
+
 const PHOTOS: &str = "source raw : Image .raw [shot]\npath raw: photos/{shot}.raw\nsource meta : Json .json beside raw\n";
 
 const COPY: &str =
