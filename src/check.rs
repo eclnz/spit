@@ -11,8 +11,8 @@ use rustc_hash::FxHashMap;
 
 use crate::command::CommandError;
 use crate::model::{
-    stage_and_parents, CheckDef, CheckUse, DefaultChecks, Invocation, OperationDef, Pipeline,
-    PipelineIndex, Port,
+    stage_and_parents, CheckDef, CheckId, CheckUse, DefaultChecks, Invocation, OperationDef,
+    Pipeline, PipelineIndex, Port,
 };
 use crate::parser::SourceMap;
 use crate::span::Place;
@@ -32,7 +32,7 @@ pub(crate) fn collect_checks(
     let mut errors = Vec::new();
     let mut checks: BTreeMap<&str, &CheckDef> = BTreeMap::new();
     for (index, check) in pipeline.checks.iter().enumerate() {
-        let place = lines.checks.get(index).cloned();
+        let place = lines.checks.get(CheckId::at(index)).cloned();
         if checks.insert(&check.name, check).is_some() {
             errors.push(
                 CommandError::new(format!("duplicate check `{}`", check.name))
