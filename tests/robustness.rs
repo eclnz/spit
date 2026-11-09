@@ -96,6 +96,21 @@ fn paths_that_differ_only_in_case_are_flagged() {
 }
 
 #[test]
+fn a_source_value_holding_its_rules_separator_is_flagged() {
+    let text = "source x [a, b]\npath x: in/{a}-{b}.txt\noperation f(i) -> Text\npath y: out/{a}/{b}.txt\ny = f(x)\n";
+    // `y` is an output, whose path nothing reads back, so only `x` is named.
+    assert_eq!(
+        rendered(
+            &diagnose(text, Some("sources:\n    x[a=p-q,b=r]\n    x[a=s,b=t-u]\n")),
+            text
+        ),
+        [
+            "warning: line 2, column 9: `x[a=p-q,b=r]` has path `in/p-q-r.txt`, which its rule reads back as `x[a=p,b=q-r]`, so its file would be found under those values; use a separator between placeholders that no value holds",
+        ]
+    );
+}
+
+#[test]
 fn shell_operators_in_a_command_are_errors() {
     let text = "source x [s]\ndefault path: {@product}/{@entities}\noperation f(a) -> Text\ncommand f: tool {a} {@output} 2>&1 | tee '>' log\ny = f(x)\n";
     let messages = rendered(&diagnose(text, None), text);

@@ -184,13 +184,15 @@ impl PathTemplate {
     }
 
     /// Fail when two placeholders of this template, with nothing between
-    /// them, both take a shape of any length. `parse` checks the template
-    /// as written; a product whose `[...]` group is dropped has a different
-    /// one, so the same check runs on `resolve`'s result.
-    pub(crate) fn check_open_shapes(&self) -> Result<(), String> {
+    /// them, can both be any length: with `source`, any two dimensions
+    /// without a shape of fixed length; else two with shapes of any length.
+    /// `parse` checks the shapes of the template as written; a product whose
+    /// `[...]` group is dropped has a different one, and only a source's
+    /// files are read back into values, so this runs on `resolve`'s result.
+    pub(crate) fn check_touching(&self, source: bool) -> Result<(), String> {
         let mut all = Vec::new();
         flatten(&self.parts, &mut all);
-        open_shapes_apart(&all, &self.text)
+        open_apart(&all, &self.text, source)
     }
 
     /// Whether the template has a `[...]` group, which each product
@@ -508,19 +510,21 @@ fn check_shapes(parts: &[PathPart], text: &str) -> Result<(), String> {
             }
         }
     }
-    open_shapes_apart(&all, text)
+    open_apart(&all, text, false)
 }
 
-/// Fail when two placeholders with nothing between them both take a shape
-/// of any length, as `{a:digits}{b:digits}` does. `all` is the template's
+/// Fail when two placeholders with nothing between them can both be any
+/// length, so where one value ends and the next starts is not written down:
+/// two shapes of any length, as `{a:digits}{b:digits}`, and with `unshaped`
+/// a dimension without a shape too, as `{a}{b}`. `all` is the template's
 /// parts with groups flattened away.
-fn open_shapes_apart(all: &[&PathPart], text: &str) -> Result<(), String> {
-    let open = |part: &&PathPart| {
-        matches!(
-            part,
-            PathPart::Placeholder(PathPlaceholder::Dimension(_, Some(shape)))
-                if shape.fixed_length().is_none()
-        )
+fn open_apart(all: &[&PathPart], text: &str, unshaped: bool) -> Result<(), String> {
+    let open = |part: &&PathPart| match part {
+        PathPart::Placeholder(PathPlaceholder::Dimension(_, Some(shape))) => {
+            shape.fixed_length().is_none()
+        }
+        PathPart::Placeholder(PathPlaceholder::Dimension(_, None)) => unshaped,
+        _ => false,
     };
     for pair in all.windows(2) {
         if open(&pair[0]) && open(&pair[1]) {
@@ -528,8 +532,16 @@ fn open_shapes_apart(all: &[&PathPart], text: &str) -> Result<(), String> {
             else {
                 continue;
             };
+            let shaped = |placeholder: &PathPlaceholder| {
+                matches!(placeholder, PathPlaceholder::Dimension(_, Some(_)))
+            };
+            let what = if shaped(left) && shaped(right) {
+                "two shapes of any length"
+            } else {
+                "two values of any length, so a file's name does not say where one ends"
+            };
             return Err(format!(
-                "`{left}{right}` in `{text}` has no text between two shapes of any length; put a `-` or `_` between them"
+                "`{left}{right}` in `{text}` has no text between {what}; put a `-` or `_` between them"
             ));
         }
     }
