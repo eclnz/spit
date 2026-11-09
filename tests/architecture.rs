@@ -72,11 +72,6 @@ fn allowed(from: Layer, to: Layer) -> bool {
 /// shrinks.
 const BACK_EDGES: &[(&str, &str, &str)] = &[
     (
-        "span",
-        "parser",
-        "span uses parser::strip_comment, which step 8 moves below the parser",
-    ),
-    (
         "model",
         "paths",
         "the model holds PathTemplate, EntitiesFormat and Holder, which step 8 moves to the value layer",

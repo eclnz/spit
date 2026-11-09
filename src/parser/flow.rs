@@ -3,7 +3,7 @@
 //! beneath a `stage name:` header.
 
 use crate::model::{CommandRole, DefaultChecks, DefaultReviews, Invocation, TypeChecking};
-use crate::span::Place;
+use crate::span::{strip_comment, Place};
 
 use super::body::OpenBody;
 use super::check::parse_default_checks;
@@ -14,9 +14,7 @@ use super::declarations::{
 use super::entities::parse_entities;
 use super::keyword::{removed_section, File, Keyword};
 use super::layout::{is_step, Block, Layout};
-use super::lexical::{
-    comma_items, extension, identifier, product_name, reserved_name, strip_comment,
-};
+use super::lexical::{comma_items, extension, identifier, product_name, reserved_name};
 use super::review::parse_default_reviews;
 use super::source_map::{name_place, step_place, tail_place};
 use super::{FlowStep, ParseError, StatementKind, StepOutput, Syntax, SHELL_SOURCE_ERROR};

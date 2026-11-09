@@ -13,7 +13,7 @@ use std::borrow::Cow;
 use std::ops::Range;
 
 use super::keyword::{has_top_level_equals, Header, Keyword};
-use super::lexical::strip_comment;
+use crate::span::strip_comment;
 
 /// The lines of one text, as `str::lines` gives them, and its statements.
 #[derive(Clone, Debug, Default)]
