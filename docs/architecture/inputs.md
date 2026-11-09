@@ -6,7 +6,8 @@ The input stage settles which contexts and source files a dataset holds. It read
 flowchart LR
     spec["InputSpec<br/>InputRules, root"] --> resolve["InputSpec::resolve"]
     files["review files<br/>ReviewFile::text"] --> spec
-    pipeline["Pipeline<br/>sources and path rules"] --> resolve
+    pipeline["Pipeline<br/>sources and path rules"] --> pattern["PathPattern<br/>one per source and context rule"]
+    pattern --> resolve
     scan["InputSource::Discover<br/>a dataset root"] --> resolve
     records["InputSource::Inventory<br/>records already written"] --> resolve
     resolve --> resolved["ResolvedInputs<br/>SourceInventory and CoverageGaps"]
@@ -25,6 +26,7 @@ flowchart LR
     - the source path rules, with the default in `source_default`.
 
     Nothing settles the rules in place. `InputRules::defaulted_sources` derives the sources the default covers, and `InputRules::source_paths_for` the rule the recipe gives each source.
+- **`PathPattern`** ([`src/template/pattern.rs`](https://github.com/eclnz/spit/blob/dev/src/template/pattern.rs)) is a rule compiled once, by `PathPattern::new`, for each source's completed rule (`path_pattern` in [`src/inputs/pattern.rs`](https://github.com/eclnz/spit/blob/dev/src/inputs/pattern.rs)), each `contexts:` pattern, and each output's rule (`OutputPaths`). `PathPattern::match_path` gives a path's value of each dimension, still encoded; `PathPattern::reach` gives where a file parts from the rule. It is the pattern binding renders paths with, as [binding](binding.md) describes.
 - **`InputSource`** says where the inventory comes from: `Discover(root)` scans a folder, and `Inventory(records)` takes records from a `.spitout` or the recipe.
 - **`SourceInventory`** is a list of `SourceRecord`s: a product, a complete `EntityBinding`, and optionally the file's path. Beside them it keeps:
     - the deduplicated observed `contexts`;
@@ -81,6 +83,7 @@ While it scans, the stage also:
 - **A review file is read against the pipeline, and never changes the dataset.** The inventory keeps every record a verdict names. Tests: [`a_review_file_gives_the_verdicts_and_the_commands_note_what_they_did`](https://github.com/eclnz/spit/blob/dev/tests/reviews.rs), [`a_review_without_a_file_holds_back_everything_it_judges`](https://github.com/eclnz/spit/blob/dev/tests/reviews.rs).
 - **Rows that judge one artifact agree.** A conflict is an error whether or not the artifact exists. Tests: [`a_malformed_review_file_is_an_error_that_names_its_file_and_line`](https://github.com/eclnz/spit/blob/dev/tests/reviews.rs), [`check_conflicts` in `src/inputs/reviews.rs`](https://github.com/eclnz/spit/blob/dev/src/inputs/reviews.rs).
 - **The `.spitout` carries the verdicts.** A DAG made from a `.spitout` judges artifacts by the same rows as one made from the recipe. Tests: [`the_spitout_writes_the_verdicts_and_reads_them_back`](https://github.com/eclnz/spit/blob/dev/tests/reviews.rs), [`the_verdicts_reach_the_spitout_and_a_dag_made_from_it_agrees`](https://github.com/eclnz/spit/blob/dev/tests/reviews.rs).
+- **A value is one path component.** Encoding, matching and the `default entities:` separator check read one rule, `is_kept`, and no shape accepts a character an encoded value cannot hold. Test: [`every_shape_accepts_only_value_characters`](https://github.com/eclnz/spit/blob/dev/src/template/pattern.rs).
 - **Shapes narrow matching only.** A placeholder's `Shape` decides which files match, and never changes how a value is written. Tests: [`a_leading_zero_is_kept`](https://github.com/eclnz/spit/blob/dev/tests/placeholder_shapes.rs), [`a_shape_on_an_output_or_a_default_is_an_error`](https://github.com/eclnz/spit/blob/dev/tests/placeholder_shapes.rs).
 
 ## Failure

@@ -36,10 +36,9 @@ impl Shape {
     /// How long every value of this shape is, if all are the same length;
     /// then a placeholder's end needs no searching.
     ///
-    /// Keep in step with `Shape::matches`: a shape has a fixed length only
-    /// if `matches` accepts values of that length alone. `value_ends` in
-    /// `inputs/pattern.rs` and `check_shapes` in `template/path.rs` rely on
-    /// it, and a unit test below checks it.
+    /// A shape has a fixed length only if `matches` accepts values of that
+    /// length alone, which `PathPattern` and `check_shapes` in
+    /// `template/path.rs` rely on; a unit test below checks it.
     pub(crate) fn fixed_length(self) -> Option<usize> {
         match self {
             Self::Digits => None,
@@ -48,13 +47,9 @@ impl Shape {
         }
     }
 
-    /// Whether `value` has this shape.
-    ///
-    /// Keep in step with `is_value_character` in `inputs/pattern.rs`: no
-    /// shape may accept a character a value cannot hold.
-    ///
-    /// Keep in step with `Shape::fixed_length`: it says how long the values
-    /// accepted here are, when they are all one length.
+    /// Whether `value` has this shape. No shape accepts a character an
+    /// encoded value cannot hold, which a test in `template/pattern.rs`
+    /// checks.
     pub(crate) fn matches(self, value: &str) -> bool {
         match self {
             Self::Digits => !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit()),

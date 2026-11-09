@@ -1,101 +1,51 @@
-//! Path rules as patterns: matching one against a file or directory, where
-//! a pipeline's outputs lie, and how near a file comes to a rule that
+//! Path rules as patterns for discovery: a source's rule compiled to match,
+//! where a pipeline's outputs lie, and how near a file comes to a rule that
 //! matches none.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::fmt;
-use std::ops::Range;
 
 use rustc_hash::FxHashSet;
 
 use crate::model::stage_directories;
 use crate::model::{Pipeline, PipelineIndex, ProductDef};
 use crate::paths::unspelled_entities;
-use crate::template::{
-    error, product_text, PathError, PathPart, PathPlaceholder, PathTemplate, Shape,
-};
+use crate::template::{error, Gap, PathError, PathPattern, PathPlaceholder, PathTemplate};
 
-/// One piece of a path rule: text written as is, or a dimension's value.
-pub(super) enum Piece {
-    Literal(String),
-    /// One path component value, as `bind_path` encodes it, with the shape
-    /// the rule gives it, if any.
-    Value(String, Option<Shape>),
-}
-
-/// Give every `Value` of a dimension the shape any of them has, so a
-/// dimension written twice, as `{id:digits}/{id}`, is read with it both
-/// times. A template has one shape per dimension at most.
-pub(super) fn inherit_shapes(pieces: &mut [Piece]) {
-    let shapes: Vec<(String, Shape)> = pieces
-        .iter()
-        .filter_map(|piece| match piece {
-            Piece::Value(name, Some(shape)) => Some((name.clone(), *shape)),
-            _ => None,
-        })
-        .collect();
-    for piece in pieces {
-        if let Piece::Value(name, shape @ None) = piece {
-            *shape = shapes
-                .iter()
-                .find(|(shaped, _)| shaped == name)
-                .map(|(_, shape)| *shape);
-        }
-    }
-}
-
-/// The pieces `product`'s paths match. `stage` is the directories
+/// `product`'s path pattern, for matching. `stage` is the directories
 /// `{@stage}` gives it, `None` for a source.
 pub(super) fn path_pattern(
     template: &PathTemplate,
     product: &ProductDef,
     stage: Option<&str>,
-) -> Result<Vec<Piece>, PathError> {
-    let mut pieces = Vec::new();
-    for part in template.parts() {
-        match part {
-            PathPart::Literal(value) => pieces.push(Piece::Literal(value.clone())),
-            PathPart::Placeholder(PathPlaceholder::Product) => {
-                pieces.push(Piece::Literal(product_text(&product.name).into_owned()));
-            }
-            // A source with dimensions and a spelling has `{@entities}`
-            // written out; the path checks fail the rest first.
-            PathPart::Placeholder(PathPlaceholder::Entities) => {
-                return Err(error(unspelled_entities(
-                    &product.name,
-                    product.dimensions.is_empty(),
-                )))
-            }
-            PathPart::Placeholder(PathPlaceholder::Stage) => match stage {
-                Some(stage) => pieces.push(Piece::Literal(stage.to_owned())),
-                // A source is made in no stage, so its rule never binds
-                // `{@stage}`; `inspect_paths` rejects such a rule first.
-                None => {
-                    return Err(error(format!(
-                        "path rule for `{}` uses `{}`, but `{}` is not made in a stage",
-                        product.name,
-                        PathPlaceholder::Stage,
-                        product.name
-                    )))
-                }
-            },
-            PathPart::Placeholder(PathPlaceholder::Dimension(dimension, shape)) => {
-                pieces.push(Piece::Value(dimension.clone(), *shape));
-            }
-            PathPart::Group(_) => unreachable!("a product's template has its groups resolved"),
-        }
+) -> Result<PathPattern, PathError> {
+    let pattern = PathPattern::new(template, &product.name, stage);
+    match pattern.gap {
+        None => Ok(pattern),
+        // A source with dimensions and a spelling has `{@entities}`
+        // written out; the path checks fail the rest first.
+        Some(Gap::Entities) => Err(error(unspelled_entities(
+            &product.name,
+            product.dimensions.is_empty(),
+        ))),
+        // A source is made in no stage, so its rule never binds `{@stage}`;
+        // `inspect_paths` rejects such a rule first.
+        Some(Gap::Stage) => Err(error(format!(
+            "path rule for `{}` uses `{}`, but `{}` is not made in a stage",
+            product.name,
+            PathPlaceholder::Stage,
+            product.name
+        ))),
     }
-    inherit_shapes(&mut pieces);
-    Ok(pieces)
 }
 
 /// Where the products a step of a pipeline makes lie under a root, to tell
 /// what an earlier run wrote from files no rule matches.
 pub(super) struct OutputPaths<'l> {
     /// The pattern of each file output.
-    files: Vec<Vec<Piece>>,
+    files: Vec<PathPattern>,
     /// The pattern of each file output written beside a source's file.
-    beside_sources: Vec<Vec<Piece>>,
+    beside_sources: Vec<PathPattern>,
     /// The directories a folder output's pattern matches.
     folders: FxHashSet<&'l str>,
 }
@@ -122,19 +72,19 @@ impl<'l> OutputPaths<'l> {
                 continue;
             };
             let stage = stage_directories(&index, &product.name);
-            let Ok(pieces) = path_pattern(&template, product, stage.as_deref()) else {
+            let Ok(pattern) = path_pattern(&template, product, stage.as_deref()) else {
                 continue;
             };
             if index.is_folder(&product.name) {
-                folder_patterns.push(pieces);
+                folder_patterns.push(pattern);
             } else {
                 let beside_source = index
                     .beside(&product.name)
                     .is_some_and(|beside| index.is_source(beside.sibling));
                 if beside_source {
-                    beside_sources.push(pieces);
+                    beside_sources.push(pattern);
                 } else {
-                    files.push(pieces);
+                    files.push(pattern);
                 }
             }
         }
@@ -143,7 +93,7 @@ impl<'l> OutputPaths<'l> {
             .filter(|directory| {
                 folder_patterns
                     .iter()
-                    .any(|pieces| match_pattern(pieces, directory).is_some())
+                    .any(|pattern| pattern.match_path(directory).is_some())
             })
             .map(String::as_str)
             .collect();
@@ -159,174 +109,18 @@ impl<'l> OutputPaths<'l> {
     pub(super) fn beside_source(&self, file: &str) -> bool {
         self.beside_sources
             .iter()
-            .any(|pieces| match_pattern(pieces, file).is_some())
+            .any(|pattern| pattern.match_path(file).is_some())
     }
 
     /// Whether `file` is at an output's path, or inside an output folder.
     pub(super) fn hold(&self, file: &str) -> bool {
         self.files
             .iter()
-            .any(|pieces| match_pattern(pieces, file).is_some())
+            .any(|pattern| pattern.match_path(file).is_some())
             || self.beside_source(file)
             || file
                 .match_indices('/')
                 .any(|(end, _)| self.folders.contains(&file[..end]))
-    }
-}
-
-/// Match `text` against `pieces`, binding each dimension to its encoded
-/// value; a dimension used twice must have the same value both times.
-pub(super) fn match_pattern<'a>(
-    pieces: &[Piece],
-    text: &'a str,
-) -> Option<BTreeMap<String, &'a str>> {
-    // A match begins with a literal first piece and ends with a literal last
-    // one, which rules out most patterns without searching.
-    if let Some(Piece::Literal(first)) = pieces.first() {
-        if !text.starts_with(first.as_str()) {
-            return None;
-        }
-    }
-    if let Some(Piece::Literal(last)) = pieces.last() {
-        if !text.ends_with(last.as_str()) {
-            return None;
-        }
-    }
-    let mut bound = BTreeMap::new();
-    let mut failed = BTreeSet::new();
-    match_from(pieces, 0, text, 0, &mut bound, &mut failed).then(|| {
-        bound
-            .into_iter()
-            .map(|(dimension, value)| (dimension, &text[value]))
-            .collect()
-    })
-}
-
-/// A position that failed to match: the piece, the offset in the text, and
-/// the values bound for dimensions that later pieces repeat.
-type Attempt = (usize, usize, Vec<(usize, usize)>);
-
-/// Match `pieces[index..]` against `text[offset..]`, binding each dimension
-/// to the byte range of its value in `text`. Where a value's end is not
-/// forced, failed positions are remembered, which keeps ambiguous splits
-/// from taking exponential time.
-fn match_from(
-    pieces: &[Piece],
-    index: usize,
-    text: &str,
-    offset: usize,
-    bound: &mut BTreeMap<String, Range<usize>>,
-    failed: &mut BTreeSet<Attempt>,
-) -> bool {
-    let rest = &text[offset..];
-    let Some(piece) = pieces.get(index) else {
-        return rest.is_empty();
-    };
-    match piece {
-        Piece::Literal(literal) => {
-            rest.starts_with(literal.as_str())
-                && match_from(
-                    pieces,
-                    index + 1,
-                    text,
-                    offset + literal.len(),
-                    bound,
-                    failed,
-                )
-        }
-        Piece::Value(dimension, shape) => {
-            if let Some(value) = bound.get(dimension).map(|value| &text[value.clone()]) {
-                return rest.starts_with(value)
-                    && match_from(pieces, index + 1, text, offset + value.len(), bound, failed);
-            }
-            let longest = rest
-                .find(|character: char| !is_value_character(character))
-                .unwrap_or(rest.len());
-            if let Some(end) = forced_end(pieces.get(index + 1), rest, longest) {
-                if end == 0 || !shape.is_none_or(|shape| shape.matches(&rest[..end])) {
-                    return false;
-                }
-                bound.insert(dimension.clone(), offset..offset + end);
-                let found = match_from(pieces, index + 1, text, offset + end, bound, failed);
-                if !found {
-                    bound.remove(dimension);
-                }
-                return found;
-            }
-            let later: Vec<_> = bound
-                .iter()
-                .filter(|(dimension, _)| {
-                    pieces
-                        .iter()
-                        .skip(index)
-                        .any(|piece| matches!(piece, Piece::Value(name, _) if name == *dimension))
-                })
-                .map(|(_, value)| (value.start, value.end))
-                .collect();
-            let attempt = (index, offset, later);
-            if failed.contains(&attempt) {
-                return false;
-            }
-            let found = value_ends(*shape, rest, longest).any(|end| {
-                bound.insert(dimension.clone(), offset..offset + end);
-                match_from(pieces, index + 1, text, offset + end, bound, failed)
-            });
-            if !found {
-                bound.remove(dimension);
-                failed.insert(attempt);
-            }
-            found
-        }
-    }
-}
-
-/// The lengths, up to `longest`, a value at the start of `rest` may have
-/// and keep to `shape`. A shape of one length has only that one, so the
-/// value needs no search; any other is tested at each length.
-fn value_ends(
-    shape: Option<Shape>,
-    rest: &str,
-    longest: usize,
-) -> impl Iterator<Item = usize> + '_ {
-    let fixed = shape.and_then(Shape::fixed_length);
-    let (first, last) = match fixed {
-        Some(length) if length <= longest => (length, length),
-        Some(_) => (1, 0),
-        None => (1, longest),
-    };
-    (first..=last).filter(move |&end| shape.is_none_or(|shape| shape.matches(&rest[..end])))
-}
-
-/// Whether a value can hold `character`: what `encode_component` keeps, and
-/// the `%` of what it escapes.
-///
-/// Keep in step with `encode_component` in `template/component.rs`: if a value
-/// could hold a character this denies, `forced_end` would bind it too short
-/// and discovery would miss files.
-/// Keep in step with `Shape::matches` in `template/shape.rs`: no shape may
-/// accept a character this denies.
-fn is_value_character(character: char) -> bool {
-    character.is_ascii_alphanumeric() || character == '-' || character == '%'
-}
-
-/// The one length a value at the start of `rest` can have, when what
-/// follows it decides: the rest of the text at the end of the pattern, or
-/// its first `longest` characters before a literal that starts with a
-/// character no value holds, since every shorter value leaves a value
-/// character where the literal must start. `Some(0)` means none fits; `None`
-/// means several lengths must be tried.
-fn forced_end(next: Option<&Piece>, rest: &str, longest: usize) -> Option<usize> {
-    match next {
-        None => Some(if longest == rest.len() { longest } else { 0 }),
-        Some(Piece::Literal(literal))
-            if literal
-                .chars()
-                .next()
-                .is_some_and(|first| !is_value_character(first)) =>
-        {
-            Some(longest)
-        }
-        _ => None,
     }
 }
 
@@ -396,7 +190,7 @@ impl NearestFile {
     }
 }
 
-/// `product`'s rule, `pieces`, which matched no file, with the file of
+/// `product`'s rule, `pattern`, which matched no file, with the file of
 /// `files` it comes nearest to: the one it matches furthest from the start,
 /// then the one that shares most of the rule's ending. A file is near only
 /// when the rule matches some of its start, or it ends with the rule's last
@@ -404,14 +198,11 @@ impl NearestFile {
 /// are the folders under the root.
 pub(super) fn missed_source(
     product: &str,
-    pieces: &[Piece],
+    pattern: &PathPattern,
     files: &[String],
     folder: bool,
 ) -> MissedSource {
-    let ending = match pieces.last() {
-        Some(Piece::Literal(last)) => last.as_str(),
-        _ => "",
-    };
+    let ending = pattern.ending();
     let shared_ending = |file: &str| {
         file.bytes()
             .rev()
@@ -421,7 +212,7 @@ pub(super) fn missed_source(
     };
     let mut best: Option<(usize, usize, NearestFile)> = None;
     for file in files {
-        let (matched, expected) = reach(pieces, file);
+        let (matched, expected) = pattern.reach(file);
         let score = (matched, shared_ending(file));
         let near = matched > 0 || (!ending.is_empty() && score.1 == ending.len());
         if near && best.as_ref().is_none_or(|(a, b, _)| score > (*a, *b)) {
@@ -436,78 +227,7 @@ pub(super) fn missed_source(
     MissedSource {
         product: product.to_owned(),
         folder,
-        rule: render(pieces),
+        rule: pattern.to_string(),
         nearest: best.map(|(_, _, near)| near),
     }
-}
-
-/// How far `pieces` match `text` from its start, in bytes, and the rest of
-/// the rule from there. A literal may match in part, up to a separator
-/// (`/`, `_`, `-` or `.`), so the rest can start inside it: `_run-` against
-/// `_task-` matches `_`, while `sub-` against `ses-` matches nothing.
-///
-/// Every way of splitting values is tried, from an explicit stack: unlike
-/// `match_from`, this keeps no bindings, so a dimension written twice may
-/// take two values. It only says where a file parts from a rule.
-pub(super) fn reach(pieces: &[Piece], text: &str) -> (usize, String) {
-    let mut furthest = (0, render(pieces));
-    let mut seen = BTreeSet::new();
-    let mut stack = vec![(0, 0)];
-    while let Some((index, offset)) = stack.pop() {
-        if !seen.insert((index, offset)) {
-            continue;
-        }
-        let rest = &text[offset..];
-        let Some(piece) = pieces.get(index) else {
-            if offset > furthest.0 {
-                furthest = (offset, String::new());
-            }
-            continue;
-        };
-        match piece {
-            Piece::Literal(literal) if rest.starts_with(literal.as_str()) => {
-                stack.push((index + 1, offset + literal.len()));
-            }
-            Piece::Literal(literal) => {
-                let common: usize = literal
-                    .chars()
-                    .zip(rest.chars())
-                    .take_while(|(a, b)| a == b)
-                    .map(|(a, _)| a.len_utf8())
-                    .sum();
-                let shared = literal[..common]
-                    .rfind(['/', '_', '-', '.'])
-                    .map_or(0, |separator| separator + 1);
-                if offset + shared > furthest.0 {
-                    let expected =
-                        format!("{}{}", &literal[shared..], render(&pieces[index + 1..]));
-                    furthest = (offset + shared, expected);
-                }
-            }
-            Piece::Value(_, shape) => {
-                let longest = rest
-                    .find(|character: char| !is_value_character(character))
-                    .unwrap_or(rest.len());
-                let mut ends = value_ends(*shape, rest, longest).peekable();
-                // No value here: the text has none, or none of the shape.
-                if ends.peek().is_none() && offset > furthest.0 {
-                    furthest = (offset, render(&pieces[index..]));
-                }
-                stack.extend(ends.map(|end| (index + 1, offset + end)));
-            }
-        }
-    }
-    furthest
-}
-
-/// `pieces` written as a path rule.
-fn render(pieces: &[Piece]) -> String {
-    pieces
-        .iter()
-        .map(|piece| match piece {
-            Piece::Literal(literal) => literal.clone(),
-            Piece::Value(dimension, None) => format!("{{{dimension}}}"),
-            Piece::Value(dimension, Some(shape)) => format!("{{{dimension}:{shape}}}"),
-        })
-        .collect()
 }

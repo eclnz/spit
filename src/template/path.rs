@@ -10,7 +10,7 @@ use super::builtin::{ENTITIES, PRODUCT, STAGE};
 use super::{parse_template, Part};
 use crate::span::Located;
 
-use super::component::encode_component;
+use super::pattern::encode_component;
 use super::shape::{shape_names, Shape};
 use super::EntitiesFormat;
 
@@ -165,9 +165,7 @@ pub struct PathTemplate {
 }
 
 /// What `{@product}` writes for the product `name`: `alias::name` becomes
-/// `alias.name`, since colons would go into file names. Keep in step with
-/// the placeholder's expansion in `ProductPath::new` and `path_pattern`,
-/// which write this too.
+/// `alias.name`, since colons would go into file names.
 pub(crate) fn product_text(name: &str) -> std::borrow::Cow<'_, str> {
     if name.contains("::") {
         std::borrow::Cow::Owned(name.replace("::", "."))

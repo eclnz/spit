@@ -1,7 +1,7 @@
 //! A path SPIT renders for a binding is a path discovery reads back to that
 //! binding. Rendering (binding a DAG's paths) and matching (finding source
-//! files) read the same template in two places, so this runs both over one
-//! table of templates and values.
+//! files) both read a product's compiled path pattern, so this runs both
+//! over one table of templates and values.
 
 mod support;
 
