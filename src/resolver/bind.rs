@@ -6,9 +6,8 @@ use std::fmt;
 use rustc_hash::FxHashMap;
 
 use crate::check::{step_checks, CheckIndex, StepCheck, When};
-use crate::command::{
-    facet, slot, validate_commands, CommandError, CommandTemplate, Facet, Slot, Stream,
-};
+use crate::command::{facet, slot, CommandError, CommandTemplate, Facet, Slot, Stream};
+use crate::compile::validate_commands;
 use crate::model::{
     ArtifactId, CallId, Cardinality, CommandDef, CommandRole, DagStep, Job, OperationDef, Pipeline,
     PipelineIndex, ResolvedDag, Resources,

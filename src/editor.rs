@@ -11,7 +11,7 @@ use operations::{call_details, composite_details, operation_details};
 use signatures::{check_signature, operation_signature, product_signature};
 
 use crate::builtins::{builtin_words, words_json};
-use crate::compile::collect_pipeline;
+use crate::compile::collect_definitions;
 use crate::diagnostics::{
     diagnostics_json, recover_document, shown_paths_json, Diagnostic, ShownPath,
 };
@@ -70,7 +70,7 @@ pub fn pipeline_hovers(text: &str, path: &Path) -> Vec<Hover> {
         parse_located_document_recovering(text, path, Kind::Pipeline)
     });
     let pipeline = &document.pipeline;
-    let checked = collect_pipeline(pipeline);
+    let checked = collect_definitions(pipeline);
     let steps = &checked.steps;
     let steps_by_output: BTreeMap<_, _> = steps
         .iter()

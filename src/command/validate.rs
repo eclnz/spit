@@ -81,33 +81,15 @@ pub(crate) fn slot(operation: &OperationDef, name: &str) -> Option<Slot> {
     Some(output.map_or(Slot::Dimension, Slot::Output))
 }
 
-/// Check every declared command against its operation without resolving jobs:
-/// the template must name only known placeholders and write every output; a
-/// `verify` command may read inputs only. Checks are checked too.
-pub fn validate_commands(pipeline: &Pipeline) -> Result<(), CommandError> {
-    let lines = SourceMap::default();
-    match collect_commands(pipeline, &lines, &BTreeSet::new())
-        .into_iter()
-        .next()
-    {
-        Some(error) => Err(error),
-        None => Ok(()),
-    }
-}
-
-/// Check every command, collecting each error, and then every `check` and
-/// its uses. Commands for operations in `skip` belong to declarations that
+/// Check every command, given the pipeline's operations by name, collecting
+/// each error. Commands for operations in `skip` belong to declarations that
 /// already failed and are not checked.
 pub(crate) fn collect_commands(
     pipeline: &Pipeline,
+    operations: &BTreeMap<&str, &OperationDef>,
     lines: &SourceMap,
     skip: &BTreeSet<String>,
 ) -> Vec<CommandError> {
-    let operations: BTreeMap<_, _> = pipeline
-        .operations
-        .iter()
-        .map(|operation| (operation.name.as_str(), operation))
-        .collect();
     let products: BTreeMap<_, _> = pipeline
         .products
         .iter()
@@ -202,14 +184,6 @@ pub(crate) fn collect_commands(
             errors.push(e.at(place.or(line)));
         }
     }
-    errors.extend(crate::resources::collect_resources(
-        pipeline,
-        &operations,
-        lines,
-        skip,
-    ));
-    errors.extend(crate::check::collect_checks(pipeline, lines, skip));
-    errors.extend(crate::review::collect_reviews(pipeline, lines, skip));
     errors
 }
 

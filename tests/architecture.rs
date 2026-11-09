@@ -21,6 +21,8 @@ enum Layer {
     Check,
     /// A recipe and a dataset to a `SourceInventory`.
     Inputs,
+    /// Every check of a parsed pipeline and its input rules, in one order.
+    Validate,
     /// A pipeline and a `SourceInventory` to a `ResolvedDag`.
     Resolve,
     /// A `ResolvedDag` to a `BoundDag`, and the writers of what the stages make.
@@ -38,6 +40,7 @@ fn layer(module: &str) -> Option<Layer> {
         "builtins" | "imports" | "lower" | "order" | "parser" => Layer::Parse,
         "check" | "command" | "compile" | "paths" | "resources" | "review" => Layer::Check,
         "inputs" => Layer::Inputs,
+        "validate" => Layer::Validate,
         "resolver" => Layer::Resolve,
         "render" | "spitdag" => Layer::Bind,
         "cli" | "diagnostics" | "editor" | "lib" | "main" => Layer::Driver,
@@ -57,6 +60,7 @@ fn allowed(from: Layer, to: Layer) -> bool {
         Check => matches!(to, Value | Model | Parse | Check),
         Inputs => matches!(to, Value | Model | Parse | Check | Inputs),
         Resolve => matches!(to, Value | Model | Parse | Check | Resolve),
+        Validate => matches!(to, Value | Model | Parse | Check | Inputs | Validate),
         Bind => matches!(to, Value | Model | Parse | Check | Resolve | Bind),
         Driver => true,
     }
@@ -106,21 +110,6 @@ const BACK_EDGES: &[(&str, &str, &str)] = &[
         "lower",
         "imports",
         "lowering calls imports::apply_import, which step 8 moves into lower",
-    ),
-    (
-        "command",
-        "check",
-        "collect_commands runs collect_checks, which step 7 lifts into check_pipeline",
-    ),
-    (
-        "command",
-        "resources",
-        "collect_commands runs collect_resources, which step 7 lifts into check_pipeline",
-    ),
-    (
-        "command",
-        "review",
-        "collect_commands runs collect_reviews, which step 7 lifts into check_pipeline",
     ),
     (
         "resolver",
