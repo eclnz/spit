@@ -36,7 +36,7 @@ use crate::{
 
 use places::{error_step, InCall, Places};
 use recovery::recover_parse_errors;
-use warnings::{case_warnings, empty_step_warnings, near_miss_warnings, pipeline_warning};
+use warnings::{empty_step_warnings, near_miss_warnings, path_warnings, pipeline_warning};
 
 /// Where a pipeline is, and what applies to it, when diagnosing it.
 #[derive(Clone, Copy, Debug, Default)]
@@ -387,7 +387,7 @@ fn record_diagnostics(
             ));
             return Err(error);
         }
-        diagnostics.extend(case_warnings(pipeline, lines, &report.dag));
+        diagnostics.extend(path_warnings(pipeline, lines, &report.dag));
         Ok(report)
     });
     match resolved {
