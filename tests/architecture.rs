@@ -42,7 +42,7 @@ fn layer(module: &str) -> Option<Layer> {
         "inputs" => Layer::Inputs,
         "validate" => Layer::Validate,
         "resolver" => Layer::Resolve,
-        "render" | "spitdag" => Layer::Bind,
+        "bind" | "render" | "spitdag" => Layer::Bind,
         "cli" | "diagnostics" | "editor" | "lib" | "main" => Layer::Driver,
         _ => return None,
     })
@@ -70,11 +70,7 @@ fn allowed(from: Layer, to: Layer) -> bool {
 /// names the step of `spit-architecture-plan.md` that removes the edge. The
 /// test fails when an edge here no longer breaks a rule, so the list only
 /// shrinks.
-const BACK_EDGES: &[(&str, &str, &str)] = &[(
-    "resolver",
-    "spitdag",
-    "bind_dag is in resolver/bind.rs, which step 9 moves beside spitdag",
-)];
+const BACK_EDGES: &[(&str, &str, &str)] = &[];
 
 fn source_files(directory: &Path, found: &mut Vec<PathBuf>) {
     for entry in fs::read_dir(directory).unwrap() {
