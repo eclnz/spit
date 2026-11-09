@@ -2,8 +2,8 @@
 //! `@clause(...)` list a port or a source may end with, of which
 //! `@check(...)` attaches checks.
 
-use crate::command::CommandTemplate;
 use crate::model::{CheckDef, CheckUse};
+use crate::template::CommandTemplate;
 
 use super::command::{check_redirects, reject_shell_operators};
 use super::lexical::{comma_items, identifier, qualified_identifier};

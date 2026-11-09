@@ -6,19 +6,21 @@ use std::fmt;
 use rustc_hash::FxHashMap;
 
 use crate::check::{step_checks, CheckIndex, StepCheck, When};
-use crate::command::{facet, slot, CommandError, CommandTemplate, Facet, Slot, Stream};
+use crate::command::{facet, slot, Facet, Slot};
 use crate::compile::validate_commands;
 use crate::model::{
     ArtifactId, CallId, Cardinality, CommandDef, CommandRole, DagStep, Job, OperationDef, Pipeline,
     PipelineIndex, ResolvedDag, Resources,
 };
-use crate::paths::{bound_paths, check_rules, BoundPaths, PathError};
+use crate::paths::{bound_paths, check_rules, BoundPaths};
 use crate::spitdag::{
     ArgPart, Argument, BoundCall, BoundCheck, BoundCommand, BoundDag, BoundJob, BoundStep,
     StepCall, StepCheck as BoundStepCheck,
 };
 use crate::template::builtin::CHECKED_PATH;
 use crate::template::Part;
+use crate::template::PathError;
+use crate::template::{CommandError, CommandTemplate, Stream};
 
 /// Bind every artifact of `dag` to its path and expand every job's command,
 /// `verify` commands and checks. A job whose operation has no command keeps none;

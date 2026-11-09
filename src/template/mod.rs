@@ -1,4 +1,21 @@
-//! `{placeholder}` templates shared by path rules and command templates.
+//! `{placeholder}` templates shared by path rules and command templates,
+//! and the path and command templates the model holds.
+
+mod command;
+mod component;
+mod entities;
+mod path;
+mod shape;
+
+pub(crate) use self::command::{shell_word, Stream};
+pub use self::command::{CommandError, CommandProblem, CommandTemplate};
+pub(crate) use self::component::{decode_component, encode_component, push_encoded};
+pub use self::entities::EntitiesFormat;
+pub(crate) use self::path::{
+    error, product_text, push_escaped, require_directory, Holder, PathPart, PathPlaceholder,
+};
+pub use self::path::{PathError, PathProblem, PathTemplate};
+pub(crate) use self::shape::Shape;
 
 /// The built-in placeholders, as their names are written between the
 /// braces. A name with `@` is SPIT's, so no port or dimension takes one.

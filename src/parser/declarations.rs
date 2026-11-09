@@ -5,7 +5,7 @@
 use std::collections::BTreeMap;
 
 use crate::model::{Beside, InputBinding, Invocation, ProductDef};
-use crate::paths::PathTemplate;
+use crate::template::PathTemplate;
 use crate::types::{parse_type_expr, TypeExpr, TypeParseError};
 
 use super::check::{no_space_after_at, split_clauses};

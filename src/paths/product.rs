@@ -3,13 +3,15 @@
 
 use std::borrow::Cow;
 
-use crate::model::{Artifact, Pipeline, PipelineIndex};
+use crate::model::{stage_directories, Artifact, Pipeline, PipelineIndex};
 
-use super::template::{
+use crate::template::{
     error, product_text, push_escaped, PathError, PathPart, PathPlaceholder, PathTemplate,
 };
 
-use super::components::{push_encoded, unusable_path};
+use super::components::unusable_path;
+
+use crate::template::push_encoded;
 
 /// Bind `artifact` to its relative path by its product's path template,
 /// `template`. `label` names the path in errors: a
@@ -173,21 +175,6 @@ impl<'p> ProductPath<'p> {
     }
 }
 
-/// The directories `{@stage}` gives `product`'s paths, each nested stage
-/// one, or `None` for a product made in no stage.
-pub(crate) fn stage_directories(index: &PipelineIndex<'_>, product: &str) -> Option<String> {
-    index.stage_of(product).map(|stage| {
-        let mut directories = String::new();
-        for (index, component) in stage.split('/').enumerate() {
-            if index > 0 {
-                directories.push('/');
-            }
-            push_encoded(&mut directories, component);
-        }
-        directories
-    })
-}
-
 /// `product`'s path template, `template`, with `{@product}` and `{@stage}`
 /// written out, as every artifact of it shares them, for showing beside its
 /// declaration: `derivatives/yield_table/{@entities}.csv`.
@@ -215,7 +202,7 @@ pub(crate) fn shown_path(
 /// Why `product`'s path keeps `{@entities}`: it has no dimensions, so no
 /// `{@entities}`, as a product outside every stage has no `{@stage}`, or no
 /// `default entities:` spells it. Keep in step with `push_resolved` in
-/// `template.rs`, which writes it out otherwise.
+/// `template/path.rs`, which writes it out otherwise.
 pub(crate) fn unspelled_entities(product: &str, dimensionless: bool) -> String {
     let placeholder = PathPlaceholder::Entities;
     if dimensionless {

@@ -1,14 +1,15 @@
 //! Every check of a parsed pipeline and its input rules, with no inventory,
 //! in one fixed order. The diagnostics place and render what this finds.
 
-use crate::command::CommandError;
 use crate::compile::{
     collect_command_lines, collect_definitions, operations_by_name, DefinitionCheck,
 };
 use crate::inputs::collect_rule_errors;
 use crate::lower::ParsedDocument;
 use crate::model::{DefinitionSubject, ResolveError};
-use crate::paths::{collect_paths, PathError};
+use crate::paths::collect_paths;
+use crate::template::CommandError;
+use crate::template::PathError;
 
 /// Every error [`check_pipeline`] finds, by the check that found it.
 pub(crate) struct PipelineCheck<'a> {

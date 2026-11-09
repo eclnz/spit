@@ -87,7 +87,7 @@ A comment earns its place by telling the reader what the code can't. A wrong or 
 
 **Files and modules**
 
-- **A Rust file has at most 800 lines, tests included.** A longer file usually holds two subjects, which read better as two modules. Split it along the data it handles, as `src/paths` is split into the template itself (`template.rs`), the path it gives one product's artifacts (`product.rs`), path components (`components.rs`), the checks on declared rules (`rules.rs`) and paths bound to a DAG (`bind.rs`), not into arbitrary halves. `tests/architecture.rs` fails a longer file.
+- **A Rust file has at most 800 lines, tests included.** A longer file usually holds two subjects, which read better as two modules. Split it along the data it handles, as `src/paths` is split into the path it gives one product's artifacts (`product.rs`), path components (`components.rs`), the checks on declared rules (`rules.rs`) and paths bound to a DAG (`bind.rs`), not into arbitrary halves. `tests/architecture.rs` fails a longer file.
 
 **Dependencies and boundaries**
 

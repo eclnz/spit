@@ -31,7 +31,6 @@ mod types;
 mod validate;
 
 pub use builtins::{builtin_words, Doc, Word, WordUse, DOCS, REFERENCE};
-pub use command::{CommandError, CommandProblem, CommandTemplate};
 pub use compile::{validate_commands, validate_pipeline};
 pub use diagnostics::{
     diagnose, diagnose_checked, diagnose_checked_with_inventory, diagnose_checked_with_records,
@@ -64,8 +63,8 @@ pub use model::{
 };
 pub use parser::{parse_source_inventory, render_source_inventory, ParseError, ParseErrorKind};
 pub use paths::{
-    inspect_paths, validate_bound_source_files, validate_source_files, BoundPaths, EntitiesFormat,
-    PathCoverage, PathCoverageEntry, PathError, PathProblem, PathRule, PathTemplate, VerifiedFiles,
+    inspect_paths, validate_bound_source_files, validate_source_files, BoundPaths, PathCoverage,
+    PathCoverageEntry, PathRule, VerifiedFiles,
 };
 pub use render::{
     render_artifacts, render_artifacts_by_target, render_bound_dag, render_call, render_calls,
@@ -79,6 +78,10 @@ pub use resolver::{
 pub use spitdag::{
     ArgPart, Argument, BoundArtifact, BoundCall, BoundCheck, BoundCommand, BoundDag, BoundJob,
     BoundStep, LeftOut, StepCall, StepCheck, When,
+};
+pub use template::{
+    CommandError, CommandProblem, CommandTemplate, EntitiesFormat, PathError, PathProblem,
+    PathTemplate,
 };
 pub use types::{
     parse_type_expr, Compatibility, Substitutions, TypeExpr, TypeParseError, TypeUnifyError,
