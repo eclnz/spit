@@ -49,6 +49,27 @@ fn help_lists_each_step_and_each_command_explains_itself() {
 }
 
 #[test]
+fn keywords_prints_the_keyword_table_as_json_and_help_leaves_it_out() {
+    let output = spit(&["keywords"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let text = stdout(&output);
+    assert_eq!(text, spit::keywords_json());
+    assert!(
+        text.starts_with(r#"{"keywords":[{"word":"source","block":true,"file":"pipeline"},"#),
+        "{text}"
+    );
+    assert!(
+        text.contains(r#"{"word":"exclude","block":true,"file":"recipe"}"#),
+        "{text}"
+    );
+    assert!(
+        text.contains(r#"{"word":"skip","block":false,"file":"replaced"}"#),
+        "{text}"
+    );
+    assert!(!stdout(&spit(&["help"])).contains("keywords"));
+}
+
+#[test]
 fn check_compiles_the_pipeline_without_its_inputs() {
     let output = spit(&["check", "examples/types/typed.spit"]);
     assert!(output.status.success(), "{}", stderr(&output));
