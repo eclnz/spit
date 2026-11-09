@@ -5,7 +5,7 @@ mod bind;
 mod matching;
 mod reviews;
 
-use crate::error::ResolveError;
+use crate::model::ResolveError;
 use rustc_hash::FxHashSet;
 
 use crate::model::{

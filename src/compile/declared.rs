@@ -4,7 +4,7 @@
 
 use std::collections::BTreeSet;
 
-use crate::error::{DefinitionSubject, ResolveError};
+use crate::model::{DefinitionSubject, ResolveError};
 use crate::model::{Pipeline, TypeChecking};
 use crate::types::TypeExpr;
 

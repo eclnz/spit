@@ -6,7 +6,7 @@ use std::path::PathBuf;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::error::{DefinitionSubject, ResolveError};
+use super::{DefinitionSubject, ResolveError};
 use crate::paths::{EntitiesFormat, PathTemplate};
 
 use super::{

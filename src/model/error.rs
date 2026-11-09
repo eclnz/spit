@@ -1,6 +1,6 @@
 use std::fmt;
 
-use crate::model::{
+use super::{
     ArtifactInstance, ArtifactType, CallId, CountRequirement, EntityBinding, SourceRecord,
 };
 

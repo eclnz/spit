@@ -8,7 +8,7 @@ use std::path::Path;
 
 use rustc_hash::FxHashMap;
 
-use crate::error::{DefinitionSubject, ResolveError};
+use crate::model::{DefinitionSubject, ResolveError};
 use crate::model::{
     InputRules, Pipeline, PipelineIndex, ProductDef, ReviewFile, Verdict, VerdictRow,
 };
