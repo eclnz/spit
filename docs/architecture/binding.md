@@ -7,6 +7,7 @@ flowchart LR
     dag["ResolvedDag"] --> rules["check_rules<br/>validate_commands"]
     pipeline["Pipeline"] --> rules
     rules --> paths["bound_paths<br/>PathBinder"]
+    pattern["PathPattern<br/>one per product"] --> paths
     paths --> jobs["bind_jobs<br/>commands and checks"]
     jobs --> bound["BoundDag"]
     bound --> write["write_document"]
@@ -26,7 +27,8 @@ flowchart LR
     - its `[...]` groups kept or dropped for the product's dimensions and stage;
     - `{@entities}` written out, as the nearest `default entities:` spells it;
     - its extension added: an operation's output extension, a source's declared one, or else `default ext:`.
-- **`PathBinder`** ([`src/paths/product.rs`](https://github.com/eclnz/spit/blob/dev/src/paths/product.rs)) binds artifacts to paths. `PathBinder::bind_numbered` finds each product's template and stage once, by its number in the artifact table.
+- **`PathPattern`** ([`src/template/pattern.rs`](https://github.com/eclnz/spit/blob/dev/src/template/pattern.rs)) is a product's completed template compiled once: literal text, with `{@product}` and `{@stage}` written out, and each dimension's value with the shape any of its placeholders has. It records the first placeholder it cannot write, `{@entities}` left unspelled or `{@stage}` outside every stage, as a `Gap`. `PathPattern::render` writes a binding's path, each value encoded as one path component; `PathPattern::match_path` reads a path back, which discovery uses.
+- **`PathBinder`** ([`src/paths/product.rs`](https://github.com/eclnz/spit/blob/dev/src/paths/product.rs)) binds artifacts to paths. `PathBinder::bind_numbered` compiles each product's `PathPattern` once, by its number in the artifact table, and turns a `RenderError` into a `PathError` at the placeholder.
 - **`CommandTemplate`** ([`src/template/command.rs`](https://github.com/eclnz/spit/blob/dev/src/template/command.rs)) is a command's arguments, each literal text and `{placeholders}`, and its `Redirect`s: each `<` or `>` word with the word after it, which are not arguments.
 - **`write_document`** ([`src/spitdag/write.rs`](https://github.com/eclnz/spit/blob/dev/src/spitdag/write.rs)) writes each artifact's JSON once, and each job's commands, which `write_work_commands` ([`src/spitdag/work.rs`](https://github.com/eclnz/spit/blob/dev/src/spitdag/work.rs)) writes a job's commands into.
 
@@ -73,7 +75,7 @@ flowchart LR
 
 - **The output is the same bytes for the same pipeline, inventory, root and SPIT version.** It never depends on hash order (AGENTS.md says how the code keeps to that). Test: [`tests/outputs.rs`](https://github.com/eclnz/spit/blob/dev/tests/outputs.rs), which compares every example's output with a stored copy under `tests/fixtures/outputs/`.
 - **No two artifacts share a path.** Products whose rules give the same path for the same entities are an error. Tests: [`path_rule_errors_point_to_the_rule_in_use`](https://github.com/eclnz/spit/blob/dev/tests/diagnostics.rs), [`two_sources_with_one_dimension_name_collide_whatever_their_shapes`](https://github.com/eclnz/spit/blob/dev/tests/placeholder_shapes.rs).
-- **A rendered path matches back to its binding.** Discovery reads a source's path, as binding renders it from a template, back to the values it was rendered from, for each placeholder, shape and group, and for values that need `%` escapes. It counts each output's rendered path, `{@stage}` included, as an output's rather than a file no rule matches. Where a template cannot tell two values apart, as `{a}-{b}` with a value holding `-`, the test names the binding matching gives instead. Test: [`a_rendered_path_matches_back_to_its_binding`](https://github.com/eclnz/spit/blob/dev/tests/path_roundtrip.rs).
+- **A rendered path matches back to its binding.** Rendering and matching read one `PathPattern`. Discovery reads a source's path, as binding renders it from a template, back to the values it was rendered from, for each placeholder, shape and group, and for values that need `%` escapes. It counts each output's rendered path, `{@stage}` included, as an output's rather than a file no rule matches. Where a template cannot tell two values apart, as `{a}-{b}` with a value holding `-`, the test names the binding matching gives instead. Test: [`a_rendered_path_matches_back_to_its_binding`](https://github.com/eclnz/spit/blob/dev/tests/path_roundtrip.rs).
 - **SPIT writes no path of its own.** An output with no rule fails at its declaration. A source with records but no rule fails at binding, rather than being looked for under `out/`. Tests: [`an_output_with_no_rule_is_an_error_and_a_source_waits_for_one`](https://github.com/eclnz/spit/blob/dev/tests/paths.rs), [`a_recorded_source_with_no_path_rule_is_not_looked_for_under_out`](https://github.com/eclnz/spit/blob/dev/tests/cli.rs).
 - **Checks change neither the jobs nor their commands.** Test: [`checks_change_neither_the_jobs_nor_their_commands`](https://github.com/eclnz/spit/blob/dev/tests/checks.rs).
 - **What a job needs leaves its commands as they are unless a command uses it.** Test: [`resources_leave_the_commands_unless_the_command_uses_them`](https://github.com/eclnz/spit/blob/dev/tests/resources.rs).

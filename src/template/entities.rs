@@ -2,6 +2,7 @@
 
 use std::collections::BTreeMap;
 
+use super::pattern::is_kept;
 use super::{parse_template, Part};
 
 /// How `{@entities}` writes each dimension, as a `default entities:` line
@@ -67,12 +68,11 @@ impl EntitiesFormat {
         }) {
             return Err("entities formatting must stay in one path component; literal text cannot contain whitespace, `/`, `\\`, `%`, braces or brackets".to_owned());
         }
-        // Keep in step with `push_encoded` in component.rs: values retain
-        // only ASCII letters, digits and `-`; every other byte is %XX.
-        let boundary = literals.iter().any(|text| {
-            text.bytes()
-                .any(|byte| !byte.is_ascii_alphanumeric() && byte != b'-')
-        });
+        // An encoded value holds only the bytes `is_kept` keeps, and `%`,
+        // which the check above already rejects.
+        let boundary = literals
+            .iter()
+            .any(|text| text.bytes().any(|byte| !is_kept(byte)));
         if !boundary {
             return Err("entities formatting is ambiguous: the template or separator needs punctuation other than `-` to separate encoded values".to_owned());
         }
