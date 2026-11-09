@@ -1,7 +1,10 @@
 name: CI
 
 on:
+  # A pull request runs on `pull_request` alone, so a branch is checked once;
+  # `dev` and `main` are checked as each merge lands.
   push:
+    branches: [dev, main]
   pull_request:
 
 jobs:
