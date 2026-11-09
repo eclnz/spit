@@ -92,7 +92,7 @@ A comment earns its place by telling the reader what the code can't. A wrong or 
 **Dependencies and boundaries**
 
 - **Two crates, and a new one must earn its place.** SPIT depends on `mimalloc` and `rustc-hash`. It writes JSON by hand rather than with `serde_json`, which is 15% faster and needs five fewer crates (`1b4b141`). A new dependency needs `profiling/bench.py` numbers, and the output must stay byte-for-byte the same.
-- **The three steps stay apart.** Don't make one step use another beyond what [the boundaries](docs/architecture.md#boundaries) allow, which `tests/architecture.rs` enforces. Add to `lib.rs` only what a caller outside the crate needs.
+- **The stages stay apart.** Don't make one stage use another beyond what [the boundaries](docs/architecture.md#boundaries) allow, which `tests/architecture.rs` enforces. Add to `lib.rs` only what a caller outside the crate needs.
 
 ## Writing documentation
 
