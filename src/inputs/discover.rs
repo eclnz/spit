@@ -9,17 +9,15 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::coverage::{apply_drops, EveryGroupDropped};
 use super::exclusions::{Excluder, UnmatchedExclusion};
-use super::pattern::{
-    inherit_shapes, match_pattern, missed_source, path_pattern, MissedSource, OutputPaths, Piece,
-};
+use super::pattern::{missed_source, path_pattern, MissedSource, OutputPaths};
 use crate::model::{
     ArtifactInstance, ContextPattern, EntityBinding, InputRules, Pipeline, PipelineIndex,
     ProductDef, Removal, SourceInventory, SourceRecord,
 };
 use crate::paths::{inspect_paths, validate_context_pattern, PathBinder};
 use crate::template::{
-    decode_component, encode_component, error, require_directory, PathError, PathPart,
-    PathPlaceholder, PathTemplate, Shape,
+    decode_component, encode_component, error, require_directory, PathError, PathPattern,
+    PathTemplate, Shape,
 };
 
 /// The source files found under a root, what the recipe's rules removed,
@@ -166,7 +164,7 @@ pub(super) fn discover(
             } else {
                 (&discovery.unmatched_files, false)
             };
-            missed_source(&source.product.name, &source.pieces, candidates, folder)
+            missed_source(&source.product.name, &source.pattern, candidates, folder)
         })
         .collect();
     find_contexts(&directory_patterns, &listing.directories, &mut discovery);
@@ -222,39 +220,27 @@ fn sources_of(pipeline: &Pipeline) -> impl Iterator<Item = &ProductDef> {
         .filter(move |product| !outputs.contains(&product.name))
 }
 
-/// A directory discovery rule, checked, as pieces to match.
+/// A directory discovery rule, checked, as a pattern to match.
 struct DiscoveryPattern {
-    pieces: Vec<Piece>,
+    pattern: PathPattern,
 }
 
 impl DiscoveryPattern {
     fn new(rule: &ContextPattern) -> Result<Self, PathError> {
+        // A checked rule has only literals and dimensions, so no product,
+        // stage or group for the pattern to fill.
         validate_context_pattern(rule)?;
-        let mut pieces: Vec<Piece> = rule
-            .template
-            .parts()
-            .iter()
-            .map(|part| match part {
-                PathPart::Literal(value) => Ok(Piece::Literal(value.clone())),
-                PathPart::Placeholder(PathPlaceholder::Dimension(name, shape)) => {
-                    Ok(Piece::Value(name.clone(), *shape))
-                }
-                PathPart::Placeholder(placeholder) => Err(error(format!(
-                    "context path uses reserved placeholder `{placeholder}`"
-                ))),
-                PathPart::Group(_) => unreachable!("a discovery pattern has no group"),
-            })
-            .collect::<Result<_, _>>()?;
-        inherit_shapes(&mut pieces);
-        Ok(Self { pieces })
+        Ok(Self {
+            pattern: PathPattern::new(&rule.template, "", None),
+        })
     }
 }
 
-/// A source product and the pieces its path rule matches, in the order
+/// A source product and the pattern of its path rule, in the order
 /// the pipeline declares its products.
 struct SourcePattern<'a> {
     product: &'a ProductDef,
-    pieces: Vec<Piece>,
+    pattern: PathPattern,
 }
 
 /// Every source of `pipeline` with its path pattern; each must have a rule.
@@ -268,8 +254,8 @@ fn source_patterns(pipeline: &Pipeline) -> Result<Vec<SourcePattern<'_>>, PathEr
                     product.name
                 ))
             })?;
-            let pieces = path_pattern(&template, product, None)?;
-            Ok(SourcePattern { product, pieces })
+            let pattern = path_pattern(&template, product, None)?;
+            Ok(SourcePattern { product, pattern })
         })
         .collect()
 }
@@ -280,7 +266,7 @@ fn find_contexts(patterns: &[DiscoveryPattern], directories: &[String], discover
     let mut contexts = BTreeSet::new();
     for directory in directories {
         for pattern in patterns {
-            let Some(bound) = match_pattern(&pattern.pieces, directory) else {
+            let Some(bound) = pattern.pattern.match_path(directory) else {
                 continue;
             };
             match read_binding(directory, bound) {
@@ -301,7 +287,7 @@ type Placed<'s, 'a> = (usize, &'s SourcePattern<'a>);
 fn first_match<'s, 'a>(sources: &[Placed<'s, 'a>], path: &str) -> Option<Placed<'s, 'a>> {
     sources
         .iter()
-        .find(|(_, source)| match_pattern(&source.pieces, path).is_some())
+        .find(|(_, source)| source.pattern.match_path(path).is_some())
         .copied()
 }
 
@@ -334,7 +320,10 @@ fn source_record(
     notes: &mut Vec<String>,
 ) -> Result<Option<SourceRecord>, PathError> {
     let mut matches = sources.iter().filter_map(|(_, source)| {
-        match_pattern(&source.pieces, file).map(|bound| (source.product, bound))
+        source
+            .pattern
+            .match_path(file)
+            .map(|bound| (source.product, bound))
     });
     let Some((product, bound)) = matches.next() else {
         return Ok(None);
@@ -431,19 +420,21 @@ fn is_spit_file(file: &str) -> bool {
 /// hidden folder, so a runner's state or a `.git` is not listed as files
 /// that match no rule.
 fn hidden_names(sources: &[SourcePattern], contexts: &[DiscoveryPattern]) -> BTreeSet<String> {
-    let pieces = sources
+    let literals = sources
         .iter()
-        .flat_map(|source| source.pieces.iter())
-        .chain(contexts.iter().flat_map(|context| context.pieces.iter()));
+        .flat_map(|source| source.pattern.literals())
+        .chain(
+            contexts
+                .iter()
+                .flat_map(|context| context.pattern.literals()),
+        );
     let mut names = BTreeSet::new();
-    for piece in pieces {
-        if let Piece::Literal(text) = piece {
-            names.extend(
-                text.split('/')
-                    .filter(|part| part.starts_with('.'))
-                    .map(str::to_owned),
-            );
-        }
+    for text in literals {
+        names.extend(
+            text.split('/')
+                .filter(|part| part.starts_with('.'))
+                .map(str::to_owned),
+        );
     }
     names
 }
