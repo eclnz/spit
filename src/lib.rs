@@ -4,6 +4,7 @@
 // Outside tests, `expect` states the invariant it relies on; see AGENTS.md.
 #![deny(clippy::unwrap_used)]
 
+mod bind;
 mod blob;
 mod builtins;
 mod check;
@@ -29,6 +30,7 @@ mod template;
 mod types;
 mod validate;
 
+pub use bind::{bind_dag, bind_dag_with, BindError};
 pub use builtins::{builtin_words, Doc, Word, WordUse, DOCS, REFERENCE};
 pub use compile::{validate_commands, validate_pipeline};
 pub use diagnostics::{
@@ -70,10 +72,7 @@ pub use render::{
     render_calls_json, render_dag, render_pipeline_tree, render_step_counts,
     unused_sources_summary, View,
 };
-pub use resolver::{
-    bind_dag, bind_dag_with, resolve, resolve_artifacts_excluding, resolve_artifacts_partial,
-    BindError,
-};
+pub use resolver::{resolve, resolve_artifacts_excluding, resolve_artifacts_partial};
 pub use spitdag::{
     ArgPart, Argument, BoundArtifact, BoundCall, BoundCheck, BoundCommand, BoundDag, BoundJob,
     BoundStep, LeftOut, StepCall, StepCheck, When,

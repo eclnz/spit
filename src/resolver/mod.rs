@@ -1,7 +1,6 @@
 //! Resolve jobs: expand each step of a compiled pipeline, in dependency
 //! order, into concrete jobs over an inventory's artifacts.
 
-mod bind;
 mod matching;
 mod reviews;
 
@@ -17,7 +16,6 @@ use crate::review::{port_reviews, ReviewIndex};
 
 use crate::compile::{compile, CompiledPipeline, CompiledStep};
 
-pub use self::bind::{bind_dag, bind_dag_with, BindError};
 use self::matching::{expand_step, make_job, Expansion, Held};
 use self::reviews::{Judging, Verdicts};
 

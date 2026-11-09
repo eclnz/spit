@@ -15,7 +15,7 @@ flowchart LR
 
 ## Data
 
-- **`bind_dag(&pipeline, &dag)`** ([`src/resolver/bind.rs`](https://github.com/eclnz/spit/blob/dev/src/resolver/bind.rs)) gives the `BoundDag`. `bind_dag_with` takes paths that `validate_bound_source_files` already bound, so `dag` with a root binds them once.
+- **`bind_dag(&pipeline, &dag)`** ([`src/bind.rs`](https://github.com/eclnz/spit/blob/dev/src/bind.rs)) gives the `BoundDag`. `bind_dag_with` takes paths that `validate_bound_source_files` already bound, so `dag` with a root binds them once.
 - **`BoundDag`** ([`src/spitdag/mod.rs`](https://github.com/eclnz/spit/blob/dev/src/spitdag/mod.rs)) keeps:
     - the same `Artifacts` table as the `ResolvedDag`, with each artifact's path as a column by id;
     - each product's dimensions, and whether its artifacts are folders, once per product;
