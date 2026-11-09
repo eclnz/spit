@@ -29,7 +29,7 @@ For scripts and editors, `spit check --json` prints diagnostics on stdout and ex
 - [Command line manual](docs/cli.md) lists commands and flags; [DAG format](docs/spitdag.md) defines the runner contract.
 - [Examples](docs/examples.md) show complete pipelines; [architecture](docs/architecture.md) describes contributor internals.
 
-Run `uv run --no-project --with-requirements .github/docs-requirements.txt properdocs serve` to browse the site locally, with [uv](https://docs.astral.sh/uv/) installed. `properdocs build --strict` in place of `serve` validates the site build.
+Run `uv run properdocs serve` to browse the site locally, with [uv](https://docs.astral.sh/uv/) installed, and `uv run properdocs build --strict` to validate the site build.
 
 ## Development
 
