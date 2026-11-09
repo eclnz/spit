@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::model::{ArtifactReport, PipelineIndex, ResolvedDag, SourceInventory};
 use crate::parser::{SourceMap, Step};
-use crate::paths::case_collisions;
+use crate::paths::{bound_paths, case_collisions, misread_sources, BoundPaths};
 use crate::span::Place;
 use crate::validate::PipelineWarning;
 use crate::{Pipeline, ResolveError};
@@ -42,14 +42,29 @@ pub(super) fn near_miss_warnings(report: &ArtifactReport) -> Vec<Diagnostic> {
     warnings
 }
 
-/// Flag paths that differ only in case, which are one file on macOS and Windows.
-pub(super) fn case_warnings(
+/// Flag paths that differ only in case, which are one file on macOS and
+/// Windows, and source paths their rule reads back as other values. Each
+/// artifact's path is bound once for both.
+pub(super) fn path_warnings(
     pipeline: &Pipeline,
     lines: &SourceMap,
     dag: &ResolvedDag,
 ) -> Vec<Diagnostic> {
+    let Ok(BoundPaths { paths, .. }) = bound_paths(pipeline, dag) else {
+        return Vec::new();
+    };
     let index = PipelineIndex::new(pipeline);
-    case_collisions(pipeline, dag)
+    let misread = misread_sources(pipeline, dag, &paths).into_iter().map(|found| {
+        let (product, entities) = &found.artifact;
+        warning(
+            lines.path_rule(&index, product),
+            format!(
+                "`{product}[{entities}]` has path `{}`, which its rule reads back as `{product}[{}]`, so its file would be found under those values; use a separator between placeholders that no value holds",
+                found.path, found.read
+            ),
+        )
+    });
+    case_collisions(dag, &paths)
         .into_iter()
         .map(|[(first, first_path), (second, second_path)]| {
             warning(
@@ -60,6 +75,7 @@ pub(super) fn case_warnings(
                 ),
             )
         })
+        .chain(misread)
         .collect()
 }
 

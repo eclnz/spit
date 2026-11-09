@@ -346,7 +346,7 @@ fn a_dropped_group_can_leave_two_open_shapes_touching() {
     tree.write("a.spit", "source s [a, b]\nsource t [a, b, c]\n");
     tree.write(
         "a.spitin",
-        "pipeline a.spit\nroot .\ninputs:\n    default: in/{a:digits}[-{c}]{b:digits}.txt\n",
+        "pipeline a.spit\nroot .\ninputs:\n    default: in/{a:digits}[-{c}_]{b:digits}.txt\n",
     );
     let said = text(&run(&tree, &["check", "a.spitin"]).stderr);
     assert!(
@@ -374,13 +374,39 @@ fn a_dropped_group_leaving_a_separator_is_fine() {
 }
 
 #[test]
-fn a_shape_beside_an_unshaped_placeholder_splits_shortest_first() {
-    let tree = Tree::new("shapes-mixed", &["in/123.txt", "in/1x.txt"]);
-    tree.write("a.spit", "source s [a, b]\npath s: in/{a:digits}{b}.txt\n");
+fn a_source_placeholder_of_any_length_beside_another_is_an_error() {
+    // `in/123.txt` would be `a=1, b=23` as well as `a=12, b=3`.
+    for rule in [
+        "in/{a:digits}{b}.txt",
+        "in/{a}{b}.txt",
+        "in/{a}{b:digits}.txt",
+    ] {
+        let said = check(&format!("source s [a, b]\npath s: {rule}\n"));
+        assert!(
+            said.contains("has no text between two values of any length, so a file's name does not say where one ends; put a `-` or `_` between them"),
+            "{rule}: {said}"
+        );
+    }
+}
+
+#[test]
+fn a_fixed_length_shape_beside_an_unshaped_placeholder_splits_where_it_ends() {
+    let tree = Tree::new("shapes-mixed", &["in/2024x.txt", "in/x2024.txt"]);
+    tree.write("a.spit", "source s [y, b]\npath s: in/{y:year}{b}.txt\nsource t [y, b]\npath t: in/{b}{y:year}.txt\n");
     tree.write("a.spitin", "pipeline a.spit\nroot .\n");
     let stdout = text(&run(&tree, &["inputs", "a.spitin"]).stdout);
-    assert!(stdout.contains("s[a=1,b=23]"), "{stdout}");
-    assert!(stdout.contains("s[a=1,b=x]"), "{stdout}");
+    assert!(stdout.contains("s[y=2024,b=x]"), "{stdout}");
+    assert!(stdout.contains("t[y=2024,b=x]"), "{stdout}");
+}
+
+#[test]
+fn an_output_may_put_placeholders_side_by_side() {
+    // Nothing reads an output's path back into values.
+    let said = check(
+        "source s [a, b]\npath s: in/{a}-{b}.txt\noperation f(s) -> .txt\ncommand f: f {s} {@output}\n\
+         o = f(s)\npath o: out/{a}{b}.txt\n",
+    );
+    assert!(!said.contains("no text between"), "{said}");
 }
 
 #[test]
