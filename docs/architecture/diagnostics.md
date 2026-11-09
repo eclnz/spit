@@ -15,6 +15,7 @@ flowchart LR
     list --> json["spit check --json"]
     hovers["pipeline_hovers<br/>builtin_words"] --> json
     json --> editor["spit-vscode"]
+    keywords["spit keywords<br/>keywords_json"] --> editor
 ```
 
 ## Data
@@ -53,6 +54,7 @@ flowchart LR
     - A product's hover keeps its inference failures, leaves out a declared type it would repeat, and caps its list of consumers with a count.
     - Hover fields are plain text. The extension renders known code sections itself, and never trusts Markdown from names or templates the user wrote.
 - **SPIT's own words.** `builtin_words` reads each line with the parser's `Layout`, and records each use of a word as a line, UTF-16 columns and a `Word`. Each `Word` has one entry in the static `DOCS` table, so `check --json --hovers` writes each word's documentation once, however often the word is used.
+- **SPIT's keywords.** `spit keywords`, which the help leaves out, prints `keywords_json` ([`src/parser/keyword.rs`](https://github.com/eclnz/spit/blob/dev/src/parser/keyword.rs)): each keyword with a word of its own, in table order, with whether it opens a block and which file it belongs in. spit-vscode's grammar test fails when the grammar does not colour one of them, so a keyword added here needs the extension's change too.
 - **`spit check --calls`** is `render_calls` ([`src/render/calls.rs`](https://github.com/eclnz/spit/blob/dev/src/render/calls.rs)).
     - It reads the steps, each step's `origin`, `Pipeline::calls` and `Pipeline::operation_files` alone, so it needs no data.
     - It shares `written_step` with the hovers.
@@ -66,6 +68,7 @@ flowchart LR
 - **A line with an error shows no warnings.** Test: [`a_line_with_an_error_shows_no_warnings`](https://github.com/eclnz/spit/blob/dev/tests/warnings.rs).
 - **An error in an imported file is placed in that file, and at the `use` line.** Test: [`a_body_that_reads_a_missing_product_is_reported_in_the_library`](https://github.com/eclnz/spit/blob/dev/tests/imported_errors.rs).
 - **An error in a call's step points at the call and into the body.** Tests: [`an_error_in_a_call_points_at_the_argument_the_caller_gave_and_into_the_body`](https://github.com/eclnz/spit/blob/dev/tests/composites.rs), [`an_error_in_an_imported_nested_call_relates_each_call_and_the_step`](https://github.com/eclnz/spit/blob/dev/tests/composites.rs).
+- **`spit keywords` prints the keyword table.** Test: [`keywords_prints_the_keyword_table_as_json_and_help_leaves_it_out`](https://github.com/eclnz/spit/blob/dev/tests/cli.rs).
 - **Each word in `DOCS` is documented once, and names a section of the language reference.** Test: [`every_word_is_documented_once_and_links_to_a_section`](https://github.com/eclnz/spit/blob/dev/tests/builtin_words.rs).
 - **The cost of diagnosing grows with the diagnostics, not the length of the file.** Test: [`rendering_diagnostics_costs_the_diagnostics_not_the_length_of_the_file`](https://github.com/eclnz/spit/blob/dev/tests/scale.rs), which runs on request.
 
