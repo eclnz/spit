@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use rustc_hash::FxHashSet;
 
-use crate::error::{DefinitionSubject, ResolveError};
+use crate::model::{DefinitionSubject, ResolveError};
 use crate::model::{Invocation, OperationDef, Pipeline, ProductDef};
 
 use super::{find_operation, find_product};

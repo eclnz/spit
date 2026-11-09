@@ -6,11 +6,11 @@ use std::collections::BTreeSet;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::compile::{CompiledStep, StepShape};
-use crate::error::{NearMiss, PortSite, ResolveError};
 use crate::model::{
     near_reason, ArtifactId, Artifacts, Cardinality, EntityBinding, Gap, Invocation, Job, JobId,
     Judged, OperationDef, StepId,
 };
+use crate::model::{NearMiss, PortSite, ResolveError};
 
 use super::reviews::{Block, Judging};
 

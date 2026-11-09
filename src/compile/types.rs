@@ -3,8 +3,8 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::error::{DefinitionSubject, PortSite, ResolveError, TypeConflict};
 use crate::model::{Call, CallId, Invocation, OperationDef, ProductDef};
+use crate::model::{DefinitionSubject, PortSite, ResolveError, TypeConflict};
 use crate::types::{Substitutions, TypeExpr, TypeUnifyError};
 
 use super::find_product;

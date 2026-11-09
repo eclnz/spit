@@ -11,7 +11,7 @@ use crate::parser::SourceMap;
 use crate::template::builtin::{CORES, HERE, OUTPUT};
 use crate::template::Part;
 
-use super::{CommandError, CommandTemplate, Stream};
+use crate::template::{CommandError, CommandTemplate, Stream};
 
 /// What a placeholder in a command refers to.
 pub(crate) enum Slot {

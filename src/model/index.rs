@@ -4,7 +4,7 @@ use std::borrow::Cow;
 
 use rustc_hash::FxHashMap;
 
-use crate::paths::{stage_directories, EntitiesFormat, Holder, PathTemplate};
+use crate::template::{push_encoded, EntitiesFormat, Holder, PathTemplate};
 
 use super::{
     stage_and_parents, BesideFile, ExtensionSource, Invocation, OperationDef, OutputPort, Pipeline,
@@ -464,4 +464,19 @@ impl<'p> PipelineIndex<'p> {
                 .and_then(|stage| Some((stage.name.as_str(), stage.path_template.as_ref()?)))
         })
     }
+}
+
+/// The directories `{@stage}` gives `product`'s paths, each nested stage
+/// one, or `None` for a product made in no stage.
+pub(crate) fn stage_directories(index: &PipelineIndex<'_>, product: &str) -> Option<String> {
+    index.stage_of(product).map(|stage| {
+        let mut directories = String::new();
+        for (index, component) in stage.split('/').enumerate() {
+            if index > 0 {
+                directories.push('/');
+            }
+            push_encoded(&mut directories, component);
+        }
+        directories
+    })
 }

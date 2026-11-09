@@ -5,7 +5,7 @@
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::error::ResolveError;
+use crate::model::ResolveError;
 use crate::model::{
     Cardinality, InputBinding, InputPort, Invocation, OperationDef, ProductDef, ShapeRule,
 };

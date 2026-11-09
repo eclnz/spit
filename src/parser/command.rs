@@ -2,9 +2,9 @@
 //! the shell operators every command template, a check's included, is kept
 //! free of, and the `<` and `>` that only an operation's command may use.
 
-use crate::command::{CommandTemplate, Stream};
 use crate::model::{CommandDef, CommandRole};
 use crate::span::{content_columns, Place};
+use crate::template::{CommandTemplate, Stream};
 
 use super::declarations::single_colon;
 use super::lexical::qualified_identifier;

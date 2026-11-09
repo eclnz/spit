@@ -36,8 +36,8 @@ enum Layer {
 fn layer(module: &str) -> Option<Layer> {
     Some(match module {
         "blob" | "json" | "span" | "template" | "types" => Layer::Value,
-        "error" | "model" | "shape" => Layer::Model,
-        "builtins" | "imports" | "lower" | "order" | "parser" => Layer::Parse,
+        "model" | "shape" => Layer::Model,
+        "builtins" | "lower" | "order" | "parser" => Layer::Parse,
         "check" | "command" | "compile" | "paths" | "resources" | "review" => Layer::Check,
         "inputs" => Layer::Inputs,
         "validate" => Layer::Validate,
@@ -70,53 +70,11 @@ fn allowed(from: Layer, to: Layer) -> bool {
 /// names the step of `spit-architecture-plan.md` that removes the edge. The
 /// test fails when an edge here no longer breaks a rule, so the list only
 /// shrinks.
-const BACK_EDGES: &[(&str, &str, &str)] = &[
-    (
-        "span",
-        "parser",
-        "span uses parser::strip_comment, which step 8 moves below the parser",
-    ),
-    (
-        "model",
-        "paths",
-        "the model holds PathTemplate, EntitiesFormat and Holder, which step 8 moves to the value layer",
-    ),
-    (
-        "model",
-        "command",
-        "the model holds CommandTemplate, which step 8 moves to the value layer",
-    ),
-    (
-        "model",
-        "error",
-        "the model returns ResolveError, which names model ids; step 8 makes the model a leaf",
-    ),
-    (
-        "parser",
-        "paths",
-        "the parser makes PathTemplate and EntitiesFormat, which step 8 moves to the value layer",
-    ),
-    (
-        "parser",
-        "command",
-        "the parser makes CommandTemplate, which step 8 moves to the value layer",
-    ),
-    (
-        "lower",
-        "paths",
-        "lowering reads EntitiesFormat, which step 8 moves to the value layer",
-    ),
-    (
-        "lower",
-        "imports",
-        "lowering calls imports::apply_import, which step 8 moves into lower",
-    ),
-    (
-        "resolver",
-        "spitdag",
-        "bind_dag is in resolver/bind.rs, which step 9 moves beside spitdag",
-    ),
-];
+const BACK_EDGES: &[(&str, &str, &str)] = &[(
+    "resolver",
+    "spitdag",
+    "bind_dag is in resolver/bind.rs, which step 9 moves beside spitdag",
+)];
 
 fn source_files(directory: &Path, found: &mut Vec<PathBuf>) {
     for entry in fs::read_dir(directory).unwrap() {

@@ -4,7 +4,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::error::{DefinitionSubject, ResolveError};
+use crate::model::{DefinitionSubject, ResolveError};
 use crate::model::{OperationDef, Pipeline};
 use crate::types::{Substitutions, TypeExpr};
 

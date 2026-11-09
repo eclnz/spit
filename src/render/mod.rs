@@ -3,12 +3,12 @@
 use std::collections::BTreeSet;
 use std::fmt::{self, Write as _};
 
-use crate::command::shell_word;
 use crate::model::{
     identity, push_identity, Artifact, ArtifactInstance, ArtifactReport, Call, CallId,
     EntityBinding, Gap, IncompleteJob, JobId, Pipeline, ResolvedDag, Resources,
 };
 use crate::spitdag::{Argument, BoundDag, BoundJob, StepCall, When};
+use crate::template::shell_word;
 use crate::types::TypeExpr;
 pub(crate) use calls::written_step;
 pub use calls::{render_calls, render_calls_json};

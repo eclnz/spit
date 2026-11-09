@@ -9,7 +9,6 @@ use std::collections::BTreeMap;
 
 use rustc_hash::FxHashMap;
 
-use crate::command::CommandError;
 use crate::model::{
     stage_and_parents, CheckDef, CheckId, CheckUse, DefaultChecks, Invocation, OperationDef,
     Pipeline, PipelineIndex, Port,
@@ -17,6 +16,7 @@ use crate::model::{
 use crate::parser::SourceMap;
 use crate::span::Place;
 use crate::template::builtin::CHECKED_PATH;
+use crate::template::CommandError;
 use crate::template::Part;
 
 /// Check every `check` declaration and every use of one, collecting each

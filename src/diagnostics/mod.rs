@@ -17,18 +17,17 @@ use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use crate::imports::parse_located_document_recovering;
 use crate::inputs::{
     check_inventory, with_source_paths, InputCheck, InputError, InputSpec, ResolvedInputs,
 };
+use crate::lower::imports::parse_located_document_recovering;
 use crate::lower::{parse_document_recovering, ParsedDocument};
 use crate::model::{ArtifactReport, CoverageGap, InputRules, PipelineIndex, SourceInventory};
-use crate::parser::{
-    as_read_back, glued_comment, parse_inventory_recovering, without_bom, Kind, Rule, SourceMap,
-};
-use crate::paths::{shown_path, PathTemplate};
+use crate::parser::{as_read_back, parse_inventory_recovering, without_bom, Kind, Rule, SourceMap};
+use crate::paths::shown_path;
 use crate::resolver::first_failure;
-use crate::span::{content_columns, Lines, Place};
+use crate::span::{content_columns, glued_comment, Lines, Place};
+use crate::template::PathTemplate;
 use crate::validate::check_pipeline;
 use crate::{
     parse_source_inventory, resolve_artifacts_excluding, DefinitionSubject, ParseError, Pipeline,

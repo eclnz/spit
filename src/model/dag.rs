@@ -4,7 +4,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
-use crate::error::ResolveError;
+use super::ResolveError;
 
 use super::{
     Artifact, ArtifactId, ArtifactInstance, Artifacts, CallId, SourceInventory, StepOrigin,

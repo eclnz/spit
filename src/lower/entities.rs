@@ -5,8 +5,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::model::Pipeline;
 use crate::parser::{EntitiesDeclaration, ParseError};
-use crate::paths::EntitiesFormat;
 use crate::span::Place;
+use crate::template::EntitiesFormat;
 
 /// A stage's name, or `None` for the file outside every stage.
 type Scope = Option<String>;
