@@ -48,7 +48,7 @@ pub fn diagnose_recipe(text: &str, path: &Path) -> Vec<Diagnostic> {
             if spec.root.is_none() {
                 for mut warning in checked.warnings {
                     if warning.message.starts_with("dataset root ") {
-                        warning.file = Some(crate::imports::relative_path(
+                        warning.file = Some(crate::lower::imports::relative_path(
                             path.parent().unwrap_or_else(|| Path::new("")),
                             pipeline_path,
                         ));
@@ -64,7 +64,7 @@ pub fn diagnose_recipe(text: &str, path: &Path) -> Vec<Diagnostic> {
         }
         Err(diagnostics) => {
             let external: Arc<str> = Arc::from(pipeline_text.as_str());
-            let pipeline_file = crate::imports::relative_path(
+            let pipeline_file = crate::lower::imports::relative_path(
                 path.parent().unwrap_or_else(|| Path::new("")),
                 pipeline_path,
             );
