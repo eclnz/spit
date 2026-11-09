@@ -195,11 +195,9 @@ fn needs_escape(text: &str) -> bool {
     const ONES: u64 = 0x0101_0101_0101_0101;
     // Whether any byte of `word` is zero.
     let has_zero = |word: u64| word.wrapping_sub(ONES) & !word & (ONES << 7) != 0;
-    let mut chunks = text.as_bytes().chunks_exact(8);
-    for chunk in &mut chunks {
-        let mut bytes = [0; 8];
-        bytes.copy_from_slice(chunk);
-        let word = u64::from_le_bytes(bytes);
+    let (chunks, rest) = text.as_bytes().as_chunks::<8>();
+    for &chunk in chunks {
+        let word = u64::from_le_bytes(chunk);
         // A control character has none of its top three bits set.
         if has_zero(word & (ONES * 0xe0))
             || has_zero(word ^ (ONES * u64::from(b'"')))
@@ -208,9 +206,7 @@ fn needs_escape(text: &str) -> bool {
             return true;
         }
     }
-    chunks
-        .remainder()
-        .iter()
+    rest.iter()
         .any(|&byte| byte < b' ' || byte == b'"' || byte == b'\\')
 }
 
