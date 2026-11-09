@@ -23,7 +23,7 @@ use std::path::{Path, PathBuf};
 use rustc_hash::FxHashMap;
 
 use crate::compile::validate_pipeline;
-use crate::imports::parse_located_document;
+use crate::lower::imports::parse_located_document;
 use crate::lower::{parse_document_with_imports, ParsedDocument};
 use crate::model::ResolveError;
 use crate::model::{

@@ -17,10 +17,10 @@ use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use crate::imports::parse_located_document_recovering;
 use crate::inputs::{
     check_inventory, with_source_paths, InputCheck, InputError, InputSpec, ResolvedInputs,
 };
+use crate::lower::imports::parse_located_document_recovering;
 use crate::lower::{parse_document_recovering, ParsedDocument};
 use crate::model::{ArtifactReport, CoverageGap, InputRules, PipelineIndex, SourceInventory};
 use crate::parser::{as_read_back, parse_inventory_recovering, without_bom, Kind, Rule, SourceMap};

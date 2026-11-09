@@ -22,7 +22,7 @@ Each box of the diagram, the function that makes it, and what the box doesn't sh
 
 1. **`Layout`**: `Layout::new` ([`parser/layout.rs`](https://github.com/eclnz/spit/blob/dev/src/parser/layout.rs)). Each `Line` has its indentation, its code without its comment, its `Head`, and whether it is a record. Each `Statement` has its lines, its parent, and the `Block` it opens.
 2. **`Syntax`**: `parse_flow` ([`parser/flow.rs`](https://github.com/eclnz/spit/blob/dev/src/parser/flow.rs)). The statements that parsed, and a `ParseError` for each that did not, with how many statements came before it.
-3. **Imports**: `Import::read` ([`imports.rs`](https://github.com/eclnz/spit/blob/dev/src/imports.rs)). The `Pipeline` each `use` line brings in, by line.
+3. **Imports**: `Import::read` ([`lower/imports.rs`](https://github.com/eclnz/spit/blob/dev/src/lower/imports.rs)). The `Pipeline` each `use` line brings in, by line.
 4. **`lower`** ([`lower/mod.rs`](https://github.com/eclnz/spit/blob/dev/src/lower/mod.rs), [`lower/expand.rs`](https://github.com/eclnz/spit/blob/dev/src/lower/expand.rs)) gives a `PipelineBuilder`, from which the document takes its `Pipeline`, `InputRules` and `SourceMap`.
 5. **Records**: `document_records` ([`parser/inventory.rs`](https://github.com/eclnz/spit/blob/dev/src/parser/inventory.rs)), for a recipe only.
 6. **`ParsedDocument`**: `parse_layout` ([`lower/mod.rs`](https://github.com/eclnz/spit/blob/dev/src/lower/mod.rs)).

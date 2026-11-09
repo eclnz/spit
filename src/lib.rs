@@ -11,7 +11,6 @@ mod command;
 mod compile;
 mod diagnostics;
 mod editor;
-mod imports;
 mod inputs;
 mod json;
 mod lower;
@@ -43,12 +42,12 @@ pub use editor::{
     pipeline_hovers, render_editor_json, render_recipe_editor_json, render_words_json, Hover,
     HoverKind,
 };
-pub use imports::parse_pipeline_at;
 pub use inputs::{
     case_variants, discover_source_files, discover_sources, parse_input_spec, parse_input_spec_at,
     CaseVariants, Discovery, EveryGroupDropped, InputError, InputSource, InputSpec, MissedSource,
     NearestFile, ResolvedInputs, ReviewFileError, Spelling, UnmatchedExclusion,
 };
+pub use lower::imports::parse_pipeline_at;
 pub use lower::parse_pipeline;
 pub use model::{
     stage_within, Artifact, ArtifactId, ArtifactInstance, ArtifactKey, ArtifactReport,
