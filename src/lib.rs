@@ -29,10 +29,11 @@ mod span;
 mod spitdag;
 mod template;
 mod types;
+mod validate;
 
 pub use builtins::{builtin_words, Doc, Word, WordUse, DOCS, REFERENCE};
-pub use command::{validate_commands, CommandError, CommandProblem, CommandTemplate};
-pub use compile::validate_pipeline;
+pub use command::{CommandError, CommandProblem, CommandTemplate};
+pub use compile::{validate_commands, validate_pipeline};
 pub use diagnostics::{
     diagnose, diagnose_checked, diagnose_checked_with_inventory, diagnose_checked_with_records,
     diagnose_in, diagnose_inputs, diagnose_recipe, diagnose_recipe_against,

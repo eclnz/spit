@@ -1,6 +1,8 @@
 //! Checks of recipe declarations against their pipeline.
 
 use super::*;
+use crate::inputs::collect_rule_errors;
+use crate::paths::collect_paths;
 
 /// Diagnose a `.spitin` recipe at `path` without reading any data: its own
 /// lines, then the pipeline its `pipeline` line names, then its rules and
@@ -171,7 +173,9 @@ pub fn diagnose_recipe_against(text: &str, pipeline: &Pipeline) -> Vec<Diagnosti
                     Place::new(*line, content_columns(written))
                 }),
                 InputError::Resolve(error) => {
-                    error_location(pipeline, &lines, error, text, false).1
+                    Places::new(pipeline, &lines)
+                        .error_location(error, text, false)
+                        .1
                 }
                 InputError::NotASource { product }
                 | InputError::OutputPath { product }

@@ -1,12 +1,15 @@
 # Diagnostics and the editor
 
-Every stage reports a problem as data: an error enum whose fields say what went wrong, and a place that says where. `src/diagnostics` turns those errors into one ordered list of `Diagnostic`s. It decides each one's severity once, and the command line and the editor both read that list. The editor's hovers are built beside it, from the same parse.
+Every stage reports a problem as data: an error enum whose fields say what went wrong, and a place that says where. `check_pipeline` runs every check of a parsed pipeline, and `src/diagnostics` places and renders what it and the other stages find as one ordered list of `Diagnostic`s. It decides each one's severity once, and the command line and the editor both read that list. The editor's hovers are built beside it, from the same parse.
 
 ```mermaid
 flowchart LR
-    parse["ParseError<br/>parsing and lowering"] --> diagnose["diagnose_in<br/>diagnose_recipe"]
-    compile["ResolveError<br/>compile and resolve"] --> diagnose
-    inputs["InputError, PathError<br/>CommandError"] --> diagnose
+    parse["ParsedDocument<br/>or ParseError"] --> check["check_pipeline"]
+    check --> report["PipelineCheck<br/>ResolveError, CommandError,<br/>PathError"]
+    report --> diagnose["diagnose_in<br/>diagnose_recipe"]
+    parse --> diagnose
+    records["InputError, ResolveError<br/>settling and resolving records"] --> diagnose
+    places["Places"] --> diagnose
     diagnose --> list["ordered Diagnostic list"]
     list --> text["spit check<br/>text"]
     list --> json["spit check --json"]
@@ -21,9 +24,10 @@ flowchart LR
     - its source, the document or its inventory;
     - its line and byte columns, and the file, when another file holds the problem;
     - its message.
-- **`diagnose_in`** and the other `diagnose_*` functions ([`src/diagnostics/mod.rs`](https://github.com/eclnz/spit/blob/dev/src/diagnostics/mod.rs)) check a pipeline. **`diagnose_recipe`** ([`src/diagnostics/recipe.rs`](https://github.com/eclnz/spit/blob/dev/src/diagnostics/recipe.rs)) checks a recipe. Each parses with recovery (see [parsing](parsing.md)), and checks the semantics once the document parses. It resolves jobs against an inventory only once nothing else is wrong.
+- **`PipelineCheck`** ([`src/validate.rs`](https://github.com/eclnz/spit/blob/dev/src/validate.rs)) holds every error of a parsed pipeline and its input rules, with no inventory. `check_pipeline` makes it, running the checks in a fixed order: definitions (`collect_definitions`), input rules, commands, `resources`, `check` and `review` lines (`collect_command_lines`), then paths. Each later check skips the names an earlier one poisoned. Warnings are found after it, by `src/diagnostics/warnings.rs`.
+- **`diagnose_in`** and the other `diagnose_*` functions ([`src/diagnostics/mod.rs`](https://github.com/eclnz/spit/blob/dev/src/diagnostics/mod.rs)) check a pipeline. **`diagnose_recipe`** ([`src/diagnostics/recipe.rs`](https://github.com/eclnz/spit/blob/dev/src/diagnostics/recipe.rs)) checks a recipe. Each parses with recovery (see [parsing](parsing.md)), and checks the semantics once the document parses. It resolves jobs against an inventory only once nothing else is wrong. `diagnose_checked_with_records` takes the records as text and `diagnose_checked_with_inventory` as settled in memory; both then run `diagnose_over`, so they diagnose a pipeline that passes alike.
 - **Warnings** come from [`src/diagnostics/warnings.rs`](https://github.com/eclnz/spit/blob/dev/src/diagnostics/warnings.rs).
-- **Places** come from [`src/diagnostics/places.rs`](https://github.com/eclnz/spit/blob/dev/src/diagnostics/places.rs):
+- **Places** come from `Places` ([`src/diagnostics/places.rs`](https://github.com/eclnz/spit/blob/dev/src/diagnostics/places.rs)), which indexes the pipeline's steps and operations by name once per pass, keeping the first of each name:
     - `in_call` places an error about a step that a call made. It points at the call written in the text, and at the argument when the failing port reads one of the call's inputs. Each nested call and the body step are `Related` places, each with its own line's text from `SourceMap::file_texts`.
     - `at_call` places an error about a call itself, in the same way, without a body step.
 - **Hovers** are made by `pipeline_hovers` ([`src/editor.rs`](https://github.com/eclnz/spit/blob/dev/src/editor.rs)) for a pipeline's own operations and products, and by `builtin_words` ([`src/builtins.rs`](https://github.com/eclnz/spit/blob/dev/src/builtins.rs)) for SPIT's own words.
