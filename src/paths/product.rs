@@ -1,17 +1,13 @@
-//! The path a product's template gives each of its artifacts, with the
-//! template and stage found once per product.
-
-use std::borrow::Cow;
+//! The path a product's template gives each of its artifacts, with its
+//! [`PathPattern`] compiled once per product.
 
 use crate::model::{stage_directories, Artifact, Pipeline, PipelineIndex};
-
 use crate::template::{
-    error, product_text, push_escaped, PathError, PathPart, PathPlaceholder, PathTemplate,
+    error, product_text, push_escaped, Gap, PathError, PathPart, PathPattern, PathPlaceholder,
+    PathTemplate, RenderError,
 };
 
 use super::components::unusable_path;
-
-use crate::template::push_encoded;
 
 /// Bind `artifact` to its relative path by its product's path template,
 /// `template`. `label` names the path in errors: a
@@ -22,8 +18,7 @@ pub(crate) fn bind_path(
     artifact: Artifact<'_>,
     label: impl Fn() -> String,
 ) -> Result<String, PathError> {
-    ProductPath::with_template(index, artifact.product, Cow::Borrowed(template))
-        .bind(artifact, label)
+    ProductPath::with_template(index, artifact.product, template).bind(artifact, label)
 }
 
 /// Binds many artifacts' paths, as [`bind_path`] does, finding each
@@ -31,9 +26,9 @@ pub(crate) fn bind_path(
 pub(crate) struct PathBinder<'p> {
     index: PipelineIndex<'p>,
     /// Each pipeline product's, by its id, once it is needed.
-    products: Vec<Option<ProductPath<'p>>>,
+    products: Vec<Option<ProductPath>>,
     /// The same, by the product's number in a DAG's artifact table.
-    numbered: Vec<Option<ProductPath<'p>>>,
+    numbered: Vec<Option<ProductPath>>,
 }
 
 impl<'p> PathBinder<'p> {
@@ -89,34 +84,24 @@ impl<'p> PathBinder<'p> {
     }
 }
 
-/// What every path of one product shares: its template, its name as a
-/// path gives it, and its stage's directories.
-struct ProductPath<'p> {
-    template: Cow<'p, PathTemplate>,
-    /// `alias::name` would put colons in file names.
-    name: String,
-    /// Each nested stage is a directory.
-    stage: Option<String>,
+/// One product's [`PathPattern`], compiled once for all its artifacts.
+struct ProductPath {
+    pattern: PathPattern,
 }
 
-impl<'p> ProductPath<'p> {
-    fn new(index: &PipelineIndex<'p>, product: &str) -> Result<Self, PathError> {
+impl ProductPath {
+    fn new(index: &PipelineIndex<'_>, product: &str) -> Result<Self, PathError> {
         let template = index
             .path_template_for(product)
             .ok_or_else(|| error(format!("no path template for product `{product}`")))?;
-        Ok(Self::with_template(index, product, template))
+        Ok(Self::with_template(index, product, &template))
     }
 
     /// `product`'s, with `template` already built.
-    fn with_template(
-        index: &PipelineIndex<'p>,
-        product: &str,
-        template: Cow<'p, PathTemplate>,
-    ) -> Self {
+    fn with_template(index: &PipelineIndex<'_>, product: &str, template: &PathTemplate) -> Self {
+        let stage = stage_directories(index, product);
         Self {
-            template,
-            name: product_text(product).into_owned(),
-            stage: stage_directories(index, product),
+            pattern: PathPattern::new(template, product, stage.as_deref()),
         }
     }
 
@@ -125,49 +110,37 @@ impl<'p> ProductPath<'p> {
         artifact: Artifact<'_>,
         label: impl Fn() -> String,
     ) -> Result<String, PathError> {
-        let mut relative = String::with_capacity(self.template.text.len() + 32);
-        for part in self.template.parts() {
-            match part {
-                PathPart::Literal(value) => relative.push_str(value),
-                PathPart::Placeholder(PathPlaceholder::Product) => relative.push_str(&self.name),
-                PathPart::Placeholder(PathPlaceholder::Stage) => {
-                    let stage = self.stage.as_deref().ok_or_else(|| {
-                        error(format!(
-                            "path template for `{}` uses `{}`, but `{}` is not made in a stage; write `[{}/]` to leave the stage's directory out for products outside every stage",
-                            artifact.product,
-                            PathPlaceholder::Stage,
-                            artifact.product,
-                            PathPlaceholder::Stage
-                        ))
-                        .focus(PathPlaceholder::Stage.to_string())
-                    })?;
-                    relative.push_str(stage);
-                }
+        let relative = self
+            .pattern
+            .render(|dimension| artifact.entities.get(dimension))
+            .map_err(|problem| match problem {
+                RenderError::Gap(Gap::Stage) => error(format!(
+                    "path template for `{}` uses `{}`, but `{}` is not made in a stage; write `[{}/]` to leave the stage's directory out for products outside every stage",
+                    artifact.product,
+                    PathPlaceholder::Stage,
+                    artifact.product,
+                    PathPlaceholder::Stage
+                ))
+                .focus(PathPlaceholder::Stage.to_string()),
                 // A product with dimensions and a spelling has `{@entities}`
                 // written out.
-                PathPart::Placeholder(PathPlaceholder::Entities) => {
-                    return Err(error(unspelled_entities(
+                RenderError::Gap(Gap::Entities) => error(unspelled_entities(
+                    artifact.product,
+                    artifact.entities.is_empty(),
+                ))
+                .focus(PathPlaceholder::Entities.to_string()),
+                RenderError::Absent(placeholder) => {
+                    let dimension = placeholder.name();
+                    error(format!(
+                        "path template for `{}` uses absent dimension `{dimension}`{}",
                         artifact.product,
-                        artifact.entities.is_empty(),
+                        PathPlaceholder::hint(dimension).unwrap_or_else(|| {
+                            "; put it in `[...]` if only some products have it".to_owned()
+                        })
                     ))
-                    .focus(PathPlaceholder::Entities.to_string()));
+                    .focus(placeholder.to_string())
                 }
-                PathPart::Placeholder(placeholder @ PathPlaceholder::Dimension(dimension, _)) => {
-                    let value = artifact.entities.get(dimension).ok_or_else(|| {
-                        error(format!(
-                            "path template for `{}` uses absent dimension `{dimension}`{}",
-                            artifact.product,
-                            PathPlaceholder::hint(dimension).unwrap_or_else(|| {
-                                "; put it in `[...]` if only some products have it".to_owned()
-                            })
-                        ))
-                        .focus(placeholder.to_string())
-                    })?;
-                    push_encoded(&mut relative, value);
-                }
-                PathPart::Group(_) => unreachable!("a product's template has its groups resolved"),
-            }
-        }
+            })?;
         if let Some(reason) = unusable_path(&relative) {
             return Err(error(format!("{} {reason}: `{relative}`", label())));
         }
@@ -183,14 +156,16 @@ pub(crate) fn shown_path(
     product: &str,
     template: &PathTemplate,
 ) -> String {
-    let path = ProductPath::with_template(index, product, Cow::Borrowed(template));
+    let stage = stage_directories(index, product);
     let mut shown = String::new();
-    for part in path.template.parts() {
+    for part in template.parts() {
         match part {
             PathPart::Literal(value) => push_escaped(&mut shown, value),
-            PathPart::Placeholder(PathPlaceholder::Product) => shown.push_str(&path.name),
+            PathPart::Placeholder(PathPlaceholder::Product) => {
+                shown.push_str(&product_text(product));
+            }
             PathPart::Placeholder(PathPlaceholder::Stage) => {
-                shown.push_str(path.stage.as_deref().unwrap_or("{@stage}"));
+                shown.push_str(stage.as_deref().unwrap_or("{@stage}"));
             }
             PathPart::Placeholder(placeholder) => shown.push_str(&placeholder.to_string()),
             PathPart::Group(_) => unreachable!("a product's template has its groups resolved"),
