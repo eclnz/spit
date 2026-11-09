@@ -36,7 +36,7 @@ enum Layer {
 fn layer(module: &str) -> Option<Layer> {
     Some(match module {
         "blob" | "json" | "span" | "template" | "types" => Layer::Value,
-        "error" | "model" | "shape" => Layer::Model,
+        "model" | "shape" => Layer::Model,
         "builtins" | "imports" | "lower" | "order" | "parser" => Layer::Parse,
         "check" | "command" | "compile" | "paths" | "resources" | "review" => Layer::Check,
         "inputs" => Layer::Inputs,
@@ -80,11 +80,6 @@ const BACK_EDGES: &[(&str, &str, &str)] = &[
         "model",
         "command",
         "the model holds CommandTemplate, which step 8 moves to the value layer",
-    ),
-    (
-        "model",
-        "error",
-        "the model returns ResolveError, which names model ids; step 8 makes the model a leaf",
     ),
     (
         "parser",

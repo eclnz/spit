@@ -5,9 +5,9 @@ use crate::command::CommandError;
 use crate::compile::{
     collect_command_lines, collect_definitions, operations_by_name, DefinitionCheck,
 };
-use crate::error::{DefinitionSubject, ResolveError};
 use crate::inputs::collect_rule_errors;
 use crate::lower::ParsedDocument;
+use crate::model::{DefinitionSubject, ResolveError};
 use crate::paths::{collect_paths, PathError};
 
 /// Every error [`check_pipeline`] finds, by the check that found it.

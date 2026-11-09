@@ -11,7 +11,6 @@ mod command;
 mod compile;
 mod diagnostics;
 mod editor;
-mod error;
 mod imports;
 mod inputs;
 mod json;
@@ -45,7 +44,6 @@ pub use editor::{
     pipeline_hovers, render_editor_json, render_recipe_editor_json, render_words_json, Hover,
     HoverKind,
 };
-pub use error::{DefinitionSubject, NearMiss, PortSite, ResolveError, TypeConflict};
 pub use imports::parse_pipeline_at;
 pub use inputs::{
     case_variants, discover_source_files, discover_sources, parse_input_spec, parse_input_spec_at,
@@ -57,11 +55,12 @@ pub use model::{
     stage_within, Artifact, ArtifactId, ArtifactInstance, ArtifactKey, ArtifactReport,
     ArtifactType, Artifacts, Beside, BesideFile, BodyStep, Call, CallId, Cardinality, CommandDef,
     CommandRole, ContextPattern, CountRequirement, CoverageAction, CoverageGap, CoverageRule,
-    DagStep, DefaultReviews, DimensionOrders, EntityBinding, Exclusion, Gap, IncompleteJob,
-    InputBinding, InputPort, InputRules, Invocation, Job, JobId, Judged, OperationDef, OutputPort,
-    Pipeline, Port, ProductDef, Removal, ResolvedDag, Resources, ResourcesDef, ReviewDef,
-    ReviewFile, ShapeRule, SidecarGroup, SourceFile, SourceInventory, SourceRecord, StageDef,
-    StepId, StepOrigin, StepOutput, TypeChecking, UnmatchedVerdicts, Verdict, VerdictRow, Withheld,
+    DagStep, DefaultReviews, DefinitionSubject, DimensionOrders, EntityBinding, Exclusion, Gap,
+    IncompleteJob, InputBinding, InputPort, InputRules, Invocation, Job, JobId, Judged, NearMiss,
+    OperationDef, OutputPort, Pipeline, Port, PortSite, ProductDef, Removal, ResolveError,
+    ResolvedDag, Resources, ResourcesDef, ReviewDef, ReviewFile, ShapeRule, SidecarGroup,
+    SourceFile, SourceInventory, SourceRecord, StageDef, StepId, StepOrigin, StepOutput,
+    TypeChecking, TypeConflict, UnmatchedVerdicts, Verdict, VerdictRow, Withheld,
 };
 pub use parser::{parse_source_inventory, render_source_inventory, ParseError, ParseErrorKind};
 pub use paths::{
