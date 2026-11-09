@@ -450,7 +450,21 @@ pub(crate) fn collect_rule_errors(
             // Keep the more specific subject a definition error names.
             let subject = match &error {
                 ResolveError::InvalidDefinition { subject, .. } => subject.clone(),
-                _ => DefinitionSubject::Constraint(index),
+                ResolveError::UnknownProduct { .. }
+                | ResolveError::UnknownOperation { .. }
+                | ResolveError::TypeMismatch { .. }
+                | ResolveError::TypeVariableConflict { .. }
+                | ResolveError::MissingInput { .. }
+                | ResolveError::AmbiguousInput { .. }
+                | ResolveError::CollectionTooSmall { .. }
+                | ResolveError::InvalidAggregationDimension { .. }
+                | ResolveError::DuplicateSourceArtifact { .. }
+                | ResolveError::DuplicateOutputArtifact { .. }
+                | ResolveError::Cycle { .. }
+                | ResolveError::UnsupportedShapeRelationship { .. }
+                | ResolveError::CoverageViolation { .. }
+                | ResolveError::MissingRequiredValue { .. }
+                | ResolveError::NoGroupsToCheck { .. } => DefinitionSubject::Constraint(index),
             };
             errors.push((subject, error));
         }
