@@ -1,6 +1,4 @@
-//! Lexical helpers: comments, names, and comma-separated lists.
-
-use std::ops::Range;
+//! Lexical helpers: names and comma-separated lists.
 
 use super::keyword::reserved;
 use super::ParseError;
@@ -10,77 +8,6 @@ use super::ParseError;
 /// rest of SPIT, and every column it reports, sees the text without one.
 pub(crate) fn without_bom(text: &str) -> &str {
     text.strip_prefix('\u{feff}').unwrap_or(text)
-}
-
-/// As in Bash, an unquoted `#` starts a comment only at the start of a word,
-/// so arguments such as `--color=#fff` are kept intact.
-pub(crate) fn strip_comment(line: &str) -> &str {
-    &line[..comment_start(line).unwrap_or(line.len())]
-}
-
-/// The text of `line`'s comment, after its `#`, trimmed; `None` when it
-/// has no comment or an empty one.
-pub(crate) fn comment_text(line: &str) -> Option<&str> {
-    let text = line[comment_start(line)? + 1..].trim();
-    (!text.is_empty()).then_some(text)
-}
-
-fn comment_start(line: &str) -> Option<usize> {
-    scan_hashes(line).find_map(|hash| hash.starts_word.then_some(hash.index))
-}
-
-/// Where the word before an unquoted `#` that ends it sits, as in
-/// `word# note`: the `#` stays part of the word, though it reads like the
-/// start of a comment.
-pub(crate) fn glued_comment(line: &str) -> Option<Range<usize>> {
-    let end = comment_start(line).unwrap_or(line.len());
-    scan_hashes(&line[..end]).find_map(|hash| {
-        let ends_word = line[hash.index + 1..]
-            .chars()
-            .next()
-            .is_none_or(char::is_whitespace);
-        (!hash.starts_word && ends_word).then(|| {
-            let word_start = line[..hash.index]
-                .rfind(char::is_whitespace)
-                .map_or(0, |index| index + 1);
-            word_start..hash.index
-        })
-    })
-}
-
-struct Hash {
-    index: usize,
-    starts_word: bool,
-}
-
-/// Every unquoted, unescaped `#` in `line`.
-fn scan_hashes(line: &str) -> impl Iterator<Item = Hash> + '_ {
-    let mut quote = None;
-    let mut escaped = false;
-    let mut word_start = true;
-    line.char_indices().filter_map(move |(index, character)| {
-        let at_word_start = word_start;
-        word_start = false;
-        if escaped {
-            escaped = false;
-            return None;
-        }
-        match (quote, character) {
-            (None | Some('"'), '\\') => escaped = true,
-            (None, '\'') => quote = Some('\''),
-            (None, '"') => quote = Some('"'),
-            (Some('\''), '\'') | (Some('"'), '"') => quote = None,
-            (None, '#') => {
-                return Some(Hash {
-                    index,
-                    starts_word: at_word_start,
-                })
-            }
-            _ => {}
-        }
-        word_start = quote.is_none() && character.is_whitespace();
-        None
-    })
 }
 
 pub(super) fn call_parts(line: &str, number: usize) -> Result<(&str, &str), ParseError> {
@@ -269,25 +196,4 @@ pub(super) fn qualified_identifier<'a>(
         identifier(part, number, kind)?;
     }
     Ok(value)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::strip_comment;
-
-    /// `tests/fixtures/comments.txt`, which the editor extension also
-    /// checks its own comment stripping against.
-    #[test]
-    fn comments_are_stripped_as_the_shared_fixture_says() {
-        let fixture = include_str!("../../tests/fixtures/comments.txt");
-        let mut lines = fixture.lines().filter(|line| !line.starts_with('#'));
-        let mut cases = 0;
-        while let Some(input) = lines.next() {
-            let input = input.strip_prefix("in:").expect("an `in:` line");
-            let output = lines.next().and_then(|line| line.strip_prefix("out:"));
-            assert_eq!(Some(strip_comment(input)), output, "in: {input:?}");
-            cases += 1;
-        }
-        assert!(cases > 10);
-    }
 }

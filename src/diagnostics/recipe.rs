@@ -107,7 +107,7 @@ pub(super) fn missing_root(root: Option<&(PathBuf, usize)>, text: &str) -> Optio
         return None;
     }
     let written = text.lines().nth(line - 1)?;
-    let folder = crate::parser::strip_comment(written)
+    let folder = crate::span::strip_comment(written)
         .trim()
         .strip_prefix("root ")?
         .trim();

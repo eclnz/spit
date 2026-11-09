@@ -39,7 +39,7 @@ pub(crate) use self::inventory::{
 };
 pub(crate) use self::keyword::{File, Header, Keyword};
 pub(crate) use self::layout::{Block, Head, Layout, Line};
-pub(crate) use self::lexical::{glued_comment, strip_comment, without_bom};
+pub(crate) use self::lexical::without_bom;
 pub(crate) use self::render_inventory::as_read_back;
 pub use self::render_inventory::render_source_inventory;
 pub(crate) use self::source_map::{CommandPlaces, Rule, SourceMap, Step};
@@ -346,7 +346,7 @@ impl StatementKind {
     fn exclude(original: &str, declaration: &str, number: usize) -> Result<Self, ParseError> {
         let rule = declarations::parse_exclude(declaration, number)?;
         let place = source_map::tail_place(original, number, declaration.trim());
-        let reason = lexical::comment_text(original).map(str::to_owned);
+        let reason = crate::span::comment_text(original).map(str::to_owned);
         Ok(Self::Exclude(rule, reason, place))
     }
 

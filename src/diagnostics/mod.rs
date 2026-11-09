@@ -23,12 +23,10 @@ use crate::inputs::{
 };
 use crate::lower::{parse_document_recovering, ParsedDocument};
 use crate::model::{ArtifactReport, CoverageGap, InputRules, PipelineIndex, SourceInventory};
-use crate::parser::{
-    as_read_back, glued_comment, parse_inventory_recovering, without_bom, Kind, Rule, SourceMap,
-};
+use crate::parser::{as_read_back, parse_inventory_recovering, without_bom, Kind, Rule, SourceMap};
 use crate::paths::{shown_path, PathTemplate};
 use crate::resolver::first_failure;
-use crate::span::{content_columns, Lines, Place};
+use crate::span::{content_columns, glued_comment, Lines, Place};
 use crate::validate::check_pipeline;
 use crate::{
     parse_source_inventory, resolve_artifacts_excluding, DefinitionSubject, ParseError, Pipeline,

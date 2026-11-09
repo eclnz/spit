@@ -560,7 +560,7 @@ fn recipe_input_hovers(text: &str, path: &Path) -> Vec<Hover> {
     let mut hovers = Vec::new();
     let mut block_indent = None;
     for (index, raw) in text.lines().enumerate() {
-        let line = crate::parser::strip_comment(raw);
+        let line = crate::span::strip_comment(raw);
         let trimmed = line.trim();
         let indent = line.len() - line.trim_start().len();
         if trimmed == "inputs:" {
