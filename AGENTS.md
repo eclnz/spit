@@ -149,9 +149,7 @@ This file holds the rules for agents.
 - For a change to `docs/` or `properdocs.yml`, build the site as CI does, and check that each changed diagram renders:
 
   ```sh
-  python3 -m venv /tmp/docs-venv
-  /tmp/docs-venv/bin/pip install -q -r .github/docs-requirements.txt
-  /tmp/docs-venv/bin/properdocs build --strict --site-dir /tmp/spit-site
+  uv run --no-project --with-requirements .github/docs-requirements.txt properdocs build --strict --site-dir /tmp/spit-site
   ```
 
 - When a pull request changes documentation, say in it what could not be run or checked.
@@ -184,9 +182,7 @@ usability/harness/rebuild_keys.sh             # expect `ok` for every answer key
 - **Messie.** CI also checks the repository's folders with Messie:
 
   ```sh
-  python3 -m venv /tmp/messie-venv
-  /tmp/messie-venv/bin/pip install -q -r .github/messie-requirements.txt
-  /tmp/messie-venv/bin/messie -af .   # -a judges every folder, -f checks each folder fits its surroundings
+  uv run --no-project --with-requirements .github/messie-requirements.txt messie -af .   # -a judges every folder, -f checks each folder fits its surroundings
   ```
 
   `ignore.messie` at the root leaves out the files Cargo and clippy need there under fixed names, which Messie would otherwise judge as unrelated to the rest of the root. Add a file there only when a tool requires its name and place.

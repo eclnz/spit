@@ -12,11 +12,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: astral-sh/setup-uv@v6
         with:
           python-version: '3.11'
-      - run: python -m pip install -r .github/docs-requirements.txt
-      - run: properdocs build --strict
+          enable-cache: true
+          cache-dependency-glob: .github/docs-requirements.txt
+      - run: uv run --no-project --with-requirements .github/docs-requirements.txt properdocs build --strict
 
   test:
     runs-on: ubuntu-latest
@@ -52,20 +53,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        id: setup-python
+      - uses: astral-sh/setup-uv@v6
         with:
           python-version: '3.11'
-      - name: Cache Messie environment
-        id: messie-cache
-        uses: actions/cache@v4
-        with:
-          path: .venv
-          key: ${{ runner.os }}-messie-py${{ steps.setup-python.outputs.python-version }}-${{ hashFiles('.github/messie-requirements.txt') }}
-      - name: Install Messie
-        if: steps.messie-cache.outputs.cache-hit != 'true'
-        run: |
-          python -m venv .venv
-          .venv/bin/python -m pip install -r .github/messie-requirements.txt
+          enable-cache: true
+          cache-dependency-glob: .github/messie-requirements.txt
       - name: Check repository folders
-        run: .venv/bin/messie -af .
+        run: uv run --no-project --with-requirements .github/messie-requirements.txt messie -af .
