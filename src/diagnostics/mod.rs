@@ -36,7 +36,7 @@ use crate::{
 
 use places::{error_step, InCall, Places};
 use recovery::recover_parse_errors;
-use warnings::{case_warnings, empty_step_warnings, near_miss_warnings, warnings};
+use warnings::{case_warnings, empty_step_warnings, near_miss_warnings, pipeline_warning};
 
 /// Where a pipeline is, and what applies to it, when diagnosing it.
 #[derive(Clone, Copy, Debug, Default)]
@@ -550,7 +550,12 @@ fn pipeline_diagnostics(
             .iter()
             .map(|error| Diagnostic::located(source, error, text)),
     );
-    diagnostics.extend(warnings(pipeline, lines, &checked.definitions.poisoned));
+    diagnostics.extend(
+        checked
+            .warnings
+            .iter()
+            .map(|warning| pipeline_warning(warning, lines)),
+    );
     if let Some(warning) = recipe::missing_root(pipeline.root.as_ref(), text) {
         diagnostics.push(warning);
     }
