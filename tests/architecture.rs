@@ -83,13 +83,19 @@ fn source_files(directory: &Path, found: &mut Vec<PathBuf>) {
     }
 }
 
-/// The top-level modules of `src/`: its files and its folders.
+/// The top-level modules of `src/`: its `.rs` files and its folders. Other
+/// files, such as a `.DS_Store` an operating system leaves, are no module.
 fn top_level_modules(src: &Path) -> BTreeSet<String> {
     fs::read_dir(src)
         .unwrap()
-        .map(|entry| {
-            let name = entry.unwrap().file_name().into_string().unwrap();
-            name.strip_suffix(".rs").unwrap_or(&name).to_string()
+        .filter_map(|entry| {
+            let entry = entry.unwrap();
+            let name = entry.file_name().into_string().unwrap();
+            if entry.path().is_dir() {
+                Some(name)
+            } else {
+                name.strip_suffix(".rs").map(str::to_string)
+            }
         })
         .collect()
 }
