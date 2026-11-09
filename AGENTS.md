@@ -162,7 +162,7 @@ This file holds the rules for agents.
 
 - **A change to what the extension reads needs a change in the extension.** That is anything in `check --json` or `--hovers`, any keyword, header, placeholder or other syntax, and the file kinds `check` takes. Make the extension's change as part of the same work, with the same branch name in both repositories. The extension's `extension.test.js` and `grammar.test.js` should cover it.
 - **Link the pull requests.** A spit-vscode pull request names the spit pull request it follows, as in "Follows eclnz/spit#42", and the spit pull request names the extension's. Merge the spit pull request first, since the extension needs a SPIT that has the change.
-- **Versions move together.** The extension's version follows SPIT's, so a release of SPIT bumps the extension's `package.json` as well.
+- **Versions move together.** The extension and the runner share SPIT's version (see [Versions](#conventions)), so a release of SPIT bumps the extension's `package.json` and the runner's `pyproject.toml` as well.
 
 ## The local runner
 
@@ -201,9 +201,14 @@ usability/harness/rebuild_keys.sh             # expect `ok` for every answer key
 
 ## Conventions
 
-- **Branches.** Work merges into `dev`, which carries the next release's version. `main` holds the latest release, and moves to `dev` only when `dev`'s CI is green.
+- **Branches.** Work merges into `dev`, which carries the next release's version. `main` holds the latest release, and moves to `dev` only when `dev`'s CI is green. The same holds in spit-vscode and spit-bash: a pull request targets `dev`, never `main`, so that `main` only ever moves forward to `dev`.
+- **Versions.** SPIT, spit-vscode and spit-bash share one version, `0.MINOR.PATCH`.
+  - A breaking change raises `MINOR` and sets `PATCH` to 0. That is a change that makes something written for the last release stop working or mean something else: syntax a pipeline or recipe uses, the `.spitdag` format, `check --json` or `--hovers`, a command's options or output that scripts read, or the runner's state.
+  - A compatible change raises `PATCH`: a fix, or an addition that leaves what worked before working the same.
+  - `dev` carries the version of the release it is heading for. The pull request that brings `dev`'s first breaking change since a release raises `MINOR`; the release raises `PATCH` if nothing broke.
+- **Releases.** Bump the version on a `release/<version>` branch in each repository, merged into `dev`. When `dev`'s CI is green, move `main` to `dev`, tag `main` with an annotated `v<version>` tag in each repository, and publish a GitHub release for the tag with short notes: what broke, then what was added and fixed.
 - **Language changes need not preserve old syntax during rapid development.** Choose one coherent way to express a concept. When a better design replaces a keyword, rule or file form, remove the old form rather than keeping an alias or deprecation path by default. Update the parser, diagnostics, examples, fixtures, stored outputs, user guide and companion tools in the same work, and explain the change to users. Preserve compatibility only when the change has a specific, documented reason to require it.
-- **Issues.** Bugs, feature requests and work left for later go in the GitHub issue tracker, one issue each, not in a report's or a plan's list of next steps. A report or commit that leaves work undone links its issues.
+- **Issues.** Bugs, feature requests and work left for later go in the GitHub issue tracker, one issue each, not in a report's or a plan's list of next steps. A report or commit that leaves work undone links its issues. GitHub closes an issue named by "Fixes" only when the pull request merges into the default branch, `main`, so close an issue fixed on `dev` by hand, naming the pull request.
 - **Commit messages.** The title is a plain sentence, such as "Replace skip with drop, which names the groups it removes". Then prose saying what was wrong and what changed, then the co-author and session trailers.
 - **No model names** in files pushed to the repository.
 - **New recipe rule keywords** go in `split_rules` in `tests/support/mod.rs` as well, which separates a test's recipe rules from its pipeline by keyword.
