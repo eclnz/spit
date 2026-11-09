@@ -4,7 +4,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Range;
 
-use crate::model::{CoverageRule, Invocation, PathOrigin, PipelineIndex};
+use crate::model::{
+    CheckId, CommandId, CoverageRule, IdVec, Invocation, PathOrigin, PipelineIndex, ResourcesId,
+    ReviewId,
+};
 use crate::span::{columns_of, content_columns, find_word, Place};
 
 use super::keyword::Keyword;
@@ -29,15 +32,14 @@ pub(crate) struct SourceMap {
     /// Where each `exclude` rule written in the recipe names what it
     /// removes, in the order of `InputRules::exclusions`.
     pub(crate) exclusions: Vec<Place>,
-    /// Where each `Pipeline::commands` element is, in the same order.
-    pub(crate) commands: Vec<CommandPlaces>,
-    /// One operation name per `Pipeline::resources` element, in the same
-    /// order.
-    pub(crate) resources: Vec<Place>,
-    /// One name per `Pipeline::checks` element, in the same order.
-    pub(crate) checks: Vec<Place>,
-    /// One name per `Pipeline::reviews` element, in the same order.
-    pub(crate) reviews: Vec<Place>,
+    /// Where each command is.
+    pub(crate) commands: IdVec<CommandId, CommandPlaces>,
+    /// Where each `resources` line names its operation.
+    pub(crate) resources: IdVec<ResourcesId, Place>,
+    /// Where each check is named.
+    pub(crate) checks: IdVec<CheckId, Place>,
+    /// Where each review is named.
+    pub(crate) reviews: IdVec<ReviewId, Place>,
     /// Where each `review name from file` line of a recipe names the review,
     /// in the order of `InputRules::reviews`.
     pub(crate) review_files: Vec<Place>,
@@ -140,14 +142,14 @@ impl Rule {
 }
 
 impl SourceMap {
-    /// Where the command at `index` names its operation.
-    pub(crate) fn command(&self, index: usize) -> Option<Place> {
-        Some(self.commands.get(index)?.header.clone())
+    /// Where command `id` names its operation.
+    pub(crate) fn command(&self, id: CommandId) -> Option<Place> {
+        Some(self.commands.get(id)?.header.clone())
     }
 
-    /// Where line `line`, from 0, of the command at `index` is.
-    pub(crate) fn command_line(&self, index: usize, line: usize) -> Option<Place> {
-        self.commands.get(index)?.lines.get(line).cloned()
+    /// Where line `line`, from 0, of command `id` is.
+    pub(crate) fn command_line(&self, id: CommandId, line: usize) -> Option<Place> {
+        self.commands.get(id)?.lines.get(line).cloned()
     }
 
     /// The template of the path rule that `product` uses.

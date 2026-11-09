@@ -14,7 +14,7 @@ use rustc_hash::FxHashMap;
 use crate::command::CommandError;
 use crate::model::{
     stage_and_parents, DefaultReviews, Invocation, OperationDef, Pipeline, PipelineIndex, Port,
-    ProductDef,
+    ProductDef, ReviewId,
 };
 use crate::parser::SourceMap;
 use crate::span::Place;
@@ -33,7 +33,7 @@ pub(crate) fn collect_reviews(
         if !declared.insert(review.name.as_str()) {
             errors.push(
                 CommandError::new(format!("duplicate review `{}`", review.name))
-                    .at(lines.reviews.get(index).cloned())
+                    .at(lines.reviews.get(ReviewId::at(index)).cloned())
                     .focus(&review.name),
             );
         }

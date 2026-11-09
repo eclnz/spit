@@ -1,7 +1,7 @@
 //! Lowering reviews: the `review` declarations of a pipeline, its `review:`
 //! defaults, and the `review ... from` lines of a recipe.
 
-use crate::model::{DefaultReviews, ReviewDef, ReviewFile};
+use crate::model::{DefaultReviews, ReviewDef, ReviewFile, ReviewId};
 use crate::parser::ParseError;
 use crate::span::Place;
 
@@ -9,7 +9,8 @@ use super::PipelineBuilder;
 
 impl PipelineBuilder {
     pub(crate) fn add_review(&mut self, review: ReviewDef, place: Place) {
-        self.lines.reviews.push(place);
+        let id = ReviewId::at(self.pipeline.reviews.len());
+        self.lines.reviews.push(id, place);
         self.pipeline.reviews.push(review);
     }
 
