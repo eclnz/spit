@@ -7,6 +7,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 use crate::span::Located;
+use crate::template::builtin::{ENTITIES, PRODUCT, STAGE};
 use crate::template::{parse_template, Part};
 
 use super::components::encode_component;
@@ -40,12 +41,12 @@ pub(crate) enum PathPlaceholder {
 }
 
 impl PathPlaceholder {
-    /// The built-in placeholder `{@name}` writes, if any.
+    /// The built-in placeholder `{name}` writes, if any, with its `@`.
     fn built_in(name: &str) -> Option<Self> {
         match name {
-            "product" => Some(Self::Product),
-            "entities" => Some(Self::Entities),
-            "stage" => Some(Self::Stage),
+            PRODUCT => Some(Self::Product),
+            ENTITIES => Some(Self::Entities),
+            STAGE => Some(Self::Stage),
             _ => None,
         }
     }
@@ -60,7 +61,7 @@ impl PathPlaceholder {
             Some("labels") => Err(
                 "`{@labels}` is gone: spell `{@entities}` the same way, with `default entities: {@key}-{@value} separated \"_\"`".to_owned(),
             ),
-            Some(built_in) => Self::built_in(built_in).ok_or_else(|| {
+            Some(_) => Self::built_in(&name).ok_or_else(|| {
                 format!(
                     "unknown built-in placeholder `{{{name}}}`; path templates have `{{@product}}`, `{{@entities}}` and `{{@stage}}`"
                 )
@@ -86,7 +87,7 @@ impl PathPlaceholder {
     /// What to write instead when a product has no dimension `name`, if
     /// `name` is a built-in written without its `@`.
     pub(crate) fn hint(name: &str) -> Option<String> {
-        let meaning = match Self::built_in(name)? {
+        let meaning = match Self::built_in(&["@", name].concat())? {
             Self::Product => "the product's name",
             Self::Entities => "every dimension, as `default entities:` spells them",
             Self::Stage => "the stage that makes it",
@@ -98,9 +99,9 @@ impl PathPlaceholder {
     /// The name between the braces, with a built-in's `@`.
     pub(crate) fn name(&self) -> &str {
         match self {
-            Self::Product => "@product",
-            Self::Entities => "@entities",
-            Self::Stage => "@stage",
+            Self::Product => PRODUCT,
+            Self::Entities => ENTITIES,
+            Self::Stage => STAGE,
             Self::Dimension(name, _) => name,
         }
     }
