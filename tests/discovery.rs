@@ -578,25 +578,19 @@ fn discovery_reports_skipped_files_and_still_succeeds() {
 
 #[test]
 fn discovery_is_fast_however_values_could_be_split() {
-    // Adjacent placeholders, or separators values may hold, give a long
-    // file name exponentially many ways to split.
-    let long = format!("in/{}.txt", "a".repeat(200));
+    // Separators values may hold give a long file name exponentially many
+    // ways to split. Placeholders with nothing between them are an error.
     let dashed = format!("in/{}z.txt", "a-".repeat(100));
-    let tree = Tree::new("backtrack", &[&long, &dashed]);
-    for rule in [
-        "source x [a, b, c, d, e, f, g]\npath x: in/{a}{b}{c}{d}{e}{f}{g}.dat\n",
-        "source x [a, b, c, d, e]\npath x: in/{a}-{b}-{c}-{d}-{e}.dat\n",
-    ] {
-        let started = Instant::now();
-        let (pipeline, spec) = parse(rule);
-        let discovery = discover_source_files(&pipeline, &spec.rules, tree.path()).unwrap();
-        assert!(discovery.inventory.artifacts.is_empty());
-        assert!(
-            started.elapsed() < Duration::from_secs(5),
-            "took {:?}",
-            started.elapsed()
-        );
-    }
+    let tree = Tree::new("backtrack", &[&dashed]);
+    let started = Instant::now();
+    let (pipeline, spec) = parse("source x [a, b, c, d, e]\npath x: in/{a}-{b}-{c}-{d}-{e}.dat\n");
+    let discovery = discover_source_files(&pipeline, &spec.rules, tree.path()).unwrap();
+    assert!(discovery.inventory.artifacts.is_empty());
+    assert!(
+        started.elapsed() < Duration::from_secs(5),
+        "took {:?}",
+        started.elapsed()
+    );
     // A match still finds its values, including a repeated dimension.
     let tree = Tree::new("repeat", &["in/ab-x/ab.txt", "in/ab-x/cd.txt"]);
     let rule = "source x [s, t]\npath x: in/{s}-{t}/{s}.txt\n";

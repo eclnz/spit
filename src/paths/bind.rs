@@ -260,18 +260,15 @@ fn with_paths<'a>(
 /// An artifact by its product and entities, as [`ArtifactKey`] without copies.
 type Key<'a> = (&'a str, &'a EntityBinding);
 
-/// Pairs of artifacts, with their paths, whose paths differ only in case:
-/// in artifact order, the first artifact with each such path paired with
-/// each later one.
+/// Pairs of artifacts, with their `paths` from [`bound_paths`], whose paths
+/// differ only in case: in artifact order, the first artifact with each such
+/// path paired with each later one.
 pub(crate) fn case_collisions(
-    pipeline: &Pipeline,
     dag: &ResolvedDag,
+    paths: &[Option<String>],
 ) -> Vec<[(ArtifactKey, String); 2]> {
-    let Ok(paths) = bound_paths(pipeline, dag) else {
-        return Vec::new();
-    };
     let mut folded: FxHashMap<String, Vec<(Key<'_>, &String)>> = FxHashMap::default();
-    for (_, artifact, path) in with_paths(dag, &paths) {
+    for (_, artifact, path) in with_paths(dag, paths) {
         folded
             .entry(path.to_lowercase())
             .or_default()
@@ -288,4 +285,41 @@ pub(crate) fn case_collisions(
     }
     collisions.sort_by(|[_, (left, _)], [_, (right, _)]| left.cmp(right));
     collisions
+}
+
+/// A source artifact whose path its rule reads back as other values, as
+/// `raw/{a}-{b}.txt` reads `a=x-y, b=z`'s path `raw/x-y-z.txt` as
+/// `a=x, b=y-z`, so discovery would find it under the wrong values.
+pub(crate) struct Misread {
+    pub(crate) artifact: ArtifactKey,
+    pub(crate) path: String,
+    /// The values the rule reads from `path`.
+    pub(crate) read: EntityBinding,
+}
+
+/// Each source artifact, with its path from [`bound_paths`], that its rule
+/// reads back as other values, in artifact order.
+pub(crate) fn misread_sources(
+    pipeline: &Pipeline,
+    dag: &ResolvedDag,
+    paths: &[Option<String>],
+) -> Vec<Misread> {
+    let mut binder = PathBinder::new(pipeline);
+    let mut misread = Vec::new();
+    for (_, artifact, path) in with_paths(dag, paths) {
+        if !binder.index().is_source(artifact.product) {
+            continue;
+        }
+        let Some(read) = binder.read_back(artifact.product, path) else {
+            continue;
+        };
+        if read != *artifact.entities {
+            misread.push(Misread {
+                artifact: (artifact.product.to_owned(), artifact.entities.clone()),
+                path: path.clone(),
+                read,
+            });
+        }
+    }
+    misread
 }
