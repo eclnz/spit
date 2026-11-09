@@ -12,7 +12,7 @@ use super::declarations::{
     parse_type_declaration,
 };
 use super::entities::parse_entities;
-use super::keyword::{removed_section, Keyword, BLOCKS};
+use super::keyword::{removed_section, File, Keyword};
 use super::layout::{is_step, Block, Layout};
 use super::lexical::{
     comma_items, extension, identifier, product_name, reserved_name, strip_comment,
@@ -80,10 +80,7 @@ pub(crate) fn parse_flow(layout: &Layout) -> Syntax {
             Some((block, shared)) if shared != indent => {
                 let opener = &layout.statements[block];
                 let what = if let Some(Block::Keyword(keyword)) = opener.opens {
-                    let word = BLOCKS
-                        .iter()
-                        .find(|&&(opens, _)| opens == keyword)
-                        .map_or("", |&(_, word)| word);
+                    let word = keyword.spec().word.unwrap_or("");
                     format!("`{word}:`")
                 } else if opener.opens == Some(Block::Defaults) {
                     "`default:`".to_owned()
@@ -340,7 +337,7 @@ fn flow_rest(
     // A keyword alone with its `:` opens a block of its statements. Keep in
     // step with `opens` in `src/parser/layout.rs`, which gives it its lines.
     if let (None, Some((keyword, ":"))) = (block, split) {
-        if BLOCKS.iter().any(|&(opener, _)| opener == keyword) {
+        if keyword.spec().block {
             return Ok(Read::Header);
         }
     }
@@ -507,24 +504,26 @@ fn flow_statement(
         if word == "default" {
             return Err(ParseError::new(number, DEFAULT_SETTINGS).at_token(word));
         }
-        if word == "pipeline" {
+        if word == PIPELINE {
             return Err(ParseError::new(
                 number,
                 format!("`{word}` belongs in a .spitin recipe, {RECIPE_HEADER}"),
             )
             .at_token(word));
         }
-        let hint = STATEMENT_WORDS
-            .iter()
+        let hint = Keyword::SUGGESTED
+            .into_iter()
+            .chain([PIPELINE])
             .find(|keyword| edit_distance(word, keyword) <= 2)
             .map_or_else(String::new, |keyword| format!("did you mean `{keyword}`? "));
         return Err(ParseError::new(
             number,
             format!(
                 "`{word}` does not start a statement; {hint}a pipeline line starts with \
-                 source, dimensions, types, operation, command, verify, resources, check, review, path, default, root, stage or use, or is a step \
-                 `output = operation(inputs)`, and a recipe line starts with pipeline, \
-                 root, inputs, review, require, exclude or default"
+                 {}, or is a step `output = operation(inputs)`, and a recipe line starts \
+                 with {PIPELINE}, inputs, {}",
+                statement_words(File::Pipeline),
+                statement_words(File::Recipe),
             ),
         )
         .at_token(word));
@@ -599,27 +598,25 @@ fn parse_flow_output(left: &str, number: usize) -> Result<StepOutput, ParseError
     }
 }
 
-/// The words a statement can start with, for suggesting one.
-const STATEMENT_WORDS: [&str; 18] = [
-    "source",
-    "dimensions",
-    "types",
-    "operation",
-    "command",
-    "verify",
-    "resources",
-    "check",
-    "review",
-    "path",
-    "default",
-    "stage",
-    "use",
-    "pipeline",
-    "root",
-    "require",
-    "drop",
-    "exclude",
-];
+/// The recipe's first line, `pipeline file.spit`, which starts with no
+/// keyword.
+const PIPELINE: &str = "pipeline";
+
+/// The words of the statements written in `file` or in either one, as
+/// a list to read: `a, b or c`.
+fn statement_words(file: File) -> String {
+    let words: Vec<&str> = Keyword::ALL
+        .into_iter()
+        .map(Keyword::spec)
+        .filter(|spec| spec.suggested && (spec.file == file || spec.file == File::Both))
+        .filter_map(|spec| spec.word)
+        .collect();
+    match words.split_last() {
+        Some((last, [])) => (*last).to_owned(),
+        Some((last, rest)) => format!("{} or {last}", rest.join(", ")),
+        None => String::new(),
+    }
+}
 
 /// The first word of `line`, when it reads as an unknown keyword: a
 /// lowercase word followed by more than a step's `=`, `,` or `: Type` can
