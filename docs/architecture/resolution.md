@@ -109,7 +109,7 @@ The entry points are in [`src/resolver/mod.rs`](https://github.com/eclnz/spit/bl
 
 ## Failure
 
-- A pipeline error, such as an unknown operation, a type conflict or a cycle, fails `compile` before any job is made. Each is a `ResolveError` ([`src/error.rs`](https://github.com/eclnz/spit/blob/dev/src/error.rs)).
+- A pipeline error, such as an unknown operation, a type conflict or a cycle, fails `compile` before any job is made. Each is a `ResolveError` ([`src/model/error.rs`](https://github.com/eclnz/spit/blob/dev/src/model/error.rs)).
 - `collect_definitions` reports every error that does not follow from another:
     - each declaration's check gives its first fault;
     - a step's shape is checked only once its types hold, since a product of the wrong type at a port is most often an argument in the wrong place, which would make the shape wrong too;

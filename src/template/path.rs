@@ -6,11 +6,11 @@ use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::fmt;
 
+use super::builtin::{ENTITIES, PRODUCT, STAGE};
+use super::{parse_template, Part};
 use crate::span::Located;
-use crate::template::builtin::{ENTITIES, PRODUCT, STAGE};
-use crate::template::{parse_template, Part};
 
-use super::components::encode_component;
+use super::component::encode_component;
 use super::shape::{shape_names, Shape};
 use super::EntitiesFormat;
 

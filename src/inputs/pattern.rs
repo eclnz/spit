@@ -8,10 +8,11 @@ use std::ops::Range;
 
 use rustc_hash::FxHashSet;
 
+use crate::model::stage_directories;
 use crate::model::{Pipeline, PipelineIndex, ProductDef};
-use crate::paths::{
-    error, product_text, stage_directories, unspelled_entities, PathError, PathPart,
-    PathPlaceholder, PathTemplate, Shape,
+use crate::paths::unspelled_entities;
+use crate::template::{
+    error, product_text, PathError, PathPart, PathPlaceholder, PathTemplate, Shape,
 };
 
 /// One piece of a path rule: text written as is, or a dimension's value.
@@ -299,10 +300,10 @@ fn value_ends(
 /// Whether a value can hold `character`: what `encode_component` keeps, and
 /// the `%` of what it escapes.
 ///
-/// Keep in step with `encode_component` in `paths/components.rs`: if a value
+/// Keep in step with `encode_component` in `template/component.rs`: if a value
 /// could hold a character this denies, `forced_end` would bind it too short
 /// and discovery would miss files.
-/// Keep in step with `Shape::matches` in `paths/shape.rs`: no shape may
+/// Keep in step with `Shape::matches` in `template/shape.rs`: no shape may
 /// accept a character this denies.
 fn is_value_character(character: char) -> bool {
     character.is_ascii_alphanumeric() || character == '-' || character == '%'

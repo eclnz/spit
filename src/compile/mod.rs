@@ -12,12 +12,13 @@ mod types;
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::check::collect_checks;
-use crate::command::{collect_commands, CommandError};
-use crate::error::{DefinitionSubject, ResolveError};
+use crate::command::collect_commands;
+use crate::model::{DefinitionSubject, ResolveError};
 use crate::model::{Invocation, OperationDef, Pipeline, ProductDef, TypeChecking};
 use crate::parser::SourceMap;
 use crate::resources::collect_resources;
 use crate::review::collect_reviews;
+use crate::template::CommandError;
 use crate::types::{Substitutions, TypeExpr};
 
 use self::declared::check_declared;

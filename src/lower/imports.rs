@@ -10,8 +10,8 @@ mod kind;
 mod located;
 mod shared;
 
+use super::{parse_layout, ParsedDocument, PipelineBuilder};
 use crate::blob::git_blob_id;
-use crate::lower::{parse_layout, ParsedDocument, PipelineBuilder};
 use crate::model::{
     CheckDef, CommandDef, CommandRole, OperationDef, Pipeline, PipelineIndex, ProductDef,
     ResourcesDef, SidecarGroup, SourceFile,

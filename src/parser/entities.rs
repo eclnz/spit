@@ -1,6 +1,6 @@
 //! Pipeline-wide entity assignment templates and dimension label aliases.
 
-use crate::paths::EntitiesFormat;
+use crate::template::EntitiesFormat;
 
 use super::lexical::identifier;
 use super::ParseError;

@@ -15,8 +15,8 @@ use crate::compile::collect_definitions;
 use crate::diagnostics::{
     diagnostics_json, recover_document, shown_paths_json, Diagnostic, ShownPath,
 };
-use crate::imports::parse_located_document_recovering;
 use crate::json::Json;
+use crate::lower::imports::parse_located_document_recovering;
 use crate::model::{
     BesideFile, Cardinality, CheckId, CommandId, PathOrigin, Pipeline, PipelineIndex, ProductDef,
     ResourcesId,
@@ -554,13 +554,14 @@ fn recipe_input_hovers(text: &str, path: &Path) -> Vec<Hover> {
     let Ok(pipeline_text) = std::fs::read_to_string(&pipeline_file) else {
         return Vec::new();
     };
-    let Ok(pipeline) = crate::imports::parse_pipeline_at(&pipeline_text, &pipeline_file) else {
+    let Ok(pipeline) = crate::lower::imports::parse_pipeline_at(&pipeline_text, &pipeline_file)
+    else {
         return Vec::new();
     };
     let mut hovers = Vec::new();
     let mut block_indent = None;
     for (index, raw) in text.lines().enumerate() {
-        let line = crate::parser::strip_comment(raw);
+        let line = crate::span::strip_comment(raw);
         let trimmed = line.trim();
         let indent = line.len() - line.trim_start().len();
         if trimmed == "inputs:" {

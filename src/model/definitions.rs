@@ -4,9 +4,9 @@
 use std::collections::BTreeMap;
 use std::fmt;
 
-use crate::command::CommandTemplate;
-use crate::paths::{EntitiesFormat, PathTemplate};
 use crate::span::Place;
+use crate::template::CommandTemplate;
+use crate::template::{EntitiesFormat, PathTemplate};
 
 use super::{owned_strings, ArtifactInstance, ArtifactType};
 

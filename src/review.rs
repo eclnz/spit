@@ -11,13 +11,13 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use rustc_hash::FxHashMap;
 
-use crate::command::CommandError;
 use crate::model::{
     stage_and_parents, DefaultReviews, Invocation, OperationDef, Pipeline, PipelineIndex, Port,
     ProductDef, ReviewId,
 };
 use crate::parser::SourceMap;
 use crate::span::Place;
+use crate::template::CommandError;
 
 /// Check every `review` declaration and every use of one, collecting each
 /// error. Uses on operations in `skip`, which already failed, are not

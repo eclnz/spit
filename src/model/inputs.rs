@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::path::PathBuf;
 
-use crate::paths::{EntitiesFormat, Holder, PathTemplate};
+use crate::template::{EntitiesFormat, Holder, PathTemplate};
 
 use super::{owned_strings, ContextPattern, EntityBinding, Pipeline, PipelineIndex, VerdictRow};
 

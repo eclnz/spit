@@ -7,11 +7,11 @@ use std::fmt;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::error::{DefinitionSubject, ResolveError};
 use crate::model::{
     ArtifactInstance, CountRequirement, CoverageAction, CoverageGap, CoverageRule, EntityBinding,
     GroupKey, InputRules, Pipeline, PipelineIndex, Removal, SourceInventory,
 };
+use crate::model::{DefinitionSubject, ResolveError};
 use crate::shape::dimension_set;
 
 /// A group a `drop` rule removed.

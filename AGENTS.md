@@ -67,7 +67,7 @@ The five rules under [Performance](docs/architecture/performance.md) come first:
 
 **Errors and invariants**
 
-- **Errors are data.** An error is an enum variant whose fields say what went wrong, and `Located<E>` says where. Rendering is separate, in each error's `Display` (`src/error.rs`) and in `src/diagnostics`, so that the same error can be printed as text or as JSON.
+- **Errors are data.** An error is an enum variant whose fields say what went wrong, and `Located<E>` says where. Rendering is separate, in each error's `Display` (`src/model/error.rs`) and in `src/diagnostics`, so that the same error can be printed as text or as JSON.
 - **Bad input never panics.** Outside tests, `unwrap` isn't used, and clippy rejects it. `expect` and `unreachable!` state an invariant the code already holds, and their message says what it is, as in `unreachable!("a product's template has its groups resolved")`. Anything a user's file can cause is an error.
 - **Name the other half of an invariant.** When code relies on something another place guarantees, a comment says so with "Keep in step with" and names that place, as the `Ord` for `EntityBinding` does for its hash. Add the comment on both sides.
 - **No `unsafe`.** The compiler rejects it.
@@ -87,7 +87,7 @@ A comment earns its place by telling the reader what the code can't. A wrong or 
 
 **Files and modules**
 
-- **A Rust file has at most 800 lines, tests included.** A longer file usually holds two subjects, which read better as two modules. Split it along the data it handles, as `src/paths` is split into the template itself (`template.rs`), the path it gives one product's artifacts (`product.rs`), path components (`components.rs`), the checks on declared rules (`rules.rs`) and paths bound to a DAG (`bind.rs`), not into arbitrary halves. `tests/architecture.rs` fails a longer file.
+- **A Rust file has at most 800 lines, tests included.** A longer file usually holds two subjects, which read better as two modules. Split it along the data it handles, as `src/paths` is split into the path it gives one product's artifacts (`product.rs`), path components (`components.rs`), the checks on declared rules (`rules.rs`) and paths bound to a DAG (`bind.rs`), not into arbitrary halves. `tests/architecture.rs` fails a longer file.
 
 **Dependencies and boundaries**
 

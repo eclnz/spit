@@ -7,8 +7,10 @@ use std::fmt::Write;
 use rustc_hash::FxHashSet;
 
 use crate::model::ContextPattern;
-use crate::parser::{strip_comment, ParseError, SourceMap};
-use crate::paths::{validate_context_pattern, PathPart, PathPlaceholder, PathTemplate};
+use crate::parser::{ParseError, SourceMap};
+use crate::paths::validate_context_pattern;
+use crate::span::strip_comment;
+use crate::template::{PathPart, PathPlaceholder, PathTemplate};
 
 enum Block {
     Before,

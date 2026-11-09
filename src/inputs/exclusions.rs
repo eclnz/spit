@@ -4,10 +4,10 @@
 use std::borrow::Cow;
 use std::collections::BTreeSet;
 
-use crate::error::{DefinitionSubject, ResolveError};
 use crate::model::{
     near_reason, EntityBinding, Exclusion, InputRules, PipelineIndex, Removal, SourceInventory,
 };
+use crate::model::{DefinitionSubject, ResolveError};
 
 /// Check each rule against the pipeline without reading any data: a rule's
 /// product must be a source, and each dimension it names must be one of that

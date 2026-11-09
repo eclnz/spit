@@ -7,11 +7,11 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::product::PathBinder;
 use super::rules::inspect_paths;
-use super::template::{error, require_directory, PathError};
 use crate::model::{
     Artifact, ArtifactId, ArtifactKey, BesideFile, EntityBinding, Pipeline, PipelineIndex,
     ResolvedDag,
 };
+use crate::template::{error, require_directory, PathError};
 
 /// Check the files needed to start the resolved DAG under a dataset root.
 /// Derived outputs are deliberately excluded because the pipeline creates them.

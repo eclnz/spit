@@ -9,11 +9,11 @@ use rustc_hash::FxHashMap;
 
 mod entities;
 mod expand;
+pub(crate) mod imports;
 mod reviews;
 
 use expand::BodyCheck;
 
-use crate::imports::apply_import;
 use crate::model::{
     CallId, Cardinality, CheckDef, CheckId, CommandDef, CommandId, CommandRole, CoverageRule,
     DefaultChecks, Exclusion, InputBinding, InputRules, Invocation, OperationDef, Pipeline,
@@ -28,6 +28,7 @@ use crate::parser::{
 use crate::shape::{step_context, step_driver, BoundInput};
 use crate::span::Place;
 use crate::types::TypeExpr;
+use imports::apply_import;
 
 /// A pipeline under construction, the input rules its document declares
 /// beside it, and where its declarations sit.
