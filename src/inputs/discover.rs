@@ -16,10 +16,10 @@ use crate::model::{
     ArtifactInstance, ContextPattern, EntityBinding, InputRules, Pipeline, PipelineIndex,
     ProductDef, Removal, SourceInventory, SourceRecord,
 };
-use crate::paths::{
-    decode_component, encode_component, error, inspect_paths, require_directory,
-    validate_context_pattern, PathBinder, PathError, PathPart, PathPlaceholder, PathTemplate,
-    Shape,
+use crate::paths::{inspect_paths, validate_context_pattern, PathBinder};
+use crate::template::{
+    decode_component, encode_component, error, require_directory, PathError, PathPart,
+    PathPlaceholder, PathTemplate, Shape,
 };
 
 /// The source files found under a root, what the recipe's rules removed,

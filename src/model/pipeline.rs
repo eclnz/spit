@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::{DefinitionSubject, ResolveError};
-use crate::paths::{EntitiesFormat, PathTemplate};
+use crate::template::{EntitiesFormat, PathTemplate};
 
 use super::{
     ArtifactInstance, BesideFile, Call, CallId, CheckDef, CommandDef, DefaultChecks,

@@ -72,31 +72,6 @@ fn allowed(from: Layer, to: Layer) -> bool {
 /// shrinks.
 const BACK_EDGES: &[(&str, &str, &str)] = &[
     (
-        "model",
-        "paths",
-        "the model holds PathTemplate, EntitiesFormat and Holder, which step 8 moves to the value layer",
-    ),
-    (
-        "model",
-        "command",
-        "the model holds CommandTemplate, which step 8 moves to the value layer",
-    ),
-    (
-        "parser",
-        "paths",
-        "the parser makes PathTemplate and EntitiesFormat, which step 8 moves to the value layer",
-    ),
-    (
-        "parser",
-        "command",
-        "the parser makes CommandTemplate, which step 8 moves to the value layer",
-    ),
-    (
-        "lower",
-        "paths",
-        "lowering reads EntitiesFormat, which step 8 moves to the value layer",
-    ),
-    (
         "lower",
         "imports",
         "lowering calls imports::apply_import, which step 8 moves into lower",

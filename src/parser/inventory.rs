@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use crate::model::{EntityBinding, Removal, SourceInventory, SourceRecord, Verdict, VerdictRow};
-use crate::paths::PathTemplate;
+use crate::template::PathTemplate;
 
 use super::keyword::Header;
 use super::layout::{Head, Layout, Line};

@@ -38,7 +38,7 @@ impl Shape {
     ///
     /// Keep in step with `Shape::matches`: a shape has a fixed length only
     /// if `matches` accepts values of that length alone. `value_ends` in
-    /// `inputs/pattern.rs` and `check_shapes` in `paths/template.rs` rely on
+    /// `inputs/pattern.rs` and `check_shapes` in `template/path.rs` rely on
     /// it, and a unit test below checks it.
     pub(crate) fn fixed_length(self) -> Option<usize> {
         match self {

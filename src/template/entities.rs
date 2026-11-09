@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use crate::template::{parse_template, Part};
+use super::{parse_template, Part};
 
 /// How `{@entities}` writes each dimension, as a `default entities:` line
 /// spells it: `{@entities}` has no spelling of its own. Labels change path
@@ -67,7 +67,7 @@ impl EntitiesFormat {
         }) {
             return Err("entities formatting must stay in one path component; literal text cannot contain whitespace, `/`, `\\`, `%`, braces or brackets".to_owned());
         }
-        // Keep in step with `push_encoded` in components.rs: values retain
+        // Keep in step with `push_encoded` in component.rs: values retain
         // only ASCII letters, digits and `-`; every other byte is %XX.
         let boundary = literals.iter().any(|text| {
             text.bytes()

@@ -33,7 +33,8 @@ use crate::model::{
 use crate::parser::{
     without_bom, File, Head, Header, Keyword, Kind, Layout, ParseError, SourceMap,
 };
-use crate::paths::{inspect_paths, PathError, PathTemplate};
+use crate::paths::inspect_paths;
+use crate::template::{PathError, PathTemplate};
 
 pub(crate) use self::coverage::collect_rule_errors;
 pub use self::coverage::EveryGroupDropped;
@@ -322,7 +323,7 @@ impl InputSpec {
         if let Some(format) = &self.rules.source_entities {
             let dimensions = pipeline.dimension_order();
             if let Some(dimension) = format.labels.keys().find(|name| !dimensions.contains(name)) {
-                return Err(InputError::Path(crate::paths::error(format!(
+                return Err(InputError::Path(crate::template::error(format!(
                     "the recipe's entity label names unknown dimension `{dimension}`"
                 ))));
             }

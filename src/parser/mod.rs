@@ -26,8 +26,8 @@ use crate::model::{
     CheckDef, CommandDef, CommandRole, CoverageRule, DefaultChecks, DefaultReviews, Invocation,
     OperationDef, ProductDef, ResourcesDef, ReviewDef, StepOutput, TypeChecking,
 };
-use crate::paths::PathTemplate;
 use crate::span::{address_of, columns_at, content_columns, Focus, Located, Place};
+use crate::template::PathTemplate;
 
 use self::flow::parse_flow;
 

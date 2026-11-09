@@ -7,7 +7,7 @@ use std::fmt;
 use crate::model::{
     DimensionOrders, EntityBinding, InputRules, Pipeline, SourceInventory, SourceRecord,
 };
-use crate::paths::PathTemplate;
+use crate::template::PathTemplate;
 
 /// Write an inventory in the text form [`parse_source_inventory`] reads,
 /// with each record's values in its product's declared dimension order.
