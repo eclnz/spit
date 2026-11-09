@@ -11,8 +11,13 @@ mod types;
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use crate::check::collect_checks;
+use crate::command::{collect_commands, CommandError};
 use crate::error::{DefinitionSubject, ResolveError};
 use crate::model::{Invocation, OperationDef, Pipeline, ProductDef, TypeChecking};
+use crate::parser::SourceMap;
+use crate::resources::collect_resources;
+use crate::review::collect_reviews;
 use crate::types::{Substitutions, TypeExpr};
 
 use self::declared::check_declared;
@@ -43,8 +48,9 @@ pub(crate) struct CompiledStep<'a> {
     pub(crate) shape: StepShape,
 }
 
-/// Every pipeline error, plus the names that failed or depend on a failure.
-pub(crate) struct PipelineCheck<'a> {
+/// Every error in the pipeline's declarations and steps, plus the names
+/// that failed or depend on a failure.
+pub(crate) struct DefinitionCheck<'a> {
     /// The steps that checked, producers before consumers. With errors these
     /// are only part of the pipeline, which the editor may describe but
     /// nothing may resolve.
@@ -59,15 +65,15 @@ pub(crate) struct PipelineCheck<'a> {
 /// Check everything that depends only on the pipeline text: declarations,
 /// each step's operation, inputs, dimensions and inferred types, cycles,
 /// and under `types strict` that no type is left unknown.
-/// Returns the first error [`collect_pipeline`] finds; the diagnostics give
+/// Returns the first error [`collect_definitions`] finds; the diagnostics give
 /// them all.
 pub fn validate_pipeline(pipeline: &Pipeline) -> Result<(), ResolveError> {
     compile(pipeline).map(|_| ())
 }
 
-/// Compile `pipeline`, or return the first error [`collect_pipeline`] finds.
+/// Compile `pipeline`, or return the first error [`collect_definitions`] finds.
 pub(crate) fn compile(pipeline: &Pipeline) -> Result<CompiledPipeline<'_>, ResolveError> {
-    let checked = collect_pipeline(pipeline);
+    let checked = collect_definitions(pipeline);
     match checked.errors.into_iter().next() {
         Some((_, error)) => Err(error),
         None => Ok(CompiledPipeline {
@@ -76,10 +82,11 @@ pub(crate) fn compile(pipeline: &Pipeline) -> Result<CompiledPipeline<'_>, Resol
     }
 }
 
-/// Check the whole pipeline without an inventory, collecting every error.
-/// This is the one check of a pipeline's text: [`compile`] and
-/// [`validate_pipeline`] read their answer from it.
-pub(crate) fn collect_pipeline(pipeline: &Pipeline) -> PipelineCheck<'_> {
+/// Check the pipeline's declarations and steps without an inventory,
+/// collecting every error. [`compile`] and [`validate_pipeline`] read their
+/// answer from it; `validate::check_pipeline` runs it first, before the
+/// checks of rules, commands and paths.
+pub(crate) fn collect_definitions(pipeline: &Pipeline) -> DefinitionCheck<'_> {
     let mut errors = Vec::new();
     let mut poisoned = BTreeSet::new();
     let mut duplicated = BTreeSet::new();
@@ -158,11 +165,51 @@ pub(crate) fn collect_pipeline(pipeline: &Pipeline) -> PipelineCheck<'_> {
     if pipeline.types == TypeChecking::Strict {
         check_strict(pipeline, &operations, &steps, &mut errors, &poisoned);
     }
-    PipelineCheck {
+    DefinitionCheck {
         steps,
         errors,
         poisoned,
     }
+}
+
+/// Check every declared command against its operation without resolving
+/// jobs: the template must name only known placeholders and write every
+/// output; a `verify` command may read inputs only. `resources`, `check` and
+/// `review` lines are checked too. Returns the first error
+/// [`collect_command_lines`] finds.
+pub fn validate_commands(pipeline: &Pipeline) -> Result<(), CommandError> {
+    let operations = operations_by_name(pipeline);
+    let lines = SourceMap::default();
+    let errors = collect_command_lines(pipeline, &operations, &lines, &BTreeSet::new());
+    match errors.into_iter().next() {
+        Some(error) => Err(error),
+        None => Ok(()),
+    }
+}
+
+/// The pipeline's operations by name.
+pub(crate) fn operations_by_name(pipeline: &Pipeline) -> BTreeMap<&str, &OperationDef> {
+    pipeline
+        .operations
+        .iter()
+        .map(|operation| (operation.name.as_str(), operation))
+        .collect()
+}
+
+/// Every error in the `command`, `resources`, `check` and `review` lines, in
+/// that order. Lines for names in `skip` belong to declarations that already
+/// failed and are not checked.
+pub(crate) fn collect_command_lines(
+    pipeline: &Pipeline,
+    operations: &BTreeMap<&str, &OperationDef>,
+    lines: &SourceMap,
+    skip: &BTreeSet<String>,
+) -> Vec<CommandError> {
+    let mut errors = collect_commands(pipeline, operations, lines, skip);
+    errors.extend(collect_resources(pipeline, operations, lines, skip));
+    errors.extend(collect_checks(pipeline, lines, skip));
+    errors.extend(collect_reviews(pipeline, lines, skip));
+    errors
 }
 
 pub(crate) fn find_product<'a>(

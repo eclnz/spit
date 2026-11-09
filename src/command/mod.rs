@@ -16,7 +16,6 @@ use std::ops::Range;
 use crate::span::Located;
 use crate::template::{parse_template, Part};
 
-pub use self::validate::validate_commands;
 pub(crate) use self::validate::{collect_commands, facet, slot, Facet, Slot};
 
 /// An error in a command, such as an unknown `{placeholder}`.

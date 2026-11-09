@@ -17,27 +17,25 @@ use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use crate::command::collect_commands;
-use crate::compile::collect_pipeline;
 use crate::imports::parse_located_document_recovering;
 use crate::inputs::{
-    check_inventory, collect_rule_errors, with_source_paths, InputCheck, InputError, InputSpec,
-    ResolvedInputs,
+    check_inventory, with_source_paths, InputCheck, InputError, InputSpec, ResolvedInputs,
 };
 use crate::lower::{parse_document_recovering, ParsedDocument};
 use crate::model::{ArtifactReport, CoverageGap, InputRules, PipelineIndex, SourceInventory};
 use crate::parser::{
     as_read_back, glued_comment, parse_inventory_recovering, without_bom, Kind, Rule, SourceMap,
 };
-use crate::paths::{collect_paths, shown_path, PathTemplate};
+use crate::paths::{shown_path, PathTemplate};
 use crate::resolver::first_failure;
 use crate::span::{content_columns, Lines, Place};
+use crate::validate::check_pipeline;
 use crate::{
     parse_source_inventory, resolve_artifacts_excluding, DefinitionSubject, ParseError, Pipeline,
     ResolveError,
 };
 
-use places::{at_call, error_location, error_step, in_call, subject_place, InCall};
+use places::{error_step, InCall, Places};
 use recovery::recover_parse_errors;
 use warnings::{case_warnings, empty_step_warnings, near_miss_warnings, warnings};
 
@@ -183,11 +181,6 @@ pub fn diagnose_checked(text: &str, context: Context<'_>) -> Diagnosis {
 /// As [`diagnose_checked`], with the records in `records` settled and
 /// resolved over the pipeline once it passes on its own; the inventory they
 /// parse to, and what it resolves to, are returned with it.
-///
-/// Keep in step with [`diagnose_checked_with_inventory`], which takes the
-/// same steps over records in memory: a step added or changed here must be
-/// added or changed there, or recipes will be diagnosed differently when
-/// they pass than when they fail.
 pub fn diagnose_checked_with_records(
     text: &str,
     records: &str,
@@ -198,8 +191,10 @@ pub fn diagnose_checked_with_records(
         recover_parse_errors(text, |text| context.parse(text)),
         recover_parse_errors(records, parse_inventory_recovering),
     );
-    let (parsed, inventory) = match parsed {
-        (Ok(parsed), Ok(inventory)) => (parsed, inventory),
+    match parsed {
+        (Ok(parsed), Ok(inventory)) => {
+            diagnose_over(parsed, inventory, None, text, Some(records), context)
+        }
         (parsed, inventory) => {
             let pipeline_errors = parsed.err().into_iter().flatten();
             let record_errors = inventory.err().into_iter().flatten();
@@ -210,12 +205,56 @@ pub fn diagnose_checked_with_records(
                     records,
                 ))
                 .collect();
-            return Err(finish(diagnostics, text, Some(records)));
+            Err(finish(diagnostics, text, Some(records)))
         }
-    };
+    }
+}
+
+/// As [`diagnose_checked_with_records`], for the records `settled` in memory
+/// by [`InputSpec::resolve`] with the context's recipe, without writing them
+/// as text and reading them back. It gives `None`, so that the caller
+/// diagnoses their text instead, when a diagnostic would point into that
+/// text: when anything is an error or concerns the records, or when a path
+/// rule the text would carry holds a `#`. `tests/outputs.rs` compares the
+/// two.
+pub fn diagnose_checked_with_inventory(
+    text: &str,
+    settled: &ResolvedInputs,
+    context: Context<'_>,
+) -> Option<(Checked, Records)> {
+    let text = without_bom(text);
+    let parsed = recover_parse_errors(text, |text| context.parse(text)).ok()?;
+    let no_rules = InputRules::default();
+    let rules = context.recipe.map_or(&no_rules, |recipe| &recipe.rules);
+    let inventory = as_read_back(&settled.inventory, &parsed.document.pipeline, rules)?;
+    // Checking the settled records again finds what settling found, since
+    // only the conditional `exclude` rules change records and they ran while settling.
+    let gaps = Some(settled.gaps.as_slice());
+    let (checked, records) = diagnose_over(parsed, inventory, gaps, text, None, context).ok()?;
+    let in_records = |diagnostic: &Diagnostic| diagnostic.source == DiagnosticSource::Inventory;
+    if checked.warnings.iter().any(in_records) {
+        return None;
+    }
+    Some((checked, records))
+}
+
+/// Check a parsed pipeline, then settle and resolve `inventory` over it:
+/// the pipeline with its warnings and what the records resolve to, or every
+/// diagnostic when one is an error. `gaps` holds what settling `inventory`
+/// already found, when it was settled in memory. Errors about records point
+/// into `records` when given.
+fn diagnose_over(
+    parsed: Parsed,
+    inventory: SourceInventory,
+    gaps: Option<&[CoverageGap]>,
+    text: &str,
+    records: Option<&str>,
+    context: Context<'_>,
+) -> Diagnosis<(Checked, Records)> {
     let document = &parsed.document;
-    let mut diagnostics = check_document(document, text, Some(records))?;
-    let report = record_diagnostics(document, &inventory, None, records, context.lenient);
+    let mut diagnostics = check_document(document, text, records)?;
+    let records_text = records.unwrap_or_default();
+    let report = record_diagnostics(document, &inventory, gaps, records_text, context.lenient);
     let report = match report {
         Ok((report, found)) => {
             diagnostics.extend(found);
@@ -226,52 +265,13 @@ pub fn diagnose_checked_with_records(
             None
         }
     };
-    let diagnostics = finish(diagnostics, text, Some(records));
+    let diagnostics = finish(diagnostics, text, records);
     match report {
         Some(report) if !diagnostics.iter().any(Diagnostic::is_error) => {
             Ok((parsed.checked(diagnostics), Records { inventory, report }))
         }
         _ => Err(diagnostics),
     }
-}
-
-/// As [`diagnose_checked_with_records`], for the records `settled` in memory
-/// by [`InputSpec::resolve`] with the context's recipe, without writing them
-/// as text and reading them back. It gives `None`, so that the caller
-/// diagnoses their text instead, when a diagnostic would point into that
-/// text: when anything is an error or concerns the records, or when a path
-/// rule the text would carry holds a `#`.
-///
-/// Keep in step with [`diagnose_checked_with_records`]: this takes its steps
-/// but parsing the records, and must give what it gives whenever this gives
-/// anything. `tests/outputs.rs` compares the two.
-pub fn diagnose_checked_with_inventory(
-    text: &str,
-    settled: &ResolvedInputs,
-    context: Context<'_>,
-) -> Option<(Checked, Records)> {
-    let text = without_bom(text);
-    let parsed = recover_parse_errors(text, |text| context.parse(text)).ok()?;
-    let document = &parsed.document;
-    let no_rules = InputRules::default();
-    let rules = context.recipe.map_or(&no_rules, |recipe| &recipe.rules);
-    let inventory = as_read_back(&settled.inventory, &document.pipeline, rules)?;
-    // Checking the settled records again finds what settling found, since
-    // only the conditional `exclude` rules change records and they ran while settling.
-    let gaps = Some(settled.gaps.as_slice());
-    // Only errors are placed in the records' text.
-    let mut diagnostics = check_document(document, text, None).ok()?;
-    let lenient = context.lenient;
-    let (report, found) = record_diagnostics(document, &inventory, gaps, "", lenient).ok()?;
-    diagnostics.extend(found);
-    let diagnostics = finish(diagnostics, text, None);
-    if diagnostics
-        .iter()
-        .any(|diagnostic| diagnostic.is_error() || diagnostic.source == DiagnosticSource::Inventory)
-    {
-        return None;
-    }
-    Some((parsed.checked(diagnostics), Records { inventory, report }))
 }
 
 /// Diagnose a `.spitout` on its own: the syntax of its records. Whether the
@@ -355,7 +355,8 @@ fn record_diagnostics(
         diagnostics.extend(near_miss_warnings(&report));
         if let Some(error) = first_failure(&report.incomplete) {
             let remaining: usize = report.incomplete.iter().map(|job| job.outputs.len()).sum();
-            let (source, place) = error_location(pipeline, lines, &error, records, true);
+            let places = Places::new(pipeline, lines);
+            let (source, place) = places.error_location(&error, records, true);
             let mut message = error.to_string();
             if let ResolveError::MissingInput { site, context, .. } = &error {
                 if let Some(removal) = supplied.removed.iter().find(|removal| {
@@ -382,8 +383,7 @@ fn record_diagnostics(
             ));
             diagnostics.push(within_call(
                 Diagnostic::error(source, place, message),
-                pipeline,
-                lines,
+                &places,
                 error_step(&error),
             ));
             return Err(error);
@@ -394,11 +394,11 @@ fn record_diagnostics(
     match resolved {
         Err(error) => {
             if !diagnostics.iter().any(Diagnostic::is_error) {
-                let (source, place) = error_location(pipeline, lines, &error, records, true);
+                let places = Places::new(pipeline, lines);
+                let (source, place) = places.error_location(&error, records, true);
                 diagnostics.push(within_call(
                     Diagnostic::error(source, place, error.to_string()),
-                    pipeline,
-                    lines,
+                    &places,
                     error_step(&error),
                 ));
             }
@@ -504,24 +504,30 @@ fn pipeline_diagnostics(
     inventory_text: &str,
 ) -> Vec<Diagnostic> {
     let (pipeline, lines) = (&document.pipeline, &document.lines);
-    let checked = collect_pipeline(pipeline);
-    let rule_errors = collect_rule_errors(pipeline, &document.inputs, &checked.poisoned);
-    let mut diagnostics: Vec<_> = checked
+    let checked = check_pipeline(document);
+    let mut diagnostics = Vec::new();
+    let mut errors = checked
+        .definitions
         .errors
         .iter()
-        .chain(&rule_errors)
-        .map(|(subject, error)| {
+        .chain(&checked.rules)
+        .peekable();
+    // Most pipelines have no error to place, so the index waits for one.
+    if errors.peek().is_some() {
+        let places = Places::new(pipeline, lines);
+        diagnostics.extend(errors.map(|(subject, error)| {
             let diagnostic =
                 |place| Diagnostic::error(DiagnosticSource::Pipeline, place, error.to_string());
             if let DefinitionSubject::Call(call) = subject {
                 let port = error_step(error).and_then(|(_, port)| port);
-                return match at_call(pipeline, lines, *call, port) {
+                return match places.at_call(*call, port) {
                     Some(call) => placed(diagnostic(None), call),
                     None => diagnostic(None),
                 };
             }
-            let place = subject_place(pipeline, lines, subject, error)
-                .or_else(|| error_location(pipeline, lines, error, inventory_text, false).1);
+            let place = places
+                .subject_place(subject, error)
+                .or_else(|| places.error_location(error, inventory_text, false).1);
             let step = match subject {
                 DefinitionSubject::Invocation(output) => Some((
                     output.as_str(),
@@ -529,23 +535,23 @@ fn pipeline_diagnostics(
                 )),
                 _ => error_step(error),
             };
-            within_call(diagnostic(place), pipeline, lines, step)
-        })
-        .collect();
+            within_call(diagnostic(place), &places, step)
+        }));
+    }
     let source = DiagnosticSource::Pipeline;
-    let command_errors = collect_commands(pipeline, lines, &checked.poisoned);
-    let path_errors = collect_paths(pipeline, lines, &checked.poisoned).1;
     diagnostics.extend(
-        command_errors
+        checked
+            .commands
             .iter()
             .map(|error| Diagnostic::located(source, error, text)),
     );
     diagnostics.extend(
-        path_errors
+        checked
+            .paths
             .iter()
             .map(|error| Diagnostic::located(source, error, text)),
     );
-    diagnostics.extend(warnings(pipeline, lines, &checked.poisoned));
+    diagnostics.extend(warnings(pipeline, lines, &checked.definitions.poisoned));
     if let Some(warning) = recipe::missing_root(pipeline.root.as_ref(), text) {
         diagnostics.push(warning);
     }
@@ -554,14 +560,13 @@ fn pipeline_diagnostics(
 
 /// `diagnostic`, about the step making a product at a port, reported at the
 /// call written in the text when a call to an operation carried out by
-/// steps made that step; see [`in_call`].
+/// steps made that step; see [`Places::in_call`].
 fn within_call(
     diagnostic: Diagnostic,
-    pipeline: &Pipeline,
-    lines: &SourceMap,
+    places: &Places<'_>,
     step: Option<(&str, Option<&str>)>,
 ) -> Diagnostic {
-    match step.and_then(|(output, port)| in_call(pipeline, lines, output, port)) {
+    match step.and_then(|(output, port)| places.in_call(output, port)) {
         Some(call) => placed(diagnostic, call),
         None => diagnostic,
     }

@@ -1,12 +1,12 @@
 # Resolution
 
-Resolution turns a `Pipeline` and a `SourceInventory` into jobs. `collect_pipeline` first checks everything the pipeline's text decides, with no data, and reports every error it finds. Only a pipeline with none compiles. The resolver then expands each checked step into one job per context its driving input gives, over the inventory's artifacts. The result is a `ResolvedDag` of logical artifacts and jobs, with no paths and no commands; [binding](binding.md) adds those.
+Resolution turns a `Pipeline` and a `SourceInventory` into jobs. `collect_definitions` first checks every declaration and step of the pipeline's text, with no data, and reports every error it finds. Only a pipeline with none compiles. The resolver then expands each checked step into one job per context its driving input gives, over the inventory's artifacts. The result is a `ResolvedDag` of logical artifacts and jobs, with no paths and no commands; [binding](binding.md) adds those.
 
 ```mermaid
 flowchart LR
-    pipeline["Pipeline"] --> check["collect_pipeline"]
-    check --> report["PipelineCheck<br/>every error, poisoned names,<br/>steps that checked"]
-    report --> diagnostics["diagnostics<br/>and editor"]
+    pipeline["Pipeline"] --> check["collect_definitions"]
+    check --> report["DefinitionCheck<br/>every error, poisoned names,<br/>steps that checked"]
+    report --> diagnostics["check_pipeline<br/>and editor"]
     report --> compile["compile<br/>no error, or the first"]
     compile --> compiled["CompiledPipeline<br/>CompiledStep per step"]
     compiled --> expand["resolve_artifacts_excluding"]
@@ -19,11 +19,11 @@ flowchart LR
 
 ## Data
 
-- **`PipelineCheck`** ([`src/compile/mod.rs`](https://github.com/eclnz/spit/blob/dev/src/compile/mod.rs)) is the one check of a pipeline's text. `collect_pipeline` makes it, and it holds:
+- **`DefinitionCheck`** ([`src/compile/mod.rs`](https://github.com/eclnz/spit/blob/dev/src/compile/mod.rs)) is the check of a pipeline's declarations and steps. `collect_definitions` makes it, and `check_pipeline` runs it before the checks of rules, commands and paths (see [diagnostics](diagnostics.md)). It holds:
     - every error, each with the declaration or step it belongs to (`DefinitionSubject`);
     - the poisoned names: products and operations that failed, or that are made by a step that failed or reads from one;
     - the steps that checked. With errors, they are part of a pipeline, which the editor describes but nothing resolves.
-- **`CompiledPipeline`** holds each step of a pipeline with no error, producers before consumers. Only `compile` makes one, from a `PipelineCheck` with no errors; otherwise it returns the first error. `validate_pipeline` is `compile` without the result. Each `CompiledStep` holds:
+- **`CompiledPipeline`** holds each step of a pipeline with no error, producers before consumers. Only `compile` makes one, from a `DefinitionCheck` with no errors; otherwise it returns the first error. `validate_pipeline` is `compile` without the result. Each `CompiledStep` holds:
     - its `Invocation` and `OperationDef`;
     - each output's product, with the type inferred for it;
     - its `Substitutions`;
@@ -110,7 +110,7 @@ The entry points are in [`src/resolver/mod.rs`](https://github.com/eclnz/spit/bl
 ## Failure
 
 - A pipeline error, such as an unknown operation, a type conflict or a cycle, fails `compile` before any job is made. Each is a `ResolveError` ([`src/error.rs`](https://github.com/eclnz/spit/blob/dev/src/error.rs)).
-- `collect_pipeline` reports every error that does not follow from another:
+- `collect_definitions` reports every error that does not follow from another:
     - each declaration's check gives its first fault;
     - a step's shape is checked only once its types hold, since a product of the wrong type at a port is most often an argument in the wrong place, which would make the shape wrong too;
     - a product two steps make is reported as a duplicate declaration, not also as having more than one producing invocation;
