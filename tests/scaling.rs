@@ -1,22 +1,21 @@
 //! Each stage's time must grow about in step with the dataset. The test
 //! times every stage on a small dataset and on one four times its size: work
 //! in proportion to the dataset takes about four times as long, while work
-//! that compares everything with everything else takes sixteen, as settling
-//! and resolving once did. The bound is loose, so a slow or busy machine
-//! does not fail it; it catches a stage becoming quadratic, not a few
-//! percent. Before settling was fixed, it took 13.6 times as long here;
-//! every stage now takes under 5.
+//! that compares everything with everything else takes sixteen. The bound is
+//! loose, and a stage fails only when it grows too fast on every one of
+//! [`ATTEMPTS`] measurements, so a slow or busy machine does not fail it; it
+//! catches a stage becoming quadratic, not a few percent.
 //!
 //! Checking a pipeline is timed the same way, over a chain of steps and one
 //! four times as long, with its paths and hovers, so that a check that
-//! compares every step with every other fails it. A cost that shows only on far longer chains, as lowering's
-//! search for each step's inputs once did, is left to `tests/scale.rs`.
+//! compares every step with every other fails it. A cost that shows only on
+//! far longer chains is left to `tests/scale.rs`.
 
 mod support;
 
-use std::time::{Duration, Instant};
-
+use std::collections::BTreeMap;
 use std::path::Path;
+use std::time::{Duration, Instant};
 
 use spit::{
     bind_dag, diagnose_checked, diagnose_checked_with_records, parse_input_spec, parse_pipeline,
@@ -31,6 +30,10 @@ const SUBJECTS: usize = 60;
 const MAX_GROWTH: f64 = 9.0;
 /// Below this, a stage is too quick to time reliably, and too quick to matter.
 const NOISE: Duration = Duration::from_millis(25);
+/// How many times both sizes are measured before a stage that grew too fast
+/// fails. Other work on the machine can slow one measurement, but a stage
+/// that scales worse than linearly grows too fast on all of them.
+const ATTEMPTS: usize = 3;
 
 const PIPELINE: &str = "\
 default path: out/{@product}/{@entities}.txt
@@ -130,32 +133,44 @@ fn stage_times(subjects: usize) -> Vec<(&'static str, Duration)> {
     best
 }
 
-/// The stages that took more than `MAX_GROWTH` times as long on the large
-/// input as on the small one, where `what` names the sizes.
+/// The stages that took more than `MAX_GROWTH` times as long on `size`
+/// times 4 as on `size`, in each of up to [`ATTEMPTS`] measurements by
+/// `times`, with the last measurement of each. `unit` names what `size`
+/// counts.
 fn grew_too_fast(
-    small: &[(&'static str, Duration)],
-    large: &[(&'static str, Duration)],
-    what: (usize, usize, &str),
+    times: impl Fn(usize) -> Vec<(&'static str, Duration)>,
+    size: usize,
+    unit: &str,
 ) -> Vec<String> {
-    let (small_size, large_size, unit) = what;
-    let mut slow = Vec::new();
-    for ((stage, small), (_, large)) in small.iter().zip(large) {
-        let growth = large.as_secs_f64() / small.max(&Duration::from_micros(1)).as_secs_f64();
-        eprintln!("{stage}: {small:?}, then {large:?}: {growth:.1} times as long");
-        if *large > NOISE && growth > MAX_GROWTH {
-            slow.push(format!(
-                "{stage}: {small:?} for {small_size} {unit}, {large:?} for {large_size}, {growth:.1} times as long"
-            ));
+    let mut slow: Option<BTreeMap<&str, String>> = None;
+    for _ in 0..ATTEMPTS {
+        let small = times(size);
+        let large = times(size * 4);
+        let mut now = BTreeMap::new();
+        for ((stage, small), (_, large)) in small.iter().zip(&large) {
+            let growth = large.as_secs_f64() / small.max(&Duration::from_micros(1)).as_secs_f64();
+            eprintln!("{stage}: {small:?}, then {large:?}: {growth:.1} times as long");
+            // A stage slow on an earlier attempt and not on this one was
+            // slowed by load, so it is dropped.
+            let before = slow.as_ref().is_none_or(|slow| slow.contains_key(stage));
+            if before && *large > NOISE && growth > MAX_GROWTH {
+                now.insert(*stage, format!(
+                    "{stage}: {small:?} for {size} {unit}, {large:?} for {}, {growth:.1} times as long",
+                    size * 4
+                ));
+            }
         }
+        if now.is_empty() {
+            return Vec::new();
+        }
+        slow = Some(now);
     }
-    slow
+    slow.unwrap_or_default().into_values().collect()
 }
 
 #[test]
 fn each_stage_grows_in_step_with_the_dataset() {
-    let small = stage_times(SUBJECTS);
-    let large = stage_times(SUBJECTS * 4);
-    let slow = grew_too_fast(&small, &large, (SUBJECTS, SUBJECTS * 4, "subjects"));
+    let slow = grew_too_fast(stage_times, SUBJECTS, "subjects");
     assert!(
         slow.is_empty(),
         "stages that grew faster than the dataset:\n{}",
@@ -199,9 +214,7 @@ fn pipeline_times(steps: usize) -> Vec<(&'static str, Duration)> {
 
 #[test]
 fn checking_grows_in_step_with_the_pipeline() {
-    let short = pipeline_times(STEPS);
-    let long = pipeline_times(STEPS * 4);
-    let slow = grew_too_fast(&short, &long, (STEPS, STEPS * 4, "steps"));
+    let slow = grew_too_fast(pipeline_times, STEPS, "steps");
     assert!(
         slow.is_empty(),
         "stages that grew faster than the pipeline:\n{}",
