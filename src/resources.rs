@@ -4,7 +4,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::command::CommandError;
-use crate::model::{OperationDef, Pipeline};
+use crate::model::{OperationDef, Pipeline, ResourcesId};
 use crate::parser::SourceMap;
 
 /// Every error in `pipeline`'s `resources` lines, given its operations by
@@ -35,7 +35,7 @@ pub(crate) fn collect_resources(
         };
         errors.push(
             CommandError::new(message)
-                .at(lines.resources.get(index).cloned())
+                .at(lines.resources.get(ResourcesId::at(index)).cloned())
                 .focus(name),
         );
     }

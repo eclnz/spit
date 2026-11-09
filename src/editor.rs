@@ -17,7 +17,10 @@ use crate::diagnostics::{
 };
 use crate::imports::parse_located_document_recovering;
 use crate::json::Json;
-use crate::model::{BesideFile, Cardinality, PathOrigin, Pipeline, PipelineIndex, ProductDef};
+use crate::model::{
+    BesideFile, Cardinality, CheckId, CommandId, PathOrigin, Pipeline, PipelineIndex, ProductDef,
+    ResourcesId,
+};
 use crate::parser::{without_bom, Kind};
 use crate::paths::shown_path;
 use crate::render::written_step;
@@ -147,7 +150,10 @@ pub fn pipeline_hovers(text: &str, path: &Path) -> Vec<Hover> {
             add(place.clone(), HoverKind::Product, name, signature, details);
         }
     }
-    for (check, place) in pipeline.checks.iter().zip(&document.lines.checks) {
+    for (index, check) in pipeline.checks.iter().enumerate() {
+        let Some(place) = document.lines.checks.get(CheckId::at(index)) else {
+            continue;
+        };
         let details = vec![
             "Checks one artifact: a backend runs it on each artifact of a port or source that attaches it, and a nonzero exit fails the job.".to_owned(),
         ];
@@ -305,13 +311,13 @@ pub fn pipeline_hovers(text: &str, path: &Path) -> Vec<Hover> {
         }
     }
     for (index, command) in pipeline.commands.iter().enumerate() {
-        let Some(header) = document.lines.command(index) else {
+        let id = CommandId::at(index);
+        let Some(header) = document.lines.command(id) else {
             continue;
         };
         // Before the template on a command's own line; a block's header
         // line holds no template.
-        let block =
-            document.lines.command_line(index, 0).map(|line| line.line) != Some(header.line);
+        let block = document.lines.command_line(id, 0).map(|line| line.line) != Some(header.line);
         if let (Some(line), Some((signature, details))) = (
             text_lines.get(header.line.saturating_sub(1)),
             operation_info(&command.operation),
@@ -337,7 +343,10 @@ pub fn pipeline_hovers(text: &str, path: &Path) -> Vec<Hover> {
     }
     // The operation a `resources` line names, where its place points; an
     // imported line's place is the `use` line, which does not name it there.
-    for (resources, place) in pipeline.resources.iter().zip(&document.lines.resources) {
+    for (index, resources) in pipeline.resources.iter().enumerate() {
+        let Some(place) = document.lines.resources.get(ResourcesId::at(index)) else {
+            continue;
+        };
         let named = text_lines
             .get(place.line.saturating_sub(1))
             .and_then(|line| line.get(place.columns.clone()))
