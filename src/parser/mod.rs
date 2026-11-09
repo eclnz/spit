@@ -37,6 +37,7 @@ pub use self::inventory::parse_source_inventory;
 pub(crate) use self::inventory::{
     document_records, parse_inventory_recovering, source_record_lines,
 };
+pub use self::keyword::keywords_json;
 pub(crate) use self::keyword::{File, Header, Keyword};
 pub(crate) use self::layout::{Block, Head, Layout, Line};
 pub(crate) use self::lexical::without_bom;
