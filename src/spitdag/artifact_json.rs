@@ -3,7 +3,7 @@
 use std::ops::Range;
 
 use crate::json::{write_array, write_string};
-use crate::model::ArtifactId;
+use crate::model::{ArtifactId, Under};
 use crate::types::TypeExpr;
 
 use super::{BoundArtifact, BoundDag};
@@ -58,6 +58,10 @@ pub(super) fn write_artifact(out: &mut String, artifact: &BoundArtifact<'_>) {
     write_type(out, artifact.artifact_type);
     out.push_str(",\"path\":");
     write_string(out, artifact.path);
+    out.push_str(match artifact.under {
+        Under::Root => ",\"under\":\"root\"",
+        Under::OutputRoot => ",\"under\":\"output_root\"",
+    });
     out.push_str(if artifact.folder {
         ",\"kind\":\"folder\"}"
     } else {

@@ -214,7 +214,7 @@ pub fn render_bound_dag(dag: &BoundDag, view: View) -> String {
         writer.line(port);
         writer.artifact(&artifact.identity(), artifact.artifact_type);
         if view.paths {
-            writer.path(artifact.path, artifact.folder);
+            writer.path(&dag.shown_path(id), artifact.folder);
         }
     };
     for job in &dag.jobs {
@@ -308,7 +308,7 @@ fn push_command_lines(text: &mut String, dag: &BoundDag, job: &BoundJob) {
                 text.push(' ');
                 text.push_str(sign);
                 text.push(' ');
-                text.push_str(&shell_word(dag.path(file)));
+                text.push_str(&shell_word(&dag.shown_path(file)));
             }
         }
         text.push('\n');
@@ -358,7 +358,7 @@ fn push_command(text: &mut String, dag: &BoundDag, command: &[Argument]) {
     for (index, argument) in command.iter().enumerate() {
         word.clear();
         for part in argument {
-            word.push_str(part.text(dag));
+            word.push_str(&part.shown(dag));
         }
         if index > 0 {
             text.push(' ');

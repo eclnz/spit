@@ -1,16 +1,64 @@
-//! The recipe's `inputs:` block, lowered to common path statements and
-//! context patterns while preserving line numbers for diagnostics.
+//! The recipe's own lines: its `pipeline`, `root` and `output` lines, and
+//! its `inputs:` block, lowered to common path statements and context
+//! patterns while preserving line numbers for diagnostics.
 
 use std::collections::BTreeSet;
 use std::fmt::Write;
+use std::path::PathBuf;
 
 use rustc_hash::FxHashSet;
 
 use crate::model::ContextPattern;
-use crate::parser::{ParseError, SourceMap};
+use crate::parser::{Layout, ParseError, SourceMap};
 use crate::paths::validate_context_pattern;
 use crate::span::strip_comment;
 use crate::template::{PathPart, PathPlaceholder, PathTemplate};
+
+/// The folders a recipe's `pipeline`, `root` and `output` lines name, as
+/// written.
+#[derive(Default)]
+pub(super) struct RecipeHeader {
+    pub(super) pipeline: Option<PathBuf>,
+    pub(super) root: Option<(PathBuf, usize)>,
+    pub(super) output: Option<(PathBuf, usize)>,
+}
+
+/// The pipeline a recipe names with `pipeline analysis.spit`, the root it
+/// names with `root data` and the output root it names with `output
+/// results`, and the text with those lines blanked so that other lines keep
+/// their numbers.
+pub(super) fn header_lines(text: &str) -> Result<(RecipeHeader, String), ParseError> {
+    let mut header = RecipeHeader::default();
+    let mut rest = String::new();
+    for (number, line) in Layout::new(text).numbered() {
+        if let Some(file) = line.code.strip_prefix("pipeline ") {
+            if header.pipeline.is_some() {
+                return Err(ParseError::new(number, "a .spitin names its pipeline once"));
+            }
+            header.pipeline = Some(PathBuf::from(file.trim()));
+        } else if let Some((folder, slot, what)) = line
+            .code
+            .strip_prefix("root ")
+            .map(|folder| (folder, &mut header.root, "root"))
+            .or_else(|| {
+                let folder = line.code.strip_prefix("output ")?;
+                Some((folder, &mut header.output, "output root"))
+            })
+        {
+            if slot.is_some() {
+                return Err(ParseError::new(
+                    number,
+                    format!("a .spitin names its {what} once"),
+                ));
+            }
+            *slot = Some((PathBuf::from(folder.trim()), number));
+        } else {
+            rest.push_str(line.text);
+        }
+        rest.push('\n');
+    }
+    Ok((header, rest))
+}
 
 enum Block {
     Before,

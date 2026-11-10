@@ -9,7 +9,7 @@ use super::product::PathBinder;
 use super::rules::inspect_paths;
 use crate::model::{
     Artifact, ArtifactId, ArtifactKey, BesideFile, EntityBinding, Pipeline, PipelineIndex,
-    ResolvedDag,
+    ResolvedDag, Under,
 };
 use crate::template::{error, require_directory, PathError};
 
@@ -36,11 +36,11 @@ pub fn validate_bound_source_files(
 ) -> Result<(VerifiedFiles, BoundPaths), PathError> {
     require_directory(root)?;
     check_rules(pipeline, dag)?;
-    let paths = bound_paths(pipeline, dag)?;
+    let bound = bound_paths(pipeline, dag)?;
     let made = outputs_made(dag);
     // What the jobs read and none makes, the sources, checked in artifact
     // order so the first missing file is reported.
-    let mut needed: Vec<_> = with_paths(dag, &paths)
+    let mut needed: Vec<_> = with_paths(dag, &bound.paths)
         .filter(|(id, _, _)| !made[id.index()])
         .map(|(_, artifact, relative)| (artifact.key(), relative))
         .collect();
@@ -65,13 +65,18 @@ pub fn validate_bound_source_files(
     let verified = VerifiedFiles {
         sources: needed.len(),
     };
-    Ok((verified, BoundPaths(paths)))
+    Ok((verified, bound))
 }
 
-/// Each artifact's path in a resolved DAG, as [`validate_bound_source_files`]
-/// bound them.
+/// Each artifact's path in a resolved DAG, and the root it is under, as
+/// [`validate_bound_source_files`] bound them.
 #[derive(Clone, Debug)]
-pub struct BoundPaths(pub(crate) Vec<Option<String>>);
+pub struct BoundPaths {
+    /// Each artifact's path, by id; `None` for an artifact no job uses.
+    pub(crate) paths: Vec<Option<String>>,
+    /// The root each artifact's path is relative to, by id.
+    pub(crate) under: Vec<Under>,
+}
 
 /// The files [`validate_source_files`] found under the root.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -104,14 +109,18 @@ pub(crate) fn outputs_made(dag: &ResolvedDag) -> Vec<bool> {
     made
 }
 
-/// The path of each artifact the jobs use, by artifact id; `None` for an
-/// artifact no job uses.
-pub(crate) fn bound_paths(
-    pipeline: &Pipeline,
-    dag: &ResolvedDag,
-) -> Result<Vec<Option<String>>, PathError> {
+/// The path of each artifact the jobs use, and the root it is under. A
+/// path is unique across both roots, and none is inside another's file or
+/// written folder, so a backend may key artifacts by path alone.
+pub(crate) fn bound_paths(pipeline: &Pipeline, dag: &ResolvedDag) -> Result<BoundPaths, PathError> {
     let mut binder = PathBinder::new(pipeline);
     let mut paths = vec![None; dag.artifacts.len()];
+    // Every output is under the output root except a file beside an input,
+    // which is where that input is.
+    let mut under = vec![Under::Root; dag.artifacts.len()];
+    for &output in dag.jobs.iter().flat_map(|job| &job.outputs) {
+        under[output.index()] = Under::OutputRoot;
+    }
     let mut owners: FxHashMap<String, ArtifactId> = FxHashMap::default();
     let mut own = |id: ArtifactId, relative: String, paths: &mut Vec<Option<String>>| {
         if let Some(previous) = owners.insert(relative.clone(), id) {
@@ -167,6 +176,7 @@ pub(crate) fn bound_paths(
     // Jobs come after the jobs they read from, so a file beside a file
     // beside another finds its input's path bound.
     for (id, input, beside) in companions {
+        under[id.index()] = under[input.index()];
         let relative = beside_path(dag, &paths, id, input, beside)?;
         own(id, relative, &mut paths)?;
     }
@@ -214,7 +224,7 @@ pub(crate) fn bound_paths(
             artifact.product, artifact.entities, other.product, other.entities
         )));
     }
-    Ok(paths)
+    Ok(BoundPaths { paths, under })
 }
 
 /// The path of `id`, written beside `input`, whose path is bound: the
@@ -267,7 +277,7 @@ pub(crate) fn case_collisions(
     pipeline: &Pipeline,
     dag: &ResolvedDag,
 ) -> Vec<[(ArtifactKey, String); 2]> {
-    let Ok(paths) = bound_paths(pipeline, dag) else {
+    let Ok(BoundPaths { paths, .. }) = bound_paths(pipeline, dag) else {
         return Vec::new();
     };
     let mut folded: FxHashMap<String, Vec<(Key<'_>, &String)>> = FxHashMap::default();

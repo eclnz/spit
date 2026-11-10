@@ -62,7 +62,7 @@ fn a_partial_plan_leaves_out_a_job_with_its_beside_output_and_aggregates_the_res
     let plan = text(&output.stdout);
     // The folder source is an external input, with its kind.
     assert!(
-        plan.contains("\"path\":\"dicom/sub=01\",\"kind\":\"folder\""),
+        plan.contains("\"path\":\"dicom/sub=01\",\"under\":\"root\",\"kind\":\"folder\""),
         "{plan}"
     );
     // Both outputs of the job that cannot run are left out together.

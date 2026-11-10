@@ -368,7 +368,7 @@ fn resolves_untyped_pipeline_by_shape_and_cardinality() {
 
 #[test]
 fn partially_typed_pipeline_accepts_unknown_and_rejects_known_mismatch() {
-    let text = "source raw [site]\noperation process(input: Input) -> Result\noutput : Result [site] = process(raw)\nsources:\n  raw[site=01]\n";
+    let text = "source raw [site]\noperation process(input: Input) -> Result\nprocessed : Result [site] = process(raw)\nsources:\n  raw[site=01]\n";
     let (pipeline, inventory) = support::parse_fixture(text).unwrap();
     assert_eq!(
         resolve(&pipeline, &inventory.unwrap()).unwrap().jobs.len(),

@@ -7,12 +7,13 @@ mod artifact_json;
 mod work;
 mod write;
 
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::io;
 
 use crate::model::{
     identity, natural_cmp, ArtifactId, ArtifactInstance, Artifacts, EntityBinding, JobId, Removal,
-    Resources, SourceFile, StepId,
+    Resources, SourceFile, StepId, Under,
 };
 use crate::types::TypeExpr;
 
@@ -21,15 +22,18 @@ pub use crate::check::When;
 use self::write::{write_document, PIECE};
 
 /// The schema version a `.spitdag` is written with.
-pub const SPITDAG_VERSION: usize = 11;
+pub const SPITDAG_VERSION: usize = 12;
 
 /// A resolved DAG with its paths bound and its commands expanded. Its
 /// artifacts are the resolved DAG's, each kept once with its path; jobs,
 /// and the paths in their commands, refer to them by id.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct BoundDag {
-    /// The absolute dataset folder every path is relative to, when known.
+    /// The absolute dataset folder, which sources are under, when known.
     pub root: Option<String>,
+    /// The absolute folder the other outputs are under, when known: the
+    /// dataset root when no other is declared.
+    pub output_root: Option<String>,
     /// What the input stage left out of the dataset, and why.
     pub removed: Vec<Removal>,
     /// Outputs whose jobs could not be planned, with the reasons from `artifacts`.
@@ -47,9 +51,11 @@ pub struct BoundDag {
     /// Each call to an operation with a body, which steps name.
     pub calls: Vec<BoundCall>,
     artifacts: Artifacts,
-    /// Each artifact's file, relative to the dataset root, by id; empty for
-    /// an artifact no job uses.
+    /// Each artifact's file, relative to its root, by id; empty for an
+    /// artifact no job uses.
     paths: Vec<String>,
+    /// The root each artifact's file is under, by id.
+    under: Vec<Under>,
     /// Each product's dimensions in declared order, by product number.
     dimensions: Vec<Vec<String>>,
     /// Whether each product's artifacts are folders, by product number.
@@ -168,8 +174,10 @@ pub struct BoundCommand {
 pub struct BoundArtifact<'a> {
     pub product: &'a str,
     pub artifact_type: &'a TypeExpr,
-    /// The file or folder, relative to the dataset root.
+    /// The file or folder, relative to `under`.
     pub path: &'a str,
+    /// The root `path` is relative to.
+    pub under: Under,
     /// Whether the artifact is a folder rather than a file.
     pub folder: bool,
     entities: &'a EntityBinding,
@@ -182,7 +190,7 @@ pub type Argument = Vec<ArgPart>;
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ArgPart {
     Text(String),
-    /// An artifact's file, relative to the dataset root.
+    /// An artifact's file, relative to its root.
     Path(ArtifactId),
     /// The folder of an artifact's file, as `{image.dir}` gives it.
     Dir(ArtifactId),
@@ -218,6 +226,57 @@ impl ArgPart {
             } => stem_of(dag.path(*artifact), *extension_len),
         }
     }
+}
+
+impl ArgPart {
+    /// The text this part is in a command run from the output root: as
+    /// [`ArgPart::text`], with a path under a separate dataset root made
+    /// absolute, as [`BoundDag::shown_path`] gives it.
+    pub fn shown<'a>(&'a self, dag: &'a BoundDag) -> Cow<'a, str> {
+        match self {
+            Self::Path(artifact) => dag.shown_path(*artifact),
+            Self::Dir(artifact) => match dag.shown_path(*artifact) {
+                Cow::Borrowed(path) => Cow::Borrowed(folder_of(path)),
+                Cow::Owned(path) => Cow::Owned(folder_of(&path).to_owned()),
+            },
+            _ => Cow::Borrowed(self.text(dag)),
+        }
+    }
+}
+
+/// The folder `to` as reached from the folder `from`, both absolute and
+/// `/`-separated, with `.` and `..` read as written rather than through
+/// links: `../data` from `/study/results` to `/study/data`. `None` when
+/// either does not start with `/`.
+fn relative_folder(from: &str, to: &str) -> Option<String> {
+    if !from.starts_with('/') || !to.starts_with('/') {
+        return None;
+    }
+    let (from, to) = (folder_parts(from), folder_parts(to));
+    let shared = from.iter().zip(&to).take_while(|(a, b)| a == b).count();
+    let mut relative = vec![".."; from.len() - shared];
+    relative.extend(&to[shared..]);
+    Some(if relative.is_empty() {
+        ".".to_owned()
+    } else {
+        relative.join("/")
+    })
+}
+
+/// The names of the folders `path` goes through, with `.` and `..` read
+/// as written.
+fn folder_parts(path: &str) -> Vec<&str> {
+    let mut parts = Vec::new();
+    for part in path.split('/') {
+        match part {
+            "" | "." => {}
+            ".." => {
+                parts.pop();
+            }
+            part => parts.push(part),
+        }
+    }
+    parts
 }
 
 /// The folder `path` is in, `.` for the root itself.
@@ -259,11 +318,12 @@ impl BoundJob {
 
 impl BoundDag {
     /// `jobs` over `artifacts`, where the artifact with each id has the path
-    /// `paths` holds for it and each product, by number, has `dimensions`
-    /// and is a folder where `folders` says so.
+    /// `paths` holds for it, under the root `under` holds, and each product,
+    /// by number, has `dimensions` and is a folder where `folders` says so.
     pub(crate) fn new(
         artifacts: Artifacts,
         paths: Vec<String>,
+        under: Vec<Under>,
         dimensions: Vec<Vec<String>>,
         folders: Vec<bool>,
         steps: Vec<BoundStep>,
@@ -271,6 +331,7 @@ impl BoundDag {
     ) -> Self {
         Self {
             root: None,
+            output_root: None,
             removed: Vec::new(),
             left_out: Vec::new(),
             jobs,
@@ -280,6 +341,7 @@ impl BoundDag {
             calls: Vec::new(),
             artifacts,
             paths,
+            under,
             dimensions,
             folders,
         }
@@ -297,15 +359,36 @@ impl BoundDag {
             product: artifact.product,
             artifact_type: artifact.artifact_type,
             path: &self.paths[id.index()],
+            under: self.under[id.index()],
             folder: self.folders[product],
             entities: artifact.entities,
             dimensions: &self.dimensions[product],
         }
     }
 
-    /// The path of `id`, relative to the dataset root.
+    /// The path of `id`, relative to its root.
     pub fn path(&self, id: ArtifactId) -> &str {
         &self.paths[id.index()]
+    }
+
+    /// The root the path of `id` is relative to.
+    pub fn under(&self, id: ArtifactId) -> Under {
+        self.under[id.index()]
+    }
+
+    /// The path of `id` as a command run from the output root names it:
+    /// as written, unless it is under a dataset root apart from the output
+    /// root, when it is reached from the output root, as `../data/in.txt`.
+    pub fn shown_path(&self, id: ArtifactId) -> Cow<'_, str> {
+        let path = self.path(id);
+        match (self.under(id), &self.root, &self.output_root) {
+            (Under::Root, Some(root), Some(output)) if root != output => {
+                // A folder not written with `/`, as on Windows, is given whole.
+                let folder = relative_folder(output, root).unwrap_or_else(|| root.clone());
+                Cow::Owned(format!("{folder}/{path}"))
+            }
+            _ => Cow::Borrowed(path),
+        }
     }
 
     /// Whether each artifact, by id, is an output of a job here.
@@ -403,5 +486,27 @@ impl BoundDag {
         })?;
         writer.write_all(out.as_bytes())?;
         writer.flush()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::relative_folder;
+
+    #[test]
+    fn a_folder_is_reached_from_another_as_written() {
+        let reach = |from, to| relative_folder(from, to);
+        assert_eq!(
+            reach("/study/results", "/study/data").as_deref(),
+            Some("../data")
+        );
+        assert_eq!(
+            reach("/study/out/../results", "/study/data/").as_deref(),
+            Some("../data")
+        );
+        assert_eq!(reach("/study", "/study/data").as_deref(), Some("data"));
+        assert_eq!(reach("/study/a/b", "/study").as_deref(), Some("../.."));
+        assert_eq!(reach("/study", "/study/.").as_deref(), Some("."));
+        assert_eq!(reach("C:\\results", "C:\\data"), None);
     }
 }

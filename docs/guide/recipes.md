@@ -13,7 +13,7 @@ pipeline analysis.spit
 root data
 ```
 
-Both paths are relative to the recipe's own folder. If the pipeline already declares a root, leave the recipe's out to inherit it; declaring a root in both is an error. Run `spit inputs dataset.spitin` to see the settled inputs, or `spit dag dataset.spitin` to resolve jobs directly. When the pipeline already gives every source a path and no dataset rules are needed, put `root data` in the pipeline and run `spit dag analysis.spit` without a recipe. A pipeline without a root can instead take `--root data`, relative to the working folder. All selection rules, including simple literal exclusions, require a recipe.
+Both paths are relative to the recipe's own folder. If the pipeline already declares a root, leave the recipe's out to inherit it; declaring a root in both is an error. Run `spit inputs dataset.spitin` to see the settled inputs, or `spit dag dataset.spitin` to resolve jobs directly. When the pipeline already gives every source a path and no dataset rules are needed, put `root data` in the pipeline and run `spit dag analysis.spit` without a recipe. A pipeline without a root can instead take `--root data`, relative to the working folder. An `output results` line, in the recipe or the pipeline, puts what the jobs write under a folder of its own and leaves the dataset as it is; see [the output root](../language-reference.md#the-output-root). All selection rules, including simple literal exclusions, require a recipe.
 
 ## Source paths
 
@@ -120,6 +120,6 @@ sources:
     shard[group=alpha,part=02]
 ```
 
-`spit dag pipeline.spit dataset.spitout` uses those records. A `.spitout` may also hold a `root`, `source_paths:`, `contexts`, `removed:` and `verdicts:` records. A printed or hand-written inventory without `root` does not make `dag` check that source files exist. The [inputs reference](../language-reference.md#inputs) describes the complete format.
+`spit dag pipeline.spit dataset.spitout` uses those records. A `.spitout` may also hold a `root` and an `output`, `source_paths:`, `contexts`, `removed:` and `verdicts:` records. A printed or hand-written inventory without `root` does not make `dag` check that source files exist. The [inputs reference](../language-reference.md#inputs) describes the complete format.
 
 Next: [Plans](inspection.md).

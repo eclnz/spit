@@ -1,6 +1,6 @@
 # Paths
 
-A path rule turns an artifact identity into a path relative to the dataset root. A pipeline can set a default, and a particular product can override it:
+A path rule turns an artifact identity into a path relative to the dataset root, or, for a file a job writes, to the [output root](../language-reference.md#the-output-root) when one is named. A pipeline can set a default, and a particular product can override it:
 
 ```spit
 default entities: {@key}={@value} separated "__"

@@ -188,6 +188,8 @@ pub(crate) enum StatementKind {
     Import,
     /// The pipeline's optional dataset root.
     Root(std::path::PathBuf),
+    /// The pipeline's optional output root.
+    OutputRoot(std::path::PathBuf),
     /// A `stage name:` header, by the stage's full name.
     Stage {
         name: String,

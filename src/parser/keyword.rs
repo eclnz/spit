@@ -31,6 +31,8 @@ pub(crate) enum Keyword {
     Stage,
     Use,
     Root,
+    /// `output <directory>`, the folder derived files are written under.
+    OutputRoot,
     Require,
     Drop,
     Exclude,
@@ -86,7 +88,7 @@ pub(crate) struct Spec {
 
 impl Keyword {
     /// Every keyword, in declaration order, which the assertion below keeps.
-    pub(crate) const ALL: [Self; 25] = [
+    pub(crate) const ALL: [Self; 26] = [
         Self::Source,
         Self::Dimensions,
         Self::Types,
@@ -101,6 +103,7 @@ impl Keyword {
         Self::Stage,
         Self::Use,
         Self::Root,
+        Self::OutputRoot,
         Self::Require,
         Self::Drop,
         Self::Exclude,
@@ -134,6 +137,7 @@ impl Keyword {
             Self::Stage => ("stage", false, Pipeline, true),
             Self::Use => ("use", false, Pipeline, true),
             Self::Root => ("root", false, Both, true),
+            Self::OutputRoot => ("output", false, Both, true),
             Self::Require => ("require", true, Recipe, true),
             Self::Drop => ("drop", false, Replaced, true),
             Self::Exclude => ("exclude", true, Recipe, true),
