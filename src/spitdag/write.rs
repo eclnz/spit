@@ -266,6 +266,15 @@ fn write_job(
     object.field("outputs", |out| {
         write_outputs(out, step, job, |out, id| out.push_str(artifacts.get(id)));
     });
+    if !step.seeds.is_empty() {
+        object.field("seed_folders", |out| {
+            let mut seeds = ObjectWriter::start(out);
+            for &(output, input) in &step.seeds {
+                seeds.string(&step.outputs[output], &step.inputs[input]);
+            }
+            seeds.finish();
+        });
+    }
     object.field("depends_on", |out| {
         write_array(
             out,
@@ -490,6 +499,7 @@ mod tests {
             inputs: names(inputs),
             outputs: names(outputs),
             checks: vec![],
+            seeds: vec![],
             origin: None,
             resources: crate::model::Resources::default(),
             tools: crate::model::ToolSet::default(),

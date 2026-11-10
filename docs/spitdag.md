@@ -173,6 +173,7 @@ A withheld artifact is not incomplete: a plan with reviews is complete, and `lef
 | `origin` | Where the step that made the job is written, as `{"call": 0, "file": 1, "line": 14}`. See [Where jobs come from](#where-jobs-come-from). |
 | `inputs` | Each input port and the artifacts bound to it, in port order. A `one` port holds one artifact; a `many` port holds its collection in natural order. |
 | `outputs` | Each output port and the artifact it writes. A single unnamed output is `output`. |
+| `seed_folders` | When present, a map from each seeded output folder port to the single input folder port that supplies its initial contents. |
 | `depends_on` | The jobs that write this job's inputs. |
 | `dependents` | The jobs that read this job's outputs. |
 | `commands` | The commands that write the outputs, run in order until one fails: see [Commands](#commands). `[]` for an operation with none. |
@@ -327,7 +328,8 @@ A backend that identifies a job's work leaves its checks out: a changed check do
 
 A job that writes a folder owns it: SPIT rejects a pipeline that would put any other artifact inside it. So a backend may treat the folder as one output:
 
-- Before the job's first command runs, remove what an earlier run left at the folder's path, so that its files do not mix with this run's, then make the folder, empty, with its parents. The tool writes into a folder that exists, as a tool given a folder to fill, such as `bwa index -p` or `dcm2niix -o`, expects. A tool that refuses to write into an existing folder is wrapped in a command that removes it first.
+- For an output in `seed_folders`, copy its input folder's contents into the owned output after input checks and `verify`, before the first command. Each attempt starts with the input's contents. A relative link may be preserved if its target stays inside the tree. The copy must isolate all writes from the input.
+- For an ordinary output folder, before the job's first command runs, remove what an earlier run left at the folder's path, so that its files do not mix with this run's, then make the folder, empty, with its parents. The tool writes into a folder that exists, as a tool given a folder to fill, such as `bwa index -p` or `dcm2niix -o`, expects. A tool that refuses to write into an existing folder is wrapped in a command that removes it first.
 - After the last command, require the folder to exist. It may be empty.
 - To tell whether a folder changed, look at the files under it, not the folder's own modification time, which changes only when an entry directly in it is added or removed.
 

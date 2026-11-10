@@ -326,3 +326,49 @@ fn a_folder_is_never_beside_another_output_nor_a_sidecar() {
         ["a source written beside another is a file, not a folder; drop the `/`"]
     );
 }
+
+#[test]
+fn a_seeded_folder_names_its_input_port_in_the_dag() {
+    let pipeline = RECON
+        .replace("Table .csv", "(result: FsSubject / from subject)")
+        .replace("summarise {subject} {@output}", "summarise {result}");
+    let tree = dataset(&pipeline);
+    let output = run(&tree, &["dag", "--json"]);
+    assert!(output.status.success(), "{}", text(&output.stderr));
+    let json = text(&output.stdout);
+    assert_eq!(
+        json.matches(r#""seed_folders":{"result":"subject"}"#)
+            .count(),
+        2
+    );
+    assert!(
+        json.contains(r#"[["summarise"],[{"path":"out/table/sub=01"}]]"#),
+        "{json}"
+    );
+}
+
+#[test]
+fn a_seed_requires_a_single_folder_input() {
+    let unnamed = RECON.replace("Table .csv", "FsSubject / from subject");
+    assert!(errors(&unnamed).is_empty(), "{:?}", errors(&unnamed));
+    let file = unnamed
+        .replace("from subject", "from input")
+        .replace("stats(subject: FsSubject)", "stats(input: Image)")
+        .replace("stats(subject)", "stats(image)")
+        .replace("summarise {subject}", "summarise {input}");
+    assert!(
+        errors(&file)
+            .iter()
+            .any(|error| error.contains("requires a folder")),
+        "{:?}",
+        errors(&file)
+    );
+    let unknown = unnamed.replace("from subject", "from missing");
+    assert!(
+        errors(&unknown)
+            .iter()
+            .any(|error| error.contains("single-artifact input port")),
+        "{:?}",
+        errors(&unknown)
+    );
+}

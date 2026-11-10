@@ -88,6 +88,8 @@ pub struct BoundStep {
     pub inputs: Vec<String>,
     /// The name of each output port, in port order.
     pub outputs: Vec<String>,
+    /// The output and input port indices for each folder seeded before its command.
+    pub seeds: Vec<(usize, usize)>,
     /// The checks its jobs run, which their [`BoundCheck`]s refer to by
     /// index.
     pub checks: Vec<StepCheck>,

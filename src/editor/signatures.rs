@@ -124,6 +124,9 @@ fn output_signature(port: &OutputPort, named: bool) -> String {
     } else {
         result.push_str(&ending(port.extension.as_deref(), port.folder));
     }
+    if let Some(seed) = &port.seed {
+        let _ = write!(result, " from {seed}");
+    }
     result.push_str(&checks_text(&port.checks));
     result.push_str(&reviews_text(&port.reviews));
     result

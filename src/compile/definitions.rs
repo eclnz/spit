@@ -143,6 +143,25 @@ fn check_operation(operation: &OperationDef) -> Result<(), ResolveError> {
             )));
         }
     }
+    for output in &operation.outputs {
+        let Some(seed) = &output.seed else { continue };
+        if !output.folder || output.beside.is_some() {
+            return Err(invalid(format!(
+                "output `{}` must be a folder to use `from {seed}`",
+                output.name
+            )));
+        }
+        if !operation
+            .inputs
+            .iter()
+            .any(|input| input.name == *seed && input.cardinality == crate::model::Cardinality::One)
+        {
+            return Err(invalid(format!(
+                "`from {seed}` on output `{}` needs the name of a single-artifact input port",
+                output.name
+            )));
+        }
+    }
     if operation.minimum_collection == Some(0) {
         return Err(invalid(format!(
             "operation `{}` needs `@min(count)` of at least 1",
