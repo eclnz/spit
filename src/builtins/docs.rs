@@ -24,6 +24,7 @@ pub enum Word {
     Many,
     Beside,
     SeedFrom,
+    DirectoryView,
     Vary,
     Each,
     Where,
@@ -94,7 +95,7 @@ impl Word {
 }
 
 /// Every word's documentation, in the order of [`Word`].
-pub static DOCS: [Doc; 61] = [
+pub static DOCS: [Doc; 62] = [
     Doc {
         name: "source",
         kind: "keyword",
@@ -199,6 +200,13 @@ pub static DOCS: [Doc; 61] = [
         anchor: "seeded-output-folders",
         example: "operation classify(input: WorkingDir) -> ClassifiedDir / from input",
         summary: "Starts an output folder with a private copy of the folder bound to this input port.",
+    },
+    Doc {
+        name: "view",
+        kind: "keyword",
+        anchor: "directory-views",
+        example: "operation anat(t1: Image, tissue: Image) -> Anat .anat/ view",
+        summary: "Exposes the operation’s required file inputs as one directory path. Each input’s own job writes it, and readers of the view wait for all the member jobs.",
     },
     Doc {
         name: "vary",

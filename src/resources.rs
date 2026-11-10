@@ -25,6 +25,9 @@ pub(crate) fn collect_resources(
         }
         let message = match operations.get(name) {
             None => format!("`resources` refers to unknown operation `{name}`"),
+            Some(operation) if operation.outputs.iter().any(|port| port.view) => {
+                format!("directory view `{name}` takes no `resources` line")
+            }
             Some(operation) if !operation.steps.is_empty() => format!(
                 "operation `{name}` is carried out by the steps in its body, so it takes no `resources` line; give each step's operation its own"
             ),

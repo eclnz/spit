@@ -66,12 +66,12 @@ pub(super) fn expand_step(
                 .collect()
         })
         .collect();
-    let contexts = broadcast_contexts(invocation, artifacts, &candidates);
+    let view = step.operation.outputs[0].view;
     let indexes: Vec<JoinIndex<'_>> = candidates
         .iter()
         .enumerate()
         .map(|(index, candidates)| {
-            if index == shape.driver {
+            if !view && index == shape.driver {
                 return JoinIndex::default();
             }
             let mut by_values = JoinIndex::default();
@@ -87,6 +87,38 @@ pub(super) fn expand_step(
             by_values
         })
         .collect();
+    let availability = Availability {
+        incomplete,
+        partial,
+        judging,
+    };
+    if view {
+        // Any member can establish a context. A missing first member must be
+        // reported like a missing member on any other input.
+        let seen: FxHashSet<_> = candidates
+            .iter()
+            .flatten()
+            .map(|&artifact| artifacts.entities(artifact))
+            .collect();
+        let dimensions = &step.outputs[0].0.dimensions;
+        let mut contexts: Vec<_> = seen.into_iter().collect();
+        contexts.sort_unstable_by(|left, right| left.cmp_in(right, dimensions));
+        return contexts
+            .into_iter()
+            .map(|context| {
+                expand_job(
+                    step,
+                    artifacts,
+                    &candidates,
+                    &indexes,
+                    availability,
+                    context.clone(),
+                    Vec::new(),
+                )
+            })
+            .collect();
+    }
+    let contexts = broadcast_contexts(invocation, artifacts, &candidates);
     let jobs = driver_groups(artifacts, &candidates[shape.driver], shape)
         .into_iter()
         .flat_map(|(group, driven)| {
@@ -96,11 +128,6 @@ pub(super) fn expand_step(
                 (context, driven.clone())
             })
         });
-    let availability = Availability {
-        incomplete,
-        partial,
-        judging,
-    };
     jobs.map(|(context, driven)| {
         expand_job(
             step,
@@ -197,7 +224,7 @@ fn expand_job(
     };
     let mut inputs = Vec::new();
     for (index, port) in operation.inputs.iter().enumerate() {
-        let bound = if index == shape.driver {
+        let bound = if !operation.outputs[0].view && index == shape.driver {
             std::mem::take(&mut driven)
         } else if port.cardinality == Cardinality::Many {
             let group = indexes[index]
@@ -296,7 +323,7 @@ fn screen_inputs<'a>(
         .filter(|&index| operation.inputs[index].cardinality == Cardinality::Many)
         .collect();
     let members = |index: usize| -> &[ArtifactId] {
-        if index == shape.driver {
+        if !operation.outputs[0].view && index == shape.driver {
             return driven;
         }
         indexes[index]

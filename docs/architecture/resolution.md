@@ -1,6 +1,6 @@
 # Resolution
 
-Resolution turns a `Pipeline` and a `SourceInventory` into jobs. `collect_definitions` first checks every declaration and step of the pipeline's text, with no data, and reports every error it finds. Only a pipeline with none compiles. The resolver then expands each checked step into one job per context its driving input gives, over the inventory's artifacts. The result is a `ResolvedDag` of logical artifacts and jobs, with no paths and no commands; [binding](binding.md) adds those.
+Resolution turns a `Pipeline` and a `SourceInventory` into jobs. `collect_definitions` first checks every declaration and step of the pipeline's text, with no data, and reports every error it finds. Only a pipeline with none compiles. The resolver expands checked steps over the inventory's artifacts. A command step makes jobs, and a directory view binds its required members for each context. The result is a `ResolvedDag` of logical artifacts and jobs, with no paths and no commands; [binding](binding.md) adds those.
 
 ```mermaid
 flowchart LR
@@ -13,7 +13,7 @@ flowchart LR
     inventory["SourceInventory"] --> expand
     held["held-back sources<br/>from CoverageGaps"] --> expand
     verdicts["SourceInventory::verdicts<br/>VerdictRow"] --> expand
-    expand --> artifacts["ArtifactReport<br/>ResolvedDag, IncompleteJob,<br/>Withheld"]
+    expand --> artifacts["ArtifactReport<br/>ResolvedDag with directory views,<br/>IncompleteJob, Withheld"]
     artifacts --> resolve["resolve<br/>first unmatched gap, or the DAG"]
 ```
 
@@ -32,6 +32,7 @@ flowchart LR
     - the jobs, each naming its step by `StepId`, with an ID local to this resolution, which changes when the inventory does;
     - the steps (`DagStep`), with each step's operation and stage once;
     - the `Artifacts` table every job refers to by `ArtifactId`;
+    - the directory views and each view's member file IDs;
     - the file of each source whose record gave one.
 - **`ArtifactReport`** holds every source, the DAG of the jobs that can run, each `IncompleteJob` with its gaps, each `CoverageGap`, each `Withheld` artifact with the review that withholds it and why (`Judged::Rejected` with the row's reason and origin, or `Judged::Held`), and the rows of each review file that matched no artifact (`UnmatchedVerdicts`). A `Gap` is one of two kinds:
     - `Unmatched`: a missing or ambiguous input, or a collection below its minimum;
@@ -55,7 +56,8 @@ The entry points are in [`src/resolver/mod.rs`](https://github.com/eclnz/spit/bl
     - `where(dim=value)` keeps the matching artifacts, and takes the pinned dimension out of matching.
     - `same(dim, ...)` matches on the listed dimensions alone.
     - `each(dim, ...)` broadcasts a single input over dimensions the driver lacks. The step runs for every combination of the driver's groups with the values that input has, and the outputs gain those dimensions. An input that broadcasts cannot drive.
-- **Only a step's driving artifacts create contexts.** A step whose driver has no artifact in a context has no job there, complete or not.
+- **A command step's driving artifacts create its contexts.** A command step whose driver has no artifact in a context has no job there.
+- **A directory view matches over the union of its members' contexts.** Every member must match. A consumer's dependencies name the jobs that write the matched files.
 
 **Reviews** ([`src/resolver/reviews.rs`](https://github.com/eclnz/spit/blob/dev/src/resolver/reviews.rs) and [`src/review.rs`](https://github.com/eclnz/spit/blob/dev/src/review.rs)):
 

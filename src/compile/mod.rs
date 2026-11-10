@@ -125,7 +125,12 @@ pub(crate) fn collect_definitions(pipeline: &Pipeline) -> DefinitionCheck<'_> {
     let folder_inputs = pipeline
         .operations
         .iter()
-        .any(|operation| operation.outputs.iter().any(|output| output.seed.is_some()))
+        .any(|operation| {
+            operation
+                .outputs
+                .iter()
+                .any(|output| output.seed.is_some() || output.view)
+        })
         .then(|| PipelineIndex::new(pipeline));
     let mut inferred_types = BTreeMap::new();
     let mut steps = Vec::new();
@@ -296,11 +301,11 @@ fn validate_invocation<'a>(
             let Some(seed) = &output.seed else { continue };
             for (port, binding) in operation.inputs.iter().zip(&invocation.inputs) {
                 let product = binding.product_name();
-                if port.name == *seed && !index.is_folder(product) {
+                if port.name == *seed && (!index.is_folder(product) || index.is_view(product)) {
                     return Err(unsupported(
                         operation,
                         format!(
-                        "`from {seed}` on output `{}` requires a folder, but `{product}` is a file",
+                        "`from {seed}` on output `{}` requires a folder source or an owned folder output; `{product}` is a file or directory view",
                         output.name
                     ),
                     ));
@@ -311,6 +316,38 @@ fn validate_invocation<'a>(
     let (inferred, substitutions) =
         infer_types(invocation, operation, products, &outputs, inferred_types)?;
     let shape = step_shape(invocation, operation, products, &outputs)?;
+    if operation.outputs[0].view {
+        let Some(index) = folder_inputs else {
+            unreachable!("directory view declarations require a folder index");
+        };
+        let dimensions = &outputs[0].dimensions;
+        let mut members = BTreeSet::new();
+        for (binding, join) in invocation.inputs.iter().zip(&shape.joins) {
+            let product = binding.product_name();
+            if index.is_source(product) || index.is_folder(product) {
+                return Err(unsupported(
+                    operation,
+                    format!("directory view member `{product}` must be a generated file"),
+                ));
+            }
+            if !members.insert(product) {
+                return Err(unsupported(
+                    operation,
+                    format!("directory view repeats member product `{product}`"),
+                ));
+            }
+            let declared = &find_product(products, product)?.dimensions;
+            if declared != dimensions || join != dimensions {
+                return Err(unsupported(
+                    operation,
+                    format!(
+                        "directory view member `{product}` must match the view’s full context [{}]",
+                        dimensions.join(", ")
+                    ),
+                ));
+            }
+        }
+    }
     Ok(CompiledStep {
         invocation,
         operation,

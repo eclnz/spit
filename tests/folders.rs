@@ -361,3 +361,106 @@ fn a_seed_requires_a_single_folder_input() {
         errors(&unknown)
     );
 }
+
+const VIEW: &str = "\
+source scans : Image .nii.gz [sub]
+path scans: dicom/sub={sub}/scan.nii.gz
+operation correct(input: Image) -> Image .nii.gz
+command correct: correct {input} {@output}
+corrected = correct(scans)
+path corrected: result/sub-{sub}.anat/T1_biascorr.nii.gz
+operation segment(input: Image) -> Image .nii.gz
+command segment: segment {input} {@output}
+tissue = segment(scans)
+path tissue: result/sub-{sub}.anat/T1_fast_pve_2.nii.gz
+operation view(image: Image, tissue: Image) -> Anat .anat/ view
+anatomy = view(corrected, tissue)
+path anatomy: result/sub-{sub}.anat
+operation analyse(input: Anat) -> Table .csv
+command analyse: analyse {input} {@output}
+table = analyse(anatomy)
+path table: tables/sub-{sub}.csv
+";
+
+fn view_plan(pipeline: &str) -> std::process::Output {
+    let tree = dataset(pipeline);
+    tree.write("data/dicom/sub=01/scan.nii.gz", "1");
+    tree.write("data/dicom/sub=02/scan.nii.gz", "2");
+    run(&tree, &["dag", "--json"])
+}
+
+#[test]
+fn a_directory_view_has_members_and_no_runnable_job() {
+    let plan = view_plan(VIEW);
+    assert!(plan.status.success(), "{}", text(&plan.stderr));
+    let json = text(&plan.stdout);
+    assert!(!json.contains(r#""operation":"view""#), "{json}");
+    assert_eq!(
+        json.matches(r#""kind":"directory_view""#).count(),
+        2,
+        "{json}"
+    );
+    assert_eq!(
+        json.matches(r#""path":"T1_fast_pve_2.nii.gz""#).count(),
+        2,
+        "{json}"
+    );
+    assert!(json.contains(r#""depends_on":[1,3]"#), "{json}");
+    assert!(json.contains(r#""depends_on":[2,4]"#), "{json}");
+    assert!(
+        json.contains(r#"[["analyse"],[{"path":"result/sub-01.anat"}]"#),
+        "{json}"
+    );
+
+    let tree = dataset(VIEW);
+    tree.write("data/dicom/sub=01/scan.nii.gz", "1");
+    let jobs = run(&tree, &["dag", "--jobs"]);
+    assert!(jobs.status.success(), "{}", text(&jobs.stderr));
+    assert!(!text(&jobs.stdout).contains(": view"));
+    assert!(text(&jobs.stderr).contains("3 jobs resolved"));
+
+    let terminal = VIEW.split("operation analyse").next().unwrap();
+    let plan = view_plan(terminal);
+    assert!(plan.status.success(), "{}", text(&plan.stderr));
+    let json = text(&plan.stdout);
+    assert!(
+        json.contains(r#""targets":[{"product":"anatomy""#),
+        "{json}"
+    );
+}
+
+#[test]
+fn directory_view_rejects_wrong_paths_and_unlisted_outputs() {
+    let pipeline = VIEW.replace(
+        "result/sub-{sub}.anat/T1_fast_pve_2.nii.gz",
+        "outside/sub-{sub}/T1_fast_pve_2.nii.gz",
+    );
+    let plan = view_plan(&pipeline);
+    assert!(!plan.status.success());
+    assert!(
+        text(&plan.stderr).contains("must be inside directory view"),
+        "{}",
+        text(&plan.stderr)
+    );
+
+    let pipeline = VIEW.replace("tables/sub-{sub}.csv", "result/sub-{sub}.anat/extra.csv");
+    let plan = view_plan(&pipeline);
+    assert!(!plan.status.success());
+    assert!(
+        text(&plan.stderr).contains("which does not list it"),
+        "{}",
+        text(&plan.stderr)
+    );
+
+    let pipeline = VIEW.replace("view(corrected, tissue)", "view(scans, tissue)");
+    assert!(errors(&pipeline)
+        .iter()
+        .any(|error| error.contains("must be a generated file")));
+    let pipeline = VIEW.replace(
+        "anatomy = view",
+        "command view: touch {@output}\nanatomy = view",
+    );
+    assert!(errors(&pipeline)
+        .iter()
+        .any(|error| error.contains("has no command or verify step")));
+}

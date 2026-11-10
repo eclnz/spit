@@ -179,6 +179,12 @@ impl<'p> PipelineIndex<'p> {
         }
     }
 
+    /// Whether the product names a directory view over other outputs.
+    pub(crate) fn is_view(&self, product: &str) -> bool {
+        self.output_port(product)
+            .is_some_and(|(_, _, port)| port.view)
+    }
+
     /// See [`Pipeline::stage_of`].
     pub(crate) fn stage_of(&self, product: &str) -> Option<&'p str> {
         self.producer(product)
