@@ -1,5 +1,5 @@
 # Folder artifacts for #208 and #254
 
-- [ ] Carry seeded folders through the compiler, editor, DAG and runner. Test branch isolation, failed preparation and retries.
-- [ ] Resolve explicit directory views by context. Bind and serialize their membership, then teach the runner to track it.
-- [ ] Check compiler, runner and extension together on mock FIX and .anat workflows. Run repository checks and link the PRs.
+- [x] Seed output folders from one input. SPIT 4a8da0c, runner 9fe0fdc and extension fa66a23.
+- [x] Resolve directory views by context and track their required file members. SPIT dc38fcc, runner ebf659e and extension 2f3141e.
+- [x] Verify independent folder copies, failure recovery, partial plans, and member-based reuse with mock data. The tests use small local files and stub commands.
