@@ -49,7 +49,7 @@ pub use self::pattern::{MissedSource, NearestFile};
 use self::recipe::{expand_input_block, restore_path_places};
 pub use self::reviews::ReviewFileError;
 use self::reviews::{read_review_files, read_verdicts};
-pub use self::variants::{case_variants, CaseVariants, Spelling};
+pub use self::variants::{variants, Likeness, Spelling, Variants};
 
 /// A recipe's rules and any inventory records written with them.
 #[derive(Clone, Debug, Default)]

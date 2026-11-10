@@ -45,9 +45,9 @@ pub use editor::{
     HoverKind,
 };
 pub use inputs::{
-    case_variants, discover_source_files, discover_sources, parse_input_spec, parse_input_spec_at,
-    CaseVariants, Discovery, EveryGroupDropped, InputError, InputSource, InputSpec, MissedSource,
-    NearestFile, ResolvedInputs, ReviewFileError, Spelling, UnmatchedExclusion,
+    discover_source_files, discover_sources, parse_input_spec, parse_input_spec_at, variants,
+    Discovery, EveryGroupDropped, InputError, InputSource, InputSpec, Likeness, MissedSource,
+    NearestFile, ResolvedInputs, ReviewFileError, Spelling, UnmatchedExclusion, Variants,
 };
 pub use lower::imports::parse_pipeline_at;
 pub use lower::parse_pipeline;

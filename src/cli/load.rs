@@ -8,10 +8,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use spit::{
-    case_variants, diagnose_checked, diagnose_checked_with_inventory,
-    diagnose_checked_with_records, parse_input_spec_at, render_source_inventory, ArtifactReport,
-    CaseVariants, Checked, Context, DimensionOrders, FileNames, InputSource, InputSpec, Pipeline,
-    Removal, ResolveError, ResolvedInputs,
+    diagnose_checked, diagnose_checked_with_inventory, diagnose_checked_with_records,
+    parse_input_spec_at, render_source_inventory, variants, ArtifactReport, Checked, Context,
+    DimensionOrders, FileNames, InputSource, InputSpec, Likeness, Pipeline, Removal, ResolveError,
+    ResolvedInputs, Variants,
 };
 
 use super::args::{CliArgs, Command, Flag};
@@ -190,8 +190,10 @@ pub(crate) fn settle(loaded: &Loaded) -> Result<(ResolvedInputs, PathBuf), Box<d
             review.review, review.file
         );
     }
-    for note in case_variant_notes(&case_variants(&resolved.inventory)) {
-        eprintln!("note: {note}");
+    for likeness in [Likeness::Case, Likeness::Number] {
+        for note in variant_notes(&variants(&resolved.inventory, likeness)) {
+            eprintln!("note: {note}");
+        }
     }
     if let Some(root) = &resolved.root {
         let contexts = if recipe.rules.context_paths.is_empty() {
@@ -208,11 +210,12 @@ pub(crate) fn settle(loaded: &Loaded) -> Result<(ResolvedInputs, PathBuf), Box<d
     Ok((resolved, root))
 }
 
-/// One note for each dimension with values that differ only in ASCII letter
-/// case, as ``store has values that differ only in ASCII letter case: `S07` in pricing,
-/// `s07` in sales``, so the sources of one thing under two spellings are
-/// seen together. At most three sets of a dimension are named.
-fn case_variant_notes(sets: &[CaseVariants]) -> Vec<String> {
+/// One note for each dimension with values alike in one way, as ``store has
+/// values that differ only in ASCII letter case, which are different values to
+/// SPIT: `S07` in pricing, `s07` in sales``, so the sources of one thing
+/// under two spellings are seen together. At most three sets of a dimension
+/// are named. Every set has the same [`Likeness`], as [`variants`] gives them.
+fn variant_notes(sets: &[Variants]) -> Vec<String> {
     const SHOWN: usize = 3;
     let mut notes = Vec::new();
     let mut start = 0;
@@ -247,8 +250,12 @@ fn case_variant_notes(sets: &[CaseVariants]) -> Vec<String> {
         } else {
             String::new()
         };
+        let alike = match sets[start].likeness {
+            Likeness::Case => "differ only in ASCII letter case",
+            Likeness::Number => "are equal as numbers",
+        };
         notes.push(format!(
-            "`{dimension}` has values that differ only in ASCII letter case, which are different values to SPIT: {}{more}",
+            "`{dimension}` has values that {alike}, which are different values to SPIT: {}{more}",
             named.join("; ")
         ));
         start = end;
