@@ -8,7 +8,7 @@ mod pattern;
 mod shape;
 
 pub(crate) use self::command::{shell_word, Stream};
-pub use self::command::{CommandError, CommandProblem, CommandTemplate};
+pub use self::command::{CommandError, CommandProblem, CommandTemplate, NamedFile};
 pub use self::entities::EntitiesFormat;
 pub(crate) use self::path::{
     error, product_text, push_escaped, require_directory, Holder, PathPart, PathPlaceholder,

@@ -4,6 +4,8 @@ Can someone who has only the `spit` binary and its guide turn a pipeline problem
 
 The first round's findings are in `rounds/1/README.md` in [`rounds.zip`](rounds.zip), written as a backlog of bugs, features and gaps in the guide. Every item has been resolved. The designs that answered them, and the roadmap they were built in, were plans under `usability/design/`. They were deleted when the work merged, and `git log -- usability/design` finds them. This page describes how the study was run, what came out, and how to run it again.
 
+A second study, [`researcher/`](researcher/README.md), runs SPIT and spit-bash end to end through a researcher's history of changes to a real dataset, and checks each run.
+
 ## Rounds
 
 The rounds are archived in [`rounds.zip`](rounds.zip), so their records do not weigh on the repository. Each round is a folder in it, holding its report as `README.md` and its runs under `results/`, one folder per run. Unpack it with `python3 usability/harness/archive.py unpack usability/rounds.zip <folder>`, or any unzip tool. The files it replaced are in the git history too: `git log -- usability/rounds`.
