@@ -456,6 +456,7 @@ With the pipeline in `digits/digits.spit`, `table` runs `python3 /home/lab/digit
 - Write `{@here}` in a `command` or a `verify` command, as the start of an argument, with the rest of the path after it. It gives no `.dir` or `.stem`, and cannot be redirected to or from.
 - A `.spitdag` holds the pipeline's folder once, as `pipeline_folder`, and each use as a [`here` part](spitdag.md#commands) under it. The folder is not part of any command, so moving the pipeline changes none.
 - A pipeline given on standard input, or parsed without a file, has no folder, and `{@here}` in it is an error.
+- A job declares only its ports, so editing a script a command names by `{@here}`, or by a relative path such as `scripts/table.py`, reruns nothing. `inputs`, `dag` and `artifacts` note each such file that exists: ``note: operation `table` runs `{@here}/scripts/table.py`, which it doesn't declare, so editing the file reruns nothing; ...``. To rerun a job when its script changes, keep the script under the dataset root and pass it to the operation as a source.
 
 ### A job's dimension values
 

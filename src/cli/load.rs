@@ -2,7 +2,7 @@
 //! in memory: settling a recipe's inputs, and preparing a pipeline and
 //! inventory for `dag` and `artifacts`.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -10,8 +10,8 @@ use std::path::{Path, PathBuf};
 use spit::{
     diagnose_checked, diagnose_checked_with_inventory, diagnose_checked_with_records,
     parse_input_spec_at, render_source_inventory, variants, ArtifactReport, Checked, Context,
-    DimensionOrders, FileNames, InputSource, InputSpec, Likeness, Pipeline, Removal, ResolveError,
-    ResolvedInputs, Variants,
+    DimensionOrders, FileNames, InputSource, InputSpec, Likeness, NamedFile, Pipeline, Removal,
+    ResolveError, ResolvedInputs, Variants,
 };
 
 use super::args::{CliArgs, Command, Flag};
@@ -175,6 +175,9 @@ pub(crate) fn settle(loaded: &Loaded) -> Result<(ResolvedInputs, PathBuf), Box<d
         }
     }
     let pipeline = &loaded.checked.pipeline;
+    for note in undeclared_file_notes(pipeline, &root) {
+        eprintln!("note: {note}");
+    }
     let orders = DimensionOrders::new(pipeline);
     for removal in &resolved.inventory.removed {
         eprintln!("note: {}", removal_note(removal, &orders));
@@ -261,6 +264,49 @@ fn variant_notes(sets: &[Variants]) -> Vec<String> {
         start = end;
     }
     notes
+}
+
+/// One note for each file a command or check names as text, which exists
+/// but which the job doesn't declare. A runner reruns a job when what it
+/// declares changes, so editing the file reruns nothing. A path is found
+/// from the dataset root, where commands run, or from the folder of the file
+/// declaring the operation, for `{@here}`. Each operation or check is named
+/// once per file, in name order.
+fn undeclared_file_notes(pipeline: &Pipeline, root: &Path) -> Vec<String> {
+    let declared_in = pipeline.operation_files();
+    let here = |operation: &str| -> Option<PathBuf> {
+        let folder = Path::new(pipeline.folder.as_deref()?);
+        let file = declared_in.get(operation).copied().flatten()?;
+        let parent = Path::new(&pipeline.files[file].path).parent()?;
+        Some(folder.join(parent))
+    };
+    let mut found: BTreeSet<(&str, &str, NamedFile<'_>)> = BTreeSet::new();
+    for command in &pipeline.commands {
+        for line in &command.lines {
+            for file in line.named_files() {
+                found.insert(("operation", &command.operation, file));
+            }
+        }
+    }
+    for check in &pipeline.checks {
+        for file in check.template.named_files() {
+            found.insert(("check", &check.name, file));
+        }
+    }
+    found
+        .into_iter()
+        .filter(|&(kind, name, file)| match file {
+            NamedFile::Root(path) => root.join(path).is_file(),
+            NamedFile::Here(path) => {
+                kind == "operation" && here(name).is_some_and(|folder| folder.join(path).is_file())
+            }
+        })
+        .map(|(kind, name, file)| {
+            format!(
+                "{kind} `{name}` runs `{file}`, which it doesn't declare, so editing the file reruns nothing; to rerun on a change, keep it under the dataset root and pass it to `{name}` as a source"
+            )
+        })
+        .collect()
 }
 
 /// How many files the scan left out, and which: each of them when there

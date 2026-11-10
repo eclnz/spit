@@ -11,7 +11,7 @@ use std::borrow::Cow;
 use std::fmt;
 use std::ops::Range;
 
-use super::{parse_template, Part};
+use super::{builtin, parse_template, Part};
 use crate::span::Located;
 
 /// An error in a command, such as an unknown `{placeholder}`.
@@ -159,6 +159,54 @@ impl CommandTemplate {
     pub(crate) fn arguments(&self) -> &[Argument] {
         &self.arguments
     }
+
+    /// Each file the command names as text rather than as a port: an
+    /// argument that is literal text alone and reads as a relative path, as
+    /// `../scripts/table.py`, or `{@here}` followed by one, as
+    /// `{@here}/scripts/table.py`. A relative path holds a `/` and starts
+    /// with neither `/` nor `-`; absolute paths are left out, since they name
+    /// installed tools. A job doesn't declare such a file, so editing it
+    /// reruns nothing. Whether a path names a file is for the caller, which
+    /// knows the dataset root and the pipeline's folder, to find.
+    pub fn named_files(&self) -> impl Iterator<Item = NamedFile<'_>> {
+        let relative = |text: &str| {
+            text.contains('/')
+                && !text.starts_with(['/', '-'])
+                && !text.contains(char::is_whitespace)
+        };
+        self.arguments
+            .iter()
+            .filter_map(move |argument| match argument.as_slice() {
+                [Part::Literal(text)] if relative(text) => Some(NamedFile::Root(text)),
+                [Part::Placeholder(name), Part::Literal(rest)]
+                    if name == builtin::HERE && rest.starts_with('/') && relative(&rest[1..]) =>
+                {
+                    Some(NamedFile::Here(&rest[1..]))
+                }
+                _ => None,
+            })
+    }
+}
+
+/// A file a command names as text, by where its path is relative to, as
+/// [`CommandTemplate::named_files`] gives it.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
+pub enum NamedFile<'a> {
+    /// Relative to the dataset root, where commands run.
+    Root(&'a str),
+    /// Relative to the folder of the file declaring the operation, written
+    /// after `{@here}/`.
+    Here(&'a str),
+}
+
+impl fmt::Display for NamedFile<'_> {
+    /// The path as the command writes it.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Root(path) => f.write_str(path),
+            Self::Here(path) => write!(f, "{{{}}}/{path}", builtin::HERE),
+        }
+    }
 }
 
 impl fmt::Display for CommandTemplate {
@@ -289,6 +337,24 @@ fn split_arguments(template: &str) -> Result<Vec<Word>, CommandError> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn named_files_are_relative_paths_as_text() {
+        let template = CommandTemplate::parse(
+            "python3 ../../scripts/table.py --seconds {durations} /usr/bin/env -o out/{x} 'a b/c' scripts/run.sh {@here}/lib/fit.R {@here} > {@output}",
+        )
+        .unwrap();
+        let files: Vec<_> = template.named_files().collect();
+        assert_eq!(
+            files,
+            [
+                NamedFile::Root("../../scripts/table.py"),
+                NamedFile::Root("scripts/run.sh"),
+                NamedFile::Here("lib/fit.R"),
+            ]
+        );
+        assert_eq!(files[2].to_string(), "{@here}/lib/fit.R");
+    }
     use super::*;
 
     #[test]
