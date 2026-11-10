@@ -104,6 +104,8 @@ pub struct ResolvedDag {
     pub steps: Vec<DagStep>,
     /// Every artifact the jobs refer to.
     pub artifacts: Artifacts,
+    /// Each directory view and the IDs of its required files, sorted by ID.
+    pub views: BTreeMap<ArtifactId, Vec<ArtifactId>>,
     /// Declaration order is retained for readable dry-run output.
     pub product_dimensions: BTreeMap<String, Vec<String>>,
     /// The file of each source whose inventory record gave one, by artifact

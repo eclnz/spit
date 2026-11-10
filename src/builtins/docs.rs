@@ -23,6 +23,8 @@ pub enum Word {
     Dimensions,
     Many,
     Beside,
+    SeedFrom,
+    DirectoryView,
     Vary,
     Each,
     Where,
@@ -93,7 +95,7 @@ impl Word {
 }
 
 /// Every word's documentation, in the order of [`Word`].
-pub static DOCS: [Doc; 60] = [
+pub static DOCS: [Doc; 62] = [
     Doc {
         name: "source",
         kind: "keyword",
@@ -191,6 +193,20 @@ pub static DOCS: [Doc; 60] = [
         anchor: "sidecar-files",
         example: "source image .nii.gz [sub]\nsource metadata .json beside image\noperation strip(t1: Image) -> (brain: Image .nii.gz, mask: Image \"_mask.nii.gz\" beside brain)\noperation faidx(fasta: Fasta) -> Fai +.fai beside fasta",
         summary: "A source or output whose file lies beside another file. The suffix replaces the other file's extension: beside `sub-01_brain.nii.gz`, a `.json` companion is `sub-01_brain.json`. After a `+`, it follows the whole name: beside `genome.fasta`, `+.fai` is `genome.fasta.fai`. A source inherits the other's dimensions and path. An output names another output, or a `one` input whose file it is written beside; the job writes it, and may leave it out of its command.",
+    },
+    Doc {
+        name: "seed-from",
+        kind: "keyword",
+        anchor: "seeded-output-folders",
+        example: "operation classify(input: WorkingDir) -> ClassifiedDir / from input",
+        summary: "Starts an output folder with a private copy of the folder bound to this input port.",
+    },
+    Doc {
+        name: "view",
+        kind: "keyword",
+        anchor: "directory-views",
+        example: "operation anat(t1: Image, tissue: Image) -> Anat .anat/ view",
+        summary: "Exposes the operation’s required file inputs as one directory path. Each input’s own job writes it, and readers of the view wait for all the member jobs.",
     },
     Doc {
         name: "vary",

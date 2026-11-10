@@ -92,7 +92,12 @@ fn bind_jobs(
         })
         .collect::<Result<Vec<_>, _>>()?;
     let mut produced = vec![false; dag.artifacts.len()];
-    for &output in dag.jobs.iter().flat_map(|job| &job.outputs) {
+    for &output in dag
+        .jobs
+        .iter()
+        .flat_map(|job| &job.outputs)
+        .chain(dag.views.keys())
+    {
         produced[output.index()] = true;
     }
     let folders: Vec<bool> = dag
@@ -128,6 +133,7 @@ fn bind_jobs(
         steps.iter().map(StepCommands::bound).collect(),
         jobs,
     );
+    bound.views.clone_from(&dag.views);
     bound.pipeline_files.clone_from(&pipeline.files);
     bound.pipeline_folder.clone_from(&pipeline.folder);
     // Each operation's file, found once, then each call's looked up.
@@ -268,6 +274,21 @@ impl<'p> StepCommands<'p> {
                 .outputs
                 .iter()
                 .map(|port| port.name.clone())
+                .collect(),
+            seeds: self
+                .operation
+                .outputs
+                .iter()
+                .enumerate()
+                .filter_map(|(output, port)| {
+                    let seed = port.seed.as_ref()?;
+                    let input = self
+                        .operation
+                        .inputs
+                        .iter()
+                        .position(|input| input.name == *seed)?;
+                    Some((output, input))
+                })
                 .collect(),
             // The file is filled in once the calls' files are known.
             origin: self.step.line.map(|line| StepCall {

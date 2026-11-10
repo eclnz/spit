@@ -415,6 +415,8 @@ fn parse_outputs(
         // An output's checks are its own; anything else is the operation's.
         let (attached, clauses): (Vec<_>, Vec<_>) = clauses.into_iter().partition(is_attachment);
         let attached = attachments(&attached, "an output", number)?;
+        let (text, view) = split_view(text);
+        let (text, seed) = split_seed(text, number)?;
         let (text, beside) = split_beside(text, number)?;
         let (text, extension, folder) = match beside {
             Some(_) => (text, None, false),
@@ -430,6 +432,8 @@ fn parse_outputs(
             Some(beside) => port.beside(beside),
             None => with_ending(port, extension, folder),
         };
+        port.seed = seed;
+        port.view = view;
         port.checks = attached.checks;
         port.exempt = attached.exempt;
         port.reviews = attached.reviews;
@@ -454,6 +458,8 @@ fn parse_outputs(
         .map(|item| {
             let (item, clauses) = split_clauses(item, AFTER_OUTPUT, number)?;
             let attached = attachments(&clauses, "an output", number)?;
+            let (item, view) = split_view(item);
+            let (item, seed) = split_seed(item, number)?;
             let (item, beside) = split_beside(item, number)?;
             let (item, extension, folder) = match beside {
                 Some(_) => (item, None, false),
@@ -475,6 +481,8 @@ fn parse_outputs(
                 .at_token(name));
             }
             let mut port = OutputPort::new(name, output_type);
+            port.seed = seed;
+            port.view = view;
             port.checks = attached.checks;
             port.exempt = attached.exempt;
             port.reviews = attached.reviews;
@@ -486,6 +494,30 @@ fn parse_outputs(
         })
         .collect::<Result<Vec<_>, ParseError>>()?;
     Ok((ports, clauses))
+}
+
+/// An output's signature without the directory view modifier.
+fn split_view(text: &str) -> (&str, bool) {
+    match text.strip_suffix(" view").map(str::trim_end) {
+        Some(folder) if folder.ends_with('/') => (folder, true),
+        _ => (text, false),
+    }
+}
+
+/// An output and the port after its optional folder seed clause.
+fn split_seed(item: &str, number: usize) -> Result<(&str, Option<String>), ParseError> {
+    let Some((item, port)) = item.rsplit_once(" from ") else {
+        return Ok((item, None));
+    };
+    let item = item.trim_end();
+    // A quoted suffix may contain these words; only the text after a folder ending is a seed.
+    if !item.ends_with('/') {
+        return Ok((item, None));
+    }
+    Ok((
+        item,
+        Some(identifier(port.trim(), number, "folder input port")?.to_owned()),
+    ))
 }
 
 /// An output's text before ` beside port`, and what `beside` says, if it

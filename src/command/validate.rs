@@ -145,6 +145,17 @@ pub(crate) fn collect_commands(
             );
             continue;
         };
+        if operation.outputs.iter().any(|port| port.view) {
+            errors.push(
+                CommandError::new(format!(
+                    "directory view `{}` has no command or verify step",
+                    command.operation
+                ))
+                .at(line)
+                .focus(&command.operation),
+            );
+            continue;
+        }
         if let Some(port) = operation.inputs.iter().find(|port| {
             operation
                 .outputs

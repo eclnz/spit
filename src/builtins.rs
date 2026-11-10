@@ -246,6 +246,12 @@ fn rule_word(code: &str, range: Range<usize>, statement: Option<Word>) -> Option
     }
     match (statement?, text) {
         (Word::Operation, "many") if before.ends_with(':') => Some(Word::Many),
+        (Word::Operation, "view") if before.contains("->") && before.ends_with('/') => {
+            Some(Word::DirectoryView)
+        }
+        (Word::Operation, "from") if before.contains("->") && before.ends_with('/') => {
+            Some(Word::SeedFrom)
+        }
         (Word::Operation, "beside") if before.contains("->") => Some(Word::Beside),
         (Word::Source, "beside") if before.split_whitespace().count() > 1 && spaced => {
             Some(Word::Beside)

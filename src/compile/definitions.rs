@@ -143,6 +143,56 @@ fn check_operation(operation: &OperationDef) -> Result<(), ResolveError> {
             )));
         }
     }
+    if operation.outputs.iter().any(|output| output.view) {
+        let [output] = operation.outputs.as_slice() else {
+            return Err(invalid(
+                "a directory view needs exactly one output".to_owned(),
+            ));
+        };
+        if !output.folder
+            || output.seed.is_some()
+            || output.beside.is_some()
+            || operation.inputs.is_empty()
+            || operation
+                .inputs
+                .iter()
+                .any(|input| input.cardinality != crate::model::Cardinality::One)
+        {
+            return Err(invalid(
+                "a directory view needs a folder output and one or more single-file inputs"
+                    .to_owned(),
+            ));
+        }
+        if !output.checks.is_empty()
+            || operation
+                .inputs
+                .iter()
+                .any(|input| !input.checks.is_empty())
+        {
+            return Err(invalid(
+                "attach checks to a directory view’s member producers or consumers".to_owned(),
+            ));
+        }
+    }
+    for output in &operation.outputs {
+        let Some(seed) = &output.seed else { continue };
+        if !output.folder || output.beside.is_some() {
+            return Err(invalid(format!(
+                "output `{}` must be a folder to use `from {seed}`",
+                output.name
+            )));
+        }
+        if !operation
+            .inputs
+            .iter()
+            .any(|input| input.name == *seed && input.cardinality == crate::model::Cardinality::One)
+        {
+            return Err(invalid(format!(
+                "`from {seed}` on output `{}` needs the name of a single-artifact input port",
+                output.name
+            )));
+        }
+    }
     if operation.minimum_collection == Some(0) {
         return Err(invalid(format!(
             "operation `{}` needs `@min(count)` of at least 1",

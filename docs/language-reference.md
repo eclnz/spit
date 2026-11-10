@@ -1283,6 +1283,70 @@ aligned = align(bwa_index, r1)
 
 A job owns the folder it writes, so nothing else may be written in it or read from it: a path rule that puts another product's files inside a folder a job writes is an error, as is one that puts an output inside a source folder. A source may sit in a source folder, such as `dicom/sub={sub}/info.json` beside the `dicom` folder above, since no job writes either. A folder is not written [`beside`](#files-a-tool-writes-beside-another) another file, nor has an output beside it, and a source declared [`beside`](#sidecar-files) another is a file.
 
+### Seeded output folders
+
+```spit
+source prepared : WorkingDir / [sub]
+path prepared: prepared/sub-{sub}
+operation features(input: WorkingDir) -> FeaturedDir / from input
+command features: feature-tool {@output}
+featured = features(prepared)
+path featured: featured/sub-{sub}
+```
+
+`/ from input` starts each output folder with a private copy of the folder
+bound to the named single-artifact input. The command receives the output's
+own path, such as `featured/sub-01`, and may change its contents. Each attempt
+starts with the input's contents. The input and the output may have different
+types. On a named output, write `(result: FeaturedDir / from input)`.
+
+The runner preserves relative links that resolve within the input tree and
+rejects other links and special files when preparing the copy.
+
+### Directory views
+
+```spit
+source t1 : Image .nii.gz [sub]
+path t1: raw/sub-{sub}.nii.gz
+
+operation bias_correct(input: Image) -> Image .nii.gz
+command bias_correct: correct {input} {@output}
+corrected = bias_correct(t1)
+path corrected: results/sub-{sub}.anat/T1_biascorr.nii.gz
+
+operation segment(input: Image) -> Image .nii.gz
+command segment: segment {input} {@output}
+tissue = segment(corrected)
+path tissue: results/sub-{sub}.anat/T1_fast_pve_2.nii.gz
+
+operation register(input: Image) -> Warp .nii.gz
+command register: register {input} {@output}
+warp = register(corrected)
+path warp: results/sub-{sub}.anat/T1_to_MNI_nonlin_coeff.nii.gz
+
+operation anat(image: Image, tissue: Image, warp: Warp) -> Anat .anat/ view
+anatomy = anat(corrected, tissue, warp)
+path anatomy: results/sub-{sub}.anat
+
+operation asl(anatomy: Anat) -> Report .txt
+command asl: oxford_asl --fslanat {anatomy} -o {@output}
+report = asl(anatomy)
+path report: reports/sub-{sub}.txt
+```
+
+For subject 01, the reader gets one argument, `results/sub-01.anat`. A
+`/ view` operation declares one directory and uses its input ports to list
+all the required file products. Each must be a distinct generated file
+product matched on the full context of the view. A context from any member
+requires all the others. Each producer writes its
+file directly under that directory using its own path rule. SPIT checks
+containment and path collisions, including overlap with an owned folder.
+
+The reader waits for every member's producer. The directory is read-only
+to the consumer. The tool sees the on-disk directory, so declare every file
+it relies on. Only the declared members affect readiness and reuse. A
+seeded output folder takes a folder source or an owned folder as its seed.
+
 ### Sidecar files
 
 Files that travel together often share a name and differ by extension. Declare the main file as a source, then declare each companion `beside` it:

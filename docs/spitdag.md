@@ -1,6 +1,6 @@
 # The `.spitdag` format
 
-A `.spitdag` is what `spit dag -o` writes and `spit dag --json` prints: every job a pipeline resolves to over one dataset, each with its files and its commands. A backend that runs the jobs reads nothing else: no pipeline, path rule or command template. This page describes version 12, the version SPIT writes. Use `spit dag --commands` for a readable view of the same commands.
+A `.spitdag` is what `spit dag -o` writes and `spit dag --json` prints: every job a pipeline resolves to over one dataset, each with its files and its commands. A backend that runs the jobs reads nothing else: no pipeline, path rule or command template. This page describes version 13, the version SPIT writes. Use `spit dag --commands` for a readable view of the same commands.
 
 ## Document
 
@@ -30,8 +30,8 @@ A `.spitdag` is one JSON object, followed by a newline:
 | `generator` | The program that wrote the file, and its version. |
 | `root` | The absolute dataset folder, which the sources are under, or `null` when it was not known: a `.spitout` that records no root. |
 | `output_root` | The absolute folder the files jobs write are under, and the folder commands run from: see [Roots](#roots). It is `root` when the pipeline names no output root, and `null` when neither is known. |
-| `external_inputs` | Every artifact a job reads but no job writes, once each: the sources. Ordered by path in natural order, the order `many` inputs take, so `wave2` comes before `wave10`. |
-| `targets` | Every artifact a job writes but no job reads: what a full run leaves behind. Ordered by the job that writes it. |
+| `external_inputs` | The sources the jobs read, once each. Ordered by path in natural order, the order `many` inputs take, so `wave2` comes before `wave10`. |
+| `targets` | The outputs no job reads, followed by the directory views no job reads. A member of a view counts as read by the view. |
 | `executables` | The program each command, `verify` command and check starts with, once each, in text order. A command whose first word is a path names no program and is left out. A backend can check these are installed before running anything. |
 | `removed` | What the input stage left out of the dataset, and why: see [Removal](#removal). `[]` when nothing was. |
 | `left_out` | Outputs whose jobs could not be planned, each with its reasons: see [Left out](#left-out). `[]` for a complete plan. |
@@ -55,7 +55,9 @@ Every artifact is written the same way, wherever it appears:
 | `type` | `null` for an untyped product; `{"name": N, "args": [TYPE, ...]}` for a named type, with its arguments; `{"variable": V}` for a type variable left unbound. |
 | `path` | The artifact's file or folder, relative to the folder `under` names, with no `/` at its end. No two artifacts share a path, even under different roots. |
 | `under` | `"root"` or `"output_root"`: the top-level field holding the folder `path` is relative to. |
-| `kind` | `"file"`, or `"folder"` for a product declared with a `/`, whose artifact is a folder of files: see [Folders](#folders). Version 5 added it; a reader written for version 4 does not know it. |
+| `kind` | `"file"`, `"folder"` for a source or owned folder, or `"directory_view"` for a [directory view](#directory-views). |
+| `id` | In a DAG with directory views, a numeric artifact ID unique within the file. Repeated occurrences of an artifact use the same ID. |
+| `members` | On a directory view, the required file outputs as objects with `id` and `path`. The latter is relative to the view's path. |
 
 ## Roots
 
@@ -125,7 +127,8 @@ Each output that could not be produced has its identity and the input gaps that 
 | `origin` | Where the step that made the job is written, as `{"call": 0, "file": 1, "line": 14}`. See [Where jobs come from](#where-jobs-come-from). |
 | `inputs` | Each input port and the artifacts bound to it, in port order. A `one` port holds one artifact; a `many` port holds its collection in natural order. |
 | `outputs` | Each output port and the artifact it writes. A single unnamed output is `output`. |
-| `depends_on` | The jobs that write this job's inputs. |
+| `seed_folders` | When present, a map from each seeded output folder port to the single input folder port that supplies its initial contents. |
+| `depends_on` | The jobs that write this job's inputs, including every producer of a directory view's members. |
 | `dependents` | The jobs that read this job's outputs. |
 | `commands` | The commands that write the outputs, run in order until one fails: see [Commands](#commands). `[]` for an operation with none. |
 | `verify` | The commands that check the inputs before `commands` run, in order; `[]` for none. Each is a list of arguments. |
@@ -247,11 +250,24 @@ A backend that identifies a job's work leaves its checks out: a changed check do
 
 A job that writes a folder owns it: SPIT rejects a pipeline that would put any other artifact inside it. So a backend may treat the folder as one output:
 
-- Before the job's first command runs, remove what an earlier run left at the folder's path, so that its files do not mix with this run's, then make the folder, empty, with its parents. The tool writes into a folder that exists, as a tool given a folder to fill, such as `bwa index -p` or `dcm2niix -o`, expects. A tool that refuses to write into an existing folder is wrapped in a command that removes it first.
+- For an output in `seed_folders`, copy its input folder's contents into the owned output after input checks and `verify`, before the first command. Each attempt starts with the input's contents. A relative link may be preserved if its target stays inside the tree. The copy must isolate all writes from the input.
+- For an ordinary output folder, before the job's first command runs, remove what an earlier run left at the folder's path, so that its files do not mix with this run's, then make the folder, empty, with its parents. The tool writes into a folder that exists, as a tool given a folder to fill, such as `bwa index -p` or `dcm2niix -o`, expects. A tool that refuses to write into an existing folder is wrapped in a command that removes it first.
 - After the last command, require the folder to exist. It may be empty.
 - To tell whether a folder changed, look at the files under it, not the folder's own modification time, which changes only when an entry directly in it is added or removed.
 
 A source folder may hold other sources, but never an output.
+
+## Directory views
+
+A `directory_view` is an input or target. Each member's ID refers to a file
+in some job's `outputs`. The file is under the same root and its path is the
+view's path joined with the member's relative path. All members are required.
+
+Pass the view's path as one command argument. Use the declared files for
+readiness, checks and reuse, including each file's relative name when
+identifying the consumer's work. Only the jobs that own the files write or
+clean their respective outputs. When a view is a target, its member jobs
+make it available.
 
 ## Where jobs come from
 

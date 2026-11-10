@@ -103,7 +103,12 @@ pub(crate) fn check_rules(pipeline: &Pipeline, dag: &ResolvedDag) -> Result<(), 
 /// Whether each artifact, by id, is made by one of the resolved jobs.
 pub(crate) fn outputs_made(dag: &ResolvedDag) -> Vec<bool> {
     let mut made = vec![false; dag.artifacts.len()];
-    for &output in dag.jobs.iter().flat_map(|job| &job.outputs) {
+    for &output in dag
+        .jobs
+        .iter()
+        .flat_map(|job| &job.outputs)
+        .chain(dag.views.keys())
+    {
         made[output.index()] = true;
     }
     made
@@ -118,7 +123,12 @@ pub(crate) fn bound_paths(pipeline: &Pipeline, dag: &ResolvedDag) -> Result<Boun
     // Every output is under the output root except a file beside an input,
     // which is where that input is.
     let mut under = vec![Under::Root; dag.artifacts.len()];
-    for &output in dag.jobs.iter().flat_map(|job| &job.outputs) {
+    for &output in dag
+        .jobs
+        .iter()
+        .flat_map(|job| &job.outputs)
+        .chain(dag.views.keys())
+    {
         under[output.index()] = Under::OutputRoot;
     }
     let mut owners: FxHashMap<String, ArtifactId> = FxHashMap::default();
@@ -180,10 +190,21 @@ pub(crate) fn bound_paths(pipeline: &Pipeline, dag: &ResolvedDag) -> Result<Boun
         let relative = beside_path(dag, &paths, id, input, beside)?;
         own(id, relative, &mut paths)?;
     }
+    for &view in dag.views.keys() {
+        if paths[view.index()].is_none() {
+            let artifact = dag.artifact(view);
+            let relative =
+                binder.bind_numbered(dag.artifacts.product_of(view), artifact, || {
+                    format!("path for `{artifact}`")
+                })?;
+            own(view, relative, &mut paths)?;
+        }
+    }
+    let index = binder.index();
+    check_directory_views(dag, &paths, &under)?;
     // The first such path in path order is the one reported. Paths share
     // their directories, so a directory found to hold no artifact, nor any
     // above it, is kept, and a path in it needs no more looking up.
-    let index = binder.index();
     let mut made: Option<Vec<bool>> = None;
     let mut clear: FxHashSet<&str> = FxHashSet::default();
     let enclosed = owners
@@ -193,38 +214,76 @@ pub(crate) fn bound_paths(pipeline: &Pipeline, dag: &ResolvedDag) -> Result<Boun
             if clear.contains(parent) {
                 return None;
             }
-            let found = relative
-                .match_indices('/')
-                .find_map(|(end, _)| owners.get_key_value(&relative[..end]));
-            let Some((directory, &other)) = found else {
+            let mut has_owner = false;
+            let invalid = relative.match_indices('/').find_map(|(end, _)| {
+                let (directory, &other) = owners.get_key_value(&relative[..end])?;
+                has_owner = true;
+                if let Some(members) = dag.views.get(&other) {
+                    return members.binary_search(&artifact).is_err().then_some((
+                        relative,
+                        artifact,
+                        directory,
+                        other,
+                        "a directory view that does not list it",
+                    ));
+                }
+                let folder = index.is_folder(dag.artifact(other).product);
+                let made = made.get_or_insert_with(|| outputs_made(dag));
+                let what = match (folder, made[other.index()]) {
+                    (false, _) => "which is a file",
+                    (true, true) => "a folder its job writes whole",
+                    (true, false) if made[artifact.index()] => {
+                        "a source folder, which no job may write inside"
+                    }
+                    // Sources may overlap because jobs never write them.
+                    (true, false) => return None,
+                };
+                Some((relative, artifact, directory, other, what))
+            });
+            if !has_owner {
                 clear.insert(parent);
-                return None;
-            };
-            Some((relative, artifact, directory, other))
-        })
-        // Few paths are inside another, so only they are judged.
-        .filter_map(|(relative, artifact, directory, other)| {
-            let folder = index.is_folder(dag.artifact(other).product);
-            let made = made.get_or_insert_with(|| outputs_made(dag));
-            let (inner_made, outer_made) = (made[artifact.index()], made[other.index()]);
-            // Nothing writes a source, so a source may sit in a source folder.
-            (!folder || inner_made || outer_made)
-                .then_some((relative, artifact, directory, other, folder, outer_made))
+            }
+            invalid
         })
         .min_by(|left, right| left.0.cmp(right.0));
-    if let Some((_, artifact, directory, other, folder, outer_made)) = enclosed {
+    if let Some((_, artifact, directory, other, what)) = enclosed {
         let (artifact, other) = (dag.artifact(artifact), dag.artifact(other));
-        let what = match (folder, outer_made) {
-            (false, _) => "which is a file",
-            (true, true) => "a folder its job writes whole",
-            (true, false) => "a source folder, which no job may write inside",
-        };
         return Err(error(format!(
             "path of `{}[{}]` puts it inside `{directory}`, the path of `{}[{}]`, {what}",
             artifact.product, artifact.entities, other.product, other.entities
         )));
     }
     Ok(BoundPaths { paths, under })
+}
+
+/// A view's members are generated files inside its path and under the same root.
+fn check_directory_views(
+    dag: &ResolvedDag,
+    paths: &[Option<String>],
+    under: &[Under],
+) -> Result<(), PathError> {
+    for (&view, members) in &dag.views {
+        let folder = paths[view.index()]
+            .as_deref()
+            .expect("view output has a path");
+        for &member in members {
+            let path = paths[member.index()]
+                .as_deref()
+                .expect("view input has a path");
+            // Keep in step with the relative member paths in spitdag/artifact_json.rs.
+            if under[member.index()] != under[view.index()]
+                || !path
+                    .strip_prefix(folder)
+                    .is_some_and(|tail| tail.starts_with('/'))
+            {
+                return Err(error(format!(
+                    "`{}` at `{path}` must be inside directory view `{}` at `{folder}` under the same root",
+                    dag.artifact(member), dag.artifact(view)
+                )));
+            }
+        }
+    }
+    Ok(())
 }
 
 /// The path of `id`, written beside `input`, whose path is bound: the
