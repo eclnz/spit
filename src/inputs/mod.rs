@@ -46,7 +46,7 @@ pub use self::discover::{discover_source_files, discover_sources, Discovery};
 use self::exclusions::Excluder;
 pub use self::exclusions::UnmatchedExclusion;
 pub use self::pattern::{MissedSource, NearestFile};
-use self::recipe::{expand_input_block, restore_path_places};
+use self::recipe::{expand_input_block, header_lines, restore_path_places, RecipeHeader};
 pub use self::reviews::ReviewFileError;
 use self::reviews::{read_review_files, read_verdicts};
 pub use self::variants::{case_variants, CaseVariants, Spelling};
@@ -60,6 +60,9 @@ pub struct InputSpec {
     /// The dataset root a recipe's `root data` line names, relative to the
     /// recipe's folder when parsed at a path, and the line it is on.
     pub root: Option<(PathBuf, usize)>,
+    /// The output root a recipe's `output results` line names, relative to
+    /// the recipe's folder when parsed at a path, and the line it is on.
+    pub output: Option<(PathBuf, usize)>,
     pub rules: InputRules,
     pub inventory: Option<SourceInventory>,
 }
@@ -83,6 +86,9 @@ pub fn parse_input_spec_at(text: &str, path: &Path) -> Result<InputSpec, ParseEr
     let header = RecipeHeader {
         pipeline: header.pipeline.map(|pipeline| folder.join(pipeline)),
         root: header.root.map(|(root, line)| (folder.join(root), line)),
+        output: header
+            .output
+            .map(|(output, line)| (folder.join(output), line)),
     };
     finish_spec(document, header, Some(folder))
 }
@@ -98,14 +104,7 @@ pub(crate) fn parse_recipe_lines(text: &str) -> Result<(InputSpec, SourceMap), P
     Ok((finish_spec(document, header, None)?, lines))
 }
 
-/// The folders a recipe's `pipeline` and `root` lines name, as written.
-#[derive(Default)]
-struct RecipeHeader {
-    pipeline: Option<PathBuf>,
-    root: Option<(PathBuf, usize)>,
-}
-
-/// A recipe's `pipeline` and `root` lines, and the document its other
+/// A recipe's `pipeline`, `root` and `output` lines, and the document its other
 /// lines parse to with `parse` once each is checked to belong in a recipe.
 fn parse_recipe(
     text: &str,
@@ -118,31 +117,6 @@ fn parse_recipe(
     restore_path_places(&original, &mut document.lines);
     document.inputs.context_paths = contexts;
     Ok((header, document))
-}
-
-/// The pipeline a recipe names with `pipeline analysis.spit` and the root
-/// it names with `root data`, and the text with those lines blanked so that
-/// other lines keep their numbers.
-fn header_lines(text: &str) -> Result<(RecipeHeader, String), ParseError> {
-    let mut header = RecipeHeader::default();
-    let mut rest = String::new();
-    for (number, line) in Layout::new(text).numbered() {
-        if let Some(file) = line.code.strip_prefix("pipeline ") {
-            if header.pipeline.is_some() {
-                return Err(ParseError::new(number, "a .spitin names its pipeline once"));
-            }
-            header.pipeline = Some(PathBuf::from(file.trim()));
-        } else if let Some(folder) = line.code.strip_prefix("root ") {
-            if header.root.is_some() {
-                return Err(ParseError::new(number, "a .spitin names its root once"));
-            }
-            header.root = Some((PathBuf::from(folder.trim()), number));
-        } else {
-            rest.push_str(line.text);
-        }
-        rest.push('\n');
-    }
-    Ok((header, rest))
 }
 
 /// Why a line belongs in the pipeline rather than the recipe: what each
@@ -226,6 +200,7 @@ fn finish_spec(
         // `check_input_lines` and the parser reject the lines that make
         // these; a field a new line fills must be placed here.
         root,
+        output,
         products,
         operations,
         invocations,
@@ -243,6 +218,7 @@ fn finish_spec(
         type_decls,
     } = pipeline;
     if root.is_some()
+        || output.is_some()
         || !products.is_empty()
         || !operations.is_empty()
         || !invocations.is_empty()
@@ -279,6 +255,7 @@ fn finish_spec(
     Ok(InputSpec {
         pipeline: header.pipeline,
         root: header.root,
+        output: header.output,
         rules: inputs,
         inventory,
     })
@@ -290,16 +267,23 @@ impl InputSpec {
         &'a self,
         pipeline: &'a Pipeline,
     ) -> Result<Option<&'a (PathBuf, usize)>, InputError> {
-        match (&self.root, &pipeline.root) {
-            (Some(_), Some(_)) => Err(InputError::RootInBoth),
-            (root, inline) => Ok(root.as_ref().or(inline.as_ref())),
-        }
+        either(&self.root, &pipeline.root, InputError::RootInBoth)
+    }
+
+    /// The recipe's output root or the pipeline's, rejecting duplicate
+    /// declarations.
+    pub fn output_for<'a>(
+        &'a self,
+        pipeline: &'a Pipeline,
+    ) -> Result<Option<&'a (PathBuf, usize)>, InputError> {
+        either(&self.output, &pipeline.output, InputError::OutputInBoth)
     }
 
     /// Check the recipe against the pipeline's source declarations, without
     /// reading any file or record.
     pub fn check(&self, pipeline: &Pipeline) -> Result<(), InputError> {
         self.root_for(pipeline)?;
+        self.output_for(pipeline)?;
         let index = PipelineIndex::new(pipeline);
         for name in self.rules.source_paths.keys() {
             let product = name.clone();
@@ -373,7 +357,10 @@ impl InputSpec {
                         return Err(InputError::NoSourcePath { product });
                     }
                     let located = with_source_paths(pipeline, &source_paths);
-                    let found = discover(&located, &self.rules, root)?;
+                    let outputs = self
+                        .output_for(pipeline)?
+                        .map(|(folder, _)| folder.as_path());
+                    let found = discover(&located, &self.rules, root, outputs)?;
                     if let Some(unmatched) = found.unmatched {
                         return Err(InputError::UnmatchedExclusion(unmatched));
                     }
@@ -597,6 +584,18 @@ fn incomplete_groups(
     said
 }
 
+/// The folder the recipe or the pipeline declares, or `both` when each does.
+fn either<'a>(
+    recipe: &'a Option<(PathBuf, usize)>,
+    pipeline: &'a Option<(PathBuf, usize)>,
+    both: InputError,
+) -> Result<Option<&'a (PathBuf, usize)>, InputError> {
+    match (recipe, pipeline) {
+        (Some(_), Some(_)) => Err(both),
+        (recipe, pipeline) => Ok(recipe.as_ref().or(pipeline.as_ref())),
+    }
+}
+
 /// `a`, `a and b`, or `a, b and c`.
 fn listed<'a>(items: impl Iterator<Item = &'a str>) -> String {
     let items: Vec<_> = items.collect();
@@ -612,6 +611,8 @@ fn listed<'a>(items: impl Iterator<Item = &'a str>) -> String {
 pub enum InputError {
     /// Both the recipe and pipeline declare a dataset root.
     RootInBoth,
+    /// Both the recipe and pipeline declare an output root.
+    OutputInBoth,
     /// The pipeline does not compile, a rule does not fit it, or the
     /// records break a rule.
     Resolve(ResolveError),
@@ -662,6 +663,7 @@ impl fmt::Display for InputError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::RootInBoth => f.write_str("dataset root is declared in both .spit and .spitin; keep one declaration"),
+            Self::OutputInBoth => f.write_str("output root is declared in both .spit and .spitin; keep one declaration"),
             Self::Resolve(error) => error.fmt(f),
             Self::Path(error) => error.fmt(f),
             Self::NotASource { product } => write!(

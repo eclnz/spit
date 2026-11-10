@@ -11,6 +11,17 @@ use super::EntityBinding;
 
 pub type ArtifactType = TypeExpr;
 
+/// The folder an artifact's path is relative to.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum Under {
+    /// The dataset root: a source, or a file a job writes beside one.
+    #[default]
+    Root,
+    /// The output root: every other file a job writes. It is the dataset
+    /// root when no other is declared.
+    OutputRoot,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub struct ArtifactInstance {
     pub product: String,

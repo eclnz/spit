@@ -49,16 +49,17 @@ pub fn bind_dag_with(
     paths: BoundPaths,
 ) -> Result<BoundDag, BindError> {
     validate_commands(pipeline)?;
-    bind_jobs(pipeline, dag, paths.0)
+    bind_jobs(pipeline, dag, paths)
 }
 
-/// Every job of `dag` with its commands expanded, over the path `paths`
-/// holds for each artifact, and every step with its ports named.
+/// Every job of `dag` with its commands expanded, over the path and root
+/// `bound` holds for each artifact, and every step with its ports named.
 fn bind_jobs(
     pipeline: &Pipeline,
     dag: &ResolvedDag,
-    paths: Vec<Option<String>>,
+    bound: BoundPaths,
 ) -> Result<BoundDag, BindError> {
+    let BoundPaths { paths, under } = bound;
     // Found once, since each step asks for its operation, commands and
     // producers.
     let index = PipelineIndex::new(pipeline);
@@ -121,6 +122,7 @@ fn bind_jobs(
     let mut bound = BoundDag::new(
         dag.artifacts.clone(),
         paths,
+        under,
         dimensions,
         folders,
         steps.iter().map(StepCommands::bound).collect(),

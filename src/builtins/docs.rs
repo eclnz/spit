@@ -30,6 +30,7 @@ pub enum Word {
     Min,
     Pipeline,
     Root,
+    OutputRoot,
     Inputs,
     ContextEntry,
     Require,
@@ -92,7 +93,7 @@ impl Word {
 }
 
 /// Every word's documentation, in the order of [`Word`].
-pub static DOCS: [Doc; 59] = [
+pub static DOCS: [Doc; 60] = [
     Doc {
         name: "source",
         kind: "keyword",
@@ -239,6 +240,13 @@ pub static DOCS: [Doc; 59] = [
         anchor: "recipes",
         example: "root data",
         summary: "The dataset root, the folder paths are relative to. A pipeline or recipe may name one, relative to that file's folder; a recipe inherits its pipeline's root when it has none. Declaring it in both is an error, and `root .` is the declaring file's folder; in a `.spitout` that `spit inputs -o` writes, it is relative to the `.spitout`'s folder.",
+    },
+    Doc {
+        name: "output",
+        kind: "keyword",
+        anchor: "the-output-root",
+        example: "output results",
+        summary: "The output root, the folder the files jobs write are under, apart from the dataset's own. A pipeline or recipe may name one, relative to that file's folder, but not both. Sources, and files written beside them, stay under the dataset root. Without it, outputs are under the dataset root.",
     },
     Doc {
         name: "inputs:",

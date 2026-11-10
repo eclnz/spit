@@ -1,6 +1,6 @@
 # The `.spitdag` format
 
-A `.spitdag` is what `spit dag -o` writes and `spit dag --json` prints: every job a pipeline resolves to over one dataset, each with its files and its commands. A backend that runs the jobs reads nothing else: no pipeline, path rule or command template. This page describes version 11, the version SPIT writes. Use `spit dag --commands` for a readable view of the same commands.
+A `.spitdag` is what `spit dag -o` writes and `spit dag --json` prints: every job a pipeline resolves to over one dataset, each with its files and its commands. A backend that runs the jobs reads nothing else: no pipeline, path rule or command template. This page describes version 12, the version SPIT writes. Use `spit dag --commands` for a readable view of the same commands.
 
 ## Document
 
@@ -9,8 +9,9 @@ A `.spitdag` is one JSON object, followed by a newline:
 ```json
 {
   "version": 11,
-  "generator": {"name": "spit", "version": "0.3.0"},
+  "generator": {"name": "spit", "version": "0.4.0"},
   "root": "/data/study",
+  "output_root": "/data/study-results",
   "external_inputs": [ARTIFACT, ...],
   "targets": [ARTIFACT, ...],
   "executables": ["sort", ...],
@@ -25,9 +26,10 @@ A `.spitdag` is one JSON object, followed by a newline:
 
 | Field | Holds |
 | --- | --- |
-| `version` | The format's version, `11`. A change a reader must know about raises it. Version 6 added each job's [`checks`](#checks). Version 7 added `pipeline_files`, `calls` and each job's `origin`: see [Where jobs come from](#where-jobs-come-from). Version 8 gives each job its [`commands`](#commands) in place of version 7's `command`, each with its `stdin` and `stdout`, see [Standard input and output](#standard-input-and-output), and added its `cores` and `memory`, see [Cores and memory](#cores-and-memory). Version 9 gives every job an `origin`, with the `file` and `line` of its step, where version 8 left it `null` for a step written in the pipeline. Version 10 added `pipeline_folder` and the `here` command part. Version 11 removed each job's `fingerprint`: see [Identifying work](#identifying-work). |
+| `version` | The format's version, `12`. A change a reader must know about raises it. Version 6 added each job's [`checks`](#checks). Version 7 added `pipeline_files`, `calls` and each job's `origin`: see [Where jobs come from](#where-jobs-come-from). Version 8 gives each job its [`commands`](#commands) in place of version 7's `command`, each with its `stdin` and `stdout`, see [Standard input and output](#standard-input-and-output), and added its `cores` and `memory`, see [Cores and memory](#cores-and-memory). Version 9 gives every job an `origin`, with the `file` and `line` of its step, where version 8 left it `null` for a step written in the pipeline. Version 10 added `pipeline_folder` and the `here` command part. Version 11 removed each job's `fingerprint`: see [Identifying work](#identifying-work). Version 12 added `output_root` and each artifact's `under`: see [Roots](#roots). |
 | `generator` | The program that wrote the file, and its version. |
-| `root` | The absolute dataset folder that every path is relative to, or `null` when it was not known: a `.spitout` that records no root. |
+| `root` | The absolute dataset folder, which the sources are under, or `null` when it was not known: a `.spitout` that records no root. |
+| `output_root` | The absolute folder the files jobs write are under, and the folder commands run from: see [Roots](#roots). It is `root` when the pipeline names no output root, and `null` when neither is known. |
 | `external_inputs` | Every artifact a job reads but no job writes, once each: the sources. Ordered by path in natural order, the order `many` inputs take, so `wave2` comes before `wave10`. |
 | `targets` | Every artifact a job writes but no job reads: what a full run leaves behind. Ordered by the job that writes it. |
 | `executables` | The program each command, `verify` command and check starts with, once each, in text order. A command whose first word is a path names no program and is left out. A backend can check these are installed before running anything. |
@@ -43,7 +45,7 @@ A `.spitdag` is one JSON object, followed by a newline:
 Every artifact is written the same way, wherever it appears:
 
 ```json
-{"product": "cleaned", "entities": {"sub": "01", "ses": "1"}, "type": {"name": "Image", "args": []}, "path": "derivatives/cleaned/sub=01__ses=1.txt", "kind": "file"}
+{"product": "cleaned", "entities": {"sub": "01", "ses": "1"}, "type": {"name": "Image", "args": []}, "path": "derivatives/cleaned/sub=01__ses=1.txt", "under": "output_root", "kind": "file"}
 ```
 
 | Field | Holds |
@@ -51,8 +53,18 @@ Every artifact is written the same way, wherever it appears:
 | `product` | The product's name. An imported product keeps its prefix, as in `text::shard`. |
 | `entities` | Each dimension and its value, as strings, in the product's declared order. A product with no dimensions has `{}`. |
 | `type` | `null` for an untyped product; `{"name": N, "args": [TYPE, ...]}` for a named type, with its arguments; `{"variable": V}` for a type variable left unbound. |
-| `path` | The artifact's file or folder, relative to `root`, with no `/` at its end. |
+| `path` | The artifact's file or folder, relative to the folder `under` names, with no `/` at its end. No two artifacts share a path, even under different roots. |
+| `under` | `"root"` or `"output_root"`: the top-level field holding the folder `path` is relative to. |
 | `kind` | `"file"`, or `"folder"` for a product declared with a `/`, whose artifact is a folder of files: see [Folders](#folders). Version 5 added it; a reader written for version 4 does not know it. |
+
+## Roots
+
+A `.spitdag` has two folders, which are the same unless the pipeline or recipe names an [output root](language-reference.md#the-output-root):
+
+- `root`, the dataset's folder: the sources are under it, and so is every file a job writes [beside a source](language-reference.md#files-a-tool-writes-beside-another), whose `under` is `"root"`.
+- `output_root`: every other file a job writes is under it, with `under` `"output_root"`.
+
+A path is unique across both, so a command part, a `stdin` or `stdout` and a check name an artifact by its `path` alone; look up that artifact's `under` to find its folder. Make `output_root` before running the first job, and keep a backend's own state under it rather than under `root`, which may be read-only.
 
 ## Removal
 
@@ -132,12 +144,12 @@ Each of a job's `commands` is an object:
 | Field | Holds |
 | --- | --- |
 | `command` | The program and its arguments, a list of arguments as below. |
-| `stdin` | The path, relative to `root`, of the input file the command reads on its standard input, or `null`: see [Standard input and output](#standard-input-and-output). |
-| `stdout` | The path, relative to `root`, of the output file the command's standard output is written to, or `null`. |
+| `stdin` | The path of the input file the command reads on its standard input, or `null`: see [Standard input and output](#standard-input-and-output). |
+| `stdout` | The path of the output file the command's standard output is written to, or `null`. |
 
 Most jobs have one command. A [command of several lines](language-reference.md#commands-of-several-lines) gives a job one for each line, in the order written. Run them in that order, each once the one before it exits with status 0. When one fails, the job fails, and the commands after it do not run; report which, by its place from 1, as in `command 2 exited with status 1`.
 
-A command's `command`, as a `verify` command and a check's, is a list of arguments, and each argument is a list of parts, joined with nothing between them. A part is either literal text, a JSON string, or an artifact's path, `{"path": P}` with `P` relative to `root`. The template `tool --in={raw} -o {@output}` becomes:
+A command's `command`, as a `verify` command and a check's, is a list of arguments, and each argument is a list of parts, joined with nothing between them. A part is either literal text, a JSON string, or an artifact's path, `{"path": P}` with `P` the artifact's `path`. The template `tool --in={raw} -o {@output}` becomes:
 
 ```json
 [["tool"], ["--in=", {"path": "in/1.txt"}], ["-o"], [{"path": "out/1.txt"}]]
@@ -145,7 +157,7 @@ A command's `command`, as a `verify` command and a check's, is a list of argumen
 
 That is four arguments: `tool`, `--in=in/1.txt`, `-o` and `out/1.txt`. A `many` placeholder becomes one argument for each artifact in its collection.
 
-`{image.dir}` and `{image.stem}` in a template become an output file's folder, `.` for the root itself, and its file name without its extension. Each is written with the file it is of, so a backend that moves files knows which one:
+`{image.dir}` and `{image.stem}` in a template become an output file's folder, `.` for its root itself, and its file name without its extension. Each is written with the file it is of, so a backend that moves files knows which one:
 
 ```json
 [["-o"], [{"dir": "derivatives/image", "of": "derivatives/image/sub=01.nii.gz"}], ["-f"], [{"stem": "sub=01", "of": "derivatives/image/sub=01.nii.gz"}]]
@@ -161,7 +173,7 @@ Use the `dir` or `stem` text as the part, as a `path` part is used. Version 4 ad
 
 Use `pipeline_folder`, then `/` and the part's text unless it is empty, as the part's text. A part is written relative so that the commands do not change when the pipeline moves. Version 10 added this part; a reader written for version 9 does not know it.
 
-Run each argument as one word, exactly as given: no shell is involved, so nothing in it is split, expanded or interpreted. Resolve each path against `root`, or run the command from `root`, where the relative paths name the right files.
+Run each argument as one word, exactly as given: no shell is involved, so nothing in it is split, expanded or interpreted. Run the command from `output_root`, and resolve each path against its artifact's root: a path under `output_root` is then right as written, and one under `root` names the right file once joined to `root`. `spit dag --commands` shows such a path reached from `output_root`, as `../data/in.txt`.
 
 ### Standard input and output
 
@@ -220,7 +232,7 @@ Each check runs one command on one artifact:
 | `when` | `"before"` for a check of an input, which runs before the job's `verify` commands and its `commands`; `"after"` for a check of an output, which runs after `commands`, once the output exists. |
 | `check` | The check as the pipeline attaches it, such as `ndim(4)` or `nonempty`, for reporting a failure. |
 | `port` | The input port, for `"before"`, or the output port, for `"after"`, whose artifact it checks. |
-| `path` | The checked artifact's path, relative to `root`. |
+| `path` | The checked artifact's path. |
 | `command` | The check's program and arguments, a list of arguments as a [command's](#commands) `command` is. |
 
 The `"before"` checks come first, then the `"after"` checks; within each, by port, then by artifact in the port's order, then in the order the pipeline attaches them. An input's checks include those of the source it reads. A check the job that writes an artifact runs on it is not repeated by a job in the same file that reads it.

@@ -109,6 +109,7 @@ fn keyword_word(keyword: Keyword) -> Option<Word> {
     Some(match keyword {
         Keyword::Use => Word::Use,
         Keyword::Root => Word::Root,
+        Keyword::OutputRoot => Word::OutputRoot,
         Keyword::Source => Word::Source,
         Keyword::Operation => Word::Operation,
         Keyword::Command => Word::Command,
@@ -143,10 +144,14 @@ fn statement(line: &Line) -> Option<(Word, usize)> {
         return Some((word, length));
     }
     // A recipe's or `.spitout`'s header lines, as `inputs` reads them.
-    [(Word::Pipeline, "pipeline "), (Word::Root, "root ")]
-        .into_iter()
-        .find(|(_, prefix)| line.code.starts_with(prefix) && !line.code.contains('='))
-        .map(|(word, prefix)| (word, prefix.len() - 1))
+    [
+        (Word::Pipeline, "pipeline "),
+        (Word::Root, "root "),
+        (Word::OutputRoot, "output "),
+    ]
+    .into_iter()
+    .find(|(_, prefix)| line.code.starts_with(prefix) && !line.code.contains('='))
+    .map(|(word, prefix)| (word, prefix.len() - 1))
 }
 
 /// Each word `line` uses, by byte range.

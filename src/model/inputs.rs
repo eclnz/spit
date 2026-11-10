@@ -305,6 +305,9 @@ pub struct SourceInventory {
     /// The dataset root a `.spitout`'s `root` line names, as written:
     /// relative to the `.spitout`'s folder unless absolute.
     pub root: Option<PathBuf>,
+    /// The output root a `.spitout`'s `output` line names, as written:
+    /// relative to the `.spitout`'s folder unless absolute.
+    pub output: Option<PathBuf>,
 }
 
 /// A comparison of how many artifacts or contexts a group holds, as a

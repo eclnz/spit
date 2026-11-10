@@ -4,7 +4,7 @@ This manual defines valid `.spit` pipelines, `.spitin` recipes, and `.spitout` i
 
 A `#` that starts a word begins a comment, as in Bash. A `#` inside a word or in quotes is kept, so `--color=#fff` and `'#run'` are ordinary arguments.
 
-A line's first word says what it is, so the words that start statements are reserved: no product, whether a source or a step's output, may be named `use`, `root`, `source`, `discover`, `operation`, `command`, `verify`, `resources`, `check`, `review`, `require`, `exclude`, `path`, `ext`, `default`, `entities`, `stage` or `dimensions`, nor `drop`, `skip` or `sidecars`. Those three, and `shell-source`, start a line only to give an error that says what to write instead. `check = clean(raw)` is an error that says so.
+A line's first word says what it is, so the words that start statements are reserved: no product, whether a source or a step's output, may be named `use`, `root`, `output`, `source`, `discover`, `operation`, `command`, `verify`, `resources`, `check`, `review`, `require`, `exclude`, `path`, `ext`, `default`, `entities`, `stage` or `dimensions`, nor `drop`, `skip` or `sidecars`. Those three, and `shell-source`, start a line only to give an error that says what to write instead. `check = clean(raw)` is an error that says so.
 
 ## Keyword blocks
 
@@ -436,7 +436,7 @@ Each `align` job runs `bwa mem -t 8 ...`, and a backend starts one only when 8 c
 
 ### Files beside the pipeline
 
-Commands run from the dataset root, so a script kept next to the pipeline cannot be named by a path that holds wherever the dataset is. `{@here}` in a command is the folder of the `.spit` file that declares the operation:
+Commands run from the [output root](#the-output-root), which is the dataset root unless another is named, so a script kept next to the pipeline cannot be named by a path that holds wherever the dataset is. `{@here}` in a command is the folder of the `.spit` file that declares the operation:
 
 <!-- spit-doc: setup
 source durations : Json [sample]
@@ -1019,7 +1019,7 @@ default path: results/{@product}/{@entities}.txt
 path image: input/{subject}/{visit}/{run}.txt
 ```
 
-`default path:` sets a default, and `path image:` overrides it for `image`. SPIT writes no path the pipeline does not: an output with no rule of its own, no stage default and no `default path:` is an error that names it. A source with no rule needs one from a recipe or a `.spitout`'s `source_paths:`. A recipe's `default:` entry inside `inputs:` sets the default for sources instead; see [Recipes](#recipes). Each output of a multi-output step has its own product, so its own rule. A `default path:` line inside a [stage](#stages) sets the default for that stage's products. Paths are relative to the [dataset root](#recipes): the folder a pipeline or recipe's `root` line names, or the root a `.spitout` records. A pipeline without a root may take `--root`; the flag is relative to the working folder and cannot accompany a recipe or inventory.
+`default path:` sets a default, and `path image:` overrides it for `image`. SPIT writes no path the pipeline does not: an output with no rule of its own, no stage default and no `default path:` is an error that names it. A source with no rule needs one from a recipe or a `.spitout`'s `source_paths:`. A recipe's `default:` entry inside `inputs:` sets the default for sources instead; see [Recipes](#recipes). Each output of a multi-output step has its own product, so its own rule. A `default path:` line inside a [stage](#stages) sets the default for that stage's products. Paths are relative to the [dataset root](#recipes): the folder a pipeline or recipe's `root` line names, or the root a `.spitout` records. A pipeline without a root may take `--root`; the flag is relative to the working folder and cannot accompany a recipe or inventory. With an [output root](#the-output-root), the paths of files jobs write are relative to it instead.
 
 A source with no dimensions can use a fixed path, such as `path testset: eval/testset.parquet`.
 
@@ -1401,6 +1401,53 @@ Conditional `exclude` and `require` name the groups first, then `where`, then th
 
 Rules that count form their groups from every artifact and discovered context in the dataset, whichever source or discovery found it. `exclude [store] where pricing count=0` groups by every store any source or discovery has, so a store with sales but no price list is a group with none: its count is 0.
 
+### The output root
+
+Files that jobs write go under the dataset root unless an `output` line names a folder of their own. Then the dataset stays as it was delivered: it may be read-only, two analyses of it keep their results apart, and a later scan of it finds none of them.
+
+<!-- spit-doc: recipe
+--- analysis.spit
+source reads : Fastq .fastq.gz [sample]
+path reads: fastq/{sample}
+operation count(reads: Fastq) -> Counts .txt
+command count: wc -l {reads} > {@output}
+counts = count(reads)
+path counts: counts/{sample}
+-->
+
+```text
+pipeline analysis.spit
+root data
+output results
+```
+
+`spit dag dataset.spitin --commands` then runs each command from `results`, and names the dataset's files from there:
+
+<!-- spit-doc: output
+spit dag dataset.spitin --commands
+--- dataset.spitin = @previous
+--- analysis.spit
+source reads : Fastq .fastq.gz [sample]
+path reads: fastq/{sample}
+operation count(reads: Fastq) -> Counts .txt
+command count: wc -l {reads} > {@output}
+counts = count(reads)
+path counts: counts/{sample}
+--- data/fastq/A.fastq.gz
+-->
+
+```text
+Job 1  count
+  run:    wc -l ../data/fastq/A.fastq.gz > counts/A.txt
+```
+
+- The folder is relative to the file that names it, as `root` is, and may be absolute. It need not exist yet: the backend that runs the jobs makes it.
+- A pipeline or a recipe may name it, not both; a recipe without one takes its pipeline's. A pipeline run without a recipe may take `--output-root <directory>` instead, relative to the working folder.
+- Every file a job writes is under it, except one written [beside a source](#files-a-tool-writes-beside-another), such as an index the tool finds next to the file it reads, which stays with that source under the dataset root.
+- No two artifacts share a path, even under different roots, and no path is inside another's file or written folder.
+- An output root inside the dataset root, as with `root .` and `output results`, is left out when `spit inputs` scans the dataset, so what a run wrote there is neither a source nor a file no rule matches.
+- A `.spitout` that `spit inputs -o` writes records it as `output`, after its `root`.
+
 ### Which file a line belongs in
 
 A `.spit` pipeline is the reusable graph: what work to do and where its results go, for any dataset. A `.spitin` recipe binds that pipeline to one dataset: where its folder is, where its sources are when the pipeline does not say, and which of its data to leave out or require. A small pipeline can include its root and source paths. All selection policy stays in a recipe, regardless of how few lines it takes: even a literal `exclude raw[id=bad]` is recipe-only, as are conditional exclusions and the files that hold a review's verdicts. The boundary is the declaration's meaning, not its length:
@@ -1412,6 +1459,7 @@ A `.spit` pipeline is the reusable graph: what work to do and where its results 
 | `path product:` for a source that is not declared `beside` another | either one, not both | either one, not both |
 | `default path:` | covers outputs, and sources nothing else covers | covers sources only |
 | `root` | either one, not both | either one, not both; otherwise inherits the pipeline root |
+| `output` | either one, not both | either one, not both; otherwise inherits the pipeline's |
 | `pipeline` | no | yes |
 | `review name` | yes | no |
 | `discover`, `require`, every `exclude` form, `review name from file`, `sources:`, `contexts:`, `verdicts:` | no | yes |
@@ -1727,9 +1775,10 @@ A `.spitout` that `spit inputs -o` writes starts with the dataset root it was se
 
 ```text
 root ../data
+output ../results
 ```
 
-The folder is relative to the `.spitout`'s own folder, and may be absolute. A printed `.spitout` records no root, since where it will be kept is unknown. `dag` and `artifacts` use it as the root, so they check the source files and run commands from it. The line comes before every section, once. A `.spitout` without one, printed or written by hand, has no root, so `dag` checks no source files; give it a `root` line, or run `dag` on the recipe.
+The folders are relative to the `.spitout`'s own folder, and may be absolute. The `output` line is there when the recipe or pipeline names an [output root](#the-output-root); without one, `dag` takes the pipeline's. A printed `.spitout` records neither, since where it will be kept is unknown. `dag` and `artifacts` use it as the root, so they check the source files and run commands from it. The line comes before every section, once. A `.spitout` without one, printed or written by hand, has no root, so `dag` checks no source files; give it a `root` line, or run `dag` on the recipe.
 
 `spit inputs` also writes what the recipe's `exclude` rules removed, each with its rule, where the rule is, how many a counting rule found, and the reason:
 

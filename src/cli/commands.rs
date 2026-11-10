@@ -163,12 +163,17 @@ pub(crate) fn inputs(args: &CliArgs) -> Result<(), Box<dyn Error>> {
         return Ok(());
     }
     require_complete(&settled, &loaded.checked.pipeline)?;
-    // A written .spitout records the dataset root, relative to the file, so
-    // the two can move together. A printed one records none, as where it
-    // will be kept is unknown.
-    settled.inventory.root = args
-        .value(Flag::Output)
-        .map(|file| recorded_root(&root, Path::new(&file)));
+    // A written .spitout records the dataset root and the output root,
+    // relative to the file, so they can move together. A printed one
+    // records neither, as where it will be kept is unknown.
+    let file = args.value(Flag::Output);
+    settled.inventory.root = file
+        .as_ref()
+        .map(|file| recorded_root(&root, Path::new(file)));
+    settled.inventory.output = file
+        .as_ref()
+        .zip(loaded.output.as_ref())
+        .map(|(file, output)| recorded_root(output, Path::new(file)));
     let text = render_source_inventory(
         &settled.inventory,
         &loaded.checked.pipeline,
@@ -230,9 +235,27 @@ pub(crate) fn dag(args: &CliArgs) -> Result<(), Box<dyn Error>> {
     if let Some(unused) = unused_sources_summary(&prepared.report) {
         eprintln!("note: {unused}; `spit artifacts` lists them");
     }
-    let bind = |paths: Option<BoundPaths>| match paths {
-        Some(paths) => bind_dag_with(&prepared.pipeline, dag, paths),
-        None => bind_dag(&prepared.pipeline, dag),
+    let absolute = |folder: &Path| {
+        std::path::absolute(folder)
+            .unwrap_or_else(|_| folder.to_path_buf())
+            .to_string_lossy()
+            .into_owned()
+    };
+    let root = prepared.root.as_deref().map(absolute);
+    // Without one of its own, outputs go under the dataset root.
+    let output_root = prepared
+        .output
+        .as_deref()
+        .map(absolute)
+        .or_else(|| root.clone());
+    let bind = |paths: Option<BoundPaths>| -> Result<BoundDag, Box<dyn Error>> {
+        let mut bound = match paths {
+            Some(paths) => bind_dag_with(&prepared.pipeline, dag, paths),
+            None => bind_dag(&prepared.pipeline, dag),
+        }?;
+        bound.root.clone_from(&root);
+        bound.output_root.clone_from(&output_root);
+        Ok(bound)
     };
     let counts = args.has(Flag::Counts)
         || (!args.has(Flag::Commands)
@@ -250,8 +273,8 @@ pub(crate) fn dag(args: &CliArgs) -> Result<(), Box<dyn Error>> {
     // Print the jobs as `view` shows them, after the counts if there are any.
     let print_view = |bound: &BoundDag, view: View| {
         if view.commands {
-            if let Some(root) = &prepared.root {
-                eprintln!("note: commands run from `{}`", root.display());
+            if let Some(folder) = prepared.output.as_ref().or(prepared.root.as_ref()) {
+                eprintln!("note: commands run from `{}`", folder.display());
             }
             if bound.jobs.iter().all(|job| job.commands.is_empty()) && !bound.jobs.is_empty() {
                 eprintln!(
@@ -294,12 +317,6 @@ pub(crate) fn dag(args: &CliArgs) -> Result<(), Box<dyn Error>> {
                 })
             })
             .collect();
-        bound.root = prepared.root.as_deref().map(|root| {
-            std::path::absolute(root)
-                .unwrap_or_else(|_| root.to_path_buf())
-                .to_string_lossy()
-                .into_owned()
-        });
         write_spitdag(args, &bound)?;
         // With -o, the .spitdag goes to its file and the commands to stdout.
         if view.commands {

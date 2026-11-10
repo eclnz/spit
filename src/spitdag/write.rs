@@ -36,6 +36,10 @@ pub(crate) fn write_document(
         Some(root) => write_string(out, root),
         None => out.push_str("null"),
     });
+    document.field("output_root", |out| match &dag.output_root {
+        Some(root) => write_string(out, root),
+        None => out.push_str("null"),
+    });
     document.field("external_inputs", |out| {
         write_array(out, dag.external_inputs(), |out, artifact| {
             write_artifact(out, &artifact);
@@ -329,7 +333,7 @@ fn write_optional_number(out: &mut String, value: Option<usize>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{Artifacts, EntityBinding, StepId};
+    use crate::model::{Artifacts, EntityBinding, StepId, Under};
     use crate::spitdag::{BoundCommand, BoundStep};
     use crate::types::TypeExpr;
 
@@ -388,9 +392,11 @@ mod tests {
         });
         let paths = ["in/1.txt", "out/1.txt", "out/mean.txt"].map(String::from);
         let dimensions = vec![vec!["sub".to_owned(), "run".to_owned()]; 3];
+        let under = vec![Under::Root, Under::OutputRoot, Under::OutputRoot];
         BoundDag::new(
             artifacts,
             paths.to_vec(),
+            under,
             dimensions,
             vec![false; 3],
             steps,
@@ -436,10 +442,11 @@ mod tests {
             ]
         });
         dag.root = Some("/data/study".into());
+        dag.output_root = Some("/data/results".into());
         let text = dag.to_json();
         assert!(text.starts_with(&format!(
-            "{{\"version\":11,\"generator\":{{\"name\":\"spit\",\"version\":\"{}\"}},\
-\"root\":\"/data/study\",\"external_inputs\":[{{\"product\":\"raw\"",
+            "{{\"version\":12,\"generator\":{{\"name\":\"spit\",\"version\":\"{}\"}},\
+\"root\":\"/data/study\",\"output_root\":\"/data/results\",\"external_inputs\":[{{\"product\":\"raw\"",
             env!("CARGO_PKG_VERSION")
         )));
         assert!(
@@ -448,6 +455,15 @@ mod tests {
         );
         assert!(
             text.contains("\"dependents\":[],\"commands\":[],\"verify\":[]"),
+            "{text}"
+        );
+        // Each artifact names the root its path is under.
+        assert!(
+            text.contains("\"path\":\"in/1.txt\",\"under\":\"root\",\"kind\":\"file\"}"),
+            "{text}"
+        );
+        assert!(
+            text.contains("\"path\":\"out/1.txt\",\"under\":\"output_root\",\"kind\":\"file\"}"),
             "{text}"
         );
         // A verify command that starts with a path names no program.
@@ -571,9 +587,11 @@ mod tests {
         };
         let dimensions = vec![vec!["wave".to_owned()], vec![]];
         let steps = vec![step("fit", None, &["waves"], &["output"])];
+        let under = vec![Under::Root, Under::Root, Under::Root, Under::OutputRoot];
         let dag = BoundDag::new(
             artifacts,
             paths.to_vec(),
+            under,
             dimensions,
             vec![false; 2],
             steps,

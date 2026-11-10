@@ -28,6 +28,9 @@ pub(crate) struct Loaded {
     pipeline_name: Option<String>,
     pub(crate) pipeline_text: String,
     pub(crate) checked: Checked,
+    /// The folder outputs go under, from the recipe, the pipeline or
+    /// `--output-root`; `None` to keep them under the dataset root.
+    pub(crate) output: Option<PathBuf>,
     /// What `spit inputs` takes to run step 2 again: the recipe, or the
     /// pipeline and its root.
     pub(crate) invocation: String,
@@ -48,19 +51,31 @@ impl Loaded {
 /// folder its inline root or `--root` gives.
 pub(crate) fn load_inputs(args: &CliArgs) -> Result<Loaded, Box<dyn Error>> {
     let file = &args.file;
+    let output = args.value(Flag::OutputRoot);
     match args.value(Flag::Root) {
         Some(_) if is_recipe(file) => Err(format!(
             "`{file}` names its dataset with its `root` line; `--root` is for a pipeline run without a recipe"
         )
         .into()),
-        root if is_pipeline(file) => load_pipeline(file, root.as_deref(), args.command.name()),
+        root if is_pipeline(file) => {
+            load_pipeline(file, root.as_deref(), output.as_deref(), args.command.name())
+        }
+        _ if output.is_some() && is_recipe(file) => Err(format!(
+            "`{file}` names where outputs go with an `output` line; `--output-root` is for a pipeline run without a recipe"
+        )
+        .into()),
         _ => load_recipe(file),
     }
 }
 
 /// Check the pipeline `file`, to scan `root` with its own path rules and
-/// no recipe.
-fn load_pipeline(file: &str, root: Option<&str>, command: &str) -> Result<Loaded, Box<dyn Error>> {
+/// no recipe, writing outputs under `output` when it is given.
+fn load_pipeline(
+    file: &str,
+    root: Option<&str>,
+    output: Option<&str>,
+    command: &str,
+) -> Result<Loaded, Box<dyn Error>> {
     let pipeline_file = PathBuf::from(file);
     let pipeline_text = read_file(file)?;
     let checked = match diagnose_checked(&pipeline_text, Context::at(&pipeline_file)) {
@@ -75,6 +90,12 @@ fn load_pipeline(file: &str, root: Option<&str>, command: &str) -> Result<Loaded
             "dataset root is declared in both .spit and `--root`; keep one declaration".into(),
         );
     }
+    if output.is_some() && checked.pipeline.output.is_some() {
+        return Err(
+            "output root is declared in both .spit and `--output-root`; keep one declaration"
+                .into(),
+        );
+    }
     if root.is_none() && checked.pipeline.root.is_none() {
         return Err(format!(
             "`spit {command} {file}` needs to know where the data is: add `--root <directory>`, a `root <directory>` line in the pipeline, or run a .spitin recipe"
@@ -84,11 +105,19 @@ fn load_pipeline(file: &str, root: Option<&str>, command: &str) -> Result<Loaded
         recipe: InputSpec {
             pipeline: Some(pipeline_file.clone()),
             root: root.map(|root| (PathBuf::from(root), 0)),
+            output: output.map(|output| (PathBuf::from(output), 0)),
             ..InputSpec::default()
         },
         pipeline_name: None,
         pipeline_file,
         pipeline_text,
+        output: output.map(PathBuf::from).or_else(|| {
+            checked
+                .pipeline
+                .output
+                .as_ref()
+                .map(|(output, _)| output.clone())
+        }),
         checked,
         invocation: root.map_or_else(|| file.to_owned(), |root| format!("{file} --root {root}")),
     })
@@ -125,7 +154,11 @@ fn load_recipe(file: &str) -> Result<Loaded, Box<dyn Error>> {
     if recipe.root_for(&checked.pipeline)?.is_none() {
         return Err(format!("{file}: a recipe names its dataset root with `root <directory>`, or inherits its pipeline's root").into());
     }
+    let output = recipe
+        .output_for(&checked.pipeline)?
+        .map(|(output, _)| output.clone());
     Ok(Loaded {
+        output,
         recipe,
         pipeline_name: Some(pipeline_file.display().to_string()),
         pipeline_file,
@@ -385,8 +418,8 @@ fn source_path_failure(
     Some(message)
 }
 
-/// The dataset `root` as a `.spitout` written to `file` records it: relative
-/// to the file's folder.
+/// The dataset `root`, or the output root, as a `.spitout` written to `file`
+/// records it: relative to the file's folder.
 pub(crate) fn recorded_root(root: &Path, file: &Path) -> PathBuf {
     let full = |path: &Path| {
         fs::canonicalize(path)
@@ -458,6 +491,8 @@ pub(crate) struct Prepared {
     pub(crate) report: ArtifactReport,
     /// Where source files are, when known.
     pub(crate) root: Option<PathBuf>,
+    /// Where outputs go, when not under `root`.
+    pub(crate) output: Option<PathBuf>,
 }
 
 /// Read the pipeline and its inputs for step 3, running step 2 in memory
@@ -479,6 +514,12 @@ pub(crate) fn prepare(args: &CliArgs) -> Result<Prepared, Box<dyn Error>> {
     if let (Some(_), Some(_)) = (given, args.value(Flag::Root)) {
         return Err(
             "`--root` is for a pipeline run without a recipe or .spitout; a .spitout says where its data is with its `root` line, which `spit inputs -o` writes"
+                .into(),
+        );
+    }
+    if let (Some(_), Some(_)) = (given, args.value(Flag::OutputRoot)) {
+        return Err(
+            "`--output-root` is for a pipeline run without a recipe or .spitout; a .spitout says where outputs go with its `output` line, which `spit inputs -o` writes"
                 .into(),
         );
     }
@@ -521,20 +562,37 @@ pub(crate) fn prepare(args: &CliArgs) -> Result<Prepared, Box<dyn Error>> {
         Some(&records_text),
         names,
     )?;
-    // A root the records name is relative to their file's folder.
-    let root = records.inventory.root.as_ref().map(|recorded| {
-        let folder = match inputs.as_str() {
-            "-" => Path::new(""),
-            file => Path::new(file).parent().unwrap_or_else(|| Path::new("")),
-        };
-        folder.join(recorded)
-    });
+    // The roots the records name are relative to their file's folder.
+    let folder = match inputs.as_str() {
+        "-" => Path::new(""),
+        file => Path::new(file).parent().unwrap_or_else(|| Path::new("")),
+    };
+    let root = records
+        .inventory
+        .root
+        .as_ref()
+        .map(|recorded| folder.join(recorded));
+    // Records that name no output root leave it to the pipeline.
+    let output = match &records.inventory.output {
+        Some(recorded) => Some(folder.join(recorded)),
+        None => checked
+            .pipeline
+            .output
+            .as_ref()
+            .map(|(output, _)| output.clone()),
+    };
     let settled = InputSpec::default()
         .resolve(&checked.pipeline, InputSource::Inventory(records.inventory))?;
     for incomplete in &settled.incomplete_groups {
         eprintln!("warning: {incomplete}");
     }
-    Ok(prepared(checked.pipeline, settled, records.report, root))
+    Ok(prepared(
+        checked.pipeline,
+        settled,
+        records.report,
+        root,
+        output,
+    ))
 }
 
 /// Step 2 in memory for the recipe `file`, then step 3's diagnosis of the
@@ -562,7 +620,14 @@ fn prepare_loaded(loaded: Loaded, lenient: bool) -> Result<Prepared, Box<dyn Err
     if let Some((checked, records)) = diagnose_checked_with_inventory(text, &settled, context) {
         report(&checked.warnings, text, None, loaded.names())?;
         let pipeline = loaded.checked.pipeline;
-        return Ok(prepared(pipeline, settled, records.report, Some(root)));
+        let output = loaded.output;
+        return Ok(prepared(
+            pipeline,
+            settled,
+            records.report,
+            Some(root),
+            output,
+        ));
     }
     let records_text = render_source_inventory(
         &settled.inventory,
@@ -583,6 +648,7 @@ fn prepare_loaded(loaded: Loaded, lenient: bool) -> Result<Prepared, Box<dyn Err
         settled,
         records.report,
         Some(root),
+        loaded.output,
     ))
 }
 
@@ -592,6 +658,7 @@ fn prepared(
     inputs: ResolvedInputs,
     mut report: ArtifactReport,
     root: Option<PathBuf>,
+    output: Option<PathBuf>,
 ) -> Prepared {
     report.dag.locate_sources(&inputs.inventory);
     Prepared {
@@ -599,5 +666,6 @@ fn prepared(
         inputs,
         report,
         root,
+        output,
     }
 }
