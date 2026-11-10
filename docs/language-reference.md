@@ -1629,6 +1629,32 @@ note: `store` has values that differ only in ASCII letter case, which are differ
 
 The note comes up before any rule too, as ``... `S07` in pricing, `s07` in sales``. It names at most three sets for a dimension, then counts the rest. `dag` then plans the other stores, and notes that the misnamed file is left over:
 
+Values made only of digits that are equal as numbers, such as take `03` beside take `3`, get a note of the same form. A zero-padded name is often a copy of a file under another name, which SPIT takes as another take:
+
+<!-- spit-doc: output
+spit inputs takes.spitin
+--- takes.spit
+default entities: {@key}={@value} separated "_"
+default path: out/{@product}/{@entities}
+source recording : Wav [take]
+path recording: recordings/{take}.wav
+operation trim(audio: Wav) -> Wav
+command trim: trim {audio} {@output}
+trimmed = trim(recording)
+--- takes.spitin
+pipeline takes.spit
+root takes
+--- takes/recordings/3.wav
+--- takes/recordings/03.wav
+--- takes/recordings/4.wav
+-->
+
+```text
+note: `take` has values that are equal as numbers, which are different values to SPIT: `03` in recording, `3` in recording
+```
+
+A value with any other character, as `w03` beside `w3`, gets no such note.
+
 <!-- spit-doc: output
 spit dag store.spitin
 --- store.spit
