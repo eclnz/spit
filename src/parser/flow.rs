@@ -328,6 +328,12 @@ fn flow_rest(
             "expected `root <directory>`, such as `root data`",
         ));
     }
+    if line == "output" {
+        return Err(ParseError::new(
+            number,
+            "expected `output <directory>`, such as `output results`",
+        ));
+    }
     let split = match block {
         Some(keyword) => Some((keyword, line)),
         None => Keyword::split(line),
@@ -369,6 +375,17 @@ fn flow_rest(
                 ));
             }
             StatementKind::Root(std::path::PathBuf::from(folder))
+        }
+        Some((Keyword::OutputRoot, folder)) => {
+            top_level_only("`output`")?;
+            let folder = folder.trim();
+            if folder.is_empty() {
+                return Err(ParseError::new(
+                    number,
+                    "expected `output <directory>`, such as `output results`",
+                ));
+            }
+            StatementKind::OutputRoot(std::path::PathBuf::from(folder))
         }
         Some((Keyword::Source, declaration)) => {
             top_level_only("`source`, which declares an input,")?;

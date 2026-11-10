@@ -29,8 +29,8 @@ struct CommandSpec {
 impl Command {
     fn spec(self) -> CommandSpec {
         use Flag::{
-            ByTarget, Calls, Commands, Counts, Hovers, Jobs, Json, Output, Partial, PathRules,
-            Paths, Root, Stdin, Tree, Unmatched,
+            ByTarget, Calls, Commands, Counts, Hovers, Jobs, Json, Output, OutputRoot, Partial,
+            PathRules, Paths, Root, Stdin, Tree, Unmatched,
         };
         match self {
             Self::Check => CommandSpec {
@@ -45,14 +45,16 @@ impl Command {
                 files: "<recipe.spitin | pipeline.spit>",
                 summary: "step 2: find a dataset's sources with a pipeline or recipe, apply `exclude` and `require`, and write a .spitout",
                 example: "spit inputs dataset.spitin -o dataset.spitout\n  spit inputs dataset.spitin --unmatched",
-                flags: &[Root, Output, Unmatched],
+                flags: &[Root, OutputRoot, Output, Unmatched],
             },
             Self::Dag => CommandSpec {
                 name: "dag",
                 files: "<recipe.spitin> or <pipeline.spit> [inputs.spitout | -]",
                 summary: "step 3: resolve a pipeline's jobs over a dataset's inputs and print step counts; --commands lists commands, -o writes the .spitdag",
                 example: "spit dag dataset.spitin\n  spit dag dataset.spitin --commands\n  spit dag dataset.spitin -o analysis.spitdag",
-                flags: &[Root, Paths, Commands, Jobs, Counts, Partial, Json, Output, Tree],
+                flags: &[
+                    Root, OutputRoot, Paths, Commands, Jobs, Counts, Partial, Json, Output, Tree,
+                ],
             },
             Self::Artifacts => CommandSpec {
                 name: "artifacts",
@@ -113,6 +115,8 @@ impl Command {
 #[derive(Clone, Copy, PartialEq)]
 pub(crate) enum Flag {
     Root,
+    /// `--output-root`, the folder outputs go under, for a pipeline run alone.
+    OutputRoot,
     Output,
     Paths,
     Commands,
@@ -129,8 +133,9 @@ pub(crate) enum Flag {
     Tree,
 }
 
-const FLAGS: [Flag; 15] = [
+const FLAGS: [Flag; 16] = [
     Flag::Root,
+    Flag::OutputRoot,
     Flag::Output,
     Flag::Paths,
     Flag::Commands,
@@ -168,6 +173,7 @@ impl Flag {
     pub(crate) fn name(self) -> &'static str {
         match self {
             Self::Root => "--root",
+            Self::OutputRoot => "--output-root",
             Self::Output => "-o",
             Self::Paths => "--paths",
             Self::Commands => "--commands",
@@ -188,7 +194,7 @@ impl Flag {
     /// What the flag's value is, for a flag that takes one.
     pub(crate) fn value(self) -> Option<&'static str> {
         match self {
-            Self::Root => Some("<directory>"),
+            Self::Root | Self::OutputRoot => Some("<directory>"),
             Self::Output => Some("<file>"),
             _ => None,
         }
@@ -199,6 +205,9 @@ impl Flag {
             (Self::Tree, _) => "show pipeline products and steps without reading a dataset; --ascii is an alias",
             (Self::Root, _) => {
                 "with a .spit pipeline that has no root line, the dataset folder to scan, relative to where spit runs"
+            }
+            (Self::OutputRoot, _) => {
+                "with a .spit pipeline that has no output line, the folder outputs go under, relative to where spit runs"
             }
             (Self::Output, Command::Inputs) => "write the .spitout to <file>, not standard output",
             (Self::Output, _) => "write the .spitdag to <file>",

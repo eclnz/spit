@@ -206,7 +206,7 @@ default path: results/{@product}/{@entities}.txt
 source image [sub, ses]
 path image: data/sub-{sub}/ses-{ses}/image.nii.gz
 operation process(image) -> Output
-output = process(image)
+processed = process(image)
 default entities: {@key}={@value} separated \"__\"
 ";
     let (pipeline, spec) = parse(text);

@@ -168,10 +168,16 @@ pub fn diagnose_recipe_against(text: &str, pipeline: &Pipeline) -> Vec<Diagnosti
             // Records written in the recipe keep its line numbers, and a
             // path the recipe should not give is at its `path` line.
             let place = match &problem {
-                InputError::RootInBoth => spec.root.as_ref().map(|(_, line)| {
-                    let written = text.lines().nth(line - 1).unwrap_or_default();
-                    Place::new(*line, content_columns(written))
-                }),
+                InputError::RootInBoth | InputError::OutputInBoth => {
+                    let declared = match problem {
+                        InputError::RootInBoth => &spec.root,
+                        _ => &spec.output,
+                    };
+                    declared.as_ref().map(|(_, line)| {
+                        let written = text.lines().nth(line - 1).unwrap_or_default();
+                        Place::new(*line, content_columns(written))
+                    })
+                }
                 InputError::Resolve(error) => {
                     Places::new(pipeline, &lines)
                         .error_location(error, text, false)

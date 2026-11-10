@@ -11,7 +11,7 @@ SPIT checks a pipeline, settles a dataset's inputs, and resolves jobs. Run `spit
 
 ## Input forms
 
-`check` accepts one `.spit`, `.spitin`, or `.spitout` file. `inputs` accepts a `.spitin` recipe, or a `.spit` pipeline with an inline `root` or `--root <directory>`. `dag` and `artifacts` accept those same forms, or a pipeline with a `.spitout`. A recipe names its pipeline and either declares a root or inherits that pipeline's root. Inline roots are relative to their declaring file; `--root` is relative to the working folder and is an error when the pipeline already declares a root. A `.spitout` does not name its pipeline, so pass the pipeline separately.
+`check` accepts one `.spit`, `.spitin`, or `.spitout` file. `inputs` accepts a `.spitin` recipe, or a `.spit` pipeline with an inline `root` or `--root <directory>`. `dag` and `artifacts` accept those same forms, or a pipeline with a `.spitout`. A recipe names its pipeline and either declares a root or inherits that pipeline's root. Inline roots are relative to their declaring file; `--root` is relative to the working folder and is an error when the pipeline already declares a root. `--output-root <directory>` names the [output root](language-reference.md#the-output-root) the same way, for a pipeline that has no `output` line, and is an error with a recipe or a `.spitout`. A `.spitout` does not name its pipeline, so pass the pipeline separately.
 
 <!-- spit-doc: fragment -->
 
@@ -19,6 +19,7 @@ SPIT checks a pipeline, settles a dataset's inputs, and resolves jobs. Run `spit
 spit dag dataset.spitin
 spit dag pipeline.spit dataset.spitout
 spit dag pipeline.spit --root data
+spit dag pipeline.spit --root data --output-root results
 ```
 
 `spit dag pipeline.spit --tree` reads the pipeline and its imports only. A compact overview names the products connecting stages. Within each stage, lines connect product producers to their consumers; matching product names link stage boundaries. Each distinct input has its own arrow into a boxed multi-input operation; simple chains use parentheses. Reused products branch along one live line, and `╪` marks a crossing without a join. Connected diagrams pack operations across a 120-column target and fold back through continuous product lines. Very wide labels or live product frontiers use the compact vertical layout. Output branches appear after operations. Calls to operations with bodies remain single nodes, followed by one diagram per used body, including nested bodies. Unused sources are listed. This view accepts no dataset or other flags and leaves resolved-job output unchanged.

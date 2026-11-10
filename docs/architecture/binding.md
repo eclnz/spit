@@ -7,8 +7,9 @@ flowchart LR
     dag["ResolvedDag"] --> rules["check_rules<br/>validate_commands"]
     pipeline["Pipeline"] --> rules
     rules --> paths["bound_paths<br/>PathBinder"]
+    paths --> boundpaths["BoundPaths<br/>path and Under by id"]
     pattern["PathPattern<br/>one per product"] --> paths
-    paths --> jobs["bind_jobs<br/>commands and checks"]
+    boundpaths --> jobs["bind_jobs<br/>commands and checks"]
     jobs --> bound["BoundDag"]
     bound --> write["write_document"]
     write --> file[".spitdag"]
@@ -18,11 +19,13 @@ flowchart LR
 
 - **`bind_dag(&pipeline, &dag)`** ([`src/bind.rs`](https://github.com/eclnz/spit/blob/dev/src/bind.rs)) gives the `BoundDag`. `bind_dag_with` takes paths that `validate_bound_source_files` already bound, so `dag` with a root binds them once.
 - **`BoundDag`** ([`src/spitdag/mod.rs`](https://github.com/eclnz/spit/blob/dev/src/spitdag/mod.rs)) keeps:
-    - the same `Artifacts` table as the `ResolvedDag`, with each artifact's path as a column by id;
+    - the same `Artifacts` table as the `ResolvedDag`, with each artifact's path and `Under` as columns by id;
+    - the dataset `root` and the `output_root`, which the command line fills in;
     - each product's dimensions, and whether its artifacts are folders, once per product;
     - the steps (`BoundStep`), each with its port names, so a job's inputs and outputs are artifact ids in port order, and the `Resources` each of its jobs needs;
     - the jobs (`BoundJob`), each with its `BoundCommand`s, one for each line of its operation's command: an `Argument` list of `ArgPart`s, and the artifacts its `stdin` and `stdout` are connected to;
     - what was removed and left out, the pipeline's files, and the calls.
+- **`BoundPaths`** ([`src/paths/bind.rs`](https://github.com/eclnz/spit/blob/dev/src/paths/bind.rs)) holds each artifact's path and the root it is under (`Under`, in [`src/model/artifacts.rs`](https://github.com/eclnz/spit/blob/dev/src/model/artifacts.rs)), both made by `bound_paths`.
 - **`PathTemplate`** ([`src/template/path.rs`](https://github.com/eclnz/spit/blob/dev/src/template/path.rs)) is a rule's text read into parts. `PipelineIndex::path_template_for` completes a product's rule:
     - its `[...]` groups kept or dropped for the product's dimensions and stage;
     - `{@entities}` written out, as the nearest `default entities:` spells it;
@@ -45,6 +48,7 @@ flowchart LR
     A pipeline default that needs `{@stage}` outside a group is no source's rule, since no stage makes a source. Nor is one that needs `{@entities}` outside a group the rule of a source with no dimensions.
 - **A companion source's path follows its main source.** That holds for an output a tool writes beside another too (`PipelineIndex::beside`, which gives a `BesideFile`), and when a recipe supplies the main source's rule. The suffix replaces the sibling's extension, or with `Beside::append` follows its whole name.
 - **An output beside an input follows that input's bound file.** `bound_paths` ([`src/paths/bind.rs`](https://github.com/eclnz/spit/blob/dev/src/paths/bind.rs)) binds it after every other artifact, from the path of the job's artifact at that input (`beside_path`), so it follows a source's discovered file as well as a rule. `PipelineIndex::path_template_for` gives the same path as a template, with the sibling's `{@product}`, `{@stage}` and the values the step pins written out, for the rule checks, discovery and the editor. `check_beside_inputs` ([`src/compile/steps.rs`](https://github.com/eclnz/spit/blob/dev/src/compile/steps.rs)) makes sure each job reads its own artifact there. Tests: [`an_output_beside_a_source_lies_beside_its_file_and_its_reader_waits_for_it`](https://github.com/eclnz/spit/blob/dev/tests/beside_inputs.rs), [`the_input_an_output_is_written_beside_gives_each_job_its_own_file`](https://github.com/eclnz/spit/blob/dev/tests/beside_inputs.rs).
+- **Each artifact is under one of two roots.** `bound_paths` puts every job's output under `Under::OutputRoot`, and every other artifact, the sources, under `Under::Root`. An output beside an input takes that input's root, so a file written beside a source stays in the dataset. Binding never learns where either root is: the command line sets `BoundDag::root` and `BoundDag::output_root`, the second being the first when no output root is declared. Test: [`outputs_go_under_the_output_root_and_files_beside_a_source_stay_with_it`](https://github.com/eclnz/spit/blob/dev/tests/output_root.rs).
 - **A recipe can give a source with no rule one.** It gives its own `path source:` rule, or else its `default path:`. `InputRules` keeps the recipe as written, `InputRules::source_paths_for` gives the rule for each source, and the input stage merges them into the inventory.
 - **`{@entities}` is spelled by an `EntitiesFormat`.** One may come from the file (`Pipeline::entities_format`), a stage (`StageDef::entities_format`) or a recipe (`InputRules::source_entities`). `PipelineIndex::entities_format_for` finds a product's spelling, and `PathTemplate::resolve` expands it into literal keys and ordinary placeholders once per product, so binding and discovery never see it.
 - **A placeholder in a source rule may take a shape,** as in `{date:date}` (`Shape`, in [`src/template/shape.rs`](https://github.com/eclnz/spit/blob/dev/src/template/shape.rs)). Shapes narrow matching only. `collect_paths` rejects a shape in a rule that writes: an output's rule, or a pipeline or stage default.
@@ -69,12 +73,12 @@ flowchart LR
 - **A check is its own small model.** `CheckDef` is a check declaration, and `CheckUse` its use on an input port, an output port or a source. `src/check.rs` validates them, and at binding gives each step its checks once (`step_checks`) and each job one command per checked artifact.
 - **Commands and checks change no job, path or dependency.** Nor does what a job needs: `cores` and `memory` are written from the step.
 
-**`spit dag --paths`** shows each job's named inputs and outputs and their paths: the `.spitdag` without its commands.
+**`spit dag --paths`** shows each job's named inputs and outputs and their paths: the `.spitdag` without its commands. It and `--commands` show each path as a command run from the output root names it (`BoundDag::shown_path`): under a separate dataset root, a path is reached from the output root, as `../data/in.txt`. Test: [`commands_run_from_the_output_root_and_reach_the_dataset_from_it`](https://github.com/eclnz/spit/blob/dev/tests/output_root.rs).
 
 ## Invariants
 
 - **The output is the same bytes for the same pipeline, inventory, root and SPIT version.** It never depends on hash order (AGENTS.md says how the code keeps to that). Test: [`tests/outputs.rs`](https://github.com/eclnz/spit/blob/dev/tests/outputs.rs), which compares every example's output with a stored copy under `tests/fixtures/outputs/`.
-- **No two artifacts share a path.** Products whose rules give the same path for the same entities are an error. Tests: [`path_rule_errors_point_to_the_rule_in_use`](https://github.com/eclnz/spit/blob/dev/tests/diagnostics.rs), [`two_sources_with_one_dimension_name_collide_whatever_their_shapes`](https://github.com/eclnz/spit/blob/dev/tests/placeholder_shapes.rs).
+- **No two artifacts share a path, even under different roots.** Products whose rules give the same path for the same entities are an error, so a backend may key artifacts by path alone. Tests: [`path_rule_errors_point_to_the_rule_in_use`](https://github.com/eclnz/spit/blob/dev/tests/diagnostics.rs), [`two_sources_with_one_dimension_name_collide_whatever_their_shapes`](https://github.com/eclnz/spit/blob/dev/tests/placeholder_shapes.rs).
 - **A rendered path matches back to its binding.** Rendering and matching read one `PathPattern`. Discovery reads a source's path, as binding renders it from a template, back to the values it was rendered from, for each placeholder, shape and group, and for values that need `%` escapes. It counts each output's rendered path, `{@stage}` included, as an output's rather than a file no rule matches. Where a template cannot tell two values apart, as `{a}-{b}` with a value holding `-`, the test names the binding matching gives instead. Test: [`a_rendered_path_matches_back_to_its_binding`](https://github.com/eclnz/spit/blob/dev/tests/path_roundtrip.rs).
 - **SPIT writes no path of its own.** An output with no rule fails at its declaration. A source with records but no rule fails at binding, rather than being looked for under `out/`. Tests: [`an_output_with_no_rule_is_an_error_and_a_source_waits_for_one`](https://github.com/eclnz/spit/blob/dev/tests/paths.rs), [`a_recorded_source_with_no_path_rule_is_not_looked_for_under_out`](https://github.com/eclnz/spit/blob/dev/tests/cli.rs).
 - **Checks change neither the jobs nor their commands.** Test: [`checks_change_neither_the_jobs_nor_their_commands`](https://github.com/eclnz/spit/blob/dev/tests/checks.rs).

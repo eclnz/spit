@@ -93,17 +93,21 @@ fn the_plan_marks_each_folder() {
 
     let json = run(&tree, &["dag", "--json"]);
     let json = text(&json.stdout);
-    assert!(json.starts_with("{\"version\":11,"), "{json}");
+    assert!(json.starts_with("{\"version\":12,"), "{json}");
     assert!(
-        json.contains("\"path\":\"dicom/sub=01\",\"kind\":\"folder\"}"),
+        json.contains("\"path\":\"dicom/sub=01\",\"under\":\"root\",\"kind\":\"folder\"}"),
         "{json}"
     );
     assert!(
-        json.contains("\"path\":\"out/subject/sub=01\",\"kind\":\"folder\"}"),
+        json.contains(
+            "\"path\":\"out/subject/sub=01\",\"under\":\"output_root\",\"kind\":\"folder\"}"
+        ),
         "{json}"
     );
     assert!(
-        json.contains("\"path\":\"out/table/sub=01.csv\",\"kind\":\"file\"}"),
+        json.contains(
+            "\"path\":\"out/table/sub=01.csv\",\"under\":\"output_root\",\"kind\":\"file\"}"
+        ),
         "{json}"
     );
 }

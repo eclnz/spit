@@ -93,6 +93,11 @@ impl fmt::Display for InventoryText<'_> {
         let inventory = self.inventory;
         if let Some(root) = &inventory.root {
             writeln!(f, "root {}", root.display())?;
+        }
+        if let Some(output) = &inventory.output {
+            writeln!(f, "output {}", output.display())?;
+        }
+        if inventory.root.is_some() || inventory.output.is_some() {
             writeln!(f)?;
         }
         let source_paths = written_source_paths(inventory, self.pipeline, self.rules);

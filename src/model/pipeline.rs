@@ -23,6 +23,9 @@ pub struct Pipeline {
     /// An optional dataset root and its line, relative to the pipeline's
     /// folder when parsed at a path. Imports never bring in a root.
     pub root: Option<(PathBuf, usize)>,
+    /// An optional output root and its line, relative to the pipeline's
+    /// folder when parsed at a path. Imports never bring in one.
+    pub output: Option<(PathBuf, usize)>,
     pub products: Vec<ProductDef>,
     pub operations: Vec<OperationDef>,
     pub invocations: Vec<Invocation>,
