@@ -361,14 +361,32 @@ impl Resolution<'_> {
                 self.withheld[output.index()] = true;
             }
             self.any_withheld = true;
+        } else if expansion.gaps.is_empty() && operation.outputs[0].view {
+            let view = outputs[0];
+            let mut members: Vec<_> = expansion.inputs.into_iter().flatten().collect();
+            members.sort_unstable();
+            self.dag.views.insert(view, members);
+            self.judge_product(view);
         } else if expansion.gaps.is_empty() {
-            let job = make_job(
+            let mut job = make_job(
                 JobId::new(self.dag.jobs.len() + 1),
                 step,
                 expansion.inputs,
                 outputs,
                 &self.producers,
             );
+            if !self.dag.views.is_empty() {
+                let member_producers = job
+                    .inputs
+                    .iter()
+                    .flatten()
+                    .filter_map(|input| self.dag.views.get(input))
+                    .flatten()
+                    .filter_map(|member| self.producers[member.index()]);
+                job.dependencies.extend(member_producers);
+                job.dependencies.sort_unstable();
+                job.dependencies.dedup();
+            }
             for output in &job.outputs {
                 self.producers[output.index()] = Some(job.id);
             }

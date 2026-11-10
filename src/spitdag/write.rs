@@ -42,12 +42,12 @@ pub(crate) fn write_document(
     });
     document.field("external_inputs", |out| {
         write_array(out, dag.external_inputs(), |out, artifact| {
-            write_artifact(out, &artifact);
+            write_artifact(out, dag, &artifact);
         });
     });
     document.field("targets", |out| {
         write_array(out, dag.targets(), |out, artifact| {
-            write_artifact(out, &artifact);
+            write_artifact(out, dag, &artifact);
         });
     });
     document.field("executables", |out| {

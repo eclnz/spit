@@ -398,11 +398,25 @@ pub(crate) fn collect_paths(
     }
     for (path, product) in &samples {
         if let Some((directory, other)) = enclosing_path(&samples, path) {
+            if index.is_view(other)
+                && index.producer(other).is_some_and(|(invocation, _)| {
+                    invocation
+                        .inputs
+                        .iter()
+                        .any(|input| input.product_name() == *product)
+                })
+            {
+                // Binding checks membership by artifact ID and root, after paths are known.
+                continue;
+            }
             let (inner_made, outer_made) = (outputs.contains(product), outputs.contains(other));
             let what = match (index.is_folder(other), inner_made, outer_made) {
                 // Nothing writes a source, so a source may sit in a source folder.
                 (true, false, false) => continue,
                 (false, _, _) => format!("a `{other}` file"),
+                (true, _, true) if index.is_view(other) => {
+                    format!("directory view `{other}`, which does not list it")
+                }
                 (true, _, true) => format!("a `{other}` folder, which its job writes whole"),
                 (true, true, false) => {
                     format!("a `{other}` source folder, which no job may write inside")

@@ -11,6 +11,7 @@ flowchart LR
     pattern["PathPattern<br/>one per product"] --> paths
     boundpaths --> jobs["bind_jobs<br/>commands and checks"]
     jobs --> bound["BoundDag"]
+    dag -->|"directory view members"| bound
     bound --> write["write_document"]
     write --> file[".spitdag"]
 ```
@@ -26,6 +27,8 @@ flowchart LR
     - the jobs (`BoundJob`), each with its `BoundCommand`s, one for each line of its operation's command: an `Argument` list of `ArgPart`s, and the artifacts its `stdin` and `stdout` are connected to;
     - what was removed and left out, the pipeline's files, and the calls.
 - **`BoundPaths`** ([`src/paths/bind.rs`](https://github.com/eclnz/spit/blob/dev/src/paths/bind.rs)) holds each artifact's path and the root it is under (`Under`, in [`src/model/artifacts.rs`](https://github.com/eclnz/spit/blob/dev/src/model/artifacts.rs)), both made by `bound_paths`.
+- **Directory views** carry the resolved member IDs from `ResolvedDag` into `BoundDag`. Path binding checks that the members are inside the view under the same root.
+- **`BoundStep::seeds`** maps a seeded folder's output port to its input port.
 - **`PathTemplate`** ([`src/template/path.rs`](https://github.com/eclnz/spit/blob/dev/src/template/path.rs)) is a rule's text read into parts. `PipelineIndex::path_template_for` completes a product's rule:
     - its `[...]` groups kept or dropped for the product's dimensions and stage;
     - `{@entities}` written out, as the nearest `default entities:` spells it;
@@ -79,6 +82,7 @@ flowchart LR
 
 - **The output is the same bytes for the same pipeline, inventory, root and SPIT version.** It never depends on hash order (AGENTS.md says how the code keeps to that). Test: [`tests/outputs.rs`](https://github.com/eclnz/spit/blob/dev/tests/outputs.rs), which compares every example's output with a stored copy under `tests/fixtures/outputs/`.
 - **No two artifacts share a path, even under different roots.** Products whose rules give the same path for the same entities are an error, so a backend may key artifacts by path alone. Tests: [`path_rule_errors_point_to_the_rule_in_use`](https://github.com/eclnz/spit/blob/dev/tests/diagnostics.rs), [`two_sources_with_one_dimension_name_collide_whatever_their_shapes`](https://github.com/eclnz/spit/blob/dev/tests/placeholder_shapes.rs).
+- **A directory view's member files share its root and lie within its path.** Other declared artifacts cannot overlap it. Test: [`directory_view_rejects_wrong_paths_and_unlisted_outputs`](https://github.com/eclnz/spit/blob/dev/tests/folders.rs).
 - **A rendered path matches back to its binding.** Rendering and matching read one `PathPattern`. Discovery reads a source's path, as binding renders it from a template, back to the values it was rendered from, for each placeholder, shape and group, and for values that need `%` escapes. It counts each output's rendered path, `{@stage}` included, as an output's rather than a file no rule matches. Where a template cannot tell two values apart, as `{a}-{b}` with a value holding `-`, the test names the binding matching gives instead. Test: [`a_rendered_path_matches_back_to_its_binding`](https://github.com/eclnz/spit/blob/dev/tests/path_roundtrip.rs).
 - **SPIT writes no path of its own.** An output with no rule fails at its declaration. A source with records but no rule fails at binding, rather than being looked for under `out/`. Tests: [`an_output_with_no_rule_is_an_error_and_a_source_waits_for_one`](https://github.com/eclnz/spit/blob/dev/tests/paths.rs), [`a_recorded_source_with_no_path_rule_is_not_looked_for_under_out`](https://github.com/eclnz/spit/blob/dev/tests/cli.rs).
 - **Checks change neither the jobs nor their commands.** Test: [`checks_change_neither_the_jobs_nor_their_commands`](https://github.com/eclnz/spit/blob/dev/tests/checks.rs).

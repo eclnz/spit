@@ -2,7 +2,7 @@
 
 use std::ops::Range;
 
-use crate::json::{write_array, write_string};
+use crate::json::{write_array, write_number, write_string, ObjectWriter};
 use crate::model::{ArtifactId, Under};
 use crate::types::TypeExpr;
 
@@ -29,7 +29,7 @@ impl ArtifactJson {
         for id in dag.artifacts.ids() {
             let start = text.len();
             if used[id.index()] {
-                write_artifact(&mut text, &dag.artifact(id));
+                write_artifact(&mut text, dag, &dag.artifact(id));
             }
             spans.push(start..text.len());
         }
@@ -41,7 +41,7 @@ impl ArtifactJson {
     }
 }
 
-pub(super) fn write_artifact(out: &mut String, artifact: &BoundArtifact<'_>) {
+pub(super) fn write_artifact(out: &mut String, dag: &BoundDag, artifact: &BoundArtifact<'_>) {
     out.push_str("{\"product\":");
     write_string(out, artifact.product);
     out.push_str(",\"entities\":{");
@@ -62,11 +62,30 @@ pub(super) fn write_artifact(out: &mut String, artifact: &BoundArtifact<'_>) {
         Under::Root => ",\"under\":\"root\"",
         Under::OutputRoot => ",\"under\":\"output_root\"",
     });
-    out.push_str(if artifact.folder {
-        ",\"kind\":\"folder\"}"
+    if !dag.views.is_empty() {
+        out.push_str(",\"id\":");
+        write_number(out, artifact.id.index());
+    }
+    if let Some(members) = dag.views.get(&artifact.id) {
+        out.push_str(",\"kind\":\"directory_view\",\"members\":");
+        write_array(out, members, |out, member| {
+            // Keep in step with the containment check in paths/bind.rs.
+            let relative = dag
+                .path(*member)
+                .strip_prefix(artifact.path)
+                .and_then(|tail| tail.strip_prefix('/'))
+                .expect("directory view member has a path below the view");
+            let mut entry = ObjectWriter::start(out);
+            entry.field("id", |out| write_number(out, member.index()));
+            entry.string("path", relative);
+            entry.finish();
+        });
+        out.push('}');
+    } else if artifact.folder {
+        out.push_str(",\"kind\":\"folder\"}");
     } else {
-        ",\"kind\":\"file\"}"
-    });
+        out.push_str(",\"kind\":\"file\"}");
+    }
 }
 
 fn write_type(out: &mut String, artifact_type: &TypeExpr) {
