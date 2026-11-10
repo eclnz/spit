@@ -22,7 +22,7 @@ pub use crate::check::When;
 use self::write::{write_document, PIECE};
 
 /// The schema version a `.spitdag` is written with.
-pub const SPITDAG_VERSION: usize = 12;
+pub const SPITDAG_VERSION: usize = 13;
 
 /// A resolved DAG with its paths bound and its commands expanded. Its
 /// artifacts are the resolved DAG's, each kept once with its path; jobs,
@@ -79,6 +79,8 @@ pub struct BoundStep {
     pub inputs: Vec<String>,
     /// The name of each output port, in port order.
     pub outputs: Vec<String>,
+    /// The output and input port indices for each folder seeded before its command.
+    pub seeds: Vec<(usize, usize)>,
     /// The checks its jobs run, which their [`BoundCheck`]s refer to by
     /// index.
     pub checks: Vec<StepCheck>,
