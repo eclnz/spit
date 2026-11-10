@@ -64,6 +64,13 @@ def workspace(repo, target):
     shutil.copytree(repo / "examples", target / "examples", ignore=ignore)
 
 
+def canonical(dag):
+    """`dag` with its `root` and `output_root` resolved, however the inventory wrote them."""
+    for field in ("root", "output_root"):
+        dag[field] = str(Path(dag[field]).resolve())
+    return dag
+
+
 def check_entry(binary, repo, entry, logs):
     with tempfile.TemporaryDirectory(prefix="spit-example-") as temp:
         work = Path(temp)
@@ -82,15 +89,14 @@ def check_entry(binary, repo, entry, logs):
             require(checked["diagnostics"] == [], "fresh inventory has diagnostics")
             direct = json.loads(run.cli("direct-recipe", ["dag", recipe, "--json"]))
             fresh = json.loads(run.cli("fresh-inventory", ["dag", pipeline, inventory, "--json"]))
-            # Saved inventories express the root relative to their own location.
+            # Saved inventories express the roots relative to their own location.
             # Canonicalize only that representation; compare every other field exactly.
-            direct["root"] = str(Path(direct["root"]).resolve())
-            fresh["root"] = str(Path(fresh["root"]).resolve())
+            canonical(direct)
+            canonical(fresh)
             require(direct == fresh, "direct recipe and fresh inventory resolution differ")
             saved = logs / "jobs.spitdag"
             run.cli("save-dag", ["dag", pipeline, inventory, "-o", saved])
-            dag = json.loads(saved.read_text())
-            dag["root"] = str(Path(dag["root"]).resolve())
+            dag = canonical(json.loads(saved.read_text()))
             require(dag == fresh, "saved DAG and JSON resolution differ")
             run.phase = "graph"
             validate(dag, entry["expect"])
