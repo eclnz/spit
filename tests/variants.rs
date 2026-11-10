@@ -1,5 +1,6 @@
-//! The note that lists values differing only in ASCII letter case, which a
-//! recipe's settled inputs give, and what it leaves out.
+//! The notes that list values alike but not equal, which a recipe's settled
+//! inputs give: values that differ only in ASCII letter case, and values equal
+//! as numbers. Also what the notes leave out.
 
 mod support;
 
@@ -128,6 +129,27 @@ fn a_spitout_given_directly_gets_no_case_note() {
         ]);
         assert!(
             !stderr(&output).contains("ASCII letter case"),
+            "{command}: {}",
+            stderr(&output)
+        );
+    }
+}
+
+#[test]
+fn values_equal_as_numbers_are_listed_together() {
+    // A collaborator's zero-padded copy of week 3, beside week 3 itself.
+    let (_tree, recipe) = sales_recipe(
+        "number-variants",
+        &["sales/3/s01.csv", "sales/03/s01.csv", "sales/4/s01.csv"],
+        "",
+    );
+    for command in ["inputs", "dag"] {
+        let output = spit(&[command, &recipe]);
+        assert!(output.status.success(), "{}", stderr(&output));
+        assert!(
+            stderr(&output).contains(
+                "note: `week` has values that are equal as numbers, which are different values to SPIT: `03` in sales, `3` in sales\n"
+            ),
             "{command}: {}",
             stderr(&output)
         );

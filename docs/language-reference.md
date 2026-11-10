@@ -456,6 +456,7 @@ With the pipeline in `digits/digits.spit`, `table` runs `python3 /home/lab/digit
 - Write `{@here}` in a `command` or a `verify` command, as the start of an argument, with the rest of the path after it. It gives no `.dir` or `.stem`, and cannot be redirected to or from.
 - A `.spitdag` holds the pipeline's folder once, as `pipeline_folder`, and each use as a [`here` part](spitdag.md#commands) under it. The folder is not part of any command, so moving the pipeline changes none.
 - A pipeline given on standard input, or parsed without a file, has no folder, and `{@here}` in it is an error.
+- A job declares only its ports, so editing a script a command names by `{@here}`, or by a relative path such as `scripts/table.py`, reruns nothing. `inputs`, `dag` and `artifacts` note each such file that exists: ``note: operation `table` runs `{@here}/scripts/table.py`, which it doesn't declare, so editing the file reruns nothing; ...``. To rerun a job when its script changes, keep the script under the dataset root and pass it to the operation as a source.
 
 ### A job's dimension values
 
@@ -1676,6 +1677,32 @@ note: `store` has values that differ only in ASCII letter case, which are differ
 ```
 
 The note comes up before any rule too, as ``... `S07` in pricing, `s07` in sales``. It names at most three sets for a dimension, then counts the rest. `dag` then plans the other stores, and notes that the misnamed file is left over:
+
+Values made only of digits that are equal as numbers, such as take `03` beside take `3`, get a note of the same form. A zero-padded name is often a copy of a file under another name, which SPIT takes as another take:
+
+<!-- spit-doc: output
+spit inputs takes.spitin
+--- takes.spit
+default entities: {@key}={@value} separated "_"
+default path: out/{@product}/{@entities}
+source recording : Wav [take]
+path recording: recordings/{take}.wav
+operation trim(audio: Wav) -> Wav
+command trim: trim {audio} {@output}
+trimmed = trim(recording)
+--- takes.spitin
+pipeline takes.spit
+root takes
+--- takes/recordings/3.wav
+--- takes/recordings/03.wav
+--- takes/recordings/4.wav
+-->
+
+```text
+note: `take` has values that are equal as numbers, which are different values to SPIT: `03` in recording, `3` in recording
+```
+
+A value with any other character, as `w03` beside `w3`, gets no such note.
 
 <!-- spit-doc: output
 spit dag store.spitin

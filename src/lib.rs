@@ -45,9 +45,9 @@ pub use editor::{
     HoverKind,
 };
 pub use inputs::{
-    case_variants, discover_source_files, discover_sources, parse_input_spec, parse_input_spec_at,
-    CaseVariants, Discovery, EveryGroupDropped, InputError, InputSource, InputSpec, MissedSource,
-    NearestFile, ResolvedInputs, ReviewFileError, Spelling, UnmatchedExclusion,
+    discover_source_files, discover_sources, parse_input_spec, parse_input_spec_at, variants,
+    Discovery, EveryGroupDropped, InputError, InputSource, InputSpec, Likeness, MissedSource,
+    NearestFile, ResolvedInputs, ReviewFileError, Spelling, UnmatchedExclusion, Variants,
 };
 pub use lower::imports::parse_pipeline_at;
 pub use lower::parse_pipeline;
@@ -78,8 +78,8 @@ pub use spitdag::{
     BoundStep, LeftOut, StepCall, StepCheck, When,
 };
 pub use template::{
-    CommandError, CommandProblem, CommandTemplate, EntitiesFormat, PathError, PathProblem,
-    PathTemplate,
+    CommandError, CommandProblem, CommandTemplate, EntitiesFormat, NamedFile, PathError,
+    PathProblem, PathTemplate,
 };
 pub use types::{
     parse_type_expr, Compatibility, Substitutions, TypeExpr, TypeParseError, TypeUnifyError,
