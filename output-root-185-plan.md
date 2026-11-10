@@ -39,7 +39,7 @@ Derived files may go under a folder of their own, so a read-only dataset can be 
 3. [x] `.spitdag` version 12: `output_root` and `under`; `dag` notes that commands run from the output root. Docs: `docs/spitdag.md`, `docs/architecture/binding.md`. (32862c3)
 4. [x] Discovery: an output root inside the dataset root is not scanned. Docs: `docs/architecture/inputs.md`. (32862c3)
 5. [x] Version 0.4.0, the first breaking change since 0.3.0. (b2eb430)
-6. [ ] spit-vscode: `output` keyword in the grammar and README; `--hovers` gains the `output` word; version 0.4.0.
+6. [x] spit-vscode: `output` keyword in the grammar and README; `--hovers` gains the `output` word; version 0.4.0. (eclnz/spit-vscode f58d4f1)
 7. [ ] spit-bash: read version 12, resolve paths by root, run from, make, and keep state under `output_root`; version 0.4.0.
 8. [ ] spit-showcase: use an output root where it shows the point.
 9. [ ] Delete this plan before the merge.
