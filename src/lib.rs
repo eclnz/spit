@@ -60,7 +60,7 @@ pub use model::{
     OperationDef, OutputPort, Pipeline, Port, PortSite, ProductDef, Removal, ResolveError,
     ResolvedDag, Resources, ResourcesDef, ReviewDef, ReviewFile, ShapeRule, SidecarGroup,
     SourceFile, SourceInventory, SourceRecord, StageDef, StepId, StepOrigin, StepOutput,
-    TypeChecking, TypeConflict, UnmatchedVerdicts, Verdict, VerdictRow, Withheld,
+    TypeChecking, TypeConflict, Under, UnmatchedVerdicts, Verdict, VerdictRow, Withheld,
 };
 pub use parser::{parse_source_inventory, render_source_inventory, ParseError, ParseErrorKind};
 pub use paths::{

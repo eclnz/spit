@@ -461,14 +461,18 @@ fn lower_statement(
 ) -> Result<(), ParseError> {
     match &statement.kind {
         StatementKind::Import => apply_import(builder, imports, &statement.place)?,
-        StatementKind::Root(root) => {
-            if builder.pipeline.root.is_some() {
+        StatementKind::Root(folder) | StatementKind::OutputRoot(folder) => {
+            let (slot, what) = match &statement.kind {
+                StatementKind::Root(_) => (&mut builder.pipeline.root, "root"),
+                _ => (&mut builder.pipeline.output, "output root"),
+            };
+            if slot.is_some() {
                 return Err(ParseError::new(
                     statement.place.line,
-                    "a .spit names its root once",
+                    format!("a .spit names its {what} once"),
                 ));
             }
-            builder.pipeline.root = Some((root.clone(), statement.place.line));
+            *slot = Some((folder.clone(), statement.place.line));
         }
         StatementKind::Stage { name, place } => builder.add_stage(name, place.clone()),
         StatementKind::Product(product, place) => {

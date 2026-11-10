@@ -67,6 +67,7 @@ pub fn discover_source_files(
         &with_source_paths(pipeline, &rules.source_paths_for(pipeline)),
         rules,
         root,
+        None,
     )
 }
 
@@ -85,11 +86,13 @@ pub(crate) fn with_source_paths<'a>(
 }
 
 /// Discover under `root` with `pipeline`, whose path rules already include
-/// the recipe's source paths.
+/// the recipe's source paths. The folder `outputs`, where jobs write, is
+/// not scanned when it is under `root`: what a run wrote is no source.
 pub(super) fn discover(
     pipeline: &Pipeline,
     rules: &InputRules,
     root: &Path,
+    outputs: Option<&Path>,
 ) -> Result<Discovery, PathError> {
     require_directory(root)?;
     inspect_paths(pipeline)?;
@@ -100,7 +103,9 @@ pub(super) fn discover(
         .collect::<Result<Vec<_>, _>>()?;
     let sources = source_patterns(pipeline)?;
     let named_hidden = hidden_names(&sources, &directory_patterns);
-    let mut listing = Listing::of(root, &named_hidden)?;
+    // A folder that does not exist yet holds nothing to leave out.
+    let written = outputs.and_then(|folder| fs::canonicalize(folder).ok());
+    let mut listing = Listing::of(root, &named_hidden, written.as_deref())?;
     // Each source with its place in `sources`, as file and folder sources:
     // a file source's rule is matched against files, a folder source's
     // against folders.
@@ -448,9 +453,17 @@ struct Listing {
 }
 
 impl Listing {
-    fn of(root: &Path, named_hidden: &BTreeSet<String>) -> Result<Self, PathError> {
+    fn of(
+        root: &Path,
+        named_hidden: &BTreeSet<String>,
+        outputs: Option<&Path>,
+    ) -> Result<Self, PathError> {
         let mut listing = Self::default();
-        listing.walk(root, None, "", &mut BTreeSet::new(), named_hidden)?;
+        let walk = Walk {
+            named_hidden,
+            outputs,
+        };
+        listing.walk(root, None, "", &mut BTreeSet::new(), &walk)?;
         listing.directories.sort();
         listing.files.sort();
         Ok(listing)
@@ -465,14 +478,16 @@ impl Listing {
     /// entry is, so only a link is looked up and resolved; a directory
     /// inside is its directory's canonical path and its name.
     ///
+    /// Returns `false`, having listed nothing, when `directory` is the
+    /// output root below the scanned root.
     fn walk(
         &mut self,
         directory: &Path,
         canonical: Option<PathBuf>,
         prefix: &str,
         visited: &mut BTreeSet<PathBuf>,
-        named_hidden: &BTreeSet<String>,
-    ) -> Result<(), PathError> {
+        walk: &Walk<'_>,
+    ) -> Result<bool, PathError> {
         let unreadable = |reason: std::io::Error| {
             error(format!("cannot read `{}`: {reason}", directory.display()))
         };
@@ -480,8 +495,12 @@ impl Listing {
             Some(canonical) => canonical,
             None => fs::canonicalize(directory).map_err(unreadable)?,
         };
+        // The scanned root itself is read even when outputs go there.
+        if !prefix.is_empty() && walk.outputs == Some(canonical.as_path()) {
+            return Ok(false);
+        }
         if !visited.insert(canonical.clone()) {
-            return Ok(());
+            return Ok(true);
         }
         for entry in fs::read_dir(directory).map_err(unreadable)? {
             let entry = entry.map_err(unreadable)?;
@@ -495,18 +514,27 @@ impl Listing {
                 _ => (path.is_dir(), path.is_file(), true),
             };
             if is_dir {
-                if name.starts_with('.') && !named_hidden.contains(&name) {
+                if name.starts_with('.') && !walk.named_hidden.contains(&name) {
                     continue;
                 }
                 let inner = (!linked).then(|| canonical.join(&name));
-                self.walk(&path, inner, &format!("{relative}/"), visited, named_hidden)?;
-                self.directories.push(relative);
+                if self.walk(&path, inner, &format!("{relative}/"), visited, walk)? {
+                    self.directories.push(relative);
+                }
             } else if is_file {
                 self.files.push(relative);
             }
         }
-        Ok(())
+        Ok(true)
     }
+}
+
+/// What a [`Listing`] leaves out as it walks.
+struct Walk<'a> {
+    /// Hidden folder names a rule writes out, which are read all the same.
+    named_hidden: &'a BTreeSet<String>,
+    /// The output root, with every link resolved, which is not read.
+    outputs: Option<&'a Path>,
 }
 
 /// Bind each source to its one declared path, so that resolving jobs needs

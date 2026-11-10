@@ -80,20 +80,33 @@ fn read_inventory<'a, 't: 'a>(
         // A line that fails changes nothing, and the lines after it are
         // read as they would be without it.
         let read = (|| -> Result<(), ParseError> {
-            if let Some(folder) = line.strip_prefix("root ") {
+            let root = [
+                ("root ", "root", "root"),
+                ("output ", "output", "output root"),
+            ]
+            .into_iter()
+            .find_map(|(prefix, word, what)| Some((line.strip_prefix(prefix)?, word, what)));
+            if let Some((folder, word, what)) = root {
                 if section.is_some() {
                     return Err(ParseError::new(
                         number,
-                        "`root` comes before every section of a .spitout",
+                        format!("`{word}` comes before every section of a .spitout"),
                     )
                     .locate(original));
                 }
-                if inventory.root.is_some() {
-                    return Err(
-                        ParseError::new(number, "a .spitout names its root once").locate(original)
-                    );
+                let slot = if word == "root" {
+                    &mut inventory.root
+                } else {
+                    &mut inventory.output
+                };
+                if slot.is_some() {
+                    return Err(ParseError::new(
+                        number,
+                        format!("a .spitout names its {what} once"),
+                    )
+                    .locate(original));
                 }
-                inventory.root = Some(PathBuf::from(folder.trim()));
+                *slot = Some(PathBuf::from(folder.trim()));
                 return Ok(());
             }
             match read.header() {

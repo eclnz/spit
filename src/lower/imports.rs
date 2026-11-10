@@ -614,8 +614,12 @@ fn parse_document_at_inner(
     }
     let (mut document, found) = parse_layout(&layout, &imports, kind);
     errors.extend(found);
-    if let Some((root, _)) = &mut document.pipeline.root {
-        *root = path.parent().unwrap_or_else(|| Path::new("")).join(&*root);
+    let folder = path.parent().unwrap_or_else(|| Path::new(""));
+    for (root, _) in [&mut document.pipeline.root, &mut document.pipeline.output]
+        .into_iter()
+        .flatten()
+    {
+        *root = folder.join(&*root);
     }
     document.pipeline.files = files;
     document.pipeline.folder = fs::canonicalize(base).ok().map(|f| f.display().to_string());
