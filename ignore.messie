@@ -2,3 +2,6 @@
 /Cargo.toml
 /Cargo.lock
 /clippy.toml
+# Files uv requires at the root, under these names
+/pyproject.toml
+/uv.lock

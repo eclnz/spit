@@ -13,3 +13,5 @@
 /examples/runnable/*/*.spitdag
 
 graphify-out
+# What `uv run` installs the docs and Messie tools into.
+/.venv/
