@@ -78,8 +78,8 @@ pub use spitdag::{
     BoundStep, LeftOut, StepCall, StepCheck, When,
 };
 pub use template::{
-    CommandError, CommandProblem, CommandTemplate, EntitiesFormat, PathError, PathProblem,
-    PathTemplate,
+    CommandError, CommandProblem, CommandTemplate, EntitiesFormat, NamedFile, PathError,
+    PathProblem, PathTemplate,
 };
 pub use types::{
     parse_type_expr, Compatibility, Substitutions, TypeExpr, TypeParseError, TypeUnifyError,
