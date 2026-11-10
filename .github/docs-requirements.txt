@@ -1,3 +1,0 @@
-properdocs==1.6.7
-properdocs-theme-readthedocs==1.6.5
-pymdown-extensions==12.1
