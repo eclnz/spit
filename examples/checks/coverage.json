@@ -473,6 +473,25 @@
       }
     },
     {
+      "pipeline": "examples/runnable/numbers/numbers.spit",
+      "recipe": "examples/runnable/numbers/numbers.spitin",
+      "expect": {
+        "sources": {
+          "list": 2
+        },
+        "operations": {
+          "count": 2,
+          "number": 2
+        },
+        "targets": {
+          "numbered": 2
+        },
+        "dependencies": 2,
+        "removals": 0,
+        "calls": 0
+      }
+    },
+    {
       "pipeline": "examples/runnable/streams/streams.spit",
       "recipe": "examples/runnable/streams/streams.spitin",
       "expect": {
