@@ -251,6 +251,20 @@ impl PathTemplate {
             .contains(&PathPart::Placeholder(PathPlaceholder::Stage))
     }
 
+    /// A dimension the template names outside a `[...]` group that is not
+    /// one of `dimensions`, so that a product with only `dimensions` cannot
+    /// use it.
+    pub(crate) fn needs_dimension_outside(&self, dimensions: &[String]) -> Option<&str> {
+        self.parts.iter().find_map(|part| match part {
+            PathPart::Placeholder(PathPlaceholder::Dimension(name, _))
+                if !dimensions.contains(name) =>
+            {
+                Some(name.as_str())
+            }
+            _ => None,
+        })
+    }
+
     /// Each placeholder with a shape, as `{date:date}`, and the dimension it
     /// shapes, groups included.
     pub(crate) fn shaped(&self) -> Vec<(&str, Shape)> {
