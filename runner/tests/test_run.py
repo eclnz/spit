@@ -1,0 +1,562 @@
+import asyncio
+import contextlib
+import io
+import json
+import os
+import shutil
+import signal
+import subprocess
+import sys
+import tempfile
+import time
+import unittest
+from pathlib import Path
+from unittest import mock
+
+from spit_bash.cause import Cause, Why
+from spit_bash.load import load_dag
+from spit_bash.files import Stamp
+from spit_bash.plan import Status, plan
+from spit_bash.state.store import Store
+from spit_bash.execute import events, process
+from spit_bash.execute.failure import InputChanged
+from spit_bash.execute.options import Options
+from spit_bash.execute import scheduler as scheduler_module
+from spit_bash.execute.scheduler import execute
+from spit_bash.report.run_text import failure_words
+from support import FIXTURE, artifact, command, document, error, job, job_entry, read, run, sample, state_at, job_log, new_run
+
+# Each job writes its own marker, then waits for the other's: they finish only
+# if both run at once.
+MEET = (
+    "from pathlib import Path; import sys, time\n"
+    "Path(sys.argv[2] + '.here').write_text('')\n"
+    "other = sys.argv[3]\n"
+    "deadline = time.time() + 10\n"
+    "while not Path(other).exists() and time.time() < deadline: time.sleep(0.01)\n"
+    "Path(sys.argv[2]).write_text(str(Path(other).exists()))\n"
+)
+
+
+class InputChangeDiagnosticTests(unittest.TestCase):
+    def test_names_changed_file_and_stamps(self):
+        error = failure_words(job(1), InputChanged(
+            {"source.txt": Stamp(10, 100), "stable.txt": Stamp(2, 30)},
+            {"source.txt": Stamp(12, 150), "stable.txt": Stamp(2, 30)},
+            (),
+        ))
+        self.assertEqual(
+            error,
+            "input changed during execution: source.txt: size 10 -> 12, mtime_ns 100 -> 150",
+        )
+
+    def test_names_folder_mtime_and_file_count(self):
+        error = failure_words(job(1), InputChanged(
+            {"templates": Stamp(1024, 100, 4)},
+            {"templates": Stamp(1024, 200, 5)},
+            (),
+        ))
+        self.assertEqual(
+            error,
+            "input changed during execution: templates: latest mtime_ns 100 -> 200, file count 4 -> 5",
+        )
+
+    def test_names_missing_input(self):
+        error = failure_words(job(1), InputChanged(
+            {"source.txt": Stamp(12, 100)},
+            {"source.txt": None},
+            (),
+        ))
+        self.assertEqual(
+            error, "input changed during execution: source.txt: [12, 100] -> None",
+        )
+
+
+class DirectoryTimestampTests(unittest.TestCase):
+    def test_touching_directory_metadata_during_job_does_not_fail(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            folder = root / "input"
+            folder.mkdir()
+            (folder / "a.txt").write_text("hello")
+            data = sample(root)
+            data["external_inputs"] = [dict(artifact("input"), kind="folder")]
+            data["jobs"][0]["inputs"]["input"] = [dict(artifact("input"), kind="folder")]
+            data["jobs"][0]["commands"][0]["command"] = command(
+                "from pathlib import Path; import os, sys; "
+                "folder = Path(sys.argv[1]); old = folder.stat().st_mtime_ns; "
+                "os.utime(folder, ns=(old + 1000000000, old + 1000000000)); "
+                "Path(sys.argv[2]).write_text('ok')",
+                "input", "work/upper.txt",
+            )
+            _, results = run(read(data), state_at(root))
+            self.assertEqual([error(result) for result in results], [None, None])
+
+    def test_renaming_file_inside_directory_still_fails(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            folder = root / "input"
+            folder.mkdir()
+            (folder / "a.txt").write_text("hello")
+            data = sample(root)
+            data["external_inputs"] = [dict(artifact("input"), kind="folder")]
+            data["jobs"][0]["inputs"]["input"] = [dict(artifact("input"), kind="folder")]
+            data["jobs"][0]["commands"][0]["command"] = command(
+                "from pathlib import Path; import sys; "
+                "folder = Path(sys.argv[1]); (folder / 'a.txt').rename(folder / 'b.txt'); "
+                "Path(sys.argv[2]).write_text('ok')",
+                "input", "work/upper.txt",
+            )
+            _, results = run(read(data), state_at(root))
+            self.assertIn("input changed during execution", error(results[0]))
+
+    def test_touching_a_file_inside_directory_still_fails(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            folder = root / "input"
+            folder.mkdir()
+            file = folder / "a.txt"
+            file.write_text("hello")
+            data = sample(root)
+            data["external_inputs"] = [dict(artifact("input"), kind="folder")]
+            data["jobs"][0]["inputs"]["input"] = [dict(artifact("input"), kind="folder")]
+            data["jobs"][0]["commands"][0]["command"] = command(
+                "from pathlib import Path; import os, sys; "
+                "file = Path(sys.argv[1]) / 'a.txt'; old = file.stat().st_mtime_ns; "
+                "os.utime(file, ns=(old + 1000000000, old + 1000000000)); "
+                "Path(sys.argv[2]).write_text('ok')",
+                "input", "work/upper.txt",
+            )
+            _, results = run(read(data), state_at(root))
+            self.assertIn("input changed during execution", error(results[0]))
+
+
+class RunTests(unittest.TestCase):
+    def test_runs_in_dependency_order_then_skips_and_reruns_stale_jobs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.txt"
+            source.write_text("hello")
+            data = sample(root)
+            dag = read(data)
+            decisions, results = run(dag, state_at(root))
+            self.assertEqual([d.status for d in decisions], [Status.RUN, Status.RUN])
+            self.assertFalse(any(error(r) for r in results))
+            self.assertEqual((root / "final.txt").read_text(), "HELLO!")
+            self.assertEqual([d.status for d in plan(dag, state_at(root))], [Status.SKIP, Status.SKIP])
+
+            source.write_text("changed")
+            decisions, results = run(dag, state_at(root))
+            self.assertEqual(decisions[0].cause, Cause(Why.INPUT_CHANGED))
+            self.assertFalse(any(error(r) for r in results))
+            self.assertEqual((root / "final.txt").read_text(), "CHANGED!")
+
+            data["jobs"][0]["commands"][0]["command"].append(["extra"])
+            decisions = plan(read(data), state_at(root))
+            self.assertEqual([d.status for d in decisions], [Status.RUN, Status.MAYBE])
+            self.assertEqual(decisions[0].cause, Cause(Why.WORK_CHANGED, parts=("commands",)))
+
+    def test_failed_verify_prevents_command_and_dependent(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "source.txt").write_text("hello")
+            data = sample(root)
+            data["jobs"][0]["verify"] = [command("import sys; print('input is bad'); sys.exit(3)")]
+            _, results = run(read(data), state_at(root))
+            self.assertIn("verify 1 exited with status 3", error(results[0]))
+            self.assertIn("dependency 1 failed", error(results[1]))
+            self.assertFalse((root / "work/upper.txt").exists())
+            self.assertIn("input is bad", results[0].log.read_text())
+
+    def test_a_missing_declared_output_fails_the_job_and_names_it(self):
+        # As `dcm2niix -b n` does: the command exits 0 but writes no `.json`.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "source.txt").write_text("hello")
+            data = sample(root)
+            convert = data["jobs"][0]
+            convert["outputs"] = {"image": artifact("work/upper.txt"), "meta": artifact("work/upper.json")}
+            data["jobs"][1]["inputs"]["input"] = [artifact("work/upper.txt")]
+            _, results = run(read(data), state_at(root))
+            self.assertEqual(error(results[0]), "command succeeded but did not create output meta work/upper.json")
+            self.assertIn("dependency 1 failed", error(results[1]))
+            self.assertFalse((root / "final.txt").exists())
+            # No success was recorded, so the next plan runs the job again.
+            decisions = plan(read(data), state_at(root))
+            self.assertEqual([d.status for d in decisions], [Status.RUN, Status.RUN])
+
+    def test_a_missing_output_names_the_files_the_command_wrote_in_its_folder(self):
+        # As dcm2niix does when it adds a suffix of its own, such as `_real`.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "source.txt").write_text("hello")
+            (root / "work").mkdir()
+            (root / "work/earlier.txt").write_text("not this job's")
+            data = sample(root)
+            data["jobs"][0]["commands"][0]["command"][2] = [
+                "from pathlib import Path; import sys; out = Path(sys.argv[2]); "
+                "out.with_name('upper_real.txt').write_text('HELLO'); Path('elsewhere.txt').write_text('')"
+            ]
+            _, results = run(read(data), state_at(root))
+            self.assertEqual(error(results[0]), "command succeeded but did not create output output work/upper.txt; "
+                                                "it wrote work/upper_real.txt in the same folder, left in place")
+            self.assertTrue((root / "work/upper_real.txt").exists())
+
+    def test_multiple_outputs_report_each_missing_port_and_path(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "source.txt").write_text("hello")
+            data = sample(root)
+            data["jobs"][0]["outputs"] = {
+                "image": artifact("work/upper.txt"),
+                "meta": artifact("work/upper.json"),
+                "log": artifact("work/conversion.log"),
+            }
+            dag = read(data)
+            self.assertEqual(
+                [(port.name, artifact.path) for port in dag.jobs[0].outputs for artifact in port.artifacts],
+                [("image", "work/upper.txt"), ("meta", "work/upper.json"),
+                 ("log", "work/conversion.log")],
+            )
+            _, results = run(dag, state_at(root))
+            self.assertEqual(
+                error(results[0]),
+                "command succeeded but did not create output meta work/upper.json, "
+                "output log work/conversion.log",
+            )
+            # The output the command did write is removed with the failure.
+            self.assertFalse((root / "work/upper.txt").exists())
+            self.assertIn("removed failed output work/upper.txt", results[0].log.read_text())
+
+    def test_a_failed_command_leaves_no_partial_output(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "source.txt").write_text("hello")
+            data = sample(root)
+            data["jobs"][0]["commands"][0]["command"][2] = [
+                "from pathlib import Path; import sys; Path(sys.argv[2]).write_text('HAL'); sys.exit(4)"
+            ]
+            _, results = run(read(data), state_at(root))
+            self.assertEqual(error(results[0]), "command exited with status 4")
+            self.assertFalse((root / "work/upper.txt").exists())
+            log = results[0].log.read_text()
+            self.assertTrue(log.endswith("spit-bash: removed failed output work/upper.txt\n"), log)
+
+    def test_keep_failed_leaves_a_failed_commands_outputs_and_reruns_the_job(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "source.txt").write_text("hello")
+            data = sample(root)
+            data["jobs"][0]["commands"][0]["command"][2] = [
+                "from pathlib import Path; import sys; Path(sys.argv[2]).write_text('HAL'); sys.exit(4)"
+            ]
+            dag = read(data)
+            _, results = run(dag, state_at(root), keep_failed=True)
+            self.assertEqual(error(results[0]), "command exited with status 4")
+            self.assertEqual((root / "work/upper.txt").read_text(), "HAL")
+            log = results[0].log.read_text()
+            self.assertTrue(log.endswith("spit-bash: kept failed output work/upper.txt\n"), log)
+            # The kept output is not a finished one, so the next run runs the job again.
+            decisions, _ = run(dag, state_at(root))
+            self.assertEqual(decisions[0].status, Status.RUN)
+
+    def test_a_failure_before_the_command_keeps_an_earlier_runs_outputs(self):
+        # The command never ran, so the files are still the last run's, whole.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "source.txt").write_text("hello")
+            data = sample(root)
+            run(read(data), state_at(root))
+            data["jobs"][0]["commands"][0]["command"].append(["extra"])
+            data["jobs"][0]["verify"] = [command("import sys; sys.exit(3)")]
+            _, results = run(read(data), state_at(root))
+            self.assertEqual(error(results[0]), "verify 1 exited with status 3")
+            self.assertEqual((root / "work/upper.txt").read_text(), "HELLO")
+            self.assertNotIn("removed", results[0].log.read_text())
+
+    def test_job_output_goes_to_its_log(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            (root / "source.txt").write_text("hello")
+            data = sample(root)
+            data["jobs"][0]["commands"][0]["command"][2] = ["import sys; print('to stdout'); print('to stderr', file=sys.stderr); " + data["jobs"][0]["commands"][0]["command"][2][0]]
+            _, results = run(read(data), state_at(root))
+            log = job_log(root / ".spit-bash", "work/upper.txt").read_text()
+            self.assertEqual(results[0].log, job_log(root / ".spit-bash", "work/upper.txt"))
+            self.assertIn("to stdout", log)
+            self.assertIn("to stderr", log)
+            self.assertIn("$ " + sys.executable, log)
+
+    def test_independent_jobs_run_at_once(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "source.txt").write_text("")
+            jobs = [job_entry(1, ["source.txt"], "a.txt", MEET), job_entry(2, ["source.txt"], "b.txt", MEET)]
+            jobs[0]["commands"][0]["command"].append(["b.txt.here"])
+            jobs[1]["commands"][0]["command"].append(["a.txt.here"])
+            _, results = run(read(document(root, jobs, ["source.txt"])), state_at(root), cores=2)
+            self.assertFalse(any(error(r) for r in results))
+            self.assertEqual((root / "a.txt").read_text(), "True")
+            self.assertEqual((root / "b.txt").read_text(), "True")
+
+    def test_cancelling_stops_the_running_command(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "source.txt").write_text("")
+            script = (
+                "import os, sys, time\n"
+                "open(sys.argv[2], 'w').write('half')\n"
+                "open(sys.argv[2] + '.pid', 'w').write(str(os.getpid()))\n"
+                "time.sleep(60)\n"
+            )
+            dag = read(document(root, [job_entry(1, ["source.txt"], "out.txt", script)], ["source.txt"]))
+            state = state_at(root)
+            pid_file = root / "out.txt.pid"
+
+            async def cancel_once_started():
+                task = asyncio.ensure_future(execute(dag, plan(dag, state), state, Options(new_run(root / ".spit-bash/runs"))))
+                while not pid_file.exists() or not pid_file.read_text():
+                    await asyncio.sleep(0.01)
+                task.cancel()
+                with self.assertRaises(asyncio.CancelledError):
+                    await task
+
+            asyncio.run(cancel_once_started())
+            state.close()
+            with self.assertRaises(ProcessLookupError):
+                os.kill(int(pid_file.read_text()), 0)
+            self.assertEqual(state_at(root).jobs, {})
+            # The half-written output went with the stopped command.
+            self.assertFalse((root / "out.txt").exists())
+            self.assertIn("removed failed output out.txt", job_log(root / ".spit-bash", "out.txt").read_text())
+
+    def test_cancelling_kills_a_command_that_ignores_sigterm(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "source.txt").write_text("")
+            # The command and a child it starts both ignore SIGTERM, which the
+            # child inherits, so only SIGKILL stops either.
+            script = (
+                "import os, signal, subprocess, sys, time\n"
+                "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+                "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])\n"
+                "open(sys.argv[2] + '.pid', 'w').write(f'{os.getpid()} {child.pid}')\n"
+                "time.sleep(60)\n"
+            )
+            dag = read(document(root, [job_entry(1, ["source.txt"], "out.txt", script)], ["source.txt"]))
+            state = state_at(root)
+            pid_file = root / "out.txt.pid"
+
+            async def cancel_once_started():
+                task = asyncio.ensure_future(execute(dag, plan(dag, state), state, Options(new_run(root / ".spit-bash/runs"))))
+                while not pid_file.exists() or not pid_file.read_text():
+                    await asyncio.sleep(0.01)
+                started = time.monotonic()
+                task.cancel()
+                with self.assertRaises(asyncio.CancelledError):
+                    await task
+                return time.monotonic() - started
+
+            with mock.patch.object(process, "STOP_GRACE_SECONDS", 0.2):
+                elapsed = asyncio.run(cancel_once_started())
+            state.close()
+            self.assertLess(elapsed, 5)
+            for pid in pid_file.read_text().split():
+                deadline = time.time() + 5
+                while time.time() < deadline:
+                    try:
+                        os.kill(int(pid), 0)
+                    except ProcessLookupError:
+                        break
+                    time.sleep(0.01)
+                else:
+                    self.fail(f"process {pid} outlived the cancelled run")
+            self.assertEqual(state_at(root).jobs, {})
+
+    @unittest.skipUnless(shutil.which("sort"), "requires sort")
+    def test_runs_real_spit_fixture(self):
+        with tempfile.TemporaryDirectory() as directory, FIXTURE.open(encoding="utf-8") as source:
+            root = Path(directory)
+            for path, content in {
+                "input/alpha/01.txt": "z\na\na\n",
+                "input/alpha/02.txt": "b\na\n",
+                "input/beta/01.txt": "q\np\n",
+            }.items():
+                file = root / path
+                file.parent.mkdir(parents=True, exist_ok=True)
+                file.write_text(content)
+            dag = load_dag(source, directory)
+            decisions, results = run(dag, state_at(root), cores=3)
+            self.assertEqual([d.status for d in decisions], [Status.RUN] * 5)
+            self.assertFalse(any(error(r) for r in results))
+            self.assertEqual((root / "merged/group=alpha.txt").read_text(), "a\nb\nz\n")
+            self.assertEqual((root / "merged/group=beta.txt").read_text(), "p\nq\n")
+            self.assertEqual([d.status for d in plan(dag, state_at(root))], [Status.SKIP] * 5)
+
+
+class SignalTests(unittest.TestCase):
+    def test_sigterm_stops_running_jobs_and_exits_143(self):
+        self.stop_with(signal.SIGTERM, 143, "terminated")
+
+    def test_sigint_stops_running_jobs_and_exits_130(self):
+        self.stop_with(signal.SIGINT, 130, "interrupted")
+
+    def stop_with(self, signum, code, message):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "source.txt").write_text("")
+            script = "import os, sys, time; open(sys.argv[2] + '.pid', 'w').write(str(os.getpid())); time.sleep(60)"
+            data = document(root, [job_entry(1, ["source.txt"], "out.txt", script)], ["source.txt"])
+            (root / "dag.json").write_text(json.dumps(data))
+            env = dict(os.environ, PYTHONPATH=str(Path(__file__).parents[1] / "src"))
+            process = subprocess.Popen(
+                [sys.executable, "-m", "spit_bash", "run", str(root / "dag.json")],
+                env=env, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True,
+            )
+            pid_file = root / "out.txt.pid"
+            deadline = time.time() + 10
+            while (not pid_file.exists() or not pid_file.read_text()) and time.time() < deadline:
+                time.sleep(0.01)
+            process.send_signal(signum)
+            _, stderr = process.communicate(timeout=10)
+            self.assertEqual(process.returncode, code, stderr)
+            self.assertIn(message, stderr)
+            with self.assertRaises(ProcessLookupError):
+                os.kill(int(pid_file.read_text()), 0)
+
+
+if __name__ == "__main__":
+    unittest.main()
+
+
+class EarlierOutputTests(unittest.TestCase):
+    """A job starts with nothing at its outputs, and a failure puts the earlier version back."""
+
+    REFUSE = ("from pathlib import Path; import sys; out = Path(sys.argv[2]); "
+              "assert not out.exists(), 'exists'; out.write_text('new')")
+    FAIL = ("from pathlib import Path; import sys; Path(sys.argv[2]).write_text('half'); sys.exit(1)")
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        (self.root / "in.txt").write_text("x")
+        (self.root / "out.txt").write_text("earlier")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def run_job(self, script, keep_failed=False):
+        dag = load_dag(io.StringIO(json.dumps(document(self.root, [job_entry(1, ["in.txt"], "out.txt", script)], ["in.txt"]))), None)
+        state = Store(self.root / "state.jsonl")
+        decisions = plan(dag, state, False)
+        with contextlib.redirect_stdout(io.StringIO()):
+            return asyncio.run(execute(dag, decisions, state, Options(new_run(self.root / ".spit-bash/runs"), keep_failed=keep_failed)))
+
+    def test_a_tool_that_refuses_to_overwrite_runs_again(self):
+        (result,) = self.run_job(self.REFUSE)
+        self.assertIsNone(error(result))
+        self.assertEqual((self.root / "out.txt").read_text(), "new")
+        self.assertFalse((self.root / ".out.txt.spit-bash-previous").exists())
+
+    def test_a_failure_puts_the_earlier_output_back(self):
+        (result,) = self.run_job(self.FAIL)
+        self.assertIsNotNone(error(result))
+        self.assertEqual((self.root / "out.txt").read_text(), "earlier")
+        self.assertFalse((self.root / ".out.txt.spit-bash-previous").exists())
+
+    def test_keep_failed_keeps_the_failed_output_instead(self):
+        self.run_job(self.FAIL, keep_failed=True)
+        self.assertEqual((self.root / "out.txt").read_text(), "half")
+        self.assertFalse((self.root / ".out.txt.spit-bash-previous").exists())
+
+
+class RecordAfterFailureTests(unittest.TestCase):
+    """A job's record stays while the earlier run's outputs are at its paths, so a failed or
+    stopped rerun does not make the next run rebuild them."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        (self.root / "source.txt").write_text("hello")
+        self.data = sample(self.root)
+        run(read(self.data), state_at(self.root))
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def failing(self, script="import sys; sys.exit(4)"):
+        data = json.loads(json.dumps(self.data))
+        data["jobs"][0]["commands"][0]["command"][2] = [script]
+        return read(data)
+
+    def statuses(self):
+        decisions = plan(read(self.data), state_at(self.root), False)
+        return [decision.status for decision in decisions]
+
+    def test_a_failed_rerun_leaves_the_job_current(self):
+        _, results = run(self.failing(), state_at(self.root))
+        self.assertEqual(error(results[0]), "command exited with status 4")
+        self.assertEqual((self.root / "work/upper.txt").read_text(), "HELLO")
+        self.assertEqual(self.statuses(), [Status.SKIP, Status.SKIP])
+
+    def test_a_cancelled_rerun_leaves_the_job_current(self):
+        dag = self.failing("import time; time.sleep(30)")
+        state = state_at(self.root)
+        decisions = plan(dag, state, False)
+
+        async def cancelled():
+            task = asyncio.current_task()
+            assert task is not None
+
+            def on_event(event):
+                if isinstance(event, events.Started):
+                    asyncio.get_running_loop().call_later(0.2, task.cancel)
+
+            await execute(dag, decisions, state, Options(new_run(dag.layout.runs)), on_event)
+
+        with self.assertRaises(asyncio.CancelledError):
+            asyncio.run(cancelled())
+        state.close()
+        self.assertEqual((self.root / "work/upper.txt").read_text(), "HELLO")
+        self.assertEqual(self.statuses(), [Status.SKIP, Status.SKIP])
+
+    def test_keep_failed_forgets_the_record_of_outputs_it_replaced(self):
+        run(self.failing("from pathlib import Path; import sys; Path(sys.argv[2]).write_text('HAL'); sys.exit(4)"),
+            state_at(self.root), keep_failed=True)
+        self.assertEqual((self.root / "work/upper.txt").read_text(), "HAL")
+        self.assertNotIn(read(self.data).jobs[0].work.key, state_at(self.root).jobs)
+        self.assertEqual(self.statuses()[0], Status.RUN)
+
+
+class HashingTests(unittest.TestCase):
+    """A run on one core says that a job's commands have ended before it starts the next job."""
+
+    def test_a_job_with_large_files_says_it_is_hashing_before_the_next_job_starts(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "source.txt").write_text("x")
+            big = "from pathlib import Path; import sys; Path(sys.argv[2]).write_bytes(b'x' * (2 << 20))"
+            dag = read(document(root, [
+                job_entry(1, ["source.txt"], "one.bin", big),
+                job_entry(2, ["source.txt"], "two.bin", big),
+            ], ["source.txt"]))
+            state = state_at(root)
+            decisions = plan(dag, state, False)
+            seen = []
+            slow = scheduler_module._hash_both
+
+            def delayed(*args):
+                time.sleep(0.3)
+                return slow(*args)
+
+            with mock.patch.object(scheduler_module, "_hash_both", delayed):
+                asyncio.run(execute(dag, decisions, state, Options(new_run(dag.layout.runs), cores=1),
+                                    lambda event: seen.append((type(event).__name__, getattr(event, "job", None)))))
+            state.close()
+            order = [(kind, job.id) for kind, job in seen if job is not None]
+            first = order[0][1]
+            self.assertEqual(order[:2], [("Started", first), ("Hashing", first)])
+            self.assertEqual(sorted(order), sorted([("Started", 1), ("Hashing", 1), ("Done", 1),
+                                                    ("Started", 2), ("Hashing", 2), ("Done", 2)]))
+            second = 3 - first
+            self.assertLess(order.index(("Hashing", first)), order.index(("Started", second)))
