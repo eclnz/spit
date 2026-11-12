@@ -1,0 +1,112 @@
+$ spit-bash plan jobs.spitdag
+exit 0
+--- stdout
+since the last run: 1 source.txt changed
+1 job can start, 2 jobs may run if an upstream output changes
+1 job will replace existing outputs:
+  op1: input changed
+--- stderr
+
+$ spit-bash plan jobs.spitdag --verbose
+exit 0
+--- stdout
+since the last run: 1 source.txt changed
+1 job can start, 2 jobs may run if an upstream output changes
+[1] ready   op1: input changed
+[2] may run op2: runs if an upstream output changes
+[3] may run op3: runs if an upstream output changes
+--- stderr
+
+$ spit-bash plan jobs.spitdag --json
+exit 0
+--- stdout
+{
+  "left_out": [],
+  "jobs": [
+    {
+      "id": 1,
+      "operation": "op1",
+      "status": "run",
+      "reason": "input changed",
+      "code": "input_changed",
+      "waits_for": [],
+      "caused_by": null,
+      "holds_up": 0
+    },
+    {
+      "id": 2,
+      "operation": "op2",
+      "status": "maybe",
+      "reason": "runs if an upstream output changes",
+      "code": "upstream_may_run",
+      "waits_for": [
+        1
+      ],
+      "caused_by": null,
+      "holds_up": 0
+    },
+    {
+      "id": 3,
+      "operation": "op3",
+      "status": "maybe",
+      "reason": "runs if an upstream output changes",
+      "code": "upstream_may_run",
+      "waits_for": [
+        2
+      ],
+      "caused_by": null,
+      "holds_up": 0
+    }
+  ]
+}
+--- stderr
+
+$ spit-bash explain 2 jobs.spitdag
+exit 0
+--- stdout
+Job 2: op2
+  decision: maybe, runs if an upstream output changes
+  made by run <run>; log at <root>/.spit-bash/runs/<run>/jobs/final.txt.log
+  fingerprint: same (recorded 3959901bb9a60cd2, now 3959901bb9a60cd2)
+  checks: same (recorded none, now none)
+  inputs that differ from the record:
+    none differs from the record
+  outputs that differ from the record:
+    none differs from the record
+  upstream jobs that will or may rewrite its inputs: 1 (run)
+--- stderr
+
+$ spit-bash run jobs.spitdag --cores 1
+exit 0
+--- stdout
+since the last run: 1 source.txt changed
+1 job can start, 2 jobs may run if an upstream output changes
+1 job will replace existing outputs:
+  op1: input changed
+
+Running 1 job, and 2 more that may, <time>
+  [1] start   op1
+  [1] done    op1 in <time>; 2 left, <time>
+  [2] skip    op2: upstream output unchanged
+  [3] skip    op3: upstream output unchanged
+--- stderr
+kept the 1 output that 1 job replaced (5B) in <root>/.spit-bash/runs/<run>/replaced; `spit-bash restore --run <run>` puts it back
+1 done, 0 checked, 0 failed, 0 current, 2 kept (upstream reran with unchanged output), 0 blocked
+
+$ spit-bash run jobs.spitdag --cores 1 --verbose
+exit 0
+--- stdout
+since the last run: 1 source.txt changed
+1 job can start, 2 jobs may run if an upstream output changes
+[1] ready   op1: input changed
+[2] may run op2: runs if an upstream output changes
+[3] may run op3: runs if an upstream output changes
+
+Running 1 job, and 2 more that may, <time>
+  [1] start   op1
+  [1] done    op1 in <time>; 2 left, <time>
+  [2] skip    op2: upstream output unchanged
+  [3] skip    op3: upstream output unchanged
+--- stderr
+kept the 1 output that 1 job replaced (5B) in <root>/.spit-bash/runs/<run>/replaced; `spit-bash restore --run <run>` puts it back
+1 done, 0 checked, 0 failed, 0 current, 2 kept (upstream reran with unchanged output), 0 blocked

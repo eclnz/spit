@@ -1,0 +1,152 @@
+import tempfile
+import unittest
+from pathlib import Path
+
+from spit_bash.load import load_dag
+from spit_bash.model import DagError
+from support import FIXTURE, read, sample
+
+
+class LoadTests(unittest.TestCase):
+    def test_rejects_escaping_path_and_bad_dependencies(self):
+        with tempfile.TemporaryDirectory() as directory:
+            data = sample(Path(directory))
+            data["jobs"][0]["outputs"]["output"]["path"] = "../escape.txt"
+            with self.assertRaisesRegex(DagError, "stay within"):
+                read(data)
+            data = sample(Path(directory))
+            data["jobs"][1]["depends_on"] = []
+            with self.assertRaisesRegex(DagError, "do not match"):
+                read(data)
+
+    def test_a_link_made_after_loading_cannot_lead_outside_the_root(self):
+        with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as outside:
+            root = Path(directory).resolve()
+            dag = read(sample(root))
+            self.assertEqual(dag.path("work/upper.txt"), root / "work" / "upper.txt")
+            (root / "work").symlink_to(outside)
+            with self.assertRaisesRegex(DagError, "^work/upper.txt leads through the link work to "):
+                dag.checked("work/upper.txt")
+
+    def test_a_source_linked_outside_the_root_names_the_link_where_it_leads_and_its_job(self):
+        with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as outside:
+            root, elsewhere = Path(directory).resolve(), Path(outside).resolve()
+            (elsewhere / "source.txt").write_text("hello")
+            (root / "source.txt").symlink_to(elsewhere / "source.txt")
+            with self.assertRaises(DagError) as caught:
+                read(sample(root))
+            self.assertEqual(str(caught.exception).splitlines(), [
+                f"source.txt is a link to {elsewhere / 'source.txt'}, outside the dataset root {root}.",
+                "  Job 1 (op1) reads it as a source.",
+                "  spit-bash reads and writes only under its roots, so no link may lead out of one: "
+                "move or copy what it links to under the root.",
+            ])
+
+    def test_an_output_under_a_linked_folder_names_the_folder_and_its_job(self):
+        with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as outside:
+            root, elsewhere = Path(directory).resolve(), Path(outside).resolve()
+            (root / "work").symlink_to(elsewhere)
+            with self.assertRaises(DagError) as caught:
+                read(sample(root))
+            lines = str(caught.exception).splitlines()
+            self.assertEqual(lines[0], f"work/upper.txt leads through the link work to {elsewhere / 'upper.txt'}, "
+                                       f"outside the dataset root {root}.")
+            self.assertEqual(lines[1], "  Job 1 (op1) writes it.")
+
+    def test_a_link_leading_outside_the_root_is_rejected_when_loading(self):
+        with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as outside:
+            root = Path(directory).resolve()
+            data = sample(root)
+            (root / "work").symlink_to(outside)
+            with self.assertRaisesRegex(DagError, "^work/upper.txt leads through the link work to "):
+                read(data)
+            (root / "work").unlink()
+            (root / "work").mkdir()
+            (root / "work" / "upper.txt").symlink_to(Path(outside) / "upper.txt")
+            with self.assertRaisesRegex(DagError, "^work/upper.txt is a link to "):
+                read(data)
+
+    def test_pydantic_rejects_missing_and_wrong_typed_fields(self):
+        with tempfile.TemporaryDirectory() as directory:
+            data = sample(Path(directory))
+            del data["jobs"][0]["verify"]
+            with self.assertRaisesRegex(DagError, "verify"):
+                read(data)
+            data = sample(Path(directory))
+            data["jobs"][0]["id"] = "1"
+            with self.assertRaisesRegex(DagError, "int_type"):
+                read(data)
+            data = sample(Path(directory))
+            data["jobs"][0]["commands"][0]["command"][0] = [{"unknown": "program"}]
+            with self.assertRaisesRegex(DagError, "unknown"):
+                read(data)
+
+    def test_reads_cores_and_memory_and_rejects_bad_ones(self):
+        with tempfile.TemporaryDirectory() as directory:
+            data = sample(Path(directory))
+            data["jobs"][1]["cores"], data["jobs"][1]["memory"] = 8, 16 * 2**30
+            dag = read(data)
+            self.assertEqual([(job.cores, job.memory) for job in dag.jobs], [(1, None), (8, 16 * 2**30)])
+            for field, value, message in (("cores", 0, "greater_than_equal"), ("cores", True, "int_type"),
+                                          ("cores", None, "int_type"), ("memory", -1, "greater_than_equal"),
+                                          ("memory", 2**53 + 1, "less_than_equal"), ("memory", "16G", "int_type")):
+                data = sample(Path(directory))
+                data["jobs"][0][field] = value
+                with self.subTest(field=field, value=value), self.assertRaisesRegex(DagError, message):
+                    read(data)
+            for field in ("cores", "memory"):
+                data = sample(Path(directory))
+                del data["jobs"][0][field]
+                with self.subTest(missing=field), self.assertRaisesRegex(DagError, field):
+                    read(data)
+
+    def test_requires_a_root(self):
+        with tempfile.TemporaryDirectory() as directory:
+            data = sample(Path(directory))
+            data["root"] = None
+            with self.assertRaisesRegex(DagError, "pass --root"):
+                read(data)
+            self.assertEqual(read(data, directory).root, Path(directory).resolve())
+
+    def test_reads_real_spit_fixture(self):
+        with tempfile.TemporaryDirectory() as directory, FIXTURE.open(encoding="utf-8") as source:
+            dag = load_dag(source, directory)
+            self.assertEqual(len(dag.jobs), 5)
+            self.assertEqual(dag.jobs[3].depends_on, (1, 2))
+            self.assertEqual(dag.jobs[3].commands[0].arguments[4], "merged/group=alpha.txt")
+            self.assertEqual(dag.executables, ("sort",))
+            self.assertEqual({(job.cores, job.memory) for job in dag.jobs}, {(1, None)})
+
+
+if __name__ == "__main__":
+    unittest.main()
+
+
+class HereTests(unittest.TestCase):
+    """`{@here}` arrives as a part under the pipeline's folder."""
+
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.root = Path(directory.name)
+        (self.root / "source.txt").write_text("hello")
+
+    def data(self, here):
+        data = sample(self.root)
+        data["pipeline_folder"] = "/home/lab/study"
+        data["jobs"][0]["commands"][0]["command"][2] = ["print(1)", {"here": here}, "/run.sh"]
+        return data
+
+    def test_a_here_part_is_the_pipelines_folder_with_the_relative_folder_under_it(self):
+        self.assertEqual(read(self.data(""), self.root).jobs[0].commands[0].arguments[2], "print(1)/home/lab/study/run.sh")
+        self.assertEqual(read(self.data("libs/sub"), self.root).jobs[0].commands[0].arguments[2],
+                         "print(1)/home/lab/study/libs/sub/run.sh")
+
+    def test_a_here_part_needs_the_folder_and_stays_under_it(self):
+        data = self.data("libs")
+        data["pipeline_folder"] = None
+        with self.assertRaisesRegex(DagError, "pipeline_folder"):
+            read(data, self.root)
+        for bad in ("../x", "/etc"):
+            with self.assertRaisesRegex(DagError, "not a folder under"):
+                read(self.data(bad), self.root)
