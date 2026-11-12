@@ -146,8 +146,18 @@ pub(super) fn parse_type_declaration(
     let text = text.trim();
     let expected = "expected `type Name<Param, ...>`, such as `type Frame<Kind, Space>`";
     let declared = parse_type_expr(text, false).map_err(|error| type_error(number, text, error))?;
-    let TypeExpr::Applied { constructor, args } = declared else {
-        return Err(ParseError::new(number, expected).at_token(text));
+    let (constructor, args) = match declared {
+        TypeExpr::Applied { constructor, args } => (constructor, args),
+        // A type without parameters is used as it is, so a line declaring one
+        // is the mistake, not a missing list of parameters.
+        TypeExpr::Named(name) => {
+            let message =
+                format!("`{name}` has no parameters, so it needs no declaration; remove this line");
+            return Err(ParseError::new(number, message).at_token(text));
+        }
+        TypeExpr::Variable(_) | TypeExpr::Unknown => {
+            return Err(ParseError::new(number, expected).at_token(text));
+        }
     };
     let mut params: Vec<String> = Vec::new();
     for arg in args {

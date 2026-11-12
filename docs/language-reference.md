@@ -1884,7 +1884,7 @@ spit check wrong.spit || true
 error: line 2, column 8: source `scan`: `Frame<Diffusion>` has 1 type argument, but `Frame` is declared `type Frame<Kind, Space>` and takes 2 type arguments
 ```
 
-A type that is not declared is not checked, unless the pipeline is [strict](#strict-typing). Declaring a name again with the same parameters is one declaration; other parameters under the same name are an error. An import brings the declarations of the file it reads. A recipe takes no `type` line.
+A type that is not declared is not checked, unless the pipeline is [strict](#strict-typing). A type with no parameters, such as `Script`, is used without a declaration, and `type Script` is an error that says to remove the line. Declaring a name again with the same parameters is one declaration; other parameters under the same name are an error. An import brings the declarations of the file it reads. A recipe takes no `type` line.
 
 ### Strict typing
 
