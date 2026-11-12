@@ -191,6 +191,19 @@ $ tr a-z A-Z < input/allotment.txt > output/loud/plot=allotment.txt
 
 `verify` commands and checks never redirect. When the DAG is loaded, each command's `stdin` must be one of the job's input files and its `stdout` one of its output files, neither a folder, and one of a job's commands at most has a `stdout`; a DAG that breaks one of these is rejected.
 
+## Numbers read from files
+
+A SPIT command written `oxford_asl --tr @scalar(tr, min=5) ...` passes the number in the input file `tr` as an argument. Once a job's input checks pass, before its `verify` commands, the runner reads each such file and writes what it holds to the job's log:
+
+```text
+spit-bash: derivatives/tr/sub=01.txt holds 6.234000
+$ oxford_asl --tr 6.234000 ...
+```
+
+- The file must hold one number written as a decimal, such as `6.234000`, `-2` or `1e-3`, with only whitespace around it. The argument is the number as the file writes it.
+- A file that holds anything else, or a number outside the bounds, fails the job before any of its commands start, as ``derivatives/tr/sub=02.txt, read by `@scalar`, holds 4.1, which is under the min of 5``.
+- The file is one of the job's inputs, so the job reruns when it changes. `plan` and `explain` show the read, as `@scalar(derivatives/tr/sub=01.txt, min=5)`, since the number is known only when the job starts.
+
 ## Cores and memory
 
 A job's `cores` and `memory` in the DAG come from its operation's `resources` line, as in `resources merge: cores=2, memory=64M`: a job needs one core and claims no memory when its operation declares neither. `run` has a number of cores and an amount of memory to share among the jobs it runs at once:

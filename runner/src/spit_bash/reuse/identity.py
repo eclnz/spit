@@ -6,7 +6,7 @@ import hashlib
 import json
 
 from ..model import Artifact, Check, Work
-from ..schema import Command, CommandPart, DirPart, PathPart, SpitJob, StemPart
+from ..schema import Command, CommandPart, DirPart, PathPart, ScalarPart, SpitJob, StemPart
 
 # The work's parts, each hashed on its own. Keep in step with the keys `_parts` gives.
 PARTS = ("commands", "verify", "inputs", "outputs")
@@ -51,6 +51,9 @@ def _parts(item: SpitJob, slots: dict[str, str]) -> dict[str, object]:
             return ["dir", value.dir, of(value.of_path)]
         if isinstance(value, StemPart):
             return ["stem", value.stem, of(value.of_path)]
+        if isinstance(value, ScalarPart):
+            # The number is the input's; the bounds are part of the work.
+            return ["scalar", of(value.scalar), value.least, value.greatest]
         return ["here", value.here]
 
     def command(arguments: Command) -> list:

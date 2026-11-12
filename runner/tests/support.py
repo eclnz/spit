@@ -63,7 +63,7 @@ def placed(data):
 
 def document(root, jobs, external_inputs):
     return placed({
-        "version": 12,
+        "version": 13,
         "generator": {"name": "spit", "version": "0.5.0"},
         "root": None if root is None else str(root),
         "output_root": None if root is None else str(root),

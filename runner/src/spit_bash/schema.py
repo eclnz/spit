@@ -1,4 +1,4 @@
-"""The version 12 SPIT DAG schema, before filesystem checks or execution."""
+"""The version 13 SPIT DAG schema, before filesystem checks or execution."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from typing import Annotated, Literal
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
 
 # The one version of the format spit-bash reads.
-VERSION = 12
+VERSION = 13
 
 
 class SchemaModel(BaseModel):
@@ -68,7 +68,15 @@ class HerePart(SchemaModel):
     here: str
 
 
-CommandPart = str | PathPart | DirPart | StemPart | HerePart
+class ScalarPart(SchemaModel):
+    """The number in an input file, read when the job starts, with the least and greatest values allowed."""
+
+    scalar: RelativePath
+    least: float | None = Field(alias="min")
+    greatest: float | None = Field(alias="max")
+
+
+CommandPart = str | PathPart | DirPart | StemPart | HerePart | ScalarPart
 Argument = Annotated[list[CommandPart], Field(min_length=1)]
 Command = Annotated[list[Argument], Field(min_length=1)]
 
