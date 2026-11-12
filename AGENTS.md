@@ -173,7 +173,7 @@ spit-bash, in `runner/`, runs a `.spitdag`'s jobs on one machine. It is a Python
 
   ```sh
   python3 -m pip install -e ./runner
-  SPIT=target/debug/spit python3 -m unittest discover -s runner/tests
+  SPIT=$PWD/target/debug/spit python3 -m unittest discover -s runner/tests
   ```
 
   Its stored outputs are under `runner/tests/fixtures/output/`. Re-save them with `SPIT_BASH_BLESS=1`, then read the diff.
