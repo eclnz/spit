@@ -42,11 +42,10 @@ fn sha1(parts: &[&[u8]]) -> [u8; 20] {
             }
             compress(&mut state, &buffer);
         }
-        let mut blocks = rest.chunks_exact(64);
-        for block in &mut blocks {
+        let (blocks, tail) = rest.as_chunks::<64>();
+        for block in blocks {
             compress(&mut state, block);
         }
-        let tail = blocks.remainder();
         buffer[..tail.len()].copy_from_slice(tail);
         filled = tail.len();
     }
@@ -61,17 +60,17 @@ fn sha1(parts: &[&[u8]]) -> [u8; 20] {
     buffer[56..].copy_from_slice(&(length * 8).to_be_bytes());
     compress(&mut state, &buffer);
     let mut digest = [0u8; 20];
-    for (bytes, value) in digest.chunks_exact_mut(4).zip(state) {
-        bytes.copy_from_slice(&value.to_be_bytes());
+    for (bytes, value) in digest.as_chunks_mut::<4>().0.iter_mut().zip(state) {
+        *bytes = value.to_be_bytes();
     }
     digest
 }
 
 /// Fold one 64-byte block into `state`.
-fn compress(state: &mut [u32; 5], block: &[u8]) {
+fn compress(state: &mut [u32; 5], block: &[u8; 64]) {
     let mut words = [0u32; 80];
-    for (word, bytes) in words.iter_mut().zip(block.chunks_exact(4)) {
-        *word = u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
+    for (word, &bytes) in words.iter_mut().zip(block.as_chunks::<4>().0) {
+        *word = u32::from_be_bytes(bytes);
     }
     for index in 16..80 {
         words[index] =
@@ -144,7 +143,7 @@ mod tests {
                 0x1032_5476,
                 0xC3D2_E1F0,
             ];
-            for block in message.chunks_exact(64) {
+            for block in message.as_chunks::<64>().0 {
                 compress(&mut state, block);
             }
             let expected: String = state.iter().map(|word| format!("{word:08x}")).collect();

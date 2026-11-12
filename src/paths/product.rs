@@ -1,10 +1,10 @@
 //! The path a product's template gives each of its artifacts, with its
 //! [`PathPattern`] compiled once per product.
 
-use crate::model::{stage_directories, Artifact, Pipeline, PipelineIndex};
+use crate::model::{stage_directories, Artifact, EntityBinding, Pipeline, PipelineIndex};
 use crate::template::{
-    error, product_text, push_escaped, Gap, PathError, PathPart, PathPattern, PathPlaceholder,
-    PathTemplate, RenderError,
+    decode_component, error, product_text, push_escaped, Gap, PathError, PathPart, PathPattern,
+    PathPlaceholder, PathTemplate, RenderError,
 };
 
 use super::components::unusable_path;
@@ -64,6 +64,24 @@ impl<'p> PathBinder<'p> {
             slot => slot.insert(ProductPath::new(&self.index, artifact.product)?),
         };
         product.bind(artifact, label)
+    }
+
+    /// The values discovery reads from `path` with `product`'s pattern, or
+    /// `None` when the pattern does not match it or a value does not decode.
+    /// Keep in step with discovery's matching in `inputs/discover.rs`, which
+    /// reads a source's files with the same pattern.
+    pub(crate) fn read_back(&mut self, product: &str, path: &str) -> Option<EntityBinding> {
+        let id = self.index.id(product)?;
+        let product = match &mut self.products[id.index()] {
+            Some(found) => found,
+            slot => slot.insert(ProductPath::new(&self.index, product).ok()?),
+        };
+        product
+            .pattern
+            .match_path(path)?
+            .into_iter()
+            .map(|(dimension, value)| Some((dimension, decode_component(value)?)))
+            .collect::<Option<EntityBinding>>()
     }
 
     pub(crate) fn bind(
