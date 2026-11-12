@@ -1,8 +1,14 @@
 # Runnable examples
 
-Install `spit-bash` from the repository root with `python3 -m pip install .`. You also need the `spit` executable from [SPIT](https://github.com/eclnz/spit) on your `PATH`, or named by the `SPIT` variable. With sibling checkouts, `export SPIT=../spit/target/release/spit` is enough.
+These recipes run with [spit-bash](../../runner/README.md). From the repository's root, build SPIT and install the runner, then name the folder the commands below use:
 
-The recipes and their input files are in SPIT's repository, in `examples/runnable`, where SPIT's tests check them against the language. With sibling checkouts, set `EXAMPLES=../spit/examples/runnable`; the commands below use it. Each recipe uses its own folder as the dataset root. Generated DAGs, output files, and runner state go in those folders, which SPIT's `.gitignore` leaves out.
+```sh
+cargo build --release
+python3 -m pip install ./runner
+export SPIT=$PWD/target/release/spit EXAMPLES=$PWD/examples/runnable
+```
+
+SPIT's tests check these recipes against the language, and the runner's tests run them. Each recipe uses its own folder as the dataset root. Generated DAGs, output files, and runner state go in those folders, which the repository's `.gitignore` leaves out.
 
 ## Sort and merge
 

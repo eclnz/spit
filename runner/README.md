@@ -1,15 +1,15 @@
 # spit-bash
 
-`spit-bash` runs the jobs of a [SPIT](https://github.com/eclnz/spit) pipeline on one machine. Give it a recipe and it runs `spit dag` for you; give it a saved `.spitdag` or `dag --json` output and it needs nothing else, not the original `.spit` pipeline or `.spitout` inventory. It reads version 12 of SPIT's DAG format, and no other: a DAG of another version is rejected before anything runs, so use a `spit` and a `spit-bash` that match.
+`spit-bash` runs the jobs of a [SPIT](../README.md) pipeline on one machine. Give it a recipe and it runs `spit dag` for you; give it a saved `.spitdag` or `dag --json` output and it needs nothing else, not the original `.spit` pipeline or `.spitout` inventory. It reads version 12 of SPIT's DAG format, and no other: a DAG of another version is rejected before anything runs, so use a `spit` and a `spit-bash` that match.
 
-See the [runnable examples](examples/README.md) for the recipes in SPIT's repository, their commands, and expected output.
+See the [runnable examples](../examples/runnable/README.md) for recipes to run, their commands, and expected output.
 
 ## Install and use
 
-Requires Python 3.10 or newer, and `spit` on `PATH` to run a recipe or pipeline. From this repository:
+Requires Python 3.10 or newer, and `spit` on `PATH` to run a recipe or pipeline. From the repository's root:
 
 ```sh
-python3 -m pip install .
+python3 -m pip install ./runner
 spit-bash plan dataset.spitin
 spit-bash run dataset.spitin -j 4
 ```
@@ -330,11 +330,12 @@ A SPIT DAG is validated with Pydantic before planning. Invalid field types, unkn
 
 ## Development
 
+From the repository's root:
+
 ```sh
-python3 -m pip install -e '.[dev]'
-messie -af .
-PYTHONPATH=src python3 -m unittest discover -s tests -v
+python3 -m pip install -e ./runner
+cargo build
+SPIT=target/debug/spit python3 -m unittest discover -s runner/tests -v
 ```
 
-The test fixture under `tests/fixtures/` is actual version 12 output from SPIT's `command_demo` example, written without a root. `tests/test_examples.py` runs the [examples](examples/README.md), which live in SPIT's repository under `examples/runnable` so that SPIT's own tests keep them in step with its syntax, with a real `spit`: set `SPIT` to the binary or put it on `PATH`, and `SPIT_REPOSITORY` to the checkout it was built from (a sibling `../spit` by default), or the tests are skipped. CI builds `spit` from SPIT's `dev` branch, where its work merges, for them, on each pull request, on every push to `dev` and `main`, and weekly, so a change to SPIT's DAG format fails here. The weekly run tests this repository's `dev`, not `main`, which holds the last release. A branch whose name SPIT also has, other than `main` and `dev`, builds SPIT's branch of that name instead, so a change made in both repositories is tested together before SPIT's half merges. Once SPIT's branch has merged into `dev`, CI builds `dev` again, so a branch left behind after its merge never stands in for `dev`.
-
+The test fixture under `tests/fixtures/` is actual version 12 output from SPIT's `command_demo` example, written without a root. `tests/test_examples.py` runs the [examples](../examples/runnable/README.md) in `examples/runnable`, which SPIT's own tests keep in step with its syntax, with a real `spit`: set `SPIT` to the binary built from the same checkout, or put it on `PATH`, or the tests are skipped. CI builds `spit` from each commit and runs them, so a change to SPIT's DAG format and the runner's change to read it are tested together. The repository's CI also runs Messie over the runner's folders.
