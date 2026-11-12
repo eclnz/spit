@@ -335,7 +335,7 @@ From the repository's root:
 ```sh
 python3 -m pip install -e ./runner
 cargo build
-SPIT=target/debug/spit python3 -m unittest discover -s runner/tests -v
+SPIT=$PWD/target/debug/spit python3 -m unittest discover -s runner/tests -v
 ```
 
 The test fixture under `tests/fixtures/` is actual version 12 output from SPIT's `command_demo` example, written without a root. `tests/test_examples.py` runs the [examples](../examples/runnable/README.md) in `examples/runnable`, which SPIT's own tests keep in step with its syntax, with a real `spit`: set `SPIT` to the binary built from the same checkout, or put it on `PATH`, or the tests are skipped. CI builds `spit` from each commit and runs them, so a change to SPIT's DAG format and the runner's change to read it are tested together. The repository's CI also runs Messie over the runner's folders.
