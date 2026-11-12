@@ -256,7 +256,9 @@ fn write_outputs(
 /// An argument is an array of parts: a string for text, `{"path": ...}` for
 /// a file, and `{"dir": ..., "of": ...}` or `{"stem": ..., "of": ...}` for
 /// its folder or its name without its extension, with the file they are of,
-/// and `{"here": ...}` for a folder under the pipeline's.
+/// `{"here": ...}` for a folder under the pipeline's, and `{"scalar": ...,
+/// "min": ..., "max": ...}` for the number in a file, with a bound left out
+/// as `null`.
 pub(super) fn write_command(out: &mut String, dag: &BoundDag, command: &[Argument]) {
     write_array(out, command, |out, argument| {
         write_array(out, argument, |out, part| match part {
@@ -269,6 +271,16 @@ pub(super) fn write_command(out: &mut String, dag: &BoundDag, command: &[Argumen
             ArgPart::Here { relative, .. } => {
                 out.push_str("{\"here\":");
                 write_string(out, relative);
+                out.push('}');
+            }
+            ArgPart::Scalar { artifact, min, max } => {
+                out.push_str("{\"scalar\":");
+                write_string(out, dag.path(*artifact));
+                // A bound is a decimal in its shortest form, which is JSON.
+                for (key, bound) in [(",\"min\":", min), (",\"max\":", max)] {
+                    out.push_str(key);
+                    out.push_str(bound.as_deref().unwrap_or("null"));
+                }
                 out.push('}');
             }
             ArgPart::Dir(artifact) | ArgPart::Stem { artifact, .. } => {
@@ -445,7 +457,7 @@ mod tests {
         dag.output_root = Some("/data/results".into());
         let text = dag.to_json();
         assert!(text.starts_with(&format!(
-            "{{\"version\":12,\"generator\":{{\"name\":\"spit\",\"version\":\"{}\"}},\
+            "{{\"version\":13,\"generator\":{{\"name\":\"spit\",\"version\":\"{}\"}},\
 \"root\":\"/data/study\",\"output_root\":\"/data/results\",\"external_inputs\":[{{\"product\":\"raw\"",
             env!("CARGO_PKG_VERSION")
         )));

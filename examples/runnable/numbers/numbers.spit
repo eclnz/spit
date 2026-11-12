@@ -1,0 +1,16 @@
+source list : Lines [plot]
+
+default entities: {@key}={@value} separated "_"
+default path: output/{@product}/{@entities}.txt
+path list: input/{plot}.txt
+
+# wc prints how many lines the list has, padded with spaces on some systems.
+operation count(list: Lines) -> Count
+command count: wc -l < {list} > {@output}
+size = count(list)
+
+# awk is given that number, trimmed, as `n`. An empty list counts 0, under
+# the min of 1, so its job fails before awk starts.
+operation number(list: Lines, size: Count) -> Lines
+command number: awk -v n=@scalar(size, min=1) '{ print NR "/" n ": " $0 }' {list} > {@output}
+numbered = number(list, size)

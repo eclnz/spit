@@ -9,7 +9,7 @@ use crate::model::{
 };
 use crate::parser::SourceMap;
 use crate::template::builtin::{CORES, HERE, OUTPUT};
-use crate::template::Part;
+use crate::template::{CommandPart, ScalarRead, SCALAR};
 
 use crate::template::{CommandError, CommandTemplate, Stream};
 
@@ -280,8 +280,13 @@ fn check_line_placeholders(
     for parts in template.arguments() {
         let whole = parts.len() == 1;
         for part in parts {
-            let Part::Placeholder(name) = part else {
-                continue;
+            let name = match part {
+                CommandPart::Literal(_) => continue,
+                CommandPart::Placeholder(name) => name,
+                CommandPart::Scalar(read) => {
+                    check_scalar(operation, read)?;
+                    continue;
+                }
             };
             let unknown = || {
                 CommandError::new(format!(
@@ -390,6 +395,40 @@ fn check_line_placeholders(
         }
     }
     Ok(())
+}
+
+/// Check that `read` names a `one` input of `operation`, whose one file
+/// holds the number. Whether the input is a file rather than a folder is
+/// known only once the steps are resolved, and binding checks it.
+fn check_scalar(operation: &OperationDef, read: &ScalarRead) -> Result<(), CommandError> {
+    let port = &read.port;
+    let fail = |message: String| Err(CommandError::new(message).focus(SCALAR));
+    match slot(operation, port) {
+        Some(Slot::Input(index))
+            if operation.inputs[index].cardinality == Cardinality::Many =>
+        {
+            fail(format!(
+                "`{read}`: `{port}` is a many input, and `{SCALAR}` reads the number in one file"
+            ))
+        }
+        Some(Slot::Input(_)) => Ok(()),
+        Some(Slot::Output(_)) => fail(format!(
+            "`{read}`: `{port}` is an output of `{}`, which does not exist until the command runs; `{SCALAR}` reads an input",
+            operation.name
+        )),
+        _ => {
+            let inputs: Vec<_> = operation.inputs.iter().map(|input| format!("`{}`", input.name)).collect();
+            let has = if inputs.is_empty() {
+                "it has none".to_owned()
+            } else {
+                format!("it has {}", inputs.join(", "))
+            };
+            fail(format!(
+                "`{read}`: `{}` has no input port `{port}`; {has}",
+                operation.name
+            ))
+        }
+    }
 }
 
 /// Check that every step calling `operation` reads, at its input `index`, a

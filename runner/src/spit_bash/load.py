@@ -10,10 +10,10 @@ from typing import Iterable, Iterator, TextIO
 
 from pydantic import ValidationError
 
-from . import schema
+from . import scalars, schema
 from .model import Artifact, Check, Dag, DagError, Job, Kind, Port, Run, Side
 from .reuse import identity
-from .schema import Command, DirPart, HerePart, JobCommand, PathPart, SpitDag, SpitJob, StemPart
+from .schema import Command, DirPart, HerePart, JobCommand, PathPart, ScalarPart, SpitDag, SpitJob, StemPart
 
 
 def _here(part: HerePart, folder: str | None) -> str:
@@ -32,9 +32,9 @@ def _command(command: Command, folder: str | None = None, shown: dict[str, str] 
     output root, which commands run from: its absolute path.
     """
     shown = shown or {}
-    arguments = []
+    arguments: list[str] = []
     for argument in command:
-        parts = []
+        parts: list[str | scalars.Read] = []
         for part in argument:
             if isinstance(part, str):
                 parts.append(part)
@@ -46,9 +46,16 @@ def _command(command: Command, folder: str | None = None, shown: dict[str, str] 
                 parts.append(part.stem)
             elif isinstance(part, HerePart):
                 parts.append(_here(part, folder))
-        arguments.append("".join(parts))
+            elif isinstance(part, ScalarPart):
+                parts.append(scalars.Read(part.scalar, part.least, part.greatest))
+        if any(isinstance(part, scalars.Read) for part in parts):
+            arguments.append(scalars.Reading(tuple(parts)))
+        else:
+            arguments.append("".join(parts))  # type: ignore[arg-type]
     if not arguments[0]:
         raise DagError("command has no executable")
+    if isinstance(arguments[0], scalars.Reading):
+        raise DagError("command starts with a `scalar` part, not a program")
     return tuple(arguments)
 
 
@@ -139,6 +146,16 @@ def _check_streams(job: SpitJob, folders: frozenset[str]) -> None:
                 raise DagError(f"job {job.id}: `{field_name}` names {path}, which is not one of its {side}")
             if path in folders:
                 raise DagError(f"job {job.id}: `{field_name}` names {path}, which is a folder, not a file")
+
+
+def _check_reads(job: SpitJob, reads: tuple[scalars.Read, ...], folders: frozenset[str]) -> None:
+    """Each `scalar` part names one of the job's input files."""
+    inputs = {artifact.path for port in job.inputs.values() for artifact in port}
+    for read in reads:
+        if read.path not in inputs:
+            raise DagError(f"job {job.id}: a `scalar` part names {read.path}, which is not one of its inputs")
+        if read.path in folders:
+            raise DagError(f"job {job.id}: a `scalar` part names {read.path}, which is a folder, not a file")
 
 
 def _run(command: JobCommand, folder: str | None, shown: dict[str, str]) -> Run:
@@ -237,6 +254,8 @@ def _load(source: TextIO, root_override: str | None) -> Dag:
         inputs, produced = _ports(item, slots)
         commands = tuple(_run(command, document.pipeline_folder, shown) for command in item.commands)
         verify = tuple(_command(command, document.pipeline_folder, shown) for command in item.verify)
+        reads = scalars.reads((*(run.arguments for run in commands), *verify))
+        _check_reads(item, reads, folders)
         checks = tuple(
             Check(Side(check.when), check.check, check.port, check.path,
                   _command(check.command, document.pipeline_folder, shown))
@@ -263,6 +282,7 @@ def _load(source: TextIO, root_override: str | None) -> Dag:
             origin=origin,
             cores=item.cores,
             memory=item.memory,
+            reads=reads,
         ))
         seen_ids.add(item.id)
 

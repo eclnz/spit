@@ -52,6 +52,15 @@ class CommandFailed:
 
 
 @dataclass(frozen=True)
+class ScalarInvalid:
+    """The input file at `path`, which a `scalar` part reads, does not hold a number its bounds allow:
+    `words` say what it holds and why, as in `holds 4.1, which is under the min of 5`."""
+
+    path: str
+    words: str
+
+
+@dataclass(frozen=True)
 class StdoutNotMoved:
     """A command succeeded, but its standard output could not be renamed onto the output `path`."""
 
@@ -110,5 +119,6 @@ class Blocked:
     decision: Decision
 
 
-Failure = Union[InputDisappeared, NoCommand, CheckArtifactMissing, CheckFailed, CommandFailed, StdoutNotMoved,
+Failure = Union[InputDisappeared, NoCommand, CheckArtifactMissing, CheckFailed, CommandFailed, ScalarInvalid,
+                StdoutNotMoved,
                 InputChanged, OutputsMissing, PlaceFailed, DependencyFailed, Blocked]
