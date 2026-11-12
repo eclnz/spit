@@ -114,7 +114,16 @@ error: line 18, column 40: command for `average` uses `{run}`, but `runs` collec
 
 **The pipeline stays clean of the dataset's quirks.** Which files to read, which subjects to exclude, and how many runs each must have go in a recipe (`.spitin`) beside the data, not in the pipeline. The same pipeline runs on the next dataset unchanged.
 
-**The plan is a file you can read.** A `.spitdag` holds every job with its inputs, outputs and command line, in a [documented format](docs/spitdag.md). [spit-bash](runner/README.md) runs it on one machine, in parallel, and on a rerun skips each job whose inputs hold the same bytes as before. Another runner, for a cluster or a cloud, needs nothing but the format.
+**Iterate on the data and the pipeline without starting over.** [spit-bash](runner/README.md), the runner, records what each job read, ran and wrote, and on the next run does only the work that changed:
+
+- Add a subject or a run, and only its jobs and the collections it joins run. A dataset still being collected runs with `--partial`, and the subjects not yet complete wait.
+- Edit a command, and only that operation's jobs rerun, with the steps after them.
+- Change an input in a way that leaves a step's output the same, and the run stops there: the jobs after it are kept.
+- `touch` a file, check it out again, or move the dataset, and nothing reruns, since files are compared by content.
+- Rename a product or a dimension, and `--move-files` moves the existing outputs to their new paths rather than remaking them.
+- Every output a run replaces is kept, and `spit-bash restore` puts it back. `spit-bash plan` says what will run and why before anything does.
+
+**The plan is a file you can read.** A `.spitdag` holds every job with its inputs, outputs and command line, in a [documented format](docs/spitdag.md). spit-bash runs it on one machine, in parallel. Another runner, for a cluster or a cloud, needs nothing but the format.
 
 **It is fast.** Planning 72,000 jobs for 1,000 subjects takes about a quarter of a second, and checking the pipeline a few milliseconds, so the editor can check as you type.
 
