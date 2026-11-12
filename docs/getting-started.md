@@ -58,7 +58,7 @@ The inline root and source path find two `alpha` shards and one `beta` shard in 
 cargo run -- dag examples/commands/command_demo/command_demo.spit -o /tmp/command_demo.spitdag
 ```
 
-The `.spitdag` is the job description a [runner](https://github.com/eclnz/spit-bash) reads. See the [DAG format](spitdag.md) if you are writing a runner.
+The `.spitdag` is the job description a [runner](https://github.com/eclnz/spit/tree/dev/runner) reads. See the [DAG format](spitdag.md) if you are writing a runner.
 
 ## 5. Use a real dataset
 
