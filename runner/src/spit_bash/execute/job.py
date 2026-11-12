@@ -16,8 +16,9 @@ from ..logs import StampedLog, open_log
 from ..model import Check, Dag, DagError, Job, Kind, Layout, Side
 from ..reuse.relocate import Migration
 from .failure import (CheckArtifactMissing, CheckFailed, CommandFailed, Failure, InputChanged, InputDisappeared,
-                      NoCommand, OutputsMissing, Phase, PlaceFailed, StdoutNotMoved)
+                      NoCommand, OutputsMissing, Phase, PlaceFailed, ScalarInvalid, StdoutNotMoved)
 from ..runs import kept_path
+from .. import scalars
 from .options import Options
 from .process import CommandEnd, partial, run_command, succeeded
 
@@ -251,13 +252,14 @@ def _settle_aside(moved: list[tuple[str, Path, Path]], log: Log, restore: bool, 
 
 async def _make(dag: Dag, job: Job, before: Stamps, log: Log, limit: int | None,
                 entries: dict[str, FolderEntries], listed: Listings,
-                runner: Runner) -> Failure | tuple[Stamps, Stamps]:
+                runner: Runner, values: dict[str, str]) -> Failure | tuple[Stamps, Stamps]:
     """Run a job's commands in order, then its output checks; give a failure, or its inputs' and outputs' stamps.
 
-    The first command that fails stops the job, and the commands after it do not run.
+    The first command that fails stops the job, and the commands after it do not run. `values` are the
+    numbers its `scalar` parts read, by path.
     """
     for index, run in enumerate(job.commands, 1):
-        end = await runner(dag, run.arguments, log, run.stdin, run.stdout, limit)
+        end = await runner(dag, scalars.bound(run.arguments, values), log, run.stdin, run.stdout, limit)
         if not succeeded(end):
             return CommandFailed(Phase.COMMAND, index, end)
         if run.stdout is not None:
@@ -289,7 +291,8 @@ async def run_job(dag: Dag, job: Job, log: Path, options: Options, runner: Runne
                   on_start: Callable[[], None] = lambda: None,
                   on_discard: Callable[[], None] = lambda: None, reason: str | None = None,
                   keep_edited: bool = False) -> Outcome:
-    """Run one job: its input checks and `verify` commands, its commands, then its output checks.
+    """Run one job: its input checks, the numbers its commands read, its `verify` commands and commands, then its
+    output checks.
 
     `on_start` is called once the job's inputs are all there and it has a
     command, before its log at `log` is opened. A job that fails once its
@@ -324,8 +327,13 @@ async def run_job(dag: Dag, job: Job, log: Path, options: Options, runner: Runne
         failure = await _checks(dag, job.before, stream, runner)
         if failure is not None:
             return Failed(failure, log)
+        values = scalars.read_all(job.reads, dag.path)
+        if isinstance(values, tuple):
+            return Failed(ScalarInvalid(*values), log)
+        for path, value in values.items():
+            stream.write(f"spit-bash: {path} holds {value}\n".encode())
         for index, command in enumerate(job.verify, 1):
-            end = await runner(dag, command, stream, limit=limit)
+            end = await runner(dag, scalars.bound(command, values), stream, limit=limit)
             if not succeeded(end):
                 return Failed(CommandFailed(Phase.VERIFY, index, end), log)
         # An earlier run's files would mix with this run's, and some tools refuse to write over
@@ -343,7 +351,7 @@ async def run_job(dag: Dag, job: Job, log: Path, options: Options, runner: Runne
         # outputs, unless they are kept. A cancelled command's process group is stopped before
         # the cancellation reaches this point.
         try:
-            made = await _make(dag, job, before, stream, limit, entries, listed, runner)
+            made = await _make(dag, job, before, stream, limit, entries, listed, runner, values)
         except asyncio.CancelledError:
             _remove_outputs(dag, job, stream, keep)
             _settle_aside(moved, stream, not keep)

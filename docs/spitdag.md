@@ -1,6 +1,6 @@
 # The `.spitdag` format
 
-A `.spitdag` is what `spit dag -o` writes and `spit dag --json` prints: every job a pipeline resolves to over one dataset, each with its files and its commands. A backend that runs the jobs reads nothing else: no pipeline, path rule or command template. This page describes version 12, the version SPIT writes. Use `spit dag --commands` for a readable view of the same commands.
+A `.spitdag` is what `spit dag -o` writes and `spit dag --json` prints: every job a pipeline resolves to over one dataset, each with its files and its commands. A backend that runs the jobs reads nothing else: no pipeline, path rule or command template. This page describes version 13, the version SPIT writes. Use `spit dag --commands` for a readable view of the same commands.
 
 ## Document
 
@@ -8,7 +8,7 @@ A `.spitdag` is one JSON object, followed by a newline:
 
 ```json
 {
-  "version": 12,
+  "version": 13,
   "generator": {"name": "spit", "version": "0.5.0"},
   "root": "/data/study",
   "output_root": "/data/study-results",
@@ -26,7 +26,7 @@ A `.spitdag` is one JSON object, followed by a newline:
 
 | Field | Holds |
 | --- | --- |
-| `version` | The format's version, `12`. A change a reader must know about raises it. Version 6 added each job's [`checks`](#checks). Version 7 added `pipeline_files`, `calls` and each job's `origin`: see [Where jobs come from](#where-jobs-come-from). Version 8 gives each job its [`commands`](#commands) in place of version 7's `command`, each with its `stdin` and `stdout`, see [Standard input and output](#standard-input-and-output), and added its `cores` and `memory`, see [Cores and memory](#cores-and-memory). Version 9 gives every job an `origin`, with the `file` and `line` of its step, where version 8 left it `null` for a step written in the pipeline. Version 10 added `pipeline_folder` and the `here` command part. Version 11 removed each job's `fingerprint`: see [Identifying work](#identifying-work). Version 12 added `output_root` and each artifact's `under`: see [Roots](#roots). |
+| `version` | The format's version, `13`. A change a reader must know about raises it. Version 6 added each job's [`checks`](#checks). Version 7 added `pipeline_files`, `calls` and each job's `origin`: see [Where jobs come from](#where-jobs-come-from). Version 8 gives each job its [`commands`](#commands) in place of version 7's `command`, each with its `stdin` and `stdout`, see [Standard input and output](#standard-input-and-output), and added its `cores` and `memory`, see [Cores and memory](#cores-and-memory). Version 9 gives every job an `origin`, with the `file` and `line` of its step, where version 8 left it `null` for a step written in the pipeline. Version 10 added `pipeline_folder` and the `here` command part. Version 11 removed each job's `fingerprint`: see [Identifying work](#identifying-work). Version 12 added `output_root` and each artifact's `under`: see [Roots](#roots). Version 13 added the [`scalar` part](#numbers-read-from-files). |
 | `generator` | The program that wrote the file, and its version. |
 | `root` | The absolute dataset folder, which the sources are under, or `null` when it was not known: a `.spitout` that records no root. |
 | `output_root` | The absolute folder the files jobs write are under, and the folder commands run from: see [Roots](#roots). It is `root` when the pipeline names no output root, and `null` when neither is known. |
@@ -173,6 +173,24 @@ Use the `dir` or `stem` text as the part, as a `path` part is used. Version 4 ad
 
 Use `pipeline_folder`, then `/` and the part's text unless it is empty, as the part's text. A part is written relative so that the commands do not change when the pipeline moves. Version 10 added this part; a reader written for version 9 does not know it.
 
+### Numbers read from files
+
+`@scalar(tr, min=5)` in a template, the number in an input's file, becomes a `scalar` part holding the file's path and the bounds, with `null` for one not given:
+
+```json
+[["oxford_asl"], ["--tr"], [{"scalar": "derivatives/tr/sub=01.txt", "min": 5, "max": null}]]
+```
+
+The path is that of one of the job's inputs, a file. Read the file once each time the job runs, after its `"before"` [checks](#checks) and before its first `verify` command, and use what it holds for every `scalar` part naming it, in `verify` and in `commands`:
+
+- Remove the whitespace around the file's text. What is left must be one number written as a decimal: an optional `+` or `-`, digits with at most one `.` among or around them, and an optional exponent, `e` or `E` and a whole number, such as `6.234000`, `.5` or `1e-3`. It must be finite as a double.
+- The number must be at least `min` and at most `max`, each a JSON number.
+- The part's text is the trimmed text, as the file holds it.
+
+When the file is missing, holds anything else, or is out of bounds, the job fails before its `verify` commands, as a failed `verify` command fails it. Report the path and what the file holds, as in `derivatives/tr/sub=01.txt holds 4.1, which is under the min of 5`.
+
+The part names an input, so a backend that reruns a job when an input changes reruns it when the number does. Version 13 added this part; a reader written for version 12 does not know it.
+
 Run each argument as one word, exactly as given: no shell is involved, so nothing in it is split, expanded or interpreted. Run the command from `output_root`, and resolve each path against its artifact's root: a path under `output_root` is then right as written, and one under `root` names the right file once joined to `root`. `spit dag --commands` shows such a path reached from `output_root`, as `../data/in.txt`.
 
 ### Standard input and output
@@ -239,7 +257,7 @@ The `"before"` checks come first, then the `"after"` checks; within each, by por
 
 ### Running checks
 
-A backend runs a job in this order: the `"before"` checks, the `verify` commands, `commands`, the check that every output exists, then the `"after"` checks. If any fails, the job fails, even when its commands exited with status 0, and no job that depends on it runs. Report a failure with the check, the port and the path, as in `check ndim(4) failed on output derivatives/dwi/sub=01.mif`.
+A backend runs a job in this order: the `"before"` checks, the reads of its [`scalar` parts](#numbers-read-from-files), the `verify` commands, `commands`, the check that every output exists, then the `"after"` checks. If any fails, the job fails, even when its commands exited with status 0, and no job that depends on it runs. Report a failure with the check, the port and the path, as in `check ndim(4) failed on output derivatives/dwi/sub=01.mif`.
 
 A backend that identifies a job's work leaves its checks out: a changed check does not make a job's outputs out of date. A backend that records successful jobs records the checks each passed with, such as the JSON of its `checks`. When a job is otherwise current but its checks differ from the record, the backend runs the checks alone on the existing files rather than rerunning `commands`. If one fails, the job fails and its record is dropped, so the next run reruns it.
 
@@ -299,7 +317,7 @@ None of these is part of a job's work. An edit elsewhere in a library, such as t
 SPIT writes no fingerprint: a backend that decides whether a job must run again identifies the work itself. The document holds what it needs.
 
 - A job's `inputs` and `outputs` give each artifact's `product` and `entities`, which identify it apart from its `path`.
-- A command part `{"path": P}`, `{"dir": D, "of": P}` or `{"stem": S, "of": P}` names the job's input or output whose `path` is `P`. Each path belongs to one artifact, so replacing `P` with that artifact's product and entities gives the command without its storage paths. The same holds for `stdin`, `stdout` and a check's `path`.
+- A command part `{"path": P}`, `{"dir": D, "of": P}`, `{"stem": S, "of": P}` or `{"scalar": P, ...}` names the job's input or output whose `path` is `P`. Each path belongs to one artifact, so replacing `P` with that artifact's product and entities gives the command without its storage paths. The same holds for `stdin`, `stdout` and a check's `path`.
 - A literal part, a `here` part and the order of arguments, commands and a `many` port's artifacts are part of the work as written.
 - An artifact's `type`, a job's `id`, `stage`, `origin`, `cores`, `memory` and `checks` say where the job came from or how to run it, not what it makes.
 

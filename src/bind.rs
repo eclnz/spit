@@ -18,7 +18,7 @@ use crate::spitdag::{
     StepCall, StepCheck as BoundStepCheck,
 };
 use crate::template::builtin::CHECKED_PATH;
-use crate::template::Part;
+use crate::template::CommandPart;
 use crate::template::PathError;
 use crate::template::{CommandError, CommandTemplate, Stream};
 
@@ -352,7 +352,7 @@ fn bind_job(
         .iter()
         .map(|template| {
             Ok(BoundCommand {
-                arguments: expand(template.arguments(), step, dag, job)?,
+                arguments: expand(template.arguments(), step, dag, folders, job)?,
                 stdin: redirected(template, Stream::Stdin)?,
                 stdout: redirected(template, Stream::Stdout)?,
             })
@@ -369,7 +369,7 @@ fn bind_job(
             .verify
             .iter()
             .flat_map(|command| &command.lines)
-            .map(|template| expand(template.arguments(), step, dag, job))
+            .map(|template| expand(template.arguments(), step, dag, folders, job))
             .collect::<Result<_, _>>()?,
         checks: bind_checks(&step.checks, produced, job),
     })
@@ -422,9 +422,14 @@ fn check_command(check: &StepCheck<'_>, artifact: ArtifactId) -> Vec<Argument> {
             parts
                 .iter()
                 .map(|part| match part {
-                    Part::Literal(text) => ArgPart::Text(text.clone()),
-                    Part::Placeholder(name) if name == CHECKED_PATH => ArgPart::Path(artifact),
-                    Part::Placeholder(name) => {
+                    CommandPart::Literal(text) => ArgPart::Text(text.clone()),
+                    CommandPart::Placeholder(name) if name == CHECKED_PATH => {
+                        ArgPart::Path(artifact)
+                    }
+                    CommandPart::Scalar(_) => {
+                        unreachable!("`check_template` rejects a check that reads a scalar")
+                    }
+                    CommandPart::Placeholder(name) => {
                         let index = definition
                             .parameters
                             .iter()
@@ -443,11 +448,14 @@ fn check_command(check: &StepCheck<'_>, artifact: ArtifactId) -> Vec<Argument> {
 /// or with `.dimension` its value of that dimension. `{@cores}` is the
 /// step's cores as text, a dimension's placeholder its value in the job's
 /// outputs, and a one input's `.dimension` its artifact's value, each as
-/// text within its argument.
+/// text within its argument. A scalar names its input's artifact, which
+/// must be a file: `folders` says, by product number, whether a product's
+/// artifacts are folders.
 fn expand(
-    template: &[Vec<Part>],
+    template: &[Vec<CommandPart>],
     step: &StepCommands<'_>,
     dag: &ResolvedDag,
+    folders: &[bool],
     job: &Job,
 ) -> Result<Vec<Argument>, BindError> {
     let operation = step.operation;
@@ -465,7 +473,7 @@ fn expand(
     };
     let mut arguments = Vec::new();
     for parts in template {
-        if let [Part::Placeholder(name)] = parts.as_slice() {
+        if let [CommandPart::Placeholder(name)] = parts.as_slice() {
             let (port, facet) = facet(name);
             if let Some(Slot::Input(index)) = slot(operation, port) {
                 if operation.inputs[index].cardinality == Cardinality::Many {
@@ -483,8 +491,29 @@ fn expand(
         let mut argument = Vec::new();
         for part in parts {
             match part {
-                Part::Literal(value) => argument.push(ArgPart::Text(value.clone())),
-                Part::Placeholder(name) => {
+                CommandPart::Literal(value) => argument.push(ArgPart::Text(value.clone())),
+                // `validate_commands` makes sure a scalar reads a one input.
+                CommandPart::Scalar(read) => {
+                    let artifact = match slot(operation, &read.port) {
+                        Some(Slot::Input(index)) => job.inputs.get(index).and_then(|a| a.first()),
+                        _ => None,
+                    };
+                    let artifact = *artifact.ok_or_else(|| lacks(&read.port))?;
+                    if folders[dag.artifacts.product_of(artifact) as usize] {
+                        return Err(BindError::Command(CommandError::new(format!(
+                            "`{read}` in the command for `{}` reads the number in `{}`, but it is a folder, and `{}` reads one file",
+                            operation.name,
+                            dag.artifact(artifact),
+                            crate::template::SCALAR
+                        ))));
+                    }
+                    argument.push(ArgPart::Scalar {
+                        artifact,
+                        min: read.min.clone(),
+                        max: read.max.clone(),
+                    });
+                }
+                CommandPart::Placeholder(name) => {
                     let (port, facet) = facet(name);
                     let slot = slot(operation, port);
                     let artifact = match slot {

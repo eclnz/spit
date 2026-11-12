@@ -79,6 +79,17 @@ cat $EXAMPLES/streams/output/merged.txt
 
 The result is `APPLES`, `CARROTS`, `LEEKS`, `PEARS`, `PLUMS`. The log of each `shout` job, such as `$EXAMPLES/streams/.spit-bash/logs/1-shout.log`, shows its command with the redirections; the capitals `tr` prints go to the output, not the log. Empty `$EXAMPLES/streams/input/garden.txt` and run again: `tr` prints nothing, so its output fails its `nonempty` check, the job fails, and it leaves no `plot=garden.txt`, not even an empty one. Restore the input before planning another run.
 
+## Numbers read from files
+
+`numbers.spit` counts each plot's list with `wc -l < {list} > {@output}`, then gives that count to `awk` with `-v n=@scalar(size, min=1)`, which numbers each line out of it. The runner reads the count from its file when the `number` job starts, without the spaces some `wc` put before it:
+
+```sh
+spit-bash run $EXAMPLES/numbers/numbers.spitin
+cat $EXAMPLES/numbers/output/numbered/plot=garden.txt
+```
+
+The garden result is `1/3: apples`, `2/3: pears`, `3/3: plums`. The log of each `number` job, such as the one under `$EXAMPLES/numbers/.spit-bash/runs/` ending `jobs/numbered/plot=garden.log`, says `output/size/plot=garden.txt holds 3`, then shows the command run with `n=3`. Empty `$EXAMPLES/numbers/input/garden.txt` and run again: its count is now `0`, under the min of 1, so the garden's `number` job fails before `awk` starts, naming the file and what it holds. Restore the input before planning another run.
+
 ## Several commands in one job
 
 `sequence.spit` runs two tools, one after the other, in each `tally` job: `sort -o {sorted} {list}` writes the sorted list, then `uniq -c {sorted} > {counts}` reads it and prints how often each line comes:

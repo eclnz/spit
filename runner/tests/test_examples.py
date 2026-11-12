@@ -187,6 +187,24 @@ class ExampleTests(unittest.TestCase):
                          ["plot=allotment.txt", "plot=garden.txt"])
         self.assertEqual((output / "loud/plot=garden.txt").read_text(), "APPLES\nPEARS\nPLUMS\n")
 
+    def test_numbers(self):
+        recipe = str(self.examples / "numbers/numbers.spitin")
+        result = spit_bash("run", recipe)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        output = self.examples / "numbers/output/numbered"
+        self.assertEqual((output / "plot=garden.txt").read_text(), "1/3: apples\n2/3: pears\n3/3: plums\n")
+        self.assertEqual((output / "plot=allotment.txt").read_text(), "1/2: carrots\n2/2: leeks\n")
+        log = next((self.examples / "numbers/.spit-bash/runs").glob("*/jobs/numbered/plot=garden.log")).read_text()
+        self.assertIn("spit-bash: output/size/plot=garden.txt holds 3\n", log)
+        self.assertIn("$ awk -v n=3 ", log)
+
+        # An empty list counts 0, under the min of 1: the job fails before awk starts.
+        (self.examples / "numbers/input/garden.txt").write_text("")
+        result = spit_bash("run", recipe)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("output/size/plot=garden.txt, read by `@scalar`, holds 0, which is under the min of 1",
+                      result.stderr)
+
     def test_sequence(self):
         result = spit_bash("run", str(self.examples / "sequence/sequence.spitin"))
         self.assertEqual(result.returncode, 0, result.stderr)

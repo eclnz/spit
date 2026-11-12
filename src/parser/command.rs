@@ -3,7 +3,7 @@
 //! free of, and the `<` and `>` that only an operation's command may use.
 
 use crate::model::{CommandDef, CommandRole};
-use crate::span::{content_columns, Place};
+use crate::span::{content_columns, Focus, Place};
 use crate::template::{CommandTemplate, Stream};
 
 use super::declarations::single_colon;
@@ -71,11 +71,18 @@ pub(super) fn parse_command(
     let mut stdout: Option<usize> = None;
     for (index, template) in texts.into_iter().enumerate() {
         let parsed = CommandTemplate::parse(template).map_err(|error| {
+            // An error about one piece, such as a `@scalar(...)`, points at it.
+            let piece = match &error.location.focus {
+                Some(Focus::Text(text)) => template
+                    .find(&**text)
+                    .map(|at| &template[at..at + text.len()]),
+                _ => None,
+            };
             ParseError::new(
                 number,
                 format!("command `{operation}`: {}", error.message()),
             )
-            .at_token(template)
+            .at_token(piece.unwrap_or(template))
         })?;
         reject_shell_operators(template, &parsed, &what, number)?;
         check_redirects(template, &parsed, &what, role == CommandRole::Run, number)?;
