@@ -16,12 +16,15 @@ Settled with the maintainer:
 
 ## Steps
 
-1. [ ] Language: `@scalar(...)` in command and `verify` templates; checked
+1. [x] Language (`90846ea`): `@scalar(...)` in command and `verify` templates; checked
    against the operation (a `one` input port that is a file); rejected in
    checks and redirections.
-2. [ ] `.spitdag` version 13: a `{"scalar": P, "min": N, "max": N}` part;
+2. [x] `.spitdag` version 13 (`90846ea`): a `{"scalar": P, "min": N, "max": N}` part;
    `dag --commands` shows it as `@scalar(P, min=N)`.
-3. [ ] Runner: reads and checks each scalar before `verify`, logs it, fails
+3. [x] Runner (`1a797cf`): reads and checks each scalar before `verify`, logs it, fails
    the job naming the file and what it held; work identity and load checks.
-4. [ ] Documentation: language reference, `docs/spitdag.md`, runner README.
-5. [ ] spit-vscode: highlight `@scalar(...)`.
+4. [x] Documentation: language reference, guide, `docs/spitdag.md`,
+   binding page (`90846ea`); runner README and `examples/runnable/numbers`
+   (`1a797cf`).
+5. [x] spit-vscode: highlight `@scalar(...)` (`c2e2076` in spit-vscode).
+6. [ ] Delete this plan before the branch merges; #265 builds on this.
