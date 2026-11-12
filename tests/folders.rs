@@ -188,6 +188,17 @@ fn a_path_of_the_wrong_kind_is_named() {
         text(&found.stderr)
     );
 
+    // A Finder alias is a file of bookmark data that Finder shows as a link.
+    tree.write("data/dicom/sub=04", "book\0\0\0\0mark\0\0\0\0");
+    let found = run(&tree, &["inputs"]);
+    assert!(
+        text(&found.stderr).contains(
+            "warning: skipped `dicom/sub=04`: it is a macOS Finder alias, which tools cannot follow; replace it with a symbolic link (ln -s TARGET dicom/sub=04)"
+        ),
+        "{}",
+        text(&found.stderr)
+    );
+
     let files = dataset(&RECON.replace("Dicom / [sub]", "Dicom [sub]"));
     let found = run(&files, &["inputs"]);
     assert!(

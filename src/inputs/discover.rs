@@ -20,6 +20,20 @@ use crate::template::{
     PathTemplate, Shape,
 };
 
+/// What a macOS Finder alias file starts with: the header of its bookmark data.
+const FINDER_ALIAS_HEADER: &[u8; 12] = b"book\0\0\0\0mark";
+
+/// Whether the file at `path` is a macOS Finder alias, which Finder shows as a
+/// link but which is a regular file of bookmark data that no command-line tool
+/// follows. Read only for a file a folder source skips, so its cost is off the
+/// path of a scan that finds what it expects.
+fn is_finder_alias(path: &Path) -> bool {
+    let mut header = [0; FINDER_ALIAS_HEADER.len()];
+    fs::File::open(path)
+        .and_then(|mut file| std::io::Read::read_exact(&mut file, &mut header))
+        .is_ok_and(|()| &header == FINDER_ALIAS_HEADER)
+}
+
 /// The source files found under a root, what the recipe's rules removed,
 /// and files whose values cannot be read.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -138,6 +152,9 @@ pub(super) fn discover(
             .any(|(end, _)| folders.contains(&file[..end]))
         {
             match first_match(&folder_sources, file) {
+                Some(_) if is_finder_alias(&root.join(file)) => discovery.skipped.push(format!(
+                    "`{file}`: it is a macOS Finder alias, which tools cannot follow; replace it with a symbolic link (ln -s TARGET {file})"
+                )),
                 Some((_, source)) => discovery.skipped.push(format!(
                     "`{file}`: is a file, but source `{}` reads folders",
                     source.product.name
