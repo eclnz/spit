@@ -96,7 +96,7 @@ A comment earns its place by telling the reader what the code can't. A wrong or 
 
 ## Writing documentation
 
-**Documentation says what SPIT is, as briefly as it can, and not how it got there.** A page doesn't recount what a component replaced, what was tried, or what a refactor changed. Git, pull requests and issues keep that history, and a page may cite a commit when the reason behind a rule matters. The same holds for comments in the code, and for the READMEs, documentation and comments of the repositories that work with SPIT: spit-vscode, spit-bash and spit-showcase. Commit messages and pull requests are where a change is told.
+**Documentation says what SPIT is, as briefly as it can, and not how it got there.** A page doesn't recount what a component replaced, what was tried, or what a refactor changed. Git, pull requests and issues keep that history, and a page may cite a commit when the reason behind a rule matters. The same holds for comments in the code, for the runner in `runner/`, and for the READMEs, documentation and comments of the repositories that work with SPIT: spit-vscode and spit-showcase. Commit messages and pull requests are where a change is told.
 
 - **Why this matters.** A page that tells a story grows with every change and goes stale. A page that describes the present changes only when the present does.
 - **For contributors, the diagram is the description.** A page's Mermaid diagram shows the components as they are and the data passing between them. The text around it adds only what a diagram can't show: types, invariants, failure behaviour. When the code changes, change the diagram, and delete any prose the diagram has made redundant.
@@ -160,14 +160,23 @@ This file holds the rules for agents.
 
 - **A change to what the extension reads needs a change in the extension.** That is anything in `check --json` or `--hovers`, any keyword, header, placeholder or other syntax, and the file kinds `check` takes. Make the extension's change as part of the same work, with the same branch name in both repositories. The extension's `extension.test.js` and `grammar.test.js` should cover it.
 - **Link the pull requests.** A spit-vscode pull request names the spit pull request it follows, as in "Follows eclnz/spit#42", and the spit pull request names the extension's. Merge the spit pull request first, since the extension needs a SPIT that has the change.
-- **Versions move together.** The extension and the runner share SPIT's version (see [Versions](#conventions)), so a release of SPIT bumps the extension's `package.json` and the runner's `pyproject.toml` as well.
+- **Versions move together.** The extension shares SPIT's version (see [Versions](#conventions)), so a release of SPIT bumps the extension's `package.json` as well.
 
 ## The local runner
 
-[spit-bash](https://github.com/eclnz/spit-bash) runs a `.spitdag`'s jobs on one machine. It reads only the DAG, so it must stay in step with `docs/spitdag.md`.
+spit-bash, in `runner/`, runs a `.spitdag`'s jobs on one machine. It is a Python package with its own `pyproject.toml` and [README](runner/README.md), and it shares SPIT's version.
 
-- **A change to the DAG format needs a change in the runner.** That is any field, argument part, ordering or meaning `docs/spitdag.md` gives, and above all a new `version`. Make the runner's change as part of the same work, with the same branch name in both repositories, and link the pull requests as for the extension. Merge the spit pull request first.
-- **The runner's CI catches drift.** It builds SPIT from `dev`, where SPIT's work merges, and runs its examples on each pull request, on every push to `dev` and `main`, and weekly, so a format change merged without the runner's change shows up there as a failure.
+- **The DAG is the only contract.** The runner reads the `.spitdag` and nothing else of SPIT's: it imports no compiler code, and its tests use SPIT only as the `spit` program and through `examples/runnable`. The compiler knows nothing of the runner. So another runner, such as one for a cluster, needs only `docs/spitdag.md`.
+- **A change to the DAG format changes the runner in the same pull request.** That is any field, argument part, ordering or meaning `docs/spitdag.md` gives, and above all a new `version`.
+- **CI tests them together.** It builds SPIT from the same commit and runs `examples/runnable` through the runner, so a format change without the runner's change fails the pull request.
+- **Checks before a commit that touches `runner/`.** From the repository's root, with SPIT built:
+
+  ```sh
+  python3 -m pip install -e ./runner
+  SPIT=$PWD/target/debug/spit python3 -m unittest discover -s runner/tests
+  ```
+
+  Its stored outputs are under `runner/tests/fixtures/output/`. Re-save them with `SPIT_BASH_BLESS=1`, then read the diff.
 
 ## Checks before every commit
 
@@ -197,14 +206,14 @@ usability/harness/rebuild_keys.sh             # expect `ok` for every answer key
 
 ## Conventions
 
-- **Branches.** Work merges into `dev`, which carries the next release's version. `main` holds the latest release, and moves to `dev` only when `dev`'s CI is green. The same holds in spit-vscode and spit-bash: a pull request targets `dev`, never `main`, so that `main` only ever moves forward to `dev`. `dev` is the default branch here; in spit-vscode and spit-bash `main` is.
-- **Versions.** SPIT, spit-vscode and spit-bash share one version, `0.MINOR.PATCH`.
+- **Branches.** Work merges into `dev`, which carries the next release's version. `main` holds the latest release, and moves to `dev` only when `dev`'s CI is green. The same holds in spit-vscode: a pull request targets `dev`, never `main`, so that `main` only ever moves forward to `dev`. `dev` is the default branch here; in spit-vscode `main` is.
+- **Versions.** SPIT, its runner and spit-vscode share one version, `0.MINOR.PATCH`.
   - A breaking change raises `MINOR` and sets `PATCH` to 0. That is a change that makes something written for the last release stop working or mean something else: syntax a pipeline or recipe uses, the `.spitdag` format, `check --json` or `--hovers`, a command's options or output that scripts read, or the runner's state.
   - A compatible change raises `PATCH`: a fix, or an addition that leaves what worked before working the same.
   - `dev` carries the version of the release it is heading for. The pull request that brings `dev`'s first breaking change since a release raises `MINOR`; the release raises `PATCH` if nothing broke.
-- **Releases.** Bump the version on a `release/<version>` branch in each repository, merged into `dev`. When `dev`'s CI is green, move `main` to `dev`, tag `main` with an annotated `v<version>` tag in each repository, and publish a GitHub release for the tag with short notes: what broke, then what was added and fixed.
+- **Releases.** Bump the version in `Cargo.toml`, `runner/pyproject.toml` and spit-vscode's `package.json` on a `release/<version>` branch in each repository, merged into `dev`. When `dev`'s CI is green, move `main` to `dev`, tag `main` with an annotated `v<version>` tag in each repository, and publish a GitHub release for the tag with short notes: what broke, then what was added and fixed.
 - **Language changes need not preserve old syntax during rapid development.** Choose one coherent way to express a concept. When a better design replaces a keyword, rule or file form, remove the old form rather than keeping an alias or deprecation path by default. Update the parser, diagnostics, examples, fixtures, stored outputs, user guide and companion tools in the same work, and explain the change to users. Preserve compatibility only when the change has a specific, documented reason to require it.
-- **Issues.** Bugs, feature requests and work left for later go in the GitHub issue tracker, one issue each, not in a report's or a plan's list of next steps. A report or commit that leaves work undone links its issues. A pull request names each issue it fixes with "Fixes #N". GitHub closes an issue only when the pull request merges into the default branch: here that is `dev`, so the issue closes on merge; in spit-vscode and spit-bash it is `main`, so close the issue by hand once the pull request merges into `dev`. A fix in a companion repository names the issue in full, as "Fixes eclnz/spit#N".
+- **Issues.** Bugs, feature requests and work left for later go in the GitHub issue tracker, one issue each, not in a report's or a plan's list of next steps. A report or commit that leaves work undone links its issues. A pull request names each issue it fixes with "Fixes #N". GitHub closes an issue only when the pull request merges into the default branch: here that is `dev`, so the issue closes on merge; in spit-vscode it is `main`, so close the issue by hand once the pull request merges into `dev`. A fix in a companion repository names the issue in full, as "Fixes eclnz/spit#N".
 - **Commit messages.** The title is a plain sentence, such as "Replace skip with drop, which names the groups it removes". Then prose saying what was wrong and what changed, then the co-author and session trailers.
 - **No model names** in files pushed to the repository.
 - **New recipe rule keywords** go in `split_rules` in `tests/support/mod.rs` as well, which separates a test's recipe rules from its pipeline by keyword.

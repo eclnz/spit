@@ -18,7 +18,7 @@ cargo run -- dag examples/commands/command_demo/command_demo.spit -o command_dem
 
 This pipeline includes `root command_demo_data` and its source paths, so it finds the checked-in inputs without a recipe. Add a `.spitin` for `discover`, `exclude`, or `require` rules; it can inherit the pipeline's root. Roots and explicit source paths must be declared in only one file.
 
-`spit-bash` can run the saved DAG on one machine. The [VS Code extension](https://github.com/eclnz/spit-vscode) provides live validation and context-specific hovers: generic definitions at declarations, concrete products and types at calls.
+[spit-bash](runner/README.md), in `runner/`, runs the saved DAG on one machine: `python3 -m pip install ./runner`, then `spit-bash run command_demo.spitdag`. The [VS Code extension](https://github.com/eclnz/spit-vscode) provides live validation and context-specific hovers: generic definitions at declarations, concrete products and types at calls.
 For scripts and editors, `spit check --json` prints diagnostics on stdout and exits 1 when any are errors.
 
 ## Documentation
