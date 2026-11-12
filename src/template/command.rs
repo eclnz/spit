@@ -1,15 +1,16 @@
 //! Command templates. `crate::command` checks them against their
 //! operations and the steps that call them.
 //!
-//! A command is stored as a list of arguments, each made of literal text and
-//! `{placeholders}`, and the ports its stdin and stdout are connected to,
-//! written `< {input}` and `> {output}`. A backend runs the arguments as
-//! they are; [`shell_word`] quotes one for a person to read or paste into a
-//! shell.
+//! A command is stored as a list of arguments, each made of literal text,
+//! `{placeholders}` and `@scalar(...)` reads, and the ports its stdin and
+//! stdout are connected to, written `< {input}` and `> {output}`. A backend
+//! runs the arguments as they are; [`shell_word`] quotes one for a person to
+//! read or paste into a shell.
 
 use std::borrow::Cow;
 use std::fmt;
 use std::ops::Range;
+use std::sync::Arc;
 
 use super::{builtin, parse_template, Part};
 use crate::span::Located;
@@ -22,9 +23,152 @@ crate::span::message_error!(
     CommandProblem
 );
 
-/// One argument of a command: literal text and `{placeholders}`, joined
-/// without separators.
-pub(crate) type Argument = Vec<Part>;
+/// One argument of a command: its parts, joined without separators.
+pub(crate) type Argument = Vec<CommandPart>;
+
+/// A piece of one argument of a command.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum CommandPart {
+    /// Text passed as it is.
+    Literal(String),
+    /// A `{name}` placeholder.
+    Placeholder(String),
+    /// A `@scalar(port, ...)`: the number in an input's file.
+    Scalar(ScalarRead),
+}
+
+/// The word that starts a [`ScalarRead`], up to its `(`.
+pub(crate) const SCALAR: &str = "@scalar";
+const SCALAR_OPEN: &str = "@scalar(";
+
+/// A `@scalar(port, min=N, max=N)` in a command: the number the file at an
+/// input port holds, which a backend reads when the job starts and passes
+/// as text, failing the job when it is not one finite number within the
+/// bounds.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct ScalarRead {
+    /// The input port whose file holds the number.
+    pub(crate) port: String,
+    /// The least value allowed, as the shortest decimal that reads back as
+    /// it, which is also how JSON writes it. Shared, since each job's
+    /// command holds it.
+    pub(crate) min: Option<Arc<str>>,
+    /// The greatest value allowed, written as `min` is.
+    pub(crate) max: Option<Arc<str>>,
+}
+
+impl fmt::Display for ScalarRead {
+    /// The read as a pipeline writes it, with its bounds in their shortest
+    /// form: `@scalar(tr, min=5)`.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&scalar_text(
+            &self.port,
+            self.min.as_deref(),
+            self.max.as_deref(),
+        ))
+    }
+}
+
+/// A `@scalar(...)` of `subject`, a port or a file's path, with its bounds:
+/// `@scalar(tr, min=5)`.
+pub(crate) fn scalar_text(subject: &str, min: Option<&str>, max: Option<&str>) -> String {
+    let mut text = format!("{SCALAR}({subject}");
+    for (key, bound) in [("min", min), ("max", max)] {
+        if let Some(bound) = bound {
+            text.push_str(&format!(", {key}={bound}"));
+        }
+    }
+    text.push(')');
+    text
+}
+
+impl ScalarRead {
+    /// Read the text between `@scalar(` and `)`: a port, then `min=` and
+    /// `max=` bounds, each at most once, separated by commas.
+    fn parse(inside: &str) -> Result<Self, String> {
+        let written = format!("{SCALAR}({inside})");
+        let mut items = inside.split(',').map(str::trim);
+        let port = items.next().unwrap_or_default();
+        let is_name = |text: &str| {
+            !text.is_empty()
+                && text
+                    .chars()
+                    .all(|c| c.is_alphanumeric() || c == '_' || c == '-')
+        };
+        if !is_name(port) {
+            let bare = port.trim_start_matches('{').trim_end_matches('}');
+            let hint = if is_name(bare) {
+                format!("; write `{SCALAR}({bare})`, with no braces")
+            } else {
+                format!(", as in `{SCALAR}(tr, min=5)`")
+            };
+            return Err(format!("`{written}` must name an input port first{hint}"));
+        }
+        let mut read = Self {
+            port: port.to_owned(),
+            min: None,
+            max: None,
+        };
+        for item in items {
+            let Some((key, value)) = item.split_once('=') else {
+                return Err(format!(
+                    "`{written}`: `{item}` is not a bound; write `min=N` or `max=N`"
+                ));
+            };
+            let bound = match key.trim() {
+                "min" => &mut read.min,
+                "max" => &mut read.max,
+                other => {
+                    return Err(format!(
+                        "`{written}` has no `{other}`; its bounds are `min` and `max`"
+                    ))
+                }
+            };
+            if bound.is_some() {
+                return Err(format!("`{written}` gives `{}` twice", key.trim()));
+            }
+            let value = value.trim();
+            let number = decimal(value).ok_or_else(|| {
+                format!(
+                    "`{written}`: `{value}` is not a number; write a decimal such as `5` or `0.25`"
+                )
+            })?;
+            *bound = Some(number.to_string().into());
+        }
+        if let (Some(min), Some(max)) = (&read.min, &read.max) {
+            let parse = |text: &str| text.parse::<f64>().expect("a bound is a decimal");
+            if parse(min) > parse(max) {
+                return Err(format!(
+                    "`{written}`: `min` is more than `max`, so no value passes"
+                ));
+            }
+        }
+        Ok(read)
+    }
+}
+
+/// `text` as a finite number, when it is one written as a decimal: an
+/// optional sign, digits with at most one `.`, and an optional exponent, as
+/// `-2`, `0.25`, `.5` or `6e-3`. Words such as `inf` and `nan` are not.
+/// Keep in step with `NUMBER` in the runner's `spit_bash/scalars.py`.
+fn decimal(text: &str) -> Option<f64> {
+    let body = text.strip_prefix(['+', '-']).unwrap_or(text);
+    let (mantissa, exponent) = match body.split_once(['e', 'E']) {
+        Some((mantissa, exponent)) => (mantissa, Some(exponent)),
+        None => (body, None),
+    };
+    let (whole, fraction) = mantissa.split_once('.').unwrap_or((mantissa, ""));
+    let digits = |text: &str| text.chars().all(|c| c.is_ascii_digit());
+    let exponent_ok = exponent.is_none_or(|exponent| {
+        let exponent = exponent.strip_prefix(['+', '-']).unwrap_or(exponent);
+        !exponent.is_empty() && digits(exponent)
+    });
+    let ok = digits(whole) && digits(fraction) && !(whole.is_empty() && fraction.is_empty());
+    if !ok || !exponent_ok {
+        return None;
+    }
+    text.parse::<f64>().ok().filter(|value| value.is_finite())
+}
 
 /// A command's template, split into arguments and parsed once when the
 /// command is read.
@@ -73,7 +217,7 @@ impl Redirect {
     /// one placeholder and nothing else.
     pub(crate) fn placeholder(&self) -> Option<&str> {
         match self.target.as_ref().map(|(parts, _)| parts.as_slice()) {
-            Some([Part::Placeholder(name)]) => Some(name),
+            Some([CommandPart::Placeholder(name)]) => Some(name),
             _ => None,
         }
     }
@@ -91,10 +235,10 @@ impl CommandTemplate {
         let mut arguments = Vec::new();
         let mut words = words.into_iter();
         while let Some(word) = words.next() {
-            let parse = |word: &Word| parse_template(&word.text).map_err(CommandError::new);
-            let stream = match word.text.as_str() {
-                "<" if word.bare => Some(Stream::Stdin),
-                ">" if word.bare => Some(Stream::Stdout),
+            let parse = |word: &Word| word.parse();
+            let stream = match word.text() {
+                Some("<") if word.bare => Some(Stream::Stdin),
+                Some(">") if word.bare => Some(Stream::Stdout),
                 _ => None,
             };
             if let Some(stream) = stream {
@@ -109,7 +253,7 @@ impl CommandTemplate {
                 });
                 continue;
             }
-            if word.bare && is_shell_operator(&word.text) {
+            if word.bare && word.text().is_some_and(is_shell_operator) {
                 operators.push(word.at.clone());
             }
             arguments.push(parse(&word)?);
@@ -120,6 +264,15 @@ impl CommandTemplate {
             } else {
                 "command template names no program to run, only where its stdin or stdout goes"
             }));
+        }
+        if let Some(CommandPart::Scalar(read)) = arguments[0]
+            .iter()
+            .find(|part| matches!(part, CommandPart::Scalar(_)))
+        {
+            return Err(CommandError::new(format!(
+                "a command starts with the program it runs, and `{read}` is a number; put it after the program"
+            ))
+            .focus(SCALAR));
         }
         Ok(Self {
             text,
@@ -177,8 +330,8 @@ impl CommandTemplate {
         self.arguments
             .iter()
             .filter_map(move |argument| match argument.as_slice() {
-                [Part::Literal(text)] if relative(text) => Some(NamedFile::Root(text)),
-                [Part::Placeholder(name), Part::Literal(rest)]
+                [CommandPart::Literal(text)] if relative(text) => Some(NamedFile::Root(text)),
+                [CommandPart::Placeholder(name), CommandPart::Literal(rest)]
                     if name == builtin::HERE && rest.starts_with('/') && relative(&rest[1..]) =>
                 {
                     Some(NamedFile::Here(&rest[1..]))
@@ -243,12 +396,63 @@ pub(crate) fn shell_word(word: &str) -> Cow<'_, str> {
 
 /// A word of a command, before its placeholders are parsed.
 struct Word {
-    /// The text, with quoted or escaped braces written `{{` and `}}`.
-    text: String,
+    /// The word's text and its `@scalar(...)` reads, in order.
+    pieces: Vec<Piece>,
     /// Whether the word was written without quotes or backslashes.
     bare: bool,
     /// Where the word is in the template, quotes included.
     at: Range<usize>,
+}
+
+/// A run of a [`Word`]'s text, or a `@scalar(...)` in it.
+enum Piece {
+    /// Text, with quoted or escaped braces written `{{` and `}}`.
+    Text(String),
+    /// What an unquoted `@scalar(` holds before its `)`.
+    Scalar(String),
+}
+
+impl Word {
+    /// The word's text, when it holds no `@scalar(...)`.
+    fn text(&self) -> Option<&str> {
+        match self.pieces.as_slice() {
+            [] => Some(""),
+            [Piece::Text(text)] => Some(text),
+            _ => None,
+        }
+    }
+
+    /// The word's parts, with its placeholders and reads parsed.
+    fn parse(&self) -> Result<Argument, CommandError> {
+        let mut parts: Argument = Vec::new();
+        for piece in &self.pieces {
+            match piece {
+                Piece::Text(text) => {
+                    for part in parse_template(text).map_err(CommandError::new)? {
+                        match (part, parts.last_mut()) {
+                            (Part::Literal(text), _) if text.is_empty() => {}
+                            (Part::Literal(text), Some(CommandPart::Literal(last))) => {
+                                last.push_str(&text);
+                            }
+                            (Part::Literal(text), _) => parts.push(CommandPart::Literal(text)),
+                            (Part::Placeholder(name), _) => {
+                                parts.push(CommandPart::Placeholder(name));
+                            }
+                        }
+                    }
+                }
+                Piece::Scalar(inside) => {
+                    parts.push(CommandPart::Scalar(ScalarRead::parse(inside).map_err(
+                        |message| CommandError::new(message).focus(format!("{SCALAR}({inside})")),
+                    )?))
+                }
+            }
+        }
+        if parts.is_empty() {
+            parts.push(CommandPart::Literal(String::new()));
+        }
+        Ok(parts)
+    }
 }
 
 /// Whether `word` is a shell operator such as `|`, `&&`, `;`, `>`, or `2>&1`,
@@ -269,6 +473,7 @@ fn is_shell_operator(word: &str) -> bool {
 /// Bash, single-quoted and backslash-escaped braces are literal.
 fn split_arguments(template: &str) -> Result<Vec<Word>, CommandError> {
     let mut arguments = Vec::new();
+    let mut pieces = Vec::new();
     let mut argument = String::new();
     let mut quote = None;
     let mut started = false;
@@ -305,10 +510,26 @@ fn split_arguments(template: &str) -> Result<Vec<Word>, CommandError> {
                 started = true;
                 bare = false;
             }
+            (None, '@') if template[index..].starts_with(SCALAR_OPEN) => {
+                let open = index + SCALAR_OPEN.len();
+                let close = template[open..].find(')').ok_or_else(|| {
+                    CommandError::new(format!("`{SCALAR}(` is never closed with `)`")).focus(SCALAR)
+                })?;
+                if !argument.is_empty() {
+                    pieces.push(Piece::Text(std::mem::take(&mut argument)));
+                }
+                pieces.push(Piece::Scalar(template[open..open + close].to_owned()));
+                // Move past the `)`.
+                while chars.next().is_some_and(|(at, _)| at < open + close) {}
+                started = true;
+            }
             (None, value) if value.is_whitespace() => {
                 if started {
+                    if !argument.is_empty() || pieces.is_empty() {
+                        pieces.push(Piece::Text(std::mem::take(&mut argument)));
+                    }
                     arguments.push(Word {
-                        text: std::mem::take(&mut argument),
+                        pieces: std::mem::take(&mut pieces),
                         bare,
                         at: start..index,
                     });
@@ -326,8 +547,11 @@ fn split_arguments(template: &str) -> Result<Vec<Word>, CommandError> {
         return Err(CommandError::new("unterminated quote in command"));
     }
     if started {
+        if !argument.is_empty() || pieces.is_empty() {
+            pieces.push(Piece::Text(argument));
+        }
         arguments.push(Word {
-            text: argument,
+            pieces,
             bare,
             at: start..template.len(),
         });
@@ -356,6 +580,25 @@ mod tests {
         assert_eq!(files[2].to_string(), "{@here}/lib/fit.R");
     }
     use super::*;
+
+    #[test]
+    fn a_decimal_is_a_finite_number_in_digits() {
+        for (text, value) in [
+            ("5", 5.0),
+            ("-2", -2.0),
+            ("+0.25", 0.25),
+            (".5", 0.5),
+            ("5.", 5.0),
+            ("6E-3", 0.006),
+        ] {
+            assert_eq!(decimal(text), Some(value), "{text}");
+        }
+        for text in [
+            "", ".", "-", "inf", "NaN", "1e", "1e+", "1_000", "0x10", "1e999", " 5",
+        ] {
+            assert_eq!(decimal(text), None, "{text}");
+        }
+    }
 
     #[test]
     fn a_plain_word_is_left_as_it_is() {
@@ -402,7 +645,7 @@ mod tests {
         // Quoted braces read back doubled, as a template's literal braces do.
         let read: Vec<_> = split
             .iter()
-            .map(|word| word.text.replace("{{", "{").replace("}}", "}"))
+            .map(|word| word.text().unwrap().replace("{{", "{").replace("}}", "}"))
             .collect();
         assert_eq!(read, words);
     }

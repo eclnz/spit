@@ -17,7 +17,7 @@ use crate::parser::SourceMap;
 use crate::span::Place;
 use crate::template::builtin::CHECKED_PATH;
 use crate::template::CommandError;
-use crate::template::Part;
+use crate::template::{CommandPart, SCALAR};
 
 /// Check every `check` declaration and every use of one, collecting each
 /// error. Uses on operations in `skip`, which already failed, are not
@@ -126,8 +126,16 @@ fn check_template(check: &CheckDef) -> Result<(), CommandError> {
     let mut path = false;
     let mut used = vec![false; check.parameters.len()];
     for part in check.template.arguments().iter().flatten() {
-        let Part::Placeholder(name) = part else {
-            continue;
+        let name = match part {
+            CommandPart::Literal(_) => continue,
+            CommandPart::Placeholder(name) => name,
+            CommandPart::Scalar(read) => {
+                return Err(CommandError::new(format!(
+                    "check `{}` cannot use `{read}`: a check has no input ports, only `{{@path}}`, the artifact it checks",
+                    check.name
+                ))
+                .focus(SCALAR));
+            }
         };
         if name == CHECKED_PATH {
             path = true;

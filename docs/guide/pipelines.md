@@ -100,6 +100,28 @@ figure = plot(image)
 
 The job for `image[sub=01,ses=2]` runs `plot_tool ... --title 'subject 01, session 2' ...`. A job has the dimensions of its outputs, so a step that collects sessions with `@vary(ses)` has no one `{ses}`, and `spit check` says so. Such a step's `{items.ses}` gives each collected artifact's session instead, one argument per artifact, in the order `{items}` gives their paths. See [a job's dimension values](../language-reference.md#a-jobs-dimension-values).
 
+## Numbers from files
+
+When a tool needs a number another tool prints, write the number to a file in one step, and read it into an argument with `@scalar(port)`:
+
+<!-- spit-doc: setup
+source image : Image .nii.gz [sub]
+default entities: {@key}={@value} separated "_"
+default path: out/{@product}/{@entities}
+-->
+
+```spit
+operation read_tr(input: Image) -> Scalar .txt
+command read_tr: fslval {input} pixdim4 > {@output}
+tr = read_tr(image)
+
+operation fit(tr: Scalar, input: Image) -> Map .nii.gz
+command fit: fit_tool --tr @scalar(tr, min=5) {input} --out {@output}
+map = fit(tr, image)
+```
+
+When a `fit` job starts, the runner reads the number in that subject's `tr` file and runs `fit_tool --tr 6.234000 ...`. A file that holds anything but one number, or a number under 5, fails the job before `fit_tool` starts. See [numbers read from files](../language-reference.md#numbers-read-from-files).
+
 ## Composite operations
 
 An operation can have an indented body in place of a `command`. Its outputs are named because the body assigns each one:
