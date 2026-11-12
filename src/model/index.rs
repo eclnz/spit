@@ -270,10 +270,11 @@ impl<'p> PipelineIndex<'p> {
     /// An output written beside another has no rule of its own, whatever
     /// this finds; ask [`PipelineIndex::beside`] first.
     ///
-    /// A default that needs `{@stage}` is for products made in a stage, and
-    /// one that needs `{@entities}` for products with dimensions, so neither
-    /// finds a source it cannot write, which is left for a rule of its own
-    /// or the recipe's default.
+    /// A default that needs `{@stage}` is for products made in a stage, one
+    /// that needs `{@entities}` for products with dimensions, and one that
+    /// names a dimension outside a `[...]` group for products with it, so
+    /// none finds a source it cannot write, which is left for a rule of its
+    /// own or the recipe's.
     pub(crate) fn path_origin(&self, product: &str) -> Option<(PathOrigin<'p>, &'p PathTemplate)> {
         let pipeline = self.pipeline;
         if let Some(template) = pipeline.product_paths.get(product) {
@@ -286,10 +287,12 @@ impl<'p> PipelineIndex<'p> {
         // A default a source cannot use is left for the source's own rule or
         // the recipe's default, as no source is made in a stage.
         let unusable = default.needs_stage()
-            || (default.needs_entities()
-                && self
-                    .product(product)
-                    .is_some_and(|declared| declared.dimensions.is_empty()));
+            || self.product(product).is_some_and(|declared| {
+                (default.needs_entities() && declared.dimensions.is_empty())
+                    || default
+                        .needs_dimension_outside(&declared.dimensions)
+                        .is_some()
+            });
         (!(unusable && self.is_source(product))).then_some((PathOrigin::Default, default))
     }
 

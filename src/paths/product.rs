@@ -1,7 +1,9 @@
 //! The path a product's template gives each of its artifacts, with its
 //! [`PathPattern`] compiled once per product.
 
-use crate::model::{stage_directories, Artifact, EntityBinding, Pipeline, PipelineIndex};
+use crate::model::{
+    stage_directories, Artifact, EntityBinding, PathOrigin, Pipeline, PipelineIndex,
+};
 use crate::template::{
     decode_component, error, product_text, push_escaped, Gap, PathError, PathPart, PathPattern,
     PathPlaceholder, PathTemplate, RenderError,
@@ -105,6 +107,10 @@ impl<'p> PathBinder<'p> {
 /// One product's [`PathPattern`], compiled once for all its artifacts.
 struct ProductPath {
     pattern: PathPattern,
+    /// Whether the rule is a default, shared with other products, rather
+    /// than the product's own, so that a dimension it lacks can be fixed
+    /// with a rule of its own.
+    shared: bool,
 }
 
 impl ProductPath {
@@ -118,8 +124,13 @@ impl ProductPath {
     /// `product`'s, with `template` already built.
     fn with_template(index: &PipelineIndex<'_>, product: &str, template: &PathTemplate) -> Self {
         let stage = stage_directories(index, product);
+        let shared = !matches!(
+            index.path_origin(product),
+            Some((PathOrigin::Explicit, _)) | None
+        ) && index.beside(product).is_none();
         Self {
             pattern: PathPattern::new(template, product, stage.as_deref()),
+            shared,
         }
     }
 
@@ -149,12 +160,16 @@ impl ProductPath {
                 .focus(PathPlaceholder::Entities.to_string()),
                 RenderError::Absent(placeholder) => {
                     let dimension = placeholder.name();
-                    error(format!(
-                        "path template for `{}` uses absent dimension `{dimension}`{}",
-                        artifact.product,
-                        PathPlaceholder::hint(dimension).unwrap_or_else(|| {
+                    let product = artifact.product;
+                    let fix = PathPlaceholder::hint(dimension).unwrap_or_else(|| {
+                        if self.shared {
+                            format!("; put it in `[...]` if only some products have it, or give `{product}` a rule of its own with `path {product}:`")
+                        } else {
                             "; put it in `[...]` if only some products have it".to_owned()
-                        })
+                        }
+                    });
+                    error(format!(
+                        "path template for `{product}` uses absent dimension `{dimension}`{fix}"
                     ))
                     .focus(placeholder.to_string())
                 }

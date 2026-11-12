@@ -120,13 +120,60 @@ fn path_rules_that_cannot_separate_artifacts_are_rejected() {
     .unwrap_err();
     assert!(error.message().contains("`raw` and `cleaned`"), "{error}");
 
-    let error = check("source raw [id]\ndefault path: {@product}/{id}/{shard}.csv\n").unwrap_err();
+    let error = check("source raw [id]\npath raw: {@product}/{id}/{shard}.csv\n").unwrap_err();
     assert_eq!(
         error.to_string(),
         "path template for `raw` uses absent dimension `shard`; put it in `[...]` if only some products have it"
     );
 
+    // A default shared with other products can also be left for a rule of
+    // the product's own.
+    let error = check(
+        "source raw [id]\ndefault path: {@product}/{id}.csv\noperation total(raw: many) -> Table\ncommand total: tool {raw} {@output}\nsummary = total(raw @vary(id))\n",
+    )
+    .unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        "path template for `summary` uses absent dimension `id`; put it in `[...]` if only some products have it, or give `summary` a rule of its own with `path summary:`"
+    );
+
     // Rules naming different dimensions are not treated as colliding.
     check("source raw [id]\nsource extra [batch]\npath raw: out/{id}.csv\npath extra: out/{batch}.csv\n")
         .unwrap();
+}
+
+#[test]
+fn a_default_naming_a_dimension_a_source_lacks_leaves_it_to_the_recipe() {
+    let tree = support::Tree::new(
+        "default-absent-dimension",
+        &["data/in/01/a.txt", "data/scripts/plot.py"],
+    );
+    tree.write(
+        "b.spit",
+        "source raw : Text .txt [sub]\nsource plotter : Script .py\ndefault path: out/sub-{sub}/{@product}\noperation plot(raw: Text, script: Script) -> Figure .png\ncommand plot: python {script} {raw} {@output}\nfig = plot(raw, plotter)\n",
+    );
+    let recipe = |rules: &str| {
+        format!("pipeline b.spit\nroot data\ninputs:\n    raw: in/{{sub}}/a.txt\n{rules}")
+    };
+    let run = |args: &[&str]| {
+        std::process::Command::new(env!("CARGO_BIN_EXE_spit"))
+            .args(args)
+            .current_dir(tree.path())
+            .output()
+            .unwrap()
+    };
+
+    tree.write("b.spitin", &recipe("    plotter: scripts/plot.py\n"));
+    let output = run(&["check", "b.spitin"]);
+    assert!(output.status.success(), "{}", support::text(&output.stderr));
+
+    // Without the recipe's rule, the source has none, and the error says
+    // where to write one.
+    tree.write("b.spitin", &recipe(""));
+    let output = run(&["check", "b.spitin"]);
+    assert!(
+        support::text(&output.stderr).contains("source `plotter` has no path rule"),
+        "{}",
+        support::text(&output.stderr)
+    );
 }
