@@ -9,6 +9,8 @@ use crate::model::{
 };
 use crate::template::PathTemplate;
 
+use super::inventory::MISSING;
+
 /// Write an inventory in the text form [`parse_source_inventory`] reads,
 /// with each record's values in its product's declared dimension order.
 ///
@@ -165,10 +167,13 @@ impl InventoryText<'_> {
         Ok(())
     }
 
-    /// The rows of the review files, each with its verdict:
+    /// Each review file, then the rows of those that exist, each with its
+    /// verdict:
     ///
     /// ```text
     /// verdicts:
+    ///     looked_at from qc/looked_at.csv
+    ///     second from qc/second.csv (missing)
     ///     looked_at[sub=04]
     ///         verdict: fail
     ///         at: qc/looked_at.csv line 2
@@ -176,11 +181,21 @@ impl InventoryText<'_> {
     /// ```
     fn write_verdicts(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let verdicts = &self.inventory.verdicts;
-        if verdicts.is_empty() {
+        let files = &self.inventory.review_files;
+        if verdicts.is_empty() && files.is_empty() {
             return Ok(());
         }
         let declared = self.pipeline.dimension_order();
         writeln!(f, "\nverdicts:")?;
+        for file in files {
+            let missing = if file.found { "" } else { MISSING };
+            writeln!(
+                f,
+                "    {} from {}{missing}",
+                file.review,
+                file.file.display()
+            )?;
+        }
         for row in verdicts {
             writeln!(
                 f,

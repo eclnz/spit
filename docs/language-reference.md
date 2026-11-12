@@ -852,11 +852,11 @@ A row judges each artifact whose dimensions have the values the row gives. An em
 
 These are errors, each naming the file and line: a column that is not a dimension of every product the review judges, a `verdict` that is not `pass` or `fail`, a row with no dimension value, and rows that conflict. A row that matches no artifact is a note, because a review file is a record of what was judged and often covers more than one run plans: a subset of the data, a reviewer working ahead of the data, or a sheet several pipelines share. The note counts the rows once for the file, as in `note: 12 verdicts in qc/looked_at.csv match no artifact (lines 6–17)`. A recipe that names a review the pipeline does not declare is an error.
 
-A review with no `review ... from` line in the recipe, or whose file does not exist yet, has no verdicts. That is no error: nobody has judged yet.
+A review with no `review ... from` line in the recipe, or whose file does not exist yet or holds a header and no rows, has no verdicts. That is no error: nobody has judged yet, and `spit inputs` and `spit dag` note it, as in ``note: review `looked_at` has no verdicts yet: `qc/looked_at.csv` holds none``. A review file inside the dataset folder is not listed among the files no source rule matches.
 
 ### What a verdict does
 
-SPIT reads the review files when it makes the plan, so a review needs nothing from the `.spitdag` or the runner. An artifact the review judges is:
+SPIT reads the review files when it makes the plan, so a review needs nothing from the runner to take effect. An artifact the review judges is:
 
 - **Passed,** when a row says `pass`: it is used as usual.
 - **Rejected,** when a row says `fail`.
@@ -901,7 +901,7 @@ note: review `looked_at` holds back t1w[sub=03]: no verdict yet
 note: 1 verdict in qc/looked_at.csv matches no artifact (line 4)
 ```
 
-`spit inputs` writes each row of the files into the `.spitout`'s [`verdicts:`](#inputs) section, so a DAG made from the `.spitout` is made from the same verdicts. A row is not an `exclude` rule: it removes nothing from the dataset, and the files stay where they are. To leave data out for a reason that is not a judgement, use [`exclude`](#exclude-named-artifacts).
+`spit inputs` writes each review's file and each row of it into the `.spitout`'s [`verdicts:`](#inputs) section, so a DAG made from the `.spitout` is made from the same verdicts. The `.spitdag` records each review's file and every artifact it rejected or held, with the outputs each one kept from the plan, so a runner can say what is waiting for a verdict: see [Reviews](spitdag.md#reviews). A row is not an `exclude` rule: it removes nothing from the dataset, and the files stay where they are. To leave data out for a reason that is not a judgement, use [`exclude`](#exclude-named-artifacts).
 
 ## Defaults
 
@@ -1854,12 +1854,14 @@ removed:
 
 The section is a record, not a rule: the records above it already leave these out, and resolving jobs removes nothing more. Scanning again rewrites it from the recipe, so a removal survives a rescan. `dag` copies it into the `.spitdag`.
 
-`spit inputs` also writes the rows of the files the recipe's `review ... from` lines name, each with its verdict, the file and line it was read from, and the reason:
+`spit inputs` also writes each file the recipe's `review ... from` lines name, then the rows of those files, each with its verdict, the file and line it was read from, and the reason:
 
 <!-- spit-doc: spitout -->
 
 ```text
 verdicts:
+    looked_at from qc/looked_at.csv
+    second from qc/second.csv (missing)
     looked_at[sub=04]
         verdict: fail
         at: qc/looked_at.csv line 2
@@ -1869,7 +1871,7 @@ verdicts:
         at: qc/looked_at.csv line 3
 ```
 
-Each entry names a review and the dimensions its row gives; a dimension the row leaves empty is absent. The section is a record the plan reads: [`dag`](#what-a-verdict-does) withholds the artifacts a verdict fails, and those with no verdict, from the readers their review covers. Rows are in the order of the recipe's `review` lines and each file's lines.
+A `from` line names a review's file, relative to the `.spitout`'s folder as its `root` is, or as the recipe gives it when `spit inputs` prints the `.spitout`; `(missing)` marks a file that did not exist yet. Each other entry names a review and the dimensions its row gives; a dimension the row leaves empty is absent. The section is a record the plan reads: [`dag`](#what-a-verdict-does) withholds the artifacts a verdict fails, and those with no verdict, from the readers their review covers. Rows are in the order of the recipe's `review` lines and each file's lines.
 
 `dag --partial` is a choice for one planning run, not a recipe rule. It keeps jobs with complete inputs, including aggregate jobs whose `many` input still has complete members, and writes the other outputs with their reasons in the `.spitdag`'s `left_out` array. A `many` input's `@min(count)` is checked after incomplete members have been removed. Plain `dag` still fails on the first incomplete job and points to `artifacts` and `dag --partial`.
 

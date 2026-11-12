@@ -4,7 +4,7 @@
 use std::collections::BTreeSet;
 use std::fmt;
 use std::io::ErrorKind;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use rustc_hash::FxHashMap;
 
@@ -20,7 +20,8 @@ use crate::review::{attached_products, ReviewIndex};
 /// review has no verdicts, which is no error.
 pub(crate) fn read_review_files(rules: &mut InputRules, folder: &Path) -> Result<(), ParseError> {
     for review in &mut rules.reviews {
-        match std::fs::read_to_string(folder.join(&review.file)) {
+        review.path = folder.join(&review.file);
+        match std::fs::read_to_string(&review.path) {
             Ok(text) => review.text = Some(text),
             Err(reason) if reason.kind() == ErrorKind::NotFound => {}
             Err(reason) => {
@@ -35,6 +36,31 @@ pub(crate) fn read_review_files(rules: &mut InputRules, folder: &Path) -> Result
         }
     }
     Ok(())
+}
+
+/// `unmatched`, the dataset's files under `root` that no source rule
+/// matches, without the review files `rules` names: a review file may sit
+/// in the dataset, and is read for its verdicts, not as a source.
+pub(crate) fn without_review_files(
+    unmatched: Vec<String>,
+    root: Option<&Path>,
+    rules: &InputRules,
+) -> Vec<String> {
+    let reviews: Vec<PathBuf> = rules
+        .reviews
+        .iter()
+        .filter(|review| review.text.is_some())
+        .filter_map(|review| std::fs::canonicalize(&review.path).ok())
+        .collect();
+    let Some(root) = root.filter(|_| !reviews.is_empty()) else {
+        return unmatched;
+    };
+    unmatched
+        .into_iter()
+        .filter(|file| {
+            std::fs::canonicalize(root.join(file)).map_or(true, |path| !reviews.contains(&path))
+        })
+        .collect()
 }
 
 /// A problem in a review file: the file, the line when it is on one, and
@@ -386,6 +412,7 @@ mod tests {
         ReviewFile {
             review: "looked_at".to_owned(),
             file: "qc/looked_at.csv".to_owned(),
+            path: "qc/looked_at.csv".into(),
             line: 3,
             text: Some(text.to_owned()),
         }

@@ -28,7 +28,8 @@ use crate::lower::{parse_document_with_imports, ParsedDocument};
 use crate::model::ResolveError;
 use crate::model::{
     ArtifactInstance, CoverageAction, CoverageGap, DefaultChecks, DefaultReviews, EntityBinding,
-    GroupKey, InputRules, Pipeline, PipelineIndex, Removal, SourceInventory, TypeChecking,
+    GroupKey, InputRules, Pipeline, PipelineIndex, Removal, ReviewRecord, SourceInventory,
+    TypeChecking,
 };
 use crate::parser::{
     without_bom, File, Head, Header, Keyword, Kind, Layout, ParseError, SourceMap,
@@ -48,7 +49,7 @@ pub use self::exclusions::UnmatchedExclusion;
 pub use self::pattern::{MissedSource, NearestFile};
 use self::recipe::{expand_input_block, header_lines, restore_path_places, RecipeHeader};
 pub use self::reviews::ReviewFileError;
-use self::reviews::{read_review_files, read_verdicts};
+use self::reviews::{read_review_files, read_verdicts, without_review_files};
 pub use self::variants::{variants, Likeness, Spelling, Variants};
 
 /// A recipe's rules and any inventory records written with them.
@@ -406,11 +407,19 @@ impl InputSpec {
                     )
                 }
             };
+        let unmatched_files = without_review_files(unmatched_files, root.as_deref(), &self.rules);
         merge_source_paths(pipeline, &source_paths, &mut inventory)?;
         // After any verdicts the inventory already held, as a .spitout does.
         inventory
             .verdicts
             .extend(read_verdicts(pipeline, &self.rules).map_err(InputError::ReviewFile)?);
+        inventory
+            .review_files
+            .extend(self.rules.reviews.iter().map(|review| ReviewRecord {
+                review: review.review.clone(),
+                file: review.path.clone(),
+                found: review.text.is_some(),
+            }));
         let located = with_source_paths(pipeline, &inventory.source_paths);
         inspect_paths(&located)?;
         let checked = check_inventory(pipeline, &self.rules, Cow::Owned(inventory))?;

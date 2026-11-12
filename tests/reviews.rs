@@ -463,7 +463,7 @@ fn the_verdicts_reach_the_spitout_and_a_dag_made_from_it_agrees() {
     assert!(output.status.success(), "{}", text(&output.stderr));
     let written = std::fs::read_to_string(&spitout).unwrap();
     assert!(
-        written.contains("verdicts:\n    looked_at[sub=01]\n        verdict: pass\n        at: qc/looked_at.csv line 2\n"),
+        written.contains("verdicts:\n    looked_at from qc/looked_at.csv\n    looked_at[sub=01]\n        verdict: pass\n        at: qc/looked_at.csv line 2\n"),
         "{written}"
     );
     check_output("reviews_spitout", &written);

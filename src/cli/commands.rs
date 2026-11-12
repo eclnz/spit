@@ -174,6 +174,12 @@ pub(crate) fn inputs(args: &CliArgs) -> Result<(), Box<dyn Error>> {
         .as_ref()
         .zip(loaded.output.as_ref())
         .map(|(file, output)| recorded_root(output, Path::new(file)));
+    // Review files are recorded as the roots are, relative to the file.
+    if let Some(file) = &file {
+        for review in &mut settled.inventory.review_files {
+            review.file = recorded_root(&review.file, Path::new(file));
+        }
+    }
     let text = render_source_inventory(
         &settled.inventory,
         &loaded.checked.pipeline,
@@ -290,6 +296,12 @@ pub(crate) fn dag(args: &CliArgs) -> Result<(), Box<dyn Error>> {
     if args.has(Flag::Output) || args.has(Flag::Json) {
         let mut bound = bind(paths)?;
         bound.removed = prepared.inputs.inventory.removed.clone();
+        bound.add_reviews(
+            &prepared.pipeline,
+            &prepared.report,
+            &prepared.inputs.inventory.review_files,
+            &prepared.inputs.inventory.verdicts,
+        );
         bound.left_out = prepared
             .report
             .incomplete

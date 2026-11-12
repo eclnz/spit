@@ -5,7 +5,7 @@ mod matching;
 mod reviews;
 
 use crate::model::ResolveError;
-use rustc_hash::FxHashSet;
+use rustc_hash::FxHashMap;
 
 use crate::model::{
     ArtifactId, ArtifactInstance, ArtifactReport, ArtifactType, DagStep, Gap, IncompleteJob,
@@ -82,7 +82,8 @@ fn resolve_artifacts_with_partial(
         withheld: Vec::new(),
         any_withheld: false,
         withheld_report: Vec::new(),
-        held_seen: FxHashSet::default(),
+        held_seen: FxHashMap::default(),
+        causes: FxHashMap::default(),
         reviewed: &reviewed,
         verdicts: &verdicts,
         producers: Vec::new(),
@@ -264,8 +265,12 @@ struct Resolution<'a> {
     /// Each reviewed artifact a review withholds, as a note says it.
     withheld_report: Vec<Withheld>,
     /// The artifacts a review on an input port has been noted for, by step
-    /// and port, so a step that reads one many times notes it once.
-    held_seen: FxHashSet<(StepId, usize, ArtifactId)>,
+    /// and port, so a step that reads one many times notes it once: each
+    /// with its place in `withheld_report`.
+    held_seen: FxHashMap<(StepId, usize, ArtifactId), usize>,
+    /// For each artifact withheld from every reader, the places in
+    /// `withheld_report` of the reviewed artifacts that withheld it.
+    causes: FxHashMap<ArtifactId, Vec<usize>>,
     /// The reviews on each product's artifacts for every reader.
     reviewed: &'a ReviewIndex<'a>,
     verdicts: &'a Verdicts<'a>,
@@ -301,11 +306,17 @@ impl Resolution<'_> {
             let Some(judged) = self.verdicts.judge(review, view.entities) else {
                 continue;
             };
+            self.causes
+                .entry(artifact)
+                .or_default()
+                .push(self.withheld_report.len());
             self.withheld_report.push(Withheld {
                 artifact: view.to_instance(),
                 review: review.to_owned(),
                 port: None,
                 outcome: judged,
+                withholds: Vec::new(),
+                shrinks: Vec::new(),
             });
             self.withheld[artifact.index()] = true;
             self.any_withheld = true;
@@ -316,9 +327,11 @@ impl Resolution<'_> {
     /// `step`, once however many jobs read it.
     fn note_held(&mut self, step: StepId, operation: &OperationDef, held: Vec<Held>) {
         for held in held {
-            if !self.held_seen.insert((step, held.port, held.artifact)) {
+            let key = (step, held.port, held.artifact);
+            if self.held_seen.contains_key(&key) {
                 continue;
             }
+            self.held_seen.insert(key, self.withheld_report.len());
             self.withheld_report.push(Withheld {
                 artifact: self.dag.artifacts.get(held.artifact).to_instance(),
                 review: held.review,
@@ -327,8 +340,27 @@ impl Resolution<'_> {
                     operation.inputs[held.port].name.clone(),
                 )),
                 outcome: held.judged,
+                withholds: Vec::new(),
+                shrinks: Vec::new(),
             });
         }
+    }
+
+    /// The places in `withheld_report` of the reviewed artifacts behind
+    /// `kept_from`, the artifacts kept from a job of `step`, each once in
+    /// the order first met.
+    fn causes_of(&self, step: StepId, kept_from: &[(usize, ArtifactId)]) -> Vec<usize> {
+        let mut causes: Vec<usize> = Vec::new();
+        for &(port, artifact) in kept_from {
+            let direct = self.held_seen.get(&(step, port, artifact)).copied();
+            let inherited = self.causes.get(&artifact).map_or(&[][..], Vec::as_slice);
+            for &cause in direct.iter().chain(inherited) {
+                if !causes.contains(&cause) {
+                    causes.push(cause);
+                }
+            }
+        }
+        causes
     }
 
     /// Record one expanded job: a complete job joins the DAG, one with gaps
@@ -356,12 +388,24 @@ impl Resolution<'_> {
         }
         self.grow();
         self.note_held(step, operation, expansion.held);
+        let causes = self.causes_of(step, &expansion.kept_from);
         if expansion.left_out {
-            for output in &outputs {
+            for &output in &outputs {
                 self.withheld[output.index()] = true;
+                let instance = self.dag.artifacts.get(output).to_instance();
+                for &cause in &causes {
+                    self.withheld_report[cause].withholds.push(instance.clone());
+                }
+                self.causes.insert(output, causes.clone());
             }
             self.any_withheld = true;
         } else if expansion.gaps.is_empty() {
+            for &output in &outputs {
+                let instance = self.dag.artifacts.get(output).to_instance();
+                for &cause in &causes {
+                    self.withheld_report[cause].shrinks.push(instance.clone());
+                }
+            }
             let job = make_job(
                 JobId::new(self.dag.jobs.len() + 1),
                 step,
