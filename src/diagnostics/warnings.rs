@@ -2,13 +2,12 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::model::{
-    stage_within, ArtifactReport, CommandRole, PipelineIndex, ResolvedDag, SourceInventory,
-};
+use crate::model::{ArtifactReport, PipelineIndex, ResolvedDag, SourceInventory};
 use crate::parser::{SourceMap, Step};
-use crate::paths::case_collisions;
+use crate::paths::{bound_paths, case_collisions, misread_sources, BoundPaths};
 use crate::span::Place;
-use crate::{InputBinding, Pipeline, ResolveError};
+use crate::validate::PipelineWarning;
+use crate::{Pipeline, ResolveError};
 
 use super::{Diagnostic, DiagnosticSource, Severity};
 
@@ -43,14 +42,29 @@ pub(super) fn near_miss_warnings(report: &ArtifactReport) -> Vec<Diagnostic> {
     warnings
 }
 
-/// Flag paths that differ only in case, which are one file on macOS and Windows.
-pub(super) fn case_warnings(
+/// Flag paths that differ only in case, which are one file on macOS and
+/// Windows, and source paths their rule reads back as other values. Each
+/// artifact's path is bound once for both.
+pub(super) fn path_warnings(
     pipeline: &Pipeline,
     lines: &SourceMap,
     dag: &ResolvedDag,
 ) -> Vec<Diagnostic> {
+    let Ok(BoundPaths { paths, .. }) = bound_paths(pipeline, dag) else {
+        return Vec::new();
+    };
     let index = PipelineIndex::new(pipeline);
-    case_collisions(pipeline, dag)
+    let misread = misread_sources(pipeline, dag, &paths).into_iter().map(|found| {
+        let (product, entities) = &found.artifact;
+        warning(
+            lines.path_rule(&index, product),
+            format!(
+                "`{product}[{entities}]` has path `{}`, which its rule reads back as `{product}[{}]`, so its file would be found under those values; use a separator between placeholders that no value holds",
+                found.path, found.read
+            ),
+        )
+    });
+    case_collisions(dag, &paths)
         .into_iter()
         .map(|[(first, first_path), (second, second_path)]| {
             warning(
@@ -61,28 +75,26 @@ pub(super) fn case_warnings(
                 ),
             )
         })
+        .chain(misread)
         .collect()
 }
 
-/// Legal but likely mistaken pipeline text. Names in `skip` already have an
-/// error. Nothing is reported as unused in a file with no steps, which is a
-/// library of definitions, nor for imported names: a library is imported for
-/// the definitions a pipeline needs, and is linted on its own.
-pub(super) fn warnings(
-    pipeline: &Pipeline,
-    lines: &SourceMap,
-    skip: &BTreeSet<String>,
-) -> Vec<Diagnostic> {
-    // A library, with no steps, may declare what it never uses.
-    if pipeline.invocations.is_empty() {
-        return operation_warnings(pipeline, lines, skip, true);
-    }
-    let mut warnings = stage_warnings(pipeline, lines);
-    warnings.extend(placement_warnings(pipeline, lines));
-    warnings.extend(name_warnings(pipeline, lines));
-    warnings.extend(product_warnings(pipeline, lines, skip));
-    warnings.extend(operation_warnings(pipeline, lines, skip, false));
-    warnings
+/// `warning` as a diagnostic, at the declaration or step it is about.
+pub(super) fn pipeline_warning(warning: &PipelineWarning, lines: &SourceMap) -> Diagnostic {
+    let place = match warning {
+        PipelineWarning::EmptyStage { stage } => lines.stages.get(*stage).cloned(),
+        PipelineWarning::ProductNamedAfterOperation { product } => {
+            lines.invocations.get(*product).map(Step::output)
+        }
+        PipelineWarning::UnusedSource { product } => lines.products.get(*product).cloned(),
+        PipelineWarning::OperationOutsideStage { operation, .. }
+        | PipelineWarning::UnusedOperation { operation }
+        | PipelineWarning::NoCommand { operation }
+        | PipelineWarning::UnboundOutputVariable { operation, .. } => {
+            lines.operations.get(*operation).cloned()
+        }
+    };
+    self::warning(place, warning.to_string())
 }
 
 fn warning(place: Option<Place>, message: String) -> Diagnostic {
@@ -92,227 +104,6 @@ fn warning(place: Option<Place>, message: String) -> Diagnostic {
         place,
         message,
     )
-}
-
-/// Stages that hold no steps, directly or in stages nested in them.
-fn stage_warnings(pipeline: &Pipeline, lines: &SourceMap) -> Vec<Diagnostic> {
-    pipeline
-        .stages
-        .iter()
-        .filter(|stage| {
-            !pipeline.invocations.iter().any(|invocation| {
-                invocation
-                    .stage
-                    .as_deref()
-                    .is_some_and(|name| stage_within(name, &stage.name))
-            })
-        })
-        .map(|stage| {
-            warning(
-                lines.stages.get(&stage.name).cloned(),
-                format!("stage `{}` has no steps", stage.name),
-            )
-        })
-        .collect()
-}
-
-/// Operations declared in a stage but called outside it. An operation is
-/// global wherever it is declared, so this is legal, but the stage reads as
-/// if it held the operation's uses; say where the declaration would.
-fn placement_warnings(pipeline: &Pipeline, lines: &SourceMap) -> Vec<Diagnostic> {
-    /// The first call outside the declaring stage, and the innermost stage
-    /// holding the declaration and every call, `None` for the top level.
-    struct Outside<'a> {
-        line: Option<usize>,
-        stage: Option<&'a str>,
-        common: Option<&'a str>,
-    }
-    let mut outside: BTreeMap<&str, Outside> = BTreeMap::new();
-    for invocation in &pipeline.invocations {
-        let operation = invocation.operation.as_str();
-        let Some(declared) = lines.operation_stages.get(operation) else {
-            continue;
-        };
-        let called = invocation.stage.as_deref();
-        if called.is_some_and(|stage| stage_within(stage, declared)) {
-            continue;
-        }
-        let entry = outside.entry(operation).or_insert_with(|| Outside {
-            line: invocation
-                .outputs
-                .first()
-                .and_then(|output| lines.invocations.get(output))
-                .map(|step| step.line),
-            stage: called,
-            common: Some(declared),
-        });
-        entry.common = entry
-            .common
-            .zip(called)
-            .and_then(|(common, called)| common_stage(common, called));
-    }
-    outside
-        .into_iter()
-        .map(|(operation, found)| {
-            let declared = &lines.operation_stages[operation];
-            let called = found
-                .stage
-                .map_or_else(|| "outside every stage".to_owned(), |stage| format!("in stage `{stage}`"));
-            let on_line = found.line.map(|line| format!(" on line {line}")).unwrap_or_default();
-            let target = found.common.map_or_else(
-                || "the top level, outside every stage".to_owned(),
-                |stage| format!("stage `{stage}`, which holds every call"),
-            );
-            warning(
-                lines.operations.get(operation).cloned(),
-                format!(
-                    "operation `{operation}` is declared in stage `{declared}` but called {called}{on_line}; a stage does not limit where its operations are used, so declare it in {target}"
-                ),
-            )
-        })
-        .collect()
-}
-
-/// The innermost stage holding both `first` and `second`, if any.
-fn common_stage<'a>(first: &'a str, second: &str) -> Option<&'a str> {
-    let mut end = None;
-    for (index, _) in first.match_indices('/').chain([(first.len(), "")]) {
-        if stage_within(second, &first[..index]) {
-            end = Some(index);
-        } else {
-            break;
-        }
-    }
-    end.map(|end| &first[..end])
-}
-
-/// Products named after the operation that makes them, as in
-/// `digest = digest(log)`: legal, since the names are separate, but the step
-/// then reads as the operation, not its result.
-fn name_warnings(pipeline: &Pipeline, lines: &SourceMap) -> Vec<Diagnostic> {
-    pipeline
-        .invocations
-        .iter()
-        .flat_map(|invocation| {
-            invocation
-                .outputs
-                .iter()
-                .filter(move |output| **output == invocation.operation)
-        })
-        .map(|output| {
-            warning(
-                lines.invocations.get(output).map(Step::output),
-                format!(
-                    "product `{output}` has the name of the operation that makes it; \
-                     name the result instead, so the step reads as what it makes"
-                ),
-            )
-        })
-        .collect()
-}
-
-/// Source products that no step reads.
-fn product_warnings(
-    pipeline: &Pipeline,
-    lines: &SourceMap,
-    skip: &BTreeSet<String>,
-) -> Vec<Diagnostic> {
-    let used: BTreeSet<_> = pipeline
-        .invocations
-        .iter()
-        .flat_map(|invocation| {
-            invocation
-                .outputs
-                .iter()
-                .map(String::as_str)
-                .chain(invocation.inputs.iter().map(InputBinding::product_name))
-        })
-        .collect();
-    pipeline
-        .products
-        .iter()
-        .map(|product| product.name.as_str())
-        .filter(|name| !skip.contains(*name) && !lines.imported.contains(*name))
-        .filter(|name| !used.contains(name))
-        .map(|name| {
-            warning(
-                lines.products.get(name).cloned(),
-                format!("source product `{name}` is never used as an input"),
-            )
-        })
-        .collect()
-}
-
-/// Operations that no step uses, that have no command while others do, or
-/// whose output types name a variable no input binds.
-fn operation_warnings(
-    pipeline: &Pipeline,
-    lines: &SourceMap,
-    skip: &BTreeSet<String>,
-    library: bool,
-) -> Vec<Diagnostic> {
-    // A call to an operation with a body leaves the body's steps, so the
-    // call itself is in `calls`.
-    let used: BTreeSet<_> = pipeline
-        .invocations
-        .iter()
-        .map(|invocation| invocation.operation.as_str())
-        .chain(pipeline.calls.iter().map(|call| call.operation.as_str()))
-        .collect();
-    let commands: BTreeSet<_> = pipeline
-        .commands
-        .iter()
-        .filter(|command| command.role == CommandRole::Run)
-        .map(|command| command.operation.as_str())
-        .collect();
-    let mut warnings = Vec::new();
-    for operation in &pipeline.operations {
-        let name = operation.name.as_str();
-        if skip.contains(name) {
-            continue;
-        }
-        let place = lines.operations.get(name).cloned();
-        let imported = lines.imported.contains(name);
-        if !used.contains(name) {
-            if !imported && !library {
-                warnings.push(warning(
-                    place.clone(),
-                    format!("operation `{name}` is declared but never used"),
-                ));
-            }
-        } else if !pipeline.commands.is_empty()
-            && !commands.contains(name)
-            && operation.steps.is_empty()
-        {
-            // Only once commands are in use: a pipeline may be written for its DAG alone.
-            warnings.push(warning(
-                place.clone(),
-                format!("operation `{name}` has no command, so its jobs cannot run"),
-            ));
-        }
-        if imported {
-            continue;
-        }
-        let bound: BTreeSet<_> = operation
-            .inputs
-            .iter()
-            .flat_map(|port| port.artifact_type.variables())
-            .collect();
-        let produced: BTreeSet<_> = operation
-            .outputs
-            .iter()
-            .flat_map(|port| port.artifact_type.variables())
-            .collect();
-        for variable in produced.difference(&bound) {
-            warnings.push(warning(
-                place.clone(),
-                format!(
-                    "output type variable `{variable}` of `{name}` appears in no input; it is known only where the output product declares its type"
-                ),
-            ));
-        }
-    }
-    warnings
 }
 
 /// Steps that resolve no jobs from a supplied inventory. A source with no

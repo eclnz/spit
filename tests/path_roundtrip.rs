@@ -116,6 +116,7 @@ const CASES: &[Case] = &[
     },
     // `-` is kept as it is, so a value holding it gives the same path as a
     // shorter value before the `-`: matching takes the shortest first value.
+    // `spit dag` warns of such a value, which `tests/robustness.rs` checks.
     Case {
         name: "two dimensions apart by `-`, the first holding `-`",
         source: "raw",
@@ -125,19 +126,6 @@ const CASES: &[Case] = &[
         back: Back::Differs {
             renders: &["raw/x-y-z.txt"],
             matches: &[&[("a", "x"), ("b", "y-z")]],
-        },
-    },
-    // Two values side by side meet with nothing between them, and matching
-    // takes the shortest first value.
-    Case {
-        name: "two dimensions with nothing between them",
-        source: "raw",
-        pipeline: "source raw [a, b]\npath raw: raw/{a}{b}.txt\n",
-        library: None,
-        bindings: &[&[("a", "xy"), ("b", "z")]],
-        back: Back::Differs {
-            renders: &["raw/xyz.txt"],
-            matches: &[&[("a", "x"), ("b", "yz")]],
         },
     },
     Case {

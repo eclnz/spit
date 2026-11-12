@@ -62,7 +62,9 @@ pub use model::{
     SourceFile, SourceInventory, SourceRecord, StageDef, StepId, StepOrigin, StepOutput,
     TypeChecking, TypeConflict, Under, UnmatchedVerdicts, Verdict, VerdictRow, Withheld,
 };
-pub use parser::{parse_source_inventory, render_source_inventory, ParseError, ParseErrorKind};
+pub use parser::{
+    keywords_json, parse_source_inventory, render_source_inventory, ParseError, ParseErrorKind,
+};
 pub use paths::{
     inspect_paths, validate_bound_source_files, validate_source_files, BoundPaths, PathCoverage,
     PathCoverageEntry, PathRule, VerifiedFiles,

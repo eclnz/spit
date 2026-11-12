@@ -370,6 +370,9 @@ pub(crate) enum Request {
     Run(CliArgs),
     Help(Option<Command>),
     Version,
+    /// `spit keywords`, SPIT's keywords as JSON for tools such as the
+    /// editor's grammar. The help leaves it out, since it is not a step.
+    Keywords,
 }
 
 /// `spit help`, or `spit help <command>`.
@@ -452,6 +455,7 @@ pub(crate) fn parse_args(args: impl IntoIterator<Item = String>) -> Result<Reque
             };
         }
         Some("--version" | "-V") => return Ok(Request::Version),
+        Some("keywords") => return Ok(Request::Keywords),
         Some(name) => Command::parse(name)
             .ok_or_else(|| misuse(format_args!("unknown command `{name}`"), None))?,
     };

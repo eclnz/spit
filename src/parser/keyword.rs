@@ -2,6 +2,8 @@
 //! records header such as `sources:` or `contexts name:`. Every reader of
 //! a document classifies its lines here, so they agree on what each is.
 
+use crate::json::{write_array, ObjectWriter};
+
 /// A keyword that starts a statement. The variants are declared in the
 /// order of [`Keyword::ALL`], which is the order suggestions are tried in.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -234,6 +236,38 @@ const WORDS: [(Keyword, &str); count(Filter::Spelled)] = {
     }
     table
 };
+
+/// Every keyword with a word of its own, in the order of [`Keyword::ALL`],
+/// as one line of JSON for tools that must know SPIT's keywords, such as an
+/// editor's grammar: `{"keywords":[{"word":"source","block":true,"file":"pipeline"},...]}`.
+/// `block` says whether the word alone with a `:` opens a block, and `file`
+/// is `pipeline`, `recipe`, `both`, or `replaced` for a word read only to
+/// say what to write instead.
+pub fn keywords_json() -> String {
+    let mut out = String::new();
+    let mut object = ObjectWriter::start(&mut out);
+    object.field("keywords", |out| {
+        write_array(out, WORDS, |out, (keyword, word)| {
+            let spec = keyword.spec();
+            let mut entry = ObjectWriter::start(out);
+            entry.string("word", word);
+            entry.raw("block", if spec.block { "true" } else { "false" });
+            entry.string(
+                "file",
+                match spec.file {
+                    File::Pipeline => "pipeline",
+                    File::Recipe => "recipe",
+                    File::Both => "both",
+                    File::Replaced => "replaced",
+                },
+            );
+            entry.finish();
+        });
+    });
+    object.finish();
+    out.push('\n');
+    out
+}
 
 /// Whether `name` is a keyword's word, which no product may take.
 pub(crate) fn reserved(name: &str) -> bool {
