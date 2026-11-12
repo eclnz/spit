@@ -458,6 +458,35 @@ With the pipeline in `digits/digits.spit`, `table` runs `python3 /home/lab/digit
 - A pipeline given on standard input, or parsed without a file, has no folder, and `{@here}` in it is an error.
 - A job declares only its ports, so editing a script a command names by `{@here}`, or by a relative path such as `scripts/table.py`, reruns nothing. `inputs`, `dag` and `artifacts` note each such file that exists: ``note: operation `table` runs `{@here}/scripts/table.py`, which it doesn't declare, so editing the file reruns nothing; ...``. To rerun a job when its script changes, keep the script under the dataset root and pass it to the operation as a source.
 
+### Numbers read from files
+
+A tool often needs a number that another tool prints, such as the repetition time `fslval` reads from an image's header. One step writes the number to a file, and `@scalar(port)` in a later command passes the number that port's file holds as an argument:
+
+<!-- spit-doc: setup
+source calib : Image .nii.gz [sub]
+source delays : Image .nii.gz [sub]
+default entities: {@key}={@value} separated "_"
+default path: out/{@product}/{@entities}
+-->
+
+```text
+operation read_tr(image: Image) -> Scalar .txt
+command read_tr: fslval {image} pixdim4 > {@output}
+tr = read_tr(calib)
+
+operation fit(tr: Scalar, delays: Image, calib: Image) -> Perfusion .nii.gz
+command fit: oxford_asl --tr @scalar(tr, min=5) -i {delays} -c {calib} -o {@output}
+perfusion = fit(tr, delays, calib)
+```
+
+For `sub=01`, `fslval` writes `6.234000 ` to `out/tr/sub=01.txt`. When the `fit` job starts, the backend reads that file and runs `oxford_asl --tr 6.234000 -i ...`. A file that holds no number, or `4.1`, which is under `min=5`, fails the job before `oxford_asl` starts, naming the file and what it holds.
+
+- `@scalar(port)` names a `one` input of the operation, whose artifact is a file. It goes in a `command` or a `verify` command, as a whole argument or within one, as in `--tr=@scalar(tr)`, but not as the program and not after `<` or `>`. A check has no ports, so it cannot read one.
+- The file must hold one finite number and nothing else but whitespace around it, written as a decimal: `6.234000`, `-2`, `.5` or `1e-3`. The argument is that text with the whitespace trimmed, so the tool gets the number as the first tool printed it.
+- `min=N` and `max=N`, after the port and separated by commas, are the least and greatest values allowed, both included: `@scalar(tr, min=5, max=100)`.
+- Written in quotes, as `'@scalar(tr)'`, it is text, passed to the tool as it is.
+- The number stays in its file, an artifact like any other, so a job that reads it reruns when the file changes, and the file records the value a job ran with. `spit dag --commands` shows each read with its file, as `'@scalar(out/tr/sub=01.txt, min=5)'`, since the number is known only once the file is written.
+
 ### A job's dimension values
 
 A command can give a tool the values of the job it runs, as for a read group, a plot's title or a run's name. A placeholder that names a dimension of the job, such as `{sample}`, is that job's value:

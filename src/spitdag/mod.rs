@@ -10,11 +10,13 @@ mod write;
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::io;
+use std::sync::Arc;
 
 use crate::model::{
     identity, natural_cmp, ArtifactId, ArtifactInstance, Artifacts, EntityBinding, JobId, Removal,
     Resources, SourceFile, StepId, Under,
 };
+use crate::template::scalar_text;
 use crate::types::TypeExpr;
 
 pub use crate::check::When;
@@ -22,7 +24,7 @@ pub use crate::check::When;
 use self::write::{write_document, PIECE};
 
 /// The schema version a `.spitdag` is written with.
-pub const SPITDAG_VERSION: usize = 12;
+pub const SPITDAG_VERSION: usize = 13;
 
 /// A resolved DAG with its paths bound and its commands expanded. Its
 /// artifacts are the resolved DAG's, each kept once with its path; jobs,
@@ -211,14 +213,24 @@ pub enum ArgPart {
         relative: String,
         text: String,
     },
+    /// The number in an input's file, which a backend reads when the job
+    /// starts, as `@scalar(port, min=N, max=N)` gives it. Each bound is the
+    /// shortest decimal for its value.
+    Scalar {
+        artifact: ArtifactId,
+        min: Option<Arc<str>>,
+        max: Option<Arc<str>>,
+    },
 }
 
 impl ArgPart {
-    /// The text this part is in a command, given the DAG it belongs to.
+    /// The text this part is in a command, given the DAG it belongs to. A
+    /// scalar's is the path of the file it reads, since its number is known
+    /// only when the job starts.
     pub fn text<'a>(&'a self, dag: &'a BoundDag) -> &'a str {
         match self {
             Self::Text(text) | Self::Here { text, .. } => text,
-            Self::Path(artifact) => dag.path(*artifact),
+            Self::Path(artifact) | Self::Scalar { artifact, .. } => dag.path(*artifact),
             Self::Dir(artifact) => folder_of(dag.path(*artifact)),
             Self::Stem {
                 artifact,
@@ -231,9 +243,16 @@ impl ArgPart {
 impl ArgPart {
     /// The text this part is in a command run from the output root: as
     /// [`ArgPart::text`], with a path under a separate dataset root made
-    /// absolute, as [`BoundDag::shown_path`] gives it.
+    /// absolute, as [`BoundDag::shown_path`] gives it. A scalar is shown as
+    /// a pipeline writes it, with its file's path for its port:
+    /// `@scalar(tr/sub=01.txt, min=5)`.
     pub fn shown<'a>(&'a self, dag: &'a BoundDag) -> Cow<'a, str> {
         match self {
+            Self::Scalar { artifact, min, max } => Cow::Owned(scalar_text(
+                &dag.shown_path(*artifact),
+                min.as_deref(),
+                max.as_deref(),
+            )),
             Self::Path(artifact) => dag.shown_path(*artifact),
             Self::Dir(artifact) => match dag.shown_path(*artifact) {
                 Cow::Borrowed(path) => Cow::Borrowed(folder_of(path)),
