@@ -8,7 +8,9 @@ use std::path::PathBuf;
 
 use crate::template::{EntitiesFormat, Holder, PathTemplate};
 
-use super::{owned_strings, ContextPattern, EntityBinding, Pipeline, PipelineIndex, VerdictRow};
+use super::{
+    owned_strings, ContextPattern, EntityBinding, Pipeline, PipelineIndex, ReviewRecord, VerdictRow,
+};
 
 /// How a dataset's sources are found and filtered: observed directories,
 /// `exclude` and `require` rules, and where source files live. The input stage
@@ -129,6 +131,9 @@ pub struct ReviewFile {
     pub review: String,
     /// The file as the recipe writes it, relative to the recipe's folder.
     pub file: String,
+    /// The file under the recipe's folder, once that folder is known;
+    /// `file` until then.
+    pub path: PathBuf,
     /// The recipe line it is written on.
     pub line: usize,
     /// The file's text, when it was read and exists. A review whose file does
@@ -302,6 +307,9 @@ pub struct SourceInventory {
     /// the reviewed artifacts by. A review with no rows holds back everything
     /// it judges.
     pub verdicts: Vec<VerdictRow>,
+    /// Each review file the recipe names, in the recipe's order, whether or
+    /// not it exists.
+    pub review_files: Vec<ReviewRecord>,
     /// The dataset root a `.spitout`'s `root` line names, as written:
     /// relative to the `.spitout`'s folder unless absolute.
     pub root: Option<PathBuf>,

@@ -8,7 +8,7 @@ use crate::model::{ArtifactId, JobId, Removal};
 
 use super::artifact_json::{write_artifact, ArtifactJson};
 use super::work::{write_work_commands, WorkCommands};
-use super::{ArgPart, Argument, BoundDag, BoundJob, BoundStep, When, SPITDAG_VERSION};
+use super::{ArgPart, Argument, BoundDag, BoundJob, BoundReview, BoundStep, When, SPITDAG_VERSION};
 
 /// How much of a document [`BoundDag::write_json`] holds before writing it.
 pub(crate) const PIECE: usize = 1 << 16;
@@ -70,6 +70,11 @@ pub(crate) fn write_document(
             item.finish();
         });
     });
+    document.field("reviews", |out| {
+        write_array(out, &dag.reviews, |out, review| {
+            write_review(out, dag, review)
+        });
+    });
     document.field("pipeline_folder", |out| match &dag.pipeline_folder {
         Some(folder) => write_string(out, folder),
         None => out.push_str("null"),
@@ -114,6 +119,66 @@ pub(crate) fn write_document(
     document.finish();
     out.push('\n');
     handed
+}
+
+/// One review, with each artifact it withheld.
+fn write_review(out: &mut String, dag: &BoundDag, review: &BoundReview) {
+    let mut item = ObjectWriter::start(out);
+    item.string("name", &review.name);
+    item.field("file", |out| match &review.file {
+        Some(file) => write_string(out, file),
+        None => out.push_str("null"),
+    });
+    item.field("found", |out| {
+        out.push_str(if review.found { "true" } else { "false" })
+    });
+    item.field("verdicts", |out| write_number(out, review.verdicts));
+    item.field("unmatched", |out| {
+        write_array(out, &review.unmatched, |out, &line| write_number(out, line));
+    });
+    item.field("targets", |out| {
+        write_array(out, &review.targets, |out, target| {
+            let mut item = ObjectWriter::start(out);
+            item.field("artifact", |out| {
+                write_artifact(out, &dag.artifact(target.artifact))
+            });
+            item.field("port", |out| match &target.port {
+                Some((operation, port)) => {
+                    let mut at = ObjectWriter::start(out);
+                    at.string("operation", operation);
+                    at.string("port", port);
+                    at.finish();
+                }
+                None => out.push_str("null"),
+            });
+            let rejected = target.rejected.as_ref();
+            item.field("verdict", |out| match rejected {
+                Some(_) => write_string(out, "fail"),
+                None => out.push_str("null"),
+            });
+            item.field("reason", |out| {
+                match rejected.and_then(|rejected| rejected.reason.as_deref()) {
+                    Some(reason) => write_string(out, reason),
+                    None => out.push_str("null"),
+                }
+            });
+            item.field("line", |out| {
+                write_optional_number(out, rejected.map(|rejected| rejected.line));
+            });
+            for (field, outputs) in [
+                ("withholds", &target.withholds),
+                ("shrinks", &target.shrinks),
+            ] {
+                item.field(field, |out| {
+                    write_array(out, outputs, |out, output| {
+                        write_string(out, &output.to_string())
+                    });
+                });
+            }
+            item.finish();
+        });
+    });
+    item.finish();
 }
 
 /// One job. Its operation, commands and `verify` are written first into
@@ -457,7 +522,7 @@ mod tests {
         dag.output_root = Some("/data/results".into());
         let text = dag.to_json();
         assert!(text.starts_with(&format!(
-            "{{\"version\":13,\"generator\":{{\"name\":\"spit\",\"version\":\"{}\"}},\
+            "{{\"version\":14,\"generator\":{{\"name\":\"spit\",\"version\":\"{}\"}},\
 \"root\":\"/data/study\",\"output_root\":\"/data/results\",\"external_inputs\":[{{\"product\":\"raw\"",
             env!("CARGO_PKG_VERSION")
         )));
@@ -480,7 +545,7 @@ mod tests {
         );
         // A verify command that starts with a path names no program.
         assert!(
-            text.contains("\"executables\":[\"tool\"],\"removed\":[],\"left_out\":[],\"pipeline_folder\":null,\"pipeline_files\":[],\"calls\":[],\"jobs\""),
+            text.contains("\"executables\":[\"tool\"],\"removed\":[],\"left_out\":[],\"reviews\":[],\"pipeline_folder\":null,\"pipeline_files\":[],\"calls\":[],\"jobs\""),
             "{text}"
         );
         assert!(
