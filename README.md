@@ -2,146 +2,303 @@
 
 <img src="logo.png" alt="SPIT logo" width="160">
 
-**Describe an analysis once. Run it on any dataset. See every job, and every gap, before anything runs.**
+**Describe your pipeline concisely and expressively. Make it repeatable, and keep it maintainable as your inputs and processes change.**
 
-Research data is ragged. One subject is missing a scan, one sample has a corrupt run, one configuration has fewer seeds than the rest. A loop over files, or a workflow tool driven by filename patterns, finds that out hours into a run, or quietly skips the work and leaves you to notice.
+SPIT is a domain-agnostic language for describing data analysis pipelines whose commands can be executed in the command line. The SPIT compiler handles job planning, and the runner handles execution.
 
-SPIT is a compiler for batch pipelines over files. You name the kinds of files you have, the dimensions they vary along (subject, run, sample, seed), and the commands that turn one into another. SPIT matches that against the files on disk, checks it, and hands back the exact list of jobs. When something can't be made, it says which file is missing and which line needs it.
+SPIT abstracts the pipeline away from the tools and the data. A step is just a command line, so it doesn't matter whether it's `bet`, `bwa`, `ffmpeg` or `python train.py`. If it reads files and writes files, SPIT can plan it.
 
-## See it work
+Reasons to use SPIT:
 
-A small study: three subjects, each with functional runs, one without an anatomical scan.
+- Describe the logical flow of data through your system. Let SPIT stitch everything together.
+- Catch bugs at compile time in your editor, instead of hours into your processing.
+- Separate your input data from the processing. Inputs can change without breaking the pipeline.
+- Effortlessly work between and across data dimensions. Additional analysis requires no new implementation.
+- Modify your pipeline as you work, and only run the processing that needs to run.
+- Elegantly handle CLI arguments. No more hardcoded paths or gymnastics.
+
+
+## How it works
+
+You write a pipeline (`.spit`) that says what to do, and a recipe (`.spitin`) that says where your data is and what to leave out. `spit` reads both, finds your files, and plans every job into a `.spitdag`. The runner, spit-bash, runs those jobs and keeps track of what's already done.
+
+```mermaid
+flowchart LR
+    pipeline["<b>Pipeline</b> .spit<br/>what to do"] --> compiler(["<b>SPIT compiler</b>"])
+    recipe["<b>Recipe</b> .spitin<br/>where the data is,<br/>what to leave out"] --> compiler
+    data[("<b>Your input files</b>")] --> compiler
+    compiler --> dag["<b>Plan</b> .spitdag<br/>every job and command"]
+    dag --> runner(["<b>Runner</b>"])
+    data --> runner
+    runner --> results[("<b>Your results</b>")]
+
+    classDef written fill:#dbe7fb,stroke:#3d63c9,color:#111
+    classDef tool fill:#fde7cf,stroke:#c9771d,color:#111
+    classDef files fill:#d9f0df,stroke:#2f8a48,color:#111
+    class pipeline,recipe written
+    class compiler,runner tool
+    class data,dag,results files
+```
+
+Blue is what you write, orange is SPIT's tools, and green is files.
+
+## What does writing SPIT look like?
+
+Imagine collecting data from multiple weather sites in multiple regions. Each site logs a file of readings every day, beside a calibration file for its sensor and a file saying where it stands. A file for each kind of alert says when a reading is too cold or too hot:
 
 <!-- spit-doc: plain -->
 
 ```text
 data/
-├── sub-01/  anat.nii.gz  bold_run-1.nii.gz  bold_run-2.nii.gz
-├── sub-02/               bold_run-1.nii.gz
-└── sub-03/  anat.nii.gz  bold_run-1.nii.gz
+├── alerts/  frost.json  heat.json
+├── north/
+│   ├── alder/  calibration.json  site.json  01.csv  02.csv  03.csv
+│   └── birch/  calibration.json  site.json  01.csv  02.csv  03.csv
+└── south/
+    ├── cedar/  calibration.json  site.json  01.csv  02.csv  03.csv
+    ├── dune/   calibration.json  site.json  01.csv  02.csv  03.csv
+    └── elm/    calibration.json  site.json  01.csv  02.csv  03.csv
 ```
-
-The pipeline, `study.spit`, says what to do for any subject, and nothing about these three:
 
 ```spit
-root data
-default path: derivatives/sub-{sub}/{@product}[_run-{run}].nii.gz
+# Logic for saving results.
+default path: results/[{region}/][{site}/]{@product}[_{alert}][_{day}].csv
 
-source anat : T1 [sub]
-path anat: sub-{sub}/anat.nii.gz
-source bold : Bold [sub, run]
-path bold: sub-{sub}/bold_run-{run}.nii.gz
+# Declare the inputs, and the dimensions they vary by.
+source reading : Readings<Raw> [region, site, day]
+source calibration : Calibration [region, site]
+source location : Site [region, site]
+source threshold : Threshold [alert]
+# No source holds `alert` beside the others, so say where it goes.
+dimensions [region, site, day, alert]
 
-operation skullstrip(image: T1) -> T1
-command skullstrip: bet {image} {@output}
-brain = skullstrip(anat)
+# Define the operations on the data, and commands required.
+operation clean(days: many Readings<Raw> @min(2), calibration: Calibration) -> Readings<Clean>
+command clean: python clean.py --calibration {calibration} --days {days.day} -o {@output} {days}
 
-operation register(bold: Bold, anat: T1) -> Bold
-command register: flirt -in {bold} -ref {anat} -out {@output}
-aligned = register(bold, brain)
+operation average(series: many Readings<S>) -> Readings<S>
+command average: python average.py -o {@output} {series}
 
-operation average(runs: many Bold) -> Bold
-command average: fslmerge -t {@output} {runs}
-mean = average(aligned @vary(run))
+operation reduce(series: Readings<Clean>, location: Site) -> Readings<SeaLevel>
+command reduce: python reduce.py --location {location} -o {@output} {series}
+
+operation compare(readings: Readings<SeaLevel>, baseline: Readings<SeaLevel>) -> Anomaly
+command compare: python compare.py {readings} {baseline} {@output}
+
+operation rank(anomalies: many Anomaly) -> Table
+command rank: python rank.py --sites {anomalies.site} -o {@output} -- {anomalies}
+
+operation tally(series: Readings<Clean>, threshold: Threshold) -> Count
+command tally: python tally.py --alert {alert} --threshold {threshold} -o {@output} {series}
+
+# Define the artifacts and data flow
+cleaned = clean(reading @vary(day), calibration)
+regional = average(cleaned @vary(site))
+overall = average(cleaned @vary(region, site))
+reduced = reduce(cleaned, location)
+regional_reduced = average(reduced @vary(site))
+anomaly = compare(reduced, regional_reduced)
+league = rank(anomaly @vary(region, site))
+alert_days = tally(cleaned, threshold @each(alert))
 ```
 
-`[sub, run]` names what each file varies by. Steps join their inputs on the dimensions they share, so each run is registered to its own subject's brain, and `@vary(run)` gathers a subject's runs into one average. Ask SPIT for the plan:
+- `default path` says where every output goes, built from the dimensions it has.
+- `[region, site, day]` says what each file varies by. Steps join their inputs on the dimensions they share, so each site's readings are cleaned with its own calibration.
+- `@vary` says what to gather. `clean(reading @vary(day), calibration)` gathers each site's days into one series, so every step after it runs once per site, not once per file. `@min(2)` says a site needs at least two days.
+- One `average` makes three products: each region's temperature with `@vary(site)`, every site's together with `@vary(region, site)`, and each region's at sea level from the reduced series.
+- `Readings<Raw>`, `Readings<Clean>` and `Readings<SeaLevel>` are types. `average` takes any of them, written `Readings<S>`, and gives back the same kind. `compare` takes sea-level readings on both sides, so a site is never compared with a region at another height.
+- `reduce` takes each site to sea level, so `compare(reduced, regional_reduced)` finds what height doesn't explain: a town, shade, or a hollow that pools cold air.
+- `@vary(region, site)` ranks every site in one table, and `{anomalies.site}` lists the sites in the same order as their files.
+- `@each(alert)` goes the other way from `@vary`: it repeats a step across a dimension its main input doesn't have. Every site is checked against every alert. Add a `drought.json`, and every site gets checked for drought too.
 
-<!-- spit-doc: output
-mkdir -p data/sub-01 data/sub-02 data/sub-03
-touch data/sub-01/anat.nii.gz data/sub-01/bold_run-1.nii.gz data/sub-01/bold_run-2.nii.gz data/sub-02/bold_run-1.nii.gz data/sub-03/anat.nii.gz data/sub-03/bold_run-1.nii.gz
-echo '$ spit dag study.spit'
-spit dag study.spit 2>&1 || true
-echo '$ spit dag study.spit --partial --commands'
-spit dag study.spit --partial --commands 2>&1
---- study.spit = @previous
+The pipeline doesn't say where the data is. That goes in a recipe, a `.spitin` file beside the data, so the pipeline stays the same from one dataset to the next. The recipe names the pipeline, the folder the data is in, where each input file lives, and anything to leave out:
+
+<!-- spit-doc: recipe
+--- weather.spit
+# Logic for saving results.
+default path: results/[{region}/][{site}/]{@product}[_{alert}][_{day}].csv
+
+# Declare the inputs, and the dimensions they vary by.
+source reading : Readings<Raw> [region, site, day]
+source calibration : Calibration [region, site]
+source location : Site [region, site]
+source threshold : Threshold [alert]
+# No source holds `alert` beside the others, so say where it goes.
+dimensions [region, site, day, alert]
+
+# Define the operations on the data, and commands required.
+operation clean(days: many Readings<Raw> @min(2), calibration: Calibration) -> Readings<Clean>
+command clean: python clean.py --calibration {calibration} --days {days.day} -o {@output} {days}
+
+operation average(series: many Readings<S>) -> Readings<S>
+command average: python average.py -o {@output} {series}
+
+operation reduce(series: Readings<Clean>, location: Site) -> Readings<SeaLevel>
+command reduce: python reduce.py --location {location} -o {@output} {series}
+
+operation compare(readings: Readings<SeaLevel>, baseline: Readings<SeaLevel>) -> Anomaly
+command compare: python compare.py {readings} {baseline} {@output}
+
+operation rank(anomalies: many Anomaly) -> Table
+command rank: python rank.py --sites {anomalies.site} -o {@output} -- {anomalies}
+
+operation tally(series: Readings<Clean>, threshold: Threshold) -> Count
+command tally: python tally.py --alert {alert} --threshold {threshold} -o {@output} {series}
+
+# Define the artifacts and data flow
+cleaned = clean(reading @vary(day), calibration)
+regional = average(cleaned @vary(site))
+overall = average(cleaned @vary(region, site))
+reduced = reduce(cleaned, location)
+regional_reduced = average(reduced @vary(site))
+anomaly = compare(reduced, regional_reduced)
+league = rank(anomaly @vary(region, site))
+alert_days = tally(cleaned, threshold @each(alert))
 -->
 
-```text
-$ spit dag study.spit
-error: line 15, column 26: no `brain` artifact for input `anat` of `register` at [run=1,sub=02]
-  1 more artifacts cannot be produced; run `spit artifacts` to list them, or `spit dag --partial` to plan the rest
-$ spit dag study.spit --partial --commands
-note: planned 7 jobs; left out 2 artifacts that cannot be produced (see left_out)
-Job 1  skullstrip
-  run:    bet sub-01/anat.nii.gz derivatives/sub-01/brain.nii.gz
-Job 3  register
-  run:    flirt -in sub-01/bold_run-1.nii.gz -ref derivatives/sub-01/brain.nii.gz -out derivatives/sub-01/aligned_run-1.nii.gz
-Job 6  average
-  run:    fslmerge -t derivatives/sub-01/mean.nii.gz derivatives/sub-01/aligned_run-1.nii.gz derivatives/sub-01/aligned_run-2.nii.gz
+```spit
+pipeline weather.spit
+root data
+
+inputs:
+    reading: {region}/{site}/{day}.csv
+    calibration: {region}/{site}/calibration.json
+    location: {region}/{site}/site.json
+    threshold: alerts/{alert}.json
+
+exclude reading[region=south,site=dune,day=02]    # sensor iced over
+require [region, site] where calibration count=1
 ```
 
-Nothing has run yet, and none of `bet`, `flirt` or `fslmerge` needs to be installed to get this far. `spit dag study.spit -o study.spitdag` saves the plan, and a runner executes it.
+`exclude` leaves out a file, and says why. `require` makes sure every site has its calibration file, so a missing one is an error before anything runs.
 
-## Why SPIT
+Run it:
 
-**Mistakes are compile errors, not failed jobs.** Types, dimensions, command placeholders and output paths are checked before any data is read. Pass the arguments of `register` in the wrong order, or name a placeholder that a job has many values of, and `spit check` points at the line:
+<!-- spit-doc: fragment -->
+
+```sh
+spit-bash run weather.spitin -j 4
+```
+
+Eight steps become 31 jobs, with output paths defined by `default path`:
+
+<!-- spit-doc: plain -->
+
+```text
+results/
+├── league.csv
+├── overall.csv
+├── north/
+│   ├── regional.csv  regional_reduced.csv
+│   ├── alder/  cleaned.csv  reduced.csv  anomaly.csv  alert_days_frost.csv  alert_days_heat.csv
+│   └── birch/  (the same)
+└── south/
+    ├── regional.csv  regional_reduced.csv
+    ├── cedar/  (the same)
+    ├── dune/   (the same, cleaned from two days)
+    └── elm/    (the same)
+```
+
+No loops over regions, sites or days, no list of which site belongs to which region, and no file names. Add a site, a region, a week of days or a kind of alert, and every step that needs it picks it up.
+
+At a larger scale, the same pipeline, with checks and a plotting stage added, follows 16 sites across a mapped landscape for a year and draws this figure. Its 98 jobs run in seconds. The [dataset](https://github.com/eclnz/spit-showcase/raw/main/weather/weather-data.zip) and the [pipeline](https://github.com/eclnz/spit-showcase/tree/main/weather) are in spit-showcase, ready to run:
+
+![The sites on a map, one day cleaned, regional temperatures over a year, each site's daily anomaly, alert days, and drift against mean anomaly](https://github.com/eclnz/spit-showcase/raw/main/weather/figure.png)
+
+- **a**, The landscape: the sea to the west, a ridge to the north, and the sites on it, coloured by region. Each site's temperature is built from where it stands: a yearly cycle that swings more inland, a day-night cycle, weather that is partly shared and partly the region's own, and 6.5 °C less for each kilometre of height.
+- **b**, What cleaning does to one site's day, chosen because it has both a dropout and a spike. Grey is the sensor as read. Blue is the cleaned day: the readings with the sensor's calibration undone, using the gain and offset from its calibration file, and the two bad hours interpolated from their neighbours. The crosses mark those hours: the dropout at 3 am, and the spike at 9 am, which read 51 °C, off the top of the axis.
+- **c**, Each region's daily temperature through the year, the median of its sites, and all sites' together. A median, so that one faulty sensor can't move its region. The coast swings least between winter and summer, and the highland is coldest.
+- **d**, How far each site's day is from its own region's, once both are reduced to sea level so that height doesn't count. Red is warmer than the region and blue is colder; grey is a day with no file. Elm is warm all year, sedge is cool, and poppy starts level and turns redder from April.
+- **e**, On how many days each site had a frost alert (left) or a heat alert (right), on the same rows as **d**. The highland sites had 29 to 42 frost days; only the valley had heat days.
+- **f**, Each site's mean anomaly against its drift, the slope of its anomaly over the year. The shaded band is where a site is not named: within 3.5 robust standard deviations of the median site and, for drift, within the 1 °C a year a sound sensor can wander. Elm, in a town, and sedge, in a hollow that pools cold air, are the place, not the sensor. Poppy has drifted 3.3 °C, which is a sensor going wrong, so it is the one to visit.
+
+## Why SPIT?
+
+**Say what varies, not how to loop.** Name the dimensions your data varies by, and SPIT joins and gathers by them. `@vary(site)` collects each region's sites; `@vary(region, site)` collects every site. The same `average` serves both. `@each(alert)` goes the other way, repeating a step for every alert there is. Nobody writes a loop, a filename pattern or a list of which site belongs where.
+
+**Know exactly what will run, and what can't, before anything does.** Hand-written scripts may not warn you when files are missing, or may crash partway through. SPIT matches the pipeline against your files first. It plans only the combinations that exist, and traces every gap back to the file that's missing. `spit artifacts` lists them all, and `--partial` runs everything that can be made while the rest waits.
+
+**Catch mistakes before they cost you a run.** `spit check` tests types, dimensions, command placeholders and output paths without touching any data, in a few milliseconds, so the editor shows errors as you type. Compare a site's sea-level readings with a region's actual ones, or use a placeholder that has many values in one job, and it points you to the line:
 
 <!-- spit-doc: output
 mkdir data
-sed 's/register(bold, brain)/register(brain, bold)/' study.spit > swapped.spit
-sed 's/{@output} {runs}/{@output} {run}/' study.spit > typo.spit
-spit check swapped.spit || true
+sed 's/anomaly = compare(reduced, regional_reduced)/anomaly = compare(reduced, regional)/' weather.spit > mixed.spit
+sed 's/{anomalies.site}/{site}/' weather.spit > typo.spit
+spit check mixed.spit || true
 spit check typo.spit || true
---- study.spit
-root data
-default path: derivatives/sub-{sub}/{@product}[_run-{run}].nii.gz
+--- weather.spit
+# Logic for saving results.
+default path: results/[{region}/][{site}/]{@product}[_{alert}][_{day}].csv
 
-source anat : T1 [sub]
-path anat: sub-{sub}/anat.nii.gz
-source bold : Bold [sub, run]
-path bold: sub-{sub}/bold_run-{run}.nii.gz
+# Declare the inputs, and the dimensions they vary by.
+source reading : Readings<Raw> [region, site, day]
+source calibration : Calibration [region, site]
+source location : Site [region, site]
+source threshold : Threshold [alert]
+# No source holds `alert` beside the others, so say where it goes.
+dimensions [region, site, day, alert]
 
-operation skullstrip(image: T1) -> T1
-command skullstrip: bet {image} {@output}
-brain = skullstrip(anat)
+# Define the operations on the data, and commands required.
+operation clean(days: many Readings<Raw> @min(2), calibration: Calibration) -> Readings<Clean>
+command clean: python clean.py --calibration {calibration} --days {days.day} -o {@output} {days}
 
-operation register(bold: Bold, anat: T1) -> Bold
-command register: flirt -in {bold} -ref {anat} -out {@output}
-aligned = register(bold, brain)
+operation average(series: many Readings<S>) -> Readings<S>
+command average: python average.py -o {@output} {series}
 
-operation average(runs: many Bold) -> Bold
-command average: fslmerge -t {@output} {runs}
-mean = average(aligned @vary(run))
+operation reduce(series: Readings<Clean>, location: Site) -> Readings<SeaLevel>
+command reduce: python reduce.py --location {location} -o {@output} {series}
+
+operation compare(readings: Readings<SeaLevel>, baseline: Readings<SeaLevel>) -> Anomaly
+command compare: python compare.py {readings} {baseline} {@output}
+
+operation rank(anomalies: many Anomaly) -> Table
+command rank: python rank.py --sites {anomalies.site} -o {@output} -- {anomalies}
+
+operation tally(series: Readings<Clean>, threshold: Threshold) -> Count
+command tally: python tally.py --alert {alert} --threshold {threshold} -o {@output} {series}
+
+# Define the artifacts and data flow
+cleaned = clean(reading @vary(day), calibration)
+regional = average(cleaned @vary(site))
+overall = average(cleaned @vary(region, site))
+reduced = reduce(cleaned, location)
+regional_reduced = average(reduced @vary(site))
+anomaly = compare(reduced, regional_reduced)
+league = rank(anomaly @vary(region, site))
+alert_days = tally(cleaned, threshold @each(alert))
 -->
 
 ```text
-error: line 15, column 20: type mismatch at `register.bold`: product `brain` is T1, expected Bold
-error: line 18, column 40: command for `average` uses `{run}`, but `runs` collects `aligned` across `run` with `@vary(run)`, so each job has many values of it; `{runs.run}` gives each artifact's, and the jobs of `mean` have `sub`
+error: line 37, column 28: type mismatch at `compare.baseline`: product `regional` is Readings<Clean>, expected Readings<SeaLevel>
+error: line 26, column 38: command for `rank` uses `{site}`, but `anomalies` collects `anomaly` across `site` with `@vary(region, site)`, so each job has many values of it; `{anomalies.site}` gives each artifact's, and the jobs of `league` have no dimensions
 ```
 
-**Gaps in the data are explained, not discovered.** `spit artifacts` lists everything that can't be made and why, tracing each gap back to the missing file. `--partial` plans the rest, and the saved plan records what it left out.
+Once it runs, your assumptions are tested where they matter, not discovered three steps later. A `check` tests a file the moment it's read or written, as `@check(nonempty)` or `@check(ndim(3))`, and a `verify` command tests a job's inputs before its command starts. A failing file fails its own job, by name, and nothing downstream runs on it. The runner won't even start while a program or an input is missing.
 
-**The pipeline stays clean of the dataset's quirks.** Which files to read, which subjects to exclude, and how many runs each must have go in a recipe (`.spitin`) beside the data, not in the pipeline. The same pipeline runs on the next dataset unchanged.
+**Structure that grows with your pipeline.** Each step is one command with declared inputs and outputs, so every stage of the work is a file you can open, check and rerun on its own. Steps that belong together become one operation the pipeline calls as a single step, and `use` shares it between pipelines. A `stage` groups a phase of work, with its own output folder and its own default checks. Types are there when you want them: the example's `Readings<Clean>` and `Readings<SeaLevel>` are what made comparing a site with a region at another height an error above. Start without them, add them where a mistake would cost you, and switch on `types strict` once the pipeline settles.
 
-**Iterate on the data and the pipeline without starting over.** [spit-bash](runner/README.md), the runner, records what each job read, ran and wrote, and on the next run does only the work that changed:
+**One pipeline, many datasets, every exclusion explained.** Which files to read, what to leave out and how much each group must have go in a recipe (`.spitin`) beside the data. Each `exclude` carries its reason, and `require` makes a gap an error rather than a surprise. For quality control by eye, a `review` reads pass and fail verdicts from a spreadsheet, and holds back whatever hasn't passed.
 
-- Add a subject or a run, and only its jobs and the collections it joins run. A dataset still being collected runs with `--partial`, and the subjects not yet complete wait.
-- Edit a command, and only that operation's jobs rerun, with the steps after them.
-- Change an input in a way that leaves a step's output the same, and the run stops there: the jobs after it are kept.
-- `touch` a file, check it out again, or move the dataset, and nothing reruns, since files are compared by content.
-- Rename a product or a dimension, and `--move-files` moves the existing outputs to their new paths rather than remaking them.
-- Every output a run replaces is kept, and `spit-bash restore` puts it back. `spit-bash plan` says what will run and why before anything does.
+**Never write a path again.** One `default path` names every output from its dimensions, with optional parts for the dimensions a product doesn't have. Commands get paths, not path-building code.
 
-**The plan is a file you can read.** A `.spitdag` holds every job with its inputs, outputs and command line, in a [documented format](docs/spitdag.md). spit-bash runs it on one machine, in parallel. Another runner, for a cluster or a cloud, needs nothing but the format.
+**A runner that comes with it.** [spit-bash](runner/README.md), in this repository, runs the plan in parallel on your machine and remembers what each job read, ran and wrote:
 
-**It is fast.** Planning 72,000 jobs for 1,000 subjects takes about a quarter of a second, and checking the pipeline a few milliseconds, so the editor can check as you type.
+- Add data or edit a command, and only the jobs it affects rerun. If a rerun gives the same output as before, everything after it is kept.
+- Files are compared by content, so `touch`, a fresh checkout or a moved dataset reruns nothing.
+- A failed job never leaves a half-written file behind: its outputs are removed and the previous version is put back. Its log holds every command it ran, ready to run by hand.
+- `spit-bash plan` says what will run, and why, before anything does. Every replaced output is kept, and `spit-bash restore` puts it back.
 
-## Is it for you?
+The plan itself is a file in a [documented format](docs/spitdag.md), so another runner, for a cluster or the cloud, needs nothing else.
 
-SPIT fits work where the same command-line tools run over many subjects, samples, files or configurations, and where each step reads files and writes files: neuroimaging, genomics, audio, geospatial tiles, parameter sweeps. [spit-showcase](https://github.com/eclnz/spit-showcase) has six pipelines on public data, from BIDS quality control to variant calling to a scikit-learn sweep.
+**Is it for you?** SPIT fits work where command-line tools run over many files, each step reading files and writing files. It isn't a fit when:
 
-It is not a fit for:
-
-- **Plans that change as they run.** SPIT decides every job up front. A job can read a number from a file when it starts, but its output can't decide which jobs exist.
-- **In-process code.** Steps are commands. A Python function is a script that the command calls.
-- **Clusters and clouds, today.** The one runner runs jobs on a single machine.
-
-SPIT is young: it is at version 0.5, and syntax still changes between minor versions.
+- you need a cluster or the cloud today: spit-bash runs on one machine, and other runners don't exist yet;
+- steps are Python functions passing data in memory, or read from databases or streams;
+- what runs next depends on what a step finds: the plan is fixed before anything runs.
 
 ## Install
 
-SPIT needs the [Rust toolchain](https://www.rust-lang.org/tools/install), and spit-bash Python 3.10 or newer:
+You'll need the [Rust toolchain](https://www.rust-lang.org/tools/install) for SPIT, and Python 3.10 or newer for spit-bash:
 
 <!-- spit-doc: fragment -->
 
@@ -150,34 +307,35 @@ cargo install --git https://github.com/eclnz/spit --branch dev spit
 python3 -m pip install "git+https://github.com/eclnz/spit@dev#subdirectory=runner"
 ```
 
-Then plan and run a pipeline:
+Then check, plan and run your pipeline:
 
 <!-- spit-doc: fragment -->
 
 ```sh
-spit check study.spit                  # check the pipeline; reads no data
-spit dag study.spit --counts           # jobs per step
-spit-bash run study.spit -j 4          # run them, four cores at a time
+spit check weather.spit             # check the pipeline without reading any data
+spit dag weather.spitin --counts    # count the jobs for each step
+spit-bash run weather.spitin -j 4   # run them, four at a time
 ```
 
-The [VS Code extension](https://github.com/eclnz/spit-vscode) shows the same errors as you type, and on hover the type, dimensions, command and output path of each product.
+Install the [VS Code extension](https://github.com/eclnz/spit-vscode) to see errors as you type. Hover over any product to see its type, dimensions, command and output path.
 
 ## Learn more
 
-- [Getting started](docs/getting-started.md) walks through a pipeline in this repository.
-- [The guide](docs/guide/concepts.md) covers pipelines, matching, paths, recipes and finding why a job is missing.
+- New to SPIT? [Getting started](docs/getting-started.md) walks you through a pipeline in this repository.
+- [The guide](docs/guide/concepts.md) covers pipelines, matching, paths, recipes, and how to find out why a job is missing.
 - [Examples](docs/examples.md) include a ragged parameter sweep and a cohort with missing inputs.
-- The [language manual](docs/language-reference.md), [command line](docs/cli.md) and [DAG format](docs/spitdag.md) are the references.
+- [spit-showcase](https://github.com/eclnz/spit-showcase) has the weather network above, and pipelines on public data from unrelated fields: spoken-digit audio, MRI, SARS-CoV-2 variant calling, elevation tiles and scikit-learn models.
+- For the details, see the [language manual](docs/language-reference.md), the [command line](docs/cli.md) and the [DAG format](docs/spitdag.md).
 
-To browse the documentation as a site, install [uv](https://docs.astral.sh/uv/) and run `uv run properdocs serve`.
+To browse the docs as a site, install [uv](https://docs.astral.sh/uv/) and run `uv run properdocs serve`.
 
 ## Contributing
 
-Issues and pull requests are welcome. [The architecture map](docs/architecture.md) shows how the compiler is laid out, and [AGENTS.md](AGENTS.md) holds the rules for the code and the checks to run before a commit.
+Issues and pull requests are welcome. Start with [the architecture map](docs/architecture.md) to see how the compiler fits together, and [AGENTS.md](AGENTS.md) for the code rules and the checks to run before you commit.
 
 ## Disclaimer
 
-SPIT was developed with the help of generative AI tools. I am not a Rust developer: most of the code and documentation was generated by AI, and I have checked it by testing its behavior rather than by expert review of the Rust itself. The test suite covers the examples and language features, but the code may still contain errors or unidiomatic Rust. The commands in a `.spitdag` run on your system when a backend runs them: review them before running them, especially on data you cannot easily replace. The software is provided as is, without warranty of any kind; see the [license](LICENSE).
+SPIT was built with the help of generative AI. I'm not a Rust developer: AI wrote most of the code and docs, and I've checked it by testing how it behaves, not by expert review of the Rust. The tests cover the examples and language features, but the code may still have bugs or unidiomatic Rust. The commands in a `.spitdag` run on your system, so review them before you run them, especially on data you can't easily replace. The software is provided as is, without warranty of any kind; see the [license](LICENSE).
 
 ## License
 
