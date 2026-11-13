@@ -1,0 +1,3 @@
+pipeline review.spit
+root .
+review looked_at from qc/looked_at.csv

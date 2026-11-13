@@ -1,6 +1,6 @@
 # The `.spitdag` format
 
-A `.spitdag` is what `spit dag -o` writes and `spit dag --json` prints: every job a pipeline resolves to over one dataset, each with its files and its commands. A backend that runs the jobs reads nothing else: no pipeline, path rule or command template. This page describes version 13, the version SPIT writes. Use `spit dag --commands` for a readable view of the same commands.
+A `.spitdag` is what `spit dag -o` writes and `spit dag --json` prints: every job a pipeline resolves to over one dataset, each with its files and its commands. A backend that runs the jobs reads nothing else: no pipeline, path rule or command template. This page describes version 14, the version SPIT writes. Use `spit dag --commands` for a readable view of the same commands.
 
 ## Document
 
@@ -8,7 +8,7 @@ A `.spitdag` is one JSON object, followed by a newline:
 
 ```json
 {
-  "version": 13,
+  "version": 14,
   "generator": {"name": "spit", "version": "0.5.0"},
   "root": "/data/study",
   "output_root": "/data/study-results",
@@ -17,6 +17,7 @@ A `.spitdag` is one JSON object, followed by a newline:
   "executables": ["sort", ...],
   "removed": [REMOVAL, ...],
   "left_out": [LEFT_OUT, ...],
+  "reviews": [REVIEW, ...],
   "pipeline_folder": "/home/lab/study",
   "pipeline_files": [FILE, ...],
   "calls": [CALL, ...],
@@ -26,7 +27,7 @@ A `.spitdag` is one JSON object, followed by a newline:
 
 | Field | Holds |
 | --- | --- |
-| `version` | The format's version, `13`. A change a reader must know about raises it. Version 6 added each job's [`checks`](#checks). Version 7 added `pipeline_files`, `calls` and each job's `origin`: see [Where jobs come from](#where-jobs-come-from). Version 8 gives each job its [`commands`](#commands) in place of version 7's `command`, each with its `stdin` and `stdout`, see [Standard input and output](#standard-input-and-output), and added its `cores` and `memory`, see [Cores and memory](#cores-and-memory). Version 9 gives every job an `origin`, with the `file` and `line` of its step, where version 8 left it `null` for a step written in the pipeline. Version 10 added `pipeline_folder` and the `here` command part. Version 11 removed each job's `fingerprint`: see [Identifying work](#identifying-work). Version 12 added `output_root` and each artifact's `under`: see [Roots](#roots). Version 13 added the [`scalar` part](#numbers-read-from-files). |
+| `version` | The format's version, `14`. A change a reader must know about raises it. Version 6 added each job's [`checks`](#checks). Version 7 added `pipeline_files`, `calls` and each job's `origin`: see [Where jobs come from](#where-jobs-come-from). Version 8 gives each job its [`commands`](#commands) in place of version 7's `command`, each with its `stdin` and `stdout`, see [Standard input and output](#standard-input-and-output), and added its `cores` and `memory`, see [Cores and memory](#cores-and-memory). Version 9 gives every job an `origin`, with the `file` and `line` of its step, where version 8 left it `null` for a step written in the pipeline. Version 10 added `pipeline_folder` and the `here` command part. Version 11 removed each job's `fingerprint`: see [Identifying work](#identifying-work). Version 12 added `output_root` and each artifact's `under`: see [Roots](#roots). Version 13 added the [`scalar` part](#numbers-read-from-files). Version 14 added [`reviews`](#reviews). |
 | `generator` | The program that wrote the file, and its version. |
 | `root` | The absolute dataset folder, which the sources are under, or `null` when it was not known: a `.spitout` that records no root. |
 | `output_root` | The absolute folder the files jobs write are under, and the folder commands run from: see [Roots](#roots). It is `root` when the pipeline names no output root, and `null` when neither is known. |
@@ -35,6 +36,7 @@ A `.spitdag` is one JSON object, followed by a newline:
 | `executables` | The program each command, `verify` command and check starts with, once each, in text order. A command whose first word is a path names no program and is left out. A backend can check these are installed before running anything. |
 | `removed` | What the input stage left out of the dataset, and why: see [Removal](#removal). `[]` when nothing was. |
 | `left_out` | Outputs whose jobs could not be planned, each with its reasons: see [Left out](#left-out). `[]` for a complete plan. |
+| `reviews` | Each review the pipeline attaches, with its file and what it withheld: see [Reviews](#reviews). `[]` for a pipeline with none. |
 | `pipeline_folder` | The absolute path of the folder holding the pipeline's own file, which a [`here` part](#commands) is under; `null` when SPIT did not read the pipeline from a file. |
 | `pipeline_files` | Every file the pipeline was read from, with its git blob id: see [Where jobs come from](#where-jobs-come-from). |
 | `calls` | Every call to an operation carried out by steps: see [Where jobs come from](#where-jobs-come-from). `[]` for a pipeline that makes none. |
@@ -85,7 +87,7 @@ Each artifact or group a named or conditional `exclude` rule removed, as the `.s
 
 Nothing in `removed` is among the jobs' inputs: the record says what was left out, so a report can say so.
 
-A [review](language-reference.md#reviews) leaves no field here. SPIT applies the verdicts when it makes the plan: an artifact a review withholds is in no job's inputs, and the jobs that would have read it are not in the DAG.
+A [review](language-reference.md#reviews) leaves no record here: what it withheld is under [Reviews](#reviews).
 
 ## Left out
 
@@ -96,6 +98,46 @@ Each output that could not be produced has its identity and the input gaps that 
 ```
 
 `dag --partial` fills this array while keeping every complete job. Plain `dag` fails if any output would be left out. A reason about a step that a call to an [operation carried out by steps](language-reference.md#operations-carried-out-by-steps) made starts with the call, as ``in `m, t = L::summarise(...)`: ``. The reasons are the same kinds shown by `spit artifacts`: a missing or ambiguous input, a collection below `@min`, or an input artifact whose job cannot be completed. A `many` input in a partial plan uses only its complete members, so a downstream aggregate may still run.
+
+## Reviews
+
+SPIT applies a [review](language-reference.md#reviews)'s verdicts when it makes the plan: an artifact a review rejects, or that no row judges yet, is in no job's inputs that the review covers, and the jobs that would have read it are not in the DAG. `reviews` records each review the pipeline attaches to a product, in declaration order, so a backend can report what is waiting for a verdict and where a person records it:
+
+```json
+{
+  "name": "looked_at",
+  "file": "/home/lab/study/qc/looked_at.csv",
+  "found": true,
+  "verdicts": 3,
+  "unmatched": [4],
+  "targets": [
+    {"artifact": ARTIFACT, "port": null, "verdict": "fail", "reason": "ghosting", "line": 3, "withholds": ["fits[sub=02]", "reports[sub=02]"], "shrinks": ["total"]},
+    {"artifact": ARTIFACT, "port": null, "verdict": null, "reason": null, "line": null, "withholds": ["fits[sub=03]", "reports[sub=03]"], "shrinks": ["total"]}
+  ]
+}
+```
+
+| Field | Holds |
+| --- | --- |
+| `name` | The review, as `review` declares it. |
+| `file` | The absolute path of the file the recipe's `review ... from` line names, or `null` when it names none. |
+| `found` | Whether `file` existed when SPIT made the plan. A file with a header and no rows is `found` with `verdicts` `0`. |
+| `verdicts` | How many rows the file holds. |
+| `unmatched` | The lines of rows that match no artifact the review judges. |
+| `targets` | Each artifact the review withheld, in the order SPIT met them. A passed artifact is not listed: it is planned as usual. |
+
+Each target:
+
+| Field | Holds |
+| --- | --- |
+| `artifact` | The artifact a person inspects, with its path: a source, which is under `root` even when no job reads it, or an output of a job in the DAG. |
+| `port` | `{"operation": O, "port": P}` when the review is on an input port and withholds the artifact from that port alone; `null` for a review on a source or an output, which withholds it from every reader. |
+| `verdict` | `"fail"` for a rejection, or `null` when no row judges it yet. |
+| `reason`, `line` | The rejecting row's reason, or `null` when it gives none, and its line in `file`; both `null` when no row judges it. |
+| `withholds` | The outputs not planned because of it, directly or through outputs withheld in turn, by identity as `left_out` writes them. |
+| `shrinks` | The outputs of jobs in the DAG that take a `many` input without it. |
+
+A withheld artifact is not incomplete: a plan with reviews is complete, and `left_out` holds only what could not be planned. The record is a snapshot of the verdicts when the plan was made. Changing the review file changes nothing in a saved `.spitdag`; make the plan again to apply the new verdicts.
 
 ## Job
 

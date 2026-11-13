@@ -22,6 +22,7 @@ exit 0
 --- stdout
 {
   "left_out": [],
+  "reviews": [],
   "jobs": [
     {
       "id": 1,

@@ -28,6 +28,7 @@ from .report.changes import change_lines
 from .report.explain import explain
 from .report.plan_json import document
 from .report.plan_text import adoption_line, listing, move_hint, nothing_run
+from .report.reviews import review_json, review_lines
 from .report.summary import Summary, left_out
 from .leftovers import leftovers, lines as leftover_lines, remove as remove_leftovers
 from . import clean, confirm, runs
@@ -258,19 +259,22 @@ def _plan_and_run(args: argparse.Namespace, dag: Dag, everything: Dag, selection
         movable = sum(decision.status is Status.PLACE for decision in moved)
     if run is not None:
         state.apply(writes(decisions))
-        run.plan.write_text(document(dag, decisions) + "\n", encoding="utf-8")
+        run.plan.write_text(document(dag, decisions, review_json(everything, decisions)) + "\n", encoding="utf-8")
     blocked = any(decision.status is Status.BLOCKED for decision in decisions)
     if args.action is Action.EXPLAIN:
         decision, found = explained(dag, state, decisions, args.job, compare)
         print("\n".join(explain(dag, decisions, decision, found, layout.runs)))
         return 1 if decision.status is Status.BLOCKED else 0
     if args.action is Action.PLAN and args.json:
-        print(document(dag, decisions))
+        print(document(dag, decisions, review_json(everything, decisions)))
     else:
         for line in change_lines(dag, everything, decisions, state.jobs):
             print(line)
         for line in listing(dag, decisions, args.verbose):
             print(line)
+        if args.action is Action.PLAN:
+            for line in review_lines(everything, decisions):
+                print(line)
     if movable:
         print(move_hint(movable), file=sys.stderr)
     # A partial DAG leaves jobs out, whose records would look like those of jobs the pipeline lost.
@@ -333,6 +337,9 @@ def _plan_and_run(args: argparse.Namespace, dag: Dag, everything: Dag, selection
     for line in run_text.replaced_lines(run):
         print(line, file=sys.stderr)
     print(run_text.summary_line(summary), file=sys.stderr)
+    # Withheld work waits for a verdict, so it leaves the exit status alone.
+    for line in review_lines(everything, decisions, results):
+        print(line, file=sys.stderr)
     if selection:
         for line in run_text.left_lines(left_out(everything, dag, decisions, results, state, compare)):
             print(line, file=sys.stderr)
