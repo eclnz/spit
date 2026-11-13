@@ -268,7 +268,7 @@ Each `run` gets a folder of its own, `.spit-bash/runs/RUN`, named by when it sta
 
 - `run.log`, what the run printed, written line by line as it goes, so `tail -f` follows it and a stopped run keeps everything up to that point;
 - `plan.json`, the plan the run acted on, as `plan --json` prints it;
-- `summary.json`, how the run ended, `finished`, `blocked`, `over memory`, `interrupted` or `terminated`, with its counts; a run killed before it got there has none;
+- `summary.json`, how the run ended, `finished`, `blocked`, `over memory`, `declined`, `interrupted` or `terminated`, with its counts; a run killed before it got there has none;
 - `jobs/`, each job's log, named by the job's first output and its entities, so a job's logs share one name from run to run whatever its id, and a rerun writes a new log rather than over an old one;
 - `replaced/`, the outputs the run's jobs replaced, each job's under the same name with the record that described them.
 
@@ -298,6 +298,19 @@ Ctrl-C (SIGINT) or SIGTERM, as a cluster scheduler sends at a time limit, stops 
 ## Existing paths and reruns
 
 The runner records successful jobs in `.spit-bash/state.jsonl` under the output root, keyed by the products and entities they make, not their paths, so a dataset keeps its state when it moves or its path rules change. The runner computes each job's fingerprint from the shape of what it reads and makes and its commands, with every path replaced by its place in the job, so renaming an operation, a port, a product, a dimension, a source or an entity value changes nothing; SPIT writes none. What the inputs hold is checked against the record's hashes. A job with no record under its key takes an unclaimed record of the same work when each input holds what that record's did, so a renamed product, dimension or source reuses its earlier outputs (with `--move-files`, they are moved to their new paths). Identical inputs, such as copies of one mock file, are interchangeable, so a job first tries the records that keep its dimensions and values, as a renamed product's do, then those that keep its values, as a renamed dimension's do: each job takes its own record, and moves its own outputs. Stamps and hashes in a record are kept by place in the job as well, so files moved or copied to new paths are current when their size and time, or their content, match the record; files that are not at the new paths run the job, and when the pipeline's path rules change, a job whose files are not at its new paths runs again, as its output is missing. Files already at the new paths are reused with or without `--move-files`, when they match the record. The state is version 8, and an earlier state is refused: delete it to start from fresh records. The record keeps the fingerprint's parts, so a changed job is reported as `command changed`, `verify commands changed`, `the artifacts it reads changed` or `the artifacts it makes changed`, and a missing output as `output missing; an earlier run left it at PATH` when a change of path rules stranded it. A job runs if an output is missing, its fingerprint changed, an input or output file changed, or a producer will run. It skips only when its recorded fingerprint still matches and its files are as recorded: the same size and modification time, or, where those differ, the same content. A `touch`, a `git checkout` or a copy that leaves the bytes alone does not rerun a job. `--force` reruns every command job, or only the jobs matched by `--entity`, `--product` or `--stage` when a selection is given; see [Choosing jobs](#choosing-jobs). A job that reruns its recorded work on the inputs its record holds, as under `--force`, and makes outputs whose content differs from the record's, has a tool that doesn't give the same bytes twice, such as one that dithers or stamps the time. `run` then notes it once per operation, as `note: normalise gave different output from the same inputs (8 jobs); what reads it will rerun every time`, since nothing below it can stop at an unchanged output.
+
+At a terminal, `run` asks before it replaces the outputs of a job whose last recorded run took at least `--ask-over` (default `2m`; `90s`, `1h` and the like are taken), listing those jobs by operation with the time their outputs took, after the plan's own list of why each job replaces outputs. It starts nothing, deletes nothing and exits with status 1 unless the answer is `y`. A job planned to run only if an upstream output changes, and a job run under `--force`, are not asked about, and neither is anything with `--yes`, or when standard input is not a terminal or holds the DAG.
+
+```text
+$ spit-bash run pipeline.spitdag
+1 job can start, 1 job may run if an upstream output changes
+1 job will replace existing outputs:
+  register: input changed
+1 job will replace outputs that took 6m to make:
+  register (6m)
+Continue? [y/N] n
+nothing was run
+```
 
 Without `--move-files`, `plan` and `run` say when moving would save work, as `1,018 jobs rerun only because their outputs are recorded at other paths; --move-files moves them instead`, counting the jobs a plan with the flag would place.
 

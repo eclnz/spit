@@ -30,7 +30,7 @@ from .report.plan_json import document
 from .report.plan_text import adoption_line, listing, move_hint, nothing_run
 from .report.summary import Summary, left_out
 from .leftovers import leftovers, lines as leftover_lines, remove as remove_leftovers
-from . import clean, runs
+from . import clean, confirm, runs
 from .schedule import over_memory
 from .selection import Selected, Selection, parse_entities, parse_stage, select
 
@@ -145,6 +145,11 @@ def _parser() -> argparse.ArgumentParser:
             command.add_argument("--remove-leftovers", action="store_true",
                                  help="delete the outputs earlier runs made for jobs the pipeline no longer has,\n"
                                       "where they are as those runs left them, and forget their records")
+            command.add_argument("--ask-over", type=_ask_over, default=confirm.ASK_OVER, metavar="TIME",
+                                 help="at a terminal, ask before replacing the outputs of jobs whose last run took at\n"
+                                      "least this long, as 90s, 2m or 1h (default: 2m)")
+            command.add_argument("--yes", action="store_true",
+                                 help="replace outputs without asking, as a run without a terminal does")
             command.add_argument("--keep-failed", action="store_true",
                                  help="keep what a failed job's command wrote at its outputs, to debug it")
             command.add_argument("--no-keep-replaced", dest="keep_replaced", action="store_false",
@@ -166,6 +171,13 @@ def _memory(text: str) -> int:
     if not (number.isascii() and number.isdigit()) or int(number) < 1:
         raise argparse.ArgumentTypeError(f"expected a size such as 512M or 32G, not {text!r}")
     return int(number) * scale
+
+
+def _ask_over(text: str) -> float:
+    try:
+        return confirm.parse(text)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
 
 
 def _machine_memory() -> int | None:
@@ -283,6 +295,17 @@ def _plan_and_run(args: argparse.Namespace, dag: Dag, everything: Dag, selection
                   "or pass --no-enforce-memory to run it alone", file=sys.stderr)
             runs.finish(run, "over memory", {})
             return 2
+
+    if not args.yes and args.files[0] != "-" and sys.stdin.isatty():
+        costly = confirm.costly(decisions, state.jobs, args.ask_over)
+        if costly:
+            for line in confirm.lines(costly):
+                print(line, file=sys.stderr)
+            print("Continue? [y/N] ", end="", file=sys.stderr, flush=True)
+            if sys.stdin.readline().strip().lower() not in ("y", "yes"):
+                print("nothing was run", file=sys.stderr)
+                runs.finish(run, "declined", {})
+                return 1
 
     for line in leftover_lines(found, args.verbose, removing):
         print(line, file=sys.stderr)
