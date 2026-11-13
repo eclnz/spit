@@ -492,6 +492,27 @@
       }
     },
     {
+      "pipeline": "examples/runnable/review/review.spit",
+      "recipe": "examples/runnable/review/review.spitin",
+      "expect": {
+        "sources": {
+          "list": 3
+        },
+        "operations": {
+          "tidy": 3,
+          "count": 1,
+          "gather": 1
+        },
+        "targets": {
+          "tidied": 2,
+          "total": 1
+        },
+        "dependencies": 2,
+        "removals": 0,
+        "calls": 0
+      }
+    },
+    {
       "pipeline": "examples/runnable/streams/streams.spit",
       "recipe": "examples/runnable/streams/streams.spitin",
       "expect": {

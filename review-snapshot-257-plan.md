@@ -122,10 +122,24 @@ file (below).
 
 ## Steps
 
-- [ ] Inputs: review files in the inventory and `.spitout`; header-only note;
-      review file not an unmatched source.
-- [ ] Resolver: targets with `withholds` and `shrinks`.
-- [ ] Binding and writer: `reviews`, version 14; docs; stored outputs.
-- [ ] spit-bash: load, plan, run, `plan --json`; README; tests.
-- [ ] Example and coverage.
-- [ ] Benchmark with `--old`.
+- [x] Inputs: review files in the inventory and `.spitout`; header-only note;
+      review file not an unmatched source (313558a).
+- [x] Resolver: targets with `withholds` and `shrinks` (313558a).
+- [x] Binding and writer: `reviews`, version 14; docs; stored outputs (313558a).
+- [x] spit-bash: load, plan, run, `plan --json`; README; tests.
+- [x] Example `examples/runnable/review` and coverage.
+- [x] Benchmark with `--old`: passed (313558a).
+
+## Decisions made while building
+
+- **The `.spitout` records review files in `verdicts:`**, as
+  `looked_at from qc/looked_at.csv` with `(missing)`, rather than in a new
+  section, so no header word, hover or grammar changes.
+- **A printed `.spitout` writes the file as the recipe's folder gives it**,
+  since where it will be kept is unknown, as it records no root.
+- **The runner lists held artifacts only**, with readiness; rejected ones are
+  listed with their row, since nobody needs to inspect them.
+- **`plan` writes the review lines to standard output and `run` to standard
+  error**, after its summary, each beside its other reports.
+- **spit-vscode needs no change**: no keyword, header, `check --json` or
+  `--hovers` field changed; the `verdicts:` hover text comes from SPIT.
