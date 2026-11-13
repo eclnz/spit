@@ -1,6 +1,6 @@
 # spit-bash
 
-`spit-bash` runs the jobs of a [SPIT](../README.md) pipeline on one machine. Give it a recipe and it runs `spit dag` for you; give it a saved `.spitdag` or `dag --json` output and it needs nothing else, not the original `.spit` pipeline or `.spitout` inventory. It reads version 12 of SPIT's DAG format, and no other: a DAG of another version is rejected before anything runs, so use a `spit` and a `spit-bash` that match.
+`spit-bash` runs the jobs of a [SPIT](../README.md) pipeline on one machine. Give it a recipe and it runs `spit dag` for you; give it a saved `.spitdag` or `dag --json` output and it needs nothing else, not the original `.spit` pipeline or `.spitout` inventory. It reads version 14 of SPIT's DAG format, and no other: a DAG of another version is rejected before anything runs, so use a `spit` and a `spit-bash` that match.
 
 See the [runnable examples](../examples/runnable/README.md) for recipes to run, their commands, and expected output.
 
@@ -369,4 +369,4 @@ cargo build
 SPIT=$PWD/target/debug/spit python3 -m unittest discover -s runner/tests -v
 ```
 
-The test fixture under `tests/fixtures/` is actual version 12 output from SPIT's `command_demo` example, written without a root. `tests/test_examples.py` runs the [examples](../examples/runnable/README.md) in `examples/runnable`, which SPIT's own tests keep in step with its syntax, with a real `spit`: set `SPIT` to the binary built from the same checkout, or put it on `PATH`, or the tests are skipped. CI builds `spit` from each commit and runs them, so a change to SPIT's DAG format and the runner's change to read it are tested together. The repository's CI also runs Messie over the runner's folders.
+The test fixture under `tests/fixtures/` is actual version 14 output from SPIT's `command_demo` example, written without a root. `tests/test_examples.py` runs the [examples](../examples/runnable/README.md) in `examples/runnable`, which SPIT's own tests keep in step with its syntax, with a real `spit`: set `SPIT` to the binary built from the same checkout, or put it on `PATH`, or the tests are skipped. CI builds `spit` from each commit and runs them, so a change to SPIT's DAG format and the runner's change to read it are tested together. The repository's CI also runs Messie over the runner's folders.
