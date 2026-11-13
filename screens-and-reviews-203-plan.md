@@ -145,11 +145,9 @@ flowchart LR
 
 ## Phase 2: screens
 
-Not started. The review snapshot (`review-snapshot-257-plan.md`, `.spitdag`
-version 14) lands first, so screens raise the version once more. The
-[decisions](#decisions-to-make-before-building) below are not settled by the
-issue or the code, and each changes the `.spitdag` or what a user sees, so
-they are made before the first step is built.
+Not started. The review snapshot (`.spitdag` version 14) lands first, then
+the rerun theme, eclnz/spit#279, which takes version 15, so screens take
+version 16. The [decisions](#decisions) below are settled.
 
 ### What clashes
 
@@ -197,7 +195,7 @@ flowchart LR
     index --> bind
     decided --> bind
     bind --> bound["BoundDag::screens<br/>BoundJob::gates"]
-    bound --> write[".spitdag version 15"]
+    bound --> write[".spitdag version 16"]
     write --> runner["spit-bash<br/>runs screens, drops members, writes records"]
 ```
 
@@ -214,7 +212,7 @@ with its defaults), or both are on the same input port.
   It is no target in the `.spitdag`'s `reviews`.
 - Each of the first two gives a `reviewed` row in the product's record.
 
-### `.spitdag` version 15
+### `.spitdag` version 16
 
 Three additions. A pipeline with no screen changes only in the version, the
 empty fields and the `value` part.
@@ -266,7 +264,7 @@ empty fields and the `value` part.
 
 **A `value` part**, `{"value": "01", "of": P}`: the argument
 `{summaries.sub}` gives for the member at `P` of a `many` input, which is
-plain text in version 14. With it, every argument a `many` placeholder
+plain text in version 15. With it, every argument a `many` placeholder
 makes holds one part naming its member, so a runner drops a member's
 arguments by path and `{summaries}` and `{summaries.sub}` stay paired.
 
@@ -301,61 +299,62 @@ rejected artifacts into aggregates.
   `rejected 2 by usable(35): sub=04, sub=13`, with the outputs not made.
   `plan --json` gains `screens`.
 
-### Decisions to make before building
+### Decisions
 
-Each has a recommendation, which the steps below assume.
+Each was settled as the first option given, which the steps below assume.
+The second is kept as the option not taken.
 
 1. **Where a record goes when the product's path names a dimension outside
    a group.** The issue derives the record from the path rule "with its
    dimension groups left out", which gives `out/measure/summaries` for
    `out/{@stage}/{@product}[/{@entities}]` and nothing usable for
    `out/{sub}.json`.
-   - *Recommended:* drop the groups; if what is left names no dimension,
+   - *Settled:* drop the groups; if what is left names no dimension,
      the record is that with `.screens.csv` in place of the extension;
      otherwise it is `<product>.screens.csv` in the last folder before the
      first component that names a dimension, so `out/{sub}.json` gives
      `out/summaries.screens.csv`.
-   - *Or:* require a rule of its own for the record when the product's
+   - *Not taken:* require a rule of its own for the record when the product's
      gives none. More to write, and a new kind of path rule.
 2. **Where a source's record goes.** Its path rule is under `root`, which
    may be read-only, and `docs/spitdag.md` tells a backend to keep what it
    writes under `output_root`.
-   - *Recommended:* the same relative path under `output_root`, checked
+   - *Settled:* the same relative path under `output_root`, checked
      for collisions as an artifact's path is.
-   - *Or:* under `root`, beside the data, as the issue's rule read
+   - *Not taken:* under `root`, beside the data, as the issue's rule read
      literally gives.
 3. **A `many` input that rejections take below `@min`.**
-   - *Recommended:* the job is rejected, not failed, and the report gives
+   - *Settled:* the job is rejected, not failed, and the report gives
      how many passed and the minimum, as it reports a job with no member
      left.
-   - *Or:* it fails, since a declared minimum was not met.
+   - *Not taken:* it fails, since a declared minimum was not met.
 4. **A screen that cannot give a verdict**: its program cannot be started,
    or a signal kills it.
-   - *Recommended:* a failure of the job that runs it, as a check's is. A
+   - *Settled:* a failure of the job that runs it, as a check's is. A
      verdict is an exit status the screen chose.
-   - *Or:* a rejection with the reason `could not be run`, which keeps the
+   - *Not taken:* a rejection with the reason `could not be run`, which keeps the
      run at exit status 0 and hides a broken installation.
 5. **The reason.** The issue says "what the screen printed when it
    failed".
-   - *Recommended:* the last non-empty line of standard error, with each
+   - *Settled:* the last non-empty line of standard error, with each
      run of whitespace as one space, which is what `sys.exit("...")`
      writes; `exited with status N` when there is none. Standard output
      goes to the log.
-   - *Or:* every line, joined, which makes a long CSV cell of a tool's
+   - *Not taken:* every line, joined, which makes a long CSV cell of a tool's
      traceback.
 6. **Outputs an earlier run made downstream of an artifact that is now
    rejected.**
-   - *Recommended:* left where they are, and named in the rejection report
+   - *Settled:* left where they are, and named in the rejection report
      as left by an earlier run. eclnz/spit#280 owns what a pipeline leaves
      on disk.
-   - *Or:* removed, which eclnz/spit#273 rules out for a review's
+   - *Not taken:* removed, which eclnz/spit#273 rules out for a review's
      rejections.
 7. **A screen for one call**, as in
    `table(summaries @vary(sub) @screen(usable(35)))`: the issue's open
    question.
-   - *Recommended:* not in this phase. It is a new place for `@check` and
+   - *Settled:* not in this phase. It is a new place for `@check` and
      `@review` as well, so it is an issue of its own.
-   - *Or:* add the place for all three here, which widens the parser and
+   - *Not taken:* add the place for all three here, which widens the parser and
      spit-vscode changes.
 
 ### Where it enters
@@ -395,9 +394,9 @@ runner ignores lets rejected artifacts through.
 - [ ] A review beside a screen: passed, failed and unjudged, in the
       resolver and the review snapshot.
 - [ ] The record's path, with its collision checks.
-- [ ] Bind screens, gates and the `value` part; write version 15;
+- [ ] Bind screens, gates and the `value` part; write version 16;
       `--commands`; stored outputs.
-- [ ] spit-bash: load version 15; run screens and reject jobs.
+- [ ] spit-bash: load version 16; run screens and reject jobs.
 - [ ] spit-bash: drop members and identify an aggregate's work by them.
 - [ ] spit-bash: standing verdicts and the records.
 - [ ] spit-bash: reports, `plan --json`, exit status.
