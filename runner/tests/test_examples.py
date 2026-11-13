@@ -236,6 +236,35 @@ class ExampleTests(unittest.TestCase):
                       result.stderr)
         self.assertEqual(sorted((folder / "output/total.txt").read_text().split()), ["2", "2"])
 
+    def test_a_review_file_that_cannot_be_used_stops_a_recipe_before_any_job_runs(self):
+        folder = self.examples / "review"
+        recipe = str(folder / "review.spitin")
+        verdicts = folder / "qc/looked_at.csv"
+        saved = folder / "review.spitdag"
+        subprocess.run([SPIT, "dag", recipe, "-o", str(saved)], check=True, capture_output=True)
+        for held, problem in [
+            (b"plot,verdict,reason\ngarden,maybe,\n", "qc/looked_at.csv line 2: verdict `maybe` must be `pass` or `fail`"),
+            (b"", "qc/looked_at.csv: expected a header row"),
+            (b"plot,verdict\ngarden,\xff\n", "cannot read `qc/looked_at.csv` for `review looked_at`"),
+        ]:
+            with self.subTest(problem=problem):
+                verdicts.write_bytes(held)
+                for command in ("plan", "run"):
+                    result = spit_bash(command, recipe)
+                    self.assertEqual(result.returncode, 2, result.stderr)
+                    self.assertIn(problem, result.stderr)
+                    self.assertIn("`spit dag` exited with status 1", result.stderr)
+                    self.assertFalse((folder / "output").exists())
+        # A saved DAG holds the verdicts it was made with, whatever becomes of the file.
+        result = spit_bash("plan", str(saved))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("review `looked_at`: 1 rejected, 1 held", result.stdout)
+        verdicts.unlink()
+        result = spit_bash("run", str(saved))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((folder / "output/total.txt").read_text().split(), ["2"])
+        self.assertIn("review `looked_at`: 1 rejected, 1 held", result.stderr)
+
     def test_sequence(self):
         result = spit_bash("run", str(self.examples / "sequence/sequence.spitin"))
         self.assertEqual(result.returncode, 0, result.stderr)

@@ -507,13 +507,50 @@ fn a_malformed_review_file_is_an_error_that_names_its_file_and_line() {
             "sub,verdict\n01,pass\n\"02,fail\n",
             "qc/looked_at.csv line 3: a quoted field is not closed",
         ),
+        (
+            "sub,verdict\n01,pass,extra\n",
+            "qc/looked_at.csv line 2: expected 2 cells, as the header has, found 3",
+        ),
+        ("", "qc/looked_at.csv: expected a header row"),
     ] {
         tree.write("qc/looked_at.csv", csv);
         for command in ["inputs", "dag"] {
-            let (ok, _, stderr) = run(&tree, command);
-            assert!(!ok, "{csv}");
+            let (ok, stdout, stderr) = run(&tree, command);
+            // Nothing of a plan is printed from the rows read before the bad one.
+            assert!(!ok && stdout.is_empty(), "{command} {csv}: {stdout}");
             assert!(stderr.contains(message), "{command} {csv}: {stderr}");
         }
+    }
+}
+
+/// A file that is there and cannot be read is an error, never a review
+/// with no verdicts, which would hold back or let through the wrong work.
+#[test]
+fn a_review_file_that_cannot_be_read_is_an_error_not_an_empty_review() {
+    let tree = dataset(
+        "review-unreadable",
+        "review looked_at from qc/looked_at.csv\n",
+    );
+    let file = tree.path().join("qc/looked_at.csv");
+    std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+    std::fs::write(&file, b"sub,verdict\n01,\xff\xfe\n").unwrap();
+    for command in ["inputs", "dag"] {
+        let (ok, stdout, stderr) = run(&tree, command);
+        assert!(!ok && stdout.is_empty(), "{command}: {stdout}");
+        assert!(
+            stderr.contains("line 3: cannot read `qc/looked_at.csv` for `review looked_at`: stream did not contain valid UTF-8"),
+            "{command}: {stderr}"
+        );
+    }
+    std::fs::remove_file(&file).unwrap();
+    std::fs::create_dir(&file).unwrap();
+    for command in ["inputs", "dag"] {
+        let (ok, stdout, stderr) = run(&tree, command);
+        assert!(!ok && stdout.is_empty(), "{command}: {stdout}");
+        assert!(
+            stderr.contains("line 3: cannot read `qc/looked_at.csv` for `review looked_at`:"),
+            "{command}: {stderr}"
+        );
     }
 }
 
