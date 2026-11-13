@@ -210,6 +210,42 @@ class Layout:
 
 
 @dataclass(frozen=True)
+class Target:
+    """An artifact a review withheld when SPIT made the plan: a person inspects it to give a verdict."""
+
+    # As SPIT names it, `product[dimension=value,...]`.
+    identity: str
+    path: str
+    # Whether `path` is under the dataset root rather than the output root.
+    in_dataset: bool
+    # The operation and input port the review is on; None for a review on a source or an output.
+    port: tuple[str, str] | None
+    # Whether a row failed it; one no row judges yet is held.
+    rejected: bool
+    reason: str | None
+    # The rejecting row's line in the review's file.
+    line: int | None
+    # The outputs not planned because of it, and those of planned jobs that take it out of a `many` input.
+    withholds: tuple[str, ...]
+    shrinks: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class Review:
+    """A review as SPIT applied it when it made the plan, a snapshot that a change to its file does not alter."""
+
+    name: str
+    # Where a person records its verdicts; None when the recipe names no file.
+    file: Path | None
+    # Whether `file` existed when SPIT made the plan.
+    found: bool
+    # How many rows the file held, and the lines of those that matched no artifact.
+    verdicts: int
+    unmatched: tuple[int, ...]
+    targets: tuple[Target, ...]
+
+
+@dataclass(frozen=True)
 class Dag:
     # The dataset root, which the sources are under.
     root: Path
@@ -229,6 +265,8 @@ class Dag:
     # Each file the pipeline was read from, as its path from the pipeline's folder, its absolute
     # path, and its git blob id when the DAG was written; empty when SPIT did not read it from a file.
     pipeline_files: tuple[tuple[str, Path, str], ...] = ()
+    # Each review the pipeline attaches, with what it withheld.
+    reviews: tuple[Review, ...] = ()
 
     @property
     def outputs(self) -> Path:

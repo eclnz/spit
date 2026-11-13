@@ -90,6 +90,17 @@ cat $EXAMPLES/numbers/output/numbered/plot=garden.txt
 
 The garden result is `1/3: apples`, `2/3: pears`, `3/3: plums`. The log of each `number` job, such as the one under `$EXAMPLES/numbers/.spit-bash/runs/` ending `jobs/numbered/plot=garden.log`, says `output/size/plot=garden.txt holds 3`, then shows the command run with `n=3`. Empty `$EXAMPLES/numbers/input/garden.txt` and run again: its count is now `0`, under the min of 1, so the garden's `number` job fails before `awk` starts, naming the file and what it holds. Restore the input before planning another run.
 
+## Reviews
+
+`review.spit` tidies each plot's list with `sort -u`, counts the lines of each tidied list, and gathers the counts. A person looks at each tidied list first: the tidy step's output has `@review(looked_at)`, and the recipe's `review looked_at from qc/looked_at.csv` names the file of verdicts, which passes the garden and fails the orchard. The allotment has no verdict yet:
+
+```sh
+spit-bash run $EXAMPLES/review/review.spitin
+cat $EXAMPLES/review/output/total.txt
+```
+
+All three tidy jobs run, so there is something to look at, but only the garden's list is counted: the total is `2`. After its summary, the run says that the review rejected the orchard's list and held the allotment's, that the allotment's list is ready to inspect at `$EXAMPLES/review/output/tidied/plot=allotment.txt`, and where to record the verdict. Add the line `allotment,pass,` to `$EXAMPLES/review/qc/looked_at.csv` and run again: the allotment's list is counted, and the total holds `2` twice.
+
 ## Several commands in one job
 
 `sequence.spit` runs two tools, one after the other, in each `tally` job: `sort -o {sorted} {list}` writes the sorted list, then `uniq -c {sorted} > {counts}` reads it and prints how often each line comes:
