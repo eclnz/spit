@@ -129,6 +129,9 @@ file (below).
 - [x] spit-bash: load, plan, run, `plan --json`; README; tests.
 - [x] Example `examples/runnable/review` and coverage.
 - [x] Benchmark with `--old`: passed (313558a).
+- [x] Tests for the review files eclnz/spit#273 lists that had none: one that
+      cannot be read, an empty one and a ragged row in SPIT, and a recipe
+      with each in spit-bash, which stops before any job runs.
 
 ## Decisions made while building
 
