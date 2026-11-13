@@ -2,6 +2,7 @@
 //! attaches a `review` to, and what a plan withheld for them.
 
 use std::fmt;
+use std::path::PathBuf;
 
 use super::{ArtifactInstance, EntityBinding};
 
@@ -55,6 +56,18 @@ impl VerdictRow {
     }
 }
 
+/// A review's file as the plan read it: where it is, and whether it existed.
+/// A review the recipe names no file for has none.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ReviewRecord {
+    pub review: String,
+    /// The file: under the recipe's folder, or under a `.spitout`'s folder
+    /// unless absolute, as the inventory's `root` is.
+    pub file: PathBuf,
+    /// Whether the file existed. One that does not has no verdicts.
+    pub found: bool,
+}
+
 /// An artifact a review keeps from the readers it covers, and why.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Withheld {
@@ -65,6 +78,12 @@ pub struct Withheld {
     /// every reader of the product is kept from.
     pub port: Option<(String, String)>,
     pub outcome: Judged,
+    /// The outputs not planned because of it, directly or through other
+    /// outputs withheld in turn, in the order their jobs are met.
+    pub withholds: Vec<ArtifactInstance>,
+    /// The outputs of jobs planned without it, as a member of a `many`
+    /// input, in the order their jobs are met.
+    pub shrinks: Vec<ArtifactInstance>,
 }
 
 /// How a review judged an artifact it withholds.
@@ -75,6 +94,8 @@ pub enum Judged {
         reason: Option<String>,
         /// The row, as [`VerdictRow::origin`] writes it.
         origin: String,
+        /// The row's line in its file.
+        line: usize,
     },
     /// No row judges it yet.
     Held,
@@ -91,7 +112,7 @@ impl fmt::Display for Withheld {
             None => String::new(),
         };
         match &self.outcome {
-            Judged::Rejected { reason, origin } => {
+            Judged::Rejected { reason, origin, .. } => {
                 write!(
                     f,
                     "review `{}` rejected {identity}{at} ({origin})",
