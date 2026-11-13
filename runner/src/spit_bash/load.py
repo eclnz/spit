@@ -11,7 +11,7 @@ from typing import Iterable, Iterator, TextIO
 from pydantic import ValidationError
 
 from . import scalars, schema
-from .model import Artifact, Check, Dag, DagError, Job, Kind, Port, Run, Side
+from .model import Artifact, Check, Dag, DagError, Job, Kind, Port, Review, Run, Side, Target
 from .reuse import identity
 from .schema import Command, DirPart, HerePart, JobCommand, PathPart, ScalarPart, SpitDag, SpitJob, StemPart
 
@@ -303,9 +303,38 @@ def _load(source: TextIO, root_override: str | None) -> Dag:
         output_root=output_root,
         in_dataset=in_dataset,
         pipeline_files=_pipeline_files(document),
+        reviews=tuple(_review(review) for review in document.reviews),
     )
     dag.absolute.update(_absolute(dag, _uses(external_set, jobs)))
     return dag
+
+
+def _review(review: schema.Review) -> Review:
+    """A review of the DAG, with each artifact it withheld."""
+    return Review(
+        review.name,
+        None if review.file is None else Path(review.file),
+        review.found,
+        review.verdicts,
+        tuple(review.unmatched),
+        tuple(_target(target) for target in review.targets),
+    )
+
+
+def _target(target: schema.ReviewTarget) -> Target:
+    artifact = target.artifact
+    values = ",".join(f"{dimension}={value}" for dimension, value in artifact.entities.items())
+    return Target(
+        f"{artifact.product}[{values}]" if values else artifact.product,
+        artifact.path,
+        artifact.under == "root",
+        None if target.port is None else (target.port.operation, target.port.port),
+        target.verdict == "fail",
+        target.reason,
+        target.line,
+        tuple(target.withholds),
+        tuple(target.shrinks),
+    )
 
 
 def _pipeline_files(document: SpitDag) -> tuple[tuple[str, Path, str], ...]:

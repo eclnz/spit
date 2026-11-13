@@ -79,6 +79,7 @@ impl<'v> Verdicts<'v> {
             Verdict::Fail => Some(Judged::Rejected {
                 reason: row.reason.clone(),
                 origin: row.origin(),
+                line: row.line,
             }),
         }
     }

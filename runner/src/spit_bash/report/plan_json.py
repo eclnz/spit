@@ -10,10 +10,12 @@ from ..plan import Decision, Status
 from .causes import decided
 
 
-def document(dag: Dag, decisions: tuple[Decision, ...]) -> str:
-    """The outputs the DAG left out, and each job's decision with its reason in words and as a code, and how many jobs it holds up.
+def document(dag: Dag, decisions: tuple[Decision, ...], reviews: list[dict[str, object]] | None = None) -> str:
+    """The outputs the DAG left out, what its reviews withheld, and each job's decision with its reason in
+    words and as a code, and how many jobs it holds up.
 
-    A job planned `place` also has its `moves`, each as `from` and `to`.
+    A job planned `place` also has its `moves`, each as `from` and `to`. `reviews` are as
+    `report.reviews.review_json` gives them.
     """
     held = Counter(d.caused_by for d in decisions if d.caused_by is not None)
     jobs = []
@@ -24,4 +26,4 @@ def document(dag: Dag, decisions: tuple[Decision, ...]) -> str:
         if d.status is Status.PLACE and d.placement is not None:
             item["moves"] = [{"from": old, "to": new} for old, new in d.placement.moves]
         jobs.append(item)
-    return json.dumps({"left_out": list(dag.left_out), "jobs": jobs}, indent=2)
+    return json.dumps({"left_out": list(dag.left_out), "reviews": reviews or [], "jobs": jobs}, indent=2)

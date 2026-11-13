@@ -1,6 +1,8 @@
 //! Lowering reviews: the `review` declarations of a pipeline, its `review:`
 //! defaults, and the `review ... from` lines of a recipe.
 
+use std::path::PathBuf;
+
 use crate::model::{DefaultReviews, ReviewDef, ReviewFile, ReviewId};
 use crate::parser::ParseError;
 use crate::span::Place;
@@ -40,6 +42,7 @@ impl PipelineBuilder {
         self.inputs.reviews.push(ReviewFile {
             review: review.to_owned(),
             file: file.to_owned(),
+            path: PathBuf::from(file),
             line: place.line,
             text: None,
         });

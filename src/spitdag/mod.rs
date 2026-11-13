@@ -4,6 +4,7 @@
 //! template. Written as a `.spitdag`, a JSON document.
 
 mod artifact_json;
+mod reviews;
 mod work;
 mod write;
 
@@ -21,10 +22,11 @@ use crate::types::TypeExpr;
 
 pub use crate::check::When;
 
+pub use self::reviews::{BoundReview, BoundTarget, Rejection};
 use self::write::{write_document, PIECE};
 
 /// The schema version a `.spitdag` is written with.
-pub const SPITDAG_VERSION: usize = 13;
+pub const SPITDAG_VERSION: usize = 14;
 
 /// A resolved DAG with its paths bound and its commands expanded. Its
 /// artifacts are the resolved DAG's, each kept once with its path; jobs,
@@ -40,6 +42,8 @@ pub struct BoundDag {
     pub removed: Vec<Removal>,
     /// Outputs whose jobs could not be planned, with the reasons from `artifacts`.
     pub left_out: Vec<LeftOut>,
+    /// Each review the pipeline attaches, with what it withheld.
+    pub reviews: Vec<BoundReview>,
     /// Each job after the jobs it depends on.
     pub jobs: Vec<BoundJob>,
     /// Each step of the resolved DAG, with its ports named, which jobs
@@ -353,6 +357,7 @@ impl BoundDag {
             output_root: None,
             removed: Vec::new(),
             left_out: Vec::new(),
+            reviews: Vec::new(),
             jobs,
             steps,
             pipeline_files: Vec::new(),

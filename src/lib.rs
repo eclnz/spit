@@ -77,7 +77,7 @@ pub use render::{
 pub use resolver::{resolve, resolve_artifacts_excluding, resolve_artifacts_partial};
 pub use spitdag::{
     ArgPart, Argument, BoundArtifact, BoundCall, BoundCheck, BoundCommand, BoundDag, BoundJob,
-    BoundStep, LeftOut, StepCall, StepCheck, When,
+    BoundReview, BoundStep, BoundTarget, LeftOut, Rejection, StepCall, StepCheck, When,
 };
 pub use template::{
     CommandError, CommandProblem, CommandTemplate, EntitiesFormat, NamedFile, PathError,

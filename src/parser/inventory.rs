@@ -4,7 +4,9 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use crate::model::{EntityBinding, Removal, SourceInventory, SourceRecord, Verdict, VerdictRow};
+use crate::model::{
+    EntityBinding, Removal, ReviewRecord, SourceInventory, SourceRecord, Verdict, VerdictRow,
+};
 use crate::template::PathTemplate;
 
 use super::keyword::Header;
@@ -79,37 +81,38 @@ fn read_inventory<'a, 't: 'a>(
         }
         // A line that fails changes nothing, and the lines after it are
         // read as they would be without it.
-        let read = (|| -> Result<(), ParseError> {
-            let root = [
-                ("root ", "root", "root"),
-                ("output ", "output", "output root"),
-            ]
-            .into_iter()
-            .find_map(|(prefix, word, what)| Some((line.strip_prefix(prefix)?, word, what)));
-            if let Some((folder, word, what)) = root {
-                if section.is_some() {
-                    return Err(ParseError::new(
-                        number,
-                        format!("`{word}` comes before every section of a .spitout"),
-                    )
-                    .locate(original));
+        let read =
+            (|| -> Result<(), ParseError> {
+                let root = [
+                    ("root ", "root", "root"),
+                    ("output ", "output", "output root"),
+                ]
+                .into_iter()
+                .find_map(|(prefix, word, what)| Some((line.strip_prefix(prefix)?, word, what)));
+                if let Some((folder, word, what)) = root {
+                    if section.is_some() {
+                        return Err(ParseError::new(
+                            number,
+                            format!("`{word}` comes before every section of a .spitout"),
+                        )
+                        .locate(original));
+                    }
+                    let slot = if word == "root" {
+                        &mut inventory.root
+                    } else {
+                        &mut inventory.output
+                    };
+                    if slot.is_some() {
+                        return Err(ParseError::new(
+                            number,
+                            format!("a .spitout names its {what} once"),
+                        )
+                        .locate(original));
+                    }
+                    *slot = Some(PathBuf::from(folder.trim()));
+                    return Ok(());
                 }
-                let slot = if word == "root" {
-                    &mut inventory.root
-                } else {
-                    &mut inventory.output
-                };
-                if slot.is_some() {
-                    return Err(ParseError::new(
-                        number,
-                        format!("a .spitout names its {what} once"),
-                    )
-                    .locate(original));
-                }
-                *slot = Some(PathBuf::from(folder.trim()));
-                return Ok(());
-            }
-            match read.header() {
+                match read.header() {
                 Some(Header::Sources) => {
                     section = Some(InventorySection::Sources);
                     parent = None;
@@ -163,7 +166,7 @@ fn read_inventory<'a, 't: 'a>(
                             .map_err(|e| e.locate(original))?;
                     }
                     Some(InventorySection::Verdicts) => {
-                        parse_verdict_line(read, number, &mut verdicts)
+                        parse_verdict_line(read, number, &mut verdicts, &mut inventory.review_files)
                             .map_err(|e| e.locate(original))?;
                     }
                     Some(InventorySection::SourcePaths) => {
@@ -233,8 +236,8 @@ fn read_inventory<'a, 't: 'a>(
                     .locate(original)),
                 },
             }
-            Ok(())
-        })();
+                Ok(())
+            })();
         if let Err(error) = read {
             errors.push(error);
         }
@@ -335,6 +338,9 @@ impl PendingVerdict {
     }
 }
 
+/// What a `verdicts:` section writes after a review file that did not exist.
+pub(super) const MISSING: &str = " (missing)";
+
 /// Read one line of a `verdicts:` section into `verdicts`: the review and
 /// what it judges, `review[dimension=value,...]`, or one of its `verdict:`,
 /// `at:` and `reason:` lines. Values are read from the whole line, so a `#`
@@ -343,8 +349,26 @@ fn parse_verdict_line(
     read: &Line,
     number: usize,
     verdicts: &mut Vec<PendingVerdict>,
+    files: &mut Vec<ReviewRecord>,
 ) -> Result<(), ParseError> {
     let line = read.text.trim();
+    // A review file, `looked_at from qc/looked_at.csv`, read from the whole
+    // line so a `#` in its path is kept.
+    if let Some((review, file)) = line
+        .split_once(" from ")
+        .filter(|(review, _)| !review.contains('['))
+    {
+        let (file, found) = match file.strip_suffix(MISSING) {
+            Some(file) => (file, false),
+            None => (file, true),
+        };
+        files.push(ReviewRecord {
+            review: review.trim().to_owned(),
+            file: PathBuf::from(file.trim()),
+            found,
+        });
+        return Ok(());
+    }
     if let Some((key, value)) = line
         .split_once(':')
         .filter(|(key, _)| matches!(*key, "verdict" | "at" | "reason"))
