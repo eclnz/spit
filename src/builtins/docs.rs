@@ -427,8 +427,8 @@ pub static DOCS: [Doc; 60] = [
         name: "verdicts:",
         kind: "header",
         anchor: "inputs",
-        example: "verdicts:\n    looked_at[sub=04]\n        verdict: fail\n        at: qc/looked_at.csv line 2\n        reason: ghosting",
-        summary: "The rows of each review's file, each with its verdict, the file and line it was read from, and its reason. A record, not a rule: a DAG made from the `.spitout` judges artifacts by these rows.",
+        example: "verdicts:\n    looked_at from qc/looked_at.csv\n    looked_at[sub=04]\n        verdict: fail\n        at: qc/looked_at.csv line 2\n        reason: ghosting",
+        summary: "Each review's file, marked `(missing)` when it did not exist, then the rows of each, with its verdict, the file and line it was read from, and its reason. A record, not a rule: a DAG made from the `.spitout` judges artifacts by these rows.",
     },
     Doc {
         name: "check",

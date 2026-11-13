@@ -1,4 +1,4 @@
-"""The version 13 SPIT DAG schema, before filesystem checks or execution."""
+"""The version 14 SPIT DAG schema, before filesystem checks or execution."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from typing import Annotated, Literal
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
 
 # The one version of the format spit-bash reads.
-VERSION = 13
+VERSION = 14
 
 
 class SchemaModel(BaseModel):
@@ -157,6 +157,36 @@ class JobCommand(SchemaModel):
     stdout: RelativePath | None
 
 
+class ReviewPort(SchemaModel):
+    operation: NonEmpty
+    port: NonEmpty
+
+
+class ReviewTarget(SchemaModel):
+    """An artifact a review withheld when SPIT made the plan, which a person inspects to give a verdict."""
+
+    artifact: Artifact
+    # The input port the review is on, null for a review on a source or an output.
+    port: ReviewPort | None
+    # "fail" for a rejection, null for an artifact no row judges yet.
+    verdict: Literal["fail"] | None
+    reason: str | None
+    line: Line | None
+    # The outputs not planned because of it, and those of planned jobs that take a `many` input without it.
+    withholds: list[NonEmpty]
+    shrinks: list[NonEmpty]
+
+
+class Review(SchemaModel):
+    name: NonEmpty
+    # The review's file as an absolute path, null when the recipe names none.
+    file: NonEmpty | None
+    found: bool
+    verdicts: Annotated[int, Field(ge=0)]
+    unmatched: list[Line]
+    targets: list[ReviewTarget]
+
+
 class SpitJob(SchemaModel):
     id: JobId
     operation: NonEmpty
@@ -189,6 +219,7 @@ class SpitDag(SchemaModel):
     executables: list[str]
     removed: list[Removal]
     left_out: list[LeftOut]
+    reviews: list[Review]
     # The absolute folder of the pipeline's own file, null when SPIT read the pipeline from no file.
     pipeline_folder: NonEmpty | None
     pipeline_files: list[PipelineFile]

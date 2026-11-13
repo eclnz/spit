@@ -21,7 +21,7 @@ flowchart LR
 - **`InputRules`** ([`src/model/inputs.rs`](https://github.com/eclnz/spit/blob/dev/src/model/inputs.rs)) keeps the recipe's rules as written:
     - `context_paths`, unnamed `ContextPattern` directory patterns;
     - `exclusions`;
-    - `reviews`, one `ReviewFile` for each `review name from file` line: the review, the file as written, the line, and the file's text once it is read, or `None` when the file does not exist;
+    - `reviews`, one `ReviewFile` for each `review name from file` line: the review, the file as written and its `path` under the recipe's folder, the line, and the file's text once it is read, or `None` when the file does not exist;
     - `constraints`, which are the `require` rules and the conditional `exclude` rules (`CoverageAction::Drop`);
     - the source path rules, with the default in `source_default`.
 
@@ -33,6 +33,7 @@ flowchart LR
     - the `source_paths` a recipe supplied;
     - what was `removed`, and why;
     - the `verdicts`: a `VerdictRow` for each row of each review's file, with the review, the dimensions the row gives, its `Verdict`, its reason, and the file and line it was read from;
+    - the `review_files`: a `ReviewRecord` for each review file, with its path and whether it existed, so a plan made from a `.spitout` knows the file of a review with no rows;
     - the `root`.
 
     Context bindings carry dimensions and values, without rule names.
@@ -64,7 +65,7 @@ While it scans, the stage also:
 - **Reports the near misses.** For each source whose rule matches no file, it records the unmatched file the rule matches furthest into, and where the two part.
 - **Notes companion groups found only in part** (`incomplete_groups`), whether scanned or written as records. Records are grouped in one pass by `GroupKey`, and only an incomplete group's binding is written out as text.
 
-**Review files.** `read_review_files` reads each file a `review ... from` line names, relative to the recipe's folder, when the recipe is parsed at a path. A file that does not exist is left unread, and its review has no verdicts. Nothing here removes a record: a review only records a judgement, and the [resolver](resolution.md) applies it.
+**Review files.** `read_review_files` reads each file a `review ... from` line names, relative to the recipe's folder, when the recipe is parsed at a path. A file that does not exist is left unread, and its review has no verdicts. `without_review_files` leaves the review files out of the dataset's files that no source rule matches. Nothing here removes a record: a review only records a judgement, and the [resolver](resolution.md) applies it.
 
 **The root.**
 

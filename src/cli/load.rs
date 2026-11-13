@@ -215,14 +215,21 @@ pub(crate) fn settle(loaded: &Loaded) -> Result<(ResolvedInputs, PathBuf), Box<d
     for removal in &resolved.inventory.removed {
         eprintln!("note: {}", removal_note(removal, &orders));
     }
-    for review in recipe
-        .rules
-        .reviews
-        .iter()
-        .filter(|review| review.text.is_none())
-    {
+    for review in &recipe.rules.reviews {
+        let rows = || {
+            resolved
+                .inventory
+                .verdicts
+                .iter()
+                .any(|row| row.review == review.review && row.file == review.file)
+        };
+        let why = match &review.text {
+            None => "does not exist",
+            Some(_) if !rows() => "holds none",
+            Some(_) => continue,
+        };
         eprintln!(
-            "note: review `{}` has no verdicts yet: `{}` does not exist",
+            "note: review `{}` has no verdicts yet: `{}` {why}",
             review.review, review.file
         );
     }
@@ -634,8 +641,12 @@ pub(crate) fn prepare(args: &CliArgs) -> Result<Prepared, Box<dyn Error>> {
             .as_ref()
             .map(|(output, _)| output.clone()),
     };
-    let settled = InputSpec::default()
-        .resolve(&checked.pipeline, InputSource::Inventory(records.inventory))?;
+    let mut inventory = records.inventory;
+    for review in &mut inventory.review_files {
+        review.file = folder.join(&review.file);
+    }
+    let settled =
+        InputSpec::default().resolve(&checked.pipeline, InputSource::Inventory(inventory))?;
     for incomplete in &settled.incomplete_groups {
         eprintln!("warning: {incomplete}");
     }

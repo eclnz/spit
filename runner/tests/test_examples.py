@@ -205,6 +205,66 @@ class ExampleTests(unittest.TestCase):
         self.assertIn("output/size/plot=garden.txt, read by `@scalar`, holds 0, which is under the min of 1",
                       result.stderr)
 
+    def test_review(self):
+        folder = self.examples / "review"
+        recipe = str(folder / "review.spitin")
+        tidied = folder / "output/tidied"
+        result = spit_bash("plan", recipe)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("review `looked_at`: 1 rejected, 1 held; 2 outputs withheld, 1 output made without them\n",
+                      result.stdout)
+        self.assertIn(f"  to inspect once job 1 makes it: {tidied / 'plot=allotment.txt'}\n", result.stdout)
+
+        # The tidy jobs run for a person to look at; only the garden passed, so only it is counted.
+        result = spit_bash("run", recipe)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((folder / "output/total.txt").read_text().split(), ["2"])
+        self.assertIn(f"  record verdicts in {folder / 'qc/looked_at.csv'}, which held 2\n", result.stderr)
+        self.assertIn("  rejected tidied[plot=orchard] (line 3): figs are not plums\n", result.stderr)
+        self.assertIn(f"  ready to inspect: {tidied / 'plot=allotment.txt'}\n", result.stderr)
+
+        # A saved DAG keeps the verdicts it was made with, and a DAG made again applies the new ones.
+        saved = folder / "review.spitdag"
+        subprocess.run([SPIT, "dag", recipe, "-o", str(saved)], check=True, capture_output=True)
+        with open(folder / "qc/looked_at.csv", "a") as verdicts:
+            verdicts.write("allotment,pass,\n")
+        result = spit_bash("plan", str(saved))
+        self.assertIn("1 rejected, 1 held", result.stdout)
+        result = spit_bash("run", recipe)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("review `looked_at`: 1 rejected, 0 held; 1 output withheld, 1 output made without them\n",
+                      result.stderr)
+        self.assertEqual(sorted((folder / "output/total.txt").read_text().split()), ["2", "2"])
+
+    def test_a_review_file_that_cannot_be_used_stops_a_recipe_before_any_job_runs(self):
+        folder = self.examples / "review"
+        recipe = str(folder / "review.spitin")
+        verdicts = folder / "qc/looked_at.csv"
+        saved = folder / "review.spitdag"
+        subprocess.run([SPIT, "dag", recipe, "-o", str(saved)], check=True, capture_output=True)
+        for held, problem in [
+            (b"plot,verdict,reason\ngarden,maybe,\n", "qc/looked_at.csv line 2: verdict `maybe` must be `pass` or `fail`"),
+            (b"", "qc/looked_at.csv: expected a header row"),
+            (b"plot,verdict\ngarden,\xff\n", "cannot read `qc/looked_at.csv` for `review looked_at`"),
+        ]:
+            with self.subTest(problem=problem):
+                verdicts.write_bytes(held)
+                for command in ("plan", "run"):
+                    result = spit_bash(command, recipe)
+                    self.assertEqual(result.returncode, 2, result.stderr)
+                    self.assertIn(problem, result.stderr)
+                    self.assertIn("`spit dag` exited with status 1", result.stderr)
+                    self.assertFalse((folder / "output").exists())
+        # A saved DAG holds the verdicts it was made with, whatever becomes of the file.
+        result = spit_bash("plan", str(saved))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("review `looked_at`: 1 rejected, 1 held", result.stdout)
+        verdicts.unlink()
+        result = spit_bash("run", str(saved))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((folder / "output/total.txt").read_text().split(), ["2"])
+        self.assertIn("review `looked_at`: 1 rejected, 1 held", result.stderr)
+
     def test_sequence(self):
         result = spit_bash("run", str(self.examples / "sequence/sequence.spitin"))
         self.assertEqual(result.returncode, 0, result.stderr)
