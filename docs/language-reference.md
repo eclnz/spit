@@ -531,7 +531,32 @@ group = group_feat(firsts @vary(sub), design)
 
 ### Files beside the pipeline
 
-Commands run from the [output root](#the-output-root), which is the dataset root unless another is named, so a script kept next to the pipeline cannot be named by a path that holds wherever the dataset is. `{@here}` in a command is the folder of the `.spit` file that declares the operation:
+Commands run from the [output root](#the-output-root), which is the dataset root unless another is named, so a script kept next to the pipeline cannot be named by a path that holds wherever the dataset is. A source declared `here` is a file found from the folder of the `.spit` file that declares it, rather than in the dataset:
+
+<!-- spit-doc: setup
+source durations : Json [sample]
+default entities: {@key}={@value} separated "_"
+default path: out/{@product}/{@entities}
+-->
+
+```text
+source tabulate : Script .py here
+path tabulate: scripts/table.py
+
+operation table(durations: Json, script: Script) -> Table .tsv
+command table: python3 {script} {durations} > {@output}
+
+summary = table(durations, tabulate)
+```
+
+With the pipeline in `/home/lab/digits/digits.spit`, `table` runs `python3 /home/lab/digits/scripts/table.py ...`, and a job that reads `tabulate` reruns when the script changes, as it would for any other source.
+
+- A `here` source is one file: it takes no `[dimensions]`, `/` or `beside`. Its path rule is relative to the folder of the file that declares it, so a library imported from `libs/lib.spit` ships its scripts in `libs`.
+- The file must be in the pipeline's folder or beneath it, and must exist when the pipeline is run. Nothing may be written beside it.
+- A `.spitdag` gives its path relative to `pipeline_folder`, with `under` `"pipeline_folder"`: see [Roots](spitdag.md#roots).
+- A pipeline given on standard input, or parsed without a file, has no folder, and a `here` source in it is an error.
+
+`{@here}` in a command is that folder itself, for a script that is not an input of the operation:
 
 <!-- spit-doc: setup
 source durations : Json [sample]
@@ -546,12 +571,10 @@ command table: python3 {@here}/scripts/table.py {durations} > {@output}
 summary = table(durations)
 ```
 
-With the pipeline in `digits/digits.spit`, `table` runs `python3 /home/lab/digits/scripts/table.py ...`. An operation imported from `libs/lib.spit` gets `libs`, the folder of the file that declares it, so a library ships its scripts with it.
-
-- Write `{@here}` in a `command` or a `verify` command, as the start of an argument, with the rest of the path after it. It gives no `.dir` or `.stem`, and cannot be redirected to or from.
+- Write `{@here}` in a `command` or a `verify` command, as the start of an argument, with the rest of the path after it. It gives no `.dir` or `.stem`, and cannot be redirected to or from. An operation imported from `libs/lib.spit` gets `libs`, the folder of the file that declares it.
 - A `.spitdag` holds the pipeline's folder once, as `pipeline_folder`, and each use as a [`here` part](spitdag.md#commands) under it. The folder is not part of any command, so moving the pipeline changes none.
 - A pipeline given on standard input, or parsed without a file, has no folder, and `{@here}` in it is an error.
-- A job declares only its ports, so editing a script a command names by `{@here}`, or by a relative path such as `scripts/table.py`, reruns nothing. `inputs`, `dag` and `artifacts` note each such file that exists: ``note: operation `table` runs `{@here}/scripts/table.py`, which it doesn't declare, so editing the file reruns nothing; ...``. To rerun a job when its script changes, keep the script under the dataset root and pass it to the operation as a source.
+- A job declares only its ports, so editing a script a command names by `{@here}`, or by a relative path such as `scripts/table.py`, reruns nothing. `inputs`, `dag` and `artifacts` note each such file that exists: ``note: operation `table` runs `{@here}/scripts/table.py`, which it doesn't declare, so editing the file reruns nothing; to rerun on a change, declare it a `here` source and pass it to `table` as a source``.
 
 ### Numbers read from files
 

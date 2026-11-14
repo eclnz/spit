@@ -35,6 +35,11 @@ pub struct ProductDef {
     /// The reviews that judge a source's artifacts, as in
     /// `source t1w : Image [sub] @review(looked_at)`; none for an output.
     pub reviews: Vec<String>,
+    /// For a source declared `here`, kept beside the pipeline rather than in
+    /// the dataset: the folder of the file declaring it, relative to the
+    /// pipeline's folder, `""` for that folder itself. `None` for any other
+    /// product.
+    pub here: Option<String>,
 }
 
 impl ProductDef {
@@ -54,6 +59,7 @@ impl ProductDef {
             beside: None,
             checks: Vec::new(),
             reviews: Vec::new(),
+            here: None,
         }
     }
 }

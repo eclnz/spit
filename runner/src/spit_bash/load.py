@@ -235,7 +235,15 @@ def _load(source: TextIO, root_override: str | None) -> Dag:
         if unders.setdefault(artifact.path, artifact.under) != artifact.under:
             raise DagError(f"path is under both roots: {artifact.path}")
     in_dataset = frozenset(path for path, under in unders.items() if under == "root") if output_root else frozenset()
+    in_pipeline = frozenset(path for path, under in unders.items() if under == "pipeline_folder")
+    pipeline_folder = Path(document.pipeline_folder).resolve() if document.pipeline_folder is not None else None
+    if in_pipeline and (pipeline_folder is None or not pipeline_folder.is_dir()):
+        raise DagError(f"the DAG reads {min(in_pipeline)} from the pipeline's folder, "
+                       f"which is not a directory: {document.pipeline_folder}")
+    # Commands run from the output root, so a path under another root is given whole.
     shown = {path: str(root.joinpath(*PurePosixPath(path).parts)) for path in in_dataset}
+    if pipeline_folder is not None:
+        shown.update((path, str(pipeline_folder.joinpath(*PurePosixPath(path).parts))) for path in in_pipeline)
     external_paths = tuple(artifact.path for artifact in document.external_inputs)
     external_set = set(external_paths)
     jobs = []
@@ -249,6 +257,8 @@ def _load(source: TextIO, root_override: str | None) -> Dag:
         if len(item.depends_on) != len(set(item.depends_on)) or any(dep not in seen_ids for dep in item.depends_on):
             raise DagError(f"job {item.id} dependencies must name earlier jobs once each")
         for path in outputs:
+            if path in in_pipeline:
+                raise DagError(f"job {item.id} writes {path} under the pipeline's folder, which jobs only read")
             if path in producers or path in external_set:
                 raise DagError(f"multiple jobs or sources claim path: {path}")
             producers[path] = item.id
@@ -309,6 +319,8 @@ def _load(source: TextIO, root_override: str | None) -> Dag:
         folders,
         output_root=output_root,
         in_dataset=in_dataset,
+        in_pipeline=in_pipeline,
+        pipeline_folder=pipeline_folder,
         pipeline_files=_pipeline_files(document),
         reviews=tuple(_review(review) for review in document.reviews),
         tools=identities,

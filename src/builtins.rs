@@ -254,6 +254,12 @@ fn rule_word(code: &str, range: Range<usize>, statement: Option<Word>) -> Option
         (Word::Source, "beside") if before.split_whitespace().count() > 1 && spaced => {
             Some(Word::Beside)
         }
+        (Word::Source, "here")
+            if before.split_whitespace().count() > 1
+                && (after.is_empty() || after.starts_with('@')) =>
+        {
+            Some(Word::HereSource)
+        }
         (Word::Use, "as") if spaced => Some(Word::UseAs),
         (Word::Use, "from") if spaced => Some(Word::UseFrom),
         (Word::Review, "from") if spaced && before.split_whitespace().count() == 2 => {

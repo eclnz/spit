@@ -411,9 +411,14 @@ impl BoundDag {
 
     /// The path of `id` as a command run from the output root names it:
     /// as written, unless it is under a dataset root apart from the output
-    /// root, when it is reached from the output root, as `../data/in.txt`.
+    /// root, when it is reached from the output root, as `../data/in.txt`,
+    /// or is a `here` source, when it is the absolute path under the
+    /// pipeline's folder.
     pub fn shown_path(&self, id: ArtifactId) -> Cow<'_, str> {
         let path = self.path(id);
+        if let (Under::Pipeline, Some(folder)) = (self.under(id), &self.pipeline_folder) {
+            return Cow::Owned(format!("{folder}/{path}"));
+        }
         match (self.under(id), &self.root, &self.output_root) {
             (Under::Root, Some(root), Some(output)) if root != output => {
                 // A folder not written with `/`, as on Windows, is given whole.
