@@ -3,11 +3,11 @@
 //! of the products a flow step declares without them, and put every
 //! product's dimensions in the pipeline's order.
 
+use rustc_hash::FxHashMap;
 use std::collections::BTreeMap;
 
-use rustc_hash::FxHashMap;
-
 mod entities;
+mod environment;
 mod expand;
 pub(crate) mod imports;
 mod reviews;
@@ -554,6 +554,10 @@ fn lower_statement(
         StatementKind::Command(command, places) => {
             builder.add_command(command.clone(), places.clone());
         }
+        StatementKind::Tools(_)
+        | StatementKind::Tool(_)
+        | StatementKind::Uses(_, _)
+        | StatementKind::Anchored(_) => environment::apply(builder, statement)?,
         StatementKind::Resources(resources, place) => {
             builder.add_resources(resources.clone(), place.clone());
         }

@@ -14,6 +14,7 @@ FileStamp = Annotated[list[int], Field(min_length=2, max_length=3)]
 class Record(BaseModel):
     model_config = ConfigDict(strict=True, extra="forbid")
 
+    tools: dict[str, str] = Field(default_factory=dict)
     fingerprint: str
     # The fingerprint's parts as `Job.parts` gives them, to say which changed;
     # None for a record made before they were kept.

@@ -6,10 +6,10 @@ import hashlib
 import json
 
 from ..model import Artifact, Check, Work
-from ..schema import Command, CommandPart, DirPart, PathPart, ScalarPart, SpitJob, StemPart
+from ..schema import Command, CommandPart, JoinPart, ListPart, DirPart, PathPart, ScalarPart, SpitJob, StemPart
 
 # The work's parts, each hashed on its own. Keep in step with the keys `_parts` gives.
-PARTS = ("commands", "verify", "inputs", "outputs")
+PARTS = ("commands", "verify", "inputs", "outputs", "paths", "tools")
 
 
 def slots(item: SpitJob) -> dict[str, str]:
@@ -31,7 +31,7 @@ def _digest(value: object) -> str:
     return hashlib.sha256(json.dumps(value, separators=(",", ":"), sort_keys=True).encode()).hexdigest()[:16]
 
 
-def _parts(item: SpitJob, slots: dict[str, str]) -> dict[str, object]:
+def _parts(item: SpitJob, slots: dict[str, str], absolute: dict[str, str] | None = None) -> dict[str, object]:
     """The job's work as the runner identifies it: the shape of what it reads and
     writes, and its commands, with every path replaced by its place in the job.
     Names, storage paths, checks, scheduling and where the job came from are left
@@ -44,6 +44,10 @@ def _parts(item: SpitJob, slots: dict[str, str]) -> dict[str, object]:
     def part(value: CommandPart) -> list | str:
         if isinstance(value, str):
             return value
+        if isinstance(value, JoinPart):
+            return ["join", [of(p) for p in value.join], value.separator]
+        if isinstance(value, ListPart):
+            return ["list", [of(p) for p in value.list]]
         if isinstance(value, PathPart):
             return ["path", of(value.path)]
         if isinstance(value, DirPart):
@@ -60,7 +64,7 @@ def _parts(item: SpitJob, slots: dict[str, str]) -> dict[str, object]:
         return [[part(value) for value in argument] for argument in arguments]
 
     # Ports are listed in order, without their names: a renamed operation or port is the same work.
-    return {
+    parts = {
         "inputs": [[[slots[a.path], a.kind] for a in artifacts] for artifacts in item.inputs.values()],
         "outputs": [[slots[a.path], a.kind] for a in item.outputs.values()],
         "commands": [
@@ -69,6 +73,10 @@ def _parts(item: SpitJob, slots: dict[str, str]) -> dict[str, object]:
         ],
         "verify": [command(c) for c in item.verify],
     }
+
+    if item.anchored:
+        parts["paths"] = [(slot, (absolute or {}).get(path, path)) for path, slot in slots.items()]
+    return parts
 
 
 def checks_key(checks: tuple[Check, ...], slots: dict[str, str], shown: dict[str, str] | None = None) -> str | None:
@@ -98,10 +106,12 @@ def key(outputs: tuple[Artifact, ...]) -> str:
 
 
 def work(item: SpitJob, slots: dict[str, str], checks: tuple[Check, ...], outputs: tuple[Artifact, ...],
-         shown: dict[str, str] | None = None) -> Work:
+         shown: dict[str, str] | None = None, absolute: dict[str, str] | None = None, tool_ids: dict[str, str] | None = None) -> Work:
     """The job's `Work`, from its wire form, its slots, and its checks and outputs as loaded, with
     `shown` as `checks_key` takes it."""
-    parts = _parts(item, slots)
+    parts = _parts(item, slots, absolute)
+    selected = {name: (tool_ids or {})[name] for name in sorted(item.tools)}
+    if selected: parts["tools"] = sorted(selected.items())
     # The parts are hashed apart so that a record can say which of them changed.
     return Work(_digest(parts), {name: _digest(value) for name, value in parts.items()},
-                checks_key(checks, slots, shown), key(outputs))
+                checks_key(checks, slots, shown), key(outputs), selected)

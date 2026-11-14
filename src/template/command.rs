@@ -12,6 +12,7 @@ use std::fmt;
 use std::ops::Range;
 use std::sync::Arc;
 
+use super::collection::{function_end, CollectionRead};
 use super::{builtin, parse_template, Part};
 use crate::span::Located;
 
@@ -35,6 +36,8 @@ pub(crate) enum CommandPart {
     Placeholder(String),
     /// A `@scalar(port, ...)`: the number in an input's file.
     Scalar(ScalarRead),
+    /// A many input joined into one argument or written to a list file.
+    Collection(CollectionRead),
 }
 
 /// The word that starts a [`ScalarRead`], up to its `(`.
@@ -265,6 +268,15 @@ impl CommandTemplate {
                 "command template names no program to run, only where its stdin or stdout goes"
             }));
         }
+        if arguments[0]
+            .iter()
+            .any(|part| matches!(part, CommandPart::Collection(_)))
+        {
+            return Err(CommandError::new(
+                "a command starts with a program, not a collection function",
+            )
+            .focus("@"));
+        }
         if let Some(CommandPart::Scalar(read)) = arguments[0]
             .iter()
             .find(|part| matches!(part, CommandPart::Scalar(_)))
@@ -410,6 +422,7 @@ enum Piece {
     Text(String),
     /// What an unquoted `@scalar(` holds before its `)`.
     Scalar(String),
+    Collection(String, bool),
 }
 
 impl Word {
@@ -441,6 +454,9 @@ impl Word {
                         }
                     }
                 }
+                Piece::Collection(inside, list) => parts.push(CommandPart::Collection(
+                    CollectionRead::parse(inside, *list)?,
+                )),
                 Piece::Scalar(inside) => {
                     parts.push(CommandPart::Scalar(ScalarRead::parse(inside).map_err(
                         |message| CommandError::new(message).focus(format!("{SCALAR}({inside})")),
@@ -509,6 +525,19 @@ fn split_arguments(template: &str) -> Result<Vec<Word>, CommandError> {
                 literal(&mut argument, escaped);
                 started = true;
                 bare = false;
+            }
+            (None, '@')
+                if template[index..].starts_with("@join(")
+                    || template[index..].starts_with("@list(") =>
+            {
+                let list = template[index..].starts_with("@list(");
+                let open = index + 6;
+                let end = function_end(template, open, &mut chars)?;
+                if !argument.is_empty() {
+                    pieces.push(Piece::Text(std::mem::take(&mut argument)));
+                }
+                pieces.push(Piece::Collection(template[open..end].to_owned(), list));
+                started = true;
             }
             (None, '@') if template[index..].starts_with(SCALAR_OPEN) => {
                 let open = index + SCALAR_OPEN.len();

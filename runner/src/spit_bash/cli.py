@@ -49,6 +49,7 @@ its .spitout (or - for one on stdin), or a .spit pipeline with --root"""
 
 
 class Action(str, Enum):
+    ACCEPT_TOOLS = "accept-tools"
     PLAN = "plan"
     EXPLAIN = "explain"
     RUN = "run"
@@ -63,6 +64,7 @@ PLANS = (Action.PLAN, Action.EXPLAIN, Action.RUN)
 
 
 HELP = {
+    Action.ACCEPT_TOOLS: "accept changed tool identities for recorded jobs without rerunning or refreshing file evidence",
     Action.PLAN: "report which jobs would run, be checked, skip or be blocked",
     Action.EXPLAIN: "explain one job's decision: its recorded and current fingerprint and checks,\n"
                     "the files that differ from the record, and the upstream jobs that will rewrite its inputs",
@@ -334,13 +336,19 @@ def main(argv: list[str] | None = None) -> int:
             needed = f", and {selected.needed} they need" if selected.needed else ""
             print(f"chose {selected.matched} of {total} jobs{needed}", file=sys.stderr)
         layout = Layout(Path(args.dir).expanduser().resolve()) if args.dir else dag.layout
-        writes_state = args.action in (Action.RUN, Action.ADOPT, Action.PRUNE, Action.RESTORE)
+        writes_state = args.action in (Action.RUN, Action.ADOPT, Action.PRUNE, Action.RESTORE, Action.ACCEPT_TOOLS)
         state = Store(layout.state, writes_state)
         if writes_state:
             state.lock()
         if dag.left_out:
             print(f"partial DAG: {len(dag.left_out)} output(s) left out", file=sys.stderr)
 
+        from . import tools
+        if args.action in (Action.PLAN, Action.EXPLAIN, Action.RUN, Action.ACCEPT_TOOLS):
+            for line in tools.changed_notes(dag, state): print(line, file=sys.stderr)
+        if args.action is Action.ACCEPT_TOOLS:
+            print(f"accepted tool identities for {tools.accept(dag, state)} recorded jobs")
+            return 0
         if args.action is Action.ADOPT:
             adoptions = adopt(dag, state)
             for adoption in adoptions:

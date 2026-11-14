@@ -100,6 +100,8 @@ class Work:
     checks_key: str | None
     # The state file's key for the job's record: what it makes, by product and entities.
     key: str
+    # Exact declared or probed identities used by this job.
+    tools: dict[str, str] = field(default_factory=dict, compare=False)
 
 
 @dataclass(frozen=True)
@@ -125,6 +127,8 @@ class Job:
     memory: int | None = None
     # The numbers its `verify` commands and commands read from its input files, each once.
     reads: tuple[Read, ...] = ()
+    # These outputs retain absolute paths that a relocation would invalidate.
+    anchored: bool = False
 
     @cached_property
     def input_artifacts(self) -> tuple[Artifact, ...]:
@@ -262,6 +266,9 @@ class Dag:
     # The paths under `root` when `output_root` is another folder: the sources,
     # and the files jobs write beside them. Every other path is under `output_root`.
     in_dataset: frozenset[str] = frozenset()
+    # Declared local sources are read under this separately checked root.
+    in_pipeline: frozenset[str] = frozenset()
+    pipeline_folder: Path | None = None
     # Each file the pipeline was read from, as its path from the pipeline's folder, its absolute
     # path, and its git blob id when the DAG was written; empty when SPIT did not read it from a file.
     pipeline_files: tuple[tuple[str, Path, str], ...] = ()
@@ -280,6 +287,9 @@ class Dag:
 
     def base(self, relative: str) -> Path:
         """The root that `relative` is under."""
+        if relative in self.in_pipeline:
+            if self.pipeline_folder is None: raise DagError("pipeline-local input has no pipeline_folder")
+            return self.pipeline_folder
         return self.root if relative in self.in_dataset else self.outputs
 
     def path(self, relative: str) -> Path:

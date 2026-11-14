@@ -56,6 +56,11 @@ pub(crate) fn apply_import(
             .iter()
             .map(|(product, template)| (product.clone(), template.clone())),
     );
+    for name in &imported.tool_names {
+        if !builder.pipeline.tool_names.contains(name) {
+            builder.pipeline.tool_names.push(name.clone());
+        }
+    }
     for command in &imported.commands {
         let places = CommandPlaces {
             header: place.clone(),
@@ -208,6 +213,7 @@ fn select_import(module: &Pipeline, spec: &UseSpec, line: usize) -> Result<Pipel
     // The types an operation's ports write are declared by the file,
     // whichever names the import selects.
     selected.pipeline.type_decls = module.index.pipeline.type_decls.clone();
+    selected.pipeline.tool_names = module.index.pipeline.tool_names.clone();
     let import_all = spec.names.is_none();
     let names: Vec<&str> = match &spec.names {
         Some(names) => names.iter().map(String::as_str).collect(),
@@ -286,6 +292,17 @@ fn select_import(module: &Pipeline, spec: &UseSpec, line: usize) -> Result<Pipel
         }
     }
     import_called(&mut selected, &module, spec, line)?;
+    for product in &mut selected.pipeline.products {
+        if let Some(folder) = &mut product.here {
+            if let Some((parent, _)) = spec.path.rsplit_once('/') {
+                *folder = if folder.is_empty() {
+                    parent.to_owned()
+                } else {
+                    format!("{parent}/{folder}")
+                };
+            }
+        }
+    }
     qualify_attached(&mut selected.pipeline, spec.alias.as_deref());
     Ok(selected.pipeline)
 }
@@ -615,9 +632,13 @@ fn parse_document_at_inner(
     let (mut document, found) = parse_layout(&layout, &imports, kind);
     errors.extend(found);
     let folder = path.parent().unwrap_or_else(|| Path::new(""));
-    for (root, _) in [&mut document.pipeline.root, &mut document.pipeline.output]
-        .into_iter()
-        .flatten()
+    for (root, _) in [
+        &mut document.pipeline.root,
+        &mut document.pipeline.output,
+        &mut document.pipeline.tools_file,
+    ]
+    .into_iter()
+    .flatten()
     {
         *root = folder.join(&*root);
     }

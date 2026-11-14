@@ -102,6 +102,9 @@ impl fmt::Display for InventoryText<'_> {
         if inventory.root.is_some() || inventory.output.is_some() {
             writeln!(f)?;
         }
+        if let Some(tools) = &inventory.tools_file {
+            writeln!(f, "tools from {}", tools.display())?;
+        }
         let source_paths = written_source_paths(inventory, self.pipeline, self.rules);
         if !source_paths.is_empty() {
             writeln!(f, "source_paths:")?;

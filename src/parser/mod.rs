@@ -213,6 +213,14 @@ pub(crate) enum StatementKind {
     Command(CommandDef, CommandPlaces),
     /// A `resources` line, and where its operation's name is.
     Resources(ResourcesDef, Place),
+    /// Operations whose output files retain the paths they were made with.
+    Anchored(Vec<String>),
+    /// The environment file selected by a tools from line.
+    Tools(std::path::PathBuf),
+    /// A declared tool name.
+    Tool(String),
+    /// An operation and its explicit tool dependencies.
+    Uses(String, Vec<String>),
     /// A `check` declaration, and where its name is.
     Check(CheckDef, Place),
     /// A `review` declaration, and where its name is.
@@ -301,7 +309,20 @@ pub(crate) fn parse_syntax(layout: &Layout) -> Syntax {
 impl StatementKind {
     /// A product declared by `declaration`, a slice of the line `original`.
     fn product(original: &str, declaration: &str, number: usize) -> Result<Self, ParseError> {
-        let product = declarations::parse_product(declaration, number)?;
+        let (declaration, here) = declaration
+            .trim_end()
+            .strip_suffix(" here")
+            .map_or((declaration, false), |s| (s.trim_end(), true));
+        let mut product = declarations::parse_product(declaration, number)?;
+        if here {
+            if !product.dimensions.is_empty() || product.beside.is_some() || product.folder {
+                return Err(ParseError::new(
+                    number,
+                    "a here source names one fixed file, without dimensions or beside",
+                ));
+            }
+            product.here = Some(String::new());
+        }
         let place = source_map::name_place(original, number, declaration, &product.name);
         Ok(Self::Product(product, place))
     }

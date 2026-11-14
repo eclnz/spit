@@ -17,6 +17,8 @@ use super::{
 /// reads these; job resolution never does.
 #[derive(Clone, Debug, Default)]
 pub struct InputRules {
+    /// The recipe-selected tool environment file.
+    pub tools_file: Option<PathBuf>,
     pub context_paths: Vec<ContextPattern>,
     /// `require` and conditional `exclude` rules, in declaration order.
     pub constraints: Vec<CoverageRule>,
@@ -38,7 +40,8 @@ pub struct InputRules {
 
 impl InputRules {
     pub fn is_empty(&self) -> bool {
-        self.context_paths.is_empty()
+        self.tools_file.is_none()
+            && self.context_paths.is_empty()
             && self.constraints.is_empty()
             && self.exclusions.is_empty()
             && self.reviews.is_empty()
@@ -292,6 +295,8 @@ impl SourceRecord {
 /// Supplied by a dataset indexer, a manifest, or the text fixture parser.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct SourceInventory {
+    /// The tool environment file recorded with these inputs.
+    pub tools_file: Option<PathBuf>,
     pub artifacts: Vec<SourceRecord>,
     /// Observed contexts can expose missing artifacts even when no other source
     /// family has an artifact for that context.

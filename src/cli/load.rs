@@ -642,6 +642,9 @@ pub(crate) fn prepare(args: &CliArgs) -> Result<Prepared, Box<dyn Error>> {
             .map(|(output, _)| output.clone()),
     };
     let mut inventory = records.inventory;
+    if let Some(tools) = &mut inventory.tools_file {
+        *tools = folder.join(&*tools);
+    }
     for review in &mut inventory.review_files {
         review.file = folder.join(&review.file);
     }

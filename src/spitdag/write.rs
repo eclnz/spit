@@ -32,6 +32,21 @@ pub(crate) fn write_document(
         generator.string("version", env!("CARGO_PKG_VERSION"));
         generator.finish();
     });
+    document.field("tools", |out| {
+        write_array(out, &dag.tools, |out, tool| {
+            let mut item = ObjectWriter::start(out);
+            item.string("name", &tool.name);
+            item.field("identity", |out| match &tool.identity {
+                Some(value) => write_string(out, value),
+                None => out.push_str("null"),
+            });
+            item.field("probe", |out| match &tool.probe {
+                Some(args) => write_array(out, args, |out, arg| write_string(out, arg)),
+                None => out.push_str("null"),
+            });
+            item.finish();
+        });
+    });
     document.field("root", |out| match &dag.root {
         Some(root) => write_string(out, root),
         None => out.push_str("null"),
@@ -207,6 +222,14 @@ fn write_job(
     let mut object = ObjectWriter::start(out);
     object.field("id", |out| write_number(out, job.id.number()));
     object.raw("operation", &work[operation]);
+    object.field("tools", |out| {
+        write_array(out, step.tools.iter().flatten(), |out, name| {
+            write_string(out, name)
+        });
+    });
+    object.field("anchored", |out| {
+        out.push_str(if step.anchored { "true" } else { "false" })
+    });
     object.field("stage", |out| {
         write_array(
             out,
@@ -327,6 +350,19 @@ fn write_outputs(
 pub(super) fn write_command(out: &mut String, dag: &BoundDag, command: &[Argument]) {
     write_array(out, command, |out, argument| {
         write_array(out, argument, |out, part| match part {
+            ArgPart::Collection {
+                artifacts,
+                separator,
+            } => {
+                let mut object = ObjectWriter::start(out);
+                object.field(if separator.is_some() { "join" } else { "list" }, |out| {
+                    write_array(out, artifacts, |out, id| write_string(out, dag.path(*id)));
+                });
+                if let Some(separator) = separator {
+                    object.string("separator", separator);
+                }
+                object.finish();
+            }
             ArgPart::Text(text) => write_string(out, text),
             ArgPart::Path(artifact) => {
                 out.push_str("{\"path\":");
@@ -428,6 +464,8 @@ mod tests {
     fn step(operation: &str, stage: Option<&str>, inputs: &[&str], outputs: &[&str]) -> BoundStep {
         let names = |ports: &[&str]| ports.iter().map(|&port| port.to_owned()).collect();
         BoundStep {
+            anchored: false,
+            tools: None,
             operation: operation.to_owned(),
             stage: stage.map(str::to_owned),
             inputs: names(inputs),
@@ -522,8 +560,8 @@ mod tests {
         dag.output_root = Some("/data/results".into());
         let text = dag.to_json();
         assert!(text.starts_with(&format!(
-            "{{\"version\":14,\"generator\":{{\"name\":\"spit\",\"version\":\"{}\"}},\
-\"root\":\"/data/study\",\"output_root\":\"/data/results\",\"external_inputs\":[{{\"product\":\"raw\"",
+            "{{\"version\":15,\"generator\":{{\"name\":\"spit\",\"version\":\"{}\"}},\
+\"tools\":[],\"root\":\"/data/study\",\"output_root\":\"/data/results\",\"external_inputs\":[{{\"product\":\"raw\"",
             env!("CARGO_PKG_VERSION")
         )));
         assert!(

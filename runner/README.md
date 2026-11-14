@@ -1,6 +1,6 @@
 # spit-bash
 
-`spit-bash` runs the jobs of a [SPIT](../README.md) pipeline on one machine. Give it a recipe and it runs `spit dag` for you; give it a saved `.spitdag` or `dag --json` output and it needs nothing else, not the original `.spit` pipeline or `.spitout` inventory. It reads version 14 of SPIT's DAG format, and no other: a DAG of another version is rejected before anything runs, so use a `spit` and a `spit-bash` that match.
+`spit-bash` runs the jobs of a [SPIT](../README.md) pipeline on one machine. Give it a recipe and it runs `spit dag` for you; give it a saved `.spitdag` or `dag --json` output and it needs nothing else, not the original `.spit` pipeline or `.spitout` inventory. It reads version 15 of SPIT's DAG format, and no other: a DAG of another version is rejected before anything runs, so use a `spit` and a `spit-bash` that match.
 
 See the [runnable examples](../examples/runnable/README.md) for recipes to run, their commands, and expected output.
 
@@ -369,4 +369,27 @@ cargo build
 SPIT=$PWD/target/debug/spit python3 -m unittest discover -s runner/tests -v
 ```
 
-The test fixture under `tests/fixtures/` is actual version 14 output from SPIT's `command_demo` example, written without a root. `tests/test_examples.py` runs the [examples](../examples/runnable/README.md) in `examples/runnable`, which SPIT's own tests keep in step with its syntax, with a real `spit`: set `SPIT` to the binary built from the same checkout, or put it on `PATH`, or the tests are skipped. CI builds `spit` from each commit and runs them, so a change to SPIT's DAG format and the runner's change to read it are tested together. The repository's CI also runs Messie over the runner's folders.
+The test fixture under `tests/fixtures/` is actual version 15 output from SPIT's `command_demo` example, written without a root. `tests/test_examples.py` runs the [examples](../examples/runnable/README.md) in `examples/runnable`, which SPIT's own tests keep in step with its syntax, with a real `spit`: set `SPIT` to the binary built from the same checkout, or put it on `PATH`, or the tests are skipped. CI builds `spit` from each commit and runs them, so a change to SPIT's DAG format and the runner's change to read it are tested together. The repository's CI also runs Messie over the runner's folders.
+
+
+### Collection arguments and rerun dependencies
+
+SPIT's `@join(xs)` is a single argument made from paths, with a literal separator;
+`@list(xs)` is a temporary file holding absolute paths, one per line. The runner
+checks separators after resolving roots and removes list files after the job,
+including failed or cancelled jobs. Plans show `@list(...)` until a job runs.
+
+A declared `here` source is read from `pipeline_folder`, including its content
+in the usual input checks. Jobs cannot write under that root. An `anchored`
+operation reruns when any absolute input or output path changes; `--move-files`
+never moves its outputs.
+
+A DAG carries its tool declarations. The runner resolves used probes once per
+load, before any jobs, and compares their exact stdout bytes or opaque declared
+identities with each job's record. It reports identity changes and reruns their
+readers. Probes run without an implicit shell from the dataset root, with a
+30-second timeout. A failed probe stops loading. `accept-tools FILE` accepts
+changed tool identities for recorded jobs while retaining file hashes, checks
+and timestamps; other changed work is refused before any record is written.
+
+The runnable `examples/runnable/collections` example combines these features.

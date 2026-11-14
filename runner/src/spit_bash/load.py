@@ -10,10 +10,11 @@ from typing import Iterable, Iterator, TextIO
 
 from pydantic import ValidationError
 
-from . import scalars, schema
+from . import scalars, schema, tools
+from .collections import ListRead
 from .model import Artifact, Check, Dag, DagError, Job, Kind, Port, Review, Run, Side, Target
 from .reuse import identity
-from .schema import Command, DirPart, HerePart, JobCommand, PathPart, ScalarPart, SpitDag, SpitJob, StemPart
+from .schema import Command, JoinPart, ListPart, DirPart, HerePart, JobCommand, PathPart, ScalarPart, SpitDag, SpitJob, StemPart
 
 
 def _here(part: HerePart, folder: str | None) -> str:
@@ -31,6 +32,8 @@ def _command(command: Command, folder: str | None = None, shown: dict[str, str] 
     `shown` gives the text of each path under a dataset root apart from the
     output root, which commands run from: its absolute path.
     """
+    if any(isinstance(part, (JoinPart, ListPart)) for part in command[0]):
+        raise DagError("command starts with a collection part, not a program")
     shown = shown or {}
     arguments: list[str] = []
     for argument in command:
@@ -38,6 +41,13 @@ def _command(command: Command, folder: str | None = None, shown: dict[str, str] 
         for part in argument:
             if isinstance(part, str):
                 parts.append(part)
+            elif isinstance(part, JoinPart):
+                paths = [shown.get(p, p) for p in part.join]
+                if part.separator and any(part.separator in p for p in paths):
+                    raise DagError(f"join separator {part.separator!r} occurs in an input path: {paths}")
+                parts.append(part.separator.join(paths))
+            elif isinstance(part, ListPart):
+                parts.append(ListRead(tuple(part.list)))
             elif isinstance(part, PathPart):
                 parts.append(shown.get(part.path, part.path))
             elif isinstance(part, DirPart):
@@ -48,7 +58,7 @@ def _command(command: Command, folder: str | None = None, shown: dict[str, str] 
                 parts.append(_here(part, folder))
             elif isinstance(part, ScalarPart):
                 parts.append(scalars.Read(part.scalar, part.least, part.greatest))
-        if any(isinstance(part, scalars.Read) for part in parts):
+        if any(isinstance(part, (scalars.Read, ListRead)) for part in parts):
             arguments.append(scalars.Reading(tuple(parts)))
         else:
             arguments.append("".join(parts))  # type: ignore[arg-type]
@@ -233,7 +243,13 @@ def _load(source: TextIO, root_override: str | None) -> Dag:
         if unders.setdefault(artifact.path, artifact.under) != artifact.under:
             raise DagError(f"path is under both roots: {artifact.path}")
     in_dataset = frozenset(path for path, under in unders.items() if under == "root") if output_root else frozenset()
+    in_pipeline = frozenset(path for path, under in unders.items() if under == "pipeline_folder")
+    pipeline_folder = Path(document.pipeline_folder).resolve() if document.pipeline_folder else None
+    if in_pipeline and (pipeline_folder is None or not pipeline_folder.is_dir()):
+        raise DagError("pipeline-local inputs need an existing pipeline_folder")
     shown = {path: str(root.joinpath(*PurePosixPath(path).parts)) for path in in_dataset}
+    shown.update((path, str(pipeline_folder / path)) for path in in_pipeline)
+    tool_ids = tools.resolve(document.tools, {name for job in document.jobs for name in job.tools}, root)
     external_paths = tuple(artifact.path for artifact in document.external_inputs)
     external_set = set(external_paths)
     jobs = []
@@ -243,7 +259,16 @@ def _load(source: TextIO, root_override: str | None) -> Dag:
         if item.id in seen_ids:
             raise DagError(f"duplicate job id: {item.id}")
         _check_streams(item, folders)
+        input_paths = {a.path for port in item.inputs.values() for a in port}
+        for command in [*(c.command for c in item.commands), *item.verify]:
+            for part in (p for argument in command for p in argument):
+                if isinstance(part, (JoinPart, ListPart)):
+                    members = part.join if isinstance(part, JoinPart) else part.list
+                    if any(p not in input_paths for p in members):
+                        raise DagError(f"job {item.id}: collection part names a path outside its inputs")
         outputs = tuple(artifact.path for artifact in item.outputs.values())
+        if any(path in in_pipeline for path in outputs):
+            raise DagError("jobs cannot write under pipeline_folder")
         if len(item.depends_on) != len(set(item.depends_on)) or any(dep not in seen_ids for dep in item.depends_on):
             raise DagError(f"job {item.id} dependencies must name earlier jobs once each")
         for path in outputs:
@@ -261,6 +286,9 @@ def _load(source: TextIO, root_override: str | None) -> Dag:
                   _command(check.command, document.pipeline_folder, shown))
             for check in item.checks
         )
+        for check in item.checks:
+            if any(isinstance(part, (JoinPart, ListPart)) for argument in check.command for part in argument):
+                raise DagError("a check cannot read a collection part")
         origin = _origin(document, item)
         # Before the checks key, which names each checked path by its slot.
         for check in item.checks:
@@ -272,7 +300,8 @@ def _load(source: TextIO, root_override: str | None) -> Dag:
             id=item.id,
             operation=item.operation,
             stage=tuple(item.stage),
-            work=identity.work(item, slots, checks, tuple(a for port in produced for a in port.artifacts), shown),
+            work=identity.work(item, slots, checks, tuple(a for port in produced for a in port.artifacts), shown,
+                               {p: str((pipeline_folder if p in in_pipeline else root if p in in_dataset else output_root or root) / p) for p in slots}, tool_ids),
             inputs=inputs,
             outputs=produced,
             depends_on=tuple(item.depends_on),
@@ -283,6 +312,7 @@ def _load(source: TextIO, root_override: str | None) -> Dag:
             cores=item.cores,
             memory=item.memory,
             reads=reads,
+            anchored=item.anchored,
         ))
         seen_ids.add(item.id)
 
@@ -302,6 +332,8 @@ def _load(source: TextIO, root_override: str | None) -> Dag:
         folders,
         output_root=output_root,
         in_dataset=in_dataset,
+        in_pipeline=in_pipeline,
+        pipeline_folder=pipeline_folder,
         pipeline_files=_pipeline_files(document),
         reviews=tuple(_review(review) for review in document.reviews),
     )

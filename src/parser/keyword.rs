@@ -19,6 +19,12 @@ pub(crate) enum Keyword {
     /// `resources operation: cores=8, memory=16G`, what each job of an
     /// operation needs.
     Resources,
+    /// Operations whose outputs depend on absolute input and output paths.
+    Anchored,
+    /// An environment file, tool name, or per-operation dependency declaration.
+    Tools,
+    Tool,
+    Uses,
     /// `check name(params): command`, a test of one artifact.
     Check,
     /// `review name`, which declares a review, and in a recipe `review name
@@ -90,7 +96,7 @@ pub(crate) struct Spec {
 
 impl Keyword {
     /// Every keyword, in declaration order, which the assertion below keeps.
-    pub(crate) const ALL: [Self; 26] = [
+    pub(crate) const ALL: [Self; 30] = [
         Self::Source,
         Self::Dimensions,
         Self::Types,
@@ -98,6 +104,10 @@ impl Keyword {
         Self::Command,
         Self::Verify,
         Self::Resources,
+        Self::Anchored,
+        Self::Tools,
+        Self::Tool,
+        Self::Uses,
         Self::Check,
         Self::Review,
         Self::Path,
@@ -129,6 +139,10 @@ impl Keyword {
             Self::Operation => ("operation", true, Pipeline, true),
             Self::Command => ("command", true, Pipeline, true),
             Self::Verify => ("verify", true, Pipeline, true),
+            Self::Tools => ("tools", false, Both, true),
+            Self::Tool => ("tool", false, Pipeline, true),
+            Self::Uses => ("uses", false, Pipeline, true),
+            Self::Anchored => ("anchored", false, Pipeline, true),
             Self::Resources => ("resources", true, Pipeline, true),
             Self::Check => ("check", true, Pipeline, true),
             // `review name from file.csv` names a review's file in a

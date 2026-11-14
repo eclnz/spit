@@ -114,6 +114,8 @@ fn keyword_word(keyword: Keyword) -> Option<Word> {
         Keyword::Operation => Word::Operation,
         Keyword::Command => Word::Command,
         Keyword::Verify => Word::Verify,
+        Keyword::Anchored => Word::Anchored,
+        Keyword::Tools | Keyword::Tool | Keyword::Uses => return None,
         Keyword::Resources => Word::Resources,
         Keyword::Check | Keyword::Checks => Word::Check,
         Keyword::Review | Keyword::Reviews => Word::Review,

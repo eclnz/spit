@@ -458,6 +458,37 @@ fn flow_rest(
             };
             StatementKind::command(original, declaration.trim(), number, role)?
         }
+        Some((Keyword::Tools, declaration)) => {
+            let file = declaration
+                .trim()
+                .strip_prefix("from ")
+                .filter(|s| !s.trim().is_empty())
+                .ok_or_else(|| ParseError::new(number, "expected tools from file.spitenv"))?;
+            StatementKind::Tools(file.trim().into())
+        }
+        Some((Keyword::Tool, declaration)) => StatementKind::Tool(declaration.trim().to_owned()),
+        Some((Keyword::Uses, declaration)) => {
+            let (operation, names) = declaration
+                .split_once(':')
+                .ok_or_else(|| ParseError::new(number, "expected uses operation: tool, other"))?;
+            StatementKind::Uses(
+                operation.trim().to_owned(),
+                names
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_owned)
+                    .collect(),
+            )
+        }
+        Some((Keyword::Anchored, declaration)) => {
+            let names = declaration
+                .split(',')
+                .map(str::trim)
+                .map(str::to_owned)
+                .collect();
+            StatementKind::Anchored(names)
+        }
         Some((Keyword::Resources, declaration)) => {
             StatementKind::resources(original, declaration.trim(), number)?
         }

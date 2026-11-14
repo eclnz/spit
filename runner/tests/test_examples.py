@@ -5,6 +5,7 @@ in step with its syntax. Set SPIT to the binary built from this checkout, or put
 """
 
 import os
+import json
 import shutil
 import subprocess
 import sys
@@ -35,6 +36,32 @@ class ExampleTests(unittest.TestCase):
     def dag_json(self, recipe):
         return subprocess.run([SPIT, "dag", str(self.examples / recipe), "--json"],
                               check=True, capture_output=True, text=True).stdout
+
+    def test_collection_arguments_local_sources_and_tool_identities(self):
+        folder = self.examples / "collections"
+        recipe = str(folder / "collections.spitin")
+        result = spit_bash("run", recipe)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        joined = json.loads((folder / "results/joined.json").read_text())
+        listed = json.loads((folder / "results/listed.json").read_text())
+        self.assertEqual(joined, listed)
+        self.assertEqual([Path(row["path"]).name for row in joined], ["2.txt", "10.txt"])
+        result = spit_bash("plan", recipe, "--verbose")
+        self.assertEqual(result.stdout.count(" current "), 2, result.stdout)
+        script = folder / "bundle.py"
+        script.write_text(script.read_text() + "\n# changed script\n")
+        result = spit_bash("plan", recipe, "--verbose")
+        self.assertEqual(result.stdout.count("input changed"), 2, result.stdout)
+        environment = folder / "runtime.spitenv"
+        environment.write_text("tools:\n    python: declared-upgrade\n")
+        result = spit_bash("plan", recipe, "--verbose")
+        self.assertIn("tool python identity changed", result.stderr)
+        self.assertIn("tool identities changed", result.stdout)
+        accepted = spit_bash("accept-tools", recipe)
+        self.assertEqual(accepted.returncode, 0, accepted.stderr)
+        result = spit_bash("plan", recipe, "--verbose")
+        self.assertNotIn("tool identities changed", result.stdout)
+        self.assertEqual(result.stdout.count("input changed"), 2, result.stdout)
 
     def test_lines(self):
         dag = self.dag_json("lines/lines.spitin")

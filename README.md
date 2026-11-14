@@ -340,3 +340,11 @@ SPIT was built with the help of generative AI. I'm not a Rust developer: AI wrot
 ## License
 
 SPIT is released under the [MIT License](LICENSE).
+
+
+Collections can reach tools as separate arguments (`{xs}`), one joined argument
+(`@join(xs, ",")`), or a temporary list file (`@list(xs)`). A source ending in
+`here` makes a pipeline-local script a tracked input. Tool environment files
+(`tools from host.spitenv`) and `anchored` operations declare additional reasons
+to rerun. See the [language reference](docs/language-reference.md#collection-arguments)
+and the [runnable collection example](examples/runnable/collections/collections.spitin).

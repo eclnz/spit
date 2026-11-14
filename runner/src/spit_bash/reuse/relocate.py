@@ -68,7 +68,7 @@ def movable(dag: Dag, job: Job, record: Record | None, claimed: set[str], moving
     current = job.output_paths_by_slot
     if all(record.output_paths.get(key, path) == path for key, path in current.items()):
         return None
-    if record.fingerprint != job.work.fingerprint:
+    if job.anchored or record.fingerprint != job.work.fingerprint:
         return Migration(job, (), MoveCause.WORK_CHANGED, parts=changed_parts(record, job))
     # A moved output is reused only if the job would be current but for the move.
     in_paths = {slot: path for slot, path in job.input_paths_by_slot.items() if path not in moving}

@@ -30,7 +30,7 @@ impl Command {
     fn spec(self) -> CommandSpec {
         use Flag::{
             ByTarget, Calls, Commands, Counts, Hovers, Jobs, Json, Output, OutputRoot, Partial,
-            PathRules, Paths, Root, Stdin, Tree, Unmatched,
+            PathRules, Paths, Root, Stdin, Tools, Tree, Unmatched,
         };
         match self {
             Self::Check => CommandSpec {
@@ -53,7 +53,7 @@ impl Command {
                 summary: "step 3: resolve a pipeline's jobs over a dataset's inputs and print step counts; --commands lists commands, -o writes the .spitdag",
                 example: "spit dag dataset.spitin\n  spit dag dataset.spitin --commands\n  spit dag dataset.spitin -o analysis.spitdag",
                 flags: &[
-                    Root, OutputRoot, Paths, Commands, Jobs, Counts, Partial, Json, Output, Tree,
+                    Root, OutputRoot, Tools, Paths, Commands, Jobs, Counts, Partial, Json, Output, Tree,
                 ],
             },
             Self::Artifacts => CommandSpec {
@@ -114,6 +114,7 @@ impl Command {
 
 #[derive(Clone, Copy, PartialEq)]
 pub(crate) enum Flag {
+    Tools,
     Root,
     /// `--output-root`, the folder outputs go under, for a pipeline run alone.
     OutputRoot,
@@ -133,7 +134,8 @@ pub(crate) enum Flag {
     Tree,
 }
 
-const FLAGS: [Flag; 16] = [
+const FLAGS: [Flag; 17] = [
+    Flag::Tools,
     Flag::Root,
     Flag::OutputRoot,
     Flag::Output,
@@ -172,6 +174,7 @@ const CONFLICTS: [(Flag, Flag); 13] = [
 impl Flag {
     pub(crate) fn name(self) -> &'static str {
         match self {
+            Self::Tools => "--tools",
             Self::Root => "--root",
             Self::OutputRoot => "--output-root",
             Self::Output => "-o",
@@ -195,13 +198,14 @@ impl Flag {
     pub(crate) fn value(self) -> Option<&'static str> {
         match self {
             Self::Root | Self::OutputRoot => Some("<directory>"),
-            Self::Output => Some("<file>"),
+            Self::Tools | Self::Output => Some("<file>"),
             _ => None,
         }
     }
 
     fn help(self, command: Command) -> &'static str {
         match (self, command) {
+            (Self::Tools, _) => "use this .spitenv instead of the recipe or pipeline tool environment",
             (Self::Tree, _) => "show pipeline products and steps without reading a dataset; --ascii is an alias",
             (Self::Root, _) => {
                 "with a .spit pipeline that has no root line, the dataset folder to scan, relative to where spit runs"

@@ -1961,3 +1961,153 @@ error: line 8, column 8: `types strict` needs a type on source `atlas`, as in `s
 With `source atlas : Atlas<MNI>`, the pipeline is valid: `smoothed` is `Frame<Native>` and `registered` is `Frame<MNI>`, though neither is written. A missing type is reported once, where it is missing: here `registered`, which reads `atlas`, is not reported as well. A variable that no input fixes, as in `operation wrap(x: Image) -> Frame<T>`, is reported at the product the step makes, with the type to write there, such as `wrapped : Frame<Type> [subject] = wrap(...)`. An operation no step or call uses may leave its ports untyped.
 
 `types standard`, the default, checks only the types that are known. The importing file's line decides for everything it imports; an imported file's `types` line does not apply. A recipe takes no `types` line.
+
+## Collection arguments
+
+A many input's ordinary `{port}` placeholder passes one argument per artifact.
+`@join(port)` passes one argument containing their paths separated by commas.
+`@join(port, "; ")` chooses a literal separator, including an empty separator.
+`@join(port.dimension)` joins dimension values in the same order as the paths.
+Each form preserves the collection's natural order: 2 comes before 10.
+
+<!-- spit-doc: setup
+source raw: Text [n]
+path raw: input/{n}.txt
+path result: out.txt
+-->
+```spit
+operation gather(xs: many Text) -> Text .txt
+command gather: tool --inputs=@join(xs) --labels=@join(xs.n, "; ") {@output}
+result = gather(raw @vary(n))
+```
+
+For `input/2.txt` and `input/10.txt`, the first option is the single argument
+`--inputs=input/2.txt,input/10.txt`. Paths and spaces remain literal; no shell
+splits the result. A nonempty separator occurring in a member is an error.
+For paths, the runner checks after resolving roots, including a root override.
+The separator uses double quotes, with `\"`, `\\`, `\n`, `\r` and `\t` escapes.
+An empty collection joins to an empty string; grouping and `@min` still decide
+whether a job exists.
+
+`@list(port)` passes the path of a temporary UTF-8 file, with one absolute input
+path per line and a final newline. An empty collection gives an empty file.
+Paths containing a newline cannot be represented. The runner creates each list
+before `verify`, shares it through the job's command sequence, and removes it
+when the job ends, including on failure or cancellation. The list is not an
+output or an extra dependency. Its members remain ordinary inputs.
+
+Both functions require a many input, work inside a larger argument and in
+`verify`, and cannot be a program, a redirection target or an artifact check.
+Single- or double-quoted calls are literal text, as with `@scalar`.
+
+The [collections example](../examples/runnable/collections/collections.spit)
+runs both forms with Python and produces the same bundle.
+
+## Pipeline-local sources
+
+A fixed file kept with a pipeline can be a declared input even when its dataset
+root is elsewhere. End its source declaration with `here`:
+
+<!-- spit-doc: setup
+source raw: Text
+path raw: input.txt
+path result: figure.txt
+-->
+```spit
+source plotter: Script .py here
+path plotter: scripts/plot.py
+operation plot(raw: Text, script: Script) -> Text .txt
+command plot: python3 {script} {raw} {@output}
+result = plot(raw, plotter)
+```
+
+The path is relative to the file declaring the source, including an imported
+library. A local source names one fixed file, without dimensions, folders or
+`beside`. A runner hashes it like every other input: editing the script reruns
+its readers. `{@here}/scripts/plot.py` alone does not declare an input.
+Local files must stay under the pipeline folder; jobs cannot write there.
+Relative artifact paths must remain unique across dataset, output and pipeline
+roots. Choose a distinct script subfolder if two sources would share a path.
+
+## Anchored operations
+
+Mark an operation when its outputs retain paths that another tool reads later,
+such as FSL FEAT's `design.fsf` or a GDAL virtual raster:
+
+<!-- spit-doc: setup
+source image: Raster
+path image: image.tif
+path result: mosaic.vrt
+-->
+```spit
+operation vrt(image: Raster) -> Raster .vrt
+command vrt: gdalbuildvrt {@output} {image}
+anchored vrt
+result = vrt(image)
+```
+
+An anchored job depends on its absolute input and output paths. Changing a path
+or moving a root reruns it; `--move-files` never relocates its outputs. The mark
+follows the operation through imports and calls. Declare the operation first.
+There is no stage or pipeline-wide mark. Merely recording provenance, as in a
+SAM `@PG` line, need not anchor an operation. `.dir` and `.stem` do not imply it;
+the text those placeholders give a tool already identifies its work.
+
+## Tool identities
+
+A recipe selects the installed tools with `tools from host.spitenv`. A pipeline
+run without a recipe can use the same line. `spit dag --tools other.spitenv`
+overrides either, including when using a saved `.spitout`.
+
+<!-- spit-doc: fragment -->
+```spit
+pipeline analysis.spit
+root data
+tools from host.spitenv
+```
+
+A `.spitenv` starts with `tools:`. Each entry is an opaque identity or a probe:
+
+<!-- spit-doc: fragment -->
+```spit
+tools:
+    fsl: lab-fsl-6.0.7.23
+    python: probe python3 --version
+```
+
+A probe runs one program without an implicit shell, in the dataset root, once
+per DAG load for each used tool. Its exact stdout bytes identify the tool; SPIT
+parses no version strings. A nonzero exit, missing program or 30-second timeout
+stops loading before any job starts. Use an explicit `sh -c` when a probe needs
+environment expansion or shell logic. Probe output should be stable.
+
+By default each job depends on every environment tool. To narrow an operation,
+declare names and give its `uses` list:
+
+<!-- spit-doc: setup
+source raw: Text
+path raw: input.txt
+path result: out.txt
+-->
+```spit
+tool python
+operation process(raw: Text) -> Text .txt
+uses process: python
+command process: python3 -c 'print("done")' {raw} > {@output}
+result = process(raw)
+```
+
+The operation and tool names are declared before `uses`. The environment must
+cover every declared tool. A first positive name selects an explicit set;
+a first `!name` starts from every tool and removes that name. Later positive
+names add and `!name` removes. An empty `uses operation:` selects none. There
+are no stage or default `uses` settings. These dependencies follow the operation,
+not the stage calling it. A list that omits a tool can miss a rerun.
+
+A changed identity reruns dependent jobs; the runner shows the old and new
+identity. `spit-bash accept-tools FILE` accepts an intentional tool change for
+recorded jobs, without rerunning or adopting any edited files. It refuses a job
+whose other work changed. Reference files passed to a command are declared as
+sources; reference files read from inside a tool's installation belong to that
+tool's identity. A saved DAG keeps its declared identities and probe commands;
+probes run on the machine executing it. Rebuild the DAG to change declarations.
