@@ -125,3 +125,10 @@ tar -tf $EXAMPLES/folders/output/archive/trip=alpha.tar
 The alpha archive holds `./day1/morning.txt` and `./evening.txt`. Before each copy runs, the runner removes any copy an earlier run left and makes the folder again, empty, and `cp -R {notes}/. {@output}` copies the trip's contents into it. Edit a file anywhere under `$EXAMPLES/folders/input/alpha/` and plan again: the alpha copy and its archive rerun, because a folder counts as changed when any file under it does.
 
 `tests/test_examples.py` runs these examples, and checks the results above.
+
+
+`collections/collections.spitin` runs Python over naturally ordered inputs using
+both `@join` and `@list`. The declared local `bundle.py` script is a content-tracked
+input, `runtime.spitenv` probes Python's identity, and the operations are anchored
+because their JSON bundles retain absolute paths. The two bundles under
+`collections/results` hold the same paths and contents.

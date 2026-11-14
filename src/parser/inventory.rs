@@ -83,6 +83,13 @@ fn read_inventory<'a, 't: 'a>(
         // read as they would be without it.
         let read =
             (|| -> Result<(), ParseError> {
+                if let Some(file) = line.strip_prefix("tools from ") {
+                    if file.trim().is_empty() || inventory.tools_file.is_some() {
+                        return Err(ParseError::new(number, "give tools from one file"));
+                    }
+                    inventory.tools_file = Some(file.trim().into());
+                    return Ok(());
+                }
                 let root = [
                     ("root ", "root", "root"),
                     ("output ", "output", "output root"),

@@ -14,6 +14,7 @@ pub enum Word {
     Command,
     Verify,
     Resources,
+    Anchored,
     Path,
     Ext,
     Stage,
@@ -93,7 +94,7 @@ impl Word {
 }
 
 /// Every word's documentation, in the order of [`Word`].
-pub static DOCS: [Doc; 60] = [
+pub static DOCS: [Doc; 61] = [
     Doc {
         name: "source",
         kind: "keyword",
@@ -128,6 +129,13 @@ pub static DOCS: [Doc; 60] = [
         anchor: "cores-and-memory",
         example: "resources align: cores=8, memory=16G",
         summary: "What each job of an operation needs to run: `cores=N`, at least 1, and `memory=SIZE`, a whole number and a unit, K, M, G or T. Either may be left out: a job needs one core and claims no memory unless it says so. A backend starts a job only when that many cores and that much memory are free. `{@cores}` in the command gives the tool the cores it was given.",
+    },
+    Doc {
+        name: "anchored",
+        kind: "keyword",
+        anchor: "anchored-operations",
+        example: "anchored feat, group_feat",
+        summary: "The named operations retain absolute paths in their outputs. A changed input or output path reruns their jobs, including when a root moves. The runner never relocates these outputs.",
     },
     Doc {
         name: "path",

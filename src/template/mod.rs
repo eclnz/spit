@@ -1,6 +1,7 @@
 //! `{placeholder}` templates shared by path rules and command templates,
 //! and the path and command templates the model holds.
 
+mod collection;
 mod command;
 mod entities;
 mod path;

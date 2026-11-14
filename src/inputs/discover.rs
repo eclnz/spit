@@ -225,6 +225,7 @@ pub(super) fn discover(
         }
         Err(unmatched) => discovery.unmatched = Some(unmatched),
     }
+    super::local::append(pipeline, &mut discovery.inventory)?;
     Ok(discovery)
 }
 
@@ -269,6 +270,7 @@ struct SourcePattern<'a> {
 fn source_patterns(pipeline: &Pipeline) -> Result<Vec<SourcePattern<'_>>, PathError> {
     let index = PipelineIndex::new(pipeline);
     sources_of(pipeline)
+        .filter(|product| product.here.is_none())
         .map(|product| {
             let template = index.path_template_for(&product.name).ok_or_else(|| {
                 error(format!(
@@ -616,7 +618,12 @@ pub(crate) fn locate_sources(
             product.artifact_type.clone(),
             record.entities.clone(),
         );
+        let prefix = product.here.clone();
         let path = binder.bind(artifact.view(), || format!("source `{artifact}`"))?;
+        let path = match prefix {
+            Some(folder) if !folder.is_empty() => format!("{folder}/{path}"),
+            _ => path,
+        };
         if let Some(given) = &record.path {
             if *given != path {
                 return Err(error(format!(

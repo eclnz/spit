@@ -10,6 +10,14 @@ use std::collections::BTreeMap;
 
 pub(super) fn operation_details(pipeline: &Pipeline, operation: &OperationDef) -> Vec<String> {
     let mut details = Vec::new();
+    if let Some(tools) = &operation.tools {
+        details.push(format!("Uses: {}", tools.join(", ")));
+    }
+    if operation.anchored {
+        details.push(
+            "Anchored: changing absolute input or output paths reruns this operation.".to_owned(),
+        );
+    }
     if !operation.steps.is_empty() {
         let steps: Vec<String> = operation
             .steps

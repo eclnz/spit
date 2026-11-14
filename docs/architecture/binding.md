@@ -10,7 +10,8 @@ flowchart LR
     paths --> boundpaths["BoundPaths<br/>path and Under by id"]
     pattern["PathPattern<br/>one per product"] --> paths
     boundpaths --> jobs["bind_jobs<br/>commands and checks"]
-    jobs --> bound["BoundDag"]
+    template["CommandTemplate<br/>ScalarRead and CollectionRead"] --> jobs
+    jobs --> bound["BoundDag<br/>ArgPart, tools and anchored steps"]
     bound --> write["write_document"]
     write --> file[".spitdag"]
 ```
@@ -32,7 +33,7 @@ flowchart LR
     - its extension added: an operation's output extension, a source's declared one, or else `default ext:`.
 - **`PathPattern`** ([`src/template/pattern.rs`](https://github.com/eclnz/spit/blob/dev/src/template/pattern.rs)) is a product's completed template compiled once: literal text, with `{@product}` and `{@stage}` written out, and each dimension's value with the shape any of its placeholders has. It records the first placeholder it cannot write, `{@entities}` left unspelled or `{@stage}` outside every stage, as a `Gap`. `PathPattern::render` writes a binding's path, each value encoded as one path component; `PathPattern::match_path` reads a path back, which discovery uses.
 - **`PathBinder`** ([`src/paths/product.rs`](https://github.com/eclnz/spit/blob/dev/src/paths/product.rs)) binds artifacts to paths. `PathBinder::bind_numbered` compiles each product's `PathPattern` once, by its number in the artifact table, and turns a `RenderError` into a `PathError` at the placeholder.
-- **`CommandTemplate`** ([`src/template/command.rs`](https://github.com/eclnz/spit/blob/dev/src/template/command.rs)) is a command's arguments, each a list of `CommandPart`s (literal text, `{placeholders}` and `ScalarRead`s), and its `Redirect`s: each `<` or `>` word with the word after it, which are not arguments.
+- **`CommandTemplate`** ([`src/template/command.rs`](https://github.com/eclnz/spit/blob/dev/src/template/command.rs)) is a command's arguments, each a list of `CommandPart`s (literal text, `{placeholders}`, `ScalarRead`s and `CollectionRead`s), and its `Redirect`s: each `<` or `>` word with the word after it, which are not arguments.
 - **`write_document`** ([`src/spitdag/write.rs`](https://github.com/eclnz/spit/blob/dev/src/spitdag/write.rs)) writes each artifact's JSON once, and each job's commands, which `write_work_commands` ([`src/spitdag/work.rs`](https://github.com/eclnz/spit/blob/dev/src/spitdag/work.rs)) writes a job's commands into.
 
 ## Responsibilities
@@ -48,7 +49,7 @@ flowchart LR
     A pipeline default that needs `{@stage}` outside a group is no source's rule, since no stage makes a source. Nor is one that needs `{@entities}` outside a group the rule of a source with no dimensions.
 - **A companion source's path follows its main source.** That holds for an output a tool writes beside another too (`PipelineIndex::beside`, which gives a `BesideFile`), and when a recipe supplies the main source's rule. The suffix replaces the sibling's extension, or with `Beside::append` follows its whole name.
 - **An output beside an input follows that input's bound file.** `bound_paths` ([`src/paths/bind.rs`](https://github.com/eclnz/spit/blob/dev/src/paths/bind.rs)) binds it after every other artifact, from the path of the job's artifact at that input (`beside_path`), so it follows a source's discovered file as well as a rule. `PipelineIndex::path_template_for` gives the same path as a template, with the sibling's `{@product}`, `{@stage}` and the values the step pins written out, for the rule checks, discovery and the editor. `check_beside_inputs` ([`src/compile/steps.rs`](https://github.com/eclnz/spit/blob/dev/src/compile/steps.rs)) makes sure each job reads its own artifact there. Tests: [`an_output_beside_a_source_lies_beside_its_file_and_its_reader_waits_for_it`](https://github.com/eclnz/spit/blob/dev/tests/beside_inputs.rs), [`the_input_an_output_is_written_beside_gives_each_job_its_own_file`](https://github.com/eclnz/spit/blob/dev/tests/beside_inputs.rs).
-- **Each artifact is under one of two roots.** `bound_paths` puts every job's output under `Under::OutputRoot`, and every other artifact, the sources, under `Under::Root`. An output beside an input takes that input's root, so a file written beside a source stays in the dataset. Binding never learns where either root is: the command line sets `BoundDag::root` and `BoundDag::output_root`, the second being the first when no output root is declared. Test: [`outputs_go_under_the_output_root_and_files_beside_a_source_stay_with_it`](https://github.com/eclnz/spit/blob/dev/tests/output_root.rs).
+- **Each artifact has one root.** `bound_paths` puts every job's output under `Under::OutputRoot`, ordinary sources under `Under::Root`, and fixed local sources under `Under::Pipeline`. An output beside an input takes that input's root, so a file written beside a source stays in the dataset. Binding does not resolve dataset or output roots: the command line sets `BoundDag::root` and `BoundDag::output_root`, the second being the first when no output root is declared. Test: [`outputs_go_under_the_output_root_and_files_beside_a_source_stay_with_it`](https://github.com/eclnz/spit/blob/dev/tests/output_root.rs).
 - **A recipe can give a source with no rule one.** It gives its own `path source:` rule, or else its `default path:`. `InputRules` keeps the recipe as written, `InputRules::source_paths_for` gives the rule for each source, and the input stage merges them into the inventory.
 - **`{@entities}` is spelled by an `EntitiesFormat`.** One may come from the file (`Pipeline::entities_format`), a stage (`StageDef::entities_format`) or a recipe (`InputRules::source_entities`). `PipelineIndex::entities_format_for` finds a product's spelling, and `PathTemplate::resolve` expands it into literal keys and ordinary placeholders once per product, so binding and discovery never see it.
 - **A placeholder in a source rule may take a shape,** as in `{date:date}` (`Shape`, in [`src/template/shape.rs`](https://github.com/eclnz/spit/blob/dev/src/template/shape.rs)). Shapes narrow matching only. `collect_paths` rejects a shape in a rule that writes: an output's rule, or a pipeline or stage default.
@@ -93,3 +94,12 @@ A `.spitdag` belongs to the inventory it was made from: a new inventory needs a 
 
 - Every failure comes before the `.spitdag` is written: an unknown placeholder, a path collision, an embedded `many` expansion, or a rule that cannot be bound. Each is a `BindError`, made from a `PathError` or a `CommandError`.
 - With a dataset root, `dag` and `artifacts` also check that each source file the DAG needs exists under it (`validate_bound_source_files`). Output paths are checked as paths, but are not expected to exist before the run.
+
+
+Collection command parts retain ordered artifact ids until paths are rendered.
+`CollectionRead` in `src/template/collection.rs` parses joins and list-file reads;
+`ArgPart::Collection` binds their members. The wire form distinguishes joins
+from list files so backends validate separators after resolving effective roots.
+Dimension joins bind to text. The runner owns list-file creation and lifetime.
+`BoundStep` carries operation-level tool overrides and the anchored flag;
+`BoundDag::tools` supplies the tool definitions selected by the command line.

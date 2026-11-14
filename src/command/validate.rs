@@ -280,14 +280,46 @@ fn check_line_placeholders(
     for parts in template.arguments() {
         let whole = parts.len() == 1;
         for part in parts {
-            let name = match part {
-                CommandPart::Literal(_) => continue,
-                CommandPart::Placeholder(name) => name,
-                CommandPart::Scalar(read) => {
-                    check_scalar(operation, read)?;
-                    continue;
-                }
-            };
+            let name =
+                match part {
+                    CommandPart::Literal(_) => continue,
+                    CommandPart::Placeholder(name) => name,
+                    CommandPart::Collection(read) => {
+                        let (port, field) = facet(&read.subject);
+                        let index = match slot(operation, port) {
+                            Some(Slot::Input(index))
+                                if operation.inputs[index].cardinality == Cardinality::Many =>
+                            {
+                                index
+                            }
+                            _ => {
+                                return Err(CommandError::new(format!(
+                                    "collection function needs a many input; `{port}` is not one"
+                                ))
+                                .focus(&read.subject))
+                            }
+                        };
+                        match field {
+                            Facet::Dimension(dimension) => check_input_dimension(
+                                operation,
+                                index,
+                                &read.subject,
+                                dimension,
+                                callers,
+                            )?,
+                            Facet::Path => {}
+                            _ => return Err(CommandError::new(
+                                "a collection gives paths or dimension values, not .dir or .stem",
+                            )
+                            .focus(&read.subject)),
+                        }
+                        continue;
+                    }
+                    CommandPart::Scalar(read) => {
+                        check_scalar(operation, read)?;
+                        continue;
+                    }
+                };
             let unknown = || {
                 CommandError::new(format!(
                     "command for `{}` uses unknown placeholder `{{{name}}}`",

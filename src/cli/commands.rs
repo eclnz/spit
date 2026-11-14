@@ -40,6 +40,30 @@ pub(crate) fn check(args: &CliArgs) -> Result<(), Box<dyn Error>> {
     } else {
         read_file(file)?
     };
+    if file.ends_with(".spitenv") {
+        let diagnostics = match spit::parse_tools(&text) {
+            Ok(_) => Vec::new(),
+            Err(error) => vec![Diagnostic {
+                severity: spit::Severity::Error,
+                source: spit::DiagnosticSource::Pipeline,
+                line: error.location.line.or(Some(1)),
+                columns: error.location.columns.clone().or(Some(0..1)),
+                message: error.message().to_owned(),
+                file: None,
+                external_text: None,
+                related: Vec::new(),
+            }],
+        };
+        if args.has(Flag::Json) {
+            return print_check_json(
+                &render_diagnostics_json(&diagnostics, &text, None),
+                &diagnostics,
+            );
+        }
+        report(&diagnostics, &text, None, FileNames::default())?;
+        println!("Tool environment valid.");
+        return Ok(());
+    }
     if args.has(Flag::Calls) && (is_inputs(file) || is_recipe(file)) {
         return Err("--calls lists a pipeline's calls; give a .spit pipeline".into());
     }
@@ -180,6 +204,10 @@ pub(crate) fn inputs(args: &CliArgs) -> Result<(), Box<dyn Error>> {
             review.file = recorded_root(&review.file, Path::new(file));
         }
     }
+    settled.inventory.tools_file = loaded.recipe.rules.tools_file.as_ref().map(|path| {
+        file.as_ref()
+            .map_or_else(|| path.clone(), |file| recorded_root(path, Path::new(file)))
+    });
     let text = render_source_inventory(
         &settled.inventory,
         &loaded.checked.pipeline,
@@ -254,11 +282,32 @@ pub(crate) fn dag(args: &CliArgs) -> Result<(), Box<dyn Error>> {
         .as_deref()
         .map(absolute)
         .or_else(|| root.clone());
+    let tools_path = args
+        .value(Flag::Tools)
+        .map(std::path::PathBuf::from)
+        .or_else(|| prepared.inputs.inventory.tools_file.clone())
+        .or_else(|| {
+            prepared
+                .pipeline
+                .tools_file
+                .as_ref()
+                .map(|(path, _)| path.clone())
+        });
+    let tools = match tools_path {
+        Some(path) => spit::parse_tools(&read_file(&path.display().to_string())?)?,
+        None => Vec::new(),
+    };
+    for name in &prepared.pipeline.tool_names {
+        if !tools.iter().any(|tool| &tool.name == name) {
+            return Err(format!("tool environment does not define declared tool `{name}`").into());
+        }
+    }
     let bind = |paths: Option<BoundPaths>| -> Result<BoundDag, Box<dyn Error>> {
         let mut bound = match paths {
             Some(paths) => bind_dag_with(&prepared.pipeline, dag, paths),
             None => bind_dag(&prepared.pipeline, dag),
         }?;
+        bound.set_tools(tools.clone())?;
         bound.root.clone_from(&root);
         bound.output_root.clone_from(&output_root);
         Ok(bound)

@@ -129,6 +129,12 @@ fn check_template(check: &CheckDef) -> Result<(), CommandError> {
         let name = match part {
             CommandPart::Literal(_) => continue,
             CommandPart::Placeholder(name) => name,
+            CommandPart::Collection(_) => {
+                return Err(
+                    CommandError::new("a check has no many input ports for @join or @list")
+                        .focus("@"),
+                )
+            }
             CommandPart::Scalar(read) => {
                 return Err(CommandError::new(format!(
                     "check `{}` cannot use `{read}`: a check has no input ports, only `{{@path}}`, the artifact it checks",

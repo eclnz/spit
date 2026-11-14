@@ -8,6 +8,7 @@ flowchart LR
     files["review files<br/>ReviewFile::text"] --> spec
     pipeline["Pipeline<br/>sources and path rules"] --> pattern["PathPattern<br/>one per source and context rule"]
     pattern --> resolve
+    local["ProductDef::here<br/>fixed local sources"] --> resolve
     scan["InputSource::Discover<br/>a dataset root"] --> resolve
     records["InputSource::Inventory<br/>records already written"] --> resolve
     resolve --> resolved["ResolvedInputs<br/>SourceInventory and CoverageGaps"]
@@ -100,3 +101,10 @@ While it scans, the stage also:
     - a path or resolve error.
 - A failed `require` rule is not an error of the stage. It is a `CoverageGap`. `spit inputs` writes no `.spitout` while there is one, and `artifacts` reports each one.
 - An incomplete companion group is a warning. A missing member matters only to a step that reads it, and resolution reports that step's missing input as it reports any other.
+
+
+Fixed local sources carry their declaring folder in `ProductDef::here`.
+`inputs::local::append` binds and reads these separately from dataset discovery;
+imports prefix the declaring folder. Their records and the bound artifact table
+retain the path under `pipeline_folder`. Ordinary source validation and runner
+content hashing also apply to these inputs.

@@ -14,6 +14,8 @@ use super::{owned_strings, ArtifactInstance, ArtifactType};
 /// dimensions that tell its artifacts apart.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProductDef {
+    /// The declaring file's folder relative to the pipeline, for a fixed local source.
+    pub here: Option<String>,
     pub name: String,
     pub artifact_type: ArtifactType,
     pub dimensions: Vec<String>,
@@ -49,6 +51,7 @@ impl ProductDef {
             name: name.into(),
             artifact_type,
             dimensions: owned_strings(dimensions),
+            here: None,
             extension: None,
             folder: false,
             beside: None,
@@ -239,6 +242,10 @@ pub(crate) const DEFAULT_OUTPUT: &str = "output";
 /// dimensions of its inputs. Its command is a `CommandDef` of the same name.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct OperationDef {
+    /// Tool dependency overrides; None depends on every environment tool.
+    pub tools: Option<Vec<String>>,
+    /// Whether its outputs depend on the absolute paths used by its commands.
+    pub anchored: bool,
     pub name: String,
     pub inputs: Vec<InputPort>,
     /// Every artifact one job writes, in declaration order.
@@ -304,6 +311,8 @@ impl OperationDef {
             inputs,
             outputs,
             shape_rule,
+            anchored: false,
+            tools: None,
             minimum_collection: None,
             steps: Vec::new(),
             file: None,

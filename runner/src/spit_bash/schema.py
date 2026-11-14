@@ -1,4 +1,4 @@
-"""The version 14 SPIT DAG schema, before filesystem checks or execution."""
+"""The version 15 SPIT DAG schema, before filesystem checks or execution."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from typing import Annotated, Literal
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
 
 # The one version of the format spit-bash reads.
-VERSION = 14
+VERSION = 15
 
 
 class SchemaModel(BaseModel):
@@ -29,6 +29,14 @@ def relative_path(value: str) -> str:
 RelativePath = Annotated[str, AfterValidator(relative_path)]
 
 
+def command_text(value: str) -> str:
+    if "\0" in value: raise ValueError("a command argument cannot contain NUL")
+    return value
+
+
+CommandText = Annotated[str, AfterValidator(command_text)]
+
+
 class VariableType(SchemaModel):
     variable: NonEmpty
 
@@ -44,7 +52,7 @@ class Artifact(SchemaModel):
     artifact_type: NamedType | VariableType | None = Field(alias="type")
     path: RelativePath
     # The top-level field holding the folder `path` is relative to.
-    under: Literal["root", "output_root"]
+    under: Literal["root", "output_root", "pipeline_folder"]
     kind: Literal["file", "folder"]
 
 
@@ -76,7 +84,16 @@ class ScalarPart(SchemaModel):
     greatest: float | None = Field(alias="max")
 
 
-CommandPart = str | PathPart | DirPart | StemPart | HerePart | ScalarPart
+class JoinPart(SchemaModel):
+    join: list[RelativePath]
+    separator: CommandText
+
+
+class ListPart(SchemaModel):
+    list: list[RelativePath]
+
+
+CommandPart = JoinPart | ListPart | str | PathPart | DirPart | StemPart | HerePart | ScalarPart
 Argument = Annotated[list[CommandPart], Field(min_length=1)]
 Command = Annotated[list[Argument], Field(min_length=1)]
 
@@ -188,6 +205,8 @@ class Review(SchemaModel):
 
 
 class SpitJob(SchemaModel):
+    tools: list[NonEmpty] = Field(default_factory=list)
+    anchored: bool = False
     id: JobId
     operation: NonEmpty
     stage: list[str]
@@ -207,7 +226,22 @@ class SpitJob(SchemaModel):
     memory: Annotated[int, Field(ge=0, le=2**53)] | None
 
 
+class Tool(SchemaModel):
+    name: NonEmpty
+    identity: str | None
+    probe: Annotated[list[str], Field(min_length=1)] | None
+
+    @model_validator(mode="after")
+    def one_identity(self):
+        if (self.identity is None) == (self.probe is None):
+            raise ValueError("a tool needs exactly one identity or probe")
+        if self.probe is not None and (not self.probe[0] or any("\0" in arg for arg in self.probe)):
+            raise ValueError("invalid probe argument")
+        return self
+
+
 class SpitDag(SchemaModel):
+    tools: list[Tool] = Field(default_factory=list)
     version: int
     generator: Generator
     root: str | None

@@ -20,6 +20,10 @@ use super::{
 /// about how a dataset's sources are filtered; see [`InputRules`].
 #[derive(Clone, Debug, Default)]
 pub struct Pipeline {
+    /// An environment file selected by this pipeline or recipe, and its line.
+    pub tools_file: Option<(PathBuf, usize)>,
+    /// Names used to validate explicit per-operation tool dependencies.
+    pub tool_names: Vec<String>,
     /// An optional dataset root and its line, relative to the pipeline's
     /// folder when parsed at a path. Imports never bring in a root.
     pub root: Option<(PathBuf, usize)>,

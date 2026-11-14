@@ -8,6 +8,7 @@ import os
 import shutil
 import time
 from dataclasses import dataclass
+from contextlib import ExitStack
 from pathlib import Path
 from typing import IO, Awaitable, Callable, Protocol, Union
 
@@ -16,9 +17,10 @@ from ..logs import StampedLog, open_log
 from ..model import Check, Dag, DagError, Job, Kind, Layout, Side
 from ..reuse.relocate import Migration
 from .failure import (CheckArtifactMissing, CheckFailed, CommandFailed, Failure, InputChanged, InputDisappeared,
-                      NoCommand, OutputsMissing, Phase, PlaceFailed, ScalarInvalid, StdoutNotMoved)
+                      CollectionInvalid, NoCommand, OutputsMissing, Phase, PlaceFailed, ScalarInvalid, StdoutNotMoved)
 from ..runs import kept_path
 from .. import scalars
+from ..collections import prepared
 from .options import Options
 from .process import CommandEnd, partial, run_command, succeeded
 
@@ -332,40 +334,45 @@ async def run_job(dag: Dag, job: Job, log: Path, options: Options, runner: Runne
             return Failed(ScalarInvalid(*values), log)
         for path, value in values.items():
             stream.write(f"spit-bash: {path} holds {value}\n".encode())
-        for index, command in enumerate(job.verify, 1):
-            end = await runner(dag, scalars.bound(command, values), stream, limit=limit)
-            if not succeeded(end):
-                return Failed(CommandFailed(Phase.VERIFY, index, end), log)
-        # An earlier run's files would mix with this run's, and some tools refuse to write over
-        # them: the job starts with nothing at its outputs, as a first run does.
-        moved = _set_aside(dag, job, stream)
-        for output in job.output_artifacts:
-            written = dag.checked(output.path)
-            if output.kind is Kind.FOLDER:
-                # The tool writes into an empty folder.
-                written.mkdir(parents=True)
-            else:
-                written.parent.mkdir(parents=True, exist_ok=True)
-        listed = _listings(dag, job)
-        # From here on, a failure removes what the command left at the job's
-        # outputs, unless they are kept. A cancelled command's process group is stopped before
-        # the cancellation reaches this point.
-        try:
-            made = await _make(dag, job, before, stream, limit, entries, listed, runner, values)
-        except asyncio.CancelledError:
-            _remove_outputs(dag, job, stream, keep)
-            _settle_aside(moved, stream, not keep)
-            if keep:
-                on_discard()
-            raise
-        if not isinstance(made, tuple):
-            _remove_outputs(dag, job, stream, keep)
-            _settle_aside(moved, stream, not keep)
-            if keep:
-                on_discard()
-            return Failed(made, log)
-        key = job.work.key
-        store = (lambda output: kept_path(options.run, key, output)) if options.keep_replaced else None
-        replaced = _settle_aside(moved, stream, False, options.started if keep_edited else None, store)
+        with ExitStack() as temporary:
+            try:
+                job = temporary.enter_context(prepared(job, dag.path))
+            except (OSError, ValueError) as exc:
+                return Failed(CollectionInvalid(str(exc)), log)
+            for index, command in enumerate(job.verify, 1):
+                end = await runner(dag, scalars.bound(command, values), stream, limit=limit)
+                if not succeeded(end):
+                    return Failed(CommandFailed(Phase.VERIFY, index, end), log)
+            # An earlier run's files would mix with this run's, and some tools refuse to write over
+            # them: the job starts with nothing at its outputs, as a first run does.
+            moved = _set_aside(dag, job, stream)
+            for output in job.output_artifacts:
+                written = dag.checked(output.path)
+                if output.kind is Kind.FOLDER:
+                    # The tool writes into an empty folder.
+                    written.mkdir(parents=True)
+                else:
+                    written.parent.mkdir(parents=True, exist_ok=True)
+            listed = _listings(dag, job)
+            # From here on, a failure removes what the command left at the job's
+            # outputs, unless they are kept. A cancelled command's process group is stopped before
+            # the cancellation reaches this point.
+            try:
+                made = await _make(dag, job, before, stream, limit, entries, listed, runner, values)
+            except asyncio.CancelledError:
+                _remove_outputs(dag, job, stream, keep)
+                _settle_aside(moved, stream, not keep)
+                if keep:
+                    on_discard()
+                raise
+            if not isinstance(made, tuple):
+                _remove_outputs(dag, job, stream, keep)
+                _settle_aside(moved, stream, not keep)
+                if keep:
+                    on_discard()
+                return Failed(made, log)
+            key = job.work.key
+            store = (lambda output: kept_path(options.run, key, output)) if options.keep_replaced else None
+            replaced = _settle_aside(moved, stream, False, options.started if keep_edited else None, store)
     after, outputs = made
     return Made(after, outputs, time.monotonic() - started, replaced)

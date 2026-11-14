@@ -9,6 +9,7 @@
 mod coverage;
 mod discover;
 mod exclusions;
+mod local;
 mod pattern;
 mod recipe;
 mod reviews;
@@ -202,6 +203,8 @@ fn finish_spec(
         // these; a field a new line fills must be placed here.
         root,
         output,
+        tools_file,
+        tool_names,
         products,
         operations,
         invocations,
@@ -220,6 +223,7 @@ fn finish_spec(
     } = pipeline;
     if root.is_some()
         || output.is_some()
+        || !tool_names.is_empty()
         || !products.is_empty()
         || !operations.is_empty()
         || !invocations.is_empty()
@@ -247,6 +251,7 @@ fn finish_spec(
             ));
         }
     }
+    inputs.tools_file = tools_file.map(|(path, _)| path);
     inputs.source_paths = product_paths;
     inputs.source_default = path_template;
     inputs.source_entities = entities_format;
@@ -408,6 +413,9 @@ impl InputSpec {
                 }
             };
         let unmatched_files = without_review_files(unmatched_files, root.as_deref(), &self.rules);
+        if self.rules.tools_file.is_some() {
+            inventory.tools_file.clone_from(&self.rules.tools_file);
+        }
         merge_source_paths(pipeline, &source_paths, &mut inventory)?;
         // After any verdicts the inventory already held, as a .spitout does.
         inventory

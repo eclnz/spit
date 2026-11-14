@@ -20,6 +20,8 @@ pub enum Under {
     /// The output root: every other file a job writes. It is the dataset
     /// root when no other is declared.
     OutputRoot,
+    /// A declared local source, relative to the pipeline folder.
+    Pipeline,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]

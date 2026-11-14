@@ -255,6 +255,8 @@ impl<'p> StepCommands<'p> {
     /// The step as the bound DAG keeps it, with its ports named.
     fn bound(&self) -> BoundStep {
         BoundStep {
+            anchored: self.operation.anchored,
+            tools: self.operation.tools.clone(),
             operation: self.step.operation.clone(),
             stage: self.step.stage.clone(),
             inputs: self
@@ -352,7 +354,7 @@ fn bind_job(
         .iter()
         .map(|template| {
             Ok(BoundCommand {
-                arguments: expand(template.arguments(), step, dag, folders, job)?,
+                arguments: expand(template.arguments(), step, dag, folders, paths, job)?,
                 stdin: redirected(template, Stream::Stdin)?,
                 stdout: redirected(template, Stream::Stdout)?,
             })
@@ -369,7 +371,7 @@ fn bind_job(
             .verify
             .iter()
             .flat_map(|command| &command.lines)
-            .map(|template| expand(template.arguments(), step, dag, folders, job))
+            .map(|template| expand(template.arguments(), step, dag, folders, paths, job))
             .collect::<Result<_, _>>()?,
         checks: bind_checks(&step.checks, produced, job),
     })
@@ -426,7 +428,7 @@ fn check_command(check: &StepCheck<'_>, artifact: ArtifactId) -> Vec<Argument> {
                     CommandPart::Placeholder(name) if name == CHECKED_PATH => {
                         ArgPart::Path(artifact)
                     }
-                    CommandPart::Scalar(_) => {
+                    CommandPart::Scalar(_) | CommandPart::Collection(_) => {
                         unreachable!("`check_template` rejects a check that reads a scalar")
                     }
                     CommandPart::Placeholder(name) => {
@@ -456,6 +458,7 @@ fn expand(
     step: &StepCommands<'_>,
     dag: &ResolvedDag,
     folders: &[bool],
+    paths: &[Option<String>],
     job: &Job,
 ) -> Result<Vec<Argument>, BindError> {
     let operation = step.operation;
@@ -492,6 +495,67 @@ fn expand(
         for part in parts {
             match part {
                 CommandPart::Literal(value) => argument.push(ArgPart::Text(value.clone())),
+                CommandPart::Collection(read) => {
+                    let (port, field) = facet(&read.subject);
+                    let Some(Slot::Input(index)) = slot(operation, port) else {
+                        unreachable!("collection validation requires an input")
+                    };
+                    let artifacts = job.inputs.get(index).ok_or_else(|| lacks(port))?;
+                    if field == Facet::Path {
+                        for &artifact in artifacts {
+                            let path = paths[artifact.index()]
+                                .as_deref()
+                                .expect("a bound input has a path");
+                            if read.separator.as_deref().is_some_and(|separator| {
+                                !separator.is_empty() && path.contains(separator)
+                            }) {
+                                return Err(CommandError::new(format!(
+                                    "{}: path `{path}` contains the join separator",
+                                    dag.artifact(artifact)
+                                ))
+                                .into());
+                            }
+                            if read.separator.is_none() && path.contains(['\n', '\r']) {
+                                return Err(CommandError::new(format!(
+                                    "{}: a list-file path contains a newline",
+                                    dag.artifact(artifact)
+                                ))
+                                .into());
+                            }
+                        }
+                    }
+                    if let Facet::Dimension(dimension) = field {
+                        let separator = read
+                            .separator
+                            .as_deref()
+                            .expect("only joins read dimensions");
+                        let mut joined = String::new();
+                        for (i, &artifact) in artifacts.iter().enumerate() {
+                            let text = dag
+                                .artifacts
+                                .entities(artifact)
+                                .get(dimension)
+                                .ok_or_else(|| lacks(dimension))?;
+                            if !separator.is_empty() && text.contains(separator) {
+                                return Err(CommandError::new(format!(
+                                    "{}: value `{text}` contains the join separator `{separator}`",
+                                    dag.artifact(artifact)
+                                ))
+                                .into());
+                            }
+                            if i > 0 {
+                                joined.push_str(separator);
+                            }
+                            joined.push_str(text);
+                        }
+                        argument.push(ArgPart::Text(joined));
+                    } else {
+                        argument.push(ArgPart::Collection {
+                            artifacts: artifacts.clone(),
+                            separator: read.separator.clone(),
+                        });
+                    }
+                }
                 // `validate_commands` makes sure a scalar reads a one input.
                 CommandPart::Scalar(read) => {
                     let artifact = match slot(operation, &read.port) {

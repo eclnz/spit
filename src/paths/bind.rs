@@ -42,12 +42,22 @@ pub fn validate_bound_source_files(
     // order so the first missing file is reported.
     let mut needed: Vec<_> = with_paths(dag, &bound.paths)
         .filter(|(id, _, _)| !made[id.index()])
-        .map(|(_, artifact, relative)| (artifact.key(), relative))
+        .map(|(id, artifact, relative)| (artifact.key(), relative, bound.under[id.index()]))
         .collect();
-    needed.sort_unstable_by_key(|&(artifact, _)| artifact);
+    needed.sort_unstable_by_key(|&(artifact, _, _)| artifact);
     let index = PipelineIndex::new(pipeline);
-    for &(artifact, relative) in &needed {
-        let full_path = root.join(relative);
+    for &(artifact, relative, under) in &needed {
+        let base = if under == Under::Pipeline {
+            Path::new(
+                pipeline
+                    .folder
+                    .as_deref()
+                    .ok_or_else(|| error("a here source needs a pipeline read from a file"))?,
+            )
+        } else {
+            root
+        };
+        let full_path = base.join(relative);
         let (present, kind) = if index.is_folder(artifact.0) {
             (full_path.is_dir(), "folder")
         } else {
@@ -164,10 +174,26 @@ pub(crate) fn bound_paths(pipeline: &Pipeline, dag: &ResolvedDag) -> Result<Boun
                 }
             }
             let artifact = dag.artifact(id);
+            if binder
+                .index()
+                .product(artifact.product)
+                .is_some_and(|product| product.here.is_some())
+            {
+                under[id.index()] = Under::Pipeline;
+            }
             let relative = match dag.source_path(id) {
                 Some(path) => path.to_owned(),
                 None => {
-                    binder.bind_numbered(number, artifact, || format!("path for `{artifact}`"))?
+                    let relative = binder
+                        .bind_numbered(number, artifact, || format!("path for `{artifact}`"))?;
+                    match binder
+                        .index()
+                        .product(artifact.product)
+                        .and_then(|product| product.here.as_deref())
+                    {
+                        Some(folder) if !folder.is_empty() => format!("{folder}/{relative}"),
+                        _ => relative,
+                    }
                 }
             };
             own(id, relative, &mut paths)?;
@@ -177,6 +203,11 @@ pub(crate) fn bound_paths(pipeline: &Pipeline, dag: &ResolvedDag) -> Result<Boun
     // beside another finds its input's path bound.
     for (id, input, beside) in companions {
         under[id.index()] = under[input.index()];
+        if under[id.index()] == Under::Pipeline {
+            return Err(error(
+                "an output cannot be written beside a pipeline-local source",
+            ));
+        }
         let relative = beside_path(dag, &paths, id, input, beside)?;
         own(id, relative, &mut paths)?;
     }

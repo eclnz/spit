@@ -5,7 +5,9 @@
 
 mod artifact_json;
 mod reviews;
+mod tools;
 mod work;
+pub use tools::{parse_tools, Tool};
 mod write;
 
 use std::borrow::Cow;
@@ -26,13 +28,15 @@ pub use self::reviews::{BoundReview, BoundTarget, Rejection};
 use self::write::{write_document, PIECE};
 
 /// The schema version a `.spitdag` is written with.
-pub const SPITDAG_VERSION: usize = 14;
+pub const SPITDAG_VERSION: usize = 15;
 
 /// A resolved DAG with its paths bound and its commands expanded. Its
 /// artifacts are the resolved DAG's, each kept once with its path; jobs,
 /// and the paths in their commands, refer to them by id.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct BoundDag {
+    /// Tool identities or probes used to identify work on the execution machine.
+    pub tools: Vec<Tool>,
     /// The absolute dataset folder, which sources are under, when known.
     pub root: Option<String>,
     /// The absolute folder the other outputs are under, when known: the
@@ -78,6 +82,10 @@ pub struct LeftOut {
 /// than in each job: the operation, the stage, and the names of its ports.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct BoundStep {
+    /// Whether these jobs depend on the absolute paths of their artifacts.
+    pub anchored: bool,
+    /// Tool dependency overrides; None depends on every environment tool.
+    pub tools: Option<Vec<String>>,
     pub operation: String,
     /// The stage whose block holds the step, as `outer/inner`, if any.
     pub stage: Option<String>,
@@ -195,6 +203,11 @@ pub type Argument = Vec<ArgPart>;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ArgPart {
+    /// A many input's paths, joined with a separator or written to a temporary list file.
+    Collection {
+        artifacts: Vec<ArtifactId>,
+        separator: Option<Arc<str>>,
+    },
     Text(String),
     /// An artifact's file, relative to its root.
     Path(ArtifactId),
@@ -233,6 +246,7 @@ impl ArgPart {
     /// only when the job starts.
     pub fn text<'a>(&'a self, dag: &'a BoundDag) -> &'a str {
         match self {
+            Self::Collection { .. } => "@list",
             Self::Text(text) | Self::Here { text, .. } => text,
             Self::Path(artifact) | Self::Scalar { artifact, .. } => dag.path(*artifact),
             Self::Dir(artifact) => folder_of(dag.path(*artifact)),
@@ -252,6 +266,16 @@ impl ArgPart {
     /// `@scalar(tr/sub=01.txt, min=5)`.
     pub fn shown<'a>(&'a self, dag: &'a BoundDag) -> Cow<'a, str> {
         match self {
+            Self::Collection {
+                artifacts,
+                separator,
+            } => {
+                let paths: Vec<_> = artifacts.iter().map(|id| dag.shown_path(*id)).collect();
+                Cow::Owned(match separator {
+                    Some(separator) => paths.join(separator),
+                    None => format!("@list({})", paths.join(", ")),
+                })
+            }
             Self::Scalar { artifact, min, max } => Cow::Owned(scalar_text(
                 &dag.shown_path(*artifact),
                 min.as_deref(),
@@ -354,6 +378,7 @@ impl BoundDag {
     ) -> Self {
         Self {
             root: None,
+            tools: Vec::new(),
             output_root: None,
             removed: Vec::new(),
             left_out: Vec::new(),
@@ -406,6 +431,10 @@ impl BoundDag {
     pub fn shown_path(&self, id: ArtifactId) -> Cow<'_, str> {
         let path = self.path(id);
         match (self.under(id), &self.root, &self.output_root) {
+            (Under::Pipeline, _, _) => Cow::Owned(format!(
+                "{}/{path}",
+                self.pipeline_folder.as_deref().unwrap_or(".")
+            )),
             (Under::Root, Some(root), Some(output)) if root != output => {
                 // A folder not written with `/`, as on Windows, is given whole.
                 let folder = relative_folder(output, root).unwrap_or_else(|| root.clone());
@@ -459,7 +488,8 @@ impl BoundDag {
     /// argument that is plain text, so a backend can look for them before it
     /// starts.
     pub fn executables(&self) -> BTreeSet<String> {
-        self.jobs
+        let mut programs: BTreeSet<String> = self
+            .jobs
             .iter()
             .flat_map(|job| {
                 let checks = job.checks.iter().map(|check| &check.command);
@@ -476,7 +506,13 @@ impl BoundDag {
                     })
                     .collect()
             })
-            .collect()
+            .collect();
+        programs.extend(
+            self.tools
+                .iter()
+                .filter_map(|tool| tool.probe.as_ref()?.first().cloned()),
+        );
+        programs
     }
 
     /// The jobs that depend on each job, by ID.
