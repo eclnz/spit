@@ -173,7 +173,7 @@ None of this is part of a job's fingerprint, so an edit to a library that leaves
 
 A job's `commands` in the DAG run in order, each once the one before it exits 0. A SPIT command written as a block runs a line each, as an aligner's output is sorted and then indexed in one job:
 
-```text
+```spit
 command sort:
     samtools sort --threads {@cores} -o {bam} {sam}
     samtools index {bam}
