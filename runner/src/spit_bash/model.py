@@ -6,9 +6,12 @@ from dataclasses import dataclass, field
 from enum import Enum
 from functools import cached_property
 from pathlib import Path, PurePosixPath
-from typing import TypeVar
+from typing import TYPE_CHECKING, TypeVar
 
 from .scalars import Read
+
+if TYPE_CHECKING:
+    from .tools import Identity
 
 
 T = TypeVar("T")
@@ -189,6 +192,11 @@ class Layout:
         return self.folder / "state.jsonl"
 
     @property
+    def tools(self) -> Path:
+        """The tools' identities the last run or `accept-tools` recorded, as `tools.save` writes them."""
+        return self.folder / "tools.json"
+
+    @property
     def runs(self) -> Path:
         """The folder of run folders, as `runs.Run` describes one."""
         return self.folder / "runs"
@@ -267,6 +275,8 @@ class Dag:
     pipeline_files: tuple[tuple[str, Path, str], ...] = ()
     # Each review the pipeline attaches, with what it withheld.
     reviews: tuple[Review, ...] = ()
+    # Each tool's identity on this machine, by name, as `tools.identify` found it when the DAG was loaded.
+    tools: dict[str, "Identity"] = field(default_factory=dict, compare=False)
 
     @property
     def outputs(self) -> Path:

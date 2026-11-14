@@ -19,6 +19,11 @@ pub(crate) enum Keyword {
     /// `resources operation: cores=8, memory=16G`, what each job of an
     /// operation needs.
     Resources,
+    /// `tool name`, which declares a tool that `uses` lines may name.
+    Tool,
+    /// `uses operation: tools`, the tools each job of an operation depends
+    /// on, and after `default`, those of every operation in a file or stage.
+    Uses,
     /// `check name(params): command`, a test of one artifact.
     Check,
     /// `review name`, which declares a review, and in a recipe `review name
@@ -38,6 +43,9 @@ pub(crate) enum Keyword {
     Require,
     Drop,
     Exclude,
+    /// `tools from file.spitenv`, in a recipe: what each tool is on the
+    /// machine the jobs run on.
+    Tools,
     /// `check:`, the checks every output in a file or stage runs, written
     /// after `default` or in a `default:` block.
     Checks,
@@ -90,7 +98,7 @@ pub(crate) struct Spec {
 
 impl Keyword {
     /// Every keyword, in declaration order, which the assertion below keeps.
-    pub(crate) const ALL: [Self; 26] = [
+    pub(crate) const ALL: [Self; 29] = [
         Self::Source,
         Self::Dimensions,
         Self::Types,
@@ -98,6 +106,8 @@ impl Keyword {
         Self::Command,
         Self::Verify,
         Self::Resources,
+        Self::Tool,
+        Self::Uses,
         Self::Check,
         Self::Review,
         Self::Path,
@@ -109,6 +119,7 @@ impl Keyword {
         Self::Require,
         Self::Drop,
         Self::Exclude,
+        Self::Tools,
         Self::Checks,
         Self::Reviews,
         Self::Ext,
@@ -130,6 +141,8 @@ impl Keyword {
             Self::Command => ("command", true, Pipeline, true),
             Self::Verify => ("verify", true, Pipeline, true),
             Self::Resources => ("resources", true, Pipeline, true),
+            Self::Tool => ("tool", true, Pipeline, true),
+            Self::Uses => ("uses", true, Pipeline, true),
             Self::Check => ("check", true, Pipeline, true),
             // `review name from file.csv` names a review's file in a
             // recipe; the parser rejects `review name` alone there.
@@ -143,6 +156,7 @@ impl Keyword {
             Self::Require => ("require", true, Recipe, true),
             Self::Drop => ("drop", false, Replaced, true),
             Self::Exclude => ("exclude", true, Recipe, true),
+            Self::Tools => ("tools", false, Recipe, true),
             Self::Checks | Self::Reviews => {
                 return Spec {
                     word: None,

@@ -16,7 +16,7 @@ from pathlib import Path
 from .load import changed_pipeline_files, load_dag
 from .cause import Why
 from .model import Dag, DagError, Layout
-from .plan import Status, adopt, explained, plan, writes
+from .plan import Status, accept_tools, adopt, explained, plan, writes
 from .reuse.evidence import Compare
 from .reuse.relabel import relabel
 from .state.store import Store
@@ -31,7 +31,7 @@ from .report.plan_text import adoption_line, listing, move_hint, nothing_run
 from .report.reviews import review_json, review_lines
 from .report.summary import Summary, left_out
 from .leftovers import leftovers, lines as leftover_lines, remove as remove_leftovers
-from . import clean, confirm, runs
+from . import clean, confirm, runs, tools
 from .schedule import over_memory
 from .selection import Selected, Selection, parse_entities, parse_stage, select
 
@@ -53,6 +53,7 @@ class Action(str, Enum):
     EXPLAIN = "explain"
     RUN = "run"
     ADOPT = "adopt"
+    ACCEPT_TOOLS = "accept-tools"
     LOG = "log"
     PRUNE = "prune"
     RESTORE = "restore"
@@ -69,6 +70,8 @@ HELP = {
                     "the files that differ from the record, and the upstream jobs that will rewrite its inputs",
     Action.RUN: "run every job that is not current or blocked, and check current jobs whose checks changed",
     Action.ADOPT: "record jobs whose files already exist as current, without running them",
+    Action.ACCEPT_TOOLS: "take the tools as they are now as those current jobs ran with, so a tool's upgrade\n"
+                         "or a new tool reruns no job that has not changed otherwise",
     Action.LOG: "list each chosen job's logs, from every run that kept one, newest first",
     Action.PRUNE: "remove all but the newest run folders, keeping the log of each job whose current outputs a run made",
     Action.RESTORE: "put back the outputs a run replaced, with the records they had; the outputs there now are kept\n"
@@ -344,6 +347,9 @@ def _plan_and_run(args: argparse.Namespace, dag: Dag, everything: Dag, selection
         for line in run_text.left_lines(left_out(everything, dag, decisions, results, state, compare)):
             print(line, file=sys.stderr)
     failed = summary.failed or summary.not_run
+    if dag.tools:
+        # What the jobs ran with, for the next plan to say what changed.
+        tools.save(layout.tools, dag.tools)
     runs.finish(run, "finished", run_text.counts(summary))
     return 1 if failed or blocked else 0
 
@@ -389,7 +395,7 @@ def main(argv: list[str] | None = None) -> int:
             needed = f", and {selected.needed} they need" if selected.needed else ""
             print(f"chose {selected.matched} of {total} jobs{needed}", file=sys.stderr)
         layout = Layout(Path(args.dir).expanduser().resolve()) if args.dir else dag.layout
-        writes_state = args.action in (Action.RUN, Action.ADOPT, Action.PRUNE, Action.RESTORE) or \
+        writes_state = args.action in (Action.RUN, Action.ADOPT, Action.ACCEPT_TOOLS, Action.PRUNE, Action.RESTORE) or \
             (args.action is Action.CLEAN and args.yes)
         state = Store(layout.state, writes_state)
         if writes_state:
@@ -397,6 +403,16 @@ def main(argv: list[str] | None = None) -> int:
         if dag.left_out:
             print(f"partial DAG: {len(dag.left_out)} output(s) left out", file=sys.stderr)
 
+        if args.action is Action.ACCEPT_TOOLS:
+            accepted = accept_tools(dag, state)
+            if dag.tools:
+                tools.save(layout.tools, dag.tools)
+            print(f"recorded the tools as they are now for {accepted} job{'' if accepted == 1 else 's'}",
+                  file=sys.stderr)
+            return 0
+        if args.action in PLANS:
+            for line in tools.change_lines(tools.saved(layout.tools), dag.tools):
+                print(line, file=sys.stderr)
         if args.action is Action.ADOPT:
             adoptions = adopt(dag, state)
             for adoption in adoptions:

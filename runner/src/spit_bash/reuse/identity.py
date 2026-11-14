@@ -10,6 +10,8 @@ from ..schema import Command, CommandPart, DirPart, PathPart, ScalarPart, SpitJo
 
 # The work's parts, each hashed on its own. Keep in step with the keys `_parts` gives.
 PARTS = ("commands", "verify", "inputs", "outputs")
+# The start of the part that holds one tool's identity, by the tool's name.
+TOOL = "tool:"
 
 
 def slots(item: SpitJob) -> dict[str, str]:
@@ -98,10 +100,14 @@ def key(outputs: tuple[Artifact, ...]) -> str:
 
 
 def work(item: SpitJob, slots: dict[str, str], checks: tuple[Check, ...], outputs: tuple[Artifact, ...],
-         shown: dict[str, str] | None = None) -> Work:
+         shown: dict[str, str] | None = None, tools: dict[str, str] | None = None) -> Work:
     """The job's `Work`, from its wire form, its slots, and its checks and outputs as loaded, with
-    `shown` as `checks_key` takes it."""
+    `shown` as `checks_key` takes it, and `tools` the digest of each tool the job depends on, by name."""
     parts = _parts(item, slots)
+    named = {name: _digest(value) for name, value in parts.items()}
+    if tools:
+        # Only a job that depends on a tool has this part, so a DAG with no tools identifies work as before.
+        parts["tools"] = dict(sorted(tools.items()))
+        named.update({f"{TOOL}{name}": digest for name, digest in tools.items()})
     # The parts are hashed apart so that a record can say which of them changed.
-    return Work(_digest(parts), {name: _digest(value) for name, value in parts.items()},
-                checks_key(checks, slots, shown), key(outputs))
+    return Work(_digest(parts), named, checks_key(checks, slots, shown), key(outputs))

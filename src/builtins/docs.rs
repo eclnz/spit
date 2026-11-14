@@ -69,6 +69,9 @@ pub enum Word {
     Default,
     Types,
     Type,
+    Tool,
+    Uses,
+    ToolsFrom,
 }
 
 /// What a word's hover says.
@@ -93,7 +96,7 @@ impl Word {
 }
 
 /// Every word's documentation, in the order of [`Word`].
-pub static DOCS: [Doc; 60] = [
+pub static DOCS: [Doc; 63] = [
     Doc {
         name: "source",
         kind: "keyword",
@@ -513,5 +516,26 @@ pub static DOCS: [Doc; 60] = [
         anchor: "declared-types",
         example: "type Frame<Kind, Space>",
         summary: "Declares a parameterized type and names its parameters, in order. A type written with this name takes that many arguments wherever it appears, in a source, an operation's port or a step's product; arguments are still given by position. Under `types strict`, a type written with arguments must be declared.",
+    },
+    Doc {
+        name: "tool",
+        kind: "keyword",
+        anchor: "tools",
+        example: "tool mrtrix3\ntool fsl",
+        summary: "Declares a tool that `uses` lines may name, so that `spit check` catches a misspelled one. A recipe's `.spitenv` must then say what each declared tool is. Needed only with `uses`.",
+    },
+    Doc {
+        name: "uses",
+        kind: "keyword",
+        anchor: "tools",
+        example: "default uses: mrtrix3\nuses preprocess_dwi: fsl\nuses flirt_register: fsl, !mrtrix3",
+        summary: "The tools each job of an operation depends on, so that a change to one reruns the jobs that use it. With no `uses`, a job depends on every tool. The first name replaces every tool with a list, and names then add up from the file's `default uses:`, through each stage's, to the operation's own line; `!name` removes one. Tools follow where the operation is declared.",
+    },
+    Doc {
+        name: "tools from",
+        kind: "keyword",
+        anchor: "tools",
+        example: "tools from hpc.spitenv",
+        summary: "Names the `.spitenv` file that says what each tool is on the machine the jobs run on: a text compared as it is, such as a container's digest, or `probe program args`, whose output is the tool's identity. A runner reruns the jobs whose tools changed.",
     },
 ];

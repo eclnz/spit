@@ -35,7 +35,7 @@ pub use builtins::{builtin_words, Doc, Word, WordUse, DOCS, REFERENCE};
 pub use compile::{validate_commands, validate_pipeline};
 pub use diagnostics::{
     diagnose, diagnose_checked, diagnose_checked_with_inventory, diagnose_checked_with_records,
-    diagnose_in, diagnose_inputs, diagnose_recipe, diagnose_recipe_against,
+    diagnose_in, diagnose_inputs, diagnose_recipe, diagnose_recipe_against, diagnose_tools,
     render_calls_check_json, render_check_json, render_diagnostics_json, Checked, Context,
     Diagnosis, Diagnostic, DiagnosticSource, FileNames, Records, Related, Severity, ShownPath,
     SourceLines,
@@ -45,9 +45,10 @@ pub use editor::{
     HoverKind,
 };
 pub use inputs::{
-    discover_source_files, discover_sources, parse_input_spec, parse_input_spec_at, variants,
-    Discovery, EveryGroupDropped, InputError, InputSource, InputSpec, Likeness, MissedSource,
-    NearestFile, ResolvedInputs, ReviewFileError, Spelling, UnmatchedExclusion, Variants,
+    discover_source_files, discover_sources, parse_input_spec, parse_input_spec_at, parse_tools,
+    variants, Discovery, EveryGroupDropped, InputError, InputSource, InputSpec, Likeness,
+    MissedSource, NearestFile, ResolvedInputs, ReviewFileError, Spelling, ToolsFile,
+    UnmatchedExclusion, Variants,
 };
 pub use lower::imports::parse_pipeline_at;
 pub use lower::parse_pipeline;
@@ -59,8 +60,9 @@ pub use model::{
     IncompleteJob, InputBinding, InputPort, InputRules, Invocation, Job, JobId, Judged, NearMiss,
     OperationDef, OutputPort, Pipeline, Port, PortSite, ProductDef, Removal, ResolveError,
     ResolvedDag, Resources, ResourcesDef, ReviewDef, ReviewFile, ShapeRule, SidecarGroup,
-    SourceFile, SourceInventory, SourceRecord, StageDef, StepId, StepOrigin, StepOutput,
-    TypeChecking, TypeConflict, Under, UnmatchedVerdicts, Verdict, VerdictRow, Withheld,
+    SourceFile, SourceInventory, SourceRecord, StageDef, StepId, StepOrigin, StepOutput, Tool,
+    ToolIdentity, ToolList, ToolSet, TypeChecking, TypeConflict, Under, UnmatchedVerdicts, UsesDef,
+    Verdict, VerdictRow, Withheld,
 };
 pub use parser::{
     keywords_json, parse_source_inventory, render_source_inventory, ParseError, ParseErrorKind,

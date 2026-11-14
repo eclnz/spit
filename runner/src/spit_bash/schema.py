@@ -1,4 +1,4 @@
-"""The version 14 SPIT DAG schema, before filesystem checks or execution."""
+"""The version 15 SPIT DAG schema, before filesystem checks or execution."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from typing import Annotated, Literal
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
 
 # The one version of the format spit-bash reads.
-VERSION = 14
+VERSION = 15
 
 
 class SchemaModel(BaseModel):
@@ -79,6 +79,20 @@ class ScalarPart(SchemaModel):
 CommandPart = str | PathPart | DirPart | StemPart | HerePart | ScalarPart
 Argument = Annotated[list[CommandPart], Field(min_length=1)]
 Command = Annotated[list[Argument], Field(min_length=1)]
+
+
+class Tool(SchemaModel):
+    """What a tool is on the machine the jobs run on: a declared text, or a probe whose output is its identity."""
+
+    name: NonEmpty
+    identity: str | None
+    probe: Annotated[list[str], Field(min_length=1)] | None
+
+    @model_validator(mode="after")
+    def _one(self) -> "Tool":
+        if (self.identity is None) == (self.probe is None):
+            raise ValueError(f"tool {self.name} needs exactly one of `identity` and `probe`")
+        return self
 
 
 class Generator(SchemaModel):
@@ -205,6 +219,8 @@ class SpitJob(SchemaModel):
     # declares none, and memory in bytes, null when it claims none.
     cores: Annotated[int, Field(ge=1)]
     memory: Annotated[int, Field(ge=0, le=2**53)] | None
+    # The tools the job depends on, by name, in the order of `SpitDag.tools`.
+    tools: list[NonEmpty]
 
 
 class SpitDag(SchemaModel):
@@ -217,6 +233,7 @@ class SpitDag(SchemaModel):
     external_inputs: list[Artifact]
     targets: list[Artifact]
     executables: list[str]
+    tools: list[Tool]
     removed: list[Removal]
     left_out: list[LeftOut]
     reviews: list[Review]

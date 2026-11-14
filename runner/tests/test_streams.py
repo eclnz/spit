@@ -135,10 +135,10 @@ class StreamTests(unittest.TestCase):
         with self.assertRaisesRegex(DagError, "stdout"):
             read(data)
 
-    def test_reads_only_version_14(self):
+    def test_reads_only_version_15(self):
         data = streamed(self.root, UPPER)
-        data["version"] = 13
-        with self.assertRaisesRegex(DagError, "spit-bash reads version 14 of the DAG format, not 13"):
+        data["version"] = 14
+        with self.assertRaisesRegex(DagError, "spit-bash reads version 15 of the DAG format, not 14"):
             read(data)
 
 

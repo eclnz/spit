@@ -10,7 +10,7 @@ from typing import Iterable, Iterator, TextIO
 
 from pydantic import ValidationError
 
-from . import scalars, schema
+from . import scalars, schema, tools
 from .model import Artifact, Check, Dag, DagError, Job, Kind, Port, Review, Run, Side, Target
 from .reuse import identity
 from .schema import Command, DirPart, HerePart, JobCommand, PathPart, ScalarPart, SpitDag, SpitJob, StemPart
@@ -224,6 +224,8 @@ def _load(source: TextIO, root_override: str | None) -> Dag:
             output_root = None
 
     _check_origins(document)
+    # Probes run before any job, on the machine the jobs run on, once for the whole DAG.
+    identities = tools.identify(document.tools, root) if document.tools else {}
     folders = frozenset(artifact.path for artifact in _artifacts(document) if artifact.kind == "folder")
     for artifact in _artifacts(document):
         if (artifact.kind == "folder") != (artifact.path in folders):
@@ -250,6 +252,9 @@ def _load(source: TextIO, root_override: str | None) -> Dag:
             if path in producers or path in external_set:
                 raise DagError(f"multiple jobs or sources claim path: {path}")
             producers[path] = item.id
+        unknown = [name for name in item.tools if name not in identities]
+        if unknown:
+            raise DagError(f"job {item.id} names tool {unknown[0]}, which `tools` does not list")
         slots = identity.slots(item)
         inputs, produced = _ports(item, slots)
         commands = tuple(_run(command, document.pipeline_folder, shown) for command in item.commands)
@@ -272,7 +277,8 @@ def _load(source: TextIO, root_override: str | None) -> Dag:
             id=item.id,
             operation=item.operation,
             stage=tuple(item.stage),
-            work=identity.work(item, slots, checks, tuple(a for port in produced for a in port.artifacts), shown),
+            work=identity.work(item, slots, checks, tuple(a for port in produced for a in port.artifacts), shown,
+                               {name: identities[name].digest for name in item.tools}),
             inputs=inputs,
             outputs=produced,
             depends_on=tuple(item.depends_on),
@@ -304,6 +310,7 @@ def _load(source: TextIO, root_override: str | None) -> Dag:
         in_dataset=in_dataset,
         pipeline_files=_pipeline_files(document),
         reviews=tuple(_review(review) for review in document.reviews),
+        tools=identities,
     )
     dag.absolute.update(_absolute(dag, _uses(external_set, jobs)))
     return dag

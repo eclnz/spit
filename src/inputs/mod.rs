@@ -8,16 +8,16 @@
 
 mod coverage;
 mod discover;
+mod error;
 mod exclusions;
 mod pattern;
 mod recipe;
 mod reviews;
+mod tools;
 mod variants;
 
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
-use std::error::Error;
-use std::fmt;
 use std::path::{Path, PathBuf};
 
 use rustc_hash::FxHashMap;
@@ -35,7 +35,7 @@ use crate::parser::{
     without_bom, File, Head, Header, Keyword, Kind, Layout, ParseError, SourceMap,
 };
 use crate::paths::inspect_paths;
-use crate::template::{PathError, PathTemplate};
+use crate::template::PathTemplate;
 
 pub(crate) use self::coverage::collect_rule_errors;
 pub use self::coverage::EveryGroupDropped;
@@ -44,12 +44,16 @@ pub(crate) use self::coverage::{check_inventory, InputCheck};
 pub(crate) use self::discover::with_source_paths;
 use self::discover::{discover, locate_sources};
 pub use self::discover::{discover_source_files, discover_sources, Discovery};
+pub use self::error::InputError;
 use self::exclusions::Excluder;
 pub use self::exclusions::UnmatchedExclusion;
 pub use self::pattern::{MissedSource, NearestFile};
 use self::recipe::{expand_input_block, header_lines, restore_path_places, RecipeHeader};
 pub use self::reviews::ReviewFileError;
 use self::reviews::{read_review_files, read_verdicts, without_review_files};
+pub(crate) use self::tools::missing_tool;
+use self::tools::read_tools_file;
+pub use self::tools::{parse_tools, ToolsFile};
 pub use self::variants::{variants, Likeness, Spelling, Variants};
 
 /// A recipe's rules and any inventory records written with them.
@@ -64,6 +68,9 @@ pub struct InputSpec {
     /// The output root a recipe's `output results` line names, relative to
     /// the recipe's folder when parsed at a path, and the line it is on.
     pub output: Option<(PathBuf, usize)>,
+    /// The `.spitenv` a recipe's `tools from` line names, read when the
+    /// recipe is parsed at a path.
+    pub tools: Option<ToolsFile>,
     pub rules: InputRules,
     pub inventory: Option<SourceInventory>,
 }
@@ -90,6 +97,7 @@ pub fn parse_input_spec_at(text: &str, path: &Path) -> Result<InputSpec, ParseEr
         output: header
             .output
             .map(|(output, line)| (folder.join(output), line)),
+        tools: header.tools,
     };
     finish_spec(document, header, Some(folder))
 }
@@ -207,6 +215,9 @@ fn finish_spec(
         invocations,
         commands,
         resources,
+        tools,
+        uses,
+        default_uses,
         checks,
         default_checks,
         reviews,
@@ -225,6 +236,9 @@ fn finish_spec(
         || !invocations.is_empty()
         || !commands.is_empty()
         || !resources.is_empty()
+        || !tools.is_empty()
+        || !uses.is_empty()
+        || default_uses.is_some()
         || !checks.is_empty()
         || default_checks != DefaultChecks::default()
         || !reviews.is_empty()
@@ -250,13 +264,18 @@ fn finish_spec(
     inputs.source_paths = product_paths;
     inputs.source_default = path_template;
     inputs.source_entities = entities_format;
+    let mut tools = None;
     if let Some(folder) = folder {
         read_review_files(&mut inputs, folder)?;
+        if let Some((file, line)) = &header.tools {
+            tools = Some(read_tools_file(folder, file, *line)?);
+        }
     }
     Ok(InputSpec {
         pipeline: header.pipeline,
         root: header.root,
         output: header.output,
+        tools,
         rules: inputs,
         inventory,
     })
@@ -285,6 +304,15 @@ impl InputSpec {
     pub fn check(&self, pipeline: &Pipeline) -> Result<(), InputError> {
         self.root_for(pipeline)?;
         self.output_for(pipeline)?;
+        if let Some(tools) = &self.tools {
+            if let Some(tool) = missing_tool(pipeline, tools) {
+                return Err(InputError::MissingTool {
+                    tool: tool.to_owned(),
+                    file: tools.file.clone(),
+                    line: tools.line,
+                });
+            }
+        }
         let index = PipelineIndex::new(pipeline);
         for name in self.rules.source_paths.keys() {
             let product = name.clone();
@@ -614,116 +642,6 @@ fn listed<'a>(items: impl Iterator<Item = &'a str>) -> String {
         None => String::new(),
     }
 }
-
-/// Why a recipe cannot be applied to a pipeline, or to a dataset.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum InputError {
-    /// Both the recipe and pipeline declare a dataset root.
-    RootInBoth,
-    /// Both the recipe and pipeline declare an output root.
-    OutputInBoth,
-    /// The pipeline does not compile, a rule does not fit it, or the
-    /// records break a rule.
-    Resolve(ResolveError),
-    /// A path rule is invalid, or a file under the root is missing or
-    /// cannot be read.
-    Path(PathError),
-    /// The recipe sets a path for a product the pipeline does not declare.
-    NotASource { product: String },
-    /// The recipe sets a path for a product a step makes, whose path is
-    /// the pipeline's to give.
-    OutputPath { product: String },
-    /// A source has a path rule in both the pipeline
-    /// and the recipe.
-    PathInBoth { product: String },
-    /// The recipe sets a path for a companion, which follows its main source.
-    MemberPath { product: String, group: String },
-    /// A scan finds every source's files, and this one has no path rule to
-    /// find them by.
-    NoSourcePath { product: String },
-    /// The recipe and the `.spitout` give a source different path rules.
-    ConflictingSourcePaths { product: String },
-    /// A `.spitout` gives a path rule for a product that is not a source.
-    UnknownSourcePath { product: String },
-    /// A source has a path rule in both the pipeline and the `.spitout`.
-    InventoryPathInBoth { product: String },
-    /// An `exclude` rule matches nothing in the dataset.
-    UnmatchedExclusion(UnmatchedExclusion),
-    /// A review's file is malformed, or names a column the review's
-    /// products do not have.
-    ReviewFile(ReviewFileError),
-    /// conditional `exclude` rules remove every group of a grouping.
-    EveryGroupDropped(EveryGroupDropped),
-}
-
-impl From<ResolveError> for InputError {
-    fn from(error: ResolveError) -> Self {
-        Self::Resolve(error)
-    }
-}
-
-impl From<PathError> for InputError {
-    fn from(error: PathError) -> Self {
-        Self::Path(error)
-    }
-}
-
-impl fmt::Display for InputError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::RootInBoth => f.write_str("dataset root is declared in both .spit and .spitin; keep one declaration"),
-            Self::OutputInBoth => f.write_str("output root is declared in both .spit and .spitin; keep one declaration"),
-            Self::Resolve(error) => error.fmt(f),
-            Self::Path(error) => error.fmt(f),
-            Self::NotASource { product } => write!(
-                f,
-                "input path `{product}` must name a source product in the pipeline"
-            ),
-            Self::OutputPath { product } => write!(
-                f,
-                "`{product}` is made by a step, so its path belongs in the .spit pipeline; a .spitin gives paths only for sources"
-            ),
-            Self::PathInBoth { product } => write!(
-                f,
-                "`{product}` has path rules in both .spit and .spitin; keep the pipeline's if every dataset has this layout, or the recipe's if only this one does"
-            ),
-            Self::MemberPath { product, group } => write!(
-                f,
-                "source `{product}` is beside `{group}` and takes its path from it; give `{group}` the path in `inputs:` instead"
-            ),
-            Self::NoSourcePath { product } => write!(
-                f,
-                "source `{product}` has no path rule, so its files cannot be found; write `path {product}:` in the pipeline or `{product}:` or `default:` in the recipe's `inputs:` block"
-            ),
-            Self::ConflictingSourcePaths { product } => write!(
-                f,
-                "source `{product}` has conflicting path rules in .spitin and .spitout"
-            ),
-            Self::UnknownSourcePath { product } => {
-                write!(f, "source path rule names unknown source `{product}`")
-            }
-            Self::InventoryPathInBoth { product } => write!(
-                f,
-                "source `{product}` has path rules in both .spit and .spitout"
-            ),
-            Self::EveryGroupDropped(emptied) => emptied.fmt(f),
-            Self::ReviewFile(error) => error.fmt(f),
-            Self::UnmatchedExclusion(unmatched) => {
-                write!(
-                    f,
-                    "`{}` ({}) matches nothing in this dataset",
-                    unmatched.rule, unmatched.origin
-                )?;
-                if !unmatched.near.is_empty() {
-                    write!(f, "; it has {}", unmatched.near.join(", "))?;
-                }
-                Ok(())
-            }
-        }
-    }
-}
-
-impl Error for InputError {}
 
 /// Where the input stage gets its inventory.
 pub enum InputSource<'a> {

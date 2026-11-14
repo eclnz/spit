@@ -4,7 +4,7 @@ This manual defines valid `.spit` pipelines, `.spitin` recipes, and `.spitout` i
 
 A `#` that starts a word begins a comment, as in Bash. A `#` inside a word or in quotes is kept, so `--color=#fff` and `'#run'` are ordinary arguments.
 
-A line's first word says what it is, so the words that start statements are reserved: no product, whether a source or a step's output, may be named `use`, `root`, `output`, `source`, `discover`, `operation`, `command`, `verify`, `resources`, `check`, `review`, `require`, `exclude`, `path`, `ext`, `default`, `entities`, `stage` or `dimensions`, nor `drop`, `skip` or `sidecars`. Those three, and `shell-source`, start a line only to give an error that says what to write instead. `check = clean(raw)` is an error that says so.
+A line's first word says what it is, so the words that start statements are reserved: no product, whether a source or a step's output, may be named `use`, `root`, `output`, `source`, `discover`, `operation`, `command`, `verify`, `resources`, `tool`, `uses`, `tools`, `check`, `review`, `require`, `exclude`, `path`, `ext`, `default`, `entities`, `stage` or `dimensions`, nor `drop`, `skip` or `sidecars`. Those three, and `shell-source`, start a line only to give an error that says what to write instead. `check = clean(raw)` is an error that says so.
 
 ## Keyword blocks
 
@@ -33,7 +33,7 @@ command:
     denoise: dn {image} {@output}
 ```
 
-`source:`, `operation:`, `command:`, `verify:`, `resources:`, `check:`, `review:` and `path:` open blocks in a pipeline, and `path:`, `require:`, `exclude:` and `review:` in a recipe. An entry is read as its keyword's statement would be, with the same errors on its own line; a `source:` block inside a stage is an error at each entry, as a `source` line there is. The entries of a block share one indentation, and the next line that is not indented beneath the keyword ends it. In an `operation:` block, an entry that ends in `:` opens the [body of steps](#operations-carried-out-by-steps) that carries it out, indented beneath the entry, and in a `command:` block, the [lines of a command](#commands-of-several-lines), as `command sort:` does. [Defaults](#defaults) have a block of their own, `default:`, and a stage's lines are a block of their own too.
+`source:`, `operation:`, `command:`, `verify:`, `resources:`, `tool:`, `uses:`, `check:`, `review:` and `path:` open blocks in a pipeline, and `path:`, `require:`, `exclude:` and `review:` in a recipe. An entry is read as its keyword's statement would be, with the same errors on its own line; a `source:` block inside a stage is an error at each entry, as a `source` line there is. The entries of a block share one indentation, and the next line that is not indented beneath the keyword ends it. In an `operation:` block, an entry that ends in `:` opens the [body of steps](#operations-carried-out-by-steps) that carries it out, indented beneath the entry, and in a `command:` block, the [lines of a command](#commands-of-several-lines), as `command sort:` does. [Defaults](#defaults) have a block of their own, `default:`, and a stage's lines are a block of their own too.
 
 ### Statements over several lines
 
@@ -433,6 +433,74 @@ Each `align` job runs `bwa mem -t 8 ...`, and a backend starts one only when 8 c
 - `{@cores}` is the declared number, written into the command as text, in a `command` or a `verify` command. It is `1` for an operation that declares none. Write it where the tool takes its thread count, so that the tool uses what the backend set aside, and the number is written once.
 - An operation has one `resources` line, wherever it is written, as its `command` is. An imported operation brings its line with it. An [operation carried out by steps](#operations-carried-out-by-steps) has none: give each operation its body calls a line of its own.
 - What a job needs does not change what it makes, so a changed `resources` line does not make a job out of date, unless the command's `{@cores}` changes with it.
+
+### Tools
+
+A runner reruns a job when its command or the files it reads change. It cannot see a tool's version: after an upgrade, a job that ran with the old one still looks current. A recipe names a `.spitenv` file that says what each tool is on the machine the jobs run on, and a runner reruns the jobs whose tools changed:
+
+<!-- spit-doc: recipe
+--- analysis.spit
+source dwi : Image .mif [sub]
+path dwi: dwi/{sub}.mif
+default entities: {@key}={@value} separated "_"
+default path: out/{@product}/{@entities}
+operation denoise(dwi: Image) -> Image .mif
+command denoise: dwidenoise {dwi} {@output}
+denoised = denoise(dwi)
+--- hpc.spitenv
+tools:
+    mrtrix3: probe mrconvert -version
+    fsl: probe sh -c 'cat "$FSLDIR/etc/fslversion"'
+    synthseg: docker.io/lab/synthseg@sha256:4f1c
+-->
+
+```text
+pipeline analysis.spit
+root data
+tools from hpc.spitenv
+```
+
+A `.spitenv` is one `tools:` block, with a line for each tool, `name: identity`:
+
+- `probe program args...` is a command, run once before any job with no shell, as a job's commands are: its output is the tool's identity, compared as bytes, and a probe that fails stops the run. To check that FSL is the version a pipeline was tested with, write the check into the probe, as in `sh -c 'grep -qx 6.0.7.23 "$FSLDIR/etc/fslversion" && conda list -p "$FSLDIR" --explicit --md5'`. A probe's program is one of the [`executables`](spitdag.md#document) a runner looks for.
+- Anything else is a text compared as it is, such as a container's digest. SPIT reads no version from it.
+
+Version flags are uneven: `flirt -version` gives only `FLIRT version 6.0`, and `bet` has none. A conda environment's lockfile and a container's digest identify a tool exactly. A file the tool reads from its own install, such as a template, is covered by the tool's identity; a file the command names is declared as a [source](#products-and-dimensions).
+
+With no `uses` line, every job depends on every tool, which never misses a rerun, at the cost of some reruns that were not needed. `uses` narrows it:
+
+<!-- spit-doc: setup
+source dwi : Image .mif [sub]
+default entities: {@key}={@value} separated "_"
+default path: out/{@product}/{@entities}
+operation preprocess(dwi: Image) -> Image .mif
+command preprocess: dwifslpreproc {dwi} {@output}
+operation register(dwi: Image) -> Image .mif
+command register: flirt -in {dwi} -out {@output}
+operation denoise(dwi: Image) -> Image .mif
+command denoise: dwidenoise {dwi} {@output}
+-->
+
+```text
+tool mrtrix3
+tool fsl
+default uses: mrtrix3
+
+uses preprocess: fsl            # mrtrix3 and fsl
+uses register: fsl, !mrtrix3    # fsl only
+
+preprocessed = preprocess(dwi)
+registered = register(dwi)
+denoised = denoise(dwi)         # mrtrix3 only
+```
+
+- With nothing said, an operation's jobs depend on every tool the `.spitenv` lists. The first name replaces that with a list, and names then add up: the file's `default uses:`, then each stage's, from the outermost, then the operation's own `uses` line. `!name` removes a tool, from the list or from every tool.
+- An operation's tools follow where it is declared, as its `resources` line does, because its command is what runs the tool: a stage's `default uses:` covers the operations declared in that stage. An imported operation keeps the tools its own file gives it, and a `uses` line names an operation its file declares.
+- A tool a `uses` list names is declared with `tool`, so that `spit check` catches a misspelled one, and the recipe's `.spitenv` must then list every declared tool. A `.spitenv` may list tools no pipeline declares.
+- Tools change only which jobs rerun, never how a job runs. A `uses` list that leaves out a tool its command runs can miss a rerun, and `spit check` cannot tell.
+- A pipeline run without a recipe, or with a `.spitout`, has no `.spitenv`, so its jobs depend on no tool.
+
+Inference from programs would not work: `dwifslpreproc`, `5ttgen fsl` and `dwibiascorrect fsl` are MRtrix3 programs that run FSL. `spit check hpc.spitenv` checks a `.spitenv` alone, and `spit check dataset.spitin` checks it against the pipeline.
 
 ### Files beside the pipeline
 
@@ -931,9 +999,10 @@ stage preprocess:
 - `default ext:` is the [extension](#extensions) that completes a default path rule.
 - `default check:` lists the [checks](#default-checks) every output runs.
 - `default review:` lists the [reviews](#reviews) that judge every output.
+- `default uses:` lists the [tools](#tools) of every operation declared in the file or stage.
 - `default entities:` [spells `{@entities}`](#entity-formatting) for the products it covers.
 
-`default:` opens a block of them: each line indented beneath it is a `path:`, `ext:`, `check:`, `review:` or `entities:` line, read as if `default` came before it, and nothing else belongs there. A default outside every stage covers the whole file, stages included; one inside a stage covers that stage and the stages nested in it. For a path, an extension or an entities spelling the nearest one wins, and check lists add up. A file or a stage sets each default once, whether on its own line or in a block. In a `.spitin` recipe, `default path:` is the rule for sources with none of their own and `default entities:` spells the rules the recipe gives; `default ext:`, `default check:` and `default review:` belong in the pipeline.
+`default:` opens a block of them: each line indented beneath it is a `path:`, `ext:`, `check:`, `review:`, `uses:` or `entities:` line, read as if `default` came before it, and nothing else belongs there. A default outside every stage covers the whole file, stages included; one inside a stage covers that stage and the stages nested in it. For a path, an extension or an entities spelling the nearest one wins, and check lists add up, as `uses` lists do by the rules under [Tools](#tools). A file or a stage sets each default once, whether on its own line or in a block. In a `.spitin` recipe, `default path:` is the rule for sources with none of their own and `default entities:` spells the rules the recipe gives; `default ext:`, `default check:` and `default review:` belong in the pipeline.
 
 A `path:`, `ext:`, `check:` or `entities:` line without `default`, outside a `default:` block, is an error that says how to write it.
 
@@ -1376,7 +1445,7 @@ exclude [sub] where contexts[sub,ses] count<2
 require [sub, ses] where image count=1
 ```
 
-A recipe may contain `inputs:`, `exclude`, `require` and `review ... from` rules, `path product:` rules for source products, a `default path:` rule for its sources, and `sources:`/`contexts:` records. It cannot declare sources, operations, steps, commands, checks, stages, imports, types, or `default ext:`, `default check:` and `default review:`; the pipeline still declares each logical `source` with its dimensions and optional type. Rules in a pipeline are an error, and so are records.
+A recipe may contain `inputs:`, `exclude`, `require` and `review ... from` rules, a [`tools from`](#tools) line, `path product:` rules for source products, a `default path:` rule for its sources, and `sources:`/`contexts:` records. It cannot declare sources, operations, steps, commands, checks, stages, imports, types, or `default ext:`, `default check:` and `default review:`; the pipeline still declares each logical `source` with its dimensions and optional type. Rules in a pipeline are an error, and so are records.
 
 A recipe's `default:` entry inside `inputs:` line is the default for every source with no rule of its own, in the pipeline or the recipe. Where a dataset keeps its inputs is the dataset's to say, so the pipeline's `default path:` can say where outputs go, by stage if it likes, and the recipe says where sources are:
 
@@ -1484,13 +1553,13 @@ A `.spit` pipeline is the reusable graph: what work to do and where its results 
 
 | Line | Pipeline | Recipe |
 | --- | --- | --- |
-| `source`, `dimensions`, `types`, `type`, `operation`, `command`, `verify`, `resources`, `check`, steps, `stage`, `use`, `default ext:`, `default check:`, `default review:` | yes | no |
+| `source`, `dimensions`, `types`, `type`, `operation`, `command`, `verify`, `resources`, `tool`, `uses`, `check`, steps, `stage`, `use`, `default ext:`, `default check:`, `default review:` | yes | no |
 | `path product:` for a product a step makes | yes | no |
 | `path product:` for a source that is not declared `beside` another | either one, not both | either one, not both |
 | `default path:` | covers outputs, and sources nothing else covers | covers sources only |
 | `root` | either one, not both | either one, not both; otherwise inherits the pipeline root |
 | `output` | either one, not both | either one, not both; otherwise inherits the pipeline's |
-| `pipeline` | no | yes |
+| `pipeline`, `tools from` | no | yes |
 | `review name` | yes | no |
 | `discover`, `require`, every `exclude` form, `review name from file`, `sources:`, `contexts:`, `verdicts:` | no | yes |
 

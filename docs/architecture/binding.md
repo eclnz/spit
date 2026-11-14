@@ -22,9 +22,10 @@ flowchart LR
     - the same `Artifacts` table as the `ResolvedDag`, with each artifact's path and `Under` as columns by id;
     - the dataset `root` and the `output_root`, which the command line fills in;
     - each product's dimensions, and whether its artifacts are folders, once per product;
-    - the steps (`BoundStep`), each with its port names, so a job's inputs and outputs are artifact ids in port order, and the `Resources` each of its jobs needs;
+    - the steps (`BoundStep`), each with its port names, so a job's inputs and outputs are artifact ids in port order, the `Resources` each of its jobs needs, and the `ToolSet` its operation's `uses` lines give;
     - the jobs (`BoundJob`), each with its `BoundCommand`s, one for each line of its operation's command: an `Argument` list of `ArgPart`s, and the artifacts its `stdin` and `stdout` are connected to;
-    - what was removed and left out, the pipeline's files, and the calls.
+    - what was removed and left out, the pipeline's files, and the calls;
+    - the `Tool`s of the recipe's `.spitenv`, which the command line fills in. `BoundDag::step_tools` gives the ones a step's jobs depend on, and `write_document` writes them once per step.
 - **`BoundPaths`** ([`src/paths/bind.rs`](https://github.com/eclnz/spit/blob/dev/src/paths/bind.rs)) holds each artifact's path and the root it is under (`Under`, in [`src/model/artifacts.rs`](https://github.com/eclnz/spit/blob/dev/src/model/artifacts.rs)), both made by `bound_paths`.
 - **`PathTemplate`** ([`src/template/path.rs`](https://github.com/eclnz/spit/blob/dev/src/template/path.rs)) is a rule's text read into parts. `PipelineIndex::path_template_for` completes a product's rule:
     - its `[...]` groups kept or dropped for the product's dimensions and stage;
