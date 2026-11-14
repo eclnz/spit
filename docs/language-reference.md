@@ -14,7 +14,7 @@ A keyword alone with its `:` opens a block of its statements, each written on a 
 operation denoise(image: Image) -> Image
 -->
 
-```text
+```spit
 source raw : Image [sub]
 source mask : Mask [sub]
 command denoise: dn {image} {@output}
@@ -24,7 +24,7 @@ command denoise: dn {image} {@output}
 operation denoise(image: Image) -> Image
 -->
 
-```text
+```spit
 source:
     raw : Image [sub]
     mask : Mask [sub]
@@ -47,7 +47,7 @@ default entities: {@key}={@value} separated "_"
 default path: out/{@product}/{@entities}
 -->
 
-```text
+```spit
 registered = register(
     denoised,
     anatomy @where(session=1)
@@ -60,7 +60,7 @@ A command written after its `:`, of `command`, `verify` or `check`, also goes on
 operation register(moving: Image, reference: Image) -> Image
 -->
 
-```text
+```spit
 command register: flirt -in {moving}
     -ref {reference}
     -out {@output}
@@ -93,14 +93,23 @@ default entities: {@key}={@value} separated "_"
 default path: out/{@product}/{@entities}
 -->
 
-```text
+```spit
 processed = process(image)
 average = mean(processed @vary(run))
 ```
 
 The input with the most dimensions drives a normal operation and gives its outputs their dimensions, wherever it sits among the ports. Its observed artifacts determine the initial jobs: an input with `[config, seed]` creates only the config and seed pairs actually present, rather than every combination of known values. For an aggregation, `vary(run)` removes `run` from the output identity; `@each(...)` adds a dimension, as described under selectors. You can write the output type and dimensions explicitly when helpful; SPIT checks them against the step and the [dimension order](#dimension-order):
 
-```text
+<!-- spit-doc: setup
+source image : Image [subject, visit, run]
+operation process(image: Image) -> Image
+operation mean(items: many Image) -> Image
+default entities: {@key}={@value} separated "_"
+default path: out/{@product}/{@entities}
+processed = process(image)
+-->
+
+```spit
 average : Image [subject, visit] = mean(processed @vary(run))
 ```
 
@@ -116,7 +125,7 @@ When a product holds two dimensions that no source orders, declare the order onc
 source runs : Run [model, config, seed]
 -->
 
-```text
+```spit
 dimensions [model, config, seed]
 ```
 
@@ -141,7 +150,7 @@ default entities: {@key}={@value} separated "_"
 default path: out/{@product}/{@entities}
 -->
 
-```text
+```spit
 operation summarise(days: many Series @min(2), policy: Policy) -> Summary
 summary = summarise(reading @vary(day), policy)
 ```
@@ -156,7 +165,7 @@ default entities: {@key}={@value} separated "_"
 default path: out/{@product}[/{@entities}]
 -->
 
-```text
+```spit
 operation leaderboard(summaries: many Summary) -> Table
 board = leaderboard(summary @vary(model, config))
 ```
@@ -175,7 +184,7 @@ default entities: {@key}={@value} separated "_"
 default path: out/{@product}/{@entities}
 -->
 
-```text
+```spit
 calibrated = calibrate(reading, calibration @where(revision=2))
 anomaly = compare(calibrated, reference @same(station))
 ```
@@ -186,7 +195,7 @@ Every `@` clause, whether a selector, `@min(n)` or `@check(...)`, is written wit
 
 <!-- spit-doc: fragment -->
 
-```text
+```spit
 source series : T [day]
 operation f(x: many T) -> T
 r = f(series @ vary(day))
@@ -209,7 +218,7 @@ default entities: {@key}={@value} separated "_"
 default path: out/{@product}/{@entities}
 -->
 
-```text
+```spit
 dimensions [station, scenario]
 source reading : Series [station]
 source model : Model [scenario]
@@ -230,7 +239,7 @@ default entities: {@key}={@value} separated "_"
 default path: out/{@product}/{@entities}
 -->
 
-```text
+```spit
 trial = simulate(reading, seed @each(rep))
 summary = average(trial @vary(rep))
 ```
@@ -245,7 +254,7 @@ default entities: {@key}={@value} separated "_"
 default path: out/{@product}/{@entities}
 -->
 
-```text
+```spit
 operation estimate(dwi: DWI) -> (wm: Response, gm: Response, csf: Response)
 command estimate: dwi2response dhollander {dwi} {wm} {gm} {csf}
 wm_response, gm_response, csf_response = estimate(dwi)
@@ -258,7 +267,7 @@ operation register(moving: Image, reference: Image) -> Image
 command register: reg {moving} {reference} {@output}
 -->
 
-```text
+```spit
 verify register: check_same_grid {moving} {reference}
 ```
 
@@ -306,7 +315,7 @@ The first word of a command must be an executable available on `PATH` (or an exe
 operation process(image: Image) -> Image
 -->
 
-```text
+```spit
 command process: process_tool {image} {@output}
 ```
 
@@ -320,7 +329,7 @@ default entities: {@key}={@value} separated "_"
 default path: out/{@product}/{@entities}
 -->
 
-```text
+```spit
 operation first(table: Table) -> Column .tsv
 command first: cut -f1 {table} > {@output}
 
@@ -349,7 +358,7 @@ default entities: {@key}={@value} separated "_"
 default path: out/{@product}/{@entities}
 -->
 
-```text
+```spit
 operation sort(sam: Sam) -> (bam: Bam .bam, bai: Bai +.bai beside bam)
 resources sort: cores=4
 command sort:
@@ -398,7 +407,7 @@ default path: out/{@product}/{@entities}
 bam, bai = sort(sam)
 -->
 
-```text
+```spit
 command:
     sort:
         samtools sort -o {bam} {sam}
@@ -418,7 +427,7 @@ default entities: {@key}={@value} separated "_"
 default path: out/{@product}/{@entities}
 -->
 
-```text
+```spit
 operation align(reference: Fasta, reads: Fastq) -> Sam .sam
 command align: bwa mem -t {@cores} {reference} {reads} > {@output}
 resources align: cores=8, memory=16G
@@ -454,7 +463,7 @@ tools:
     synthseg: docker.io/lab/synthseg@sha256:4f1c
 -->
 
-```text
+```spit
 pipeline analysis.spit
 root data
 tools from hpc.spitenv
@@ -481,7 +490,7 @@ operation denoise(dwi: Image) -> Image .mif
 command denoise: dwidenoise {dwi} {@output}
 -->
 
-```text
+```spit
 tool mrtrix3
 tool fsl
 default uses: mrtrix3
@@ -513,7 +522,7 @@ default entities: {@key}={@value} separated "_"
 default path: out/{@product}[/{@entities}]
 -->
 
-```text
+```spit
 operation feat(bold: Bold, design: Fsf) -> FeatDir .feat/
 command feat: feat {design} {bold} {@output}
 operation group_feat(firsts: many FeatDir, design: Fsf) -> FeatDir .gfeat/
@@ -539,7 +548,7 @@ default entities: {@key}={@value} separated "_"
 default path: out/{@product}/{@entities}
 -->
 
-```text
+```spit
 source tabulate : Script .py here
 path tabulate: scripts/table.py
 
@@ -564,7 +573,7 @@ default entities: {@key}={@value} separated "_"
 default path: out/{@product}/{@entities}
 -->
 
-```text
+```spit
 operation table(durations: Json) -> Table .tsv
 command table: python3 {@here}/scripts/table.py {durations} > {@output}
 
@@ -587,7 +596,7 @@ default entities: {@key}={@value} separated "_"
 default path: out/{@product}/{@entities}
 -->
 
-```text
+```spit
 operation read_tr(image: Image) -> Scalar .txt
 command read_tr: fslval {image} pixdim4 > {@output}
 tr = read_tr(calib)
@@ -615,7 +624,7 @@ default entities: {@key}={@value} separated "_"
 default path: out/{@product}/{@entities}
 -->
 
-```text
+```spit
 operation merge(images: many Image) -> Image .nii.gz
 command merge: fslmerge -t {@output} {images}
 
@@ -651,7 +660,7 @@ default entities: {@key}={@value} separated "_"
 default path: out/{@product}/{@entities}
 -->
 
-```text
+```spit
 operation align(reference: Fasta, reads: Fastq) -> Sam .sam
 command align: bwa mem -R "@RG\tID:{sample}\tSM:{sample}" {reference} {reads} > {@output}
 
@@ -691,7 +700,7 @@ Every step that calls the operation must give its jobs the dimension. Otherwise 
 
 <!-- spit-doc: fragment -->
 
-```text
+```spit
 source seconds : Duration [speaker, digit]
 operation table(durations: many Duration) -> Table
 command table: table --digit {digit} {durations} -o {@output}
@@ -715,7 +724,7 @@ default entities: {@key}={@value} separated "_"
 default path: out/{@product}/{@entities}
 -->
 
-```text
+```spit
 operation table(durations: many Duration) -> Table .tsv
 command table: table --digits {durations.digit} --files {durations} > {@output}
 summary = table(seconds @vary(digit))
@@ -755,7 +764,7 @@ default entities: {@key}={@value} separated "_"
 default path: out/{@product}/{@entities}
 -->
 
-```text
+```spit
 operation clean(x: Lines, t: Table) -> Lines
 command clean: clean {x} {t} {@output}
 operation merge(xs: many Lines) -> Lines
@@ -933,7 +942,7 @@ default entities: {@key}={@value} separated "_"
 default path: out/{@product}/{@entities}
 -->
 
-```text
+```spit
 check nonempty: test -s {@path}
 check ndim(n): check_ndim {@path} {n}
 
@@ -972,7 +981,7 @@ source t1w : Image .nii.gz [sub] @review(looked_at)
 path t1w: sub-{sub}/t1w.nii.gz
 -->
 
-```text
+```spit
 pipeline analysis.spit
 root data
 review looked_at from qc/looked_at.csv
@@ -1067,7 +1076,7 @@ command denoise: dn {input} {@output}
 check nonempty: test -s {@path}
 -->
 
-```text
+```spit
 default entities: {@key}={@value} separated "__"
 default path: results/{@product}/{@entities}
 default ext: .txt
@@ -1131,7 +1140,7 @@ default entities: {@key}={@value} separated "_"
 default path: out/{@product}/{@entities}
 -->
 
-```text
+```spit
 stage preprocess:
     stage clean:
         sorted = sort_lines(shard)
@@ -1164,7 +1173,7 @@ default path: out/{@product}/{@entities}
 --- text.spit = examples/imports/text.spit
 -->
 
-```text
+```spit
 use text.spit as text
 
 sorted = text::sort_lines(text::shard)
@@ -1197,7 +1206,7 @@ A library that imports a broken library lists each `use` line, nearest the error
 source image : Image [subject, visit, run]
 -->
 
-```text
+```spit
 default entities: {@key}={@value} separated "__"
 default path: results/{@product}/{@entities}.txt
 path image: input/{subject}/{visit}/{run}.txt
@@ -1224,7 +1233,7 @@ A path may put text in `[...]` when only some products have it. SPIT keeps the g
 source image : Image [sub, ses]
 -->
 
-```text
+```spit
 default entities: {@key}-{@value} separated "_"
 default path: derivatives/sub-{sub}[/ses-{ses}][/{@stage}]/{@entities}_{@product}
 default ext: .nii.gz
@@ -1338,7 +1347,7 @@ source log : Log [server, date]
 source run : Run [sub, run]
 -->
 
-```text
+```spit
 path log: logs/{server}/{date:date}.log
 path run: raw/sub-{sub:digits}_run-{run:digits}.csv
 ```
@@ -1437,7 +1446,7 @@ A command is given a folder by its path, as a file is: `{dicom}` above is `dicom
 operation recon(t1: T1) -> (subject: Subject /)
 -->
 
-```text
+```spit
 command recon: recon-all -i {t1} -sd {subject.dir} -s {subject.stem}
 ```
 
@@ -1452,7 +1461,7 @@ default entities: {@key}={@value} separated "_"
 default path: out/{@product}[/{@entities}]
 -->
 
-```text
+```spit
 operation index(reference: Fasta) -> BwaIndex /
 command index: bwa index -p {@output}/genome {reference}
 operation align(index: BwaIndex, reads: Fastq) -> Sam .sam
@@ -1518,7 +1527,7 @@ A `.spitin` recipe says how to find and select one dataset's inputs. Basic file 
 source image : Image [sub, ses]
 -->
 
-```text
+```spit
 pipeline analysis.spit
 root .
 
@@ -1537,7 +1546,7 @@ A recipe's `default:` entry inside `inputs:` line is the default for every sourc
 <!-- spit-doc: files
 -->
 
-```text
+```spit
 # analysis.spit
 default entities: {@key}={@value} separated "__"
 default path: {@stage}/{@product}/{@entities}
@@ -1561,7 +1570,7 @@ source image : Image [sub]
 path image: image-{sub}.nii.gz
 -->
 
-```text
+```spit
 pipeline analysis.spit
 root data
 ```
@@ -1599,7 +1608,7 @@ counts = count(reads)
 path counts: counts/{sample}
 -->
 
-```text
+```spit
 pipeline analysis.spit
 root data
 output results
@@ -1719,7 +1728,7 @@ source image : Image [subject, visit, run]
 source reference : Image [subject, visit]
 -->
 
-```text
+```spit
 require [subject, visit] where image count>=2
 require [subject, visit] where reference count=1
 ```
@@ -1735,7 +1744,7 @@ inputs:
 source image : Image [subject, visit, run]
 -->
 
-```text
+```spit
 require [subject, visit] where image has run=1,2
 ```
 
@@ -1759,7 +1768,7 @@ source t1w : T1 [sub, ses]
 source bold : Bold [sub, ses, run]
 -->
 
-```text
+```spit
 exclude [sub] where contexts[sub,ses] count<2
 exclude [sub, ses] where t1w count=0
 exclude [sub, ses] where bold missing run=1,2
@@ -1794,7 +1803,7 @@ source bold : Bold [sub, ses, run]
 source calibration : Table
 -->
 
-```text
+```spit
 exclude bold[sub=02,ses=02,run=3]    # corrupted: motion spike at volume 140
 exclude [sub=07]                     # withdrew consent
 exclude bold[run=3]                  # run 3 dropped from the protocol
@@ -1826,7 +1835,7 @@ command price: price {sales} {pricing} {@output}
 report = price(sales, pricing)
 -->
 
-```text
+```spit
 exclude [store=s07]            # price list filed as S07; renamed next week
 ```
 
@@ -1930,7 +1939,7 @@ command price: price {sales} {pricing} {@output}
 report = price(sales, pricing)
 -->
 
-```text
+```spit
 exclude [store=s07]            # price list filed as S07; renamed next week
 exclude pricing[store=S07]     # the same list, under the name it was filed as
 ```
@@ -2055,7 +2064,7 @@ A type with too few or too many arguments is an error where it is written:
 
 <!-- spit-doc: fragment -->
 
-```text
+```spit
 type Frame<Kind, Space>
 source scan : Frame<Diffusion> [subject]
 ```
@@ -2084,7 +2093,7 @@ A product a step makes needs no type of its own when inference gives it one:
 
 <!-- spit-doc: fragment -->
 
-```text
+```spit
 types strict
 type Frame<Space>
 type Atlas<Space>
