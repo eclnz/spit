@@ -4,7 +4,7 @@ This manual defines valid `.spit` pipelines, `.spitin` recipes, and `.spitout` i
 
 A `#` that starts a word begins a comment, as in Bash. A `#` inside a word or in quotes is kept, so `--color=#fff` and `'#run'` are ordinary arguments.
 
-A line's first word says what it is, so the words that start statements are reserved: no product, whether a source or a step's output, may be named `use`, `root`, `output`, `source`, `discover`, `operation`, `command`, `verify`, `resources`, `check`, `review`, `require`, `exclude`, `path`, `ext`, `default`, `entities`, `stage` or `dimensions`, nor `drop`, `skip` or `sidecars`. Those three, and `shell-source`, start a line only to give an error that says what to write instead. `check = clean(raw)` is an error that says so.
+A line's first word says what it is, so the words that start statements are reserved: no product, whether a source or a step's output, may be named `use`, `root`, `output`, `source`, `discover`, `operation`, `command`, `verify`, `resources`, `tool`, `uses`, `tools`, `anchored`, `check`, `review`, `require`, `exclude`, `path`, `ext`, `default`, `entities`, `stage` or `dimensions`, nor `drop`, `skip` or `sidecars`. Those three, and `shell-source`, start a line only to give an error that says what to write instead. `check = clean(raw)` is an error that says so.
 
 ## Keyword blocks
 
@@ -33,7 +33,7 @@ command:
     denoise: dn {image} {@output}
 ```
 
-`source:`, `operation:`, `command:`, `verify:`, `resources:`, `check:`, `review:` and `path:` open blocks in a pipeline, and `path:`, `require:`, `exclude:` and `review:` in a recipe. An entry is read as its keyword's statement would be, with the same errors on its own line; a `source:` block inside a stage is an error at each entry, as a `source` line there is. The entries of a block share one indentation, and the next line that is not indented beneath the keyword ends it. In an `operation:` block, an entry that ends in `:` opens the [body of steps](#operations-carried-out-by-steps) that carries it out, indented beneath the entry, and in a `command:` block, the [lines of a command](#commands-of-several-lines), as `command sort:` does. [Defaults](#defaults) have a block of their own, `default:`, and a stage's lines are a block of their own too.
+`source:`, `operation:`, `command:`, `verify:`, `resources:`, `tool:`, `uses:`, `anchored:`, `check:`, `review:` and `path:` open blocks in a pipeline, and `path:`, `require:`, `exclude:` and `review:` in a recipe. An entry is read as its keyword's statement would be, with the same errors on its own line; a `source:` block inside a stage is an error at each entry, as a `source` line there is. The entries of a block share one indentation, and the next line that is not indented beneath the keyword ends it. In an `operation:` block, an entry that ends in `:` opens the [body of steps](#operations-carried-out-by-steps) that carries it out, indented beneath the entry, and in a `command:` block, the [lines of a command](#commands-of-several-lines), as `command sort:` does. [Defaults](#defaults) have a block of their own, `default:`, and a stage's lines are a block of their own too.
 
 ### Statements over several lines
 
@@ -434,9 +434,129 @@ Each `align` job runs `bwa mem -t 8 ...`, and a backend starts one only when 8 c
 - An operation has one `resources` line, wherever it is written, as its `command` is. An imported operation brings its line with it. An [operation carried out by steps](#operations-carried-out-by-steps) has none: give each operation its body calls a line of its own.
 - What a job needs does not change what it makes, so a changed `resources` line does not make a job out of date, unless the command's `{@cores}` changes with it.
 
+### Tools
+
+A runner reruns a job when its command or the files it reads change. It cannot see a tool's version: after an upgrade, a job that ran with the old one still looks current. A recipe names a `.spitenv` file that says what each tool is on the machine the jobs run on, and a runner reruns the jobs whose tools changed:
+
+<!-- spit-doc: recipe
+--- analysis.spit
+source dwi : Image .mif [sub]
+path dwi: dwi/{sub}.mif
+default entities: {@key}={@value} separated "_"
+default path: out/{@product}/{@entities}
+operation denoise(dwi: Image) -> Image .mif
+command denoise: dwidenoise {dwi} {@output}
+denoised = denoise(dwi)
+--- hpc.spitenv
+tools:
+    mrtrix3: probe mrconvert -version
+    fsl: probe sh -c 'cat "$FSLDIR/etc/fslversion"'
+    synthseg: docker.io/lab/synthseg@sha256:4f1c
+-->
+
+```text
+pipeline analysis.spit
+root data
+tools from hpc.spitenv
+```
+
+A `.spitenv` is one `tools:` block, with a line for each tool, `name: identity`:
+
+- `probe program args...` is a command, run once before any job with no shell, as a job's commands are: its output is the tool's identity, compared as bytes, and a probe that fails stops the run. To check that FSL is the version a pipeline was tested with, write the check into the probe, as in `sh -c 'grep -qx 6.0.7.23 "$FSLDIR/etc/fslversion" && conda list -p "$FSLDIR" --explicit --md5'`. A probe's program is one of the [`executables`](spitdag.md#document) a runner looks for.
+- Anything else is a text compared as it is, such as a container's digest. SPIT reads no version from it.
+
+Version flags are uneven: `flirt -version` gives only `FLIRT version 6.0`, and `bet` has none. A conda environment's lockfile and a container's digest identify a tool exactly. A file the tool reads from its own install, such as a template, is covered by the tool's identity; a file the command names is declared as a [source](#products-and-dimensions).
+
+With no `uses` line, every job depends on every tool, which never misses a rerun, at the cost of some reruns that were not needed. `uses` narrows it:
+
+<!-- spit-doc: setup
+source dwi : Image .mif [sub]
+default entities: {@key}={@value} separated "_"
+default path: out/{@product}/{@entities}
+operation preprocess(dwi: Image) -> Image .mif
+command preprocess: dwifslpreproc {dwi} {@output}
+operation register(dwi: Image) -> Image .mif
+command register: flirt -in {dwi} -out {@output}
+operation denoise(dwi: Image) -> Image .mif
+command denoise: dwidenoise {dwi} {@output}
+-->
+
+```text
+tool mrtrix3
+tool fsl
+default uses: mrtrix3
+
+uses preprocess: fsl            # mrtrix3 and fsl
+uses register: fsl, !mrtrix3    # fsl only
+
+preprocessed = preprocess(dwi)
+registered = register(dwi)
+denoised = denoise(dwi)         # mrtrix3 only
+```
+
+- With nothing said, an operation's jobs depend on every tool the `.spitenv` lists. The first name replaces that with a list, and names then add up: the file's `default uses:`, then each stage's, from the outermost, then the operation's own `uses` line. `!name` removes a tool, from the list or from every tool.
+- An operation's tools follow where it is declared, as its `resources` line does, because its command is what runs the tool: a stage's `default uses:` covers the operations declared in that stage. An imported operation keeps the tools its own file gives it, and a `uses` line names an operation its file declares.
+- A tool a `uses` list names is declared with `tool`, so that `spit check` catches a misspelled one, and the recipe's `.spitenv` must then list every declared tool. A `.spitenv` may list tools no pipeline declares.
+- Tools change only which jobs rerun, never how a job runs. A `uses` list that leaves out a tool its command runs can miss a rerun, and `spit check` cannot tell.
+- A pipeline run without a recipe, or with a `.spitout`, has no `.spitenv`, so its jobs depend on no tool.
+
+Inference from programs would not work: `dwifslpreproc`, `5ttgen fsl` and `dwibiascorrect fsl` are MRtrix3 programs that run FSL. `spit check hpc.spitenv` checks a `.spitenv` alone, and `spit check dataset.spitin` checks it against the pipeline.
+
+### Tools that store their paths
+
+A runner identifies a job by what it makes and runs, not by where its files are, so a change of path rules, or a dataset moved to another folder, leaves finished jobs current. Most tools are fine with that. Some write their own paths into an output that is read later: FSL FEAT's `design.fsf` holds absolute paths, and a group analysis's `.gfeat` names its first-level `.feat` folders. A moved file then names a place that is gone. `anchored` marks such operations:
+
+<!-- spit-doc: setup
+source bold : Bold .nii.gz [sub]
+source design : Fsf .fsf
+default entities: {@key}={@value} separated "_"
+default path: out/{@product}[/{@entities}]
+-->
+
+```text
+operation feat(bold: Bold, design: Fsf) -> FeatDir .feat/
+command feat: feat {design} {bold} {@output}
+operation group_feat(firsts: many FeatDir, design: Fsf) -> FeatDir .gfeat/
+command group_feat: feat {design} {firsts} {@output}
+anchored feat, group_feat
+
+firsts = feat(bold, design)
+group = group_feat(firsts @vary(sub), design)
+```
+
+- A runner reruns an anchored job when the path of a file it reads or writes changes, or when the dataset's folder does, and never moves its outputs to new paths: see [Identifying work](spitdag.md#identifying-work).
+- The mark belongs to the operation, wherever it is called, and an imported operation keeps it. `anchored` names one or more operations the file declares, separated by commas, or one on each line of an `anchored:` block, before or after their declarations. Naming an operation that is not declared, one twice, or an imported one, whose own file marks it, is an error.
+- Tools that only record how an output was made, such as the `@PG` lines of `bwa mem` and `samtools sort`, or MRtrix3's `command_history`, need no mark: their outputs are still right after a move.
+- A `{x.dir}` or `{x.stem}` in a command is already part of a job's work, so it needs no mark either.
+
 ### Files beside the pipeline
 
-Commands run from the [output root](#the-output-root), which is the dataset root unless another is named, so a script kept next to the pipeline cannot be named by a path that holds wherever the dataset is. `{@here}` in a command is the folder of the `.spit` file that declares the operation:
+Commands run from the [output root](#the-output-root), which is the dataset root unless another is named, so a script kept next to the pipeline cannot be named by a path that holds wherever the dataset is. A source declared `here` is a file found from the folder of the `.spit` file that declares it, rather than in the dataset:
+
+<!-- spit-doc: setup
+source durations : Json [sample]
+default entities: {@key}={@value} separated "_"
+default path: out/{@product}/{@entities}
+-->
+
+```text
+source tabulate : Script .py here
+path tabulate: scripts/table.py
+
+operation table(durations: Json, script: Script) -> Table .tsv
+command table: python3 {script} {durations} > {@output}
+
+summary = table(durations, tabulate)
+```
+
+With the pipeline in `/home/lab/digits/digits.spit`, `table` runs `python3 /home/lab/digits/scripts/table.py ...`, and a job that reads `tabulate` reruns when the script changes, as it would for any other source.
+
+- A `here` source is one file: it takes no `[dimensions]`, `/` or `beside`. Its path rule is relative to the folder of the file that declares it, so a library imported from `libs/lib.spit` ships its scripts in `libs`.
+- The file must be in the pipeline's folder or beneath it, and must exist when the pipeline is run. Nothing may be written beside it.
+- A `.spitdag` gives its path relative to `pipeline_folder`, with `under` `"pipeline_folder"`: see [Roots](spitdag.md#roots).
+- A pipeline given on standard input, or parsed without a file, has no folder, and a `here` source in it is an error.
+
+`{@here}` in a command is that folder itself, for a script that is not an input of the operation:
 
 <!-- spit-doc: setup
 source durations : Json [sample]
@@ -451,12 +571,10 @@ command table: python3 {@here}/scripts/table.py {durations} > {@output}
 summary = table(durations)
 ```
 
-With the pipeline in `digits/digits.spit`, `table` runs `python3 /home/lab/digits/scripts/table.py ...`. An operation imported from `libs/lib.spit` gets `libs`, the folder of the file that declares it, so a library ships its scripts with it.
-
-- Write `{@here}` in a `command` or a `verify` command, as the start of an argument, with the rest of the path after it. It gives no `.dir` or `.stem`, and cannot be redirected to or from.
+- Write `{@here}` in a `command` or a `verify` command, as the start of an argument, with the rest of the path after it. It gives no `.dir` or `.stem`, and cannot be redirected to or from. An operation imported from `libs/lib.spit` gets `libs`, the folder of the file that declares it.
 - A `.spitdag` holds the pipeline's folder once, as `pipeline_folder`, and each use as a [`here` part](spitdag.md#commands) under it. The folder is not part of any command, so moving the pipeline changes none.
 - A pipeline given on standard input, or parsed without a file, has no folder, and `{@here}` in it is an error.
-- A job declares only its ports, so editing a script a command names by `{@here}`, or by a relative path such as `scripts/table.py`, reruns nothing. `inputs`, `dag` and `artifacts` note each such file that exists: ``note: operation `table` runs `{@here}/scripts/table.py`, which it doesn't declare, so editing the file reruns nothing; ...``. To rerun a job when its script changes, keep the script under the dataset root and pass it to the operation as a source.
+- A job declares only its ports, so editing a script a command names by `{@here}`, or by a relative path such as `scripts/table.py`, reruns nothing. `inputs`, `dag` and `artifacts` note each such file that exists: ``note: operation `table` runs `{@here}/scripts/table.py`, which it doesn't declare, so editing the file reruns nothing; to rerun on a change, declare it a `here` source and pass it to `table` as a source``.
 
 ### Numbers read from files
 
@@ -486,6 +604,41 @@ For `sub=01`, `fslval` writes `6.234000 ` to `out/tr/sub=01.txt`. When the `fit`
 - `min=N` and `max=N`, after the port and separated by commas, are the least and greatest values allowed, both included: `@scalar(tr, min=5, max=100)`.
 - Written in quotes, as `'@scalar(tr)'`, it is text, passed to the tool as it is.
 - The number stays in its file, an artifact like any other, so a job that reads it reruns when the file changes, and the file records the value a job ran with. `spit dag --commands` shows each read with its file, as `'@scalar(out/tr/sub=01.txt, min=5)'`, since the number is known only once the file is written.
+
+### A many input as one argument
+
+A `many` placeholder such as `{images}` gives a tool one argument for each artifact. Some tools take every file in one argument, such as `--inputs=a.nii,b.nii`, or read them from a file that lists them. `@join(port)` gives the paths joined into one argument, and `@list(port)` the path of a file that lists them, one to a line:
+
+<!-- spit-doc: setup
+source scan : Image .nii.gz [sub, run]
+default entities: {@key}={@value} separated "_"
+default path: out/{@product}/{@entities}
+-->
+
+```text
+operation merge(images: many Image) -> Image .nii.gz
+command merge: fslmerge -t {@output} {images}
+
+operation average(images: many Image) -> Image .nii.gz
+command average: mean_tool --inputs=@join(images) --runs=@join(images.run, ";") -o {@output}
+
+operation register(images: many Image) -> Table .tsv
+command register: register_tool --file-list @list(images) -o {@output}
+
+merged = merge(scan @vary(run))
+averaged = average(scan @vary(run))
+registered = register(scan @vary(run))
+```
+
+For `sub=01` with runs 2 and 10, `average` runs `mean_tool --inputs=out/scan/sub=01_run=2.nii.gz,out/scan/sub=01_run=10.nii.gz --runs=2;10 -o ...`, and `register` gives `register_tool` the path of a file holding the two paths, each on its own line.
+
+- `@join(port)` and `@list(port)` name a `many` input of the operation. They go in a `command` or a `verify` command, as a whole argument or within one, but not as the program and not after `<` or `>`. A check has no ports, so it cannot use them.
+- The artifacts come in the order `{port}` gives them, the [natural order](#dimension-order), so run 2 comes before run 10.
+- `@join` separates the paths with `,`, or with the text after a comma, in double quotes: `@join(images, " ")`, or `""` for none. Write `\"`, `\\`, `\n`, `\r` or `\t` for a quote, a backslash, a newline, a carriage return or a tab. A path that holds the separator is an error, since the tool could not split the argument back into its paths. A collection with no artifacts joins to nothing.
+- `@join(port.dimension)` joins the artifacts' values of a dimension instead, in the same order, as `{port.dimension}` gives them one to an argument.
+- `@list` writes each path whole, as the tool is to open it from where commands run, and ends each with a newline. A backend writes the file when the job starts, before its `verify` commands, gives the same file to each of the job's commands, and removes it when the job ends, whether it succeeds, fails or is stopped. The file is not an output, and where it is written is not part of the job's work.
+- Written in quotes, as `'@join(images)'`, either is text, passed to the tool as it is.
+- `spit dag --commands` shows a join as the joined paths, and a list as `@list(...)` with its paths, since its file is made only when the job starts.
 
 ### A job's dimension values
 
@@ -931,9 +1084,10 @@ stage preprocess:
 - `default ext:` is the [extension](#extensions) that completes a default path rule.
 - `default check:` lists the [checks](#default-checks) every output runs.
 - `default review:` lists the [reviews](#reviews) that judge every output.
+- `default uses:` lists the [tools](#tools) of every operation declared in the file or stage.
 - `default entities:` [spells `{@entities}`](#entity-formatting) for the products it covers.
 
-`default:` opens a block of them: each line indented beneath it is a `path:`, `ext:`, `check:`, `review:` or `entities:` line, read as if `default` came before it, and nothing else belongs there. A default outside every stage covers the whole file, stages included; one inside a stage covers that stage and the stages nested in it. For a path, an extension or an entities spelling the nearest one wins, and check lists add up. A file or a stage sets each default once, whether on its own line or in a block. In a `.spitin` recipe, `default path:` is the rule for sources with none of their own and `default entities:` spells the rules the recipe gives; `default ext:`, `default check:` and `default review:` belong in the pipeline.
+`default:` opens a block of them: each line indented beneath it is a `path:`, `ext:`, `check:`, `review:`, `uses:` or `entities:` line, read as if `default` came before it, and nothing else belongs there. A default outside every stage covers the whole file, stages included; one inside a stage covers that stage and the stages nested in it. For a path, an extension or an entities spelling the nearest one wins, and check lists add up, as `uses` lists do by the rules under [Tools](#tools). A file or a stage sets each default once, whether on its own line or in a block. In a `.spitin` recipe, `default path:` is the rule for sources with none of their own and `default entities:` spells the rules the recipe gives; `default ext:`, `default check:` and `default review:` belong in the pipeline.
 
 A `path:`, `ext:`, `check:` or `entities:` line without `default`, outside a `default:` block, is an error that says how to write it.
 
@@ -1376,7 +1530,7 @@ exclude [sub] where contexts[sub,ses] count<2
 require [sub, ses] where image count=1
 ```
 
-A recipe may contain `inputs:`, `exclude`, `require` and `review ... from` rules, `path product:` rules for source products, a `default path:` rule for its sources, and `sources:`/`contexts:` records. It cannot declare sources, operations, steps, commands, checks, stages, imports, types, or `default ext:`, `default check:` and `default review:`; the pipeline still declares each logical `source` with its dimensions and optional type. Rules in a pipeline are an error, and so are records.
+A recipe may contain `inputs:`, `exclude`, `require` and `review ... from` rules, a [`tools from`](#tools) line, `path product:` rules for source products, a `default path:` rule for its sources, and `sources:`/`contexts:` records. It cannot declare sources, operations, steps, commands, checks, stages, imports, types, or `default ext:`, `default check:` and `default review:`; the pipeline still declares each logical `source` with its dimensions and optional type. Rules in a pipeline are an error, and so are records.
 
 A recipe's `default:` entry inside `inputs:` line is the default for every source with no rule of its own, in the pipeline or the recipe. Where a dataset keeps its inputs is the dataset's to say, so the pipeline's `default path:` can say where outputs go, by stage if it likes, and the recipe says where sources are:
 
@@ -1484,13 +1638,13 @@ A `.spit` pipeline is the reusable graph: what work to do and where its results 
 
 | Line | Pipeline | Recipe |
 | --- | --- | --- |
-| `source`, `dimensions`, `types`, `type`, `operation`, `command`, `verify`, `resources`, `check`, steps, `stage`, `use`, `default ext:`, `default check:`, `default review:` | yes | no |
+| `source`, `dimensions`, `types`, `type`, `operation`, `command`, `verify`, `resources`, `tool`, `uses`, `anchored`, `check`, steps, `stage`, `use`, `default ext:`, `default check:`, `default review:` | yes | no |
 | `path product:` for a product a step makes | yes | no |
 | `path product:` for a source that is not declared `beside` another | either one, not both | either one, not both |
 | `default path:` | covers outputs, and sources nothing else covers | covers sources only |
 | `root` | either one, not both | either one, not both; otherwise inherits the pipeline root |
 | `output` | either one, not both | either one, not both; otherwise inherits the pipeline's |
-| `pipeline` | no | yes |
+| `pipeline`, `tools from` | no | yes |
 | `review name` | yes | no |
 | `discover`, `require`, every `exclude` form, `review name from file`, `sources:`, `contexts:`, `verdicts:` | no | yes |
 

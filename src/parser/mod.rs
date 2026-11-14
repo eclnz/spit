@@ -16,6 +16,7 @@ mod resources;
 mod review;
 mod rules;
 mod source_map;
+mod tools;
 
 pub(crate) use entities::EntitiesDeclaration;
 
@@ -24,7 +25,7 @@ use std::ops::Range;
 
 use crate::model::{
     CheckDef, CommandDef, CommandRole, CoverageRule, DefaultChecks, DefaultReviews, Invocation,
-    OperationDef, ProductDef, ResourcesDef, ReviewDef, StepOutput, TypeChecking,
+    OperationDef, ProductDef, ResourcesDef, ReviewDef, StepOutput, ToolList, TypeChecking, UsesDef,
 };
 use crate::span::{address_of, columns_at, content_columns, Focus, Located, Place};
 use crate::template::PathTemplate;
@@ -213,6 +214,20 @@ pub(crate) enum StatementKind {
     Command(CommandDef, CommandPlaces),
     /// A `resources` line, and where its operation's name is.
     Resources(ResourcesDef, Place),
+    /// A `tool` line's names, and where the line's text is.
+    Tool(Vec<String>, Place),
+    /// A `uses` line, and where its operation's name is.
+    Uses(UsesDef, Place),
+    /// An `anchored` line's operations, and where the line's text is.
+    Anchored(Vec<String>, Place),
+    /// A `default uses:` line: the tools of every operation declared in
+    /// `stage` or, outside every stage, in the file.
+    DefaultUses {
+        stage: Option<String>,
+        tools: ToolList,
+        /// Where the list sits.
+        place: Place,
+    },
     /// A `check` declaration, and where its name is.
     Check(CheckDef, Place),
     /// A `review` declaration, and where its name is.
@@ -397,6 +412,34 @@ impl StatementKind {
         let resources = resources::parse_resources(declaration, number)?;
         let place = source_map::name_place(original, number, declaration, &resources.operation);
         Ok(Self::Resources(resources, place))
+    }
+
+    /// A `tool` line, `declaration` being the text after its keyword in
+    /// `original`.
+    fn tool(original: &str, declaration: &str, number: usize) -> Result<Self, ParseError> {
+        let names = tools::parse_tool_names(declaration, number)?;
+        Ok(Self::Tool(
+            names,
+            source_map::tail_place(original, number, declaration),
+        ))
+    }
+
+    /// An `anchored` line, `declaration` being the text after its keyword
+    /// in `original`.
+    fn anchored(original: &str, declaration: &str, number: usize) -> Result<Self, ParseError> {
+        let names = tools::parse_anchored(declaration, number)?;
+        Ok(Self::Anchored(
+            names,
+            source_map::tail_place(original, number, declaration),
+        ))
+    }
+
+    /// A `uses` line, `declaration` being the text after its keyword in
+    /// `original`.
+    fn uses(original: &str, declaration: &str, number: usize) -> Result<Self, ParseError> {
+        let uses = tools::parse_uses(declaration, number)?;
+        let place = source_map::name_place(original, number, declaration, &uses.operation);
+        Ok(Self::Uses(uses, place))
     }
 }
 

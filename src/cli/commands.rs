@@ -5,19 +5,20 @@ use std::error::Error;
 use std::path::Path;
 
 use spit::{
-    bind_dag, bind_dag_with, diagnose_checked, diagnose_inputs, diagnose_recipe, inspect_paths,
-    parse_input_spec_at, render_artifacts, render_artifacts_by_target, render_bound_dag,
-    render_call, render_calls, render_calls_check_json, render_calls_json, render_check_json,
-    render_dag, render_diagnostics_json, render_editor_json, render_recipe_editor_json,
-    render_source_inventory, render_step_counts, render_words_json, resolve_artifacts_partial,
-    unused_sources_summary, validate_bound_source_files, validate_source_files, ArtifactReport,
-    BoundDag, BoundPaths, Context, Diagnostic, FileNames, Gap, LeftOut, View,
+    bind_dag, bind_dag_with, diagnose_checked, diagnose_inputs, diagnose_recipe, diagnose_tools,
+    inspect_paths, parse_input_spec_at, render_artifacts, render_artifacts_by_target,
+    render_bound_dag, render_call, render_calls, render_calls_check_json, render_calls_json,
+    render_check_json, render_dag, render_diagnostics_json, render_editor_json,
+    render_recipe_editor_json, render_source_inventory, render_step_counts, render_words_json,
+    resolve_artifacts_partial, unused_sources_summary, validate_bound_source_files,
+    validate_source_files, ArtifactReport, BoundDag, BoundPaths, Context, Diagnostic, FileNames,
+    Gap, LeftOut, View,
 };
 
 use super::args::{CliArgs, Flag};
 use super::load::{load_inputs, prepare, recorded_root, require_complete, settle};
 use super::output::{
-    is_inputs, is_recipe, job_count, passed, read_file, read_stdin, report, write_output,
+    is_inputs, is_recipe, is_tools, job_count, passed, read_file, read_stdin, report, write_output,
     write_spitdag, Reported,
 };
 
@@ -42,6 +43,19 @@ pub(crate) fn check(args: &CliArgs) -> Result<(), Box<dyn Error>> {
     };
     if args.has(Flag::Calls) && (is_inputs(file) || is_recipe(file)) {
         return Err("--calls lists a pipeline's calls; give a .spit pipeline".into());
+    }
+    if is_tools(file) {
+        if args.has(Flag::PathRules) || args.has(Flag::Calls) {
+            return Err("a .spitenv has no path rules or calls to show".into());
+        }
+        let diagnostics = diagnose_tools(&text);
+        if args.has(Flag::Json) {
+            let json = render_diagnostics_json(&diagnostics, &text, None);
+            return print_check_json(&json, &diagnostics);
+        }
+        report(&diagnostics, &text, None, FileNames::default())?;
+        println!("Tools valid.");
+        return Ok(());
     }
     if is_inputs(file) {
         if args.has(Flag::PathRules) {
@@ -261,6 +275,7 @@ pub(crate) fn dag(args: &CliArgs) -> Result<(), Box<dyn Error>> {
         }?;
         bound.root.clone_from(&root);
         bound.output_root.clone_from(&output_root);
+        bound.tools.clone_from(&prepared.tools);
         Ok(bound)
     };
     let counts = args.has(Flag::Counts)

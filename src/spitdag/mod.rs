@@ -15,7 +15,7 @@ use std::sync::Arc;
 
 use crate::model::{
     identity, natural_cmp, ArtifactId, ArtifactInstance, Artifacts, EntityBinding, JobId, Removal,
-    Resources, SourceFile, StepId, Under,
+    Resources, SourceFile, StepId, Tool, ToolIdentity, ToolSet, Under,
 };
 use crate::template::scalar_text;
 use crate::types::TypeExpr;
@@ -26,7 +26,7 @@ pub use self::reviews::{BoundReview, BoundTarget, Rejection};
 use self::write::{write_document, PIECE};
 
 /// The schema version a `.spitdag` is written with.
-pub const SPITDAG_VERSION: usize = 14;
+pub const SPITDAG_VERSION: usize = 15;
 
 /// A resolved DAG with its paths bound and its commands expanded. Its
 /// artifacts are the resolved DAG's, each kept once with its path; jobs,
@@ -56,6 +56,9 @@ pub struct BoundDag {
     pub pipeline_folder: Option<String>,
     /// Each call to an operation with a body, which steps name.
     pub calls: Vec<BoundCall>,
+    /// What each tool is, from the recipe's `.spitenv`; empty without one,
+    /// when jobs depend on no tool.
+    pub tools: Vec<Tool>,
     artifacts: Artifacts,
     /// Each artifact's file, relative to its root, by id; empty for an
     /// artifact no job uses.
@@ -92,6 +95,11 @@ pub struct BoundStep {
     pub origin: Option<StepCall>,
     /// What each of its jobs needs to run.
     pub resources: Resources,
+    /// The tools each of its jobs depends on.
+    pub tools: ToolSet,
+    /// Whether its jobs' outputs hold their own paths, so a backend reruns a
+    /// job whose paths change rather than moving its outputs.
+    pub anchored: bool,
 }
 
 /// Where a step is written: the line and its file, and for a step a call
@@ -225,14 +233,26 @@ pub enum ArgPart {
         min: Option<Arc<str>>,
         max: Option<Arc<str>>,
     },
+    /// A `many` input's files, in the order its placeholder gives them:
+    /// joined with `separator` into the argument, as `@join(port)` gives
+    /// them, or, with no separator, the path of a file a backend writes
+    /// listing them, as `@list(port)` does.
+    Collection {
+        artifacts: Vec<ArtifactId>,
+        separator: Option<Arc<str>>,
+    },
 }
 
 impl ArgPart {
     /// The text this part is in a command, given the DAG it belongs to. A
     /// scalar's is the path of the file it reads, since its number is known
-    /// only when the job starts.
+    /// only when the job starts. A collection has no one text: see
+    /// [`ArgPart::shown`].
     pub fn text<'a>(&'a self, dag: &'a BoundDag) -> &'a str {
         match self {
+            Self::Collection { .. } => {
+                unreachable!("a collection's paths are written and shown one by one")
+            }
             Self::Text(text) | Self::Here { text, .. } => text,
             Self::Path(artifact) | Self::Scalar { artifact, .. } => dag.path(*artifact),
             Self::Dir(artifact) => folder_of(dag.path(*artifact)),
@@ -249,9 +269,24 @@ impl ArgPart {
     /// [`ArgPart::text`], with a path under a separate dataset root made
     /// absolute, as [`BoundDag::shown_path`] gives it. A scalar is shown as
     /// a pipeline writes it, with its file's path for its port:
-    /// `@scalar(tr/sub=01.txt, min=5)`.
+    /// `@scalar(tr/sub=01.txt, min=5)`. A join is its paths joined, and a
+    /// list is shown with its paths, as `@list(a.txt, b.txt)`, since its
+    /// file is made only when the job starts.
     pub fn shown<'a>(&'a self, dag: &'a BoundDag) -> Cow<'a, str> {
         match self {
+            Self::Collection {
+                artifacts,
+                separator,
+            } => {
+                let paths: Vec<Cow<'_, str>> = artifacts
+                    .iter()
+                    .map(|&artifact| dag.shown_path(artifact))
+                    .collect();
+                Cow::Owned(match separator {
+                    Some(separator) => paths.join(&**separator),
+                    None => format!("@list({})", paths.join(", ")),
+                })
+            }
             Self::Scalar { artifact, min, max } => Cow::Owned(scalar_text(
                 &dag.shown_path(*artifact),
                 min.as_deref(),
@@ -363,6 +398,7 @@ impl BoundDag {
             pipeline_files: Vec::new(),
             pipeline_folder: None,
             calls: Vec::new(),
+            tools: Vec::new(),
             artifacts,
             paths,
             under,
@@ -402,9 +438,14 @@ impl BoundDag {
 
     /// The path of `id` as a command run from the output root names it:
     /// as written, unless it is under a dataset root apart from the output
-    /// root, when it is reached from the output root, as `../data/in.txt`.
+    /// root, when it is reached from the output root, as `../data/in.txt`,
+    /// or is a `here` source, when it is the absolute path under the
+    /// pipeline's folder.
     pub fn shown_path(&self, id: ArtifactId) -> Cow<'_, str> {
         let path = self.path(id);
+        if let (Under::Pipeline, Some(folder)) = (self.under(id), &self.pipeline_folder) {
+            return Cow::Owned(format!("{folder}/{path}"));
+        }
         match (self.under(id), &self.root, &self.output_root) {
             (Under::Root, Some(root), Some(output)) if root != output => {
                 // A folder not written with `/`, as on Windows, is given whole.
@@ -456,8 +497,8 @@ impl BoundDag {
     }
 
     /// The programs the commands run, each once: every command's first
-    /// argument that is plain text, so a backend can look for them before it
-    /// starts.
+    /// argument that is plain text, and each tool's probe's, so a backend can
+    /// look for them before it starts.
     pub fn executables(&self) -> BTreeSet<String> {
         self.jobs
             .iter()
@@ -476,7 +517,20 @@ impl BoundDag {
                     })
                     .collect()
             })
+            .chain(self.tools.iter().filter_map(|tool| match &tool.identity {
+                ToolIdentity::Probe(command) => command.first().cloned(),
+                ToolIdentity::Declared(_) => None,
+            }))
             .collect()
+    }
+
+    /// The names of the tools in [`BoundDag::tools`] that each job of `step`
+    /// depends on, in that order.
+    pub fn step_tools<'a>(&'a self, step: &'a BoundStep) -> impl Iterator<Item = &'a str> {
+        self.tools
+            .iter()
+            .filter(|tool| step.tools.includes(&tool.name))
+            .map(|tool| tool.name.as_str())
     }
 
     /// The jobs that depend on each job, by ID.

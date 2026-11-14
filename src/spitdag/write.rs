@@ -4,7 +4,7 @@
 use std::io;
 
 use crate::json::{write_array, write_number, write_string, write_u64, ObjectWriter};
-use crate::model::{ArtifactId, JobId, Removal};
+use crate::model::{ArtifactId, JobId, Removal, ToolIdentity};
 
 use super::artifact_json::{write_artifact, ArtifactJson};
 use super::work::{write_work_commands, WorkCommands};
@@ -52,6 +52,23 @@ pub(crate) fn write_document(
     });
     document.field("executables", |out| {
         write_array(out, dag.executables(), |out, name| write_string(out, &name));
+    });
+    document.field("tools", |out| {
+        write_array(out, &dag.tools, |out, tool| {
+            let mut item = ObjectWriter::start(out);
+            item.string("name", &tool.name);
+            item.field("identity", |out| match &tool.identity {
+                ToolIdentity::Declared(text) => write_string(out, text),
+                ToolIdentity::Probe(_) => out.push_str("null"),
+            });
+            item.field("probe", |out| match &tool.identity {
+                ToolIdentity::Probe(command) => write_array(out, command, |out, argument| {
+                    write_string(out, argument);
+                }),
+                ToolIdentity::Declared(_) => out.push_str("null"),
+            });
+            item.finish();
+        });
     });
     document.field("removed", |out| {
         write_array(out, &dag.removed, |out, removal| {
@@ -103,6 +120,16 @@ pub(crate) fn write_document(
             item.finish();
         });
     });
+    // Each step's tools as JSON, written once rather than once per job.
+    let tools: Vec<String> = dag
+        .steps
+        .iter()
+        .map(|step| {
+            let mut json = String::new();
+            write_array(&mut json, dag.step_tools(step), write_string);
+            json
+        })
+        .collect();
     let mut work = String::new();
     document.field("jobs", |out| {
         write_array(out, &dag.jobs, |out, job| {
@@ -110,7 +137,15 @@ pub(crate) fn write_document(
                 return;
             }
             let dependents = dependents.get(&job.id).map_or(&[][..], Vec::as_slice);
-            write_job(out, dag, &artifacts, job, dependents, &mut work);
+            write_job(
+                out,
+                dag,
+                &artifacts,
+                job,
+                dependents,
+                &tools[job.step.index()],
+                &mut work,
+            );
             if out.len() >= PIECE {
                 handed = hand_on(out);
             }
@@ -190,6 +225,7 @@ fn write_job(
     artifacts: &ArtifactJson,
     job: &BoundJob,
     dependents: &[JobId],
+    tools: &str,
     work: &mut String,
 ) {
     let step = dag.step(job);
@@ -284,6 +320,8 @@ fn write_job(
         Some(bytes) => write_u64(out, bytes),
         None => out.push_str("null"),
     });
+    object.raw("tools", tools);
+    object.raw("anchored", if step.anchored { "true" } else { "false" });
     object.finish();
 }
 
@@ -321,9 +359,10 @@ fn write_outputs(
 /// An argument is an array of parts: a string for text, `{"path": ...}` for
 /// a file, and `{"dir": ..., "of": ...}` or `{"stem": ..., "of": ...}` for
 /// its folder or its name without its extension, with the file they are of,
-/// `{"here": ...}` for a folder under the pipeline's, and `{"scalar": ...,
+/// `{"here": ...}` for a folder under the pipeline's, `{"scalar": ...,
 /// "min": ..., "max": ...}` for the number in a file, with a bound left out
-/// as `null`.
+/// as `null`, and `{"join": [...], "separator": ...}` or `{"list": [...]}`
+/// for a `many` input's files.
 pub(super) fn write_command(out: &mut String, dag: &BoundDag, command: &[Argument]) {
     write_array(out, command, |out, argument| {
         write_array(out, argument, |out, part| match part {
@@ -345,6 +384,24 @@ pub(super) fn write_command(out: &mut String, dag: &BoundDag, command: &[Argumen
                 for (key, bound) in [(",\"min\":", min), (",\"max\":", max)] {
                     out.push_str(key);
                     out.push_str(bound.as_deref().unwrap_or("null"));
+                }
+                out.push('}');
+            }
+            ArgPart::Collection {
+                artifacts,
+                separator,
+            } => {
+                out.push_str(if separator.is_some() {
+                    "{\"join\":"
+                } else {
+                    "{\"list\":"
+                });
+                write_array(out, artifacts, |out, &artifact| {
+                    write_string(out, dag.path(artifact));
+                });
+                if let Some(separator) = separator {
+                    out.push_str(",\"separator\":");
+                    write_string(out, separator);
                 }
                 out.push('}');
             }
@@ -435,6 +492,8 @@ mod tests {
             checks: vec![],
             origin: None,
             resources: crate::model::Resources::default(),
+            tools: crate::model::ToolSet::default(),
+            anchored: false,
         }
     }
 
@@ -522,7 +581,7 @@ mod tests {
         dag.output_root = Some("/data/results".into());
         let text = dag.to_json();
         assert!(text.starts_with(&format!(
-            "{{\"version\":14,\"generator\":{{\"name\":\"spit\",\"version\":\"{}\"}},\
+            "{{\"version\":15,\"generator\":{{\"name\":\"spit\",\"version\":\"{}\"}},\
 \"root\":\"/data/study\",\"output_root\":\"/data/results\",\"external_inputs\":[{{\"product\":\"raw\"",
             env!("CARGO_PKG_VERSION")
         )));
@@ -545,7 +604,7 @@ mod tests {
         );
         // A verify command that starts with a path names no program.
         assert!(
-            text.contains("\"executables\":[\"tool\"],\"removed\":[],\"left_out\":[],\"reviews\":[],\"pipeline_folder\":null,\"pipeline_files\":[],\"calls\":[],\"jobs\""),
+            text.contains("\"executables\":[\"tool\"],\"tools\":[],\"removed\":[],\"left_out\":[],\"reviews\":[],\"pipeline_folder\":null,\"pipeline_files\":[],\"calls\":[],\"jobs\""),
             "{text}"
         );
         assert!(
