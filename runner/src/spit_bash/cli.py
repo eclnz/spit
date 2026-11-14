@@ -31,7 +31,7 @@ from .report.plan_text import adoption_line, listing, move_hint, nothing_run
 from .report.reviews import review_json, review_lines
 from .report.summary import Summary, left_out
 from .leftovers import leftovers, lines as leftover_lines, remove as remove_leftovers
-from . import runs
+from . import clean, confirm, runs
 from .schedule import over_memory
 from .selection import Selected, Selection, parse_entities, parse_stage, select
 
@@ -56,6 +56,7 @@ class Action(str, Enum):
     LOG = "log"
     PRUNE = "prune"
     RESTORE = "restore"
+    CLEAN = "clean"
 
 
 # The actions that plan, and take the options that change a plan.
@@ -72,6 +73,8 @@ HELP = {
     Action.PRUNE: "remove all but the newest run folders, keeping the log of each job whose current outputs a run made",
     Action.RESTORE: "put back the outputs a run replaced, with the records they had; the outputs there now are kept\n"
                     "in a new run folder, so a restore can be undone the same way",
+    Action.CLEAN: "list every file and folder under FOLDER that the DAG does not explain, and with --yes delete them;\n"
+                  "naming FOLDER says it holds pipeline outputs only",
 }
 
 
@@ -85,6 +88,11 @@ def _parser() -> argparse.ArgumentParser:
         if action is Action.EXPLAIN:
             command.add_argument("job", type=int, metavar="ID", help="the job to explain, by its id")
         command.add_argument("files", nargs="+", metavar="FILE", help=FILES_HELP)
+        if action is Action.CLEAN:
+            command.add_argument("folder", metavar="FOLDER",
+                                 help="a folder under the dataset or output root that holds only what the pipeline writes")
+            command.add_argument("--yes", action="store_true",
+                                 help="delete what the listing names, and forget the records of the outputs deleted")
         command.add_argument("--root", help="dataset root: required when the DAG has no root,\n"
                                             "and the folder `spit dag` scans for a .spit alone")
         command.add_argument("--spit", default=os.environ.get("SPIT", "spit"),
@@ -138,6 +146,11 @@ def _parser() -> argparse.ArgumentParser:
             command.add_argument("--remove-leftovers", action="store_true",
                                  help="delete the outputs earlier runs made for jobs the pipeline no longer has,\n"
                                       "where they are as those runs left them, and forget their records")
+            command.add_argument("--ask-over", type=_ask_over, default=confirm.ASK_OVER, metavar="TIME",
+                                 help="at a terminal, ask before replacing the outputs of jobs whose last run took at\n"
+                                      "least this long, as 90s, 2m or 1h (default: 2m)")
+            command.add_argument("--yes", action="store_true",
+                                 help="replace outputs without asking, as a run without a terminal does")
             command.add_argument("--keep-failed", action="store_true",
                                  help="keep what a failed job's command wrote at its outputs, to debug it")
             command.add_argument("--no-keep-replaced", dest="keep_replaced", action="store_false",
@@ -159,6 +172,13 @@ def _memory(text: str) -> int:
     if not (number.isascii() and number.isdigit()) or int(number) < 1:
         raise argparse.ArgumentTypeError(f"expected a size such as 512M or 32G, not {text!r}")
     return int(number) * scale
+
+
+def _ask_over(text: str) -> float:
+    try:
+        return confirm.parse(text)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
 
 
 def _machine_memory() -> int | None:
@@ -280,6 +300,17 @@ def _plan_and_run(args: argparse.Namespace, dag: Dag, everything: Dag, selection
             runs.finish(run, "over memory", {})
             return 2
 
+    if not args.yes and args.files[0] != "-" and sys.stdin.isatty():
+        costly = confirm.costly(decisions, state.jobs, args.ask_over)
+        if costly:
+            for line in confirm.lines(costly):
+                print(line, file=sys.stderr)
+            print("Continue? [y/N] ", end="", file=sys.stderr, flush=True)
+            if sys.stdin.readline().strip().lower() not in ("y", "yes"):
+                print("nothing was run", file=sys.stderr)
+                runs.finish(run, "declined", {})
+                return 1
+
     for line in leftover_lines(found, args.verbose, removing):
         print(line, file=sys.stderr)
     if removing and found:
@@ -317,6 +348,30 @@ def _plan_and_run(args: argparse.Namespace, dag: Dag, everything: Dag, selection
     return 1 if failed or blocked else 0
 
 
+def _clean(args: argparse.Namespace, dag: Dag, selection: Selection, layout: Layout, state: Store) -> int:
+    """List, or with --yes delete, the strays under `args.folder`; 1 when one could not be deleted."""
+    if selection:
+        raise DagError("clean takes the whole DAG: jobs left out by --entity, --product or --stage "
+                       "would make their outputs look like strays")
+    folder = Path(args.folder).expanduser().resolve()
+    if not folder.is_dir():
+        raise DagError(f"{args.folder} is not a folder")
+    # The runner's own folder, and the files the pipeline is read from, are never strays.
+    kept = (layout.folder, *(Path(name).resolve() for name in args.files if name != "-"),
+            *(path for _, path, _ in dag.pipeline_files))
+    found = clean.strays(dag, folder, kept)
+    shown = dag.outputs if folder.is_relative_to(dag.outputs) else dag.root
+    for line in clean.lines(found, folder, shown, args.yes):
+        print(line)
+    if not args.yes:
+        return 0
+    failures, forgotten = clean.remove(dag, found, state.jobs)
+    state.apply(forgotten)
+    for failure in failures:
+        print(f"could not delete {failure}", file=sys.stderr)
+    return 1 if failures else 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = _parser()
     args = parser.parse_args(argv)
@@ -334,7 +389,8 @@ def main(argv: list[str] | None = None) -> int:
             needed = f", and {selected.needed} they need" if selected.needed else ""
             print(f"chose {selected.matched} of {total} jobs{needed}", file=sys.stderr)
         layout = Layout(Path(args.dir).expanduser().resolve()) if args.dir else dag.layout
-        writes_state = args.action in (Action.RUN, Action.ADOPT, Action.PRUNE, Action.RESTORE)
+        writes_state = args.action in (Action.RUN, Action.ADOPT, Action.PRUNE, Action.RESTORE) or \
+            (args.action is Action.CLEAN and args.yes)
         state = Store(layout.state, writes_state)
         if writes_state:
             state.lock()
@@ -372,6 +428,8 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 undo.folder.rmdir()
             return 0
+        if args.action is Action.CLEAN:
+            return _clean(args, dag, selection, layout, state)
 
         with contextlib.ExitStack() as stack:
             run = None

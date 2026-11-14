@@ -153,8 +153,8 @@ class Recording:
 
 
 def finish(run: Run, ended: str, counts: dict[str, object]) -> None:
-    """Write how the run ended, as `finished`, `blocked`, `over memory`, `interrupted`, `terminated` or `restored`,
-    with its counts."""
+    """Write how the run ended, as `finished`, `blocked`, `over memory`, `declined`, `interrupted`, `terminated`
+    or `restored`, with its counts."""
     run.summary.write_text(json.dumps({"ended": ended, **counts}, indent=2) + "\n", encoding="utf-8")
 
 
