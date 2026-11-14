@@ -605,6 +605,41 @@ For `sub=01`, `fslval` writes `6.234000 ` to `out/tr/sub=01.txt`. When the `fit`
 - Written in quotes, as `'@scalar(tr)'`, it is text, passed to the tool as it is.
 - The number stays in its file, an artifact like any other, so a job that reads it reruns when the file changes, and the file records the value a job ran with. `spit dag --commands` shows each read with its file, as `'@scalar(out/tr/sub=01.txt, min=5)'`, since the number is known only once the file is written.
 
+### A many input as one argument
+
+A `many` placeholder such as `{images}` gives a tool one argument for each artifact. Some tools take every file in one argument, such as `--inputs=a.nii,b.nii`, or read them from a file that lists them. `@join(port)` gives the paths joined into one argument, and `@list(port)` the path of a file that lists them, one to a line:
+
+<!-- spit-doc: setup
+source scan : Image .nii.gz [sub, run]
+default entities: {@key}={@value} separated "_"
+default path: out/{@product}/{@entities}
+-->
+
+```text
+operation merge(images: many Image) -> Image .nii.gz
+command merge: fslmerge -t {@output} {images}
+
+operation average(images: many Image) -> Image .nii.gz
+command average: mean_tool --inputs=@join(images) --runs=@join(images.run, ";") -o {@output}
+
+operation register(images: many Image) -> Table .tsv
+command register: register_tool --file-list @list(images) -o {@output}
+
+merged = merge(scan @vary(run))
+averaged = average(scan @vary(run))
+registered = register(scan @vary(run))
+```
+
+For `sub=01` with runs 2 and 10, `average` runs `mean_tool --inputs=out/scan/sub=01_run=2.nii.gz,out/scan/sub=01_run=10.nii.gz --runs=2;10 -o ...`, and `register` gives `register_tool` the path of a file holding the two paths, each on its own line.
+
+- `@join(port)` and `@list(port)` name a `many` input of the operation. They go in a `command` or a `verify` command, as a whole argument or within one, but not as the program and not after `<` or `>`. A check has no ports, so it cannot use them.
+- The artifacts come in the order `{port}` gives them, the [natural order](#dimension-order), so run 2 comes before run 10.
+- `@join` separates the paths with `,`, or with the text after a comma, in double quotes: `@join(images, " ")`, or `""` for none. Write `\"`, `\\`, `\n`, `\r` or `\t` for a quote, a backslash, a newline, a carriage return or a tab. A path that holds the separator is an error, since the tool could not split the argument back into its paths. A collection with no artifacts joins to nothing.
+- `@join(port.dimension)` joins the artifacts' values of a dimension instead, in the same order, as `{port.dimension}` gives them one to an argument.
+- `@list` writes each path whole, as the tool is to open it from where commands run, and ends each with a newline. A backend writes the file when the job starts, before its `verify` commands, gives the same file to each of the job's commands, and removes it when the job ends, whether it succeeds, fails or is stopped. The file is not an output, and where it is written is not part of the job's work.
+- Written in quotes, as `'@join(images)'`, either is text, passed to the tool as it is.
+- `spit dag --commands` shows a join as the joined paths, and a list as `@list(...)` with its paths, since its file is made only when the job starts.
+
 ### A job's dimension values
 
 A command can give a tool the values of the job it runs, as for a read group, a plot's title or a run's name. A placeholder that names a dimension of the job, such as `{sample}`, is that job's value:

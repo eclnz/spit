@@ -207,6 +207,17 @@ fn an_anchored_operation_marks_its_jobs_and_a_wrong_name_is_an_error() {
     let json = text(&output.stdout);
     assert_eq!(json.matches("\"anchored\":true}").count(), 1, "{json}");
     assert_eq!(json.matches("\"anchored\":false}").count(), 1, "{json}");
+    let hovers = spit(&[
+        "check",
+        tree.path().join("main.spit").to_str().unwrap(),
+        "--json",
+        "--hovers",
+    ]);
+    assert!(
+        text(&hovers.stdout).contains("Anchored: its outputs hold their own paths"),
+        "{}",
+        text(&hovers.stdout)
+    );
     let errors = |rest: &str| rendered(&diagnose(&format!("{HEADER}{rest}"), None));
     let found = errors("anchored clen\nc = clean(raw)\n");
     assert!(

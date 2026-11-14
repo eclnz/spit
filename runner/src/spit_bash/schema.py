@@ -76,7 +76,20 @@ class ScalarPart(SchemaModel):
     greatest: float | None = Field(alias="max")
 
 
-CommandPart = str | PathPart | DirPart | StemPart | HerePart | ScalarPart
+class JoinPart(SchemaModel):
+    """A `many` input's paths, in order, joined with `separator` into the argument."""
+
+    join: list[RelativePath]
+    separator: str
+
+
+class ListPart(SchemaModel):
+    """The path of a file the runner writes listing a `many` input's paths, one to a line, in order."""
+
+    list: list[RelativePath]
+
+
+CommandPart = str | PathPart | DirPart | StemPart | HerePart | ScalarPart | JoinPart | ListPart
 Argument = Annotated[list[CommandPart], Field(min_length=1)]
 Command = Annotated[list[Argument], Field(min_length=1)]
 

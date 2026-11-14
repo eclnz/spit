@@ -8,6 +8,7 @@ from functools import cached_property
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, TypeVar
 
+from .lists import ListRead
 from .scalars import Read
 
 if TYPE_CHECKING:
@@ -128,6 +129,8 @@ class Job:
     memory: int | None = None
     # The numbers its `verify` commands and commands read from its input files, each once.
     reads: tuple[Read, ...] = ()
+    # The files listing a `many` input's paths that its `verify` commands and commands read, each once.
+    lists: tuple[ListRead, ...] = ()
 
     @cached_property
     def input_artifacts(self) -> tuple[Artifact, ...]:

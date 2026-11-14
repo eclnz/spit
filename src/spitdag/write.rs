@@ -359,9 +359,10 @@ fn write_outputs(
 /// An argument is an array of parts: a string for text, `{"path": ...}` for
 /// a file, and `{"dir": ..., "of": ...}` or `{"stem": ..., "of": ...}` for
 /// its folder or its name without its extension, with the file they are of,
-/// `{"here": ...}` for a folder under the pipeline's, and `{"scalar": ...,
+/// `{"here": ...}` for a folder under the pipeline's, `{"scalar": ...,
 /// "min": ..., "max": ...}` for the number in a file, with a bound left out
-/// as `null`.
+/// as `null`, and `{"join": [...], "separator": ...}` or `{"list": [...]}`
+/// for a `many` input's files.
 pub(super) fn write_command(out: &mut String, dag: &BoundDag, command: &[Argument]) {
     write_array(out, command, |out, argument| {
         write_array(out, argument, |out, part| match part {
@@ -383,6 +384,24 @@ pub(super) fn write_command(out: &mut String, dag: &BoundDag, command: &[Argumen
                 for (key, bound) in [(",\"min\":", min), (",\"max\":", max)] {
                     out.push_str(key);
                     out.push_str(bound.as_deref().unwrap_or("null"));
+                }
+                out.push('}');
+            }
+            ArgPart::Collection {
+                artifacts,
+                separator,
+            } => {
+                out.push_str(if separator.is_some() {
+                    "{\"join\":"
+                } else {
+                    "{\"list\":"
+                });
+                write_array(out, artifacts, |out, &artifact| {
+                    write_string(out, dag.path(artifact));
+                });
+                if let Some(separator) = separator {
+                    out.push_str(",\"separator\":");
+                    write_string(out, separator);
                 }
                 out.push('}');
             }

@@ -28,7 +28,7 @@ A `.spitdag` is one JSON object, followed by a newline:
 
 | Field | Holds |
 | --- | --- |
-| `version` | The format's version, `15`. A change a reader must know about raises it. Version 6 added each job's [`checks`](#checks). Version 7 added `pipeline_files`, `calls` and each job's `origin`: see [Where jobs come from](#where-jobs-come-from). Version 8 gives each job its [`commands`](#commands) in place of version 7's `command`, each with its `stdin` and `stdout`, see [Standard input and output](#standard-input-and-output), and added its `cores` and `memory`, see [Cores and memory](#cores-and-memory). Version 9 gives every job an `origin`, with the `file` and `line` of its step, where version 8 left it `null` for a step written in the pipeline. Version 10 added `pipeline_folder` and the `here` command part. Version 11 removed each job's `fingerprint`: see [Identifying work](#identifying-work). Version 12 added `output_root` and each artifact's `under`: see [Roots](#roots). Version 13 added the [`scalar` part](#numbers-read-from-files). Version 14 added [`reviews`](#reviews). Version 15 added `tools` and each job's `tools`, see [Tools](#tools), and each job's `anchored`. |
+| `version` | The format's version, `15`. A change a reader must know about raises it. Version 6 added each job's [`checks`](#checks). Version 7 added `pipeline_files`, `calls` and each job's `origin`: see [Where jobs come from](#where-jobs-come-from). Version 8 gives each job its [`commands`](#commands) in place of version 7's `command`, each with its `stdin` and `stdout`, see [Standard input and output](#standard-input-and-output), and added its `cores` and `memory`, see [Cores and memory](#cores-and-memory). Version 9 gives every job an `origin`, with the `file` and `line` of its step, where version 8 left it `null` for a step written in the pipeline. Version 10 added `pipeline_folder` and the `here` command part. Version 11 removed each job's `fingerprint`: see [Identifying work](#identifying-work). Version 12 added `output_root` and each artifact's `under`: see [Roots](#roots). Version 13 added the [`scalar` part](#numbers-read-from-files). Version 14 added [`reviews`](#reviews). Version 15 added `tools` and each job's `tools`, see [Tools](#tools), each job's `anchored`, the [`join` and `list` parts](#collections), and `under` `"pipeline_folder"`: see [Roots](#roots). |
 | `generator` | The program that wrote the file, and its version. |
 | `root` | The absolute dataset folder, which the sources are under, or `null` when it was not known: a `.spitout` that records no root. |
 | `output_root` | The absolute folder the files jobs write are under, and the folder commands run from: see [Roots](#roots). It is `root` when the pipeline names no output root, and `null` when neither is known. |
@@ -243,6 +243,18 @@ The part names an input, so a backend that reruns a job when an input changes re
 
 Run each argument as one word, exactly as given: no shell is involved, so nothing in it is split, expanded or interpreted. Run the command from `output_root`, and resolve each path against its artifact's root: a path under `output_root` is then right as written, and one under `root` names the right file once joined to `root`. `spit dag --commands` shows such a path reached from `output_root`, as `../data/in.txt`.
 
+### Collections
+
+`@join(images)` and `@list(images)` in a template, a `many` input's paths as one argument, become a `join` part, with its separator, and a `list` part. Each holds the paths of the input's artifacts, in the order the `many` placeholder gives them:
+
+```json
+[["--inputs=", {"join": ["in/run=2.nii.gz", "in/run=10.nii.gz"], "separator": ","}], ["--file-list"], [{"list": ["in/run=2.nii.gz", "in/run=10.nii.gz"]}]]
+```
+
+Each path names one of the job's inputs. A `join` part's text is each path, resolved against its artifact's root as a `path` part's is, joined with the separator; a path holding a nonempty separator cannot be split apart again, so refuse the job. A `list` part's text is the path of a file that holds each path, made absolute, followed by a newline, in order; an empty list is an empty file. Write the file when the job starts, before its `verify` commands, give the same file to every command and `verify` command of the job that names the same paths, and remove it when the job ends, whether it succeeds, fails or is cancelled. Neither part is a check's, a program or a redirection. The file's own path is not part of the work: see [Identifying work](#identifying-work). Version 15 added these parts.
+
+`@join(images.run)`, of a dimension's values, is literal text in the DAG.
+
 ### Standard input and output
 
 A command written `wc -l < {table} > {@output}` reads an input on its standard input and writes an output on its standard output. It names the two files in `stdin` and `stdout`, and its `command` holds only the program and its arguments:
@@ -386,8 +398,8 @@ A recipe names a `.spitenv`, which says what each tool is on the machine the job
 SPIT writes no fingerprint: a backend that decides whether a job must run again identifies the work itself. The document holds what it needs.
 
 - A job's `inputs` and `outputs` give each artifact's `product` and `entities`, which identify it apart from its `path`.
-- A command part `{"path": P}`, `{"dir": D, "of": P}`, `{"stem": S, "of": P}` or `{"scalar": P, ...}` names the job's input or output whose `path` is `P`. Each path belongs to one artifact, so replacing `P` with that artifact's product and entities gives the command without its storage paths. The same holds for `stdin`, `stdout` and a check's `path`.
-- A literal part, a `here` part and the order of arguments, commands and a `many` port's artifacts are part of the work as written.
+- A command part `{"path": P}`, `{"dir": D, "of": P}`, `{"stem": S, "of": P}` or `{"scalar": P, ...}` names the job's input or output whose `path` is `P`, and a `join` or `list` part names an input by each of its paths. Each path belongs to one artifact, so replacing `P` with that artifact's product and entities gives the command without its storage paths. The same holds for `stdin`, `stdout` and a check's `path`.
+- A literal part, a `here` part, a `join` part's separator and the order of arguments, commands and a `many` port's artifacts are part of the work as written. Where a `list` part's file is written is not.
 - For a job whose `anchored` is `true`, the `path` of each of its inputs and outputs, and the absolute `root` and `output_root`, are part of its work too: its outputs hold those paths, so a change of path or of root makes it stale, and a backend reruns it rather than moving its outputs to new paths.
 - A job's `tools`, each with its identity in the top-level `tools`, are part of its work: a tool whose identity changed changes the work of every job that names it.
 - An artifact's `type`, a job's `id`, `stage`, `origin`, `cores`, `memory` and `checks` say where the job came from or how to run it, not what it makes.

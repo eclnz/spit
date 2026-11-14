@@ -233,14 +233,26 @@ pub enum ArgPart {
         min: Option<Arc<str>>,
         max: Option<Arc<str>>,
     },
+    /// A `many` input's files, in the order its placeholder gives them:
+    /// joined with `separator` into the argument, as `@join(port)` gives
+    /// them, or, with no separator, the path of a file a backend writes
+    /// listing them, as `@list(port)` does.
+    Collection {
+        artifacts: Vec<ArtifactId>,
+        separator: Option<Arc<str>>,
+    },
 }
 
 impl ArgPart {
     /// The text this part is in a command, given the DAG it belongs to. A
     /// scalar's is the path of the file it reads, since its number is known
-    /// only when the job starts.
+    /// only when the job starts. A collection has no one text: see
+    /// [`ArgPart::shown`].
     pub fn text<'a>(&'a self, dag: &'a BoundDag) -> &'a str {
         match self {
+            Self::Collection { .. } => {
+                unreachable!("a collection's paths are written and shown one by one")
+            }
             Self::Text(text) | Self::Here { text, .. } => text,
             Self::Path(artifact) | Self::Scalar { artifact, .. } => dag.path(*artifact),
             Self::Dir(artifact) => folder_of(dag.path(*artifact)),
@@ -257,9 +269,24 @@ impl ArgPart {
     /// [`ArgPart::text`], with a path under a separate dataset root made
     /// absolute, as [`BoundDag::shown_path`] gives it. A scalar is shown as
     /// a pipeline writes it, with its file's path for its port:
-    /// `@scalar(tr/sub=01.txt, min=5)`.
+    /// `@scalar(tr/sub=01.txt, min=5)`. A join is its paths joined, and a
+    /// list is shown with its paths, as `@list(a.txt, b.txt)`, since its
+    /// file is made only when the job starts.
     pub fn shown<'a>(&'a self, dag: &'a BoundDag) -> Cow<'a, str> {
         match self {
+            Self::Collection {
+                artifacts,
+                separator,
+            } => {
+                let paths: Vec<Cow<'_, str>> = artifacts
+                    .iter()
+                    .map(|&artifact| dag.shown_path(artifact))
+                    .collect();
+                Cow::Owned(match separator {
+                    Some(separator) => paths.join(&**separator),
+                    None => format!("@list({})", paths.join(", ")),
+                })
+            }
             Self::Scalar { artifact, min, max } => Cow::Owned(scalar_text(
                 &dag.shown_path(*artifact),
                 min.as_deref(),

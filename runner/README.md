@@ -218,6 +218,12 @@ $ oxford_asl --tr 6.234000 ...
 - A file that holds anything else, or a number outside the bounds, fails the job before any of its commands start, as ``derivatives/tr/sub=02.txt, read by `@scalar`, holds 4.1, which is under the min of 5``.
 - The file is one of the job's inputs, so the job reruns when it changes. `plan` and `explain` show the read, as `@scalar(derivatives/tr/sub=01.txt, min=5)`, since the number is known only when the job starts.
 
+## Files that list a job's inputs
+
+A SPIT command written `register_tool --file-list @list(images) ...` passes the path of a file listing the `many` input `images`, one absolute path to a line. The runner writes the file in a folder of its own under the system's temporary folder once the job's input checks pass, before its `verify` commands, gives the same file to each of the job's commands, and removes it when the job ends, whether it succeeds, fails or is cancelled. A file that cannot be written fails the job before its commands start. `plan` and `explain` show the part as `@list(...)` with its paths, and where the file is written is not part of the job's work, so it does not make a job rerun.
+
+`@join(images)` needs nothing at run time: the runner joins the paths as commands name them, and refuses a DAG in which a path holds the separator.
+
 ## Reviews
 
 A [review](https://github.com/eclnz/spit/blob/main/docs/language-reference.md#reviews) is a person's verdict on an artifact. SPIT applies the verdicts when it makes the DAG: what a review rejects, or that nobody has judged yet, is withheld, with the jobs that would read it, while the jobs that make what a person looks at still run. The DAG records what each review withheld, and `plan` and `run` report it after their other lines, `plan` on standard output and `run` on standard error after its summary:

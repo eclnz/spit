@@ -9,7 +9,7 @@ use crate::model::{
 };
 use crate::parser::SourceMap;
 use crate::template::builtin::{CORES, HERE, OUTPUT};
-use crate::template::{CommandPart, ScalarRead, SCALAR};
+use crate::template::{CollectionRead, CommandPart, ScalarRead, SCALAR};
 
 use crate::template::{CommandError, CommandTemplate, Stream};
 
@@ -283,6 +283,10 @@ fn check_line_placeholders(
             let name = match part {
                 CommandPart::Literal(_) => continue,
                 CommandPart::Placeholder(name) => name,
+                CommandPart::Collection(read) => {
+                    check_collection(operation, read, callers)?;
+                    continue;
+                }
                 CommandPart::Scalar(read) => {
                     check_scalar(operation, read)?;
                     continue;
@@ -428,6 +432,43 @@ fn check_scalar(operation: &OperationDef, read: &ScalarRead) -> Result<(), Comma
                 operation.name
             ))
         }
+    }
+}
+
+/// Check that `read`, a `@join` or `@list`, names a `many` input of
+/// `operation`, and for `@join(port.dimension)`, a dimension each of its
+/// artifacts has.
+fn check_collection(
+    operation: &OperationDef,
+    read: &CollectionRead,
+    callers: &Callers<'_, '_>,
+) -> Result<(), CommandError> {
+    let (port, field) = facet(&read.subject);
+    let fail = |message: String| Err(CommandError::new(message).focus(&read.subject));
+    let index = match slot(operation, port) {
+        Some(Slot::Input(index)) if operation.inputs[index].cardinality == Cardinality::Many => {
+            index
+        }
+        Some(Slot::Input(_)) => {
+            return fail(format!(
+                "`{read}`: `{port}` is a `one` input, so it has one file; write `{{{port}}}`, or make it `{port}: many`"
+            ))
+        }
+        _ => {
+            return fail(format!(
+                "`{read}`: `{}` has no `many` input port `{port}`",
+                operation.name
+            ))
+        }
+    };
+    match field {
+        Facet::Path => Ok(()),
+        Facet::Dimension(dimension) => {
+            check_input_dimension(operation, index, &read.subject, dimension, callers)
+        }
+        Facet::Dir | Facet::Stem => fail(format!(
+            "`{read}` gives the input's paths or a dimension's values, not their `.dir` or `.stem`"
+        )),
     }
 }
 

@@ -225,7 +225,7 @@ pub(super) fn discover(
         }
         Err(unmatched) => discovery.unmatched = Some(unmatched),
     }
-    super::local::append(pipeline, &mut discovery.inventory)?;
+    super::local::append(pipeline, root, &mut discovery)?;
     Ok(discovery)
 }
 
@@ -433,7 +433,7 @@ pub(super) fn readable_value(encoded: &str) -> Result<String, &'static str> {
 /// Whether `file` is a pipeline, recipe, `.spitout` or `.spitdag`.
 fn is_spit_file(file: &str) -> bool {
     Path::new(file).extension().is_some_and(|extension| {
-        ["spit", "spitin", "spitout", "spitdag"]
+        ["spit", "spitin", "spitout", "spitdag", "spitenv"]
             .iter()
             .any(|spit| extension == *spit)
     })

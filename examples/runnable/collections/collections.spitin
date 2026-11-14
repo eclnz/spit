@@ -1,0 +1,4 @@
+pipeline collections.spit
+root .
+output output
+tools from runtime.spitenv
