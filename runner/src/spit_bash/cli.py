@@ -11,6 +11,7 @@ import signal
 import subprocess
 import sys
 from enum import Enum
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
 from .load import changed_pipeline_files, load_dag
@@ -33,6 +34,7 @@ from .report.summary import Summary, left_out
 from .leftovers import leftovers, lines as leftover_lines, remove as remove_leftovers
 from . import clean, confirm, runs, tools
 from .schedule import over_memory
+from .schema import VERSION as DAG_VERSION
 from .selection import Selected, Selection, parse_entities, parse_stage, select
 
 SPIT_SUFFIXES = (".spitin", ".spit", ".spitout")
@@ -83,6 +85,14 @@ HELP = {
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="spit-bash", description="Plan and run SPIT .spitdag jobs")
+    try:
+        release = version("spit-bash")
+    except PackageNotFoundError:
+        release = "(uninstalled)"
+    parser.add_argument("-V", "--version", action="version", version=f"%(prog)s {release}",
+                        help="print the runner version and exit")
+    parser.add_argument("--dag-version", action="version", version=str(DAG_VERSION),
+                        help="print the .spitdag format version read by the runner and exit")
     subcommands = parser.add_subparsers(required=True)
     for action in Action:
         command = subcommands.add_parser(action.value, help=HELP[action], description=HELP[action],
