@@ -55,6 +55,7 @@ def placed(data):
     data.setdefault("tools", [])
     for job in data["jobs"]:
         job.setdefault("tools", [])
+        job.setdefault("anchored", False)
     made = {artifact["path"] for job in data["jobs"] for artifact in job["outputs"].values()}
     artifacts = [*data["external_inputs"], *data["targets"]]
     for job in data["jobs"]:

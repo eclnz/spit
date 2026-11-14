@@ -24,6 +24,9 @@ pub(crate) enum Keyword {
     /// `uses operation: tools`, the tools each job of an operation depends
     /// on, and after `default`, those of every operation in a file or stage.
     Uses,
+    /// `anchored operation, ...`: operations whose tools write their own
+    /// paths into their outputs.
+    Anchored,
     /// `check name(params): command`, a test of one artifact.
     Check,
     /// `review name`, which declares a review, and in a recipe `review name
@@ -98,7 +101,7 @@ pub(crate) struct Spec {
 
 impl Keyword {
     /// Every keyword, in declaration order, which the assertion below keeps.
-    pub(crate) const ALL: [Self; 29] = [
+    pub(crate) const ALL: [Self; 30] = [
         Self::Source,
         Self::Dimensions,
         Self::Types,
@@ -108,6 +111,7 @@ impl Keyword {
         Self::Resources,
         Self::Tool,
         Self::Uses,
+        Self::Anchored,
         Self::Check,
         Self::Review,
         Self::Path,
@@ -143,6 +147,7 @@ impl Keyword {
             Self::Resources => ("resources", true, Pipeline, true),
             Self::Tool => ("tool", true, Pipeline, true),
             Self::Uses => ("uses", true, Pipeline, true),
+            Self::Anchored => ("anchored", true, Pipeline, true),
             Self::Check => ("check", true, Pipeline, true),
             // `review name from file.csv` names a review's file in a
             // recipe; the parser rejects `review name` alone there.

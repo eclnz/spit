@@ -12,7 +12,8 @@ MOVES_NAMED = 3
 
 # The words for each of `reuse.identity.PARTS`, in the order they are named.
 PART_NAMES = {"commands": "command", "verify": "verify commands",
-              "inputs": "the artifacts it reads", "outputs": "the artifacts it makes"}
+              "inputs": "the artifacts it reads", "outputs": "the artifacts it makes",
+              "paths": "the paths it stores"}
 
 
 def parts(changed: tuple[str, ...] | None) -> str:

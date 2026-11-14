@@ -72,6 +72,7 @@ pub enum Word {
     Tool,
     Uses,
     ToolsFrom,
+    Anchored,
 }
 
 /// What a word's hover says.
@@ -96,7 +97,7 @@ impl Word {
 }
 
 /// Every word's documentation, in the order of [`Word`].
-pub static DOCS: [Doc; 63] = [
+pub static DOCS: [Doc; 64] = [
     Doc {
         name: "source",
         kind: "keyword",
@@ -537,5 +538,12 @@ pub static DOCS: [Doc; 63] = [
         anchor: "tools",
         example: "tools from hpc.spitenv",
         summary: "Names the `.spitenv` file that says what each tool is on the machine the jobs run on: a text compared as it is, such as a container's digest, or `probe program args`, whose output is the tool's identity. A runner reruns the jobs whose tools changed.",
+    },
+    Doc {
+        name: "anchored",
+        kind: "keyword",
+        anchor: "tools-that-store-their-paths",
+        example: "anchored feat, group_feat",
+        summary: "Marks operations whose tools write their own file paths into their outputs, where something later reads them, as FSL FEAT's `design.fsf` does. A runner reruns such a job when its paths or the dataset's folder change, and never moves its outputs to new paths. Tools that only record a command line, as `bwa` and `samtools` do, need no mark.",
     },
 ];

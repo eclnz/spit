@@ -286,6 +286,7 @@ impl<'p> StepCommands<'p> {
                 .collect(),
             resources: self.resources,
             tools: self.operation.tools.clone(),
+            anchored: self.operation.anchored,
         }
     }
 }

@@ -218,6 +218,8 @@ pub(crate) enum StatementKind {
     Tool(Vec<String>, Place),
     /// A `uses` line, and where its operation's name is.
     Uses(UsesDef, Place),
+    /// An `anchored` line's operations, and where the line's text is.
+    Anchored(Vec<String>, Place),
     /// A `default uses:` line: the tools of every operation declared in
     /// `stage` or, outside every stage, in the file.
     DefaultUses {
@@ -417,6 +419,16 @@ impl StatementKind {
     fn tool(original: &str, declaration: &str, number: usize) -> Result<Self, ParseError> {
         let names = tools::parse_tool_names(declaration, number)?;
         Ok(Self::Tool(
+            names,
+            source_map::tail_place(original, number, declaration),
+        ))
+    }
+
+    /// An `anchored` line, `declaration` being the text after its keyword
+    /// in `original`.
+    fn anchored(original: &str, declaration: &str, number: usize) -> Result<Self, ParseError> {
+        let names = tools::parse_anchored(declaration, number)?;
+        Ok(Self::Anchored(
             names,
             source_map::tail_place(original, number, declaration),
         ))

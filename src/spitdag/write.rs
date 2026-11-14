@@ -321,6 +321,7 @@ fn write_job(
         None => out.push_str("null"),
     });
     object.raw("tools", tools);
+    object.raw("anchored", if step.anchored { "true" } else { "false" });
     object.finish();
 }
 
@@ -473,6 +474,7 @@ mod tests {
             origin: None,
             resources: crate::model::Resources::default(),
             tools: crate::model::ToolSet::default(),
+            anchored: false,
         }
     }
 

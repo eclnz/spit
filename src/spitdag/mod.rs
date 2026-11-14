@@ -97,6 +97,9 @@ pub struct BoundStep {
     pub resources: Resources,
     /// The tools each of its jobs depends on.
     pub tools: ToolSet,
+    /// Whether its jobs' outputs hold their own paths, so a backend reruns a
+    /// job whose paths change rather than moving its outputs.
+    pub anchored: bool,
 }
 
 /// Where a step is written: the line and its file, and for a step a call

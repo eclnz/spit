@@ -183,9 +183,25 @@ mod tests {
     }
 
     #[test]
+    fn a_comment_ends_a_line_and_is_not_part_of_an_identity() {
+        let tools = parse_tools("tools:\n    fsl: 6.0.7   # pinned\n    ants: probe antsRegistration --version  # prints a banner\n")
+            .expect("a valid .spitenv");
+        assert_eq!(tools[0].identity, ToolIdentity::Declared("6.0.7".into()));
+        assert_eq!(
+            tools[1].identity,
+            ToolIdentity::Probe(vec!["antsRegistration".into(), "--version".into()])
+        );
+    }
+
+    #[test]
     fn mistakes_are_on_their_lines() {
         let error = |text: &str| parse_tools(text).expect_err("invalid");
         assert_eq!(error("tools:\n  a: probe\n").line(), 2);
+        assert_eq!(error("tools:\n  a: probe   # no command\n").line(), 2);
+        assert_eq!(error("tools:\n  a:\n").line(), 2);
+        assert_eq!(error("tools:\n  my-tool: x\n").line(), 2);
+        assert_eq!(error("tools:\n  a x\n").line(), 2);
+        assert_eq!(error("  tools:\n  a: x\n").line(), 1);
         assert_eq!(error("tools:\n  a: x\n  a: y\n").line(), 3);
         assert_eq!(error("tools:\n  a: x\nb: y\n").line(), 3);
         assert_eq!(error("tools:\n  a: probe ls > out\n").line(), 2);

@@ -257,6 +257,9 @@ pub struct OperationDef {
     /// The tools its jobs depend on, from the `uses` lines of the file
     /// declaring it.
     pub tools: ToolSet,
+    /// Whether its tools write its jobs' file paths into their outputs, from
+    /// an `anchored` line.
+    pub anchored: bool,
 }
 
 /// A step in an operation's body, as written: the call it makes over the
@@ -311,6 +314,7 @@ impl OperationDef {
             steps: Vec::new(),
             file: None,
             tools: ToolSet::default(),
+            anchored: false,
         }
     }
 

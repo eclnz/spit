@@ -1,5 +1,6 @@
-//! Lowering `tool`, `uses` and `default uses:` lines: each operation the
-//! file declares gets the tools its jobs depend on.
+//! Lowering `tool`, `uses`, `default uses:` and `anchored` lines: each
+//! operation the file declares gets the tools its jobs depend on, and
+//! whether its tools store their own paths.
 
 use crate::model::{stage_and_parents, Pipeline, ToolList, ToolSet};
 use crate::parser::{ParseError, SourceMap, StatementKind};
@@ -15,11 +16,13 @@ pub(super) struct ToolLines {
     uses: Vec<Place>,
     /// Each `default uses:` list, by its stage, and where it is.
     defaults: Vec<(Option<String>, Place)>,
+    /// Each operation an `anchored` line names, and where the line is.
+    anchored: Vec<(String, Place)>,
 }
 
 impl ToolLines {
-    /// Add a `tool`, `uses` or `default uses:` line to `pipeline`. Any other
-    /// statement is left alone.
+    /// Add a `tool`, `uses`, `default uses:` or `anchored` line to
+    /// `pipeline`. Any other statement is left alone.
     pub(super) fn add(
         &mut self,
         pipeline: &mut Pipeline,
@@ -89,16 +92,31 @@ impl ToolLines {
                 *slot = Some(tools.clone());
                 self.defaults.push((stage.clone(), place.clone()));
             }
+            StatementKind::Anchored(names, place) => {
+                if let Some(name) = names
+                    .iter()
+                    .find(|name| self.anchored.iter().any(|(earlier, _)| earlier == *name))
+                {
+                    return Err(ParseError::new(
+                        line,
+                        format!("operation `{name}` is already marked `anchored`"),
+                    )
+                    .within(place));
+                }
+                self.anchored
+                    .extend(names.iter().map(|name| (name.clone(), place.clone())));
+            }
             _ => {}
         }
         Ok(())
     }
 
-    /// Check every list against the declared tools and operations, then give
-    /// each operation the file declares its [`ToolSet`]: the file's default,
-    /// then each stage's from the outermost, then its own `uses` line. An
-    /// imported operation keeps the set its own file gave it, and the tools
-    /// it names join `pipeline.tools`.
+    /// Check every list against the declared tools and operations, mark each
+    /// operation an `anchored` line names, then give each operation the file
+    /// declares its [`ToolSet`]: the file's default, then each stage's from
+    /// the outermost, then its own `uses` line. An imported operation keeps
+    /// the set and the mark its own file gave it, and the tools it names join
+    /// `pipeline.tools`.
     pub(super) fn apply(
         &self,
         pipeline: &mut Pipeline,
@@ -148,6 +166,28 @@ impl ToolLines {
                 .within(place));
             }
             undeclared(&uses.tools, place)?;
+        }
+        for (name, place) in &self.anchored {
+            // The mark travels with the operation, so only its own file sets it.
+            if lines.imported.contains(name) {
+                return Err(ParseError::new(
+                    place.line,
+                    format!("operation `{name}` is imported; mark it `anchored` in the file that declares it"),
+                )
+                .within(place));
+            }
+            let operation = pipeline
+                .operations
+                .iter_mut()
+                .find(|operation| &operation.name == name)
+                .ok_or_else(|| {
+                    ParseError::new(
+                        place.line,
+                        format!("`anchored` names operation `{name}`, which is not declared"),
+                    )
+                    .within(place)
+                })?;
+            operation.anchored = true;
         }
         let mut imported_tools = Vec::new();
         for operation in &mut pipeline.operations {

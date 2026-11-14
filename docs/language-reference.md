@@ -4,7 +4,7 @@ This manual defines valid `.spit` pipelines, `.spitin` recipes, and `.spitout` i
 
 A `#` that starts a word begins a comment, as in Bash. A `#` inside a word or in quotes is kept, so `--color=#fff` and `'#run'` are ordinary arguments.
 
-A line's first word says what it is, so the words that start statements are reserved: no product, whether a source or a step's output, may be named `use`, `root`, `output`, `source`, `discover`, `operation`, `command`, `verify`, `resources`, `tool`, `uses`, `tools`, `check`, `review`, `require`, `exclude`, `path`, `ext`, `default`, `entities`, `stage` or `dimensions`, nor `drop`, `skip` or `sidecars`. Those three, and `shell-source`, start a line only to give an error that says what to write instead. `check = clean(raw)` is an error that says so.
+A line's first word says what it is, so the words that start statements are reserved: no product, whether a source or a step's output, may be named `use`, `root`, `output`, `source`, `discover`, `operation`, `command`, `verify`, `resources`, `tool`, `uses`, `tools`, `anchored`, `check`, `review`, `require`, `exclude`, `path`, `ext`, `default`, `entities`, `stage` or `dimensions`, nor `drop`, `skip` or `sidecars`. Those three, and `shell-source`, start a line only to give an error that says what to write instead. `check = clean(raw)` is an error that says so.
 
 ## Keyword blocks
 
@@ -33,7 +33,7 @@ command:
     denoise: dn {image} {@output}
 ```
 
-`source:`, `operation:`, `command:`, `verify:`, `resources:`, `tool:`, `uses:`, `check:`, `review:` and `path:` open blocks in a pipeline, and `path:`, `require:`, `exclude:` and `review:` in a recipe. An entry is read as its keyword's statement would be, with the same errors on its own line; a `source:` block inside a stage is an error at each entry, as a `source` line there is. The entries of a block share one indentation, and the next line that is not indented beneath the keyword ends it. In an `operation:` block, an entry that ends in `:` opens the [body of steps](#operations-carried-out-by-steps) that carries it out, indented beneath the entry, and in a `command:` block, the [lines of a command](#commands-of-several-lines), as `command sort:` does. [Defaults](#defaults) have a block of their own, `default:`, and a stage's lines are a block of their own too.
+`source:`, `operation:`, `command:`, `verify:`, `resources:`, `tool:`, `uses:`, `anchored:`, `check:`, `review:` and `path:` open blocks in a pipeline, and `path:`, `require:`, `exclude:` and `review:` in a recipe. An entry is read as its keyword's statement would be, with the same errors on its own line; a `source:` block inside a stage is an error at each entry, as a `source` line there is. The entries of a block share one indentation, and the next line that is not indented beneath the keyword ends it. In an `operation:` block, an entry that ends in `:` opens the [body of steps](#operations-carried-out-by-steps) that carries it out, indented beneath the entry, and in a `command:` block, the [lines of a command](#commands-of-several-lines), as `command sort:` does. [Defaults](#defaults) have a block of their own, `default:`, and a stage's lines are a block of their own too.
 
 ### Statements over several lines
 
@@ -501,6 +501,33 @@ denoised = denoise(dwi)         # mrtrix3 only
 - A pipeline run without a recipe, or with a `.spitout`, has no `.spitenv`, so its jobs depend on no tool.
 
 Inference from programs would not work: `dwifslpreproc`, `5ttgen fsl` and `dwibiascorrect fsl` are MRtrix3 programs that run FSL. `spit check hpc.spitenv` checks a `.spitenv` alone, and `spit check dataset.spitin` checks it against the pipeline.
+
+### Tools that store their paths
+
+A runner identifies a job by what it makes and runs, not by where its files are, so a change of path rules, or a dataset moved to another folder, leaves finished jobs current. Most tools are fine with that. Some write their own paths into an output that is read later: FSL FEAT's `design.fsf` holds absolute paths, and a group analysis's `.gfeat` names its first-level `.feat` folders. A moved file then names a place that is gone. `anchored` marks such operations:
+
+<!-- spit-doc: setup
+source bold : Bold .nii.gz [sub]
+source design : Fsf .fsf
+default entities: {@key}={@value} separated "_"
+default path: out/{@product}[/{@entities}]
+-->
+
+```text
+operation feat(bold: Bold, design: Fsf) -> FeatDir .feat/
+command feat: feat {design} {bold} {@output}
+operation group_feat(firsts: many FeatDir, design: Fsf) -> FeatDir .gfeat/
+command group_feat: feat {design} {firsts} {@output}
+anchored feat, group_feat
+
+firsts = feat(bold, design)
+group = group_feat(firsts @vary(sub), design)
+```
+
+- A runner reruns an anchored job when the path of a file it reads or writes changes, or when the dataset's folder does, and never moves its outputs to new paths: see [Identifying work](spitdag.md#identifying-work).
+- The mark belongs to the operation, wherever it is called, and an imported operation keeps it. `anchored` names one or more operations the file declares, separated by commas, or one on each line of an `anchored:` block, before or after their declarations. Naming an operation that is not declared, one twice, or an imported one, whose own file marks it, is an error.
+- Tools that only record how an output was made, such as the `@PG` lines of `bwa mem` and `samtools sort`, or MRtrix3's `command_history`, need no mark: their outputs are still right after a move.
+- A `{x.dir}` or `{x.stem}` in a command is already part of a job's work, so it needs no mark either.
 
 ### Files beside the pipeline
 
@@ -1553,7 +1580,7 @@ A `.spit` pipeline is the reusable graph: what work to do and where its results 
 
 | Line | Pipeline | Recipe |
 | --- | --- | --- |
-| `source`, `dimensions`, `types`, `type`, `operation`, `command`, `verify`, `resources`, `tool`, `uses`, `check`, steps, `stage`, `use`, `default ext:`, `default check:`, `default review:` | yes | no |
+| `source`, `dimensions`, `types`, `type`, `operation`, `command`, `verify`, `resources`, `tool`, `uses`, `anchored`, `check`, steps, `stage`, `use`, `default ext:`, `default check:`, `default review:` | yes | no |
 | `path product:` for a product a step makes | yes | no |
 | `path product:` for a source that is not declared `beside` another | either one, not both | either one, not both |
 | `default path:` | covers outputs, and sources nothing else covers | covers sources only |
