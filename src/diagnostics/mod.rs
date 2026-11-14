@@ -286,6 +286,18 @@ pub fn diagnose_inputs(text: &str) -> Vec<Diagnostic> {
     }
 }
 
+/// Check a `.spitenv`'s text: its first error, if it has one.
+pub fn diagnose_tools(text: &str) -> Vec<Diagnostic> {
+    let text = without_bom(text);
+    match crate::inputs::parse_tools(text) {
+        Ok(_) => Vec::new(),
+        Err(parse) => {
+            let diagnostic = Diagnostic::located(DiagnosticSource::Pipeline, &parse, text);
+            finish(vec![diagnostic], text, None)
+        }
+    }
+}
+
 /// Each parse error in `text` as a diagnostic.
 fn located_all<'a>(
     source: DiagnosticSource,

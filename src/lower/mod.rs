@@ -11,14 +11,14 @@ mod entities;
 mod expand;
 pub(crate) mod imports;
 mod reviews;
+mod tools;
 
 use expand::BodyCheck;
 
 use crate::model::{
-    CallId, Cardinality, CheckDef, CheckId, CommandDef, CommandId, CommandRole, CoverageRule,
-    DefaultChecks, Exclusion, InputBinding, InputRules, Invocation, OperationDef, Pipeline,
-    ProductDef, ProductId, ResourcesDef, ResourcesId, SidecarGroup, SourceInventory, StageDef,
-    StepOutput,
+    CallId, Cardinality, CheckDef, CheckId, CommandDef, CommandId, CoverageRule, DefaultChecks,
+    Exclusion, InputBinding, InputRules, Invocation, OperationDef, Pipeline, ProductDef, ProductId,
+    ResourcesDef, ResourcesId, SidecarGroup, SourceInventory, StageDef, StepOutput,
 };
 use crate::order::{order_dimensions, Output};
 use crate::parser::{
@@ -42,6 +42,7 @@ pub(crate) struct PipelineBuilder {
     /// Whether a `types` line has been read.
     types_line: bool,
     entities: entities::EntitiesDeclarations,
+    tools: tools::ToolLines,
     /// Each product a step makes, and whether the step wrote its dimensions.
     outputs: BTreeMap<String, Output>,
     /// Each product's id, the first of a name, so a step finds its inputs
@@ -385,7 +386,7 @@ pub(crate) fn lower(
     // statements that failed, as the pipeline would read once they are
     // fixed or gone. Each gives its first error.
     let checks = [
-        check_bodies_have_no_commands(&builder),
+        expand::check_bodies_have_no_commands(&builder),
         check_source_beside_paths(&builder),
         order_dimensions(
             &mut builder.pipeline.products,
@@ -394,43 +395,10 @@ pub(crate) fn lower(
             &builder.lines,
         ),
         builder.entities.validate(&mut builder.pipeline),
+        builder.tools.apply(&mut builder.pipeline, &builder.lines),
     ];
     errors.extend(checks.into_iter().filter_map(Result::err));
     (builder, errors)
-}
-
-/// An operation with a body is carried out by its steps, so it takes no
-/// `command` or `verify` line of its own.
-fn check_bodies_have_no_commands(builder: &PipelineBuilder) -> Result<(), ParseError> {
-    let PipelineBuilder {
-        pipeline,
-        lines,
-        operation_at,
-        ..
-    } = builder;
-    for (index, command) in pipeline.commands.iter().enumerate() {
-        let Some(&operation) = operation_at.get(&command.operation) else {
-            continue;
-        };
-        let Some(place) = lines.command(CommandId::at(index)) else {
-            continue;
-        };
-        if !pipeline.operations[operation].steps.is_empty() {
-            return Err(ParseError::new(
-                place.line,
-                format!(
-                    "operation `{}` is carried out by the steps in its body, so it takes no `{}` line; give each step's operation its own",
-                    command.operation,
-                    match command.role {
-                        CommandRole::Run => "command",
-                        CommandRole::Verify => "verify",
-                    }
-                ),
-            )
-            .within(&place));
-        }
-    }
-    Ok(())
 }
 
 /// A source written beside another takes the other's path, so it has no
@@ -625,6 +593,12 @@ fn lower_statement(
             builder.add_extension(stage.as_deref(), extension, statement.place.line)?;
         }
         StatementKind::FlowStep(flow) => builder.add_flow_step(flow)?,
+        kind @ (StatementKind::Tool(..)
+        | StatementKind::Uses(..)
+        | StatementKind::DefaultUses { .. }) => {
+            let line = statement.place.line;
+            builder.tools.add(&mut builder.pipeline, kind, line)?;
+        }
     }
     Ok(())
 }

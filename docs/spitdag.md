@@ -1,6 +1,6 @@
 # The `.spitdag` format
 
-A `.spitdag` is what `spit dag -o` writes and `spit dag --json` prints: every job a pipeline resolves to over one dataset, each with its files and its commands. A backend that runs the jobs reads nothing else: no pipeline, path rule or command template. This page describes version 14, the version SPIT writes. Use `spit dag --commands` for a readable view of the same commands.
+A `.spitdag` is what `spit dag -o` writes and `spit dag --json` prints: every job a pipeline resolves to over one dataset, each with its files and its commands. A backend that runs the jobs reads nothing else: no pipeline, path rule or command template. This page describes version 15, the version SPIT writes. Use `spit dag --commands` for a readable view of the same commands.
 
 ## Document
 
@@ -8,13 +8,14 @@ A `.spitdag` is one JSON object, followed by a newline:
 
 ```json
 {
-  "version": 14,
+  "version": 15,
   "generator": {"name": "spit", "version": "0.5.0"},
   "root": "/data/study",
   "output_root": "/data/study-results",
   "external_inputs": [ARTIFACT, ...],
   "targets": [ARTIFACT, ...],
   "executables": ["sort", ...],
+  "tools": [TOOL, ...],
   "removed": [REMOVAL, ...],
   "left_out": [LEFT_OUT, ...],
   "reviews": [REVIEW, ...],
@@ -27,13 +28,14 @@ A `.spitdag` is one JSON object, followed by a newline:
 
 | Field | Holds |
 | --- | --- |
-| `version` | The format's version, `14`. A change a reader must know about raises it. Version 6 added each job's [`checks`](#checks). Version 7 added `pipeline_files`, `calls` and each job's `origin`: see [Where jobs come from](#where-jobs-come-from). Version 8 gives each job its [`commands`](#commands) in place of version 7's `command`, each with its `stdin` and `stdout`, see [Standard input and output](#standard-input-and-output), and added its `cores` and `memory`, see [Cores and memory](#cores-and-memory). Version 9 gives every job an `origin`, with the `file` and `line` of its step, where version 8 left it `null` for a step written in the pipeline. Version 10 added `pipeline_folder` and the `here` command part. Version 11 removed each job's `fingerprint`: see [Identifying work](#identifying-work). Version 12 added `output_root` and each artifact's `under`: see [Roots](#roots). Version 13 added the [`scalar` part](#numbers-read-from-files). Version 14 added [`reviews`](#reviews). |
+| `version` | The format's version, `15`. A change a reader must know about raises it. Version 6 added each job's [`checks`](#checks). Version 7 added `pipeline_files`, `calls` and each job's `origin`: see [Where jobs come from](#where-jobs-come-from). Version 8 gives each job its [`commands`](#commands) in place of version 7's `command`, each with its `stdin` and `stdout`, see [Standard input and output](#standard-input-and-output), and added its `cores` and `memory`, see [Cores and memory](#cores-and-memory). Version 9 gives every job an `origin`, with the `file` and `line` of its step, where version 8 left it `null` for a step written in the pipeline. Version 10 added `pipeline_folder` and the `here` command part. Version 11 removed each job's `fingerprint`: see [Identifying work](#identifying-work). Version 12 added `output_root` and each artifact's `under`: see [Roots](#roots). Version 13 added the [`scalar` part](#numbers-read-from-files). Version 14 added [`reviews`](#reviews). Version 15 added `tools` and each job's `tools`: see [Tools](#tools). |
 | `generator` | The program that wrote the file, and its version. |
 | `root` | The absolute dataset folder, which the sources are under, or `null` when it was not known: a `.spitout` that records no root. |
 | `output_root` | The absolute folder the files jobs write are under, and the folder commands run from: see [Roots](#roots). It is `root` when the pipeline names no output root, and `null` when neither is known. |
 | `external_inputs` | Every artifact a job reads but no job writes, once each: the sources. Ordered by path in natural order, the order `many` inputs take, so `wave2` comes before `wave10`. |
 | `targets` | Every artifact a job writes but no job reads: what a full run leaves behind. Ordered by the job that writes it. |
-| `executables` | The program each command, `verify` command and check starts with, once each, in text order. A command whose first word is a path names no program and is left out. A backend can check these are installed before running anything. |
+| `executables` | The program each command, `verify` command, check and tool probe starts with, once each, in text order. A command whose first word is a path names no program and is left out. A backend can check these are installed before running anything. |
+| `tools` | What each tool is on the machine the jobs run on, from the recipe's `.spitenv`: see [Tools](#tools). `[]` without one. |
 | `removed` | What the input stage left out of the dataset, and why: see [Removal](#removal). `[]` when nothing was. |
 | `left_out` | Outputs whose jobs could not be planned, each with its reasons: see [Left out](#left-out). `[]` for a complete plan. |
 | `reviews` | Each review the pipeline attaches, with its file and what it withheld: see [Reviews](#reviews). `[]` for a pipeline with none. |
@@ -155,7 +157,8 @@ A withheld artifact is not incomplete: a plan with reviews is complete, and `lef
   "verify": [[ARGUMENT, ...], ...],
   "checks": [CHECK, ...],
   "cores": 8,
-  "memory": 17179869184
+  "memory": 17179869184,
+  "tools": ["mrtrix3", "fsl"]
 }
 ```
 
@@ -174,6 +177,7 @@ A withheld artifact is not incomplete: a plan with reviews is complete, and `lef
 | `checks` | The checks of single artifacts the job reads and writes, in the order they run: see [Checks](#checks). `[]` for none. |
 | `cores` | The number of cores the job uses, a whole number from 1: see [Cores and memory](#cores-and-memory). |
 | `memory` | The most memory the job needs, in bytes, or `null` for no claim. |
+| `tools` | The names of the [tools](#tools) the job depends on, in the order of the top-level `tools`. |
 
 ### Commands
 
@@ -354,6 +358,25 @@ A job's `origin` says where the step that made it is written:
 
 None of these is part of a job's work. An edit elsewhere in a library, such as to a comment, changes a blob id and changes no command.
 
+## Tools
+
+A recipe names a `.spitenv`, which says what each tool is on the machine the jobs run on, and the pipeline says which tools each operation's jobs depend on: see [Tools](language-reference.md#tools). Each tool is an object:
+
+```json
+{"name": "mrtrix3", "identity": null, "probe": ["mrconvert", "-version"]}
+{"name": "synthseg", "identity": "docker.io/lab/synthseg@sha256:4f1c", "probe": null}
+```
+
+| Field | Holds |
+| --- | --- |
+| `name` | The tool's name, unique in `tools`. |
+| `identity` | The text the `.spitenv` gives, compared as it is; `null` for a tool with a probe. |
+| `probe` | A command as a list of plain strings, run with no shell; `null` for a tool with an `identity`. |
+
+- Run each probe once, before any job, on the machine the jobs run on, from the dataset root. Its standard output, as bytes, is the tool's identity. A probe that fails, or cannot be started, stops the run before any job starts.
+- A job's `tools` names each tool it depends on. A job with `[]` depends on none, as every job does in a DAG without a `.spitenv`.
+- A tool changes which jobs must run again, never how a job runs.
+
 ## Identifying work
 
 SPIT writes no fingerprint: a backend that decides whether a job must run again identifies the work itself. The document holds what it needs.
@@ -361,6 +384,7 @@ SPIT writes no fingerprint: a backend that decides whether a job must run again 
 - A job's `inputs` and `outputs` give each artifact's `product` and `entities`, which identify it apart from its `path`.
 - A command part `{"path": P}`, `{"dir": D, "of": P}`, `{"stem": S, "of": P}` or `{"scalar": P, ...}` names the job's input or output whose `path` is `P`. Each path belongs to one artifact, so replacing `P` with that artifact's product and entities gives the command without its storage paths. The same holds for `stdin`, `stdout` and a check's `path`.
 - A literal part, a `here` part and the order of arguments, commands and a `many` port's artifacts are part of the work as written.
+- A job's `tools`, each with its identity in the top-level `tools`, are part of its work: a tool whose identity changed changes the work of every job that names it.
 - An artifact's `type`, a job's `id`, `stage`, `origin`, `cores`, `memory` and `checks` say where the job came from or how to run it, not what it makes.
 
 A backend that must rerun a job after its inputs change combines its identity of the work with its own record of the files, such as their modification times or hashes.

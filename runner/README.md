@@ -1,6 +1,6 @@
 # spit-bash
 
-`spit-bash` runs the jobs of a [SPIT](../README.md) pipeline on one machine. Give it a recipe and it runs `spit dag` for you; give it a saved `.spitdag` or `dag --json` output and it needs nothing else, not the original `.spit` pipeline or `.spitout` inventory. It reads version 14 of SPIT's DAG format, and no other: a DAG of another version is rejected before anything runs, so use a `spit` and a `spit-bash` that match.
+`spit-bash` runs the jobs of a [SPIT](../README.md) pipeline on one machine. Give it a recipe and it runs `spit dag` for you; give it a saved `.spitdag` or `dag --json` output and it needs nothing else, not the original `.spit` pipeline or `.spitout` inventory. It reads version 15 of SPIT's DAG format, and no other: a DAG of another version is rejected before anything runs, so use a `spit` and a `spit-bash` that match.
 
 See the [runnable examples](../examples/runnable/README.md) for recipes to run, their commands, and expected output.
 
@@ -82,6 +82,20 @@ result = transform(script, lines)
 ```
 
 With `scripts/transform.py` and `input.txt` under the dataset root, run the pipeline with `spit-bash run analysis.spit --root DATASET`. The compiler puts `scripts/transform.py` in the job's input list. When it changes, that operation reruns; a command argument that is not declared as an input is not inferred as one.
+
+## Tools
+
+A recipe's `tools from` line names a `.spitenv` that says what each tool is on this machine, and the pipeline's `uses` lines say which tools each operation's jobs depend on (see [Tools](../docs/language-reference.md#tools)). `plan`, `explain` and `run` run each tool's probe once, before planning, from the dataset root and with no shell, and a probe that fails stops them with an error before any job runs: `error: the probe of tool fsl, sh -c ..., exited with status 1: ...`. A tool's identity, its probe's output or the text the `.spitenv` gives, is part of the work of each job that names it, so a job reruns when one of its tools changes, as `since the last run: register: tool fsl changed (12 jobs)` says, and a job that names none is unaffected.
+
+A run records what each probe printed in `tools.json`, beside the state. When a tool's output differs from that record, `plan` and `run` show the lines that changed before anything else, so a probe that prints something that changes on every call, such as a date, is spotted on its first rerun rather than after many:
+
+```text
+tool fsl changed since it was last recorded:
+  -6.0.7.22
+  +6.0.7.23
+```
+
+After an upgrade that should not rerun finished work, or when a tool is added to the `.spitenv`, `spit-bash accept-tools dataset.spitin` records the tools as they are now as those each job ran with, for every job whose record differs from the DAG in its tools alone. A job whose command or files changed as well is left to rerun.
 
 ## Planning and running
 
@@ -389,7 +403,7 @@ Jobs with no command can only be skipped, or checked, when all their outputs alr
 
 A file is first compared by size and modification time, which costs one `stat`, and only a file whose stamp differs from the record is read and hashed. A folder's stamp sums these over the files under it, and its hash covers the names of everything under it and the bytes of its files. When the hash matches, `run` stores the new stamp, so the next plan need not hash the file again; `plan` itself changes nothing. If another tool changes a file while preserving both its size and its modification time, the runner will not notice. After a job runs, the hashes of its inputs and outputs are recorded; `adopt` records none, so a touched file of an adopted job counts as changed once. `--compare` on `plan` and `run` sets how a file counts as unchanged. `content`, the default, is as above. `stat` judges by size and time alone and records no hashes, so a job below a rerun always runs and a renamed product, dimension or source is not reused. `full` reads and hashes every recorded file of every job that would be skipped, trusting no size or time, and reruns a job whose record holds no hashes, such as one from `adopt`: it costs one full read of the data, for when a tool may have kept a file's size and time while changing it. The hash is xxh3_128 from the `xxhash` package, or BLAKE2b where that has no wheel, and each recorded hash names its algorithm, so one made with another is never taken as equal. The runner keeps its state and its [run folders](#run-history) in `.spit-bash` under the output root; `--dir DIR` names another folder for both. Keep one folder per output root.
 
-The state file is a log of JSON lines: a header with its version, then one line each time a job is recorded or forgotten, and the last line for a job wins. Finishing a job appends a line rather than rewriting the file, and the end of a run compacts it to one line per job. `run`, `adopt`, `restore`, `prune` and `clean --yes` lock the state, so a second run on the same dataset stops with an error instead of overwriting the first one's records. Locking uses `flock`, so spit-bash runs on Linux and macOS, not Windows.
+The state file is a log of JSON lines: a header with its version, then one line each time a job is recorded or forgotten, and the last line for a job wins. Finishing a job appends a line rather than rewriting the file, and the end of a run compacts it to one line per job. `run`, `adopt`, `accept-tools`, `restore`, `prune` and `clean --yes` lock the state, so a second run on the same dataset stops with an error instead of overwriting the first one's records. Locking uses `flock`, so spit-bash runs on Linux and macOS, not Windows.
 
 A SPIT DAG is validated with Pydantic before planning. Invalid field types, unknown fields, malformed argument parts and paths outside their root are rejected before any command runs.
 
@@ -403,4 +417,4 @@ cargo build
 SPIT=$PWD/target/debug/spit python3 -m unittest discover -s runner/tests -v
 ```
 
-The test fixture under `tests/fixtures/` is actual version 14 output from SPIT's `command_demo` example, written without a root. `tests/test_examples.py` runs the [examples](../examples/runnable/README.md) in `examples/runnable`, which SPIT's own tests keep in step with its syntax, with a real `spit`: set `SPIT` to the binary built from the same checkout, or put it on `PATH`, or the tests are skipped. CI builds `spit` from each commit and runs them, so a change to SPIT's DAG format and the runner's change to read it are tested together. The repository's CI also runs Messie over the runner's folders.
+The test fixture under `tests/fixtures/` is actual version 15 output from SPIT's `command_demo` example, written without a root. `tests/test_examples.py` runs the [examples](../examples/runnable/README.md) in `examples/runnable`, which SPIT's own tests keep in step with its syntax, with a real `spit`: set `SPIT` to the binary built from the same checkout, or put it on `PATH`, or the tests are skipped. CI builds `spit` from each commit and runs them, so a change to SPIT's DAG format and the runner's change to read it are tested together. The repository's CI also runs Messie over the runner's folders.

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from ..cause import Cause, Why
+from ..reuse.identity import TOOL
 from ..plan import AdoptCause, Decision, Status
 from ..reuse.relocate import Migration, MoveCause
 
@@ -17,6 +18,7 @@ PART_NAMES = {"commands": "command", "verify": "verify commands",
 def parts(changed: tuple[str, ...] | None) -> str:
     """Why a job's work differs from its record's, naming the parts that changed when it can."""
     names = [text for part, text in PART_NAMES.items() if part in (changed or ())]
+    names += [f"tool {part.removeprefix(TOOL)}" for part in changed or () if part.startswith(TOOL)]
     return "; ".join(names) + " changed" if names else "job fingerprint changed"
 
 

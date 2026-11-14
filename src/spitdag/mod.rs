@@ -15,7 +15,7 @@ use std::sync::Arc;
 
 use crate::model::{
     identity, natural_cmp, ArtifactId, ArtifactInstance, Artifacts, EntityBinding, JobId, Removal,
-    Resources, SourceFile, StepId, Under,
+    Resources, SourceFile, StepId, Tool, ToolIdentity, ToolSet, Under,
 };
 use crate::template::scalar_text;
 use crate::types::TypeExpr;
@@ -26,7 +26,7 @@ pub use self::reviews::{BoundReview, BoundTarget, Rejection};
 use self::write::{write_document, PIECE};
 
 /// The schema version a `.spitdag` is written with.
-pub const SPITDAG_VERSION: usize = 14;
+pub const SPITDAG_VERSION: usize = 15;
 
 /// A resolved DAG with its paths bound and its commands expanded. Its
 /// artifacts are the resolved DAG's, each kept once with its path; jobs,
@@ -56,6 +56,9 @@ pub struct BoundDag {
     pub pipeline_folder: Option<String>,
     /// Each call to an operation with a body, which steps name.
     pub calls: Vec<BoundCall>,
+    /// What each tool is, from the recipe's `.spitenv`; empty without one,
+    /// when jobs depend on no tool.
+    pub tools: Vec<Tool>,
     artifacts: Artifacts,
     /// Each artifact's file, relative to its root, by id; empty for an
     /// artifact no job uses.
@@ -92,6 +95,8 @@ pub struct BoundStep {
     pub origin: Option<StepCall>,
     /// What each of its jobs needs to run.
     pub resources: Resources,
+    /// The tools each of its jobs depends on.
+    pub tools: ToolSet,
 }
 
 /// Where a step is written: the line and its file, and for a step a call
@@ -363,6 +368,7 @@ impl BoundDag {
             pipeline_files: Vec::new(),
             pipeline_folder: None,
             calls: Vec::new(),
+            tools: Vec::new(),
             artifacts,
             paths,
             under,
@@ -456,8 +462,8 @@ impl BoundDag {
     }
 
     /// The programs the commands run, each once: every command's first
-    /// argument that is plain text, so a backend can look for them before it
-    /// starts.
+    /// argument that is plain text, and each tool's probe's, so a backend can
+    /// look for them before it starts.
     pub fn executables(&self) -> BTreeSet<String> {
         self.jobs
             .iter()
@@ -476,7 +482,20 @@ impl BoundDag {
                     })
                     .collect()
             })
+            .chain(self.tools.iter().filter_map(|tool| match &tool.identity {
+                ToolIdentity::Probe(command) => command.first().cloned(),
+                ToolIdentity::Declared(_) => None,
+            }))
             .collect()
+    }
+
+    /// The names of the tools in [`BoundDag::tools`] that each job of `step`
+    /// depends on, in that order.
+    pub fn step_tools<'a>(&'a self, step: &'a BoundStep) -> impl Iterator<Item = &'a str> {
+        self.tools
+            .iter()
+            .filter(|tool| step.tools.includes(&tool.name))
+            .map(|tool| tool.name.as_str())
     }
 
     /// The jobs that depend on each job, by ID.

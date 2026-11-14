@@ -60,6 +60,12 @@ pub(crate) fn is_inputs(file: &str) -> bool {
         .is_some_and(|extension| extension == "spitout")
 }
 
+pub(crate) fn is_tools(file: &str) -> bool {
+    Path::new(file)
+        .extension()
+        .is_some_and(|extension| extension == "spitenv")
+}
+
 pub(crate) fn is_recipe(file: &str) -> bool {
     Path::new(file)
         .extension()

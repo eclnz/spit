@@ -17,7 +17,8 @@ flowchart LR
 
 ## Data
 
-- **`InputSpec`** ([`src/inputs/mod.rs`](https://github.com/eclnz/spit/blob/dev/src/inputs/mod.rs)) is a parsed recipe: its pipeline, its root, its `InputRules`, and any records it writes itself.
+- **`InputSpec`** ([`src/inputs/mod.rs`](https://github.com/eclnz/spit/blob/dev/src/inputs/mod.rs)) is a parsed recipe: its pipeline, its root, its `InputRules`, its `ToolsFile`, and any records it writes itself.
+- **`ToolsFile`** ([`src/inputs/tools.rs`](https://github.com/eclnz/spit/blob/dev/src/inputs/tools.rs)) is the `.spitenv` a `tools from` line names, as `read_tools_file` reads it: the file as written, the line, and a `Tool` for each of its lines, whose `ToolIdentity` is a declared text or a probe's arguments. The input stage only carries it: the command line hands its tools to the `BoundDag`, and nothing settles them against the dataset.
 - **`InputRules`** ([`src/model/inputs.rs`](https://github.com/eclnz/spit/blob/dev/src/model/inputs.rs)) keeps the recipe's rules as written:
     - `context_paths`, unnamed `ContextPattern` directory patterns;
     - `exclusions`;
@@ -64,6 +65,8 @@ While it scans, the stage also:
 - **Leaves out SPIT's own files.** Files at an output's completed path, or inside an output folder, are not reported as unmatched sources, so an earlier run's outputs under the root are ignored (`OutputPaths` in [`src/inputs/pattern.rs`](https://github.com/eclnz/spit/blob/dev/src/inputs/pattern.rs)). An output whose path cannot be bound is skipped there, and resolution reports it. A file at the path of an output written beside a source (`OutputPaths::beside_source`) is left out before any rule is matched, so it is never read as a source either. Test: [`an_output_beside_a_source_is_neither_a_source_nor_an_unmatched_file`](https://github.com/eclnz/spit/blob/dev/tests/beside_inputs.rs).
 - **Reports the near misses.** For each source whose rule matches no file, it records the unmatched file the rule matches furthest into, and where the two part.
 - **Notes companion groups found only in part** (`incomplete_groups`), whether scanned or written as records. Records are grouped in one pass by `GroupKey`, and only an incomplete group's binding is written out as text.
+
+**Tools files.** A `.spitenv` is read when the recipe is parsed at a path, as review files are; one that is missing or malformed is an error on the `tools from` line, naming the file's own line. `InputSpec::check` fails when the pipeline declares a tool the file does not list (`InputError::MissingTool`).
 
 **Review files.** `read_review_files` reads each file a `review ... from` line names, relative to the recipe's folder, when the recipe is parsed at a path. A file that does not exist is left unread, and its review has no verdicts. `without_review_files` leaves the review files out of the dataset's files that no source rule matches. Nothing here removes a record: a review only records a judgement, and the [resolver](resolution.md) applies it.
 
