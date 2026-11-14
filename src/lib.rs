@@ -80,6 +80,7 @@ pub use resolver::{resolve, resolve_artifacts_excluding, resolve_artifacts_parti
 pub use spitdag::{
     ArgPart, Argument, BoundArtifact, BoundCall, BoundCheck, BoundCommand, BoundDag, BoundJob,
     BoundReview, BoundStep, BoundTarget, LeftOut, Rejection, StepCall, StepCheck, When,
+    SPITDAG_VERSION,
 };
 pub use template::{
     CommandError, CommandProblem, CommandTemplate, EntitiesFormat, NamedFile, PathError,

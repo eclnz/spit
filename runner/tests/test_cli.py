@@ -4,11 +4,13 @@ import json
 import sys
 import tempfile
 import unittest
+from importlib.metadata import version
 from pathlib import Path
 from unittest import mock
 
 from spit_bash.cli import main
 from spit_bash.load import blob_id
+from spit_bash.schema import VERSION as DAG_VERSION
 from support import artifact, document, job_entry, sample, UPPER, placed, job_log
 
 
@@ -32,6 +34,15 @@ class CliTests(unittest.TestCase):
     def write(self):
         self.dag.write_text(json.dumps(placed(self.data)))
         return str(self.dag)
+
+    def test_version_flags_need_no_subcommand(self):
+        release = f"spit-bash {version('spit-bash')}\n"
+        for flag, expected in (("-V", release), ("--version", release), ("--dag-version", f"{DAG_VERSION}\n")):
+            with self.subTest(flag=flag), contextlib.redirect_stdout(io.StringIO()) as out, \
+                    self.assertRaises(SystemExit) as exited:
+                main([flag])
+            self.assertEqual(exited.exception.code, 0)
+            self.assertEqual(out.getvalue(), expected)
 
     def test_a_saved_dag_warns_when_its_pipeline_files_changed(self):
         pipeline = self.root / "pipeline"

@@ -2,6 +2,8 @@
 
 SPIT checks a pipeline, settles a dataset's inputs, and resolves jobs. Run `spit help` or `spit help <command>` for the binary's help. The [language manual](language-reference.md) defines the accepted file formats.
 
+`spit --version` (`-V`) identifies the compiler and prints its release version. `spit --dag-version` prints the `.spitdag` format version it writes. Compare it with `spit-bash --dag-version` to check whether the runner can read that format.
+
 | Command | Purpose | Common invocation |
 | --- | --- | --- |
 | `check` | Validate a pipeline, recipe, input inventory, or tools file | `spit check pipeline.spit --path-rules` |

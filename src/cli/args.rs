@@ -370,6 +370,8 @@ pub(crate) enum Request {
     Run(CliArgs),
     Help(Option<Command>),
     Version,
+    /// Print the format version of the DAG the compiler writes.
+    DagVersion,
     /// `spit keywords`, SPIT's keywords as JSON for tools such as the
     /// editor's grammar. The help leaves it out, since it is not a step.
     Keywords,
@@ -395,7 +397,7 @@ fn overview(f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "  {:<10} {}", command.name(), command.summary())?;
     }
     f.write_str(
-        "\nfiles:\n  .spit      a pipeline: sources, operations, steps, commands, path rules, optional root\n  .spitin    a recipe for a dataset's inputs, naming its pipeline\n  .spitout   a dataset's settled inputs, each source with its file\n  .spitdag   the resolved jobs, each with its files and command\n\nRun `spit help <command>` for its options.\n",
+        "\nfiles:\n  .spit      a pipeline: sources, operations, steps, commands, path rules, optional root\n  .spitin    a recipe for a dataset's inputs, naming its pipeline\n  .spitout   a dataset's settled inputs, each source with its file\n  .spitdag   the resolved jobs, each with its files and command\n\noptions:\n  -V, --version  print the compiler version\n  --dag-version  print the .spitdag format version written by the compiler\n\nRun `spit help <command>` for its options.\n",
     )
 }
 
@@ -455,6 +457,7 @@ pub(crate) fn parse_args(args: impl IntoIterator<Item = String>) -> Result<Reque
             };
         }
         Some("--version" | "-V") => return Ok(Request::Version),
+        Some("--dag-version") => return Ok(Request::DagVersion),
         Some("keywords") => return Ok(Request::Keywords),
         Some(name) => Command::parse(name)
             .ok_or_else(|| misuse(format_args!("unknown command `{name}`"), None))?,

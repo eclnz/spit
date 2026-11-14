@@ -38,14 +38,20 @@ fn help_lists_each_step_and_each_command_explains_itself() {
         assert!(text.contains("-o <file>"), "{text}");
         assert!(text.contains("example:"), "{text}");
     }
-    let version = spit(&["--version"]);
-    assert_eq!(
-        stdout(&version),
-        format!(
-            "SPIT (Simple Pipeline in Text) compiler, version {}\n",
-            env!("CARGO_PKG_VERSION")
-        )
-    );
+    for flag in ["--version", "-V"] {
+        let version = spit(&[flag]);
+        assert!(version.status.success(), "{}", stderr(&version));
+        assert_eq!(
+            stdout(&version),
+            format!(
+                "SPIT (Simple Pipeline in Text) compiler, version {}\n",
+                env!("CARGO_PKG_VERSION")
+            )
+        );
+    }
+    let dag_version = spit(&["--dag-version"]);
+    assert!(dag_version.status.success(), "{}", stderr(&dag_version));
+    assert_eq!(stdout(&dag_version), format!("{}\n", spit::SPITDAG_VERSION));
 }
 
 #[test]

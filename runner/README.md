@@ -14,6 +14,8 @@ spit-bash plan dataset.spitin
 spit-bash run dataset.spitin -j 4
 ```
 
+`spit-bash --version` (`-V`) prints the installed runner's release version. `spit-bash --dag-version` prints the `.spitdag` format version it reads. Compare it with `spit --dag-version` to check whether the compiler writes that format.
+
 `spit-bash` takes what `spit dag` takes, and runs `spit dag --json` on it:
 
 | Files | Runs |
