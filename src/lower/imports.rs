@@ -286,6 +286,19 @@ fn select_import(module: &Pipeline, spec: &UseSpec, line: usize) -> Result<Pipel
         }
     }
     import_called(&mut selected, &module, spec, line)?;
+    // A `here` source's folder was the imported file's; it is now the
+    // importing file's, through the folder the `use` line names.
+    for product in &mut selected.pipeline.products {
+        if let Some(folder) = &mut product.here {
+            *folder = if folder.is_empty() {
+                rebase(&spec.path, "")
+                    .rsplit_once('/')
+                    .map_or_else(String::new, |(parent, _)| parent.to_owned())
+            } else {
+                rebase(&spec.path, folder)
+            };
+        }
+    }
     qualify_attached(&mut selected.pipeline, spec.alias.as_deref());
     Ok(selected.pipeline)
 }

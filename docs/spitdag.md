@@ -58,7 +58,7 @@ Every artifact is written the same way, wherever it appears:
 | `entities` | Each dimension and its value, as strings, in the product's declared order. A product with no dimensions has `{}`. |
 | `type` | `null` for an untyped product; `{"name": N, "args": [TYPE, ...]}` for a named type, with its arguments; `{"variable": V}` for a type variable left unbound. |
 | `path` | The artifact's file or folder, relative to the folder `under` names, with no `/` at its end. No two artifacts share a path, even under different roots. |
-| `under` | `"root"` or `"output_root"`: the top-level field holding the folder `path` is relative to. |
+| `under` | `"root"`, `"output_root"` or `"pipeline_folder"`: the top-level field holding the folder `path` is relative to. |
 | `kind` | `"file"`, or `"folder"` for a product declared with a `/`, whose artifact is a folder of files: see [Folders](#folders). Version 5 added it; a reader written for version 4 does not know it. |
 
 ## Roots
@@ -68,7 +68,9 @@ A `.spitdag` has two folders, which are the same unless the pipeline or recipe n
 - `root`, the dataset's folder: the sources are under it, and so is every file a job writes [beside a source](language-reference.md#files-a-tool-writes-beside-another), whose `under` is `"root"`.
 - `output_root`: every other file a job writes is under it, with `under` `"output_root"`.
 
-A path is unique across both, so a command part, a `stdin` or `stdout` and a check name an artifact by its `path` alone; look up that artifact's `under` to find its folder. Make `output_root` before running the first job, and keep a backend's own state under it rather than under `root`, which may be read-only.
+A [`here` source](language-reference.md#files-beside-the-pipeline), a file kept beside the pipeline such as a script, is under a third folder, `pipeline_folder`, with `under` `"pipeline_folder"`. It is an input like any other source, so a backend that reruns a job when its inputs change reruns it when the file does. No job writes under `pipeline_folder`, and a backend refuses a DAG whose job does.
+
+A path is unique across all three, so a command part, a `stdin` or `stdout` and a check name an artifact by its `path` alone; look up that artifact's `under` to find its folder. Make `output_root` before running the first job, and keep a backend's own state under it rather than under `root`, which may be read-only.
 
 ## Removal
 

@@ -10,6 +10,7 @@ mod coverage;
 mod discover;
 mod error;
 mod exclusions;
+mod local;
 mod pattern;
 mod recipe;
 mod reviews;

@@ -73,6 +73,7 @@ pub enum Word {
     Uses,
     ToolsFrom,
     Anchored,
+    HereSource,
 }
 
 /// What a word's hover says.
@@ -97,7 +98,7 @@ impl Word {
 }
 
 /// Every word's documentation, in the order of [`Word`].
-pub static DOCS: [Doc; 64] = [
+pub static DOCS: [Doc; 65] = [
     Doc {
         name: "source",
         kind: "keyword",
@@ -545,5 +546,12 @@ pub static DOCS: [Doc; 64] = [
         anchor: "tools-that-store-their-paths",
         example: "anchored feat, group_feat",
         summary: "Marks operations whose tools write their own file paths into their outputs, where something later reads them, as FSL FEAT's `design.fsf` does. A runner reruns such a job when its paths or the dataset's folder change, and never moves its outputs to new paths. Tools that only record a command line, as `bwa` and `samtools` do, need no mark.",
+    },
+    Doc {
+        name: "here",
+        kind: "keyword",
+        anchor: "files-beside-the-pipeline",
+        example: "source plotter : Script .py here\npath plotter: scripts/plot.py",
+        summary: "A source kept beside the pipeline rather than in the dataset, such as a script: one file, whose path rule is relative to the folder of the file declaring it. It is an input like any other source, so a job that reads it reruns when it changes.",
     },
 ];

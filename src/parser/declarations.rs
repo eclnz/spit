@@ -208,6 +208,13 @@ pub(super) fn parse_product(line: &str, number: usize) -> Result<ProductDef, Par
         number,
     )?;
     let attached = only_attachments(&clauses, "a source", number)?;
+    // `here` ends the declaration, before any `@check` or `@review`.
+    let (line, here) = match line.trim_end().strip_suffix("here") {
+        Some(rest) if rest.ends_with(char::is_whitespace) => {
+            (rest.trim_end(), Some(&line.trim_end()[rest.len()..]))
+        }
+        _ => (line, None),
+    };
     let (line, beside) = match line.rsplit_once(" beside ") {
         Some((item, sibling)) => {
             if item.trim_end().ends_with(']') {
@@ -286,6 +293,16 @@ pub(super) fn parse_product(line: &str, number: usize) -> Result<ProductDef, Par
         };
         product.extension = beside.extension().map(str::to_owned);
         product.beside = Some(beside);
+    }
+    if let Some(here) = here {
+        if product.folder || !product.dimensions.is_empty() || product.beside.is_some() {
+            return Err(ParseError::new(
+                number,
+                "a `here` source is one file kept beside the pipeline, so it takes no [dimensions], `/` or `beside`, as in `source plotter : Script .py here`",
+            )
+            .at_token(here));
+        }
+        product.here = Some(String::new());
     }
     Ok(product)
 }

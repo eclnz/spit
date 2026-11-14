@@ -44,7 +44,7 @@ class Artifact(SchemaModel):
     artifact_type: NamedType | VariableType | None = Field(alias="type")
     path: RelativePath
     # The top-level field holding the folder `path` is relative to.
-    under: Literal["root", "output_root"]
+    under: Literal["root", "output_root", "pipeline_folder"]
     kind: Literal["file", "folder"]
 
 

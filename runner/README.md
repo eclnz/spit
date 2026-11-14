@@ -65,10 +65,10 @@ Without `--entity`, `--product` or `--stage`, `--force` reruns every command job
 
 ## Scripts as inputs
 
-The runner identifies a job by its command text, and the DAG lists files a job declares as inputs. To make edits to a script invalidate just the operation that reads it, declare the script as a source and pass that source to the operation:
+The runner identifies a job by its command text, and the DAG lists files a job declares as inputs. To make edits to a script invalidate just the operation that reads it, declare the script as a source and pass that source to the operation. A script kept beside the pipeline is declared `here`, which finds it from the pipeline's folder rather than the dataset (see [Files beside the pipeline](../docs/language-reference.md#files-beside-the-pipeline)):
 
 ```spit
-source script : Script .py
+source script : Script .py here
 source lines : Lines .txt
 
 default path: out/{@product}
@@ -81,7 +81,7 @@ command transform: python3 {script} {lines} > {@output}
 result = transform(script, lines)
 ```
 
-With `scripts/transform.py` and `input.txt` under the dataset root, run the pipeline with `spit-bash run analysis.spit --root DATASET`. The compiler puts `scripts/transform.py` in the job's input list. When it changes, that operation reruns; a command argument that is not declared as an input is not inferred as one.
+With `scripts/transform.py` beside `analysis.spit` and `input.txt` under the dataset root, run the pipeline with `spit-bash run analysis.spit --root DATASET`. The compiler puts `scripts/transform.py` in the job's input list. When it changes, that operation reruns; a command argument that is not declared as an input is not inferred as one.
 
 ## Tools
 
@@ -99,7 +99,7 @@ After an upgrade that should not rerun finished work, or when a tool is added to
 
 ## Planning and running
 
-SPIT writes the absolute dataset `root` into a DAG when it knows it. If `root` is `null`, pass `--root /path/to/dataset`. A DAG also names its `output_root`, where the jobs' outputs go: the dataset root, unless the pipeline or recipe names [a folder of its own](https://github.com/eclnz/spit/blob/main/docs/language-reference.md#the-output-root). Each artifact's path is relative to the root it is under: sources, and files a job writes beside a source, are under the dataset root, and every other output is under the output root. Commands run from the output root, which the runner makes before the first job, and a command names a file under a separate dataset root by its absolute path, so the dataset itself is only read and may be read-only. With `--root`, an output root that is the dataset root moves with it.
+SPIT writes the absolute dataset `root` into a DAG when it knows it. If `root` is `null`, pass `--root /path/to/dataset`. A DAG also names its `output_root`, where the jobs' outputs go: the dataset root, unless the pipeline or recipe names [a folder of its own](https://github.com/eclnz/spit/blob/main/docs/language-reference.md#the-output-root). Each artifact's path is relative to the root it is under: sources, and files a job writes beside a source, are under the dataset root, `here` sources are under the DAG's `pipeline_folder`, and every other output is under the output root. Commands run from the output root, which the runner makes before the first job, and a command names a file under a separate dataset root by its absolute path, so the dataset itself is only read and may be read-only. With `--root`, an output root that is the dataset root moves with it.
 
 Every artifact must stay under its root once symbolic links are followed, so a job never reads or writes outside the folders the DAG names. `spit dag` follows a link wherever it leads, but `plan` and `run` refuse a link that leads out, naming the link, where it leads and the job that uses it:
 
@@ -109,7 +109,7 @@ error: scripts/plot.py is a link to /home/me/project/pipeline/plot.py, outside t
   spit-bash reads and writes only under its roots, so no link may lead out of one: move or copy what it links to under the root.
 ```
 
-A script kept beside the pipeline can be named with `{@here}` instead, which this section describes below, or declared as a source under the dataset root, as in [Scripts as inputs](#scripts-as-inputs).
+A script kept beside the pipeline is declared a `here` source, as in [Scripts as inputs](#scripts-as-inputs), or named with `{@here}`, which this section describes below. No job writes under the pipeline's folder, and `plan` refuses a DAG whose job does.
 
 `plan` first says what changed since the last run, in the terms of the data and the pipeline, as `since the last run: +30 recording (take=3); 1 recording changed (digit=3 take=2 voice=lucas); 131 jobs from earlier runs no longer in the DAG (voice=yweweler); trim: command changed (90 jobs)`. A source is new when only jobs with no record read it, and is named by its entities, or, among many, by the values no other source has. Work gone is the records no job claims, named by the values only they made. A first run, or one where nothing changed, has no such line. Then `plan` prints counts, such as `13 jobs can start, 68 jobs will wait, 12 jobs are blocked`, then a line for each cause that blocks jobs, such as `blocked: parcellate_t1 x3: program not found: mri_synthseg (9 more depend on them)`, because a cause is what needs action. A job can start when what it reads exists; it waits when a job upstream will, or may, rewrite what it reads, and cannot start until that job finishes. A job below a blocked one is blocked, and counted under the cause. A job that will run over outputs already on disk is told apart from one making its outputs for the first time, since running it replaces them: `plan` gives their count and a line for each operation and reason, such as
 

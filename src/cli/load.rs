@@ -342,8 +342,12 @@ fn undeclared_file_notes(pipeline: &Pipeline, root: &Path) -> Vec<String> {
             }
         })
         .map(|(kind, name, file)| {
+            let fix = match file {
+                NamedFile::Root(_) => "keep it under the dataset root and pass it to",
+                NamedFile::Here(_) => "declare it a `here` source and pass it to",
+            };
             format!(
-                "{kind} `{name}` runs `{file}`, which it doesn't declare, so editing the file reruns nothing; to rerun on a change, keep it under the dataset root and pass it to `{name}` as a source"
+                "{kind} `{name}` runs `{file}`, which it doesn't declare, so editing the file reruns nothing; to rerun on a change, {fix} `{name}` as a source"
             )
         })
         .collect()
