@@ -286,7 +286,7 @@ Each `run` gets a folder of its own, `.spit-bash/runs/RUN`, named by when it sta
 
 - `run.log`, what the run printed, written line by line as it goes, so `tail -f` follows it and a stopped run keeps everything up to that point;
 - `plan.json`, the plan the run acted on, as `plan --json` prints it;
-- `summary.json`, how the run ended, `finished`, `blocked`, `over memory`, `interrupted` or `terminated`, with its counts; a run killed before it got there has none;
+- `summary.json`, how the run ended, `finished`, `blocked`, `over memory`, `declined`, `interrupted` or `terminated`, with its counts; a run killed before it got there has none;
 - `jobs/`, each job's log, named by the job's first output and its entities, so a job's logs share one name from run to run whatever its id, and a rerun writes a new log rather than over an old one;
 - `replaced/`, the outputs the run's jobs replaced, each job's under the same name with the record that described them.
 
@@ -316,6 +316,19 @@ Ctrl-C (SIGINT) or SIGTERM, as a cluster scheduler sends at a time limit, stops 
 ## Existing paths and reruns
 
 The runner records successful jobs in `.spit-bash/state.jsonl` under the output root, keyed by the products and entities they make, not their paths, so a dataset keeps its state when it moves or its path rules change. The runner computes each job's fingerprint from the shape of what it reads and makes and its commands, with every path replaced by its place in the job, so renaming an operation, a port, a product, a dimension, a source or an entity value changes nothing; SPIT writes none. What the inputs hold is checked against the record's hashes. A job with no record under its key takes an unclaimed record of the same work when each input holds what that record's did, so a renamed product, dimension or source reuses its earlier outputs (with `--move-files`, they are moved to their new paths). Identical inputs, such as copies of one mock file, are interchangeable, so a job first tries the records that keep its dimensions and values, as a renamed product's do, then those that keep its values, as a renamed dimension's do: each job takes its own record, and moves its own outputs. Stamps and hashes in a record are kept by place in the job as well, so files moved or copied to new paths are current when their size and time, or their content, match the record; files that are not at the new paths run the job, and when the pipeline's path rules change, a job whose files are not at its new paths runs again, as its output is missing. Files already at the new paths are reused with or without `--move-files`, when they match the record. The state is version 8, and an earlier state is refused: delete it to start from fresh records. The record keeps the fingerprint's parts, so a changed job is reported as `command changed`, `verify commands changed`, `the artifacts it reads changed` or `the artifacts it makes changed`, and a missing output as `output missing; an earlier run left it at PATH` when a change of path rules stranded it. A job runs if an output is missing, its fingerprint changed, an input or output file changed, or a producer will run. It skips only when its recorded fingerprint still matches and its files are as recorded: the same size and modification time, or, where those differ, the same content. A `touch`, a `git checkout` or a copy that leaves the bytes alone does not rerun a job. `--force` reruns every command job, or only the jobs matched by `--entity`, `--product` or `--stage` when a selection is given; see [Choosing jobs](#choosing-jobs). A job that reruns its recorded work on the inputs its record holds, as under `--force`, and makes outputs whose content differs from the record's, has a tool that doesn't give the same bytes twice, such as one that dithers or stamps the time. `run` then notes it once per operation, as `note: normalise gave different output from the same inputs (8 jobs); what reads it will rerun every time`, since nothing below it can stop at an unchanged output.
+
+At a terminal, `run` asks before it replaces the outputs of a job whose last recorded run took at least `--ask-over` (default `2m`; `90s`, `1h` and the like are taken), listing those jobs by operation with the time their outputs took, after the plan's own list of why each job replaces outputs. It starts nothing, deletes nothing and exits with status 1 unless the answer is `y`. A job planned to run only if an upstream output changes, and a job run under `--force`, are not asked about, and neither is anything with `--yes`, or when standard input is not a terminal or holds the DAG.
+
+```text
+$ spit-bash run pipeline.spitdag
+1 job can start, 1 job may run if an upstream output changes
+1 job will replace existing outputs:
+  register: input changed
+1 job will replace outputs that took 6m to make:
+  register (6m)
+Continue? [y/N] n
+nothing was run
+```
 
 Without `--move-files`, `plan` and `run` say when moving would save work, as `1,018 jobs rerun only because their outputs are recorded at other paths; --move-files moves them instead`, counting the jobs a plan with the flag would place.
 
@@ -349,13 +362,34 @@ $ spit-bash run pipeline.spitdag --remove-leftovers
 0 done, 0 checked, 0 failed, 1 current, 0 blocked
 ```
 
+Records name only what spit-bash wrote at the paths the pipeline gave. To find everything else, such as a file a failed tool wrote under a name of its own or outputs from before the state was kept, name a folder that holds only what the pipeline writes:
+
+```text
+$ spit-bash clean analysis.spitdag out
+3 paths (9 bytes) under out that the DAG does not explain:
+  out/old/ (3 bytes)
+  out/upper/map_real.txt (4 bytes)
+  sub=03, which no job of the DAG reads or makes:
+    out/upper/sub=03.txt (2 bytes)
+run again with --yes to delete them
+```
+
+A path is explained when it is a job's input or output, lies inside an output folder, is the runner's folder or a file the pipeline is read from, or is an edited output kept as `NAME.edited-<time>` beside its job's output. Everything else under the folder is listed with its size, and a folder with nothing explained in it is listed once, with a `/`. Strays whose paths name an entity value no job reads or makes, such as a subject an `exclude` line or a failed review left out, are listed under that value, so that a subject meant to come back is not deleted unseen. A stray in a folder that is not writable says that it cannot be deleted. `clean` deletes nothing without `--yes`. With it, it deletes each stray, says which it could not delete and why, exiting with status 1, and forgets the records of jobs the DAG does not have whose outputs it deleted.
+
+Naming the folder says that it holds outputs only, so `clean` refuses, deleting nothing, a folder that:
+
+- is under neither the dataset root nor the output root;
+- holds a source of the DAG, or lies inside one, as the dataset root itself does when it holds the sources;
+- no job writes under;
+- is cleaned with a partial DAG, or with `--entity`, `--product` or `--stage`, since the jobs left out would make their outputs look like strays.
+
 Existing outputs with no successful record are run again; use `plan` to inspect this before `run`. For a dataset whose outputs were made before spit-bash was used, `spit-bash adopt` records every job whose inputs and outputs all exist as current, without running it. It trusts the files as they are, so adopt only outputs you know were made by the commands in the DAG.
 
 Jobs with no command can only be skipped, or checked, when all their outputs already exist and are at least as new as their inputs; a missing or stale output blocks them. Failed verification, failed commands, failed checks and missing outputs fail the job and its dependents, and a failure once the command has started [removes the job's outputs](#when-a-job-fails). A partial DAG reports its `left_out` count while still planning and running its complete jobs.
 
 A file is first compared by size and modification time, which costs one `stat`, and only a file whose stamp differs from the record is read and hashed. A folder's stamp sums these over the files under it, and its hash covers the names of everything under it and the bytes of its files. When the hash matches, `run` stores the new stamp, so the next plan need not hash the file again; `plan` itself changes nothing. If another tool changes a file while preserving both its size and its modification time, the runner will not notice. After a job runs, the hashes of its inputs and outputs are recorded; `adopt` records none, so a touched file of an adopted job counts as changed once. `--compare` on `plan` and `run` sets how a file counts as unchanged. `content`, the default, is as above. `stat` judges by size and time alone and records no hashes, so a job below a rerun always runs and a renamed product, dimension or source is not reused. `full` reads and hashes every recorded file of every job that would be skipped, trusting no size or time, and reruns a job whose record holds no hashes, such as one from `adopt`: it costs one full read of the data, for when a tool may have kept a file's size and time while changing it. The hash is xxh3_128 from the `xxhash` package, or BLAKE2b where that has no wheel, and each recorded hash names its algorithm, so one made with another is never taken as equal. The runner keeps its state and its [run folders](#run-history) in `.spit-bash` under the output root; `--dir DIR` names another folder for both. Keep one folder per output root.
 
-The state file is a log of JSON lines: a header with its version, then one line each time a job is recorded or forgotten, and the last line for a job wins. Finishing a job appends a line rather than rewriting the file, and the end of a run compacts it to one line per job. `run`, `adopt`, `restore` and `prune` lock the state, so a second run on the same dataset stops with an error instead of overwriting the first one's records. Locking uses `flock`, so spit-bash runs on Linux and macOS, not Windows.
+The state file is a log of JSON lines: a header with its version, then one line each time a job is recorded or forgotten, and the last line for a job wins. Finishing a job appends a line rather than rewriting the file, and the end of a run compacts it to one line per job. `run`, `adopt`, `restore`, `prune` and `clean --yes` lock the state, so a second run on the same dataset stops with an error instead of overwriting the first one's records. Locking uses `flock`, so spit-bash runs on Linux and macOS, not Windows.
 
 A SPIT DAG is validated with Pydantic before planning. Invalid field types, unknown fields, malformed argument parts and paths outside their root are rejected before any command runs.
 
