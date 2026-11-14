@@ -10,10 +10,11 @@ from typing import Iterable, Iterator, TextIO
 
 from pydantic import ValidationError
 
-from . import scalars, schema, tools
+from . import lists, scalars, schema, tools
 from .model import Artifact, Check, Dag, DagError, Job, Kind, Port, Review, Run, Side, Target
 from .reuse import identity
-from .schema import Command, DirPart, HerePart, JobCommand, PathPart, ScalarPart, SpitDag, SpitJob, StemPart
+from .schema import (Command, DirPart, HerePart, JobCommand, JoinPart, ListPart, PathPart, ScalarPart, SpitDag, SpitJob,
+                     StemPart)
 
 
 def _here(part: HerePart, folder: str | None) -> str:
@@ -34,10 +35,14 @@ def _command(command: Command, folder: str | None = None, shown: dict[str, str] 
     shown = shown or {}
     arguments: list[str] = []
     for argument in command:
-        parts: list[str | scalars.Read] = []
+        parts: list[str | scalars.Read | lists.ListRead] = []
         for part in argument:
             if isinstance(part, str):
                 parts.append(part)
+            elif isinstance(part, JoinPart):
+                parts.append(_join(part, shown))
+            elif isinstance(part, ListPart):
+                parts.append(lists.ListRead(tuple(part.list)))
             elif isinstance(part, PathPart):
                 parts.append(shown.get(part.path, part.path))
             elif isinstance(part, DirPart):
@@ -48,15 +53,32 @@ def _command(command: Command, folder: str | None = None, shown: dict[str, str] 
                 parts.append(_here(part, folder))
             elif isinstance(part, ScalarPart):
                 parts.append(scalars.Read(part.scalar, part.least, part.greatest))
-        if any(isinstance(part, scalars.Read) for part in parts):
+        if any(isinstance(part, (scalars.Read, lists.ListRead)) for part in parts):
             arguments.append(scalars.Reading(tuple(parts)))
         else:
             arguments.append("".join(parts))  # type: ignore[arg-type]
     if not arguments[0]:
         raise DagError("command has no executable")
+    if any(isinstance(part, (JoinPart, ListPart)) for part in command[0]):
+        raise DagError("command starts with a `join` or `list` part, not a program")
     if isinstance(arguments[0], scalars.Reading):
         raise DagError("command starts with a `scalar` part, not a program")
     return tuple(arguments)
+
+
+def _join(part: JoinPart, shown: dict[str, str]) -> str:
+    """A `join` part's text: its paths, as commands name them, joined with its separator.
+
+    A path holding the separator could not be told apart from two, so it is refused. Keep in step with
+    `collection` in SPIT's `src/bind.rs`, which makes the same check before the paths are absolute.
+    """
+    paths = [shown.get(path, path) for path in part.join]
+    if part.separator:
+        holding = next((path for path in paths if part.separator in path), None)
+        if holding is not None:
+            raise DagError(f"{holding} holds the join separator {part.separator!r}, "
+                           f"so a tool could not split the joined paths apart")
+    return part.separator.join(paths)
 
 
 def _dir(part: DirPart, shown: dict[str, str]) -> str:
@@ -156,6 +178,21 @@ def _check_reads(job: SpitJob, reads: tuple[scalars.Read, ...], folders: frozens
             raise DagError(f"job {job.id}: a `scalar` part names {read.path}, which is not one of its inputs")
         if read.path in folders:
             raise DagError(f"job {job.id}: a `scalar` part names {read.path}, which is a folder, not a file")
+
+
+def _check_collections(job: SpitJob) -> None:
+    """Each `join` and `list` part names the job's input files, and is in a command or a `verify`
+    command, not a check, which reads one artifact."""
+    inputs = {artifact.path for port in job.inputs.values() for artifact in port}
+    for command in (*(run.command for run in job.commands), *job.verify):
+        for part in (part for argument in command for part in argument):
+            members = part.join if isinstance(part, JoinPart) else part.list if isinstance(part, ListPart) else ()
+            outside = next((path for path in members if path not in inputs), None)
+            if outside is not None:
+                raise DagError(f"job {job.id}: a `join` or `list` part names {outside}, which is not one of its inputs")
+    if any(isinstance(part, (JoinPart, ListPart)) for check in job.checks for argument in check.command
+           for part in argument):
+        raise DagError(f"job {job.id}: a check has a `join` or `list` part, but a check reads only its artifact")
 
 
 def _run(command: JobCommand, folder: str | None, shown: dict[str, str]) -> Run:
@@ -271,6 +308,7 @@ def _load(source: TextIO, root_override: str | None) -> Dag:
         verify = tuple(_command(command, document.pipeline_folder, shown) for command in item.verify)
         reads = scalars.reads((*(run.arguments for run in commands), *verify))
         _check_reads(item, reads, folders)
+        _check_collections(item)
         checks = tuple(
             Check(Side(check.when), check.check, check.port, check.path,
                   _command(check.command, document.pipeline_folder, shown))
@@ -300,6 +338,7 @@ def _load(source: TextIO, root_override: str | None) -> Dag:
             cores=item.cores,
             memory=item.memory,
             reads=reads,
+            lists=lists.found((*(run.arguments for run in commands), *verify)),
         ))
         seen_ids.add(item.id)
 

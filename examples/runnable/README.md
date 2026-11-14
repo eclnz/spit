@@ -124,4 +124,15 @@ tar -tf $EXAMPLES/folders/output/archive/trip=alpha.tar
 
 The alpha archive holds `./day1/morning.txt` and `./evening.txt`. Before each copy runs, the runner removes any copy an earlier run left and makes the folder again, empty, and `cp -R {notes}/. {@output}` copies the trip's contents into it. Edit a file anywhere under `$EXAMPLES/folders/input/alpha/` and plan again: the alpha copy and its archive rerun, because a folder counts as changed when any file under it does.
 
+## A many input as one argument
+
+`bundle.py` writes each file it is given, with its path and what it holds, to a JSON file. One step gives it the two inputs joined by commas, `@join(xs)`, and the other the path of a file listing them, `@list(xs)`. `bundle.py` is a `here` source beside the pipeline, `runtime.spitenv` probes the Python that runs it, and both operations are `anchored`, since their bundles hold the paths they were given:
+
+```sh
+spit-bash run $EXAMPLES/collections/collections.spitin
+cat $EXAMPLES/collections/output/joined.json
+```
+
+The two bundles are the same, with `input/2.txt` before `input/10.txt`. Edit `bundle.py` and plan again: both jobs rerun, because the script is one of their inputs.
+
 `tests/test_examples.py` runs these examples, and checks the results above.

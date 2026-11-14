@@ -4,16 +4,21 @@
 
 use std::path::Path;
 
-use crate::model::{ArtifactInstance, EntityBinding, Pipeline, SourceInventory, SourceRecord};
+use super::Discovery;
+use crate::model::{ArtifactInstance, EntityBinding, Pipeline, SourceRecord};
 use crate::paths::{PathBinder, HERE_WITHOUT_FILE};
 use crate::template::{error, PathError};
 
-/// Add a record for each `here` source of `pipeline` to `inventory`, with
-/// its path from the pipeline's folder. A file that is missing is an error.
+/// Add a record for each `here` source of `pipeline` to what `discovery`
+/// found under `root`, with its path from the pipeline's folder. A file that
+/// is missing is an error. A pipeline kept in its dataset has its `here`
+/// sources under `root` too, and they are not files a source rule missed.
 pub(super) fn append(
     pipeline: &Pipeline,
-    inventory: &mut SourceInventory,
+    root: &Path,
+    discovery: &mut Discovery,
 ) -> Result<(), PathError> {
+    let root = std::fs::canonicalize(root).ok();
     let mut binder = PathBinder::new(pipeline);
     for product in pipeline
         .products
@@ -40,7 +45,16 @@ pub(super) fn append(
                 full.display()
             )));
         }
-        inventory
+        if let Some(inside) = root.as_deref().and_then(|root| {
+            let full = std::fs::canonicalize(&full).ok()?;
+            full.strip_prefix(root)
+                .ok()
+                .map(|inside| inside.to_string_lossy().replace('\\', "/"))
+        }) {
+            discovery.unmatched_files.retain(|file| *file != inside);
+        }
+        discovery
+            .inventory
             .artifacts
             .push(SourceRecord::new(&product.name, EntityBinding::default()).at(relative));
     }

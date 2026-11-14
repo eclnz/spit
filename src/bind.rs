@@ -18,8 +18,8 @@ use crate::spitdag::{
     StepCall, StepCheck as BoundStepCheck,
 };
 use crate::template::builtin::CHECKED_PATH;
-use crate::template::CommandPart;
 use crate::template::PathError;
+use crate::template::{CollectionRead, CommandPart};
 use crate::template::{CommandError, CommandTemplate, Stream};
 
 /// Bind every artifact of `dag` to its path and expand every job's command,
@@ -354,7 +354,7 @@ fn bind_job(
         .iter()
         .map(|template| {
             Ok(BoundCommand {
-                arguments: expand(template.arguments(), step, dag, folders, job)?,
+                arguments: expand(template.arguments(), step, dag, folders, paths, job)?,
                 stdin: redirected(template, Stream::Stdin)?,
                 stdout: redirected(template, Stream::Stdout)?,
             })
@@ -371,9 +371,85 @@ fn bind_job(
             .verify
             .iter()
             .flat_map(|command| &command.lines)
-            .map(|template| expand(template.arguments(), step, dag, folders, job))
+            .map(|template| expand(template.arguments(), step, dag, folders, paths, job))
             .collect::<Result<_, _>>()?,
         checks: bind_checks(&step.checks, produced, job),
+    })
+}
+
+/// `@join` or `@list` of a `many` input of `job`: its paths as an
+/// [`ArgPart::Collection`], or, for `@join(port.dimension)`, their values
+/// joined as text. A value or path holding a nonempty separator, or a path
+/// for a list holding a line break, is an error, since the tool could not
+/// split the argument back into its members. Keep in step with the
+/// runner's check in `load.py`, which looks again once paths are absolute.
+fn collection(
+    read: &CollectionRead,
+    operation: &OperationDef,
+    dag: &ResolvedDag,
+    paths: &[Option<String>],
+    job: &Job,
+) -> Result<ArgPart, BindError> {
+    let (port, field) = facet(&read.subject);
+    // `validate_commands` makes sure a collection reads a `many` input.
+    let Some(Slot::Input(index)) = slot(operation, port) else {
+        unreachable!("`validate_commands` gives `@join` and `@list` a many input")
+    };
+    let artifacts = job
+        .inputs
+        .get(index)
+        .ok_or_else(|| CommandError::new(format!("job {} lacks `{port}`", job.id)))?;
+    let separator = read.separator.as_deref();
+    let breaks = |member: &str| match separator {
+        Some(separator) => !separator.is_empty() && member.contains(separator),
+        None => member.contains(['\n', '\r']),
+    };
+    let refuse = |artifact: ArtifactId, what: &str, member: &str| {
+        let why = match separator {
+            Some(separator) => format!("holds the separator `{}`", separator.escape_debug()),
+            None => "holds a line break".to_owned(),
+        };
+        BindError::Command(CommandError::new(format!(
+            "`{}` in the command for `{}` cannot be split back into its members: the {what} of `{}`, `{}`, {why}",
+            read,
+            operation.name,
+            dag.artifact(artifact),
+            member.escape_debug()
+        )))
+    };
+    if let Facet::Dimension(dimension) = field {
+        let separator = separator.expect("only `@join` reads a dimension's values");
+        let mut joined = String::new();
+        for (at, &artifact) in artifacts.iter().enumerate() {
+            let value = dag
+                .artifacts
+                .entities(artifact)
+                .get(dimension)
+                .ok_or_else(|| {
+                    CommandError::new(format!("job {} lacks `{}`", job.id, read.subject))
+                })?;
+            if breaks(value) {
+                return Err(refuse(artifact, "value", value));
+            }
+            if at > 0 {
+                joined.push_str(separator);
+            }
+            joined.push_str(value);
+        }
+        return Ok(ArgPart::Text(joined));
+    }
+    for &artifact in artifacts {
+        let path = paths[artifact.index()]
+            .as_deref()
+            .expect("a bound input has a path");
+        if breaks(path) {
+            return Err(refuse(artifact, "path", path));
+        }
+    }
+    Ok(ArgPart::Collection {
+        // The ids, not the paths: the part names artifacts as a `Path` does.
+        artifacts: artifacts.clone(),
+        separator: read.separator.clone(),
     })
 }
 
@@ -428,8 +504,10 @@ fn check_command(check: &StepCheck<'_>, artifact: ArtifactId) -> Vec<Argument> {
                     CommandPart::Placeholder(name) if name == CHECKED_PATH => {
                         ArgPart::Path(artifact)
                     }
-                    CommandPart::Scalar(_) => {
-                        unreachable!("`check_template` rejects a check that reads a scalar")
+                    CommandPart::Scalar(_) | CommandPart::Collection(_) => {
+                        unreachable!(
+                            "`check_template` rejects a check that reads a scalar or a collection"
+                        )
                     }
                     CommandPart::Placeholder(name) => {
                         let index = definition
@@ -458,6 +536,7 @@ fn expand(
     step: &StepCommands<'_>,
     dag: &ResolvedDag,
     folders: &[bool],
+    paths: &[Option<String>],
     job: &Job,
 ) -> Result<Vec<Argument>, BindError> {
     let operation = step.operation;
@@ -494,6 +573,9 @@ fn expand(
         for part in parts {
             match part {
                 CommandPart::Literal(value) => argument.push(ArgPart::Text(value.clone())),
+                CommandPart::Collection(read) => {
+                    argument.push(collection(read, operation, dag, paths, job)?);
+                }
                 // `validate_commands` makes sure a scalar reads a one input.
                 CommandPart::Scalar(read) => {
                     let artifact = match slot(operation, &read.port) {

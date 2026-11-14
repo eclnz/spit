@@ -61,6 +61,13 @@ class ScalarInvalid:
 
 
 @dataclass(frozen=True)
+class ListNotWritten:
+    """The file a `list` part gives a command could not be written before the job's first command: `words` say why."""
+
+    words: str
+
+
+@dataclass(frozen=True)
 class StdoutNotMoved:
     """A command succeeded, but its standard output could not be renamed onto the output `path`."""
 
@@ -120,5 +127,5 @@ class Blocked:
 
 
 Failure = Union[InputDisappeared, NoCommand, CheckArtifactMissing, CheckFailed, CommandFailed, ScalarInvalid,
-                StdoutNotMoved,
+                ListNotWritten, StdoutNotMoved,
                 InputChanged, OutputsMissing, PlaceFailed, DependencyFailed, Blocked]

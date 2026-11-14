@@ -398,6 +398,27 @@
       }
     },
     {
+      "pipeline": "examples/runnable/collections/collections.spit",
+      "recipe": "examples/runnable/collections/collections.spitin",
+      "expect": {
+        "sources": {
+          "raw": 2,
+          "script": 1
+        },
+        "operations": {
+          "joined": 1,
+          "listed": 1
+        },
+        "targets": {
+          "joined_result": 1,
+          "listed_result": 1
+        },
+        "dependencies": 0,
+        "removals": 0,
+        "calls": 0
+      }
+    },
+    {
       "pipeline": "examples/runnable/folders/albums.spit",
       "recipe": "examples/runnable/folders/albums.spitin",
       "expect": {
