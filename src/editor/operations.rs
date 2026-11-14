@@ -55,6 +55,11 @@ pub(super) fn operation_details(pipeline: &Pipeline, operation: &OperationDef) -
     {
         details.push(format!("Resources: {}", line.resources));
     }
+    if operation.anchored {
+        details.push(
+            "Anchored: its outputs hold their own paths, so a runner reruns a job whose paths change rather than moving its files.".to_owned(),
+        );
+    }
     // Every tool is what a pipeline that says nothing of tools gives, so
     // only a narrowed set is shown.
     match &operation.tools {

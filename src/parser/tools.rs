@@ -1,5 +1,6 @@
-//! `tool` and `uses` lines: the tools a pipeline names, and which of them
-//! each operation's jobs depend on, as in `uses register: fsl, !mrtrix3`.
+//! `tool`, `uses` and `anchored` lines: the tools a pipeline names, which of
+//! them each operation's jobs depend on, as in `uses register: fsl, !mrtrix3`,
+//! and the operations whose tools store their own paths.
 
 use crate::model::{ToolList, UsesDef};
 
@@ -25,6 +26,29 @@ pub(super) fn parse_tool_names(line: &str, number: usize) -> Result<Vec<String>,
         if names.iter().any(|earlier| earlier == name) {
             return Err(
                 ParseError::new(number, format!("tool `{name}` is named twice")).at_token(item),
+            );
+        }
+        names.push(name.to_owned());
+    }
+    Ok(names)
+}
+
+/// The operations an `anchored` line names, `line` being the text after
+/// `anchored`: one or more, separated by commas.
+pub(super) fn parse_anchored(line: &str, number: usize) -> Result<Vec<String>, ParseError> {
+    let mut names: Vec<String> = Vec::new();
+    for item in line.split(',').map(str::trim) {
+        if item.is_empty() {
+            return Err(ParseError::new(
+                number,
+                "expected `anchored operation`, as in `anchored feat`, or operations separated by commas",
+            ));
+        }
+        let name = qualified_identifier(item, number, "anchored operation")?;
+        if names.iter().any(|earlier| earlier == name) {
+            return Err(
+                ParseError::new(number, format!("operation `{name}` is named twice"))
+                    .at_token(item),
             );
         }
         names.push(name.to_owned());

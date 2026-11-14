@@ -118,11 +118,11 @@ fn the_spitdag_lists_each_tool_and_each_job_names_its_own() {
         "{json}"
     );
     assert!(
-        json.contains("\"memory\":null,\"tools\":[\"sorter\"]}"),
+        json.contains("\"memory\":null,\"tools\":[\"sorter\"],\"anchored\":false}"),
         "{json}"
     );
     assert!(
-        json.contains("\"memory\":null,\"tools\":[\"counter\"]}"),
+        json.contains("\"memory\":null,\"tools\":[\"counter\"],\"anchored\":false}"),
         "{json}"
     );
 }
@@ -178,5 +178,177 @@ fn without_a_spitenv_jobs_depend_on_no_tool() {
     ]);
     let json = text(&output.stdout);
     assert!(json.contains("\"tools\":[],\"removed\""), "{json}");
-    assert!(json.contains("\"memory\":null,\"tools\":[]}"), "{json}");
+    assert!(
+        json.contains("\"memory\":null,\"tools\":[],\"anchored\":false}"),
+        "{json}"
+    );
+}
+
+#[test]
+fn an_anchored_operation_marks_its_jobs_and_a_wrong_name_is_an_error() {
+    let pipeline = parse_pipeline(&format!(
+        "{HEADER}anchored clean\nanchored:\n    count\nc = clean(raw)\n"
+    ))
+    .unwrap();
+    assert!(pipeline
+        .operations
+        .iter()
+        .all(|operation| operation.anchored));
+    let tree = Tree::new("anchored", &["data/in/1.txt"]);
+    tree.write(
+        "main.spit",
+        &format!("root data\n{HEADER}anchored count\nc = clean(raw)\nn = count(c)\n"),
+    );
+    let output = spit(&[
+        "dag",
+        tree.path().join("main.spit").to_str().unwrap(),
+        "--json",
+    ]);
+    let json = text(&output.stdout);
+    assert_eq!(json.matches("\"anchored\":true}").count(), 1, "{json}");
+    assert_eq!(json.matches("\"anchored\":false}").count(), 1, "{json}");
+    let errors = |rest: &str| rendered(&diagnose(&format!("{HEADER}{rest}"), None));
+    let found = errors("anchored clen\nc = clean(raw)\n");
+    assert!(
+        found[0].contains("`anchored` names operation `clen`, which is not declared"),
+        "{found:?}"
+    );
+    let found = errors("anchored clean\nanchored clean\nc = clean(raw)\n");
+    assert!(found[0].contains("already marked `anchored`"), "{found:?}");
+}
+
+#[test]
+fn uses_and_anchored_may_come_before_the_operation_they_name() {
+    let pipeline = parse_pipeline(
+        "tool sorter, counter
+uses late: counter
+anchored late
+source raw : Text .txt [id]
+path raw: in/{id}
+default path: out/{@product}/{@entities}
+default entities: {@key}={@value} separated \"_\"
+operation late(x: Text) -> Text .txt
+command late: sort -o {@output} {x}
+l = late(raw)
+",
+    )
+    .unwrap();
+    let late = &pipeline.operations[0];
+    assert_eq!(late.tools, only(&["counter"]));
+    assert!(late.anchored);
+}
+
+#[test]
+fn a_removal_means_the_same_wherever_it_is_in_a_list() {
+    let rest = "tool sorter, counter, archiver\n";
+    let first = tools(&format!(
+        "{rest}uses clean: !sorter, counter\nc = clean(raw)\n"
+    ));
+    let last = tools(&format!(
+        "{rest}uses clean: counter, !sorter\nc = clean(raw)\n"
+    ));
+    assert_eq!(first, last);
+    assert_eq!(first[0].1, only(&["counter"]));
+    let removed = tools(&format!("{rest}uses clean: !sorter\nc = clean(raw)\n"));
+    assert!(!removed[0].1.includes("sorter") && removed[0].1.includes("counter"));
+}
+
+#[test]
+fn each_compile_error_of_tool_uses_and_anchored_names_its_place() {
+    // `HEADER` is eight lines, so `rest` starts on line 9.
+    for (rest, line, columns, message) in [
+        ("tool fsl-6\n", 9, 5..10, "invalid tool name `fsl-6`"),
+        (
+            "tool sorter\nuses clean: my-tool\n",
+            10,
+            12..19,
+            "invalid tool name `my-tool`",
+        ),
+        (
+            "tool sorter\nuses clean: sorter, sorter\n",
+            10,
+            20..26,
+            "named twice in one `uses` list",
+        ),
+        (
+            "anchored clean, clean\n",
+            9,
+            16..21,
+            "operation `clean` is named twice",
+        ),
+        (
+            "anchored:\n    clen\n",
+            10,
+            4..8,
+            "`anchored` names operation `clen`",
+        ),
+        (
+            "default uses: sortr\n",
+            9,
+            14..19,
+            "tool `sortr` is not declared",
+        ),
+    ] {
+        let found = diagnose(&format!("{HEADER}{rest}c = clean(raw)\n"), None);
+        let first = found.first().expect("an error");
+        assert!(first.message.contains(message), "{rest}: {found:?}");
+        assert_eq!(
+            (first.line, first.columns.clone()),
+            (Some(line), Some(columns)),
+            "{rest}: {found:?}"
+        );
+    }
+    let errors = |rest: &str| rendered(&diagnose(&format!("{HEADER}{rest}"), None));
+    for (rest, message) in [
+        ("tool sorter\nuses clean: sorter,\n", "separates two tools"),
+        ("uses clean:\n", "names one or more tools"),
+        ("uses clean sorter\n", "expected `uses operation: tools`"),
+        ("anchored clean,\n", "expected `anchored operation`"),
+    ] {
+        let found = errors(&format!("{rest}c = clean(raw)\n"));
+        assert!(
+            found.first().is_some_and(|first| first.contains(message)),
+            "{rest}: {found:?}"
+        );
+    }
+}
+
+#[test]
+fn an_imported_operation_keeps_its_tools_and_mark_and_the_importer_cannot_change_them() {
+    let tree = Tree::new("tools-import", &["data/in/1.txt"]);
+    tree.write(
+        "lib.spit",
+        "tool sorter\nuses clean: sorter\nanchored clean\noperation clean(x: Text) -> Text .txt\ncommand clean: sort -o {@output} {x}\n",
+    );
+    let main = "root data\nuse lib.spit\nsource raw : Text .txt [id]\npath raw: in/{id}\ndefault path: out/{@product}/{@entities}\ndefault entities: {@key}={@value} separated \"_\"\nc = clean(raw)\n";
+    tree.write("main.spit", main);
+    let output = spit(&[
+        "dag",
+        tree.path().join("main.spit").to_str().unwrap(),
+        "--json",
+    ]);
+    assert!(output.status.success(), "{}", text(&output.stderr));
+    assert!(
+        text(&output.stdout).contains("\"anchored\":true}"),
+        "{}",
+        text(&output.stdout)
+    );
+    for (line, message) in [
+        (
+            "anchored clean\n",
+            "mark it `anchored` in the file that declares it",
+        ),
+        (
+            "uses clean: sorter\n",
+            "its tools are set by `uses` in the file that declares it",
+        ),
+    ] {
+        tree.write("main.spit", &format!("{main}{line}"));
+        let output = spit(&["check", tree.path().join("main.spit").to_str().unwrap()]);
+        assert!(
+            text(&output.stderr).contains(message),
+            "{}",
+            text(&output.stderr)
+        );
+    }
 }

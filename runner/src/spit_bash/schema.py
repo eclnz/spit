@@ -221,6 +221,8 @@ class SpitJob(SchemaModel):
     memory: Annotated[int, Field(ge=0, le=2**53)] | None
     # The tools the job depends on, by name, in the order of `SpitDag.tools`.
     tools: list[NonEmpty]
+    # Whether the job's tools write its file paths into its outputs.
+    anchored: bool
 
 
 class SpitDag(SchemaModel):

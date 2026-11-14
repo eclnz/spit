@@ -479,6 +479,9 @@ fn flow_rest(
         {
             StatementKind::uses(original, declaration.trim(), number)?
         }
+        Some((Keyword::Anchored, declaration)) => {
+            StatementKind::anchored(original, declaration.trim(), number)?
+        }
         Some((Keyword::Tools, _)) => {
             return Err(ParseError::new(
                 number,

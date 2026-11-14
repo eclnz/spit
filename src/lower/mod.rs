@@ -595,6 +595,7 @@ fn lower_statement(
         StatementKind::FlowStep(flow) => builder.add_flow_step(flow)?,
         kind @ (StatementKind::Tool(..)
         | StatementKind::Uses(..)
+        | StatementKind::Anchored(..)
         | StatementKind::DefaultUses { .. }) => {
             let line = statement.place.line;
             builder.tools.add(&mut builder.pipeline, kind, line)?;

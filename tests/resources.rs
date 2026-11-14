@@ -58,12 +58,14 @@ copied = copy(sorted)
         "{json}"
     );
     assert!(
-        json.contains("\"checks\":[],\"cores\":4,\"memory\":1610612736,\"tools\":[]}"),
+        json.contains(
+            "\"checks\":[],\"cores\":4,\"memory\":1610612736,\"tools\":[],\"anchored\":false}"
+        ),
         "{json}"
     );
     // An operation that declares nothing needs one core and claims no memory.
     assert!(
-        json.contains("\"checks\":[],\"cores\":1,\"memory\":null,\"tools\":[]}"),
+        json.contains("\"checks\":[],\"cores\":1,\"memory\":null,\"tools\":[],\"anchored\":false}"),
         "{json}"
     );
 }
