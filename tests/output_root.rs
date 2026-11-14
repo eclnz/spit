@@ -41,7 +41,7 @@ fn succeeded(args: &[&str]) -> String {
 fn outputs_go_under_the_output_root_and_files_beside_a_source_stay_with_it() {
     let (tree, recipe) = dataset("pipeline analysis.spit\nroot data\noutput results\n");
     let plan = succeeded(&["dag", &recipe, "--json"]);
-    assert!(plan.starts_with("{\"version\":14,"), "{plan}");
+    assert!(plan.starts_with("{\"version\":15,"), "{plan}");
     let folder = tree.path().display().to_string();
     assert!(
         plan.contains(&format!(

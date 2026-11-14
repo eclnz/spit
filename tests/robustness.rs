@@ -215,7 +215,7 @@ fn command_line_mistakes_are_named() {
         ),
         (
             &["check"][..],
-            "check needs <pipeline.spit | recipe.spitin | inputs.spitout>",
+            "check needs <pipeline.spit | recipe.spitin | inputs.spitout | tools.spitenv>",
             "usage: spit check ",
         ),
         (

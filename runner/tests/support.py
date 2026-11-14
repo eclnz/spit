@@ -51,7 +51,11 @@ def job(id, depends_on=(), cores=1, memory=None, operation=None, product="p"):
 
 def placed(data):
     """`data` with each artifact that names no root under the one SPIT puts it under: a file a
-    job writes under `output_root`, every other under `root`."""
+    job writes under `output_root`, every other under `root`; and with no tools where it names none."""
+    data.setdefault("tools", [])
+    for job in data["jobs"]:
+        job.setdefault("tools", [])
+        job.setdefault("anchored", False)
     made = {artifact["path"] for job in data["jobs"] for artifact in job["outputs"].values()}
     artifacts = [*data["external_inputs"], *data["targets"]]
     for job in data["jobs"]:
@@ -63,7 +67,7 @@ def placed(data):
 
 def document(root, jobs, external_inputs):
     return placed({
-        "version": 14,
+        "version": 15,
         "generator": {"name": "spit", "version": "0.5.0"},
         "root": None if root is None else str(root),
         "output_root": None if root is None else str(root),

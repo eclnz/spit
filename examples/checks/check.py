@@ -71,6 +71,16 @@ def canonical(dag):
     return dag
 
 
+def without_tools(dag):
+    """`dag` without its tools, each job's tools, and the probes' programs among its executables."""
+    probes = {tool["probe"][0] for tool in dag["tools"] if tool["probe"]}
+    programs = {part for job in dag["jobs"] for command in [*(c["command"] for c in job["commands"]), *job["verify"],
+                                                            *(c["command"] for c in job["checks"])]
+                for part in command[0] if isinstance(part, str)}
+    return {**dag, "tools": [], "jobs": [{**job, "tools": []} for job in dag["jobs"]],
+            "executables": [name for name in dag["executables"] if name not in probes or name in programs]}
+
+
 def check_entry(binary, repo, entry, logs):
     with tempfile.TemporaryDirectory(prefix="spit-example-") as temp:
         work = Path(temp)
@@ -93,7 +103,10 @@ def check_entry(binary, repo, entry, logs):
             # Canonicalize only that representation; compare every other field exactly.
             canonical(direct)
             canonical(fresh)
-            require(direct == fresh, "direct recipe and fresh inventory resolution differ")
+            require(without_tools(direct) == without_tools(fresh), "direct recipe and fresh inventory resolution differ")
+            # Only a recipe names a .spitenv, so a DAG made from a .spitout depends on no tool.
+            require(fresh["tools"] == [] and all(job["tools"] == [] for job in fresh["jobs"]),
+                    "a DAG made from a .spitout has tools")
             saved = logs / "jobs.spitdag"
             run.cli("save-dag", ["dag", pipeline, inventory, "-o", saved])
             dag = canonical(json.loads(saved.read_text()))

@@ -42,7 +42,7 @@ fn a_scalar_is_a_part_naming_its_file_and_bounds() {
     );
     let (ok, json) = run(&["dag", &main, "--json"]);
     assert!(ok, "{json}");
-    assert!(json.contains("\"version\":14,"), "{json}");
+    assert!(json.contains("\"version\":15,"), "{json}");
     assert!(
         json.contains(
             "[[\"fit\"],[\"--tr\"],[{\"scalar\":\"out/tr/sub=1.txt\",\"min\":5,\"max\":null}],\

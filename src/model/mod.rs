@@ -13,6 +13,7 @@ mod index;
 mod inputs;
 mod pipeline;
 mod reviews;
+mod tools;
 
 pub use artifacts::*;
 pub use dag::*;
@@ -24,6 +25,7 @@ pub(crate) use index::*;
 pub use inputs::*;
 pub use pipeline::*;
 pub use reviews::*;
+pub use tools::*;
 
 fn owned_strings(values: impl IntoIterator<Item = impl AsRef<str>>) -> Vec<String> {
     values

@@ -1,0 +1,19 @@
+source raw: Text [n]
+path raw: input/{n}.txt
+source script: Script .py here
+path script: bundle.py
+
+tool python
+operation joined(xs: many Text, script: Script) -> Bundle .json
+uses joined: python
+anchored joined
+command joined: python3 {script} joined @join(xs) {@output}
+joined_result = joined(raw @vary(n), script)
+path joined_result: joined.json
+
+operation listed(xs: many Text, script: Script) -> Bundle .json
+uses listed: python
+anchored listed
+command listed: python3 {script} listed @list(xs) {@output}
+listed_result = listed(raw @vary(n), script)
+path listed_result: listed.json

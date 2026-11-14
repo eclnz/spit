@@ -35,8 +35,8 @@ impl Command {
         match self {
             Self::Check => CommandSpec {
                 name: "check",
-                files: "<pipeline.spit | recipe.spitin | inputs.spitout>",
-                summary: "step 1: compile a pipeline, check a recipe against its pipeline, or check a .spitout's syntax; reads no data",
+                files: "<pipeline.spit | recipe.spitin | inputs.spitout | tools.spitenv>",
+                summary: "step 1: compile a pipeline, check a recipe against its pipeline, check a .spitout's or .spitenv's syntax; reads no data",
                 example: "spit check analysis.spit\n  spit check dataset.spitin",
                 flags: &[PathRules, Calls, Json, Stdin, Hovers],
             },

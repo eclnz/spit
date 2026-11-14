@@ -11,7 +11,8 @@ from .cause import Cause, Why
 from .files import Stamps, stamp, stamps
 from .model import Dag, DagError, Job
 from .reuse import records, relocate
-from .reuse.evidence import Compare, Evidence, evidence
+from .reuse.evidence import Compare, Evidence, changed_parts, evidence
+from .reuse.identity import TOOL
 from .reuse.relocate import Migration, MoveCause
 from .reuse.verdict import Standing, verdict
 from .state.store import StateWrite, Store
@@ -316,3 +317,19 @@ def adopt(dag: Dag, state: Store) -> tuple[Adoption, ...]:
             adoption = Adoption(job, AdoptStatus.ADOPTED, AdoptCause.OUTPUTS_EXIST)
         adoptions.append(adoption)
     return tuple(adoptions)
+
+
+def accept_tools(dag: Dag, state: Store) -> int:
+    """Record the tools' identities now as those of every job whose record differs from it in tools alone, so an
+    upgrade or an added tool reruns nothing. Returns how many records changed."""
+    accepted = 0
+    for job in dag.jobs:
+        record = state.jobs.get(job.work.key)
+        if record is None or record.fingerprint == job.work.fingerprint:
+            continue
+        changed = changed_parts(record, job)
+        if changed and all(part.startswith(TOOL) for part in changed):
+            state.record(job.work.key, record.model_copy(update={"fingerprint": job.work.fingerprint,
+                                                                  "parts": job.work.parts}))
+            accepted += 1
+    return accepted

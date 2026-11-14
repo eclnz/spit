@@ -3,7 +3,7 @@
 use super::cardinality;
 use super::signatures::product_signature;
 use crate::compile::CompiledStep;
-use crate::model::{Call, Cardinality, CommandRole, OperationDef, Pipeline, ProductDef};
+use crate::model::{Call, Cardinality, CommandRole, OperationDef, Pipeline, ProductDef, ToolSet};
 use crate::render::written_step;
 use crate::types::TypeExpr;
 use std::collections::BTreeMap;
@@ -54,6 +54,21 @@ pub(super) fn operation_details(pipeline: &Pipeline, operation: &OperationDef) -
         .filter(|line| line.operation == operation.name)
     {
         details.push(format!("Resources: {}", line.resources));
+    }
+    if operation.anchored {
+        details.push(
+            "Anchored: its outputs hold their own paths, so a runner reruns a job whose paths change rather than moving its files.".to_owned(),
+        );
+    }
+    // Every tool is what a pipeline that says nothing of tools gives, so
+    // only a narrowed set is shown.
+    match &operation.tools {
+        ToolSet::Only(names) if names.is_empty() => details.push("Tools: none".to_owned()),
+        ToolSet::Only(names) => details.push(format!("Tools: {}", names.join(", "))),
+        ToolSet::Every { except } if !except.is_empty() => {
+            details.push(format!("Tools: every tool but {}", except.join(", ")));
+        }
+        ToolSet::Every { .. } => {}
     }
     details
 }

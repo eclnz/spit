@@ -1,6 +1,6 @@
 # spit-bash
 
-`spit-bash` runs the jobs of a [SPIT](../README.md) pipeline on one machine. Give it a recipe and it runs `spit dag` for you; give it a saved `.spitdag` or `dag --json` output and it needs nothing else, not the original `.spit` pipeline or `.spitout` inventory. It reads version 14 of SPIT's DAG format, and no other: a DAG of another version is rejected before anything runs, so use a `spit` and a `spit-bash` that match.
+`spit-bash` runs the jobs of a [SPIT](../README.md) pipeline on one machine. Give it a recipe and it runs `spit dag` for you; give it a saved `.spitdag` or `dag --json` output and it needs nothing else, not the original `.spit` pipeline or `.spitout` inventory. It reads version 15 of SPIT's DAG format, and no other: a DAG of another version is rejected before anything runs, so use a `spit` and a `spit-bash` that match.
 
 See the [runnable examples](../examples/runnable/README.md) for recipes to run, their commands, and expected output.
 
@@ -65,10 +65,10 @@ Without `--entity`, `--product` or `--stage`, `--force` reruns every command job
 
 ## Scripts as inputs
 
-The runner identifies a job by its command text, and the DAG lists files a job declares as inputs. To make edits to a script invalidate just the operation that reads it, declare the script as a source and pass that source to the operation:
+The runner identifies a job by its command text, and the DAG lists files a job declares as inputs. To make edits to a script invalidate just the operation that reads it, declare the script as a source and pass that source to the operation. A script kept beside the pipeline is declared `here`, which finds it from the pipeline's folder rather than the dataset (see [Files beside the pipeline](../docs/language-reference.md#files-beside-the-pipeline)):
 
 ```spit
-source script : Script .py
+source script : Script .py here
 source lines : Lines .txt
 
 default path: out/{@product}
@@ -81,11 +81,25 @@ command transform: python3 {script} {lines} > {@output}
 result = transform(script, lines)
 ```
 
-With `scripts/transform.py` and `input.txt` under the dataset root, run the pipeline with `spit-bash run analysis.spit --root DATASET`. The compiler puts `scripts/transform.py` in the job's input list. When it changes, that operation reruns; a command argument that is not declared as an input is not inferred as one.
+With `scripts/transform.py` beside `analysis.spit` and `input.txt` under the dataset root, run the pipeline with `spit-bash run analysis.spit --root DATASET`. The compiler puts `scripts/transform.py` in the job's input list. When it changes, that operation reruns; a command argument that is not declared as an input is not inferred as one.
+
+## Tools
+
+A recipe's `tools from` line names a `.spitenv` that says what each tool is on this machine, and the pipeline's `uses` lines say which tools each operation's jobs depend on (see [Tools](../docs/language-reference.md#tools)). `plan`, `explain` and `run` run each tool's probe once, before planning, from the dataset root and with no shell, and a probe that fails stops them with an error before any job runs: `error: the probe of tool fsl, sh -c ..., exited with status 1: ...`. A tool's identity, its probe's output or the text the `.spitenv` gives, is part of the work of each job that names it, so a job reruns when one of its tools changes, as `since the last run: register: tool fsl changed (12 jobs)` says, and a job that names none is unaffected.
+
+A run records what each probe printed in `tools.json`, beside the state. When a tool's output differs from that record, `plan` and `run` show the lines that changed before anything else, so a probe that prints something that changes on every call, such as a date, is spotted on its first rerun rather than after many:
+
+```text
+tool fsl changed since it was last recorded:
+  -6.0.7.22
+  +6.0.7.23
+```
+
+After an upgrade that should not rerun finished work, or when a tool is added to the `.spitenv`, `spit-bash accept-tools dataset.spitin` records the tools as they are now as those each job ran with, for every job whose record differs from the DAG in its tools alone. A job whose command or files changed as well is left to rerun.
 
 ## Planning and running
 
-SPIT writes the absolute dataset `root` into a DAG when it knows it. If `root` is `null`, pass `--root /path/to/dataset`. A DAG also names its `output_root`, where the jobs' outputs go: the dataset root, unless the pipeline or recipe names [a folder of its own](https://github.com/eclnz/spit/blob/main/docs/language-reference.md#the-output-root). Each artifact's path is relative to the root it is under: sources, and files a job writes beside a source, are under the dataset root, and every other output is under the output root. Commands run from the output root, which the runner makes before the first job, and a command names a file under a separate dataset root by its absolute path, so the dataset itself is only read and may be read-only. With `--root`, an output root that is the dataset root moves with it.
+SPIT writes the absolute dataset `root` into a DAG when it knows it. If `root` is `null`, pass `--root /path/to/dataset`. A DAG also names its `output_root`, where the jobs' outputs go: the dataset root, unless the pipeline or recipe names [a folder of its own](https://github.com/eclnz/spit/blob/main/docs/language-reference.md#the-output-root). Each artifact's path is relative to the root it is under: sources, and files a job writes beside a source, are under the dataset root, `here` sources are under the DAG's `pipeline_folder`, and every other output is under the output root. Commands run from the output root, which the runner makes before the first job, and a command names a file under a separate dataset root by its absolute path, so the dataset itself is only read and may be read-only. With `--root`, an output root that is the dataset root moves with it.
 
 Every artifact must stay under its root once symbolic links are followed, so a job never reads or writes outside the folders the DAG names. `spit dag` follows a link wherever it leads, but `plan` and `run` refuse a link that leads out, naming the link, where it leads and the job that uses it:
 
@@ -95,7 +109,7 @@ error: scripts/plot.py is a link to /home/me/project/pipeline/plot.py, outside t
   spit-bash reads and writes only under its roots, so no link may lead out of one: move or copy what it links to under the root.
 ```
 
-A script kept beside the pipeline can be named with `{@here}` instead, which this section describes below, or declared as a source under the dataset root, as in [Scripts as inputs](#scripts-as-inputs).
+A script kept beside the pipeline is declared a `here` source, as in [Scripts as inputs](#scripts-as-inputs), or named with `{@here}`, which this section describes below. No job writes under the pipeline's folder, and `plan` refuses a DAG whose job does.
 
 `plan` first says what changed since the last run, in the terms of the data and the pipeline, as `since the last run: +30 recording (take=3); 1 recording changed (digit=3 take=2 voice=lucas); 131 jobs from earlier runs no longer in the DAG (voice=yweweler); trim: command changed (90 jobs)`. A source is new when only jobs with no record read it, and is named by its entities, or, among many, by the values no other source has. Work gone is the records no job claims, named by the values only they made. A first run, or one where nothing changed, has no such line. Then `plan` prints counts, such as `13 jobs can start, 68 jobs will wait, 12 jobs are blocked`, then a line for each cause that blocks jobs, such as `blocked: parcellate_t1 x3: program not found: mri_synthseg (9 more depend on them)`, because a cause is what needs action. A job can start when what it reads exists; it waits when a job upstream will, or may, rewrite what it reads, and cannot start until that job finishes. A job below a blocked one is blocked, and counted under the cause. A job that will run over outputs already on disk is told apart from one making its outputs for the first time, since running it replaces them: `plan` gives their count and a line for each operation and reason, such as
 
@@ -203,6 +217,12 @@ $ oxford_asl --tr 6.234000 ...
 - The file must hold one number written as a decimal, such as `6.234000`, `-2` or `1e-3`, with only whitespace around it. The argument is the number as the file writes it.
 - A file that holds anything else, or a number outside the bounds, fails the job before any of its commands start, as ``derivatives/tr/sub=02.txt, read by `@scalar`, holds 4.1, which is under the min of 5``.
 - The file is one of the job's inputs, so the job reruns when it changes. `plan` and `explain` show the read, as `@scalar(derivatives/tr/sub=01.txt, min=5)`, since the number is known only when the job starts.
+
+## Files that list a job's inputs
+
+A SPIT command written `register_tool --file-list @list(images) ...` passes the path of a file listing the `many` input `images`, one absolute path to a line. The runner writes the file in a folder of its own under the system's temporary folder once the job's input checks pass, before its `verify` commands, gives the same file to each of the job's commands, and removes it when the job ends, whether it succeeds, fails or is cancelled. A file that cannot be written fails the job before its commands start. `plan` and `explain` show the part as `@list(...)` with its paths, and where the file is written is not part of the job's work, so it does not make a job rerun.
+
+`@join(images)` needs nothing at run time: the runner joins the paths as commands name them, and refuses a DAG in which a path holds the separator.
 
 ## Reviews
 
@@ -389,7 +409,7 @@ Jobs with no command can only be skipped, or checked, when all their outputs alr
 
 A file is first compared by size and modification time, which costs one `stat`, and only a file whose stamp differs from the record is read and hashed. A folder's stamp sums these over the files under it, and its hash covers the names of everything under it and the bytes of its files. When the hash matches, `run` stores the new stamp, so the next plan need not hash the file again; `plan` itself changes nothing. If another tool changes a file while preserving both its size and its modification time, the runner will not notice. After a job runs, the hashes of its inputs and outputs are recorded; `adopt` records none, so a touched file of an adopted job counts as changed once. `--compare` on `plan` and `run` sets how a file counts as unchanged. `content`, the default, is as above. `stat` judges by size and time alone and records no hashes, so a job below a rerun always runs and a renamed product, dimension or source is not reused. `full` reads and hashes every recorded file of every job that would be skipped, trusting no size or time, and reruns a job whose record holds no hashes, such as one from `adopt`: it costs one full read of the data, for when a tool may have kept a file's size and time while changing it. The hash is xxh3_128 from the `xxhash` package, or BLAKE2b where that has no wheel, and each recorded hash names its algorithm, so one made with another is never taken as equal. The runner keeps its state and its [run folders](#run-history) in `.spit-bash` under the output root; `--dir DIR` names another folder for both. Keep one folder per output root.
 
-The state file is a log of JSON lines: a header with its version, then one line each time a job is recorded or forgotten, and the last line for a job wins. Finishing a job appends a line rather than rewriting the file, and the end of a run compacts it to one line per job. `run`, `adopt`, `restore`, `prune` and `clean --yes` lock the state, so a second run on the same dataset stops with an error instead of overwriting the first one's records. Locking uses `flock`, so spit-bash runs on Linux and macOS, not Windows.
+The state file is a log of JSON lines: a header with its version, then one line each time a job is recorded or forgotten, and the last line for a job wins. Finishing a job appends a line rather than rewriting the file, and the end of a run compacts it to one line per job. `run`, `adopt`, `accept-tools`, `restore`, `prune` and `clean --yes` lock the state, so a second run on the same dataset stops with an error instead of overwriting the first one's records. Locking uses `flock`, so spit-bash runs on Linux and macOS, not Windows.
 
 A SPIT DAG is validated with Pydantic before planning. Invalid field types, unknown fields, malformed argument parts and paths outside their root are rejected before any command runs.
 
@@ -403,4 +423,4 @@ cargo build
 SPIT=$PWD/target/debug/spit python3 -m unittest discover -s runner/tests -v
 ```
 
-The test fixture under `tests/fixtures/` is actual version 14 output from SPIT's `command_demo` example, written without a root. `tests/test_examples.py` runs the [examples](../examples/runnable/README.md) in `examples/runnable`, which SPIT's own tests keep in step with its syntax, with a real `spit`: set `SPIT` to the binary built from the same checkout, or put it on `PATH`, or the tests are skipped. CI builds `spit` from each commit and runs them, so a change to SPIT's DAG format and the runner's change to read it are tested together. The repository's CI also runs Messie over the runner's folders.
+The test fixture under `tests/fixtures/` is actual version 15 output from SPIT's `command_demo` example, written without a root. `tests/test_examples.py` runs the [examples](../examples/runnable/README.md) in `examples/runnable`, which SPIT's own tests keep in step with its syntax, with a real `spit`: set `SPIT` to the binary built from the same checkout, or put it on `PATH`, or the tests are skipped. CI builds `spit` from each commit and runs them, so a change to SPIT's DAG format and the runner's change to read it are tested together. The repository's CI also runs Messie over the runner's folders.

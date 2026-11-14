@@ -1,4 +1,4 @@
-//! The recipe's own lines: its `pipeline`, `root` and `output` lines, and
+//! The recipe's own lines: its `pipeline`, `root`, `output` and `tools from` lines, and
 //! its `inputs:` block, lowered to common path statements and context
 //! patterns while preserving line numbers for diagnostics.
 
@@ -21,6 +21,8 @@ pub(super) struct RecipeHeader {
     pub(super) pipeline: Option<PathBuf>,
     pub(super) root: Option<(PathBuf, usize)>,
     pub(super) output: Option<(PathBuf, usize)>,
+    /// The `.spitenv` a `tools from` line names, as written, and its line.
+    pub(super) tools: Option<(String, usize)>,
 }
 
 /// The pipeline a recipe names with `pipeline analysis.spit`, the root it
@@ -36,6 +38,18 @@ pub(super) fn header_lines(text: &str) -> Result<(RecipeHeader, String), ParseEr
                 return Err(ParseError::new(number, "a .spitin names its pipeline once"));
             }
             header.pipeline = Some(PathBuf::from(file.trim()));
+        } else if let Some(rest) = line.code.strip_prefix("tools ") {
+            let file = rest.trim_start().strip_prefix("from ").map(str::trim);
+            let Some(file) = file.filter(|file| !file.is_empty()) else {
+                return Err(ParseError::new(
+                    number,
+                    "expected `tools from file.spitenv`, the file that says what each tool is",
+                ));
+            };
+            if header.tools.is_some() {
+                return Err(ParseError::new(number, "a .spitin names its tools once"));
+            }
+            header.tools = Some((file.to_owned(), number));
         } else if let Some((folder, slot, what)) = line
             .code
             .strip_prefix("root ")

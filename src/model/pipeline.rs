@@ -13,7 +13,7 @@ use super::{
     ArtifactInstance, BesideFile, Call, CallId, CheckDef, CommandDef, DefaultChecks,
     DefaultReviews, EntityBinding, ExtensionSource, Invocation, OperationDef, PipelineIndex,
     ProductDef, Removal, ResourcesDef, ReviewDef, SidecarGroup, SourceInventory, SourceRecord,
-    StageDef,
+    StageDef, ToolList, UsesDef,
 };
 
 /// The logical pipeline: what to make from which sources. It says nothing
@@ -33,6 +33,15 @@ pub struct Pipeline {
     /// `resources` lines, in declaration order: what each job of an
     /// operation needs to run.
     pub resources: Vec<ResourcesDef>,
+    /// The tools `tool` lines declare, and those the operations it imports
+    /// use, each once, in declaration order.
+    pub tools: Vec<String>,
+    /// `uses` lines, in declaration order. Lowering has already applied
+    /// each to its operation's [`OperationDef::tools`].
+    pub uses: Vec<UsesDef>,
+    /// The `uses:` default of the operations the file declares outside
+    /// every stage.
+    pub default_uses: Option<ToolList>,
     /// `check` declarations, in declaration order.
     pub checks: Vec<CheckDef>,
     /// The `check:` default of every output in the file, outside any stage.

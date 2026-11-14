@@ -6,9 +6,13 @@ from dataclasses import dataclass, field
 from enum import Enum
 from functools import cached_property
 from pathlib import Path, PurePosixPath
-from typing import TypeVar
+from typing import TYPE_CHECKING, TypeVar
 
+from .lists import ListRead
 from .scalars import Read
+
+if TYPE_CHECKING:
+    from .tools import Identity
 
 
 T = TypeVar("T")
@@ -125,6 +129,8 @@ class Job:
     memory: int | None = None
     # The numbers its `verify` commands and commands read from its input files, each once.
     reads: tuple[Read, ...] = ()
+    # The files listing a `many` input's paths that its `verify` commands and commands read, each once.
+    lists: tuple[ListRead, ...] = ()
 
     @cached_property
     def input_artifacts(self) -> tuple[Artifact, ...]:
@@ -187,6 +193,11 @@ class Layout:
     @property
     def state(self) -> Path:
         return self.folder / "state.jsonl"
+
+    @property
+    def tools(self) -> Path:
+        """The tools' identities the last run or `accept-tools` recorded, as `tools.save` writes them."""
+        return self.folder / "tools.json"
 
     @property
     def runs(self) -> Path:
@@ -262,11 +273,17 @@ class Dag:
     # The paths under `root` when `output_root` is another folder: the sources,
     # and the files jobs write beside them. Every other path is under `output_root`.
     in_dataset: frozenset[str] = frozenset()
+    # The `here` sources' paths, which are under `pipeline_folder` and no job writes.
+    in_pipeline: frozenset[str] = frozenset()
+    # The folder holding the pipeline's own file; None when SPIT did not read it from one.
+    pipeline_folder: Path | None = None
     # Each file the pipeline was read from, as its path from the pipeline's folder, its absolute
     # path, and its git blob id when the DAG was written; empty when SPIT did not read it from a file.
     pipeline_files: tuple[tuple[str, Path, str], ...] = ()
     # Each review the pipeline attaches, with what it withheld.
     reviews: tuple[Review, ...] = ()
+    # Each tool's identity on this machine, by name, as `tools.identify` found it when the DAG was loaded.
+    tools: dict[str, "Identity"] = field(default_factory=dict, compare=False)
 
     @property
     def outputs(self) -> Path:
@@ -280,6 +297,9 @@ class Dag:
 
     def base(self, relative: str) -> Path:
         """The root that `relative` is under."""
+        if relative in self.in_pipeline:
+            assert self.pipeline_folder is not None, "load_dag refuses a `here` source without a pipeline folder"
+            return self.pipeline_folder
         return self.root if relative in self.in_dataset else self.outputs
 
     def path(self, relative: str) -> Path:
@@ -296,8 +316,14 @@ class Dag:
         path = base.joinpath(*PurePosixPath(relative).parts)
         resolved = path.resolve()
         if not resolved.is_relative_to(base):
-            raise DagError(_escape(base, relative, resolved, "dataset" if base == self.root else "output", use))
+            raise DagError(_escape(base, relative, resolved, self._which(relative), use))
         return path
+
+    def _which(self, relative: str) -> str:
+        """The name of the root `relative` is under, for an error."""
+        if relative in self.in_pipeline:
+            return "pipeline"
+        return "dataset" if self.base(relative) == self.root else "output"
 
 
 def _escape(base: Path, relative: str, resolved: Path, which: str, use: str | None) -> str:

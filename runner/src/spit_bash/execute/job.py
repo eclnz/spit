@@ -16,9 +16,9 @@ from ..logs import StampedLog, open_log
 from ..model import Check, Dag, DagError, Job, Kind, Layout, Side
 from ..reuse.relocate import Migration
 from .failure import (CheckArtifactMissing, CheckFailed, CommandFailed, Failure, InputChanged, InputDisappeared,
-                      NoCommand, OutputsMissing, Phase, PlaceFailed, ScalarInvalid, StdoutNotMoved)
+                      ListNotWritten, NoCommand, OutputsMissing, Phase, PlaceFailed, ScalarInvalid, StdoutNotMoved)
 from ..runs import kept_path
-from .. import scalars
+from .. import lists, scalars
 from .options import Options
 from .process import CommandEnd, partial, run_command, succeeded
 
@@ -252,14 +252,15 @@ def _settle_aside(moved: list[tuple[str, Path, Path]], log: Log, restore: bool, 
 
 async def _make(dag: Dag, job: Job, before: Stamps, log: Log, limit: int | None,
                 entries: dict[str, FolderEntries], listed: Listings,
-                runner: Runner, values: dict[str, str]) -> Failure | tuple[Stamps, Stamps]:
+                runner: Runner, values: dict[str, str],
+                files: dict[lists.ListRead, str]) -> Failure | tuple[Stamps, Stamps]:
     """Run a job's commands in order, then its output checks; give a failure, or its inputs' and outputs' stamps.
 
     The first command that fails stops the job, and the commands after it do not run. `values` are the
-    numbers its `scalar` parts read, by path.
+    numbers its `scalar` parts read, by path, and `files` the paths of the files its `list` parts give.
     """
     for index, run in enumerate(job.commands, 1):
-        end = await runner(dag, scalars.bound(run.arguments, values), log, run.stdin, run.stdout, limit)
+        end = await runner(dag, scalars.bound(run.arguments, values, files), log, run.stdin, run.stdout, limit)
         if not succeeded(end):
             return CommandFailed(Phase.COMMAND, index, end)
         if run.stdout is not None:
@@ -321,7 +322,10 @@ async def run_job(dag: Dag, job: Job, log: Path, options: Options, runner: Runne
     started = time.monotonic()
     limit = job.memory if options.enforce_memory else None
     keep = options.keep_failed
-    with open_log(log, options.timestamp_logs) as stream:
+    # A list's file lasts as long as the job, whether it succeeds, fails or is cancelled.
+    with open_log(log, options.timestamp_logs) as stream, lists.written(job.lists, dag.path) as files:
+        if isinstance(files, str):
+            return Failed(ListNotWritten(files), log)
         if reason is not None:
             stream.write(f"{REASON_PREFIX}{reason}\n".encode())
         failure = await _checks(dag, job.before, stream, runner)
@@ -333,7 +337,7 @@ async def run_job(dag: Dag, job: Job, log: Path, options: Options, runner: Runne
         for path, value in values.items():
             stream.write(f"spit-bash: {path} holds {value}\n".encode())
         for index, command in enumerate(job.verify, 1):
-            end = await runner(dag, scalars.bound(command, values), stream, limit=limit)
+            end = await runner(dag, scalars.bound(command, values, files), stream, limit=limit)
             if not succeeded(end):
                 return Failed(CommandFailed(Phase.VERIFY, index, end), log)
         # An earlier run's files would mix with this run's, and some tools refuse to write over
@@ -351,7 +355,7 @@ async def run_job(dag: Dag, job: Job, log: Path, options: Options, runner: Runne
         # outputs, unless they are kept. A cancelled command's process group is stopped before
         # the cancellation reaches this point.
         try:
-            made = await _make(dag, job, before, stream, limit, entries, listed, runner, values)
+            made = await _make(dag, job, before, stream, limit, entries, listed, runner, values, files)
         except asyncio.CancelledError:
             _remove_outputs(dag, job, stream, keep)
             _settle_aside(moved, stream, not keep)
