@@ -431,6 +431,18 @@ fn a_directory_view_has_members_and_no_runnable_job() {
         "{json}"
     );
 
+    let warnings: Vec<_> = diagnose(VIEW, None)
+        .into_iter()
+        .filter(|diagnostic| !diagnostic.is_error())
+        .map(|diagnostic| diagnostic.message)
+        .collect();
+    assert!(
+        !warnings
+            .iter()
+            .any(|warning| warning.contains("no command")),
+        "{warnings:?}"
+    );
+
     let tree = dataset(VIEW);
     tree.write("data/dicom/sub=01/scan.nii.gz", "1");
     let jobs = run(&tree, &["dag", "--jobs"]);
